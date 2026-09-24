@@ -9,7 +9,6 @@
 //! description at a point in time, which both the compositor and the main thread's intersection
 //! observations run.
 
-
 use crate::easing::Easing;
 use crate::filter_bytes::filter_functions_graph;
 use crate::filter_bytes::{FfiFilterFunction, FfiFilterFunctionKind};

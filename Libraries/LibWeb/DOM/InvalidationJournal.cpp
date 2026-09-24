@@ -195,7 +195,7 @@ void InvalidationJournal::note_paint_facts(NodeIdentity identity, PaintFactsFami
     drain_if_the_render_side_is_reading();
 }
 
-void InvalidationJournal::note_unanchored_paint_facts(Layout::RustFFI::NodeSlotId slot, Function<void(Layout::Node const&)>&& update)
+void InvalidationJournal::note_unanchored_paint_facts(Compositing::RustFFI::NodeSlotId slot, Function<void(Layout::Node const&)>&& update)
 {
     count_entry_during_flight(HTML::EventLoop::JournalEntryKind::PaintFacts);
     if (is_empty())
@@ -324,7 +324,7 @@ void InvalidationJournal::note_scrollbar_enlarged_state(Painting::Scrollbar& scr
     drain_if_the_render_side_is_reading();
 }
 
-void InvalidationJournal::note_visual_context_box_dirty(Layout::RustFFI::NodeSlotId slot, Layout::RustFFI::FfiVisualContextBoxDirtyKind kind)
+void InvalidationJournal::note_visual_context_box_dirty(Compositing::RustFFI::NodeSlotId slot, Layout::RustFFI::FfiVisualContextBoxDirtyKind kind)
 {
     count_entry_during_flight(HTML::EventLoop::JournalEntryKind::VisualContext);
     if (is_empty())

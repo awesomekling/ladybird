@@ -707,7 +707,7 @@ fn resolve_timing(row: &AnimationTimingRow, timeline_time: Option<TimeValue>) ->
 #[must_use]
 pub(crate) fn row_current_key(
     row: &AnimationTimingRow,
-    linear_points: &[crate::css::animation::FfiLinearEasingPoint],
+    linear_points: &[crate::css::easing::FfiLinearEasingPoint],
     timeline_time: Option<TimeValue>,
 ) -> Option<Option<f64>> {
     use timing_row_flag as flag;
@@ -783,14 +783,14 @@ pub(crate) fn row_current_key(
     let output_progress = match easing_kind {
         // `linear()`, whose stops the row names by range in the list's shared buffer. An empty
         // range is `linear` itself, which the host holds as `linear(0, 1)`.
-        0 => crate::css::animation::evaluate_linear_easing(
+        0 => crate::css::easing::evaluate_linear_easing(
             match row.linear_point_count {
                 0 => &[
-                    crate::css::animation::FfiLinearEasingPoint {
+                    crate::css::easing::FfiLinearEasingPoint {
                         input: 0.0,
                         output: 0.0,
                     },
-                    crate::css::animation::FfiLinearEasingPoint {
+                    crate::css::easing::FfiLinearEasingPoint {
                         input: 1.0,
                         output: 1.0,
                     },
@@ -802,14 +802,14 @@ pub(crate) fn row_current_key(
             directed_progress,
             before_flag,
         ),
-        1 => crate::css::animation::evaluate_cubic_bezier_easing(
+        1 => crate::css::easing::evaluate_cubic_bezier_easing(
             row.times[TIME_EASING_X1],
             row.times[TIME_EASING_Y1],
             row.times[TIME_EASING_X2],
             row.times[TIME_EASING_Y2],
             directed_progress,
         ),
-        2 => crate::css::animation::evaluate_steps_easing(
+        2 => crate::css::easing::evaluate_steps_easing(
             row.easing_interval_count,
             ((row.flags >> flag::EASING_STEP_POSITION_SHIFT) & flag::EASING_STEP_POSITION_MASK) as u8,
             directed_progress,
@@ -842,7 +842,7 @@ pub(crate) struct RowSelectedEffect {
 #[must_use]
 pub(crate) fn select_sampled_effects(
     rows: &[AnimationTimingRow],
-    linear_points: &[crate::css::animation::FfiLinearEasingPoint],
+    linear_points: &[crate::css::easing::FfiLinearEasingPoint],
     samples: &AnimationTimelineSamples,
 ) -> Option<Vec<RowSelectedEffect>> {
     let mut selected = Vec::with_capacity(rows.len());
@@ -871,7 +871,7 @@ pub(crate) fn select_sampled_effects(
 #[derive(PartialEq)]
 struct PublishedTimingRows {
     rows: Box<[AnimationTimingRow]>,
-    linear_points: Box<[crate::css::animation::FfiLinearEasingPoint]>,
+    linear_points: Box<[crate::css::easing::FfiLinearEasingPoint]>,
 }
 
 #[derive(Default)]
@@ -915,7 +915,7 @@ impl AnimationTimingRows {
                 .as_chunks::<2>()
                 .0
                 .iter()
-                .map(|&[input, output]| crate::css::animation::FfiLinearEasingPoint { input, output })
+                .map(|&[input, output]| crate::css::easing::FfiLinearEasingPoint { input, output })
                 .collect(),
         };
         // Republishing an unchanged list is the common case - the host cannot cheaply tell that
@@ -941,7 +941,7 @@ impl AnimationTimingRows {
         &self,
         node: StyleNodeID,
         slot: AnimationSlot,
-    ) -> &[crate::css::animation::FfiLinearEasingPoint] {
+    ) -> &[crate::css::easing::FfiLinearEasingPoint] {
         self.rows
             .get(&(node, slot))
             .map_or(&[][..], |published| &published.linear_points[..])
@@ -1139,7 +1139,7 @@ pub(crate) mod effect_flag {
 #[derive(Clone)]
 pub(crate) struct PublishedEasing {
     kind: u8,
-    linear_points: Box<[crate::css::animation::FfiLinearEasingPoint]>,
+    linear_points: Box<[crate::css::easing::FfiLinearEasingPoint]>,
     x1: f64,
     y1: f64,
     x2: f64,
@@ -1174,11 +1174,11 @@ impl PublishedEasing {
                     // `linear` is `linear(0, 1)`, the identity curve, spelled out the way the host
                     // spells it out when it describes a keyframe that runs it.
                     linear_points: Box::new([
-                        crate::css::animation::FfiLinearEasingPoint {
+                        crate::css::easing::FfiLinearEasingPoint {
                             input: 0.0,
                             output: 0.0,
                         },
-                        crate::css::animation::FfiLinearEasingPoint {
+                        crate::css::easing::FfiLinearEasingPoint {
                             input: 1.0,
                             output: 1.0,
                         },
@@ -1246,7 +1246,7 @@ impl PublishedEasing {
                             .as_slice()
                             .iter()
                             .map(|stop| {
-                                Some(crate::css::animation::FfiLinearEasingPoint {
+                                Some(crate::css::easing::FfiLinearEasingPoint {
                                     input: numeric(stop.input())? / 100.0,
                                     output: numeric(stop.output())?,
                                 })
@@ -1283,8 +1283,8 @@ impl PublishedEasing {
     }
 
     #[must_use]
-    pub(crate) fn descriptor(&self) -> crate::css::animation::FfiEasingDescriptor {
-        use crate::css::animation::{FfiEasingDescriptor, FfiEasingKind};
+    pub(crate) fn descriptor(&self) -> crate::css::easing::FfiEasingDescriptor {
+        use crate::css::easing::{FfiEasingDescriptor, FfiEasingKind};
         FfiEasingDescriptor {
             kind: match self.kind {
                 1 => FfiEasingKind::CubicBezier,
@@ -1507,7 +1507,7 @@ unsafe fn build_published_effects(published_buffers: PublishedEffectBuffers<'_>)
                 let points = linear_points[keyframe.first_linear_point as usize..]
                     [..keyframe.linear_point_count as usize]
                     .iter()
-                    .map(|point| crate::css::animation::FfiLinearEasingPoint {
+                    .map(|point| crate::css::easing::FfiLinearEasingPoint {
                         input: point.input,
                         output: point.output,
                     })

@@ -33,6 +33,10 @@ ALLOWED = {
     "Libraries/LibWeb/HTML/Parser/Rust/src/token.rs:SPARE_ATTRIBUTE_LISTS": "per-thread allocation pool; a second copy costs memory, never an answer",
     "Libraries/LibWeb/HTML/Parser/Rust/src/token.rs:SPARE_ATTRIBUTE_VALUES": "per-thread allocation pool; a second copy costs memory, never an answer",
     "Libraries/LibJS/Flap/src/low_ir/lowering.rs:LABELS": "per-thread scratch buffer; a second copy costs memory, never an answer",
+    "Libraries/LibCompositing/Rust/src/display_list/replay.rs:WARM_REPLAY_SCRATCH_STORAGE": "per-thread replay scratch; a second copy costs memory, never an answer",
+    # FIXME: Two copies hand out overlapping epochs; a tree one copy built and a plan the other copy
+    #        prepared could then agree on an epoch they do not share. Move the counter to C++.
+    "Libraries/LibCompositing/Rust/src/visual_context/mod.rs:NEXT_STRUCTURAL_EPOCH": "process-wide identity counter, per copy until it moves to C++ storage",
 }
 
 # libweb_rust: `file:name` -> why the state is safe for a render stage on another thread.
@@ -62,7 +66,6 @@ RENDER_STAGE_ALLOWED = {
         [
             "css/cascaded_properties.rs:STORE_POOL",
             "css/style/column.rs:STAMPED_INDEX_POOL",
-            "painting/display_list/replay.rs:WARM_REPLAY_SCRATCH_STORAGE",
         ],
     ),
     **render_stage_entries(
@@ -125,7 +128,6 @@ RENDER_STAGE_ALLOWED = {
             "css/style/prefix.rs:NEXT",
             "css/style_sheet.rs:NEXT_SHEET_IDENTITY",
             "layout/fragment_tree.rs:NEXT_IDENTITY",
-            "painting/visual_context/mod.rs:NEXT_STRUCTURAL_EPOCH",
         ],
     ),
     **render_stage_entries(

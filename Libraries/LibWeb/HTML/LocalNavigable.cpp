@@ -6928,6 +6928,10 @@ bool LocalNavigable::paint_next_frame_if_needed(DOM::UpdateLayoutReason layout_r
         document->update_layout(layout_reason);
         if (document->font_computer().should_defer_initial_paint())
             return false;
+        // NB: A layout frame that runs beside this thread lets tasks run while the update above does; see
+        //     EventLoop::update_the_rendering().
+        if (active_document() != document || !document->has_committed_viewport_box() || !document->layout_is_up_to_date())
+            return false;
     }
     paint_next_frame();
     return true;

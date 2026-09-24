@@ -298,7 +298,7 @@ public:
     struct PendingCompositorFrame {
         GC::Ref<DOM::Document> document;
         PaintConfig paint_config;
-        Compositor::KeyboardScrollState keyboard_scroll_state;
+        Compositing::KeyboardScrollState keyboard_scroll_state;
         OwnPtr<Painting::PendingDisplayListRecording> recording;
     };
     Optional<PendingCompositorFrame> begin_painting_next_frame(Painting::RecordingRun);

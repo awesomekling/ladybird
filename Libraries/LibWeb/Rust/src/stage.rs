@@ -98,17 +98,6 @@ pub(crate) unsafe fn from_ffi_entry<'host>(_: &impl FfiEntry, arena_handle: *mut
     unsafe { MainThread::from_ffi_entry(Some(HostTables::from_handle(arena_handle))) }
 }
 
-/// Mint a main-thread capability for a designated FFI entry module, for an entry that names no
-/// arena and so reaches no host tables.
-///
-/// # Safety
-///
-/// As for [`from_ffi_entry`].
-pub(crate) unsafe fn from_ffi_entry_without_arena(_: &impl FfiEntry) -> MainThread<'static> {
-    // SAFETY: As above.
-    unsafe { MainThread::from_ffi_entry(None) }
-}
-
 macro_rules! ffi_entry {
     ($entry:path) => {
         impl private::FfiEntry for $entry {}

@@ -60,6 +60,8 @@ class ChromeWidgetRegistry;
 enum class PaintCommandCacheMode : u8;
 struct GradientPaintStyle;
 struct PatternPaintStyle;
+struct PendingDisplayListRecording;
+enum class RecordingRun : u8;
 class Scrollbar;
 
 }

@@ -58,7 +58,7 @@ public:
     void note_paint_facts(NodeIdentity, PaintFactsFamily, Function<void(Layout::Node const&)>&&);
     // The row, and every row it descends from, is built for no DOM node an entry could name, so
     // the update is made on the row itself at the drain, if it is still live.
-    void note_unanchored_paint_facts(Layout::RustFFI::NodeSlotId, Function<void(Layout::Node const&)>&&);
+    void note_unanchored_paint_facts(Compositing::RustFFI::NodeSlotId, Function<void(Layout::Node const&)>&&);
     void note_paint_cache_invalidation(NodeIdentity, Painting::PaintCacheInvalidation);
     // Whether the node is an editing host, or a text node that produces a fragment when empty,
     // may have changed, and the rows built for it restamp both at the drain.
@@ -87,7 +87,7 @@ public:
     // take the spans it has at the drain.
     void note_table_spans(NodeIdentity);
     // The accumulated visual contexts built from the row's box need the given kind of update.
-    void note_visual_context_box_dirty(Layout::RustFFI::NodeSlotId, Layout::RustFFI::FfiVisualContextBoxDirtyKind);
+    void note_visual_context_box_dirty(Compositing::RustFFI::NodeSlotId, Layout::RustFFI::FfiVisualContextBoxDirtyKind);
     // Every accumulated visual context needs rebuilding, for the given reason.
     void note_visual_context_full_rebuild(Layout::RustFFI::FfiVisualContextGlobalRebuildReason);
     // The SVG paint resources may have changed, and the enrolled ones resync at the next visual
@@ -163,13 +163,13 @@ private:
     bool m_scroll_state_is_stale { false };
     bool m_selection_states_are_stale { false };
     struct UnanchoredPaintFacts {
-        Layout::RustFFI::NodeSlotId slot;
+        Compositing::RustFFI::NodeSlotId slot;
         Function<void(Layout::Node const&)> update;
     };
     Vector<UnanchoredPaintFacts> m_unanchored_paint_facts;
     Vector<NonnullRefPtr<Painting::Scrollbar>> m_scrollbars_with_stale_enlarged_state;
     struct VisualContextBoxDirtyMark {
-        Layout::RustFFI::NodeSlotId slot;
+        Compositing::RustFFI::NodeSlotId slot;
         Layout::RustFFI::FfiVisualContextBoxDirtyKind kind;
     };
     Vector<VisualContextBoxDirtyMark> m_visual_context_box_dirty_marks;

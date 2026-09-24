@@ -699,6 +699,9 @@ Layout::NodeArena& Document::layout_node_arena()
             case Layout::RustFFI::NodeKind::RangeInputBox:
             case Layout::RustFFI::NodeKind::SVGForeignObjectBox:
             case Layout::RustFFI::NodeKind::TableWrapper:
+            case Layout::RustFFI::NodeKind::TextAreaBox:
+            case Layout::RustFFI::NodeKind::TextInputBox:
+            case Layout::RustFFI::NodeKind::AudioBox:
             case Layout::RustFFI::NodeKind::Box:
             case Layout::RustFFI::NodeKind::CanvasBox:
             case Layout::RustFFI::NodeKind::CheckBox:
@@ -1733,7 +1736,7 @@ WebIDL::ExceptionOr<void> Document::set_title(Utf16View title)
 Compositing::RustFFI::NodeSlotId Document::layout_root_slot() const
 {
     if (!m_layout_node_arena)
-        return Layout::RustFFI::NodeSlotId_INVALID;
+        return Compositing::RustFFI::NodeSlotId_INVALID;
     return Layout::RustFFI::layout_arena_layout_root(m_layout_node_arena->handle());
 }
 
@@ -1744,7 +1747,7 @@ u32 Document::prepare_layout_tree_build()
 
 // The build records the root it placed in the arena itself, so what is left for the document is to
 // retire the tree that was replaced and give the new one a paint state.
-Layout::RustFFI::FfiLayoutTreeBuildOutcome Document::finish_layout_tree_build(void* walk, Layout::RustFFI::NodeSlotId replaced_root)
+Layout::RustFFI::FfiLayoutTreeBuildOutcome Document::finish_layout_tree_build(void* walk, Compositing::RustFFI::NodeSlotId replaced_root)
 {
     auto outcome = Layout::pay_layout_tree_build(*this, walk);
     if (replaced_root.index == outcome.viewport.index)
@@ -2135,8 +2138,8 @@ void Document::end_style_stabilization_epoch()
 void Document::apply_layout_commit_effects(Layout::RustFFI::FfiLayoutCommitEffects const& effects)
 {
     if (effects.boxes_with_auto_content_visibility_collected) {
-        paint_state().set_boxes_with_auto_content_visibility(Vector<Layout::RustFFI::NodeSlotId> {
-            ReadonlySpan<Layout::RustFFI::NodeSlotId> { effects.boxes_with_auto_content_visibility, effects.boxes_with_auto_content_visibility_count } });
+        paint_state().set_boxes_with_auto_content_visibility(Vector<Compositing::RustFFI::NodeSlotId> {
+            ReadonlySpan<Compositing::RustFFI::NodeSlotId> { effects.boxes_with_auto_content_visibility, effects.boxes_with_auto_content_visibility_count } });
     }
     // The frame's rendering preparation clamped these offsets to what the committed overflow allows. Storing one
     // clamps it again, against the box its node has now.
@@ -10243,14 +10246,14 @@ void Document::register_scroll_snap_container(Layout::Node const& snap_container
     m_scroll_snap_containers.append(snap_container_slot);
 }
 
-Vector<Layout::RustFFI::NodeSlotId> Document::collect_scroll_snap_containers()
+Vector<Compositing::RustFFI::NodeSlotId> Document::collect_scroll_snap_containers()
 {
     // A registered box whose layout node a style or layout update dropped is no longer a box of this document.
     m_scroll_snap_containers.remove_all_matching([&](auto registered_slot) {
         return !layout_node_arena().node_if_live(registered_slot);
     });
 
-    Vector<Layout::RustFFI::NodeSlotId> snap_containers;
+    Vector<Compositing::RustFFI::NodeSlotId> snap_containers;
     snap_containers.ensure_capacity(m_scroll_snap_containers.size());
     for (auto registered_slot : m_scroll_snap_containers) {
         auto const& registered = *layout_node_arena().node_if_live(registered_slot);
@@ -10283,7 +10286,7 @@ RefPtr<Compositing::DisplayList> Document::record_display_list(HTML::PaintConfig
     return finish_display_list_recording(*recording);
 }
 
-Optional<Painting::PendingDisplayListRecording> Document::begin_display_list_recording(HTML::PaintConfig config, Painting::DisplayListResourceStorage& resource_storage, Painting::PaintCommandCacheMode cache_mode, Painting::RecordingRun run)
+Optional<Painting::PendingDisplayListRecording> Document::begin_display_list_recording(HTML::PaintConfig config, Compositing::DisplayListResourceStorage& resource_storage, Painting::PaintCommandCacheMode cache_mode, Painting::RecordingRun run)
 {
     update_paint_and_hit_testing_properties_if_needed();
     VERIFY(has_committed_viewport_box());
@@ -10331,7 +10334,7 @@ Optional<Painting::PendingDisplayListRecording> Document::begin_display_list_rec
     return recording;
 }
 
-NonnullRefPtr<Painting::DisplayList> Document::finish_display_list_recording(Painting::PendingDisplayListRecording& recording)
+NonnullRefPtr<Compositing::DisplayList> Document::finish_display_list_recording(Painting::PendingDisplayListRecording& recording)
 {
     VERIFY(recording.document.ptr() == this);
     auto display_list = Painting::finish_rust_display_list_recording(recording);

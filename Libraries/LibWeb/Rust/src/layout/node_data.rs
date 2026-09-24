@@ -146,10 +146,6 @@ pub enum NodeFlag {
     IsPseudoElementPrincipalBox = 1 << 19,
     FollowsPrincipalStyle = 1 << 20,
     EstablishesAbsolutePositionContainingBlock = 1 << 21,
-    /// The row's node sits in the user agent shadow tree of a form-associated text control that
-    /// is focused right now. Republished when a row is built and when the document's focused area
-    /// changes, so the overflow measurement need not ask the document who has focus.
-    IsInFocusedTextControl = 1 << 21,
     ProducesLineBoxFragmentWhenEmpty = 1 << 22,
     ListMarkerIsInside = 1 << 23,
     HasAnchorNames = 1 << 24,

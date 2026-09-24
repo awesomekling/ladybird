@@ -15,6 +15,7 @@
 #include <LibJS/Runtime/VM.h>
 #include <LibWeb/Animations/ScrollTimeline.h>
 #include <LibWeb/Bindings/MainThreadVM.h>
+#include <LibWeb/CSS/FontComputer.h>
 #include <LibWeb/CSS/FontFaceSet.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
@@ -949,8 +950,37 @@ void EventLoop::update_the_rendering()
         auto navigable = doc->navigable();
         // AD-HOC: Script that ran earlier in this rendering update may have spun the event loop and run tasks that
         //         detached doc from its navigable (e.g. after its iframe was removed).
-        if (!navigable || !navigable->paint_next_frame_if_needed(DOM::UpdateLayoutReason::HTMLEventLoopRenderingUpdate))
+        if (!navigable || !navigable->needs_repaint())
             continue;
+        // OPTIMIZATION: Don't paint navigables hidden by an ancestor iframe with visibility: hidden.
+        //               needs_repaint() stays true — so, once the navigable becomes visible, it's painted.
+        if (navigable->has_inclusive_ancestor_with_visibility_hidden())
+            continue;
+        if (navigable->is_svg_page())
+            continue;
+        if (auto document = navigable->active_document()) {
+            document->update_layout(DOM::UpdateLayoutReason::HTMLEventLoopRenderingUpdate);
+            if (document->font_computer().should_defer_initial_paint())
+                continue;
+            // NB: A layout frame that runs beside this thread lets tasks run while the update above does. One of them
+            //     may have replaced the navigable's active document, dropped the layout tree the frame built, or
+            //     changed what it laid out. The navigable still needs a repaint, and the next rendering update
+            //     paints what the task left.
+            if (navigable->active_document() != document || !document->has_committed_viewport_box() || !document->layout_is_up_to_date()) {
+                navigable->page().client().request_frame();
+                continue;
+            }
+        }
+        // A frame the render side records beside this thread is finished by the frame scheduler once it has
+        // been, and so is every frame after it, so that frames reach their compositor contexts in paint order.
+        auto pending_frame = navigable->begin_painting_next_frame(m_frame_scheduler->recording_run());
+        if (!pending_frame.has_value())
+            continue;
+        if (m_frame_scheduler->ticket_takes_frames() || (pending_frame->recording && pending_frame->recording->run == Painting::RecordingRun::InSubmittedFrame)) {
+            m_frame_scheduler->add_to_ticket(*navigable, pending_frame.release_value());
+            continue;
+        }
+        navigable->finish_painting_next_frame(*pending_frame);
         ++m_rendering_scheduler_counters.paints;
         if (navigable->is_local_root())
             navigable->page().process_screenshot_requests();

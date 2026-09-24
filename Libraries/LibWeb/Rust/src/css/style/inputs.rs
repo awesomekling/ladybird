@@ -1555,7 +1555,7 @@ impl RetainedState {
         &self,
         node: StyleNodeID,
         slot: animations::AnimationSlot,
-    ) -> &[crate::css::animation::FfiLinearEasingPoint] {
+    ) -> &[crate::css::easing::FfiLinearEasingPoint] {
         self.animation_timing_rows.linear_points(node, slot)
     }
 

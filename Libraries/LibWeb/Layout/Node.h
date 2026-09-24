@@ -229,9 +229,6 @@ public:
     // The overflow measurement reserves a pixel for the caret of one, so the render side is told
     // the answer rather than asking: published when a row is built, and again for both sides of a
     // change of the document's focused area.
-    void publish_is_in_focused_text_control();
-    void publish_own_is_in_focused_text_control();
-    [[nodiscard]] bool dom_target_is_in_focused_text_control() const;
 
     // A rebuild can leave an old row and its replacement both built for one node, and the document
     // hands out only the replacement. The old row is still read as that node's box until the commit

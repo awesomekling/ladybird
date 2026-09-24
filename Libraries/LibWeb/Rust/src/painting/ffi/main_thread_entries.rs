@@ -151,45 +151,6 @@ unsafe extern "C" fn layout_arena_paintable_layout_node_shell(arena: *mut c_void
 
 /// # Safety
 ///
-/// `tree` must be a live retained tree handle, `command_runs` must address `command_run_count`
-/// runs and `scroll_offsets` `scroll_offsets_len` points for the call, and `callbacks` must be
-/// live. The painter callbacks run synchronously and may re-enter this function for a nested
-/// display list. `effect_clip_plan` must remain live and must have been prepared
-/// for these runs and the tree's current structural epoch.
-#[unsafe(no_mangle)]
-unsafe extern "C" fn display_list_replay(
-    tree: *const c_void,
-    effect_clip_plan: *const c_void,
-    command_runs: *const crate::painting::display_list::commands::DisplayListCommandRun,
-    command_run_count: usize,
-    scroll_offsets: *const libgfx_rust::FloatPoint,
-    scroll_offsets_len: usize,
-    callbacks: *const crate::painting::host::FfiDisplayListReplayCallbacks,
-) {
-    let main_thread = unsafe { crate::stage::from_ffi_entry_without_arena(&MAIN_THREAD_FFI_ENTRY) };
-    let tree = unsafe { tree_from_handle(tree) };
-    // SAFETY: The caller guarantees the slices address the stated number of values.
-    let (command_runs, scroll_offsets) = unsafe {
-        (
-            ffi_slice(command_runs, command_run_count),
-            ffi_slice(scroll_offsets, scroll_offsets_len),
-        )
-    };
-    // SAFETY: The caller guarantees `callbacks` is live for the call.
-    let mut painter = crate::painting::host::DisplayListReplayHost::new(unsafe { *callbacks }, &main_thread);
-    let effect_clip_plan =
-        unsafe { &*effect_clip_plan.cast::<crate::painting::display_list::effect_clip_plan::EffectClipPlan>() };
-    crate::painting::display_list::replay::replay_display_list(
-        tree,
-        command_runs,
-        effect_clip_plan,
-        scroll_offsets,
-        &mut painter,
-    );
-}
-
-/// # Safety
-///
 /// `arena` must be a live arena used on the document thread.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn layout_arena_prepare_for_rendering(

@@ -42,7 +42,7 @@ public:
 
 private:
     bool post(IPC::MessageBuffer&);
-    bool post_resource_additions_in_batches(Web::Compositor::CompositorContextId, Web::Painting::DisplayListResourceTransaction&);
+    bool post_resource_additions_in_batches(Compositing::CompositorContextId, Compositing::DisplayListResourceTransaction&);
 
     // Held while a frame is posted, so that frames submitted from different threads do not interleave.
     Mutex m_mutex;
@@ -66,7 +66,7 @@ bool CompositorConnectionFrameSink::post(IPC::MessageBuffer& buffer)
 static constexpr size_t max_resources_per_message = 100;
 static_assert(max_resources_per_message <= IPC::MAX_MESSAGE_FD_COUNT);
 
-bool CompositorConnectionFrameSink::post_resource_additions_in_batches(Web::Compositor::CompositorContextId context_id, Web::Painting::DisplayListResourceTransaction& resource_transaction)
+bool CompositorConnectionFrameSink::post_resource_additions_in_batches(Compositing::CompositorContextId context_id, Compositing::DisplayListResourceTransaction& resource_transaction)
 {
     auto fonts = move(resource_transaction.fonts);
     auto image_frames = move(resource_transaction.image_frames);
@@ -84,7 +84,7 @@ bool CompositorConnectionFrameSink::post_resource_additions_in_batches(Web::Comp
     size_t fonts_taken = 0;
     size_t image_frames_taken = 0;
     while (fonts_taken < fonts.size() || image_frames_taken < image_frames.size()) {
-        Web::Painting::DisplayListResourceTransaction batch;
+        Compositing::DisplayListResourceTransaction batch;
         auto room = max_resources_per_message;
         room -= take(fonts, fonts_taken, room, batch.fonts);
         room -= take(image_frames, image_frames_taken, room, batch.image_frames);
@@ -443,7 +443,7 @@ void CompositorConnection::hurry_rendering_opportunity(Compositing::CompositorCo
     async_hurry_rendering_opportunity(context_id);
 }
 
-Optional<Web::Painting::CanvasId> CompositorConnection::create_webgl_context(Web::WebGL::WebGLVersion webgl_version, Gfx::IntSize size, bool depth, bool stencil, bool antialias, Vector<String>& out_supported_extensions)
+Optional<Compositing::CanvasId> CompositorConnection::create_webgl_context(Compositing::WebGL::WebGLVersion webgl_version, Gfx::IntSize size, bool depth, bool stencil, bool antialias, Vector<String>& out_supported_extensions)
 {
     if (!can_send_message_to_compositor())
         return {};

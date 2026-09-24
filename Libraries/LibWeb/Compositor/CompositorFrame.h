@@ -9,13 +9,13 @@
 #include <AK/AtomicRefCounted.h>
 #include <AK/NonnullRefPtr.h>
 #include <AK/Optional.h>
+#include <LibCompositing/DisplayList/AccumulatedVisualContext.h>
+#include <LibCompositing/DisplayList/DisplayList.h>
+#include <LibCompositing/DisplayList/DisplayListResourceStorage.h>
+#include <LibCompositing/Scrolling/ScrollState.h>
+#include <LibCompositing/Types.h>
 #include <LibGfx/Rect.h>
-#include <LibWeb/Compositor/Types.h>
 #include <LibWeb/Export.h>
-#include <LibWeb/Painting/AccumulatedVisualContext.h>
-#include <LibWeb/Painting/DisplayList.h>
-#include <LibWeb/Painting/DisplayListResourceStorage.h>
-#include <LibWeb/Painting/ScrollState.h>
 
 namespace Web::Compositor {
 
@@ -24,25 +24,25 @@ namespace Web::Compositor {
 struct CompositorFrame {
     // A newly recorded display list, with the visual context tree, resources and scroll state it paints with.
     struct DisplayListUpdate {
-        NonnullRefPtr<Painting::DisplayList> display_list;
-        Painting::AccumulatedVisualContextTree visual_context_tree;
-        Painting::DisplayListResourceTransaction resource_transaction;
-        Painting::ScrollStateSnapshot scroll_state_snapshot;
+        NonnullRefPtr<Compositing::DisplayList> display_list;
+        Compositing::AccumulatedVisualContextTree visual_context_tree;
+        Compositing::DisplayListResourceTransaction resource_transaction;
+        Compositing::ScrollStateSnapshot scroll_state_snapshot;
     };
 
     // A new visual context tree for the display list the compositor already has.
     struct VisualContextTreeUpdate {
-        Painting::AccumulatedVisualContextTree visual_context_tree;
-        Painting::DisplayListResourceTransaction resource_transaction;
+        Compositing::AccumulatedVisualContextTree visual_context_tree;
+        Compositing::DisplayListResourceTransaction resource_transaction;
     };
 
     // The scroll state of the display list the compositor already has.
     struct ScrollStateUpdate {
-        Painting::ScrollStateSnapshot scroll_state_snapshot;
-        KeyboardScrollState keyboard_scroll_state;
+        Compositing::ScrollStateSnapshot scroll_state_snapshot;
+        Compositing::KeyboardScrollState keyboard_scroll_state;
     };
 
-    CompositorContextId context_id;
+    Compositing::CompositorContextId context_id;
     Optional<DisplayListUpdate> display_list_update;
     Optional<VisualContextTreeUpdate> visual_context_tree_update;
     Optional<ScrollStateUpdate> scroll_state_update;

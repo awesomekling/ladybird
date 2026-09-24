@@ -12043,8 +12043,8 @@ fn sheet_occurrences_update_retained_cascade_order_without_recompiling() {
     let target = StyleAtomID(200);
     let shared_rule = add_target_rule(&mut engine, StyleSheetObjectID(1), target);
     let middle_rule = add_target_rule(&mut engine, StyleSheetObjectID(2), target);
-    engine.set_rule_declared_properties(shared_rule, &[(1, false)], true);
-    engine.set_rule_declared_properties(middle_rule, &[(1, false)], true);
+    engine.set_rule_declared_properties(shared_rule, &[(1, false)]);
+    engine.set_rule_declared_properties(middle_rule, &[(1, false)]);
     let shared = engine.program.rule_sheet(shared_rule);
     let middle = engine.program.rule_sheet(middle_rule);
     let scope = TreeScopeID::DOCUMENT;
@@ -12080,7 +12080,7 @@ fn retiring_the_last_sheet_occurrence_invalidates_its_winners() {
     let (mut engine, nodes) = linear_document();
     let target = StyleAtomID(200);
     let rule = add_target_rule(&mut engine, StyleSheetObjectID(1), target);
-    engine.set_rule_declared_properties(rule, &[(1, false)], true);
+    engine.set_rule_declared_properties(rule, &[(1, false)]);
     let sheet = engine.program.rule_sheet(rule);
     let scope = TreeScopeID::DOCUMENT;
     engine.detach_sheet(sheet, scope);

@@ -356,7 +356,7 @@ static RustFFI::FfiViewportPropagationFacts viewport_propagation_facts(DOM::Docu
         return facts;
     // The rows are found by identity, so no shell is made just to name them.
     auto root_row = RustFFI::layout_arena_bound_row(arena->handle(), root_element->style_node_id().value());
-    if (root_row.index == RustFFI::NodeSlotId_INVALID.index)
+    if (root_row.index == Compositing::RustFFI::NodeSlotId_INVALID.index)
         return facts;
     auto const* root_box_values = root_element->style_group<CSS::ComputedValues::BoxValues>();
     auto const* root_inherited_box_values = root_element->style_group<CSS::ComputedValues::InheritedBoxValues>();

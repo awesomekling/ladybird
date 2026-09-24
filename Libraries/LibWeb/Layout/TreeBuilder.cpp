@@ -196,16 +196,16 @@ static CSS::PseudoElement css_pseudo_element(RustFFI::FfiPseudoElement pseudo_el
 
 // A box the build produced for a pseudo-element, named by its arena row. The build hands these
 // back by slot rather than keeping a pointer to them, so the frame carries no box of its own.
-static NodeWithStyle* pseudo_element_build_node(DOM::Document& document, RustFFI::NodeSlotId slot)
+static NodeWithStyle* pseudo_element_build_node(DOM::Document& document, Compositing::RustFFI::NodeSlotId slot)
 {
-    if (slot.index == RustFFI::INVALID_NODE_SLOT_INDEX)
+    if (slot.index == Compositing::RustFFI::INVALID_NODE_SLOT_INDEX)
         return nullptr;
     auto* layout_node = static_cast<Node*>(RustFFI::layout_arena_node_shell_if_live(document.layout_node_arena().handle(), slot));
     VERIFY(layout_node);
     return &as<NodeWithStyle>(*layout_node);
 }
 
-bool attach_owed_style_resources(DOM::Document& document, RustFFI::NodeSlotId slot, bool owns_content_replacement_image)
+bool attach_owed_style_resources(DOM::Document& document, Compositing::RustFFI::NodeSlotId slot, bool owns_content_replacement_image)
 {
     auto* layout_node = static_cast<Node*>(RustFFI::layout_arena_node_shell_if_live(document.layout_node_arena().handle(), slot));
     VERIFY(layout_node);
@@ -225,12 +225,12 @@ bool attach_owed_style_resources(DOM::Document& document, RustFFI::NodeSlotId sl
     return image_was_available;
 }
 
-bool attach_owed_generated_image(DOM::Document& document, RustFFI::NodeSlotId slot, u32 style_node, RustFFI::FfiPseudoElement ffi_pseudo, RustFFI::FfiGeneratedContentItem item, RustFFI::NodeSlotId pseudo_element_box_slot)
+bool attach_owed_generated_image(DOM::Document& document, Compositing::RustFFI::NodeSlotId slot, u32 style_node, RustFFI::FfiPseudoElement ffi_pseudo, RustFFI::FfiGeneratedContentItem item, Compositing::RustFFI::NodeSlotId pseudo_element_box_slot)
 {
     auto& element = as<DOM::Element>(dom_node_for_style_node(document, style_node));
     auto& image_box = as<Box>(*pseudo_element_build_node(document, slot));
     // The marker a list-item pseudo-element nests takes its content's style from itself.
-    auto& style_box = item.nested_marker.index != RustFFI::INVALID_NODE_SLOT_INDEX
+    auto& style_box = item.nested_marker.index != Compositing::RustFFI::INVALID_NODE_SLOT_INDEX
         ? *pseudo_element_build_node(document, item.nested_marker)
         : *pseudo_element_build_node(document, pseudo_element_box_slot);
     auto image = [&] -> NonnullRefPtr<CSS::AbstractImageStyleValue const> {

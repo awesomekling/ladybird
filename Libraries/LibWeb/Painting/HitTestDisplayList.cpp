@@ -323,7 +323,7 @@ HitTestResult HitTestDisplayList::hit_test_result_for_item(Item item, CSSPixelPo
     DOM::NodeIdentity root_element;
     if (paintable_layout_node && paintable_layout_node->kind() == Layout::RustFFI::NodeKind::Viewport) {
         auto root_row = Layout::RustFFI::layout_arena_published_root_element_row(m_arena->handle());
-        if (root_row.index != Layout::RustFFI::INVALID_NODE_SLOT_INDEX) {
+        if (root_row.index != Compositing::RustFFI::INVALID_NODE_SLOT_INDEX) {
             root_element = identity_for_dispatch_shell(layout_node_for_committed_slot(*m_arena, root_row), false);
             hit_node = root_row;
         }

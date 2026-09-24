@@ -27,21 +27,17 @@ pub struct FfiDisplayListReplayCallbacks {
     pub execute_run: unsafe extern "C" fn(*mut c_void, usize),
 }
 
-pub(crate) struct DisplayListReplayHost<'a> {
+pub(crate) struct DisplayListReplayHost {
     callbacks: FfiDisplayListReplayCallbacks,
-    _main_thread: &'a crate::stage::MainThread<'a>,
 }
 
-impl<'a> DisplayListReplayHost<'a> {
-    pub(crate) fn new(callbacks: FfiDisplayListReplayCallbacks, main_thread: &'a crate::stage::MainThread) -> Self {
-        Self {
-            callbacks,
-            _main_thread: main_thread,
-        }
+impl DisplayListReplayHost {
+    pub(crate) fn new(callbacks: FfiDisplayListReplayCallbacks) -> Self {
+        Self { callbacks }
     }
 }
 
-impl ReplayPainter for DisplayListReplayHost<'_> {
+impl ReplayPainter for DisplayListReplayHost {
     fn canvas_matrix(&mut self) -> FloatMatrix4x4 {
         // SAFETY: The C++ painter answers synchronously.
         unsafe { (self.callbacks.canvas_matrix)(self.callbacks.context) }
