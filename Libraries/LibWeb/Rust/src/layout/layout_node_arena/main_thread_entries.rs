@@ -309,7 +309,9 @@ unsafe extern "C" fn layout_arena_adopt_derived_node_style(arena: *mut c_void, n
         engine.pin_layout_style_record(record);
         DerivedStyleRecord {
             record,
-            payloads: engine.style_record_payloads(record).unwrap().as_ptr().cast(),
+            payloads: crate::layout::node_data::StylePayloadsRef::new(
+                engine.style_record_payloads(record).unwrap().as_ptr().cast(),
+            ),
         }
     });
     arena.apply_reinherited_style_record(node, derived, ShellStyleChangeNotice::Now(&main_thread));

@@ -39,7 +39,7 @@ pub(crate) fn node_style_view(data: &NodeData) -> Option<ComputedValuesView<'_>>
     }
     // SAFETY: A non-null style pointer addresses the container's group
     // pointer array, which FfiStylePayloads mirrors exactly.
-    let payloads = unsafe { &*data.style.get().cast::<crate::layout::FfiStylePayloads>() };
+    let payloads = unsafe { &*data.style.get().as_ptr().cast::<crate::layout::FfiStylePayloads>() };
     Some(ComputedValuesView::new(&payloads.groups))
 }
 
