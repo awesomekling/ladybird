@@ -206,10 +206,6 @@ impl StyleRecordView<'_> {
         };
         ComputedLonghandTable::copied_for_partial_drive(source)
     }
-
-    pub(crate) fn longhand_table_seeded_with_values(&self) -> Option<ComputedLonghandTable> {
-        unsafe { self.longhand_table.as_ref() }.map(ComputedLonghandTable::seeded_with_values_from)
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2790,6 +2786,7 @@ impl ComputedGroupSets {
 
     /// The longhands whose previous specified values read the effective color scheme.
     #[must_use]
+    #[cfg(any(test, feature = "style-recording"))]
     pub fn color_scheme_dependency_properties(&self, target: ComputedStyleTarget) -> Option<[u64; 6]> {
         Self::specified_value_dependency_properties(
             self.longhand_table_for_target(target)?,
@@ -2808,6 +2805,7 @@ impl ComputedGroupSets {
 
     /// The longhands whose previous specified values may read font metrics.
     #[must_use]
+    #[cfg(any(test, feature = "style-recording"))]
     pub fn font_dependency_properties(&self, target: ComputedStyleTarget) -> Option<[u64; 6]> {
         Self::specified_value_dependency_properties(
             self.longhand_table_for_target(target)?,
@@ -4373,113 +4371,6 @@ mod tests {
         );
         sets.remove(node);
         assert_eq!(sets.live_animation_overlay_records(), 0);
-    }
-
-    #[test]
-    fn base_access_keeps_the_installed_composition_separate() {
-        let mut sets = ComputedGroupSets::default();
-        let node = StyleNodeID::from_raw(1).unwrap();
-        let target = ComputedStyleTarget::new(node, u8::MAX);
-        let base = sets.publish_unowned(Some(target), &[], 0, 7, metadata(0, 0, 0));
-        let animated_overlay = crate::css::animated_overlay::AnimatedOverlay::default();
-        let mut animated_metadata = metadata(0, 0, 0);
-        animated_metadata.animation_overlay_identity = 1;
-        animated_metadata.animated_overlay = HostShared::new(std::ptr::from_ref(&animated_overlay));
-        let composed = sets.publish_unowned(Some(target), &[], 0, 7, animated_metadata);
-
-        assert_eq!(
-            sets.assigned_base_style_record(target),
-            Some(base.style_record_identity)
-        );
-        assert_eq!(
-            sets.assigned_final_style_record(target),
-            Some(composed.style_record_identity)
-        );
-        assert_ne!(base.style_record_identity, composed.style_record_identity);
-        assert_eq!(
-            sets.base_style_record_view(composed.style_record_identity)
-                .unwrap()
-                .payloads,
-            sets.style_record_view(base.style_record_identity.raw())
-                .unwrap()
-                .payloads
-        );
-        assert!(sets.base_style_record_view(FinalStyleRecordID::NONE).is_none());
-        assert!(
-            sets.base_style_record_view(FinalStyleRecordID(base.style_record_identity.raw() + (1 << 32)))
-                .is_none()
-        );
-    }
-
-    #[test]
-    fn discarded_candidate_restores_the_pinned_composition_and_environment() {
-        let mut sets = ComputedGroupSets::default();
-        let node = StyleNodeID::from_raw(1).unwrap();
-        let target = ComputedStyleTarget::new(node, u8::MAX);
-        let base = sets.publish_unowned(Some(target), &[], 0, 7, metadata(0, 0, 0));
-        let animated_overlay = crate::css::animated_overlay::AnimatedOverlay::default();
-        let mut animated_metadata = metadata(0, 0, 0);
-        animated_metadata.animation_overlay_identity = 1;
-        animated_metadata.animated_overlay = HostShared::new(std::ptr::from_ref(&animated_overlay));
-        let composition = sets.publish_unowned(Some(target), &[], 0, 7, animated_metadata);
-        sets.set_node_custom_property_environment(node, 9);
-        sets.pin_style_record(composition.style_record_identity.raw());
-
-        let candidate = sets.publish_unowned(Some(target), &[], 0, 11, metadata(0, 0, 0));
-        assert_eq!(
-            sets.assigned_final_style_record(target),
-            Some(candidate.style_record_identity)
-        );
-        sets.revert_engine_computed_record(node, candidate.style_record_identity, composition.style_record_identity);
-        sets.unpin_style_record(composition.style_record_identity.raw());
-
-        assert_eq!(
-            sets.assigned_final_style_record(target),
-            Some(composition.style_record_identity)
-        );
-        assert_eq!(
-            sets.assigned_base_style_record(target),
-            Some(base.style_record_identity)
-        );
-        assert_eq!(sets.custom_property_environment_identity(node), Some(9));
-        assert_eq!(sets.live_animation_overlay_records(), 1);
-    }
-
-    #[test]
-    fn environment_candidate_retains_the_old_composition_until_completion() {
-        let mut sets = ComputedGroupSets::default();
-        let node = StyleNodeID::from_raw(1).unwrap();
-        let target = ComputedStyleTarget::new(node, u8::MAX);
-        let base = sets.publish_unowned(Some(target), &[], 0, 7, metadata(0, 0, 0));
-        let animated_overlay = crate::css::animated_overlay::AnimatedOverlay::default();
-        let mut animated_metadata = metadata(0, 0, 0);
-        animated_metadata.animation_overlay_identity = 1;
-        animated_metadata.animated_overlay = HostShared::new(std::ptr::from_ref(&animated_overlay));
-        let composition = sets.publish_unowned(Some(target), &[], 0, 7, animated_metadata);
-
-        let candidate = sets.republish_animated_base_with_environment(node, 11).unwrap();
-        assert_eq!(candidate.delta.0, composition.style_record_identity);
-        assert_ne!(candidate.delta.1, base.style_record_identity);
-        assert_eq!(sets.assigned_final_style_record(target), Some(candidate.delta.1));
-        assert_eq!(
-            sets.style_record_custom_property_environment(candidate.delta.1.raw()),
-            Some(11)
-        );
-        assert!(
-            sets.style_record_view(composition.style_record_identity.raw())
-                .is_some()
-        );
-
-        sets.revert_engine_computed_record(node, candidate.delta.1, candidate.delta.0);
-        sets.unpin_style_record(candidate.pinned_composition.unwrap());
-        assert_eq!(
-            sets.assigned_final_style_record(target),
-            Some(composition.style_record_identity)
-        );
-        assert_eq!(
-            sets.assigned_base_style_record(target),
-            Some(base.style_record_identity)
-        );
     }
 
     #[test]

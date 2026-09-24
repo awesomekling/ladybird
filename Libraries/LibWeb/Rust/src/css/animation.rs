@@ -6959,38 +6959,6 @@ pub unsafe extern "C" fn rust_published_animation_current_key(
     true
 }
 
-/// Where one effect sits in the composite order of the element's published animation list.
-///
-/// The list is published in composite order, so a stage that holds a subset of it can put its own
-/// effects in order by their positions in it instead of comparing the host's animations. Returns
-/// whether the list names the effect at all: an effect of a transition that was provisionally
-/// started and then discarded belongs to no list, and there the stage has to ask the host.
-///
-/// # Safety
-/// `style_engine` must be a live style engine, and `position_out` must be writable.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_published_animation_composite_position(
-    style_engine: *const std::ffi::c_void,
-    style_node: u32,
-    slot: u8,
-    effect_identity: u64,
-    position_out: *mut u32,
-) -> bool {
-    let engine = unsafe { &*style_engine.cast::<crate::css::style::StyleEngine>() };
-    let Some(node) = crate::css::style::tree::StyleNodeID::from_raw(style_node) else {
-        return false;
-    };
-    let Some(position) = engine
-        .element_animation_timing_rows(node, slot)
-        .iter()
-        .position(|row| row.effect_identity() == effect_identity)
-    else {
-        return false;
-    };
-    unsafe { *position_out = position as u32 };
-    true
-}
-
 /// Order one element's animation timing rows in composite order, as indices into the list the host
 /// packed. The order is decided from the rows alone: every number
 /// `KeyframeEffect::composite_order()` compares travels on the row, so the list a stage reads is in
@@ -7133,11 +7101,6 @@ impl<'a> AnimatedCustomProperties<'a> {
     pub(crate) fn with_own_importance(mut self, own_importance: std::collections::HashMap<usize, u8>) -> Self {
         self.own_importance = Some(own_importance);
         self
-    }
-
-    /// Whether this stack animates a name the channel cannot carry.
-    pub(crate) fn refuses_a_name(&self) -> bool {
-        self.refuses_a_name
     }
 
     fn store(store: *const std::ffi::c_void) -> Option<&'static crate::css::custom_properties::CustomPropertyStore> {

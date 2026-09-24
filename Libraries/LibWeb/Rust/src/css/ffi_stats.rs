@@ -318,26 +318,6 @@ pub extern "C" fn rust_style_ffi_complete_style_update_end() -> FfiDeferredCppRe
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn rust_style_ffi_note_longhand_input_freeze(reasons: u8) {
-    crate::css::style::seal::note_longhand_input_freeze(reasons);
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn rust_style_ffi_style_seal_is_reporting() -> bool {
-    crate::css::style::seal::is_reporting()
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn rust_style_ffi_note_host_driven_row(kinds: u8) {
-    crate::css::style::seal::note_host_driven_row(kinds);
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn rust_style_ffi_note_longhand_result_apply() {
-    crate::css::style::seal::note_stage_interleave("longhand_result_apply");
-}
-
-#[unsafe(no_mangle)]
 pub extern "C" fn rust_deferred_cpp_releases_clear() {
     COMPLETE_STYLE_UPDATE_STATE.with(|state| {
         let mut state = state.borrow_mut();

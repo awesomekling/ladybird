@@ -442,12 +442,15 @@ fn write_enum_and_from_ffi(output: &mut String, enum_name: &str, variants: &[Str
     }
     writeln!(output, "}}").unwrap();
     writeln!(output).unwrap();
-    let fn_name = if enum_name == "PseudoClassType" {
-        "pseudo_class_from_ffi"
-    } else {
-        "pseudo_element_from_ffi"
-    };
-    writeln!(output, "pub(crate) fn {fn_name}(value: u8) -> {enum_name} {{").unwrap();
+    // Only pseudo-classes cross the FFI by code; a pseudo-element never does.
+    if enum_name != "PseudoClassType" {
+        return;
+    }
+    writeln!(
+        output,
+        "pub(crate) fn pseudo_class_from_ffi(value: u8) -> {enum_name} {{"
+    )
+    .unwrap();
     writeln!(output, "    match value {{").unwrap();
     for (index, variant) in variants.iter().enumerate() {
         writeln!(output, "        {index} => {enum_name}::{variant},").unwrap();
@@ -3025,6 +3028,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         "ComputedValuesFFI".to_string(),
     ]);
     computed_values_config.export.include = vec![
+        // Named by no exported signature: the settled animation definitions cross as a borrowed
+        // array of these.
+        "FfiComputedAnimation".to_string(),
         "StyleGroupVTable".to_string(),
         "STYLE_GROUP_STATIC_REFCOUNT".to_string(),
         "GRID_NO_INDEX".to_string(),

@@ -91,7 +91,7 @@ impl RetainedState {
             entry = entry.or_else(|| overlay.and_then(|overlay| overlay.get(property)));
             inherits = ancestor_table.is_inherited(property);
             if !inherits {
-                let base_value = crate::css::style_compute::ParentSnapshot::new(ancestor_table, None, false, false)
+                let base_value = crate::css::style_compute::ParentSnapshot::new(ancestor_table, None, false)
                     .value(property)
                     .map_or(std::ptr::null(), std::ptr::from_ref);
                 return entry
