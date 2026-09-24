@@ -3169,7 +3169,9 @@ pub unsafe extern "C" fn style_engine_element_record_damage(
     new_style_record: u64,
 ) -> u32 {
     let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
-    let node = StyleNodeID::from_raw(node).expect("damage is computed for a live style node");
+    let Some(node) = StyleNodeID::from_raw(node) else {
+        return super::style_invalidation::unreadable_record_damage("ElementRecordDamageWithoutStyleNode");
+    };
     engine.element_record_damage(node, false, old_style_record, new_style_record)
 }
 
@@ -3190,7 +3192,9 @@ pub unsafe extern "C" fn style_engine_pseudo_element_record_damage(
     counter_styles_changed: bool,
 ) -> u32 {
     let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
-    let node = StyleNodeID::from_raw(node).expect("damage is computed for a live style node");
+    let Some(node) = StyleNodeID::from_raw(node) else {
+        return super::style_invalidation::unreadable_record_damage("PseudoElementRecordDamageWithoutStyleNode");
+    };
     engine.pseudo_element_record_damage(
         node,
         pseudo_kind,

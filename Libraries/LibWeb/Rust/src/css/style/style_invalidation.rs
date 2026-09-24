@@ -134,6 +134,16 @@ impl StyleInvalidation {
     }
 }
 
+/// What a move damages when the engine cannot read one of its records, or the host names no style
+/// node for it: everything. A debug build asserts; the seal reports the site.
+pub(crate) fn unreadable_record_damage(site: &'static str) -> u32 {
+    debug_assert!(false, "record damage without a readable record ({site})");
+    super::seal::note_broken_assumption(site);
+    let mut damage = StyleInvalidation::full();
+    damage.any_computed_value_changed = true;
+    damage.pack()
+}
+
 fn style_value_is_none(value: Option<&StyleValueData>) -> bool {
     match value {
         Some(StyleValueData::Keyword { keyword }) => *keyword == crate::css::css_enums::keyword::NONE,
@@ -937,14 +947,12 @@ impl RetainedState {
         new_style_record: u64,
     ) -> u32 {
         let (font_lists_equal, color_changed, stroke_uses_current_color, table_fixup_child_changed) = {
-            let old_record = self
-                .computed_group_sets
-                .style_record_view(old_style_record)
-                .unwrap_or_else(|| panic!("old style record {old_style_record:#x} is not live"));
-            let new_record = self
-                .computed_group_sets
-                .style_record_view(new_style_record)
-                .unwrap_or_else(|| panic!("new style record {new_style_record:#x} is not live"));
+            let (Some(old_record), Some(new_record)) = (
+                self.computed_group_sets.style_record_view(old_style_record),
+                self.computed_group_sets.style_record_view(new_style_record),
+            ) else {
+                return unreadable_record_damage("ElementRecordDamageRecordNotLive");
+            };
             let old_values = ComputedValuesView::new(SharedPayload::as_pointer_slice(old_record.payloads));
             let new_values = ComputedValuesView::new(SharedPayload::as_pointer_slice(new_record.payloads));
             let stroke_uses_current_color = |values: ComputedValuesView<'_>| {
@@ -1031,21 +1039,21 @@ impl RetainedState {
         if unchanged || (old_style_record == 0 && new_style_record == 0) {
             return 0;
         }
-        let view = |record: u64| {
-            (record != 0).then(|| {
-                let view = self
-                    .computed_group_sets
-                    .style_record_view(record)
-                    .unwrap_or_else(|| panic!("style record {record:#x} is not live"));
-                ComputedValuesView::new(SharedPayload::as_pointer_slice(view.payloads))
-            })
+        // A zero record is an absent one; a nonzero record the engine cannot read is none at all.
+        let view = |record: u64| match record {
+            0 => Some(None),
+            record => self
+                .computed_group_sets
+                .style_record_view(record)
+                .map(|view| Some(ComputedValuesView::new(SharedPayload::as_pointer_slice(view.payloads)))),
         };
-        let (old_values, new_values, originating_values) = (
+        let (Some(old_values), Some(new_values), Some(Some(originating_values))) = (
             view(old_style_record),
             view(new_style_record),
             view(originating_style_record),
-        );
-        let originating_values = originating_values.expect("a pseudo-element's originating element has style");
+        ) else {
+            return unreadable_record_damage("PseudoElementRecordDamageRecordNotLive");
+        };
 
         // A non-inline generated box can split an inline originating element and mutate anonymous structure in
         // its parent. Inline ::before and ::after boxes remain confined to the originating element's layout
