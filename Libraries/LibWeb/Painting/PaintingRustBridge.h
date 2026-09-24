@@ -18,6 +18,7 @@
 #include <LibWeb/Painting/FlexboxInspectorOverlay.h>
 #include <LibWeb/Painting/GridInspectorOverlay.h>
 #include <LibWeb/Painting/PaintableTypes.h>
+#include <LibWeb/Painting/PendingDisplayListRecording.h>
 
 namespace Web::Painting {
 
@@ -62,7 +63,10 @@ struct InspectorOverlayInputs {
     Optional<CSSPixelRect> caret_debug_rect;
 };
 
-WEB_API RefPtr<Compositing::DisplayList> record_rust_display_list(DOM::Document&, Compositing::DisplayList const& placeholder_display_list, Compositing::DisplayListResourceStorage&, PaintCommandCacheMode, HTML::PaintConfig const&, InspectorOverlayInputs const&);
+// Resolves what the recording reads on the main thread and has the render side record it. Returns nothing if there is
+// nothing to record; otherwise finish_rust_display_list_recording() finishes it once the render side has recorded it.
+WEB_API Optional<PendingDisplayListRecording> begin_rust_display_list_recording(DOM::Document&, Compositing::DisplayList const& placeholder_display_list, Compositing::DisplayListResourceStorage&, PaintCommandCacheMode, HTML::PaintConfig const&, InspectorOverlayInputs const&, RecordingRun);
+WEB_API NonnullRefPtr<Compositing::DisplayList> finish_rust_display_list_recording(PendingDisplayListRecording&);
 WEB_API bool last_recording_missed_vector_images(DOM::Document const&);
 WEB_API Utf16String serialize_painting_dump(DOM::Document const&, Compositing::AccumulatedVisualContextTree const&, Compositing::DisplayList const&, Compositing::DisplayListResourceStorage const&);
 

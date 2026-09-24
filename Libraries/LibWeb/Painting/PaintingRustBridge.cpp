@@ -535,7 +535,7 @@ bool last_recording_missed_vector_images(DOM::Document const& document)
     return Layout::RustFFI::layout_arena_last_recording_missed_vector_images(layout_arena_handle(document));
 }
 
-RefPtr<Compositing::DisplayList> record_rust_display_list(DOM::Document& document, Compositing::DisplayList const& placeholder_display_list, Compositing::DisplayListResourceStorage& resource_storage, PaintCommandCacheMode cache_mode, HTML::PaintConfig const& config, InspectorOverlayInputs const& overlay_inputs)
+Optional<PendingDisplayListRecording> begin_rust_display_list_recording(DOM::Document& document, Compositing::DisplayList const& placeholder_display_list, Compositing::DisplayListResourceStorage& resource_storage, PaintCommandCacheMode cache_mode, HTML::PaintConfig const& config, InspectorOverlayInputs const& overlay_inputs, RecordingRun run)
 {
     auto* arena = layout_arena_handle(document);
     RecordingPublishContext publish_context { resource_storage, document };
@@ -653,8 +653,29 @@ RefPtr<Compositing::DisplayList> record_rust_display_list(DOM::Document& documen
     // thread before the recording starts; the recording only looks the renders up.
     Layout::RustFFI::layout_arena_resolve_painted_vector_images(arena, &inputs, vector_image_callbacks(publish_context));
     auto rust_timer = Core::ElapsedTimer::start_new(Core::TimerType::Precise);
+    VERIFY(run == RecordingRun::Now);
     if (!Layout::RustFFI::layout_arena_record_display_list(arena, viewport_row_slot(document), inputs))
-        return nullptr;
+        return {};
+    return PendingDisplayListRecording {
+        .document = document,
+        .resource_storage = resource_storage,
+        .visual_context_tree = document.paint_state().visual_context_tree(document),
+        .cache_mode = cache_mode,
+        .surface_clear_color = placeholder_display_list.surface_clear_color(),
+        .device_viewport_rect = device_viewport_rect,
+        .wheel_event_region_state = wheel_event_region_state,
+        .timer = rust_timer,
+    };
+}
+
+NonnullRefPtr<DisplayList> finish_rust_display_list_recording(PendingDisplayListRecording& recording)
+{
+    auto& document = *recording.document;
+    auto* arena = layout_arena_handle(document);
+    RecordingPublishContext publish_context { recording.resource_storage, document };
+    auto const& device_viewport_rect = recording.device_viewport_rect;
+    auto& wheel_event_region_state = recording.wheel_event_region_state;
+    auto const& rust_timer = recording.timer;
     Layout::RustFFI::layout_arena_publish_recording(arena, recording_publish_callbacks(publish_context));
     take_recording_trace_if_pending(document);
     if (Layout::RustFFI::layout_arena_last_recording_has_blocking_wheel_event_listeners(arena))
@@ -684,8 +705,8 @@ RefPtr<Compositing::DisplayList> record_rust_display_list(DOM::Document& documen
     if (rust_painting_timing_enabled())
         dbgln("PAINT_RECORD rust={} µs commands={} bytes", rust_timer.elapsed_time().to_microseconds(), display_list->command_bytes().size());
 
-    if (auto color = placeholder_display_list.surface_clear_color(); color.has_value())
-        display_list->set_surface_clear_color(*color);
+    if (recording.surface_clear_color.has_value())
+        display_list->set_surface_clear_color(*recording.surface_clear_color);
     stamp_async_scrolling_metadata_with_current_viewport_rect(*display_list);
     return display_list;
 }
