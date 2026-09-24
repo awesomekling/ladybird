@@ -65,9 +65,10 @@
 //! A memo *miss* is the part that leaves the process: a renderer cannot match a code point itself
 //! and has to ask the UI process. That is a resource service the design permits, but only over a
 //! connection the render side owns; `WebView::RendererFontService` is that connection, and a
-//! renderer installs it at startup. Should it be missing, the miss falls back to the system font
-//! provider, which asks on the connection the document thread owns and pumps - a data race today
-//! and a deadlock once a pass runs on its own thread. LibGfx reports that case as
+//! renderer cannot start without it. Only a process that runs no render thread (a worker, the
+//! compositor) lacks it; there the miss falls back to the system font provider, which asks on the
+//! connection the document thread owns and pumps. That would be a data race, and a deadlock once
+//! a pass runs on its own thread, so LibGfx still reports the case as
 //! `WebContentClient::match_system_font_for_code_point`, and the seal treats it like any other
 //! host call.
 //!

@@ -197,12 +197,9 @@ void ConnectionFromClient::set_font_catalog(IPC::File file, u64 size, u64 genera
 
 void ConnectionFromClient::set_renderer_font_service_transport(IPC::TransportHandle handle)
 {
-    auto service = WebView::RendererFontService::create(move(handle));
-    if (service.is_error()) {
-        dbgln("WebContent: Unable to connect the render side's font service: {}", service.error());
-        return;
-    }
-    auto renderer_font_service = service.release_value();
+    // NB: A renderer cannot run without this service: a fallback font miss from a render pass would
+    //     otherwise go out on the connection the document thread owns.
+    auto renderer_font_service = MUST(WebView::RendererFontService::create(move(handle)));
     // The same connection answers both: a code point no family covers, and the questions family
     // matching asks. Installing the broker first keeps the reference valid - the service object
     // does not move when the fallback slot takes ownership of it.
