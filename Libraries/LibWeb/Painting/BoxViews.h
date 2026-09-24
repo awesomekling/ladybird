@@ -26,7 +26,7 @@ WEB_API GC::Ptr<SVG::SVGFilterElement> resolve_svg_filter_reference(CSS::Compute
 
 Compositing::RustFFI::NodeSlotId committed_row_slot(Layout::Node const&);
 Compositing::RustFFI::NodeSlotId viewport_row_slot(DOM::Document const&);
-Layout::RustFFI::PaintableData const* committed_row(Layout::Node const&);
+Layout::RustFFI::FfiCommittedRow committed_row(Layout::Node const&);
 
 WEB_API bool has_committed_box(Layout::Node const&);
 WEB_API Layout::Node* layout_node_for_committed_slot(Layout::NodeArena&, Compositing::RustFFI::NodeSlotId);

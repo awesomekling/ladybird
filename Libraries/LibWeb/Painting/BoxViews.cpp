@@ -72,14 +72,14 @@ Compositing::RustFFI::NodeSlotId viewport_row_slot(DOM::Document const& document
     return Layout::Node::slot_id(document.unsafe_layout_node());
 }
 
-Layout::RustFFI::PaintableData const* committed_row(Layout::Node const& node)
+Layout::RustFFI::FfiCommittedRow committed_row(Layout::Node const& node)
 {
-    return Layout::RustFFI::layout_arena_paintable_row(node.arena_handle(), committed_row_slot(node));
+    return Layout::RustFFI::layout_arena_committed_row(node.arena_handle(), committed_row_slot(node));
 }
 
 bool has_committed_box(Layout::Node const& node)
 {
-    return committed_row(node) != nullptr;
+    return committed_row(node).is_populated;
 }
 
 Layout::Node* layout_node_for_committed_slot(Layout::NodeArena& arena, Compositing::RustFFI::NodeSlotId slot)
@@ -192,8 +192,7 @@ bool visible_for_hit_testing(Layout::Node const& node)
 
 bool has_stacking_context(Layout::Node const& node)
 {
-    auto const* row = committed_row(node);
-    return row && row->establishes_stacking_context;
+    return committed_row(node).establishes_stacking_context;
 }
 
 CSS::Display display(Layout::Node const& node)
@@ -259,32 +258,29 @@ bool is_svg_svg_paintable(Layout::Node const& node)
 
 bool has_accumulated_visual_context(Layout::Node const& node)
 {
-    auto const* row = committed_row(node);
-    return row && row->has_accumulated_visual_context;
+    return committed_row(node).has_accumulated_visual_context;
 }
 
 Compositing::ContextRef accumulated_visual_context(Layout::Node const& node)
 {
-    auto const* row = committed_row(node);
-    return row ? row->accumulated_visual_context : Compositing::ContextRef {};
+    return committed_row(node).accumulated_visual_context;
 }
 
 Compositing::ContextRef accumulated_visual_context_for_descendants(Layout::Node const& node)
 {
-    auto const* row = committed_row(node);
-    return row ? row->accumulated_visual_context_for_descendants : Compositing::ContextRef {};
+    return committed_row(node).accumulated_visual_context_for_descendants;
 }
 
 Compositing::SpatialNodeIndex enclosing_scroll_node_index(Layout::Node const& node)
 {
-    auto const* row = committed_row(node);
-    return row ? row->enclosing_scroll_node_index : Compositing::VISUAL_VIEWPORT_NODE_INDEX;
+    auto row = committed_row(node);
+    return row.is_populated ? row.enclosing_scroll_node_index : Compositing::VISUAL_VIEWPORT_NODE_INDEX;
 }
 
 Compositing::SpatialNodeIndex own_scroll_node_index(Layout::Node const& node)
 {
-    auto const* row = committed_row(node);
-    return row ? row->own_scroll_node_index : Compositing::VISUAL_VIEWPORT_NODE_INDEX;
+    auto row = committed_row(node);
+    return row.is_populated ? row.own_scroll_node_index : Compositing::VISUAL_VIEWPORT_NODE_INDEX;
 }
 
 Gfx::Path const* committed_svg_path(Layout::Node const& node)
@@ -317,8 +313,7 @@ CSS::RustStyleValueHandle used_value_for_grid_template(Layout::Node const& node,
 
 CSSPixelPoint box_type_agnostic_position(Layout::Node const& node)
 {
-    auto const* row = committed_row(node);
-    if (!row)
+    if (!has_committed_box(node))
         return {};
     if (is_inline_paintable(node)) {
         auto result = Layout::RustFFI::layout_arena_inline_paintable_first_piece_position(node.arena_handle(), committed_row_slot(node));
@@ -641,30 +636,30 @@ CSSPixelRect transform_reference_box(Layout::Node const& node)
 
 CSSPixelRect transform_rect_to_viewport(Layout::Node const& node, CSSPixelRect const& rect, Compositing::AccumulatedVisualContextTree::IncludeVisualViewportTransform include_visual_viewport_transform)
 {
-    auto const* row = committed_row(node);
-    if (!row)
+    auto row = committed_row(node);
+    if (!row.is_populated)
         return {};
     auto const& document = node.document();
     if (!document.is_rendered())
         return rect;
     auto pixel_ratio = static_cast<float>(document.page().client().device_pixels_per_css_pixel());
     auto result = document.visual_context_tree().transform_rect_to_viewport(
-        row->accumulated_visual_context.spatial, rect.to_type<float>() * pixel_ratio,
+        row.accumulated_visual_context.spatial, rect.to_type<float>() * pixel_ratio,
         document.scroll_state_snapshot(), include_visual_viewport_transform);
     return (result * (1.f / pixel_ratio)).to_type<CSSPixels>();
 }
 
 Optional<CSSPixelPoint> transform_point_to_local(Layout::Node const& node, CSSPixelPoint position)
 {
-    auto const* row = committed_row(node);
-    if (!row)
+    auto row = committed_row(node);
+    if (!row.is_populated)
         return {};
     auto const& document = node.document();
     if (!document.is_rendered())
         return position;
     auto pixel_ratio = static_cast<float>(document.page().client().device_pixels_per_css_pixel());
     auto result = document.visual_context_tree().transform_point_for_hit_test(
-        row->accumulated_visual_context, position.to_type<float>() * pixel_ratio,
+        row.accumulated_visual_context, position.to_type<float>() * pixel_ratio,
         document.scroll_state_snapshot());
     if (!result.has_value())
         return {};
@@ -673,14 +668,14 @@ Optional<CSSPixelPoint> transform_point_to_local(Layout::Node const& node, CSSPi
 
 CSSPixelPoint inverse_transform_point(Layout::Node const& node, CSSPixelPoint position)
 {
-    auto const* row = committed_row(node);
-    if (!row)
+    auto row = committed_row(node);
+    if (!row.is_populated)
         return {};
     auto const& document = node.document();
     if (!document.is_rendered())
         return position;
     auto pixel_ratio = static_cast<float>(document.page().client().device_pixels_per_css_pixel());
-    auto result = document.visual_context_tree().inverse_transform_point(row->accumulated_visual_context.spatial, position.to_type<float>() * pixel_ratio);
+    auto result = document.visual_context_tree().inverse_transform_point(row.accumulated_visual_context.spatial, position.to_type<float>() * pixel_ratio);
     return (result / pixel_ratio).to_type<CSSPixels>();
 }
 

@@ -1954,6 +1954,15 @@ impl LayoutNodeArena {
         self.active_layout_pass_depth.get() > 0
     }
 
+    /// True while a render stage is on the stack: a layout pass, a layout tree build, or a paint
+    /// pass. A host call made in that window is part of the stage, not a main-side read between
+    /// stages.
+    pub(crate) fn a_stage_is_running(&self) -> bool {
+        self.layout_pass_is_running()
+            || super::tree_build_seal::build_is_running()
+            || crate::painting::seal::current_pass_name().is_some()
+    }
+
     pub(crate) fn begin_active_layout_pass(&self) {
         let depth = self.active_layout_pass_depth.get();
         if depth == 0 {

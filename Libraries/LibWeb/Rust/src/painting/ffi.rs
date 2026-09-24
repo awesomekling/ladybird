@@ -16,7 +16,7 @@ use crate::painting::filter_bytes::{FfiFilterFunction, filter_functions_graph};
 use crate::painting::force_dark::ForceDarkRole;
 use crate::painting::host::visual_context::FfiSvgFilterPrimitive;
 use crate::painting::paintable_data::*;
-use crate::painting::paintable_rows::{PaintableRowsRead, with_inline_pieces};
+use crate::painting::paintable_rows::{MainSidePaintableRows, PaintableRowsRead, with_inline_pieces};
 use crate::painting::rect_to_viewport_transform::RectToViewportTransform;
 use crate::painting::scroll_chain::ViewportWheelOverflow;
 use crate::painting::svg_filter::SvgFilterPrimitive;
@@ -48,6 +48,21 @@ unsafe fn arena_from_handle_inside_render_pass<'a>(arena: *mut c_void) -> &'a La
 #[track_caller]
 unsafe fn arena_from_handle_mut<'a>(arena: *mut c_void) -> &'a mut LayoutNodeArena {
     unsafe { LayoutNodeArena::from_handle_mut(arena) }
+}
+
+/// The main side's one door to the paintable rows. Between stages it reads the rows as last
+/// committed; a host call made while a stage runs belongs to that stage and reads the rows the
+/// stage is writing.
+///
+/// SAFETY: Same as [`arena_from_handle`]. Between stages, no other borrow of the arena may be live
+/// while the view is.
+#[track_caller]
+unsafe fn main_side_paintable_rows<'a>(arena: *mut c_void) -> MainSidePaintableRows<'a> {
+    let shared = unsafe { arena_from_handle(arena) };
+    if shared.a_stage_is_running() {
+        return MainSidePaintableRows::DuringStage(shared.paintable_rows());
+    }
+    MainSidePaintableRows::Committed(unsafe { arena_from_handle_mut(arena) }.committed_paintable_rows())
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -367,17 +382,40 @@ pub unsafe extern "C" fn layout_arena_published_root_element_row(arena: *mut c_v
     slot
 }
 
+/// The fields of a committed paintable row that C++ reads, copied out through
+/// [`main_side_paintable_rows`]. `is_populated` is false, and the rest default, when the slot has
+/// no committed box.
+#[derive(Default)]
+#[repr(C)]
+pub struct FfiCommittedRow {
+    pub is_populated: bool,
+    pub establishes_stacking_context: bool,
+    pub has_accumulated_visual_context: bool,
+    pub accumulated_visual_context: ContextRef,
+    pub accumulated_visual_context_for_descendants: ContextRef,
+    pub enclosing_scroll_node_index: SpatialNodeIndex,
+    pub own_scroll_node_index: SpatialNodeIndex,
+}
+
 /// # Safety
 ///
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_paintable_row(arena: *mut c_void, slot: NodeSlotId) -> *const PaintableData {
-    let arena = unsafe { arena_from_handle(arena) };
-    let paintable_rows = arena.paintable_rows();
+pub unsafe extern "C" fn layout_arena_committed_row(arena: *mut c_void, slot: NodeSlotId) -> FfiCommittedRow {
+    let paintable_rows = unsafe { main_side_paintable_rows(arena) };
     if !paintable_rows.paintable_row_is_populated(slot) {
-        return std::ptr::null();
+        return FfiCommittedRow::default();
     }
-    paintable_rows.paintable_data_ptr(slot)
+    let row = paintable_rows.paintable_data(slot);
+    FfiCommittedRow {
+        is_populated: true,
+        establishes_stacking_context: row.establishes_stacking_context,
+        has_accumulated_visual_context: row.has_accumulated_visual_context,
+        accumulated_visual_context: row.accumulated_visual_context,
+        accumulated_visual_context_for_descendants: row.accumulated_visual_context_for_descendants,
+        enclosing_scroll_node_index: row.enclosing_scroll_node_index,
+        own_scroll_node_index: row.own_scroll_node_index,
+    }
 }
 
 /// Clears the paint state of `layout_node`'s row, whose box is going away, and hands back its
