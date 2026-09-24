@@ -267,13 +267,12 @@ enum FrameJoin {
     /// the document's own loop over its elements.
     Style,
     /// The layout tree build: the builder reads the DOM, and runs its walk as a stage of its own.
-    /// A partial relayout's build also reconciles the stale list item counters and answers with
-    /// the facts after it, since the build can resize this document's viewport through its
-    /// embedding document, and with the sources of the pass that follows.
+    /// Unless the build asks for another pass, the join then reconciles the list item counters
+    /// the build left stale, which live in the document's element sets, and answers with the
+    /// sources of the pass that follows. A partial relayout's build also answers with the facts
+    /// after it, since the build can resize this document's viewport through its embedding
+    /// document.
     BuildLayoutTree,
-    /// The list item counters a build left stale live in the document's element sets. Once they
-    /// are reconciled, the join answers with the sources of the pass that follows.
-    ReconcileStaleListItemCounters,
     /// The host half of a partial relayout boundary's commit when another boundary follows it:
     /// the host is paid its handbacks and delivered the commit messages the document applies at
     /// once, and only then are the arena's update flags settled for the next boundary's pass.
@@ -466,24 +465,26 @@ impl LayoutFrame<'_> {
             let layout_started = self.inputs.trace.now();
 
             if needs_layout_tree_rebuild {
-                let outcome = self.join(FrameJoin::BuildLayoutTree, |main_thread, host| {
-                    host.build_layout_tree(main_thread)
-                });
-                self.arena().record_layout_tree_build(&outcome);
-
-                if outcome.needs_another_build_pass {
-                    continue;
-                }
-
-                // The full layout below covers every boundary the build's invalidation registered.
-                drop(self.arena().take_partial_relayout_boundary_roots());
-
-                self.arena().set_needs_full_layout_tree_update(false);
-                self.inputs.trace.tree_build(layout_started);
-
                 let arena_handle = self.inputs.arena_handle;
-                let pass_sources = self.join(FrameJoin::ReconcileStaleListItemCounters, |main_thread, host| {
+                let pass_sources = self.join(FrameJoin::BuildLayoutTree, |main_thread, host| {
+                    let outcome = host.build_layout_tree(main_thread);
                     // SAFETY: The frame runs for the update the arena is in.
+                    let arena = unsafe { arena(arena_handle) };
+                    arena.record_layout_tree_build(&outcome);
+                    if outcome.needs_another_build_pass {
+                        return None;
+                    }
+
+                    // The full layout below covers every boundary the build's invalidation
+                    // registered.
+                    drop(arena.take_partial_relayout_boundary_roots());
+
+                    // The reconciliation can mark the tree for another build, so it follows the
+                    // reset of the full tree update flag.
+                    arena.set_needs_full_layout_tree_update(false);
+                    self.inputs.trace.tree_build(layout_started);
+
+                    // SAFETY: As above.
                     (!host.reconcile_stale_list_item_counters_after_tree_build(main_thread))
                         .then(|| unsafe { LayoutPassSources::read(main_thread, arena_handle) })
                 });
