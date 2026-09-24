@@ -118,9 +118,6 @@ public:
     [[nodiscard]] u64 style_record_custom_property_environment(StyleRecordID style_record) const;
     [[nodiscard]] bool node_record_reads_attributes(StyleNodeID) const;
     [[nodiscard]] u8 node_record_custom_condition_usage(StyleNodeID) const;
-    void begin_computed_record_verification(StyleNodeID, u64 settled_pseudo_element_kinds);
-    void end_computed_record_verification();
-    [[nodiscard]] bool style_records_match_for_verification(StyleNodeID, u8 pseudo_kind, StyleRecordID, StyleRecordID) const;
     [[nodiscard]] u32 compare_style_records(StyleRecordID old_style_record, StyleRecordID new_style_record, bool font_lists_equal, bool element_folds_transform_into_layout, bool element_propagates_overflow_to_viewport) const;
     [[nodiscard]] bool animation_overlay_changed(StyleRecordID old_style_record, void const* animated_overlay) const;
     [[nodiscard]] Optional<u32> current_color_dependent_style_groups(StyleNodeID node, u8 pseudo_kind) const;

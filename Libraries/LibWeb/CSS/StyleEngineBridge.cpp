@@ -284,21 +284,6 @@ u64 StyleEngine::style_record_custom_property_environment(StyleRecordID style_re
     return StyleEngineFFI::style_engine_style_record_custom_property_environment(m_impl, style_record.value());
 }
 
-void StyleEngine::begin_computed_record_verification(StyleNodeID node, u64 settled_pseudo_element_kinds)
-{
-    StyleEngineFFI::style_engine_begin_computed_record_verification(m_impl, node.value(), settled_pseudo_element_kinds);
-}
-
-void StyleEngine::end_computed_record_verification()
-{
-    StyleEngineFFI::style_engine_end_computed_record_verification(m_impl);
-}
-
-bool StyleEngine::style_records_match_for_verification(StyleNodeID node, u8 pseudo_kind, StyleRecordID first, StyleRecordID second) const
-{
-    return StyleEngineFFI::style_engine_style_records_match_for_verification(m_impl, node.value(), pseudo_kind, first.value(), second.value());
-}
-
 u32 StyleEngine::compare_style_records(StyleRecordID old_style_record, StyleRecordID new_style_record, bool font_lists_equal, bool element_folds_transform_into_layout, bool element_propagates_overflow_to_viewport) const
 {
     return StyleEngineFFI::style_engine_compare_style_records(m_impl, old_style_record.value(), new_style_record.value(), font_lists_equal, element_folds_transform_into_layout, element_propagates_overflow_to_viewport);

@@ -18,7 +18,7 @@
 //! Observation folds those contexts into process-wide totals; the disabled hot
 //! path remains one relaxed atomic load per crossing.
 
-use std::cell::{Cell, OnceCell, RefCell};
+use std::cell::{OnceCell, RefCell};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -165,7 +165,6 @@ fn counter_registry() -> &'static Arc<Mutex<CounterRegistry>> {
 thread_local! {
     // Includes parsing and value lifetime operations outside a document's style update.
     static COUNTER_CONTEXT: OnceCell<BridgeCounterContext> = const { OnceCell::new() };
-    static COUNTERS_SUSPENDED_FOR_VERIFICATION: Cell<bool> = const { Cell::new(false) };
 }
 
 static COUNTERS_ENABLED: AtomicBool = AtomicBool::new(false);
@@ -219,7 +218,7 @@ unsafe extern "C" {
 
 #[inline]
 pub(crate) fn bump(op: FfiOp) {
-    if COUNTERS_ENABLED.load(Ordering::Relaxed) && !COUNTERS_SUSPENDED_FOR_VERIFICATION.with(Cell::get) {
+    if COUNTERS_ENABLED.load(Ordering::Relaxed) {
         let counted = COUNTER_CONTEXT.try_with(|context| {
             context
                 .get_or_init(|| BridgeCounterContext::new(counter_registry().clone()))
@@ -236,7 +235,7 @@ pub(crate) fn bump(op: FfiOp) {
 /// Counts a table ownership boundary only while diagnostics are enabled.
 #[inline]
 pub(crate) fn count_table_copy(values: impl FnOnce() -> (u64, u64)) {
-    if !COUNTERS_ENABLED.load(Ordering::Relaxed) || COUNTERS_SUSPENDED_FOR_VERIFICATION.with(Cell::get) {
+    if !COUNTERS_ENABLED.load(Ordering::Relaxed) {
         return;
     }
     let (slots, retains) = values();
@@ -374,12 +373,6 @@ pub extern "C" fn rust_style_ffi_counter_value(index: usize) -> u64 {
 pub extern "C" fn rust_style_ffi_counters_reset() {
     counter_registry().lock().unwrap().reset();
     COUNTERS_ENABLED.store(true, Ordering::Relaxed);
-}
-
-/// Excludes the reference computation's work from production FFI counters.
-#[unsafe(no_mangle)]
-pub extern "C" fn rust_style_ffi_counters_suspend_for_verification(suspended: bool) -> bool {
-    COUNTERS_SUSPENDED_FOR_VERIFICATION.with(|state| state.replace(suspended))
 }
 
 /// Notes the adoption of a Rust style value allocation by a C++ shell; called
