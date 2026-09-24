@@ -4489,11 +4489,14 @@ pub unsafe extern "C" fn style_engine_frozen_longhand_input(
 }
 
 /// Keeps the custom-property environment an element now holds. A null `data` records that the
-/// element holds none.
+/// element holds none. An environment the element's animations sampled custom properties into
+/// names the environment it was composed over, which its store does not: `animation_base`,
+/// `animation_base_store` and `animation_base_environment`, null and zero for an overlay composed
+/// over none. Every other environment passes `is_animation_overlay` false.
 ///
 /// # Safety
 /// `engine` must be live, and `data` must be null or a live `Web::CSS::CustomPropertyData`
-/// carrying `store`.
+/// carrying `store`, and holding the base environment an overlay names alive.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_set_element_custom_property_data(
     engine: *mut c_void,
@@ -4503,12 +4506,17 @@ pub unsafe extern "C" fn style_engine_set_element_custom_property_data(
     environment: u64,
     is_animation_overlay: bool,
     declares: bool,
+    animation_base: *const c_void,
+    animation_base_store: *const c_void,
+    animation_base_environment: u64,
 ) {
     let Some(node) = StyleNodeID::from_raw(node) else {
         return;
     };
     let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
-    unsafe { engine.set_element_custom_property_data(node, data, store, environment, is_animation_overlay, declares) };
+    let animation_base =
+        is_animation_overlay.then_some((animation_base_environment, animation_base_store, animation_base));
+    unsafe { engine.set_element_custom_property_data(node, data, store, environment, declares, animation_base) };
 }
 
 /// The custom-property environment an element holds: the host's object for it, or null with the

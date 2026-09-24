@@ -55,7 +55,7 @@ fn report(line: &str) {
 }
 
 /// The engine could not answer for this input, so there is nothing to compare.
-pub(crate) fn note_declined(input: &'static str) {
+pub(crate) fn note_declined(input: &str) {
     if mode() == Mode::Off {
         return;
     }

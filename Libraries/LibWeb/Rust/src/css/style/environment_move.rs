@@ -213,6 +213,7 @@ impl StyleEngineState {
         }
         if environment & custom_property_environments::ENGINE_ENVIRONMENT_IDENTITY_BIT != 0 {
             return Some(Some(HeldCustomPropertyEnvironment {
+                animation_base: None,
                 identity: environment,
                 is_animation_overlay: false,
                 declares: self.environment_declares(environment),
@@ -226,6 +227,7 @@ impl StyleEngineState {
             .and_then(Option::as_ref)
             .filter(|held| held.identity == environment && !held.is_animation_overlay)?;
         Some(Some(HeldCustomPropertyEnvironment {
+            animation_base: None,
             identity: environment,
             is_animation_overlay: false,
             declares: parent_held.declares,
@@ -272,6 +274,7 @@ impl StyleEngineState {
             let held = self.retained.pseudo_element_custom_property_data[&(element, kind)].identity;
             let replacement = if held == existing {
                 moved.map(|moved| HeldCustomPropertyEnvironment {
+                    animation_base: None,
                     identity: moved.identity,
                     is_animation_overlay: false,
                     declares: moved.declares,
@@ -282,6 +285,7 @@ impl StyleEngineState {
                 })
             } else if held == existing_inheritable && moved_inheritable == moved_identity {
                 moved.map(|moved| HeldCustomPropertyEnvironment {
+                    animation_base: None,
                     identity: moved.identity,
                     is_animation_overlay: false,
                     declares: moved.declares,
@@ -294,6 +298,7 @@ impl StyleEngineState {
                 && moved_inheritable & custom_property_environments::ENGINE_ENVIRONMENT_IDENTITY_BIT != 0
             {
                 Some(HeldCustomPropertyEnvironment {
+                    animation_base: None,
                     identity: moved_inheritable,
                     is_animation_overlay: false,
                     declares: self.environment_declares(moved_inheritable),

@@ -5350,10 +5350,16 @@ void Element::install_custom_property_data(Optional<CSS::PseudoElement> pseudo_e
         if (!pseudo_element.has_value()) {
             // The engine moves an element's environment when the one it inherits moves: what it
             // needs to know is whether this is an animation overlay, and whether what the element's
-            // style resolves to declares custom properties of its own.
+            // style resolves to declares custom properties of its own. An overlay flattens the
+            // environment it was composed over into its store, so it names that one to the engine
+            // itself.
             bool const is_animation_overlay = data && data->is_animation_overlay_for({ *this });
             auto base = is_animation_overlay ? data->parent() : data;
-            style_engine.set_element_custom_property_data(style_node, data.ptr(), is_animation_overlay, base && base->declared_count() > 0);
+            auto animation_base = is_animation_overlay ? base : nullptr;
+            CSS::StyleEngineFFI::style_engine_set_element_custom_property_data(
+                style_engine.rust_handle(), style_node.value(), data.ptr(), data ? data->rust_store() : nullptr,
+                data ? data->identity() : 0, is_animation_overlay, base && base->declared_count() > 0, animation_base.ptr(),
+                animation_base ? animation_base->rust_store() : nullptr, animation_base ? animation_base->identity() : 0);
             return;
         }
         if (data)

@@ -33,15 +33,19 @@ unsafe extern "C" {
 /// moves, and released when the node is retired.
 pub(crate) struct RetainedCustomPropertyData {
     data: crate::css::host_shared::HostShared<std::ffi::c_void>,
+    /// The store the environment holds its values in, which lives as long as it does; null where
+    /// the host did not name it.
+    store: crate::css::host_shared::HostShared<std::ffi::c_void>,
 }
 
 impl RetainedCustomPropertyData {
     /// # Safety
-    /// `data` must be a live `Web::CSS::CustomPropertyData`.
-    unsafe fn retain(data: *const std::ffi::c_void) -> Self {
+    /// `data` must be a live `Web::CSS::CustomPropertyData`, and `store` null or its store.
+    unsafe fn retain(data: *const std::ffi::c_void, store: *const std::ffi::c_void) -> Self {
         unsafe { web_css_custom_property_data_reference(data) };
         Self {
             data: crate::css::host_shared::HostShared::new(data),
+            store: crate::css::host_shared::HostShared::new(store),
         }
     }
 
@@ -52,7 +56,7 @@ impl RetainedCustomPropertyData {
     /// Another reference to the same environment, for another element that holds it.
     pub(crate) fn share(&self) -> Self {
         // SAFETY: This row keeps the environment live.
-        unsafe { Self::retain(self.data()) }
+        unsafe { Self::retain(self.data(), self.store.as_ptr()) }
     }
 }
 
@@ -67,6 +71,16 @@ pub(crate) struct HeldCustomPropertyEnvironment {
     /// Whether it declares custom properties of its own, over the environment it inherits.
     pub(crate) declares: bool,
     pub(crate) data: Option<RetainedCustomPropertyData>,
+    /// For an animation overlay, the environment it was composed over, which it keeps alive.
+    pub(crate) animation_base: Option<AnimationBaseEnvironment>,
+}
+
+/// The environment an animation-sampled one was composed over: its identity, its store and the
+/// host's environment object, which the sampled one keeps alive.
+pub(crate) struct AnimationBaseEnvironment {
+    environment: u64,
+    store: crate::css::host_shared::HostShared<std::ffi::c_void>,
+    data: crate::css::host_shared::HostShared<std::ffi::c_void>,
 }
 
 impl Drop for RetainedCustomPropertyData {
@@ -149,15 +163,17 @@ impl RetainedState {
     /// which is what a missing entry means.
     ///
     /// # Safety
-    /// `data` must be null or a live `Web::CSS::CustomPropertyData` carrying `store`.
+    /// `data` must be null or a live `Web::CSS::CustomPropertyData` carrying `store`, and, where it
+    /// is an animation overlay, keep alive the environment `animation_base` names; `animation_base`
+    /// is `None` for any other environment.
     pub(crate) unsafe fn set_element_custom_property_data(
         &mut self,
         node: StyleNodeID,
         data: *const std::ffi::c_void,
         store: *const std::ffi::c_void,
         environment: u64,
-        is_animation_overlay: bool,
         declares: bool,
+        animation_base: Option<(u64, *const std::ffi::c_void, *const std::ffi::c_void)>,
     ) {
         if data.is_null() {
             self.element_custom_property_data.insert(node, None);
@@ -181,11 +197,51 @@ impl RetainedState {
             node,
             Some(HeldCustomPropertyEnvironment {
                 identity: environment,
-                is_animation_overlay,
+                is_animation_overlay: animation_base.is_some(),
                 declares,
-                data: Some(unsafe { RetainedCustomPropertyData::retain(data) }),
+                animation_base: animation_base.map(|(environment, store, data)| AnimationBaseEnvironment {
+                    environment,
+                    store: crate::css::host_shared::HostShared::new(store),
+                    data: crate::css::host_shared::HostShared::new(data),
+                }),
+                data: Some(unsafe { RetainedCustomPropertyData::retain(data, store) }),
             }),
         );
+    }
+
+    /// The identity and the store of the environment an element holds: `(0, null)` for an element
+    /// holding none, and `None` for an element the engine was never told about.
+    pub(crate) fn element_custom_property_environment(
+        &self,
+        node: StyleNodeID,
+    ) -> Option<(u64, *const std::ffi::c_void)> {
+        Some(match self.element_custom_property_data.get(&node)? {
+            Some(held) => (
+                held.identity,
+                held.data
+                    .as_ref()
+                    .map(|data| data.store.as_ptr())
+                    .filter(|store| !store.is_null())
+                    .or_else(|| self.custom_property_environments.store(held.identity))
+                    .unwrap_or(std::ptr::null()),
+            ),
+            None => (0, std::ptr::null()),
+        })
+    }
+
+    /// The identity, the store and the host object of the environment the one an element holds was
+    /// composed over, where the element's animations sampled custom properties into it: `(0, null,
+    /// null)` for one composed over none, and `None` for any other environment.
+    pub(crate) fn element_custom_property_animation_base(
+        &self,
+        node: StyleNodeID,
+    ) -> Option<(u64, *const std::ffi::c_void, *const std::ffi::c_void)> {
+        self.element_custom_property_data
+            .get(&node)?
+            .as_ref()?
+            .animation_base
+            .as_ref()
+            .map(|base| (base.environment, base.store.as_ptr(), base.data.as_ptr()))
     }
 
     /// The environment an element holds, as it was last kept: the host's object for it, or null with
@@ -235,7 +291,8 @@ impl RetainedState {
                 identity: environment,
                 is_animation_overlay: false,
                 declares: false,
-                data: Some(unsafe { RetainedCustomPropertyData::retain(data) }),
+                data: Some(unsafe { RetainedCustomPropertyData::retain(data, std::ptr::null()) }),
+                animation_base: None,
             },
         );
     }

@@ -631,6 +631,26 @@ impl CustomPropertyStore {
         result
     }
 
+    /// Whether this store resolves every custom property to the same value as `other`, such as a
+    /// copy the host made of an environment the engine resolved.
+    pub(crate) fn resolves_like(&self, other: &Self) -> bool {
+        let mut names = std::collections::HashSet::new();
+        for mut store in [self, other] {
+            loop {
+                names.extend(store.own_values.keys().copied());
+                let Some(parent) = store.parent.as_deref() else {
+                    break;
+                };
+                store = parent;
+            }
+        }
+        names.into_iter().all(|name| match (self.get(name), other.get(name)) {
+            (Some(ours), Some(theirs)) => ours.value == theirs.value && ours.important == theirs.important,
+            (None, None) => true,
+            _ => false,
+        })
+    }
+
     pub(crate) fn get(&self, name_raw: usize) -> Option<&CustomPropertyEntry> {
         self.own_values
             .get(&name_raw)
