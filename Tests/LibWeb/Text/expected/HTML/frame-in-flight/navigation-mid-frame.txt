@@ -1,0 +1,5 @@
+navigation: held as armed: true
+navigation: new document: second
+document.open: held as armed: true
+document.open: document: third
+document.open: body width: true

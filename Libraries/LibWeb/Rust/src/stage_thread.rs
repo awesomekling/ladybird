@@ -39,6 +39,7 @@ use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
 use std::panic::AssertUnwindSafe;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Condvar, Mutex, OnceLock};
 use std::thread::ThreadId;
@@ -277,8 +278,14 @@ pub(crate) unsafe fn submit_stage(label: &'static str, arena: *mut c_void, stage
     debug_assert!(submits(label), "the stage {label} is not submitted");
     let (to_caller, from_stage) = channel::<StageOutcome>();
     let caller = std::thread::current().id();
+    let run = SubmittedRun {
+        label,
+        arena: arena as usize,
+        number: NEXT_SUBMITTED_RUN.fetch_add(1, Ordering::Relaxed),
+    };
     let job: Job = Box::new(move || {
-        wait_if_held(label);
+        RUNNING_SUBMITTED_RUN.with(|running| running.set(Some(run)));
+        hold_here(FfiStageHoldPoint::BeforeRun);
         tsan::acquire(thread);
         let waiting_caller = WAITING_CALLER.with(|waiting| waiting.replace(Some(caller)));
         let outcome = std::panic::catch_unwind(AssertUnwindSafe(stage));
@@ -287,6 +294,8 @@ pub(crate) unsafe fn submit_stage(label: &'static str, arena: *mut c_void, stage
         drop(take_style_update_scope());
         WAITING_CALLER.with(|waiting| waiting.set(waiting_caller));
         tsan::release(thread);
+        hold_here(FfiStageHoldPoint::BeforeCompletion);
+        RUNNING_SUBMITTED_RUN.with(|running| running.set(None));
         // The caller keeps the receiver until it has taken this reply.
         let _ = to_caller.send(outcome);
         frame_completion_notify();
@@ -306,13 +315,54 @@ pub(crate) unsafe fn submit_stage(label: &'static str, arena: *mut c_void, stage
     }
 }
 
-/// A test's hold on the next submitted run of a stage: the stage thread waits before it runs that
-/// stage until the hold is released, so that the main thread runs its tasks beside the frame in
+/// Where in a submitted run of a stage a test's hold makes the stage thread wait.
+#[repr(u8)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FfiStageHoldPoint {
+    /// Before the stage runs.
+    BeforeRun,
+    /// In the recording, once it holds the arena's paint state and scratch, before it records.
+    MidRecording,
+    /// Once the stage has run, before the main thread hears that it has finished.
+    BeforeCompletion,
+}
+
+/// A submitted run of a stage, as the stage thread knows it while it runs it.
+#[derive(Clone, Copy)]
+struct SubmittedRun {
+    label: &'static str,
+    arena: usize,
+    // In submission order, from 1.
+    number: u64,
+}
+
+// The number of the next submitted run.
+static NEXT_SUBMITTED_RUN: AtomicU64 = AtomicU64::new(1);
+
+thread_local! {
+    // On the stage thread, the submitted run it is running.
+    static RUNNING_SUBMITTED_RUN: Cell<Option<SubmittedRun>> = const { Cell::new(None) };
+}
+
+/// Which run a test's hold is armed for.
+#[derive(Clone)]
+struct ArmedHold {
+    label: String,
+    point: FfiStageHoldPoint,
+    // The arena of the run to hold, or 0 for any.
+    arena: usize,
+}
+
+/// A test's hold on the next submitted run of a stage: the stage thread waits at a point of that
+/// run until the hold is released, so that the main thread runs its tasks beside the frame in
 /// flight at a point the test chooses.
 #[derive(Default)]
 struct StageHold {
-    armed_for: Option<String>,
-    holding: bool,
+    armed: Option<ArmedHold>,
+    // Runs submitted before this one are not held: the main thread has queued a stage behind them.
+    first_holdable_run: u64,
+    // The hold the stage thread is holding a run for.
+    holding: Option<ArmedHold>,
 }
 
 fn stage_hold() -> &'static (Mutex<StageHold>, Condvar) {
@@ -320,60 +370,113 @@ fn stage_hold() -> &'static (Mutex<StageHold>, Condvar) {
     STAGE_HOLD.get_or_init(Default::default)
 }
 
-/// Makes the stage thread wait before the next submitted run of the stage `label` names, until
-/// [`rust_stage_thread_release_held_stage`] or a main-thread wait for the stage releases it.
-/// Returns false, and holds nothing, unless stages are submitted.
+fn lock_stage_hold() -> (std::sync::MutexGuard<'static, StageHold>, &'static Condvar) {
+    let (hold, changed) = stage_hold();
+    (hold.lock().expect("the stage hold is never poisoned"), changed)
+}
+
+/// Makes the stage thread wait at `point` of the next submitted run of the stage `label` names
+/// (for the arena `arena` only, unless it is null), until [`rust_stage_thread_release_held_stage`]
+/// or a main-thread wait for the stage releases it. Returns false, and holds nothing, unless stages
+/// are submitted.
 ///
 /// # Safety
 ///
 /// `label` must point to `label_length` bytes of UTF-8.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_stage_thread_hold_next_submitted_stage(label: *const u8, label_length: usize) -> bool {
+pub unsafe extern "C" fn rust_stage_thread_hold_next_submitted_stage(
+    label: *const u8,
+    label_length: usize,
+    point: FfiStageHoldPoint,
+    arena: *mut c_void,
+) -> bool {
     if stage_thread_mode() != Some(StageThreadMode::Overlap) || FRAME_SCHEDULER_HOST.get().is_none() {
         return false;
     }
     // SAFETY: Guaranteed by the caller.
     let label = unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(label, label_length)) };
-    let (hold, _) = stage_hold();
-    hold.lock().expect("the stage hold is never poisoned").armed_for = Some(label.to_owned());
+    let (mut hold, _) = lock_stage_hold();
+    hold.armed = Some(ArmedHold {
+        label: label.to_owned(),
+        point,
+        arena: arena as usize,
+    });
+    hold.first_holdable_run = NEXT_SUBMITTED_RUN.load(Ordering::Relaxed);
     true
 }
 
 /// Releases a held stage, or disarms a hold no stage has reached yet.
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_stage_thread_release_held_stage() {
-    let (hold, released) = stage_hold();
-    let mut hold = hold.lock().expect("the stage hold is never poisoned");
-    hold.armed_for = None;
-    hold.holding = false;
-    released.notify_all();
+    let (mut hold, changed) = lock_stage_hold();
+    hold.armed = None;
+    hold.holding = None;
+    changed.notify_all();
 }
 
-/// Releases the stage the stage thread is holding, and disarms a hold for `label` that the stage
+/// Test only: waits up to `timeout_ms` for the stage thread to hold a run. Returns where it holds
+/// it, if it does.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_stage_thread_wait_for_held_stage(timeout_ms: u32, held_at: &mut FfiStageHoldPoint) -> bool {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms.into());
+    let (mut hold, changed) = lock_stage_hold();
+    loop {
+        if let Some(holding) = &hold.holding {
+            *held_at = holding.point;
+            return true;
+        }
+        let now = std::time::Instant::now();
+        if hold.armed.is_none() || now >= deadline {
+            return false;
+        }
+        hold = changed
+            .wait_timeout(hold, deadline - now)
+            .expect("the stage hold is never poisoned")
+            .0;
+    }
+}
+
+/// Releases the run the stage thread is holding, and disarms a hold for `label` that the stage
 /// thread has not reached yet. A hold for another stage stays armed.
 fn release_hold_on(label: &'static str) {
-    let (hold, released) = stage_hold();
-    let mut hold = hold.lock().expect("the stage hold is never poisoned");
-    if hold.armed_for.as_deref() == Some(label) {
-        hold.armed_for = None;
+    let (mut hold, changed) = lock_stage_hold();
+    if hold.armed.as_ref().is_some_and(|armed| armed.label == label) {
+        hold.armed = None;
     }
-    if hold.holding {
-        hold.holding = false;
-        released.notify_all();
+    if hold.holding.take().is_some() {
+        changed.notify_all();
     }
 }
 
-/// On the stage thread, before a submitted run of `label`: waits while a hold is armed for it.
-fn wait_if_held(label: &'static str) {
-    let (hold, released) = stage_hold();
-    let mut hold = hold.lock().expect("the stage hold is never poisoned");
-    if hold.armed_for.as_deref() != Some(label) {
+/// Called before the main thread queues a stage behind the submitted ones: releases the run the
+/// stage thread is holding, and leaves the hold armed for the runs submitted from now on, so that
+/// the last run of the frame is the one that holds.
+fn release_hold_for_queued_stage() {
+    let (mut hold, changed) = lock_stage_hold();
+    hold.first_holdable_run = NEXT_SUBMITTED_RUN.load(Ordering::Relaxed);
+    if let Some(holding) = hold.holding.take() {
+        hold.armed = Some(holding);
+        changed.notify_all();
+    }
+}
+
+/// On the stage thread, at `point` of a submitted run: waits while a hold is armed for it.
+/// Anywhere else, does nothing.
+pub(crate) fn hold_here(point: FfiStageHoldPoint) {
+    let Some(run) = RUNNING_SUBMITTED_RUN.with(Cell::get) else {
+        return;
+    };
+    let (mut hold, changed) = lock_stage_hold();
+    let holds_run = hold.armed.as_ref().is_some_and(|armed| {
+        armed.label == run.label && armed.point == point && (armed.arena == 0 || armed.arena == run.arena)
+    });
+    if !holds_run || run.number < hold.first_holdable_run {
         return;
     }
-    hold.armed_for = None;
-    hold.holding = true;
-    while hold.holding {
-        hold = released.wait(hold).expect("the stage hold is never poisoned");
+    hold.holding = hold.armed.take();
+    changed.notify_all();
+    while hold.holding.is_some() {
+        hold = changed.wait(hold).expect("the stage hold is never poisoned");
     }
 }
 
@@ -462,6 +565,24 @@ pub(crate) fn join_frame_in_flight_at(arena: *mut c_void, file: &'static str, li
     let host = FRAME_SCHEDULER_HOST.get().expect("a submitted frame has a scheduler");
     // SAFETY: Called on the main thread, with the frame taken back.
     unsafe { (host.consume_commit)() }
+}
+
+/// Test only: waits up to `timeout_ms` for every stage of the main thread's frame in flight to
+/// finish, without taking the frame back. Returns false if there is no frame in flight or it has not
+/// finished in time.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_stage_thread_wait_for_frame_in_flight_to_finish(timeout_ms: u32) -> bool {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms.into());
+    while has_frame_in_flight() {
+        if frame_in_flight_has_finished() {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    false
 }
 
 /// Whether the main thread has a frame in flight. Asking does not wait for it.
@@ -689,6 +810,10 @@ unsafe fn run_stage_on<R: Send>(
     // SAFETY: The job borrows from the calling thread's frame. It drops everything it captured
     // before it replies, and this function does not return before the reply arrives.
     let job = unsafe { std::mem::transmute::<Box<dyn FnOnce() + Send + '_>, Job>(job) };
+    // This stage queues behind the submitted ones, so a held one has to go on.
+    if has_frame_in_flight() {
+        release_hold_for_queued_stage();
+    }
     tsan::release(thread);
     if thread.jobs.send(StageMessage::Run(job)).is_err() {
         // The stage thread only goes away if the process is going away.

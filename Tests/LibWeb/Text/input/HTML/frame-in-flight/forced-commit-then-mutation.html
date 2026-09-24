@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<style>
+    #box { width: 100px; height: 20px; background: blue; }
+</style>
+<div id="box"></div>
+<script>
+    // A layout read while the frame records forces a join: it waits for the frame, takes it in (consume-commit, no
+    // script) and reads committed layout. A mutation right after it must reach the next frame, and the tail of the
+    // joined frame must still run once the stack is empty.
+    asyncTest(async done => {
+        const frame = await whileFrameInFlight("mid-recording", () => {
+            box.style.backgroundColor = "green";
+        }, frame => {
+            const widthAtJoin = box.offsetWidth;
+            const stateAfterJoin = internals.frameSchedulerState();
+            box.style.width = "123px";
+            box.textContent = "mutated";
+            const widthAfterMutation = box.offsetWidth;
+            const style = getComputedStyle(box).width;
+            return { ...frame, widthAtJoin, stateAfterJoin, widthAfterMutation, style };
+        });
+        println(`held as armed: ${heldAsArmed(frame, "mid-recording")}`);
+        println(`width at join: ${frame.widthAtJoin}`);
+        println(`join took the frame in: ${!frame.armed || frame.stateAfterJoin === "committed-tail-pending"}`);
+        println(`width after mutation: ${frame.widthAfterMutation}`);
+        println(`computed width: ${frame.style}`);
+        await nextTask();
+        println(`tail ran by the next task: ${internals.frameSchedulerState() === "idle"}`);
+        internals.resetRenderingSchedulerCounters();
+        await twoFrames();
+        println(`next frames painted: ${internals.getRenderingSchedulerCounters().paints > 0}`);
+        println(`width at the end: ${box.offsetWidth}`);
+        done();
+    });
+</script>

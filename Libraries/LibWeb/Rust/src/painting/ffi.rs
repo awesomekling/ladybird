@@ -1293,6 +1293,7 @@ fn record_display_list_stage(stage: RecordingStageInput<'_>) -> RecordingStageOu
     let copies_from_published_frame = source_frame.is_some();
     arena.set_paint_recording_in_progress(true);
     let pass = crate::painting::seal::enter(crate::painting::seal::Pass::Recording);
+    crate::stage_thread::hold_here(crate::stage_thread::FfiStageHoldPoint::MidRecording);
     let recording = crate::painting::record::traversal::record_display_list(
         arena,
         &paint_state,

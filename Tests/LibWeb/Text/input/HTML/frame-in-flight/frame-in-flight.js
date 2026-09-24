@@ -1,0 +1,54 @@
+// Deterministic holds on the frame in flight (LIBWEB_STAGE_THREAD=overlap).
+//
+// whileFrameInFlight(point, mutate, during) runs `mutate` in a rAF callback, so the rendering update paints, and holds
+// the recording that update submits at `point` ("before-run", "mid-recording" or "before-completion"). `during`
+// then runs in a task while that frame is held there, and gets { armed, heldAt, state }. With `doc`, only that
+// document's recording is held (with iframes, hold the one the rendering update paints last: a main-thread wait for
+// the render side, such as the layout update of a document painted after it, lets a held recording go on). Where frames are not
+// submitted (default and lockstep modes), nothing is armed and `during` runs after the rendering update: a test prints
+// the same output in every mode, and checks the in-flight facts only when `armed` is set.
+// It starts once the document has loaded: the load task lays the document out, which waits for the frame in flight.
+async function whileFrameInFlight(point, mutate, during, doc = null) {
+    if (document.readyState !== "complete")
+        await new Promise(resolve => window.addEventListener("load", resolve, { once: true }));
+    return new Promise((resolve, reject) => {
+        requestAnimationFrame(() => {
+            const armed = internals.holdNextRecordingFrame(point, doc);
+            mutate();
+            setTimeout(async () => {
+                try {
+                    const heldAt = armed ? internals.waitForHeldFrame() : "";
+                    const frame = { armed, heldAt, state: internals.frameSchedulerState() };
+                    const result = await during(frame);
+                    internals.releaseHeldFrame();
+                    resolve(result);
+                } catch (e) {
+                    internals.releaseHeldFrame();
+                    reject(e);
+                }
+            }, 0);
+        });
+    });
+}
+
+// Whether the frame was held where it was armed and was in flight while it was (true in every mode that did not arm).
+function heldAsArmed(frame, point) {
+    return !frame.armed || (frame.heldAt === point && frame.state === "in-flight");
+}
+
+function nextTask() {
+    const { promise, resolve } = Promise.withResolvers();
+    const channel = new MessageChannel();
+    channel.port1.onmessage = resolve;
+    channel.port2.postMessage(null);
+    return promise;
+}
+
+function nextFrame() {
+    return new Promise(resolve => requestAnimationFrame(() => resolve()));
+}
+
+async function twoFrames() {
+    await nextFrame();
+    await nextFrame();
+}

@@ -168,6 +168,8 @@ RENDER_STAGE_ALLOWED = {
             "stage_thread.rs:FORCED_JOIN_SITES",
             "layout/frame_retirement.rs:HOLDS",
             "layout/frame_retirement.rs:COUNTERS",
+            "stage_thread.rs:NEXT_SUBMITTED_RUN",
+            "stage_thread.rs:RUNNING_SUBMITTED_RUN",
         ],
     ),
     **render_stage_entries(

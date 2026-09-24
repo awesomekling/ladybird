@@ -1,0 +1,11 @@
+alert: held as armed: true
+alert: finished beside the script: true
+alert: rendering updates inside the nested loop: 1
+alert: tail ran before the pause's rendering update: true
+alert: tail ran by the next task: true
+sync xhr: held as armed: true
+sync xhr: finished beside the script: true
+sync xhr: rendering updates inside the nested loop: 0
+sync xhr: no tail inside the nested loop: true
+sync xhr: tail ran by the next task: true
+box width: 50

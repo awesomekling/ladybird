@@ -1,0 +1,6 @@
+held as armed: true
+visibility: hidden
+still in flight once hidden: true
+finished while hidden: true
+taken in while hidden: true
+rendering resumed: visible

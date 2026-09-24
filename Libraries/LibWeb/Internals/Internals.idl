@@ -214,8 +214,15 @@ interface Internals {
     undefined resetRenderingSchedulerCounters();
     // Under LIBWEB_STAGE_THREAD=overlap, holds the next recording submitted to the render side
     // until releaseHeldFrame(), so that tasks run beside that frame in flight. Returns whether it
-    // will hold one; it never does in the other modes.
-    boolean holdNextRecordingFrame();
+    // will hold one; it never does in the other modes. It holds the recording at `point`:
+    // "before-run", "mid-recording" (holding the arena's paint state and scratch) or
+    // "before-completion" (finished, before the main thread hears of it); with a document, only
+    // that document's recording. A main-thread wait for the recording releases it too, and a stage
+    // queued behind it (the layout update of a document painted after it) releases it and leaves
+    // the hold armed for the recordings submitted after that stage.
+    boolean holdNextRecordingFrame(optional DOMString point = "before-run", optional Document? document = null);
+    // Blocks (bounded) until a recording is held and returns where, or "" if none is.
+    DOMString waitForHeldFrame();
     undefined releaseHeldFrame();
     // Whether a frame is in flight and holds this document.
     boolean frameInFlightHoldsDocument();
@@ -224,6 +231,12 @@ interface Internals {
     boolean frameInFlightReferencesAreAlive();
     undefined setManualRenderingOpportunities(boolean enabled);
     undefined injectRenderingOpportunity(double frameTimeMs);
+    // Blocks (bounded) until the frame in flight has finished on the render side, without taking it
+    // in. Returns false if no frame is in flight.
+    boolean waitForFrameToFinish();
+    // The frame scheduler's state: "idle", "main-half", "in-flight", "consuming" or
+    // "committed-tail-pending".
+    DOMString frameSchedulerState();
     undefined updateCompositorAnimations();
     boolean runEmptyAnimationStyleUpdateForTesting();
     undefined armCompositorAnimationTimersForTesting();

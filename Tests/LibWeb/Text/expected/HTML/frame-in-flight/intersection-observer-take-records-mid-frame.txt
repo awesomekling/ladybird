@@ -1,0 +1,3 @@
+initial: true
+held as armed: true
+after moving out: false
