@@ -3846,9 +3846,22 @@ impl RetainedState {
         let shorthand = (crate::css::property_metadata::FIRST_SHORTHAND_PROPERTY_ID
             ..=crate::css::property_metadata::LAST_SHORTHAND_PROPERTY_ID)
             .find(|&candidate| {
-                let expansion = crate::css::property_metadata::longhands_for_shorthand(candidate);
-                expansion.len() == pending_longhands.len()
-                    && expansion.iter().all(|longhand| pending_longhands.contains(longhand))
+                // A shorthand nested in another one (`border-width` in `border`) expands the
+                // outer one into its leaf longhands.
+                fn expand(property: u16, longhands: &mut Vec<u16>) {
+                    for &longhand in crate::css::property_metadata::longhands_for_shorthand(property) {
+                        if longhand < crate::css::property_metadata::FIRST_LONGHAND_PROPERTY_ID {
+                            expand(longhand, longhands);
+                        } else {
+                            longhands.push(longhand);
+                        }
+                    }
+                }
+                let mut expansion = Vec::new();
+                expand(candidate, &mut expansion);
+                expansion.sort_unstable();
+                expansion.dedup();
+                expansion == pending_longhands
             })?;
         Some((shorthand, Self::underlying_shorthand_substitution(original?)))
     }
