@@ -149,6 +149,23 @@ pub(crate) fn note_host_entry(cause: &'static str, kind: HostEntryKind, cold: bo
     STATE.with_borrow_mut(|state| *state.host_entry_causes.entry(key).or_default() += 1);
 }
 
+/// Report an assumption about runtime state that did not hold where the engine took a defined
+/// fallback instead: a debug build asserts at the site, a release build carries on. Each site is
+/// reported once; `abort` makes it fatal.
+pub(crate) fn note_broken_assumption(site: &'static str) {
+    let mode = mode();
+    if mode == Mode::Off {
+        return;
+    }
+    assert!(
+        mode != Mode::Abort,
+        "style stage is sealed, but an assumption broke ({site})"
+    );
+    if STATE.with_borrow_mut(|state| state.reported.insert(site)) {
+        write_report(&format!("STYLE SEAL: broken_assumption {site}\n"));
+    }
+}
+
 /// Record one engine entry point the host called. Only calls made while an update runs are
 /// counted, and none is fatal: the census ranks the round trips left between host and engine.
 pub(crate) fn note_engine_call(entry: &'static str) {
