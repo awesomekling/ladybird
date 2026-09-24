@@ -376,7 +376,7 @@ static RefPtr<CustomPropertyData const> custom_property_environment_base(DOM::El
 // by identity, and the style engine, which keeps what each holds, moves them: each takes the moved
 // one directly, and only the descendants whose style reads the environment are recorded to compute
 // again. What is left here is to install the records the move republished over the moved ones.
-static void propagate_custom_property_environment_move(DOM::Document& document, DOM::Element& origin, RefPtr<CustomPropertyData const> old_origin_data, HashTable<StyleNodeID>& republished_nodes)
+static void propagate_custom_property_environment_move(StyleDrainScope const& scope, DOM::Document& document, DOM::Element& origin, RefPtr<CustomPropertyData const> old_origin_data, HashTable<StyleNodeID>& republished_nodes)
 {
     // Nothing inherits from an element with nothing below it in the flat tree.
     if (!origin.first_element_child() && !origin.shadow_root() && !is<HTML::HTMLSlotElement>(origin))
@@ -389,7 +389,7 @@ static void propagate_custom_property_environment_move(DOM::Document& document, 
     };
     Vector<MovedRecord> moved_records;
     StyleEngineFFI::style_engine_move_custom_property_environment(
-        document.style_computer().style_engine().rust_handle(), origin.style_node_id().value(),
+        scope.engine().rust_handle(), origin.style_node_id().value(),
         old_base ? old_base->identity() : 0, new_base ? new_base->identity() : 0,
         [](void* context, u32 node, u64 record) {
             static_cast<Vector<MovedRecord>*>(context)->append({ StyleNodeID { node }, StyleRecordID { record } });
@@ -404,16 +404,16 @@ static void propagate_custom_property_environment_move(DOM::Document& document, 
     }
 }
 
-static Optional<RequiredInvalidationAfterStyleChange> install_targeted_record_demand_answer(DOM::Element&, bool& did_change_custom_properties);
+static Optional<RequiredInvalidationAfterStyleChange> install_targeted_record_demand_answer(StyleDrainScope const&, DOM::Element&, bool& did_change_custom_properties);
 
 // A row the engine did not settle in its transaction: ask it for the element's record now, the way
 // a targeted read does.
-static RequiredInvalidationAfterStyleChange apply_engine_record_demand(DOM::Element& element, bool& did_change_custom_properties)
+static RequiredInvalidationAfterStyleChange apply_engine_record_demand(StyleDrainScope const& scope, DOM::Element& element, bool& did_change_custom_properties)
 {
-    auto invalidation = install_targeted_record_demand_answer(element, did_change_custom_properties);
+    auto invalidation = install_targeted_record_demand_answer(scope, element, did_change_custom_properties);
     if (!invalidation.has_value())
         return {};
-    element.document().style_computer().style_engine().consume_recorded_element_style_input_change(element.style_node_id());
+    scope.engine().consume_recorded_element_style_input_change(element.style_node_id());
     return *invalidation;
 }
 
@@ -897,7 +897,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
             } else if (needs_regular_style_recompute || needs_inherited_style_recompute || needs_full_custom_property_recompute) {
                 StyleEngineFFI::style_engine_note_host_step(StyleEngineFFI::FfiStyleHostStep::HostRecordDemand);
                 old_custom_property_data = element->custom_property_data({});
-                invalidation = apply_engine_record_demand(*element, did_change_custom_properties);
+                invalidation = apply_engine_record_demand(scope, *element, did_change_custom_properties);
                 if (reaction.reaction & StyleEngine::PseudoInputsMayHaveChanged)
                     sample_animations_for_installed_pseudos(*element);
             }
@@ -923,7 +923,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
             // for the move.
             if (did_change_custom_properties) {
                 StyleEngineFFI::style_engine_note_host_step(StyleEngineFFI::FfiStyleHostStep::EnvironmentMove);
-                propagate_custom_property_environment_move(document, *element, old_custom_property_data, republished_nodes);
+                propagate_custom_property_environment_move(scope, document, *element, old_custom_property_data, republished_nodes);
             }
             // The children of a row the engine derived them for have their reactions in the batch
             // already. A row that installed another record than the one the engine derived them
@@ -1262,9 +1262,9 @@ static void update_style(DOM::Document& document, DocumentWithoutBrowsingContext
 
 // What a targeted materialization of one element found, reported to the engine the way a reaction
 // pass reports it, so the element's children get the same derived reactions either way.
-static void note_targeted_style_reaction_applied(DOM::Element& element, StyleRowStart const& row_start, RequiredInvalidationAfterStyleChange const& invalidation, bool did_change_custom_properties, bool descendant_style_recompute_needed)
+static void note_targeted_style_reaction_applied(StyleDrainScope const& scope, DOM::Element& element, StyleRowStart const& row_start, RequiredInvalidationAfterStyleChange const& invalidation, bool did_change_custom_properties, bool descendant_style_recompute_needed)
 {
-    auto& style_engine = element.document().style_computer().style_engine();
+    auto& style_engine = scope.engine();
     u8 reaction = StyleEngine::PublishedStyle | StyleEngine::RecomputeStyle;
     if (descendant_style_recompute_needed)
         reaction |= StyleEngine::RecomputeDescendantStyles;
@@ -1284,7 +1284,7 @@ static void note_targeted_style_reaction_applied(DOM::Element& element, StyleRow
     style_engine.note_style_reaction_applied(element.style_node_id(), reaction, invalidation.inherited_style_groups_changed(), facts);
 }
 
-static void apply_targeted_style_invalidation(DOM::Element& element, StyleRowStart const& row_start, RequiredInvalidationAfterStyleChange const& invalidation, RequiredInvalidationAfterStyleChange const& counter_style_invalidation, bool did_change_custom_properties, bool descendant_style_recompute_needed)
+static void apply_targeted_style_invalidation(StyleDrainScope const& scope, DOM::Element& element, StyleRowStart const& row_start, RequiredInvalidationAfterStyleChange const& invalidation, RequiredInvalidationAfterStyleChange const& counter_style_invalidation, bool did_change_custom_properties, bool descendant_style_recompute_needed)
 {
     if (!invalidation.is_none() || did_change_custom_properties)
         Invalidation::invalidate_assigned_slottables_after_slot_style_change(element);
@@ -1292,15 +1292,15 @@ static void apply_targeted_style_invalidation(DOM::Element& element, StyleRowSta
     auto effects = invalidation;
     effects |= counter_style_invalidation;
     apply_element_style_invalidation_after_style_change(element, effects);
-    note_targeted_style_reaction_applied(element, row_start, invalidation, did_change_custom_properties, descendant_style_recompute_needed);
+    note_targeted_style_reaction_applied(scope, element, row_start, invalidation, did_change_custom_properties, descendant_style_recompute_needed);
     apply_document_style_invalidation_after_style_change(element.document(), effects);
 }
 
 // Install the engine's answer for a targeted demand of one element.
-static Optional<RequiredInvalidationAfterStyleChange> install_targeted_record_demand_answer(DOM::Element& element, bool& did_change_custom_properties)
+static Optional<RequiredInvalidationAfterStyleChange> install_targeted_record_demand_answer(StyleDrainScope const& scope, DOM::Element& element, bool& did_change_custom_properties)
 {
     auto& style_computer = element.document().style_computer();
-    auto& engine = style_computer.style_engine();
+    auto& engine = scope.engine();
     auto answer = engine.answer_record_demand(element.style_node_id(), {}, false, true);
 
     // The engine answers every element of the document it hosts, over the custom-property
@@ -1344,12 +1344,11 @@ static Optional<RequiredInvalidationAfterStyleChange> install_targeted_record_de
     return invalidation;
 }
 
-static RequiredInvalidationAfterStyleChange materialize_style_for_targeted_update(DOM::Element& element, bool& did_change_custom_properties)
+static RequiredInvalidationAfterStyleChange materialize_style_for_targeted_update(StyleDrainScope const& scope, DOM::Element& element, bool& did_change_custom_properties)
 {
     // A targeted update only reaches connected elements, and every one of them has a parent.
-    auto& style_computer = element.document().style_computer();
     bool const was_unstyled = !element.has_style();
-    auto invalidation = install_targeted_record_demand_answer(element, did_change_custom_properties);
+    auto invalidation = install_targeted_record_demand_answer(scope, element, did_change_custom_properties);
     if (invalidation.has_value()) {
         // A scoped read of an unstyled hidden animation target installs its
         // base record first. Sample its effects over that record now: the
@@ -1371,7 +1370,7 @@ static RequiredInvalidationAfterStyleChange materialize_style_for_targeted_updat
             bool settled_pseudo = false;
             u32 row_facts = 0;
             for (auto kind : { PseudoElement::Before, PseudoElement::After, PseudoElement::FirstLetter, PseudoElement::Marker }) {
-                auto answer = style_computer.style_engine().answer_record_demand(element.style_node_id(), to_underlying(kind), false, true, true);
+                auto answer = scope.engine().answer_record_demand(element.style_node_id(), to_underlying(kind), false, true, true);
                 pseudo_records[to_underlying(kind)] = StyleRecordID { answer.record.style_record };
                 row_facts = answer.row_facts;
                 settled_pseudo = true;
@@ -1385,6 +1384,37 @@ static RequiredInvalidationAfterStyleChange materialize_style_for_targeted_updat
         return *invalidation;
     }
     return {};
+}
+
+// Install the records a targeted read demands for the inheritance chain, from its topmost stale
+// element down, inside the effect drain. False when the walk stops at a display:none element.
+static bool install_targeted_styles(StyleDrainScope const& scope, GC::RootVector<GC::Ref<DOM::Element>>& inheritance_chain, size_t topmost_element_to_recompute, StyleUpdateMode mode)
+{
+    bool descendant_style_recompute_needed = false;
+    for (size_t i = topmost_element_to_recompute + 1; i > 0; --i) {
+        auto& element = inheritance_chain[i - 1];
+        bool did_change_custom_properties = false;
+        auto const row_start = style_row_start(*element);
+        DOM::begin_style_row_counter_style_invalidation(*element);
+        auto invalidation = materialize_style_for_targeted_update(scope, element, did_change_custom_properties);
+        auto const counter_style_invalidation = DOM::end_style_row_counter_style_invalidation(*element);
+        apply_targeted_style_invalidation(scope, element, row_start, invalidation, counter_style_invalidation, did_change_custom_properties, descendant_style_recompute_needed);
+
+        descendant_style_recompute_needed |= invalidation.recompute_descendant_styles;
+
+        VERIFY(element->has_style());
+        auto const* box_values = element->style_group<ComputedValues::BoxValues>();
+        VERIFY(box_values);
+        if (display_from_ffi_display(box_values->display).is_none()) {
+            if (mode == StyleUpdateMode::StopAtDisplayNone)
+                return false;
+            descendant_style_recompute_needed = false;
+        }
+
+        if (did_change_custom_properties || invalidation.needs_layout_tree_rebuild())
+            descendant_style_recompute_needed = true;
+    }
+    return true;
 }
 
 // A targeted style update has nothing to do when every source of style work in the document is settled: A full style
@@ -1612,31 +1642,12 @@ static bool update_style_for_element(DOM::Document& document, DOM::AbstractEleme
             return abstract_element.has_style();
     }
 
-    bool descendant_style_recompute_needed = false;
-    for (size_t i = *topmost_element_to_recompute + 1; i > 0; --i) {
-        auto& element = inheritance_chain[i - 1];
-        bool did_change_custom_properties = false;
-        auto const row_start = style_row_start(*element);
-        DOM::begin_style_row_counter_style_invalidation(*element);
-        auto invalidation = materialize_style_for_targeted_update(element, did_change_custom_properties);
-        auto const counter_style_invalidation = DOM::end_style_row_counter_style_invalidation(*element);
-        apply_targeted_style_invalidation(element, row_start, invalidation, counter_style_invalidation, did_change_custom_properties, descendant_style_recompute_needed);
-
-        descendant_style_recompute_needed |= invalidation.recompute_descendant_styles;
-
-        VERIFY(element->has_style());
-        auto const* box_values = element->style_group<ComputedValues::BoxValues>();
-        VERIFY(box_values);
-        if (display_from_ffi_display(box_values->display).is_none()) {
-            if (mode == StyleUpdateMode::StopAtDisplayNone)
-                return false;
-            descendant_style_recompute_needed = false;
-        }
-
-        if (did_change_custom_properties || invalidation.needs_layout_tree_rebuild())
-            descendant_style_recompute_needed = true;
-    }
-
+    bool stopped_at_display_none = false;
+    StyleEffectDrain::install(document, [&](StyleDrainScope const& scope) {
+        stopped_at_display_none = !install_targeted_styles(scope, inheritance_chain, *topmost_element_to_recompute, mode);
+    });
+    if (stopped_at_display_none)
+        return false;
     return abstract_element.has_style();
 }
 
