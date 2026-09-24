@@ -5005,16 +5005,25 @@ impl StyleEngineState {
         let mut private_origin_record = None;
         if pseudo.is_some() && self.computed_group_sets.assigned_style_record(node).is_none() {
             let parent = self.answer_record_demand(node, None, false, targeted, read_only, 0, counters)?;
-            if read_only {
-                let record = parent.ok_or("EngineComputedRecordBailRecord")?.style_record;
-                self.computed_group_sets
-                    .assign_shared_style_record(
-                        computed::ComputedStyleTarget::new(node, u8::MAX),
-                        record,
-                        computed::ENGINE_INHERITED_GROUP_COUNT,
-                        false,
-                    )
-                    .ok_or("EngineComputedRecordBailRecord")?;
+            // An element demand answers a live record. Without one the pseudo-element has no
+            // originating record, and generates no box.
+            let record = parent.map(|parent| parent.style_record).filter(|&record| {
+                read_only
+                    && self
+                        .computed_group_sets
+                        .assign_shared_style_record(
+                            computed::ComputedStyleTarget::new(node, u8::MAX),
+                            record,
+                            computed::ENGINE_INHERITED_GROUP_COUNT,
+                            false,
+                        )
+                        .is_some()
+            });
+            debug_assert!(
+                !read_only || record.is_some(),
+                "an element demand answers an assignable record"
+            );
+            if let Some(record) = record {
                 self.set_element_container_query_inputs(node, record);
                 private_origin_record = computed::FinalStyleRecordID::from_raw(record);
             }
@@ -5044,18 +5053,17 @@ impl StyleEngineState {
                         self.restore_private_ancestor_records(private_ancestor_records);
                         return Err("GateReaction");
                     };
-                    if self
-                        .computed_group_sets
-                        .assign_shared_style_record(
-                            computed::ComputedStyleTarget::new(parent, u8::MAX),
-                            private.raw(),
-                            computed::ENGINE_INHERITED_GROUP_COUNT,
-                            false,
-                        )
-                        .is_none()
-                    {
-                        self.restore_private_ancestor_records(private_ancestor_records);
-                        return Err("EngineComputedRecordBailRecord");
+                    // The record the demand just derived is live; one that is not leaves the
+                    // ancestor its installed record.
+                    let assigned = self.computed_group_sets.assign_shared_style_record(
+                        computed::ComputedStyleTarget::new(parent, u8::MAX),
+                        private.raw(),
+                        computed::ENGINE_INHERITED_GROUP_COUNT,
+                        false,
+                    );
+                    debug_assert!(assigned.is_some(), "a record a demand derived is assignable");
+                    if assigned.is_none() {
+                        continue;
                     }
                     self.set_element_container_query_inputs(parent, private.raw());
                     private_ancestor_records.push((parent, private, previous, inputs));
