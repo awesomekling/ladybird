@@ -5553,8 +5553,11 @@ pub unsafe extern "C" fn style_engine_record_size_container_query_dependents(eng
 }
 
 /// A step the host takes for a style pass between its engine calls, which the style seal counts.
+/// NB: It crosses the FFI by value at full register width. The x86-64 ABI leaves the upper bits of
+///     a byte-sized argument undefined, and GCC-built callers leave them set, while the Rust side
+///     assumes they are clear and indexes its name table with the whole register.
 #[derive(Clone, Copy)]
-#[repr(u8)]
+#[repr(u32)]
 pub enum FfiStyleHostStep {
     /// Another style transaction taken within the same update.
     Wave,
