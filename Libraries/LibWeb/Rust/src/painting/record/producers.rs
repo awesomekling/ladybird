@@ -276,6 +276,8 @@ impl<O: Observer> AssemblyHost for PaintRecorder<'_, O> {
             .expect("clean output is copied from a published frame");
         let destination = self.output_position();
         if !bytes.is_empty() {
+            self.resources
+                .note_copied_vector_images(&frame.display_list, &frame.vector_images, bytes.clone());
             self.recorder.append_cached_command_range_verbatim(
                 &frame.display_list,
                 CommandRange {

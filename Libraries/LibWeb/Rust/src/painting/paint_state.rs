@@ -26,8 +26,6 @@ pub struct PaintState {
     // The SVG-as-image renders the next recording looks up, resolved by the main thread.
     pub(crate) vector_image_display_lists:
         std::sync::Arc<crate::painting::record::vector_images::VectorImageDisplayLists>,
-    // The renders the last recording painted: what the main thread resolves before the next one.
-    pub(crate) painted_vector_images: Vec<crate::painting::record::vector_images::VectorImageRenderRequest>,
     pub(crate) visual_context: crate::painting::visual_context::VisualContextState,
     pub(crate) root_background_source: Option<crate::painting::host::FfiRootBackgroundSource>,
     pub(crate) hit_test_list_generation: u64,

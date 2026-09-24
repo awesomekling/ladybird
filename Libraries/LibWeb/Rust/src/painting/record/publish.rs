@@ -67,7 +67,7 @@ pub(crate) fn publish_recording(
         fonts,
         image_frames,
         video_sinks,
-        painted_vector_images,
+        mut painted_vector_images,
         missed_vector_images,
         ..
     } = resources;
@@ -94,7 +94,12 @@ pub(crate) fn publish_recording(
         );
         recording_from_scratch
     });
-    arena.paint_state().borrow_mut().painted_vector_images = painted_vector_images.into_iter().collect();
+    painted_vector_images.extend(
+        missed_vector_images
+            .iter()
+            .filter_map(|request| Some((resolved.get(request)?, *request))),
+    );
+    output.vector_images = painted_vector_images;
     if let Some(recording_from_scratch) = recording_from_scratch {
         crate::painting::record::verify::verify_assembled_recording_matches_fresh(
             &output,

@@ -157,15 +157,19 @@ fn record_display_list_impl<O: Observer>(
                 && frame.prologue_bytes == prologue_bytes
                 && recorder.recorder.bytes() == &frame.display_list.bytes[..prologue_bytes as usize]
         })
-        .map(|(frame, items)| (frame.display_list.clone(), items.items.clone()));
+        .map(|(frame, items)| (frame.clone(), items.items.clone()));
     let display_list = match unchanged_frame {
-        Some((display_list, items)) => {
+        Some((frame, items)) => {
+            recorder
+                .resources
+                .painted_vector_images
+                .extend(frame.vector_images.iter().map(|(id, request)| (*id, *request)));
             recorder
                 .observer
                 .observe(|log| log.leaf(Operation::Scope(root_scope), Action::Copy, false));
             recorder.list.items = items;
             recorder.blocking_wheel_event_region_count = tree.root_entry().output().blocking_wheel_event_regions;
-            display_list
+            frame.display_list.clone()
         }
         None => {
             let source_prologue_bytes = recorder.source_frame.as_ref().map(|frame| frame.prologue_bytes);
@@ -191,6 +195,7 @@ fn record_display_list_impl<O: Observer>(
         has_blocking_wheel_event_listeners: recorder.blocking_wheel_event_region_count > 0,
         wheel_event_listener_state_generation: inputs.wheel_event_listener_state_generation,
         is_identical_to_published_frame: false,
+        vector_images: Default::default(),
         capture_log_for_verification: recorder.observer.finish(),
     };
     RecordingResult {
