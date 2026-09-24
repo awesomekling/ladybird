@@ -129,7 +129,15 @@ pub(crate) struct BasePaintFacts {
     pub paint_phase_mask: u8,
 }
 
-impl<O: Observer> PaintRecorder<'_, O> {
+impl<'a, O: Observer> PaintRecorder<'a, O> {
+    pub(crate) fn layer_resolution_context(&self) -> paint::background_resolution::LayerResolutionContext<'a> {
+        paint::background_resolution::LayerResolutionContext {
+            layout_arena: self.layout_arena,
+            root_background_source: self.inputs.uncaptured.root_background_source,
+            css_viewport_rect: self.inputs.css_viewport_rect,
+        }
+    }
+
     pub(crate) fn mark_live_producer(&mut self) {
         self.live_producer = true;
     }

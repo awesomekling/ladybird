@@ -225,8 +225,12 @@ impl<O: Observer> PaintRecorder<'_, O> {
             .node_style_if_live(paintable)
             .expect("the mask recording target holds a live layout node");
         let is_root_element = crate::painting::style_queries::node_is_root_element(layout_arena, paintable);
-        let resolved =
-            crate::painting::record::paint::background_resolution::resolve_mask_layers(self, paintable, style, area);
+        let resolved = crate::painting::record::paint::background_resolution::resolve_mask_layers(
+            self.layer_resolution_context(),
+            paintable,
+            style,
+            area,
+        );
         // A mask's output is coverage rather than color anyone sees, and a luminance mask's lightness is its alpha,
         // so force-dark stays out of it.
         let suspended_force_dark = self.recorder.suspend_force_dark();
