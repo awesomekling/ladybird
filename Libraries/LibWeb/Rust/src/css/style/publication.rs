@@ -355,11 +355,14 @@ impl RetainedState {
         // its settled ancestors published. The pass drives the node only once those are installed.
         // A row omitted from winner publication can still carry a retained selector answer.
         // Rebuild its winners before comparing them with the record's cascade state: otherwise
-        // an empty delta can describe yesterday's answer after this flush flipped a rule.
-        let stale_element_winners = scratch.answer_or_declarations_moved
+        // an empty delta can describe yesterday's answer after this flush flipped a rule. So does
+        // a row that holds no winners for the current program at all.
+        let winner_key = WinnerGroupKey::current(node, self.program.version());
+        let stale_element_winners = (scratch.answer_or_declarations_moved
             && !self.published_container_verdicts.contains_key(&node)
             && !self.container_gates_unheld.contains(&node)
-            && self.current_winner_groups().row_stamp(node) != Some(self.flush_stamp);
+            && self.current_winner_groups().row_stamp(node) != Some(self.flush_stamp))
+            || !matches!(self.current_winner_groups().token_for(winner_key), Lookup::Known(_));
         if self.container_gates_unheld.contains(&node) || self.container_verdicts_moved(node) || stale_element_winners {
             // A published row has the fact row its winners are matched from.
             let republished = self.republish_winners_from_answer(node, counters);
@@ -385,23 +388,8 @@ impl RetainedState {
         }
         // The winners the record was computed from, against the winners the node holds now: the
         // same comparison a C++ publication makes to select what it recomputes.
-        let (generation, state) = match self
-            .current_winner_groups()
-            .token_for(WinnerGroupKey::current(node, self.program.version()))
-        {
-            Lookup::Known(token) => token,
-            Lookup::Missing(gap) => {
-                counters.bump(match gap {
-                    cascade::WinnerGroupGap::MissingNode(_) => Counter::EngineComputedRecordBailWinnerMissingNode,
-                    cascade::WinnerGroupGap::StaleProgram { .. } => Counter::EngineComputedRecordBailWinnerStaleProgram,
-                    cascade::WinnerGroupGap::StalePriority(_) => Counter::EngineComputedRecordBailWinnerStalePriority,
-                });
-                return Err(Unanswered::Refused);
-            }
-            Lookup::KnownAbsent => {
-                counters.bump(Counter::EngineComputedRecordBailWinner);
-                return Err(Unanswered::Refused);
-            }
+        let Lookup::Known((generation, state)) = self.current_winner_groups().token_for(winner_key) else {
+            unreachable!("the node's winners were republished from its answer");
         };
         let container_unit_mask = self.state_container_unit_mask(node, state);
         let tree_counting_key = self.state_tree_counting_key(node, state);
