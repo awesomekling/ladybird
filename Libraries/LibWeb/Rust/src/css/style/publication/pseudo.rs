@@ -715,22 +715,20 @@ impl RetainedState {
                         scratch.pseudo_explicitly_inherited_groups |= explicitly_inherited_groups;
                     }
                     let font = font.expect("a full drive resolves the font");
-                    let (record, _) = self
-                        .assemble_and_publish_engine_record(
-                            target,
-                            true,
-                            Some(new_element_record),
-                            table,
-                            &length,
-                            &font,
-                            environment,
-                            0,
-                            0,
-                            cascade_state,
-                            &mut scratch.computability,
-                            counters,
-                        )
-                        .or_refused()?;
+                    let (record, _) = self.assemble_and_publish_engine_record(
+                        target,
+                        true,
+                        Some(new_element_record),
+                        table,
+                        &length,
+                        &font,
+                        environment,
+                        0,
+                        0,
+                        cascade_state,
+                        &mut scratch.computability,
+                        counters,
+                    );
                     if let Some(key) = key {
                         scratch.pseudo_cohorts.insert(key, record);
                         if self.engine_pseudo_record_cache.len() >= COLD_RECORD_CACHE_LIMIT {
@@ -1295,7 +1293,7 @@ impl RetainedState {
         if let Some(old) = old_composition {
             self.computed_group_sets.pin_style_record(old.raw());
         }
-        let Some((record, _)) = self.assemble_and_publish_engine_record(
+        let (record, _) = self.assemble_and_publish_engine_record(
             target,
             true,
             Some(parent_record),
@@ -1308,12 +1306,7 @@ impl RetainedState {
             None,
             &mut scratch.computability,
             counters,
-        ) else {
-            if let Some(old) = old_composition {
-                self.computed_group_sets.unpin_style_record(old.raw());
-            }
-            return Err(Unanswered::Refused);
-        };
+        );
         if let Some(old) = old_composition {
             self.batch_pinned_compositions.push((node, old.raw()));
         }
