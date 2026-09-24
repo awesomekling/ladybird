@@ -401,10 +401,12 @@ impl RetainedState {
         // Either the root's font inputs moved under this element, or the element's own font
         // environment did: a face its cascade names became available or failed. The winners are
         // the same either way, so nothing else below would notice, and the record has to be
-        // driven again in full rather than stand.
+        // driven again in full rather than stand. The root's font the root-input probe computed
+        // is left pending for the root's own row, which resumes it the same way.
         let font_inputs_moved = (scratch.root_font_inputs_changed
             && facts & bridge::element_adjustment_fact::IS_DOCUMENT_ELEMENT == 0)
-            || scratch.font_environment_moved;
+            || scratch.font_environment_moved
+            || scratch.font_drive.is_pending_for(node);
         // An element's animations compose into its style in the C++ computation, and the record it
         // holds is the one they were composed into. Deriving another record from it, or moving it
         // to another environment, would publish the composition as if it were the element's own
@@ -965,9 +967,14 @@ impl RetainedState {
         if goal == FontDriveGoal::RootInputs && !full_drive && !driver_input_moved {
             // NB: No font property moved, but borrowing the retained font still needs the
             //     proof that only the named rule flips changed the computation's inputs.
-            return Ok(ElementAnswer::RootInputs(
-                exact_flipped_rules.and_then(|_| self.root_font_inputs_from_record(old_style_record)),
-            ));
+            if let Some(root_inputs) =
+                exact_flipped_rules.and_then(|_| self.root_font_inputs_from_record(old_style_record))
+            {
+                return Ok(ElementAnswer::RootInputs(Some(root_inputs)));
+            }
+            // Without that proof the root's font is computed, not borrowed.
+            driver_input_moved = true;
+            groups_to_rebuild = (1 << crate::css::table_group_builder::group_index::COUNT) - 1;
         }
 
         // Attributes, inherited custom values, conditions, and function definitions can differ

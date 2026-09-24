@@ -1911,7 +1911,11 @@ impl StyleEngineState {
                 const DERIVABLE: u8 = transaction::STYLE_REACTION_RECOMPUTE_STYLE
                     | transaction::STYLE_REACTION_INHERITED_STYLE
                     | transaction::STYLE_REACTION_INHERITED_CUSTOM_PROPERTIES;
-                let reaction_is_settleable = reaction & !(transaction::STYLE_REACTION_PUBLISHED_STYLE | DERIVABLE) == 0
+                // Every reaction kind is the engine's, as it is for the root's own row below: a
+                // descendant recompute, an ancestor becoming visible and a moved font environment
+                // drive the root's font in full, and pseudo-element inputs do not reach it.
+                let reaction_is_settleable = !(environment_changed
+                    && reaction & transaction::STYLE_REACTION_PSEUDO_INPUTS_MAY_HAVE_CHANGED != 0)
                     && !(reaction & DERIVABLE != 0 && style_input_nodes_for_cpp.contains(&root));
                 let can_prepare = (reaction_is_settleable
                     || (old_record.is_none() && reaction & transaction::STYLE_REACTION_PUBLISHED_STYLE != 0))
@@ -1947,8 +1951,14 @@ impl StyleEngineState {
                     engine_computed_record_scratch.answer_or_declarations_moved = rule_declarations_edited
                         || !flipped_rules.is_empty()
                         || !selector_truth_changes.refreshes_for(root).is_empty();
-                    engine_computed_record_scratch.recompute_in_full =
-                        counter_styles_moved && self.node_reads_counter_styles(root);
+                    engine_computed_record_scratch.recompute_in_full = (counter_styles_moved
+                        && self.node_reads_counter_styles(root))
+                        || reaction
+                            & (transaction::STYLE_REACTION_RECOMPUTE_DESCENDANT_STYLES
+                                | transaction::STYLE_REACTION_ANCESTOR_BECAME_VISIBLE)
+                            != 0;
+                    engine_computed_record_scratch.font_environment_moved =
+                        font_feature_values_moved || reaction & transaction::STYLE_REACTION_FONT_INPUTS_CHANGED != 0;
                     self.prepare_root_font_inputs(
                         root,
                         answer_winners_are_complete,
@@ -1958,6 +1968,7 @@ impl StyleEngineState {
                         counters,
                     );
                     engine_computed_record_scratch.recompute_in_full = false;
+                    engine_computed_record_scratch.font_environment_moved = font_feature_values_moved;
                 } else {
                     counters.bump(Counter::RootFontInputsUnprovenFallbacks);
                 }
