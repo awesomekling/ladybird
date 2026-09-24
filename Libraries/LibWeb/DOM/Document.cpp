@@ -9285,6 +9285,9 @@ void Document::unregister_shadow_root(Badge<DOM::ShadowRoot>, DOM::ShadowRoot& s
 // https://drafts.csswg.org/css-position-4/#add-an-element-to-the-top-layer
 void Document::add_an_element_to_the_top_layer(GC::Ref<Element> element)
 {
+    // Top layer membership is a fact the style mirror keeps for the layout tree build.
+    join_frame_for_dom_tree_mutation();
+
     // 1. Let doc be el’s node document.
 
     // 2. If el is already contained in doc’s top layer:
@@ -9310,6 +9313,9 @@ void Document::add_an_element_to_the_top_layer(GC::Ref<Element> element)
 // https://drafts.csswg.org/css-position-4/#request-an-element-to-be-removed-from-the-top-layer
 void Document::request_an_element_to_be_remove_from_the_top_layer(GC::Ref<Element> element)
 {
+    // Top layer membership is a fact the style mirror keeps for the layout tree build.
+    join_frame_for_dom_tree_mutation();
+
     // 1. Let doc be el’s node document.
 
     // 2. If el is not contained doc’s top layer, or el is already contained in doc’s pending top layer removals, return.
@@ -9328,6 +9334,9 @@ void Document::request_an_element_to_be_remove_from_the_top_layer(GC::Ref<Elemen
 // https://drafts.csswg.org/css-position-4/#remove-an-element-from-the-top-layer-immediately
 void Document::remove_an_element_from_the_top_layer_immediately(GC::Ref<Element> element)
 {
+    // Top layer membership is a fact the style mirror keeps for the layout tree build.
+    join_frame_for_dom_tree_mutation();
+
     // 1. Let doc be el’s node document.
 
     // 2. Remove el from doc’s top layer and pending top layer removals.
@@ -9344,6 +9353,9 @@ void Document::remove_an_element_from_the_top_layer_immediately(GC::Ref<Element>
 // https://drafts.csswg.org/css-position-4/#process-top-layer-removals
 void Document::process_top_layer_removals()
 {
+    // Top layer membership is a fact the style mirror keeps for the layout tree build.
+    join_frame_for_dom_tree_mutation();
+
     // 1. For each element el in doc’s pending top layer removals: if el’s computed value of overlay is none, or el is
     //    not rendered, remove el from doc’s top layer and pending top layer removals.
     GC::RootVector<GC::Ref<Element>> elements_to_remove;
