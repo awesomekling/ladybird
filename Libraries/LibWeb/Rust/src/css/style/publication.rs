@@ -4975,23 +4975,9 @@ impl StyleEngineState {
         parent_highlight: u64,
         counters: &mut Counters,
     ) -> Result<Option<RetriedEngineRecord>, &'static str> {
-        if pseudo.is_some_and(|kind| {
-            ![
-                pseudo_kind::BEFORE,
-                pseudo_kind::AFTER,
-                pseudo_kind::FIRST_LETTER,
-                pseudo_kind::MARKER,
-                pseudo_kind::BACKDROP,
-                pseudo_kind::SELECTION,
-            ]
-            .contains(&kind)
-        }) {
-            if read_only && pseudo.is_some_and(|kind| kind >= 20) {
-                return Ok(None);
-            }
-            if !read_only || pseudo.is_some_and(|kind| kind >= 20) {
-                return Err("NotOfferedPseudoElement");
-            }
+        // A kind the engine holds no rows for generates no box.
+        if pseudo.is_some_and(|kind| kind >= 20) {
+            return Ok(None);
         }
         // A private observation checks the target and its ancestors below. Pending work on
         // another node must not prevent it from answering this pseudo-element.

@@ -246,10 +246,6 @@ impl RetainedState {
             if selected_kind.is_some_and(|selected| selected != kind) {
                 continue;
             }
-            // Other highlight kinds still use the host's inheritance path.
-            if selected_kind.is_none() && pseudo_kind::is_highlight(usize::from(kind)) && kind != SELECTION {
-                continue;
-            }
             if version != program_version || !priority_current {
                 // The backdrop of a node outside the top layer cannot generate a box. Its
                 // retained winner may be stale without changing this transaction's answer.
@@ -382,9 +378,7 @@ impl RetainedState {
             if selected_kind.is_some_and(|selected| selected != kind) {
                 continue;
             }
-            if (selected_kind.is_none()
-                && self.deferred_pseudo_element == Some(tree::PseudoElementKind(u16::from(kind))))
-                || (selected_kind.is_none() && pseudo_kind::is_highlight(usize::from(kind)) && kind != SELECTION)
+            if selected_kind.is_none() && self.deferred_pseudo_element == Some(tree::PseudoElementKind(u16::from(kind)))
             {
                 continue;
             }
@@ -1394,18 +1388,9 @@ impl StyleEngineState {
         counters: &mut Counters,
     ) -> Result<Option<computed::FinalStyleRecordID>, &'static str> {
         let cssom_read = read_only && !targeted;
-        if ![
-            pseudo_kind::BEFORE,
-            pseudo_kind::AFTER,
-            pseudo_kind::FIRST_LETTER,
-            pseudo_kind::MARKER,
-            pseudo_kind::BACKDROP,
-            pseudo_kind::SELECTION,
-        ]
-        .contains(&kind)
-            && !(cssom_read && kind < 20)
-        {
-            return Err("NotOfferedPseudoElement");
+        // A kind the engine holds no rows for generates no box.
+        if kind >= 20 {
+            return Ok(None);
         }
         let Some(mask) = self.pseudo_style_mask(node) else {
             return Err("EngineComputedRecordBailPseudoMask");
