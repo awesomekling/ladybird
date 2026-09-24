@@ -44,7 +44,11 @@ bool InvalidationJournal::is_empty() const
 {
     return m_entries.is_empty()
         && !m_selection_states_are_stale
-        && m_scrollbars_with_stale_enlarged_state.is_empty();
+        && m_scrollbars_with_stale_enlarged_state.is_empty()
+        && m_visual_context_box_dirty_marks.is_empty()
+        && m_visual_context_full_rebuild_reasons.is_empty()
+        && !m_svg_paint_resources_changed
+        && !m_visual_viewport_transform_is_stale;
 }
 
 InvalidationJournal::Entry& InvalidationJournal::entry_for(NodeIdentity identity)
@@ -261,6 +265,65 @@ void InvalidationJournal::note_scrollbar_enlarged_state(Painting::Scrollbar& scr
     drain_if_the_render_side_is_reading();
 }
 
+void InvalidationJournal::note_visual_context_box_dirty(Layout::RustFFI::NodeSlotId slot, Layout::RustFFI::FfiVisualContextBoxDirtyKind kind)
+{
+    if (is_empty())
+        report_journal_pending_to_census(m_document, true);
+    m_visual_context_box_dirty_marks.append({ slot, kind });
+    drain_if_the_render_side_is_reading();
+}
+
+void InvalidationJournal::note_visual_context_full_rebuild(Layout::RustFFI::FfiVisualContextGlobalRebuildReason reason)
+{
+    if (is_empty())
+        report_journal_pending_to_census(m_document, true);
+    if (!m_visual_context_full_rebuild_reasons.contains_slow(reason))
+        m_visual_context_full_rebuild_reasons.append(reason);
+    drain_if_the_render_side_is_reading();
+}
+
+void InvalidationJournal::note_svg_paint_resources_changed()
+{
+    if (is_empty())
+        report_journal_pending_to_census(m_document, true);
+    m_svg_paint_resources_changed = true;
+    drain_if_the_render_side_is_reading();
+}
+
+void InvalidationJournal::note_visual_viewport_transform()
+{
+    if (is_empty())
+        report_journal_pending_to_census(m_document, true);
+    m_visual_viewport_transform_is_stale = true;
+    drain_if_the_render_side_is_reading();
+}
+
+// A mark on a row that was freed since lands nowhere, and one on a row reused since marks a box
+// the next update revisits for nothing.
+void InvalidationJournal::publish_visual_context_marks()
+{
+    auto* arena = m_document.layout_node_arena_if_created();
+    auto box_dirty_marks = move(m_visual_context_box_dirty_marks);
+    auto full_rebuild_reasons = move(m_visual_context_full_rebuild_reasons);
+    if (exchange(m_visual_viewport_transform_is_stale, false)) {
+        if (m_document.has_committed_viewport_box() && m_document.paint_state().has_visual_context_tree())
+            m_document.paint_state().update_visual_viewport_accumulated_visual_context(m_document);
+        else {
+            if (!full_rebuild_reasons.contains_slow(Layout::RustFFI::FfiVisualContextGlobalRebuildReason::FirstBuild))
+                full_rebuild_reasons.append(Layout::RustFFI::FfiVisualContextGlobalRebuildReason::FirstBuild);
+            m_document.set_needs_accumulated_visual_contexts_update(true);
+        }
+    }
+    if (!arena)
+        return;
+    for (auto reason : full_rebuild_reasons)
+        Layout::RustFFI::layout_arena_visual_context_request_full_rebuild(arena->handle(), reason);
+    for (auto const& mark : box_dirty_marks)
+        Layout::RustFFI::layout_arena_visual_context_note_box_dirty(arena->handle(), mark.slot, mark.kind);
+    if (exchange(m_svg_paint_resources_changed, false) && Layout::RustFFI::layout_arena_note_svg_paint_resources_changed(arena->handle()))
+        m_document.set_needs_accumulated_visual_contexts_update(true);
+}
+
 // The offsets are read from where the DOM side stores them now, except a pseudo-element's, which
 // the entry carries to the render side that stores it.
 //
@@ -402,6 +465,8 @@ void InvalidationJournal::drain()
             }
         }
     }
+
+    publish_visual_context_marks();
 
     if (exchange(m_scroll_state_is_stale, false))
         m_document.invalidate_scroll_state();

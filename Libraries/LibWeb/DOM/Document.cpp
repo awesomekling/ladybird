@@ -10076,10 +10076,8 @@ void Document::republish_inheriting_svg_pattern_attribute_facts()
 
 void Document::note_svg_paint_resources_changed()
 {
-    if (!m_layout_node_arena)
-        return;
-    if (Layout::RustFFI::layout_arena_note_svg_paint_resources_changed(m_layout_node_arena->handle()))
-        set_needs_accumulated_visual_contexts_update(true);
+    if (m_layout_node_arena)
+        m_invalidation_journal->note_svg_paint_resources_changed();
 }
 
 bool Document::has_enrolled_svg_paint_resources() const
@@ -10089,8 +10087,7 @@ bool Document::has_enrolled_svg_paint_resources() const
 
 void Document::schedule_full_accumulated_visual_context_rebuild(Layout::RustFFI::FfiVisualContextGlobalRebuildReason reason)
 {
-    if (m_layout_node_arena)
-        Layout::RustFFI::layout_arena_visual_context_request_full_rebuild(m_layout_node_arena->handle(), reason);
+    m_invalidation_journal->note_visual_context_full_rebuild(reason);
     set_needs_accumulated_visual_contexts_update(true);
 }
 
@@ -10098,10 +10095,8 @@ void Document::schedule_accumulated_visual_context_update(Layout::Node const& la
 {
     if (!Painting::has_committed_box(layout_node))
         return;
-    auto slot = Painting::committed_row_slot(layout_node);
-    Layout::RustFFI::layout_arena_visual_context_note_box_dirty(
-        layout_node_arena().handle(),
-        slot,
+    m_invalidation_journal->note_visual_context_box_dirty(
+        Painting::committed_row_slot(layout_node),
         scope == AccumulatedVisualContextUpdateScope::Values
             ? Layout::RustFFI::FfiVisualContextBoxDirtyKind::StyleValueChange
             : Layout::RustFFI::FfiVisualContextBoxDirtyKind::StyleStructuralChange);
