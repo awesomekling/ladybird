@@ -77,6 +77,9 @@ public:
     // Whether the scrollbar is enlarged may have changed, and it publishes the answer it has at the
     // drain to the row it is built for.
     void note_scrollbar_enlarged_state(Painting::Scrollbar&);
+    // The text node's data changed, and the mirror and the text's box take what it holds at the
+    // drain. Whether it was nothing but ASCII whitespace may have changed as well.
+    void note_text_data(Text&, bool whitespace_state_changed);
     // The accumulated visual contexts built from the row's box need the given kind of update.
     void note_visual_context_box_dirty(Layout::RustFFI::NodeSlotId, Layout::RustFFI::FfiVisualContextBoxDirtyKind);
     // Every accumulated visual context needs rebuilding, for the given reason.
@@ -132,6 +135,8 @@ private:
         bool needs_editability_stamps_refresh { false };
         bool needs_focused_text_control_publish { false };
         bool needs_scroll_offset_publish { false };
+        bool needs_text_data_publish { false };
+        bool text_whitespace_state_changed { false };
         Vector<PseudoElementScrollOffset, 1> pseudo_element_scroll_offsets;
     };
 
