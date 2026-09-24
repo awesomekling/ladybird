@@ -142,7 +142,6 @@ RENDER_STAGE_ALLOWED = {
     **render_stage_entries(
         STYLE_UPDATE_SCOPE,
         [
-            "css/ffi_stats.rs:COMPLETE_STYLE_UPDATE_STATE",
             "css/style/seal.rs:STATE",
         ],
     ),
@@ -157,6 +156,7 @@ RENDER_STAGE_ALLOWED = {
     **render_stage_entries(
         LOCKED,
         [
+            "css/ffi_stats.rs:COMPLETE_STYLE_UPDATE_STATE",
             "css/parser/stylesheet_cache.rs:CACHE",
             "css/style/atoms.rs:GLOBAL_ATOMS",
             "css/style/matching.rs:DISPATCH_POOLS",
