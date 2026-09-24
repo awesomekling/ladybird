@@ -561,24 +561,19 @@ impl RetainedState {
             None => None,
         };
         let inheritance_store = parent_environment.map_or(std::ptr::null(), |(_, store)| store);
-        // The base is what the element inherits where it is the environment the parent passes on.
-        let inputs = self.document_style_computation_inputs;
-        // Where custom properties are registered, the host builds the environment a parent passes
-        // on as an object of its own - a projection without the names that do not inherit, over the
-        // projection of its own parent - which the engine cannot name.
-        let registry = unsafe {
-            inputs
-                .custom_property_registry
-                .as_pointer()
-                .cast::<crate::css::custom_properties::CustomPropertyRegistry>()
-                .as_ref()
-        };
-        let Some(registry) = registry else {
-            return Err("a document that published no registry");
-        };
-        if registry.has_registrations() {
-            return Err("a parent whose inheritable environment the host builds");
+        // Where custom properties are registered, the environment a parent passes on is a
+        // projection of its own without the names that do not inherit, so whether the element's
+        // base is what it inherits is what its own cascade says: whether it declares any.
+        if self.custom_property_registry_has_registrations()? {
+            return Ok(SampleCustomPropertyEnvironments {
+                store,
+                base_store,
+                inheritance_store,
+                element_declares_own: !base_store.is_null() && self.node_declares_custom_properties(node),
+                base_is_engine: !base_store.is_null() && base_environment & ENGINE_CUSTOM_PROPERTY_ENVIRONMENT_TAG != 0,
+            });
         }
+        // The base is what the element inherits where it is the environment the parent passes on.
         // An environment the engine moved the parent to has no host object, so the one the element
         // holds, the host's view of it, is the parent's by identity.
         let base_is_inherited = match parent {
@@ -601,6 +596,21 @@ impl RetainedState {
         })
     }
 
+    /// Whether the document registers custom properties, or why the engine cannot say.
+    fn custom_property_registry_has_registrations(&self) -> Result<bool, &'static str> {
+        // SAFETY: The document keeps the registry it published alive while the engine holds it.
+        let registry = unsafe {
+            self.document_style_computation_inputs
+                .custom_property_registry
+                .as_pointer()
+                .cast::<crate::css::custom_properties::CustomPropertyRegistry>()
+                .as_ref()
+        };
+        registry
+            .map(crate::css::custom_properties::CustomPropertyRegistry::has_registrations)
+            .ok_or("a document that published no registry")
+    }
+
     /// The custom-property environments a sample of a row the pass settled reads, from the
     /// environment its new record was published with and the one its inheritance parent passes on,
     /// before the host installs either; or why the engine cannot say.
@@ -613,20 +623,7 @@ impl RetainedState {
         if self.sampled_custom_property_environments.contains_key(&node) {
             return Err("custom properties an earlier sample animated");
         }
-        let registry = unsafe {
-            self.document_style_computation_inputs
-                .custom_property_registry
-                .as_pointer()
-                .cast::<crate::css::custom_properties::CustomPropertyRegistry>()
-                .as_ref()
-        };
-        match registry {
-            None => return Err("a document that published no registry"),
-            Some(registry) if registry.has_registrations() => {
-                return Err("a parent whose inheritable environment the host builds");
-            }
-            Some(_) => {}
-        }
+        let has_registrations = self.custom_property_registry_has_registrations()?;
         let store_of = |environment: u64| match environment {
             0 => Ok(std::ptr::null()),
             environment => self
@@ -648,7 +645,13 @@ impl RetainedState {
             store,
             base_store: store,
             inheritance_store: store_of(parent_environment)?,
-            element_declares_own: environment != 0 && environment != parent_environment,
+            // A parent passes on a projection of its environment where custom properties are
+            // registered, so the element's own cascade says whether it declares its own.
+            element_declares_own: environment != 0
+                && match has_registrations {
+                    true => self.node_declares_custom_properties(node),
+                    false => environment != parent_environment,
+                },
             base_is_engine: environment & ENGINE_CUSTOM_PROPERTY_ENVIRONMENT_TAG != 0,
         })
     }
