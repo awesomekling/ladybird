@@ -3017,6 +3017,28 @@ impl StyleEngineState {
                 );
             }
         }
+        // The host closed the last wave's rows over the ancestors between them and completed an
+        // answer for each, which it installed with that wave. Such an ancestor is no row of the
+        // pass, and read as published but not installed it would stop every later wave before
+        // the same row.
+        let rows_to_come: HashSet<StyleNodeID> = pass.published_nodes[pass.next_index..].iter().copied().collect();
+        for answer in &pass.published_match_answers.entries {
+            if rows_to_come.contains(&answer.node) {
+                continue;
+            }
+            if let Some(index) = answer.node.element_index() {
+                pass.scratch.derived_child_inputs.insert(
+                    index as usize,
+                    publication::DerivedChildInputs {
+                        settled: true,
+                        awaits_host: false,
+                        installed: true,
+                        inheritance_unresolved: false,
+                        chain: None,
+                    },
+                );
+            }
+        }
         let font_environment_generation = self
             .retained
             .document_style_computation_inputs
