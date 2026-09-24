@@ -869,10 +869,6 @@ Optional<StyleComputer::SettledAnimationPlan> StyleComputer::take_settled_animat
 // sampling pass after installation publishes their values.
 void StyleComputer::apply_settled_animation_plan(DOM::AbstractElement abstract_element, SettledAnimationPlan const& plan) const
 {
-    // Which animations the element references is an index a `@keyframes` rule finds its elements
-    // by, and the row exists because the declarations naming them moved.
-    if (!abstract_element.pseudo_element().has_value())
-        abstract_element.element().republish_animation_name_registry();
     auto const* existing_animations = abstract_element.css_defined_animations();
     if (!existing_animations)
         return;

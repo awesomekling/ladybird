@@ -43,7 +43,13 @@ public:
         StyleNodeID style_node;
         Vector<Utf16FlyString> old_names;
     };
-    using Effect = Variant<LayoutNodeStyle, ElementInvalidation, ExplicitInheritance, AnchorNames>;
+    // Which animations a row's record references, as the index a `@keyframes` rule finds its
+    // elements by holds them. A row with an animation plan exists because the declarations naming
+    // them moved.
+    struct AnimationNames {
+        StyleNodeID style_node;
+    };
+    using Effect = Variant<LayoutNodeStyle, ElementInvalidation, ExplicitInheritance, AnchorNames, AnimationNames>;
 
     void append(Effect effect) { m_effects.append(move(effect)); }
     void apply(DOM::Document&);
