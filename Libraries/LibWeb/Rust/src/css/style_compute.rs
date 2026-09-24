@@ -2998,6 +2998,9 @@ pub struct FfiHostAnimationSampleResult {
     pub animated_custom_property_count: usize,
     /// Released with `rust_release_animated_custom_property_results`.
     pub animated_custom_properties_storage: *mut c_void,
+    /// Whether the sample left what it read of the element's containers for the host to take, as
+    /// a record the engine computed does.
+    pub noted_container_effects: bool,
 }
 
 impl FfiHostAnimationSampleResult {
@@ -3012,6 +3015,7 @@ impl FfiHostAnimationSampleResult {
             animated_custom_properties: std::ptr::null(),
             animated_custom_property_count: 0,
             animated_custom_properties_storage: std::ptr::null_mut(),
+            noted_container_effects: false,
         }
     }
 }
@@ -3045,8 +3049,8 @@ pub unsafe extern "C" fn rust_sample_animation_effects(
         let Some(descriptions) = engine.take_element_animation_effect_descriptions(node, slot) else {
             return FfiHostAnimationSampleResult::with_outcome(FfiHostAnimationSampleOutcome::Cleared);
         };
-        let result = match input.samples_whole_stack && crate::css::style::engine_sample_check::is_checking() {
-            true => unsafe { sample_and_check_against_the_engine(input, engine, node, &descriptions) },
+        let result = match input.samples_whole_stack {
+            true => unsafe { sample_whole_effect_stack(input, engine, node, &descriptions) },
             false => unsafe { sample_described_animation_effects(input, engine, node, &descriptions) },
         };
         engine.restore_element_animation_effect_descriptions(node, slot, descriptions);
@@ -3267,17 +3271,25 @@ struct EngineSampleRun {
     identities: Vec<u64>,
     generations: Vec<u64>,
     current_keys: Vec<f64>,
+    /// The overlay the sample composes into: the host working set's, once the sample first writes
+    /// to it through `host_overlay`.
     overlay: *mut AnimatedOverlay,
+    host_overlay: (*mut c_void, unsafe extern "C" fn(*mut c_void) -> *mut c_void),
     /// The record the sample composes over.
     record_table: *const ComputedLonghandTable,
     record_overlay: *const AnimatedOverlay,
     /// The contexts for each pair of container axes a batch can ask a basis for.
     length_contexts: [FfiAnimationLengthContexts; 4],
     horizontal: bool,
+    /// The container units the sample resolved, whose containers the host learns about.
+    container_unit_mask: std::cell::Cell<u8>,
 }
 
 unsafe extern "C" fn engine_sample_run_overlay(context: *mut c_void) -> *mut c_void {
-    unsafe { (*context.cast::<EngineSampleRun>()).overlay.cast() }
+    let run = unsafe { &mut *context.cast::<EngineSampleRun>() };
+    let (host_context, prepare) = run.host_overlay;
+    run.overlay = unsafe { prepare(host_context) }.cast();
+    run.overlay.cast()
 }
 
 unsafe extern "C" fn engine_sample_run_length_contexts(
@@ -3286,36 +3298,31 @@ unsafe extern "C" fn engine_sample_run_length_contexts(
     contexts: *mut FfiAnimationLengthContexts,
 ) {
     let run = unsafe { &*context.cast::<EngineSampleRun>() };
+    run.container_unit_mask
+        .set(run.container_unit_mask.get() | container_unit_mask);
     let (width, height) = container_relative_axes_needed(container_unit_mask, run.horizontal);
     unsafe { *contexts = run.length_contexts[usize::from(width) | (usize::from(height) << 1)] };
 }
 
-/// The host's sample, observed: which overlay the host composed into.
-struct HostSampleCapture {
+/// The sample the host's own inputs take, composed into an overlay of its own for the check.
+struct HostInputsSample {
     input: FfiHostAnimationSample,
-    overlay: *mut c_void,
+    overlay: *mut AnimatedOverlay,
 }
 
-unsafe extern "C" fn host_sample_capture_overlay(context: *mut c_void) -> *mut c_void {
-    let capture = unsafe { &mut *context.cast::<HostSampleCapture>() };
-    capture.overlay = unsafe {
-        (capture
-            .input
-            .prepare_overlay_for_mutation
-            .expect("the host makes its overlay writable"))(capture.input.callback_context)
-    };
-    capture.overlay
+unsafe extern "C" fn host_inputs_sample_overlay(context: *mut c_void) -> *mut c_void {
+    unsafe { (*context.cast::<HostInputsSample>()).overlay.cast() }
 }
 
-unsafe extern "C" fn host_sample_capture_length_contexts(
+unsafe extern "C" fn host_inputs_sample_length_contexts(
     context: *mut c_void,
     container_unit_mask: u8,
     contexts: *mut FfiAnimationLengthContexts,
 ) {
-    let capture = unsafe { &*context.cast::<HostSampleCapture>() };
+    let sample = unsafe { &*context.cast::<HostInputsSample>() };
     unsafe {
-        (capture.input.length_contexts.expect("the host builds length contexts"))(
-            capture.input.callback_context,
+        (sample.input.length_contexts.expect("the host builds length contexts"))(
+            sample.input.callback_context,
             container_unit_mask,
             contexts,
         );
@@ -3377,16 +3384,18 @@ fn prepare_engine_sample(
         identities: Vec::with_capacity(selected.len()),
         generations: Vec::with_capacity(selected.len()),
         current_keys: Vec::with_capacity(selected.len()),
-        overlay: match record_overlay.is_null() {
-            true => crate::css::animated_overlay::rust_animated_overlay_create(),
-            // What the record's composition inherited is where a sample starts from; the element's own
-            // animated values are the sample's to write again.
-            false => unsafe { crate::css::animated_overlay::rust_animated_overlay_clone_inherited(record_overlay) },
-        },
+        overlay: input.animated_overlay.cast_mut().cast(),
+        host_overlay: (
+            input.callback_context,
+            input
+                .prepare_overlay_for_mutation
+                .expect("the host makes its overlay writable"),
+        ),
         record_table: table.cast(),
         record_overlay,
         length_contexts,
         horizontal,
+        container_unit_mask: std::cell::Cell::new(0),
     });
     for effect in selected {
         let Some(description) = descriptions
@@ -3405,10 +3414,9 @@ fn prepare_engine_sample(
         generations: run.generations.as_ptr(),
         current_keys: run.current_keys.as_ptr(),
         effect_count: run.identities.len(),
-        // The run is checked, not checking.
+        // The per-input checks compare the host's inputs with these.
         samples_whole_stack: false,
         longhand_table: table,
-        animated_overlay: run.overlay.cast(),
         custom_property_store: environments.store,
         base_custom_property_store: environments.base_store,
         inheritance_custom_property_store: environments.inheritance_store,
@@ -3450,48 +3458,67 @@ fn overlays_agree(host: *const c_void, engine: *const c_void) -> bool {
         })
 }
 
-/// Sample for the host, and check the sample against the one the engine takes from its own inputs.
+/// Sample an element's whole effect stack from the engine's own inputs: the effects it selects
+/// from the timing rows, the environments it holds and the length contexts it builds, into the host
+/// working set's overlay. Where the engine cannot say, the host's inputs are sampled instead.
+///
+/// With the check on, the host's inputs are first sampled into an overlay of their own, and what
+/// the two composed is compared.
 ///
 /// # Safety
 /// As `sample_described_animation_effects`.
-unsafe fn sample_and_check_against_the_engine(
+unsafe fn sample_whole_effect_stack(
     input: &FfiHostAnimationSample,
     engine: &mut crate::css::style::StyleEngine,
     node: crate::css::style::tree::StyleNodeID,
     descriptions: &[crate::css::style::animations::PublishedEffect],
 ) -> FfiHostAnimationSampleResult {
+    use crate::css::animated_overlay::{
+        rust_animated_overlay_clone, rust_animated_overlay_clone_inherited, rust_animated_overlay_create,
+        rust_animated_overlay_free,
+    };
     use crate::css::style::engine_sample_check;
 
-    // The engine samples first, from the overlay the element's record holds, which is the one the
-    // host is about to compose into.
-    crate::css::style::engine_sample_check::expect_sampled_style(
-        std::ptr::from_ref(&*engine).addr(),
-        node,
-        input.pseudo_kind,
-        None,
-    );
-    let engine_sample = match prepare_engine_sample(input, engine, node, descriptions) {
-        Ok((run, run_input)) => {
-            let result = unsafe { sample_described_animation_effects(&run_input, engine, node, descriptions) };
-            Some((run, result))
-        }
+    let checking = engine_sample_check::is_checking();
+    if checking {
+        engine_sample_check::expect_sampled_style(std::ptr::from_ref(&*engine).addr(), node, input.pseudo_kind, None);
+    }
+    let (mut run, run_input) = match prepare_engine_sample(input, engine, node, descriptions) {
+        Ok(prepared) => prepared,
         Err(reason) => {
             engine_sample_check::note_declined(&format!("whole sample: {reason}"));
-            None
+            return unsafe { sample_described_animation_effects(input, engine, node, descriptions) };
         }
     };
-    let mut capture = Box::new(HostSampleCapture {
-        input: *input,
-        overlay: std::ptr::null_mut(),
+    // The host's inputs sample first, while the working set they read length contexts from is
+    // still the one the engine is about to compose into.
+    let host_sample = checking.then(|| {
+        let mut sample = Box::new(HostInputsSample {
+            input: *input,
+            overlay: match input.animated_overlay.is_null() {
+                true => rust_animated_overlay_create(),
+                false => unsafe { rust_animated_overlay_clone(input.animated_overlay.cast()) },
+            },
+        });
+        let host_input = FfiHostAnimationSample {
+            animated_overlay: sample.overlay.cast_const().cast(),
+            callback_context: std::ptr::from_mut(&mut *sample).cast(),
+            prepare_overlay_for_mutation: Some(host_inputs_sample_overlay),
+            length_contexts: Some(host_inputs_sample_length_contexts),
+            ..*input
+        };
+        let result = unsafe { sample_described_animation_effects(&host_input, engine, node, descriptions) };
+        (sample, result)
     });
-    let host_input = FfiHostAnimationSample {
-        callback_context: std::ptr::from_mut(&mut *capture).cast(),
-        prepare_overlay_for_mutation: Some(host_sample_capture_overlay),
-        length_contexts: Some(host_sample_capture_length_contexts),
-        ..*input
-    };
-    let result = unsafe { sample_described_animation_effects(&host_input, engine, node, descriptions) };
-    let Some((run, engine_result)) = engine_sample else {
+    let mut result = unsafe { sample_described_animation_effects(&run_input, engine, node, descriptions) };
+    // What the host's length contexts leave on the containers they resolve a unit against - that
+    // they are size containers in use, and to be evaluated again once laid out - the host records
+    // from the engine's notes.
+    if run.container_unit_mask.get() != 0 {
+        result.noted_container_effects =
+            engine.note_sampled_container_unit_effects(node, input.style_record, run.container_unit_mask.get());
+    }
+    let Some((host, host_result)) = host_sample else {
         return result;
     };
     let custom_properties = |result: &FfiHostAnimationSampleResult| {
@@ -3500,21 +3527,21 @@ unsafe fn sample_and_check_against_the_engine(
             .map(|property| (property.name_raw, property.value))
             .collect::<Vec<_>>()
     };
-    let (host_custom, engine_custom) = (custom_properties(&result), custom_properties(&engine_result));
-    let agrees = result.outcome == engine_result.outcome
-        && result.keyframes_inherited_non_inherited_style_groups
-            == engine_result.keyframes_inherited_non_inherited_style_groups
-        && result.depends_on_viewport_metrics == engine_result.depends_on_viewport_metrics
-        && result.font_metrics_depend_on_viewport_metrics == engine_result.font_metrics_depend_on_viewport_metrics
-        && result.uses_tree_counting_function == engine_result.uses_tree_counting_function
-        && result.substitution_marks == engine_result.substitution_marks
+    let (host_custom, engine_custom) = (custom_properties(&host_result), custom_properties(&result));
+    let agrees = host_result.outcome == result.outcome
+        && host_result.keyframes_inherited_non_inherited_style_groups
+            == result.keyframes_inherited_non_inherited_style_groups
+        && host_result.depends_on_viewport_metrics == result.depends_on_viewport_metrics
+        && host_result.font_metrics_depend_on_viewport_metrics == result.font_metrics_depend_on_viewport_metrics
+        && host_result.uses_tree_counting_function == result.uses_tree_counting_function
+        && host_result.substitution_marks == result.substitution_marks
         && host_custom.len() == engine_custom.len()
         && host_custom.iter().zip(&engine_custom).all(|(host, engine)| {
             host.0 == engine.0
                 && unsafe { crate::css::style_value::rust_style_value_equals(host.1.cast(), engine.1.cast()) }
         })
         && (result.outcome != FfiHostAnimationSampleOutcome::Evaluated
-            || overlays_agree(capture.overlay, run.overlay.cast()));
+            || overlays_agree(host.overlay.cast_const().cast(), run.overlay.cast_const().cast()));
     if agrees {
         engine_sample_check::note_agreed("whole sample");
     } else {
@@ -3522,35 +3549,49 @@ unsafe fn sample_and_check_against_the_engine(
             format!(
                 "node {}: host {:?} {:?}, engine {:?} {:?}",
                 node.raw(),
-                result.outcome,
-                describe_overlay(capture.overlay)
+                host_result.outcome,
+                describe_overlay(host.overlay.cast_const().cast())
                     .iter()
                     .map(|entry| entry.0)
                     .collect::<Vec<_>>(),
-                engine_result.outcome,
-                describe_overlay(run.overlay.cast())
+                result.outcome,
+                describe_overlay(run.overlay.cast_const().cast())
                     .iter()
                     .map(|entry| entry.0)
                     .collect::<Vec<_>>(),
             )
         });
     }
-    unsafe { rust_release_animated_custom_property_results(engine_result.animated_custom_properties_storage) };
+    unsafe {
+        rust_release_animated_custom_property_results(host_result.animated_custom_properties_storage);
+        rust_animated_overlay_free(host.overlay);
+    }
+    // The host finalizes the overlay the engine composed in place; the engine's finalization runs
+    // over a copy of what the host will hold, which is the element's inherited animated values
+    // alone where the sample cleared its own.
+    let sampled = match (result.outcome, run.overlay.is_null()) {
+        (_, true) => rust_animated_overlay_create(),
+        (FfiHostAnimationSampleOutcome::Cleared, false) => unsafe {
+            rust_animated_overlay_clone_inherited(run.overlay)
+        },
+        (_, false) => unsafe { rust_animated_overlay_clone(run.overlay) },
+    };
+    run.overlay = sampled;
     let engine_identity = std::ptr::from_ref(&*engine).addr();
     let pseudo = (input.pseudo_kind != crate::css::cascaded_properties::NO_PSEUDO_ELEMENT).then_some(input.pseudo_kind);
     match unsafe { finalize_engine_sample(engine, node, pseudo, run.record_table, run.record_overlay, run.overlay) } {
-        Ok(table) => crate::css::style::engine_sample_check::expect_sampled_style(
+        Ok(table) => engine_sample_check::expect_sampled_style(
             engine_identity,
             node,
             input.pseudo_kind,
-            Some(crate::css::style::engine_sample_check::EngineSampledStyle {
+            Some(engine_sample_check::EngineSampledStyle {
                 table,
                 overlay: run.overlay,
             }),
         ),
         Err(reason) => {
             engine_sample_check::note_declined(&format!("sampled style: {reason}"));
-            unsafe { crate::css::animated_overlay::rust_animated_overlay_free(run.overlay) };
+            unsafe { rust_animated_overlay_free(run.overlay) };
         }
     }
     result
