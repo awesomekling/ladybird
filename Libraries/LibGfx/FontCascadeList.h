@@ -121,7 +121,7 @@ public:
         Optional<RangeData> range_data;
     };
 
-    class PendingFace : public RefCounted<PendingFace> {
+    class PendingFace : public AtomicRefCounted<PendingFace> {
     public:
         PendingFace(UnicodeRange enclosing, Vector<UnicodeRange> ranges, Function<PendingFontState()> resolve, Function<RefPtr<Font const>()> resolved_font, Function<PendingFontState()> peek_state);
         ~PendingFace();
