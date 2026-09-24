@@ -727,14 +727,15 @@ impl super::StyleEngineState {
             )
         };
         let font_unresolved = std::cell::Cell::new(false);
-        let payloads = {
+        let mut refilled_font = false;
+        let payloads = loop {
             let retained = &self.retained;
             let mut font = || {
                 let inputs = retained.animated_font_group_inputs(node, table, Some(overlay));
                 font_unresolved.set(inputs.is_none());
                 inputs
             };
-            unsafe {
+            let payloads = unsafe {
                 self.build_animation_overlay_payloads(
                     node,
                     u8::MAX,
@@ -745,11 +746,28 @@ impl super::StyleEngineState {
                     display_before_box_type_transformation,
                     &mut font,
                 )
+            };
+            match payloads {
+                Some(payloads) => break payloads,
+                // A font the overlay asks for that nobody resolved yet is resolved between two
+                // complete builds, as a parked row's font is, and the overlay is built again.
+                None if font_unresolved.get() && !refilled_font && self.retained.font_resolution.is_some() => {
+                    let request = font_resolution_inputs(
+                        table,
+                        Some(overlay),
+                        self.retained.tree.tree_scope(node).0,
+                        &self.retained.document_style_computation_inputs,
+                    )
+                    .request;
+                    self.refill_font_requests(
+                        vec![(Some(node), super::font_resolution::FontRequest::new(request))],
+                        counters,
+                    );
+                    refilled_font = true;
+                }
+                None if font_unresolved.get() => return Err("an overlay font nobody resolved yet"),
+                None => return Err("no record to compose over"),
             }
-            .ok_or(match font_unresolved.get() {
-                true => "an overlay font nobody resolved yet",
-                false => "no record to compose over",
-            })?
         };
         let shared = SharedPayload::from_pointer_slice(&payloads.payloads);
         let is_document_element =
