@@ -331,13 +331,10 @@ enum FrameJoin {
     /// answers with the facts after it, since the build can resize this document's viewport
     /// through its embedding document.
     BuildLayoutTree,
-    /// The host half of a partial relayout boundary's commit when another boundary follows it:
-    /// the host is paid its handbacks and delivered the commit messages the document applies at
-    /// once, and only then are the arena's update flags settled for the next boundary's pass.
-    LayoutCommit,
-    /// The host half of the last pass's commit, then what derives from committed layout on the
-    /// document side, then the container queries the commit made pending, which are the
-    /// document's query container elements, then the facts after them. What derives from the
+    /// The host halves of the partial relayout boundaries' commits the frame settled ahead of
+    /// them, in commit order, and of the last pass's commit, then what derives from committed
+    /// layout on the document side, then the container queries the commit made pending, which are
+    /// the document's query container elements, then the facts after them. What derives from the
     /// commit there is the rendering preparation, which hands the scroll offsets it clamps to the
     /// document's elements and reads the root element's style, the selection states the document's
     /// selection range recomputes, and, after a tree change, the viewport rect the document's
@@ -823,12 +820,14 @@ impl LayoutFrame<'_> {
         // since the sources were read.
         unsafe { apply_enrolled_content_sources(arena_handle, content) };
         let mut pending_commit: Option<PendingLayoutCommit> = None;
+        let mut deferred_host_halves = Vec::new();
         for &root in &partial_relayout_roots {
-            // The next boundary's pass starts from the arena the previous commit settled.
+            // The next boundary's pass starts from the arena the previous commit settled; the
+            // commit's host half waits for the join after the last boundary.
             if let Some(pending_commit) = pending_commit.take() {
-                self.join(FrameJoin::LayoutCommit, |main_thread, _| unsafe {
-                    pending_commit.finish(main_thread);
-                });
+                // SAFETY: The frame runs for the update the arena is in, and delivers the host
+                // halves in commit order below.
+                deferred_host_halves.push(unsafe { pending_commit.settle_ahead_of_host() });
             }
             let output = unsafe {
                 compute_subtree_layout_fragments(
@@ -849,6 +848,10 @@ impl LayoutFrame<'_> {
             value: needs_style_update_after_layout,
             facts,
         } = self.join(FrameJoin::AfterLayoutCommit, |main_thread, host| {
+            for host_half in deferred_host_halves {
+                // SAFETY: The frame runs for the update the arena is in.
+                unsafe { host_half.deliver(main_thread) };
+            }
             if let Some(pending_commit) = pending_commit {
                 // SAFETY: The frame runs for the update the arena is in.
                 unsafe { pending_commit.finish(main_thread) };

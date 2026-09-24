@@ -2537,6 +2537,78 @@ impl PendingLayoutCommit {
     }
 }
 
+/// The host half of a partial relayout boundary's commit whose arena half has already settled, so
+/// the next boundary's pass could start without the document thread. What the commit owes the host
+/// and the notifications it produced wait here, in order, for the join that ends the run of passes.
+#[must_use]
+pub(crate) struct DeferredLayoutCommitHostHalf {
+    arena_handle: *mut c_void,
+    handbacks: crate::layout::layout_node_arena::HostHandbacks,
+    notifications: commit::CommitNotifications,
+}
+
+impl PendingLayoutCommit {
+    /// Settles the arena-local bookkeeping of a partial relayout boundary's commit before its host
+    /// half runs, so the next boundary's pass starts from the settled arena without a join. The
+    /// update flags the committed subtree satisfied are reset ahead of the host code; whatever
+    /// that code marks inside the subtree is left for another pass.
+    ///
+    /// # Safety
+    ///
+    /// As for [`Self::finish`], and the frame must deliver the returned host half, in commit
+    /// order, before the host half of any later commit.
+    pub(crate) unsafe fn settle_ahead_of_host(self) -> DeferredLayoutCommitHostHalf {
+        let Self {
+            arena_handle,
+            root,
+            entry,
+            notifications,
+        } = self;
+        assert!(
+            matches!(entry, CommittedEntry::Subtree),
+            "only a partial relayout boundary's commit settles ahead of its host half"
+        );
+        // SAFETY: Guaranteed by the caller; commit's mutable borrow has ended.
+        let arena = unsafe { LayoutNodeArena::from_handle(arena_handle) };
+        let handbacks = arena.take_host_handbacks_ahead_of_payment();
+        // SAFETY: The scratch lives beside the arena for as long as the handle does.
+        unsafe { LayoutScratch::from_handle(arena_handle) }.clear_inline_item_stashes();
+        arena.end_layout_pass();
+        arena.reset_layout_update_flags_in_subtree(root);
+        // As in finish: the subtree's new size may affect ancestor scrollable overflow.
+        debug_assert!(!node_facts::kind_is_svg_box(arena.data(root).kind.get()));
+        arena.schedule_scrollable_overflow_recalculation(root);
+        arena.end_active_layout_pass_ahead_of_host();
+        DeferredLayoutCommitHostHalf {
+            arena_handle,
+            handbacks,
+            notifications,
+        }
+    }
+}
+
+impl DeferredLayoutCommitHostHalf {
+    /// Pays the host what the commit owed it and delivers the commit's notifications, as
+    /// [`PendingLayoutCommit::finish`] would have before settling the arena.
+    ///
+    /// # Safety
+    ///
+    /// The arena must still be live, with no borrow taken during a pass still in use.
+    pub(crate) unsafe fn deliver(self, main_thread: &crate::stage::MainThread) {
+        let Self {
+            arena_handle,
+            handbacks,
+            notifications,
+        } = self;
+        let host = LayoutHost::of(main_thread);
+        // SAFETY: Guaranteed by the caller.
+        unsafe { LayoutNodeArena::from_handle(arena_handle) }
+            .finish_paying_taken_host_handbacks(main_thread, handbacks);
+        // SAFETY: The host and shells remain live, and no arena borrow is active.
+        unsafe { notifications.notify_host(main_thread, &host) };
+    }
+}
+
 fn finish_entry_pass(
     entry_records: &RunRecords<'_>,
     entry_fragments: &std::rc::Rc<fragment_tree::RunFragmentBuilder>,
