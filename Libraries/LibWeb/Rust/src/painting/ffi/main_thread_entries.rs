@@ -288,6 +288,7 @@ unsafe extern "C" fn layout_arena_resolve_painted_vector_images(
 ) {
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let arena = unsafe { arena_from_handle(arena) };
+    let _write = arena.join_frame_for_main_side_write("painted vector images");
     let mut last_painted = std::collections::HashSet::new();
     let prediction_inputs = {
         let paint_state = arena.paint_state().borrow();
@@ -360,6 +361,7 @@ unsafe extern "C" fn layout_arena_publish_recording(
 ) -> u64 {
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let arena = unsafe { arena_from_handle(arena) };
+    let _write = arena.join_frame_for_main_side_write("recording publication");
     let Some(pending) = arena.paint_state().borrow_mut().pending_recording.take() else {
         return 0;
     };
