@@ -36,11 +36,6 @@ pub(super) struct PrefixRelationProgram {
     memory: super::super::memory::MemoryLease,
 }
 
-thread_local! {
-    static RELATION_PROGRAM_MEMORY: std::cell::RefCell<super::super::memory::MemoryController> =
-        std::cell::RefCell::new(super::super::memory::MemoryController::new(super::super::memory::DeviceClass::ForegroundDesktop));
-}
-
 impl PrefixRelationProgram {
     fn capacity_bytes(&self) -> u64 {
         self.queue.shallow_capacity_bytes()
@@ -1001,6 +996,7 @@ impl PrefixAutomaton {
         &self,
         evaluation: &mut PrefixEvaluation<'_, '_>,
         root: StyleNodeID,
+        relation_program_memory: &mut super::super::memory::MemoryController,
         counters: &mut Counters,
     ) -> PrefixRelation {
         counters.bump(Counter::PrefixRelationBuilds);
@@ -1284,9 +1280,9 @@ impl PrefixAutomaton {
                 terminal_steps,
                 memory: super::super::memory::MemoryLease::new(super::super::memory::MemoryCategory::RuleProgram),
             };
-            RELATION_PROGRAM_MEMORY.with_borrow_mut(|memory| {
-                program.memory.resize_required_to(memory, program.capacity_bytes());
-            });
+            program
+                .memory
+                .resize_required_to(relation_program_memory, program.capacity_bytes());
             std::sync::Arc::new(program)
         }));
         let mut relation = PrefixRelation {
