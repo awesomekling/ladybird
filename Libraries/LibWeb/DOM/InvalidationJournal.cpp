@@ -52,6 +52,15 @@ InvalidationJournal::InvalidationJournal(Document& document)
 
 InvalidationJournal::~InvalidationJournal() = default;
 
+// The census reads its flag through the arena's host tables, which wait for the frame in flight, so
+// the next generation's marks count as pending once the document holds them.
+void InvalidationJournal::set_holds_next_generation(bool holds_next_generation)
+{
+    m_holds_next_generation = holds_next_generation;
+    if (!holds_next_generation && !is_empty())
+        report_journal_pending_to_census(m_document, true);
+}
+
 bool InvalidationJournal::is_empty() const
 {
     return m_entries.is_empty()
@@ -66,7 +75,7 @@ bool InvalidationJournal::is_empty() const
 
 InvalidationJournal::Entry& InvalidationJournal::entry_for(NodeIdentity identity)
 {
-    if (is_empty())
+    if (is_empty() && !m_holds_next_generation)
         report_journal_pending_to_census(m_document, true);
     auto index = m_entry_index_by_identity.ensure(identity, [&] {
         m_entries.append(Entry {
@@ -198,7 +207,7 @@ void InvalidationJournal::note_paint_facts(NodeIdentity identity, PaintFactsFami
 void InvalidationJournal::note_unanchored_paint_facts(Compositing::RustFFI::NodeSlotId slot, Function<void(Layout::Node const&)>&& update)
 {
     count_entry_during_flight(HTML::EventLoop::JournalEntryKind::PaintFacts);
-    if (is_empty())
+    if (is_empty() && !m_holds_next_generation)
         report_journal_pending_to_census(m_document, true);
     m_unanchored_paint_facts.append({ slot, move(update) });
     m_document.request_frame_for_journalled_repaint({});
@@ -272,7 +281,7 @@ static void refresh_editability_stamps(Node& node)
 void InvalidationJournal::note_selection_states()
 {
     count_entry_during_flight(HTML::EventLoop::JournalEntryKind::Selection);
-    if (is_empty())
+    if (is_empty() && !m_holds_next_generation)
         report_journal_pending_to_census(m_document, true);
     m_selection_states_are_stale = true;
     drain_if_the_render_side_is_reading();
@@ -314,7 +323,7 @@ void InvalidationJournal::note_pseudo_element_scroll_offset(NodeIdentity generat
 void InvalidationJournal::note_scrollbar_enlarged_state(Painting::Scrollbar& scrollbar)
 {
     count_entry_during_flight(HTML::EventLoop::JournalEntryKind::Scrollbar);
-    if (is_empty())
+    if (is_empty() && !m_holds_next_generation)
         report_journal_pending_to_census(m_document, true);
     if (!m_scrollbars_with_stale_enlarged_state.contains_slow(NonnullRefPtr { scrollbar }))
         m_scrollbars_with_stale_enlarged_state.append(scrollbar);
@@ -327,7 +336,7 @@ void InvalidationJournal::note_scrollbar_enlarged_state(Painting::Scrollbar& scr
 void InvalidationJournal::note_visual_context_box_dirty(Compositing::RustFFI::NodeSlotId slot, Layout::RustFFI::FfiVisualContextBoxDirtyKind kind)
 {
     count_entry_during_flight(HTML::EventLoop::JournalEntryKind::VisualContext);
-    if (is_empty())
+    if (is_empty() && !m_holds_next_generation)
         report_journal_pending_to_census(m_document, true);
     m_visual_context_box_dirty_marks.append({ slot, kind });
     drain_if_the_render_side_is_reading();
@@ -336,7 +345,7 @@ void InvalidationJournal::note_visual_context_box_dirty(Compositing::RustFFI::No
 void InvalidationJournal::note_visual_context_full_rebuild(Layout::RustFFI::FfiVisualContextGlobalRebuildReason reason)
 {
     count_entry_during_flight(HTML::EventLoop::JournalEntryKind::VisualContext);
-    if (is_empty())
+    if (is_empty() && !m_holds_next_generation)
         report_journal_pending_to_census(m_document, true);
     if (!m_visual_context_full_rebuild_reasons.contains_slow(reason))
         m_visual_context_full_rebuild_reasons.append(reason);
@@ -346,7 +355,7 @@ void InvalidationJournal::note_visual_context_full_rebuild(Layout::RustFFI::FfiV
 void InvalidationJournal::note_svg_paint_resources_changed()
 {
     count_entry_during_flight(HTML::EventLoop::JournalEntryKind::VisualContext);
-    if (is_empty())
+    if (is_empty() && !m_holds_next_generation)
         report_journal_pending_to_census(m_document, true);
     m_svg_paint_resources_changed = true;
     drain_if_the_render_side_is_reading();
@@ -355,7 +364,7 @@ void InvalidationJournal::note_svg_paint_resources_changed()
 void InvalidationJournal::note_visual_viewport_transform()
 {
     count_entry_during_flight(HTML::EventLoop::JournalEntryKind::VisualContext);
-    if (is_empty())
+    if (is_empty() && !m_holds_next_generation)
         report_journal_pending_to_census(m_document, true);
     m_visual_viewport_transform_is_stale = true;
     drain_if_the_render_side_is_reading();
@@ -497,7 +506,7 @@ void InvalidationJournal::publish_scroll_offsets(Node& node, Entry const& entry)
 // the next drain, and the next frame starts with one.
 void InvalidationJournal::drain_if_the_render_side_is_reading()
 {
-    if (m_document.is_running_update_layout())
+    if (!m_holds_next_generation && m_document.is_running_update_layout())
         drain();
 }
 
@@ -507,6 +516,7 @@ void InvalidationJournal::drain()
     // running takes whatever such a read would have.
     // The drain writes what the frame reads, so a frame in flight is waited for first. Its last join
     // hands this journal what was marked beside it.
+    VERIFY(!m_holds_next_generation);
     m_document.join_frame_in_flight();
     if (is_empty() || m_draining)
         return;

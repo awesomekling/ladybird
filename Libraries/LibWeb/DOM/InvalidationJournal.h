@@ -101,6 +101,11 @@ public:
     void drain();
     bool is_empty() const;
 
+    // The journal the document keeps beside its frame in flight holds the next generation of marks.
+    // It never reaches the render side, which the frame owns: nothing it notes writes through, and
+    // it is drained only once the document holds the journal again, after the frame is over.
+    void set_holds_next_generation(bool);
+
 private:
     struct PseudoElementScrollOffset {
         CSS::PseudoElement type;
@@ -177,6 +182,7 @@ private:
     bool m_svg_paint_resources_changed { false };
     bool m_visual_viewport_transform_is_stale { false };
     bool m_draining { false };
+    bool m_holds_next_generation { false };
 };
 
 }
