@@ -173,6 +173,8 @@ void set_transition_step_follow_up_left_to_caller(bool);
 
 namespace Web::DOM {
 
+void pin_bound_box_style_records_for_detachment(Node&);
+
 Element::RareData::~RareData() = default;
 
 void Element::RareData::visit_edges(Cell::Visitor& visitor)
@@ -2804,6 +2806,9 @@ void Element::set_shadow_root(GC::Ptr<ShadowRoot> shadow_root)
         if (auto count = m_shadow_root->associated_animation_count_in_subtree())
             change_associated_animation_count_in_subtree(-static_cast<i32>(count));
         if (is_connected()) {
+            // The old tree's boxes stay in the layout tree until the host's box is rebuilt, and are read until then,
+            // but the disconnect retires the identities that hold their style records.
+            pin_bound_box_style_records_for_detachment(*m_shadow_root);
             // A pseudo-element's box is found through its generator's identity, which the disconnect retires.
             m_shadow_root->for_each_shadow_including_descendant([](DOM::Node& descendant) {
                 if (auto* element = as_if<Element>(descendant))

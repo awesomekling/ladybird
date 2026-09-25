@@ -1400,6 +1400,24 @@ static void pin_bound_box_style_record_for_detachment(Node& node, Optional<CSS::
     }));
 }
 
+// Pins the style record of every box `node` and its shadow-including descendants are bound to, for a subtree that
+// leaves the document: its boxes stay in the layout tree, and are read, until they are detached.
+void pin_bound_box_style_records_for_detachment(Node&);
+void pin_bound_box_style_records_for_detachment(Node& node)
+{
+    node.for_each_shadow_including_inclusive_descendant([](Node& inclusive_descendant) {
+        pin_bound_box_style_record_for_detachment(inclusive_descendant);
+
+        if (auto* element = as_if<Element>(inclusive_descendant)) {
+            element->for_each_synthetic_pseudo_element([&](CSS::PseudoElement type, SyntheticPseudoElement&) {
+                pin_bound_box_style_record_for_detachment(*element, type);
+            });
+        }
+
+        return TraversalDecision::Continue;
+    });
+}
+
 class RemovalStyleRecordPins {
 public:
     explicit RemovalStyleRecordPins(CSS::StyleComputer const& style_computer)
@@ -1437,17 +1455,7 @@ public:
             return;
         // Detached subtrees do not need DOM-held record pins, but layout nodes can still outlive removing steps and
         // keep their detachment pins.
-        node.for_each_shadow_including_inclusive_descendant([](Node& inclusive_descendant) {
-            pin_bound_box_style_record_for_detachment(inclusive_descendant);
-
-            if (auto* element = as_if<Element>(inclusive_descendant)) {
-                element->for_each_synthetic_pseudo_element([&](CSS::PseudoElement type, SyntheticPseudoElement&) {
-                    pin_bound_box_style_record_for_detachment(*element, type);
-                });
-            }
-
-            return TraversalDecision::Continue;
-        });
+        pin_bound_box_style_records_for_detachment(node);
     }
 
     void release_dom_style_records()

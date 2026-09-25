@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<input id="input" type="button" value="Button">
+<div id="container"></div>
+<script>
+    // A type change replaces the input's user-agent shadow tree. The old tree's boxes stay in the layout tree until
+    // the next layout, and a style update that finishes before it may sweep the records nothing assigns anymore:
+    // enough new records are made here for that sweep to run.
+    asyncTest(async done => {
+        await twoFrames();
+        input.type = "text";
+        for (let i = 0; i < 1500; ++i) {
+            const element = document.createElement("div");
+            element.style.width = `${i + 1}px`;
+            element.style.height = "1px";
+            container.appendChild(element);
+        }
+        await twoFrames();
+        println(`input: ${input.type} ${input.offsetWidth > 0}`);
+        println(`container height: ${container.offsetHeight}`);
+        done();
+    });
+</script>
