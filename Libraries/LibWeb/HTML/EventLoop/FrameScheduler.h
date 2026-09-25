@@ -170,6 +170,9 @@ public:
     void clock_lend_taken_back(void* arena);
     // A read of render state ended: the render clock may go on ticking the leases if the task changed nothing since.
     void relend_clock_leases_after_read();
+    // The main thread presented a frame of its own mid-task, which shows its documents at the task's time: the render
+    // clock's ticks, which show them at theirs, present no more beside the task.
+    void did_present_beside_clock_lend();
     // A render clock tick ended a lease; the rendering update takes over.
     void render_clock_needs_main();
     // For tests: whether leases are left to the main thread's rendering updates, with no render clock armed.

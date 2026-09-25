@@ -7025,6 +7025,9 @@ void LocalNavigable::adopt_render_clock_frame_kit(RenderClockFrameKit& kit)
     if (!exchange(kit.presented, false))
         return;
     auto& presentation = *kit.presentation;
+    // The main thread presented a later scene of its own beside the ticks (a hit test's), which stays what it hit tests.
+    if (presentation.presented_scene_epoch.has_value() && *presentation.presented_scene_epoch < m_presenter->adopted_scene_epoch())
+        return;
     if (presentation.presented_scene_epoch.has_value())
         m_presenter->did_adopt_scene(*presentation.presented_scene_epoch);
     auto document = kit.recording->document;
