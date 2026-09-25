@@ -114,6 +114,7 @@ RENDER_STAGE_ALLOWED = {
         ENVIRONMENT_SWITCH,
         [
             "stage_thread.rs:LOGS",
+            "stage_thread.rs:ENABLED",
             "css/style/flush.rs:ENABLED",
             "css/style/mod.rs:CASCADE_WINNERS",
             "css/style/mod.rs:PREFIX_RELATION",

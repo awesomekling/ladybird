@@ -1738,9 +1738,18 @@ void Document::finish_submitted_style_update()
     CSS::finish_submitted_style_update(*this);
 }
 
+// A style update for one element reads and writes nothing a recording in flight reads, and what it changes in the arena
+// joins at the arena's doors, so beside a recording of the document it does not take the recording in.
+static bool updates_element_style_beside_recording(Document const& document)
+{
+    auto const* arena = document.layout_node_arena_if_created();
+    return arena && Layout::RustFFI::rust_stage_thread_reads_beside_recording_of(arena->handle());
+}
+
 bool Document::update_style_for_element(AbstractElement const& abstract_element)
 {
-    join_frame_in_flight();
+    if (!updates_element_style_beside_recording(*this))
+        join_frame_in_flight();
     update_selection_style_observability();
     flush_throttled_animation_style_update_for_node(abstract_element.element());
     return CSS::update_style_for_element(*this, abstract_element, StyleUpdateMode::Normal);
@@ -1748,7 +1757,8 @@ bool Document::update_style_for_element(AbstractElement const& abstract_element)
 
 bool Document::update_style_for_element(AbstractElement const& abstract_element, StyleUpdateMode mode)
 {
-    join_frame_in_flight();
+    if (!updates_element_style_beside_recording(*this))
+        join_frame_in_flight();
     update_selection_style_observability();
     flush_throttled_animation_style_update_for_node(abstract_element.element());
     return CSS::update_style_for_element(*this, abstract_element, mode);

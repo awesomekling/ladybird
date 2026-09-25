@@ -126,6 +126,40 @@ fn overlapping_stages() -> &'static [String] {
     })
 }
 
+/// Whether a main-side read of a document's committed geometry may be answered beside a recording of that document
+/// in flight instead of taking the recording in (`LIBWEB_READS_BESIDE_RECORDING=1`). The recording writes no geometry.
+fn reads_beside_recording_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("LIBWEB_READS_BESIDE_RECORDING").is_some_and(|value| value == "1"))
+}
+
+/// Whether the frame in flight holds the document whose arena is `arena` only for its recordings, and a read of that
+/// document's committed geometry reads the rows its layout published instead of taking the frame in. The recording
+/// reads those rows and writes none of them, and the view it lends the main side is published before it is submitted.
+pub(crate) fn reads_beside_recording_of(arena: *const c_void) -> bool {
+    if !reads_beside_recording_enabled() || RUNNING_JOIN_WORK.with(Cell::get) != 0 {
+        return false;
+    }
+    SUBMITTED.with_borrow(|submitted| {
+        let mut stages = submitted
+            .iter()
+            .filter(|stage| stage.arena == arena as usize)
+            .peekable();
+        stages.peek().is_some() && stages.all(|stage| stage.label == "recording")
+    })
+}
+
+/// Whether a recording submitted for an arena lends the main side the rows its layout published.
+pub(crate) fn recordings_lend_published_rows() -> bool {
+    reads_beside_recording_enabled()
+}
+
+/// See [`reads_beside_recording_of`].
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_stage_thread_reads_beside_recording_of(arena: *const c_void) -> bool {
+    reads_beside_recording_of(arena)
+}
+
 /// What the frame scheduler on the main thread does for a submitted stage.
 #[repr(C)]
 #[derive(Clone, Copy)]

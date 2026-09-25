@@ -5739,6 +5739,25 @@ impl LayoutNodeArena {
         unsafe { &*arena.cast::<Self>() }
     }
 
+    /// Like [`Self::from_handle`], for a main-side read that reads nothing a recording writes: beside a recording of
+    /// the arena in flight that a read of committed geometry does not take in (see
+    /// [`crate::stage_thread::reads_beside_recording_of`]), it goes on beside the recording.
+    ///
+    /// # Safety
+    ///
+    /// As for [`Self::from_handle`], and the caller reads nothing the recording writes: its scratch, the paint state,
+    /// the paint damage, the absolute rect memo, or the rows as it reads them rather than as they were published.
+    #[track_caller]
+    pub(crate) unsafe fn from_handle_beside_recording<'a>(arena: *mut c_void) -> &'a Self {
+        if crate::stage_thread::reads_beside_recording_of(arena) {
+            super::main_side_census::note_arena_access(std::panic::Location::caller(), arena);
+            // SAFETY: Guaranteed by the caller.
+            return unsafe { &*arena.cast::<Self>() };
+        }
+        // SAFETY: Guaranteed by the caller.
+        unsafe { Self::from_handle(arena) }
+    }
+
     #[track_caller]
     pub(crate) unsafe fn from_handle_mut<'a>(arena: *mut c_void) -> &'a mut Self {
         assert!(!arena.is_null(), "layout node arena handle is null");
@@ -5997,13 +6016,13 @@ pub unsafe extern "C" fn layout_arena_node_link_slot(
     link: FfiNodeLink,
 ) -> NodeSlotId {
     // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
-    unsafe { LayoutNodeArena::from_handle(arena) }.node_link_slot(id, link)
+    unsafe { LayoutNodeArena::from_handle_beside_recording(arena) }.node_link_slot(id, link)
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_node_flags(arena: *mut c_void, id: NodeSlotId) -> u32 {
     // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
-    unsafe { LayoutNodeArena::from_handle(arena) }.node_flags(id)
+    unsafe { LayoutNodeArena::from_handle_beside_recording(arena) }.node_flags(id)
 }
 
 #[unsafe(no_mangle)]
@@ -6019,7 +6038,7 @@ pub unsafe extern "C" fn layout_arena_node_has_compositor_animation_frame(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_node_generated_for(arena: *mut c_void, id: NodeSlotId) -> u8 {
     // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
-    unsafe { LayoutNodeArena::from_handle(arena) }.node_generated_for(id)
+    unsafe { LayoutNodeArena::from_handle_beside_recording(arena) }.node_generated_for(id)
 }
 
 /// # Safety
@@ -6282,7 +6301,7 @@ pub unsafe extern "C" fn layout_arena_set_node_generated_for(
 pub unsafe extern "C" fn layout_arena_node_style_node(arena: *mut c_void, id: NodeSlotId) -> u32 {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }
+    unsafe { LayoutNodeArena::from_handle_beside_recording(arena) }
         .node_style_node(id)
         .map_or(0, StyleNodeID::raw)
 }
@@ -6597,21 +6616,21 @@ pub unsafe extern "C" fn layout_arena_publish_document_style_record(
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_node_has_derived_style(arena: *mut c_void, node: NodeSlotId) -> bool {
-    unsafe { LayoutNodeArena::from_handle(arena) }.node_style_record_is_pinned_by_arena(node)
+    unsafe { LayoutNodeArena::from_handle_beside_recording(arena) }.node_style_record_is_pinned_by_arena(node)
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_node_style_record(arena: *mut c_void, id: NodeSlotId) -> u64 {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }.node_style_record(id)
+    unsafe { LayoutNodeArena::from_handle_beside_recording(arena) }.node_style_record(id)
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_node_style_payloads(arena: *mut c_void, id: NodeSlotId) -> *const c_void {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }
+    unsafe { LayoutNodeArena::from_handle_beside_recording(arena) }
         .data(id)
         .style
         .get()
@@ -6681,8 +6700,8 @@ pub unsafe extern "C" fn layout_arena_clear_shell_factory(arena: *mut c_void) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_attach_shell(arena: *mut c_void, id: NodeSlotId, shell: *mut c_void) {
     assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }.attach_shell(id, shell);
+    // SAFETY: As above. No stage reads the shell a read beside a recording materialises.
+    unsafe { LayoutNodeArena::from_handle_beside_recording(arena) }.attach_shell(id, shell);
 }
 
 #[unsafe(no_mangle)]
