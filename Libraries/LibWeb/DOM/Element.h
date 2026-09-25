@@ -397,8 +397,8 @@ public:
         VERIFY(payload);
         return static_cast<StyleGroup const*>(payload);
     }
-    void set_computed_style(Optional<CSS::PseudoElement>, CSS::StyleRecordID);
-    void refresh_computed_style(Optional<CSS::PseudoElement>, CSS::StyleRecordID);
+    void set_computed_style(CSS::StyleDrainScope const&, Optional<CSS::PseudoElement>, CSS::StyleRecordID);
+    void refresh_computed_style(CSS::StyleDrainScope const&, Optional<CSS::PseudoElement>, CSS::StyleRecordID);
     void update_animated_properties(Badge<Web::Animations::KeyframeEffect> const&, Optional<CSS::PseudoElement>, Web::Animations::KeyframeEffect&, Web::Animations::AnimationUpdateContext&);
     void update_animated_properties_for_abstract_element(Badge<Web::Animations::KeyframeEffect> const&, DOM::AbstractElement, Web::Animations::KeyframeEffect&, Web::Animations::AnimationUpdateContext&);
 
@@ -935,7 +935,8 @@ private:
     void publish_custom_property_names();
     void publish_custom_property_names(RefPtr<CSS::CustomPropertyData const> data);
     RefPtr<CSS::CustomPropertyData const> set_own_custom_property_data(CSS::StyleDrainScope const&, RefPtr<CSS::CustomPropertyData const> current, RefPtr<CSS::CustomPropertyData const> data);
-    void replace_style_record(CSS::StyleRecordID);
+    void replace_style_record(CSS::StyleDrainScope const&, CSS::StyleRecordID);
+    void clear_style_record_on_removal();
     void clear_computed_styles_from_display_none_descendants(CSS::StyleDrainScope const&);
 
     WebIDL::ExceptionOr<GC::Ptr<Node>> insert_adjacent(Utf16View where, GC::Ref<Node> node);

@@ -1100,7 +1100,7 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_inst
 
     auto [animated_property_invalidation, publication] = publish_sampled_animation_overlay(abstract_element, *new_style, installed_style_record);
     auto& element = abstract_element.element();
-    element.refresh_computed_style(abstract_element.pseudo_element(), publication.new_style_record);
+    element.refresh_computed_style(scope, abstract_element.pseudo_element(), publication.new_style_record);
     if (auto* svg_element = as_if<SVG::SVGElement>(element))
         svg_element->note_svg_paint_resource_description_may_have_changed();
     // Box-type, overflow and text-alignment adjustments consume the unadjusted base values, which
