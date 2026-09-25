@@ -58,6 +58,10 @@ static RenderClockNeedsMain& render_clock_needs_main()
     return *s_needs_main;
 }
 
+// How far behind a rendering update's time the last tick of a render clock may be for the rendering update to show that
+// tick's time: a few display frames.
+static constexpr double render_clock_lag_tolerance_milliseconds = 50;
+
 // The kits the render clock's ticks present with, by the layout arena of their document. The main thread changes them
 // only while no tick runs, and a tick reads them only while the main thread idles.
 static Mutex& render_clock_kits_mutex()
@@ -634,6 +638,8 @@ void FrameScheduler::grant_clock_leases()
     if (!Layout::RustFFI::rust_clock_frames_enabled())
         return;
     auto documents = m_synchronous_update ? Vector<GC::Root<DOM::Document>> {} : m_event_loop.documents_in_this_event_loop_matching([](auto&) { return true; });
+    for (auto& hold : m_clock_leases)
+        hold.timeline_time_for_update.clear();
     for (size_t index = m_clock_leases.size(); index-- > 0;) {
         if (!documents.first_matching([&](auto const& document) { return document.ptr() == m_clock_leases[index].document.ptr(); }).has_value())
             revoke_clock_lease(index);
@@ -965,9 +971,32 @@ void FrameScheduler::prepare_clock_ticks(ReadonlySpan<GC::Root<DOM::Document>> d
         }
         // NB: The default document timeline's origin time is zero: its time is the document's relative time.
         auto time = max(0.0, HighResolutionTime::relative_high_resolution_time(frame_timestamp, relevant_global_object(*document)));
-        if (!(time < plan->deadline))
+        if (!(time < plan->deadline)) {
             revoke_clock_lease(index);
+            continue;
+        }
+        // Where a render clock keeps up with the display, the document shows what its last tick presented, and its
+        // timeline reads the time of that tick: the rendering update, which runs for something else, moves neither.
+        // Ticking the lease here instead would leave the next rendering update something to tick again, and keep the
+        // main thread rendering at every display frame. A render clock that falls behind, the rendering update ticks.
+        auto& hold = m_clock_leases[index];
+        hold.timeline_time_for_update.clear();
+        if (hold.render_clock_context.has_value()) {
+            auto lease_time = Layout::RustFFI::rust_clock_lease_time(arena->handle());
+            auto current = document->timeline()->current_time();
+            if (!isnan(lease_time) && current.has_value() && current->type == Animations::TimeValue::Type::Milliseconds
+                && lease_time >= current->value && time - lease_time <= render_clock_lag_tolerance_milliseconds)
+                hold.timeline_time_for_update = lease_time;
+        }
     }
+}
+
+Optional<double> FrameScheduler::clock_lease_timeline_time(DOM::Document const& document) const
+{
+    auto held = m_clock_leases.find_first_index_if([&](auto const& hold) { return hold.document.ptr() == &document; });
+    if (!held.has_value())
+        return {};
+    return m_clock_leases[*held].timeline_time_for_update;
 }
 
 bool FrameScheduler::tick_clock_leases(Vector<GC::Ref<DOM::Document>> const& docs, size_t first_document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp, bool may_submit)
@@ -992,8 +1021,8 @@ bool FrameScheduler::submit_clock_tick(Vector<GC::Ref<DOM::Document>> const& doc
         auto* arena = document->layout_node_arena_if_created();
         if (!held.has_value() || !arena)
             continue;
-        // A render clock ticks the lease at the display's ticks, not the rendering update.
-        if (m_clock_leases[*held].render_clock_context.has_value()) {
+        // A render clock that keeps up ticks the lease at the display's ticks, not the rendering update.
+        if (m_clock_leases[*held].timeline_time_for_update.has_value()) {
             m_clock_leases[*held].ticked = true;
             continue;
         }
