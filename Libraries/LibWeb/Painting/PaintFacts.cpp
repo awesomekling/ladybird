@@ -50,8 +50,10 @@ static void push_form_control_paint_facts_onto(HTML::HTMLInputElement const& inp
 
 void push_form_control_paint_facts(HTML::HTMLInputElement& input)
 {
-    auto const* layout_node = input.unsafe_layout_node();
-    if (!layout_node || !paints_form_control_from_facts(*layout_node))
+    // The journal finds the box as it drains and gives the facts only to a box that paints from them. Finding the box
+    // here would read its style record, which a style pass in flight owns.
+    using enum HTML::HTMLInputElement::TypeAttributeState;
+    if (!input.has_layout_box() || !first_is_one_of(input.type_state(), Checkbox, RadioButton))
         return;
     input.document().invalidation_journal().note_form_control_paint_facts(
         DOM::NodeIdentity::of(input), input.enabled(), input.checked(), input.indeterminate(), input.is_being_activated());
