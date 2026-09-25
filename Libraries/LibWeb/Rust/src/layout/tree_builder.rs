@@ -2927,28 +2927,56 @@ struct TreeBuildStageOutput {
     handbacks: super::layout_node_arena::HostHandbacks,
 }
 
-/// A finished layout tree build walk whose host half has not run yet: what it owes the host, and
-/// what it found out for the document. The document thread pays it with
-/// `rust_pay_layout_tree_build`, which answers with the build's outcome.
+/// A finished layout tree build walk whose shells have not been made yet. The document thread
+/// makes them with `rust_pay_layout_tree_build`, which answers with the build's outcome.
 #[must_use]
-pub(crate) struct LayoutTreeBuildWalk(TreeBuildStageOutput);
+pub(crate) struct LayoutTreeBuildWalk(FfiLayoutTreeBuildOutcome);
+
+/// What a finished layout tree build walk owes the host besides its shells, and what it found out
+/// for the document. The walk's frame pays it on the document thread in its next join after the
+/// walk's own, since no host code runs in between: the layout pass that may follow the build reads
+/// only the arena.
+#[must_use]
+pub(crate) struct TreeBuildHostHalf {
+    reports: Vec<crate::layout::commit::FfiCommitMessage>,
+    handbacks: super::layout_node_arena::HostHandbacks,
+}
 
 // The walk's handbacks name the shells they owe by id, so the walk crosses back on its own terms.
 const _: () = {
     const fn assert_send<T: Send>() {}
     assert_send::<LayoutTreeBuildWalk>();
+    assert_send::<TreeBuildHostHalf>();
 };
 
 impl LayoutTreeBuildWalk {
     /// Whether the build asked for another build pass, which the outcome its host half answers
     /// with says as well.
     pub(crate) fn needs_another_build_pass(&self) -> bool {
-        self.0.outcome.needs_another_build_pass
+        self.0.needs_another_build_pass
     }
 }
 
-/// Runs the layout tree build walk of the document `document_style_node` names, as a stage. The
-/// host half is left to `rust_pay_layout_tree_build`.
+impl TreeBuildHostHalf {
+    /// Pays what the walk let go of, as it would have while the walk ran: the boxes nodes gained or
+    /// lost, the host-owned objects of the rows it freed, and the style changes of the shells of
+    /// the boxes it kept. Then what the build found out goes to the document, in the order the
+    /// build found it out; nothing can clear a DOM update flag again once the walk is complete.
+    pub(crate) fn pay(self, main_thread: &crate::stage::MainThread, arena: &LayoutNodeArena) {
+        // A layout pass that ran since may have queued handbacks its commit pays; they stay queued.
+        arena.pay_handbacks_ahead_of_queued(main_thread, self.handbacks);
+        if !self.reports.is_empty() {
+            super::tree_build_seal::note_host_call("deliver_commit_messages");
+            // SAFETY: The document outlives the build, and no arena borrow is held here.
+            unsafe {
+                crate::layout::LayoutHost::of(main_thread).deliver_commit_messages(main_thread, &self.reports);
+            };
+        }
+    }
+}
+
+/// Runs the layout tree build walk of the document `document_style_node` names, as a stage. Its
+/// shells are left to `rust_pay_layout_tree_build`, and the rest of its host half to the caller.
 ///
 /// # Safety
 ///
@@ -2957,13 +2985,18 @@ impl LayoutTreeBuildWalk {
 pub(crate) unsafe fn walk_layout_tree_build(
     arena_handle: *mut c_void,
     document_style_node: u32,
-) -> LayoutTreeBuildWalk {
+) -> (LayoutTreeBuildWalk, TreeBuildHostHalf) {
     // SAFETY: Guaranteed by the caller.
     let arena = unsafe { LayoutNodeArena::from_handle_mut(arena_handle) };
     arena.run_stage(|arena| {
         // The host is made on the stage's side from the arena the stage holds alone.
         let host = dom_tree_builder_host(std::ptr::from_mut(arena).cast());
-        LayoutTreeBuildWalk(run_tree_build_stage(&host, document_style_node))
+        let TreeBuildStageOutput {
+            outcome,
+            reports,
+            handbacks,
+        } = run_tree_build_stage(&host, document_style_node);
+        (LayoutTreeBuildWalk(outcome), TreeBuildHostHalf { reports, handbacks })
     })
 }
 

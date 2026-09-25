@@ -21,7 +21,8 @@ use super::node_data::NodeSlotId;
 use super::node_facts;
 use super::partial_relayout::FfiPartialRelayoutHostFacts;
 use super::tree_builder::{
-    FfiGeneratedContentItem, FfiLayoutTreeBuildOutcome, FfiPseudoElement, LayoutTreeBuildWalk, walk_layout_tree_build,
+    FfiGeneratedContentItem, FfiLayoutTreeBuildOutcome, FfiPseudoElement, LayoutTreeBuildWalk, TreeBuildHostHalf,
+    walk_layout_tree_build,
 };
 use super::viewport_propagation::FfiViewportPropagationFacts;
 use crate::abort_on_panic;
@@ -31,6 +32,7 @@ use crate::layout::used_values::FfiCssPixelPoint;
 use crate::painting::host::FfiRootBackgroundSource;
 use crate::painting::paintable_data::FfiSelectionSnapshot;
 use crate::painting::selection::SelectionSnapshot;
+use std::cell::Cell;
 use std::ffi::c_void;
 use std::time::Instant;
 
@@ -402,10 +404,11 @@ enum FrameJoin {
     /// what the node's layout node and its document ask for.
     Style,
     /// The host half of a layout tree build whose walk the frame has run, all of which is the
-    /// document's C++ and GC-side objects: the shells of the rows the walk freed and the box
-    /// presence it changed, the DOM nodes its commit messages resolve to, the shells, style
-    /// resources and generated image providers of its new rows, the retirement of the shells of
-    /// the tree a new viewport replaced, and the document paint state of the new one. When a pass
+    /// document's C++ and GC-side objects: the shells of its new rows, the retirement of the
+    /// shells of the tree a new viewport replaced, and the document paint state of the new one.
+    /// The shells of the rows the walk freed, the box presence it changed and the DOM nodes its
+    /// commit messages resolve to wait for the next join, and the style resources and generated
+    /// image providers of its new rows for the frame to be over. When a pass
     /// follows, the join answers with its sources, which the document reads from its root and body
     /// elements' style and from the shells of replaced content. A partial relayout's build also
     /// answers with the facts after it, since the build can resize this document's viewport
@@ -553,6 +556,9 @@ struct LayoutFrame<'a> {
     list_owners_to_rebuild: Vec<StyleNodeID>,
     /// The document's selection as the style join of the round read it, if it has one.
     selection: Option<SelectionSnapshot>,
+    /// What the last tree build owes the document thread beyond its own join, which the next join
+    /// pays before its work.
+    owed_tree_build_host_half: Cell<Option<TreeBuildHostHalf>>,
 }
 
 /// The document facts together with what a join answered.
@@ -568,7 +574,15 @@ impl LayoutFrame<'_> {
         work: impl FnOnce(&crate::stage::MainThread<'_>, &LayoutUpdateHost) -> R,
     ) -> R {
         let host = self.inputs.host;
-        self.joins.join(|main_thread| work(main_thread, &host))
+        let arena_handle = self.inputs.arena_handle;
+        let owed_tree_build_host_half = self.owed_tree_build_host_half.take();
+        self.joins.join(|main_thread| {
+            if let Some(owed) = owed_tree_build_host_half {
+                // SAFETY: The frame runs for the update the arena is in, and no borrow spans a join.
+                owed.pay(main_thread, unsafe { arena(arena_handle) });
+            }
+            work(main_thread, &host)
+        })
     }
 
     fn arena(&self) -> &LayoutNodeArena {
@@ -621,20 +635,31 @@ impl LayoutFrame<'_> {
 
     /// Walks the tree build the style join readied, in the frame. Its host half is left to the
     /// BuildLayoutTree join.
-    fn walk_layout_tree_build(&mut self) -> WalkedLayoutTreeBuild {
+    fn walk_layout_tree_build(&mut self) -> (WalkedLayoutTreeBuild, TreeBuildHostHalf) {
         let document_style_node = self
             .tree_build_document_style_node
             .take()
             .expect("the style join readies the tree build");
         let replaced_layout_root = self.arena().layout_root();
-        WalkedLayoutTreeBuild {
-            // SAFETY: The frame runs for the update the arena is in, and the style join published
-            // the document's style for the build.
-            walk: unsafe { walk_layout_tree_build(self.inputs.arena_handle, document_style_node) },
+        // SAFETY: The frame runs for the update the arena is in, and the style join published the
+        // document's style for the build.
+        let (walk, host_half) = unsafe { walk_layout_tree_build(self.inputs.arena_handle, document_style_node) };
+        let walked = WalkedLayoutTreeBuild {
+            walk,
             document_style_node: StyleNodeID::from_raw(document_style_node)
                 .expect("the document has a style node when it builds a layout tree"),
             replaced_layout_root,
-        }
+        };
+        (walked, host_half)
+    }
+
+    /// Leaves what a tree build owes the document thread beyond its own join to the next join.
+    fn owe_tree_build_host_half(&self, host_half: TreeBuildHostHalf) {
+        let previous = self.owed_tree_build_host_half.replace(Some(host_half));
+        assert!(
+            previous.is_none(),
+            "a join pays a tree build's host half before the next build"
+        );
     }
 
     /// Settles the list owners with stale counters after a tree build, and holds on to the ones
@@ -718,7 +743,14 @@ impl LayoutFrame<'_> {
             .expect("the join ahead of a layout pass reads its sources")
     }
 
-    fn run(mut self) -> FrameMessages {
+    /// Runs the frame's rounds, and hands back its messages together with what a tree build that
+    /// no join followed still owes the document thread.
+    fn run(mut self) -> (FrameMessages, Option<TreeBuildHostHalf>) {
+        let messages = self.run_rounds();
+        (messages, self.owed_tree_build_host_half.take())
+    }
+
+    fn run_rounds(&mut self) -> FrameMessages {
         // Size-query dependencies point from a descendant to an ancestor query container. They are
         // therefore acyclic, and a coherent style/layout pass can settle at least one more level of
         // a nested dependency chain. One pass per connected element is a conservative exact bound.
@@ -755,14 +787,14 @@ impl LayoutFrame<'_> {
 
             if !self.round_lays_out(&facts) {
                 self.messages.prepare_for_rendering = true;
-                return self.messages;
+                return std::mem::take(&mut self.messages);
             }
 
             let mut registered_partial_relayout_roots = self.arena().take_partial_relayout_boundary_roots();
 
             // NOTE: If this is a document hosting <template> contents, layout is unnecessary.
             if self.inputs.is_template_contents_document {
-                return self.messages;
+                return std::mem::take(&mut self.messages);
             }
 
             let mut needs_layout_tree_rebuild = self.needs_layout_tree_rebuild(&facts);
@@ -773,7 +805,7 @@ impl LayoutFrame<'_> {
                 &mut registered_partial_relayout_roots,
                 &mut needs_layout_tree_rebuild,
             ) {
-                PartialRelayout::Done => return self.messages,
+                PartialRelayout::Done => return std::mem::take(&mut self.messages),
                 PartialRelayout::NeedsAnotherLayoutPass => continue,
                 PartialRelayout::NotEligible => {}
             }
@@ -783,7 +815,7 @@ impl LayoutFrame<'_> {
 
             if needs_layout_tree_rebuild {
                 let arena_handle = self.inputs.arena_handle;
-                let walked = self.walk_layout_tree_build();
+                let (walked, host_half) = self.walk_layout_tree_build();
                 let needs_another_build_pass = walked.walk.needs_another_build_pass();
                 if !needs_another_build_pass {
                     self.reconcile_stale_list_item_counters(&walked);
@@ -796,6 +828,7 @@ impl LayoutFrame<'_> {
                         pass_follows.then(|| unsafe { LayoutPassSources::read(main_thread, host, arena_handle) });
                     (outcome, pass_sources)
                 });
+                self.owe_tree_build_host_half(host_half);
                 self.note_layout_tree_build(&outcome);
                 debug_assert_eq!(outcome.needs_another_build_pass, needs_another_build_pass);
                 debug_assert_eq!(outcome.needs_another_build_pass, needs_another_build_pass);
@@ -876,7 +909,7 @@ impl LayoutFrame<'_> {
             // join has just answered the final facts, and nothing has run on the document thread
             // since, so the loop has stabilized.
             if layout_is_up_to_date(self.arena(), &facts) {
-                return self.messages;
+                return std::mem::take(&mut self.messages);
             }
         }
 
@@ -894,7 +927,7 @@ impl LayoutFrame<'_> {
         if needs_style_update_after_layout || !layout_is_up_to_date(self.arena(), &facts) {
             self.messages.stabilization_bound_failed = true;
         }
-        self.messages
+        std::mem::take(&mut self.messages)
     }
 
     /// Attempts to satisfy the pending layout update by re-laying out only the registered partial
@@ -923,7 +956,7 @@ impl LayoutFrame<'_> {
         if *needs_layout_tree_rebuild {
             let tree_build_started = self.inputs.trace.now();
             let arena_handle = self.inputs.arena_handle;
-            let walked = self.walk_layout_tree_build();
+            let (walked, host_half) = self.walk_layout_tree_build();
             let needs_another_build_pass = walked.walk.needs_another_build_pass();
             self.reconcile_stale_list_item_counters(&walked);
             let counters_were_stale = !self.list_owners_to_rebuild.is_empty();
@@ -943,6 +976,7 @@ impl LayoutFrame<'_> {
                     facts,
                 }
             });
+            self.owe_tree_build_host_half(host_half);
             self.note_layout_tree_build(&outcome);
             *facts = facts_after_build;
             *needs_layout_tree_rebuild = false;
@@ -1111,10 +1145,14 @@ unsafe fn update_layout(
                 tree_build_document_style_node: None,
                 list_owners_to_rebuild: Vec::new(),
                 selection: None,
+                owed_tree_build_host_half: Cell::new(None),
             };
             let arena_handle = frame.inputs.arena_handle;
-            let messages = frame.run();
+            let (messages, owed_tree_build_host_half) = frame.run();
             joins.join(|main_thread| {
+                if let Some(owed) = owed_tree_build_host_half {
+                    owed.pay(main_thread, arena(arena_handle));
+                }
                 let host = layout_update_host(main_thread);
                 // The frame runs for the update the arena is in, and is over.
                 messages.apply(main_thread, &host, arena(arena_handle));
