@@ -6,6 +6,7 @@
 
 #include <AK/HashTable.h>
 #include <AK/StdLibExtras.h>
+#include <AK/TemporaryChange.h>
 #include <AK/Time.h>
 #include <LibGfx/Font/SharedFontProvider.h>
 #include <LibWeb/CSS/ComputedStyleWorkingSet.h>
@@ -47,8 +48,10 @@ void StyleEngine::publish_input(Function<void(StyleInputScope const&)>&& input)
         return;
     }
     // A layout pass taken back publishes what waited for it as its frame ends, and code the take-back runs before
-    // that may publish too: what waited goes first.
-    publish_inputs_queued_during_pass();
+    // that may publish too: what waited goes first. An input that one of those publishes is part of it, and goes
+    // before the rest of what waited.
+    if (!m_publishing_queued_inputs)
+        publish_inputs_queued_during_pass();
     StyleInputScope const scope { *this };
     input(scope);
 }
@@ -68,6 +71,10 @@ void StyleEngine::end_holding_input_recorded_beside_pass()
 
 void StyleEngine::publish_inputs_queued_during_pass()
 {
+    // What waited is published one input at a time, each of them whole, in the order the host published them.
+    if (m_publishing_queued_inputs)
+        return;
+    TemporaryChange publishing_queued_inputs { m_publishing_queued_inputs, true };
     while (!pass_is_in_flight() && !m_holds_input_recorded_beside_pass && !m_inputs_queued_during_pass.is_empty() && !layout_pass_is_in_flight()) {
         auto input = m_inputs_queued_during_pass.take_first();
         StyleInputScope const scope { *this };

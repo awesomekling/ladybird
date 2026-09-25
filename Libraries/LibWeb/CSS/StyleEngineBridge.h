@@ -449,6 +449,7 @@ private:
     HashTable<StyleNodeID> m_style_nodes_retired_beside_pass;
     Vector<StyleDrainScope const*> m_effect_drain_scopes;
     Vector<Function<void(StyleInputScope const&)>> m_inputs_queued_during_pass;
+    bool m_publishing_queued_inputs { false };
     u64 m_attribute_value_text_requirements_version { 0 };
     HashTable<StyleNodeID> m_nodes_with_pending_initial_features;
     HashTable<StyleNodeID> m_nodes_awaiting_first_style_computation;
