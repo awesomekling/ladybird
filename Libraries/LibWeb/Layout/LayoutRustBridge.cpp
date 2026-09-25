@@ -382,8 +382,9 @@ void register_layout_host(NodeArena& arena, DOM::Document& document)
             auto& document = *static_cast<DOM::Document*>(context);
             for (size_t index = 0; index < count; ++index)
                 document.commit_messages().append(messages[index]);
-            // The pass that produced them reads back what they change before it ends.
-            document.apply_commit_messages(); },
+            // The pass that produced them reads back what they change before it ends. They can arrive
+            // as a forced join takes a frame back, so the continuations wait for the next drain point.
+            document.commit_messages().apply_script_free(); },
     };
     RustFFI::layout_arena_set_layout_host_callbacks(arena.handle(), callbacks);
     RustFFI::layout_arena_set_document_is_decoded_svg(arena.handle(), document.is_decoded_svg());
