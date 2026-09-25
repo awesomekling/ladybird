@@ -1,0 +1,12 @@
+a popover shown: held as armed: true
+a popover shown: joined the pass: false
+a popover shown: after: open: true, position: fixed
+disabled inputs: held as armed: true
+disabled inputs: joined the pass: false
+disabled inputs: after: rgb(0, 128, 0) rgb(0, 128, 0)
+a direction: held as armed: true
+a direction: joined the pass: false
+a direction: after: rgb(0, 0, 255)
+a slotted child: held as armed: true
+a slotted child: joined the pass: false
+a slotted child: after: rgb(128, 0, 128)
