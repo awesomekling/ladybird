@@ -1,0 +1,2 @@
+held at: before-completion
+laid-out width is the computed one: true

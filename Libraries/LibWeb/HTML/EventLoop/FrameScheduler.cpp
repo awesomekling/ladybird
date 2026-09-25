@@ -620,8 +620,27 @@ static Optional<ClockLeasePlan> clock_lease_plan(DOM::Document& document)
     return plan;
 }
 
+bool FrameScheduler::clock_tick_in_flight_for(DOM::Document const& document) const
+{
+    if (m_state != State::InFlight || !m_ticket || !m_ticket->submitted_pass.has_value())
+        return false;
+    auto const& pass = *m_ticket->submitted_pass;
+    return pass.kind == FrameTicket::SubmittedPass::Kind::Clock && pass.documents[pass.document_index].ptr() == &document;
+}
+
 void FrameScheduler::revoke_clock_lease(size_t index)
 {
+    // A tick in flight installs its samples in the arena ahead of the document, which adopts them when it takes the
+    // frame in: the lease ends there, and nothing ticks it meanwhile.
+    if (clock_tick_in_flight_for(*m_clock_leases[index].document)) {
+        auto& hold = m_clock_leases[index];
+        hold.revoke_at_adoption = true;
+        if (auto armed = exchange(hold.render_clock_context, {}); armed.has_value())
+            hold.document->page().client().disarm_render_clock(*armed);
+        if (auto* arena = hold.document->layout_node_arena_if_created())
+            Layout::RustFFI::rust_clock_lease_set_paused(arena->handle(), true);
+        return;
+    }
     // No tick may run beside what ending the lease reaches, and the documents take in what the ticks sampled first.
     auto document = m_clock_leases[index].document;
     take_back_clock_lend_for_adoption();
@@ -760,8 +779,11 @@ bool FrameScheduler::render_clock_ticks(DOM::Document const& document) const
 
 void FrameScheduler::revoke_all_clock_leases()
 {
-    while (!m_clock_leases.is_empty())
-        revoke_clock_lease(m_clock_leases.size() - 1);
+    // A lease whose tick is in flight stays until the tick is in, and ending one can end others with it.
+    for (size_t index = m_clock_leases.size(); index-- > 0;) {
+        if (index < m_clock_leases.size())
+            revoke_clock_lease(index);
+    }
 }
 
 void FrameScheduler::main_thread_will_idle()
@@ -786,8 +808,13 @@ void FrameScheduler::main_thread_will_idle()
     bool any_ticks = false;
     for (auto& hold : m_clock_leases) {
         auto* arena = hold.document->layout_node_arena_if_created();
-        if (!arena || !hold.render_clock_context.has_value())
+        if (!arena)
             continue;
+        // A lease no render clock is armed for takes no tick, whichever context it was granted for.
+        if (!hold.render_clock_context.has_value()) {
+            Layout::RustFFI::rust_clock_lease_set_paused(arena->handle(), true);
+            continue;
+        }
         auto plan = clock_lease_plan(*hold.document);
         bool ticks = plan.has_value() && plan->effects == hold.effects && publish_clock_lease_targets(hold);
         Layout::RustFFI::rust_clock_lease_set_paused(arena->handle(), !ticks);
@@ -1134,9 +1161,9 @@ void FrameScheduler::adopt_clock_tick(DOM::Document& document)
     if (installed_any)
         Layout::RustFFI::rust_clock_ticks_note_presented();
     // A tick that could not sample every effect, or reached the deadline, ends the lease: the rendering update samples
-    // the effects itself.
-    if (Layout::RustFFI::rust_clock_lease_tick_outcome(arena->handle()) != Layout::RustFFI::FfiClockTickOutcome::Presented) {
-        if (auto held = m_clock_leases.find_first_index_if([&](auto const& hold) { return hold.document.ptr() == &document; }); held.has_value())
+    // the effects itself. So does a lease that was ended while its tick was in flight.
+    if (auto held = m_clock_leases.find_first_index_if([&](auto const& hold) { return hold.document.ptr() == &document; }); held.has_value()) {
+        if (m_clock_leases[*held].revoke_at_adoption || Layout::RustFFI::rust_clock_lease_tick_outcome(arena->handle()) != Layout::RustFFI::FfiClockTickOutcome::Presented)
             revoke_clock_lease(*held);
     }
 }
