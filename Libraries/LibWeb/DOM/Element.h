@@ -523,8 +523,8 @@ public:
     GC::Ptr<ShadowRoot const> shadow_root() const { return m_shadow_root; }
     void set_shadow_root(GC::Ptr<ShadowRoot>);
 
-    void set_custom_property_data(Optional<CSS::PseudoElement>, RefPtr<CSS::CustomPropertyData const>);
-    void replace_custom_property_data(Optional<CSS::PseudoElement>, RefPtr<CSS::CustomPropertyData const>);
+    void set_custom_property_data(CSS::StyleDrainScope const&, Optional<CSS::PseudoElement>, RefPtr<CSS::CustomPropertyData const>);
+    void replace_custom_property_data(CSS::StyleDrainScope const&, Optional<CSS::PseudoElement>, RefPtr<CSS::CustomPropertyData const>);
     // The environment an element holds is the one the style engine keeps for it.
     [[nodiscard]] RefPtr<CSS::CustomPropertyData const> custom_property_data(Optional<CSS::PseudoElement>) const;
 
@@ -902,7 +902,7 @@ private:
 
     AttributeList& ensure_attribute_list();
 
-    void install_custom_property_data(Optional<CSS::PseudoElement>, RefPtr<CSS::CustomPropertyData const>);
+    void install_custom_property_data(CSS::StyleDrainScope const&, Optional<CSS::PseudoElement>, RefPtr<CSS::CustomPropertyData const>);
     void synchronize_attribute(Utf16FlyString const& qualified_name) const;
     void synchronize_attribute_ns(Optional<Utf16FlyString> const&, Utf16FlyString const& local_name) const;
     void synchronize_style_attribute() const;
@@ -934,7 +934,7 @@ private:
     void apply_computed_pseudo_element_styles_to_layout_nodes_if_needed(CSS::RequiredInvalidationAfterStyleChange const&);
     void publish_custom_property_names();
     void publish_custom_property_names(RefPtr<CSS::CustomPropertyData const> data);
-    RefPtr<CSS::CustomPropertyData const> set_own_custom_property_data(RefPtr<CSS::CustomPropertyData const> current, RefPtr<CSS::CustomPropertyData const> data);
+    RefPtr<CSS::CustomPropertyData const> set_own_custom_property_data(CSS::StyleDrainScope const&, RefPtr<CSS::CustomPropertyData const> current, RefPtr<CSS::CustomPropertyData const> data);
     void replace_style_record(CSS::StyleRecordID);
     void clear_computed_styles_from_display_none_descendants(CSS::StyleDrainScope const&);
 

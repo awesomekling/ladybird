@@ -1772,7 +1772,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
                 auto element_data = custom_property_data({});
                 data = element_data ? element_data->inheritable(document()) : nullptr;
             }
-            set_custom_property_data(pseudo_element, move(data));
+            set_custom_property_data(scope, pseudo_element, move(data));
             if (!!old_style_record || !new_pseudo_element_style->transition_delay_and_duration_are_single_zero()) {
                 auto transition_invalidation = style_computer.run_transition_step_for_installed_record({ *this, pseudo_element }, old_style_record);
                 invalidation |= transition_invalidation;
@@ -2389,7 +2389,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
         bool installable = false;
         auto data = custom_property_environment_of_engine_record(new_style_record, installable);
         VERIFY(installable);
-        return set_own_custom_property_data(move(current), move(data));
+        return set_own_custom_property_data(scope, move(current), move(data));
     };
     auto old_computed_values = computed_style();
     if (!old_computed_values) {
@@ -5372,7 +5372,7 @@ SyntheticPseudoElement& Element::ensure_synthetic_pseudo_element(CSS::PseudoElem
 
 // Installs `data` as the element's own environment over `current`, the one it holds, and returns
 // what the element holds then: an animation overlay the element holds stays composed over it.
-RefPtr<CSS::CustomPropertyData const> Element::set_own_custom_property_data(RefPtr<CSS::CustomPropertyData const> current, RefPtr<CSS::CustomPropertyData const> data)
+RefPtr<CSS::CustomPropertyData const> Element::set_own_custom_property_data(CSS::StyleDrainScope const& scope, RefPtr<CSS::CustomPropertyData const> current, RefPtr<CSS::CustomPropertyData const> data)
 {
     if (!data || !data->is_animation_overlay_for({ *this })) {
         if (current && current->is_animation_overlay_for({ *this })) {
@@ -5384,11 +5384,11 @@ RefPtr<CSS::CustomPropertyData const> Element::set_own_custom_property_data(RefP
             data = CSS::CustomPropertyData::create_animation_overlay(move(animated_values), move(data), { *this });
         }
     }
-    install_custom_property_data({}, data);
+    install_custom_property_data(scope, {}, data);
     return data;
 }
 
-void Element::set_custom_property_data(Optional<CSS::PseudoElement> pseudo_element, RefPtr<CSS::CustomPropertyData const> data)
+void Element::set_custom_property_data(CSS::StyleDrainScope const& scope, Optional<CSS::PseudoElement> pseudo_element, RefPtr<CSS::CustomPropertyData const> data)
 {
     if (!data || !data->is_animation_overlay_for({ *this, pseudo_element })) {
         if (auto current = custom_property_data(pseudo_element); current && current->is_animation_overlay_for({ *this, pseudo_element })) {
@@ -5400,18 +5400,18 @@ void Element::set_custom_property_data(Optional<CSS::PseudoElement> pseudo_eleme
             data = CSS::CustomPropertyData::create_animation_overlay(move(animated_values), move(data), { *this, pseudo_element });
         }
     }
-    install_custom_property_data(pseudo_element, move(data));
+    install_custom_property_data(scope, pseudo_element, move(data));
 }
 
-void Element::replace_custom_property_data(Optional<CSS::PseudoElement> pseudo_element, RefPtr<CSS::CustomPropertyData const> data)
+void Element::replace_custom_property_data(CSS::StyleDrainScope const& scope, Optional<CSS::PseudoElement> pseudo_element, RefPtr<CSS::CustomPropertyData const> data)
 {
-    install_custom_property_data(pseudo_element, move(data));
+    install_custom_property_data(scope, pseudo_element, move(data));
 }
 
 // The style engine keeps what an element's custom-property environment is, and those of its synthetic
 // pseudo-elements: a row inheriting custom properties reads it from there instead of walking the flat
 // tree to this element, and so does the element itself. This is the only place they move.
-void Element::install_custom_property_data(Optional<CSS::PseudoElement> pseudo_element, RefPtr<CSS::CustomPropertyData const> data)
+void Element::install_custom_property_data(CSS::StyleDrainScope const& scope, Optional<CSS::PseudoElement> pseudo_element, RefPtr<CSS::CustomPropertyData const> data)
 {
     if (pseudo_element.has_value() && !CSS::Selector::PseudoElementSelector::is_known_pseudo_element_type(pseudo_element.value()))
         return;
@@ -5421,7 +5421,7 @@ void Element::install_custom_property_data(Optional<CSS::PseudoElement> pseudo_e
         VERIFY(style_node != 0 || !data);
         if (style_node == 0)
             return;
-        auto& style_engine = document().style_computer().style_engine();
+        auto& style_engine = scope.engine();
         if (!pseudo_element.has_value()) {
             // The engine moves an element's environment when the one it inherits moves: what it
             // needs to know is whether this is an animation overlay, and whether what the element's
@@ -5463,7 +5463,7 @@ void Element::install_custom_property_data(Optional<CSS::PseudoElement> pseudo_e
     //        instead of on the Element/PseudoElement directly. Chrome displays this same (presumably broken)
     //        behavior whereas Firefox includes the properties in getComputedStyle.
     if (auto existing_pseudo_element = get_pseudo_element(pseudo_element.value()); existing_pseudo_element.has_value())
-        as<ElementReferencePseudoElement>(*existing_pseudo_element).referenced_element()->set_custom_property_data({}, move(data));
+        as<ElementReferencePseudoElement>(*existing_pseudo_element).referenced_element()->set_custom_property_data(scope, {}, move(data));
 }
 
 void Element::publish_style_recomputes_on_environment_move() const

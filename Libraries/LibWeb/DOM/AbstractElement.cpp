@@ -166,14 +166,14 @@ RefPtr<CSS::CustomPropertyData const> AbstractElement::custom_property_data() co
     return m_element->custom_property_data(m_pseudo_element);
 }
 
-void AbstractElement::set_custom_property_data(RefPtr<CSS::CustomPropertyData const> data)
+void AbstractElement::set_custom_property_data(CSS::StyleDrainScope const& scope, RefPtr<CSS::CustomPropertyData const> data)
 {
-    m_element->set_custom_property_data(m_pseudo_element, move(data));
+    m_element->set_custom_property_data(scope, m_pseudo_element, move(data));
 }
 
-void AbstractElement::replace_custom_property_data(Badge<CSS::StyleComputer>, RefPtr<CSS::CustomPropertyData const> data)
+void AbstractElement::replace_custom_property_data(Badge<CSS::StyleComputer>, CSS::StyleDrainScope const& scope, RefPtr<CSS::CustomPropertyData const> data)
 {
-    m_element->replace_custom_property_data(m_pseudo_element, move(data));
+    m_element->replace_custom_property_data(scope, m_pseudo_element, move(data));
 }
 
 RefPtr<CSS::StyleValue const> AbstractElement::get_custom_property(Utf16FlyString const& name) const

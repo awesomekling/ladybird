@@ -55,6 +55,7 @@
 #include <LibWeb/CSS/SelectorMatching.h>
 #include <LibWeb/CSS/StyleComputeFFI.h>
 #include <LibWeb/CSS/StyleComputer.h>
+#include <LibWeb/CSS/StyleDrainScope.h>
 #include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/CSS/StyleProperty.h>
 #include <LibWeb/CSS/StyleScope.h>
@@ -776,6 +777,8 @@ void StyleComputer::collect_animation_effects_into(DOM::AbstractElement abstract
 
 bool StyleComputer::publish_animated_custom_properties(ComputedStyleWorkingSet& computed_properties, DOM::AbstractElement abstract_element) const
 {
+    // FIXME: An animation installs the environment its custom properties were sampled into outside the drain.
+    auto const scope = StyleDrainScope::not_yet_drained(m_style_engine);
     auto data = abstract_element.custom_property_data();
     RefPtr<CustomPropertyData const> base = data;
     if (data && data->is_animation_overlay_for(abstract_element))
@@ -785,7 +788,7 @@ bool StyleComputer::publish_animated_custom_properties(ComputedStyleWorkingSet& 
     if (animated_values.is_empty()) {
         if (base.ptr() == data.ptr())
             return false;
-        abstract_element.replace_custom_property_data(Badge<StyleComputer> {}, base);
+        abstract_element.replace_custom_property_data(Badge<StyleComputer> {}, scope, base);
         invalidate_animated_custom_property_readers(abstract_element);
         return true;
     }
@@ -812,7 +815,7 @@ bool StyleComputer::publish_animated_custom_properties(ComputedStyleWorkingSet& 
                 .value = value,
             });
     }
-    abstract_element.replace_custom_property_data(Badge<StyleComputer> {}, CustomPropertyData::create_animation_overlay(move(overlay_values), move(base), abstract_element));
+    abstract_element.replace_custom_property_data(Badge<StyleComputer> {}, scope, CustomPropertyData::create_animation_overlay(move(overlay_values), move(base), abstract_element));
     invalidate_animated_custom_property_readers(abstract_element);
     return true;
 }
