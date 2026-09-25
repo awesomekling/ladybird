@@ -185,7 +185,7 @@ void FrameScheduler::commit()
             m_ticket->painted_local_roots.append(navigable);
     }
     release_holds_for_frame_in_flight();
-    apply_deferred_style_node_changes();
+    apply_deferred_arena_changes();
     m_state = state_after;
     if (counts_as_a_frame)
         m_event_loop.did_consume_frame_commit(MonotonicTime::now().nanoseconds() - start_nanoseconds);
@@ -256,23 +256,43 @@ void FrameScheduler::run_tail()
     m_event_loop.did_consume_frame_tail(MonotonicTime::now().nanoseconds() - start_nanoseconds);
 }
 
-void FrameScheduler::defer_style_node_change(DOM::Node& node, CSS::StyleNodeID old_style_node, CSS::StyleNodeID new_style_node)
+bool FrameScheduler::arena_changes_wait_for_frame(DOM::Document const& document)
 {
-    m_deferred_style_node_changes.append({ node, old_style_node, new_style_node });
+    auto const* arena = document.layout_node_arena_if_created();
+    return arena && Layout::RustFFI::rust_stage_thread_only_recordings_own(arena->handle());
 }
 
-void FrameScheduler::apply_deferred_style_node_changes()
+void FrameScheduler::defer_arena_change(GC::Ref<GC::Function<void()>> change)
+{
+    m_deferred_arena_changes.append(change);
+}
+
+void FrameScheduler::change_arena(DOM::Document& document, Function<void(Layout::NodeArena&)> change)
+{
+    auto* arena = document.layout_node_arena_if_created();
+    if (!arena)
+        return;
+    if (!arena_changes_wait_for_frame(document)) {
+        change(*arena);
+        return;
+    }
+    main_thread_event_loop().frame_scheduler().defer_arena_change(GC::create_function(document.heap(), [document = GC::Ref { document }, change = move(change)] {
+        if (auto* arena = document->layout_node_arena_if_created())
+            change(*arena);
+    }));
+}
+
+void FrameScheduler::apply_deferred_arena_changes()
 {
     // A change applied here can defer no other: nothing is in flight anymore.
-    auto changes = move(m_deferred_style_node_changes);
+    auto changes = move(m_deferred_arena_changes);
     for (auto const& change : changes)
-        Layout::Node::apply_dom_node_style_node_change(change.node, change.old_style_node, change.new_style_node);
+        change->function()();
 }
 
 void FrameScheduler::visit_edges(JS::Cell::Visitor& visitor)
 {
-    for (auto const& change : m_deferred_style_node_changes)
-        visitor.visit(change.node);
+    visitor.visit(m_deferred_arena_changes);
     if (!m_ticket)
         return;
     for (auto& submitted : m_ticket->navigables) {

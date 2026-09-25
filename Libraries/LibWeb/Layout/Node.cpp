@@ -986,8 +986,10 @@ void Node::dom_node_style_node_changed(DOM::Node& dom_node, CSS::StyleNodeID old
         RustFFI::layout_arena_clear_layout_tree_update_marks(arena->handle(), new_style_node.value());
     // A recording in flight owns the arena and reads nothing of the style engine, so the node goes on under its new
     // identity beside it, and the arena takes the change in once the frame has been taken in.
-    if (arena && RustFFI::rust_stage_thread_only_recordings_own(arena->handle())) {
-        HTML::main_thread_event_loop().frame_scheduler().defer_style_node_change(dom_node, old_style_node, new_style_node);
+    if (HTML::FrameScheduler::arena_changes_wait_for_frame(dom_node.document())) {
+        HTML::main_thread_event_loop().frame_scheduler().defer_arena_change(GC::create_function(dom_node.heap(), [node = GC::Ref { dom_node }, old_style_node, new_style_node] {
+            apply_dom_node_style_node_change(node, old_style_node, new_style_node);
+        }));
         return;
     }
     apply_dom_node_style_node_change(dom_node, old_style_node, new_style_node);

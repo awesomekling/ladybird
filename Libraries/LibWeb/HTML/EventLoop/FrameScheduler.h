@@ -10,6 +10,7 @@
 #include <AK/OwnPtr.h>
 #include <AK/Vector.h>
 #include <AK/kmalloc.h>
+#include <LibGC/Function.h>
 #include <LibGC/Ptr.h>
 #include <LibJS/Heap/Cell.h>
 #include <LibWeb/CSS/StyleEngineIdentifiers.h>
@@ -127,10 +128,20 @@ public:
     // events) waits for the next rendering update or layout update to apply it.
     void consume_commit(EventLoop::FrameConsumeSite);
 
-    // A node's style identity changed beside a recording in flight that holds its document's arena, which the recording
-    // owns until it is taken in. The arena learns of the change once the frame has been taken in, right after its
+    // Whether a main-side change to the arena of `document` waits for the frame in flight instead of joining it: only
+    // recordings own the arena, and they read nothing of the style engine, so what the document goes on to do beside
+    // them reaches the arena through the changes deferred here alone.
+    static bool arena_changes_wait_for_frame(DOM::Document const&);
+
+    // A change to an arena that waits for the frame in flight (see arena_changes_wait_for_frame()), which the recording
+    // owns until it is taken in. The arena takes the change in once the frame has been taken in, right after its
     // consume-commit, where waiting for the frame at the change would have put it.
-    void defer_style_node_change(DOM::Node&, CSS::StyleNodeID old_style_node, CSS::StyleNodeID new_style_node);
+    void defer_arena_change(GC::Ref<GC::Function<void()>>);
+
+    // Runs `change` on the arena of `document`, if it has one: now, or once the frame in flight has been taken in, if
+    // changes to that arena wait for it. A deferred change keeps only the document alive, so `change` holds no GC
+    // pointer of its own.
+    static void change_arena(DOM::Document&, Function<void(Layout::NodeArena&)>);
 
     EventLoop& event_loop() { return m_event_loop; }
 
@@ -140,20 +151,15 @@ private:
     void submit_pass(FrameTicket::SubmittedPass::Kind, Vector<GC::Ref<DOM::Document>> documents, size_t document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp);
     void commit();
     void run_tail();
-    void apply_deferred_style_node_changes();
+    void apply_deferred_arena_changes();
 
     EventLoop& m_event_loop;
     State m_state { State::Idle };
     bool m_synchronous_update { false };
     OwnPtr<FrameTicket> m_ticket;
 
-    struct DeferredStyleNodeChange {
-        GC::Ref<DOM::Node> node;
-        CSS::StyleNodeID old_style_node;
-        CSS::StyleNodeID new_style_node;
-    };
     // In the order the changes were made, which is the order the arena takes them in.
-    Vector<DeferredStyleNodeChange> m_deferred_style_node_changes;
+    Vector<GC::Ref<GC::Function<void()>>> m_deferred_arena_changes;
 };
 
 }
