@@ -1007,7 +1007,7 @@ StyleEngine::PublishedStyleTransaction StyleEngine::take_style_transaction(Style
     }
     // A sample the pass takes resolves a percentage translation against the boxes the last layout
     // committed.
-    auto* layout_node_arena = m_style_computer->document().layout_node_arena_if_created();
+    auto* layout_node_arena = m_style_computer ? m_style_computer->document().layout_node_arena_if_created() : nullptr;
     auto* layout_arena = layout_node_arena ? layout_node_arena->handle() : nullptr;
     auto bridge_started_at = MonotonicTime::now();
     auto view = StyleEngineFFI::style_engine_take_style_transaction(m_impl, root.value(), computation_inputs, layout_arena);
