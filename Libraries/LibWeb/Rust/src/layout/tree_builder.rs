@@ -4317,7 +4317,7 @@ impl TreeBuilderHost {
     fn create_dom_box(&self, kind: NodeKind, style_node: Option<StyleNodeID>) -> NodeSlotId {
         let slot = self.stamp_dom_box(kind, style_node);
         self.arena().take_over_rows_of_bound_node(slot);
-        self.owe_text_shell(slot, style_node);
+        self.enroll_text_row(slot, style_node);
         slot
     }
 
@@ -4350,7 +4350,7 @@ impl TreeBuilderHost {
     /// font metrics, giving the caret an anchor to paint at and the control its baseline. The
     /// document restamps it when editability changes. Under an element with a `::selection`
     /// style and no box of its own, the row takes that style's paint facts itself.
-    fn owe_text_shell(&self, slot: NodeSlotId, style_node: Option<StyleNodeID>) {
+    fn enroll_text_row(&self, slot: NodeSlotId, style_node: Option<StyleNodeID>) {
         // SAFETY: No arena borrow survives this call.
         unsafe { &mut *self.arena }.invalidate_text_content(slot);
         let Some(text) = style_node else {
@@ -5101,11 +5101,11 @@ fn create_first_letter_boxes(host: &DomTreeBuilderHost, style_node: u32, target:
         let first_letter_slice_slot = layout_host.stamp_generated_text_box();
         (first_letter_slice_slot, remainder_slice_slot)
     };
-    layout_host.owe_text_shell(
+    layout_host.enroll_text_row(
         first_letter_slice_slot,
         layout_host.arena().node_style_node(first_letter_slice_slot),
     );
-    layout_host.owe_text_shell(
+    layout_host.enroll_text_row(
         remainder_slice_slot,
         layout_host.arena().node_style_node(remainder_slice_slot),
     );

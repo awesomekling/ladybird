@@ -22,9 +22,8 @@
 //! gate in `abort`, and nothing the walk can reach is able to call the host. The walk is not handed
 //! the main-thread capability, and every host call the arena and the tree builder can make takes
 //! it: the tree builder's callbacks, the shell factory, and paying what the arena owes the host.
-//! What the build owes the host - the shells whose construction tells the host something, what the
-//! build found out, and what it let go of - it queues, and its entry pays once the walk has
-//! returned. A box's style resources and a generated image's provider wait longer: the frame the
+//! What the build owes the host - what it found out, and what it let go of - it queues, and its
+//! entry pays once the walk has returned. A box's style resources and a generated image's provider wait longer: the frame the
 //! build runs in carries them out, and the host attaches them once it is over.
 //!
 //! What the build lets go of is the arena's handbacks: the boxes nodes gained or lost, the shells,
@@ -53,10 +52,10 @@
 //! | `owned_image_provider_notify_detach` | 96 | 0 |
 //! | `attach_generated_image` | 20 | 0 |
 //!
-//! A build owes a shell only to a row whose shell's construction tells the host something about
-//! it; every other row gets one when something first asks for its box. Of the 4.6 million rows a
-//! suite run stamps, 2.8 million ever get a shell, most of them asked for by the layout tree dumps
-//! the tests print; of the rows `treebuild.html` stamps, fewer than three in ten do.
+//! A build owes no row a shell: a row gets one when something first asks for its box. Of the 4.6
+//! million rows a suite run stamps, 2.8 million ever get a shell, most of them asked for by the
+//! layout tree dumps the tests print; of the rows `treebuild.html` stamps, fewer than three in ten
+//! do.
 //!
 //! # No allow-list
 //!
