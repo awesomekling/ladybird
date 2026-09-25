@@ -390,6 +390,15 @@ void refresh_image_map_area_facts(DOM::Document& document)
     });
 }
 
+static void push_image_box_paint_facts(Layout::Box const& image_box)
+{
+    // A box that owns its image's provider is handed it once the frame that built the box is over,
+    // and handing it over pushes these facts. A restyle within that frame has no provider to read.
+    if (Layout::RustFFI::layout_arena_image_box_awaits_owned_provider(image_box.arena_handle(), Layout::Node::slot_id(&image_box)))
+        return;
+    push_replaced_image_paint_facts(image_box.image_provider(), image_box);
+}
+
 void push_paint_facts_after_style_attach(Layout::NodeWithStyle& layout_node, StyleHoldsImageValues style_holds_image_values)
 {
     if (auto* image_element = as_if<HTML::HTMLImageElement>(layout_node.dom_node()))
@@ -411,7 +420,7 @@ void push_paint_facts_after_style_attach(Layout::NodeWithStyle& layout_node, Sty
     else if (layout_node.kind() == Layout::RustFFI::NodeKind::CanvasBox)
         push_canvas_paint_facts_onto(as<HTML::HTMLCanvasElement>(*layout_node.dom_node()), layout_node);
     else if (layout_node.kind() == Layout::RustFFI::NodeKind::ImageBox)
-        push_replaced_image_paint_facts(static_cast<Layout::Box const&>(layout_node).image_provider(), layout_node);
+        push_image_box_paint_facts(static_cast<Layout::Box const&>(layout_node));
     else if (layout_node.kind() == Layout::RustFFI::NodeKind::SVGImageBox)
         push_replaced_image_paint_facts(as<SVG::SVGImageElement>(*layout_node.dom_node()), layout_node);
     else if (layout_node.kind() == Layout::RustFFI::NodeKind::VideoBox)
