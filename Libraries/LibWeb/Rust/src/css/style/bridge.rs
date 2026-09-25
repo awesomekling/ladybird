@@ -1776,6 +1776,26 @@ pub unsafe extern "C" fn style_engine_check_transition_step(
     engine.check_transition_step(node, actions);
 }
 
+/// Compare the composition the host's transition step left for an element with the one the pass
+/// composed, for the engine sample report.
+///
+/// # Safety
+/// `engine` must be a live style engine, and `overlay` a live animated overlay or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_check_transition_step_composition(
+    engine: *mut c_void,
+    node: u32,
+    overlay: *const c_void,
+) {
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    let Some(node) = StyleNodeID::from_raw(node) else {
+        return;
+    };
+    engine.check_transition_step_composition(node, unsafe {
+        overlay.cast::<crate::css::animated_overlay::AnimatedOverlay>().as_ref()
+    });
+}
+
 /// The transform reference box the last committed layout left for `node`, which the animation
 /// stage resolves percentage translations against. An element with no committed box, and every
 /// element while the document has no layout arena, has none.

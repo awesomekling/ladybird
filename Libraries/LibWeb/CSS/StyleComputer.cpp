@@ -1483,6 +1483,9 @@ void StyleComputer::start_needed_transitions(StyleDrainScope const& scope, Compu
         if (!had_pending_animated_style_update)
             m_document->clear_needs_animated_style_update();
     }
+    // The engine sample report compares this with the composition the pass left for an element's row.
+    if (!pseudo_element.has_value() && style_node_id != 0)
+        StyleEngineFFI::style_engine_check_transition_step_composition(scope.engine().rust_handle(), style_node_id.value(), new_style.animated_overlay(Badge<StyleComputer> {}));
 }
 
 bool StyleComputer::has_provisional_transition_states(DOM::AbstractElement abstract_element) const
