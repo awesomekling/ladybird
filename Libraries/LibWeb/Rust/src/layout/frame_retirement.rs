@@ -119,6 +119,15 @@ pub unsafe extern "C" fn layout_arena_retire_render_state(arena: *mut c_void, re
         !(held && reason == FfiRenderStateRetirement::DocumentFinalized),
         "a document was finalized while a frame in flight held its arena"
     );
+    // A render clock tick the arena is lent to reads the generation, and presents what it recorded for it: the arena
+    // comes back first. A leased document is not finalized, since its lease holds it.
+    if crate::stage_thread::has_lent(arena) {
+        assert!(
+            reason != FfiRenderStateRetirement::DocumentFinalized,
+            "a document was finalized while its arena was lent to clock ticks"
+        );
+        crate::stage_thread::join_frame_in_flight(arena);
+    }
     // The generation moves first, so the consume-commit the wait runs does not publish what the
     // frame recorded for the render state being torn down.
     // SAFETY: Guaranteed by the caller.
@@ -185,6 +194,11 @@ pub extern "C" fn rust_frame_release_compositor_context(context_id: u64) {
 pub extern "C" fn rust_retire_compositor_context(context_id: u64) {
     if HOLDS.with(|holds| holds.borrow().contains(&context_id)) && crate::stage_thread::has_frame_in_flight() {
         wait_for_frame_in_flight(std::ptr::null_mut());
+    }
+    // A render clock tick presents to a context of a document whose arena the main thread lent it: every arena comes
+    // back before the context changes or goes.
+    if crate::stage_thread::has_lent_arena() {
+        crate::stage_thread::join_frame_in_flight(std::ptr::null_mut());
     }
     count(|counters| counters.compositor_contexts_retired += 1);
 }
