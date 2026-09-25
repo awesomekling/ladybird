@@ -1360,6 +1360,19 @@ static void record_element_disconnecting(DOM::Element& element, TreeScopeID tree
 
     style_engine->cancel_deferred_element_initial_features(node);
 
+    // The engine withdraws the element's anchor names while its identity still names them, as it
+    // takes the removal in, after a pass in flight. The identity may be minted again for another
+    // element once it is retired, and must not carry the names over to it.
+    if (auto const* anchor_values = element.style_group<ComputedValues::AnchorValues>(); anchor_values && !anchor_values->anchor_names_span().is_empty()) {
+        style_engine->publish_input([document = GC::Root<DOM::Document> { element.document() }, node](StyleInputScope const& input) {
+            auto* arena = document->layout_node_arena_if_created();
+            (void)StyleEngineFFI::style_engine_register_anchor_names(input, input.engine().rust_handle(), arena ? arena->handle() : nullptr, node.value(), 0);
+        });
+        // Positioned boxes anywhere may hold geometry resolved against these names, which the
+        // partial relayout planner's subtree check can no longer see.
+        element.document().record_partial_relayout_escape(DOM::PartialRelayoutEscapeReason::AnchorNamesUnregisteredByElementRemoval);
+    }
+
     style_engine->record_tree_delta({
         .node = node.value(),
         .old_connected = true,
