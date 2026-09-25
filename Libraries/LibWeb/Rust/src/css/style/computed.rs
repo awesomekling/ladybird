@@ -656,7 +656,6 @@ struct AnimationOverlayPublication {
 }
 
 pub struct AnimationOverlayUpdate {
-    pub previous_style_record: FinalStyleRecordID,
     pub style_record: FinalStyleRecordID,
     pub slot_allocated: bool,
     pub slot_released: bool,
@@ -1982,7 +1981,6 @@ impl ComputedGroupSets {
                 self.columns.animation_overlay_slot(index),
             )
         };
-        let previous_style_record = self.final_style_record(base_style_record, current_slot);
         let animated_overlay = unsafe { animated_overlay.as_ref() };
         let publication = self.update_animation_overlay(
             current_slot,
@@ -2001,7 +1999,6 @@ impl ComputedGroupSets {
                 .set_animation_overlay_slot(target.node.element_index()? as usize, publication.slot);
         }
         let update = AnimationOverlayUpdate {
-            previous_style_record,
             style_record: publication.final_style_record,
             slot_allocated: publication.slot_allocated,
             slot_released: publication.slot_released,

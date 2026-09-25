@@ -1268,18 +1268,9 @@ void KeyframeEffect::update_computed_properties(AnimationUpdateContext& context)
 
 void KeyframeEffect::update_computed_properties_for_style(AnimationUpdateContext& context, DOM::AbstractElement abstract_element)
 {
-    auto& style_computer = abstract_element.element().document().style_computer();
-    auto& element_data = context.elements.ensure(abstract_element, [&abstract_element, &style_computer] {
-        auto style_record = abstract_element.style_record_identity();
-        if (!style_record)
-            return AnimationUpdateContext::ElementData {};
-        auto computed_properties = style_computer.reconstruct_computed_properties_for_animation(style_record);
-        return AnimationUpdateContext::ElementData { style_record, move(computed_properties) };
+    context.elements.ensure(abstract_element, [&abstract_element] {
+        return AnimationUpdateContext::ElementData { .style_record_before_update = abstract_element.style_record_identity() };
     });
-
-    if (!element_data.target_style)
-        return;
-    element_data.effects.append(*this);
 }
 
 Bindings::CompositeOperation css_animation_composition_to_bindings_composite_operation(CSS::AnimationComposition composition)

@@ -180,26 +180,6 @@ impl RetainedState {
         );
     }
 
-    /// The identity and the store of the environment an element holds: `(0, null)` for an element
-    /// holding none, and `None` for an element the engine was never told about.
-    pub(crate) fn element_custom_property_environment(
-        &self,
-        node: StyleNodeID,
-    ) -> Option<(u64, *const std::ffi::c_void)> {
-        Some(match self.element_custom_property_data.get(&node)? {
-            Some(held) => (
-                held.identity,
-                held.data
-                    .as_ref()
-                    .map(|data| data.store.as_ptr())
-                    .filter(|store| !store.is_null())
-                    .or_else(|| self.custom_property_environments.store(held.identity))
-                    .unwrap_or(std::ptr::null()),
-            ),
-            None => (0, std::ptr::null()),
-        })
-    }
-
     /// The identity, the store and the host object of the environment the one an element holds was
     /// composed over, where the element's animations sampled custom properties into it: `(0, null,
     /// null)` for one composed over none, and `None` for any other environment.

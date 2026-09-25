@@ -42,20 +42,6 @@ namespace Web::Animations {
 
 GC_DEFINE_ALLOCATOR(AnimationEffect);
 
-AnimationUpdateContext::ElementData::ElementData() = default;
-
-AnimationUpdateContext::ElementData::ElementData(CSS::StyleRecordID style_record_before_update, RefPtr<CSS::ComputedStyleWorkingSet> target_style)
-    : style_record_before_update(style_record_before_update)
-    , target_style(move(target_style))
-{
-}
-
-AnimationUpdateContext::ElementData::ElementData(ElementData&&) = default;
-
-AnimationUpdateContext::ElementData& AnimationUpdateContext::ElementData::operator=(ElementData&&) = default;
-
-AnimationUpdateContext::ElementData::~ElementData() = default;
-
 AnimationUpdateContext::AnimationUpdateContext() = default;
 
 static DOM::Document* s_document_with_open_batch_publication { nullptr };
@@ -840,15 +826,6 @@ void AnimationEffect::visit_edges(GC::Cell::Visitor& visitor)
     visitor.visit(m_associated_animation);
 }
 
-static ReadonlySpan<CSS::ComputedValuesFFI::FfiAnimatedOverlayEntry> animated_overlay_entries(CSS::ComputedValuesFFI::AnimatedOverlay const* overlay)
-{
-    if (!overlay)
-        return {};
-    size_t count = 0;
-    auto const* entries = CSS::ComputedValuesFFI::rust_animated_overlay_entries(overlay, &count);
-    return { entries, count };
-}
-
 // Install the record a sample of an element's animations published, and apply what publishing it
 // over the element's record invalidated: the element's and its layout node's style, the pseudo-element
 // styles and descendants that inherit from it, and, unless the caller compares the element's style
@@ -1076,8 +1053,7 @@ AnimationUpdateContext::~AnimationUpdateContext()
     }
 
     for (auto& it : elements) {
-        auto style = it.value.target_style;
-        if (!style)
+        if (!it.value.style_record_before_update)
             continue;
         auto& element = it.key;
         GC::Ref<DOM::Element> target = element.element();
@@ -1088,57 +1064,14 @@ AnimationUpdateContext::~AnimationUpdateContext()
         // An earlier entry already republished this style with the current animation values.
         if (element.style_record_identity() != it.value.style_record_before_update)
             continue;
-        // Provisionally started transitions are not associated with the element yet, so they are
-        // never among the collected effects, but their values are already part of the published
-        // style. Collect them first, in composite order below every associated effect, or this
-        // update would rebuild the style without them.
-        GC::ConservativeVector<GC::Ref<KeyframeEffect>> effects_to_collect;
-        target->document().style_computer().for_each_provisional_transition_effect(element, [&](KeyframeEffect& effect) {
-            effects_to_collect.append(effect);
-        });
-        for (auto& animation : target->associated_animations_in_composite_order()) {
-            if (animation->is_idle() || !animation->effect() || !is<KeyframeEffect>(*animation->effect()))
-                continue;
-            auto& effect = static_cast<KeyframeEffect&>(*animation->effect());
-            if (effect.target() != target || effect.pseudo_element_type() != element.pseudo_element())
-                continue;
-            effects_to_collect.append(effect);
-        }
-        // A dirty effect may have just become irrelevant. Include it once so rebuilding the
-        // animated overlay removes its terminal contribution.
-        for (auto& dirty_effect : it.value.effects) {
-            if (!effects_to_collect.contains_slow(dirty_effect))
-                effects_to_collect.append(dirty_effect);
-        }
+        // The engine samples the effects the element's timing rows name, which include the
+        // transitions a step provisionally started and a dirty effect that just became irrelevant,
+        // whose terminal contribution the sample removes.
         // FIXME: The pass samples an element's effect stack itself; this sample is still asked for
         //        from outside it, by animation updates and by rows the pass declined.
         auto const scope = CSS::StyleDrainScope::not_yet_drained(target->document().style_computer().style_engine());
-        if (install_engine_sample_of_installed_record(scope, element, it.value))
-            continue;
-        // With no effect left, collecting still clears the composition the style was reconstructed with.
-        target->document().style_computer().collect_animations_into(scope, element, effects_to_collect.span(), *style, CSS::StyleComputer::AnimationRefresh::Yes);
-        auto& style_computer = target->document().style_computer();
-        // A sample published between a row's derivation and its installation composed an overlay
-        // over the base the row installs. The installed record names none, but the engine still
-        // holds that composition, so it is published again even when the values have not moved.
-        auto const engine_handle = style_computer.style_engine().rust_handle();
-        auto const engine_style_record = CSS::StyleEngineFFI::style_engine_assigned_style_record(
-            engine_handle, target->style_node_id().value(), CSS::pseudo_element_to_ffi(element.pseudo_element()));
-        auto const engine_holds_a_stale_composition = engine_style_record != it.value.style_record_before_update.value()
-            && engine_style_record != 0
-            && CSS::StyleEngineFFI::style_engine_base_style_record_of(engine_handle, engine_style_record) == it.value.style_record_before_update.value();
-        if (!style_computer.style_engine().animation_overlay_changed(it.value.style_record_before_update, style->animated_overlay())
-            && !engine_holds_a_stale_composition)
-            continue;
-
-        auto [animated_property_invalidation, publication] = style_computer.publish_sampled_animation_overlay(element, *style, it.value.style_record_before_update, [&](auto const& overlay_invalidation) {
-            if (style->animated_overlay() && !animated_overlay_entries(style->animated_overlay()).is_empty()
-                && target->document().is_in_style_stabilization_epoch()
-                && (target->document().style_stabilization_has_style_reactions() || overlay_invalidation.requires_base_style_recomputation)) {
-                target->document().style_computer().record_transition_stabilization_baseline(scope, element);
-            }
-        });
-        apply_published_animation_overlay(scope, element, animated_property_invalidation, publication.new_style_record, it.value.caller_applies_invalidation);
+        // An element the engine cannot sample keeps the composition it holds.
+        (void)install_engine_sample_of_installed_record(scope, element, it.value);
     }
 }
 

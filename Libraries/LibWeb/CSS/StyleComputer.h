@@ -114,13 +114,6 @@ public:
         bool any_computed_value_changed { false };
     };
 
-    // Has the engine compose a sampled overlay over the record it was sampled on, compares it with
-    // that record, and publishes it. `before_publication` sees the comparison first.
-    struct SampledAnimationOverlayPublication {
-        StyleEngineFFI::FfiAnimationInvalidation invalidation;
-        StyleEngine::StyleRecordDelta publication;
-    };
-    [[nodiscard]] SampledAnimationOverlayPublication publish_sampled_animation_overlay(DOM::AbstractElement, ComputedStyleWorkingSet&, StyleRecordID style_record, Function<void(StyleEngineFFI::FfiAnimationInvalidation const&)> const& before_publication = {}) const;
     // Give a layout-only variant of an element or pseudo-element style an authoritative record
     // without replacing the StyleEngine assignment of its DOM target.
     [[nodiscard]] StyleRecordID intern_computed_style_inputs(DOM::AbstractElement, ComputedValues const&) const;
@@ -143,15 +136,6 @@ public:
     // `did_materialize` reports that the environment object had to be made here, which is what an
     // identity the engine has not been asked for before costs.
     [[nodiscard]] RefPtr<CustomPropertyData const> engine_custom_property_environment(u64 identity, bool* did_materialize = nullptr) const;
-
-    // Whether the collection refreshes a previously published style outside the drive; a refresh
-    // re-runs the animated element style adjustments and leaves the non-inherited-property
-    // inheritance invalidation mark itself.
-    enum class AnimationRefresh {
-        No,
-        Yes,
-    };
-    void collect_animations_into(StyleDrainScope const&, DOM::AbstractElement, ReadonlySpan<GC::Ref<Animations::KeyframeEffect>>, ComputedStyleWorkingSet&, AnimationRefresh, ComputedValuesFFI::FfiAnimationLengthContexts const* = nullptr) const;
 
     void apply_animation_definitions(DOM::AbstractElement& abstract_element, ReadonlySpan<AnimationProperties> animation_definitions, ReadonlySpan<i32> definition_matches, ReadonlySpan<RefPtr<Animations::KeyframeEffect::KeyFrameSet const>> definition_keyframe_sets, bool in_display_none_subtree) const;
     // The animation plan a record the engine settled left for the host: what the C++ computation of
@@ -184,7 +168,6 @@ public:
     // away from. Returns what publishing a started transition's values invalidates.
     [[nodiscard]] RequiredInvalidationAfterStyleChange run_transition_step_for_installed_record(StyleDrainScope const&, DOM::AbstractElement, StyleRecordID before_change_style_record, StyleEngineFFI::FfiTransitionStepDecidedInPass const* decided = nullptr) const;
     void commit_transition_stabilization_epoch();
-    void for_each_provisional_transition_effect(DOM::AbstractElement const&, Function<void(Animations::KeyframeEffect&)> const&) const;
     void for_each_provisional_transition_effect_on_element(DOM::Element const&, Function<void(Animations::KeyframeEffect&)> const&) const;
 
 private:
@@ -194,11 +177,6 @@ private:
 
     [[nodiscard]] StyleEngine::StyleRecordDelta record_computed_style_inputs(Optional<DOM::AbstractElement>, ComputedValues const&, StyleNodeID style_node_id) const;
 
-    void collect_animation_effects_into(StyleDrainScope const&, DOM::AbstractElement, ReadonlySpan<GC::Ref<Animations::KeyframeEffect>>, ComputedStyleWorkingSet&, ComputedValuesFFI::FfiAnimationLengthContexts const*) const;
-    // Says whether publishing moved the element's custom-property environment. An element whose
-    // animations settle on the values it already holds is left alone.
-    bool publish_animated_custom_properties(StyleDrainScope const&, ComputedStyleWorkingSet&, DOM::AbstractElement) const;
-    void invalidate_animated_custom_property_readers(StyleDrainScope const&, DOM::AbstractElement) const;
     void start_needed_transitions(StyleDrainScope const&, ComputedStyleWorkingSet&, DOM::AbstractElement, StyleRecordID before_change_style_record, StyleEngineFFI::FfiTransitionStepDecidedInPass const*) const;
     [[nodiscard]] bool has_provisional_transition_states(DOM::AbstractElement) const;
     void finalize_style(ComputedStyleWorkingSet&, DOM::AbstractElement, ComputedValuesFFI::FfiStyleFinalizationMode) const;
@@ -282,9 +260,6 @@ private:
         ProvisionalTransitionAction action { ProvisionalTransitionAction::None };
         bool has_decision { false };
     };
-    // Whether the animation collection of the computation in progress resolved a keyframe-borne
-    // `inherit` for a non-inherited property; folded into the explicit-inheritance bookkeeping.
-    mutable u32 m_keyframes_inherited_non_inherited_style_groups { 0 };
     mutable Vector<ProvisionalTransitionState> m_provisional_transition_states;
     mutable HashMap<u64, size_t> m_provisional_transition_state_indices;
     mutable HashMap<u64, Vector<size_t>> m_provisional_transition_state_indices_by_target;

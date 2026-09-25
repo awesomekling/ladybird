@@ -2954,9 +2954,6 @@ pub struct FfiHostAnimationSample {
     pub generations: *const u64,
     pub current_keys: *const f64,
     pub effect_count: usize,
-    /// Whether the effects are the element's whole effect stack, rather than the few a transition
-    /// step layers over an overlay it already holds.
-    pub samples_whole_stack: bool,
     /// The record the working set was reconstructed from, which is the one the element holds.
     pub style_record: u64,
     /// The working set's longhand table, which holds every longhand.
@@ -3034,41 +3031,6 @@ impl FfiHostAnimationSampleResult {
             noted_container_effects: false,
         }
     }
-}
-
-/// Sample one element's animation effects onto its working set's overlay.
-///
-/// The effects are sampled from the descriptions the host published for them. An effect with no
-/// description, or with fewer than two keyframes to interpolate between, composes nothing.
-///
-/// # Safety
-/// Every pointer in `input` must be live for the call, the callbacks must be set, and nothing may
-/// hold a borrow of the style engine.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_sample_animation_effects(
-    input: *const FfiHostAnimationSample,
-) -> FfiHostAnimationSampleResult {
-    abort_on_panic(|| {
-        let input = unsafe { &*input };
-        let engine = unsafe { &mut *input.style_engine.cast::<crate::css::style::StyleEngine>() };
-        let node = crate::css::style::tree::StyleNodeID::from_raw(input.style_node)
-            .expect("a sampled element has a style node");
-        let slot = animation_slot(input.pseudo_kind);
-        let Some(descriptions) = engine.take_element_animation_effect_descriptions(node, slot) else {
-            return FfiHostAnimationSampleResult::with_outcome(FfiHostAnimationSampleOutcome::Cleared);
-        };
-        // SAFETY: The host passes its document's live layout arena, or null.
-        let transform_reference_box =
-            unsafe { crate::css::style::animations::committed_transform_reference_box(input.layout_arena, node) };
-        let result = match input.samples_whole_stack {
-            true => unsafe { sample_whole_effect_stack(input, engine, node, &descriptions, transform_reference_box) },
-            false => unsafe {
-                sample_described_animation_effects(input, engine, node, &descriptions, transform_reference_box)
-            },
-        };
-        engine.restore_element_animation_effect_descriptions(node, slot, descriptions);
-        result
-    })
 }
 
 /// What the engine samples an element's animations from when it samples them itself: the effects it
@@ -3198,7 +3160,6 @@ fn prepare_engine_sample(
         current_keys: run.current_keys.as_ptr(),
         effect_count: run.identities.len(),
         // The per-input checks compare the host's inputs with these.
-        samples_whole_stack: false,
         longhand_table: table,
         custom_property_store: environments.store,
         base_custom_property_store: environments.base_store,
@@ -3213,47 +3174,6 @@ fn prepare_engine_sample(
         ..*input
     };
     Ok((run, run_input))
-}
-
-/// Sample an element's whole effect stack from the engine's own inputs: the effects it selects
-/// from the timing rows, the environments it holds and the length contexts it builds, into the host
-/// working set's overlay. Where the engine cannot say, the host's inputs are sampled instead.
-///
-/// # Safety
-/// As `sample_described_animation_effects`.
-unsafe fn sample_whole_effect_stack(
-    input: &FfiHostAnimationSample,
-    engine: &mut crate::css::style::StyleEngineState,
-    node: crate::css::style::tree::StyleNodeID,
-    descriptions: &[crate::css::style::animations::PublishedEffect],
-    transform_reference_box: Option<(f64, f64)>,
-) -> FfiHostAnimationSampleResult {
-    use crate::css::style::engine_sample_check;
-
-    let pseudo = (input.pseudo_kind != crate::css::cascaded_properties::NO_PSEUDO_ELEMENT).then_some(input.pseudo_kind);
-    let prepared = engine
-        .animation_sample_custom_property_environments(node, pseudo)
-        .map_err(|reason| format!("custom property environments: {reason}"))
-        .and_then(|environments| prepare_engine_sample(input, engine, node, descriptions, environments, None));
-    let (run, run_input) = match prepared {
-        Ok(prepared) => prepared,
-        Err(reason) => {
-            engine_sample_check::note_declined(&format!("whole sample: {reason}"));
-            return unsafe {
-                sample_described_animation_effects(input, engine, node, descriptions, transform_reference_box)
-            };
-        }
-    };
-    let mut result =
-        unsafe { sample_described_animation_effects(&run_input, engine, node, descriptions, transform_reference_box) };
-    // What the engine's length contexts leave on the containers they resolve a unit against - that
-    // they are size containers in use, and to be evaluated again once laid out - the host records
-    // from the engine's notes.
-    if run.container_unit_mask.get() != 0 {
-        result.noted_container_effects =
-            engine.note_sampled_container_unit_effects(node, input.style_record, run.container_unit_mask.get());
-    }
-    result
 }
 
 /// What the engine's sample of a row its pass settled composed, over the record the row settled:
@@ -3505,7 +3425,6 @@ pub(crate) fn sample_settled_row(
         generations: std::ptr::null(),
         current_keys: std::ptr::null(),
         effect_count: 0,
-        samples_whole_stack: false,
         style_record,
         longhand_table: table,
         animated_overlay: overlay.cast_const().cast(),
@@ -3727,7 +3646,6 @@ pub(crate) fn sample_transition_step(
         generations: std::ptr::null(),
         current_keys: std::ptr::null(),
         effect_count: 0,
-        samples_whole_stack: false,
         style_record: installed_style_record,
         longhand_table: table,
         animated_overlay: overlay.cast_const().cast(),
