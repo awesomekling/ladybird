@@ -292,12 +292,13 @@ enum class SampleInvalidation {
     AppliedByCaller,
 };
 
-static void sample_animations_for_installed_record(DOM::AbstractElement abstract_element, SampleInvalidation sample_invalidation = SampleInvalidation::Applied)
+static void sample_animations_for_installed_record(StyleDrainScope const& scope, DOM::AbstractElement abstract_element, SampleInvalidation sample_invalidation = SampleInvalidation::Applied)
 {
     auto record = abstract_element.style_record_identity();
     if (!record)
         return;
     Animations::AnimationUpdateContext context;
+    context.drain_scope = &scope;
     context.elements.set(abstract_element, { .style_record_before_update = record, .caller_applies_invalidation = sample_invalidation == SampleInvalidation::AppliedByCaller });
 }
 
@@ -345,7 +346,7 @@ static bool install_composition_sampled_in_pass(StyleDrainScope const& scope, DO
 
 // The pseudo-element kinds the engine sampled as it settled them, as a bit per kind; the host
 // samples the rest.
-static void sample_animations_for_installed_pseudos(DOM::Element& element, u8 kinds_sampled_by_engine = 0)
+static void sample_animations_for_installed_pseudos(StyleDrainScope const& scope, DOM::Element& element, u8 kinds_sampled_by_engine = 0)
 {
     // A dirty effect may have been visited before a newly generated pseudo had a record.
     // Compose it at installation so its first observable style includes that effect.
@@ -356,7 +357,7 @@ static void sample_animations_for_installed_pseudos(DOM::Element& element, u8 ki
             continue;
         DOM::AbstractElement pseudo { element, static_cast<PseudoElement>(kind) };
         if (pseudo.has_style())
-            sample_animations_for_installed_record(pseudo);
+            sample_animations_for_installed_record(scope, pseudo);
     }
 }
 
@@ -785,7 +786,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                         row_effects.append(StyleEffectDrain::AnimationNames { StyleNodeID { reaction.style_node } });
                     }
                     if (!installed_pass_sample && settled.has_style() && (has_animation_effects || animation_plan.has_value() || row_effect_debt & StyleEngine::SettledRowOwesAnAnimationSample))
-                        sample_animations_for_installed_record(settled, row_sample_invalidation);
+                        sample_animations_for_installed_record(scope, settled, row_sample_invalidation);
                     if (compares_after_sample)
                         invalidation = element->compare_engine_computed_style_record_after_sample(scope, old_style_record, invalidation, &row_effects);
                     // The step runs here rather than after the batch: a descendant applied later
@@ -853,7 +854,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                         apply_pseudo_element_samples_taken_by_engine(scope, *element, pseudo_samples);
                     }
                     if (element->has_associated_animations() || installed_pseudo_animation_plan)
-                        sample_animations_for_installed_pseudos(*element, pseudo_kinds_sampled_by_engine);
+                        sample_animations_for_installed_pseudos(scope, *element, pseudo_kinds_sampled_by_engine);
                     row_effects.append(StyleEffectDrain::AcknowledgeRecord { StyleNodeID { reaction.style_node } });
                     if (explicit_inheritance_debt != 0)
                         row_effects.append(StyleEffectDrain::ExplicitInheritance { StyleNodeID { reaction.style_node }, explicit_inheritance_debt });
@@ -1341,7 +1342,7 @@ static Optional<RequiredInvalidationAfterStyleChange> install_targeted_record_de
     StyleComputer::record_container_query_effects(scope, DOM::AbstractElement { element }, container_effects);
     engine.acknowledge_engine_computed_record(element.style_node_id());
     if (samples_over_the_record) {
-        sample_animations_for_installed_record(DOM::AbstractElement { element }, SampleInvalidation::AppliedByCaller);
+        sample_animations_for_installed_record(scope, DOM::AbstractElement { element }, SampleInvalidation::AppliedByCaller);
         invalidation = element.compare_engine_computed_style_record_after_sample(scope, old_style_record, invalidation);
     }
     return invalidation;
@@ -1349,9 +1350,10 @@ static Optional<RequiredInvalidationAfterStyleChange> install_targeted_record_de
 
 // A targeted read of an unstyled hidden animation target installs its base record first. Sample its
 // effects over that record now: the document's ordinary animation tick skips hidden descendants.
-static void sample_animations_of_newly_styled_target(DOM::Element& element)
+static void sample_animations_of_newly_styled_target(StyleDrainScope const& scope, DOM::Element& element)
 {
     Animations::AnimationUpdateContext context;
+    context.drain_scope = &scope;
     for (auto& animation : element.associated_animations_in_composite_order()) {
         if (animation->is_idle() || !animation->effect() || !is<Animations::KeyframeEffect>(*animation->effect()))
             continue;
@@ -1390,7 +1392,7 @@ static bool install_targeted_styles(DOM::Document& document, GC::RootVector<GC::
             installed = install_targeted_record_demand_answer(scope, element, answer, did_change_custom_properties);
             if (installed.has_value()) {
                 if (was_unstyled && element->has_relevant_animations())
-                    sample_animations_of_newly_styled_target(element);
+                    sample_animations_of_newly_styled_target(scope, element);
                 auto const* box_values = element->style_group<ComputedValues::BoxValues>();
                 reads_scroll_state_pseudo_elements = box_values && box_values->is_scroll_state_container && element->style_depends_on_size_container_query();
             }

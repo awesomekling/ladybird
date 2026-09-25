@@ -76,6 +76,10 @@ struct AnimationUpdateContext {
 
     // NOTE: This is lazily populated by KeyframeEffects as their respective animations are applied to an element.
     HashMap<DOM::AbstractElement, ElementData> elements;
+
+    // The drain an update inside one installs its samples in; an update outside any installs them
+    // in a drain of its own.
+    CSS::StyleDrainScope const* drain_scope { nullptr };
 };
 
 void apply_published_animation_overlay(CSS::StyleDrainScope const&, DOM::AbstractElement, CSS::StyleEngineFFI::FfiAnimationInvalidation const&, CSS::StyleRecordID new_style_record, bool caller_applies_invalidation);

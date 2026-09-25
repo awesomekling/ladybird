@@ -19,6 +19,7 @@
 #include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleDrainScope.h>
+#include <LibWeb/CSS/StyleEffectDrain.h>
 #include <LibWeb/CSS/StyleInvalidation.h>
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/CSS/StyleValues/StyleValueList.h>
@@ -1035,6 +1036,29 @@ void AnimationUpdateContext::publish_animation_inputs_before_sample(DOM::Element
         s_open_batch_publication_published = true;
 }
 
+// Install what the engine's samples of the updated elements published, in the drain `scope` proves.
+static void install_engine_samples(CSS::StyleDrainScope const& scope, HashMap<DOM::AbstractElement, AnimationUpdateContext::ElementData>& elements)
+{
+    for (auto& it : elements) {
+        if (!it.value.style_record_before_update)
+            continue;
+        auto& element = it.key;
+        GC::Ref<DOM::Element> target = element.element();
+        // Disconnected elements no longer have a style-engine row to publish refreshed
+        // animation style into.
+        if (target->style_node_id() == 0)
+            continue;
+        // An earlier entry already republished this style with the current animation values.
+        if (element.style_record_identity() != it.value.style_record_before_update)
+            continue;
+        // The engine samples the effects the element's timing rows name, which include the
+        // transitions a step provisionally started and a dirty effect that just became irrelevant,
+        // whose terminal contribution the sample removes. An element the engine cannot sample
+        // keeps the composition it holds.
+        (void)install_engine_sample_of_installed_record(scope, element, it.value);
+    }
+}
+
 AnimationUpdateContext::~AnimationUpdateContext()
 {
     // Building the overlay below is a style computation, and it samples each effect from the timing
@@ -1052,27 +1076,16 @@ AnimationUpdateContext::~AnimationUpdateContext()
         }
     }
 
-    for (auto& it : elements) {
-        if (!it.value.style_record_before_update)
-            continue;
-        auto& element = it.key;
-        GC::Ref<DOM::Element> target = element.element();
-        // Disconnected elements no longer have a style-engine row to publish refreshed
-        // animation style into.
-        if (target->style_node_id() == 0)
-            continue;
-        // An earlier entry already republished this style with the current animation values.
-        if (element.style_record_identity() != it.value.style_record_before_update)
-            continue;
-        // The engine samples the effects the element's timing rows name, which include the
-        // transitions a step provisionally started and a dirty effect that just became irrelevant,
-        // whose terminal contribution the sample removes.
-        // FIXME: The pass samples an element's effect stack itself; this sample is still asked for
-        //        from outside it, by animation updates and by rows the pass declined.
-        auto const scope = CSS::StyleDrainScope::not_yet_drained(target->document().style_computer().style_engine());
-        // An element the engine cannot sample keeps the composition it holds.
-        (void)install_engine_sample_of_installed_record(scope, element, it.value);
+    if (elements.is_empty())
+        return;
+    if (drain_scope) {
+        install_engine_samples(*drain_scope, elements);
+        return;
     }
+    // Installing what the engine published for the elements is the drain of that publication.
+    CSS::StyleEffectDrain::install(elements.begin()->key.element().document(), [&](CSS::StyleDrainScope const& scope) {
+        install_engine_samples(scope, elements);
+    });
 }
 
 }
