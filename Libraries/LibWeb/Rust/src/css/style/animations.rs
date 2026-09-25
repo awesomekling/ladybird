@@ -869,6 +869,13 @@ impl AnimationTimingRow {
         Some(row)
     }
 
+    /// Whether the element the row was published for holds the animation, rather than a pass having
+    /// started it provisionally.
+    #[must_use]
+    pub(crate) fn is_associated(&self) -> bool {
+        !self.has(timing_row_flag::NOT_ASSOCIATED)
+    }
+
     /// Whether the animation holds its current time, which no timeline's time then moves.
     #[must_use]
     pub(crate) fn has_hold_time(&self) -> bool {
