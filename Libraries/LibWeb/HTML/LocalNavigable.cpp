@@ -7073,6 +7073,7 @@ struct LocalNavigable::FlightPaintSeal {
     PaintConfig paint_config;
     Painting::FlightRecordingSeal recording;
     u64 hit_test_display_list_invalidations { 0 };
+    bool handed_accumulated_visual_contexts_update { false };
 };
 
 bool LocalNavigable::seal_flight_paint(DOM::Document& document)
@@ -7122,6 +7123,7 @@ bool LocalNavigable::seal_flight_paint(DOM::Document& document)
         .paint_config = paint_config,
         .recording = recording,
         .hit_test_display_list_invalidations = hit_test_display_list_invalidations,
+        .handed_accumulated_visual_contexts_update = document.hand_accumulated_visual_contexts_update_to_flight(),
     });
     // What asks for another paint beside the flight asks for the next one.
     m_needs_repaint = false;
@@ -7134,7 +7136,7 @@ bool LocalNavigable::finish_flight_paint(DOM::Document& document, FlightPaintEnd
     auto seal = move(m_flight_paint_seal);
     VERIFY(seal);
     if (document.has_paint_state())
-        document.take_in_flight_paint();
+        document.take_in_flight_paint(seal->handed_accumulated_visual_contexts_update);
     auto paint_again = [&] {
         m_needs_repaint = true;
         m_needs_to_record_display_list = true;
