@@ -20,9 +20,17 @@ ConnectionFromWebContent::ConnectionFromWebContent(NonnullOwnPtr<IPC::Transport>
 {
 }
 
+ConnectionFromWebContent::~ConnectionFromWebContent()
+{
+    // The channel's handlers point back here, and it can outlive this connection in a deferred invocation.
+    shut_down_render_clock_channel();
+}
+
 void ConnectionFromWebContent::die()
 {
     auto protector = NonnullRefPtr { *this };
+    // The channel goes first, so that no clock tick request arrives for a context that is being destroyed.
+    shut_down_render_clock_channel();
     m_compositor_state->destroy_contexts_for_web_content_client(*this);
     if (m_on_death)
         m_on_death(*this);
@@ -42,6 +50,58 @@ void ConnectionFromWebContent::offer_video_presentation_channel(IPC::TransportHa
 #endif
 
     dbgln_if(VIDEO_PRESENTATION_CHANNEL_DEBUG, "Compositor: established video presentation channel for WebContent (client_id={})", client_id());
+}
+
+void ConnectionFromWebContent::offer_render_clock_channel(IPC::TransportHandle handle)
+{
+    auto transport_or_error = handle.create_transport();
+    if (transport_or_error.is_error()) {
+        did_misbehave("WebContent sent an unusable render clock transport handle");
+        return;
+    }
+
+    // A channel offered again replaces the previous one, whose requests go with it.
+    shut_down_render_clock_channel();
+
+    auto connection = RenderClockConnection::construct(transport_or_error.release_value(), client_id());
+#ifdef AK_OS_WINDOWS
+    connection->transport().set_peer_pid(transport().peer_pid());
+#endif
+    connection->on_request_clock_tick = [this](Compositing::CompositorContextId context_id, double maximum_frames_per_second) {
+        request_clock_tick(context_id, maximum_frames_per_second);
+    };
+    connection->on_death = [this] {
+        m_compositor_state->cancel_clock_tick_requests_for_web_content_client(*this);
+        m_render_clock_connection = nullptr;
+    };
+    m_render_clock_connection = move(connection);
+}
+
+void ConnectionFromWebContent::shut_down_render_clock_channel()
+{
+    // A channel shut down here calls its on_death, which lets go of it.
+    if (m_render_clock_connection)
+        m_render_clock_connection->shutdown();
+    VERIFY(!m_render_clock_connection);
+}
+
+void ConnectionFromWebContent::request_clock_tick(Compositing::CompositorContextId context_id, double maximum_frames_per_second)
+{
+    // A request can race the context's registration or destruction on the main channel; the render clock's
+    // watchdog asks again, so an unavailable context drops it.
+    if (!context_is_owned_by_this_connection(context_id))
+        return;
+    if (!isfinite(maximum_frames_per_second) || maximum_frames_per_second <= 0) {
+        did_misbehave("WebContent sent an invalid maximum clock tick rate");
+        return;
+    }
+    m_compositor_state->request_clock_tick(context_id, maximum_frames_per_second);
+}
+
+void ConnectionFromWebContent::clock_tick(Compositing::CompositorContextId context_id, i64 frame_time_nanoseconds, double frame_interval_milliseconds)
+{
+    if (m_render_clock_connection)
+        m_render_clock_connection->async_clock_tick(context_id, frame_time_nanoseconds, frame_interval_milliseconds);
 }
 
 void ConnectionFromWebContent::add_video_sink(Media::VideoSinkHandle video_sink_handle)

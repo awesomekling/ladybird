@@ -30,6 +30,8 @@ compile_ipc(${LADYBIRD_SOURCE_DIR}/Services/Compositor/CompositorControlClient.i
 compile_ipc(${LADYBIRD_SOURCE_DIR}/Services/Compositor/CompositorControlServer.ipc ${CMAKE_BINARY_DIR}/Services/Compositor/CompositorControlServerEndpoint.h)
 compile_ipc(${LADYBIRD_SOURCE_DIR}/Services/Compositor/CompositorFontClient.ipc ${CMAKE_BINARY_DIR}/Services/Compositor/CompositorFontClientEndpoint.h)
 compile_ipc(${LADYBIRD_SOURCE_DIR}/Services/Compositor/CompositorFontServer.ipc ${CMAKE_BINARY_DIR}/Services/Compositor/CompositorFontServerEndpoint.h)
+compile_ipc(${LADYBIRD_SOURCE_DIR}/Services/Compositor/RenderClockClient.ipc ${CMAKE_BINARY_DIR}/Services/Compositor/RenderClockClientEndpoint.h)
+compile_ipc(${LADYBIRD_SOURCE_DIR}/Services/Compositor/RenderClockServer.ipc ${CMAKE_BINARY_DIR}/Services/Compositor/RenderClockServerEndpoint.h)
 compile_ipc(${LADYBIRD_SOURCE_DIR}/Services/Compositor/CompositorWebContentClient.ipc ${CMAKE_BINARY_DIR}/Services/Compositor/CompositorWebContentClientEndpoint.h)
 compile_ipc(${LADYBIRD_SOURCE_DIR}/Services/Compositor/CompositorWebContentServer.ipc ${CMAKE_BINARY_DIR}/Services/Compositor/CompositorWebContentServerEndpoint.h)
 
@@ -40,6 +42,8 @@ set(GENERATED_SOURCES
     ../../Services/Compositor/CompositorFontClientEndpoint.h
     ../../Services/Compositor/CompositorFontServerEndpoint.h
     ../../Services/Compositor/CompositorWebContentClientEndpoint.h
+    ../../Services/Compositor/RenderClockClientEndpoint.h
+    ../../Services/Compositor/RenderClockServerEndpoint.h
     ../../Services/Compositor/CompositorWebContentServerEndpoint.h
 )
 

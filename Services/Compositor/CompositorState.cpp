@@ -664,7 +664,7 @@ void CompositorState::set_display_metadata(Compositing::CompositorContextId cont
             m_unpainted_video_update_timer->set_interval(unpainted_video_update_interval_ms());
     }
 
-    if (context->rendering_opportunity_requested() && context_is_effectively_visible(*context))
+    if ((context->rendering_opportunity_requested() || context->clock_tick_requested()) && context_is_effectively_visible(*context))
         vsync_scheduler_for_display(display_id_for_context(*context)).schedule(display_refresh_rate_for_context(*context));
 }
 
@@ -690,7 +690,7 @@ void CompositorState::resume_presentation_after_becoming_visible(Compositing::Co
             continue;
         if (context.has_active_smooth_scroll_animations() || context.visual_animations_need_frame())
             vsync_scheduler_for_display(display_id_for_context(context)).schedule(display_refresh_rate_for_context(context));
-        if (context.rendering_opportunity_requested())
+        if (context.rendering_opportunity_requested() || context.clock_tick_requested())
             vsync_scheduler_for_display(display_id_for_context(context)).schedule(display_refresh_rate_for_context(context));
     }
 
@@ -722,6 +722,45 @@ void CompositorState::request_rendering_opportunity(Compositing::CompositorConte
     }
 
     scheduler.schedule(display_refresh_rate);
+}
+
+void CompositorState::request_clock_tick(Compositing::CompositorContextId context_id, double maximum_frames_per_second)
+{
+    auto* context = context_if_present(context_id);
+    VERIFY(context);
+
+    if (!context->request_clock_tick(maximum_frames_per_second))
+        return;
+    if (!context_is_effectively_visible(*context))
+        return;
+
+    auto display_id = display_id_for_context(*context);
+    auto display_refresh_rate = display_refresh_rate_for_context(*context);
+    auto& scheduler = vsync_scheduler_for_display(display_id);
+    // The render clock asks for its next tick as soon as one arrives, so the most recent display tick is usually the
+    // one it was just delivered, which the pacer turns down; one that went by unanswered is delivered now.
+    if (auto frame_time = scheduler.most_recent_tick_time(MonotonicTime::now(), display_refresh_rate);
+        frame_time.has_value() && context->clock_tick_is_due(*frame_time, display_refresh_rate)) {
+        deliver_clock_tick(context_id, *context, *frame_time, display_refresh_rate);
+        return;
+    }
+
+    scheduler.schedule(display_refresh_rate);
+}
+
+void CompositorState::cancel_clock_tick_requests_for_web_content_client(CompositorStateWebContentClient& client)
+{
+    for (auto& context : m_contexts) {
+        if (context.value->is_owned_by(client))
+            context.value->cancel_clock_tick_request();
+    }
+}
+
+void CompositorState::deliver_clock_tick(Compositing::CompositorContextId context_id, ContextState& context, MonotonicTime frame_time, double display_refresh_rate)
+{
+    auto frame_interval = context.clock_tick_frame_interval(display_refresh_rate);
+    context.did_deliver_clock_tick(frame_time);
+    context.web_content_client().clock_tick(context_id, frame_time.nanoseconds(), frame_interval);
 }
 
 void CompositorState::hurry_rendering_opportunity(Compositing::CompositorContextId context_id)
@@ -880,6 +919,14 @@ void CompositorState::present_pending_frames_on_vsync(Optional<u64> display_id, 
             } else {
                 vsync_scheduler_for_display(display_id).schedule(display_refresh_rate);
             }
+        }
+
+        if (context.clock_tick_requested() && display_id_for_context(context) == display_id) {
+            auto display_refresh_rate = display_refresh_rate_for_context(context);
+            if (context.clock_tick_is_due(frame_time, display_refresh_rate))
+                deliver_clock_tick(context_id, context, frame_time, display_refresh_rate);
+            else
+                vsync_scheduler_for_display(display_id).schedule(display_refresh_rate);
         }
 
         auto has_active_animation_on_display = (context.has_active_smooth_scroll_animations() || context.visual_animations_need_frame()) && display_id_for_context(context) == display_id;

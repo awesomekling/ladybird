@@ -59,6 +59,7 @@ public:
     virtual void dispatch_key_event_to_web_content(u64 page_id, Compositing::KeyEvent const&) = 0;
     virtual void request_rendering_update() = 0;
     virtual void rendering_opportunity(Compositing::CompositorContextId, i64 frame_time_nanoseconds, double frame_interval_milliseconds) = 0;
+    virtual void clock_tick(Compositing::CompositorContextId, i64 frame_time_nanoseconds, double frame_interval_milliseconds) = 0;
     virtual void async_scroll_updates(Compositing::CompositorContextId, Compositing::PendingAsyncScrollUpdates const&) = 0;
     virtual void create_video_edge(Media::VideoSinkHandle) = 0;
     virtual void release_video_edge(Media::VideoSinkHandle) = 0;
@@ -110,6 +111,10 @@ public:
     bool async_scroll_by(Compositing::CompositorContextId, Gfx::FloatPoint position, Gfx::FloatPoint delta, Compositing::WheelDeltaPrecision, Compositing::ScrollGesturePhase, u32 modifiers);
     void viewport_size_updated(Compositing::CompositorContextId, Gfx::IntSize, Compositing::WindowResizingInProgress);
     void request_rendering_opportunity(Compositing::CompositorContextId, double maximum_frames_per_second);
+    // A display tick for the context's render clock. A hidden context keeps its request and gets no ticks until it
+    // is shown again.
+    void request_clock_tick(Compositing::CompositorContextId, double maximum_frames_per_second);
+    void cancel_clock_tick_requests_for_web_content_client(CompositorStateWebContentClient&);
     void set_paused_debugger_overlay(Compositing::CompositorContextId, bool visible, double device_pixel_ratio, Optional<String> font_family, Optional<Compositing::PausedDebuggerOverlayAction> hovered_action);
     void set_display_metadata(Compositing::CompositorContextId, Optional<u64> display_id, double refresh_rate);
     void set_context_visibility(Compositing::CompositorContextId, Compositing::ContextVisibility);
@@ -206,6 +211,7 @@ private:
     void schedule_caret_repaint(Compositing::CompositorContextId, Gfx::IntRect damage_rect);
     VSyncScheduler& vsync_scheduler_for_display(Optional<u64> display_id);
     void present_pending_frames_on_vsync(Optional<u64> display_id, MonotonicTime frame_time);
+    void deliver_clock_tick(Compositing::CompositorContextId, ContextState&, MonotonicTime frame_time, double display_refresh_rate);
     void publish_backing_stores(Compositing::CompositorContextId, ContextState&, BackingStoreManager::Publication&&);
     BackingStoreManager::GpuSharing gpu_sharing_for_client() const;
     void did_finish_async_present(PendingAsyncPresent&);
