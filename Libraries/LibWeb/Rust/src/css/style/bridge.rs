@@ -3948,7 +3948,7 @@ pub unsafe extern "C" fn style_engine_sample_installed_record(
             return row_sampled_in_pass(engine, None);
         };
         let pseudo = (pseudo_kind != u8::MAX).then_some(pseudo_kind);
-        let layout_arena = unsafe { super::animations::LentLayoutArena::lend(layout_arena) };
+        let layout_arena = unsafe { super::animations::CommittedTransformReferenceBoxes::lend(layout_arena) };
         match engine.sample_installed_record(style_node, pseudo, style_record, layout_arena) {
             Ok(published) => {
                 super::engine_sample_check::note_taken("installed record sample");
@@ -3986,7 +3986,7 @@ pub unsafe extern "C" fn style_engine_decide_transition_step_for_installed_recor
             return row_sampled_in_pass(engine, None);
         };
         let pseudo = (pseudo_kind != u8::MAX).then_some(pseudo_kind);
-        let layout_arena = unsafe { super::animations::LentLayoutArena::lend(layout_arena) };
+        let layout_arena = unsafe { super::animations::CommittedTransformReferenceBoxes::lend(layout_arena) };
         match engine.decide_installed_record_transition_step(
             style_node,
             pseudo,
@@ -4517,7 +4517,7 @@ pub unsafe extern "C" fn style_engine_settle_pseudo_records_after_host_record(
                 // SAFETY: The host passes one record per synthetic pseudo-element kind, and lends
                 // the document's layout arena for this call.
                 let held = unsafe { &*held_pseudo_records.cast::<[u64; RETRY_PSEUDO_RECORD_SLOTS]>() };
-                let layout_arena = unsafe { super::animations::LentLayoutArena::lend(layout_arena) };
+                let layout_arena = unsafe { super::animations::CommittedTransformReferenceBoxes::lend(layout_arena) };
                 engine.sample_settled_pseudo_elements(style_node, &mut settled, held, layout_arena)
             }
             false => (0, 0),
@@ -5030,8 +5030,8 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
     // The transaction's inputs were frozen above.
     let engine_on_stage = &mut *engine;
     // SAFETY: The host passes its document's live layout arena, or null, and blocks on the stage.
-    let layout_arena = unsafe { super::animations::LentLayoutArena::lend(layout_arena) };
-    let output = crate::stage_thread::run_stage(move || run_style_pass(engine_on_stage, root, layout_arena));
+    let committed_boxes = unsafe { super::animations::CommittedTransformReferenceBoxes::lend(layout_arena) };
+    let output = crate::stage_thread::run_stage(move || run_style_pass(engine_on_stage, root, committed_boxes));
     finish_style_transaction(engine, root, output)
 }
 
@@ -5069,12 +5069,18 @@ pub unsafe extern "C" fn style_engine_submit_style_transaction(
     engine.host.atom_sweep_waits_for_host = true;
     // SAFETY: Guaranteed by the caller: the frame in flight owns the engine and the arena.
     let engine_on_stage = unsafe { crate::stage_thread::FrameOwns::new(engine_handle.cast::<StyleEngine>()) };
-    // SAFETY: As above.
-    let lent_arena = unsafe { super::animations::LentLayoutArena::lend(layout_arena) };
+    // The pass never reaches the arena, which the main thread goes on writing beside it: it takes
+    // along the committed boxes of the nodes it may sample against them.
+    // SAFETY: Guaranteed by the caller: no stage owns the arena yet.
+    let snapshot = unsafe {
+        super::animations::CommittedTransformReferenceBoxSnapshot::take(layout_arena, engine.state.animated_nodes())
+    };
     let pass = move || {
         // SAFETY: The frame in flight owns the engine until the main thread takes it back.
         let engine = unsafe { &mut *engine_on_stage.into_inner() };
-        let output = run_style_pass(engine, root, lent_arena);
+        // SAFETY: The pass owns the snapshot for as long as it runs.
+        let committed_boxes = unsafe { super::animations::CommittedTransformReferenceBoxes::taken_along(&snapshot) };
+        let output = run_style_pass(engine, root, committed_boxes);
         engine.host.submitted_style_pass_output = Some((root, Box::new(output)));
     };
     // SAFETY: As above.
@@ -5161,13 +5167,13 @@ unsafe fn begin_style_transaction(engine: &mut StyleEngine, mut computation_inpu
 fn run_style_pass(
     engine: &mut StyleEngine,
     root: StyleNodeID,
-    layout_arena: super::animations::LentLayoutArena,
+    committed_boxes: super::animations::CommittedTransformReferenceBoxes,
 ) -> FfiStyleTransactionOutput {
     let mut output = FfiStyleTransactionOutput::default();
     let emitted = &mut output;
-    let scoped = engine.take_style_transaction_lending_layout_arena(
+    let scoped = engine.take_style_transaction_with_committed_boxes(
         root,
-        layout_arena,
+        committed_boxes,
         |transaction_version, program_version, answers| {
             assert!(
                 emitted.answers.is_empty(),

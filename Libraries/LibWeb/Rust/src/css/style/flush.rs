@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-use super::animations::LentLayoutArena;
+use super::animations::CommittedTransformReferenceBoxes;
 use super::engine_sample_check;
 use super::*;
 
@@ -229,7 +229,7 @@ impl StyleEngineState {
         mut emit: impl FnMut(StyleTransactionVersion, ProgramVersion, &[PublishedStyleDeltaRecord]),
         clock: &mut TransactionClock,
         counters: &mut Counters,
-        layout_arena: LentLayoutArena,
+        committed_boxes: CommittedTransformReferenceBoxes,
     ) -> bool {
         // The previous transaction's uninstalled records can no longer be consumed. Revert
         // them before this transaction publishes anything: a later C++ computation can install
@@ -2064,7 +2064,7 @@ impl StyleEngineState {
                 &mut style_delta_memory,
                 &mut computation_scratch_memory,
                 counters,
-                layout_arena,
+                committed_boxes,
             );
             computation_loop_timer.stop(Counter::ComputationLoopMicroseconds, counters);
             computation_scratch_memory.resize_required_to(&mut self.retained.memory, pass.scratch.capacity_bytes());
@@ -2147,7 +2147,7 @@ impl StyleEngineState {
         style_delta_memory: &mut MemoryLease,
         computation_scratch_memory: &mut MemoryLease,
         counters: &mut Counters,
-        layout_arena: LentLayoutArena,
+        committed_boxes: CommittedTransformReferenceBoxes,
     ) {
         loop {
             let derived_children = self.run_style_pass_round(
@@ -2156,7 +2156,7 @@ impl StyleEngineState {
                 style_delta_memory,
                 computation_scratch_memory,
                 counters,
-                layout_arena,
+                committed_boxes,
             );
             if derived_children.is_empty() {
                 return;
@@ -2414,7 +2414,7 @@ impl StyleEngineState {
         style_delta_memory: &mut MemoryLease,
         computation_scratch_memory: &mut MemoryLease,
         counters: &mut Counters,
-        layout_arena: LentLayoutArena,
+        committed_boxes: CommittedTransformReferenceBoxes,
     ) -> Vec<(StyleNodeID, u8, u8, bool)> {
         // Where each row of the pass stands, for a reaction a row derives for a child that is a row
         // still to come.
@@ -3068,12 +3068,19 @@ impl StyleEngineState {
                         .scratch
                         .root_element_inputs()
                         .and_then(|root| self.retained.assigned_root_element_font_metrics(root));
-                    let published =
-                        crate::css::style_compute::sample_settled_row(self, node, None, true, None, root, layout_arena)
-                            .and_then(|sample| {
-                                self.publish_settled_row_sample(node, None, sample, counters)
-                                    .map_err(String::from)
-                            });
+                    let published = crate::css::style_compute::sample_settled_row(
+                        self,
+                        node,
+                        None,
+                        true,
+                        None,
+                        root,
+                        committed_boxes,
+                    )
+                    .and_then(|sample| {
+                        self.publish_settled_row_sample(node, None, sample, counters)
+                            .map_err(String::from)
+                    });
                     match published {
                         Ok(_) => engine_sample_check::note_taken("settled row sample"),
                         Err(reason) => engine_sample_check::note_declined(&format!("settled row: {reason}")),
@@ -3102,7 +3109,7 @@ impl StyleEngineState {
                             old_style_record.raw(),
                             new_style_record.raw(),
                             installed,
-                            layout_arena,
+                            committed_boxes,
                             counters,
                         );
                     }
@@ -3617,7 +3624,7 @@ impl StyleEngineState {
         &mut self,
         mut emit: impl FnMut(StyleTransactionVersion, ProgramVersion, &[PublishedStyleDeltaRecord]),
         counters: &mut Counters,
-        layout_arena: LentLayoutArena,
+        committed_boxes: CommittedTransformReferenceBoxes,
     ) -> bool {
         let mut pass = self
             .host
@@ -3690,7 +3697,7 @@ impl StyleEngineState {
             &mut style_delta_memory,
             &mut computation_scratch_memory,
             counters,
-            layout_arena,
+            committed_boxes,
         );
         computation_scratch_memory.release();
         // Every row before the one this wave resumes at is installed, so nothing that stopped the
@@ -3884,7 +3891,7 @@ impl StyleEngineState {
         root: StyleNodeID,
         emit: impl FnMut(StyleTransactionVersion, ProgramVersion, &[PublishedStyleDeltaRecord]),
         counters: &mut Counters,
-        layout_arena: LentLayoutArena,
+        committed_boxes: CommittedTransformReferenceBoxes,
     ) -> bool {
         self.retained.engine_row_child_facts.clear();
         self.derive_applied_style_reactions();
@@ -3897,14 +3904,14 @@ impl StyleEngineState {
                 && !self.host.program_staging.is_dirty()
                 && self.host.sheet_rule_replacement.is_none()
             {
-                return self.continue_style_pass(emit, counters, layout_arena);
+                return self.continue_style_pass(emit, counters, committed_boxes);
             }
             self.abandon_suspended_style_pass();
         }
         let mut clock = TransactionClock::new();
         self.install_witness_effects();
         self.install_pending_matching_context();
-        let scoped = self.take_style_transaction_with_clock(root, emit, &mut clock, counters, layout_arena);
+        let scoped = self.take_style_transaction_with_clock(root, emit, &mut clock, counters, committed_boxes);
         self.finish_memory_evaluation_loop();
         // Include transaction-local destruction on both ordinary and early-return paths.
         clock.finish(counters);
