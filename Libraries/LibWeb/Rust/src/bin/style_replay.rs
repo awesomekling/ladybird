@@ -713,29 +713,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 EventKind::SettlePseudoRecordsAfterHostRecord => {
-                    let engine = read_engine(&mut event.payload, &live_engines)?;
-                    let node = event.payload.read_u32()?;
-                    let old_is_list_item = event.payload.read_bool()?;
-                    let expected = event.payload.read_u64()?;
-                    let expected_present = event.payload.read_u8()?;
-                    let actual = unsafe {
-                        // Debts are not replayed.
-                        bridge::style_engine_settle_pseudo_records_after_host_record(
-                            engine,
-                            node,
-                            old_is_list_item,
-                            false,
-                            false,
-                            std::ptr::null(),
-                            std::ptr::null_mut(),
-                        )
-                    };
-                    if actual.style_record != expected || actual.pseudo_records_present != expected_present {
-                        return Err(format!(
-                            "pseudo records settled after a host record diverged for node {node}: expected {expected} (present {expected_present:#x}), got {actual:?}"
-                        )
-                        .into());
-                    }
+                    return Err("the recording predates the pass settling pseudo-elements the host left owed".into());
                 }
                 EventKind::AnswerRecordDemand => {
                     let engine = read_engine(&mut event.payload, &live_engines)?;
@@ -2236,6 +2214,7 @@ fn read_style_transaction_outputs(
                     5 => FfiStyleDeltaGap::RetriedAfterAncestors,
                     6 => FfiStyleDeltaGap::RetriedMaterialization,
                     7 => FfiStyleDeltaGap::EnvironmentMoved,
+                    8 => FfiStyleDeltaGap::PseudoElementsSettled,
                     tag => return Err(format!("unknown style delta gap tag {tag}").into()),
                 },
                 uses_substitution: format_version >= 16 && payload.read_bool()?,

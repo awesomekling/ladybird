@@ -17,6 +17,7 @@ use crate::css::computed_longhand_table::ComputedLonghandTable;
 pub(crate) use drive::drive_font_metric;
 pub(super) use drive::{Drive, Suspension, Unanswered};
 use drive::{FontDriveGoal, FullDrive, PartialDrive, table_names_animations};
+pub(crate) use pseudo::OwedPseudoSettle;
 
 /// Another element's published style that a first-time computation may build over: the element
 /// whose cascade state stands in for the previous one, and the record it must still hold.

@@ -1128,8 +1128,9 @@ impl StyleEngine {
             .declared_only_record(subject, facts, declarations, &mut self.counters)
     }
 
-    /// Settle the pseudo-element records of an element whose record C++ just installed.
+    /// Settle the pseudo-element records of an element whose record the host installed.
     #[inline]
+    #[cfg(test)]
     pub(crate) fn settle_pseudo_records_after_host_record(
         &mut self,
         node: StyleNodeID,
@@ -1170,19 +1171,6 @@ impl StyleEngine {
     ) -> Result<super::engine_sample::SettledRowPublication, String> {
         self.state
             .sample_installed_record(node, pseudo, style_record, layout_arena, &mut self.counters)
-    }
-
-    /// Sample the animations of the pseudo-elements the engine just settled for an element.
-    #[inline]
-    pub(crate) fn sample_settled_pseudo_elements(
-        &mut self,
-        node: StyleNodeID,
-        settled: &mut publication::RetriedEngineRecord,
-        held_style_records: &[u64; bridge::RETRY_PSEUDO_RECORD_SLOTS],
-        layout_arena: super::animations::CommittedTransformReferenceBoxes,
-    ) -> (u8, u8) {
-        self.state
-            .sample_settled_pseudo_elements(node, settled, held_style_records, layout_arena, &mut self.counters)
     }
 
     /// Publish the immutable computed-group payloads of one element's base style. This assigns

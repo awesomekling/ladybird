@@ -1614,7 +1614,7 @@ static void record_element_reference_pseudo_element_inputs(Element& element)
     }
 }
 
-CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styles(CSS::StyleDrainScope const& scope, bool&, bool had_list_marker, CSS::ComputedValues const* old_originating_style, EnginePseudoElementRecords const* engine_pseudo_element_records, EnginePseudoElementDamages const* engine_pseudo_element_damages)
+CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styles(CSS::StyleDrainScope const& scope, bool&, bool had_list_marker, EnginePseudoElementRecords const* engine_pseudo_element_records, EnginePseudoElementDamages const* engine_pseudo_element_damages)
 {
     CSS::RequiredInvalidationAfterStyleChange invalidation;
 
@@ -1623,60 +1623,6 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
 
     auto& style_computer = document().style_computer();
     auto originating_style = computed_style();
-    // The engine settles the synthetic pseudo-elements of an element C++ computed against the
-    // record C++ just installed, as it settles them beside a record of its own, and C++ installs
-    // the engine's records.
-    EnginePseudoElementRecords records_settled_after_host_record {};
-    u32 explicit_inheritance_debt = 0;
-    bool const settled_after_host_record = [&] {
-        if (engine_pseudo_element_records || style_node_id() == 0 || !originating_style)
-            return false;
-        // A reused originating record keeps the pseudo-element inventory it was computed with; the
-        // style engine's answer says which pseudo-elements have rules now.
-        auto const engine_pseudo_element_styles = scope.engine().published_pseudo_style_mask(style_node_id());
-        // Most elements have no style for any of the kinds the engine settles. A marker is
-        // refreshed for a list item only.
-        auto may_have_style = [&](CSS::PseudoElement pseudo_element) {
-            return ((engine_pseudo_element_styles >> to_underlying(pseudo_element)) & 1)
-                || !!style_record_identity(pseudo_element)
-                || (old_originating_style && old_originating_style->has_pseudo_element_style(pseudo_element))
-                || originating_style->has_pseudo_element_style(pseudo_element);
-        };
-        if (!had_list_marker && !originating_style->display().is_list_item()
-            && !may_have_style(CSS::PseudoElement::Before)
-            && !may_have_style(CSS::PseudoElement::After)
-            && !may_have_style(CSS::PseudoElement::FirstLetter)
-            && !(m_rendered_in_top_layer && may_have_style(CSS::PseudoElement::Backdrop))
-            && !(document().selection_styles_are_observable()
-                && (may_have_style(CSS::PseudoElement::Selection)
-                    || AbstractElement { *this, CSS::PseudoElement::Selection }.highlight_inheritance_parent().has_value())))
-            return false;
-        auto settled = scope.engine().settle_pseudo_records_after_host_record(style_node_id(), had_list_marker, CSS::StyleEngine::TakeRowDebts::Yes);
-        explicit_inheritance_debt = settled.explicit_inheritance_debt;
-        // What the settled pseudo-elements' container units read of the element's containers.
-        auto container_effects = CSS::StyleEngineFFI::style_engine_take_container_effects(scope.engine().rust_handle(), style_node_id().value());
-        ScopeGuard release_container_effects = [&] { CSS::StyleEngineFFI::style_engine_native_container_effects_release(container_effects.effects); };
-        CSS::StyleComputer::record_container_query_effects(scope, AbstractElement { *this }, container_effects);
-        for (size_t kind = 0; kind < array_size(settled.pseudo_records); ++kind) {
-            if (!((settled.pseudo_records_present >> kind) & 1))
-                continue;
-            CSS::StyleRecordID record { settled.pseudo_records[kind] };
-            records_settled_after_host_record[kind] = record;
-            // What the element's dependencies record for a pseudo-element's computation.
-            if (!!record && has_flag(scope.engine().style_record_dependency_flags(record), CSS::StyleRecordDependencyFlag::DependsOnViewportMetrics))
-                set_style_depends_on_viewport_metrics();
-        }
-        if (settled.uses_substitution)
-            set_style_uses_var_css_function();
-        return true;
-    }();
-    if (settled_after_host_record) {
-        engine_pseudo_element_records = &records_settled_after_host_record;
-        if (explicit_inheritance_debt != 0) {
-            if (auto* parent = this->parent())
-                parent->add_children_explicitly_inherited_non_inherited_style_groups(explicit_inheritance_debt == NumericLimits<u32>::max() ? CSS::ComputedValues::all_style_groups : explicit_inheritance_debt);
-        }
-    }
 
     // Any document change that can cause this element's style to change, could also affect its pseudo-elements.
     auto recompute_pseudo_element_style = [&](CSS::PseudoElement pseudo_element) {
@@ -1807,40 +1753,33 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
     if (had_list_marker || originating_style->display().is_list_item()
         || (engine_pseudo_element_records && engine_pseudo_element_records->at(to_underlying(CSS::PseudoElement::Marker)).has_value()))
         recompute_pseudo_element_style(CSS::PseudoElement::Marker);
-    if (settled_after_host_record) {
-        // The CSS animation plans the engine settled beside the pseudo-elements' records, applied in
-        // pseudo tree order, as for pseudo-elements settled beside an engine record.
-        for (auto pseudo_element : { CSS::PseudoElement::Marker, CSS::PseudoElement::Before, CSS::PseudoElement::FirstLetter, CSS::PseudoElement::Selection, CSS::PseudoElement::After }) {
-            auto kind = to_underlying(pseudo_element);
-            if (!records_settled_after_host_record[kind].has_value() || !*records_settled_after_host_record[kind])
-                continue;
-            if (auto plan = style_computer.take_settled_animation_plan(scope, style_node_id(), kind); plan.has_value())
-                style_computer.apply_settled_animation_plan({ *this, pseudo_element }, *plan);
-        }
-        scope.engine().acknowledge_engine_computed_record(style_node_id());
-    }
-
     return invalidation;
 }
 
-CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styles(CSS::StyleDrainScope const& scope)
+// The pseudo-elements inherit from a composition installed after the pass that settled the element:
+// the next pass settles them over it, and decides their transition steps from the records they hold.
+void Element::settle_pseudo_elements_in_next_pass(CSS::StyleDrainScope const& scope, bool old_is_list_item)
+{
+    Array<u64, 8> held_pseudo_records {};
+    for (size_t kind = 0; kind < held_pseudo_records.size(); ++kind)
+        held_pseudo_records[kind] = style_record_identity(static_cast<CSS::PseudoElement>(kind)).value();
+    scope.engine().settle_pseudo_elements_in_next_pass(style_node_id(), old_is_list_item, held_pseudo_records);
+}
+
+// A sample of the element's animations moved what its pseudo-elements, and the elements backing its
+// element-backed pseudo-elements, inherit.
+void Element::settle_pseudo_elements_over_moved_composition(CSS::StyleDrainScope const& scope)
 {
     auto computed_values = this->computed_style();
     VERIFY(computed_values);
 
-    bool did_change_custom_properties = false;
     record_element_reference_pseudo_element_inputs(*this);
-    auto invalidation = recompute_pseudo_element_styles(scope, did_change_custom_properties, computed_values->display().is_list_item(), nullptr);
-    publish_custom_property_names();
-    if (!invalidation.is_none())
-        document().style_invalidation_counters().committed_style_observer_consequences++;
-    apply_computed_pseudo_element_styles_to_layout_nodes_if_needed(with_style_row_counter_style_invalidation(*this, invalidation));
-    return invalidation;
+    settle_pseudo_elements_in_next_pass(scope, computed_values->display().is_list_item());
 }
 
-CSS::RequiredInvalidationAfterStyleChange Element::install_engine_pseudo_element_records_after_sample(CSS::StyleDrainScope const& scope, bool& did_change_custom_properties, bool old_is_list_item, CSS::ComputedValues const* old_originating_style, EnginePseudoElementRecords const* records, CSS::StyleEffectDrain* effect_drain)
+CSS::RequiredInvalidationAfterStyleChange Element::install_engine_pseudo_element_records_after_sample(CSS::StyleDrainScope const& scope, bool& did_change_custom_properties, bool old_is_list_item, EnginePseudoElementRecords const* records, CSS::StyleEffectDrain* effect_drain)
 {
-    auto invalidation = recompute_pseudo_element_styles(scope, did_change_custom_properties, old_is_list_item, old_originating_style, records);
+    auto invalidation = recompute_pseudo_element_styles(scope, did_change_custom_properties, old_is_list_item, records);
     if (effect_drain)
         effect_drain->append(CSS::StyleEffectDrain::LayoutNodeStyle { style_node_id(), with_style_row_counter_style_invalidation(*this, invalidation) });
     else
@@ -2415,7 +2354,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
         counters.element_computed_style_changes++;
         auto invalidation = CSS::RequiredInvalidationAfterStyleChange::full();
         if (!CSS::deferring_engine_pseudo_installation())
-            invalidation |= recompute_pseudo_element_styles(scope, did_change_custom_properties, false, nullptr, &pseudo_element_records, pseudo_element_damages);
+            invalidation |= recompute_pseudo_element_styles(scope, did_change_custom_properties, false, &pseudo_element_records, pseudo_element_damages);
         publish_custom_property_names(move(custom_property_environment));
         if (effect_drain)
             effect_drain->append(CSS::StyleEffectDrain::LayoutNodeStyle { style_node_id(), invalidation });
@@ -2501,7 +2440,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
     }
     // The pseudo-element records the engine settled beside this one install with it.
     if (!CSS::deferring_engine_pseudo_installation())
-        result.invalidation |= recompute_pseudo_element_styles(scope, did_change_custom_properties, old_computed_values->display().is_list_item(), &*old_computed_values, &pseudo_element_records, pseudo_element_damages);
+        result.invalidation |= recompute_pseudo_element_styles(scope, did_change_custom_properties, old_computed_values->display().is_list_item(), &pseudo_element_records, pseudo_element_damages);
     if (held_custom_property_environment.has_value())
         publish_custom_property_names(held_custom_property_environment.release_value());
     else

@@ -145,6 +145,11 @@ pub enum FfiStyleDeltaGap {
     /// record over the moved one as it settled the ancestor. C++ installs the record, and the element
     /// takes the moved environment as it acknowledges it.
     EnvironmentMoved,
+    /// The pass settled the synthetic pseudo-elements of an element over the composition the host
+    /// installed for it since the pass that settled the element: the element's row names the record
+    /// they were settled over, with the kinds whose animations the pass sampled as its
+    /// `inherited_style_groups`, and the rows after it name their records. C++ installs those.
+    PseudoElementsSettled,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -204,18 +209,10 @@ pub enum FfiStyleRowFact {
 pub struct FfiEngineComputedRecord {
     pub style_record: u64,
     pub uses_substitution: bool,
-    /// The node's explicit inheritance debt, when the caller asked to take it with the record.
-    pub explicit_inheritance_debt: u32,
     /// The synthetic pseudo-element kinds whose records the engine settled beside the
     /// element's, as a bit per kind; a present slot holding zero is a removal.
     pub pseudo_records_present: u8,
     pub pseudo_records: [u64; RETRY_PSEUDO_RECORD_SLOTS],
-    /// The synthetic pseudo-element kinds whose animations the engine sampled as it settled them,
-    /// as a bit per kind: their named records are the compositions, and the host samples the rest.
-    pub pseudo_samples_taken: u8,
-    /// The kinds whose transition step the engine decided, as a bit per kind, which the host
-    /// takes and applies where it installs their records.
-    pub pseudo_transition_steps_decided: u8,
 }
 
 /// One synchronous record demand: the row's record, or the absence of a pseudo-element that
@@ -4379,11 +4376,8 @@ fn answer_record_demand_for_host(
             record: FfiEngineComputedRecord {
                 style_record: answer.style_record,
                 uses_substitution: engine.nodes_with_substituted_records.contains(&node),
-                explicit_inheritance_debt: 0,
                 pseudo_records_present: answer.pseudo_records_present,
                 pseudo_records: answer.pseudo_records,
-                pseudo_samples_taken: 0,
-                pseudo_transition_steps_decided: 0,
             },
             is_absent: false,
             is_provisional: answer.provisional,
@@ -4490,72 +4484,6 @@ unsafe fn with_declared_only_declarations<R>(
         }))
         .collect::<Vec<_>>();
     body(&declarations)
-}
-
-/// Settle the synthetic pseudo-element records of an element whose record C++ has just installed.
-/// A kind the answer does not name keeps the record it has.
-///
-/// # Safety
-/// `engine` must be live.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_settle_pseudo_records_after_host_record(
-    engine: *mut c_void,
-    node: u32,
-    old_is_list_item: bool,
-    take_explicit_inheritance_debt: bool,
-    sample_animations: bool,
-    held_pseudo_records: *const u64,
-    layout_arena: *mut c_void,
-) -> FfiEngineComputedRecord {
-    engine_entrance(engine, "style_engine_settle_pseudo_records_after_host_record");
-    abort_on_panic(|| {
-        let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
-        let Some(style_node) = StyleNodeID::from_raw(node) else {
-            return FfiEngineComputedRecord::default();
-        };
-        engine.forget_pseudo_elements_sampled_in_pass(style_node);
-        let (mut settled, uses_substitution) =
-            engine.settle_pseudo_records_after_host_record(style_node, old_is_list_item);
-        // A replay settles without sampling, so it compares what the settle named.
-        let settled_present = settled.pseudo_records_present;
-        let (pseudo_samples_taken, pseudo_transition_steps_decided) = match sample_animations {
-            true => {
-                // SAFETY: The host passes one record per synthetic pseudo-element kind, and lends
-                // the document's layout arena for this call.
-                let held = unsafe { &*held_pseudo_records.cast::<[u64; RETRY_PSEUDO_RECORD_SLOTS]>() };
-                let layout_arena = unsafe { super::animations::CommittedTransformReferenceBoxes::lend(layout_arena) };
-                engine.sample_settled_pseudo_elements(style_node, &mut settled, held, layout_arena)
-            }
-            false => (0, 0),
-        };
-        // The engine names the environment each settled pseudo-element holds once its record is
-        // installed.
-        for kind in 0..RETRY_PSEUDO_RECORD_SLOTS {
-            if (settled.pseudo_records_present >> kind) & 1 != 0 && settled.pseudo_records[kind] != 0 {
-                engine.name_settled_pseudo_element_environment(style_node, kind as u8, settled.pseudo_records[kind]);
-            }
-        }
-        let result = FfiEngineComputedRecord {
-            style_record: settled.style_record,
-            uses_substitution,
-            explicit_inheritance_debt: if take_explicit_inheritance_debt {
-                engine.take_explicit_inheritance_debt(style_node)
-            } else {
-                0
-            },
-            pseudo_records_present: settled.pseudo_records_present,
-            pseudo_records: settled.pseudo_records,
-            pseudo_samples_taken,
-            pseudo_transition_steps_decided,
-        };
-        engine.record_boundary_call(EventKind::SettlePseudoRecordsAfterHostRecord, |payload| {
-            payload.write_u32(node);
-            payload.write_bool(old_is_list_item);
-            payload.write_u64(result.style_record);
-            payload.write_u8(settled_present);
-        });
-        result
-    })
 }
 
 /// The host installs the record of a synthetic pseudo-element the engine settled: the
@@ -5263,7 +5191,9 @@ fn finish_style_transaction(
         if answer.pseudo_kind != u8::MAX
             || matches!(
                 answer.gap,
-                FfiStyleDeltaGap::SkippedHidden | FfiStyleDeltaGap::EnvironmentMoved
+                FfiStyleDeltaGap::SkippedHidden
+                    | FfiStyleDeltaGap::EnvironmentMoved
+                    | FfiStyleDeltaGap::PseudoElementsSettled
             )
         {
             continue;
@@ -5305,8 +5235,10 @@ fn finish_style_transaction(
             .answers
             .iter()
             .filter(|answer| {
-                answer.gap != FfiStyleDeltaGap::EnvironmentMoved
-                    && answer.record_damage & FfiStyleInvalidationField::JoinedByDerivation as u32 == 0
+                !matches!(
+                    answer.gap,
+                    FfiStyleDeltaGap::EnvironmentMoved | FfiStyleDeltaGap::PseudoElementsSettled
+                ) && answer.record_damage & FfiStyleInvalidationField::JoinedByDerivation as u32 == 0
             })
             .count();
         let broad = !output.scoped || planned_rows * 16 > engine.connected_element_count() as usize;
@@ -6450,8 +6382,6 @@ pub enum FfiStyleHostStep {
     Row,
     RetriedAfterAncestors,
     RetriedMaterialization,
-    /// Pseudo-element records settled after the host installed and sampled the element's.
-    PseudoSettle,
     DeclinedRow,
     InheritedCustomPropertyRefresh,
 }
@@ -6463,7 +6393,6 @@ impl FfiStyleHostStep {
             Self::Row => "host:row",
             Self::RetriedAfterAncestors => "host:retried_after_ancestors",
             Self::RetriedMaterialization => "host:retried_materialization",
-            Self::PseudoSettle => "host:pseudo_settle",
             Self::DeclinedRow => "host:declined_row",
             Self::InheritedCustomPropertyRefresh => "host:inherited_custom_property_refresh",
         }

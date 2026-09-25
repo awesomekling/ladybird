@@ -847,19 +847,11 @@ void apply_published_animation_overlay(CSS::StyleDrainScope const& scope, DOM::A
         target->document().style_computer().style_engine().record_derived_element_style_input_change(
             target->style_node_id(), CSS::StyleEngine::PublishedStyle | CSS::StyleEngine::RecomputeStyle);
 
-    if (!element.pseudo_element().has_value() && invalidation.inherited_style_changed()) {
-        // Recomputing pseudo-element styles can start transitions, which stay provisional until a stabilization
-        // epoch commits them. This update also runs outside any style update (for example when an inert animation
-        // is disassociated from its target), so hold an epoch open around it.
-        auto& document = target->document();
-        document.begin_style_stabilization_epoch();
-        ScopeGuard end_stabilization_epoch = [&] {
-            document.end_style_stabilization_epoch();
-        };
-        if (!CSS::deferring_engine_pseudo_installation()) {
-            target->document().style_computer().style_engine().set_sampled_composition_identity(target->style_node_id(), target->style_record_identity());
-            invalidation |= target->recompute_pseudo_element_styles(scope);
-        }
+    // The pseudo-elements inherit from the composition: the next pass settles them over it, as the ordinary
+    // transaction settles the descendants below.
+    if (!element.pseudo_element().has_value() && invalidation.inherited_style_changed() && !CSS::deferring_engine_pseudo_installation()) {
+        target->document().style_computer().style_engine().set_sampled_composition_identity(target->style_node_id(), target->style_record_identity());
+        target->settle_pseudo_elements_over_moved_composition(scope);
     }
 
     // An animated value can be inherited through shadow and slot boundaries. Publish the exact

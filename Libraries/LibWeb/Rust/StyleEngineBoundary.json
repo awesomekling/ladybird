@@ -153,9 +153,11 @@
     [176, "RestoreRowDebts"],
     [177, "GrantStyleNodes"],
     [178, "AcknowledgeEnvironmentMove"],
-    [179, "SetElementReplacedContentInput"]
+    [179, "SetElementReplacedContentInput"],
+    [180, "SettlePseudoElementsInNextPass"]
   ],
   "operations": [
+    { "event": "SettlePseudoElementsInNextPass", "ffi": "style_engine_settle_pseudo_elements_in_next_pass", "cpp": "settle_pseudo_elements_in_next_pass", "return": "void", "args": [["node", "style_node"], ["old_is_list_item", "bool"], ["held_pseudo_records", "u64_slice"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.settle_pseudo_elements_in_next_pass(node, old_is_list_item, held_pseudo_records);" },
     { "event": "RecordContainerQueryInput", "ffi": "style_engine_record_container_query_input", "cpp": "record_container_query_input", "return": "void", "args": [["node", "style_node"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.record_container_query_input(node);" },
     { "event": "NoteHostEntry", "ffi": "style_engine_note_host_entry", "cpp": "note_host_entry", "return": "void", "args": [["node", "style_node"], ["kind", "u8"], ["row_kinds", "u8"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.note_host_entry(node, kind, row_kinds);" },
     { "event": "SetPseudoElementStyleDeferred", "ffi": "style_engine_set_pseudo_element_style_deferred", "cpp": "set_pseudo_element_style_deferred", "return": "void", "args": [["kind", "u8"], ["deferred", "bool"]], "body": "engine.set_pseudo_element_style_deferred(crate::css::style::tree::PseudoElementKind(u16::from(kind)), deferred);" },

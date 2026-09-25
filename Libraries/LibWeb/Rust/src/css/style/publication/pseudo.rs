@@ -1475,6 +1475,168 @@ impl StyleEngineState {
         }
         (settled, scratch.pseudo_uses_substitution)
     }
+
+    /// The host installed the composition of an element whose synthetic pseudo-elements the pass
+    /// that settled it left alone, as they inherit from a composition still to come: the next pass
+    /// settles them over it. `old_is_list_item` is whether the element generated a marker before,
+    /// and `held_pseudo_records` are the records the host holds for its pseudo-elements, one per
+    /// kind, which their transition steps are decided from. An element with no synthetic
+    /// pseudo-element to settle owes nothing.
+    pub fn settle_pseudo_elements_in_next_pass(
+        &mut self,
+        node: StyleNodeID,
+        old_is_list_item: bool,
+        held_pseudo_records: &[u64],
+    ) {
+        if !self
+            .retained
+            .may_settle_pseudo_elements(node, old_is_list_item, held_pseudo_records)
+        {
+            return;
+        }
+        let owed = self.retained.pseudo_settles_owed.entry(node).or_insert_with(|| {
+            let mut held = [0; bridge::RETRY_PSEUDO_RECORD_SLOTS];
+            for (held, &record) in held.iter_mut().zip(held_pseudo_records) {
+                *held = record;
+            }
+            publication::OwedPseudoSettle {
+                old_is_list_item,
+                held_pseudo_records: held,
+            }
+        });
+        owed.old_is_list_item |= old_is_list_item;
+    }
+
+    /// Settle the synthetic pseudo-elements the host's installations since the last pass left
+    /// owed, over the records their elements hold now, as the settle beside an engine record does:
+    /// their animations sampled, their transition steps decided and their environments named.
+    /// Each element's settle is published as a `PseudoElementsSettled` row, followed by a row per
+    /// pseudo-element it names. An element with a row of its own in `rows` has them settled beside
+    /// that row.
+    pub(crate) fn settle_owed_pseudo_elements(
+        &mut self,
+        rows: &[PublishedStyleDeltaRecord],
+        committed_boxes: super::animations::CommittedTransformReferenceBoxes,
+        counters: &mut Counters,
+    ) -> Vec<PublishedStyleDeltaRecord> {
+        let owed = std::mem::take(&mut self.retained.pseudo_settles_owed);
+        let mut settled_rows = Vec::new();
+        for (
+            node,
+            publication::OwedPseudoSettle {
+                old_is_list_item,
+                held_pseudo_records: held,
+            },
+        ) in owed
+        {
+            let has_own_row = rows.iter().any(|row| {
+                row.style_node == node.raw()
+                    && row.pseudo_kind == u8::MAX
+                    && !matches!(
+                        row.gap,
+                        bridge::FfiStyleDeltaGap::SkippedHidden | bridge::FfiStyleDeltaGap::EnvironmentMoved
+                    )
+            });
+            if has_own_row || self.retained.computed_group_sets.assigned_style_record(node).is_none() {
+                continue;
+            }
+            self.forget_pseudo_elements_sampled_in_pass(node);
+            let (mut settled, uses_substitution) =
+                self.settle_pseudo_records_after_host_record(node, old_is_list_item, counters);
+            let (sampled, _) =
+                self.sample_settled_pseudo_elements(node, &mut settled, &held, committed_boxes, counters);
+            for (kind, &record) in settled.pseudo_records.iter().enumerate() {
+                if (settled.pseudo_records_present >> kind) & 1 != 0 && record != 0 {
+                    self.name_settled_pseudo_element_environment(node, kind as u8, record);
+                }
+            }
+            super::engine_sample_check::note_taken("pseudo-elements settled in the pass");
+            let explicit_inheritance_debt = self.retained.take_explicit_inheritance_debt(node);
+            if settled.pseudo_records_present == 0 && explicit_inheritance_debt == 0 {
+                continue;
+            }
+            let row = |old_style_record: u64, new_style_record: u64, pseudo_kind: u8| PublishedStyleDeltaRecord {
+                style_node: node.raw(),
+                match_answer: 0,
+                old_style_record,
+                new_style_record,
+                damage: bridge::FfiStyleDeltaDamage::Full,
+                reaction: 0,
+                inherited_style_groups: 0,
+                pseudo_kind,
+                gap: bridge::FfiStyleDeltaGap::PseudoElementsSettled,
+                uses_substitution: false,
+                record_damage: 0,
+                row_facts: 0,
+                explicit_inheritance_debt: 0,
+                row_effect_debt: 0,
+            };
+            settled_rows.push(PublishedStyleDeltaRecord {
+                inherited_style_groups: sampled,
+                uses_substitution,
+                explicit_inheritance_debt,
+                ..row(settled.style_record, settled.style_record, u8::MAX)
+            });
+            for (kind, &record) in settled.pseudo_records.iter().enumerate() {
+                if (settled.pseudo_records_present >> kind) & 1 != 0 {
+                    settled_rows.push(row(held[kind], record, kind as u8));
+                }
+            }
+        }
+        settled_rows
+    }
+}
+
+/// What an element owes the next pass of its synthetic pseudo-elements: whether it generated a
+/// marker before, and the records the host holds for them, one per kind.
+#[derive(Clone, Copy)]
+pub(crate) struct OwedPseudoSettle {
+    old_is_list_item: bool,
+    held_pseudo_records: [u64; bridge::RETRY_PSEUDO_RECORD_SLOTS],
+}
+
+impl RetainedState {
+    /// Whether a settle may name a synthetic pseudo-element of an element holding `held_pseudo_records`:
+    /// one it holds, a marker of a list item, or one its rules generate, which for a selection
+    /// includes one its ancestors' highlights style.
+    fn may_settle_pseudo_elements(
+        &self,
+        node: StyleNodeID,
+        old_is_list_item: bool,
+        held_pseudo_records: &[u64],
+    ) -> bool {
+        use pseudo_kind::{AFTER, BACKDROP, BEFORE, FIRST_LETTER, SELECTION};
+        if self.backs_host_pseudo_element(node) {
+            return false;
+        }
+        if old_is_list_item || held_pseudo_records.iter().any(|&record| record != 0) {
+            return true;
+        }
+        let is_list_item = self
+            .computed_group_sets
+            .assigned_style_record(node)
+            .and_then(|record| self.computed_group_sets.style_record_view(record.raw()))
+            .and_then(|view| unsafe { view.longhand_table.as_ref() })
+            .is_some_and(|table| table.display_is_list_item());
+        if is_list_item {
+            return true;
+        }
+        // Every element matches the user agent's `::marker` rules; a marker is generated for a list
+        // item alone, as a backdrop is for an element in the top layer alone.
+        let selection_is_deferred = self.deferred_pseudo_element == Some(tree::PseudoElementKind(u16::from(SELECTION)));
+        let mut generated = (1 << BEFORE) | (1 << AFTER) | (1 << FIRST_LETTER);
+        if !selection_is_deferred {
+            generated |= 1 << SELECTION;
+        }
+        if self.top_layer_elements.contains(&node) {
+            generated |= 1 << BACKDROP;
+        }
+        self.published_pseudo_style_mask(node) & generated != 0
+            || (!selection_is_deferred
+                && self
+                    .retained_highlight_inheritance_parent_style_record(node, SELECTION)
+                    .is_some())
+    }
 }
 
 fn synthetic_pseudo_bit(pseudo: Option<tree::PseudoElementTarget>) -> u64 {

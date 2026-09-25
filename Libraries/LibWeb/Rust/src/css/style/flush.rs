@@ -267,9 +267,11 @@ impl StyleEngineState {
         );
         // A transaction made of derived child reactions alone continues the style change whose
         // reactions C++ applied last, one tree generation further.
+        // So does one that settles the pseudo-elements the host's installations left owed.
         self.retained.last_transaction_only_derived_child_reactions =
-            self.host.deferred_element_style_inputs_are_pending
-                && !self.host.deferred_element_style_inputs.is_empty()
+            ((self.host.deferred_element_style_inputs_are_pending
+                && !self.host.deferred_element_style_inputs.is_empty())
+                || !self.retained.pseudo_settles_owed.is_empty())
                 && self.host.externally_recorded_style_input_nodes.is_empty()
                 && self.host.journal.is_empty()
                 && self.host.tree_staging.is_empty()
@@ -3885,6 +3887,45 @@ impl StyleEngineState {
 
 impl StyleEngineState {
     pub fn take_style_transaction(
+        &mut self,
+        root: StyleNodeID,
+        mut emit: impl FnMut(StyleTransactionVersion, ProgramVersion, &[PublishedStyleDeltaRecord]),
+        counters: &mut Counters,
+        committed_boxes: CommittedTransformReferenceBoxes,
+    ) -> bool {
+        if self.retained.pseudo_settles_owed.is_empty() {
+            return self.take_style_transaction_rows(root, emit, counters, committed_boxes);
+        }
+        // The pseudo-elements the host's installations left owed are settled once the rows are:
+        // an element with a row of its own has them settled beside it.
+        let mut batch = None;
+        let scoped = self.take_style_transaction_rows(
+            root,
+            |transaction_version, program_version, rows| {
+                batch = Some((transaction_version, program_version, rows.to_vec()));
+            },
+            counters,
+            committed_boxes,
+        );
+        let (transaction_version, program_version, mut rows) = batch.unwrap_or_else(|| {
+            let transaction_version = self.retained.next_style_transaction_version;
+            self.retained.next_style_transaction_version = StyleTransactionVersion(
+                transaction_version
+                    .0
+                    .checked_add(1)
+                    .expect("style transaction version space exhausted"),
+            );
+            (transaction_version, self.retained.program.version(), Vec::new())
+        });
+        let settled_rows = self.settle_owed_pseudo_elements(&rows, committed_boxes, counters);
+        rows.extend(settled_rows);
+        if !rows.is_empty() {
+            emit(transaction_version, program_version, &rows);
+        }
+        scoped
+    }
+
+    fn take_style_transaction_rows(
         &mut self,
         root: StyleNodeID,
         emit: impl FnMut(StyleTransactionVersion, ProgramVersion, &[PublishedStyleDeltaRecord]),
