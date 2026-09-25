@@ -359,6 +359,16 @@ static RustDeclarationBlock parse_native_declaration_block(Utf16View source)
     return RustDeclarationBlock { block };
 }
 
+// Records an element's inline style the way the host does: as a snapshot of the block that crosses with the next
+// transaction.
+static void record_inline_style_properties(Web::CSS::StyleEngine& engine, Web::CSS::StyleNodeID node, Web::CSS::RustDeclarationBlock const* declarations)
+{
+    auto const* snapshot = declarations ? Web::CSS::Parser::ValueParserFFI::rust_declaration_block_snapshot(declarations->handle()) : nullptr;
+    if (snapshot && Web::CSS::Parser::ValueParserFFI::rust_declaration_data_defines_a_css_transition(snapshot))
+        engine.note_css_transitions_may_observe_style_changes();
+    engine.record_inline_style_properties(node, snapshot);
+}
+
 TEST_CASE(style_engine_consumes_native_inline_declaration_blocks)
 {
     StyleEngine engine(StyleEngine::DeviceClass::ForegroundDesktop);
@@ -368,12 +378,12 @@ TEST_CASE(style_engine_consumes_native_inline_declaration_blocks)
     auto transitions = parse_native_declaration_block(u"transition-duration: 1s"sv);
     auto retained = declarations.retain();
     StyleValueFFI::rust_style_ffi_counters_reset();
-    engine.set_element_inline_style_properties(node, &declarations);
+    record_inline_style_properties(engine, node, &declarations);
     EXPECT(!engine.css_transitions_may_observe_style_changes());
-    engine.set_element_inline_style_properties(node, &shared);
-    engine.set_element_inline_style_properties(node, nullptr);
+    record_inline_style_properties(engine, node, &shared);
+    record_inline_style_properties(engine, node, nullptr);
     declarations.replace(transitions);
-    engine.set_element_inline_style_properties(node, &retained);
+    record_inline_style_properties(engine, node, &retained);
     EXPECT(engine.css_transitions_may_observe_style_changes());
     for (size_t index = 0; index < StyleValueFFI::rust_style_ffi_counter_count(); ++index) {
         auto const* name_data = reinterpret_cast<char const*>(StyleValueFFI::rust_style_ffi_counter_name(index));
