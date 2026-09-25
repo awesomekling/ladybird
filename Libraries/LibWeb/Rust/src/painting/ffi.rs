@@ -835,13 +835,12 @@ pub unsafe extern "C" fn layout_arena_visual_context_pending_dirty_box_count(are
 pub unsafe extern "C" fn layout_arena_background_color_can_be_compositor_animated(
     arena: *mut c_void,
     slot: NodeSlotId,
-    root_background_source: crate::painting::host::FfiRootBackgroundSource,
 ) -> bool {
     let arena = unsafe { arena_from_handle(arena) };
     crate::painting::record::paint::background_resolution::background_color_can_be_compositor_animated(
         &arena.paintable_rows(),
         slot,
-        root_background_source,
+        crate::layout::root_background_source(arena),
     )
 }
 

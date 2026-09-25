@@ -10,7 +10,11 @@
 //! boxes' values and a `display: none` body has style but no box. The boxes' final styles are
 //! derived before the layout pass borrows their payloads.
 
+use crate::css::computed_value_views::ComputedValuesView;
 use crate::css::css_enums::overflow;
+use crate::css::style::StyleEngine;
+use crate::css::style::bridge::{element_adjustment_fact, element_construction_fact};
+use crate::css::style::tree::StyleNodeID;
 use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::NodeSlotId;
 
@@ -59,13 +63,43 @@ fn overflow_as_applied_to_viewport(value: u8) -> u8 {
     }
 }
 
+/// The published style record the style engine holds for an element.
+fn published_style(engine: &StyleEngine, node: StyleNodeID) -> Option<ComputedValuesView<'_>> {
+    let (_, payloads) = engine.element_published_style_record(node)?;
+    // SAFETY: A published record's payload pointer addresses the record's group pointer array,
+    // which FfiStylePayloads mirrors exactly, and the engine keeps the record while it is borrowed.
+    Some(ComputedValuesView::new(
+        &unsafe { &*payloads.cast::<crate::layout::FfiStylePayloads>() }.groups,
+    ))
+}
+
+fn has_any_containment(style: ComputedValuesView<'_>) -> bool {
+    let values = style.box_values();
+    values.size_containment
+        || values.inline_size_containment
+        || values.layout_containment
+        || values.style_containment
+        || values.paint_containment
+}
+
+/// The document element, which is the first DOM child of the style node the viewport box was
+/// built for.
+fn document_element(arena: &LayoutNodeArena) -> Option<StyleNodeID> {
+    arena.first_dom_child(arena.document_style_node())
+}
+
+/// The first child of the document element the style engine knows as an HTML body element.
+fn first_html_body_child(engine: &StyleEngine, root_element: StyleNodeID) -> Option<StyleNodeID> {
+    engine
+        .tree()
+        .dom_children(root_element)
+        .find(|&child| engine.element_adjustment_facts(child) & element_adjustment_fact::IS_HTML_BODY_ELEMENT != 0)
+}
+
 /// The inputs of the propagation: the document element and its first HTML body child element, as
 /// their own published style records have them. The previous pass rewrote their boxes' values,
 /// and a `display: none` body has style but no box, so the records are read rather than the rows.
 pub(crate) fn viewport_propagation_facts(arena: &LayoutNodeArena) -> ViewportPropagationFacts {
-    use crate::css::computed_value_views::ComputedValuesView;
-    use crate::css::style::bridge::{element_adjustment_fact, element_construction_fact};
-
     let mut facts = ViewportPropagationFacts {
         root_layout_node: NodeSlotId::INVALID,
         root_is_html_html_element: false,
@@ -83,7 +117,7 @@ pub(crate) fn viewport_propagation_facts(arena: &LayoutNodeArena) -> ViewportPro
         body_direction: 0,
         body_has_containment: false,
     };
-    let Some(root_element) = arena.first_dom_child(arena.document_style_node()) else {
+    let Some(root_element) = document_element(arena) else {
         return facts;
     };
     let root_row = arena.bound_row(root_element);
@@ -91,23 +125,8 @@ pub(crate) fn viewport_propagation_facts(arena: &LayoutNodeArena) -> ViewportPro
         return facts;
     }
     arena.with_style_store(|engine| {
-        let style_of = |node| {
-            let (_, payloads) = engine.element_published_style_record(node)?;
-            // SAFETY: A published record's payload pointer addresses the record's group pointer
-            // array, which FfiStylePayloads mirrors exactly, and the record outlives this read.
-            Some(ComputedValuesView::new(
-                &unsafe { &*payloads.cast::<crate::layout::FfiStylePayloads>() }.groups,
-            ))
-        };
-        let has_any_containment = |style: ComputedValuesView<'_>| {
-            let values = style.box_values();
-            values.size_containment
-                || values.inline_size_containment
-                || values.layout_containment
-                || values.style_containment
-                || values.paint_containment
-        };
-        let root_style = style_of(root_element).expect("the document element's box was built from its published style");
+        let root_style = published_style(engine, root_element)
+            .expect("the document element's box was built from its published style");
         facts.root_layout_node = root_row;
         facts.root_is_html_html_element =
             engine.element_construction_facts(root_element) & element_construction_fact::IS_HTML_HTML_ELEMENT != 0;
@@ -117,14 +136,10 @@ pub(crate) fn viewport_propagation_facts(arena: &LayoutNodeArena) -> ViewportPro
         facts.root_direction = root_style.direction();
         facts.root_has_containment = has_any_containment(root_style);
 
-        let Some(body_element) = engine
-            .tree()
-            .dom_children(root_element)
-            .find(|&child| engine.element_adjustment_facts(child) & element_adjustment_fact::IS_HTML_BODY_ELEMENT != 0)
-        else {
+        let Some(body_element) = first_html_body_child(engine, root_element) else {
             return;
         };
-        let Some(body_style) = style_of(body_element) else {
+        let Some(body_style) = published_style(engine, body_element) else {
             return;
         };
         facts.has_styled_body = true;
@@ -137,6 +152,56 @@ pub(crate) fn viewport_propagation_facts(arena: &LayoutNodeArena) -> ViewportPro
         facts.body_has_containment = has_any_containment(body_style);
     });
     facts
+}
+
+// https://drafts.csswg.org/css-backgrounds-3/#body-background
+/// The boxes the canvas background is painted from: the document element's, and the document's
+/// body's, whose background the canvas takes over when the root's is transparent and has no image.
+pub(crate) fn root_background_source(arena: &LayoutNodeArena) -> crate::painting::host::FfiRootBackgroundSource {
+    let mut source = crate::painting::host::FfiRootBackgroundSource::default();
+    let Some(root_element) = document_element(arena) else {
+        return source;
+    };
+    source.root_layout_node = arena.bound_row(root_element);
+    arena.with_style_store(|engine| {
+        // The document's body is the first child of its <html> document element that is a <body>
+        // or a <frameset>, which the element knows of itself.
+        if let Some(body) = engine
+            .tree()
+            .dom_children(root_element)
+            .find(|&child| engine.element_construction_facts(child) & element_construction_fact::IS_BODY != 0)
+        {
+            source.body_layout_node = arena.bound_row(body);
+        }
+
+        // https://drafts.csswg.org/css-contain-2/#contain-property
+        // Additionally, when any containments are active on either the HTML <html> or <body> elements, propagation of
+        // properties from the <body> element to the initial containing block, the viewport, or the canvas background,
+        // is disabled.
+        if source.root_layout_node.is_invalid()
+            || engine.element_construction_facts(root_element) & element_construction_fact::IS_HTML_HTML_ELEMENT == 0
+        {
+            return;
+        }
+        let Some(root_style) = published_style(engine, root_element) else {
+            return;
+        };
+        if has_any_containment(root_style) {
+            return;
+        }
+        let Some(body_element) = first_html_body_child(engine, root_element) else {
+            return;
+        };
+        if arena.bound_row(body_element).is_invalid()
+            || published_style(engine, body_element).is_none_or(has_any_containment)
+        {
+            return;
+        }
+        source.use_body_background_properties =
+            !crate::painting::style_queries::background_layers_have_image(root_style)
+                && root_style.background().background_color == 0;
+    });
+    source
 }
 
 /// `None` when the document element has no box; the viewport then only gets `overflow: auto`.
