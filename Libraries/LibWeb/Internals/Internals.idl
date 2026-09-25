@@ -214,6 +214,8 @@ interface Internals {
     boolean clockFramesEnabled();
     // LIBWEB_RENDER_CLOCK_FRAMES: the display ticks the render clock handed the stage thread, without the main thread.
     unsigned long long clockTicksReceived();
+    // LIBWEB_RENDER_CLOCK_FRAMES: whether document holds a clock lease a render clock ticks.
+    boolean renderClockTicks(Document document);
     // What the render clock did with them: ticksPosted, ticksFolded, ticksRun, ticksInstalled, ticksNeedingMain and
     // why it dropped the others.
     object getRenderClockCounters();

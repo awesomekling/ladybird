@@ -1549,6 +1549,11 @@ u64 Internals::clock_ticks_received() const
     return counters.ticks_posted + counters.ticks_folded;
 }
 
+bool Internals::render_clock_ticks(DOM::Document const& document) const
+{
+    return HTML::main_thread_event_loop().frame_scheduler().render_clock_ticks(document);
+}
+
 void Internals::set_render_clock_suspended(bool suspended)
 {
     HTML::main_thread_event_loop().frame_scheduler().set_render_clock_suspended(suspended);

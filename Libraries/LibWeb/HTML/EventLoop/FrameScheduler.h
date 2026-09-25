@@ -235,6 +235,9 @@ private:
         Vector<GC::Ref<Animations::KeyframeEffect>> effects;
         // Whether the rendering update running now ticked the lease.
         bool ticked { false };
+        // Whether the rendering update running now renders the lease's document: one that renders only other documents
+        // (another top-level traversable's, at its own rendering opportunity) leaves the lease as it is.
+        bool renders_in_update { true };
         // The compositor context at whose display ticks a render clock ticks the lease, if one does.
         Optional<Compositing::CompositorContextId> render_clock_context {};
         // The time the document timeline reads in the rendering update running now: that of the render clock's last
