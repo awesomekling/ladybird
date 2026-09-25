@@ -5182,6 +5182,52 @@ pub unsafe extern "C" fn style_engine_submit_style_transaction(
     computation_inputs: FfiDocumentStyleComputationInputs,
     layout_arena: *mut c_void,
 ) {
+    // SAFETY: Guaranteed by the caller.
+    let pass = unsafe { prepare_style_pass(engine, root, computation_inputs, layout_arena) };
+    // SAFETY: As above.
+    unsafe { crate::stage_thread::submit_stage("style", layout_arena, move || pass.run()) };
+}
+
+/// A style pass the main thread has prepared to run beside it: the engine it owns while it runs,
+/// and what it takes along from the main thread. Running it leaves its output in the engine, for
+/// [`style_engine_finish_submitted_style_transaction`].
+pub(crate) struct StylePassJob {
+    engine: crate::stage_thread::FrameOwns<*mut StyleEngine>,
+    root: StyleNodeID,
+    snapshot: super::animations::CommittedTransformReferenceBoxSnapshot,
+    timeline_samples: super::animations::AnimationTimelineSamples,
+}
+
+impl StylePassJob {
+    /// Runs the pass, on the stage that owns the engine.
+    pub(crate) fn run(self) {
+        let Self {
+            engine,
+            root,
+            snapshot,
+            timeline_samples,
+        } = self;
+        // SAFETY: The frame in flight owns the engine until the main thread takes it back.
+        let engine = unsafe { &mut *engine.into_inner() };
+        // SAFETY: The pass owns the snapshot for as long as it runs.
+        let committed_boxes = unsafe { super::animations::CommittedTransformReferenceBoxes::taken_along(&snapshot) };
+        let output = run_style_pass(engine, root, committed_boxes, &timeline_samples);
+        engine.host.submitted_style_pass_output = Some((root, Box::new(output)));
+    }
+}
+
+/// Takes the pending style transaction as [`style_engine_submit_style_transaction`] does, up to the
+/// point where its pass would be submitted, and returns that pass.
+///
+/// # Safety
+/// As for [`style_engine_submit_style_transaction`]: the pass returned has to run in a frame in
+/// flight that owns the engine.
+pub(crate) unsafe fn prepare_style_pass(
+    engine: *mut c_void,
+    root: u32,
+    computation_inputs: FfiDocumentStyleComputationInputs,
+    layout_arena: *mut c_void,
+) -> StylePassJob {
     engine_entrance(engine, "style_engine_take_style_transaction");
     assert!(
         !layout_arena.is_null(),
@@ -5198,8 +5244,6 @@ pub unsafe extern "C" fn style_engine_submit_style_transaction(
     // SAFETY: Guaranteed by the caller.
     unsafe { begin_style_transaction(engine, computation_inputs) };
     engine.host.atom_sweep_waits_for_host = true;
-    // SAFETY: Guaranteed by the caller: the frame in flight owns the engine.
-    let engine_on_stage = unsafe { crate::stage_thread::FrameOwns::new(engine_handle.cast::<StyleEngine>()) };
     // The pass never reaches the arena, which the main thread goes on writing beside it: it takes
     // along the committed boxes of the nodes it may sample against them.
     // SAFETY: Guaranteed by the caller: no stage owns the arena yet.
@@ -5208,16 +5252,13 @@ pub unsafe extern "C" fn style_engine_submit_style_transaction(
     };
     // It takes along the times the host published for this update as well, which it samples at.
     let timeline_samples = engine.animation_timeline_samples().clone();
-    let pass = move || {
-        // SAFETY: The frame in flight owns the engine until the main thread takes it back.
-        let engine = unsafe { &mut *engine_on_stage.into_inner() };
-        // SAFETY: The pass owns the snapshot for as long as it runs.
-        let committed_boxes = unsafe { super::animations::CommittedTransformReferenceBoxes::taken_along(&snapshot) };
-        let output = run_style_pass(engine, root, committed_boxes, &timeline_samples);
-        engine.host.submitted_style_pass_output = Some((root, Box::new(output)));
-    };
-    // SAFETY: As above.
-    unsafe { crate::stage_thread::submit_stage("style", layout_arena, pass) };
+    StylePassJob {
+        // SAFETY: Guaranteed by the caller: the frame in flight owns the engine.
+        engine: unsafe { crate::stage_thread::FrameOwns::new(engine_handle.cast::<StyleEngine>()) },
+        root,
+        snapshot,
+        timeline_samples,
+    }
 }
 
 /// The answers of the style pass [`style_engine_submit_style_transaction`] submitted, once the

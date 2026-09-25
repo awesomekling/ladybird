@@ -1348,60 +1348,113 @@ unsafe fn update_layout(
         trace: unsafe { UpdateLayoutTrace::new(inputs.reason_name) },
     };
     let submits_pass = may_submit_pass && crate::stage_thread::submits("layout");
-    let mut frame = LayoutFrame {
-        inputs,
-        messages: FrameMessages::default(),
-        layout_pass: 0,
-        connected_element_count: 0,
-        pass_sources: None,
-        tree_build_document_style_node: None,
-        list_owners_to_rebuild: Vec::new(),
-        selection: None,
-        owed_host_halves: Cell::default(),
-    };
     // SAFETY: Guaranteed by the caller.
-    let Some(facts) = (unsafe { frame.drive(main_thread, submits_pass) }) else {
+    let Some(pass) = (unsafe { LayoutPassJob::prepare(main_thread, inputs, submits_pass) }) else {
         return FfiLayoutUpdateOutcome::Finished;
     };
-    // The style round paid what the frame owed. What the round in flight comes to owe (its tree
-    // build's host half, its commits' host halves) is paid as the frame is taken back: tasks that
-    // run beside the flight and would read it reach it through the arena's doors, which join.
-    debug_assert!(
-        frame.owed_host_halves.get_mut().is_empty(),
-        "the style round pays what the frame owed"
-    );
-    let taken_back = std::sync::Arc::new(std::sync::Mutex::new(None));
-    let taken_back_by_stage = taken_back.clone();
+    let take_back = pass.take_back();
     // SAFETY: The frame reaches only the arena, which the frame in flight owns until the document
     // thread takes it back, and every document-thread path to the arena, the style mirror its tree
     // build walks and the tree update marks it holds joins the frame first.
-    let frame = unsafe { crate::stage_thread::FrameOwns::new(frame) };
-    // SAFETY: As above.
     unsafe {
         crate::stage_thread::submit_stage_with_take_back(
             "layout",
             arena_handle,
-            move || {
-                let mut frame = frame.into_inner();
-                // Where the frame would go on from here is the next layout update's to find: the
-                // take-back ends it wherever the document thread is.
-                // The frame in flight owns the arena, as the safety comment above says.
-                let _ = frame.run_round_through_pass(facts);
-                *taken_back_by_stage.lock().expect("a frame that ran left itself") =
-                    Some(crate::stage_thread::FrameOwns::new(frame));
-            },
-            move || {
-                let frame = taken_back
-                    .lock()
-                    .expect("a frame that ran left itself")
-                    .take()
-                    .expect("the frame is taken back once its round has run")
-                    .into_inner();
-                main_thread_entries::finish_layout_frame_taken_back(arena_handle, frame);
-            },
+            move || pass.run(),
+            move || take_back.finish(),
         );
     }
     FfiLayoutUpdateOutcome::PassSubmitted
+}
+
+/// A layout frame the document thread has driven up to its full layout pass, which it hands to a
+/// stage to run the rest of its round. The stage leaves the frame where [`LayoutPassTakeBack`]
+/// finds it once the document thread has taken the frame back.
+pub(crate) struct LayoutPassJob {
+    arena_handle: usize,
+    frame: crate::stage_thread::FrameOwns<LayoutFrame>,
+    facts: FfiLayoutUpdateDocumentFacts,
+    ran: std::sync::Arc<std::sync::Mutex<Option<crate::stage_thread::FrameOwns<LayoutFrame>>>>,
+}
+
+/// What the document thread runs once it has taken back the frame of a [`LayoutPassJob`].
+pub(crate) struct LayoutPassTakeBack {
+    arena_handle: *mut c_void,
+    ran: std::sync::Arc<std::sync::Mutex<Option<crate::stage_thread::FrameOwns<LayoutFrame>>>>,
+}
+
+impl LayoutPassJob {
+    /// Drives the layout frame of `inputs` on the document thread up to its full layout pass, if
+    /// `submits_pass`, and returns the pass. Returns `None` if the frame ended on the document
+    /// thread instead.
+    ///
+    /// # Safety
+    ///
+    /// As for [`update_layout`]. The pass returned has to run in a frame in flight that owns the arena.
+    unsafe fn prepare(main_thread: &crate::stage::MainThread, inputs: FrameInputs, submits_pass: bool) -> Option<Self> {
+        let mut frame = LayoutFrame {
+            inputs,
+            messages: FrameMessages::default(),
+            layout_pass: 0,
+            connected_element_count: 0,
+            pass_sources: None,
+            tree_build_document_style_node: None,
+            list_owners_to_rebuild: Vec::new(),
+            selection: None,
+            owed_host_halves: Cell::default(),
+        };
+        // SAFETY: Guaranteed by the caller.
+        let facts = unsafe { frame.drive(main_thread, submits_pass) }?;
+        // The style round paid what the frame owed. What the round in flight comes to owe (its tree
+        // build's host half, its commits' host halves) is paid as the frame is taken back: tasks that
+        // run beside the flight and would read it reach it through the arena's doors, which join.
+        debug_assert!(
+            frame.owed_host_halves.get_mut().is_empty(),
+            "the style round pays what the frame owed"
+        );
+        Some(Self {
+            arena_handle: frame.inputs.arena_handle as usize,
+            // SAFETY: Guaranteed by the caller.
+            frame: unsafe { crate::stage_thread::FrameOwns::new(frame) },
+            facts,
+            ran: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        })
+    }
+
+    /// What the document thread runs once it has taken the frame back.
+    pub(crate) fn take_back(&self) -> LayoutPassTakeBack {
+        LayoutPassTakeBack {
+            arena_handle: self.arena_handle as *mut c_void,
+            ran: self.ran.clone(),
+        }
+    }
+
+    /// Runs the rest of the frame's round, on the stage that owns the arena.
+    pub(crate) fn run(self) {
+        let Self { frame, facts, ran, .. } = self;
+        let mut frame = frame.into_inner();
+        // Where the frame would go on from here is the next layout update's to find: the take-back
+        // ends it wherever the document thread is.
+        // SAFETY: The frame in flight owns the arena, as LayoutPassJob::prepare requires.
+        let _ = unsafe { frame.run_round_through_pass(facts) };
+        // SAFETY: As above.
+        *ran.lock().expect("a frame that ran left itself") =
+            Some(unsafe { crate::stage_thread::FrameOwns::new(frame) });
+    }
+}
+
+impl LayoutPassTakeBack {
+    /// Ends the frame the stage ran, on the document thread, which has taken the frame back.
+    pub(crate) fn finish(self) {
+        let frame = self
+            .ran
+            .lock()
+            .expect("a frame that ran left itself")
+            .take()
+            .expect("the frame is taken back once its round has run")
+            .into_inner();
+        main_thread_entries::finish_layout_frame_taken_back(self.arena_handle, frame);
+    }
 }
 
 /// Ends a layout frame whose round the document thread has taken back, and then the update: takes
