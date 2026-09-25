@@ -45,7 +45,6 @@ pub(crate) use main_thread_entries::MainThreadFfiEntry;
 #[repr(C)]
 pub struct FfiLayoutUpdateHostCallbacks {
     pub context: *mut c_void,
-    pub connected_element_count: unsafe extern "C" fn(*mut c_void) -> u32,
     pub update_style: unsafe extern "C" fn(*mut c_void),
     pub process_pending_list_item_renumbers: unsafe extern "C" fn(*mut c_void),
     pub process_pending_top_layer_layout_changes: unsafe extern "C" fn(*mut c_void),
@@ -166,7 +165,6 @@ pub struct FfiLayoutTreeBuildStats {
 #[derive(Clone, Copy)]
 pub(crate) struct LayoutUpdateHost {
     context: *mut c_void,
-    connected_element_count: unsafe extern "C" fn(*mut c_void) -> u32,
     update_style: unsafe extern "C" fn(*mut c_void),
     process_pending_list_item_renumbers: unsafe extern "C" fn(*mut c_void),
     process_pending_top_layer_layout_changes: unsafe extern "C" fn(*mut c_void),
@@ -192,7 +190,6 @@ impl From<FfiLayoutUpdateHostCallbacks> for LayoutUpdateHost {
     fn from(host: FfiLayoutUpdateHostCallbacks) -> Self {
         Self {
             context: host.context,
-            connected_element_count: host.connected_element_count,
             update_style: host.update_style,
             process_pending_list_item_renumbers: host.process_pending_list_item_renumbers,
             process_pending_top_layer_layout_changes: host.process_pending_top_layer_layout_changes,
@@ -216,10 +213,6 @@ impl From<FfiLayoutUpdateHostCallbacks> for LayoutUpdateHost {
 
 impl LayoutUpdateHost {
     // SAFETY (for every call below): The C++ host answers synchronously from its live document.
-    fn connected_element_count(&self, _: &crate::stage::MainThread) -> u32 {
-        unsafe { (self.connected_element_count)(self.context) }
-    }
-
     fn update_style(&self, _: &crate::stage::MainThread) {
         unsafe { (self.update_style)(self.context) }
     }
@@ -748,7 +741,8 @@ impl LayoutFrame<'_> {
                 let facts = host.document_facts(main_thread);
                 Joined {
                     value: (
-                        host.connected_element_count(main_thread),
+                        self.arena()
+                            .with_style_store(|engine| engine.tree().connected_element_count()),
                         self.ready_round_after_style(main_thread, host, &facts),
                     ),
                     facts,

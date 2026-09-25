@@ -294,6 +294,9 @@ public:
     // not moved.
     [[nodiscard]] PublishedTransactionVersion published_transaction_version() const { return m_published_transaction_version; }
     void note_published_transaction_version(PublishedTransactionVersion version) { m_published_transaction_version = version; }
+    // The elements connected to the document as the last style transaction was taken, published
+    // with it.
+    [[nodiscard]] u32 connected_element_count_at_last_transaction() const { return m_connected_element_count_at_last_transaction; }
 
     struct PublishedStyleTransaction {
         PublishedTransactionVersion version;
@@ -377,6 +380,7 @@ private:
     HashMap<StyleAtomID, bool> m_attribute_names_requiring_value_text;
     u64 m_atom_generation { 1 };
     PublishedTransactionVersion m_published_transaction_version { 0, 0 };
+    u32 m_connected_element_count_at_last_transaction { 0 };
     u64 m_attribute_value_text_requirements_version { 0 };
     HashTable<StyleNodeID> m_nodes_with_pending_initial_features;
     HashTable<StyleNodeID> m_nodes_awaiting_first_style_computation;
