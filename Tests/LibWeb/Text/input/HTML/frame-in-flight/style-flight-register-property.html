@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<style>
+    :root { --gap: 3px; }
+    :root.big { --gap: 6px; font-size: 20px; }
+    #outer { --size: 20px; width: 100px; }
+    #inner { width: var(--size, 50px); height: var(--gap); }
+</style>
+<div id="outer"><div id="inner"></div></div>
+<script>
+    // CSS.registerProperty() while the style pass is in flight: the pass reads the document's registrations (the root
+    // declares a custom property), so the change waits for the pass's drain instead of rewriting them under it, and
+    // the next style update sees the registration.
+    asyncTest(async done => {
+        const registered = await whileStyleInFlight("before-run", () => {
+            document.documentElement.classList.add("big");
+        }, frame => {
+            const joined = writeJoinedStylePass(() => {
+                CSS.registerProperty({ name: "--size", syntax: "<length>", inherits: false, initialValue: "5px" });
+            });
+            return { ...frame, joined };
+        });
+        println(`held as armed: ${styleHeldAsArmed(registered, "before-run")}`);
+        println(`registration joined the pass: ${registered.joined}`);
+        await twoFrames();
+        println(`inner width (not inherited, initial value): ${inner.offsetWidth}`);
+        println(`inner height: ${inner.offsetHeight}`);
+        println(`outer --size: ${getComputedStyle(outer).getPropertyValue("--size")}`);
+        println(`inner --size: ${getComputedStyle(inner).getPropertyValue("--size")}`);
+        done();
+    });
+</script>
