@@ -46,7 +46,7 @@ pub(crate) fn node_replaced_content_facts_need_host(data: &NodeData) -> bool {
     }
     matches!(
         kind,
-        NodeKind::ImageBox | NodeKind::NavigableContainerViewport | NodeKind::SVGSVGBox | NodeKind::VideoBox
+        NodeKind::ImageBox | NodeKind::NavigableContainerViewport | NodeKind::SVGSVGBox
     )
 }
 
@@ -62,26 +62,26 @@ fn style_has_size_containment(style: ComputedValuesView<'_>) -> bool {
 }
 
 /// The replaced-content facts of a node whose facts need no host: a size-contained box, a
-/// checkbox, radio button, slider, textarea, text input or canvas, or a kind with no natural size.
+/// checkbox, radio button, slider, textarea, text input, canvas or video, or a kind with no
+/// natural size.
 pub(crate) fn derived_replaced_content_facts(data: &NodeData, input: ReplacedContentInput) -> FfiReplacedContentFacts {
     debug_assert!(!node_replaced_content_facts_need_host(data));
     let mut facts = FfiReplacedContentFacts::default();
     let Some(style) = node_style_view(data) else {
         return facts;
     };
-    if let Some((width, height)) = derived_auto_content_size(data, style, input) {
+    let auto_content_size = derived_auto_content_size(data, style, input);
+    if let Some(width) = auto_content_size.width {
         facts.has_auto_content_width = true;
         facts.auto_content_width = width;
+    }
+    if let Some(height) = auto_content_size.height {
         facts.has_auto_content_height = true;
         facts.auto_content_height = height;
-        if data.kind.get() == NodeKind::CanvasBox
-            && !style_has_size_containment(style)
-            && width != CssPixels::default()
-            && height != CssPixels::default()
-        {
-            facts.auto_content_aspect_ratio_numerator = width;
-            facts.auto_content_aspect_ratio_denominator = height;
-        }
+    }
+    if let Some((numerator, denominator)) = auto_content_size.aspect_ratio {
+        facts.auto_content_aspect_ratio_numerator = numerator;
+        facts.auto_content_aspect_ratio_denominator = denominator;
     }
     if style.appearance() == crate::css::css_enums::appearance::NONE
         && let ReplacedContentInput::Input {
@@ -98,11 +98,29 @@ pub(crate) fn derived_replaced_content_facts(data: &NodeData, input: ReplacedCon
     facts
 }
 
+/// A replaced box's natural size and aspect ratio, any of which it can lack.
+#[derive(Default)]
+struct AutoContentSize {
+    width: Option<CssPixels>,
+    height: Option<CssPixels>,
+    aspect_ratio: Option<(CssPixels, CssPixels)>,
+}
+
+impl AutoContentSize {
+    fn of_size(width: CssPixels, height: CssPixels) -> Self {
+        Self {
+            width: Some(width),
+            height: Some(height),
+            aspect_ratio: None,
+        }
+    }
+}
+
 fn derived_auto_content_size(
     data: &NodeData,
     style: ComputedValuesView<'_>,
     input: ReplacedContentInput,
-) -> Option<(CssPixels, CssPixels)> {
+) -> AutoContentSize {
     if style_has_size_containment(style) {
         // https://drafts.csswg.org/css-contain-2/#containment-size
         // Replaced elements must be treated as having a natural width and height of 0 and no natural aspect ratio.
@@ -116,7 +134,7 @@ fn derived_auto_content_size(
                 CssPixels::default()
             }
         };
-        return Some((
+        return AutoContentSize::of_size(
             explicit_size(
                 style.contain_intrinsic_width_has_length(),
                 style.contain_intrinsic_width_px(),
@@ -125,37 +143,55 @@ fn derived_auto_content_size(
                 style.contain_intrinsic_height_has_length(),
                 style.contain_intrinsic_height_px(),
             ),
-        ));
+        );
     }
     match data.kind.get() {
-        NodeKind::CheckBox => Some((CssPixels::from_integer(13), CssPixels::from_integer(13))),
-        NodeKind::RadioButton => Some((CssPixels::from_integer(12), CssPixels::from_integer(12))),
+        NodeKind::CheckBox => AutoContentSize::of_size(CssPixels::from_integer(13), CssPixels::from_integer(13)),
+        NodeKind::RadioButton => AutoContentSize::of_size(CssPixels::from_integer(12), CssPixels::from_integer(12)),
         // AD-HOC: A slider has no in-flow content to size itself from, so provide a default content-box size for when
         //         its `width` or `height` is `auto`: 20ch by 16px.
-        NodeKind::RangeInputBox => Some((characters_to_px(style, 20), CssPixels::from_integer(16))),
+        NodeKind::RangeInputBox => AutoContentSize::of_size(characters_to_px(style, 20), CssPixels::from_integer(16)),
         NodeKind::TextAreaBox => {
             let ReplacedContentInput::TextArea { cols, rows } = input else {
                 panic!("a textarea publishes its cols and rows as it arrives");
             };
             let block_size = CssPixels::nearest_value_for(f64::from(rows) * style.line_height().to_double());
-            Some(in_writing_mode(style, characters_to_px(style, cols), block_size))
+            let (width, height) = in_writing_mode(style, characters_to_px(style, cols), block_size);
+            AutoContentSize::of_size(width, height)
         }
         NodeKind::CanvasBox => {
             let ReplacedContentInput::Canvas { width, height } = input else {
                 panic!("a canvas publishes its width and height as it arrives");
             };
-            Some((
-                CssPixels::from_integer(i64::from(width)),
-                CssPixels::from_integer(i64::from(height)),
-            ))
+            let width = CssPixels::from_integer(i64::from(width));
+            let height = CssPixels::from_integer(i64::from(height));
+            AutoContentSize {
+                width: Some(width),
+                height: Some(height),
+                aspect_ratio: (width != CssPixels::default() && height != CssPixels::default())
+                    .then_some((width, height)),
+            }
         }
         NodeKind::TextInputBox => {
             let ReplacedContentInput::Input { size, .. } = input else {
                 panic!("an input publishes its size as it arrives");
             };
-            Some(text_control_default_preferred_size(style, size))
+            let (width, height) = text_control_default_preferred_size(style, size);
+            AutoContentSize::of_size(width, height)
         }
-        _ => None,
+        NodeKind::VideoBox => {
+            let ReplacedContentInput::NaturalSize(natural_size) = input else {
+                panic!("a video publishes its natural size as it arrives");
+            };
+            AutoContentSize {
+                width: natural_size.width.map(CssPixels::from_raw),
+                height: natural_size.height.map(CssPixels::from_raw),
+                aspect_ratio: natural_size
+                    .aspect_ratio
+                    .map(|(numerator, denominator)| (CssPixels::from_raw(numerator), CssPixels::from_raw(denominator))),
+            }
+        }
+        _ => AutoContentSize::default(),
     }
 }
 

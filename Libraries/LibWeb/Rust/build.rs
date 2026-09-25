@@ -3000,6 +3000,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     style_engine_config.export.include = vec![
         // Named by no exported signature: a host fact write points at one.
         "FfiReplacedContentInput".to_string(),
+        "FfiReplacedContentInputPresent".to_string(),
         "FfiStyleInvalidationField".to_string(),
         "FfiStyleRowFact".to_string(),
         "FfiStyleSheetResourceContextEntry".to_string(),
