@@ -18,6 +18,8 @@
 #include <LibWeb/DOM/InvalidationJournal.h>
 #include <LibWeb/DOM/Text.h>
 #include <LibWeb/Dump.h>
+#include <LibWeb/HTML/EventLoop/EventLoop.h>
+#include <LibWeb/HTML/EventLoop/FrameScheduler.h>
 #include <LibWeb/HTML/HTMLElement.h>
 #include <LibWeb/HTML/HTMLHtmlElement.h>
 #include <LibWeb/HTML/HTMLTableCellElement.h>
@@ -969,9 +971,26 @@ void Node::set_generated_for(CSS::PseudoElement type, DOM::Element& element)
 
 void Node::dom_node_style_node_changed(DOM::Node& dom_node, CSS::StyleNodeID old_style_node)
 {
+    auto new_style_node = Node::style_node_of(&dom_node);
+    auto* arena = dom_node.document().layout_node_arena_if_created();
+    // A mark the new identity's previous holder left does not carry over to this node: it was keyed by the identity
+    // alone, and may sit in this arena after that node moved to another document. The marks are the host's, so this
+    // goes through beside a frame too, ahead of any mark made under the new identity.
+    if (arena && new_style_node != 0)
+        RustFFI::layout_arena_clear_layout_tree_update_marks(arena->handle(), new_style_node.value());
+    // A recording in flight owns the arena and reads nothing of the style engine, so the node goes on under its new
+    // identity beside it, and the arena takes the change in once the frame has been taken in.
+    if (arena && RustFFI::rust_stage_thread_only_recordings_own(arena->handle())) {
+        HTML::main_thread_event_loop().frame_scheduler().defer_style_node_change(dom_node, old_style_node, new_style_node);
+        return;
+    }
+    apply_dom_node_style_node_change(dom_node, old_style_node, new_style_node);
+}
+
+void Node::apply_dom_node_style_node_change(DOM::Node& dom_node, CSS::StyleNodeID old_style_node, CSS::StyleNodeID new_style_node)
+{
     auto* arena = dom_node.document().layout_node_arena_if_created();
     if (arena) {
-        auto new_style_node = Node::style_node_of(&dom_node);
         // The node's rows, and those of its pseudo-elements, take its new identity along with their
         // bindings. Both are still keyed by the old identity here, so this precedes retiring it.
         if (old_style_node != 0 && new_style_node != 0) {
@@ -995,10 +1014,6 @@ void Node::dom_node_style_node_changed(DOM::Node& dom_node, CSS::StyleNodeID old
         // removed subtree that outlive the disconnection.
         if (old_style_node != 0)
             RustFFI::layout_arena_forget_style_node(arena->handle(), old_style_node.value());
-        // Nor does a mark the identity's previous holder left: it was keyed by the identity alone,
-        // and may sit in this arena after that node moved to another document.
-        if (new_style_node != 0)
-            RustFFI::layout_arena_clear_layout_tree_update_marks(arena->handle(), new_style_node.value());
     }
     // The arena names the node it tells about a binding change by identity, so a node changing
     // identity is one the arena cannot name. Its box-presence bits are re-committed here instead,

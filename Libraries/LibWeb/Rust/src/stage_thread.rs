@@ -710,6 +710,20 @@ pub(crate) fn join_frame_reaching_style_engine_at(arena: *mut c_void, file: &'st
     }
 }
 
+/// Whether the frame in flight owns the arena `arena` with stages that reach no style engine (its
+/// recordings) only. A main-side change the arena would take in beside such a frame can wait for
+/// the frame's take-back instead of joining it.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_stage_thread_only_recordings_own(arena: *mut c_void) -> bool {
+    SUBMITTED.with_borrow(|submitted| {
+        let mut owners = submitted
+            .iter()
+            .filter(|stage| stage.arena == arena as usize)
+            .peekable();
+        owners.peek().is_some() && owners.all(|stage| stage.style_engine == 0)
+    })
+}
+
 /// Counts a forced join against the label of each stage of the frame in flight it takes in.
 fn count_forced_join() {
     SUBMITTED.with_borrow(|submitted| {
