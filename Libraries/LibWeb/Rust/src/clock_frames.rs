@@ -1284,7 +1284,9 @@ pub unsafe extern "C" fn rust_render_clock_post_tick(
 
 /// Runs a display tick for the lease of `context` on the stage thread.
 fn run_render_clock_tick(context: u64, slot: &ClockSlot) {
-    slot.queued.store(false, Ordering::Release);
+    // A read-modify-write, which a later tick's post orders against: either that post finds the slot
+    // free and posts a tick of its own, or the time it stored is the one read here.
+    slot.queued.swap(false, Ordering::AcqRel);
     let frame_time_nanoseconds = slot.frame_time_nanoseconds.load(Ordering::Acquire);
     run_render_clock_tick_at(context, frame_time_nanoseconds);
 }
