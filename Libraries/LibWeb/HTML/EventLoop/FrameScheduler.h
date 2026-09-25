@@ -53,6 +53,8 @@ public:
         enum class Kind : u8 {
             Style,
             Layout,
+            // A clock lease's tick (LIBWEB_RENDER_CLOCK_FRAMES), which goes on at step 16 for every document.
+            Clock,
         };
         Kind kind { Kind::Layout };
         Vector<GC::Ref<DOM::Document>> documents;
@@ -114,6 +116,19 @@ public:
     // has submitted. Consume-commit finishes the document's style update; the tail then goes on with the rendering
     // update at step 16 for that document, as a main half of its own that may submit the layout pass and the recording.
     void submit_style(Vector<GC::Ref<DOM::Document>> documents, size_t document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp);
+    // LIBWEB_RENDER_CLOCK_FRAMES: at the end of a rendering update, grants a clock lease to every document whose next
+    // rendering update would change nothing but what the running animations of its document timeline show, and ends
+    // the lease of every other one.
+    void grant_clock_leases();
+    // Before a rendering update moves the documents' timelines to frame_timestamp: ends the leases the rendering update
+    // cannot tick, so that the update samples their effects itself.
+    void prepare_clock_ticks(ReadonlySpan<GC::Root<DOM::Document>> docs, HighResolutionTime::DOMHighResTimeStamp frame_timestamp);
+    // Ends the main half with a frame that ticks the lease of the first leased document from docs[first_document_index]
+    // on, if there is one and `may_submit` says so. Once the frame is taken back and the document has adopted the tick,
+    // the next leased document ticks, and then the rendering update goes on at step 16. Where no lease is left to tick,
+    // ends every lease the rendering update did not tick, and returns false.
+    bool tick_clock_leases(Vector<GC::Ref<DOM::Document>> const& docs, size_t first_document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp, bool may_submit);
+
     // Whether the frame in flight runs the style or layout pass of `document`. The ticket keeps its documents alive.
     bool pass_in_flight_holds(DOM::Document const&) const;
 
@@ -163,10 +178,23 @@ private:
     u64 finish_one_frame();
     void apply_deferred_arena_changes();
 
+    struct ClockLeaseHold {
+        GC::Ref<DOM::Document> document;
+        // The effects the lease ticks, which the main thread does not sample while it holds.
+        Vector<GC::Ref<Animations::KeyframeEffect>> effects;
+        // Whether the rendering update running now ticked the lease.
+        bool ticked { false };
+    };
+    bool submit_clock_tick(Vector<GC::Ref<DOM::Document>> const& docs, size_t first_document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp);
+    void revoke_clock_lease(size_t index);
+    void adopt_clock_tick(DOM::Document&);
+
     EventLoop& m_event_loop;
     State m_state { State::Idle };
     bool m_synchronous_update { false };
     OwnPtr<FrameTicket> m_ticket;
+
+    Vector<ClockLeaseHold> m_clock_leases;
 
     // In the order the changes were made, which is the order the arena takes them in.
     Vector<GC::Ref<GC::Function<void()>>> m_deferred_arena_changes;

@@ -1553,6 +1553,21 @@ impl AnimationTimelineSamples {
         }
     }
 
+    /// These samples, with the timeline `identity` sampled at `time` instead: the times a clock tick
+    /// samples at, which moves the document timeline alone.
+    #[must_use]
+    pub(crate) fn with_time(&self, identity: u32, time: f64) -> Self {
+        let mut samples = self.clone();
+        samples.samples.insert(
+            identity,
+            Some(TimeValue {
+                is_percentage: false,
+                value: time,
+            }),
+        );
+        samples
+    }
+
     /// The sample for one timeline, or `None` when no sample was published for it - a timeline of
     /// another document, most of all, whose identities are not this engine's to read.
     #[must_use]

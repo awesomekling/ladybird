@@ -349,7 +349,21 @@ pub(crate) fn submits(label: &'static str) -> bool {
         && FRAME_SCHEDULER_HOST.get().is_some()
         && RUNNING_JOIN_WORK.with(Cell::get) == 0
         && stage_thread().is_some_and(|thread| std::thread::current().id() != thread.id)
-        && overlapping_stages().iter().any(|stage| stage == label)
+        && stage_overlaps(label)
+}
+
+/// Whether `LIBWEB_STAGE_OVERLAP` lets the stage `label` run beside the main thread. A clock tick
+/// goes where the layout pass it runs ahead of goes, where clock frames are on.
+fn stage_overlaps(label: &str) -> bool {
+    let overlaps = |label: &str| overlapping_stages().iter().any(|stage| stage == label);
+    overlaps(label) || (label == "clock" && crate::clock_frames::enabled() && overlaps("layout"))
+}
+
+/// Whether what the main thread publishes to the style engine beside a submitted stage `label`
+/// waits for the stage to be taken back, and a change to its arena waits for the frame: a layout
+/// pass, which reads the engine, and a clock tick, which samples it.
+fn inputs_wait_for_take_back(label: &str) -> bool {
+    label == "layout" || label == "clock"
 }
 
 /// Hands `stage` to the stage thread and returns at once. The stage owns the arena `arena` until
@@ -535,10 +549,10 @@ pub extern "C" fn rust_stage_thread_presentation_counters() -> FfiPresentationCo
 }
 
 /// The style engine a submitted stage reaches: the arena's, for a layout pass (it pins style
-/// records, reads the style mirror and evaluates size containers) and a style stage. The recording
-/// reaches none.
+/// records, reads the style mirror and evaluates size containers), a style stage and a clock tick
+/// (it samples the document's animations). The recording reaches none.
 fn style_engine_of_stage(label: &'static str, arena: *mut c_void) -> usize {
-    if label != "layout" && label != "style" {
+    if label != "layout" && label != "style" && label != "clock" {
         return 0;
     }
     // SAFETY: The stage has not been sent yet, so the main thread still owns the arena.
@@ -625,7 +639,7 @@ pub unsafe extern "C" fn rust_stage_thread_hold_next_submitted_stage(
     }
     // SAFETY: Guaranteed by the caller.
     let label = unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(label, label_length)) };
-    if !overlapping_stages().iter().any(|stage| stage == label) {
+    if !stage_overlaps(label) {
         return false;
     }
     let (mut hold, _) = lock_stage_hold();
@@ -939,14 +953,15 @@ pub extern "C" fn rust_stage_thread_only_style_pass_in_flight_for(engine: *const
     })
 }
 
-/// Whether a layout pass that reads the style engine `engine` is in flight: what the host publishes to
-/// that engine beside it waits for the pass to be taken back (see `StyleEngine::publish_input`).
+/// Whether a layout pass that reads the style engine `engine` is in flight, or a clock tick that
+/// samples it: what the host publishes to that engine beside it waits for the stage to be taken
+/// back (see `StyleEngine::publish_input`).
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_stage_thread_layout_pass_in_flight_for(engine: *const c_void) -> bool {
     SUBMITTED.with_borrow(|submitted| {
         submitted
             .iter()
-            .any(|stage| stage.label == "layout" && stage.style_engine == engine as usize)
+            .any(|stage| inputs_wait_for_take_back(stage.label) && stage.style_engine == engine as usize)
     })
 }
 
@@ -955,7 +970,7 @@ pub(crate) fn layout_pass_in_flight_for_arena(arena: *mut c_void) -> bool {
     SUBMITTED.with_borrow(|submitted| {
         submitted
             .iter()
-            .any(|stage| stage.label == "layout" && stage.arena == arena as usize)
+            .any(|stage| inputs_wait_for_take_back(stage.label) && stage.arena == arena as usize)
     })
 }
 
@@ -976,8 +991,8 @@ pub(crate) fn join_frame_reaching_style_engine_at(arena: *mut c_void, file: &'st
 }
 
 /// Whether the frame in flight owns the arena `arena` with its recordings, which reach no style
-/// engine, and its layout pass, beside which what the document publishes to its style engine waits
-/// (see [`rust_stage_thread_layout_pass_in_flight_for`]), only. A main-side change the arena would
+/// engine, and its layout pass or clock tick, beside which what the document publishes to its style
+/// engine waits (see [`rust_stage_thread_layout_pass_in_flight_for`]), only. A main-side change the arena would
 /// take in beside such a frame can wait for the frame's take-back instead of joining it.
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_stage_thread_arena_changes_wait_for_frame(arena: *mut c_void) -> bool {
@@ -986,7 +1001,7 @@ pub extern "C" fn rust_stage_thread_arena_changes_wait_for_frame(arena: *mut c_v
             .iter()
             .filter(|stage| stage.arena == arena as usize)
             .peekable();
-        owners.peek().is_some() && owners.all(|stage| stage.style_engine == 0 || stage.label == "layout")
+        owners.peek().is_some() && owners.all(|stage| stage.style_engine == 0 || inputs_wait_for_take_back(stage.label))
     })
 }
 

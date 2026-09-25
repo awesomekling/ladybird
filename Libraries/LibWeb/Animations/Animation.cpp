@@ -1237,7 +1237,9 @@ void Animation::update()
                 && m_timeline
                 && m_timeline->is_monotonically_increasing()
                 && playback_rate() > 0;
-            if (effect.can_skip_per_frame_style_update()) {
+            if (effect.is_clock_driven()) {
+                // The clock lease's tick samples the effect at this time, and the main thread adopts it.
+            } else if (effect.can_skip_per_frame_style_update()) {
                 if (auto target = effect.target())
                     target->document().note_throttled_animation_style_update();
             } else if (!pending() && !output_is_constant_before_active_start) {

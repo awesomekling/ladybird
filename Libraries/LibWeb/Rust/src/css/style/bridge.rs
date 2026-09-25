@@ -3864,6 +3864,69 @@ pub unsafe extern "C" fn style_engine_sample_installed_record(
     })
 }
 
+/// Sample the animations of an element over the record the host holds for it at the times
+/// `timeline_samples` names, and publish the composition as its record, as
+/// [`style_engine_sample_installed_record`] does for the host: for a clock tick, which samples on
+/// the render side. `None` where the element owns no overlay slot or the engine cannot sample it,
+/// and the host samples it itself.
+///
+/// # Safety
+/// `layout_arena` must be the document's live layout arena, which the caller owns, as it owns the
+/// engine.
+pub(crate) unsafe fn sample_installed_record_for_clock_tick(
+    engine: &mut StyleEngine,
+    node: StyleNodeID,
+    style_record: u64,
+    layout_arena: *mut c_void,
+    timeline_samples: &super::animations::AnimationTimelineSamples,
+) -> Option<FfiRowSampledInPass> {
+    if !engine
+        .computed_group_sets
+        .owns_animation_overlay_slot(super::computed::ComputedStyleTarget::new(node, u8::MAX))
+    {
+        return None;
+    }
+    // SAFETY: Guaranteed by the caller.
+    let layout_arena = unsafe { super::animations::CommittedTransformReferenceBoxes::lend(layout_arena) };
+    match engine.sample_installed_record(node, None, style_record, layout_arena, timeline_samples) {
+        Ok(published) => {
+            super::engine_sample_check::note_taken("clock tick sample");
+            Some(row_sampled_in_pass(engine, Some(published)))
+        }
+        Err(reason) => {
+            super::engine_sample_check::note_declined(&format!("clock tick: {reason}"));
+            None
+        }
+    }
+}
+
+/// Takes the next sample the last clock tick of the document whose layout arena is `layout_arena`
+/// left for the host to adopt: the element's style node and the record it held before the tick, and
+/// whether the arena took the sample's record ahead of the host. False once none is left.
+///
+/// # Safety
+/// The out pointers must be valid for writes, and the tick taken back.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_clock_tick_take_entry(
+    layout_arena: *mut c_void,
+    node: *mut u32,
+    style_record_before: *mut u64,
+    installed_in_arena: *mut bool,
+    sample: *mut FfiRowSampledInPass,
+) -> bool {
+    let Some(entry) = crate::clock_frames::take_clock_tick_entry(layout_arena) else {
+        return false;
+    };
+    // SAFETY: Guaranteed by the caller.
+    unsafe {
+        *node = entry.style_node.raw();
+        *style_record_before = entry.style_record_before;
+        *installed_in_arena = entry.installed_in_arena;
+        sample.write(entry.sample);
+    }
+    true
+}
+
 /// Sample the animations of a pseudo-element the engine holds no assignment for, which owns no
 /// overlay slot, over the record the host holds for it, and publish the composition as the whole
 /// record again over the same base, as the host's own publication does.

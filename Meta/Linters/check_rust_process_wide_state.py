@@ -50,6 +50,7 @@ BUILT_ONCE = "built once and read-only after; every thread shares the same table
 STAGE_THREAD = "the stage thread itself, and the caller waiting on it"
 STYLE_UPDATE_SCOPE = "the document thread's open style update; a stage run carries it to the stage thread and back"
 LOCKED = "process-wide and behind a mutex"
+PRESENTED_COUNTER = "process-wide atomic count of presented frames that tests read; nothing branches on it"
 REPLAY = "style replay capture; replay builds only, or off unless an environment variable turns it on"
 TEST_ONLY = "test only"
 MAIN_SIDE_COUNTER = "counter kept by the main side's doors, which a render stage never passes"
@@ -62,6 +63,7 @@ def render_stage_entries(reason, entries):
 
 RENDER_STAGE_ALLOWED = {
     **render_stage_entries(MAIN_SIDE_COUNTER, ["layout/layout_node_arena.rs:DOOR_COUNTERS"]),
+    **render_stage_entries(PRESENTED_COUNTER, ["clock_frames.rs:CLOCK_TICKS_PRESENTED"]),
     **render_stage_entries(
         GROW_ONLY,
         [
@@ -115,6 +117,7 @@ RENDER_STAGE_ALLOWED = {
         [
             "stage_thread.rs:LOGS",
             "stage_thread.rs:ENABLED",
+            "clock_frames.rs:ENABLED",
             "css/style/flush.rs:ENABLED",
             "css/style/mod.rs:CASCADE_WINNERS",
             "css/style/mod.rs:PREFIX_RELATION",
@@ -191,6 +194,7 @@ RENDER_STAGE_ALLOWED = {
     **render_stage_entries(
         LOCKED,
         [
+            "clock_frames.rs:LEASES",
             "css/ffi_stats.rs:COMPLETE_STYLE_UPDATE_STATE",
             "css/parser/stylesheet_cache.rs:CACHE",
             "css/style/atoms.rs:GLOBAL_ATOMS",

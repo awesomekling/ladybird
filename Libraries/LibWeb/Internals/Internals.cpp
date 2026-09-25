@@ -1533,6 +1533,16 @@ void Internals::reset_style_invalidation_counters()
     window().associated_document().reset_style_invalidation_counters();
 }
 
+u64 Internals::clock_ticks_presented() const
+{
+    return Layout::RustFFI::rust_clock_ticks_presented();
+}
+
+bool Internals::clock_frames_enabled() const
+{
+    return Layout::RustFFI::rust_stage_thread_submits_clock();
+}
+
 GC::Ref<JS::Object> Internals::join_counters_object() const
 {
     auto& realm = HTML::relevant_realm(window());
@@ -1735,6 +1745,11 @@ bool Internals::hold_next_recording_frame(Utf16String const& point, GC::Ptr<DOM:
 bool Internals::hold_next_layout_frame(Utf16String const& point, GC::Ptr<DOM::Document> document)
 {
     return hold_next_submitted_stage("layout"sv, point, document);
+}
+
+bool Internals::hold_next_clock_tick(Utf16String const& point, GC::Ptr<DOM::Document> document)
+{
+    return hold_next_submitted_stage("clock"sv, point, document);
 }
 
 bool Internals::hold_next_style_frame(Utf16String const& point, GC::Ptr<DOM::Document> document)

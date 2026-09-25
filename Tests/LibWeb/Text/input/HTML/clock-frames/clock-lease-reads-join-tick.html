@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<style>
+    #box {
+        width: 100px;
+        height: 20px;
+        animation: grow 20s linear;
+    }
+    @keyframes grow {
+        from { width: 100px; }
+        to { width: 2100px; }
+    }
+</style>
+<div id="box"></div>
+<script src="../../include.js"></script>
+<script>
+    const nextTask = () => new Promise(resolve => setTimeout(resolve, 0));
+
+    // Under LIBWEB_RENDER_CLOCK_FRAMES, a clock lease's tick owns the document's arena and style engine while it is in
+    // flight: a style write beside it waits for it, and a geometry read joins it, and sees what it installed. The
+    // time the animation reports stays the same within the task.
+    asyncTest(async done => {
+        const box = document.getElementById("box");
+        const animation = box.getAnimations()[0];
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        const armed = internals.holdNextClockTick("before-completion");
+        let heldAt = "";
+        if (armed) {
+            for (let i = 0; i < 200 && !(internals.frameSchedulerState() === "in-flight" && internals.renderingUpdateAwaitsPass()); ++i)
+                await new Promise(resolve => setTimeout(resolve, 5));
+            heldAt = internals.waitForHeldFrame();
+            internals.setManualRenderingOpportunities(true);
+        }
+
+        const joinsBefore = internals.forcedJoinCount("clock");
+        box.style.height = "30px";
+        const joinsAfterWrite = internals.forcedJoinCount("clock");
+        const time = animation.currentTime;
+        const width = box.getBoundingClientRect().width;
+        const joinsAfterRead = internals.forcedJoinCount("clock");
+        const height = box.getBoundingClientRect().height;
+        const expectedWidth = 100 + (2000 * animation.currentTime) / 20000;
+
+        internals.releaseHeldFrame();
+        if (armed)
+            internals.setManualRenderingOpportunities(false);
+
+        if (internals.clockFramesEnabled()) {
+            println(`held at: ${heldAt}`);
+            println(`write joined the tick: ${joinsAfterWrite !== joinsBefore}`);
+            println(`read joined the tick: ${joinsAfterRead === joinsBefore + 1}`);
+        } else {
+            println("held at: before-completion");
+            println("write joined the tick: false");
+            println("read joined the tick: true");
+        }
+        println(`currentTime stable within the task: ${animation.currentTime === time}`);
+        println(`width is the one composed at currentTime: ${Math.abs(width - expectedWidth) <= 0.5}`);
+        println(`height: ${height}`);
+        done();
+    });
+</script>

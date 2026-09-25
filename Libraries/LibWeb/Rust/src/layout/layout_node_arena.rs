@@ -2095,6 +2095,16 @@ impl LayoutNodeArena {
         true
     }
 
+    /// Drops what no host adopted of the records animation samples installed ahead of it, with their
+    /// pins: the rows of elements that left the document before the host could adopt their
+    /// samples, which go with them.
+    pub(crate) fn drop_animation_adoptions(&self) {
+        let dropped = std::mem::take(&mut *self.animation_adoption_log.borrow_mut());
+        for adoption in dropped {
+            self.with_style_engine(|engine| engine.unpin_layout_style_record(adoption.style_record));
+        }
+    }
+
     pub(crate) fn animation_adoption_log_is_empty(&self) -> bool {
         self.animation_adoption_log.borrow().is_empty()
     }
@@ -5915,6 +5925,8 @@ pub unsafe extern "C" fn layout_arena_destroy(arena: *mut c_void) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // A frame in flight owns the arena until it is taken back.
     crate::stage_thread::join_frame_in_flight(arena);
+    // The render side no longer ticks the document's animations.
+    crate::clock_frames::rust_clock_lease_revoke(arena);
     // SAFETY: The handle came from layout_arena_create and ownership is
     // transferred back exactly once by the C++ RAII wrapper.
     let handle = unsafe { Box::from_raw(arena.cast::<super::ArenaHandle>()) };

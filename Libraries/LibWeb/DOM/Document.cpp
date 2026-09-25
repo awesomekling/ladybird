@@ -8564,6 +8564,13 @@ void Document::update_animations_and_send_events(double timestamp)
             continue;
         if (animation.effect() && is<Animations::KeyframeEffect>(*animation.effect())) {
             auto& effect = static_cast<Animations::KeyframeEffect&>(*animation.effect());
+            // A clock lease ticks the effect in the rendering updates this pump drives.
+            if (effect.is_clock_driven()) {
+                effect.clear_per_frame_animation_tick_was_skipped();
+                ++m_style_invalidation_counters.animation_frame_pump_requests;
+                page().client().request_frame();
+                break;
+            }
             if (effect.can_skip_per_frame_animation_tick()) {
                 effect.note_per_frame_animation_tick_was_skipped();
                 continue;
