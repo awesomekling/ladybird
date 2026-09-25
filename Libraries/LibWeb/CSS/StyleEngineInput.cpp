@@ -813,7 +813,25 @@ void record_element_replaced_content_input(DOM::Element& element)
     if (!style_engine || element.style_node_id() == no_style_node)
         return;
     if (auto const* text_area = as_if<HTML::HTMLTextAreaElement>(element)) {
-        style_engine->record_replaced_content_input(element.style_node_id(), { .kind = StyleEngineFFI::FfiReplacedContentInputKind::TextArea, .flags = 0, .first = static_cast<u32>(text_area->cols()), .second = static_cast<u32>(text_area->rows()), .third = 0, .fourth = 0 });
+        style_engine->record_replaced_content_input(element.style_node_id(), { .kind = StyleEngineFFI::FfiReplacedContentInputKind::TextArea, .first = static_cast<u32>(text_area->cols()), .second = static_cast<u32>(text_area->rows()), .third = 0, .fourth = 0 });
+        return;
+    }
+    if (auto const* input = as_if<HTML::HTMLInputElement>(element)) {
+        auto kind = StyleEngineFFI::FfiReplacedContentInputKind::Input;
+        switch (input->type_state()) {
+        case HTML::HTMLInputElement::TypeAttributeState::Text:
+        case HTML::HTMLInputElement::TypeAttributeState::Search:
+        case HTML::HTMLInputElement::TypeAttributeState::URL:
+        case HTML::HTMLInputElement::TypeAttributeState::Telephone:
+        case HTML::HTMLInputElement::TypeAttributeState::Email:
+        case HTML::HTMLInputElement::TypeAttributeState::Password:
+        case HTML::HTMLInputElement::TypeAttributeState::Number:
+            kind = StyleEngineFFI::FfiReplacedContentInputKind::TextEntryInput;
+            break;
+        default:
+            break;
+        }
+        style_engine->record_replaced_content_input(element.style_node_id(), { .kind = kind, .first = static_cast<u32>(input->size()), .second = 0, .third = 0, .fourth = 0 });
         return;
     }
 }
@@ -2751,8 +2769,9 @@ void record_element_attribute_changed(DOM::Element& element, Utf16FlyString cons
     else if (name == HTML::AttributeNames::contenteditable || name == HTML::AttributeNames::alt)
         record_element_construction_facts(element);
 
-    // What the replaced content of a textarea is sized from.
-    if (is<HTML::HTMLTextAreaElement>(element) && (name == HTML::AttributeNames::cols || name == HTML::AttributeNames::rows))
+    // What the replaced content of a textarea or an input is sized from.
+    if ((is<HTML::HTMLTextAreaElement>(element) && (name == HTML::AttributeNames::cols || name == HTML::AttributeNames::rows))
+        || (is<HTML::HTMLInputElement>(element) && (name == HTML::AttributeNames::size || name == HTML::AttributeNames::type)))
         record_element_replaced_content_input(element);
 
     // Whether an event aimed at this element, or at anything written under it, is dispatched at all.

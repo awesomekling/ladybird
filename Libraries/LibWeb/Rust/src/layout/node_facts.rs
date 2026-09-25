@@ -41,18 +41,7 @@ pub(crate) fn node_replaced_content_facts_need_host(data: &NodeData) -> bool {
     if kind == NodeKind::SVGImageBox {
         return true;
     }
-    let style = node_style_view(data);
-    // A text entry input with no appearance gets its default preferred size from its size attribute.
-    if has_flag(data, NodeFlag::IsHtmlInputElement)
-        && !matches!(
-            kind,
-            NodeKind::CheckBox | NodeKind::RadioButton | NodeKind::RangeInputBox
-        )
-        && style.is_some_and(|style| style.appearance() == crate::css::css_enums::appearance::NONE)
-    {
-        return true;
-    }
-    if style.is_some_and(|style| style_has_size_containment(style)) {
+    if node_style_view(data).is_some_and(|style| style_has_size_containment(style)) {
         return false;
     }
     matches!(
@@ -61,7 +50,6 @@ pub(crate) fn node_replaced_content_facts_need_host(data: &NodeData) -> bool {
             | NodeKind::ImageBox
             | NodeKind::NavigableContainerViewport
             | NodeKind::SVGSVGBox
-            | NodeKind::TextInputBox
             | NodeKind::VideoBox
     )
 }
@@ -78,19 +66,39 @@ fn style_has_size_containment(style: ComputedValuesView<'_>) -> bool {
 }
 
 /// The replaced-content facts of a node whose facts need no host: a size-contained box, a
-/// checkbox, radio button, slider or textarea, or a kind with no natural size.
+/// checkbox, radio button, slider, textarea or text input, or a kind with no natural size.
 pub(crate) fn derived_replaced_content_facts(data: &NodeData, input: ReplacedContentInput) -> FfiReplacedContentFacts {
     debug_assert!(!node_replaced_content_facts_need_host(data));
     let mut facts = FfiReplacedContentFacts::default();
     let Some(style) = node_style_view(data) else {
         return facts;
     };
-    let mut set_auto_content_size = |width: CssPixels, height: CssPixels| {
+    if let Some((width, height)) = derived_auto_content_size(data, style, input) {
         facts.has_auto_content_width = true;
         facts.auto_content_width = width;
         facts.has_auto_content_height = true;
         facts.auto_content_height = height;
-    };
+    }
+    if style.appearance() == crate::css::css_enums::appearance::NONE
+        && let ReplacedContentInput::Input {
+            size,
+            is_text_entry: true,
+        } = input
+    {
+        let (width, height) = text_control_default_preferred_size(style, size);
+        facts.has_default_preferred_width = true;
+        facts.default_preferred_width = width;
+        facts.has_default_preferred_height = true;
+        facts.default_preferred_height = height;
+    }
+    facts
+}
+
+fn derived_auto_content_size(
+    data: &NodeData,
+    style: ComputedValuesView<'_>,
+    input: ReplacedContentInput,
+) -> Option<(CssPixels, CssPixels)> {
     if style_has_size_containment(style) {
         // https://drafts.csswg.org/css-contain-2/#containment-size
         // Replaced elements must be treated as having a natural width and height of 0 and no natural aspect ratio.
@@ -104,7 +112,7 @@ pub(crate) fn derived_replaced_content_facts(data: &NodeData, input: ReplacedCon
                 CssPixels::default()
             }
         };
-        set_auto_content_size(
+        return Some((
             explicit_size(
                 style.contain_intrinsic_width_has_length(),
                 style.contain_intrinsic_width_px(),
@@ -113,36 +121,60 @@ pub(crate) fn derived_replaced_content_facts(data: &NodeData, input: ReplacedCon
                 style.contain_intrinsic_height_has_length(),
                 style.contain_intrinsic_height_px(),
             ),
-        );
-        return facts;
+        ));
     }
-    let zero_advance = CssPixels::nearest_value_for_f32(style.font_zero_advance());
     match data.kind.get() {
-        NodeKind::CheckBox => set_auto_content_size(CssPixels::from_integer(13), CssPixels::from_integer(13)),
-        NodeKind::RadioButton => set_auto_content_size(CssPixels::from_integer(12), CssPixels::from_integer(12)),
-        NodeKind::RangeInputBox => {
-            // AD-HOC: A slider has no in-flow content to size itself from, so provide a default content-box size for
-            //         when its `width` or `height` is `auto`: 20ch by 16px.
-            set_auto_content_size(
-                CssPixels::nearest_value_for(20.0 * zero_advance.to_double()),
-                CssPixels::from_integer(16),
-            );
-        }
+        NodeKind::CheckBox => Some((CssPixels::from_integer(13), CssPixels::from_integer(13))),
+        NodeKind::RadioButton => Some((CssPixels::from_integer(12), CssPixels::from_integer(12))),
+        // AD-HOC: A slider has no in-flow content to size itself from, so provide a default content-box size for when
+        //         its `width` or `height` is `auto`: 20ch by 16px.
+        NodeKind::RangeInputBox => Some((characters_to_px(style, 20), CssPixels::from_integer(16))),
         NodeKind::TextAreaBox => {
             let ReplacedContentInput::TextArea { cols, rows } = input else {
                 panic!("a textarea publishes its cols and rows as it arrives");
             };
-            let inline_size = CssPixels::nearest_value_for(f64::from(cols) * zero_advance.to_double());
             let block_size = CssPixels::nearest_value_for(f64::from(rows) * style.line_height().to_double());
-            if style.writing_mode() == crate::css::css_enums::writing_mode::HORIZONTAL_TB {
-                set_auto_content_size(inline_size, block_size);
-            } else {
-                set_auto_content_size(block_size, inline_size);
-            }
+            Some(in_writing_mode(style, characters_to_px(style, cols), block_size))
         }
-        _ => {}
+        NodeKind::TextInputBox => {
+            let ReplacedContentInput::Input { size, .. } = input else {
+                panic!("an input publishes its size as it arrives");
+            };
+            Some(text_control_default_preferred_size(style, size))
+        }
+        _ => None,
     }
-    facts
+}
+
+/// `count` characters in the box's font, the `ch` unit.
+fn characters_to_px(style: ComputedValuesView<'_>, count: u32) -> CssPixels {
+    let zero_advance = CssPixels::nearest_value_for_f32(style.font_zero_advance());
+    CssPixels::nearest_value_for(f64::from(count) * zero_advance.to_double())
+}
+
+/// An inline size and a block size as a width and a height.
+fn in_writing_mode(
+    style: ComputedValuesView<'_>,
+    inline_size: CssPixels,
+    block_size: CssPixels,
+) -> (CssPixels, CssPixels) {
+    if style.writing_mode() == crate::css::css_enums::writing_mode::HORIZONTAL_TB {
+        (inline_size, block_size)
+    } else {
+        (block_size, inline_size)
+    }
+}
+
+// https://html.spec.whatwg.org/multipage/rendering.html#the-input-element-as-a-text-entry-widget
+fn text_control_default_preferred_size(style: ComputedValuesView<'_>, size: u32) -> (CssPixels, CssPixels) {
+    // [...] If the element has a size attribute, and parsing that attribute's value using the rules for parsing
+    // non-negative integers doesn't generate an error, return the value obtained from applying the converting a
+    // character width to pixels algorithm to the value of the attribute. Otherwise, return the value obtained from
+    // applying the converting a character width to pixels algorithm to the number 20.
+    // FIXME: Implement the specified "converting a character width to pixels" algorithm.
+    // FIXME: HTML does not yet detail the primitive appearance of text inputs. Use one line for the default preferred
+    //        block size, matching the native appearance described by HTML and the behavior of other engines.
+    in_writing_mode(style, characters_to_px(style, size), style.line_height())
 }
 
 /// The node's own computed style, read off the style container the node data points at. Callers inside a layout pass go

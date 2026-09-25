@@ -969,15 +969,18 @@ pub enum FfiReplacedContentInputKind {
     None = 0,
     /// A `<textarea>`: `first` is its `cols`, and `second` its `rows`.
     TextArea = 1,
+    /// An `<input>` whose type makes it no text entry widget: `first` is its `size`.
+    Input = 2,
+    /// An `<input>` whose type makes it a text entry widget: `first` is its `size`.
+    TextEntryInput = 3,
 }
 
 /// What an element gives the natural size of its replaced content, which layout resolves against
-/// the style of the element's box. What `flags` and the values mean depends on `kind`.
+/// the style of the element's box. What the values mean depends on `kind`.
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
 pub struct FfiReplacedContentInput {
     pub kind: FfiReplacedContentInputKind,
-    pub flags: u8,
     pub first: u32,
     pub second: u32,
     pub third: u32,
@@ -2087,7 +2090,6 @@ unsafe fn apply_host_fact_writes(engine: &mut StyleEngine, writes: &[FfiHostFact
                     engine,
                     write.node,
                     input.kind as u8,
-                    input.flags,
                     input.first,
                     input.second,
                     input.third,

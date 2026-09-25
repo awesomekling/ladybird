@@ -621,16 +621,23 @@ pub enum ReplacedContentInput {
     None,
     /// A `<textarea>`'s `cols` and `rows`: its natural size is that many `ch` by that many `lh`.
     TextArea { cols: u32, rows: u32 },
+    /// An `<input>`'s `size`, and whether its type makes it a text entry widget, whose default
+    /// preferred size is that many `ch` by one line.
+    Input { size: u32, is_text_entry: bool },
 }
 
 impl ReplacedContentInput {
     #[must_use]
-    pub fn from_raw(kind: u8, _flags: u8, values: [u32; 4]) -> Self {
+    pub fn from_raw(kind: u8, values: [u32; 4]) -> Self {
         use super::bridge::FfiReplacedContentInputKind as Kind;
         match kind {
             kind if kind == Kind::TextArea as u8 => Self::TextArea {
                 cols: values[0],
                 rows: values[1],
+            },
+            kind if kind == Kind::Input as u8 || kind == Kind::TextEntryInput as u8 => Self::Input {
+                size: values[0],
+                is_text_entry: kind == Kind::TextEntryInput as u8,
             },
             _ => Self::None,
         }
