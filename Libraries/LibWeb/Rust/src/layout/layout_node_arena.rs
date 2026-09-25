@@ -3328,11 +3328,21 @@ impl LayoutNodeArena {
         main_thread: &crate::stage::MainThread,
         handbacks: HostHandbacks,
     ) {
+        self.pay_handbacks_ahead_of_queued(main_thread, handbacks);
+        self.close_host_handback_span();
+    }
+
+    /// Pays `handbacks`, which were let go of before what the arena owes the host now, and
+    /// anything paying them hands back, while what is owed now stays queued.
+    pub(crate) fn pay_handbacks_ahead_of_queued(
+        &self,
+        main_thread: &crate::stage::MainThread,
+        handbacks: HostHandbacks,
+    ) {
         let later = std::mem::take(&mut *self.host_handbacks.borrow_mut());
         self.pay_tree_build_handbacks(main_thread, handbacks);
         self.pay_host_handbacks(main_thread);
         *self.host_handbacks.borrow_mut() = later;
-        self.close_host_handback_span();
     }
 
     /// Opens the span of a layout pass's commit, which may run off the document thread. The
