@@ -11276,7 +11276,7 @@ RefPtr<SelectorQuery const> Document::selector_query_for(Utf16View selector_text
 
     RefPtr<SelectorQuery const> query;
     if (maybe_selectors.has_value())
-        query = SelectorQuery::create(const_cast<Document&>(*this), maybe_selectors.release_value());
+        query = SelectorQuery::create(maybe_selectors.release_value());
     mark_used(query);
 
     // Evict the query used least recently. A page cycling through a working set of selectors that fits the cache then

@@ -1,0 +1,3 @@
+queries the DOM answers: held as armed: true
+queries the DOM answers: joined the pass: false
+queries the DOM answers: after: true 3 true true

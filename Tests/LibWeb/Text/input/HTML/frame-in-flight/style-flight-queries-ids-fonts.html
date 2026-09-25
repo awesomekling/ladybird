@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<style id="base">
+    #box { width: 100px; height: 20px; }
+    .item { height: 10px; }
+</style>
+<div id="box" class="item"></div>
+<div id="list"><div class="item">a</div><div class="item">b</div></div>
+<script>
+    // Selector queries the DOM answers alone, made while the style pass is in flight: none of them waits for the pass,
+    // and the next style update sees each of them.
+    asyncTest(async done => {
+        const element = box;
+        let height = 20;
+
+        // `write` runs beside a pass of its own, since a write that joins takes the pass back for the ones after it.
+        // `after` reads the outcome once the next style update has taken the write in.
+        async function besidePass(name, write, after) {
+            const result = await whileStyleInFlight("before-run", () => {
+                element.style.height = `${++height}px`;
+            }, frame => ({ ...frame, joined: writeJoinedStylePass(write) }));
+            println(`${name}: held as armed: ${styleHeldAsArmed(result, "before-run")}`);
+            println(`${name}: joined the pass: ${result.joined}`);
+            await twoFrames();
+            println(`${name}: after: ${after()}`);
+        }
+
+        let answers;
+        await besidePass("queries the DOM answers", () => {
+            answers = [
+                document.querySelector("#box") === element,
+                document.querySelectorAll(".item").length,
+                element.matches(".item"),
+                list.firstChild.closest("#list") === list,
+            ];
+        }, () => answers.join(" "));
+        done();
+    });
+</script>
