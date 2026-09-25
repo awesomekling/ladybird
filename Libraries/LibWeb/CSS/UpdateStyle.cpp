@@ -463,16 +463,6 @@ struct PublishedRowDebts {
     u8 row_effect { 0 };
 
     bool is_empty() const { return explicit_inheritance == 0 && row_effect == 0; }
-
-    // A new demand for the row's node recomputed it, and the engine took what that left too. Its
-    // transition step replaces the published one.
-    void combine_with_demand(StyleEngineFFI::FfiRecordDemandAnswer const& demand)
-    {
-        explicit_inheritance |= demand.record.explicit_inheritance_debt;
-        auto const demand_row_effect = static_cast<u8>(demand.row_effect_debt);
-        auto const transition = (demand_row_effect & StyleEngine::SettledRowTransitionDebt) ? (demand_row_effect & StyleEngine::SettledRowTransitionDebt) : (row_effect & StyleEngine::SettledRowTransitionDebt);
-        row_effect = static_cast<u8>(((row_effect | demand_row_effect) & ~StyleEngine::SettledRowTransitionDebt) | transition);
-    }
 };
 
 // `declined_rows` names the rows the previous wave declined, and returns the ones this wave declines.
@@ -560,8 +550,6 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                     continue;
             }
 
-            // The pseudo-element records a new demand settled beside the element's record.
-            Optional<DOM::Element::EnginePseudoElementRecords> retried_pseudo_element_records;
             bool retried_unstyled_materialization = false;
             bool retried_after_installed_ancestors = false;
             if (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::RetriedAfterAncestors
@@ -725,34 +713,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                 // inherited custom-property environment.
                 VERIFY(needs_regular_style_recompute || needs_inherited_style_recompute || needs_custom_property_recompute);
                 VERIFY(reaction.pseudo_kind == NumericLimits<u8>::max());
-                // Installing an earlier row can update this element's declaration block, or
-                // re-sample its parent's animated custom properties into a new environment. The
-                // batch record names the old block or environment, so answer a new demand from
-                // the current ones before deciding whether this row needs the host computation.
-                bool refreshed_declarations = false;
-                if ((declarations_changed_during_apply(StyleNodeID { reaction.style_node })
-                        || !engine_computed_record_environment_is_installable(*element, StyleRecordID { reaction.new_style_record }))
-                    && !element->has_associated_animations()) {
-                    StyleEngineFFI::style_engine_note_host_step(StyleEngineFFI::FfiStyleHostStep::InLoopRecordDemand);
-                    auto demand = document.style_computer().style_engine().answer_record_demand(
-                        StyleNodeID { reaction.style_node }, {}, false, true, false, StyleEngine::TakeRowDebts::Yes);
-                    row_debts.combine_with_demand(demand);
-                    if (demand.record.style_record) {
-                        reaction.new_style_record = demand.record.style_record;
-                        reaction.uses_substitution = demand.record.uses_substitution;
-                        reaction.damage = StyleEngineFFI::FfiStyleDeltaDamage::Full;
-                        reaction.record_damage = 0;
-                        DOM::Element::EnginePseudoElementRecords pseudo_element_records {};
-                        for (size_t kind = 0; kind < array_size(demand.record.pseudo_records); ++kind) {
-                            if ((demand.record.pseudo_records_present >> kind) & 1)
-                                pseudo_element_records[kind] = StyleRecordID { demand.record.pseudo_records[kind] };
-                        }
-                        retried_pseudo_element_records = pseudo_element_records;
-                        refreshed_declarations = true;
-                        row_facts = demand.row_facts;
-                    }
-                }
-                auto pseudo_element_records = retried_pseudo_element_records.value_or({});
+                DOM::Element::EnginePseudoElementRecords pseudo_element_records {};
                 DOM::Element::EnginePseudoElementDamages pseudo_element_damages {};
                 for (auto next = reaction_index + 1; next < reactions.size() && reactions[next].style_node == published_reaction.style_node && reactions[next].pseudo_kind != NumericLimits<u8>::max(); ++next) {
                     auto const& pseudo_reaction = reactions[next];
@@ -763,7 +724,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                 // The row's own effects come with the decision that settled it, whether or not
                 // the record is the one that installs: a C++ computation of this element runs the
                 // transition step itself, so the debt is discharged either way. The engine took
-                // them as it published the row, and with a new demand's answer.
+                // them as it published the row.
                 auto const explicit_inheritance_debt = row_debts.explicit_inheritance;
                 auto const row_effect_debt = row_debts.row_effect;
                 row_debts = {};
@@ -774,10 +735,10 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                 bool const has_animations_or_plan = animation_plan.has_value() || element->has_relevant_animations()
                     || element->has_associated_animations();
                 if (!engine_computed_record_environment_is_installable(*element, StyleRecordID { reaction.new_style_record })
-                    || (declarations_changed_during_apply(StyleNodeID { reaction.style_node }) && !refreshed_declarations)) {
+                    || declarations_changed_during_apply(StyleNodeID { reaction.style_node })) {
                     // The record names declarations or an environment an earlier row of this batch
-                    // has since moved, and no fresh answer replaced it. The move schedules the next
-                    // transaction, which asks for this element again.
+                    // has since moved. The move schedules the next transaction, whose pass computes
+                    // this element again over them.
                     // A row the engine answered again over what the previous wave moved names what
                     // the element's inputs are now: declining it twice would ask for it forever.
                     ASSERT(!rows_declined_by_previous_wave.contains(StyleNodeID { reaction.style_node }));
