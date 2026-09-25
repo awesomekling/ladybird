@@ -940,6 +940,10 @@ void FrameScheduler::main_thread_did_not_block()
     // task that took the arenas back or went over the restore budget would stop the ticks until it idles again.
     if (m_clock_leases.is_empty())
         return;
+    // A lend no tick has used since stays as it is: a loop that goes round thousands of times a second would otherwise
+    // plan and pin the leases again at every turn.
+    if (Layout::RustFFI::rust_clock_lend_is_active() && !m_clock_lend_suspended && !Layout::RustFFI::rust_clock_lend_has_ticks_to_adopt())
+        return;
     take_back_clock_lend_for_adoption();
     m_clock_lend_taken_back = false;
     m_clock_lend_suspended = false;
