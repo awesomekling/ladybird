@@ -745,10 +745,9 @@ impl LayoutFrame {
     }
 
     /// Walks the tree build the style round readied, in the frame. Its host half (the shells of the
-    /// rows the walk freed and of the new rows whose making tells the document something, the box
-    /// presence it changed, the DOM nodes its commit messages resolve to, a new viewport's paint
-    /// state) is left to the next join, and the style resources and generated image providers of
-    /// its new rows to the end of the frame.
+    /// rows the walk freed, the box presence it changed, the DOM nodes its commit messages resolve
+    /// to, a new viewport's paint state) is left to the next join, and the style resources and
+    /// generated image providers of its new rows to the end of the frame.
     fn walk_layout_tree_build(&mut self) -> (WalkedLayoutTreeBuild, TreeBuildHostHalf) {
         let document_style_node = self
             .tree_build_document_style_node

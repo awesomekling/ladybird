@@ -814,6 +814,9 @@ void NodeWithStyle::did_update_style_record()
     if (!snap_container)
         return;
 
+    // What the layout tree builds found out about their scroll containers comes before what this style says.
+    Painting::take_built_scroll_snap_containers(document());
+
     // A style change can make a box a snap container without the paint tree being built again, so the box registers
     // itself here as well as when it is built.
     if (Painting::is_scroll_snap_container(*snap_container)) {

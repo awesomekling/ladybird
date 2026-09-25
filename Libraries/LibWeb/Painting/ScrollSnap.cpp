@@ -9,6 +9,7 @@
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/Layout/Node.h>
+#include <LibWeb/Layout/NodeArena.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/Painting/PaintingRustBridge.h>
 #include <LibWeb/Painting/ScrollSnap.h>
@@ -98,6 +99,42 @@ bool is_scroll_snap_container(Layout::Node const& node)
     if (!node_with_style || !node_with_style->is_scroll_container())
         return false;
     return !snap_axes_of_scroll_container(node).is_empty();
+}
+
+bool document_may_have_scroll_snap_areas(DOM::Document const& document)
+{
+    if (document.may_have_scroll_snap_areas())
+        return true;
+    auto const* arena = document.layout_node_arena_if_created();
+    return arena && Layout::RustFFI::layout_arena_may_have_scroll_snap_areas(arena->handle());
+}
+
+void take_built_scroll_snap_containers(DOM::Document& document)
+{
+    auto* arena = document.layout_node_arena_if_created();
+    if (!arena)
+        return;
+    struct BuiltScrollContainer {
+        Compositing::RustFFI::NodeSlotId slot;
+        bool is_scroll_snap_container { false };
+    };
+    Vector<BuiltScrollContainer> built_scroll_containers;
+    Layout::RustFFI::layout_arena_take_built_scroll_snap_containers(arena->handle(), &built_scroll_containers,
+        [](void* context, Compositing::RustFFI::NodeSlotId slot, bool is_scroll_snap_container) {
+            static_cast<Vector<BuiltScrollContainer>*>(context)->append({ slot, is_scroll_snap_container });
+        });
+    for (auto const& built : built_scroll_containers) {
+        auto const* scroll_container = arena->node_if_live(built.slot);
+        if (!scroll_container)
+            continue;
+        if (built.is_scroll_snap_container) {
+            document.register_scroll_snap_container(*scroll_container);
+            continue;
+        }
+        // A box that does not snap is snapped to no snap areas, so that a scroll it is given while it does not snap is
+        // not undone by a re-snap once it snaps again.
+        document.forget_snapped_areas_of_scroll_container(*scroll_container);
+    }
 }
 
 // https://drafts.csswg.org/css-scroll-snap-1/#choosing
