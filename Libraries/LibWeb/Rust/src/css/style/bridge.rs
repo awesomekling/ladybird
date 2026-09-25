@@ -4787,7 +4787,7 @@ fn record_interned_atom(engine: &mut StyleEngine, raw: usize, atom: StyleAtomID)
 pub unsafe extern "C" fn style_engine_take_style_transaction(
     engine: *mut c_void,
     root: u32,
-    mut computation_inputs: FfiDocumentStyleComputationInputs,
+    computation_inputs: FfiDocumentStyleComputationInputs,
     layout_arena: *mut c_void,
 ) -> FfiStyleTransactionView {
     engine_entrance(engine, "style_engine_take_style_transaction");
@@ -4795,6 +4795,21 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
         return FfiStyleTransactionView::default();
     };
     let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    // SAFETY: Guaranteed by the caller.
+    unsafe { begin_style_transaction(engine, computation_inputs) };
+    // The transaction's inputs were frozen above.
+    let engine_on_stage = &mut *engine;
+    // SAFETY: The host passes its document's live layout arena, or null, and blocks on the stage.
+    let layout_arena = unsafe { super::animations::LentLayoutArena::lend(layout_arena) };
+    let output = crate::stage_thread::run_stage(move || run_style_pass(engine_on_stage, root, layout_arena));
+    finish_style_transaction(engine, root, output)
+}
+
+/// Freezes a style transaction's inputs in the engine before its pass runs.
+///
+/// # Safety
+/// As for [`style_engine_take_style_transaction`]'s `computation_inputs`.
+unsafe fn begin_style_transaction(engine: &mut StyleEngine, mut computation_inputs: FfiDocumentStyleComputationInputs) {
     let resource_contexts =
         unsafe { super::resource_contexts::DocumentResourceContexts::take_from(&mut computation_inputs) };
     engine.document_media_snapshot =
@@ -4839,28 +4854,40 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
     }
     engine.document_style_computation_inputs = computation_inputs;
     engine.clear_ffi_style_transaction_output();
+}
+
+/// A style transaction's pass: the part of the take that runs as a stage.
+fn run_style_pass(
+    engine: &mut StyleEngine,
+    root: StyleNodeID,
+    layout_arena: super::animations::LentLayoutArena,
+) -> FfiStyleTransactionOutput {
     let mut output = FfiStyleTransactionOutput::default();
     let emitted = &mut output;
-    // The transaction's inputs were frozen above.
-    let engine_on_stage = &mut *engine;
-    // SAFETY: The host passes its document's live layout arena, or null, and blocks on the stage.
-    let layout_arena = unsafe { super::animations::LentLayoutArena::lend(layout_arena) };
-    let scoped = crate::stage_thread::run_stage(move || {
-        engine_on_stage.take_style_transaction_lending_layout_arena(
-            root,
-            layout_arena,
-            |transaction_version, program_version, answers| {
-                assert!(
-                    emitted.answers.is_empty(),
-                    "a style transaction emitted more than one batch"
-                );
-                emitted.transaction_version = transaction_version.0;
-                emitted.program_version = program_version.0;
-                emitted.answers.extend_from_slice(answers);
-            },
-        )
-    });
+    let scoped = engine.take_style_transaction_lending_layout_arena(
+        root,
+        layout_arena,
+        |transaction_version, program_version, answers| {
+            assert!(
+                emitted.answers.is_empty(),
+                "a style transaction emitted more than one batch"
+            );
+            emitted.transaction_version = transaction_version.0;
+            emitted.program_version = program_version.0;
+            emitted.answers.extend_from_slice(answers);
+        },
+    );
     output.scoped = scoped;
+    output
+}
+
+/// What the main thread does with a style pass's output once the pass has run: hands each row the
+/// facts and debts of its node, and publishes the batch.
+fn finish_style_transaction(
+    engine: &mut StyleEngine,
+    root: StyleNodeID,
+    mut output: FfiStyleTransactionOutput,
+) -> FfiStyleTransactionView {
     // What each element row's node holds now travels with the row, and a computed row takes the
     // debts its computation left: the host settles them as it installs the row, or hands them back.
     for answer in &mut output.answers {
@@ -4925,6 +4952,7 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
     close_style_deltas_over_inheritance(engine, &mut output.answers);
     sort_style_deltas_for_direct_application(engine, &mut output.answers);
     if engine.recording_id().is_some() {
+        let computation_inputs = engine.document_style_computation_inputs;
         engine.record_boundary_call(EventKind::StyleDeltaBatch, |payload| {
             payload.write_u32(root.raw());
             payload.write_u64(computation_inputs.viewport_width.to_bits());
