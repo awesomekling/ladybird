@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<div id="target" style="position: absolute; top: 0; width: 50px; height: 50px"></div>
+<div id="other" style="position: absolute; top: 0; left: 100px; width: 50px; height: 50px"></div>
+<script>
+    // IntersectionObserver calls while a layout pass is in flight (R9). The rendering update has not run its
+    // intersection steps yet, so takeRecords() returns what earlier updates queued, and observe() and disconnect()
+    // change what the steps read later: every entry is delivered exactly once, either to takeRecords() or to the
+    // callback, as when the task runs before or after the rendering update.
+    asyncTest(async done => {
+        const seen = [];
+        const seenByOther = [];
+        const observer = new IntersectionObserver(entries => {
+            for (const entry of entries)
+                seen.push(entry.isIntersecting);
+        });
+        observer.observe(target);
+        await twoFrames();
+        await nextTask();
+        println(`initial: ${seen.splice(0).join(",")}`);
+
+        let otherObserver;
+        const movedOut = await whileLayoutInFlight("before-run", () => {
+            target.style.top = "5000px";
+        }, frame => {
+            for (const entry of observer.takeRecords())
+                seen.push(entry.isIntersecting);
+            otherObserver = new IntersectionObserver(entries => {
+                for (const entry of entries)
+                    seenByOther.push(entry.isIntersecting);
+            });
+            otherObserver.observe(other);
+            return frame;
+        });
+        println(`moved out: held as armed: ${layoutHeldAsArmed(movedOut, "before-run")}`);
+        await twoFrames();
+        await nextTask();
+        println(`moved out: ${seen.join(",")}`);
+        println(`observed beside the pass: ${seenByOther.join(",")}`);
+
+        const movedIn = await whileLayoutInFlight("before-completion", () => {
+            target.style.top = "0px";
+        }, frame => {
+            for (const entry of observer.takeRecords())
+                seen.push(entry.isIntersecting);
+            observer.observe(target);
+            otherObserver.disconnect();
+            return frame;
+        });
+        println(`moved in: held as armed: ${layoutHeldAsArmed(movedIn, "before-completion")}`);
+        await twoFrames();
+        await nextTask();
+        println(`moved in: ${seen.join(",")}`);
+        println(`disconnected beside the pass: ${seenByOther.join(",")}`);
+        observer.disconnect();
+        done();
+    });
+</script>
