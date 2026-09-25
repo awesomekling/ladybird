@@ -1818,7 +1818,10 @@ u64 Internals::style_pass_forced_joins() const
 
 void Internals::update_compositor_animations()
 {
-    window().associated_document().update_compositor_animations();
+    // NB: A test asks for what its last changes put on the compositor, so a style pass in flight is taken in first.
+    auto& document = window().associated_document();
+    document.join_frame_in_flight();
+    document.update_compositor_animations();
 }
 
 bool Internals::run_empty_animation_style_update_for_testing()
