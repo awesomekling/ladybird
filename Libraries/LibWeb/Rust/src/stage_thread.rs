@@ -113,12 +113,12 @@ fn stage_thread_mode() -> Option<StageThreadMode> {
 }
 
 /// The stages the rendering update submits when the stages overlap: a comma-separated list in
-/// `LIBWEB_STAGE_OVERLAP` (`none` names none), or the recording when it is not set.
+/// `LIBWEB_STAGE_OVERLAP` (`none` names none), or the recording and layout when it is not set.
 fn overlapping_stages() -> &'static [String] {
     static STAGES: OnceLock<Vec<String>> = OnceLock::new();
     STAGES.get_or_init(|| {
         std::env::var("LIBWEB_STAGE_OVERLAP")
-            .unwrap_or_else(|_| "recording".into())
+            .unwrap_or_else(|_| "recording,layout".into())
             .split(',')
             .map(|stage| stage.trim().to_owned())
             .filter(|stage| !stage.is_empty() && stage != "none")
