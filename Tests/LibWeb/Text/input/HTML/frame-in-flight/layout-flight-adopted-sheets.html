@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<div id="box" style="height: 10px"></div>
+<div class="x" id="target">x</div>
+<script>
+    // Style sheets adopted beside a layout pass in flight wait for the pass to be taken back, and reach the style
+    // engine in the order they were adopted: each attachment publishes more input as it runs, which goes in with it,
+    // ahead of the attachments queued behind it.
+    asyncTest(async done => {
+        const first = new CSSStyleSheet();
+        first.replaceSync(".x { color: rgb(255, 0, 0); }");
+        const second = new CSSStyleSheet();
+        second.replaceSync(".x { color: rgb(0, 0, 255); }");
+        const result = await whileLayoutInFlight("before-run", () => {
+            box.style.height = "20px";
+        }, frame => {
+            const joinsBefore = internals.forcedJoinCount("layout");
+            document.adoptedStyleSheets = [first, second];
+            return {
+                ...frame,
+                joins: internals.forcedJoinCount("layout") - joinsBefore,
+                stillInFlight: !frame.heldAt || internals.frameInFlightHoldsDocument(),
+            };
+        });
+        println(`held as armed: ${layoutHeldAsArmed(result, "before-run")}`);
+        println(`forced joins of the layout pass: ${result.joins}`);
+        println(`layout pass still in flight after the adoption: ${result.stillInFlight}`);
+        println(`color: ${getComputedStyle(target).color}`);
+        document.adoptedStyleSheets = [second, first];
+        println(`color after reordering: ${getComputedStyle(target).color}`);
+        done();
+    });
+</script>
