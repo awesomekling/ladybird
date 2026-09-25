@@ -78,10 +78,6 @@ public:
     // Whether a rendering update may submit its frame, rather than waiting for the render side.
     static bool submits_frames();
 
-    // Whether the rendering update holds on to its rendering opportunity: until its tail has run, the next rendering
-    // update does not start.
-    bool holds_rendering_update() const { return m_state != State::Idle && m_state != State::MainHalf; }
-
     void begin_main_half(bool synchronous);
     // The recording mode of the main half's recordings.
     Painting::RecordingRun recording_run() const;

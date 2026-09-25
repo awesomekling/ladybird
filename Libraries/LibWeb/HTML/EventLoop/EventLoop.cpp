@@ -60,6 +60,9 @@ EventLoop::EventLoop(Type type)
 
     m_rendering_task_function = GC::create_function(GC::Heap::the(), [this] {
         VERIFY(m_rendering_task_queued);
+        // The previous rendering update's frame and tail come first. The tail hands its pages the rendering opportunity
+        // this task was queued for again, and while the task still counts as queued, that queues no second one.
+        m_frame_scheduler->finish_frame_now();
         m_rendering_task_queued = false;
         update_the_rendering();
     });
@@ -479,10 +482,10 @@ bool EventLoop::rendering_opportunity(HighResolutionTime::DOMHighResTimeStamp fr
     if (m_running_rendering_task)
         return false;
 
-    // A rendering update whose frame has not been taken in, or whose tail has not run, keeps the opportunity too.
-    if (m_frame_scheduler->holds_rendering_update())
-        return false;
-
+    // NB: A rendering update whose frame has not been taken in, or whose tail has not run, does not hold the opportunity
+    //     back: the rendering task queued for it finishes that frame first, as a rendering update in lockstep would
+    //     have. Held back, the opportunity would reach the rendering task queue only behind the tasks queued after it,
+    //     and one granted by hand would be lost.
     m_rendering_update_requested = false;
 
     if (m_rendering_task_queued)
@@ -1410,6 +1413,8 @@ EventLoop::PauseHandle EventLoop::pause(UpdateTheRendering should_update_the_ren
     // NB: UpdateTheRendering::No skips this step, for a caller that must not run author callbacks (e.g., rAF callbacks)
     //     while it's blocked — a sync XHR send(), which may itself have been invoked from within a microtask.
     if (should_update_the_rendering == UpdateTheRendering::Yes && !m_running_rendering_task) {
+        // The previous rendering update's tail first, so the rendering task it can queue is removed with the others.
+        m_frame_scheduler->finish_frame_now();
         if (m_rendering_task_queued) {
             m_task_queue->remove_tasks_matching([](auto const& task) {
                 return task.source() == Task::Source::Rendering;
