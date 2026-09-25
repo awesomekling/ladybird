@@ -16,6 +16,15 @@
         return new Promise(resolve => requestAnimationFrame(resolve));
     }
 
+    // A rendering update that submits its style or layout pass finishes in a later task, once the main thread takes
+    // the pass back.
+    async function renderingUpdateFinished() {
+        while (internals.renderingUpdateAwaitsPass()) {
+            internals.waitForFrameToFinish();
+            await new Promise(resolve => setTimeout(resolve, 0));
+        }
+    }
+
     async function animationOverlayBuildsOverFrames(frameCount) {
         const before = internals.getStyleInvalidationCounters().animatedStyleOverlayBuilds;
         for (let i = 0; i < frameCount; ++i)
@@ -165,6 +174,7 @@
         internals.resetStyleInvalidationCounters();
         styleOnlyVisibilityChange.style.visibility = "visible";
         await new Promise(resolve => setTimeout(resolve, 0));
+        await renderingUpdateFinished();
         println(`style-only visibility change samples animation: ${internals.getStyleInvalidationCounters().animatedStyleOverlayBuilds > 0}`);
         styleOnlyVisibilityChange.remove();
 
