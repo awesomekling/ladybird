@@ -1372,8 +1372,10 @@ void Element::did_publish_presentational_hint_properties(ReadonlySpan<CSS::Style
 
 void Element::run_attribute_change_steps(Utf16FlyString const& local_name, Optional<Utf16String> const& old_value, Optional<Utf16String> const& value, Optional<Utf16FlyString> const& namespace_)
 {
-    // An attribute change writes the facts the style mirror keeps of the element as it goes.
-    if (!Layout::RustFFI::rust_stage_thread_only_style_pass_in_flight_for(document().style_computer().style_engine().rust_handle()))
+    // An attribute change writes the facts the style mirror keeps of the element as it goes. The
+    // mirror keeps none of an element with no style node, such as one outside the document, and
+    // the change reaches nothing a frame in flight reads.
+    if (style_node_id() != 0 && !Layout::RustFFI::rust_stage_thread_only_style_pass_in_flight_for(document().style_computer().style_engine().rust_handle()))
         document().join_frame_for_dom_tree_mutation();
 
     attribute_changed(local_name, old_value, value, namespace_);
@@ -6379,8 +6381,10 @@ void Element::attribute_changed(Utf16FlyString const& local_name, Optional<Utf16
         if (m_inline_style && m_inline_style->is_updating())
             return;
         // The new declaration block has not replaced the old one yet, so this is the last point at
-        // which a deferred geometry-read boundary can commit its before-change style.
-        document().flush_deferred_style_change_event();
+        // which a deferred geometry-read boundary can commit its before-change style. An element
+        // with no style node has no style there.
+        if (style_node_id() != 0)
+            document().flush_deferred_style_change_event();
         if (!m_inline_style)
             m_inline_style = CSS::CSSStyleProperties::create_element_inline_style({ *this });
         m_inline_style->set_declarations_from_text(value_or_empty);
