@@ -229,6 +229,10 @@ interface Internals {
     // LIBWEB_STAGE_THREAD=overlap with LIBWEB_STAGE_OVERLAP naming "layout". It holds the pass at
     // "before-run" or "before-completion" (laid out, before the main thread hears of it).
     boolean holdNextLayoutFrame(optional DOMString point = "before-run", optional Document? document = null);
+    // Like holdNextLayoutFrame(), for the first style pass a rendering update submits, under
+    // LIBWEB_STAGE_THREAD=overlap with LIBWEB_STAGE_OVERLAP naming "style". It holds the pass at
+    // "before-run" or "before-completion" (styled, before the main thread hears of it).
+    boolean holdNextStyleFrame(optional DOMString point = "before-run", optional Document? document = null);
     // Blocks (bounded) until the stage a hold is armed for is held and returns where, or "" if none
     // is. Returns "" at once if no such stage has been submitted, since none can be while it blocks.
     DOMString waitForHeldFrame();

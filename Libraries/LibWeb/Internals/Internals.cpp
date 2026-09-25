@@ -1729,6 +1729,11 @@ bool Internals::hold_next_layout_frame(Utf16String const& point, GC::Ptr<DOM::Do
     return hold_next_submitted_stage("layout"sv, point, document);
 }
 
+bool Internals::hold_next_style_frame(Utf16String const& point, GC::Ptr<DOM::Document> document)
+{
+    return hold_next_submitted_stage("style"sv, point, document);
+}
+
 Utf16String Internals::wait_for_held_frame()
 {
     // Bounded, so a frame that is never held fails the test instead of hanging it.
