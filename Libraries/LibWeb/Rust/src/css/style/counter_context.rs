@@ -1132,10 +1132,11 @@ impl StyleEngine {
         &mut self,
         node: StyleNodeID,
         settled: &mut publication::RetriedEngineRecord,
+        held_style_records: &[u64; bridge::RETRY_PSEUDO_RECORD_SLOTS],
         layout_arena: super::animations::LentLayoutArena,
-    ) -> u8 {
+    ) -> (u8, u8) {
         self.state
-            .sample_settled_pseudo_elements(node, settled, layout_arena, &mut self.counters)
+            .sample_settled_pseudo_elements(node, settled, held_style_records, layout_arena, &mut self.counters)
     }
 
     /// Publish the immutable computed-group payloads of one element's base style. This assigns

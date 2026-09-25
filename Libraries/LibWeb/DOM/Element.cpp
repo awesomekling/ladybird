@@ -1776,7 +1776,11 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
             }
             set_custom_property_data(scope, pseudo_element, move(data));
             if (!!old_style_record || !new_pseudo_element_style->transition_delay_and_duration_are_single_zero()) {
-                auto transition_invalidation = style_computer.run_transition_step_for_installed_record(scope, { *this, pseudo_element }, old_style_record);
+                // A step the engine decided as it settled the pseudo-element is applied as it decided
+                // it, its composition already installed.
+                auto const decided = CSS::StyleEngineFFI::style_engine_take_pseudo_element_transition_step_decided_in_pass(
+                    scope.engine().rust_handle(), style_node_id().value(), to_underlying(pseudo_element));
+                auto transition_invalidation = style_computer.run_transition_step_for_installed_record(scope, { *this, pseudo_element }, old_style_record, decided.present ? &decided : nullptr);
                 invalidation |= transition_invalidation;
             }
         } else if (auto existing_pseudo_element = get_synthetic_pseudo_element(pseudo_element); existing_pseudo_element.has_value())

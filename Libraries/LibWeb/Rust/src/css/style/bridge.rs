@@ -213,6 +213,9 @@ pub struct FfiEngineComputedRecord {
     /// The synthetic pseudo-element kinds whose animations the engine sampled as it settled them,
     /// as a bit per kind: their named records are the compositions, and the host samples the rest.
     pub pseudo_samples_taken: u8,
+    /// The kinds whose transition step the engine decided, as a bit per kind, which the host
+    /// takes and applies where it installs their records.
+    pub pseudo_transition_steps_decided: u8,
 }
 
 /// One synchronous record demand: the row's record, or the absence of a pseudo-element that
@@ -1838,6 +1841,35 @@ pub unsafe extern "C" fn style_engine_take_transition_step_decided_in_pass(
 ) -> FfiTransitionStepDecidedInPass {
     let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
     match StyleNodeID::from_raw(node).and_then(|node| engine.take_transition_step_decided_in_pass(node)) {
+        Some(step) => FfiTransitionStepDecidedInPass {
+            present: true,
+            actions: step.actions().as_ptr(),
+            action_count: step.actions().len(),
+        },
+        None => FfiTransitionStepDecidedInPass {
+            present: false,
+            actions: std::ptr::null(),
+            action_count: 0,
+        },
+    }
+}
+
+/// Take the transition step the engine decided for a synthetic pseudo-element it settled, which
+/// the host applies instead of deciding it: the engine already composed what it starts into the
+/// record the pseudo-element installs.
+///
+/// # Safety
+/// `engine` must be a live style engine.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_take_pseudo_element_transition_step_decided_in_pass(
+    engine: *mut c_void,
+    node: u32,
+    pseudo_kind: u8,
+) -> FfiTransitionStepDecidedInPass {
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    match StyleNodeID::from_raw(node)
+        .and_then(|node| engine.take_pseudo_element_transition_step_decided_in_pass(node, pseudo_kind))
+    {
         Some(step) => FfiTransitionStepDecidedInPass {
             present: true,
             actions: step.actions().as_ptr(),
@@ -4203,6 +4235,7 @@ fn answer_record_demand_for_host(
                 pseudo_records_present: answer.pseudo_records_present,
                 pseudo_records: answer.pseudo_records,
                 pseudo_samples_taken: 0,
+                pseudo_transition_steps_decided: 0,
             },
             is_absent: false,
             is_provisional: answer.provisional,
@@ -4319,6 +4352,7 @@ pub unsafe extern "C" fn style_engine_settle_pseudo_records_after_host_record(
     old_is_list_item: bool,
     take_explicit_inheritance_debt: bool,
     sample_animations: bool,
+    held_pseudo_records: *const u64,
     layout_arena: *mut c_void,
 ) -> FfiEngineComputedRecord {
     engine_entrance(engine, "style_engine_settle_pseudo_records_after_host_record");
@@ -4327,16 +4361,20 @@ pub unsafe extern "C" fn style_engine_settle_pseudo_records_after_host_record(
         let Some(style_node) = StyleNodeID::from_raw(node) else {
             return FfiEngineComputedRecord::default();
         };
+        engine.forget_pseudo_elements_sampled_in_pass(style_node);
         let (mut settled, uses_substitution) =
             engine.settle_pseudo_records_after_host_record(style_node, old_is_list_item);
         // A replay settles without sampling, so it compares what the settle named.
         let settled_present = settled.pseudo_records_present;
-        // SAFETY: The host lends the document's layout arena for this call.
-        let pseudo_samples_taken = match sample_animations {
-            true => engine.sample_settled_pseudo_elements(style_node, &mut settled, unsafe {
-                super::animations::LentLayoutArena::lend(layout_arena)
-            }),
-            false => 0,
+        let (pseudo_samples_taken, pseudo_transition_steps_decided) = match sample_animations {
+            true => {
+                // SAFETY: The host passes one record per synthetic pseudo-element kind, and lends
+                // the document's layout arena for this call.
+                let held = unsafe { &*held_pseudo_records.cast::<[u64; RETRY_PSEUDO_RECORD_SLOTS]>() };
+                let layout_arena = unsafe { super::animations::LentLayoutArena::lend(layout_arena) };
+                engine.sample_settled_pseudo_elements(style_node, &mut settled, held, layout_arena)
+            }
+            false => (0, 0),
         };
         let result = FfiEngineComputedRecord {
             style_record: settled.style_record,
@@ -4349,6 +4387,7 @@ pub unsafe extern "C" fn style_engine_settle_pseudo_records_after_host_record(
             pseudo_records_present: settled.pseudo_records_present,
             pseudo_records: settled.pseudo_records,
             pseudo_samples_taken,
+            pseudo_transition_steps_decided,
         };
         engine.record_boundary_call(EventKind::SettlePseudoRecordsAfterHostRecord, |payload| {
             payload.write_u32(node);

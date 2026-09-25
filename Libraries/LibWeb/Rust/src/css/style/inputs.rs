@@ -2050,6 +2050,7 @@ impl StyleEngineState {
                 transition_baselines: HashMap::default(),
                 element_transitions: Default::default(),
                 transition_steps_decided_in_pass: HashMap::default(),
+                pseudo_element_transition_steps_decided_in_pass: HashMap::default(),
                 taken_transition_step: None,
                 counter_style_environment_identities: HashMap::default(),
                 nodes_owing_animation_definitions: HashMap::default(),
@@ -2901,6 +2902,9 @@ impl StyleEngineState {
             self.retained.rows_sampled_in_pass.remove(&node);
             self.retained
                 .pseudo_elements_sampled_in_pass
+                .retain(|(owner, _), _| *owner != node);
+            self.retained
+                .pseudo_element_transition_steps_decided_in_pass
                 .retain(|(owner, _), _| *owner != node);
             self.retained.release_transition_baselines_of(node);
             self.retained

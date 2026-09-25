@@ -662,6 +662,7 @@ impl AnimationTimingRow {
     #[must_use]
     pub(crate) fn for_new_css_transition(
         owning_node: StyleNodeID,
+        owning_slot: AnimationSlot,
         property_id: u16,
         delay: f64,
         active_duration: f64,
@@ -692,7 +693,7 @@ impl AnimationTimingRow {
             easing_interval_count: easing.interval_count,
             effect_identity: 0,
             composite_class: animation_class::CSS_TRANSITION,
-            composite_owning_slot: ELEMENT_ANIMATION_SLOT,
+            composite_owning_slot: owning_slot,
             composite_transition_property: property_id,
             composite_owning_node: owning_node.raw(),
             composite_class_key: 0,

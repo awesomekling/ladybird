@@ -726,6 +726,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             old_is_list_item,
                             false,
                             false,
+                            std::ptr::null(),
                             std::ptr::null_mut(),
                         )
                     };

@@ -3658,6 +3658,7 @@ pub(crate) struct StartedTransition {
 pub(crate) fn sample_transition_step(
     engine: &mut crate::css::style::StyleEngineState,
     node: crate::css::style::tree::StyleNodeID,
+    pseudo: Option<u8>,
     installed_style_record: u64,
     removed: Option<&[u64]>,
     started: &[StartedTransition],
@@ -3670,9 +3671,12 @@ pub(crate) fn sample_transition_step(
     use crate::css::cascaded_properties::NO_PSEUDO_ELEMENT;
     use crate::css::style::animations;
 
-    let environments = engine
-        .settled_row_custom_property_environments(node)
-        .map_err(|reason| format!("custom property environments: {reason}"))?;
+    let pseudo_kind = pseudo.unwrap_or(NO_PSEUDO_ELEMENT);
+    let environments = match pseudo {
+        None => engine.settled_row_custom_property_environments(node),
+        Some(kind) => engine.settled_pseudo_element_custom_property_environments(node, kind, installed_style_record),
+    }
+    .map_err(|reason| format!("custom property environments: {reason}"))?;
     let (table, record_overlay) = {
         let view = engine
             .style_record_view(installed_style_record)
@@ -3692,7 +3696,7 @@ pub(crate) fn sample_transition_step(
     let input = FfiHostAnimationSample {
         style_engine: std::ptr::null_mut(),
         style_node: node.raw(),
-        pseudo_kind: NO_PSEUDO_ELEMENT,
+        pseudo_kind,
         identities: std::ptr::null(),
         generations: std::ptr::null(),
         current_keys: std::ptr::null(),
@@ -3713,7 +3717,7 @@ pub(crate) fn sample_transition_step(
         length_contexts: None,
         layout_arena: layout_arena.as_ptr(),
     };
-    let slot = animations::ELEMENT_ANIMATION_SLOT;
+    let slot = animation_slot(pseudo_kind);
     let descriptions = match removed {
         Some(_) => engine.take_element_animation_effect_descriptions(node, slot),
         None => None,

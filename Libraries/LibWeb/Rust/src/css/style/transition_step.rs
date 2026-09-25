@@ -161,15 +161,17 @@ impl RetainedState {
     fn decide_transition_step(
         &self,
         node: StyleNodeID,
+        pseudo: Option<u8>,
         old_style_record: u64,
         installed_style_record: u64,
         layout_arena: super::animations::LentLayoutArena,
     ) -> Result<TransitionStep, &'static str> {
-        const SLOT: AnimationSlot = 0;
         const IN_DISPLAY_NONE_SUBTREE: u8 = 1 << 2;
+        let pseudo_kind = pseudo.unwrap_or(u8::MAX);
+        let slot: AnimationSlot = crate::css::style_compute::animation_slot(pseudo_kind);
 
         // https://drafts.csswg.org/css-transitions-2/#defining-before-change-style
-        let before_style_record = match self.transition_baseline(node, u8::MAX) {
+        let before_style_record = match self.transition_baseline(node, pseudo_kind) {
             0 => old_style_record,
             baseline => baseline,
         };
@@ -182,7 +184,12 @@ impl RetainedState {
         if before.dependency_flags & IN_DISPLAY_NONE_SUBTREE != 0 {
             return Ok(TransitionStep::default());
         }
-        if let Some(parent) = self.tree.inheritance_parent(node)
+        // A pseudo-element inherits from its originating element.
+        let parent = match pseudo {
+            None => self.tree.inheritance_parent(node),
+            Some(_) => Some(node),
+        };
+        if let Some(parent) = parent
             && let Some(parent_record) = self.computed_group_sets.assigned_style_record(parent)
             && let Some(parent_view) = self.style_record_view(parent_record.raw())
             && parent_view.dependency_flags & IN_DISPLAY_NONE_SUBTREE != 0
@@ -195,7 +202,7 @@ impl RetainedState {
             .ok_or("no installed record")?;
         let after_table = unsafe { installed.longhand_table.as_ref() }.ok_or("an installed record with no table")?;
         let after_overlay = unsafe { installed.animated_overlay.as_ref() };
-        let transitions = self.element_transitions.get(node, SLOT);
+        let transitions = self.element_transitions.get(node, slot);
         let entries = match crate::css::style_compute::transition_delay_and_duration_are_single_zero(after_table)
             && transitions.is_empty()
         {
@@ -233,8 +240,8 @@ impl RetainedState {
             context.transform_reference_box_height = height;
         }
 
-        let rows = self.element_animation_timing_rows(node, SLOT);
-        let linear_points = self.element_animation_timing_row_linear_points(node, SLOT);
+        let rows = self.element_animation_timing_rows(node, slot);
+        let linear_points = self.element_animation_timing_row_linear_points(node, slot);
         let input = |property_id: u16, entry: Option<&crate::css::transition::FfiTransitionEntry>| {
             let existing = transitions
                 .iter()
@@ -311,7 +318,7 @@ impl RetainedState {
             after_table,
             after_overlay,
             &context,
-            (u64::from(node.raw()) << 8) | u64::from(u8::MAX),
+            (u64::from(node.raw()) << 8) | u64::from(pseudo_kind),
             &mut properties,
             &mut actions,
         );
@@ -364,6 +371,7 @@ impl RetainedState {
                 effect: PublishedEffect::for_css_transition(action.property_id, retain(start_value), retain(end_value)),
                 row: AnimationTimingRow::for_new_css_transition(
                     node,
+                    slot,
                     action.property_id,
                     action.delay,
                     action.active_duration,
@@ -403,70 +411,138 @@ impl StyleEngineState {
         layout_arena: super::animations::LentLayoutArena,
         counters: &mut super::Counters,
     ) {
-        let step = match self.decide_transition_step(node, old_style_record, installed_style_record, layout_arena) {
-            Ok(step) => step,
-            Err(reason) => {
-                engine_sample_check::note_declined(&format!("transition step: {reason}"));
-                return;
-            }
-        };
         // A step that removes a transition collects the element's effects again without it, which
         // the host does once it applied the row's animation plan, and the published rows are the
         // effects from before.
-        if !step.removed.is_empty()
-            && self
-                .retained
-                .nodes_owing_animation_definitions
-                .contains_key(&(node, u8::MAX))
-        {
-            engine_sample_check::note_declined("transition step: a step that removes a transition beside a plan");
-            return;
-        }
-        if !step.started.is_empty() || !step.removed.is_empty() {
-            let removed = (!step.removed.is_empty()).then_some(&step.removed[..]);
-            let published = crate::css::style_compute::sample_transition_step(
-                self,
-                node,
-                installed_style_record,
-                removed,
-                &step.started,
-                layout_arena,
-            )
-            .and_then(|overlay| {
-                self.publish_transition_step_composition(
-                    node,
-                    settled_style_record,
-                    installed_style_record,
-                    overlay,
-                    counters,
-                )
-                .map_err(String::from)
-            });
-            if let Err(reason) = published {
-                engine_sample_check::note_declined(&format!("transition step: {reason}"));
-                return;
+        let owes_a_plan = self
+            .retained
+            .nodes_owing_animation_definitions
+            .contains_key(&(node, u8::MAX));
+        match self.decide_and_compose_transition_step(
+            node,
+            None,
+            old_style_record,
+            settled_style_record,
+            installed_style_record,
+            owes_a_plan,
+            layout_arena,
+            counters,
+        ) {
+            Ok((step, _)) => {
+                engine_sample_check::note_taken("transition step");
+                self.retained.transition_steps_decided_in_pass.insert(node, step);
             }
+            Err(reason) => engine_sample_check::note_declined(&format!("transition step: {reason}")),
         }
-        engine_sample_check::note_taken("transition step");
-        self.retained
-            .transition_steps_decided_in_pass
-            .insert(node, step.for_host);
     }
 
-    /// Publish the composition a step left as the element's record, as the pass publishes its
-    /// sample of the row: over the record the row settled, with what the sample the step was
+    /// Decide the transition step of a synthetic pseudo-element the engine just settled, as the
+    /// host decides it when it installs the pseudo-element's record over `old_style_record`, the
+    /// one it holds, and compose what the step leaves of `installed_style_record`. Returns the
+    /// record the host installs, the step's composition where it moved it; `None` where the host
+    /// runs no step or decides it itself.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn decide_settled_pseudo_element_transition_step(
+        &mut self,
+        node: StyleNodeID,
+        pseudo_kind: u8,
+        old_style_record: u64,
+        settled_style_record: u64,
+        installed_style_record: u64,
+        layout_arena: super::animations::LentLayoutArena,
+        counters: &mut super::Counters,
+    ) -> Option<u64> {
+        // The host runs the step of a pseudo-element that had a record, or whose new one
+        // declares transitions.
+        let declares_transitions = self
+            .style_record_view(installed_style_record)
+            .and_then(|view| unsafe { view.longhand_table.as_ref() })
+            .is_some_and(|table| !crate::css::style_compute::transition_delay_and_duration_are_single_zero(table));
+        if old_style_record == 0 && !declares_transitions {
+            return None;
+        }
+        match self.decide_and_compose_transition_step(
+            node,
+            Some(pseudo_kind),
+            old_style_record,
+            settled_style_record,
+            installed_style_record,
+            false,
+            layout_arena,
+            counters,
+        ) {
+            Ok((step, composition)) => {
+                engine_sample_check::note_taken("pseudo-element transition step");
+                self.retained
+                    .pseudo_element_transition_steps_decided_in_pass
+                    .insert((node, pseudo_kind), step);
+                Some(composition.unwrap_or(installed_style_record))
+            }
+            Err(reason) => {
+                engine_sample_check::note_declined(&format!("pseudo-element transition step: {reason}"));
+                None
+            }
+        }
+    }
+
+    /// Decide a step and compose what the transitions it starts and removes leave of the
+    /// composition installed, published as the target's record over the one the engine settled:
+    /// the decisions for the host, and the published composition where the step moved it.
+    #[allow(clippy::too_many_arguments)]
+    fn decide_and_compose_transition_step(
+        &mut self,
+        node: StyleNodeID,
+        pseudo: Option<u8>,
+        old_style_record: u64,
+        settled_style_record: u64,
+        installed_style_record: u64,
+        owes_a_plan: bool,
+        layout_arena: super::animations::LentLayoutArena,
+        counters: &mut super::Counters,
+    ) -> Result<(TransitionStepForHost, Option<u64>), String> {
+        let step = self.decide_transition_step(node, pseudo, old_style_record, installed_style_record, layout_arena)?;
+        if !step.removed.is_empty() && owes_a_plan {
+            return Err("a step that removes a transition beside a plan".into());
+        }
+        if step.started.is_empty() && step.removed.is_empty() {
+            return Ok((step.for_host, None));
+        }
+        let removed = (!step.removed.is_empty()).then_some(&step.removed[..]);
+        let overlay = crate::css::style_compute::sample_transition_step(
+            self,
+            node,
+            pseudo,
+            installed_style_record,
+            removed,
+            &step.started,
+            layout_arena,
+        )?;
+        let composition = self.publish_transition_step_composition(
+            node,
+            pseudo,
+            settled_style_record,
+            installed_style_record,
+            overlay,
+            counters,
+        )?;
+        Ok((step.for_host, Some(composition)))
+    }
+
+    /// Publish the composition a step left as the target's record, as the pass publishes its
+    /// sample of the row: over the record the engine settled, with what the sample the step was
     /// layered over found out.
     fn publish_transition_step_composition(
         &mut self,
         node: StyleNodeID,
+        pseudo: Option<u8>,
         settled_style_record: u64,
         installed_style_record: u64,
         overlay: Box<AnimatedOverlay>,
         counters: &mut super::Counters,
-    ) -> Result<(), &'static str> {
+    ) -> Result<u64, &'static str> {
         // Publishing the step's composition does not compose the element's animated custom
         // properties again.
-        if self.retained.sampled_custom_property_environments.contains_key(&node) {
+        if pseudo.is_none() && self.retained.sampled_custom_property_environments.contains_key(&node) {
             return Err("a composition over animated custom properties");
         }
         let view = self
@@ -494,7 +570,14 @@ impl StyleEngineState {
                     }
                     false => table.display_before_box_type_transformation(),
                 });
-        let previous = self.retained.rows_sampled_in_pass.get(&node).copied();
+        let previous = match pseudo {
+            None => self.retained.rows_sampled_in_pass.get(&node).copied(),
+            Some(kind) => self
+                .retained
+                .pseudo_elements_sampled_in_pass
+                .get(&(node, kind))
+                .copied(),
+        };
         let sample = crate::css::style_compute::SettledRowSample {
             style_record: settled_style_record,
             keyframes_inherited_non_inherited_style_groups: previous
@@ -509,14 +592,30 @@ impl StyleEngineState {
                 overlay: Box::into_raw(overlay),
             },
         };
-        self.publish_settled_row_sample(node, None, sample, counters)?;
-        Ok(())
+        Ok(self
+            .publish_settled_row_sample(node, pseudo, sample, counters)?
+            .style_record)
     }
 
     /// Take the step the pass decided for a row, so that exactly one installation applies it. What
     /// it points at stays alive until the next take.
     pub(crate) fn take_transition_step_decided_in_pass(&mut self, node: StyleNodeID) -> Option<&TransitionStepForHost> {
         let step = self.retained.transition_steps_decided_in_pass.remove(&node)?;
+        self.retained.taken_transition_step = Some(step);
+        self.retained.taken_transition_step.as_ref()
+    }
+
+    /// Take the step the engine decided for a pseudo-element it settled, so that exactly one
+    /// installation applies it. What it points at stays alive until the next take.
+    pub(crate) fn take_pseudo_element_transition_step_decided_in_pass(
+        &mut self,
+        node: StyleNodeID,
+        pseudo_kind: u8,
+    ) -> Option<&TransitionStepForHost> {
+        let step = self
+            .retained
+            .pseudo_element_transition_steps_decided_in_pass
+            .remove(&(node, pseudo_kind))?;
         self.retained.taken_transition_step = Some(step);
         self.retained.taken_transition_step.as_ref()
     }
