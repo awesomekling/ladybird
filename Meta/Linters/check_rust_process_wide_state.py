@@ -113,6 +113,7 @@ RENDER_STAGE_ALLOWED = {
     **render_stage_entries(
         ENVIRONMENT_SWITCH,
         [
+            "stage_thread.rs:LOGS",
             "css/style/flush.rs:ENABLED",
             "css/style/mod.rs:CASCADE_WINNERS",
             "css/style/mod.rs:PREFIX_RELATION",
@@ -182,6 +183,8 @@ RENDER_STAGE_ALLOWED = {
             "layout/frame_retirement.rs:COUNTERS",
             "stage_thread.rs:NEXT_SUBMITTED_RUN",
             "stage_thread.rs:RUNNING_SUBMITTED_RUN",
+            "stage_thread.rs:PRESENTATIONS_SUBMITTED",
+            "stage_thread.rs:TAKE_BACKS_THAT_WAITED_FOR_PRESENTATION",
         ],
     ),
     **render_stage_entries(

@@ -732,14 +732,22 @@ Compositing::ScrollStateSnapshot DocumentPresentationSource::scroll_state_snapsh
     return scroll_state_snapshot;
 }
 
-Compositor::PublishedDisplayList publish_rust_display_list_recording(PendingDisplayListRecording& recording, Compositing::DisplayList* paint_command_cache_source, Compositing::DisplayListResourceSet const& paint_command_cache_source_resources, Compositor::PresentationSource& source)
+enum class PublicationSite : u8 {
+    MainThread,
+    FrameInFlight,
+};
+
+static Compositor::PublishedDisplayList publish_rust_display_list_recording(PublicationSite site, PendingDisplayListRecording& recording, Compositing::DisplayList* paint_command_cache_source, Compositing::DisplayListResourceSet const& paint_command_cache_source_resources, Compositor::PresentationSource& source)
 {
     auto* arena = recording.arena;
     RecordingPublishStorage publish_storage { recording.resource_storage };
     auto const& device_viewport_rect = recording.device_viewport_rect;
     auto& wheel_event_region_state = recording.wheel_event_region_state;
     auto const& rust_timer = recording.timer;
-    Layout::RustFFI::layout_arena_publish_recording(arena, recording_publish_callbacks(publish_storage));
+    if (site == PublicationSite::FrameInFlight)
+        Layout::RustFFI::layout_arena_publish_recording_in_frame(arena, recording_publish_callbacks(publish_storage));
+    else
+        Layout::RustFFI::layout_arena_publish_recording(arena, recording_publish_callbacks(publish_storage));
     source.did_publish_recording();
     if (Layout::RustFFI::layout_arena_last_recording_has_blocking_wheel_event_listeners(arena))
         wheel_event_region_state.has_blocking_wheel_event_listeners = true;
@@ -783,6 +791,16 @@ Compositor::PublishedDisplayList publish_rust_display_list_recording(PendingDisp
         .is_paint_command_cache_source = false,
         .becomes_paint_command_cache_source = recording.cache_mode == PaintCommandCacheMode::ReadWrite,
     };
+}
+
+Compositor::PublishedDisplayList publish_rust_display_list_recording(PendingDisplayListRecording& recording, Compositing::DisplayList* paint_command_cache_source, Compositing::DisplayListResourceSet const& paint_command_cache_source_resources, Compositor::PresentationSource& source)
+{
+    return publish_rust_display_list_recording(PublicationSite::MainThread, recording, paint_command_cache_source, paint_command_cache_source_resources, source);
+}
+
+Compositor::PublishedDisplayList publish_rust_display_list_recording_in_frame(PendingDisplayListRecording& recording, Compositing::DisplayList* paint_command_cache_source, Compositing::DisplayListResourceSet const& paint_command_cache_source_resources, Compositor::PresentationSource& source)
+{
+    return publish_rust_display_list_recording(PublicationSite::FrameInFlight, recording, paint_command_cache_source, paint_command_cache_source_resources, source);
 }
 
 Compositing::DisplayListResource record_image_paint_display_list(ImagePaint const& paint, ImagePaintRequest const& request, double device_pixels_per_css_pixel)

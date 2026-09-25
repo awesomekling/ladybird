@@ -42,6 +42,13 @@ RefPtr<CompositorFrameSink> CompositorContextHandle::prepare_to_submit_frame(Com
     return m_host.frame_sink();
 }
 
+RefPtr<CompositorFrameSink> CompositorContextHandle::prepare_to_submit_frame_from_render_side()
+{
+    // The frame may present canvases, whose pending commands and present markers go ahead of it.
+    m_host.flush_canvas_2d_stream();
+    return m_host.frame_sink();
+}
+
 void CompositorContextHandle::add_video_sink(Media::VideoSinkHandle video_sink_handle)
 {
     m_host.add_video_sink(video_sink_handle);

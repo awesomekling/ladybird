@@ -134,6 +134,30 @@ pub unsafe extern "C" fn layout_arena_retire_render_state(arena: *mut c_void, re
     });
 }
 
+/// The generation of the arena's render state, which a presentation sealed with a frame takes along.
+///
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_render_state_generation(arena: *mut c_void) -> u64 {
+    // SAFETY: Guaranteed by the caller.
+    unsafe { frame_generation(arena) }
+}
+
+/// Whether the render state a frame presented at `generation` was made for has been retired since,
+/// which counts the frame as retired. The render side presented it already; the document thread
+/// takes in nothing of it.
+///
+/// # Safety
+///
+/// As for [`layout_arena_render_state_generation`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_presented_frame_was_retired(arena: *mut c_void, generation: u64) -> bool {
+    // SAFETY: Guaranteed by the caller.
+    unsafe { frame_was_retired(arena, generation) }
+}
+
 /// The submitted frame hands a compositor frame to the context `context_id` once it is taken in, so
 /// it holds the context until [`rust_frame_release_compositor_context`] is called with the same id.
 #[unsafe(no_mangle)]

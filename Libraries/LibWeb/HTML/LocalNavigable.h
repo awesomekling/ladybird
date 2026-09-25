@@ -10,6 +10,7 @@
 #include <AK/Assertions.h>
 #include <AK/HashTable.h>
 #include <AK/OwnPtr.h>
+#include <AK/SourceLocation.h>
 #include <AK/Tuple.h>
 #include <AK/Utf16String.h>
 #include <AK/Utf16View.h>
@@ -304,9 +305,13 @@ public:
     };
     Optional<PendingCompositorFrame> begin_painting_next_frame(Painting::RecordingRun);
     void finish_painting_next_frame(PendingCompositorFrame&);
+    // Hands the frame's presentation to the frame in flight, which presents it once it has recorded it
+    // (LIBWEB_RENDER_PRESENTS=1). Returns false if the frame is finished and presented here instead.
+    bool submit_presentation(PendingCompositorFrame&);
+    void adopt_presented_frame(PendingCompositorFrame&);
     void render_screenshot(Gfx::PaintingSurface&, PaintConfig, Function<void()>&& callback);
     // The presenter, once the frame in flight that presents from it has been taken in.
-    Compositor::NavigablePresenter& presenter();
+    Compositor::NavigablePresenter& presenter(SourceLocation = SourceLocation::current());
     Compositing::DisplayListResourceStorage& display_list_resource_storage();
 
     bool needs_repaint() const { return m_needs_repaint; }
