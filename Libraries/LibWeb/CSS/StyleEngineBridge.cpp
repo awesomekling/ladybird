@@ -30,20 +30,29 @@
 namespace Web::CSS {
 
 extern "C" void style_engine_prepare_root_font_resolution(void*, u64);
-extern "C" void rust_style_seal_note_input_in_flight(u8 const*, size_t);
 extern "C" void rust_style_seal_note_font_match_reached_document_thread();
 extern "C" void style_engine_publish_font_face_snapshot(void*, void const*, uintptr_t);
 extern "C" void rust_font_face_snapshot_view(void const*, FontFaceSnapshotView*);
 extern "C" void style_engine_reset_custom_functions(void*);
 extern "C" void style_engine_publish_custom_function(void*, void const*, FlatPtr, FlatPtr, u32);
 
-StyleInputScope StyleInputScope::between_passes(StyleEngine& engine, SourceLocation location)
+void StyleEngine::publish_input(Function<void(StyleInputScope const&)>&& input)
 {
-    if (engine.pass_is_in_flight()) {
-        auto site = location.function_name();
-        rust_style_seal_note_input_in_flight(reinterpret_cast<u8 const*>(site.characters_without_null_termination()), site.length());
+    if (pass_is_in_flight()) {
+        m_inputs_queued_during_pass.append(move(input));
+        return;
     }
-    return StyleInputScope { engine };
+    StyleInputScope const scope { *this };
+    input(scope);
+}
+
+void StyleEngine::publish_inputs_queued_during_pass()
+{
+    while (!pass_is_in_flight() && !m_inputs_queued_during_pass.is_empty()) {
+        auto input = m_inputs_queued_during_pass.take_first();
+        StyleInputScope const scope { *this };
+        input(scope);
+    }
 }
 
 // The style stage's between-pass font batch. It is a function of the document's published
@@ -230,7 +239,10 @@ void StyleEngine::ensure_granted_style_nodes(size_t element_count, size_t text_c
         return;
     // A grant asked for on the spot crosses alone. A mutation in progress is no place to end a transaction,
     // so what the host recorded so far waits for its own.
-    auto const input = StyleInputScope::between_passes(*this);
+    // FIXME: A mutation the drain makes (a text control building its shadow tree, say) can ask for one
+    //        while a pass is in flight, and the identities cannot wait for it to drain. A grant moves no
+    //        answer of the pass, but it crosses with the transaction that carries input.
+    StyleInputScope const input { *this };
     Vector<StyleNodeID> style_node_grant;
     Vector<StyleNodeID> text_style_node_grant;
     if (m_granted_style_nodes.size() < element_count)
@@ -265,8 +277,9 @@ void StyleEngine::set_element_parts(StyleNodeID node, ReadonlySpan<StyleAtomID> 
 
 void StyleEngine::finish_sheet_rules_replacement(SheetID sheet)
 {
-    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*this);
-    StyleEngineFFI::style_engine_finish_sheet_rules_replacement(m_impl, sheet.value());
+    publish_input([sheet](StyleInputScope const& input) {
+        StyleEngineFFI::style_engine_finish_sheet_rules_replacement(input.engine().m_impl, sheet.value());
+    });
 }
 
 void StyleEngine::set_element_presentational_hint_properties(StyleNodeID node, StyleEngineFFI::FfiElementDeclarationKind kind, ReadonlySpan<StyleProperty> properties)
@@ -474,7 +487,6 @@ void const* StyleEngine::borrow_engine_custom_property_environment(u64 identity,
 
 StyleAtomID StyleEngine::intern_text_atom(Utf16View text)
 {
-    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*this);
     return intern_atom(Utf16FlyString::from_utf16(text).to_ascii_lowercase());
 }
 
@@ -494,7 +506,6 @@ StyleAtomID StyleEngine::intern_language_atom(Utf16View text)
 
 StyleAtomID StyleEngine::intern_case_sensitive_text_atom(Utf16View text)
 {
-    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*this);
     return intern_atom(Utf16FlyString::from_utf16(text));
 }
 
@@ -509,7 +520,6 @@ StyleAtomID StyleEngine::intern_case_sensitive_text_atom(Utf16View text)
 // own, and one entry per attribute answers all three.
 StyleAtomID StyleEngine::intern_attribute_name(Utf16FlyString const& local_name, Optional<Utf16FlyString> const& namespace_uri)
 {
-    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*this);
     auto local = intern_atom(local_name);
     auto namespace_atom = !namespace_uri.has_value() || namespace_uri->is_empty()
         ? StyleAtomID {}
@@ -546,7 +556,6 @@ StyleAtomID StyleEngine::intern_attribute_name(Utf16FlyString const& local_name,
 
 StyleAtomID StyleEngine::intern_attribute_value(StyleAtomID name, Utf16String const& value)
 {
-    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*this);
     auto atom = intern_atom(Utf16FlyString { value });
     publish_attribute_value_text(atom, value, attribute_name_requires_value_text(name));
     return atom;
@@ -557,7 +566,6 @@ void StyleEngine::backfill_attribute_value_text_if_required(StyleAtomID name, Ut
     if (!attribute_name_requires_value_text(name))
         return;
 
-    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*this);
     auto atom = intern_atom(Utf16FlyString { value });
     publish_attribute_value_text(atom, value, true);
 }
@@ -742,7 +750,6 @@ void StyleEngine::record_container_query_input_change(StyleNodeID style_node)
     if (style_node == 0)
         return;
 
-    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*this);
     flush_deferred_geometry_transaction_before_non_replayable_input(*this, m_style_computer);
     note_recorded_input(*this, m_style_computer);
     record_container_query_input(style_node);
@@ -768,7 +775,6 @@ void StyleEngine::record_element_style_input_change(StyleNodeID style_node, u8 r
 
 void StyleEngine::record_derived_element_style_input_change(StyleNodeID style_node, u8 reaction, u8 inherited_style_groups)
 {
-    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*this);
     if (style_node != 0 && reaction != 0) {
         flush_deferred_geometry_transaction_before_non_replayable_input(*this, m_style_computer);
         note_recorded_input(*this, m_style_computer);
@@ -790,7 +796,6 @@ void StyleEngine::record_flat_tree_descendant_style_input_changes(StyleNodeID st
     if (style_node == 0 || reaction == 0)
         return;
 
-    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*this);
     flush_deferred_geometry_transaction_before_non_replayable_input(*this, m_style_computer);
     // The relation columns must include every tree delta recorded before this derived action.
     submit_recorded_input();
@@ -834,7 +839,10 @@ bool StyleEngine::has_recorded_input() const
 
 void StyleEngine::submit_recorded_input()
 {
-    auto const input = StyleInputScope::between_passes(*this);
+    // The recorded input is the next transaction's journal. While a pass is in flight it stays there.
+    if (pass_is_in_flight())
+        return;
+    StyleInputScope const input { *this };
     if (m_style_computer)
         publish_pending_element_features(*this, *m_style_computer);
     if (!has_recorded_input() && m_host_fact_writes.is_empty() && !m_style_node_grant_request && !m_text_style_node_grant_request) {
@@ -1227,7 +1235,6 @@ void* StyleEngine::compile_selector_query(ReadonlySpan<void const*> selectors)
 
 void* StyleEngine::compile_selector_query(ReadonlySpan<void const*> selectors, Function<void()> const& backfill_attribute_value_texts)
 {
-    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*this);
     auto* query = StyleEngineFFI::style_engine_compile_selector_query(m_impl, selectors.data(), selectors.size());
     if (refresh_attribute_value_text_requirements()) {
         if (m_style_computer)

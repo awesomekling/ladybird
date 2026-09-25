@@ -112,7 +112,6 @@ static CSS::StyleAtomID svg_reference_fragment_atom(DOM::Element& element, Optio
         return {};
     auto fragment = SVG::decode_fragment_identifier(*url->fragment());
     auto& style_engine = element.document().style_computer().style_engine();
-    [[maybe_unused]] auto const input = CSS::StyleInputScope::between_passes(style_engine);
     return style_engine.intern_atom(Utf16FlyString::from_utf16(fragment.utf16_view()));
 }
 
@@ -130,7 +129,6 @@ static CSS::StyleAtomID svg_style_reference_fragment_atom(DOM::Element& element,
         return {};
     auto fragment = SVG::decode_fragment_identifier(url->url().substring_view(fragment_offset.value() + 1));
     auto& style_engine = element.document().style_computer().style_engine();
-    [[maybe_unused]] auto const input = CSS::StyleInputScope::between_passes(style_engine);
     return style_engine.intern_atom(Utf16FlyString::from_utf16(fragment.utf16_view()));
 }
 

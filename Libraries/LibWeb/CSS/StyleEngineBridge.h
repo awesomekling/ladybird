@@ -20,6 +20,7 @@
 #include <LibGC/Ptr.h>
 #include <LibWeb/CSS/StyleDrainScope.h>
 #include <LibWeb/CSS/StyleEngineIdentifiers.h>
+#include <LibWeb/CSS/StyleInputScope.h>
 #include <LibWeb/CSS/StyleRecordID.h>
 #include <LibWeb/ComputedValuesRustFFI.h>
 #include <LibWeb/Export.h>
@@ -297,13 +298,22 @@ public:
     // Whether a style pass is in flight: a batch the engine published waits for the host, or the
     // host is draining one. An input published now is one the pass did not see (see StyleInputScope).
     [[nodiscard]] bool pass_is_in_flight() const { return m_published_batch_waits || m_effect_drain_depth != 0; }
-    void set_published_batch_waits(bool waits) { m_published_batch_waits = waits; }
+    void set_published_batch_waits(bool waits)
+    {
+        m_published_batch_waits = waits;
+        publish_inputs_queued_during_pass();
+    }
     void enter_effect_drain() { ++m_effect_drain_depth; }
     void leave_effect_drain()
     {
         VERIFY(m_effect_drain_depth != 0);
         --m_effect_drain_depth;
+        publish_inputs_queued_during_pass();
     }
+
+    // Publish a style input: at once between passes, and once the pass has drained while one is in
+    // flight, in the order the host published them.
+    void publish_input(Function<void(StyleInputScope const&)>&&);
 
     struct PublishedStyleTransaction {
         PublishedTransactionVersion version;
@@ -358,6 +368,7 @@ private:
     bool read_matches(StyleNodeID, Vector<RuleMatch>&, Optional<MatchPurpose>);
     void apply_transaction(StyleInputScope const&, InputTransaction const&);
     void submit_recorded_input();
+    void publish_inputs_queued_during_pass();
     void record_host_fact_write(StyleEngineFFI::FfiHostFactWrite);
     void mint_style_nodes(Span<StyleNodeID>, Vector<StyleNodeID>& granted, size_t& grant_request, StyleEngineFFI::FfiHostFactKind, u8 value);
     bool refresh_attribute_value_text_requirements();
@@ -390,6 +401,7 @@ private:
     u32 m_connected_element_count_at_last_transaction { 0 };
     bool m_published_batch_waits { false };
     u32 m_effect_drain_depth { 0 };
+    Vector<Function<void(StyleInputScope const&)>> m_inputs_queued_during_pass;
     u64 m_attribute_value_text_requirements_version { 0 };
     HashTable<StyleNodeID> m_nodes_with_pending_initial_features;
     HashTable<StyleNodeID> m_nodes_awaiting_first_style_computation;
