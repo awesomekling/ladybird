@@ -2163,15 +2163,141 @@ impl StyleEngineState {
                 return;
             }
             // A wave that stops before a row leaves the children to the next transaction, as the
-            // host's application of their parents would.
+            // host's application of their parents would, unless a child is what the rows still to
+            // come inherit through: then it joins before them, and the pass goes on from the row
+            // it stopped before.
             if pass.next_index < pass.published_nodes.len() {
-                self.defer_derived_children(pass, derived_children);
-                return;
+                if !self.join_derived_children_before_rows_to_come(pass, derived_children, counters) {
+                    return;
+                }
+                continue;
             }
             if !self.extend_style_pass(pass, derived_children, counters) {
                 return;
             }
         }
+    }
+
+    /// A round stopped before a row whose flat-tree ancestor is no row of the pass, where a row the
+    /// round settled derived a reaction for that ancestor. The ancestor joins the pass right
+    /// before the first row still to come below it, so the next round settles it before the rows
+    /// that inherit from it, in this pass. The other children wait for the next transaction, as
+    /// they did. Whether any child joined.
+    fn join_derived_children_before_rows_to_come(
+        &mut self,
+        pass: &mut StylePass,
+        mut derived_children: Vec<(StyleNodeID, u8, u8, bool)>,
+        counters: &mut Counters,
+    ) -> bool {
+        derived_children.sort_unstable_by_key(|&(child, _, _, _)| child);
+        derived_children.dedup_by(|next, kept| {
+            if next.0 != kept.0 {
+                return false;
+            }
+            kept.1 |= next.1;
+            kept.2 |= next.2;
+            kept.3 |= next.3;
+            true
+        });
+        let row_positions: HashMap<StyleNodeID, usize> = pass
+            .published_nodes
+            .iter()
+            .enumerate()
+            .map(|(index, &node)| (node, index))
+            .collect();
+        // The first row still to come below each child that is no row of the pass.
+        let mut unplaced: HashSet<StyleNodeID> = derived_children
+            .iter()
+            .map(|&(child, _, _, _)| child)
+            .filter(|child| !row_positions.contains_key(child))
+            .collect();
+        let mut first_row_below = HashMap::<StyleNodeID, usize>::default();
+        for index in pass.next_index..pass.published_nodes.len() {
+            if unplaced.is_empty() {
+                break;
+            }
+            let mut ancestor = self.tree.flat_tree_parent(pass.published_nodes[index]);
+            while let Some(current) = ancestor {
+                if row_positions.contains_key(&current) {
+                    break;
+                }
+                if unplaced.remove(&current) {
+                    first_row_below.insert(current, index);
+                }
+                ancestor = self.tree.flat_tree_parent(current);
+            }
+        }
+        let mut joining = Vec::<(usize, (StyleNodeID, u8, u8, bool))>::new();
+        let mut deferred = Vec::new();
+        for child in derived_children {
+            if let Some(&index) = first_row_below.get(&child.0) {
+                joining.push((index, child));
+            } else {
+                deferred.push(child);
+            }
+        }
+        if joining.is_empty() {
+            self.defer_derived_children(pass, deferred);
+            return false;
+        }
+        let nodes: Vec<StyleNodeID> = joining.iter().map(|&(_, (child, _, _, _))| child).collect();
+        std::mem::swap(
+            &mut pass.published_match_answers,
+            &mut self.retained.published_match_answers,
+        );
+        let completed = self.complete_published_match_answers_for_closure(&nodes, counters);
+        std::mem::swap(
+            &mut pass.published_match_answers,
+            &mut self.retained.published_match_answers,
+        );
+        if completed.is_err() {
+            deferred.extend(joining.into_iter().map(|(_, child)| child));
+            self.defer_derived_children(pass, deferred);
+            return false;
+        }
+        self.defer_derived_children(pass, deferred);
+        // An ancestor above another joins before it, as it comes first in the flat tree.
+        joining.sort_by_key(|&(index, (child, _, _, _))| (index, self.tree.depth(child)));
+        // The row the round stopped before is driven afresh over the ancestors that join.
+        pass.rows_after_installed_ancestors
+            .remove(&pass.published_nodes[pass.next_index]);
+        let published_node_capacity = pass.published_nodes.capacity();
+        let mut published_nodes = Vec::with_capacity(pass.published_nodes.len() + joining.len());
+        let mut previous_cascade_inputs = Vec::with_capacity(published_nodes.capacity());
+        let mut joining = joining.into_iter().peekable();
+        for (index, &node) in pass.published_nodes.iter().enumerate() {
+            while let Some((_, (child, reaction, groups, display_moved))) =
+                joining.next_if(|&(before, _)| before == index)
+            {
+                pass.joined_by_derivation.insert(child);
+                match pass
+                    .style_input_reactions
+                    .binary_search_by_key(&child, |&(style_node, _, _)| style_node)
+                {
+                    Ok(position) => {
+                        pass.style_input_reactions[position].1 |= reaction;
+                        pass.style_input_reactions[position].2 |= groups;
+                    }
+                    Err(position) => pass.style_input_reactions.insert(position, (child, reaction, groups)),
+                }
+                if display_moved {
+                    pass.parent_inputs_moved_nodes.insert(child);
+                }
+                published_nodes.push(child);
+                previous_cascade_inputs.push(None);
+            }
+            published_nodes.push(node);
+            previous_cascade_inputs.push(pass.previous_cascade_inputs[index]);
+        }
+        pass.published_nodes = published_nodes;
+        pass.previous_cascade_inputs = previous_cascade_inputs;
+        if pass.published_nodes_are_charged && pass.published_nodes.capacity() > published_node_capacity {
+            self.retained.memory.reserve_required(
+                MemoryCategory::BatchScratch,
+                ((pass.published_nodes.capacity() - published_node_capacity) * size_of::<StyleNodeID>()) as u64,
+            );
+        }
+        true
     }
 
     /// Leave reactions a row of the pass derived for its children to the next transaction.
