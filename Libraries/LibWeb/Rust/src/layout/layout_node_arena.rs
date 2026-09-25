@@ -6605,6 +6605,8 @@ pub(crate) struct EnrolledContentSources {
     /// The enrolled replaced nodes the facts were read for, whether or not they are still live.
     enrolled_replaced_node_count: usize,
     replaced_content_facts: Vec<(NodeSlotId, FfiReplacedContentFacts)>,
+    /// The enrolled nodes whose facts follow from their kind and style, which the arena half derives.
+    style_derived_nodes: Vec<NodeSlotId>,
 }
 
 /// The host half of the enrolled content sync. It reads the replaced-content facts of the nodes
@@ -6632,7 +6634,18 @@ pub(crate) unsafe fn read_enrolled_content_sources(
         .borrow()
         .clone();
     let mut replaced_content_facts = Vec::with_capacity(enrolled_replaced_nodes.len());
+    let mut style_derived_nodes = Vec::new();
     for &node in &enrolled_replaced_nodes {
+        {
+            let arena = unsafe { &*arena.cast::<LayoutNodeArena>() };
+            if !arena.slot_is_live(node) {
+                continue;
+            }
+            if !super::node_facts::node_replaced_content_facts_need_host(arena.data(node)) {
+                style_derived_nodes.push(node);
+                continue;
+            }
+        }
         let shell = unsafe { &*arena.cast::<LayoutNodeArena>() }.shell_if_live(main_thread, node);
         if shell.is_null() {
             continue;
@@ -6651,6 +6664,7 @@ pub(crate) unsafe fn read_enrolled_content_sources(
         pass_was_running: false,
         enrolled_replaced_node_count: enrolled_replaced_nodes.len(),
         replaced_content_facts,
+        style_derived_nodes,
     }
 }
 
@@ -6683,8 +6697,17 @@ pub(crate) unsafe fn apply_enrolled_content_sources(arena: *mut c_void, sources:
         unsafe { super::rendered_text::ensure_text_content(arena.cast(), node) };
     }
 
-    let mut live_replaced_nodes = Vec::with_capacity(sources.replaced_content_facts.len());
-    for (node, facts) in sources.replaced_content_facts {
+    let mut live_replaced_nodes =
+        Vec::with_capacity(sources.replaced_content_facts.len() + sources.style_derived_nodes.len());
+    let style_derived_facts = sources.style_derived_nodes.into_iter().map(|node| {
+        // SAFETY: As above.
+        let facts = super::node_facts::style_derived_replaced_content_facts(unsafe {
+            (*arena.cast::<LayoutNodeArena>()).data(node)
+        });
+        (node, facts)
+    });
+    let replaced_content_facts: Vec<_> = sources.replaced_content_facts.into_iter().chain(style_derived_facts).collect();
+    for (node, facts) in replaced_content_facts {
         live_replaced_nodes.push(node);
         // Changed facts invalidate cached formatting-context runs regardless of which
         // channel produced the change, including sources with no invalidation of their own.

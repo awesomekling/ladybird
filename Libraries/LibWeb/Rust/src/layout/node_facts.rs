@@ -31,6 +31,98 @@ pub(crate) fn node_may_have_replaced_content_facts_including_size_containment(da
     style.has_size_containment() || style.is_size_container()
 }
 
+/// Whether the node's replaced-content facts need something only the DOM knows. The rest follow
+/// from the node's kind and computed style, see [`style_derived_replaced_content_facts`].
+pub(crate) fn node_replaced_content_facts_need_host(data: &NodeData) -> bool {
+    let kind = data.kind.get();
+    // An SVG <image> reports its image's sizes whether or not it is size-contained.
+    if kind == NodeKind::SVGImageBox {
+        return true;
+    }
+    let style = node_style_view(data);
+    // A text entry input with no appearance gets its default preferred size from its size attribute.
+    if has_flag(data, NodeFlag::IsHtmlInputElement)
+        && !matches!(kind, NodeKind::CheckBox | NodeKind::RadioButton | NodeKind::RangeInputBox)
+        && style.is_some_and(|style| style.appearance() == crate::css::css_enums::appearance::NONE)
+    {
+        return true;
+    }
+    if style.is_some_and(|style| style_has_size_containment(style)) {
+        return false;
+    }
+    matches!(
+        kind,
+        NodeKind::CanvasBox
+            | NodeKind::ImageBox
+            | NodeKind::NavigableContainerViewport
+            | NodeKind::SVGSVGBox
+            | NodeKind::TextAreaBox
+            | NodeKind::TextInputBox
+            | NodeKind::VideoBox
+    )
+}
+
+// https://drafts.csswg.org/css-contain-2/#containment-size
+fn style_has_size_containment(style: ComputedValuesView<'_>) -> bool {
+    // Giving an element size containment has no effect if its inner display type is 'table', or if its principal box
+    // is an internal table box.
+    let display = style.display();
+    if display.is_table_inside() || display.is_internal_table() {
+        return false;
+    }
+    style.has_size_containment() || style.is_size_container()
+}
+
+/// The replaced-content facts of a node whose facts need no host: a size-contained box, a
+/// checkbox, radio button or slider, or a kind with no natural size.
+pub(crate) fn style_derived_replaced_content_facts(data: &NodeData) -> FfiReplacedContentFacts {
+    debug_assert!(!node_replaced_content_facts_need_host(data));
+    let mut facts = FfiReplacedContentFacts::default();
+    let Some(style) = node_style_view(data) else {
+        return facts;
+    };
+    let mut set_auto_content_size = |width: CssPixels, height: CssPixels| {
+        facts.has_auto_content_width = true;
+        facts.auto_content_width = width;
+        facts.has_auto_content_height = true;
+        facts.auto_content_height = height;
+    };
+    if style_has_size_containment(style) {
+        // https://drafts.csswg.org/css-contain-2/#containment-size
+        // Replaced elements must be treated as having a natural width and height of 0 and no natural aspect ratio.
+        // https://drafts.csswg.org/css-sizing-4/#intrinsic-size-override
+        // If an element has an explicit intrinsic inner size in an axis, [...] the size of the contents in that axis
+        // are instead treated as being the explicit intrinsic inner size.
+        let explicit_size = |has_length: bool, length_px: f64| {
+            if has_length {
+                CssPixels::nearest_value_for(length_px)
+            } else {
+                CssPixels::default()
+            }
+        };
+        set_auto_content_size(
+            explicit_size(style.contain_intrinsic_width_has_length(), style.contain_intrinsic_width_px()),
+            explicit_size(style.contain_intrinsic_height_has_length(), style.contain_intrinsic_height_px()),
+        );
+        return facts;
+    }
+    match data.kind.get() {
+        NodeKind::CheckBox => set_auto_content_size(CssPixels::from_integer(13), CssPixels::from_integer(13)),
+        NodeKind::RadioButton => set_auto_content_size(CssPixels::from_integer(12), CssPixels::from_integer(12)),
+        NodeKind::RangeInputBox => {
+            // AD-HOC: A slider has no in-flow content to size itself from, so provide a default content-box size for
+            //         when its `width` or `height` is `auto`: 20ch by 16px.
+            let zero_advance = CssPixels::nearest_value_for_f32(style.font_zero_advance());
+            set_auto_content_size(
+                CssPixels::nearest_value_for(20.0 * zero_advance.to_double()),
+                CssPixels::from_integer(16),
+            );
+        }
+        _ => {}
+    }
+    facts
+}
+
 /// The node's own computed style, read off the style container the node data points at. Callers inside a layout pass go
 /// through the pass callbacks instead; this is for the node-data entry points the C++ side calls directly.
 pub(crate) fn node_style_view(data: &NodeData) -> Option<ComputedValuesView<'_>> {
