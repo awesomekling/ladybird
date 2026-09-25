@@ -22,7 +22,7 @@ use super::update_layout::FfiLayoutTreeBuildStats;
 use super::used_values::SizeConstraint;
 use crate::css::style::bridge::ElementBoxKind;
 use crate::css::style::fast_hash::{FastMap as HashMap, FastSet as HashSet};
-use crate::css::style::tree::{ReplacedContentInput, StyleNodeID};
+use crate::css::style::tree::{NaturalSize, ReplacedContentInput, StyleNodeID};
 use crate::css::style::{
     PublishedBoxFacts, PublishedTextSource, StyleEngine, TextStyleParentFacts,
     layout_style::{AnonymousStyleKind, AnonymousStyleOverrides, DerivedStyleRecord, LayoutStyle},
@@ -6654,7 +6654,19 @@ pub(crate) unsafe fn read_enrolled_content_sources(
             if !arena.slot_is_live(node) {
                 continue;
             }
-            if !super::node_facts::node_replaced_content_facts_need_host(arena.data(node)) {
+            // An image box waiting for the provider it owns shows no image until the frame that
+            // built it is over.
+            if arena.image_box_awaits_owned_provider(node) {
+                let no_image = NaturalSize {
+                    width: Some(0),
+                    height: Some(0),
+                    aspect_ratio: None,
+                };
+                derived_nodes.push((node, ReplacedContentInput::NaturalSize(no_image)));
+                continue;
+            }
+            let has_owned_image_provider = arena.rows_with_owned_image_provider.borrow().contains(&node);
+            if !super::node_facts::node_replaced_content_facts_need_host(arena.data(node), has_owned_image_provider) {
                 derived_nodes.push((node, arena.replaced_content_input(node)));
                 continue;
             }
