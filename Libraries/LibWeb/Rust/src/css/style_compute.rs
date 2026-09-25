@@ -3347,7 +3347,7 @@ fn plan_effect_stack(
             } else if computed.change_is_only_simple_timing(published) {
                 changed.push((index as u32, definition, true));
             } else {
-                return Err("a plan that moves the timeline of an animation");
+                return Err(computed.why_timing_moves(published));
             }
         }
         new_indices[matched] = i32::try_from(index).map_err(|_| "a definition index")?;

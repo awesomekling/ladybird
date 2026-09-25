@@ -20,6 +20,9 @@ use super::tree::StyleNodeID;
 use super::{RetainedState, StyleEngineState, engine_sample_check};
 use crate::css::animated_overlay::{AnimatedOverlay, overlay_wins};
 use crate::css::computed_longhand_table::ComputedLonghandTable;
+use crate::css::computed_value_views::ComputedValuesView;
+use crate::css::host_shared::SharedPayload;
+use crate::css::property_metadata::property_id;
 use crate::css::style_compute::StartedTransition;
 use crate::css::style_value::{RetainedStyleValueData, StyleValueData};
 use crate::css::transition::{FfiTransitionAction, FfiTransitionActionKind, FfiTransitionPropertyInput};
@@ -210,11 +213,7 @@ impl RetainedState {
 
         let mut context = crate::css::animation::FfiAnimationContext {
             allow_discrete: false,
-            current_color: effective_value(
-                after_table,
-                after_overlay,
-                crate::css::property_metadata::property_id::COLOR,
-            ),
+            current_color: effective_value(after_table, after_overlay, property_id::COLOR),
             has_length_resolution_context: false,
             // SAFETY: A plain-data context the flag says is absent.
             length_resolution_context: unsafe { std::mem::zeroed() },
@@ -465,20 +464,36 @@ impl StyleEngineState {
         overlay: Box<AnimatedOverlay>,
         counters: &mut super::Counters,
     ) -> Result<(), &'static str> {
-        use crate::css::property_metadata::property_id;
-
         // Publishing the step's composition does not compose the element's animated custom
-        // properties again, nor its animated display.
+        // properties again.
         if self.retained.sampled_custom_property_environments.contains_key(&node) {
             return Err("a composition over animated custom properties");
         }
-        if overlay.get(property_id::DISPLAY).is_some() {
-            return Err("a composition that animates display");
-        }
-        let table = self
+        let view = self
             .style_record_view(installed_style_record)
-            .and_then(|view| unsafe { view.longhand_table.as_ref() })
-            .ok_or("an installed record with no table")?;
+            .ok_or("an installed record with no view")?;
+        let table = unsafe { view.longhand_table.as_ref() }.ok_or("an installed record with no table")?;
+        // The display before the box-type transformation an animated display publishes with is the
+        // one the host's step reconstructs from the installed record: the base record's display
+        // where the installed composition animated display already, the table's otherwise.
+        let installed_animates_display = unsafe { view.animated_overlay.as_ref() }
+            .is_some_and(|installed| installed.get(property_id::DISPLAY).is_some());
+        let animated_display_before_box_type_transformation =
+            overlay
+                .get(property_id::DISPLAY)
+                .map(|_| match installed_animates_display {
+                    true => {
+                        let base_payloads = match view.base_payloads.is_empty() {
+                            true => view.payloads,
+                            false => view.base_payloads,
+                        };
+                        ComputedValuesView::new(SharedPayload::as_pointer_slice(base_payloads))
+                            .box_values()
+                            .display
+                            .encoded()
+                    }
+                    false => table.display_before_box_type_transformation(),
+                });
         let previous = self.retained.rows_sampled_in_pass.get(&node).copied();
         let sample = crate::css::style_compute::SettledRowSample {
             style_record: settled_style_record,
@@ -486,7 +501,7 @@ impl StyleEngineState {
                 .map_or(0, |previous| previous.keyframes_inherited_non_inherited_style_groups),
             uses_tree_counting_function: previous.is_some_and(|previous| previous.uses_tree_counting_function),
             substitution_marks: previous.map_or(0, |previous| previous.substitution_marks),
-            animated_display_before_box_type_transformation: None,
+            animated_display_before_box_type_transformation,
             animated_custom_properties: Vec::new(),
             style: super::engine_sample::EngineSampledStyle {
                 table: unsafe { crate::css::computed_longhand_table::rust_computed_longhand_table_retain(table) }

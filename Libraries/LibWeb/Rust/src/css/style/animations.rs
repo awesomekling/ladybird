@@ -161,6 +161,21 @@ impl AppliedAnimationDefinition {
         row
     }
 
+    /// Why a change is not one `change_is_only_simple_timing` describes, for the report.
+    #[must_use]
+    pub(crate) fn why_timing_moves(&self, published: &Self) -> &'static str {
+        if !self.timeline_is_decidable() {
+            return "a plan over a scroll timeline";
+        }
+        if published.words[APPLIED_DEFINITION_TIMING_FUNCTION_WORD] == 0 {
+            return "a plan over an animation no plan described";
+        }
+        if self.words[APPLIED_DEFINITION_FLAGS_WORD] & APPLIED_DEFINITION_DURATION_IS_AUTO != 0 {
+            return "a plan with an auto duration";
+        }
+        "a plan that moves the timeline of an animation"
+    }
+
     /// Whether applying `self` to an animation that last had `published` applied would change only
     /// what its effect is sampled from and how far a given time is along it, and move no time.
     ///
