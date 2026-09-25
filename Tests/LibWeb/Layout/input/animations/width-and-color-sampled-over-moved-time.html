@@ -1,0 +1,31 @@
+<!doctype html>
+<html class="reftest-wait">
+<style>
+    body { font-family: sans-serif; }
+    #width { height: 20px; background: green; }
+</style>
+<div id="width"></div>
+<div id="color">colored text</div>
+<script>
+    const options = { duration: 1000, fill: "both" };
+    const animations = [
+        document.getElementById("width").animate({ width: ["100px", "300px"] }, options),
+        document.getElementById("color").animate({ color: ["red", "blue"] }, options),
+    ];
+    for (const animation of animations) {
+        animation.pause();
+        animation.currentTime = 250;
+    }
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            for (const animation of animations)
+                animation.currentTime = 750;
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    document.documentElement.classList.remove("reftest-wait");
+                });
+            });
+        });
+    });
+</script>
+</html>

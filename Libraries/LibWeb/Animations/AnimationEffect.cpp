@@ -828,11 +828,29 @@ void AnimationEffect::visit_edges(GC::Cell::Visitor& visitor)
     visitor.visit(m_associated_animation);
 }
 
+// LIBWEB_RENDER_CLOCK_FRAMES: the render side installs what an animation sample published over the element's box
+// in the layout arena, ahead of the host, which then applies the adoption log entry that leaves. Both still run
+// on the main thread, one after the other.
+static bool render_side_installs_animation_samples()
+{
+    static bool const installs = [] {
+        auto const* value = getenv("LIBWEB_RENDER_CLOCK_FRAMES");
+        return value && *value && StringView { value, strlen(value) } != "0"sv;
+    }();
+    return installs;
+}
+
+enum class InstalledInArena {
+    No,
+    Yes,
+};
+
 // Install the record a sample of an element's animations published, and apply what publishing it
 // over the element's record invalidated: the element's and its layout node's style, the pseudo-element
 // styles and descendants that inherit from it, and, unless the caller compares the element's style
-// itself, what layout and paint need.
-void apply_published_animation_overlay(CSS::StyleDrainScope const& scope, DOM::AbstractElement element, CSS::StyleEngineFFI::FfiAnimationInvalidation const& animated_property_invalidation, CSS::StyleRecordID new_style_record, bool caller_applies_invalidation)
+// itself, what layout and paint need. Where the render side installed the record in the arena, this
+// applies its adoption log entry: the arena row and its layout mark are there already.
+static void apply_animation_overlay(CSS::StyleDrainScope const& scope, DOM::AbstractElement element, CSS::StyleEngineFFI::FfiAnimationInvalidation const& animated_property_invalidation, CSS::StyleRecordID new_style_record, bool caller_applies_invalidation, InstalledInArena installed_in_arena)
 {
     GC::Ref<DOM::Element> target = element.element();
     auto invalidation = CSS::decode_style_invalidation(animated_property_invalidation.invalidation);
@@ -897,8 +915,12 @@ void apply_published_animation_overlay(CSS::StyleDrainScope const& scope, DOM::A
     if (caller_applies_invalidation)
         return;
 
-    if (invalidation.needs_relayout())
-        target->set_needs_layout_update(DOM::SetNeedsLayoutReason::KeyframeEffect);
+    if (invalidation.needs_relayout()) {
+        if (installed_in_arena == InstalledInArena::Yes)
+            target->document().note_render_state_mutation();
+        else
+            target->set_needs_layout_update(DOM::SetNeedsLayoutReason::KeyframeEffect);
+    }
     if (invalidation.needs_layout_tree_rebuild()) {
         auto rebuild_root = element.pseudo_element().has_value()
             ? CSS::LayoutTreeRebuildRoot::Parent
@@ -924,6 +946,30 @@ void apply_published_animation_overlay(CSS::StyleDrainScope const& scope, DOM::A
         : target->unsafe_layout_node();
     if (repaint_layout_node && Painting::has_committed_box(*repaint_layout_node))
         Painting::repaint_after_style_change(*repaint_layout_node, invalidation);
+}
+
+void apply_published_animation_overlay(CSS::StyleDrainScope const& scope, DOM::AbstractElement element, CSS::StyleEngineFFI::FfiAnimationInvalidation const& animated_property_invalidation, CSS::StyleRecordID new_style_record, bool caller_applies_invalidation)
+{
+    apply_animation_overlay(scope, element, animated_property_invalidation, new_style_record, caller_applies_invalidation, InstalledInArena::No);
+}
+
+// Install a sample's record over the element's box in the arena ahead of the host, where the render side can, and
+// apply the adoption log entry that leaves. The render side leaves a pseudo-element, a composition its caller
+// compares itself, and one that rebuilds the layout tree to the host.
+static bool install_animation_sample_in_arena(CSS::StyleDrainScope const& scope, DOM::AbstractElement element, CSS::StyleEngineFFI::FfiAnimationInvalidation const& animated_property_invalidation, CSS::StyleRecordID new_style_record, bool caller_applies_invalidation)
+{
+    if (!render_side_installs_animation_samples() || element.pseudo_element().has_value() || caller_applies_invalidation)
+        return false;
+    auto invalidation = CSS::decode_style_invalidation(animated_property_invalidation.invalidation);
+    if (invalidation.needs_layout_tree_rebuild())
+        return false;
+    GC::Ref<DOM::Element> target = element.element();
+    auto* layout_node_arena = target->document().layout_node_arena_if_created();
+    if (!layout_node_arena || !Layout::RustFFI::layout_arena_install_animation_sample(layout_node_arena->handle(), target->style_node_id().value(), new_style_record.value(), invalidation.needs_relayout()))
+        return false;
+    apply_animation_overlay(scope, element, animated_property_invalidation, new_style_record, caller_applies_invalidation, InstalledInArena::Yes);
+    VERIFY(Layout::RustFFI::layout_arena_animation_adoption_log_is_empty(layout_node_arena->handle()));
+    return true;
 }
 
 // The environment a sample composed an element's or pseudo-element's animated custom properties
@@ -1019,7 +1065,8 @@ static bool install_engine_sample_of_installed_record(CSS::StyleDrainScope const
     if (!sample.overlay_is_empty && document.is_in_style_stabilization_epoch()
         && (document.style_stabilization_has_style_reactions() || sample.invalidation.requires_base_style_recomputation))
         document.style_computer().record_transition_stabilization_baseline(scope, element);
-    apply_published_animation_overlay(scope, element, sample.invalidation, CSS::StyleRecordID { sample.style_record }, data.caller_applies_invalidation);
+    if (!install_animation_sample_in_arena(scope, element, sample.invalidation, CSS::StyleRecordID { sample.style_record }, data.caller_applies_invalidation))
+        apply_published_animation_overlay(scope, element, sample.invalidation, CSS::StyleRecordID { sample.style_record }, data.caller_applies_invalidation);
     return true;
 }
 

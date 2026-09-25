@@ -1,0 +1,14 @@
+Viewport <#document> at [0,0] [0+0+0 800 0+0+0] [0+0+0 600 0+0+0] [BFC] children: not-inline
+  BlockContainer <html> at [0,0] [0+0+0 800 0+0+0] [0+0+0 41 0+0+0] [BFC] children: not-inline
+    BlockContainer <body> at [8,8] [8+0+0 784 0+0+8] [8+0+0 25 0+0+8] children: not-inline
+      BlockContainer <div#font> at [8,8] [0+0+0 400 0+0+384] [0+0+0 25 0+0+0] children: inline
+        InlineNode <span> at [8,8] [0+0+0 233.28125 0+0+0] [0+0+0 25 0+0+0]
+          frag 0 from TextNode start: 0, length: 19, rect: [8,8 233.28125x25] baseline: 20
+              "inherited font size"
+          TextNode <#text> (not painted)
+      BlockContainer <(anonymous)> at [8,33] [0+0+0 784 0+0+0] [0+0+0 0 0+0+0] children: inline
+        TextNode <#text> (not painted)
+        TextNode <#text> (not painted)
+
+SC for Viewport<#document> [0,0 800x600] (z-index: auto)
+ SC for BlockContainer<HTML> [0,0 800x41] (z-index: auto)
