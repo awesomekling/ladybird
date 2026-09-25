@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<style>
+    @keyframes fade { from { opacity: 0.5; } to { opacity: 1; } }
+    .animated { animation: fade 100s; }
+    a { transition: all 100s; }
+    .gone { display: none; }
+</style>
+<div id="outer"><div id="box"><a id="link" href="#">link</a></div></div>
+<script>
+    document.body.offsetWidth;
+
+    // The pass decides the link's transition step under its hidden parent, but only #box's style is
+    // installed. The link keeps its old style, and the step must not outlive the update.
+    box.classList.add("gone");
+    link.style.color = "blue";
+    getComputedStyle(box).display;
+
+    // Starting an animation on #outer as the link becomes visible again drives the link's row over
+    // its installed ancestors, whose transition step the host decides over the style it installs.
+    box.classList.remove("gone");
+    outer.classList.add("animated");
+    document.body.offsetWidth;
+</script>

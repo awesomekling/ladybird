@@ -700,8 +700,16 @@ impl StyleEngineState {
         self.retained.taken_transition_step.as_ref()
     }
 
-    /// A row the pass decides the step of again leaves no earlier decision behind.
+    /// A row the pass settles again leaves no earlier decision behind: the host applies only a step
+    /// decided over the row it installs.
     pub(crate) fn forget_transition_step_decided_in_pass(&mut self, node: StyleNodeID) {
         self.retained.transition_steps_decided_in_pass.remove(&node);
+    }
+
+    /// The steps decided for rows no installation applied go with the rest of the transaction's
+    /// outputs. They were decided over records and parents the host never installed.
+    pub(crate) fn discard_transition_steps_decided_in_pass(&mut self) {
+        self.retained.transition_steps_decided_in_pass.clear();
+        self.retained.pseudo_element_transition_steps_decided_in_pass.clear();
     }
 }
