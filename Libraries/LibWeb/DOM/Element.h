@@ -349,9 +349,8 @@ public:
     // An installation given a drain leaves its render-side effects (the layout node restyle, the
     // anchor name registry) there, for its batch to apply once the batch is installed.
     using EnginePseudoElementDamages = Array<Optional<EngineRecordDamage>, to_underlying(CSS::PseudoElement::KnownPseudoElementCount)>;
-    // `replaced_custom_property_data` receives the environment the element held before, when the
-    // installation moves it. `row_facts` is the `FfiStyleRowFact` word the record's row carries.
-    CSS::RequiredInvalidationAfterStyleChange apply_engine_computed_style_record(CSS::StyleDrainScope const&, CSS::StyleRecordID new_style_record, EnginePseudoElementRecords const&, bool uses_substitution, u32 row_facts, bool& did_change_custom_properties, EngineRecordComparison = EngineRecordComparison::AtInstallation, Optional<EngineRecordDamage> = {}, EnginePseudoElementDamages const* = nullptr, CSS::StyleEffectDrain* = nullptr, RefPtr<CSS::CustomPropertyData const>* replaced_custom_property_data = nullptr);
+    // `row_facts` is the `FfiStyleRowFact` word the record's row carries.
+    CSS::RequiredInvalidationAfterStyleChange apply_engine_computed_style_record(CSS::StyleDrainScope const&, CSS::StyleRecordID new_style_record, EnginePseudoElementRecords const&, bool uses_substitution, u32 row_facts, bool& did_change_custom_properties, EngineRecordComparison = EngineRecordComparison::AtInstallation, Optional<EngineRecordDamage> = {}, EnginePseudoElementDamages const* = nullptr, CSS::StyleEffectDrain* = nullptr);
     // Compare the record an AfterSample installation left, now sampled, with the style the element
     // held before it, and apply the result to the element's layout node.
     CSS::RequiredInvalidationAfterStyleChange compare_engine_computed_style_record_after_sample(CSS::StyleDrainScope const&, CSS::StyleRecordID style_record_before_installation, CSS::RequiredInvalidationAfterStyleChange installation_invalidation, CSS::StyleEffectDrain* = nullptr);
