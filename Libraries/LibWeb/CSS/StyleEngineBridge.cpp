@@ -237,24 +237,16 @@ void StyleEngine::ensure_granted_style_nodes(size_t element_count, size_t text_c
 {
     if (m_granted_style_nodes.size() >= element_count && m_granted_text_style_nodes.size() >= text_count)
         return;
-    // A grant asked for on the spot crosses alone. A mutation in progress is no place to end a transaction,
-    // so what the host recorded so far waits for its own.
-    // FIXME: A mutation the drain makes (a text control building its shadow tree, say) can ask for one
-    //        while a pass is in flight, and the identities cannot wait for it to drain. A grant moves no
-    //        answer of the pass, but it crosses with the transaction that carries input.
-    StyleInputScope const input { *this };
+    // A grant asked for on the spot is no input: it readies slots no node the engine knows names, and changes
+    // no answer of a pass. So it is granted at once, even while a pass is in flight (a text control the drain
+    // gives a shadow tree, say), and what the host recorded so far waits for its own transaction.
     Vector<StyleNodeID> style_node_grant;
     Vector<StyleNodeID> text_style_node_grant;
     if (m_granted_style_nodes.size() < element_count)
         style_node_grant.resize(element_count - m_granted_style_nodes.size() + STYLE_NODE_GRANT_SIZE);
     if (m_granted_text_style_nodes.size() < text_count)
         text_style_node_grant.resize(text_count - m_granted_text_style_nodes.size() + STYLE_NODE_GRANT_SIZE);
-    InputTransaction transaction {};
-    transaction.element_identity_grant = reinterpret_cast<u32*>(style_node_grant.data());
-    transaction.element_identity_grant_count = style_node_grant.size();
-    transaction.text_identity_grant = reinterpret_cast<u32*>(text_style_node_grant.data());
-    transaction.text_identity_grant_count = text_style_node_grant.size();
-    apply_transaction(input, transaction);
+    StyleEngineFFI::style_engine_grant_style_nodes(m_impl, reinterpret_cast<u32*>(style_node_grant.data()), style_node_grant.size(), reinterpret_cast<u32*>(text_style_node_grant.data()), text_style_node_grant.size());
     adopt_identity_grant(m_granted_style_nodes, style_node_grant);
     adopt_identity_grant(m_granted_text_style_nodes, text_style_node_grant);
 }

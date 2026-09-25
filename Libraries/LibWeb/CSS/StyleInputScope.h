@@ -20,8 +20,9 @@ class StyleEngine;
 // the drain's StyleDrainScope instead.
 //
 // Appending to an input journal the next transaction takes (the host's recorded input, the engine's
-// deferred element inputs) and interning into the engine's catalogs (atoms, attribute value texts,
-// selector queries) change no answer of a pass, and need no scope.
+// deferred element inputs), interning into the engine's catalogs (atoms, attribute value texts,
+// selector queries) and granting the host style node identities to mint change no answer of a pass,
+// and need no scope.
 class StyleInputScope {
     AK_MAKE_NONCOPYABLE(StyleInputScope);
     AK_MAKE_NONMOVABLE(StyleInputScope);
