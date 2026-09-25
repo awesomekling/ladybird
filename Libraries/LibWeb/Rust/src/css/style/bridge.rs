@@ -1775,6 +1775,9 @@ pub struct FfiPublishedTransition {
     pub effect_identity: u64,
     /// Script replaced the effect the transition started with.
     pub effect_replaced: bool,
+    /// The identity of the keyframe effect the transition's animation runs now, which its timing
+    /// row is published under; zero where it runs none.
+    pub current_effect_identity: u64,
     pub end_value: *const std::ffi::c_void,
     pub reversing_adjusted_start_value: *const std::ffi::c_void,
     pub reversing_shortening_factor: f64,
