@@ -265,12 +265,26 @@ impl StyleEngineState {
         let invalidation_is_none = has(fact::INVALIDATION_IS_NONE);
         let ancestor_became_visible = reaction & STYLE_REACTION_ANCESTOR_BECAME_VISIBLE != 0;
 
+        let installed = self.installed_record_state(node);
+        // The node leaving display:none, or an ancestor's doing so, reveals its children.
+        let reveals_children = ancestor_became_visible
+            || (row_facts.was_display_none
+                && installed
+                    .as_ref()
+                    .is_some_and(|installed| !installed.in_display_none_subtree));
+
         // A slot's assigned elements take their style from the slot, and a slot that moved at all
-        // recomputes them. A slot leaving display:none reveals them as it does its children.
+        // recomputes them. A slot leaving display:none reveals them as it does its children, and
+        // they reveal theirs in turn.
         if self.retained.facts.is_slot(node)
             && (!invalidation_is_none || did_change_custom_properties || ancestor_became_visible)
         {
-            let reaction = STYLE_REACTION_RECOMPUTE_STYLE | (reaction & STYLE_REACTION_ANCESTOR_BECAME_VISIBLE);
+            let reaction = STYLE_REACTION_RECOMPUTE_STYLE
+                | if reveals_children {
+                    STYLE_REACTION_ANCESTOR_BECAME_VISIBLE
+                } else {
+                    0
+                };
             for index in 0..self.retained.tree.assigned_nodes_of(node).len() {
                 let assigned = self.retained.tree.assigned_nodes_of(node)[index];
                 // A text slottable holds a place in the list but has no style of its own to recompute.
@@ -287,7 +301,7 @@ impl StyleEngineState {
         }
 
         // A descendant whose style was cleared on entry to display:none stays unmaterialized.
-        let Some(installed) = self.installed_record_state(node) else {
+        let Some(installed) = installed else {
             return;
         };
 
@@ -340,7 +354,7 @@ impl StyleEngineState {
         if reaction & STYLE_REACTION_RECOMPUTE_DESCENDANT_STYLES != 0 || has(fact::RECOMPUTE_DESCENDANT_STYLES) {
             common_child_reaction |= STYLE_REACTION_RECOMPUTE_DESCENDANT_STYLES;
         }
-        if ancestor_became_visible || (row_facts.was_display_none && !installed.in_display_none_subtree) {
+        if reveals_children {
             common_child_reaction |= STYLE_REACTION_ANCESTOR_BECAME_VISIBLE;
         }
 
