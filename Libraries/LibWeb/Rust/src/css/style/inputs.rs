@@ -2116,6 +2116,7 @@ impl StyleEngineState {
                 deferred_element_style_inputs: Vec::new(),
                 latent_deferred_pseudo_element_style_inputs: Vec::new(),
                 deferred_element_style_inputs_are_pending: false,
+                applied_style_reactions: Vec::new(),
                 externally_recorded_style_input_nodes: HashSet::default(),
                 held_style_records: HashMap::default(),
                 deferred_element_style_input_memory: MemoryLease::new(MemoryCategory::NormalizationJournal),
@@ -2342,6 +2343,7 @@ impl StyleEngineState {
     #[must_use]
     pub fn has_pending_transaction(&self) -> bool {
         (self.host.deferred_element_style_inputs_are_pending && !self.host.deferred_element_style_inputs.is_empty())
+            || self.has_applied_style_reactions()
             || !self.host.journal.is_empty()
             || (!self.host.flushing_deferred_geometry_journal && !self.host.deferred_geometry_journal.is_empty())
             || !self.host.tree_staging.is_empty()

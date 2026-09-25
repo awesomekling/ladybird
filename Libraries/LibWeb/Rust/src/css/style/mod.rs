@@ -1201,6 +1201,8 @@ pub struct HostState {
     /// Whether the deferred element style inputs are owed to the next transaction, as opposed to
     /// held back by a flush without a document root.
     deferred_element_style_inputs_are_pending: bool,
+    /// The reactions C++ applied since the last transaction, which it derives the children's from.
+    applied_style_reactions: Vec<child_reactions::AppliedStyleReaction>,
     /// The nodes whose deferred element style input C++ recorded and the engine did not also
     /// derive as a child reaction: what makes the next transaction a new pass of a style change
     /// rather than one more generation of the last one.

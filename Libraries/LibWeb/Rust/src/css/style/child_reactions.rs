@@ -8,8 +8,8 @@
 //!
 //! What a child reads of its parent is the inherited half of its style, its custom-property
 //! environment, and its display; a change confined to anything else reaches no child. C++ reports
-//! each reaction it applied together with what its invalidation says moved, and the engine turns
-//! that into the exact style inputs of the flat-tree children for the next transaction.
+//! each reaction it applied together with what its invalidation says moved, and the next
+//! transaction's pass turns that into the exact style inputs of the flat-tree children.
 
 use super::bridge::style_reaction_applied_fact as fact;
 use super::transaction::{
@@ -70,33 +70,79 @@ impl StyleEngineState {
         }
     }
 
-    /// Derive the children's reactions from a reaction C++ applied to `node`: `reaction` is what
-    /// the element reacted to, `inherited_style_groups_changed` names the inherited groups its
-    /// style moved, and `facts` says what else the application found. What the element's
-    /// installed record generates is read from the record.
-    pub fn note_style_reaction_applied(
+    /// Keep a reaction C++ applied to `node`, for the next transaction's pass to derive the
+    /// children's reactions from: `reaction` is what the element reacted to,
+    /// `inherited_style_groups_changed` names the inherited groups its style moved, and `facts`
+    /// says what else the application found.
+    pub fn record_applied_style_reaction(
         &mut self,
         node: StyleNodeID,
         reaction: u8,
         inherited_style_groups_changed: u8,
         facts: u32,
     ) {
-        let row_facts = Self::style_reaction_row_facts(facts);
-        let mut derived = Vec::new();
-        self.derive_child_reactions(
+        self.host.applied_style_reactions.push(AppliedStyleReaction {
             node,
             reaction,
             inherited_style_groups_changed,
             facts,
-            &row_facts,
-            &mut derived,
-        );
-        for child in derived {
-            self.record_derived_element_style_input(child.child, child.reaction, child.groups);
-            if child.parent_display_moved {
-                self.retained.parent_inputs_moved_nodes.insert(child.child);
+        });
+    }
+
+    /// Whether a reaction C++ applied is still to derive the children's reactions from.
+    #[must_use]
+    pub(super) fn has_applied_style_reactions(&self) -> bool {
+        !self.host.applied_style_reactions.is_empty()
+    }
+
+    /// The children's reactions of every reaction C++ applied since the last transaction, which
+    /// join this one. What each element's installed record generates is read from the record.
+    pub(super) fn derive_applied_style_reactions(&mut self) {
+        let applied = std::mem::take(&mut self.host.applied_style_reactions);
+        let mut derived = Vec::new();
+        for applied in &applied {
+            if !self.retained.tree.is_live(applied.node) {
+                continue;
+            }
+            derived.clear();
+            self.derive_applied_style_reaction(applied, &mut derived);
+            for child in &derived {
+                self.record_derived_element_style_input(child.child, child.reaction, child.groups);
+                if child.parent_display_moved {
+                    self.retained.parent_inputs_moved_nodes.insert(child.child);
+                }
             }
         }
+    }
+
+    /// Whether `node` owes a style input: one recorded or derived for it, or one a reaction C++
+    /// applied to an element it inherits from derives once the next transaction takes it.
+    #[must_use]
+    pub fn owes_element_style_input(&self, node: StyleNodeID) -> bool {
+        if self.has_deferred_element_style_input(node) {
+            return true;
+        }
+        let mut derived = Vec::new();
+        self.host.applied_style_reactions.iter().any(|applied| {
+            if !self.retained.tree.is_live(applied.node) {
+                return false;
+            }
+            derived.clear();
+            self.derive_applied_style_reaction(applied, &mut derived);
+            derived.iter().any(|child| child.child == node && child.reaction != 0)
+        })
+    }
+
+    fn derive_applied_style_reaction(&self, applied: &AppliedStyleReaction, out: &mut Vec<DerivedChildReaction>) {
+        let row_facts = Self::style_reaction_row_facts(applied.facts);
+        self.derive_child_reactions(
+            applied.node,
+            applied.reaction,
+            applied.inherited_style_groups_changed,
+            applied.facts,
+            &row_facts,
+            out,
+        );
     }
 
     /// The display a record generates, as the host's held-record mirror keeps it.
@@ -347,6 +393,15 @@ impl StyleEngineState {
             });
         }
     }
+}
+
+/// A reaction C++ applied to an element, as it reported it.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct AppliedStyleReaction {
+    node: StyleNodeID,
+    reaction: u8,
+    inherited_style_groups_changed: u8,
+    facts: u32,
 }
 
 /// One child reaction a parent's applied reaction derives.

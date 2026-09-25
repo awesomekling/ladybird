@@ -928,7 +928,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                 facts |= StyleEngine::ChildrenExplicitlyInherit;
             if (auto shadow_root = element->shadow_root(); shadow_root && shadow_root->children_explicitly_inherited_non_inherited_style_groups() != 0)
                 facts |= StyleEngine::ShadowChildrenExplicitlyInherit;
-            document.style_computer().style_engine().note_style_reaction_applied(reaction.style_node, reaction.reaction, invalidation.inherited_style_groups_changed(), facts);
+            document.style_computer().style_engine().record_applied_style_reaction(reaction.style_node, reaction.reaction, invalidation.inherited_style_groups_changed(), facts);
         }
     }
 
@@ -1190,7 +1190,7 @@ static void note_targeted_style_reaction_applied(StyleDrainScope const& scope, D
         facts |= StyleEngine::ChildrenExplicitlyInherit;
     if (auto shadow_root = element.shadow_root(); shadow_root && shadow_root->children_explicitly_inherited_non_inherited_style_groups() != 0)
         facts |= StyleEngine::ShadowChildrenExplicitlyInherit;
-    style_engine.note_style_reaction_applied(element.style_node_id(), reaction, invalidation.inherited_style_groups_changed(), facts);
+    style_engine.record_applied_style_reaction(element.style_node_id(), reaction, invalidation.inherited_style_groups_changed(), facts);
 }
 
 static void apply_targeted_style_invalidation(StyleDrainScope const& scope, DOM::Element& element, StyleRowStart const& row_start, RequiredInvalidationAfterStyleChange const& invalidation, RequiredInvalidationAfterStyleChange const& counter_style_invalidation, bool did_change_custom_properties, bool descendant_style_recompute_needed)
