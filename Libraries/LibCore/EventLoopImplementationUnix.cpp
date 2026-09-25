@@ -300,6 +300,10 @@ try_select_again:
     }
     if (idle_observer)
         idle_observer->did_wake();
+    else if (s_pump_depth == 1) {
+        if (auto const* observer = idle_observer_for_current_thread(); observer && observer->did_not_block)
+            observer->did_not_block();
+    }
 
     // We woke up due to a call to wake() or a POSIX signal.
     // Handle signals and see whether we need to handle events as well.

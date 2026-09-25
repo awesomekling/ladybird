@@ -103,6 +103,9 @@ static void install_render_clock_host()
         .did_wake = [] {
             if (s_frame_scheduler_with_host)
                 s_frame_scheduler_with_host->main_thread_did_wake(); },
+        .did_not_block = [] {
+            if (s_frame_scheduler_with_host)
+                s_frame_scheduler_with_host->main_thread_did_not_block(); },
     };
     Core::set_idle_observer_for_current_thread(&s_idle_observer);
     {
@@ -928,6 +931,20 @@ void FrameScheduler::main_thread_did_wake()
         });
     }
     // The render clock goes on ticking the leases while the main thread runs its tasks.
+    lend_clock_leases_to_busy_main(false);
+}
+
+void FrameScheduler::main_thread_did_not_block()
+{
+    // Nothing else ends a lend here for a main thread that never idles: it would lend once, at its last wake, and a
+    // task that took the arenas back or went over the restore budget would stop the ticks until it idles again.
+    if (m_clock_leases.is_empty())
+        return;
+    take_back_clock_lend_for_adoption();
+    m_clock_lend_taken_back = false;
+    m_clock_lend_suspended = false;
+    m_clock_lend_woke_at_nanoseconds = MonotonicTime::now().nanoseconds();
+    m_clock_lend_restore_nanoseconds = 0;
     lend_clock_leases_to_busy_main(false);
 }
 

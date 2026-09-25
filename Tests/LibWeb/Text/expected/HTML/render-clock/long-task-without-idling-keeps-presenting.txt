@@ -1,0 +1,3 @@
+the lease was granted: true
+the task began lent: true
+frames presented during the task: true
