@@ -250,7 +250,7 @@ private:
     enum class ClockLendSuspension : u8 {
         // The task changed what a tick would show.
         Write,
-        // The task's restores went over budget, or only a layout update of the main thread's could lay them out.
+        // The task's restores took too much of its time, or only a layout update of the main thread's could lay them out.
         Budget,
     };
     void suspend_clock_lend(ClockLendSuspension);
@@ -276,8 +276,8 @@ private:
     bool m_clock_lend_taken_back { false };
     // Whether the main thread lends the arenas no more until it next idles.
     bool m_clock_lend_suspended { false };
-    // How many restores took the arenas back since the main thread last woke, and how long they took.
-    u32 m_clock_lend_restores { 0 };
+    // When the main thread last woke, and how long restores took since.
+    u64 m_clock_lend_woke_at_nanoseconds { 0 };
     u64 m_clock_lend_restore_nanoseconds { 0 };
 
     // The display ticks tests injected, waiting for the main thread to go idle, and those the render side runs now.

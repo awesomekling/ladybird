@@ -38,10 +38,11 @@ namespace Web::HTML {
 
 static FrameScheduler* s_frame_scheduler_with_host = nullptr;
 
-// How many times, and for how long, a task may have the ticks' samples put back under it before the render clock leaves
-// its arenas alone until the main thread next idles: each costs a layout of the animated rows.
-static constexpr u32 max_clock_lend_restores_per_wake = 8;
-static constexpr u64 max_clock_lend_restore_nanoseconds_per_wake = 4'000'000;
+// How long the main thread may spend putting the ticks' samples back under its tasks before the render clock leaves its
+// arenas alone until the main thread next idles: each costs a layout of the animated rows. A task that reads once per
+// frame spends a small share of its time on them; one whose restores cost it more than this share stops them.
+static constexpr u64 clock_lend_restore_nanoseconds_allowed_anyway = 4'000'000;
+static constexpr u64 clock_lend_restore_share_of_wake_divisor = 10;
 
 // LIBWEB_RENDER_CLOCK_FRAMES: A render clock ticks the leases while the main thread idles, and tells it where a tick
 // ended one. The stage thread reaches the main thread through this.
@@ -894,7 +895,7 @@ void FrameScheduler::main_thread_did_wake()
 {
     m_clock_lend_taken_back = false;
     m_clock_lend_suspended = false;
-    m_clock_lend_restores = 0;
+    m_clock_lend_woke_at_nanoseconds = MonotonicTime::now().nanoseconds();
     m_clock_lend_restore_nanoseconds = 0;
     if (Layout::RustFFI::rust_render_clock_main_did_wake())
         adopt_render_clock_ticks();
@@ -1002,9 +1003,10 @@ void FrameScheduler::clock_lend_taken_back(void* arena)
     auto restore = Layout::RustFFI::rust_clock_lease_restore_host_records(arena);
     if (restore != Layout::RustFFI::FfiClockRestore::Nothing) {
         take_in_clock_layout_frame(*document);
-        m_clock_lend_restore_nanoseconds += MonotonicTime::now().nanoseconds() - start_nanoseconds;
-        if (restore == Layout::RustFFI::FfiClockRestore::NeedsMain || ++m_clock_lend_restores >= max_clock_lend_restores_per_wake
-            || m_clock_lend_restore_nanoseconds > max_clock_lend_restore_nanoseconds_per_wake)
+        auto now_nanoseconds = MonotonicTime::now().nanoseconds();
+        m_clock_lend_restore_nanoseconds += now_nanoseconds - start_nanoseconds;
+        auto allowed_nanoseconds = max(clock_lend_restore_nanoseconds_allowed_anyway, (now_nanoseconds - m_clock_lend_woke_at_nanoseconds) / clock_lend_restore_share_of_wake_divisor);
+        if (restore == Layout::RustFFI::FfiClockRestore::NeedsMain || m_clock_lend_restore_nanoseconds > allowed_nanoseconds)
             suspend_clock_lend(ClockLendSuspension::Budget);
     }
     held = m_clock_leases.find_first_index_if([&](auto const& hold) { return hold.document.ptr() == document.ptr(); });
