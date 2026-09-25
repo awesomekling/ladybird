@@ -22,10 +22,17 @@
         };
     }
 
+    // The rendering update records a change that lays nothing out: where a flight runs layout and recording in one, a
+    // change that lays out goes into the flight, and a read has to wait for its layout.
+    let repaints = 0;
+    function repaint() {
+        box.style.backgroundColor = ++repaints % 2 ? "green" : "blue";
+    }
+
     asyncTest(async done => {
-        const result = await whileFrameInFlight("mid-recording", () => {
-            box.style.height = "20px";
-        }, frame => {
+        box.style.height = "20px";
+        await twoFrames();
+        const result = await whileFrameInFlight("mid-recording", repaint, frame => {
             const joinsBefore = internals.forcedJoinCount("recording");
             const geometry = readGeometry();
             return {
@@ -45,9 +52,9 @@
         println(`box: ${after.offsets}`);
 
         // A dirty document has to lay out first, and takes the recording in.
-        const dirty = await whileFrameInFlight("mid-recording", () => {
-            box.style.height = "30px";
-        }, frame => {
+        box.style.height = "30px";
+        await twoFrames();
+        const dirty = await whileFrameInFlight("mid-recording", repaint, frame => {
             box.style.height = "40px";
             const joinsBefore = internals.forcedJoinCount("recording");
             const height = box.offsetHeight;
