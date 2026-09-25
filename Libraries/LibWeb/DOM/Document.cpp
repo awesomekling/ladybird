@@ -19,6 +19,7 @@
 #include <AK/NeverDestroyed.h>
 #include <AK/ScopeGuard.h>
 #include <AK/StringBuilder.h>
+#include <AK/TemporaryChange.h>
 #include <AK/Time.h>
 #include <AK/Utf16StringBuilder.h>
 #include <AK/Utf16View.h>
@@ -828,6 +829,15 @@ static bool reads_committed_geometry_beside_recording(Document const& document, 
     return true;
 }
 
+// Whether a read for `reason` of a document with something to lay out starts its style update beside the recording of
+// the document in flight: the recording reaches no style engine, and what the update writes to the arena, such as the
+// style of a box it restyles, takes the recording in at the arena's doors.
+static bool styles_beside_recording(Document const& document, UpdateLayoutReason reason)
+{
+    auto const* arena = document.layout_node_arena_if_created();
+    return arena && reason_reads_layout_geometry(reason) && Layout::RustFFI::rust_stage_thread_styles_beside_recording_of(arena->handle());
+}
+
 Document::JoinScope::JoinScope(Document& document, UpdateLayoutReason reason)
     : m_document(document)
     , m_reason(reason)
@@ -835,8 +845,13 @@ Document::JoinScope::JoinScope(Document& document, UpdateLayoutReason reason)
     // A read of render state waits for the frame in flight before it asks anything, and the
     // cleanliness check below already asks the style engine. A read of committed geometry that a
     // clean document answers goes on beside its recording in flight, which changes no geometry.
-    if (!reads_committed_geometry_beside_recording(m_document, m_reason))
-        m_document.join_frame_in_flight();
+    // One that finds it dirty starts its style update beside the recording too, and takes the
+    // recording in where that update writes the arena, or else before its layout.
+    if (!reads_committed_geometry_beside_recording(m_document, m_reason)) {
+        m_styles_beside_recording = styles_beside_recording(m_document, m_reason);
+        if (!m_styles_beside_recording)
+            m_document.join_frame_in_flight();
+    }
     auto& counters = m_document.m_join_counters[to_underlying(m_reason)];
     ++counters.calls;
 
@@ -881,6 +896,33 @@ Document::JoinScope::~JoinScope()
         ++counters.joins_that_published_nothing;
     }
     counters.max_nanoseconds = max(counters.max_nanoseconds, elapsed);
+}
+
+// The style update of a read that starts it beside the recording of the document in flight. It is the style update the
+// layout update would start with, so that one finds nothing left to do but what it asks of layout.
+void Document::JoinScope::update_style_beside_recording(ThrottledAnimationSamplingScope animation_sampling_scope) const
+{
+    // A read the style update makes of a document it lays out runs no second one inside it.
+    static bool s_running_style_update_beside_recording = false;
+    if (!m_styles_beside_recording || s_running_style_update_beside_recording)
+        return;
+    if (auto navigable = m_document.navigable(); !navigable || navigable->active_document().ptr() != &m_document)
+        return;
+    auto const* arena = m_document.layout_node_arena_if_created();
+    if (!arena || !Layout::RustFFI::rust_stage_thread_styles_beside_recording_of(arena->handle()))
+        return;
+    // The layout update flushes these before its style update, which this one runs ahead of.
+    if (animation_sampling_scope == ThrottledAnimationSamplingScope::Document)
+        m_document.flush_throttled_animation_style_update();
+    auto& counters = m_document.m_join_counters[to_underlying(m_reason)];
+    ++counters.styles_beside_recording;
+    {
+        TemporaryChange running { s_running_style_update_beside_recording, true };
+        m_document.update_style_beside_recording();
+    }
+    // One that installed a style in a box the recording reads took the recording in at the arena's door.
+    if (Layout::RustFFI::rust_stage_thread_styles_beside_recording_of(arena->handle()))
+        ++counters.styles_finished_beside_recording;
 }
 
 void Document::JoinScope::note_extra_pass() const
