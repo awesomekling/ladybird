@@ -1082,7 +1082,9 @@ static void update_style(DOM::Document& document, DocumentWithoutBrowsingContext
     // back to document invalidation.
     auto style_engine_transaction = take_style_engine_transaction(document);
     ScopeGuard discard_style_engine_transaction_outputs = [&] {
-        document.style_computer().style_engine().discard_style_transaction_outputs();
+        StyleEffectDrain::install(document, [](StyleDrainScope const& scope) {
+            scope.engine().discard_style_transaction_outputs(scope);
+        });
     };
 
     if (!style_engine_transaction.reactions.is_empty())

@@ -18,6 +18,7 @@
 #include <AK/Vector.h>
 #include <LibGC/Cell.h>
 #include <LibGC/Ptr.h>
+#include <LibWeb/CSS/StyleDrainScope.h>
 #include <LibWeb/CSS/StyleEngineIdentifiers.h>
 #include <LibWeb/CSS/StyleRecordID.h>
 #include <LibWeb/ComputedValuesRustFFI.h>
@@ -315,7 +316,7 @@ public:
     //     explicit discard. Consume them synchronously before asking the engine anything else.
     bool take_diagnostic_style_transaction(StyleNodeID root, Function<void(ReadonlySpan<StyleNodeID>)>&&);
     PublishedStyleTransaction take_style_transaction(StyleNodeID root);
-    void discard_style_transaction_outputs();
+    void discard_style_transaction_outputs(StyleDrainScope const&);
 
     using RuleMatch = StyleEngineFFI::FfiRuleMatch;
 
