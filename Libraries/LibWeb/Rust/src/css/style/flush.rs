@@ -2375,6 +2375,7 @@ impl StyleEngineState {
             let settled_rows_before_round = settled_row_count(style_deltas, record_deltas.as_deref());
             let mut resumed_records = std::mem::take(&mut waiting_records).into_iter();
             let mut next_parked_records = Vec::<publication::pending::ParkedEngineComputedRecord>::new();
+            let mut carried_records = Vec::<publication::pending::ParkedEngineComputedRecord>::new();
             for (published_index, node) in pass
                 .published_nodes
                 .iter()
@@ -2385,12 +2386,32 @@ impl StyleEngineState {
                 if cut_at.is_some_and(|cut| published_index >= cut) {
                     break;
                 }
+                // A row below a parked record waits for it: its record is what the row inherits.
+                // A slotted row inherits from its slot, which is no DOM ancestor of it, so the
+                // flat tree is walked too.
                 if let Some(record_deltas) = &record_deltas
                     && (record_deltas[published_index].is_some()
                         || next_parked_records
                             .iter()
-                            .any(|parked| self.tree.is_in_subtree_of(node, parked.subtree_root)))
+                            .any(|parked| self.tree.is_in_subtree_of(node, parked.subtree_root))
+                        || (!next_parked_records.is_empty()
+                            && std::iter::successors(self.tree.flat_tree_parent(node), |&ancestor| {
+                                self.tree.flat_tree_parent(ancestor)
+                            })
+                            .any(|ancestor| next_parked_records.iter().any(|parked| parked.subtree_root == ancestor))))
                 {
+                    // A record this round would resume waits for the next one with its ancestor,
+                    // unless its row has settled, and the next record to resume is the one after it.
+                    if ready_record
+                        .as_ref()
+                        .is_some_and(|parked| parked.published_index == published_index)
+                    {
+                        let parked = ready_record.take();
+                        if record_deltas[published_index].is_none() {
+                            carried_records.extend(parked);
+                        }
+                        ready_record = resumed_records.next();
+                    }
                     continue;
                 }
                 let parked_parent_inputs = if ready_record
@@ -3278,7 +3299,13 @@ impl StyleEngineState {
             // it parked, unless the wave stops before its row: every row after the cut is driven
             // again in the wave that reaches it, and resuming a record there would restart the
             // scan below the cut forever.
-            next_parked_records.extend(ready_record.take().into_iter().chain(resumed_records));
+            next_parked_records.extend(
+                ready_record
+                    .take()
+                    .into_iter()
+                    .chain(resumed_records)
+                    .chain(carried_records),
+            );
             if let Some(cut) = cut_at {
                 next_parked_records.retain(|parked| parked.published_index < cut);
             }
