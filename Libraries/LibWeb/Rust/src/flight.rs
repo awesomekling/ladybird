@@ -388,3 +388,9 @@ pub extern "C" fn rust_stage_thread_submits_flight() -> bool {
 pub extern "C" fn rust_flight_ends(reason: FfiFlightEndReason, reached: FfiFlightStage) -> u64 {
     FLIGHT_ENDS.with(|ends| ends.get()[reason as usize][reached as usize])
 }
+
+/// Forgets how the calling thread's flights ended so far.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_reset_flight_ends() {
+    FLIGHT_ENDS.with(|ends| ends.set([[0; FLIGHT_STAGE_COUNT]; FLIGHT_END_REASON_COUNT]));
+}

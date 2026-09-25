@@ -1787,6 +1787,7 @@ void Internals::reset_rendering_scheduler_counters()
 {
     HTML::main_thread_event_loop().reset_rendering_scheduler_counters();
     Layout::RustFFI::rust_reset_frame_retirement_counters();
+    Layout::RustFFI::rust_reset_flight_ends();
 }
 
 static bool hold_next_submitted_stage(StringView label, Utf16String const& point, GC::Ptr<DOM::Document> document)
