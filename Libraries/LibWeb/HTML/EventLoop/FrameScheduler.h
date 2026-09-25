@@ -238,6 +238,8 @@ private:
         // or when the main thread last took it back from them: a task that moves either changed what a tick would show.
         u64 lend_layout_commit_generation { 0 };
         u64 lend_style_transaction { 0 };
+        // Whether the lease ends once the document has adopted the tick in flight: it was revoked beside it.
+        bool revoke_at_adoption { false };
     };
     void lend_clock_leases_to_busy_main(bool relend);
     void take_back_clock_lend_for_adoption();
@@ -253,7 +255,9 @@ private:
     void update_render_clock(ClockLeaseHold&, Optional<Compositing::CompositorContextId>);
     bool publish_clock_lease_targets(ClockLeaseHold const&);
     bool submit_clock_tick(Vector<GC::Ref<DOM::Document>> const& docs, size_t first_document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp);
+    // Ends the lease at `index`, or, where its tick is in flight, has it end once the document adopted the tick.
     void revoke_clock_lease(size_t index);
+    bool clock_tick_in_flight_for(DOM::Document const&) const;
     void adopt_clock_tick(DOM::Document&);
 
     EventLoop& m_event_loop;
