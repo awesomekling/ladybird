@@ -1631,7 +1631,7 @@ impl StyleNodeTree {
     }
 
     /// Whether `a` comes before `b` in the tree order of the scope they share.
-    fn precedes_in_tree_order(&self, a: StyleNodeID, b: StyleNodeID) -> bool {
+    pub(crate) fn precedes_in_tree_order(&self, a: StyleNodeID, b: StyleNodeID) -> bool {
         if a == b {
             return false;
         }

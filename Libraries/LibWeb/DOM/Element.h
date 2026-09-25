@@ -331,7 +331,8 @@ public:
     // The synthetic pseudo-element records the style engine settled beside an engine-computed record: a kind it
     // decided holds the record, or none when the pseudo-element is not generated; a kind it left alone is unchanged.
     using EnginePseudoElementRecords = Array<Optional<CSS::StyleRecordID>, to_underlying(CSS::PseudoElement::KnownPseudoElementCount)>;
-    void update_anchor_name_registry(ReadonlySpan<Utf16FlyString> old_anchor_names, CSS::ComputedValues const& new_style);
+    // The style engine keeps the anchor names the element's installed record registers.
+    void register_anchor_names(CSS::StyleDrainScope const&);
     // A record the host samples the element's animations over is compared once the sample has
     // composed it, against the style the element held before the record was installed.
     enum class EngineRecordComparison {

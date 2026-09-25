@@ -515,7 +515,6 @@ class AbortSignal;
 class AbstractElement;
 class AbstractRange;
 class AccessibilityTreeNode;
-class AnchorNameMap;
 class Attr;
 class CDATASection;
 class CaretPosition;

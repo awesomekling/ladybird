@@ -11,7 +11,6 @@
 #include <LibJS/Forward.h>
 #include <LibWeb/Bindings/ShadowRoot.h>
 #include <LibWeb/CSS/StyleScope.h>
-#include <LibWeb/DOM/AnchorNameMap.h>
 #include <LibWeb/DOM/DocumentFragment.h>
 #include <LibWeb/DOM/ElementByIdMap.h>
 #include <LibWeb/DOM/SlotRegistry.h>
@@ -80,9 +79,6 @@ public:
     WebIDL::ExceptionOr<Vector<GC::Ref<Animations::Animation>>> get_animations();
 
     ElementByIdMap& element_by_id() const;
-
-    AnchorNameMap& anchor_name_map() { return m_anchor_name_map; }
-    AnchorNameMap const& anchor_name_map() const { return m_anchor_name_map; }
 
     void register_slot(HTML::HTMLSlotElement&);
     void unregister_slot(HTML::HTMLSlotElement&);
@@ -167,8 +163,6 @@ private:
     bool m_serializable { false };
 
     mutable OwnPtr<ElementByIdMap> m_element_by_id;
-
-    AnchorNameMap m_anchor_name_map;
 
     OwnPtr<SlotRegistry> m_slot_registry;
 
