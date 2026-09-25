@@ -559,10 +559,19 @@ struct ClockLeasePlan {
     // The timeline time at which the document has something observable to do: an event, a phase change, the end of an
     // effect. No tick samples at or past it.
     double deadline { AK::Infinity<double> };
+    // The deadline of ticks beside a task of the main thread's: the next phase change or end of an effect. The main
+    // thread sends the events of the iterations they pass once the task is over, as it would without them.
+    double deadline_beside_task { AK::Infinity<double> };
 };
 
-// The next time, in the local time of `effect`, at which its phase or current iteration changes.
-static Optional<double> next_boundary_in_local_time(Animations::KeyframeEffect const& effect, double local_time)
+struct EffectBoundaries {
+    // The next time, in the local time of the effect, at which its phase or current iteration changes.
+    double next_boundary;
+    // The next time at which its phase changes.
+    double next_phase_change;
+};
+
+static Optional<EffectBoundaries> next_boundaries_in_local_time(Animations::KeyframeEffect const& effect, double local_time)
 {
     if (effect.start_delay().type != Animations::TimeValue::Type::Milliseconds
         || effect.iteration_duration().type != Animations::TimeValue::Type::Milliseconds
@@ -572,11 +581,11 @@ static Optional<double> next_boundary_in_local_time(Animations::KeyframeEffect c
     auto iteration_duration = effect.iteration_duration().value;
     auto active_end = start_delay + effect.active_duration().value;
     if (local_time < start_delay)
-        return start_delay;
+        return EffectBoundaries { start_delay, start_delay };
     if (!(iteration_duration > 0) || local_time >= active_end)
         return {};
     auto next_iteration_start = start_delay + (floor((local_time - start_delay) / iteration_duration) + 1) * iteration_duration;
-    return min(next_iteration_start, active_end);
+    return EffectBoundaries { min(next_iteration_start, active_end), active_end };
 }
 
 // Whether a clock lease can tick the running animations of `document`, and which of their effects it ticks. The lease
@@ -635,10 +644,11 @@ static Optional<ClockLeasePlan> clock_lease_plan(DOM::Document& document)
             auto local_time = keyframe_effect.local_time();
             if (!local_time.has_value() || local_time->type != Animations::TimeValue::Type::Milliseconds)
                 return {};
-            auto boundary = next_boundary_in_local_time(keyframe_effect, local_time->value);
-            if (!boundary.has_value())
+            auto boundaries = next_boundaries_in_local_time(keyframe_effect, local_time->value);
+            if (!boundaries.has_value())
                 return {};
-            plan.deadline = min(plan.deadline, timeline_time->value + (*boundary - local_time->value) / animation.playback_rate());
+            plan.deadline = min(plan.deadline, timeline_time->value + (boundaries->next_boundary - local_time->value) / animation.playback_rate());
+            plan.deadline_beside_task = min(plan.deadline_beside_task, timeline_time->value + (boundaries->next_phase_change - local_time->value) / animation.playback_rate());
             // What the compositor or the offscreen throttle runs, the main thread does not sample per frame either.
             if (keyframe_effect.is_compositor_driven() || keyframe_effect.is_compositor_replaced() || keyframe_effect.can_skip_per_frame_style_update())
                 continue;
@@ -730,7 +740,7 @@ void FrameScheduler::grant_clock_leases()
         u64 context_id = 0;
         if (auto navigable = document->navigable(); navigable && navigable->has_compositor_context())
             context_id = navigable->compositor_context().id().value();
-        Layout::RustFFI::rust_clock_lease_grant(document->layout_node_arena_if_created()->handle(), context_id, timeline->style_engine_identity(), timeline_zero, timeline_time, plan->deadline);
+        Layout::RustFFI::rust_clock_lease_grant(document->layout_node_arena_if_created()->handle(), context_id, timeline->style_engine_identity(), timeline_zero, timeline_time, plan->deadline, plan->deadline_beside_task);
         auto& hold = *m_clock_leases.find_if([&](auto const& hold) { return hold.document.ptr() == document.ptr(); });
         publish_clock_lease_targets(hold);
         update_render_clock(hold, context_id ? Optional<Compositing::CompositorContextId> { context_id } : OptionalNone {});

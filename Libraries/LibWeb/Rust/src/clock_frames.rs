@@ -101,6 +101,10 @@ pub struct ClockLease {
     /// The timeline time at which the host has something observable to do (an event, a phase
     /// change, the end of an effect): no tick samples at or past it.
     deadline: f64,
+    /// The deadline of ticks that run while the main thread runs a task: the next phase change or
+    /// end of an effect. The events of the iterations they pass wait for the task to end anyway, and
+    /// the rendering update after it sends them.
+    deadline_beside_task: f64,
     /// The timeline time of the last tick, as `f64` bits.
     time: AtomicU64,
     revoked: AtomicBool,
@@ -151,6 +155,15 @@ impl ClockLease {
         self.deadline
     }
 
+    /// The deadline of a tick, which runs beside a task of the main thread's where `beside_task`.
+    pub fn deadline_for_tick(&self, beside_task: bool) -> f64 {
+        if beside_task {
+            self.deadline_beside_task
+        } else {
+            self.deadline
+        }
+    }
+
     pub fn is_revoked(&self) -> bool {
         self.revoked.load(Ordering::Acquire)
     }
@@ -162,16 +175,16 @@ impl ClockLease {
 
     /// Samples the lease's targets at timeline time `time` and installs what they compose into the
     /// arena, ahead of the host, which adopts the entries this leaves (see
-    /// `style_engine_clock_tick_take_entry`).
+    /// `style_engine_clock_tick_take_entry`). No tick samples at or past `deadline`.
     ///
     /// # Safety
     ///
     /// On the thread that owns the lease's arena and its style engine: the stage thread inside the
     /// `clock` stage the host submitted, or the main thread with nothing in flight.
-    pub unsafe fn run_tick(&self, time: f64) -> FfiClockTickOutcome {
+    pub unsafe fn run_tick(&self, time: f64, deadline: f64) -> FfiClockTickOutcome {
         let outcome = if self.is_revoked() {
             FfiClockTickOutcome::Revoked
-        } else if time >= self.deadline {
+        } else if time >= deadline {
             FfiClockTickOutcome::PastDeadline
         } else {
             // SAFETY: Guaranteed by the caller.
@@ -507,8 +520,9 @@ pub extern "C" fn rust_stage_thread_submits_clock() -> bool {
 
 /// Grants the document whose layout arena is `arena` a lease over its document timeline, which the
 /// style engine knows as `timeline_identity`, reading zero at `timeline_zero` and now at `time`,
-/// until `deadline` (timeline times, ms). The render clock ticks it at the display ticks of the
-/// compositor context `context`, unless that is 0. Replaces a lease the document held.
+/// until `deadline`, or `deadline_beside_task` for ticks that run while the main thread runs a task
+/// (timeline times, ms). The render clock ticks it at the display ticks of the compositor context
+/// `context`, unless that is 0. Replaces a lease the document held.
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_clock_lease_grant(
     arena: *mut c_void,
@@ -517,6 +531,7 @@ pub extern "C" fn rust_clock_lease_grant(
     timeline_zero: f64,
     time: f64,
     deadline: f64,
+    deadline_beside_task: f64,
 ) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     let lease = Arc::new(ClockLease {
@@ -525,6 +540,7 @@ pub extern "C" fn rust_clock_lease_grant(
         timeline_identity,
         timeline_zero,
         deadline,
+        deadline_beside_task: deadline_beside_task.max(deadline),
         time: AtomicU64::new(time.to_bits()),
         revoked: AtomicBool::new(false),
         paused: AtomicBool::new(false),
@@ -669,7 +685,7 @@ pub unsafe extern "C" fn rust_clock_lease_submit_tick(arena: *mut c_void, time: 
     lease.presented_since_adoption.store(false, Ordering::Release);
     let tick = move || {
         // SAFETY: The stage owns the arena, as below.
-        unsafe { lease.run_tick(time) };
+        unsafe { lease.run_tick(time, lease.deadline()) };
     };
     // SAFETY: The stage reaches the arena and its engine only, which the `clock` stage owns until
     // the main thread takes it back, and every main-thread path to either joins it first.
@@ -1304,7 +1320,8 @@ fn run_render_clock_tick_at(context: u64, frame_time_nanoseconds: i64) {
         count(&COUNTERS.ticks_dropped_main_busy);
         return;
     };
-    if LENT_TO_BUSY_MAIN.load(Ordering::Acquire) {
+    let beside_task = LENT_TO_BUSY_MAIN.load(Ordering::Acquire);
+    if beside_task {
         count(&COUNTERS.ticks_mid_task);
     }
     // Only the main thread grants and revokes, and it is idle: the lease stays as it is found, and
@@ -1331,7 +1348,7 @@ fn run_render_clock_tick_at(context: u64, frame_time_nanoseconds: i64) {
         tick = Some(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             // SAFETY: The main thread is idle with nothing in flight, and waits for this tick when
             // it wakes: the stage thread owns the arena and its engine until `idle_tick` is dropped.
-            let outcome = unsafe { lease.run_tick(time) };
+            let outcome = unsafe { lease.run_tick(time, lease.deadline_for_tick(beside_task)) };
             if outcome != FfiClockTickOutcome::Presented {
                 return (outcome, false);
             }
