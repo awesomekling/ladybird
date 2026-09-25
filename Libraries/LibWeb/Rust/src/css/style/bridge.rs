@@ -4958,8 +4958,9 @@ pub unsafe extern "C" fn style_engine_has_suspended_style_pass(engine: *const c_
     engine.state.host.suspended_style_pass.is_some()
 }
 
-/// What the container conditions of an element's engine-answered row left for the host to record,
-/// in the shape an evaluation answers with. `matches` is unused.
+/// What the container conditions of an element's row left for the host to record, in the shape an
+/// evaluation answers with. `matches` is unused. The engine has recorded what it reads of them
+/// itself by the time this returns.
 ///
 /// # Safety
 /// Engine must be live.
@@ -4970,7 +4971,7 @@ pub unsafe extern "C" fn style_engine_take_container_effects(
 ) -> FfiNativeContainerMatchResult {
     engine_entrance(engine, "style_engine_take_container_effects");
     let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
-    let Some(verdict) = StyleNodeID::from_raw(node).and_then(|node| engine.take_container_effects_for_host(node))
+    let Some(verdict) = StyleNodeID::from_raw(node).and_then(|node| engine.take_and_record_container_effects(node))
     else {
         return FfiNativeContainerMatchResult::default();
     };
@@ -4985,6 +4986,20 @@ pub unsafe extern "C" fn style_engine_take_container_effects(
         depends_on_size: verdict.depends_on_size,
         depends_on_style: verdict.depends_on_style,
         effects: effects.unwrap_or(std::ptr::null_mut()),
+    }
+}
+
+/// Drops what the container conditions of a declined row read of its containers: nothing records
+/// it, and the next transaction computes the element again.
+///
+/// # Safety
+/// Engine must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_discard_container_effects(engine: *mut c_void, node: u32) {
+    engine_entrance(engine, "style_engine_discard_container_effects");
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    if let Some(node) = StyleNodeID::from_raw(node) {
+        let _ = engine.take_container_effects_for_host(node);
     }
 }
 

@@ -319,6 +319,7 @@
     "style_engine_acknowledge_engine_computed_record",
     "style_engine_consume_element_style_input",
     "style_engine_connected_element_count",
+    "style_engine_discard_container_effects",
     "style_engine_discard_style_transaction_outputs",
     "style_engine_element_record_damage",
     "style_engine_layer_index",

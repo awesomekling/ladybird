@@ -153,7 +153,7 @@ void StyleEffectDrain::apply(StyleDrainScope const& scope, DOM::Document& docume
             continue;
         }
         if (auto const* row = effect.get_pointer<DiscardContainerQueryEffects>()) {
-            StyleEngineFFI::style_engine_native_container_effects_release(scope, StyleEngineFFI::style_engine_take_container_effects(scope, scope.engine().rust_handle(), row->style_node.value()).effects);
+            StyleEngineFFI::style_engine_discard_container_effects(scope, scope.engine().rust_handle(), row->style_node.value());
             continue;
         }
         auto element = document.style_computer().element_for_style_node(effect.visit([](auto const& row) { return row.style_node; }));

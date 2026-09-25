@@ -759,3 +759,32 @@ impl RetainedState {
         Some(false)
     }
 }
+
+impl StyleEngine {
+    /// Take what a row's container conditions read of its containers as the row installs. What
+    /// the engine itself reads of it, which containers are queried and which wait for a layout
+    /// to give them a box, what depends on a size query and what a moved environment computes
+    /// again, it records here; the host keeps only its mirrors of it on the elements.
+    pub(crate) fn take_and_record_container_effects(&mut self, node: StyleNodeID) -> Option<ContainerVerdict> {
+        let verdict = self.take_container_effects_for_host(node)?;
+        for (container, kind, _) in &verdict.effects {
+            let Some(container) = StyleNodeID::from_raw(*container) else {
+                continue;
+            };
+            match kind {
+                FfiContainerEffectKind::SizeContainerUsage => self.note_size_query_container(container),
+                FfiContainerEffectKind::NeedsEvaluationAfterLayout => {
+                    self.note_size_container_needs_evaluation_after_layout(container);
+                }
+                _ => {}
+            }
+        }
+        if verdict.depends_on_size {
+            self.note_style_depends_on_size_container_query(node);
+        }
+        if verdict.depends_on_style {
+            self.note_element_recomputes_on_environment_move(node);
+        }
+        Some(verdict)
+    }
+}
