@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<div id="box" style="width: 50px; height: 50px; background: blue"></div>
+<script>
+    // The page is hidden while its layout pass is in flight, so no rendering opportunity comes: the finished pass must
+    // still be taken back and the rendering update finished, and rendering goes on once the page is visible again.
+    asyncTest(async done => {
+        const frame = await whileLayoutInFlight("before-completion", () => {
+            box.style.width = "80px";
+        }, async frame => {
+            // The pass stays held while the page is hidden, unless something joins it.
+            internals.setSystemVisibilityState("hidden");
+            for (let tasks = 0; document.visibilityState !== "hidden" && tasks < 100; ++tasks)
+                await nextTask();
+            const visibility = document.visibilityState;
+            const stateWhenHidden = internals.frameSchedulerState();
+            internals.releaseHeldFrame();
+            return { ...frame, visibility, stateWhenHidden, finished: frame.heldAt ? internals.waitForFrameToFinish() : true };
+        });
+        println(`held as armed: ${layoutHeldAsArmed(frame, "before-completion")}`);
+        println(`visibility: ${frame.visibility}`);
+        println(`still in flight once hidden: ${!frame.heldAt || frame.stateWhenHidden === "in-flight"}`);
+        println(`finished while hidden: ${frame.finished}`);
+        let tasks = 0;
+        while (internals.frameSchedulerState() !== "idle" && tasks < 100) {
+            await nextTask();
+            ++tasks;
+        }
+        println(`taken back while hidden: ${internals.frameSchedulerState() === "idle"}`);
+        println(`laid out while hidden: ${box.offsetWidth}`);
+        internals.setSystemVisibilityState("visible");
+        box.style.width = "90px";
+        await twoFrames();
+        println(`rendering resumed: ${document.visibilityState}, ${box.offsetWidth}`);
+        done();
+    });
+</script>
