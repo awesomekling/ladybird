@@ -599,7 +599,10 @@ void StyleEngine::record_element_declaration_delta(StyleEngineFFI::FfiElementDec
 
 void StyleEngine::record_host_fact_write(StyleEngineFFI::FfiHostFactWrite write)
 {
-    note_recorded_input(*this, m_style_computer);
+    // A text arrival alone is five writes. The first since the last transaction is the one that
+    // needs a frame, and the mutation behind each of them notes the render state change itself.
+    if (m_host_fact_writes.size() == m_pending_atom_adoption_count)
+        note_recorded_input(*this, m_style_computer);
     m_host_fact_writes.append(write);
 }
 
