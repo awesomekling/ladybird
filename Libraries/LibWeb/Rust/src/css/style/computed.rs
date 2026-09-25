@@ -1810,11 +1810,14 @@ impl ComputedGroupSets {
         let record = self.animation_overlay_slots[slot as usize]
             .as_mut()
             .expect("animation-overlay slot is live");
+        // A retired slot is in `retired_animation_overlay_slots`, and only the sweep over them
+        // reclaims it.
+        if record.is_retired {
+            return;
+        }
         if host_pins.may_pin(record.final_style_record.raw()) {
-            if !record.is_retired {
-                record.is_retired = true;
-                self.retired_animation_overlay_slots.push(slot);
-            }
+            record.is_retired = true;
+            self.retired_animation_overlay_slots.push(slot);
             return;
         }
         self.reclaim_animation_overlay_slot(slot);
@@ -1830,10 +1833,12 @@ impl ComputedGroupSets {
             let record = self.animation_overlay_slots[slot as usize]
                 .as_mut()
                 .expect("a retired animation-overlay slot is live");
-            assert!(
-                !record.is_assigned,
-                "a retired animation-overlay slot has no assignment"
-            );
+            // An engine pin can take a retired record back into an assignment, which keeps it
+            // live; releasing that assignment decides again.
+            if record.is_assigned {
+                record.is_retired = false;
+                continue;
+            }
             if host_pins.may_pin(record.final_style_record.raw()) {
                 self.retired_animation_overlay_slots.push(slot);
                 continue;
@@ -1901,7 +1906,12 @@ impl ComputedGroupSets {
                     record_updated: false,
                 };
             }
-            if current.pin_count == 0 && !self.host_pins.may_pin(current.final_style_record.raw()) {
+            // A retired slot an assignment took back still waits for the retired sweep, which
+            // reads the record it retired.
+            if current.pin_count == 0
+                && !current.is_retired
+                && !self.host_pins.may_pin(current.final_style_record.raw())
+            {
                 let old_final_style_record = current.final_style_record;
                 let old_payload_bytes = size_of_val(current.payloads.as_ref()) as u64;
                 let record = self.make_animation_overlay_record(
@@ -4434,6 +4444,33 @@ mod tests {
         assert!(!sets.style_record_is_held(first.style_record_identity.raw()));
         assert!(sets.style_record_is_held(second.style_record_identity.raw()));
         sets.remove(node);
+        assert_eq!(sets.live_animation_overlay_records(), 0);
+    }
+
+    #[test]
+    fn a_retired_animation_overlay_the_engine_pins_waits_for_the_retired_sweep() {
+        let mut sets = ComputedGroupSets::default();
+        let pins = host_pins_lent_to(&mut sets);
+        let node = StyleNodeID::from_raw(1).unwrap();
+        let target = ComputedStyleTarget::new(node, u8::MAX);
+        let animated_overlay = crate::css::animated_overlay::AnimatedOverlay::default();
+        let mut first_metadata = metadata(0, 0, 0);
+        first_metadata.animation_overlay_identity = 1;
+        first_metadata.animated_overlay = HostShared::new(std::ptr::from_ref(&animated_overlay));
+        let first = sets.publish_unowned(Some(target), &[], 0, 0, first_metadata);
+        let first_record = first.style_record_identity.raw();
+
+        // The host pins the overlay, the node moves off it, and the engine pins the retired slot.
+        pins.pin(first_record);
+        let second = sets.publish_unowned(Some(target), &[], 0, 0, metadata(0, 0, 0));
+        sets.pin_style_record(first_record);
+        pins.unpin(first_record);
+        // The engine's last unpin leaves the retired slot to the sweep over retired slots.
+        sets.unpin_style_record(first_record);
+        assert!(sets.style_record_is_held(first_record));
+        sets.reclaim_retired_animation_overlays();
+        assert!(!sets.style_record_is_held(first_record));
+        assert!(sets.style_record_is_held(second.style_record_identity.raw()));
         assert_eq!(sets.live_animation_overlay_records(), 0);
     }
 
