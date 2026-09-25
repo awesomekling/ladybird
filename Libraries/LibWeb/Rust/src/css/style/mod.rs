@@ -1250,6 +1250,11 @@ pub struct HostState {
     /// Whether transaction settlement performed an atom sweep, including a sweep that reclaimed
     /// no identities. Recording consumes this alongside the release batch.
     style_atoms_swept: bool,
+    /// While a submitted style pass runs, the host may name an atom beside it that the engine no
+    /// longer holds, so the pass leaves its sweep to the host's finish of it.
+    atom_sweep_waits_for_host: bool,
+    /// Whether the submitted pass would have swept.
+    atom_sweep_skipped_by_submitted_pass: bool,
     /// Replay reconstructs semantic engine state but not transient C++ query handles. The recorded
     /// release batch supplies their lifetime boundary while still requiring every released atom to
     /// be reclaimable from replay's complete semantic root set.

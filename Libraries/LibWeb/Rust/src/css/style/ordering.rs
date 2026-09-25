@@ -2090,10 +2090,28 @@ impl StyleEngineState {
         (atoms, visited)
     }
 
+    /// Settles the sweep a submitted style pass left to the host (see `atom_sweep_waits_for_host`):
+    /// it runs now unless the host named atoms beside the pass, which the next transaction's sweep
+    /// sees live once the host's input has crossed.
+    pub(super) fn settle_atom_sweep_of_submitted_pass(
+        &mut self,
+        host_named_atoms_beside_pass: bool,
+        counters: &mut Counters,
+    ) {
+        self.host.atom_sweep_waits_for_host = false;
+        if std::mem::take(&mut self.host.atom_sweep_skipped_by_submitted_pass) && !host_named_atoms_beside_pass {
+            self.sweep_style_atoms(counters);
+        }
+    }
+
     pub(super) fn sweep_style_atoms(&mut self, counters: &mut Counters) {
         let decision = self.retained.atoms.sweep_decision();
         counters.add(Counter::AtomSweepPinReleasesSkipped, decision.skipped_pin_releases);
         if !decision.should_sweep && self.host.replay_reclaimed_style_atoms.is_none() {
+            return;
+        }
+        if self.host.atom_sweep_waits_for_host {
+            self.host.atom_sweep_skipped_by_submitted_pass = true;
             return;
         }
         if self.retained.batch_matching_traversal.is_some() {

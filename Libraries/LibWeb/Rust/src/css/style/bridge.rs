@@ -4835,6 +4835,7 @@ pub unsafe extern "C" fn style_engine_submit_style_transaction(
     );
     // SAFETY: Guaranteed by the caller.
     unsafe { begin_style_transaction(engine, computation_inputs) };
+    engine.host.atom_sweep_waits_for_host = true;
     // SAFETY: Guaranteed by the caller: the frame in flight owns the engine and the arena.
     let engine_on_stage = unsafe { crate::stage_thread::FrameOwns::new(engine_handle.cast::<StyleEngine>()) };
     // SAFETY: As above.
@@ -4850,7 +4851,9 @@ pub unsafe extern "C" fn style_engine_submit_style_transaction(
 }
 
 /// The answers of the style pass [`style_engine_submit_style_transaction`] submitted, once the
-/// main thread has taken its frame back.
+/// main thread has taken its frame back. The pass left its atom sweep to this call, which runs it
+/// unless `host_named_atoms_beside_pass`: an atom the host named beside the pass may be one the
+/// pass found unused.
 ///
 /// # Safety
 /// `engine` must be live, with no frame in flight that owns it. The answer slice stays valid as
@@ -4858,9 +4861,11 @@ pub unsafe extern "C" fn style_engine_submit_style_transaction(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_finish_submitted_style_transaction(
     engine: *mut c_void,
+    host_named_atoms_beside_pass: bool,
 ) -> FfiStyleTransactionView {
     engine_entrance(engine, "style_engine_finish_submitted_style_transaction");
     let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    engine.settle_atom_sweep_of_submitted_pass(host_named_atoms_beside_pass);
     let (root, output) = engine
         .host
         .submitted_style_pass_output

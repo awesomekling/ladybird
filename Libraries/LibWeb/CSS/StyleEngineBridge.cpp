@@ -1152,7 +1152,9 @@ void StyleEngine::submit_style_transaction(StyleNodeID root)
 StyleEngine::PublishedStyleTransaction StyleEngine::finish_submitted_style_transaction()
 {
     auto bridge_started_at = MonotonicTime::now();
-    auto view = StyleEngineFFI::style_engine_finish_submitted_style_transaction(m_impl);
+    // What was recorded beside the pass is held (see begin_holding_input_recorded_beside_pass()), and it may name an
+    // atom the pass found unused.
+    auto view = StyleEngineFFI::style_engine_finish_submitted_style_transaction(m_impl, m_holds_input_recorded_beside_pass);
     auto bridge_microseconds = (MonotonicTime::now() - bridge_started_at).to_truncated_microseconds();
     return publish_style_transaction_view(view, exchange(m_submitted_style_transaction_microseconds, 0), bridge_microseconds);
 }

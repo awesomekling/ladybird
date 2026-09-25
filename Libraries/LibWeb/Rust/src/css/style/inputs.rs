@@ -2150,6 +2150,8 @@ impl StyleEngineState {
                 retired_custom_property_data: Vec::new(),
                 environment_moves_in_flight: HashMap::default(),
                 style_atoms_swept: false,
+                atom_sweep_waits_for_host: false,
+                atom_sweep_skipped_by_submitted_pass: false,
                 replay_reclaimed_style_atoms: None,
             },
         }
