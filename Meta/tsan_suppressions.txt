@@ -12,6 +12,10 @@ race:std::sync::mpmc
 # comparing a key another thread inserted under the lock looks unsynchronized.
 race:libweb_rust::css::parser::stylesheet_cache
 
+# The test-only stage hold (Internals' holdNext*Frame()) is behind a std::sync::Mutex too, so the stage
+# thread comparing the armed hold's label looks unsynchronized with the main thread dropping it.
+race:libweb_rust::stage_thread::hold_here
+
 # FFmpeg's and dav1d's frame threads hand buffers to each other through synchronization inside
 # libavcodec, libavutil and libdav1d, which are not instrumented, so touching a buffer another frame
 # thread wrote looks like a race.
