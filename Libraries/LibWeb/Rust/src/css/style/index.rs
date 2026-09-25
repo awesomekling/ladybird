@@ -374,6 +374,8 @@ struct AttributeCatalogs {
     name_texts: PagedOwnedColumn<Option<Box<[u16]>>>,
     names_without_namespace: PagedCopyColumn<bool>,
     value_texts: PagedOwnedColumn<Option<Box<[u16]>>>,
+    /// Whether a name a selector reads has needed the value text, which moved the catalog version.
+    value_texts_read_by_selectors: PagedCopyColumn<bool>,
     language_texts: PagedOwnedColumn<Option<Box<[u16]>>>,
 }
 
@@ -5238,22 +5240,29 @@ impl ElementFactStore {
             .filter_map(move |(index, key)| (!key.is_none() && !keys[..index].contains(&key)).then_some(key))
     }
 
-    pub fn set_attribute_value_text(&mut self, value: StyleAtomID, text: &[u16], affects_selector_catalog: bool) {
+    /// Records what a value atom spells, unless it is recorded already, in which case `text` is not
+    /// read. The catalog version, which selector plans are keyed by, moves the first time a name a
+    /// selector reads needs the text: a value atom is shared by every name that spells it, so text
+    /// an `attr()` asked for is still new to the selectors when one of their names comes to spell
+    /// it, and finds it recorded.
+    pub fn set_attribute_value_text(&mut self, value: StyleAtomID, text: &[u16], read_by_selectors: bool) {
         let index = value.0 as usize;
-        if value.is_none()
-            || self
-                .attribute_catalogs
-                .value_texts
-                .get(index)
-                .is_some_and(Option::is_some)
-        {
+        if value.is_none() {
+            return;
+        }
+        let catalogs = &self.attribute_catalogs;
+        let recorded = catalogs.value_texts.get(index).is_some_and(Option::is_some);
+        let selectors_read_it = catalogs.value_texts_read_by_selectors.get(index).unwrap_or(false);
+        if recorded && (selectors_read_it || !read_by_selectors) {
             return;
         }
         self.memory_dirty = true;
-        self.attribute_catalogs_mut()
-            .value_texts
-            .insert(index, Some(text.into()));
-        if affects_selector_catalog {
+        let catalogs = self.attribute_catalogs_mut();
+        if !recorded {
+            catalogs.value_texts.insert(index, Some(text.into()));
+        }
+        if read_by_selectors {
+            catalogs.value_texts_read_by_selectors.insert(index, true);
             self.attribute_value_catalog_version = self
                 .attribute_value_catalog_version
                 .checked_add(1)
@@ -5440,6 +5449,9 @@ impl ElementFactStore {
         for (index, text) in attribute_catalogs.value_texts.indexed_iter_mut() {
             if self.attribute_value_live_counts.get(index).unwrap_or(0) == 0 {
                 *text = None;
+                if attribute_catalogs.value_texts_read_by_selectors.get(index).is_some() {
+                    attribute_catalogs.value_texts_read_by_selectors.insert(index, false);
+                }
             }
         }
 
@@ -5493,6 +5505,9 @@ impl ElementFactStore {
             }
             if let Some(text) = catalogs.value_texts.get_mut(index) {
                 *text = None;
+            }
+            if catalogs.value_texts_read_by_selectors.get(index).is_some() {
+                catalogs.value_texts_read_by_selectors.insert(index, false);
             }
             if let Some(text) = catalogs.language_texts.get_mut(index) {
                 *text = None;
@@ -5613,6 +5628,7 @@ impl ElementFactStore {
                 self.attribute_catalogs.name_forms,
                 self.attribute_catalogs.name_texts,
                 self.attribute_catalogs.names_without_namespace,
+                self.attribute_catalogs.value_texts_read_by_selectors,
             ];
             cached [];
             nested [
@@ -7222,12 +7238,19 @@ mod tests {
     }
 
     #[test]
-    fn substitution_only_attribute_text_does_not_invalidate_selector_plans() {
+    fn attribute_text_invalidates_selector_plans_once_a_selector_name_needs_it() {
         let mut store = ElementFactStore::new();
         let version = store.attribute_value_catalog_version;
 
         store.set_attribute_value_text(StyleAtomID(1), &[1, 2, 3], false);
+        assert_eq!(store.attribute_value_catalog_version, version);
 
+        // A value atom is shared by every name that spells it: text an attr() asked for is new to
+        // the selectors once one of their names spells it, and is not recorded again.
+        store.set_attribute_value_text(StyleAtomID(1), &[], true);
+        assert_ne!(store.attribute_value_catalog_version, version);
+        let version = store.attribute_value_catalog_version;
+        store.set_attribute_value_text(StyleAtomID(1), &[], true);
         assert_eq!(store.attribute_value_catalog_version, version);
         assert_eq!(store.attribute_value_text(StyleAtomID(1)), Some(&[1, 2, 3][..]));
     }

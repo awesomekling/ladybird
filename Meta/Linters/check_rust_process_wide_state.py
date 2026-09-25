@@ -53,6 +53,7 @@ LOCKED = "process-wide and behind a mutex"
 REPLAY = "style replay capture; replay builds only, or off unless an environment variable turns it on"
 TEST_ONLY = "test only"
 MAIN_SIDE_COUNTER = "counter kept by the main side's doors, which a render stage never passes"
+GROW_ONLY = "process-wide behind a lock or atomic, and only grows; growing asks readers to keep more, never less"
 
 
 def render_stage_entries(reason, entries):
@@ -61,6 +62,13 @@ def render_stage_entries(reason, entries):
 
 RENDER_STAGE_ALLOWED = {
     **render_stage_entries(MAIN_SIDE_COUNTER, ["layout/layout_node_arena.rs:DOOR_COUNTERS"]),
+    **render_stage_entries(
+        GROW_ONLY,
+        [
+            "css/parser/arbitrary_substitution.rs:ATTR_NAMES_READ",
+            "css/parser/arbitrary_substitution.rs:ATTR_NAMES_READ_GENERATION",
+        ],
+    ),
     **render_stage_entries(
         SCRATCH,
         [

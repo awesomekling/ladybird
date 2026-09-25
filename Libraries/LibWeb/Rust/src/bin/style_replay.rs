@@ -1155,10 +1155,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let _engine = read_engine(&mut event.payload, &live_engines)?;
                     let _recorded_version = event.payload.read_u64()?;
                 }
-                EventKind::AttributeNameRequiresValueText => {
+                EventKind::AttributeValueTextReaders => {
                     let _engine = read_engine(&mut event.payload, &live_engines)?;
                     let _name = event.payload.read_u32()?;
-                    let _recorded_result = event.payload.read_bool()?;
+                    let _recorded_result = event.payload.read_u32()?;
                 }
                 EventKind::HasDeferredGeometryTransaction => {
                     let engine = read_engine(&mut event.payload, &live_engines)?;

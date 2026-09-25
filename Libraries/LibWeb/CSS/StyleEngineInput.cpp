@@ -2977,7 +2977,8 @@ void record_element_attribute_changed(DOM::Element& element, Utf16FlyString cons
         record_element_form_control_disabled_facts(element);
 
     // Both values cross as atoms. Their text is recorded once per distinct value only when a
-    // compiled selector for this attribute uses an operator that cannot compare atom identities.
+    // compiled selector for this attribute uses an operator that cannot compare atom identities,
+    // or when an attr() can read the name.
     // This lets the match evaluator reconstruct either side of such a transaction without asking
     // the DOM, and two different values cannot cancel in the journal merely because both are
     // present.
