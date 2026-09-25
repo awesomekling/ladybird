@@ -27,11 +27,13 @@ TextNode::TextNode(DOM::Document& document, DOM::Text& text, AttachToDOMNode att
     Painting::push_selection_pseudo_style_of_parent(*this);
 }
 
+// The tree build stamped the row with whether an empty text produces a line box fragment, and the
+// document restamps it through the shell when editability changes, so a shell made after that
+// leaves the stamp for the restamp to compare against.
 TextNode::TextNode(DOM::Document& document, BindToPreparedArenaSlot bind, Compositing::RustFFI::NodeSlotId slot, RustFFI::NodeKind kind)
     : Node(document, bind, slot, kind)
 {
     invalidate_text_for_rendering();
-    update_produces_line_box_fragment_when_empty_flag();
     Painting::push_selection_pseudo_style_of_parent(*this);
 }
 

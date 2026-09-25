@@ -4336,28 +4336,45 @@ impl TreeBuilderHost {
     }
 
     /// A text row's content is synced from what the mirror publishes for it, so the row enrolls
-    /// itself. Its shell is owed only where materialising one tells the host something: in a
-    /// text control's shadow tree or directly under an editing host, where the shell lets an
-    /// empty text produce a line box fragment, and under an element with a `::selection` style,
-    /// whose paint facts the shell pushes onto a text whose parent has no box of its own.
+    /// itself. The row is stamped with whether an empty text produces a line box fragment, which
+    /// text controls and editing hosts rely on: the fragment keeps the line box alive with real
+    /// font metrics, giving the caret an anchor to paint at and the control its baseline. The
+    /// document restamps it when editability changes. Its shell is owed only under an element
+    /// with a `::selection` style, whose paint facts the shell pushes onto a text whose parent
+    /// has no box of its own.
     fn owe_text_shell(&self, slot: NodeSlotId, style_node: Option<StyleNodeID>) {
         // SAFETY: No arena borrow survives this call.
         unsafe { &mut *self.arena }.invalidate_text_content(slot);
-        let owes_shell = style_node.is_some_and(|text| {
-            self.arena().node_flags(slot) & NodeFlag::IsInUserAgentShadowTree as u32 != 0
-                || self.arena().with_style_store(|engine| {
-                    engine
-                        .tree()
-                        .text_parent(text)
-                        .filter(|parent| parent.element_index().is_some())
-                        .is_some_and(|parent| {
-                            engine.element_construction_facts(parent)
-                                & crate::css::style::bridge::element_construction_fact::IS_EDITING_HOST
-                                != 0
-                                || engine.published_pseudo_record_mask(parent) & (1 << SELECTION_PSEUDO_KIND) != 0
-                        })
-                })
+        let Some(text) = style_node else {
+            return;
+        };
+        let (produces_line_box_fragment_when_empty, owes_shell) = self.arena().with_style_store(|engine| {
+            let tree = engine.tree();
+            let parent = tree.text_parent(text);
+            let parent_element = parent.filter(|parent| parent.element_index().is_some());
+            let parent_is_editing_host = parent_element.is_some_and(|parent| {
+                engine.element_construction_facts(parent)
+                    & crate::css::style::bridge::element_construction_fact::IS_EDITING_HOST
+                    != 0
+            });
+            let is_in_text_control = self.arena().node_flags(slot) & NodeFlag::IsInUserAgentShadowTree as u32 != 0
+                && parent_element
+                    .and_then(|parent| tree.shadow_host_of(parent))
+                    .is_some_and(|host| {
+                        engine.element_construction_facts(host)
+                            & crate::css::style::bridge::element_construction_fact::IS_HTML_INPUT_ELEMENT
+                            != 0
+                            || engine.element_box_kind(host) == ElementBoxKind::TextArea as u8
+                    });
+            let parent_has_selection_style = parent_element
+                .is_some_and(|parent| engine.published_pseudo_record_mask(parent) & (1 << SELECTION_PSEUDO_KIND) != 0);
+            (parent_is_editing_host || is_in_text_control, parent_has_selection_style)
         });
+        self.arena().set_node_flag(
+            slot,
+            NodeFlag::ProducesLineBoxFragmentWhenEmpty,
+            produces_line_box_fragment_when_empty,
+        );
         if owes_shell {
             self.arena().defer_shell(slot);
         }
