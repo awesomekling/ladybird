@@ -2330,9 +2330,13 @@ impl LayoutNodeArena {
         self.style_engine.get().0
     }
 
+    /// The style engine, for a read or write of it through the arena. A style pass in flight owns
+    /// the engine but not the arena, so a main-side access joins the pass here, as an entrance of
+    /// the engine's own does.
     fn style_engine(&self) -> *mut c_void {
         let style_engine = self.style_engine.get().0;
         assert!(!style_engine.is_null(), "layout node arena has no style record host");
+        crate::stage_thread::join_frame_for_style_engine_entrance(style_engine, "layout arena style engine access");
         style_engine
     }
 
@@ -6144,12 +6148,17 @@ pub extern "C" fn layout_arena_reset_door_counters() {
 pub unsafe extern "C" fn layout_arena_join_frame_for_dom_tree_mutation(arena: *mut c_void) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     let location = std::panic::Location::caller();
-    crate::stage_thread::join_frame_reaching_style_engine_at(
-        arena,
-        location.file(),
-        location.line(),
-        location.column(),
-    );
+    // A style pass alone in flight is the exception: what the mutation writes to the style mirror
+    // goes through the engine's own entrances, which leave their inputs for the pass's drain or
+    // join the pass, and the rows it frees or marks are no longer the pass's to read.
+    if !crate::stage_thread::only_style_pass_in_flight_for_arena(arena) {
+        crate::stage_thread::join_frame_reaching_style_engine_at(
+            arena,
+            location.file(),
+            location.line(),
+            location.column(),
+        );
+    }
     if crate::stage_thread::frame_in_flight_owns(arena) {
         record_door_pass(LayoutNodeArena::DOM_TREE_MUTATION_WRITER, None);
         return;

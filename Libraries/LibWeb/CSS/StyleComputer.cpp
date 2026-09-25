@@ -317,6 +317,8 @@ void StyleComputer::unregister_style_node(StyleNodeID style_node_id)
         // A style node identity is reissued, so what was published under it leaves with it.
         if (auto* svg_element = as_if<SVG::SVGElement>(m_element_style_nodes[index].ptr()))
             Layout::clear_svg_attribute_facts(svg_element->document(), style_node_id);
+        // NB: Noted first: the engine entrance below may join a submitted pass, whose drain skips the identity.
+        m_style_engine.note_style_node_retired(style_node_id);
         m_element_style_nodes[index] = nullptr;
         m_style_engine.consume_recorded_element_style_input_change(style_node_id);
     }

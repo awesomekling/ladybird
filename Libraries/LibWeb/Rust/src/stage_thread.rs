@@ -230,8 +230,11 @@ type StageOutcome = Result<(), Box<dyn Any + Send>>;
 /// A stage the calling thread has submitted and not taken back yet.
 struct SubmittedStage {
     label: &'static str,
-    // The arena the stage owns while it runs, as the handle the main thread knows it by.
+    // The arena of the document the stage runs for, as the handle the main thread knows it by.
     arena: usize,
+    // Whether the stage owns `arena` while it runs. A style pass does not: it reaches only its
+    // style engine, and the main thread goes on writing the arena beside it.
+    owns_arena: bool,
     // The style engine the stage reads and writes while it runs, as the handle the main thread
     // knows it by, or 0 for a stage that never reaches one.
     style_engine: usize,
@@ -307,7 +310,8 @@ pub(crate) fn submits(label: &'static str) -> bool {
 /// Hands `stage` to the stage thread and returns at once. The stage owns the arena `arena` until
 /// the main thread takes the frame back: the frame scheduler does at the top of its event loop
 /// once the stage has finished, and a main-thread access to the arena does before it goes on
-/// ([`join_frame_in_flight`]).
+/// ([`join_frame_in_flight`]). A style pass owns its document's style engine instead, which its
+/// entrances join for ([`join_frame_for_style_engine_entrance`]).
 ///
 /// # Safety
 ///
@@ -374,6 +378,7 @@ unsafe fn submit(
         submitted.borrow_mut().push(SubmittedStage {
             label,
             arena: arena as usize,
+            owns_arena: label != "style",
             style_engine: style_engine_of_stage(label, arena),
             from_stage,
             outcome: None,
@@ -592,7 +597,18 @@ pub(crate) fn has_frame_in_flight() -> bool {
 
 /// Whether the frame in flight owns the arena `arena`.
 pub(crate) fn frame_in_flight_owns(arena: *mut c_void) -> bool {
-    SUBMITTED.with(|submitted| submitted.borrow().iter().any(|stage| stage.arena == arena as usize))
+    SUBMITTED.with(|submitted| {
+        submitted
+            .borrow()
+            .iter()
+            .any(|stage| stage.owns_arena && stage.arena == arena as usize)
+    })
+}
+
+/// Whether the frame in flight has a stage for the document whose arena is `arena`, owning the
+/// arena or not.
+pub(crate) fn document_frame_in_flight(arena: *mut c_void) -> bool {
+    SUBMITTED.with_borrow(|submitted| submitted.iter().any(|stage| stage.arena == arena as usize))
 }
 
 /// Whether every stage of the frame in flight has finished. Does not wait.
@@ -640,6 +656,29 @@ pub(crate) fn join_frame_in_flight(arena: *mut c_void) {
 /// Like [`join_frame_in_flight`], for a call site outside Rust that names itself (column 0 when it
 /// has none).
 pub(crate) fn join_frame_in_flight_at(arena: *mut c_void, file: &'static str, line: u32, column: u32) {
+    join_frame_in_flight_for_stage(
+        |stage| arena.is_null() || (stage.owns_arena && stage.arena == arena as usize),
+        file,
+        line,
+        column,
+    );
+}
+
+/// Like [`join_frame_in_flight_at`], for a main-thread operation on the document whose arena is
+/// `arena` rather than an access to the arena: it also joins a stage that runs for the document
+/// without owning its arena, such as a style pass.
+pub(crate) fn join_document_frame_in_flight_at(arena: *mut c_void, file: &'static str, line: u32, column: u32) {
+    join_frame_in_flight_for_stage(|stage| stage.arena == arena as usize, file, line, column);
+}
+
+/// If a stage of the frame in flight is `reached`, waits for the frame, takes it back and runs the
+/// frame scheduler's consume-commit, as [`join_frame_in_flight`] describes.
+fn join_frame_in_flight_for_stage(
+    reached: impl Fn(&SubmittedStage) -> bool,
+    file: &'static str,
+    line: u32,
+    column: u32,
+) {
     if RUNNING_JOIN_WORK.with(Cell::get) != 0 {
         return;
     }
@@ -647,7 +686,7 @@ pub(crate) fn join_frame_in_flight_at(arena: *mut c_void, file: &'static str, li
         submitted
             .borrow()
             .iter()
-            .find(|stage| arena.is_null() || stage.arena == arena as usize)
+            .find(|stage| reached(stage))
             .map(|stage| stage.label)
     });
     let Some(label) = label else {
@@ -706,7 +745,7 @@ pub(crate) fn join_frame_reaching_style_engine_at(arena: *mut c_void, file: &'st
             .any(|stage| stage.arena == arena as usize && stage.style_engine != 0)
     });
     if reaches_style_engine {
-        join_frame_in_flight_at(arena, file, line, column);
+        join_document_frame_in_flight_at(arena, file, line, column);
     }
 }
 
@@ -721,6 +760,17 @@ pub extern "C" fn rust_stage_thread_only_recordings_own(arena: *mut c_void) -> b
             .filter(|stage| stage.arena == arena as usize)
             .peekable();
         owners.peek().is_some() && owners.all(|stage| stage.style_engine == 0)
+    })
+}
+
+/// Whether the frame in flight is a style pass for the document the arena `arena` belongs to, and
+/// nothing else. See [`rust_stage_thread_only_style_pass_in_flight_for`].
+pub(crate) fn only_style_pass_in_flight_for_arena(arena: *mut c_void) -> bool {
+    SUBMITTED.with_borrow(|submitted| {
+        !submitted.is_empty()
+            && submitted
+                .iter()
+                .all(|stage| stage.label == "style" && stage.arena == arena as usize)
     })
 }
 
@@ -773,9 +823,7 @@ pub(crate) fn join_frame_for_style_engine_entrance(engine: *const c_void, entry:
         wait_for_submitted_stages_reaching(engine);
         return;
     }
-    if let Some(arena) = arena_of_submitted_stage_reaching(engine) {
-        join_frame_in_flight_at(arena as *mut c_void, entry, 0, 0);
-    }
+    join_frame_in_flight_for_stage(|stage| stage.style_engine == engine as usize, entry, 0, 0);
 }
 
 /// Waits for every stage of the calling thread's frame in flight that reaches the style engine
@@ -811,14 +859,15 @@ pub extern "C" fn rust_stage_thread_end_style_engine_entrances_that_only_wait() 
     STYLE_ENGINE_ENTRANCES_ONLY_WAIT.with(|depth| depth.set(depth.get() - 1));
 }
 
-/// The arena of the calling thread's submitted stage that reaches the style engine `engine`.
-fn arena_of_submitted_stage_reaching(engine: *const c_void) -> Option<usize> {
+/// The label of the calling thread's submitted stage that reaches the style engine `engine`.
+#[cfg(test)]
+fn label_of_submitted_stage_reaching(engine: *const c_void) -> Option<&'static str> {
     SUBMITTED.with(|submitted| {
         submitted
             .borrow()
             .iter()
             .find(|stage| stage.style_engine == engine as usize)
-            .map(|stage| stage.arena)
+            .map(|stage| stage.label)
     })
 }
 
@@ -1148,6 +1197,7 @@ mod tests {
                 submitted.borrow_mut().push(SubmittedStage {
                     label,
                     arena,
+                    owns_arena: label != "style",
                     style_engine,
                     from_stage,
                     outcome: None,
@@ -1157,10 +1207,13 @@ mod tests {
         };
         // A recording reaches no style engine.
         submit("recording", 0x10, 0);
-        assert_eq!(arena_of_submitted_stage_reaching(engine as *const c_void), None);
+        assert_eq!(label_of_submitted_stage_reaching(engine as *const c_void), None);
         submit("layout", 0x20, engine);
-        assert_eq!(arena_of_submitted_stage_reaching(engine as *const c_void), Some(0x20));
-        assert_eq!(arena_of_submitted_stage_reaching(0x2000 as *const c_void), None);
+        assert_eq!(
+            label_of_submitted_stage_reaching(engine as *const c_void),
+            Some("layout")
+        );
+        assert_eq!(label_of_submitted_stage_reaching(0x2000 as *const c_void), None);
 
         // An entrance that only waits leaves the finished stage in flight, with its outcome, for
         // the frame's consume.
