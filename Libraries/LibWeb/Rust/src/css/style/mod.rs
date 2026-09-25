@@ -990,6 +990,9 @@ pub struct RetainedState {
     element_transitions: transition_step::ElementTransitions,
     /// The transition steps the pass decided, which the host applies where it installs the rows.
     transition_steps_decided_in_pass: HashMap<StyleNodeID, transition_step::TransitionStepForHost>,
+    /// The transition steps the engine decided for the pseudo-elements it settled, which the host
+    /// applies where it installs their records.
+    pseudo_element_transition_steps_decided_in_pass: HashMap<(StyleNodeID, u8), transition_step::TransitionStepForHost>,
     /// The step the host took last, which what it was handed points into.
     taken_transition_step: Option<transition_step::TransitionStepForHost>,
     /// What each tree scope's registered counter styles are, as one identity per scope. A record

@@ -847,11 +847,16 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                         // The engine samples the pseudo-elements' animations as it settles them,
                         // over what the host's installations since the pass moved of their timing.
                         Animations::AnimationUpdateContext::publish_animation_inputs_before_sample(*element);
-                        // A sample resolves a percentage translation against the boxes the last layout committed.
+                        // It decides their transition steps over the records the host holds for them, and
+                        // a sample resolves a percentage translation against the boxes the last layout
+                        // committed.
+                        Array<u64, 8> held_pseudo_records {};
+                        for (size_t kind = 0; kind < held_pseudo_records.size(); ++kind)
+                            held_pseudo_records[kind] = element->style_record_identity(static_cast<PseudoElement>(kind)).value();
                         auto* layout_node_arena = document.layout_node_arena_if_created();
                         auto settled_pseudos = StyleEngineFFI::style_engine_settle_pseudo_records_after_host_record(
                             scope.engine().rust_handle(), reaction.style_node, old_is_list_item, false, true,
-                            layout_node_arena ? layout_node_arena->handle() : nullptr);
+                            held_pseudo_records.data(), layout_node_arena ? layout_node_arena->handle() : nullptr);
                         pseudo_kinds_sampled_by_engine = settled_pseudos.pseudo_samples_taken;
                         auto pseudo_samples = take_pseudo_element_samples_before_installation(scope, *element, pseudo_kinds_sampled_by_engine);
                         DOM::Element::EnginePseudoElementRecords final_pseudo_records {};

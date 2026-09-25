@@ -672,9 +672,10 @@ impl RetainedState {
                 .store(environment)
                 .ok_or("an environment without a store"),
         };
+        // A composition is published over its base with the base's environment.
         let environment = self
             .computed_group_sets
-            .style_record_custom_property_environment(style_record)
+            .style_record_custom_property_environment(self.computed_group_sets.base_style_record_of(style_record))
             .ok_or("a record with no view")?;
         let element_environment = self
             .computed_group_sets
@@ -1037,64 +1038,98 @@ impl super::StyleEngineState {
         self.retained.rows_sampled_in_pass.remove(&node)
     }
 
-    /// Sample the animations of an element's synthetic pseudo-elements over the records the
-    /// engine just settled for them over the element's composition, or over the ones they hold,
-    /// publish each composition as the pseudo-element's record and name it in the answer in its
-    /// place, so the host installs it rather than sampling the pseudo-element itself. Returns the
-    /// kinds the engine took; the host samples the rest.
+    /// Sample the animations of the synthetic pseudo-elements the engine just settled for an
+    /// element over its composition, and decide their transition steps over what the sample
+    /// composed, as the host would once it installs them over `held_style_records`, the records it
+    /// holds for them: publish each composition as the pseudo-element's record and name it in the
+    /// answer in place of the settled one, so the host installs it and applies the step's decisions
+    /// rather than sampling and deciding itself. Returns the kinds whose sample the engine took,
+    /// and the kinds whose step it decided; the host samples and steps the rest.
     pub(crate) fn sample_settled_pseudo_elements(
         &mut self,
         node: StyleNodeID,
         settled: &mut super::publication::RetriedEngineRecord,
+        held_style_records: &[u64; bridge::RETRY_PSEUDO_RECORD_SLOTS],
         layout_arena: super::animations::LentLayoutArena,
         counters: &mut super::Counters,
-    ) -> u8 {
+    ) -> (u8, u8) {
         use super::engine_sample_check;
 
-        let mut taken = 0u8;
-        for kind in 0..bridge::RETRY_PSEUDO_RECORD_SLOTS {
-            let pseudo_kind = kind as u8;
-            let slot = crate::css::style_compute::animation_slot(pseudo_kind);
-            let settled_now = (settled.pseudo_records_present >> kind) & 1 != 0;
-            let record = match settled_now {
-                true => settled.pseudo_records[kind],
-                false => self.assigned_style_record_of(node, Some(pseudo_kind)).unwrap_or(0),
-            };
-            // A pseudo-element that generates no box has nothing to compose, and one settled just
-            // now with no effect to sample composes nothing over its record.
-            if self.retained.element_animation_timing_rows(node, slot).is_empty()
-                && !self.retained.element_has_animation_effect_descriptions(node, slot)
-            {
-                if settled_now || record == 0 {
-                    taken |= 1 << kind;
-                }
+        let mut sampled = 0u8;
+        let mut stepped = 0u8;
+        for (kind, &held_style_record) in held_style_records.iter().enumerate() {
+            // A kind the settle does not name keeps the record it has, and the host samples it.
+            if (settled.pseudo_records_present >> kind) & 1 == 0 {
                 continue;
             }
+            let pseudo_kind = kind as u8;
+            let record = settled.pseudo_records[kind];
+            // A pseudo-element that generates no box has nothing to compose or transition.
             if record == 0 {
-                taken |= 1 << kind;
+                sampled |= 1 << kind;
                 continue;
             }
             if self.assigned_style_record_of(node, Some(pseudo_kind)) != Some(record) {
                 engine_sample_check::note_declined("pseudo-element: a record the engine has not assigned");
                 continue;
             }
-            let published =
-                crate::css::style_compute::sample_settled_row(self, node, Some(pseudo_kind), None, layout_arena)
+            let slot = crate::css::style_compute::animation_slot(pseudo_kind);
+            let installed = match self.retained.element_animation_timing_rows(node, slot).is_empty()
+                && !self.retained.element_has_animation_effect_descriptions(node, slot)
+            {
+                // One with no effect to sample composes nothing over its record.
+                true => record,
+                false => {
+                    let published = crate::css::style_compute::sample_settled_row(
+                        self,
+                        node,
+                        Some(pseudo_kind),
+                        None,
+                        layout_arena,
+                    )
                     .and_then(|sample| {
                         self.publish_settled_row_sample(node, Some(pseudo_kind), sample, counters)
                             .map_err(String::from)
                     });
-            match published {
-                Ok(published) => {
-                    engine_sample_check::note_taken("pseudo-element sample");
-                    settled.pseudo_records_present |= 1 << kind;
-                    settled.pseudo_records[kind] = published.style_record;
-                    taken |= 1 << kind;
+                    match published {
+                        Ok(published) => {
+                            engine_sample_check::note_taken("pseudo-element sample");
+                            published.style_record
+                        }
+                        Err(reason) => {
+                            engine_sample_check::note_declined(&format!("pseudo-element: {reason}"));
+                            continue;
+                        }
+                    }
                 }
-                Err(reason) => engine_sample_check::note_declined(&format!("pseudo-element: {reason}")),
+            };
+            sampled |= 1 << kind;
+            settled.pseudo_records[kind] = installed;
+            if let Some(composition) = self.decide_settled_pseudo_element_transition_step(
+                node,
+                pseudo_kind,
+                held_style_record,
+                record,
+                installed,
+                layout_arena,
+                counters,
+            ) {
+                stepped |= 1 << kind;
+                settled.pseudo_records[kind] = composition;
             }
         }
-        taken
+        (sampled, stepped)
+    }
+
+    /// Forget what the engine sampled and decided for an element's pseudo-elements that no
+    /// installation applied, before it settles them again.
+    pub(crate) fn forget_pseudo_elements_sampled_in_pass(&mut self, node: StyleNodeID) {
+        self.retained
+            .pseudo_elements_sampled_in_pass
+            .retain(|(owner, _), _| *owner != node);
+        self.retained
+            .pseudo_element_transition_steps_decided_in_pass
+            .retain(|(owner, _), _| *owner != node);
     }
 
     /// Take what the engine published for a pseudo-element whose animations it sampled as it
