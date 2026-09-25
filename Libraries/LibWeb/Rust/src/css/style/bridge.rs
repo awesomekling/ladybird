@@ -4336,16 +4336,6 @@ pub unsafe extern "C" fn style_engine_native_rule_id(engine: *const c_void, iden
     engine.native_rule_id(identity).map_or(0, |id| id.0 + 1)
 }
 
-/// Issue a new identity for changed declaration contents, independently of CSSOM wrappers.
-///
-/// # Safety
-/// Engine must be live and not borrowed.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_next_declaration_block_version(engine: *mut c_void) -> u32 {
-    engine_entrance(engine, "style_engine_next_declaration_block_version");
-    unsafe { &mut *engine.cast::<StyleEngine>() }.next_declaration_block_version()
-}
-
 /// Publish a native declaration edit through its owning rule and return whether it declares
 /// transitions. The host is notified before publishing, without an engine or graph borrow.
 ///
