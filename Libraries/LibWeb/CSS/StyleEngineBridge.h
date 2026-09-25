@@ -365,10 +365,11 @@ public:
     // The transaction submit_style_transaction() submitted, once its frame has been taken back.
     PublishedStyleTransaction finish_submitted_style_transaction();
     // A node removed beside a submitted pass gives up its style node identity while the pass may still answer for
-    // it. The identity is not issued again before the next transaction, so the drain of the pass skips its answers.
+    // it. Its removal waits with the rest of what was published beside the pass, so the engine goes on answering for
+    // it in the drain's waves too, and the identity is not issued again until the removal has crossed. Until then,
+    // the drain skips its answers.
     void note_style_node_retired(StyleNodeID);
     [[nodiscard]] bool style_node_was_retired_beside_pass(StyleNodeID style_node) const { return m_style_nodes_retired_beside_pass.contains(style_node); }
-    void forget_style_nodes_retired_beside_pass() { m_style_nodes_retired_beside_pass.clear(); }
     void discard_style_transaction_outputs(StyleDrainScope const&);
 
     using RuleMatch = StyleEngineFFI::FfiRuleMatch;

@@ -265,13 +265,13 @@ static StyleEngineTransaction accept_style_engine_transaction(DOM::Document& doc
         // The complete answer remains in Rust transaction scratch under this node. The identity
         // names both the semantic reaction and the payload that consumes it.
         if (!style_computer.element_for_style_node(answer.style_node)) {
-            // NB: The element was removed beside the submitted pass that answered it, and has no row to install.
+            // NB: The element was removed beside the submitted pass, and its removal has not reached the engine yet
+            //     (see StyleEngine::note_style_node_retired()). It has no row to install.
             VERIFY(style_engine.style_node_was_retired_beside_pass(StyleNodeID { answer.style_node }));
             continue;
         }
         transaction.reactions.append(answer);
     }
-    style_engine.forget_style_nodes_retired_beside_pass();
 
     transaction.only_derived_child_reactions = published_transaction.only_derived_child_reactions;
 
