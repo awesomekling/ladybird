@@ -823,6 +823,17 @@ impl ComputedGroupSets {
         self.pseudo_rows_by_node.get(&node).map_or(&[], Box::as_ref)
     }
 
+    /// Whether a composition of the target's animations can be published into an overlay slot of
+    /// its own: an element with a record, or a pseudo-element the engine holds an assignment for.
+    pub(crate) fn owns_animation_overlay_slot(&self, target: ComputedStyleTarget) -> bool {
+        match target.is_pseudo() {
+            true => self
+                .pseudo_row(target.node, target.pseudo_kind)
+                .is_some_and(|row| row.assignment.is_some()),
+            false => self.assigned_style_record(target.node).is_some(),
+        }
+    }
+
     fn pseudo_row(&self, node: StyleNodeID, kind: u8) -> Option<&PseudoComputedRow> {
         self.pseudo_rows(node).iter().find(|row| row.kind == kind)
     }

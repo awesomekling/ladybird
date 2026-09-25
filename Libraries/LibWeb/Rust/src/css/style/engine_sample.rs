@@ -956,35 +956,24 @@ impl super::StyleEngineState {
         self.host.held_style_records.get(&node).copied()
     }
 
-    /// Publish what the pass's sample of a settled row composed as the element's overlay record,
-    /// which the rows after it inherit from, and keep what the host applies when it installs the
-    /// row. Or why the engine cannot, where the host samples the row itself.
-    pub(crate) fn publish_settled_row_sample(
+    /// Build the payloads of the overlay record a sample composed over its record, as the host's
+    /// publication builds them: the groups the overlay writes rebuilt against the record's, with
+    /// the used color scheme and the display before the box-type transformation the overlay
+    /// leaves, and the font it asks for resolved.
+    pub(crate) fn build_settled_row_payloads(
         &mut self,
         node: StyleNodeID,
-        pseudo: Option<u8>,
-        sample: crate::css::style_compute::SettledRowSample,
+        pseudo_kind: u8,
+        sample: &crate::css::style_compute::SettledRowSample,
         counters: &mut super::Counters,
-    ) -> Result<SettledRowPublication, &'static str> {
+    ) -> Result<super::animations::AnimationOverlayPayloads, &'static str> {
         use crate::css::computed_value_views::ComputedValuesView;
-        use crate::css::host_shared::{HostShared, SharedPayload};
+        use crate::css::host_shared::SharedPayload;
         use crate::css::property_metadata::property_id;
 
-        let pseudo_kind = pseudo.unwrap_or(u8::MAX);
         let style_record = sample.style_record;
         let overlay = unsafe { &*sample.style.overlay };
         let table = unsafe { &*sample.style.table };
-        let base_environment = match pseudo {
-            None => self.retained.element_base_custom_property_environment(node)?,
-            Some(_) => self
-                .retained
-                .computed_group_sets
-                .style_record_custom_property_environment(style_record)
-                .unwrap_or(0),
-        };
-        if base_environment != 0 && self.custom_property_environments.store(base_environment).is_none() {
-            return Err("a base environment without a store");
-        }
         let (used_color_scheme, display_before_box_type_transformation) = {
             let view = self
                 .computed_group_sets
@@ -1057,6 +1046,36 @@ impl super::StyleEngineState {
                 None => return Err("no record to compose over"),
             }
         };
+        Ok(payloads)
+    }
+
+    /// Publish what the pass's sample of a settled row composed as the element's overlay record,
+    /// which the rows after it inherit from, and keep what the host applies when it installs the
+    /// row. Or why the engine cannot, where the host samples the row itself.
+    pub(crate) fn publish_settled_row_sample(
+        &mut self,
+        node: StyleNodeID,
+        pseudo: Option<u8>,
+        sample: crate::css::style_compute::SettledRowSample,
+        counters: &mut super::Counters,
+    ) -> Result<SettledRowPublication, &'static str> {
+        use crate::css::host_shared::{HostShared, SharedPayload};
+
+        let pseudo_kind = pseudo.unwrap_or(u8::MAX);
+        let style_record = sample.style_record;
+        let overlay = unsafe { &*sample.style.overlay };
+        let base_environment = match pseudo {
+            None => self.retained.element_base_custom_property_environment(node)?,
+            Some(_) => self
+                .retained
+                .computed_group_sets
+                .style_record_custom_property_environment(style_record)
+                .unwrap_or(0),
+        };
+        if base_environment != 0 && self.custom_property_environments.store(base_environment).is_none() {
+            return Err("a base environment without a store");
+        }
+        let payloads = self.build_settled_row_payloads(node, pseudo_kind, &sample, counters)?;
         let rebuilt_every_group = payloads.rebuilt_every_group;
         let shared = SharedPayload::from_pointer_slice(&payloads.payloads);
         let is_document_element = pseudo.is_none()
