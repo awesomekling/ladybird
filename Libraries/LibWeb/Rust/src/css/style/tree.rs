@@ -651,10 +651,6 @@ pub struct StyleNodeTree {
     /// DOM child sequence hangs from. A selector never names one and nothing publishes features
     /// for one, so a style pass that reaches one must pass it by rather than ask it to match.
     relation_only: BitColumn,
-    /// Whether a flat-tree descendant holds a layout tree update mark: the chain the layout tree
-    /// build climbs to reach a node it has to rebuild. Only an element, a shadow root and the
-    /// document ever carry one, so this needs no place in the text index space.
-    child_needs_layout_tree_update: BitColumn,
     /// Whether the element is a form control its `disabled` attribute disables. See
     /// [`StyleNodeTree::event_dispatch_is_disabled`].
     disabled_form_control: BitColumn,
@@ -681,8 +677,6 @@ pub struct StyleNodeTree {
     /// showed the `list-item` counter's value then. Their built counters are stale until a later
     /// build either rebuilds them or finds one of them rendering that value.
     list_owners_with_stale_item_counters: HashSet<StyleNodeID>,
-    /// The layout tree update mark elements hold. Text nodes hold one too, in `text.marks`.
-    marks: LayoutTreeUpdateMarks,
     connected_element_count: u32,
     /// Identities retired in the current epoch. They cannot be reused until the epoch that could
     /// still observe them has retired.
@@ -735,14 +729,12 @@ impl StyleNodeTree {
             tree_scope: None,
             live: BitColumn::default(),
             relation_only: BitColumn::default(),
-            child_needs_layout_tree_update: BitColumn::default(),
             disabled_form_control: BitColumn::default(),
             disables_descendants: BitColumn::default(),
             unique_node_ids: Vec::new(),
             dom_paint_facts: HashMap::default(),
             table_spans: HashMap::default(),
             list_owners_with_stale_item_counters: HashSet::default(),
-            marks: LayoutTreeUpdateMarks::default(),
             connected_element_count: 0,
             pending_reuse: Vec::new(),
             free_element_indexes: Vec::new(),
@@ -790,86 +782,6 @@ impl StyleNodeTree {
         }
         // The count is the number of elements a style pass has to answer for, and this is not one.
         self.connected_element_count -= 1;
-    }
-
-    /// Whether a flat-tree descendant holds a layout tree update mark. A text node is never on the
-    /// chain the mark climbs, so it answers no.
-    #[must_use]
-    pub fn child_needs_layout_tree_update(&self, node: StyleNodeID) -> bool {
-        node.element_index()
-            .is_some_and(|index| self.child_needs_layout_tree_update.contains(index as usize))
-    }
-
-    /// Record whether a flat-tree descendant holds a layout tree update mark, answering what the
-    /// column said before. The mark's ancestor walk stops where the answer is already yes.
-    pub fn set_child_needs_layout_tree_update(
-        &mut self,
-        node: StyleNodeID,
-        value: bool,
-        memory: &mut MemoryController,
-    ) -> bool {
-        let Some(index) = node.element_index() else {
-            return false;
-        };
-        let before = self.identity_capacity_bytes();
-        let (changed, _) = self.child_needs_layout_tree_update.set(index as usize, value);
-        let current = self.identity_capacity_bytes();
-        self.record_capacity_change(memory, before, current);
-        if changed { !value } else { value }
-    }
-
-    /// Whether the layout tree build has to rebuild what this node produces.
-    #[must_use]
-    pub fn needs_layout_tree_update(&self, node: StyleNodeID) -> bool {
-        match node.element_index() {
-            Some(index) => self.marks.needs(index as usize),
-            None => self.text.marks.needs(node.text_index().unwrap() as usize),
-        }
-    }
-
-    /// Which narrower rebuilds the marks collected on this node still permit. See
-    /// [`layout_tree_update_reuse_reason`].
-    #[must_use]
-    pub fn layout_tree_update_reuse_reasons(&self, node: StyleNodeID) -> u8 {
-        match node.element_index() {
-            Some(index) => self.marks.reuse_reasons(index as usize),
-            None => self.text.marks.reuse_reasons(node.text_index().unwrap() as usize),
-        }
-    }
-
-    /// Retire the marks the node holds, own and child alike: the build has just answered them.
-    /// Clearing never grows a column, so this needs no memory accounting.
-    pub fn clear_layout_tree_update_marks(&mut self, node: StyleNodeID) {
-        match node.element_index() {
-            Some(index) => {
-                self.marks.clear(index as usize);
-                self.child_needs_layout_tree_update.set(index as usize, false);
-            }
-            None => self.text.marks.clear(node.text_index().unwrap() as usize),
-        }
-    }
-
-    /// Fold one layout tree update mark into the node's, answering whether its own bit changed.
-    /// That answer is what tells the mark site it has a transition to widen from.
-    pub fn merge_layout_tree_update_mark(
-        &mut self,
-        node: StyleNodeID,
-        value: bool,
-        reuse_reason: u8,
-        memory: &mut MemoryController,
-    ) -> bool {
-        let (changed, growth) = match node.element_index() {
-            Some(index) => self.marks.merge(index as usize, value, reuse_reason),
-            None => self
-                .text
-                .marks
-                .merge(node.text_index().unwrap() as usize, value, reuse_reason),
-        };
-        if growth != 0 {
-            self.capacity_bytes += growth;
-            memory.reserve_required(MemoryCategory::RelationColumns, growth);
-        }
-        changed
     }
 
     /// Whether the identity stands in the tree without being styled. See `relation_only`.
@@ -945,13 +857,11 @@ impl StyleNodeTree {
             }
         };
         self.relation_only.set(index as usize, false);
-        self.child_needs_layout_tree_update.set(index as usize, false);
         self.disabled_form_control.set(index as usize, false);
         self.disables_descendants.set(index as usize, false);
         self.set_unique_node_id_at(index, 0);
         self.dom_paint_facts.remove(&StyleNodeID::element(index));
         self.table_spans.remove(&StyleNodeID::element(index));
-        self.marks.clear(index as usize);
         if let Some(capacity_before_growth) = capacity_before_growth {
             let current = self.identity_capacity_bytes();
             self.record_capacity_change(memory, capacity_before_growth, current);
@@ -999,7 +909,6 @@ impl StyleNodeTree {
             if !self.relation_only.set(index as usize, false).0 {
                 self.connected_element_count -= 1;
             }
-            self.child_needs_layout_tree_update.set(index as usize, false);
             self.disabled_form_control.set(index as usize, false);
             self.disables_descendants.set(index as usize, false);
             self.set_unique_node_id_at(index, 0);
@@ -1007,7 +916,6 @@ impl StyleNodeTree {
             self.table_spans.remove(&node);
             // An identity can be minted again for another element, which is no stale list owner.
             self.list_owners_with_stale_item_counters.remove(&node);
-            self.marks.clear(index as usize);
             self.parent[index as usize] = None;
             self.first_element_child[index as usize] = None;
             self.next_element_sibling[index as usize] = None;
@@ -1061,7 +969,6 @@ impl StyleNodeTree {
                 index
             }
         };
-        self.text.marks.clear(index as usize);
         self.text.is_ascii_whitespace.set(index as usize, false);
         self.text.is_in_user_agent_shadow_tree.set(index as usize, false);
         self.text.is_password_input.set(index as usize, false);
@@ -1096,7 +1003,6 @@ impl StyleNodeTree {
                 continue;
             }
             self.text.live.set(index as usize, false);
-            self.text.marks.clear(index as usize);
             self.text.is_ascii_whitespace.set(index as usize, false);
             self.text.is_in_user_agent_shadow_tree.set(index as usize, false);
             self.text.is_password_input.set(index as usize, false);
@@ -2200,11 +2106,9 @@ impl StyleNodeTree {
                     .map_or(0, |column| column.capacity() * size_of::<TreeScopeID>()),
                 self.live.capacity_bytes(),
                 self.relation_only.capacity_bytes(),
-                self.child_needs_layout_tree_update.capacity_bytes(),
                 self.unique_node_ids.capacity() as u64 * size_of::<i64>() as u64,
                 self.disabled_form_control.capacity_bytes(),
                 self.disables_descendants.capacity_bytes(),
-                self.marks.capacity_bytes(),
             ];
             skip [];
         }
@@ -2276,78 +2180,6 @@ impl StyleNodeTree {
     }
 }
 
-/// Which narrower rebuild the marks a node has collected so far still permit, as
-/// `Node::LayoutTreeUpdateReuseReason` spells them. Nothing set means only a full rebuild will do.
-pub mod layout_tree_update_reuse_reason {
-    pub const CHILD_LIST_INSERTION: u8 = 1;
-    pub const PSEUDO_ELEMENT_CHANGE: u8 = 2;
-}
-
-/// The layout tree update mark one index space holds: whether the build has to rebuild the node,
-/// and which narrower rebuilds every mark collected since the last build still permits.
-#[derive(Default)]
-struct LayoutTreeUpdateMarks {
-    needs: BitColumn,
-    reuse_child_list_insertion: BitColumn,
-    reuse_pseudo_element_change: BitColumn,
-}
-
-impl LayoutTreeUpdateMarks {
-    fn needs(&self, index: usize) -> bool {
-        self.needs.contains(index)
-    }
-
-    fn reuse_reasons(&self, index: usize) -> u8 {
-        let mut reasons = 0;
-        if self.reuse_child_list_insertion.contains(index) {
-            reasons |= layout_tree_update_reuse_reason::CHILD_LIST_INSERTION;
-        }
-        if self.reuse_pseudo_element_change.contains(index) {
-            reasons |= layout_tree_update_reuse_reason::PSEUDO_ELEMENT_CHANGE;
-        }
-        reasons
-    }
-
-    fn set_reuse_reasons(&mut self, index: usize, reasons: u8) -> u64 {
-        let child_list = self.reuse_child_list_insertion.set(
-            index,
-            reasons & layout_tree_update_reuse_reason::CHILD_LIST_INSERTION != 0,
-        );
-        let pseudo = self.reuse_pseudo_element_change.set(
-            index,
-            reasons & layout_tree_update_reuse_reason::PSEUDO_ELEMENT_CHANGE != 0,
-        );
-        child_list.1 + pseudo.1
-    }
-
-    /// Fold one mark in, answering whether the node's own bit changed. Once a reason that forbids
-    /// reuse arrives, a later one cannot narrow it back.
-    fn merge(&mut self, index: usize, value: bool, reuse_reason: u8) -> (bool, u64) {
-        if self.needs(index) == value {
-            let reasons = self.reuse_reasons(index);
-            let merged = if reuse_reason == 0 || reasons == 0 {
-                0
-            } else {
-                reasons | reuse_reason
-            };
-            return (false, self.set_reuse_reasons(index, merged));
-        }
-        let (_, growth) = self.needs.set(index, value);
-        (true, growth + self.set_reuse_reasons(index, reuse_reason))
-    }
-
-    fn clear(&mut self, index: usize) {
-        self.needs.set(index, false);
-        self.set_reuse_reasons(index, 0);
-    }
-
-    fn capacity_bytes(&self) -> u64 {
-        self.needs.capacity_bytes()
-            + self.reuse_child_list_insertion.capacity_bytes()
-            + self.reuse_pseudo_element_change.capacity_bytes()
-    }
-}
-
 /// The rows of text identities, indexed by text index with slot 0 unused.
 #[derive(Default)]
 struct TextRows {
@@ -2355,7 +2187,6 @@ struct TextRows {
     next_sibling: Vec<Option<StyleNodeID>>,
     previous_sibling: Vec<Option<StyleNodeID>>,
     live: BitColumn,
-    marks: LayoutTreeUpdateMarks,
     /// Whether the node's data is nothing but ASCII whitespace, which is what decides whether the
     /// layout tree build can collapse it away rather than give it a box of its own.
     is_ascii_whitespace: BitColumn,
@@ -2380,7 +2211,6 @@ impl TextRows {
             cached [];
             nested [
                 self.live.capacity_bytes(),
-                self.marks.capacity_bytes(),
                 self.is_ascii_whitespace.capacity_bytes(),
                 self.is_in_user_agent_shadow_tree.capacity_bytes(),
                 self.is_password_input.capacity_bytes(),

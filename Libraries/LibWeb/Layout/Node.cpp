@@ -994,6 +994,10 @@ void Node::dom_node_style_node_changed(DOM::Node& dom_node, CSS::StyleNodeID old
         // removed subtree that outlive the disconnection.
         if (old_style_node != 0)
             RustFFI::layout_arena_forget_style_node(arena->handle(), old_style_node.value());
+        // Nor does a mark the identity's previous holder left: it was keyed by the identity alone,
+        // and may sit in this arena after that node moved to another document.
+        if (new_style_node != 0)
+            RustFFI::layout_arena_clear_layout_tree_update_marks(arena->handle(), new_style_node.value());
     }
     // The arena names the node it tells about a binding change by identity, so a node changing
     // identity is one the arena cannot name. Its box-presence bits are re-committed here instead,
