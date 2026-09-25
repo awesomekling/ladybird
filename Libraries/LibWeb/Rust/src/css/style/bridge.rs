@@ -1951,6 +1951,30 @@ pub unsafe extern "C" fn style_engine_discard_viewport_dependent_nodes(engine: *
     engine.clear_ffi_style_node_query();
 }
 
+/// Grants the host identities to mint on its own, beside the ones a transaction's answer carries:
+/// fills `elements` and `texts` with element and text identities whose slots the engine has
+/// readied. A grant makes no identity live, and no node the engine knows names one, so it changes no
+/// answer of a pass and needs no transaction.
+///
+/// # Safety
+/// `engine` must be live, and `elements` and `texts` must point at their stated number of writable
+/// slots for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_grant_style_nodes(
+    engine: *mut c_void,
+    elements: *mut u32,
+    element_count: usize,
+    texts: *mut u32,
+    text_count: usize,
+) {
+    engine_entrance(engine, "style_engine_grant_style_nodes");
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    // SAFETY: the caller vouches that each pointer covers its stated count for this call.
+    let elements = unsafe { borrow_mut(elements, element_count) };
+    let texts = unsafe { borrow_mut(texts, text_count) };
+    grant_style_nodes(engine, elements, texts);
+}
+
 /// Applies one flat style input transaction.
 ///
 /// # Safety
