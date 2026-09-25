@@ -17,6 +17,9 @@ async function whileFrameInFlight(point, mutate, during, doc = null) {
     return new Promise((resolve, reject) => {
         requestAnimationFrame(() => {
             const armed = internals.holdNextRecordingFrame(point, doc);
+            // The next rendering task begins by taking the frame in flight back, which lets a held frame go. Under
+            // load it can run before the task below, so no rendering opportunity comes until the frame is released.
+            if (armed) internals.setManualRenderingOpportunities(true);
             mutate();
             setTimeout(async () => {
                 try {
@@ -28,9 +31,11 @@ async function whileFrameInFlight(point, mutate, during, doc = null) {
                     const frame = { armed, heldAt, state: internals.frameSchedulerState() };
                     const result = await during(frame);
                     internals.releaseHeldFrame();
+                    if (armed) internals.setManualRenderingOpportunities(false);
                     resolve(result);
                 } catch (e) {
                     internals.releaseHeldFrame();
+                    if (armed) internals.setManualRenderingOpportunities(false);
                     reject(e);
                 }
             }, 0);
@@ -50,6 +55,9 @@ async function whileLayoutInFlight(point, mutate, during, doc = null) {
     return new Promise((resolve, reject) => {
         requestAnimationFrame(() => {
             const armed = internals.holdNextLayoutFrame(point, doc);
+            // The next rendering task begins by taking the frame in flight back, which lets a held frame go. Under
+            // load it can run before the task below, so no rendering opportunity comes until the frame is released.
+            if (armed) internals.setManualRenderingOpportunities(true);
             mutate();
             setTimeout(async () => {
                 try {
@@ -58,9 +66,11 @@ async function whileLayoutInFlight(point, mutate, during, doc = null) {
                     const frame = { heldAt, state: internals.frameSchedulerState() };
                     const result = await during(frame);
                     internals.releaseHeldFrame();
+                    if (armed) internals.setManualRenderingOpportunities(false);
                     resolve(result);
                 } catch (e) {
                     internals.releaseHeldFrame();
+                    if (armed) internals.setManualRenderingOpportunities(false);
                     reject(e);
                 }
             }, 0);
@@ -80,6 +90,9 @@ async function whileStyleInFlight(point, mutate, during, doc = null) {
     return new Promise((resolve, reject) => {
         requestAnimationFrame(() => {
             const armed = internals.holdNextStyleFrame(point, doc);
+            // The next rendering task begins by taking the frame in flight back, which lets a held frame go. Under
+            // load it can run before the task below, so no rendering opportunity comes until the frame is released.
+            if (armed) internals.setManualRenderingOpportunities(true);
             mutate();
             setTimeout(async () => {
                 try {
@@ -88,9 +101,11 @@ async function whileStyleInFlight(point, mutate, during, doc = null) {
                     const frame = { heldAt, state: internals.frameSchedulerState() };
                     const result = await during(frame);
                     internals.releaseHeldFrame();
+                    if (armed) internals.setManualRenderingOpportunities(false);
                     resolve(result);
                 } catch (e) {
                     internals.releaseHeldFrame();
+                    if (armed) internals.setManualRenderingOpportunities(false);
                     reject(e);
                 }
             }, 0);
