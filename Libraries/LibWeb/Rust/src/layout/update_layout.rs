@@ -109,8 +109,6 @@ pub struct FfiLayoutUpdateDocumentFacts {
     pub top_layer_work_pending: bool,
     pub should_collect_devtools_layout_data: bool,
     pub document_in_quirks_mode: bool,
-    /// A style has given some element `content-visibility: auto` since the document was created.
-    pub may_have_content_visibility_auto_style: bool,
     pub viewport_inline_size_raw: i32,
     pub viewport_block_size_raw: i32,
 }
@@ -857,7 +855,7 @@ impl LayoutFrame {
     /// searchable text is dropped, and after a tree change the boxes with `content-visibility: auto`
     /// are collected again for the document's paint state, and the document's viewport clients are
     /// to be told the viewport rect.
-    fn note_layout_commit(&mut self, layout_tree_changed: bool, facts: &FfiLayoutUpdateDocumentFacts) {
+    fn note_layout_commit(&mut self, layout_tree_changed: bool) {
         self.prepare_for_rendering_after_commit();
         if let Some(selection) = &self.selection {
             // SAFETY: The frame runs for the update the arena is in, and no borrow of it is held here.
@@ -867,10 +865,7 @@ impl LayoutFrame {
         unsafe { super::text_queries::layout_arena_invalidate_searchable_text(self.inputs.arena_handle) };
         self.messages.layout_committed = true;
         self.messages.layout_tree_changed |= layout_tree_changed;
-        if layout_tree_changed
-            && (facts.may_have_content_visibility_auto_style
-                || self.arena().has_built_box_with_auto_content_visibility())
-        {
+        if layout_tree_changed && self.arena().may_have_auto_content_visibility() {
             let mut boxes = Vec::new();
             let arena = self.arena();
             crate::painting::content_visibility::for_each_box_with_auto_content_visibility(
@@ -1109,7 +1104,7 @@ impl LayoutFrame {
         } = laid_out;
         self.owe_host_half(OwedHostHalf::Commit(commit_host_half));
         self.messages.full_layouts_performed += 1;
-        self.note_layout_commit(true, &facts);
+        self.note_layout_commit(true);
         self.inputs.trace.layout(started);
         facts
     }
@@ -1201,7 +1196,7 @@ impl LayoutFrame {
 
         self.arena().note_partial_layout();
 
-        self.note_layout_commit(layout_tree_was_built_in_partial_branch, facts);
+        self.note_layout_commit(layout_tree_was_built_in_partial_branch);
         if self.commit_left_layout_work(facts) {
             return PartialRelayout::NeedsAnotherLayoutPass;
         }
@@ -1505,7 +1500,6 @@ mod tests {
             top_layer_work_pending: false,
             should_collect_devtools_layout_data: false,
             document_in_quirks_mode: false,
-            may_have_content_visibility_auto_style: false,
             viewport_inline_size_raw: 0,
             viewport_block_size_raw: 0,
         }
