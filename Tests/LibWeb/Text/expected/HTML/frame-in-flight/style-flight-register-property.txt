@@ -1,0 +1,6 @@
+held as armed: true
+registration joined the pass: false
+inner width (not inherited, initial value): 5
+inner height: 6
+outer --size: 20px
+inner --size: 5px

@@ -10995,6 +10995,18 @@ void Document::did_change_custom_property_registrations(Optional<Utf16FlyString>
 
 void Document::sync_custom_property_registrations_to_rust()
 {
+    // A style pass in flight reads the registry, so a registration change beside it waits for the pass's drain.
+    auto& style_engine = style_computer().style_engine();
+    if (style_engine.pass_is_in_flight()) {
+        if (!m_rust_custom_property_registry_sync_queued) {
+            m_rust_custom_property_registry_sync_queued = true;
+            style_engine.publish_input([document = GC::Root<Document> { *this }](CSS::StyleInputScope const&) {
+                document->m_rust_custom_property_registry_sync_queued = false;
+                document->sync_custom_property_registrations_to_rust();
+            });
+        }
+        return;
+    }
     m_rust_custom_property_registry_synced = true;
     HashMap<Utf16FlyString, CSS::CustomPropertyRegistration const*> effective_registrations;
     effective_registrations.ensure_capacity(m_registered_property_set.size() + m_cached_registered_properties_from_css_property_rules.size());
