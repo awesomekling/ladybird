@@ -1442,6 +1442,27 @@ pub unsafe extern "C" fn layout_arena_join_frame_reaching_style_engine(
     crate::stage_thread::join_frame_reaching_style_engine_at(arena, file, line, 0);
 }
 
+/// Waits for the document's frame in flight only if one of its stages owns the arena (a layout pass
+/// or a recording), not for a style pass alone, which records its arena without owning it. For a
+/// write to what the arena's stages read. `file` and `line` name the C++ call site for the
+/// forced-join log.
+///
+/// # Safety
+///
+/// As for [`layout_arena_join_frame_reaching_style_engine`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_join_frame_owning_arena(
+    arena: *mut c_void,
+    file: *const u8,
+    file_length: usize,
+    line: u32,
+) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    // SAFETY: The caller passes a string that lives for the rest of the process.
+    let file = unsafe { crate::stage_thread::call_site_file(file, file_length) };
+    crate::stage_thread::join_frame_in_flight_at(arena, file, line, 0);
+}
+
 /// # Safety
 ///
 /// `arena` must be a live handle on the document thread. The callbacks must remain valid until

@@ -516,8 +516,13 @@ void InvalidationJournal::drain()
     // running takes whatever such a read would have.
     // The drain writes what the frame reads, so a frame in flight is waited for first. Its end hands
     // this journal what was marked beside it.
+    // NB: A style pass alone reads nothing the drain writes: it does not own the arena, and what the
+    //     drain asks of the style engine joins it at the engine's own entrances.
     VERIFY(!m_holds_next_generation);
-    m_document.join_frame_in_flight();
+    if (auto* arena = m_document.layout_node_arena_if_created()) {
+        auto location = SourceLocation::current();
+        Layout::RustFFI::layout_arena_join_frame_owning_arena(arena->handle(), reinterpret_cast<u8 const*>(location.filename().characters_without_null_termination()), location.filename().length(), location.line_number());
+    }
     if (is_empty() || m_draining)
         return;
     TemporaryChange draining { m_draining, true };
