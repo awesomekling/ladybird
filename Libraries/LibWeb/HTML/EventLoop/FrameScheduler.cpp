@@ -33,6 +33,7 @@
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/PendingDisplayListRecording.h>
 #include <LibWeb/StyleEngineRustFFI.h>
+#include <time.h>
 
 namespace Web::HTML {
 
@@ -43,6 +44,19 @@ static FrameScheduler* s_frame_scheduler_with_host = nullptr;
 // frame spends a small share of its time on them; one whose restores cost it more than this share stops them.
 static constexpr u64 clock_lend_restore_nanoseconds_allowed_anyway = 4'000'000;
 static constexpr u64 clock_lend_restore_share_of_wake_divisor = 10;
+
+// The time the calling thread has run, in nanoseconds: what a restore costs the main thread, whether or not a loaded
+// machine preempted it meanwhile.
+static u64 thread_cpu_time_nanoseconds()
+{
+#if defined(AK_OS_WINDOWS)
+    return MonotonicTime::now().nanoseconds();
+#else
+    timespec time {};
+    VERIFY(clock_gettime(CLOCK_THREAD_CPUTIME_ID, &time) == 0);
+    return static_cast<u64>(time.tv_sec) * 1'000'000'000 + static_cast<u64>(time.tv_nsec);
+#endif
+}
 
 // LIBWEB_RENDER_CLOCK_FRAMES: A render clock ticks the leases while the main thread idles, and tells it where a tick
 // ended one. The stage thread reaches the main thread through this.
@@ -1043,12 +1057,12 @@ void FrameScheduler::clock_lend_taken_back(void* arena)
         return;
     auto document = m_clock_leases[*held].document;
     // The task reads its document at its own time, not at the ticks'.
-    auto start_nanoseconds = MonotonicTime::now().nanoseconds();
+    auto start_nanoseconds = thread_cpu_time_nanoseconds();
     auto restore = Layout::RustFFI::rust_clock_lease_restore_host_records(arena);
     if (restore != Layout::RustFFI::FfiClockRestore::Nothing) {
         take_in_clock_layout_frame(*document);
         auto now_nanoseconds = MonotonicTime::now().nanoseconds();
-        m_clock_lend_restore_nanoseconds += now_nanoseconds - start_nanoseconds;
+        m_clock_lend_restore_nanoseconds += thread_cpu_time_nanoseconds() - start_nanoseconds;
         auto allowed_nanoseconds = max(clock_lend_restore_nanoseconds_allowed_anyway, (now_nanoseconds - m_clock_lend_woke_at_nanoseconds) / clock_lend_restore_share_of_wake_divisor);
         if (restore == Layout::RustFFI::FfiClockRestore::NeedsMain || m_clock_lend_restore_nanoseconds > allowed_nanoseconds)
             suspend_clock_lend(ClockLendSuspension::Budget);

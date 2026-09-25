@@ -291,7 +291,7 @@ private:
     bool m_clock_lend_taken_back { false };
     // Whether the main thread lends the arenas no more until it next idles.
     bool m_clock_lend_suspended { false };
-    // When the main thread last woke, and how long restores took since.
+    // When the main thread last woke, and how much of its time restores took since.
     u64 m_clock_lend_woke_at_nanoseconds { 0 };
     u64 m_clock_lend_restore_nanoseconds { 0 };
 
