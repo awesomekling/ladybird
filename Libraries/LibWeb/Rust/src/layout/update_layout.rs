@@ -132,6 +132,10 @@ pub struct FfiLayoutCommitEffects {
     /// for the document to store.
     pub clamped_scroll_offsets: *const FfiClampedScrollOffset,
     pub clamped_scroll_offsets_count: usize,
+    /// Whether the render side showed what the commits laid out already, having updated the
+    /// visual contexts and recorded and presented the frame (`LIBWEB_RENDER_CLOCK_FRAMES`): the
+    /// document has nothing to paint again for them.
+    pub shown_on_render_side: bool,
 }
 
 /// A scroll offset a commit's overflow measurement brought back into the range its box now allows,
@@ -481,6 +485,8 @@ struct FrameMessages {
     boxes_with_auto_content_visibility: Option<Vec<NodeSlotId>>,
     /// The scroll offsets the rendering preparations after the commits clamped.
     clamped_scroll_offsets: Vec<FfiClampedScrollOffset>,
+    /// Whether the render side showed what the commits laid out (see `FfiLayoutCommitEffects`).
+    shown_on_render_side: bool,
     /// The image resources the frame's tree builds owe the rows they stamped, in the order the
     /// builds came to owe them: the images to load and observe, and the providers of the images
     /// that image boxes show. Until then an image box that owns its provider has no image, and the
@@ -513,6 +519,7 @@ impl FrameMessages {
                     boxes_with_auto_content_visibility_count: boxes.map_or(0, <[NodeSlotId]>::len),
                     clamped_scroll_offsets: self.clamped_scroll_offsets.as_ptr(),
                     clamped_scroll_offsets_count: self.clamped_scroll_offsets.len(),
+                    shown_on_render_side: self.shown_on_render_side,
                 },
             );
         }
@@ -1324,12 +1331,18 @@ impl ClockLayoutFrame {
 
 /// Takes in the layout frame of a clock lease's ticks, and ends the update the document began for
 /// it: pays what the rounds owe the document, and applies their messages at once, since the
-/// document thread takes the frame in at the top of its event loop, where they can run.
+/// document thread takes the frame in at the top of its event loop, where they can run. Where the
+/// render side showed every tick that laid out in the frame, the document paints nothing again.
 ///
 /// # Safety
 ///
 /// On the document thread, with the ticks over and the update begun.
-unsafe fn take_in_clock_layout_frame(main_thread: &crate::stage::MainThread, mut frame: ClockLayoutFrame) {
+unsafe fn take_in_clock_layout_frame(
+    main_thread: &crate::stage::MainThread,
+    mut frame: ClockLayoutFrame,
+    shown_on_render_side: bool,
+) {
+    frame.frame.messages.shown_on_render_side = shown_on_render_side;
     let host = frame.frame.inputs.host;
     // SAFETY: Guaranteed by the caller.
     unsafe {

@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<style>
+    body {
+        margin: 0;
+    }
+    div {
+        display: inline-block;
+        height: 20px;
+        vertical-align: top;
+    }
+    #box {
+        width: 100px;
+        animation: grow 20s linear;
+    }
+    @keyframes grow {
+        from {
+            width: 100px;
+        }
+        to {
+            width: 2100px;
+        }
+    }
+    #clipper {
+        width: 50px;
+        overflow: hidden;
+    }
+    #clipped {
+        width: 100px;
+        background-color: blue;
+    }
+</style>
+<div id="box"></div><div id="clipper"><div id="clipped"></div></div>
+<script src="../../include.js"></script>
+<script>
+    // Under LIBWEB_RENDER_CLOCK_FRAMES, a render clock tick whose layout moves a box that owns a clip moves the visual
+    // contexts, whose copy the compositor has from the main thread's frames: the tick ends its lease, and the main
+    // thread shows the frame.
+    asyncTest(async done => {
+        const box = document.getElementById("box");
+        const clipper = document.getElementById("clipper");
+        const animation = box.getAnimations()[0];
+        const enabled = internals.clockFramesEnabled();
+        const before = internals.getRenderClockCounters().ticksMovingVisualContexts;
+        for (let i = 0; i < 400 && enabled && internals.getRenderClockCounters().ticksMovingVisualContexts === before; ++i)
+            await new Promise(resolve => setTimeout(resolve, 10));
+        println(`a tick that moved the clip needed the main thread: ${!enabled || internals.getRenderClockCounters().ticksMovingVisualContexts > before}`);
+        const time = animation.currentTime;
+        println(`the clip is where the width at currentTime puts it: ${Math.abs(clipper.getBoundingClientRect().left - (100 + (2000 * time) / 20000)) <= 0.5}`);
+        done();
+    });
+</script>

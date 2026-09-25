@@ -9,6 +9,9 @@ pub struct VisualContextTreeDelta {
     pub structural_epoch_changed: bool,
     pub requires_display_list_recording: bool,
     pub tombstoned_any_node: bool,
+    /// Whether a node kept its place but took another payload: what the compositor keeps of the
+    /// tree moved, even where the display list does not.
+    pub payload_changed: bool,
 }
 
 impl VisualContextTreeDelta {

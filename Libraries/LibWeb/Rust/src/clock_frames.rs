@@ -795,6 +795,8 @@ pub struct FfiRenderClockCounters {
     pub ticks_presented: u64,
     /// Ticks that ended their lease: past its deadline, or with a sample only the main thread takes.
     pub ticks_needing_main: u64,
+    /// Ticks whose layout moved the visual contexts, which ended their lease.
+    pub ticks_moving_visual_contexts: u64,
 }
 
 #[derive(Default)]
@@ -812,6 +814,7 @@ struct RenderClockCounters {
     ticks_laid_out: AtomicU64,
     ticks_presented: AtomicU64,
     ticks_needing_main: AtomicU64,
+    ticks_moving_visual_contexts: AtomicU64,
 }
 
 static COUNTERS: RenderClockCounters = RenderClockCounters {
@@ -828,6 +831,7 @@ static COUNTERS: RenderClockCounters = RenderClockCounters {
     ticks_laid_out: AtomicU64::new(0),
     ticks_presented: AtomicU64::new(0),
     ticks_needing_main: AtomicU64::new(0),
+    ticks_moving_visual_contexts: AtomicU64::new(0),
 };
 
 fn count(counter: &AtomicU64) {
@@ -974,6 +978,15 @@ fn run_render_clock_tick(context: u64, slot: &ClockSlot) {
             let Some(laid_out) = (unsafe { lease.lay_out() }) else {
                 return (FfiClockTickOutcome::NeedsMain, false);
             };
+            // A round that moved a box that owns a clip, a transform or a scroll frame moved the
+            // visual contexts, which the compositor has from the main thread's frames.
+            // SAFETY: As above.
+            if laid_out
+                && !unsafe { crate::painting::ffi::settle_visual_contexts_for_clock_tick(lease.arena as *mut c_void) }
+            {
+                count(&COUNTERS.ticks_moving_visual_contexts);
+                return (FfiClockTickOutcome::NeedsMain, laid_out);
+            }
             // A tick that moved nothing shows nothing new.
             let moved_nothing = !laid_out && lease.repaints.lock().is_ok_and(|repaints| repaints.is_empty());
             // SAFETY: As above.
@@ -1034,6 +1047,7 @@ pub extern "C" fn rust_render_clock_counters() -> FfiRenderClockCounters {
         ticks_laid_out: load(&COUNTERS.ticks_laid_out),
         ticks_presented: load(&COUNTERS.ticks_presented),
         ticks_needing_main: load(&COUNTERS.ticks_needing_main),
+        ticks_moving_visual_contexts: load(&COUNTERS.ticks_moving_visual_contexts),
     }
 }
 
