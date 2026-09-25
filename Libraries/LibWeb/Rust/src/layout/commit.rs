@@ -53,6 +53,19 @@ pub(crate) struct CommitNotifications {
 }
 
 impl CommitNotifications {
+    /// Whether telling the host these leaves it no style or layout work to do: the messages ask for
+    /// no rebuild and no top layer pass.
+    pub(crate) fn leave_the_host_no_work(&self) -> bool {
+        self.messages.iter().all(|message| {
+            matches!(
+                message.kind,
+                FfiCommitMessageKind::PendingFontFaceWanted
+                    | FfiCommitMessageKind::UnexpectedFragmentedInline
+                    | FfiCommitMessageKind::SvgResourceReferenced
+            )
+        })
+    }
+
     /// # Safety
     ///
     /// The host must keep the document and node shells alive until these synchronous

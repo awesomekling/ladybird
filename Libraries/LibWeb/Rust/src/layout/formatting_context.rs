@@ -2523,6 +2523,12 @@ impl PendingLayoutCommit {
 }
 
 impl DeferredLayoutCommitHostHalf {
+    /// Whether paying this leaves the host no style or layout work to do, so a frame made from the
+    /// arena ahead of the payment is the one the document shows once it is paid.
+    pub(crate) fn leaves_the_host_no_work(&self) -> bool {
+        self.handbacks.only_reset_paintable_rows() && self.notifications.leave_the_host_no_work()
+    }
+
     /// Pays the host what the commit owed it and delivers the commit's notifications, then names
     /// the owners of the trace lines the pass left.
     ///

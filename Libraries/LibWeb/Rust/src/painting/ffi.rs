@@ -1656,6 +1656,19 @@ pub(crate) unsafe fn settle_visual_contexts_for_clock_tick(arena_handle: *mut c_
 pub(crate) struct FlightPaintSeal {
     inputs: crate::painting::record::RecordingInputs<'static>,
     frame_generation: u64,
+    presentation: Option<FlightPresentation>,
+}
+
+/// How a flight presents what it recorded, which the host sealed with its paint: `present` is
+/// called on the stage with `context`, the visual context tree the recording was made against (a
+/// reference the callee owns), and the scroll state snapshot the flight refreshed, if it did.
+pub(crate) type FfiFlightPresent =
+    unsafe extern "C" fn(*mut c_void, *const c_void, *const libgfx_rust::FloatPoint, usize, bool);
+
+#[derive(Clone, Copy)]
+pub(crate) struct FlightPresentation {
+    context: usize,
+    present: FfiFlightPresent,
 }
 
 /// What preparing and recording a flight's paint left for the main thread to take in.
@@ -1663,6 +1676,8 @@ pub(crate) struct FlightPaintSeal {
 pub(crate) struct FlightPaintProducts {
     pub(crate) visual_context_update: crate::painting::host::FfiVisualContextUpdateOutcome,
     pub(crate) scroll_state_snapshot: Option<Vec<libgfx_rust::FloatPoint>>,
+    /// How the flight presents its recording, if the host sealed a presentation with its paint.
+    pub(crate) presentation: Option<FlightPresentation>,
     /// Why the flight did not record after preparing the paint state, if it did not.
     pub(crate) stopped: Option<FlightPaintStop>,
 }
@@ -1686,16 +1701,20 @@ thread_local! {
 
 /// Seals what the next flight of the arena records with, from the host inputs of a recording as
 /// `layout_arena_record_display_list` takes them. The SVG-as-image renders the recording paints are
-/// resolved into the arena before this.
+/// resolved into the arena before this. With `present`, the flight may present what it records
+/// through it, with `present_context`.
 ///
 /// # Safety
 ///
 /// `arena` must be a live handle from `layout_arena_create`, on the document thread, with no frame in
-/// flight; the input arrays and buffers must stay valid for this call.
+/// flight; the input arrays and buffers must stay valid for this call. `present` must be callable on
+/// the stage thread with `present_context` until the flight is taken back.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_seal_flight_paint(
     arena_handle: *mut c_void,
     inputs: crate::painting::host::FfiRecordingInputs,
+    present: Option<unsafe extern "C" fn(*mut c_void, *const c_void, *const libgfx_rust::FloatPoint, usize, bool)>,
+    present_context: *mut c_void,
 ) {
     // The paint state parts are the flight's to fill in once it has prepared them.
     // SAFETY: Guaranteed by the caller; the owned copy outlives the borrow.
@@ -1715,6 +1734,10 @@ pub unsafe extern "C" fn layout_arena_seal_flight_paint(
             FlightPaintSeal {
                 inputs,
                 frame_generation,
+                presentation: present.map(|present| FlightPresentation {
+                    context: present_context as usize,
+                    present,
+                }),
             },
         ));
     });
@@ -1758,6 +1781,7 @@ pub(crate) unsafe fn paint_in_flight(
     let FlightPaintSeal {
         mut inputs,
         frame_generation,
+        presentation,
     } = seal;
     // The renders the main thread resolved as it sealed the flight are the ones the layout before it
     // predicted: the layout the flight ran may paint others. This is checked before anything is
@@ -1798,6 +1822,7 @@ pub(crate) unsafe fn paint_in_flight(
         return Ok(FlightPaintProducts {
             visual_context_update,
             scroll_state_snapshot,
+            presentation: None,
             stopped: Some(FlightPaintStop::NoViewport),
         });
     }
@@ -1844,8 +1869,43 @@ pub(crate) unsafe fn paint_in_flight(
     Ok(FlightPaintProducts {
         visual_context_update,
         scroll_state_snapshot,
+        presentation,
         stopped: None,
     })
+}
+
+/// Presents what a flight recorded through the presentation the host sealed with its paint.
+///
+/// # Safety
+///
+/// `arena_handle` must be the live arena the frame in flight owns, whose recording the flight left
+/// pending, with no borrow of it held.
+pub(crate) unsafe fn present_in_flight(arena_handle: *mut c_void, products: &FlightPaintProducts) {
+    let presentation = products
+        .presentation
+        .expect("a flight presents through the presentation sealed with its paint");
+    // SAFETY: Guaranteed by the caller.
+    let arena = unsafe { arena_from_handle(arena_handle) };
+    let tree = arena
+        .paint_state()
+        .borrow()
+        .visual_context
+        .tree
+        .as_ref()
+        .map_or(std::ptr::null(), |tree| {
+            std::sync::Arc::into_raw(std::sync::Arc::clone(tree)).cast()
+        });
+    let snapshot = products.scroll_state_snapshot.as_deref();
+    // SAFETY: Guaranteed by the host that sealed the presentation.
+    unsafe {
+        (presentation.present)(
+            presentation.context as *mut c_void,
+            tree,
+            snapshot.map_or(std::ptr::null(), <[libgfx_rust::FloatPoint]>::as_ptr),
+            snapshot.map_or(0, <[libgfx_rust::FloatPoint]>::len),
+            snapshot.is_some(),
+        );
+    }
 }
 
 /// Publishes the arena's pending recording from the presentation stage of the frame in flight

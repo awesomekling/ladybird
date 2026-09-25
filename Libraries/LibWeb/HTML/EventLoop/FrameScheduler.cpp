@@ -330,7 +330,9 @@ void FrameScheduler::commit()
         if (auto navigable = document->navigable(); navigable && navigable->has_sealed_flight_paint()) {
             using FlightPaintEnd = LocalNavigable::FlightPaintEnd;
             auto end = FlightPaintEnd::NotRecorded;
-            if (outcome.reached >= Layout::RustFFI::FfiFlightStage::Record)
+            if (outcome.reached == Layout::RustFFI::FfiFlightStage::Present)
+                end = outcome.end == Layout::RustFFI::FfiFlightEndReason::HostLeftWork ? FlightPaintEnd::PresentedAheadOfMoreWork : FlightPaintEnd::Presented;
+            else if (outcome.reached >= Layout::RustFFI::FfiFlightStage::Record)
                 end = FlightPaintEnd::Recorded;
             else if (outcome.end == Layout::RustFFI::FfiFlightEndReason::HostLeftWork)
                 end = FlightPaintEnd::RecordedAheadOfMoreWork;

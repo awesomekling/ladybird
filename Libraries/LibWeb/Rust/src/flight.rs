@@ -147,7 +147,7 @@ impl Flight {
     fn stage_holds(&self) -> &'static [&'static str] {
         match (self.began, self.paint.is_some()) {
             (FfiFlightStage::Style, _) => &["flight:style"],
-            (_, true) => &["flight:layout", "flight:record", "flight:recorded"],
+            (_, true) => &["flight:layout", "flight:record", "flight:recorded", "flight:present"],
             (_, false) => &["flight:layout"],
         }
     }
@@ -170,6 +170,7 @@ impl Flight {
         let mut reached = began;
         let mut next = began;
         let mut ran = FlightRan::default();
+        let mut may_be_presented = false;
         loop {
             let end = match next {
                 FfiFlightStage::Style => {
@@ -186,16 +187,22 @@ impl Flight {
                         .layout
                         .take()
                         .expect("a flight that begins with layout has its pass");
-                    let may_be_painted = layout.run();
-                    // What the flight runs after its layout reads nothing of the style engine.
-                    self.releases_style_engine.release();
+                    let round = layout.run();
+                    may_be_presented = round.may_be_presented;
+                    // What the flight runs after its layout reads nothing of the style engine. The
+                    // main thread's writes may go on beside it only if what the round owes the
+                    // document thread reaches no node they could change: no tree build or image
+                    // to pay for, no rebuild to ask for.
+                    if round.may_be_presented {
+                        self.releases_style_engine.release();
+                    }
                     reached = FfiFlightStage::Rounds;
                     next = FfiFlightStage::PaintPrep;
                     if self.paint.is_none() {
                         Some(FfiFlightEndReason::PaintNotSealed)
                     } else if crate::stage_thread::flight_is_preempted() {
                         Some(FfiFlightEndReason::Preempted)
-                    } else if !may_be_painted {
+                    } else if !round.may_be_painted {
                         Some(FfiFlightEndReason::RoundLeftWork)
                     } else {
                         None
@@ -208,21 +215,30 @@ impl Flight {
                     match unsafe { crate::painting::ffi::paint_in_flight(self.arena as *mut c_void, paint) } {
                         Ok(products) => {
                             let stopped = products.stopped;
+                            let presents = products.presentation.is_some();
                             ran.paint = Some(products);
                             if let Some(stop) = stopped {
                                 Some(stop.into())
                             } else {
                                 reached = FfiFlightStage::Record;
                                 next = FfiFlightStage::Present;
-                                None
+                                // A frame whose layout still owes the document thread work it may
+                                // ask for again is presented once the flight is taken back.
+                                (!presents || !may_be_presented).then_some(FfiFlightEndReason::StageRunsOnMain)
                             }
                         }
                         Err(stop) => Some(stop.into()),
                     }
                 }
-                FfiFlightStage::StyleRenderHalf | FfiFlightStage::Record | FfiFlightStage::Present => {
-                    Some(FfiFlightEndReason::StageRunsOnMain)
+                FfiFlightStage::Present => {
+                    crate::stage_thread::hold_before_flight_stage("flight:present");
+                    let products = ran.paint.as_ref().expect("a flight presents what it recorded");
+                    // SAFETY: The frame in flight owns the arena, and the recording is pending in it.
+                    unsafe { crate::painting::ffi::present_in_flight(self.arena as *mut c_void, products) };
+                    reached = FfiFlightStage::Present;
+                    Some(FfiFlightEndReason::Done)
                 }
+                FfiFlightStage::StyleRenderHalf | FfiFlightStage::Record => Some(FfiFlightEndReason::StageRunsOnMain),
             };
             if let Some(end) = end {
                 if reached >= FfiFlightStage::Record {
@@ -250,8 +266,11 @@ impl FlightTakeBack {
             return;
         }
         // What the flight prepared of the paint state stands, and its recording is published for the
-        // paint caches it filled: the document takes both in all the same, and paints again.
-        outcome.reached = FfiFlightStage::Rounds;
+        // paint caches it filled: the document takes both in all the same, and paints again. A frame
+        // the flight presented is the compositor's already, and the flight counts as having presented.
+        if outcome.reached < FfiFlightStage::Present {
+            outcome.reached = FfiFlightStage::Rounds;
+        }
         outcome.end = FfiFlightEndReason::HostLeftWork;
     }
 }
