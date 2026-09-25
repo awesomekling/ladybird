@@ -558,6 +558,15 @@ StyleAtomID StyleEngine::intern_attribute_name(Utf16FlyString const& local_name,
 StyleAtomID StyleEngine::intern_attribute_value(StyleAtomID name, Utf16String const& value)
 {
     auto atom = intern_atom(Utf16FlyString { value });
+    // Beside a style pass the engine is the pass's: the text, and whether the name asks for it, wait for its drain
+    // with the attribute change that names the value.
+    if (Layout::RustFFI::rust_stage_thread_only_style_pass_in_flight_for(m_impl)) {
+        publish_input([name, atom, value](StyleInputScope const& input) {
+            auto& engine = input.engine();
+            engine.publish_attribute_value_text(atom, value, engine.attribute_name_requires_value_text(name));
+        });
+        return atom;
+    }
     publish_attribute_value_text(atom, value, attribute_name_requires_value_text(name));
     return atom;
 }
