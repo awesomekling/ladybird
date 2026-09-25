@@ -200,6 +200,9 @@ void CSSTransition::publish_transitions(DOM::Element& element, Optional<PseudoEl
             .property_id = to_underlying(property_id),
             .effect_identity = transition->m_keyframe_effect->animation_preparation_identity(),
             .effect_replaced = transition->effect().ptr() != transition->m_keyframe_effect.ptr(),
+            .current_effect_identity = transition->effect() && is<Animations::KeyframeEffect>(*transition->effect())
+                ? static_cast<Animations::KeyframeEffect const&>(*transition->effect()).animation_preparation_identity()
+                : 0,
             .end_value = transition->m_end_value->rust_style_value_data(),
             .reversing_adjusted_start_value = transition->m_reversing_adjusted_start_value->rust_style_value_data(),
             .reversing_shortening_factor = transition->m_reversing_shortening_factor,

@@ -31,11 +31,23 @@ pub(crate) struct PublishedTransition {
     property_id: u16,
     effect_identity: u64,
     effect_replaced: bool,
+    current_effect_identity: u64,
     end_value: RetainedStyleValueData,
     reversing_adjusted_start_value: RetainedStyleValueData,
     reversing_shortening_factor: f64,
     start_time: f64,
     end_time: f64,
+}
+
+impl PublishedTransition {
+    /// The effect the transition's animation runs, whose timing row says whether it still runs
+    /// and which a step that removes the transition collects the element's effects without.
+    fn running_effect_identity(&self) -> u64 {
+        match self.effect_replaced {
+            true => self.current_effect_identity,
+            false => self.effect_identity,
+        }
+    }
 }
 
 /// Per element and pseudo-element, the transitions it holds.
@@ -71,6 +83,7 @@ impl ElementTransitions {
                 property_id: transition.property_id,
                 effect_identity: transition.effect_identity,
                 effect_replaced: transition.effect_replaced,
+                current_effect_identity: transition.current_effect_identity,
                 end_value: retain(transition.end_value),
                 reversing_adjusted_start_value: retain(transition.reversing_adjusted_start_value),
                 reversing_shortening_factor: transition.reversing_shortening_factor,
@@ -212,10 +225,13 @@ impl RetainedState {
         if entries.is_empty() && transitions.is_empty() {
             return Ok(TransitionStep::default());
         }
-        // Script replaced the effect of one of the element's transitions, whose timing no longer
-        // says whether the transition still runs: the host decides the step.
-        if transitions.iter().any(|transition| transition.effect_replaced) {
-            return Err("a transition whose effect script replaced");
+        // Script removed the effect of one of the element's transitions: whether its animation
+        // still runs is the host's to say.
+        if transitions
+            .iter()
+            .any(|transition| transition.effect_replaced && transition.current_effect_identity == 0)
+        {
+            return Err("a transition whose effect script removed");
         }
 
         let mut context = crate::css::animation::FfiAnimationContext {
@@ -242,16 +258,29 @@ impl RetainedState {
 
         let rows = self.element_animation_timing_rows(node, slot);
         let linear_points = self.element_animation_timing_row_linear_points(node, slot);
+        let running_of = |transition: &'_ PublishedTransition| {
+            let row = rows
+                .iter()
+                .find(|row| row.effect_identity() == transition.running_effect_identity())?;
+            let time = row_timeline_time(row, &self.animation_timeline_samples)?;
+            row_plays_unfinished(row, time)?.then_some((row, time))
+        };
+        // A running transition whose effect script replaced reverses with the easing of the effect
+        // it started with, which no published row carries.
+        if transitions.iter().any(|transition| {
+            transition.effect_replaced
+                && entries.iter().any(|entry| entry.property_id == transition.property_id)
+                && running_of(transition).is_some()
+        }) {
+            return Err("a running transition whose effect script replaced");
+        }
         let input = |property_id: u16, entry: Option<&crate::css::transition::FfiTransitionEntry>| {
             let existing = transitions
                 .iter()
                 .find(|transition| transition.property_id == property_id);
             let running = existing.and_then(|transition| {
-                let row = rows
-                    .iter()
-                    .find(|row| row.effect_identity() == transition.effect_identity)?;
-                let time = row_timeline_time(row, &self.animation_timeline_samples)?;
-                row_plays_unfinished(row, time)?.then_some((transition, row, time))
+                let (row, time) = running_of(transition)?;
+                Some((transition, row, time))
             });
             // `CSSTransition::timing_function_output_at_time()` at the style change event, which is
             // the time of the document timeline the transition runs on.
@@ -386,7 +415,7 @@ impl RetainedState {
                 transitions
                     .iter()
                     .find(|transition| transition.property_id == *property_id)
-                    .map(|transition| transition.effect_identity)
+                    .map(PublishedTransition::running_effect_identity)
             })
             .collect();
         Ok(TransitionStep {
@@ -411,20 +440,12 @@ impl StyleEngineState {
         layout_arena: super::animations::LentLayoutArena,
         counters: &mut super::Counters,
     ) {
-        // A step that removes a transition collects the element's effects again without it, which
-        // the host does once it applied the row's animation plan, and the published rows are the
-        // effects from before.
-        let owes_a_plan = self
-            .retained
-            .nodes_owing_animation_definitions
-            .contains_key(&(node, u8::MAX));
         match self.decide_and_compose_transition_step(
             node,
             None,
             old_style_record,
             settled_style_record,
             installed_style_record,
-            owes_a_plan,
             layout_arena,
             counters,
         ) {
@@ -467,7 +488,6 @@ impl StyleEngineState {
             old_style_record,
             settled_style_record,
             installed_style_record,
-            false,
             layout_arena,
             counters,
         ) {
@@ -496,14 +516,10 @@ impl StyleEngineState {
         old_style_record: u64,
         settled_style_record: u64,
         installed_style_record: u64,
-        owes_a_plan: bool,
         layout_arena: super::animations::LentLayoutArena,
         counters: &mut super::Counters,
     ) -> Result<(TransitionStepForHost, Option<u64>), String> {
         let step = self.decide_transition_step(node, pseudo, old_style_record, installed_style_record, layout_arena)?;
-        if !step.removed.is_empty() && owes_a_plan {
-            return Err("a step that removes a transition beside a plan".into());
-        }
         if step.started.is_empty() && step.removed.is_empty() {
             return Ok((step.for_host, None));
         }

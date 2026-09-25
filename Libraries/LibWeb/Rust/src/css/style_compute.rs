@@ -3718,17 +3718,75 @@ pub(crate) fn sample_transition_step(
         layout_arena: layout_arena.as_ptr(),
     };
     let slot = animation_slot(pseudo_kind);
+    // A row that leaves an animation plan steps over the effects the plan leaves: the host applies
+    // the plan before it collects the element's effects again.
+    let planned = match (removed, pseudo) {
+        (Some(_), None) => match engine.element_settled_animation_plan(node) {
+            Some(plan) => {
+                Some(plan_effect_stack(engine, node, plan).map_err(|reason| format!("animation plan: {reason}"))?)
+            }
+            None => None,
+        },
+        _ => None,
+    };
     let descriptions = match removed {
         Some(_) => engine.take_element_animation_effect_descriptions(node, slot),
         None => None,
     };
+    let keyframes = planned.as_ref().map(|_| engine.take_animation_keyframes());
     let composed = (|| {
         let mut selected = Vec::with_capacity(started.len());
         let mut preparation_effects = Vec::with_capacity(started.len());
         let mut selected_keys = Vec::with_capacity(started.len());
-        // The effects the element holds but for the transitions the step removes, in composite
-        // order, as `get_animations_internal()` lists them for the host's step.
-        if let Some(removed) = removed {
+        // The effects the plan leaves but for the transitions the step removes, in composite
+        // order, with those of the animations it starts sampled from their rules.
+        if let (Some(removed), Some(planned), Some(keyframes)) = (removed, &planned, &keyframes) {
+            let rows = engine.element_animation_timing_rows(node, slot);
+            let described = descriptions.as_deref().unwrap_or(&[]);
+            for effect in planned {
+                let (description, easing_from_animation, composite_from_animation) = match &effect.source {
+                    PlannedEffectSource::Described => {
+                        // A provisional transition is not among the effects the host collects.
+                        let associated = rows
+                            .iter()
+                            .any(|row| row.effect_identity() == effect.identity && row.is_associated());
+                        if !associated || removed.contains(&effect.identity) {
+                            continue;
+                        }
+                        let description = described
+                            .iter()
+                            .find(|description| description.identity == effect.identity)
+                            .ok_or("an effect with no description")?;
+                        (description, None, 0)
+                    }
+                    PlannedEffectSource::Rule {
+                        keyframe_set,
+                        easing,
+                        composite,
+                    } => (
+                        keyframes
+                            .description(*keyframe_set)
+                            .ok_or("a @keyframes rule no scope publishes")?,
+                        Some(easing),
+                        *composite,
+                    ),
+                };
+                if description.keyframes.len() < 2 {
+                    continue;
+                }
+                selected.push(crate::css::animation::SelectedEffect {
+                    effect: description,
+                    current_key: effect.current_key,
+                    easing_from_animation,
+                    composite_from_animation,
+                });
+                preparation_effects.push(crate::css::animation::FfiAnimationPreparationEffect {
+                    identity: effect.identity,
+                    generation: description.generation,
+                });
+                selected_keys.push(effect.current_key);
+            }
+        } else if let Some(removed) = removed {
             let rows = engine.element_animation_timing_rows(node, slot);
             let linear_points = engine.element_animation_timing_row_linear_points(node, slot);
             let samples = engine.animation_timeline_samples();
@@ -3805,6 +3863,9 @@ pub(crate) fn sample_transition_step(
         }
         Ok(())
     })();
+    if let Some(keyframes) = keyframes {
+        engine.restore_animation_keyframes(keyframes);
+    }
     if let Some(descriptions) = descriptions {
         engine.restore_element_animation_effect_descriptions(node, slot, descriptions);
     }
