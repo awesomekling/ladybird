@@ -17,6 +17,7 @@
 #include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/CSS/PropertyNameAndID.h>
 #include <LibWeb/CSS/StyleComputer.h>
+#include <LibWeb/CSS/StyleEffectDrain.h>
 #include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/CSS/StyleSheetInvalidation.h>
 #include <LibWeb/CSS/StyleSheetState.h>
@@ -657,7 +658,7 @@ static RefPtr<ComputedValues const> compute_pseudo_element_style_for_cssom(DOM::
         highlight_parent_style_record = highlight_parent.has_value() ? highlight_parent->style_record_identity() : StyleRecordID {};
     }
     RefPtr<ComputedValues const> target_style;
-    auto compute = [&](DOM::AbstractElement target) -> RefPtr<ComputedValues const> {
+    auto compute = [&](StyleDrainScope const& scope, DOM::AbstractElement target) -> RefPtr<ComputedValues const> {
         // A read-only answer is independent of the element's installed style. Copy its record
         // before the demand slot is reused by another style read.
         auto kind = *target.pseudo_element();
@@ -671,7 +672,7 @@ static RefPtr<ComputedValues const> compute_pseudo_element_style_for_cssom(DOM::
                 // answer before leaving C++'s negative pseudo computation out of this read.
                 auto published = style_computer.style_engine().answer_record_demand(target.element().style_node_id(), to_underlying(kind), false, false, false);
                 if (published.is_absent) {
-                    target.set_custom_property_data(nullptr);
+                    target.set_custom_property_data(scope, nullptr);
                     highlight_parent_style_record = StyleRecordID {};
                     return {};
                 }
@@ -685,7 +686,7 @@ static RefPtr<ComputedValues const> compute_pseudo_element_style_for_cssom(DOM::
                     bool environment_is_installable = false;
                     auto custom_property_data = target.element().custom_property_environment_of_engine_record(record, environment_is_installable);
                     if (environment_is_installable) {
-                        target.set_custom_property_data(move(custom_property_data));
+                        target.set_custom_property_data(scope, move(custom_property_data));
                         highlight_parent_style_record = record;
                         return ComputedValues::Builder { *view }.build();
                     }
@@ -695,18 +696,22 @@ static RefPtr<ComputedValues const> compute_pseudo_element_style_for_cssom(DOM::
         return {};
     };
 
-    Vector<RefPtr<ComputedValues const>> ancestor_styles;
-    // A highlight pseudo-element inherits from its parent element's, which nothing keeps current while selection
-    // styles are unobservable, so the chain is computed outermost first.
-    if (is_highlight_pseudo_element(*pseudo_element) && !document.selection_styles_are_observable()) {
-        highlight_parent_style_record = StyleRecordID {};
-        Vector<DOM::AbstractElement> ancestors;
-        for (auto ancestor = abstract_element.element().element_to_inherit_style_from({}); ancestor; ancestor = ancestor->element_to_inherit_style_from({}))
-            ancestors.append({ *ancestor, pseudo_element });
-        for (auto& ancestor : ancestors.in_reverse())
-            ancestor_styles.append(compute(ancestor));
-    }
-    target_style = compute(abstract_element);
+    // The environments the read's records were resolved over install inside the drain, as those
+    // of a style update's rows do.
+    StyleEffectDrain::install(document, [&](StyleDrainScope const& scope) {
+        Vector<RefPtr<ComputedValues const>> ancestor_styles;
+        // A highlight pseudo-element inherits from its parent element's, which nothing keeps current while selection
+        // styles are unobservable, so the chain is computed outermost first.
+        if (is_highlight_pseudo_element(*pseudo_element) && !document.selection_styles_are_observable()) {
+            highlight_parent_style_record = StyleRecordID {};
+            Vector<DOM::AbstractElement> ancestors;
+            for (auto ancestor = abstract_element.element().element_to_inherit_style_from({}); ancestor; ancestor = ancestor->element_to_inherit_style_from({}))
+                ancestors.append({ *ancestor, pseudo_element });
+            for (auto& ancestor : ancestors.in_reverse())
+                ancestor_styles.append(compute(scope, ancestor));
+        }
+        target_style = compute(scope, abstract_element);
+    });
     return target_style;
 }
 
