@@ -198,10 +198,15 @@ impl Flight {
                     // SAFETY: The frame in flight owns the arena, as the layout pass before it did.
                     match unsafe { crate::painting::ffi::paint_in_flight(self.arena as *mut c_void, paint) } {
                         Ok(products) => {
+                            let stopped = products.stopped;
                             ran.paint = Some(products);
-                            reached = FfiFlightStage::Record;
-                            next = FfiFlightStage::Present;
-                            None
+                            if let Some(stop) = stopped {
+                                Some(stop.into())
+                            } else {
+                                reached = FfiFlightStage::Record;
+                                next = FfiFlightStage::Present;
+                                None
+                            }
                         }
                         Err(stop) => Some(stop.into()),
                     }
