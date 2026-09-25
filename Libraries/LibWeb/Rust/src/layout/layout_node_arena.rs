@@ -6706,7 +6706,11 @@ pub(crate) unsafe fn apply_enrolled_content_sources(arena: *mut c_void, sources:
         });
         (node, facts)
     });
-    let replaced_content_facts: Vec<_> = sources.replaced_content_facts.into_iter().chain(style_derived_facts).collect();
+    let replaced_content_facts: Vec<_> = sources
+        .replaced_content_facts
+        .into_iter()
+        .chain(style_derived_facts)
+        .collect();
     for (node, facts) in replaced_content_facts {
         live_replaced_nodes.push(node);
         // Changed facts invalidate cached formatting-context runs regardless of which
