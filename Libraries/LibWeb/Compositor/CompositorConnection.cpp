@@ -229,7 +229,11 @@ Optional<Compositing::CanvasId> CompositorConnection::create_canvas_2d_context(G
     if (!can_send_message_to_compositor())
         return {};
 
-    auto response = send_sync<Messages::CompositorWebContentServer::CreateCanvas2dContext>(size, alpha);
+    auto response = send_sync_but_allow_failure<Messages::CompositorWebContentServer::CreateCanvas2dContext>(size, alpha);
+    if (!response) {
+        did_lose_compositor();
+        return {};
+    }
     if (!response->success())
         return {};
     return response->canvas_id();
@@ -260,7 +264,11 @@ Gfx::ShareableBitmap CompositorConnection::get_canvas_pixels(Compositing::Canvas
     if (!can_send_message_to_compositor())
         return {};
 
-    auto response = send_sync<Messages::CompositorWebContentServer::GetCanvasPixels>(canvas_id, rect);
+    auto response = send_sync_but_allow_failure<Messages::CompositorWebContentServer::GetCanvasPixels>(canvas_id, rect);
+    if (!response) {
+        did_lose_compositor();
+        return {};
+    }
     return response->take_pixels();
 }
 
@@ -455,7 +463,11 @@ Optional<Compositing::CanvasId> CompositorConnection::create_webgl_context(Compo
     if (!can_send_message_to_compositor())
         return {};
 
-    auto response = send_sync<Messages::CompositorWebContentServer::CreateWebglContext>(webgl_version, size, depth, stencil, antialias);
+    auto response = send_sync_but_allow_failure<Messages::CompositorWebContentServer::CreateWebglContext>(webgl_version, size, depth, stencil, antialias);
+    if (!response) {
+        did_lose_compositor();
+        return {};
+    }
     out_supported_extensions = response->take_supported_extensions();
     if (!response->success())
         return {};
@@ -529,7 +541,11 @@ ByteBuffer CompositorConnection::webgl_sync_call(Compositing::CanvasId canvas_id
     if (!can_send_message_to_compositor())
         return {};
 
-    auto response = send_sync<Messages::CompositorWebContentServer::WebglSyncCall>(canvas_id, move(request));
+    auto response = send_sync_but_allow_failure<Messages::CompositorWebContentServer::WebglSyncCall>(canvas_id, move(request));
+    if (!response) {
+        did_lose_compositor();
+        return {};
+    }
     return response->take_reply();
 }
 
@@ -538,7 +554,11 @@ Compositing::WebGL::ReadPixelsResult CompositorConnection::read_webgl_pixels(Com
     if (!can_send_message_to_compositor())
         return {};
 
-    auto response = send_sync<Messages::CompositorWebContentServer::WebglReadPixels>(canvas_id, x, y, width, height, format, type, buf_size, pixels);
+    auto response = send_sync_but_allow_failure<Messages::CompositorWebContentServer::WebglReadPixels>(canvas_id, x, y, width, height, format, type, buf_size, pixels);
+    if (!response) {
+        did_lose_compositor();
+        return {};
+    }
     return {
         .length = response->length(),
         .columns = response->columns(),
@@ -551,7 +571,11 @@ bool CompositorConnection::read_webgl_buffer_sub_data(Compositing::CanvasId canv
     if (!can_send_message_to_compositor())
         return false;
 
-    auto response = send_sync<Messages::CompositorWebContentServer::WebglReadBufferSubData>(canvas_id, target, offset, size, data);
+    auto response = send_sync_but_allow_failure<Messages::CompositorWebContentServer::WebglReadBufferSubData>(canvas_id, target, offset, size, data);
+    if (!response) {
+        did_lose_compositor();
+        return false;
+    }
     return response->success();
 }
 
