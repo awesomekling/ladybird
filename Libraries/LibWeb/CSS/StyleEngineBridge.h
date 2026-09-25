@@ -348,6 +348,8 @@ private:
 
     void* m_impl { nullptr };
     GC::Ptr<StyleComputer> m_style_computer;
+    // The recording stream the engine records under, or zero.
+    u64 m_recording_stream { 0 };
 
     // No record is reclaimed within a style-record view epoch, so what a base record's identity
     // names does not change during one: the engine answers each of these once per record.
@@ -379,6 +381,8 @@ private:
     Vector<StyleEngineFFI::FfiStateDelta> m_state_deltas;
     Vector<StyleEngineFFI::FfiElementDeclarationDelta> m_element_declaration_deltas;
     Vector<StyleEngineFFI::FfiHostFactWrite> m_host_fact_writes;
+    // How many of the host fact writes are atom adoptions, which are no input to style.
+    size_t m_pending_atom_adoption_count { 0 };
     // What each `TextData` write holds, by the index its `data` names until the writes cross.
     Vector<Utf16String> m_host_fact_text_data;
     bool m_css_transitions_may_observe_style_changes { false };

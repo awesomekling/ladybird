@@ -115,6 +115,7 @@ static_assert(!IsMoveAssignable<StyleEngine>);
 StyleEngine::StyleEngine(DeviceClass device_class, StyleComputer* style_computer)
     : m_impl(StyleEngineFFI::style_engine_create(device_class))
     , m_style_computer(style_computer)
+    , m_recording_stream(StyleEngineFFI::style_engine_recording_stream(m_impl))
 {
     if (m_style_computer) {
         set_pseudo_element_style_deferred(to_underlying(PseudoElement::Selection), true);
@@ -141,10 +142,12 @@ void StyleEngine::publish_font_faces()
 
 StyleEngine::~StyleEngine()
 {
-    // A snapshot a write took that never crossed is still the write's to give up.
+    // What a write took that never crossed is still the write's to give up.
     for (auto const& write : m_host_fact_writes) {
         if (write.kind == StyleEngineFFI::FfiHostFactKind::ElementInlineStyleProperties)
             Parser::ValueParserFFI::rust_declaration_data_release(bit_cast<Parser::ValueParserFFI::DeclarationBlockData const*>(write.data));
+        else if (write.kind == StyleEngineFFI::FfiHostFactKind::AdoptAtom)
+            StyleEngineFFI::style_engine_release_host_atom(write.data, write.facts);
     }
     if (m_impl)
         StyleEngineFFI::style_engine_destroy(m_impl);
@@ -352,9 +355,9 @@ StyleEngine::StyleRecordDelta StyleEngine::remove_computed_pseudo(StyleNodeID no
 StyleAtomID StyleEngine::intern_atom(Utf16FlyString const& name)
 {
     // Utf16FlyString is already interned, so its one-word raw form is the name's identity. The atom
-    // itself is assigned by the engine, which is also where selector names intern: two tables keyed
-    // by the same word but each assigning its own sequence would compare unequal for the same name,
-    // which fails to match silently rather than loudly.
+    // itself is assigned by the process-wide table selector names intern into as well: two tables
+    // keyed by the same word but each assigning its own sequence would compare unequal for the same
+    // name, which fails to match silently rather than loudly.
     // First time seen, the leaked reference is kept so the identity cannot be reused while the
     // atom is live. Duplicates release their new reference and return without crossing the FFI.
     auto raw = name.to_raw_leaked();
@@ -362,7 +365,11 @@ StyleAtomID StyleEngine::intern_atom(Utf16FlyString const& name)
         Utf16FlyString::unref_raw(raw);
         return atom.release_value();
     }
-    auto atom = StyleAtomID { StyleEngineFFI::style_engine_intern_atom(m_impl, raw) };
+    // The table is shared and locked, so acquiring the atom writes nothing of this document's. The
+    // document takes the atom with the next transaction.
+    auto atom = StyleAtomID { StyleEngineFFI::style_engine_acquire_host_atom(m_recording_stream, raw) };
+    m_host_fact_writes.append({ .kind = StyleEngineFFI::FfiHostFactKind::AdoptAtom, .value = 0, .node = 0, .parent = 0, .previous_sibling = 0, .facts = atom.value(), .data = raw });
+    ++m_pending_atom_adoption_count;
     m_atoms.set(raw, atom);
     return atom;
 }
@@ -742,17 +749,28 @@ bool StyleEngine::has_recorded_input() const
         || !m_local_feature_deltas.is_empty()
         || !m_state_deltas.is_empty()
         || !m_element_declaration_deltas.is_empty()
-        || !m_host_fact_writes.is_empty();
+        // An atom's adoption is no input to style.
+        || m_host_fact_writes.size() > m_pending_atom_adoption_count;
 }
 
 void StyleEngine::submit_recorded_input()
 {
     if (m_style_computer)
         publish_pending_element_features(*this, *m_style_computer);
-    if (!has_recorded_input()) {
+    if (!has_recorded_input() && m_host_fact_writes.is_empty()) {
         if (refresh_attribute_value_text_requirements() && m_style_computer)
             publish_required_attribute_value_texts(*this, *m_style_computer);
         return;
+    }
+
+    // What the engine calls back into while it applies these records the next transaction's.
+    auto host_fact_writes = move(m_host_fact_writes);
+    auto host_fact_text_data = move(m_host_fact_text_data);
+    m_pending_atom_adoption_count = 0;
+    // Each text data write hands the engine one reference to what it holds.
+    for (auto& write : host_fact_writes) {
+        if (write.kind == StyleEngineFFI::FfiHostFactKind::TextData)
+            write.data = host_fact_text_data[write.data].to_raw_leaked();
     }
 
     InputTransaction transaction {
@@ -770,18 +788,11 @@ void StyleEngine::submit_recorded_input()
         .element_declaration_delta_count = m_element_declaration_deltas.size(),
         .element_style_inputs = nullptr,
         .element_style_input_count = 0,
-        .host_fact_writes = m_host_fact_writes.data(),
-        .host_fact_write_count = m_host_fact_writes.size(),
+        .host_fact_writes = host_fact_writes.data(),
+        .host_fact_write_count = host_fact_writes.size(),
     };
-    // Each text data write hands the engine one reference to what it holds.
-    for (auto& write : m_host_fact_writes) {
-        if (write.kind == StyleEngineFFI::FfiHostFactKind::TextData)
-            write.data = m_host_fact_text_data[write.data].to_raw_leaked();
-    }
     apply_transaction(transaction);
 
-    m_host_fact_writes.clear_with_capacity();
-    m_host_fact_text_data.clear_with_capacity();
     m_tree_deltas.clear_with_capacity();
     m_element_arrivals.clear_with_capacity();
     m_arrival_custom_state_atoms.clear_with_capacity();
