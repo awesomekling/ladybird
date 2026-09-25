@@ -1,0 +1,6 @@
+held as armed: true
+forced joins of the recording: 0
+recording still in flight after the load: true
+image width: 100
+iframe height: 54
+container height: 174

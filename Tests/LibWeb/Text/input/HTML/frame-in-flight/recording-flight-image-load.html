@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<div id="container" style="width: 300px"><div id="first" style="height: 10px">first</div><img id="picture"></div>
+<script>
+    // An image that finishes loading, and an iframe that gets its navigable, beside a recording in flight: the recording
+    // reads their boxes, so their layout and paint facts change once the frame has been taken in instead of taking the
+    // recording in, and the next rendering update lays the image out at its natural size.
+    const green = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAIAAAD/gAIDAAAAkElEQVR42u3QMQ0AAAjAsElHOhb4eJpUQWviSoEsWbJkyUKBLFmyZMlCgSxZsmTJQoEsWbJkyUKBLFmyZMlCgSxZsmTJQoEsWbJkyUKBLFmyZMlCgSxZsmTJQoEsWbJkyUKBLFmyZMlCgSxZsmTJQoEsWbJkyUKBLFmyZMlCgSxZsmTJQoEsWbJkyUKBLFnfFhDniR6UCYQPAAAAAElFTkSuQmCC";
+    asyncTest(async done => {
+        await twoFrames();
+        const result = await whileFrameInFlight("before-run", () => {
+            first.style.height = "20px";
+        }, async frame => {
+            const joinsBefore = internals.forcedJoinCount("recording");
+            const loaded = new Promise(resolve => picture.onload = resolve);
+            picture.src = green;
+            const frameElement = document.createElement("iframe");
+            frameElement.id = "frameElement";
+            frameElement.style.height = "50px";
+            container.appendChild(frameElement);
+            await loaded;
+            return {
+                ...frame,
+                joins: internals.forcedJoinCount("recording") - joinsBefore,
+                stillInFlight: !frame.armed || internals.frameInFlightHoldsDocument(),
+            };
+        });
+        println(`held as armed: ${heldAsArmed(result, "before-run")}`);
+        println(`forced joins of the recording: ${result.joins}`);
+        println(`recording still in flight after the load: ${result.stillInFlight}`);
+        await twoFrames();
+        println(`image width: ${picture.offsetWidth}`);
+        println(`iframe height: ${document.getElementById("frameElement").offsetHeight}`);
+        println(`container height: ${container.offsetHeight}`);
+        done();
+    });
+</script>
