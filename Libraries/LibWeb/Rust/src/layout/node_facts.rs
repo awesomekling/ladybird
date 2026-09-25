@@ -42,7 +42,10 @@ pub(crate) fn node_replaced_content_facts_need_host(data: &NodeData) -> bool {
     let style = node_style_view(data);
     // A text entry input with no appearance gets its default preferred size from its size attribute.
     if has_flag(data, NodeFlag::IsHtmlInputElement)
-        && !matches!(kind, NodeKind::CheckBox | NodeKind::RadioButton | NodeKind::RangeInputBox)
+        && !matches!(
+            kind,
+            NodeKind::CheckBox | NodeKind::RadioButton | NodeKind::RangeInputBox
+        )
         && style.is_some_and(|style| style.appearance() == crate::css::css_enums::appearance::NONE)
     {
         return true;
@@ -101,8 +104,14 @@ pub(crate) fn style_derived_replaced_content_facts(data: &NodeData) -> FfiReplac
             }
         };
         set_auto_content_size(
-            explicit_size(style.contain_intrinsic_width_has_length(), style.contain_intrinsic_width_px()),
-            explicit_size(style.contain_intrinsic_height_has_length(), style.contain_intrinsic_height_px()),
+            explicit_size(
+                style.contain_intrinsic_width_has_length(),
+                style.contain_intrinsic_width_px(),
+            ),
+            explicit_size(
+                style.contain_intrinsic_height_has_length(),
+                style.contain_intrinsic_height_px(),
+            ),
         );
         return facts;
     }
