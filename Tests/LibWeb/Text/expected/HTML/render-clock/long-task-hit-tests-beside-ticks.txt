@@ -1,0 +1,3 @@
+frames presented during the task: true
+hit tests see the task's width: true
+no frames presented after the hit test: true

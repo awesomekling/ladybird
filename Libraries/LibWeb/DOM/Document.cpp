@@ -10643,6 +10643,8 @@ Painting::HitTestDisplayList const* Document::ensure_hit_test_display_list()
         set_needs_to_record_display_list();
         if (!navigable->record_display_list_and_scroll_state({ .paint_overlay = true }))
             return nullptr;
+        // LIBWEB_RENDER_CLOCK_FRAMES: That frame shows the document at the task's time.
+        HTML::main_thread_event_loop().frame_scheduler().did_present_beside_clock_lend();
     }
 
     return m_hit_test_display_list.ptr();

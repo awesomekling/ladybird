@@ -194,7 +194,8 @@ public:
     // Main thread only: the epoch of the last scene the main thread took in, which its hit-test list was made with.
     // Until it takes in the frame that presented a later one, what is on screen is ahead of what it hit tests.
     u64 adopted_scene_epoch() const { return m_adopted_scene_epoch; }
-    void did_adopt_scene(u64 epoch) { m_adopted_scene_epoch = epoch; }
+    // A frame taken in late never takes the epoch back: the main thread may have presented a later scene meanwhile.
+    void did_adopt_scene(u64 epoch) { m_adopted_scene_epoch = max(m_adopted_scene_epoch, epoch); }
     bool has_scene_to_adopt() const { return presented_scene_epoch() > m_adopted_scene_epoch; }
 
     // Builds the frame that brings the compositor context up to date with `published` (or, if the frame recorded

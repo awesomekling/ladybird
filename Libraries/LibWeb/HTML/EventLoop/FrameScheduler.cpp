@@ -1085,6 +1085,13 @@ void FrameScheduler::relend_clock_leases_after_read()
     lend_clock_leases_to_busy_main(true);
 }
 
+void FrameScheduler::did_present_beside_clock_lend()
+{
+    // Frames at the task's time and at the ticks' would take turns on screen.
+    if (m_clock_lent_this_wake && !m_event_loop.running_rendering_task())
+        suspend_clock_lend(ClockLendSuspension::Write);
+}
+
 void FrameScheduler::suspend_clock_lend(ClockLendSuspension reason)
 {
     if (exchange(m_clock_lend_suspended, true))
