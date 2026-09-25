@@ -24,6 +24,11 @@ namespace Web::DOM {
 //
 // A kind whose main-side readers cannot yet wait that long is applied where it is appended. That
 // still goes through the list, so messages take effect in the order the render side produced them.
+//
+// Two kinds are continuations: applying them can run script or reach another document (the hover
+// events a target change ends in, a child navigable's new viewport). Where messages arrive inside
+// main-thread code that runs no script, such as a frame taken back by a forced join or a DOM
+// mutation, only the other kinds are applied, and the continuations wait for the next drain point.
 class WEB_API CommitMessages {
     AK_MAKE_NONCOPYABLE(CommitMessages);
     AK_MAKE_NONMOVABLE(CommitMessages);
@@ -61,8 +66,12 @@ public:
     // Applies only style-stage reports, leaving layout and event messages at their existing drains.
     void apply_style_messages();
 
-    // Applies every message in order and empties the list.
+    // Applies every message in order and empties the list. Only a drain point, where script may
+    // run, calls this.
     void apply();
+
+    // Applies the messages that run no script, in order, and leaves the continuations queued.
+    void apply_script_free();
 
 private:
     enum class Kind : u8 {
@@ -103,6 +112,7 @@ private:
         bool pending_face_has_been_retried { false };
     };
 
+    static bool is_continuation(Kind);
     void apply(Message const&);
 
     Document& m_document;

@@ -32,7 +32,7 @@ void CommitMessages::note_box_presence(NodeIdentity identity, bool has_layout_bo
     });
     // The bits answer `Node::is_rendered()`, which DOM code asks in the middle of a layout pass,
     // so they cannot wait for one of the drain points yet.
-    apply();
+    apply_script_free();
 }
 
 void CommitMessages::note_hover_target_after_scroll(NodeIdentity identity, Optional<HoverEventData> hover_event_data)
@@ -63,7 +63,7 @@ void CommitMessages::note_needs_layout_tree_update(NodeIdentity identity, SetNee
     });
     // The mark decides what the next tree build does, and the DOM side reads that back as soon as
     // the mutation that made it returns.
-    apply();
+    apply_script_free();
 }
 
 void CommitMessages::note_style_query_custom_property_reference(NodeIdentity identity, Optional<CSS::PseudoElement> pseudo_element, Utf16FlyString name)
@@ -206,6 +206,32 @@ void CommitMessages::apply()
         for (auto const& message : messages)
             apply(message);
     }
+}
+
+void CommitMessages::apply_script_free()
+{
+    if (m_applying)
+        return;
+    m_applying = true;
+    ScopeGuard done = [&] { m_applying = false; };
+
+    // The continuations stay queued for the next drain point, in the order they arrived.
+    Vector<Message> continuations;
+    while (!m_messages.is_empty()) {
+        auto messages = move(m_messages);
+        for (auto& message : messages) {
+            if (is_continuation(message.kind))
+                continuations.append(move(message));
+            else
+                apply(message);
+        }
+    }
+    m_messages = move(continuations);
+}
+
+bool CommitMessages::is_continuation(Kind kind)
+{
+    return kind == Kind::HoverTargetAfterScroll || kind == Kind::NavigableContainerViewportCommitted;
 }
 
 void CommitMessages::apply(Message const& message)
