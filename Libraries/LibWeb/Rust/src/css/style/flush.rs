@@ -3068,9 +3068,9 @@ impl StyleEngineState {
                         .scratch
                         .root_element_inputs()
                         .and_then(|root| self.retained.assigned_root_element_font_metrics(root));
-                    let published = crate::css::style_compute::sample_settled_row(self, node, root, layout_arena)
+                    let published = crate::css::style_compute::sample_settled_row(self, node, None, root, layout_arena)
                         .and_then(|sample| {
-                            self.publish_settled_row_sample(node, sample, counters)
+                            self.publish_settled_row_sample(node, None, sample, counters)
                                 .map_err(String::from)
                         });
                     match published {

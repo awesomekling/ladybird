@@ -975,6 +975,10 @@ pub struct RetainedState {
     /// The rows whose animations the pass sampled itself, with what it published for them: the
     /// host installs the composition rather than sampling again, and applies what it left.
     rows_sampled_in_pass: HashMap<StyleNodeID, engine_sample::SettledRowPublication>,
+    /// The synthetic pseudo-elements whose animations the engine sampled as it settled them over
+    /// their element's composition, with what it published for them: the host installs the
+    /// composition rather than sampling again.
+    pseudo_elements_sampled_in_pass: HashMap<(StyleNodeID, u8), engine_sample::SettledRowPublication>,
     /// The identity the next overlay the engine composes itself is published under, which the
     /// high bit keeps apart from the host's.
     next_engine_animation_overlay_identity: u64,

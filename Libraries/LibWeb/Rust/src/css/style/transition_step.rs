@@ -509,7 +509,7 @@ impl StyleEngineState {
                 overlay: Box::into_raw(overlay),
             },
         };
-        self.publish_settled_row_sample(node, sample, counters)?;
+        self.publish_settled_row_sample(node, None, sample, counters)?;
         Ok(())
     }
 

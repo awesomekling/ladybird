@@ -1996,6 +1996,10 @@ impl AnimationEffectDescriptions {
 
     /// Lend one list out, for a caller that samples the effects while it substitutes against the
     /// engine the list lives in. `restore` puts it back.
+    pub(crate) fn contains(&self, node: StyleNodeID, slot: AnimationSlot) -> bool {
+        self.rows.contains_key(&(node, slot))
+    }
+
     pub(crate) fn take(&mut self, node: StyleNodeID, slot: AnimationSlot) -> Option<Box<[PublishedEffect]>> {
         self.rows.remove(&(node, slot))
     }

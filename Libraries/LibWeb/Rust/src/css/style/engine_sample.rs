@@ -641,6 +641,56 @@ impl RetainedState {
     }
 }
 
+impl RetainedState {
+    /// The custom-property environments a sample of a synthetic pseudo-element the engine settled
+    /// reads, from the environment its new record was published with and its originating
+    /// element's, which it inherits; or why the engine cannot say.
+    pub(crate) fn settled_pseudo_element_custom_property_environments(
+        &self,
+        node: StyleNodeID,
+        pseudo_kind: u8,
+        style_record: u64,
+    ) -> Result<SampleCustomPropertyEnvironments, &'static str> {
+        // Where custom properties are registered, the environment an element passes on is a
+        // projection of its own the host builds.
+        if self.custom_property_registry_has_registrations()? {
+            return Err("a pseudo-element under registered custom properties");
+        }
+        // Custom properties an earlier sample of the pseudo-element composed are in an environment
+        // the host built over its own.
+        if self
+            .pseudo_element_custom_property_data
+            .get(&(node, pseudo_kind))
+            .is_some_and(|held| held.animation_base.is_some())
+        {
+            return Err("a pseudo-element whose custom properties an earlier sample composed");
+        }
+        let store_of = |environment: u64| match environment {
+            0 => Ok(std::ptr::null()),
+            environment => self
+                .custom_property_environments
+                .store(environment)
+                .ok_or("an environment without a store"),
+        };
+        let environment = self
+            .computed_group_sets
+            .style_record_custom_property_environment(style_record)
+            .ok_or("a record with no view")?;
+        let element_environment = self
+            .computed_group_sets
+            .custom_property_environment_identity(node)
+            .unwrap_or(0);
+        let store = store_of(environment)?;
+        Ok(SampleCustomPropertyEnvironments {
+            store,
+            base_store: store,
+            inheritance_store: store_of(element_environment)?,
+            element_declares_own: environment != 0 && environment != element_environment,
+            base_is_engine: environment & ENGINE_CUSTOM_PROPERTY_ENVIRONMENT_TAG != 0,
+        })
+    }
+}
+
 /// What the engine's own sample of an element leaves for the overlay record: the table after the
 /// animated box-type finalization, and the overlay.
 pub(crate) struct EngineSampledStyle {
@@ -819,6 +869,7 @@ impl super::StyleEngineState {
     pub(crate) fn publish_settled_row_sample(
         &mut self,
         node: StyleNodeID,
+        pseudo: Option<u8>,
         sample: crate::css::style_compute::SettledRowSample,
         counters: &mut super::Counters,
     ) -> Result<SettledRowPublication, &'static str> {
@@ -826,10 +877,23 @@ impl super::StyleEngineState {
         use crate::css::host_shared::{HostShared, SharedPayload};
         use crate::css::property_metadata::property_id;
 
+        let pseudo_kind = pseudo.unwrap_or(u8::MAX);
         let style_record = sample.style_record;
         let overlay = unsafe { &*sample.style.overlay };
         let table = unsafe { &*sample.style.table };
-        let base_environment = self.retained.element_base_custom_property_environment(node)?;
+        // A pseudo-element's animated custom properties are composed into an environment the host
+        // builds.
+        if pseudo.is_some() && !sample.animated_custom_properties.is_empty() {
+            return Err("a pseudo-element sample that animates custom properties");
+        }
+        let base_environment = match pseudo {
+            None => self.retained.element_base_custom_property_environment(node)?,
+            Some(_) => self
+                .retained
+                .computed_group_sets
+                .style_record_custom_property_environment(style_record)
+                .unwrap_or(0),
+        };
         if base_environment != 0 && self.custom_property_environments.store(base_environment).is_none() {
             return Err("a base environment without a store");
         }
@@ -874,7 +938,7 @@ impl super::StyleEngineState {
             let payloads = unsafe {
                 self.build_animation_overlay_payloads(
                     node,
-                    u8::MAX,
+                    pseudo_kind,
                     style_record,
                     table,
                     Some(overlay),
@@ -906,8 +970,8 @@ impl super::StyleEngineState {
             }
         };
         let shared = SharedPayload::from_pointer_slice(&payloads.payloads);
-        let is_document_element =
-            self.computed_group_sets.adjustment_facts(node) & element_adjustment_fact::IS_DOCUMENT_ELEMENT != 0;
+        let is_document_element = pseudo.is_none()
+            && self.computed_group_sets.adjustment_facts(node) & element_adjustment_fact::IS_DOCUMENT_ELEMENT != 0;
         let invalidation =
             self.retained
                 .compare_animation_overlay(style_record, sample.style.overlay, shared, is_document_element);
@@ -921,7 +985,7 @@ impl super::StyleEngineState {
         };
         let publication = self
             .publish_animation_overlay_impl(
-                computed::ComputedStyleTarget::new(node, u8::MAX),
+                computed::ComputedStyleTarget::new(node, pseudo_kind),
                 identity,
                 HostShared::new(sample.style.overlay.cast_const()),
                 if overlay_is_empty { &[] } else { shared },
@@ -929,20 +993,25 @@ impl super::StyleEngineState {
             )
             .ok_or("no overlay publication")?;
         let style_record = publication.style_record.raw();
-        self.retained
-            .computed_group_sets
-            .set_sampled_composition_identity(node, style_record);
+        if pseudo.is_none() {
+            self.retained
+                .computed_group_sets
+                .set_sampled_composition_identity(node, style_record);
+        }
         // A sample the host publishes before it installs the row replaces the composition in its
         // slot, so the batch keeps it alive for the row until the host acknowledges it.
         if !overlay_is_empty {
             self.retained.computed_group_sets.pin_style_record(style_record);
             self.retained.batch_pinned_compositions.push((node, style_record));
         }
-        let custom_properties = self.retained.publish_sampled_custom_properties(
-            node,
-            base_environment,
-            &sample.animated_custom_properties,
-        )?;
+        let custom_properties = match pseudo {
+            None => self.retained.publish_sampled_custom_properties(
+                node,
+                base_environment,
+                &sample.animated_custom_properties,
+            )?,
+            Some(_) => None,
+        };
         let published = SettledRowPublication {
             style_record,
             custom_properties,
@@ -952,7 +1021,13 @@ impl super::StyleEngineState {
             keyframes_inherited_non_inherited_style_groups: sample.keyframes_inherited_non_inherited_style_groups,
             uses_tree_counting_function: sample.uses_tree_counting_function,
         };
-        self.retained.rows_sampled_in_pass.insert(node, published);
+        match pseudo {
+            None => self.retained.rows_sampled_in_pass.insert(node, published),
+            Some(kind) => self
+                .retained
+                .pseudo_elements_sampled_in_pass
+                .insert((node, kind), published),
+        };
         Ok(published)
     }
 
@@ -960,5 +1035,77 @@ impl super::StyleEngineState {
     /// installation applies it.
     pub(crate) fn take_row_sampled_in_pass(&mut self, node: StyleNodeID) -> Option<SettledRowPublication> {
         self.retained.rows_sampled_in_pass.remove(&node)
+    }
+
+    /// Sample the animations of an element's synthetic pseudo-elements over the records the
+    /// engine just settled for them over the element's composition, or over the ones they hold,
+    /// publish each composition as the pseudo-element's record and name it in the answer in its
+    /// place, so the host installs it rather than sampling the pseudo-element itself. Returns the
+    /// kinds the engine took; the host samples the rest.
+    pub(crate) fn sample_settled_pseudo_elements(
+        &mut self,
+        node: StyleNodeID,
+        settled: &mut super::publication::RetriedEngineRecord,
+        layout_arena: super::animations::LentLayoutArena,
+        counters: &mut super::Counters,
+    ) -> u8 {
+        use super::engine_sample_check;
+
+        let mut taken = 0u8;
+        for kind in 0..bridge::RETRY_PSEUDO_RECORD_SLOTS {
+            let pseudo_kind = kind as u8;
+            let slot = crate::css::style_compute::animation_slot(pseudo_kind);
+            let settled_now = (settled.pseudo_records_present >> kind) & 1 != 0;
+            let record = match settled_now {
+                true => settled.pseudo_records[kind],
+                false => self.assigned_style_record_of(node, Some(pseudo_kind)).unwrap_or(0),
+            };
+            // A pseudo-element that generates no box has nothing to compose, and one settled just
+            // now with no effect to sample composes nothing over its record.
+            if self.retained.element_animation_timing_rows(node, slot).is_empty()
+                && !self.retained.element_has_animation_effect_descriptions(node, slot)
+            {
+                if settled_now || record == 0 {
+                    taken |= 1 << kind;
+                }
+                continue;
+            }
+            if record == 0 {
+                taken |= 1 << kind;
+                continue;
+            }
+            if self.assigned_style_record_of(node, Some(pseudo_kind)) != Some(record) {
+                engine_sample_check::note_declined("pseudo-element: a record the engine has not assigned");
+                continue;
+            }
+            let published =
+                crate::css::style_compute::sample_settled_row(self, node, Some(pseudo_kind), None, layout_arena)
+                    .and_then(|sample| {
+                        self.publish_settled_row_sample(node, Some(pseudo_kind), sample, counters)
+                            .map_err(String::from)
+                    });
+            match published {
+                Ok(published) => {
+                    engine_sample_check::note_taken("pseudo-element sample");
+                    settled.pseudo_records_present |= 1 << kind;
+                    settled.pseudo_records[kind] = published.style_record;
+                    taken |= 1 << kind;
+                }
+                Err(reason) => engine_sample_check::note_declined(&format!("pseudo-element: {reason}")),
+            }
+        }
+        taken
+    }
+
+    /// Take what the engine published for a pseudo-element whose animations it sampled as it
+    /// settled it, so that exactly one installation applies it.
+    pub(crate) fn take_pseudo_element_sampled_in_pass(
+        &mut self,
+        node: StyleNodeID,
+        pseudo_kind: u8,
+    ) -> Option<SettledRowPublication> {
+        self.retained
+            .pseudo_elements_sampled_in_pass
+            .remove(&(node, pseudo_kind))
     }
 }

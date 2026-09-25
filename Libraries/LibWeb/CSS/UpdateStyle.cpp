@@ -365,17 +365,85 @@ static bool install_composition_sampled_in_pass(StyleDrainScope const& scope, DO
     return true;
 }
 
-static void sample_animations_for_installed_pseudos(DOM::Element& element)
+// The pseudo-element kinds the engine sampled as it settled them, as a bit per kind; the host
+// samples the rest.
+static void sample_animations_for_installed_pseudos(DOM::Element& element, u8 kinds_sampled_by_engine = 0)
 {
     // A dirty effect may have been visited before a newly generated pseudo had a record.
     // Compose it at installation so its first observable style includes that effect.
     if (!element.has_associated_animations())
         return;
     for (size_t kind = 0; kind < to_underlying(PseudoElement::KnownPseudoElementCount); ++kind) {
+        if (kind < sizeof(kinds_sampled_by_engine) * 8 && ((kinds_sampled_by_engine >> kind) & 1))
+            continue;
         DOM::AbstractElement pseudo { element, static_cast<PseudoElement>(kind) };
         if (pseudo.has_style())
             sample_animations_for_installed_record(pseudo);
     }
+}
+
+// The engine sampled the animations of the pseudo-elements it settled over the element's
+// composition and named the compositions as their records. What each sample found out is recorded
+// on the element and its parent as the host's own sample would, and the epoch's before-change style
+// is pinned before the composition replaces the record the pseudo-element holds.
+struct PseudoElementSamplesTakenByEngine {
+    Array<StyleEngineFFI::FfiRowSampledInPass, 8> samples {};
+};
+
+static PseudoElementSamplesTakenByEngine take_pseudo_element_samples_before_installation(StyleDrainScope const& scope, DOM::Element& element, u8 kinds_sampled_by_engine)
+{
+    PseudoElementSamplesTakenByEngine taken;
+    auto& document = element.document();
+    for (u8 kind = 0; kind < taken.samples.size(); ++kind) {
+        if (!((kinds_sampled_by_engine >> kind) & 1))
+            continue;
+        auto sample = StyleEngineFFI::style_engine_take_pseudo_element_sampled_in_pass(scope.engine().rust_handle(), element.style_node_id().value(), kind);
+        if (!sample.present)
+            continue;
+        DOM::AbstractElement pseudo { element, static_cast<PseudoElement>(kind) };
+        if (!sample.overlay_is_empty && pseudo.has_style() && document.is_in_style_stabilization_epoch()
+            && (document.style_stabilization_has_style_reactions() || sample.invalidation.requires_base_style_recomputation))
+            document.style_computer().record_transition_stabilization_baseline(scope, pseudo);
+        taken.samples[kind] = sample;
+    }
+    return taken;
+}
+
+static void apply_pseudo_element_samples_taken_by_engine(StyleDrainScope const& scope, DOM::Element& element, PseudoElementSamplesTakenByEngine const& taken)
+{
+    bool any_sample = false;
+    for (auto const& sample : taken.samples) {
+        if (!sample.present)
+            continue;
+        any_sample = true;
+        if (sample.substitution_marks & ComputedValuesFFI::SUBSTITUTION_MARK_VAR)
+            element.set_style_uses_var_css_function();
+        if (sample.substitution_marks & ComputedValuesFFI::SUBSTITUTION_MARK_ATTR)
+            element.set_style_uses_attr_css_function();
+        if (sample.substitution_marks & ComputedValuesFFI::SUBSTITUTION_MARK_IF)
+            element.set_style_uses_if_css_function();
+        if (sample.substitution_marks & ComputedValuesFFI::SUBSTITUTION_MARK_INHERIT)
+            element.set_style_uses_inherit_css_function();
+        if (sample.substitution_marks & ComputedValuesFFI::SUBSTITUTION_MARK_DASHED_FUNCTION)
+            element.set_style_uses_custom_function();
+        if (sample.uses_tree_counting_function)
+            element.set_style_uses_tree_counting_function();
+        if (auto style_groups = sample.keyframes_inherited_non_inherited_style_groups; style_groups != 0) {
+            if (style_groups == NumericLimits<u32>::max())
+                style_groups = ComputedValues::all_style_groups;
+            if (auto* parent = element.parent())
+                parent->add_children_explicitly_inherited_non_inherited_style_groups(style_groups);
+        }
+        // Box-type, overflow and text-alignment adjustments consume the unadjusted base values.
+        if (sample.invalidation.requires_base_style_recomputation)
+            scope.engine().record_derived_element_style_input_change(element.style_node_id(), StyleEngine::PublishedStyle | StyleEngine::RecomputeStyle);
+    }
+    if (!any_sample)
+        return;
+    // What the samples' container units read of the element's containers.
+    auto container_effects = StyleEngineFFI::style_engine_take_container_effects(scope.engine().rust_handle(), element.style_node_id().value());
+    ScopeGuard release_container_effects = [&] { StyleEngineFFI::style_engine_native_container_effects_release(container_effects.effects); };
+    StyleComputer::record_container_query_effects(scope, DOM::AbstractElement { element }, container_effects);
 }
 
 // Whether the custom-property environment an engine-computed record was published with can be
@@ -764,6 +832,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                     // that point so transition selection can still read its before-change style.
                     document.style_computer().style_engine().set_sampled_composition_identity(
                         StyleNodeID { reaction.style_node }, element->style_record_identity());
+                    u8 pseudo_kinds_sampled_by_engine = 0;
                     if (defer_pseudos) {
                         if (old_originating_style) {
                             auto const new_style = element->computed_style();
@@ -772,7 +841,16 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                             element->apply_display_none_change(scope, false, !old_originating_style->display().is_none() && new_style->display().is_none());
                         }
                         StyleEngineFFI::style_engine_note_host_step(StyleEngineFFI::FfiStyleHostStep::PseudoSettle);
-                        auto settled_pseudos = document.style_computer().style_engine().settle_pseudo_records_after_host_record(StyleNodeID { reaction.style_node }, old_is_list_item);
+                        // The engine samples the pseudo-elements' animations as it settles them,
+                        // over what the host's installations since the pass moved of their timing.
+                        Animations::AnimationUpdateContext::publish_animation_inputs_before_sample(*element);
+                        // A sample resolves a percentage translation against the boxes the last layout committed.
+                        auto* layout_node_arena = document.layout_node_arena_if_created();
+                        auto settled_pseudos = StyleEngineFFI::style_engine_settle_pseudo_records_after_host_record(
+                            scope.engine().rust_handle(), reaction.style_node, old_is_list_item, false, true,
+                            layout_node_arena ? layout_node_arena->handle() : nullptr);
+                        pseudo_kinds_sampled_by_engine = settled_pseudos.pseudo_samples_taken;
+                        auto pseudo_samples = take_pseudo_element_samples_before_installation(scope, *element, pseudo_kinds_sampled_by_engine);
                         DOM::Element::EnginePseudoElementRecords final_pseudo_records {};
                         for (size_t kind = 0; kind < array_size(settled_pseudos.pseudo_records); ++kind) {
                             if ((settled_pseudos.pseudo_records_present >> kind) & 1)
@@ -784,9 +862,10 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                             old_originating_style ? &*old_originating_style : nullptr,
                             &final_pseudo_records, &row_effects);
                         invalidation |= pseudo_invalidation;
+                        apply_pseudo_element_samples_taken_by_engine(scope, *element, pseudo_samples);
                     }
                     if (element->has_associated_animations() || installed_pseudo_animation_plan)
-                        sample_animations_for_installed_pseudos(*element);
+                        sample_animations_for_installed_pseudos(*element, pseudo_kinds_sampled_by_engine);
                     row_effects.append(StyleEffectDrain::AcknowledgeRecord { StyleNodeID { reaction.style_node } });
                     if (explicit_inheritance_debt != 0)
                         row_effects.append(StyleEffectDrain::ExplicitInheritance { StyleNodeID { reaction.style_node }, explicit_inheritance_debt });

@@ -1126,6 +1126,18 @@ impl StyleEngine {
             .settle_pseudo_records_after_host_record(node, old_is_list_item, &mut self.counters)
     }
 
+    /// Sample the animations of the pseudo-elements the engine just settled for an element.
+    #[inline]
+    pub(crate) fn sample_settled_pseudo_elements(
+        &mut self,
+        node: StyleNodeID,
+        settled: &mut publication::RetriedEngineRecord,
+        layout_arena: super::animations::LentLayoutArena,
+    ) -> u8 {
+        self.state
+            .sample_settled_pseudo_elements(node, settled, layout_arena, &mut self.counters)
+    }
+
     /// Publish the immutable computed-group payloads of one element's base style. This assigns
     /// dense identities to shared payloads and their ordered tuple, so an equal handle proves equal
     /// groups and downstream operators can consume one node handle.

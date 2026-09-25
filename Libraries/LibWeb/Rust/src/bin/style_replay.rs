@@ -725,6 +725,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             node,
                             old_is_list_item,
                             false,
+                            false,
+                            std::ptr::null_mut(),
                         )
                     };
                     if actual.style_record != expected || actual.pseudo_records_present != expected_present {
