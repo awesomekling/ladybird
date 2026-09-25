@@ -7129,8 +7129,10 @@ struct LocalNavigable::FlightPaintSeal {
     Painting::FlightRecordingSeal recording;
     u64 hit_test_display_list_invalidations { 0 };
     bool handed_accumulated_visual_contexts_update { false };
-    // Where the render side presents, how the flight presents what it records. The presenter is lent to the flight.
+    // Where the render side presents, how the flight presents what it records. The presenter is lent to the flight,
+    // and retiring the compositor context it presents to waits for the flight and takes it in.
     OwnPtr<FlightPresentation> presentation;
+    Optional<u64> held_compositor_context;
 };
 
 bool LocalNavigable::seal_flight_paint(DOM::Document& document, bool may_present)
@@ -7222,10 +7224,13 @@ bool LocalNavigable::seal_flight_paint(DOM::Document& document, bool may_present
 
     auto recording = Painting::seal_rust_display_list_recording_for_flight(document, presenter().resource_storage(), paint_config, overlay_inputs,
         flight_presentation ? present_from_flight : nullptr, flight_presentation.ptr());
+    Optional<u64> held_compositor_context;
     if (flight_presentation) {
         flight_presentation->device_viewport_rect = recording.device_viewport_rect;
         flight_presentation->wheel_event_region_state = recording.wheel_event_region_state;
         m_presenter->lend_to_frame_in_flight();
+        held_compositor_context = compositor_context().id().value();
+        Layout::RustFFI::rust_frame_hold_compositor_context(*held_compositor_context);
     }
     m_flight_paint_seal = make<FlightPaintSeal>(FlightPaintSeal {
         .paint_config = paint_config,
@@ -7233,6 +7238,7 @@ bool LocalNavigable::seal_flight_paint(DOM::Document& document, bool may_present
         .hit_test_display_list_invalidations = hit_test_display_list_invalidations,
         .handed_accumulated_visual_contexts_update = document.hand_accumulated_visual_contexts_update_to_flight(),
         .presentation = move(flight_presentation),
+        .held_compositor_context = held_compositor_context,
     });
     // What asks for another paint beside the flight asks for the next one.
     m_needs_repaint = false;
@@ -7244,6 +7250,8 @@ bool LocalNavigable::finish_flight_paint(DOM::Document& document, FlightPaintEnd
 {
     auto seal = move(m_flight_paint_seal);
     VERIFY(seal);
+    if (seal->held_compositor_context.has_value())
+        Layout::RustFFI::rust_frame_release_compositor_context(*seal->held_compositor_context);
     if (document.has_paint_state())
         document.take_in_flight_paint(seal->handed_accumulated_visual_contexts_update);
 
