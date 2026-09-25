@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-//! Clock frames (`LIBWEB_RENDER_CLOCK_FRAMES`): the animations of a document ticked on the render
-//! side under a lease the main thread grants.
+//! Clock frames (on unless `LIBWEB_RENDER_CLOCK_FRAMES=0`): the animations of a document ticked on
+//! the render side under a lease the main thread grants.
 //!
 //! The main thread grants a document a [`ClockLease`] at the end of a rendering update in which
 //! nothing but the running animations of its document timeline would change what the next one
@@ -44,12 +44,10 @@ use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::NodeSlotId;
 use crate::layout::update_layout::ClockLayoutFrame;
 
-/// Whether clock frames are on: `LIBWEB_RENDER_CLOCK_FRAMES` set to anything but empty or `0`.
+/// Whether clock frames are on: unless `LIBWEB_RENDER_CLOCK_FRAMES=0`.
 pub(crate) fn enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| {
-        std::env::var("LIBWEB_RENDER_CLOCK_FRAMES").is_ok_and(|value| !value.is_empty() && value != "0")
-    })
+    *ENABLED.get_or_init(|| std::env::var("LIBWEB_RENDER_CLOCK_FRAMES").as_deref() != Ok("0"))
 }
 
 /// An element whose animations a lease ticks, with the record it holds.

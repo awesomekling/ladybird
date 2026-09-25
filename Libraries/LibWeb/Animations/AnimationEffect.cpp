@@ -835,7 +835,7 @@ static bool render_side_installs_animation_samples()
 {
     static bool const installs = [] {
         auto const* value = getenv("LIBWEB_RENDER_CLOCK_FRAMES");
-        return value && *value && StringView { value, strlen(value) } != "0"sv;
+        return !value || StringView { value, strlen(value) } != "0"sv;
     }();
     return installs;
 }
