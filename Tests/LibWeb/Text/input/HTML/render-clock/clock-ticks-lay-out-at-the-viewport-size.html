@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<style>
+    body {
+        margin: 0;
+    }
+    #box {
+        width: 10%;
+        height: 20px;
+        animation: grow 20s linear;
+    }
+    @keyframes grow {
+        from {
+            width: 10%;
+        }
+        to {
+            width: 90%;
+        }
+    }
+</style>
+<div id="box"></div>
+<script src="../../include.js"></script>
+<script>
+    function nextTask() {
+        const { promise, resolve } = Promise.withResolvers();
+        const channel = new MessageChannel();
+        channel.port1.onmessage = resolve;
+        channel.port2.postMessage(null);
+        return promise;
+    }
+
+    // Under LIBWEB_RENDER_CLOCK_FRAMES, the render clock's ticks lay out with the document as it stands when the main
+    // thread goes idle: a zoom that changes the viewport, laid out by a read right away, is what the next tick lays out
+    // against, with no rendering update in between.
+    asyncTest(async done => {
+        const box = document.getElementById("box");
+        const animation = box.getAnimations()[0];
+        const enabled = internals.clockFramesEnabled();
+        const matches = () => {
+            const expected = (window.innerWidth * (10 + (80 * animation.currentTime) / 20000)) / 100;
+            return Math.abs(box.getBoundingClientRect().width - expected) <= 0.5;
+        };
+        internals.setManualRenderingOpportunities(true, true);
+        await nextTask();
+        const start = performance.now();
+        for (let i = 0; i < 3; ++i) {
+            internals.injectRenderingOpportunity(start + i * 16);
+            await nextTask();
+        }
+
+        const tickedBefore = await internals.injectClockTick(start + 48);
+        println(`before the zoom: ${matches()}`);
+        internals.setBrowserZoom(2);
+        box.getBoundingClientRect();
+        const updatesBefore = internals.getRenderingSchedulerCounters().updatesRun;
+        const tickedAfter = await internals.injectClockTick(start + 64);
+        println(`after the zoom: ${matches()}`);
+        println(`ticks a lease took: ${!enabled || (tickedBefore && tickedAfter)}`);
+        println(`rendering updates meanwhile: ${internals.getRenderingSchedulerCounters().updatesRun - updatesBefore}`);
+        internals.resetZoom();
+        internals.setManualRenderingOpportunities(false);
+        done();
+    });
+</script>
