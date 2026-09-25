@@ -165,6 +165,11 @@ public:
     // pointer of its own.
     static void change_arena(DOM::Document&, Function<void(Layout::NodeArena&)>);
 
+    // Has the style engine of `document` reclaim no style record until the frame in flight has been taken in. A
+    // recording in flight reads the records its rows name, and an engine entry beside it can release the record a row
+    // names before the row takes its new one at the arena's doors.
+    void hold_style_records_for_frame(DOM::Document&);
+
     EventLoop& event_loop() { return m_event_loop; }
 
     void visit_edges(JS::Cell::Visitor&);
@@ -198,6 +203,7 @@ private:
 
     // In the order the changes were made, which is the order the arena takes them in.
     Vector<GC::Ref<GC::Function<void()>>> m_deferred_arena_changes;
+    Vector<GC::Ref<DOM::Document>> m_documents_holding_style_records;
 };
 
 }
