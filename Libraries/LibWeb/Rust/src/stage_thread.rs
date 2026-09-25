@@ -1025,10 +1025,34 @@ fn stage_thread() -> Option<&'static StageThread> {
 /// it with [`CallerWaits`].
 pub(crate) fn run_stage<R: Send>(stage: impl FnOnce() -> R + Send) -> R {
     match stage_thread() {
+        Some(_) if runs_waited_for_stage_in_place() => run_in_place(stage),
         // SAFETY: The stage has no joins, and it is `Send`.
         Some(thread) => unsafe { run_stage_on(thread, None, |_| stage()) },
         None => stage(),
     }
+}
+
+/// Whether a stage the caller waits for runs right here rather than on the stage thread: with the stages overlapping
+/// and no frame in flight, nothing runs on the stage thread for the caller, which would only wait for it. The stage
+/// runs as it does when nothing overlaps, without handing its state to another core and back.
+fn runs_waited_for_stage_in_place() -> bool {
+    stage_thread_mode() == Some(StageThreadMode::Overlap)
+        && !has_frame_in_flight()
+        && stage_thread().is_some_and(|thread| std::thread::current().id() != thread.id)
+}
+
+/// Runs `stage` right here, where nothing it starts is submitted and nothing it reaches joins a frame, as for the
+/// work a stage joins its caller for: there is no frame in flight, and a stage waited for is not one.
+fn run_in_place<R>(stage: impl FnOnce() -> R) -> R {
+    struct LeaveInPlaceStage;
+    impl Drop for LeaveInPlaceStage {
+        fn drop(&mut self) {
+            RUNNING_JOIN_WORK.with(|depth| depth.set(depth.get() - 1));
+        }
+    }
+    RUNNING_JOIN_WORK.with(|depth| depth.set(depth.get() + 1));
+    let _leave = LeaveInPlaceStage;
+    stage()
 }
 
 /// Runs `stage` as [`run_stage`] does, and lets it join the calling thread: while `stage` waits
@@ -1049,6 +1073,9 @@ pub(crate) unsafe fn run_stage_with_joins<R: Send>(
     stage: impl FnOnce(&MainJoins<'_>) -> R + Send,
 ) -> R {
     match stage_thread() {
+        Some(_) if runs_waited_for_stage_in_place() => {
+            run_in_place(|| stage(&MainJoins(JoinTarget::InPlace(Some(main_thread)))))
+        }
         // SAFETY: Guaranteed by the caller.
         Some(thread) => unsafe { run_stage_on(thread, Some(main_thread), stage) },
         None => stage(&MainJoins(JoinTarget::InPlace(Some(main_thread)))),
