@@ -489,6 +489,16 @@ impl FlightReleasesStyleEngine {
     }
 }
 
+/// Set by a forced join of a flight: the flight runs no further stage than the one it is in, so the
+/// join waits for that stage alone. The rendering update goes on from where the flight stopped once
+/// it is taken back, as it would have after that stage on its own.
+static FLIGHT_PREEMPTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// On the stage thread, between the stages of a flight: whether a forced join is waiting for it.
+pub(crate) fn flight_is_preempted() -> bool {
+    FLIGHT_PREEMPTED.load(Ordering::Acquire)
+}
+
 /// The label of a flight: one stage run that runs the stages of a rendering update one after
 /// another (see `crate::flight`).
 pub(crate) const FLIGHT_STAGE: &str = "flight";
@@ -514,6 +524,7 @@ pub(crate) unsafe fn submit_flight(
     stage: impl FnOnce() + Send + 'static,
     on_taken_back: impl FnOnce() + 'static,
 ) {
+    FLIGHT_PREEMPTED.store(false, Ordering::Release);
     let hold_labels = std::iter::once(FLIGHT_STAGE)
         .chain(stage_holds.iter().copied())
         .collect();
@@ -1236,6 +1247,10 @@ fn join_frame_in_flight_for_stage(
     if unsafe { (host.tearing_down_cells)() } {
         refuse_join_while_tearing_down_cells(file, line);
         return;
+    }
+    // A flight the join waits for stops at the end of the stage it runs.
+    if label == FLIGHT_STAGE {
+        FLIGHT_PREEMPTED.store(true, Ordering::Release);
     }
     take_frame_in_flight();
     // SAFETY: Called on the main thread, with the frame taken back.
