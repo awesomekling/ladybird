@@ -569,6 +569,9 @@ StyleAtomID StyleEngine::intern_attribute_name(Utf16FlyString const& local_name,
     return name;
 }
 
+// The reader bits RetainedState::attribute_value_text_readers() answers.
+static constexpr u32 attribute_value_text_read_by_selectors = 1;
+
 StyleAtomID StyleEngine::intern_attribute_value(StyleAtomID name, Utf16String const& value)
 {
     auto atom = intern_atom(Utf16FlyString { value });
@@ -577,35 +580,44 @@ StyleAtomID StyleEngine::intern_attribute_value(StyleAtomID name, Utf16String co
     if (Layout::RustFFI::rust_stage_thread_only_style_pass_in_flight_for(m_impl)) {
         publish_input([name, atom, value](StyleInputScope const& input) {
             auto& engine = input.engine();
-            engine.publish_attribute_value_text(atom, value, engine.attribute_name_requires_value_text(name));
+            if (auto readers = engine.attribute_value_text_readers(name))
+                engine.publish_attribute_value_text(atom, value, readers & attribute_value_text_read_by_selectors);
         });
         return atom;
     }
-    publish_attribute_value_text(atom, value, attribute_name_requires_value_text(name));
+    if (auto readers = attribute_value_text_readers(name))
+        publish_attribute_value_text(atom, value, readers & attribute_value_text_read_by_selectors);
     return atom;
 }
 
 void StyleEngine::backfill_attribute_value_text_if_required(StyleAtomID name, Utf16String const& value)
 {
-    if (!attribute_name_requires_value_text(name))
+    auto readers = attribute_value_text_readers(name);
+    if (!readers)
         return;
 
     auto atom = intern_atom(Utf16FlyString { value });
-    publish_attribute_value_text(atom, value, true);
+    publish_attribute_value_text(atom, value, readers & attribute_value_text_read_by_selectors);
 }
 
-void StyleEngine::publish_attribute_value_text(StyleAtomID atom, Utf16View value, bool affects_selector_catalog)
+void StyleEngine::publish_attribute_value_text(StyleAtomID atom, Utf16View value, bool read_by_selectors)
 {
     // The engine holds one copy of the text per currently used value. Ask whether it survived
-    // reclamation before copying it out of the attribute's representation again.
-    if (StyleEngineFFI::style_engine_has_attribute_value_text(m_impl, atom.value()))
+    // reclamation before copying it out of the attribute's representation again. Text an attr()
+    // asked for is still news to the selectors once one of their names spells the same value.
+    if (StyleEngineFFI::style_engine_has_attribute_value_text(m_impl, atom.value())) {
+        if (read_by_selectors) {
+            u16 const no_text = 0;
+            StyleEngineFFI::style_engine_set_attribute_value_text(m_impl, atom.value(), &no_text, 0, true);
+        }
         return;
+    }
 
     Vector<u16> code_units;
     code_units.ensure_capacity(value.length_in_code_units());
     for (size_t i = 0; i < value.length_in_code_units(); ++i)
         code_units.unchecked_append(value.code_unit_at(i));
-    StyleEngineFFI::style_engine_set_attribute_value_text(m_impl, atom.value(), code_units.data(), code_units.size(), affects_selector_catalog);
+    StyleEngineFFI::style_engine_set_attribute_value_text(m_impl, atom.value(), code_units.data(), code_units.size(), read_by_selectors);
 }
 
 bool StyleEngine::refresh_attribute_value_text_requirements()
@@ -614,14 +626,14 @@ bool StyleEngine::refresh_attribute_value_text_requirements()
     if (version == m_attribute_value_text_requirements_version)
         return false;
     m_attribute_value_text_requirements_version = version;
-    m_attribute_names_requiring_value_text.clear();
+    m_attribute_value_text_readers.clear();
     return true;
 }
 
-bool StyleEngine::attribute_name_requires_value_text(StyleAtomID name)
+u32 StyleEngine::attribute_value_text_readers(StyleAtomID name)
 {
-    return m_attribute_names_requiring_value_text.ensure(name, [&] {
-        return StyleEngineFFI::style_engine_attribute_name_requires_value_text(m_impl, name.value());
+    return m_attribute_value_text_readers.ensure(name, [&] {
+        return StyleEngineFFI::style_engine_attribute_value_text_readers(m_impl, name.value());
     });
 }
 
@@ -1200,7 +1212,7 @@ StyleEngine::PublishedStyleTransaction StyleEngine::publish_style_transaction_vi
             reclaimed_atoms.set(atom_id);
             m_published_language_atoms.remove(atom_id);
             m_published_custom_property_names.remove(atom_id);
-            m_attribute_names_requiring_value_text.remove(atom_id);
+            m_attribute_value_text_readers.remove(atom_id);
             if (reclaimed.raw == 0)
                 continue;
             auto atom = m_atoms.take(reclaimed.raw);

@@ -180,11 +180,11 @@ public:
     // boundary again merely to recover an already published name.
     StyleAtomID intern_attribute_name(Utf16FlyString const& local_name, Optional<Utf16FlyString> const& namespace_uri);
 
-    // Interns an attribute value and records what it spells for selector matching and substituted
-    // values. Values repeat heavily, so the text crosses once per distinct value.
+    // Interns an attribute value and records what it spells when a selector or an attr() can read
+    // this name. Values repeat heavily, so the text crosses once per distinct value.
     StyleAtomID intern_attribute_value(StyleAtomID name, Utf16String const& value);
     // Demand expansion already has every value identity. Check the name before interning the text
-    // so attributes no selector reads do not pay another string hash.
+    // so attributes nothing reads as text do not pay another string hash.
     void backfill_attribute_value_text_if_required(StyleAtomID name, Utf16String const& value);
 
     // Deltas accumulate here and cross in one flat batch per style flush, never one call per
@@ -393,8 +393,9 @@ private:
     void record_host_fact_write(StyleEngineFFI::FfiHostFactWrite);
     void mint_style_nodes(Span<StyleNodeID>, Vector<StyleNodeID>& granted, size_t& grant_request, StyleEngineFFI::FfiHostFactKind, u8 value);
     bool refresh_attribute_value_text_requirements();
-    [[nodiscard]] bool attribute_name_requires_value_text(StyleAtomID);
-    void publish_attribute_value_text(StyleAtomID, Utf16View, bool affects_selector_catalog);
+    // Which of a selector and an attr() read the value text of this name, as bits; zero if neither.
+    [[nodiscard]] u32 attribute_value_text_readers(StyleAtomID);
+    void publish_attribute_value_text(StyleAtomID, Utf16View, bool read_by_selectors);
     StyleAtomID acquire_qualified_atom(StyleAtomID namespace_atom, StyleAtomID name_atom);
 
     void* m_impl { nullptr };
@@ -418,7 +419,7 @@ private:
     HashTable<StyleAtomID> m_published_language_atoms;
     HashTable<StyleAtomID> m_published_custom_property_names;
     HashMap<StyleAtomID, HashMap<StyleAtomID, StyleAtomID>> m_attribute_name_atoms;
-    HashMap<StyleAtomID, bool> m_attribute_names_requiring_value_text;
+    HashMap<StyleAtomID, u32> m_attribute_value_text_readers;
     u64 m_atom_generation { 1 };
     PublishedTransactionVersion m_published_transaction_version { 0, 0 };
     u32 m_connected_element_count_at_last_transaction { 0 };
