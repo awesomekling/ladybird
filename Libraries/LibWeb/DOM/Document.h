@@ -530,7 +530,6 @@ public:
     // The rendering update's layout update, whose full layout pass runs beside the main thread under
     // LIBWEB_STAGE_OVERLAP=layout. Returns true if it does; the rendering update goes on once the frame is taken back.
     [[nodiscard]] bool submit_layout_for_rendering_update();
-    void note_content_visibility_auto_style() { m_may_have_content_visibility_auto_style = true; }
     void update_layout_if_needed_for_node(Node const&, UpdateLayoutReason);
     [[nodiscard]] u64 partial_layout_count() const;
     [[nodiscard]] u64 full_layout_count() const;
@@ -1744,7 +1743,6 @@ private:
     NonnullOwnPtr<InvalidationJournal> m_invalidation_journal;
     NonnullOwnPtr<InvalidationJournal> m_held_invalidation_journal;
     NonnullOwnPtr<CommitMessages> m_commit_messages;
-    bool m_may_have_content_visibility_auto_style { false };
 
     GC::Ptr<Node> m_hovered_node;
     GC::Ptr<Node> m_inspected_node;
