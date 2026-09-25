@@ -315,6 +315,9 @@ public:
     // Publish a style input: at once between passes, and once the pass has drained while one is in
     // flight, in the order the host published them.
     void publish_input(Function<void(StyleInputScope const&)>&&);
+    // Publish an input the drain records too, and whose later waves read: at once inside a drain, and as
+    // publish_input() otherwise.
+    void publish_input_or_apply_in_drain(Function<void(StyleInputScope const&)>&&);
 
     // While the host takes a submitted pass back and drains it, what was recorded and published beside the pass
     // waits for the next transaction: an operation that the drain interrupted must not have half of its input
