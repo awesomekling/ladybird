@@ -803,6 +803,8 @@ void EventLoop::update_the_rendering()
 
     // FIXME: 6. For each doc of docs, reveal doc.
 
+    auto observable_steps_start_nanoseconds = MonotonicTime::now().nanoseconds();
+
     // 7. For each doc of docs, flush autofocus candidates for doc if its node navigable is a top-level traversable.
     for (auto& document : docs) {
         auto navigable = document->navigable();
@@ -846,6 +848,7 @@ void EventLoop::update_the_rendering()
         auto now = relative_frame_timestamp_for(frame_timestamp, *document);
         run_animation_frame_callbacks(*document, now);
     }
+    m_rendering_scheduler_counters.observable_steps_nanoseconds += MonotonicTime::now().nanoseconds() - observable_steps_start_nanoseconds;
 
     // Every animation frame callback of the rendering update has run, and its microtasks with it, so nothing script
     // does before the layout pass can change the decision anymore.
