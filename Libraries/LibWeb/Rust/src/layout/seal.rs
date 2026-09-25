@@ -36,9 +36,9 @@
 //!   them. `FfiLayoutHostCallbacks::deliver_commit_messages`, sent from
 //!   `commit::CommitNotifications::notify_host`.
 //! - box presence - a row telling the document that it gained or lost a box, and the paintable
-//!   row resets that ride with it. Commit queues them, and `PendingLayoutCommit::finish` pays them with the
-//!   main thread capability through `LayoutNodeArena::finish_paying_host_handbacks` once commit
-//!   has returned.
+//!   row resets that ride with it. Commit queues them, and `DeferredLayoutCommitHostHalf::deliver` pays them
+//!   with the main thread capability through `LayoutNodeArena::finish_paying_taken_host_handbacks` once
+//!   commit has returned.
 //!
 //! **Inputs synced before a pass, never during one.** These are host calls, and they are the
 //! two `note_host_call` sites that remain; each passes `layout_pass_is_running()`, so a call

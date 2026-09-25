@@ -2058,22 +2058,18 @@ impl LayoutNodeArena {
         self.active_layout_pass_depth.set(depth + 1);
     }
 
-    pub(crate) fn end_active_layout_pass(&self, main_thread: &crate::stage::MainThread) {
+    pub(crate) fn end_active_layout_pass(&self) {
         let depth = self.active_layout_pass_depth.get();
         assert!(depth > 0, "layout pass depth underflow");
         self.active_layout_pass_depth.set(depth - 1);
-        if depth == 1 {
-            self.layout_trace.name_owners(main_thread, self);
-        }
     }
 
-    /// Ends a pass whose host half the frame carries past the next pass. Its trace owners are
-    /// named with those of the pass that ends the frame's run of passes, whose host half names
-    /// them on the document thread.
-    pub(crate) fn end_active_layout_pass_ahead_of_host(&self) {
-        let depth = self.active_layout_pass_depth.get();
-        assert!(depth > 0, "layout pass depth underflow");
-        self.active_layout_pass_depth.set(depth - 1);
+    /// Names the owners of the layout trace lines the passes left, once no pass is running. A pass's
+    /// commit ends it ahead of its host half, which names them on the document thread.
+    pub(crate) fn name_layout_trace_owners(&self, main_thread: &crate::stage::MainThread) {
+        if self.active_layout_pass_depth.get() == 0 {
+            self.layout_trace.name_owners(main_thread, self);
+        }
     }
 
     pub(crate) fn set_layout_root(&self, viewport: NodeSlotId) {
@@ -3362,11 +3358,11 @@ impl LayoutNodeArena {
     }
 
     /// Closes the span [`Self::begin_layout_pass_preparation_handbacks`] opened, once the pass's
-    /// commit has paid what it owed.
-    pub(crate) fn end_layout_pass_preparation_handbacks(&self, _: &crate::stage::MainThread) {
+    /// commit has taken what it owed for its host half.
+    pub(crate) fn end_layout_pass_preparation_handbacks(&self) {
         assert!(
             self.host_handbacks.borrow().handbacks.is_empty(),
-            "a layout pass's commit left its preparation's handbacks unpaid"
+            "a layout pass's commit left its preparation's handbacks behind"
         );
         self.close_host_handback_span();
     }

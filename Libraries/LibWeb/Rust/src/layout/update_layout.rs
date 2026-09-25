@@ -11,8 +11,9 @@
 
 use super::LayoutNodeArena;
 use super::formatting_context::{
-    PendingLayoutCommit, commit_root_layout_to_arena, commit_subtree_layout_to_arena, compute_root_layout,
-    compute_subtree_layout_fragments, prepare_root_layout_from_sources, read_viewport_propagation_facts,
+    DeferredLayoutCommitHostHalf, PendingLayoutCommit, commit_root_layout_to_arena, commit_subtree_layout_to_arena,
+    compute_root_layout, compute_subtree_layout_fragments, prepare_root_layout_from_sources,
+    read_viewport_propagation_facts,
 };
 use super::layout_node_arena::{
     EnrolledContentSources, OwedImageResources, apply_enrolled_content_sources, read_enrolled_content_sources,
@@ -413,9 +414,8 @@ enum FrameJoin {
     /// its commit messages resolve to, a new viewport's paint state) waits for the next join, and
     /// the style resources and generated image providers of its new rows for the frame to be over.
     BuildLayoutTree,
-    /// The host halves of the partial relayout boundaries' commits the frame settled ahead of
-    /// them, in commit order, and of the last pass's commit, then the container queries the commit
-    /// made pending, which are the document's query container elements, then the facts after them.
+    /// Whether the last pass's commit left style work pending, which is the container queries the
+    /// commit made pending (the document's query container elements), then the facts after them.
     /// What derives from the commit, the frame does after the join, and what the document only
     /// reads once the frame is over, the frame leaves in its messages.
     AfterLayoutCommit,
@@ -539,6 +539,35 @@ impl FrameMessages {
     }
 }
 
+/// What a tree build or a commit the frame made owes the document thread beyond its own join.
+enum OwedHostHalf {
+    TreeBuild(TreeBuildHostHalf),
+    Commit(DeferredLayoutCommitHostHalf),
+}
+
+/// Pays what the frame owed the document thread, in the order the frame made it owe it.
+///
+/// # Safety
+///
+/// As for [`arena`], on the document thread, with no borrow of the arena held across the call.
+unsafe fn pay_owed_host_halves(
+    main_thread: &crate::stage::MainThread,
+    host: &LayoutUpdateHost,
+    arena_handle: *mut c_void,
+    owed_host_halves: Vec<OwedHostHalf>,
+) {
+    for owed in owed_host_halves {
+        match owed {
+            // SAFETY: Guaranteed by the caller.
+            OwedHostHalf::TreeBuild(owed) => {
+                host.pay_tree_build_host_half(main_thread, unsafe { arena(arena_handle) }, owed)
+            }
+            // SAFETY: Guaranteed by the caller.
+            OwedHostHalf::Commit(owed) => unsafe { owed.deliver(main_thread) },
+        }
+    }
+}
+
 /// The style and layout stabilization loop of one layout update, run as one stage.
 struct LayoutFrame<'a> {
     inputs: FrameInputs,
@@ -553,9 +582,9 @@ struct LayoutFrame<'a> {
     list_owners_to_rebuild: Vec<StyleNodeID>,
     /// The document's selection as the style join of the round read it, if it has one.
     selection: Option<SelectionSnapshot>,
-    /// What the last tree build owes the document thread beyond its own join, which the next join
-    /// pays before its work.
-    owed_tree_build_host_half: Cell<Option<TreeBuildHostHalf>>,
+    /// What the frame's tree builds and commits owe the document thread beyond their own joins, in
+    /// the order the frame made them, which the next join pays before its work.
+    owed_host_halves: Cell<Vec<OwedHostHalf>>,
 }
 
 /// The document facts together with what a join answered.
@@ -572,14 +601,26 @@ impl LayoutFrame<'_> {
     ) -> R {
         let host = self.inputs.host;
         let arena_handle = self.inputs.arena_handle;
-        let owed_tree_build_host_half = self.owed_tree_build_host_half.take();
+        let owed_host_halves = self.owed_host_halves.take();
         self.joins.join(|main_thread| {
-            if let Some(owed) = owed_tree_build_host_half {
-                // SAFETY: The frame runs for the update the arena is in, and no borrow spans a join.
-                host.pay_tree_build_host_half(main_thread, unsafe { arena(arena_handle) }, owed);
-            }
+            // SAFETY: The frame runs for the update the arena is in, and no borrow spans a join.
+            unsafe { pay_owed_host_halves(main_thread, &host, arena_handle, owed_host_halves) };
             work(main_thread, &host)
         })
+    }
+
+    /// Leaves what the frame owes the document thread to the next join, after what it owed before.
+    fn owe_host_half(&self, owed: OwedHostHalf) {
+        let mut owed_host_halves = self.owed_host_halves.take();
+        owed_host_halves.push(owed);
+        self.owed_host_halves.set(owed_host_halves);
+    }
+
+    /// Settles a commit's arena half, and leaves its host half for the next join.
+    fn settle_commit_ahead_of_host(&self, pending_commit: PendingLayoutCommit) {
+        // SAFETY: The frame runs for the update the arena is in, and the next join delivers the
+        // host halves in commit order.
+        self.owe_host_half(OwedHostHalf::Commit(unsafe { pending_commit.settle_ahead_of_host() }));
     }
 
     fn arena(&self) -> &LayoutNodeArena {
@@ -650,11 +691,15 @@ impl LayoutFrame<'_> {
 
     /// Leaves what a tree build owes the document thread beyond its own join to the next join.
     fn owe_tree_build_host_half(&self, host_half: TreeBuildHostHalf) {
-        let previous = self.owed_tree_build_host_half.replace(Some(host_half));
+        let owed_host_halves = self.owed_host_halves.take();
         assert!(
-            previous.is_none(),
+            !owed_host_halves
+                .iter()
+                .any(|owed| matches!(owed, OwedHostHalf::TreeBuild(_))),
             "a join pays a tree build's host half before the next build"
         );
+        self.owed_host_halves.set(owed_host_halves);
+        self.owe_host_half(OwedHostHalf::TreeBuild(host_half));
     }
 
     /// Settles the list owners with stale counters after a tree build, and holds on to the ones
@@ -738,11 +783,11 @@ impl LayoutFrame<'_> {
             .expect("the join ahead of a layout pass reads its sources")
     }
 
-    /// Runs the frame's rounds, and hands back its messages together with what a tree build that
-    /// no join followed still owes the document thread.
-    fn run(mut self) -> (FrameMessages, Option<TreeBuildHostHalf>) {
+    /// Runs the frame's rounds, and hands back its messages together with what the tree builds and
+    /// commits no join followed still owe the document thread.
+    fn run(mut self) -> (FrameMessages, Vec<OwedHostHalf>) {
         let messages = self.run_rounds();
-        (messages, self.owed_tree_build_host_half.take())
+        (messages, self.owed_host_halves.take())
     }
 
     fn run_rounds(&mut self) -> FrameMessages {
@@ -869,6 +914,8 @@ impl LayoutFrame<'_> {
             let pending_commit = unsafe { commit_root_layout_to_arena(arena_handle, layout_root, &output) };
             drop(output);
             self.arena().evaluate_size_containers_needing_evaluation_after_layout();
+            self.settle_commit_ahead_of_host(pending_commit);
+            self.arena().end_layout_pass_preparation_handbacks();
 
             self.messages.full_layouts_performed += 1;
             self.arena().note_full_layout();
@@ -876,16 +923,9 @@ impl LayoutFrame<'_> {
             let Joined {
                 value: needs_style_update_after_layout,
                 facts,
-            } = self.join(FrameJoin::AfterLayoutCommit, |main_thread, host| {
-                // SAFETY: The frame runs for the update the arena is in.
-                unsafe {
-                    pending_commit.finish(main_thread);
-                    arena(arena_handle).end_layout_pass_preparation_handbacks(main_thread);
-                }
-                Joined {
-                    value: host.needs_style_update_after_layout(main_thread),
-                    facts: host.document_facts(main_thread),
-                }
+            } = self.join(FrameJoin::AfterLayoutCommit, |main_thread, host| Joined {
+                value: host.needs_style_update_after_layout(main_thread),
+                facts: host.document_facts(main_thread),
             });
             self.note_layout_commit(true, &facts, root_background_source);
             self.inputs.trace.layout(layout_started);
@@ -1007,16 +1047,9 @@ impl LayoutFrame<'_> {
         // planned boundaries and the viewport box stay live across them, and no row was freed
         // since the sources were read.
         unsafe { apply_enrolled_content_sources(arena_handle, content) };
-        let mut pending_commit: Option<PendingLayoutCommit> = None;
-        let mut deferred_host_halves = Vec::new();
         for &root in &partial_relayout_roots {
             // The next boundary's pass starts from the arena the previous commit settled; the
-            // commit's host half waits for the join after the last boundary.
-            if let Some(pending_commit) = pending_commit.take() {
-                // SAFETY: The frame runs for the update the arena is in, and delivers the host
-                // halves in commit order below.
-                deferred_host_halves.push(unsafe { pending_commit.settle_ahead_of_host() });
-            }
+            // commit's host half waits for the next join.
             let output = unsafe {
                 compute_subtree_layout_fragments(
                     arena_handle,
@@ -1026,7 +1059,8 @@ impl LayoutFrame<'_> {
                     facts.document_in_quirks_mode,
                 )
             };
-            pending_commit = Some(unsafe { commit_subtree_layout_to_arena(arena_handle, root, &output) });
+            let pending_commit = unsafe { commit_subtree_layout_to_arena(arena_handle, root, &output) };
+            self.settle_commit_ahead_of_host(pending_commit);
         }
 
         self.arena().note_partial_layout();
@@ -1034,19 +1068,9 @@ impl LayoutFrame<'_> {
         let Joined {
             value: needs_style_update_after_layout,
             facts,
-        } = self.join(FrameJoin::AfterLayoutCommit, |main_thread, host| {
-            for host_half in deferred_host_halves {
-                // SAFETY: The frame runs for the update the arena is in.
-                unsafe { host_half.deliver(main_thread) };
-            }
-            if let Some(pending_commit) = pending_commit {
-                // SAFETY: The frame runs for the update the arena is in.
-                unsafe { pending_commit.finish(main_thread) };
-            }
-            Joined {
-                value: host.needs_style_update_after_layout(main_thread),
-                facts: host.document_facts(main_thread),
-            }
+        } = self.join(FrameJoin::AfterLayoutCommit, |main_thread, host| Joined {
+            value: host.needs_style_update_after_layout(main_thread),
+            facts: host.document_facts(main_thread),
         });
         self.note_layout_commit(layout_tree_was_built_in_partial_branch, &facts, root_background_source);
         if needs_style_update_after_layout || !layout_is_up_to_date(self.arena(), &facts) {
@@ -1138,15 +1162,13 @@ unsafe fn update_layout(
                 tree_build_document_style_node: None,
                 list_owners_to_rebuild: Vec::new(),
                 selection: None,
-                owed_tree_build_host_half: Cell::new(None),
+                owed_host_halves: Cell::default(),
             };
             let arena_handle = frame.inputs.arena_handle;
-            let (messages, owed_tree_build_host_half) = frame.run();
+            let (messages, owed_host_halves) = frame.run();
             joins.join(|main_thread| {
                 let host = layout_update_host(main_thread);
-                if let Some(owed) = owed_tree_build_host_half {
-                    host.pay_tree_build_host_half(main_thread, arena(arena_handle), owed);
-                }
+                pay_owed_host_halves(main_thread, &host, arena_handle, owed_host_halves);
                 // The frame runs for the update the arena is in, and is over.
                 messages.apply(main_thread, &host, arena(arena_handle));
                 host.finish_update_layout(main_thread);
