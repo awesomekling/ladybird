@@ -384,7 +384,9 @@ unsafe extern "C" {
     fn ladybird_gfx_process_note_host_reaching_call(name: *const u8, length: usize);
     fn ladybird_gfx_process_note_wanted_pending_face(face_id: u64);
     fn ladybird_gfx_process_requeue_wanted_pending_face(face_id: u64);
+    fn ladybird_gfx_process_set_wanted_face_owner(owner: u64) -> u64;
     fn ladybird_gfx_process_take_wanted_pending_faces(
+        owner: u64,
         context: *mut c_void,
         visit: extern "C" fn(*mut c_void, u64, bool),
     );
@@ -523,12 +525,14 @@ impl FrozenEntry {
     }
 }
 
-/// Drains the faces render passes have wanted since the last call. The document turns each number
-/// back into a face and resolves it, which is what starts the fetch and the display-period timer.
+/// Drains the faces the stages of `owner` have wanted since the last call, and those no stage
+/// owned. The document turns each number back into a face and resolves it, which is what starts
+/// the fetch and the display-period timer. `owner` names a document the way the stages that run
+/// for it do (see [`WantedFaceOwner`]).
 ///
 /// The list itself is LibGfx's, for the reason `set_host_reaching_call_hook` gives: a list this
 /// crate pushed to would not be the list the other copy of it drains.
-pub fn take_wanted_pending_faces() -> Vec<(u64, bool)> {
+pub fn take_wanted_pending_faces(owner: u64) -> Vec<(u64, bool)> {
     extern "C" fn visit(context: *mut c_void, face_id: u64, has_been_retried: bool) {
         // SAFETY: The context is the vector below, alive for the call.
         unsafe { &mut *context.cast::<Vec<(u64, bool)>>() }.push((face_id, has_been_retried));
@@ -536,9 +540,30 @@ pub fn take_wanted_pending_faces() -> Vec<(u64, bool)> {
     let mut wanted = Vec::new();
     // SAFETY: The context outlives the call, and the callback only appends to it.
     unsafe {
-        ladybird_gfx_process_take_wanted_pending_faces((&raw mut wanted).cast(), visit);
+        ladybird_gfx_process_take_wanted_pending_faces(owner, (&raw mut wanted).cast(), visit);
     }
     wanted
+}
+
+/// While alive, has every face this thread wants go to `owner`'s wants: stages of different
+/// documents run side by side, and each document's layout end takes only its own.
+pub struct WantedFaceOwner {
+    previous: u64,
+}
+
+impl WantedFaceOwner {
+    pub fn enter(owner: u64) -> Self {
+        // SAFETY: The owner is a number, kept per thread.
+        let previous = unsafe { ladybird_gfx_process_set_wanted_face_owner(owner) };
+        Self { previous }
+    }
+}
+
+impl Drop for WantedFaceOwner {
+    fn drop(&mut self) {
+        // SAFETY: As above.
+        unsafe { ladybird_gfx_process_set_wanted_face_owner(self.previous) };
+    }
 }
 
 impl FrozenFontList {
@@ -1002,7 +1027,7 @@ pub extern "C" fn ladybird_gfx_request_wanted_pending_face(face_id: u64, has_bee
 /// still around to request.
 #[unsafe(no_mangle)]
 pub extern "C" fn ladybird_gfx_request_wanted_pending_faces() -> usize {
-    take_wanted_pending_faces()
+    take_wanted_pending_faces(0)
         .into_iter()
         .filter(|(face_id, has_been_retried)| ladybird_gfx_request_wanted_pending_face(*face_id, *has_been_retried))
         .count()

@@ -368,7 +368,10 @@ unsafe fn submit(
         hold_here(FfiStageHoldPoint::BeforeRun);
         tsan::acquire(thread);
         let waiting_caller = WAITING_CALLER.with(|waiting| waiting.replace(Some(caller)));
+        // The faces the stage wants are its document's, for that document's layout end to request.
+        let wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(run.arena as u64);
         let outcome = std::panic::catch_unwind(AssertUnwindSafe(stage));
+        drop(wanted_face_owner);
         // A submitted stage runs outside any style update of the caller's; whatever it left in
         // the stage thread's style update state goes with it.
         drop(take_style_update_scope());
@@ -1081,6 +1084,11 @@ fn runs_waited_for_document_stage_in_place(arena: *const c_void) -> bool {
 /// Runs `stage`, a stage for the document whose arena is `arena`, as [`run_stage`] does, or right here when no stage
 /// of the frame in flight is that document's.
 pub(crate) fn run_document_stage<R: Send>(arena: *const c_void, stage: impl FnOnce() -> R + Send) -> R {
+    let owner = arena as u64;
+    let stage = move || {
+        let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(owner);
+        stage()
+    };
     if runs_waited_for_document_stage_in_place(arena) {
         return run_in_place(stage);
     }
@@ -1098,6 +1106,11 @@ pub(crate) unsafe fn run_document_stage_with_joins<R: Send>(
     arena: *const c_void,
     stage: impl FnOnce(&MainJoins<'_>) -> R + Send,
 ) -> R {
+    let owner = arena as u64;
+    let stage = move |joins: &MainJoins<'_>| {
+        let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(owner);
+        stage(joins)
+    };
     if runs_waited_for_document_stage_in_place(arena) {
         return run_in_place(|| stage(&MainJoins(JoinTarget::InPlace(Some(main_thread)))));
     }
