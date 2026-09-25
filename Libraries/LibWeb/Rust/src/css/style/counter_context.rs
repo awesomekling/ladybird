@@ -502,6 +502,12 @@ impl StyleEngine {
     }
 
     #[inline]
+    pub(super) fn settle_atom_sweep_of_submitted_pass(&mut self, host_named_atoms_beside_pass: bool) {
+        self.state
+            .settle_atom_sweep_of_submitted_pass(host_named_atoms_beside_pass, &mut self.counters);
+    }
+
+    #[inline]
     #[cfg(test)]
     pub(super) fn sweep_style_atoms(&mut self) {
         self.state.sweep_style_atoms(&mut self.counters);
