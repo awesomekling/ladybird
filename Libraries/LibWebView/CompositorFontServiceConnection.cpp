@@ -134,7 +134,7 @@ intptr_t CompositorFontServiceConnection::thread_main()
     }
 
     auto paired = paired_or_error.release_value();
-    auto connection = adopt_ref(*new FontServerConnection(move(paired.local), m_font_service));
+    auto connection = adopt_ref(*new FontServerConnection(move(paired.local), *m_font_service));
 
     {
         MutexLocker locker(m_mutex);

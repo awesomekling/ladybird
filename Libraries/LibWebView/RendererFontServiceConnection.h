@@ -42,7 +42,7 @@ private:
     explicit RendererFontServiceConnection(FontService&);
     intptr_t thread_main();
 
-    FontService& m_font_service;
+    NonnullRefPtr<FontService> m_font_service;
     NonnullRefPtr<Threading::Thread> m_thread;
     Mutex m_mutex;
     ConditionVariable m_initialization_condition { m_mutex };
