@@ -5,10 +5,68 @@
  */
 
 //! The layout tree update marks: what the DOM asks the layout tree build to rebuild. A mark is
-//! written where the DOM changes and read by the next build, which retires it, so it is layout tree
-//! state and the arena holds it, keyed by the style node identity the build walks by.
+//! written where the DOM changes and read by the next build, which retires it, keyed by the style
+//! node identity the build walks by.
+//!
+//! The DOM writes and reads the marks at any time, a frame in flight included, and a mark must never
+//! wait for that frame. So the document thread owns them, beside the arena in its host tables, and
+//! lends them to the arena for the one stage that reads them: the tree build takes them in as its
+//! walk begins and hands them back, with what it retired, once the walk is over. No frame is in
+//! flight while a tree build walks, so the arena holds no marks when one is.
 
+use super::LayoutNodeArena;
+use super::host_tables::HostTables;
 use crate::css::style::tree::StyleNodeID;
+use std::ffi::c_void;
+
+/// Runs `access` on the layout tree update marks of the document whose arena `handle` names: its
+/// own, or the ones its tree build holds if the access is host work the build joined the document
+/// thread for.
+///
+/// # Safety
+///
+/// `handle` must be a live handle from `layout_arena_create`, on the document thread.
+pub(crate) unsafe fn with_document_marks<R>(
+    handle: *mut c_void,
+    access: impl FnOnce(&mut LayoutTreeUpdateMarks) -> R,
+) -> R {
+    // SAFETY: Guaranteed by the caller.
+    let host_tables = unsafe { HostTables::beside_frame(handle) };
+    if host_tables.layout_tree_update_marks_are_lent.get() {
+        // SAFETY: Guaranteed by the caller. The build that holds the marks waits for this access,
+        // and a frame never walks a tree build, so borrowing the arena waits for nothing.
+        let arena = unsafe { LayoutNodeArena::from_handle(handle) };
+        return access(&mut arena.layout_tree_update_marks_held_by_the_build());
+    }
+    access(&mut host_tables.layout_tree_update_marks.borrow_mut())
+}
+
+/// Lends the document's layout tree update marks to the tree build `walk` runs on `arena`, which
+/// reads and retires them there, and takes back what it leaves.
+///
+/// # Safety
+///
+/// `handle` must be the live handle `arena` was borrowed from, on the document thread.
+pub(crate) unsafe fn lend_to_tree_build<R>(
+    handle: *mut c_void,
+    arena: &mut LayoutNodeArena,
+    walk: impl FnOnce(&mut LayoutNodeArena) -> R,
+) -> R {
+    // SAFETY: Guaranteed by the caller. The host tables sit beside the arena, not in it.
+    let host_tables = unsafe { HostTables::beside_frame(handle) };
+    assert!(
+        !host_tables.layout_tree_update_marks_are_lent.get(),
+        "a tree build walks alone"
+    );
+    *arena.lent_layout_tree_update_marks() = host_tables.layout_tree_update_marks.take();
+    host_tables.layout_tree_update_marks_are_lent.set(true);
+    let result = walk(arena);
+    host_tables
+        .layout_tree_update_marks
+        .replace(std::mem::take(arena.lent_layout_tree_update_marks()));
+    host_tables.layout_tree_update_marks_are_lent.set(false);
+    result
+}
 
 /// Which narrower rebuild the marks a node has collected so far still permit, as
 /// `Node::LayoutTreeUpdateReuseReason` spells them. Nothing set means only a full rebuild will do.

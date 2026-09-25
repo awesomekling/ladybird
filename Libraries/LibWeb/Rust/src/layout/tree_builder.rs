@@ -2988,24 +2988,29 @@ pub(crate) unsafe fn walk_layout_tree_build(
 ) -> (FfiLayoutTreeBuildOutcome, TreeBuildHostHalf) {
     // SAFETY: Guaranteed by the caller.
     let arena = unsafe { LayoutNodeArena::from_handle_mut(arena_handle) };
-    arena.run_stage(|arena| {
-        // The host is made on the stage's side from the arena the stage holds alone.
-        let host = dom_tree_builder_host(std::ptr::from_mut(arena).cast());
-        let TreeBuildStageOutput {
-            outcome,
-            reports,
-            handbacks,
-            replaced_layout_tree,
-        } = run_tree_build_stage(&host, document_style_node);
-        (
-            outcome,
-            TreeBuildHostHalf {
+    let walk = |arena: &mut LayoutNodeArena| {
+        arena.run_stage(|arena| {
+            // The host is made on the stage's side from the arena the stage holds alone.
+            let host = dom_tree_builder_host(std::ptr::from_mut(arena).cast());
+            let TreeBuildStageOutput {
+                outcome,
                 reports,
                 handbacks,
                 replaced_layout_tree,
-            },
-        )
-    })
+            } = run_tree_build_stage(&host, document_style_node);
+            (
+                outcome,
+                TreeBuildHostHalf {
+                    reports,
+                    handbacks,
+                    replaced_layout_tree,
+                },
+            )
+        })
+    };
+    // The walk reads the document thread's layout tree update marks, and retires what it answers.
+    // SAFETY: Guaranteed by the caller.
+    unsafe { super::tree_update_marks::lend_to_tree_build(arena_handle, arena, walk) }
 }
 
 /// The layout tree build stage: the walk that turns the style mirror's flat tree into layout

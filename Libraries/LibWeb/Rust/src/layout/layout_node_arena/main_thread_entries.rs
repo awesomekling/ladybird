@@ -297,6 +297,9 @@ unsafe extern "C" fn layout_arena_forget_style_node(arena: *mut c_void, style_no
         paying_host_handbacks(&main_thread, arena, || {
             LayoutNodeArena::from_handle_mut(arena).forget_style_node(style_node);
         });
+        // A retired identity leaves its layout tree update marks behind too, which the document
+        // thread holds.
+        super::super::tree_update_marks::with_document_marks(arena, |marks| marks.clear(style_node));
     }
 }
 
