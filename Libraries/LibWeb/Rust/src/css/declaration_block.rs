@@ -6,7 +6,9 @@
 
 use crate::css::css_string::CssString;
 use crate::css::ffi_support::FfiUtf16View;
-use crate::css::property_metadata::{property_is_logical_alias_including_shorthands, property_logical_group};
+use crate::css::property_metadata::{
+    property_defines_a_css_transition, property_is_logical_alias_including_shorthands, property_logical_group,
+};
 use crate::css::style_compute::expand_shorthands_with;
 use crate::css::style_value::StyleValueData;
 use std::cell::RefCell;
@@ -493,6 +495,21 @@ pub unsafe extern "C" fn rust_declaration_data_retain(
         Arc::increment_strong_count(data);
     }
     data
+}
+
+/// Take an immutable snapshot of what the block holds now, which later edits to the block leave as
+/// it is. The caller owns one reference to it.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_declaration_block_snapshot(block: &DeclarationBlock) -> *const DeclarationBlockData {
+    Arc::into_raw(block.data())
+}
+
+/// Whether one of the snapshot's declarations can define a CSS transition.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_declaration_data_defines_a_css_transition(data: &DeclarationBlockData) -> bool {
+    data.properties
+        .iter()
+        .any(|declaration| property_defines_a_css_transition(declaration.property_id))
 }
 
 /// Release an immutable declaration snapshot returned by the style engine or retained from a view.

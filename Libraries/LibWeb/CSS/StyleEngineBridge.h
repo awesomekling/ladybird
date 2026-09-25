@@ -24,6 +24,12 @@
 #include <LibWeb/Export.h>
 #include <LibWeb/StyleEngineRustFFI.h>
 
+namespace Web::CSS::Parser::ValueParserFFI {
+
+struct DeclarationBlockData;
+
+}
+
 namespace Web::CSS::StyleValueFFI {
 
 struct FfiTransitionAction;
@@ -85,7 +91,6 @@ public:
     // Which longhand properties one of an element's own declarations covers, their canonical
     // specified values and their authored aliases, and whether the inventory has complete
     // continuation semantics.
-    void set_element_inline_style_properties(StyleNodeID node, RustDeclarationBlock const*);
     void set_element_presentational_hint_properties(StyleNodeID node, StyleEngineFFI::FfiElementDeclarationKind, ReadonlySpan<StyleProperty>);
     struct StyleRecordDelta {
         StyleRecordID old_style_record;
@@ -201,6 +206,9 @@ public:
     void record_adjustment_facts(StyleNodeID, u32 facts);
     void record_associated_pseudo_kind(StyleNodeID, u8 pseudo_kind_plus_one);
     void record_construction_facts(StyleNodeID, u32 facts, u8 box_kind);
+    // A snapshot of the element's inline style declarations, or null for none. The write takes the
+    // snapshot's reference.
+    void record_inline_style_properties(StyleNodeID, Parser::ValueParserFFI::DeclarationBlockData const*);
     enum StyleReaction : u8 {
         PublishedStyle = 1 << 0,
         RecomputeStyle = 1 << 1,
