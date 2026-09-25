@@ -1,0 +1,5 @@
+held as armed: true
+presented while the task was busy: true
+not taken in by then: true
+hit test adopted the presented scene: true
+width: 20

@@ -313,6 +313,8 @@ public:
     void render_screenshot(Gfx::PaintingSurface&, PaintConfig, Function<void()>&& callback);
     // The presenter, once the frame in flight that presents from it has been taken in.
     Compositor::NavigablePresenter& presenter(SourceLocation = SourceLocation::current());
+    // The presenter as it stands beside a frame in flight that may present from it, for what may be read beside it.
+    Compositor::NavigablePresenter const& presenter_beside_frame_in_flight() const { return *m_presenter; }
     Compositing::DisplayListResourceStorage& display_list_resource_storage();
 
     bool needs_repaint() const { return m_needs_repaint; }

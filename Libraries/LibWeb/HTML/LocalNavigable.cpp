@@ -6886,6 +6886,12 @@ void LocalNavigable::submit_compositor_frame(Compositor::CompositorFrame&& frame
     auto frame_sink = compositor_context().prepare_to_submit_frame(frame);
     if (!frame_sink)
         return;
+    bool const carries_scene = frame.display_list_update.has_value() || frame.visual_context_tree_update.has_value();
+    // The main thread takes in the scene of a frame it presents as it presents it.
+    ScopeGuard adopt_scene = [&] {
+        if (carries_scene)
+            m_presenter->did_adopt_scene(m_presenter->did_present_scene());
+    };
     // The frame owns what it sends, and the sink may be used from any thread, so the handoff runs as a render stage.
     struct Handoff {
         Compositor::CompositorFrameSink& frame_sink;
@@ -6945,7 +6951,10 @@ static void present_from_frame_in_flight(void* context)
         presentation.published = published;
     }
     auto frame = presentation.presenter->build_frame(presentation.inputs, presentation.source, move(published));
+    bool const carries_scene = frame.display_list_update.has_value() || frame.visual_context_tree_update.has_value();
     presentation.frame_sink->submit(move(frame));
+    if (carries_scene)
+        presentation.presented_scene_epoch = presentation.presenter->did_present_scene();
 }
 
 bool LocalNavigable::submit_presentation(PendingCompositorFrame& pending_frame)
@@ -6977,6 +6986,8 @@ void LocalNavigable::adopt_presented_frame(PendingCompositorFrame& pending_frame
 {
     auto& presentation = *pending_frame.presentation;
     m_presenter->take_back_from_frame_in_flight();
+    if (presentation.presented_scene_epoch.has_value())
+        m_presenter->did_adopt_scene(*presentation.presented_scene_epoch);
     if (!presentation.published.has_value())
         return;
     auto document = pending_frame.document;

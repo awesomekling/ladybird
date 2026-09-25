@@ -234,6 +234,10 @@ public:
     void inject_rendering_opportunity(double frame_time_ms);
     bool wait_for_frame_to_finish();
     Utf16String frame_scheduler_state() const;
+    void set_render_presents(bool enabled);
+    void reset_render_presents();
+    WebIDL::UnsignedLongLong presented_scene_epoch();
+    WebIDL::UnsignedLongLong hit_test_scene_epoch();
     bool rendering_update_awaits_pass() const;
     u64 style_pass_forced_joins() const;
     void update_compositor_animations();

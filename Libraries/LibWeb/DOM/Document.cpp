@@ -10465,6 +10465,13 @@ Painting::HitTestDisplayList const* Document::ensure_hit_test_display_list()
     if (!has_committed_viewport_box())
         return nullptr;
 
+    // The render side presented a scene the main thread has not taken in yet. What is pointed at is on screen, so the
+    // frame that presented it is taken in first; its presentation was its last stage, so it has finished.
+    if (auto navigable = this->navigable(); navigable && navigable->presenter_beside_frame_in_flight().has_scene_to_adopt()) {
+        auto location = SourceLocation::current();
+        Layout::RustFFI::rust_stage_thread_join_frame_in_flight(reinterpret_cast<u8 const*>(location.filename().characters_without_null_termination()), location.filename().length(), location.line_number());
+    }
+
     // A stale list is a forced join: the frame the renderer publishes records the list we hit test. Nothing records
     // a display list of its own for hit testing, so a document that cannot publish a frame has nothing to hit test.
     if (!m_hit_test_display_list || !m_hit_test_display_list->is_current() || m_hit_test_display_list->visual_context_tree_structural_epoch() != visual_context_tree_structural_epoch()) {
