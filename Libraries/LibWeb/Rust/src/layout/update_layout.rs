@@ -21,8 +21,7 @@ use super::node_data::NodeSlotId;
 use super::node_facts;
 use super::partial_relayout::FfiPartialRelayoutHostFacts;
 use super::tree_builder::{
-    FfiGeneratedContentItem, FfiLayoutTreeBuildOutcome, FfiPseudoElement, TreeBuildHostHalf, make_shells_owed_to_host,
-    walk_layout_tree_build,
+    FfiGeneratedContentItem, FfiLayoutTreeBuildOutcome, FfiPseudoElement, TreeBuildHostHalf, walk_layout_tree_build,
 };
 use super::viewport_propagation::FfiViewportPropagationFacts;
 use crate::abort_on_panic;
@@ -405,16 +404,14 @@ enum FrameJoin {
     /// what the node's layout node and its document ask for.
     Style,
     /// What a layout tree build the frame has walked needs the document for before the pass that
-    /// follows it: the shells of its new rows whose making tells the document something the pass
-    /// reads (a scroll container's scroll offset, whether an empty text keeps its line box), then
-    /// the pass's sources, which the document reads from its root and body elements' style and
-    /// from the shells of replaced content. A build no pass follows has no such join. A partial
-    /// relayout's build also answers with the facts after it, having paid the build's host half
-    /// first, since that can resize this document's viewport through its embedding document.
-    /// Otherwise the host half (the shells of the rows the walk freed and of the new rows it owes,
-    /// the box presence it changed, the DOM nodes its commit messages resolve to, a new viewport's
-    /// paint state) waits for the next join, and the style resources and generated image
-    /// providers of its new rows for the frame to be over.
+    /// follows it: the pass's sources, which the document reads from its root and body elements'
+    /// style and from the shells of replaced content. A build no pass follows has no such join. A
+    /// partial relayout's build also answers with the facts after it, having paid the build's
+    /// host half first, since that can resize this document's viewport through its embedding
+    /// document. Otherwise the host half (the shells of the rows the walk freed and of the new
+    /// rows whose making tells the document something, the box presence it changed, the DOM nodes
+    /// its commit messages resolve to, a new viewport's paint state) waits for the next join, and
+    /// the style resources and generated image providers of its new rows for the frame to be over.
     BuildLayoutTree,
     /// The host halves of the partial relayout boundaries' commits the frame settled ahead of
     /// them, in commit order, and of the last pass's commit, then the container queries the commit
@@ -819,14 +816,11 @@ impl LayoutFrame<'_> {
                     self.reconcile_stale_list_item_counters(&walked);
                 }
                 let pass_follows = !needs_another_build_pass && self.list_owners_to_rebuild.is_empty();
-                // Only a pass that follows needs the document thread before the next join: the
-                // shells whose making tells the document what the pass reads, then its sources.
-                // The rest of the host half waits for the join after them.
+                // Only the sources of a pass that follows are read on the document thread; the
+                // host half waits for the join after them.
                 let pass_sources = pass_follows.then(|| {
                     self.join(FrameJoin::BuildLayoutTree, |main_thread, host| {
                         // SAFETY: The frame runs for the update the arena is in.
-                        make_shells_owed_to_host(main_thread, unsafe { arena(arena_handle) });
-                        // SAFETY: As above.
                         unsafe { LayoutPassSources::read(main_thread, host, arena_handle) }
                     })
                 });

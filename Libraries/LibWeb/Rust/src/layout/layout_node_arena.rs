@@ -1035,6 +1035,8 @@ pub(crate) struct LayoutNodeArena {
     /// The document's style, handed to a build that may build the viewport before it starts, and
     /// pinned until the viewport's row takes it or the build ends without one.
     published_document_style: Cell<Option<DerivedStyleRecord>>,
+    /// The scroll offset of the document's navigable, handed to a build with the document's style.
+    published_viewport_scroll_offset: Cell<FfiCssPixelPoint>,
     nodes_enrolled_for_replaced_content_facts_sync: RefCell<Vec<NodeSlotId>>,
     /// What the running pass has to tell the document, waiting for the commit that delivers it.
     messages_reported_during_pass: RefCell<Vec<super::commit::FfiCommitMessage>>,
@@ -1134,6 +1136,7 @@ impl LayoutNodeArena {
             image_resources_owed_to_host: RefCell::new(Vec::new()),
             image_boxes_awaiting_owned_provider: RefCell::new(HashSet::default()),
             published_document_style: Cell::new(None),
+            published_viewport_scroll_offset: Cell::new(FfiCssPixelPoint::default()),
             nodes_enrolled_for_replaced_content_facts_sync: RefCell::new(Vec::new()),
             messages_reported_during_pass: RefCell::new(Vec::new()),
             layout_style_snapshots: Default::default(),
@@ -5400,8 +5403,10 @@ impl LayoutNodeArena {
             || self.needs_layout_tree_update(document_style_node)
     }
 
-    /// Holds the document's style for the build about to run.
-    pub(crate) fn publish_document_style(&self, record: u64) {
+    /// Holds the document's style for the build about to run, and the scroll offset of the
+    /// document's navigable, which the viewport's row holds.
+    pub(crate) fn publish_document_style(&self, record: u64, viewport_scroll_offset: FfiCssPixelPoint) {
+        self.published_viewport_scroll_offset.set(viewport_scroll_offset);
         let derived = self.with_style_engine(|engine| {
             engine.pin_layout_style_record(record);
             DerivedStyleRecord {
@@ -5419,13 +5424,17 @@ impl LayoutNodeArena {
         self.published_document_style.set(Some(derived));
     }
 
-    /// Stamps the viewport's row with the document's style the build was handed.
+    /// Stamps the viewport's row with the document's style the build was handed, and with the
+    /// navigable's scroll offset. The viewport's row holds the offset without the document's node
+    /// storing one, so it is not flagged as holding one.
     pub(crate) fn adopt_published_document_style(&self, viewport: NodeSlotId) {
         let derived = self
             .published_document_style
             .take()
             .expect("a build that builds the viewport is handed the document's style");
         self.apply_reinherited_style_record(viewport, derived, ShellStyleChangeNotice::Handback);
+        self.scroll_offsets()
+            .publish(viewport, self.published_viewport_scroll_offset.get().into());
     }
 
     /// Releases the document's style if the build did not build a viewport to take it.
@@ -6303,8 +6312,12 @@ pub unsafe extern "C" fn layout_arena_tree_build_may_create_viewport(
 ///
 /// The arena and record must be live on the document thread.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_publish_document_style_record(arena: *mut c_void, record: u64) {
-    unsafe { LayoutNodeArena::from_handle(arena) }.publish_document_style(record);
+pub unsafe extern "C" fn layout_arena_publish_document_style_record(
+    arena: *mut c_void,
+    record: u64,
+    viewport_scroll_offset: FfiCssPixelPoint,
+) {
+    unsafe { LayoutNodeArena::from_handle(arena) }.publish_document_style(record, viewport_scroll_offset);
 }
 
 #[unsafe(no_mangle)]

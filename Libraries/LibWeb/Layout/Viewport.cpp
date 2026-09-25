@@ -9,17 +9,12 @@
 
 namespace Web::Layout {
 
-// The build stamps the viewport's row with the document's style, which it is handed before it
-// starts, and materialises this shell for it once it is over.
+// The build stamps the viewport's row with the document's style and the navigable's scroll offset,
+// which it is handed before it starts, and this shell is materialised for the row after the build.
 Viewport::Viewport(DOM::Document& document, BindToPreparedArenaSlot bind, Compositing::RustFFI::NodeSlotId slot, RustFFI::NodeKind kind)
     : Box(document, bind, slot, kind)
 {
     initialize_stamped_style_record();
-    // As in the DOM-backed constructor: the base constructor could not have asked for the
-    // navigable's offset, because `is_viewport()` does not answer yes until this box's own
-    // constructor runs. The rows the document already has take the navigable's offset along with
-    // this one.
-    publish_scroll_offset();
 }
 
 Viewport::~Viewport() = default;
