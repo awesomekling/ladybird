@@ -276,6 +276,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         element_declaration_delta_count: declarations.len(),
                         element_style_inputs: element_style_inputs.as_ptr(),
                         element_style_input_count: element_style_inputs.len(),
+                        // The host's fact writes are recorded as the boundary calls they stand for.
+                        host_fact_writes: std::ptr::null(),
+                        host_fact_write_count: 0,
                     };
                     unsafe { bridge::style_engine_apply_transaction(engine, &transaction) };
                 }

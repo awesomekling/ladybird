@@ -913,6 +913,48 @@ unsafe impl super::record_replay::RawRecord for FfiStateDelta {}
 unsafe impl super::record_replay::RawRecord for FfiElementDeclarationDelta {}
 unsafe impl super::record_replay::RawRecord for FfiElementStyleInput {}
 
+/// Which fact of the mirror one host fact write replaces. See [`FfiHostFactWrite`].
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum FfiHostFactKind {
+    /// `node` takes its place in `parent`'s DOM child sequence after `previous_sibling`.
+    LinkInDomOrder = 0,
+    /// `node` leaves `parent`'s DOM child sequence.
+    UnlinkFromDomOrder = 1,
+    /// The text node `node` disconnected, and its identity retires.
+    RetireText = 2,
+    /// `value` says whether the text node's data is nothing but ASCII whitespace.
+    TextIsAsciiWhitespace = 3,
+    /// `value` says whether the text node sits in a user-agent shadow tree.
+    TextIsInUserAgentShadowTree = 4,
+    /// `value` says whether the text node holds the value of a password input.
+    TextIsPasswordInput = 5,
+    /// `data` is the characters the text node now holds.
+    TextData = 6,
+    /// `facts` is the element's style adjustment facts.
+    ElementAdjustmentFacts = 7,
+    /// `value` is the element-reference pseudo kind the element represents, plus one.
+    ElementAssociatedPseudoKind = 8,
+    /// `facts` is the element's construction facts, and `value` the box kind it asks for.
+    ElementConstructionFacts = 9,
+}
+
+/// One write the host made to a fact of the mirror, which the engine applies with the next
+/// transaction in the order the host made it. These are facts the DOM holds and nothing selects
+/// or invalidates on: the DOM child sequence, what a text node holds, and what an element is.
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct FfiHostFactWrite {
+    pub kind: FfiHostFactKind,
+    pub value: u8,
+    pub node: u32,
+    pub parent: u32,
+    pub previous_sibling: u32,
+    pub facts: u32,
+    /// For `TextData`, a raw `AK::Utf16String` whose reference the write transfers to the engine.
+    pub data: usize,
+}
+
 /// One flat style input transaction. Every array is borrowed for the duration of the call.
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -931,6 +973,8 @@ pub struct FfiStyleInputTransaction {
     pub element_declaration_delta_count: usize,
     pub element_style_inputs: *const FfiElementStyleInput,
     pub element_style_input_count: usize,
+    pub host_fact_writes: *const FfiHostFactWrite,
+    pub host_fact_write_count: usize,
 }
 
 /// Device class selecting the document's memory budget coefficients.
@@ -1807,6 +1851,19 @@ pub unsafe extern "C" fn style_engine_apply_transaction(engine: *mut c_void, tra
     };
     let element_style_inputs =
         unsafe { borrow(transaction.element_style_inputs, transaction.element_style_input_count) };
+    // The host made these writes before it recorded any of the batch's inputs that came after them,
+    // and the batch reads the facts they write.
+    let host_fact_writes = unsafe { borrow(transaction.host_fact_writes, transaction.host_fact_write_count) };
+    unsafe { apply_host_fact_writes(engine, host_fact_writes) };
+    if tree.is_empty()
+        && arrivals.is_empty()
+        && features.is_empty()
+        && states.is_empty()
+        && declarations.is_empty()
+        && element_style_inputs.is_empty()
+    {
+        return;
+    }
     engine.apply_transaction_batch(
         tree,
         (arrivals, arrival_custom_state_atoms),
@@ -1824,6 +1881,70 @@ pub unsafe extern "C" fn style_engine_apply_transaction(engine: *mut c_void, tra
         payload.write_raw_slice(declarations);
         write_recording_element_style_inputs(element_style_inputs, payload);
     });
+}
+
+/// Apply the host's fact writes in the order it made them. Each is recorded as the boundary call
+/// it stands for, so a replay applies it on its own.
+///
+/// # Safety
+/// Every `TextData` write must carry a raw `AK::Utf16String` whose reference it transfers.
+unsafe fn apply_host_fact_writes(engine: &mut StyleEngine, writes: &[FfiHostFactWrite]) {
+    let mut index = 0;
+    while index < writes.len() {
+        let write = &writes[index];
+        // Links and retirements arrive a subtree at a time, so a run of them crosses as one call.
+        let run_length = writes[index..]
+            .iter()
+            .take_while(|next| next.kind == write.kind)
+            .count();
+        match write.kind {
+            FfiHostFactKind::LinkInDomOrder => {
+                let links: Vec<u32> = writes[index..index + run_length]
+                    .iter()
+                    .flat_map(|link| [link.node, link.parent, link.previous_sibling])
+                    .collect();
+                operations::link_style_nodes_in_dom_order(engine, &links);
+                index += run_length;
+                continue;
+            }
+            FfiHostFactKind::RetireText => {
+                let nodes: Vec<u32> = writes[index..index + run_length]
+                    .iter()
+                    .map(|retirement| retirement.node)
+                    .collect();
+                operations::retire_text_style_nodes(engine, &nodes);
+                index += run_length;
+                continue;
+            }
+            FfiHostFactKind::UnlinkFromDomOrder => {
+                operations::unlink_style_node_from_dom_order(engine, write.node, write.parent);
+            }
+            FfiHostFactKind::TextIsAsciiWhitespace => {
+                operations::set_text_is_ascii_whitespace(engine, write.node, write.value != 0);
+            }
+            FfiHostFactKind::TextIsInUserAgentShadowTree => {
+                operations::set_text_is_in_user_agent_shadow_tree(engine, write.node, write.value != 0);
+            }
+            FfiHostFactKind::TextIsPasswordInput => {
+                operations::set_text_is_password_input(engine, write.node, write.value != 0);
+            }
+            FfiHostFactKind::TextData => {
+                // SAFETY: The caller vouches that the write transfers one reference to a live string.
+                let data = unsafe { ak::Utf16String::from_raw_owned(write.data) };
+                set_text_data(engine, write.node, data);
+            }
+            FfiHostFactKind::ElementAdjustmentFacts => {
+                operations::set_element_adjustment_facts(engine, write.node, write.facts);
+            }
+            FfiHostFactKind::ElementAssociatedPseudoKind => {
+                operations::set_element_associated_pseudo_kind(engine, write.node, write.value);
+            }
+            FfiHostFactKind::ElementConstructionFacts => {
+                operations::set_element_construction_facts(engine, write.node, write.facts, write.value);
+            }
+        }
+        index += 1;
+    }
 }
 
 fn write_recording_tree_deltas(tree: &[FfiTreeDelta], payload: &mut super::record_replay::PayloadWriter) {
@@ -2076,16 +2197,7 @@ pub unsafe extern "C" fn style_engine_set_element_parts(
     });
 }
 /// Records the characters a text node holds, as the document spells them.
-///
-/// # Safety
-/// `engine` must be live, and `data` must be a raw `AK::Utf16String` representation for which the
-/// caller transfers one reference to this call.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_set_text_data(engine: *mut c_void, node: u32, data: usize) {
-    super::seal::note_engine_call("style_engine_set_text_data");
-    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
-    // SAFETY: The caller transfers one reference to a live string.
-    let data = unsafe { ak::Utf16String::from_raw_owned(data) };
+fn set_text_data(engine: &mut StyleEngine, node: u32, data: ak::Utf16String) {
     engine.record_boundary_call(EventKind::SetTextData, |payload| {
         payload.write_u32(node);
         payload.write_u16_slice(&data.to_utf16());

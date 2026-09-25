@@ -528,11 +528,6 @@ void StyleEngine::set_element_language(StyleNodeID node, StyleAtomID language, U
     StyleEngineFFI::style_engine_set_element_language(m_impl, node.value(), language.value(), code_units.data(), code_units.size());
 }
 
-void StyleEngine::set_text_data(StyleNodeID node, Utf16String const& data)
-{
-    StyleEngineFFI::style_engine_set_text_data(m_impl, node.value(), data.to_raw_leaked());
-}
-
 // Recording input gives the next rendering update style work to do, but touches no layout tree
 // and no paintable, so nothing else asks the page for a frame. On a quiet document a change made
 // from a timer would otherwise sit unflushed indefinitely, and a transition it should start would
@@ -594,6 +589,66 @@ void StyleEngine::record_element_declaration_delta(StyleEngineFFI::FfiElementDec
     flush_deferred_geometry_transaction_before_non_replayable_input(*this, m_style_computer);
     note_recorded_input(*this, m_style_computer);
     m_element_declaration_deltas.append(delta);
+}
+
+void StyleEngine::record_host_fact_write(StyleEngineFFI::FfiHostFactWrite write)
+{
+    note_recorded_input(*this, m_style_computer);
+    m_host_fact_writes.append(write);
+}
+
+void StyleEngine::record_dom_order_links(ReadonlySpan<u32> links)
+{
+    VERIFY(links.size() % 3 == 0);
+    for (size_t i = 0; i < links.size(); i += 3)
+        record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::LinkInDomOrder, .value = 0, .node = links[i], .parent = links[i + 1], .previous_sibling = links[i + 2], .facts = 0, .data = 0 });
+}
+
+void StyleEngine::record_dom_order_unlink(StyleNodeID node, StyleNodeID parent)
+{
+    record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::UnlinkFromDomOrder, .value = 0, .node = node.value(), .parent = parent.value(), .previous_sibling = 0, .facts = 0, .data = 0 });
+}
+
+void StyleEngine::record_text_retirements(ReadonlySpan<StyleNodeID> nodes)
+{
+    for (auto node : nodes)
+        record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::RetireText, .value = 0, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = 0, .data = 0 });
+}
+
+void StyleEngine::record_text_is_ascii_whitespace(StyleNodeID node, bool value)
+{
+    record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::TextIsAsciiWhitespace, .value = value, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = 0, .data = 0 });
+}
+
+void StyleEngine::record_text_is_in_user_agent_shadow_tree(StyleNodeID node, bool value)
+{
+    record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::TextIsInUserAgentShadowTree, .value = value, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = 0, .data = 0 });
+}
+
+void StyleEngine::record_text_is_password_input(StyleNodeID node, bool value)
+{
+    record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::TextIsPasswordInput, .value = value, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = 0, .data = 0 });
+}
+
+void StyleEngine::record_text_data(StyleNodeID node, Utf16String const& data)
+{
+    record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::TextData, .value = 0, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = 0, .data = m_host_fact_text_data.size() });
+    m_host_fact_text_data.append(data);
+}
+
+void StyleEngine::record_adjustment_facts(StyleNodeID node, u32 facts)
+{
+    record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::ElementAdjustmentFacts, .value = 0, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = facts, .data = 0 });
+}
+
+void StyleEngine::record_associated_pseudo_kind(StyleNodeID node, u8 pseudo_kind_plus_one)
+{
+    record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::ElementAssociatedPseudoKind, .value = pseudo_kind_plus_one, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = 0, .data = 0 });
+}
+
+void StyleEngine::record_construction_facts(StyleNodeID node, u32 facts, u8 box_kind)
+{
+    record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::ElementConstructionFacts, .value = box_kind, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = facts, .data = 0 });
 }
 
 void StyleEngine::record_container_query_input_change(StyleNodeID style_node)
@@ -682,7 +737,8 @@ bool StyleEngine::has_recorded_input() const
         || !m_element_arrivals.is_empty()
         || !m_local_feature_deltas.is_empty()
         || !m_state_deltas.is_empty()
-        || !m_element_declaration_deltas.is_empty();
+        || !m_element_declaration_deltas.is_empty()
+        || !m_host_fact_writes.is_empty();
 }
 
 void StyleEngine::submit_recorded_input()
@@ -710,9 +766,18 @@ void StyleEngine::submit_recorded_input()
         .element_declaration_delta_count = m_element_declaration_deltas.size(),
         .element_style_inputs = nullptr,
         .element_style_input_count = 0,
+        .host_fact_writes = m_host_fact_writes.data(),
+        .host_fact_write_count = m_host_fact_writes.size(),
     };
+    // Each text data write hands the engine one reference to what it holds.
+    for (auto& write : m_host_fact_writes) {
+        if (write.kind == StyleEngineFFI::FfiHostFactKind::TextData)
+            write.data = m_host_fact_text_data[write.data].to_raw_leaked();
+    }
     apply_transaction(transaction);
 
+    m_host_fact_writes.clear_with_capacity();
+    m_host_fact_text_data.clear_with_capacity();
     m_tree_deltas.clear_with_capacity();
     m_element_arrivals.clear_with_capacity();
     m_arrival_custom_state_atoms.clear_with_capacity();
