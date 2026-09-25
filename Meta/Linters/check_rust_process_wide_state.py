@@ -165,6 +165,7 @@ RENDER_STAGE_ALLOWED = {
             "stage_thread.rs:STAGE_HOLD",
             "stage_thread.rs:SUBMITTED",
             "stage_thread.rs:RUNNING_JOIN_WORK",
+            "stage_thread.rs:STYLE_ENGINE_ENTRANCES_ONLY_WAIT",
             "stage_thread.rs:FORCED_JOIN_SITES",
             "layout/frame_retirement.rs:HOLDS",
             "layout/frame_retirement.rs:COUNTERS",
