@@ -209,8 +209,8 @@ interface Internals {
     [ImplementedAs=join_counters_object] object getJoinCounters();
     // LIBWEB_RENDER_CLOCK_FRAMES: the clock lease ticks the main thread adopted that installed a sample.
     unsigned long long clockTicksPresented();
-    // Whether rendering updates tick clock leases: LIBWEB_RENDER_CLOCK_FRAMES is set, and the stage thread runs the
-    // clock stage beside the main thread.
+    // Whether rendering updates tick clock leases: clock frames are on (unless LIBWEB_RENDER_CLOCK_FRAMES=0), and the
+    // stage thread runs the clock stage beside the main thread.
     boolean clockFramesEnabled();
     // LIBWEB_RENDER_CLOCK_FRAMES: the display ticks the render clock handed the stage thread, without the main thread.
     unsigned long long clockTicksReceived();
