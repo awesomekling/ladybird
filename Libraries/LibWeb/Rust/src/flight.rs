@@ -101,6 +101,7 @@ pub(crate) struct Flight {
     style: Option<StylePassJob>,
     layout: Option<LayoutPassJob>,
     paint: Option<crate::painting::ffi::FlightPaintSeal>,
+    releases_style_engine: crate::stage_thread::FlightReleasesStyleEngine,
 }
 
 /// What a flight's stages left for the main thread, besides where it ended.
@@ -123,6 +124,7 @@ impl Flight {
             style: Some(style),
             layout: None,
             paint: None,
+            releases_style_engine: Default::default(),
         }
     }
 
@@ -135,6 +137,7 @@ impl Flight {
             style: None,
             layout: Some(layout),
             paint: crate::painting::ffi::take_sealed_flight_paint(arena),
+            releases_style_engine: Default::default(),
         }
     }
 
@@ -182,6 +185,8 @@ impl Flight {
                         .take()
                         .expect("a flight that begins with layout has its pass");
                     let may_be_painted = layout.run();
+                    // What the flight runs after its layout reads nothing of the style engine.
+                    self.releases_style_engine.release();
                     reached = FfiFlightStage::Rounds;
                     next = FfiFlightStage::PaintPrep;
                     if self.paint.is_none() {
@@ -271,12 +276,14 @@ pub(crate) unsafe fn submit(arena: *mut c_void, flight: Flight) {
     let outcome_of_stage = outcome.clone();
     let reach = flight.reach();
     let stage_holds = flight.stage_holds();
+    let releases_style_engine = flight.releases_style_engine.clone();
     let take_back = flight.take_back();
     // SAFETY: Guaranteed by the caller.
     unsafe {
         crate::stage_thread::submit_flight(
             reach,
             stage_holds,
+            &releases_style_engine,
             arena,
             move || {
                 let ran = flight.run();

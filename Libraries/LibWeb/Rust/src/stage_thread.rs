@@ -305,6 +305,9 @@ struct SubmittedStage {
     // The style engine the stage reads and writes while it runs, as the handle the main thread
     // knows it by, or 0 for a stage that never reaches one.
     style_engine: usize,
+    // For a flight, set once it is done with the style engine: the stages after its layout reach
+    // none, as a recording does (see [`FlightReleasesStyleEngine`]).
+    style_engine_released: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     from_stage: Receiver<StageOutcome>,
     outcome: Option<StageOutcome>,
     // What the main thread runs once it has taken the stage back, before anything else reaches
@@ -327,6 +330,23 @@ impl SubmittedStage {
         if let Some(recall) = self.recall.take() {
             recall();
         }
+    }
+
+    /// Whether the stage reaches the style engine `engine` now: a flight stops reaching it once it
+    /// is done with it. What the stage wrote of the engine is then the calling thread's to see.
+    fn reaches_style_engine(&self, engine: usize) -> bool {
+        self.style_engine == engine && self.style_engine != 0 && !self.has_released_style_engine()
+    }
+
+    fn has_released_style_engine(&self) -> bool {
+        let released = self
+            .style_engine_released
+            .as_ref()
+            .is_some_and(|released| released.load(Ordering::Acquire));
+        if let Some(thread) = stage_thread().filter(|_| released) {
+            tsan::acquire(thread);
+        }
+        released
     }
 
     fn poll(&mut self) -> bool {
@@ -422,7 +442,7 @@ fn inputs_wait_for_take_back(label: &str) -> bool {
 /// main-thread path to it has to go through [`join_frame_in_flight`] first.
 pub(crate) unsafe fn submit_stage(label: &'static str, arena: *mut c_void, stage: impl FnOnce() + Send + 'static) {
     // SAFETY: Guaranteed by the caller.
-    unsafe { submit(label, label, vec![label], arena, stage, None) }
+    unsafe { submit(label, label, vec![label], None, arena, stage, None) }
 }
 
 /// Like [`submit_stage`], and has the main thread run `on_taken_back` once it has taken the stage
@@ -439,7 +459,34 @@ pub(crate) unsafe fn submit_stage_with_take_back(
     on_taken_back: impl FnOnce() + 'static,
 ) {
     // SAFETY: Guaranteed by the caller.
-    unsafe { submit(label, label, vec![label], arena, stage, Some(Box::new(on_taken_back))) }
+    unsafe {
+        submit(
+            label,
+            label,
+            vec![label],
+            None,
+            arena,
+            stage,
+            Some(Box::new(on_taken_back)),
+        );
+    }
+}
+
+/// How a flight tells the calling thread it is done with the style engine: once its layout has run,
+/// its stages reach the arena alone, as a recording does, and the calling thread's style engine
+/// entrances and writes go on beside it. What it hands the style engine meanwhile still waits for
+/// the flight to be taken back, as beside a layout pass.
+#[derive(Clone, Default)]
+pub(crate) struct FlightReleasesStyleEngine(std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+impl FlightReleasesStyleEngine {
+    /// On the stage thread, once the flight is done with the style engine.
+    pub(crate) fn release(&self) {
+        if let Some(thread) = stage_thread() {
+            tsan::release(thread);
+        }
+        self.0.store(true, Ordering::Release);
+    }
 }
 
 /// The label of a flight: one stage run that runs the stages of a rendering update one after
@@ -462,6 +509,7 @@ pub(crate) fn submits_flight() -> bool {
 pub(crate) unsafe fn submit_flight(
     reach: &'static str,
     stage_holds: &[&'static str],
+    releases_style_engine: &FlightReleasesStyleEngine,
     arena: *mut c_void,
     stage: impl FnOnce() + Send + 'static,
     on_taken_back: impl FnOnce() + 'static,
@@ -475,6 +523,7 @@ pub(crate) unsafe fn submit_flight(
             FLIGHT_STAGE,
             reach,
             hold_labels,
+            Some(releases_style_engine.0.clone()),
             arena,
             stage,
             Some(Box::new(on_taken_back)),
@@ -489,6 +538,7 @@ unsafe fn submit(
     label: &'static str,
     role: &'static str,
     hold_labels: Vec<&'static str>,
+    style_engine_released: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     arena: *mut c_void,
     stage: impl FnOnce() + Send + 'static,
     on_taken_back: Option<Box<dyn FnOnce()>>,
@@ -541,6 +591,7 @@ unsafe fn submit(
             arena: arena as usize,
             owns_arena: role != "style",
             style_engine: style_engine_of_stage(role, arena),
+            style_engine_released,
             from_stage,
             outcome: None,
             on_taken_back,
@@ -645,6 +696,7 @@ pub(crate) unsafe fn lend_arena(
             owns_arena: true,
             // SAFETY: Guaranteed by the caller; the main thread still owns the arena.
             style_engine: unsafe { &*arena.cast::<crate::layout::LayoutNodeArena>() }.style_engine_handle() as usize,
+            style_engine_released: None,
             from_stage,
             outcome: None,
             on_taken_back: Some(Box::new(on_taken_back)),
@@ -718,6 +770,7 @@ pub unsafe extern "C" fn rust_stage_thread_submit_presentation(
             PRESENTATION_STAGE,
             PRESENTATION_STAGE,
             vec![PRESENTATION_STAGE],
+            None,
             arena,
             move || {
                 let context = context.into_inner();
@@ -1269,7 +1322,7 @@ pub(crate) fn join_frame_reaching_style_engine_at(arena: *mut c_void, file: &'st
     let reaches_style_engine = SUBMITTED.with_borrow(|submitted| {
         submitted
             .iter()
-            .any(|stage| stage.arena == arena as usize && stage.style_engine != 0)
+            .any(|stage| stage.arena == arena as usize && stage.reaches_style_engine(stage.style_engine))
     });
     if reaches_style_engine {
         join_document_frame_in_flight_at(arena, file, line, column);
@@ -1352,7 +1405,7 @@ pub(crate) fn join_frame_for_style_engine_entrance(engine: *const c_void, entry:
         wait_for_submitted_stages_reaching(engine);
         return;
     }
-    join_frame_in_flight_for_stage(|stage| stage.style_engine == engine as usize, entry, 0, 0);
+    join_frame_in_flight_for_stage(|stage| stage.reaches_style_engine(engine as usize), entry, 0, 0);
 }
 
 /// Waits for every stage of the calling thread's frame in flight that reaches the style engine
@@ -1361,7 +1414,7 @@ fn wait_for_submitted_stages_reaching(engine: *const c_void) {
     let waited = SUBMITTED.with(|submitted| {
         let mut waited = false;
         for stage in submitted.borrow_mut().iter_mut() {
-            if stage.style_engine == engine as usize {
+            if stage.reaches_style_engine(engine as usize) {
                 stage.wait_until_finished();
                 waited = true;
             }
@@ -1803,6 +1856,7 @@ mod tests {
                     label,
                     role: label,
                     hold_labels: vec![label],
+                    style_engine_released: None,
                     arena,
                     owns_arena: label != "style",
                     style_engine,
