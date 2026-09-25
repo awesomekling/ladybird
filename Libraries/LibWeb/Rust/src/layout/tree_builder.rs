@@ -2930,8 +2930,8 @@ struct TreeBuildStageOutput {
 
 /// What a finished layout tree build walk owes the host, and what it found out for the document.
 /// The walk's frame pays it on the document thread in its next join, since no host code runs in
-/// between and the layout pass that may follow the build reads only the arena, once the shells
-/// the build owes are made.
+/// between: the layout pass that may follow the build reads only the arena, and makes any shell it
+/// reads on demand.
 #[must_use]
 pub(crate) struct TreeBuildHostHalf {
     reports: Vec<crate::layout::commit::FfiCommitMessage>,
@@ -2956,7 +2956,9 @@ impl TreeBuildHostHalf {
     /// lost, the host-owned objects of the rows it freed, and the style changes of the shells of
     /// the boxes it kept. Then what the build found out goes to the document, in the order the
     /// build found it out; nothing can clear a DOM update flag again once the walk is complete.
-    /// Last come the shells the build owes, if no pass has followed it to make them first.
+    /// Last come the shells of the new rows whose making tells the document something, unless a
+    /// reader has made them already. Nothing a layout pass reads waits for them: the build stamps
+    /// the rows with the scroll offsets they hold and whether an empty text keeps its line box.
     pub(crate) fn pay(self, main_thread: &crate::stage::MainThread, arena: &LayoutNodeArena) {
         // A layout pass that ran since may have queued handbacks its commit pays; they stay queued.
         arena.pay_handbacks_ahead_of_queued(main_thread, self.handbacks);
@@ -2967,16 +2969,9 @@ impl TreeBuildHostHalf {
                 crate::layout::LayoutHost::of(main_thread).deliver_commit_messages(main_thread, &self.reports);
             };
         }
-        make_shells_owed_to_host(main_thread, arena);
-    }
-}
-
-/// Makes the shells of the new rows whose making tells the document something a layout pass
-/// reads, such as the scroll offset a scroll container holds or whether an empty text keeps its
-/// line box, unless a reader has made them already.
-pub(crate) fn make_shells_owed_to_host(main_thread: &crate::stage::MainThread, arena: &LayoutNodeArena) {
-    for row in arena.take_shells_owed_to_host() {
-        arena.node_shell(main_thread, row);
+        for row in arena.take_shells_owed_to_host() {
+            arena.node_shell(main_thread, row);
+        }
     }
 }
 

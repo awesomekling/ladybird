@@ -35,6 +35,7 @@
 #include <LibWeb/DOM/Text.h>
 #include <LibWeb/Dump.h>
 #include <LibWeb/HTML/HTMLInputElement.h>
+#include <LibWeb/HTML/LocalNavigable.h>
 #include <LibWeb/Layout/Box.h>
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/Layout/NodeArena.h>
@@ -253,11 +254,14 @@ u32 prepare_layout_tree_build(DOM::Document& document)
 {
     auto* arena = document.layout_node_arena().handle();
     // The viewport's style is the document's, which the style computer makes on demand rather than
-    // publishing, so a build that may build the viewport is handed it before it starts.
+    // publishing, so a build that may build the viewport is handed it before it starts, with the
+    // navigable's scroll offset the viewport's row holds.
     if (RustFFI::layout_arena_tree_build_may_create_viewport(arena, document.style_node_id().value())) {
         auto& style_computer = document.style_computer();
         auto document_style = style_computer.intern_anonymous_layout_style(*style_computer.create_document_style());
-        RustFFI::layout_arena_publish_document_style_record(arena, document_style.value());
+        auto navigable = document.navigable();
+        auto viewport_scroll_offset = navigable ? navigable->viewport_scroll_offset() : CSSPixelPoint {};
+        RustFFI::layout_arena_publish_document_style_record(arena, document_style.value(), viewport_scroll_offset);
     }
     return document.style_node_id().value();
 }
