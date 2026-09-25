@@ -4316,10 +4316,18 @@ impl TreeBuilderHost {
     /// `content-visibility: auto`, a scroll snap type, or a box that may be the scroll container
     /// snapping happens in, which the root element's box stands in for the viewport as.
     fn owe_styled_shell(&self, slot: NodeSlotId, element: Option<StyleNodeID>) {
+        let has_auto_content_visibility = self
+            .style(slot)
+            .is_some_and(|style| style.content_visibility() == crate::css::css_enums::content_visibility::AUTO);
+        // The commit collects the boxes with `content-visibility: auto` once a build has made one,
+        // which the shell tells the document of only once it is paid.
+        if has_auto_content_visibility {
+            self.arena().note_built_box_with_auto_content_visibility();
+        }
         let owes_shell = self.arena().node_flags(slot) & NodeFlag::IsDocumentElement as u32 != 0
+            || has_auto_content_visibility
             || self.style(slot).is_none_or(|style| {
-                style.content_visibility() == crate::css::css_enums::content_visibility::AUTO
-                    || style.misc_reset().scroll_snap_strictness != crate::css::css_enums::scroll_snap_strictness::NONE
+                style.misc_reset().scroll_snap_strictness != crate::css::css_enums::scroll_snap_strictness::NONE
                     || node_facts::kind_and_style_make_scroll_container(self.data(slot).kind.get(), Some(style))
             })
             || element.is_some_and(|element| {

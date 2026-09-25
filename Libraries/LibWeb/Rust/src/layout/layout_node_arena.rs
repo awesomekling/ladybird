@@ -912,6 +912,8 @@ pub(crate) struct LayoutNodeArena {
     bound_viewport_row: Cell<NodeSlotId>,
     /// The style node the document's viewport box was last built for.
     document_style_node: Cell<Option<StyleNodeID>>,
+    /// Whether a tree build has ever made a box with `content-visibility: auto`.
+    has_built_box_with_auto_content_visibility: Cell<bool>,
     /// The style engine whose mirror the arena's rows are built from, or null before the document
     /// registers it.
     style_engine: Cell<StyleEngineLink>,
@@ -1074,6 +1076,7 @@ impl LayoutNodeArena {
             anchor_name_elements: RefCell::new(HashMap::default()),
             bound_viewport_row: Cell::new(NodeSlotId::INVALID),
             document_style_node: Cell::new(None),
+            has_built_box_with_auto_content_visibility: Cell::new(false),
             style_engine: Cell::new(StyleEngineLink(std::ptr::null_mut())),
             host_hears_box_presence: Cell::new(false),
             host_handbacks: RefCell::new(HostHandbacks::default()),
@@ -1604,6 +1607,14 @@ impl LayoutNodeArena {
 
     pub(crate) fn set_document_style_node(&self, document_style_node: Option<StyleNodeID>) {
         self.document_style_node.set(document_style_node);
+    }
+
+    pub(crate) fn note_built_box_with_auto_content_visibility(&self) {
+        self.has_built_box_with_auto_content_visibility.set(true);
+    }
+
+    pub(crate) fn has_built_box_with_auto_content_visibility(&self) -> bool {
+        self.has_built_box_with_auto_content_visibility.get()
     }
 
     /// Everything the host did as it configured a pseudo-element's principal box: what the box is

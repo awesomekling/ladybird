@@ -812,7 +812,10 @@ impl LayoutFrame {
         unsafe { super::text_queries::layout_arena_invalidate_searchable_text(self.inputs.arena_handle) };
         self.messages.layout_committed = true;
         self.messages.layout_tree_changed |= layout_tree_changed;
-        if layout_tree_changed && facts.may_have_content_visibility_auto_style {
+        if layout_tree_changed
+            && (facts.may_have_content_visibility_auto_style
+                || self.arena().has_built_box_with_auto_content_visibility())
+        {
             let mut boxes = Vec::new();
             let arena = self.arena();
             crate::painting::content_visibility::for_each_box_with_auto_content_visibility(
