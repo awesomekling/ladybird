@@ -602,7 +602,7 @@ void InvalidationJournal::drain()
                 if (changed && Painting::has_committed_box(*layout_node))
                     Painting::apply_paint_cache_invalidation(*layout_node, Painting::PaintCacheInvalidation::PaintAndHitTest, Painting::PaintCacheInvalidationStage::JournalDrain);
             }
-            if (entry.has_form_control_paint_facts) {
+            if (entry.has_form_control_paint_facts && (layout_node->kind() == Layout::RustFFI::NodeKind::CheckBox || layout_node->kind() == Layout::RustFFI::NodeKind::RadioButton)) {
                 Layout::RustFFI::FfiFormControlPaintFacts facts {
                     .enabled = entry.form_control_enabled,
                     .checked = entry.form_control_checked,
