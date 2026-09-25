@@ -23,6 +23,7 @@
 #include <LibWeb/HTML/Parser/HTMLParser.h>
 #include <LibWeb/HTML/RadioButtonGroupRegistry.h>
 #include <LibWeb/HTML/XMLSerializer.h>
+#include <LibWeb/Layout/LayoutRustFFI.h>
 #include <LibWeb/TrustedTypes/RequireTrustedTypesForDirective.h>
 #include <LibWeb/TrustedTypes/TrustedTypePolicy.h>
 
@@ -47,7 +48,12 @@ ShadowRoot::ShadowRoot(Document& document, Element& host, ShadowRootMode mode)
 void ShadowRoot::finalize()
 {
     Base::finalize();
+    // The unregistration writes the style engine, which a frame in flight may be reading. A finalizer runs inside the
+    // garbage collector, where the frame's consume (which runs script and allocates) must not run, so it only waits
+    // for the frame's stages to finish and leaves the consume to the event loop.
+    Layout::RustFFI::rust_stage_thread_begin_style_engine_entrances_that_only_wait();
     document().unregister_shadow_root({}, *this);
+    Layout::RustFFI::rust_stage_thread_end_style_engine_entrances_that_only_wait();
 }
 
 void ShadowRoot::adopted_from(Document& old_document)
