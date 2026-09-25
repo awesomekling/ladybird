@@ -58,9 +58,11 @@ pub enum FfiFlightEndReason {
     /// Paying the layout round's host halves at the take-back left style or layout work, so its
     /// recording was dropped.
     HostLeftWork,
+    /// A forced join waited for it, and it stopped at the end of the stage it ran.
+    Preempted,
 }
 
-const FLIGHT_END_REASON_COUNT: usize = FfiFlightEndReason::HostLeftWork as usize + 1;
+const FLIGHT_END_REASON_COUNT: usize = FfiFlightEndReason::Preempted as usize + 1;
 
 impl From<crate::painting::ffi::FlightPaintStop> for FfiFlightEndReason {
     fn from(stop: crate::painting::ffi::FlightPaintStop) -> Self {
@@ -191,6 +193,8 @@ impl Flight {
                     next = FfiFlightStage::PaintPrep;
                     if self.paint.is_none() {
                         Some(FfiFlightEndReason::PaintNotSealed)
+                    } else if crate::stage_thread::flight_is_preempted() {
+                        Some(FfiFlightEndReason::Preempted)
                     } else if !may_be_painted {
                         Some(FfiFlightEndReason::RoundLeftWork)
                     } else {

@@ -1756,7 +1756,7 @@ GC::Ref<JS::Object> Internals::get_rendering_scheduler_counters() const
     auto rendering_updates_by_frames_submitted = JS::Array::create_from<u64>(realm, counters.rendering_updates_by_frames_submitted.span(), [](u64 updates) { return JS::Value(updates); });
     object->define_direct_property("renderingUpdatesByFramesSubmitted"_utf16_fly_string, rendering_updates_by_frames_submitted, JS::default_attributes);
     // Flights by why they ended, and by the last stage they ran.
-    static constexpr Array flight_end_reasons { "done"sv, "stageRunsOnMain"sv, "paintNotSealed"sv, "roundLeftWork"sv, "svgPaintResources"sv, "vectorImages"sv, "noViewport"sv, "hostLeftWork"sv };
+    static constexpr Array flight_end_reasons { "done"sv, "stageRunsOnMain"sv, "paintNotSealed"sv, "roundLeftWork"sv, "svgPaintResources"sv, "vectorImages"sv, "noViewport"sv, "hostLeftWork"sv, "preempted"sv };
     static constexpr Array flight_stages { "style"sv, "styleRenderHalf"sv, "rounds"sv, "paintPrep"sv, "record"sv, "present"sv };
     auto flight_ends = JS::Object::create(realm, nullptr);
     for (size_t reason = 0; reason < flight_end_reasons.size(); ++reason) {
