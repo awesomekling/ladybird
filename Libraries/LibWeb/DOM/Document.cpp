@@ -2860,7 +2860,7 @@ bool Document::flight_paint_is_blocked() const
     return false;
 }
 
-void Document::take_in_flight_paint()
+void Document::take_in_flight_paint(bool handed_accumulated_visual_contexts_update)
 {
     auto& state = paint_state();
     auto paint = Layout::RustFFI::rust_flight_take_paint(&state.scroll_state_snapshot_for_flight(), [](void* sink, Gfx::FloatPoint const* offsets, size_t count) {
@@ -2868,6 +2868,8 @@ void Document::take_in_flight_paint()
     });
     if (paint.prepared)
         state.did_update_accumulated_visual_contexts_in_flight(paint.visual_context_update);
+    else if (handed_accumulated_visual_contexts_update)
+        set_needs_accumulated_visual_contexts_update(true);
 }
 
 void Document::update_paint_and_hit_testing_properties_if_needed()
