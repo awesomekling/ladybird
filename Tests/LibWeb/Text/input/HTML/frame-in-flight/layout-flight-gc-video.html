@@ -18,12 +18,18 @@
             container.appendChild(video);
             videos.push(video);
         }, frame => {
+            const joinsBefore = internals.forcedJoinCount("layout");
             videos = null;
             internals.gc();
-            return { ...frame, stillInFlight: internals.frameSchedulerState() === "in-flight" };
+            return {
+                ...frame,
+                stillInFlight: internals.frameSchedulerState() === "in-flight",
+                reachedPass: internals.forcedJoinCount("layout") !== joinsBefore,
+            };
         });
         println(`held as armed: ${layoutHeldAsArmed(frame, "before-run")}`);
         println(`the collection left the pass in flight: ${!frame.heldAt || frame.stillInFlight}`);
+        println(`the collection did not reach the pass: ${!frame.reachedPass}`);
         await twoFrames();
         println(`container laid out: ${container.offsetHeight > 0}`);
         done();

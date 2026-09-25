@@ -169,6 +169,7 @@ RENDER_STAGE_ALLOWED = {
             "stage_thread.rs:FORCED_JOIN_SITES",
             "stage_thread.rs:STYLE_PASS_FORCED_JOINS",
             "stage_thread.rs:FORCED_JOINS",
+            "stage_thread.rs:SITES_REACHED_FROM_COLLECTION",
             "layout/frame_retirement.rs:HOLDS",
             "layout/frame_retirement.rs:COUNTERS",
             "stage_thread.rs:NEXT_SUBMITTED_RUN",
