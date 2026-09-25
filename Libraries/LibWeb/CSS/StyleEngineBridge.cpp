@@ -47,6 +47,16 @@ void StyleEngine::publish_input(Function<void(StyleInputScope const&)>&& input)
     input(scope);
 }
 
+void StyleEngine::publish_input_or_apply_in_drain(Function<void(StyleInputScope const&)>&& input)
+{
+    if (m_effect_drain_depth == 0) {
+        publish_input(move(input));
+        return;
+    }
+    StyleInputScope const scope { *this };
+    input(scope);
+}
+
 void StyleEngine::begin_holding_input_recorded_beside_pass()
 {
     VERIFY(!m_holds_input_recorded_beside_pass);

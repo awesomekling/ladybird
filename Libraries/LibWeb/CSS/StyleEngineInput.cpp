@@ -95,6 +95,16 @@ static void publish_element_input(StyleEngine& style_engine, DOM::Element& eleme
     });
 }
 
+// Publish an input about the element the way publish_element_input() does, except that inside a drain it goes to
+// the engine at once: the drain records it for the animations it installs, and its later waves sample them.
+static void publish_element_input_or_apply_in_drain(StyleEngine& style_engine, DOM::Element& element, Function<void(StyleInputScope const&, StyleNodeID)>&& input)
+{
+    style_engine.publish_input_or_apply_in_drain([element = GC::Root<DOM::Element> { element }, input = move(input)](StyleInputScope const& scope) {
+        if (element->style_node_id() != no_style_node)
+            input(scope, element->style_node_id());
+    });
+}
+
 // A relation is only nameable if the element on its other end already has an identity. Naming a
 // node the engine has never seen would be worse than naming none: it would assert on a relation
 // column that was never allocated.
@@ -1404,7 +1414,9 @@ void record_element_css_defined_animations(DOM::Element& element, u8 slot, Reado
         for (size_t index = 0; index < view.length_in_code_units(); ++index)
             units.unchecked_append(static_cast<u16>(view.code_unit_at(index)));
     }
-    style_engine->set_element_css_defined_animations(element.style_node_id(), slot, lengths, units, definition_words);
+    publish_element_input_or_apply_in_drain(*style_engine, element, [slot, lengths = move(lengths), units = move(units), definition_words = Vector<u64> { definition_words }](StyleInputScope const& input, StyleNodeID node) {
+        input.engine().set_element_css_defined_animations(node, slot, lengths, units, definition_words);
+    });
 }
 
 // The timing of the animations the element holds a keyframe effect for, in one of its per-pseudo-element
@@ -1418,7 +1430,9 @@ void record_element_animation_timing_rows(DOM::Element& element, u8 slot, Readon
     if (!style_engine || element.style_node_id() == no_style_node)
         return;
 
-    style_engine->set_element_animation_timing_rows(element.style_node_id(), slot, words, times, linear_points);
+    publish_element_input_or_apply_in_drain(*style_engine, element, [slot, words = Vector<u32> { words }, times = Vector<u64> { times }, linear_points = Vector<u64> { linear_points }](StyleInputScope const& input, StyleNodeID node) {
+        input.engine().set_element_animation_timing_rows(node, slot, words, times, linear_points);
+    });
 }
 
 // Mirrored by `effect_flag` in `Rust/src/css/style/animations.rs`; keep the two in step.
@@ -1642,6 +1656,8 @@ void record_element_animation_effect_descriptions(DOM::Element& element, u8 slot
     Vector<StyleEngineFFI::FfiPublishedAnimationCustomDeclaration> ffi_custom_declarations;
     Vector<StyleEngineFFI::FfiPublishedLinearEasingPoint> ffi_points;
     Vector<u8> base_url_bytes;
+    // The descriptions point into the keyframe sets' values, so the sets stay alive until they are published.
+    Vector<NonnullRefPtr<Animations::KeyframeEffect::KeyFrameSet const>> key_frame_sets;
 
     for (auto const& effect : effects) {
         auto animation = effect->associated_animation();
@@ -1661,18 +1677,21 @@ void record_element_animation_effect_descriptions(DOM::Element& element, u8 slot
                 : EasingFunction::linear();
             row.flags |= describe_keyframe_set(*key_frame_set, default_easing, effect->composite(),
                 { ffi_keyframes, ffi_declarations, ffi_custom_declarations, ffi_points, base_url_bytes }, row);
+            key_frame_sets.append(*key_frame_set);
         }
         ffi_effects.append(row);
     }
 
-    StyleEngineFFI::style_engine_set_element_animation_effect_descriptions(
-        style_engine->rust_handle(), element.style_node_id().value(), slot,
-        ffi_effects.data(), ffi_effects.size(),
-        ffi_keyframes.data(), ffi_keyframes.size(),
-        ffi_declarations.data(), ffi_declarations.size(),
-        ffi_custom_declarations.data(), ffi_custom_declarations.size(),
-        ffi_points.data(), ffi_points.size(),
-        base_url_bytes.data(), base_url_bytes.size());
+    publish_element_input_or_apply_in_drain(*style_engine, element, [slot, ffi_effects = move(ffi_effects), ffi_keyframes = move(ffi_keyframes), ffi_declarations = move(ffi_declarations), ffi_custom_declarations = move(ffi_custom_declarations), ffi_points = move(ffi_points), base_url_bytes = move(base_url_bytes), key_frame_sets = move(key_frame_sets)](StyleInputScope const& input, StyleNodeID node) {
+        StyleEngineFFI::style_engine_set_element_animation_effect_descriptions(
+            input.engine().rust_handle(), node.value(), slot,
+            ffi_effects.data(), ffi_effects.size(),
+            ffi_keyframes.data(), ffi_keyframes.size(),
+            ffi_declarations.data(), ffi_declarations.size(),
+            ffi_custom_declarations.data(), ffi_custom_declarations.size(),
+            ffi_points.data(), ffi_points.size(),
+            base_url_bytes.data(), base_url_bytes.size());
+    });
 }
 
 // The current time each of the document's animation timelines was sampled at.
@@ -1685,7 +1704,9 @@ void record_animation_timeline_samples(DOM::Document& document, ReadonlySpan<u32
     if (!style_engine)
         return;
 
-    style_engine->set_animation_timeline_samples(identities, words, times);
+    style_engine->publish_input_or_apply_in_drain([identities = Vector<u32> { identities }, words = Vector<u32> { words }, times = Vector<u64> { times }](StyleInputScope const& input) {
+        input.engine().set_animation_timeline_samples(identities, words, times);
+    });
 }
 
 // The custom properties an element declares or references.
