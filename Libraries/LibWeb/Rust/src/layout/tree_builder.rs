@@ -85,16 +85,23 @@ pub(crate) struct TreeBuilderContext {
 
 impl TreeBuilderState {
     /// Holds the record the element's box is built from for the rest of the build, so that a
-    /// restyle later in the same build cannot take it away from a box that names it.
-    fn pin_style_record_for_build(&mut self, host: &DomTreeBuilderHost, element: StyleNodeID) {
-        let record = host
+    /// restyle later in the same build cannot take it away from a box that names it. Whether the
+    /// element has a record to hold.
+    fn pin_style_record_for_build(&mut self, host: &DomTreeBuilderHost, element: StyleNodeID) -> bool {
+        let Some((record, _)) = host
             .layout()
             .arena()
             .with_style_store(|engine| engine.element_published_style_record(element))
-            .expect("an element the walk prepares has published its style")
-            .0;
+        else {
+            // The style update before the build styles every element the walk reaches, so this
+            // is a bug in the style pass. Rather than lose the tab to it, the element gets no box
+            // in this build: the style that reaches it later asks for its box again.
+            debug_assert!(false, "an element the walk prepares has published its style");
+            return false;
+        };
         host.layout().arena().pin_style_record_for_build(record);
         self.pinned_style_records.push(record);
+        true
     }
 
     pub(crate) fn current_parent(&self) -> LayoutNode {
@@ -2426,7 +2433,9 @@ fn construct_principal_layout_node(
         }
         // The record the box is built from is held for the whole build, taken after the host has
         // had its chance to compute a style the element arrived here without.
-        update.state.pin_style_record_for_build(host, element_identity);
+        if !update.state.pin_style_record_for_build(host, element_identity) {
+            return PrincipalBoxConstruction::none();
+        }
         let display = host.published_display(update.style_node);
         let generation = principal_box_generation_decision(
             true,

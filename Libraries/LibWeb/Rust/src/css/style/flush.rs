@@ -2217,7 +2217,13 @@ impl StyleEngineState {
             }
             let mut ancestor = self.tree.flat_tree_parent(pass.published_nodes[index]);
             while let Some(current) = ancestor {
-                if row_positions.contains_key(&current) {
+                // A row still to come comes before this one, and the walk up from it placed what
+                // is above it. A row the pass already settled is above this one but places
+                // nothing: a child above it still has to join before this row.
+                if row_positions
+                    .get(&current)
+                    .is_some_and(|&position| position >= pass.next_index)
+                {
                     break;
                 }
                 if unplaced.remove(&current) {
