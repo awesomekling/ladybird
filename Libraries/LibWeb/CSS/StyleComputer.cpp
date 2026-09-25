@@ -1080,6 +1080,14 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_inst
     if (auto parent = abstract_element.element_to_inherit_style_from(); parent.has_value()) {
         if (auto parent_style = parent->computed_style(); parent_style && parent_style->in_display_none_subtree())
             return {};
+        // A display:none change clears the styles of the subtree below it, while an SVG element
+        // there can still install a record. The record the engine assigned the parent says whether
+        // it is hidden, as the pass that decided the step read it.
+        if (!parent->computed_style()) {
+            auto parent_record = StyleEngineFFI::style_engine_assigned_style_record(scope.engine().rust_handle(), parent->element().style_node_id().value(), pseudo_element_to_ffi(parent->pseudo_element()));
+            if (parent_record != 0 && has_flag(scope.engine().style_record_dependency_flags(StyleRecordID { parent_record }), StyleRecordDependencyFlag::InDisplayNoneSubtree))
+                return {};
+        }
     }
     // OPTIMIZATION: The two lists `start_needed_transitions` decides over, plus this element's own
     //               provisional states. With none of them there is nothing to decide, and the

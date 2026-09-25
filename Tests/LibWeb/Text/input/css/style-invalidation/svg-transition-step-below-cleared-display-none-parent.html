@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<style>
+    .arrow { transition: transform 0.7s; }
+    .arrow.faded { opacity: 0; }
+    .gone { display: none; }
+    a { color: var(--link-color, black); }
+</style>
+<div id="accordion" style="--tone: a"><a href="#"><svg id="arrow" class="arrow" width="32" height="32"></svg></a></div>
+<script src="../../include.js"></script>
+<script>
+    test(() => {
+        document.body.offsetWidth;
+
+        // #accordion becomes display:none, which clears the host styles below it, and moves its
+        // custom-property environment, which republishes the SVG element's record but recomputes
+        // the link's. The SVG element installs its own row over a link with no style, and has to
+        // apply the transition step the pass decided under the hidden link: none.
+        accordion.style.setProperty("--tone", "b");
+        accordion.classList.add("gone");
+        arrow.classList.add("faded");
+        document.body.offsetWidth;
+
+        println(`opacity: ${getComputedStyle(arrow).opacity}`);
+        println(`transitions: ${arrow.getAnimations().length}`);
+    });
+</script>
