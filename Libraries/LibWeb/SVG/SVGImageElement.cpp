@@ -100,10 +100,12 @@ void SVGImageElement::fetch_the_document(URL::URL const& url)
     m_load_event_delayer.emplace(document());
     unregister_with_decoded_image_data_if_needed();
     m_resource_request = HTML::SharedResourceRequest::get_or_create(document(), url);
+    CSS::record_element_replaced_content_input(*this);
     m_resource_request->add_callbacks(
         [this, resource_request = GC::Root { m_resource_request }] {
             m_load_event_delayer.clear();
             register_with_decoded_image_data_if_needed();
+            CSS::record_element_replaced_content_input(*this);
             image_provider_contents_changed();
             set_needs_layout_update(DOM::SetNeedsLayoutReason::SVGImageElementFetchTheDocument);
 

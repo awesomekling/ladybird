@@ -47,6 +47,7 @@
 #include <LibWeb/SVG/SVGClipPathElement.h>
 #include <LibWeb/SVG/SVGElement.h>
 #include <LibWeb/SVG/SVGGraphicsElement.h>
+#include <LibWeb/SVG/SVGImageElement.h>
 #include <LibWeb/SVG/SVGMaskElement.h>
 #include <LibWeb/SVG/SVGPatternElement.h>
 #include <LibWeb/SVG/SVGSwitchElement.h>
@@ -865,6 +866,13 @@ void record_element_replaced_content_input(DOM::Element& element)
                 natural_size.aspect_ratio = size->width() / size->height();
         }
         style_engine->record_replaced_content_input(element.style_node_id(), natural_size_input(natural_size));
+        return;
+    }
+    if (auto const* image = as_if<SVG::SVGImageElement>(element)) {
+        auto input = natural_size_input({ image->intrinsic_width(), image->intrinsic_height(), image->intrinsic_aspect_ratio() });
+        if (image->decoded_image_data())
+            input.kind = StyleEngineFFI::FfiReplacedContentInputKind::DecodedSvgImage;
+        style_engine->record_replaced_content_input(element.style_node_id(), input);
         return;
     }
     if (auto const* canvas = as_if<HTML::HTMLCanvasElement>(element)) {

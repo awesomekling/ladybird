@@ -5,7 +5,7 @@
  */
 
 use super::*;
-use crate::css::style::tree::ReplacedContentInput;
+use crate::css::style::tree::{NaturalSize, ReplacedContentInput};
 
 pub(crate) fn node_may_have_replaced_content_facts(data: &NodeData) -> bool {
     kind_is_replaced_box(data.kind.get())
@@ -37,10 +37,6 @@ pub(crate) fn node_may_have_replaced_content_facts_including_size_containment(da
 /// replaced content, see [`derived_replaced_content_facts`].
 pub(crate) fn node_replaced_content_facts_need_host(data: &NodeData) -> bool {
     let kind = data.kind.get();
-    // An SVG <image> reports its image's sizes whether or not it is size-contained.
-    if kind == NodeKind::SVGImageBox {
-        return true;
-    }
     if node_style_view(data).is_some_and(|style| style_has_size_containment(style)) {
         return false;
     }
@@ -62,27 +58,33 @@ fn style_has_size_containment(style: ComputedValuesView<'_>) -> bool {
 }
 
 /// The replaced-content facts of a node whose facts need no host: a size-contained box, a
-/// checkbox, radio button, slider, textarea, text input, canvas or video, or a kind with no
-/// natural size.
+/// checkbox, radio button, slider, textarea, text input, canvas, video or SVG image, or a kind
+/// with no natural size.
 pub(crate) fn derived_replaced_content_facts(data: &NodeData, input: ReplacedContentInput) -> FfiReplacedContentFacts {
     debug_assert!(!node_replaced_content_facts_need_host(data));
     let mut facts = FfiReplacedContentFacts::default();
+    // An SVG <image> runs the default sizing algorithm over its own geometry, so it publishes the natural size exactly as
+    // its image reports it - absent, rather than zero, while nothing has decoded - together with the default object
+    // size that applies once something has. Size containment does not apply to it.
+    if data.kind.get() == NodeKind::SVGImageBox {
+        let (ReplacedContentInput::NaturalSize(natural_size) | ReplacedContentInput::DecodedSvgImage(natural_size)) =
+            input
+        else {
+            panic!("an SVG image publishes its natural size as it arrives");
+        };
+        set_auto_content_facts(&mut facts, natural_size_facts(natural_size));
+        if matches!(input, ReplacedContentInput::DecodedSvgImage(_)) {
+            facts.has_default_preferred_width = true;
+            facts.default_preferred_width = CssPixels::from_integer(300);
+            facts.has_default_preferred_height = true;
+            facts.default_preferred_height = CssPixels::from_integer(150);
+        }
+        return facts;
+    }
     let Some(style) = node_style_view(data) else {
         return facts;
     };
-    let auto_content_size = derived_auto_content_size(data, style, input);
-    if let Some(width) = auto_content_size.width {
-        facts.has_auto_content_width = true;
-        facts.auto_content_width = width;
-    }
-    if let Some(height) = auto_content_size.height {
-        facts.has_auto_content_height = true;
-        facts.auto_content_height = height;
-    }
-    if let Some((numerator, denominator)) = auto_content_size.aspect_ratio {
-        facts.auto_content_aspect_ratio_numerator = numerator;
-        facts.auto_content_aspect_ratio_denominator = denominator;
-    }
+    set_auto_content_facts(&mut facts, derived_auto_content_size(data, style, input));
     if style.appearance() == crate::css::css_enums::appearance::NONE
         && let ReplacedContentInput::Input {
             size,
@@ -113,6 +115,31 @@ impl AutoContentSize {
             height: Some(height),
             aspect_ratio: None,
         }
+    }
+}
+
+fn set_auto_content_facts(facts: &mut FfiReplacedContentFacts, auto_content_size: AutoContentSize) {
+    if let Some(width) = auto_content_size.width {
+        facts.has_auto_content_width = true;
+        facts.auto_content_width = width;
+    }
+    if let Some(height) = auto_content_size.height {
+        facts.has_auto_content_height = true;
+        facts.auto_content_height = height;
+    }
+    if let Some((numerator, denominator)) = auto_content_size.aspect_ratio {
+        facts.auto_content_aspect_ratio_numerator = numerator;
+        facts.auto_content_aspect_ratio_denominator = denominator;
+    }
+}
+
+fn natural_size_facts(natural_size: NaturalSize) -> AutoContentSize {
+    AutoContentSize {
+        width: natural_size.width.map(CssPixels::from_raw),
+        height: natural_size.height.map(CssPixels::from_raw),
+        aspect_ratio: natural_size
+            .aspect_ratio
+            .map(|(numerator, denominator)| (CssPixels::from_raw(numerator), CssPixels::from_raw(denominator))),
     }
 }
 
@@ -183,13 +210,7 @@ fn derived_auto_content_size(
             let ReplacedContentInput::NaturalSize(natural_size) = input else {
                 panic!("a video publishes its natural size as it arrives");
             };
-            AutoContentSize {
-                width: natural_size.width.map(CssPixels::from_raw),
-                height: natural_size.height.map(CssPixels::from_raw),
-                aspect_ratio: natural_size
-                    .aspect_ratio
-                    .map(|(numerator, denominator)| (CssPixels::from_raw(numerator), CssPixels::from_raw(denominator))),
-            }
+            natural_size_facts(natural_size)
         }
         _ => AutoContentSize::default(),
     }
