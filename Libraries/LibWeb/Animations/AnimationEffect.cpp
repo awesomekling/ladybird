@@ -878,7 +878,7 @@ void apply_published_animation_overlay(CSS::StyleDrainScope const& scope, DOM::A
         };
         if (!CSS::deferring_engine_pseudo_installation()) {
             target->document().style_computer().style_engine().set_sampled_composition_identity(target->style_node_id(), target->style_record_identity());
-            invalidation |= target->recompute_pseudo_element_styles();
+            invalidation |= target->recompute_pseudo_element_styles(scope);
         }
     }
 

@@ -1813,15 +1813,13 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
     return invalidation;
 }
 
-CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styles()
+CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styles(CSS::StyleDrainScope const& scope)
 {
     auto computed_values = this->computed_style();
     VERIFY(computed_values);
 
     bool did_change_custom_properties = false;
     record_element_reference_pseudo_element_inputs(*this);
-    // FIXME: An animation recomputes the pseudo-elements outside the drain.
-    auto const scope = CSS::StyleDrainScope::not_yet_drained(document().style_computer().style_engine());
     auto invalidation = recompute_pseudo_element_styles(scope, did_change_custom_properties, computed_values->display().is_list_item(), nullptr);
     publish_custom_property_names();
     if (!invalidation.is_none())
