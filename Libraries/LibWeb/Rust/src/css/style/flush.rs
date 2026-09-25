@@ -3869,6 +3869,7 @@ impl StyleEngineState {
         layout_arena: LentLayoutArena,
     ) -> bool {
         self.retained.engine_row_child_facts.clear();
+        self.derive_applied_style_reactions();
         if self.host.suspended_style_pass.is_some() {
             // A wave reads the facts its pass matched against. Once the tree, its features or
             // the rule program moved since, the rows the pass did not reach are owed to the
