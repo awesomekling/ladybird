@@ -182,7 +182,7 @@ impl StageThread {
     fn spawn() -> Self {
         let (jobs, incoming) = channel::<StageMessage>();
         let thread = std::thread::Builder::new()
-            .name("RenderStages".into())
+            .name("Rendering".into())
             .stack_size(STAGE_THREAD_STACK_SIZE)
             .spawn(move || {
                 if let Some(setup) = THREAD_SETUP.get() {
