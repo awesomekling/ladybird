@@ -77,6 +77,21 @@ pub(crate) struct AnimationBaseEnvironment {
     data: crate::css::host_shared::HostShared<std::ffi::c_void>,
 }
 
+impl AnimationBaseEnvironment {
+    pub(crate) fn environment(&self) -> u64 {
+        self.environment
+    }
+
+    /// One the engine resolved, which the host holds no object of its own for.
+    pub(crate) fn resolved_by_engine(environment: u64, store: *const std::ffi::c_void) -> Self {
+        Self {
+            environment,
+            store: crate::css::host_shared::HostShared::new(store),
+            data: crate::css::host_shared::HostShared::new(std::ptr::null()),
+        }
+    }
+}
+
 impl Drop for RetainedCustomPropertyData {
     fn drop(&mut self) {
         assert_eq!(

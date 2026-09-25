@@ -1807,6 +1807,20 @@ RefPtr<CustomPropertyData const> StyleComputer::engine_custom_property_environme
     auto const* store = m_style_engine.borrow_engine_custom_property_environment(identity, parent_identity);
     if (!store)
         return {};
+    // What a pseudo-element's animations composed its custom properties into is its animation
+    // overlay, over the environment its record was resolved over.
+    u32 owner_style_node = 0;
+    u8 owner_pseudo_kind = 0;
+    if (StyleEngineFFI::style_engine_sampled_pseudo_element_environment_owner(m_style_engine.rust_handle(), identity, &owner_style_node, &owner_pseudo_kind)) {
+        auto index = style_node_index(StyleNodeID { owner_style_node });
+        if (auto* owner = index < m_element_style_nodes.size() ? as_if<DOM::Element>(m_element_style_nodes[index].ptr()) : nullptr) {
+            auto data = CustomPropertyData::view_animation_overlay(store, identity, engine_custom_property_environment(parent_identity),
+                DOM::AbstractElement { *owner, static_cast<PseudoElement>(owner_pseudo_kind) });
+            ComputedValuesFFI::rust_custom_property_store_destroy(store);
+            m_engine_custom_property_environments.set(identity, *data);
+            return data;
+        }
+    }
     // An environment resolved over another engine environment is held over the host's view of it, as
     // the engine's store is over the parent's: a child inherits the parent's environment by identity
     // wherever the element's own declarations do not inherit.
