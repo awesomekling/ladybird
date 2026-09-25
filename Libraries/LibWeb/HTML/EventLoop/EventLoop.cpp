@@ -116,6 +116,27 @@ void EventLoop::queue_held_rendering_task_if_frame_finished()
     queue_a_task(Task::Source::Rendering, this, nullptr, *m_rendering_task_function);
 }
 
+// How long a rendering task waits behind other tasks before it runs ahead of them: one frame interval at 60 Hz.
+static constexpr u64 rendering_task_queue_wait_limit_nanoseconds = 1'000'000'000 / 60;
+
+bool EventLoop::rendering_task_runs_ahead_of_queue() const
+{
+    if (!m_rendering_task_queued || m_rendering_task_held)
+        return false;
+    if (m_rendering_task_runs_ahead)
+        return true;
+    if (!holds_rendering_opportunities() || m_rendering_task_ran_ahead_since_last_task)
+        return false;
+    return MonotonicTime::now().nanoseconds() - m_rendering_task_queued_at_nanoseconds >= rendering_task_queue_wait_limit_nanoseconds;
+}
+
+void EventLoop::did_run_rendering_task_ahead_of_queue()
+{
+    ++m_rendering_scheduler_counters.rendering_tasks_ahead_of_queue;
+    // The tasks it ran ahead of get to run before a rendering task runs ahead of them again.
+    m_rendering_task_ran_ahead_since_last_task = true;
+}
+
 StringView EventLoop::frame_lockstep_reason_name(FrameLockstepReason reason)
 {
     switch (reason) {
@@ -350,6 +371,7 @@ void EventLoop::process()
     [[maybe_unused]] auto task_end_time = HighResolutionTime::unsafe_shared_current_time();
 
     if (oldest_task && oldest_task->source() != Task::Source::Rendering) {
+        m_rendering_task_ran_ahead_since_last_task = false;
         auto task_duration = task_end_time - task_start_time;
         auto task_duration_microseconds = static_cast<u64>(task_duration * 1000.0);
         ++m_rendering_scheduler_counters.tasks_between_updates;
@@ -565,6 +587,7 @@ bool EventLoop::rendering_opportunity(HighResolutionTime::DOMHighResTimeStamp fr
     //         opportunity instead of one global task per page local root.
     VERIFY(!m_rendering_task_queued);
     m_rendering_task_queued = true;
+    m_rendering_task_queued_at_nanoseconds = MonotonicTime::now().nanoseconds();
     queue_a_task(Task::Source::Rendering, this, nullptr, *m_rendering_task_function);
     ++m_rendering_scheduler_counters.opportunities_that_queued_a_task;
     return true;
