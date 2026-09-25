@@ -84,6 +84,9 @@ pub(crate) struct SealState {
     in_effect_drain: bool,
     input_calls: u64,
     effect_drain_calls: u64,
+    /// The style inputs the host published while a pass was in flight, by the host function that
+    /// published each.
+    inputs_in_flight: HashMap<String, u64>,
 }
 
 thread_local! {
@@ -318,23 +321,48 @@ pub(crate) fn note_host_call(callback: &'static str) {
     }
 }
 
+/// Count one style input the host published while a pass was in flight, under the host function
+/// that published it. Such an input changes what the pass answers for under it, so it has to
+/// queue until the pass has drained; until every one does, the census lists where they come from.
+/// None is a violation yet.
+///
+/// # Safety
+/// `site` must point to `length` bytes of UTF-8.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_style_seal_note_input_in_flight(site: *const u8, length: usize) {
+    if mode() == Mode::Off {
+        return;
+    }
+    // SAFETY: The caller passes a valid UTF-8 string.
+    let site = unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(site, length)) };
+    STATE.with_borrow_mut(|state| {
+        if let Some(calls) = state.inputs_in_flight.get_mut(site) {
+            *calls += 1;
+        } else {
+            state.inputs_in_flight.insert(site.to_owned(), 1);
+        }
+    });
+}
+
 /// Flush this thread's counts at an engine lifetime boundary. Taking the map makes repeated engine
 /// destruction produce deltas rather than cumulative totals; the suite log can be summed directly.
 pub(crate) fn flush_census() {
     if mode() == Mode::Off {
         return;
     }
-    let (counts, causes, engine_calls, batches, input_calls, effect_drain_calls) = STATE.with_borrow_mut(|state| {
-        state.pass_started = false;
-        (
-            std::mem::take(&mut state.counts),
-            std::mem::take(&mut state.host_entry_causes),
-            std::mem::take(&mut state.engine_calls),
-            std::mem::take(&mut state.between_pass_batches),
-            std::mem::take(&mut state.input_calls),
-            std::mem::take(&mut state.effect_drain_calls),
-        )
-    });
+    let (counts, causes, engine_calls, batches, input_calls, effect_drain_calls, inputs_in_flight) = STATE
+        .with_borrow_mut(|state| {
+            state.pass_started = false;
+            (
+                std::mem::take(&mut state.counts),
+                std::mem::take(&mut state.host_entry_causes),
+                std::mem::take(&mut state.engine_calls),
+                std::mem::take(&mut state.between_pass_batches),
+                std::mem::take(&mut state.input_calls),
+                std::mem::take(&mut state.effect_drain_calls),
+                std::mem::take(&mut state.inputs_in_flight),
+            )
+        });
     let mut counts = counts.into_iter().collect::<Vec<_>>();
     counts.sort_unstable_by_key(|(callback, _)| *callback);
     for (callback, counts) in counts {
@@ -370,6 +398,13 @@ pub(crate) fn flush_census() {
     if effect_drain_calls != 0 {
         write_report(&format!(
             "STYLE SEAL COUNT: engine_calls_in_effect_drain: {effect_drain_calls}\n"
+        ));
+    }
+    let mut inputs_in_flight = inputs_in_flight.into_iter().collect::<Vec<_>>();
+    inputs_in_flight.sort_unstable_by(|(first, left), (second, right)| right.cmp(left).then_with(|| first.cmp(second)));
+    for (site, calls) in inputs_in_flight {
+        write_report(&format!(
+            "STYLE SEAL COUNT: input_in_flight site={site} calls={calls}\n"
         ));
     }
     let mut batches = batches.into_iter().collect::<Vec<_>>();

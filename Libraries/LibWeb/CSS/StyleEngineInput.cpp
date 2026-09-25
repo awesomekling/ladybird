@@ -18,6 +18,7 @@
 #include <LibWeb/CSS/SelectorMatching.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleEngineInput.h>
+#include <LibWeb/CSS/StyleInputScope.h>
 #include <LibWeb/CSS/StyleScope.h>
 #include <LibWeb/CSS/StyleSheetImport.h>
 #include <LibWeb/CSS/StyleSheetState.h>
@@ -327,6 +328,8 @@ void record_text_connected(DOM::Text& text)
     auto* style_engine = style_engine_for(text);
     if (!style_engine || text.style_node_id() != no_style_node)
         return;
+
+    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*style_engine);
     StyleNodeID identity;
     style_engine->mint_text_style_nodes({ &identity, 1 });
     text.set_style_node_id(identity);
@@ -385,6 +388,7 @@ void record_subtree_connecting(DOM::Node& root)
         return;
     auto& style_computer = root.document().style_computer();
     auto& style_engine = style_computer.style_engine();
+    [[maybe_unused]] auto const input = StyleInputScope::between_passes(style_engine);
     struct Arrival {
         GC::Ref<DOM::Node> node;
         TreeScopeID tree_scope;
@@ -481,6 +485,7 @@ enum class InvalidateLanguageCache {
 template<typename PublishFeature, typename PublishEmptiness>
 static void publish_element_selector_features(StyleEngine& style_engine, DOM::Element& element, StyleNodeID node, PublishFeature publish_feature, PublishEmptiness publish_emptiness, InvalidateLanguageCache invalidate_language_cache)
 {
+    [[maybe_unused]] auto const input = StyleInputScope::between_passes(style_engine);
     // Slot identity and namespace never change during an element's lifetime.
     auto is_slot = is<HTML::HTMLSlotElement>(element);
     StyleAtomID namespace_atom;
@@ -814,6 +819,7 @@ void configure_isolated_selector_query_engine(StyleEngine& style_engine, DOM::Do
 
 StyleNodeID populate_isolated_selector_query_engine(StyleEngine& style_engine, DOM::ParentNode& root, Function<void(GC::Ref<DOM::Element>, StyleNodeID)> const& publish_identity)
 {
+    [[maybe_unused]] auto const input = StyleInputScope::between_passes(style_engine);
     Optional<StyleNodeID> non_element_root_identity;
     if (!is<DOM::Element>(root) && !is<DOM::Document>(root)) {
         non_element_root_identity = style_engine.mint_style_node();
@@ -924,6 +930,7 @@ StyleNodeID populate_isolated_selector_query_engine(StyleEngine& style_engine, D
 // own name, so an element's name has to be folded the same way for the two to name one atom.
 static StyleAtomID intern_id_or_class_atom(StyleEngine& style_engine, DOM::Element const& element, Utf16FlyString const& name)
 {
+    [[maybe_unused]] auto const input = StyleInputScope::between_passes(style_engine);
     if (element.document().in_quirks_mode())
         return style_engine.intern_atom(name.to_ascii_lowercase());
     return style_engine.intern_atom(name);
@@ -940,6 +947,7 @@ static void record_element_initial_features(DOM::Element& element)
     if (!style_engine || element.style_node_id() == no_style_node)
         return;
 
+    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*style_engine);
     publish_element_selector_features(
         *style_engine,
         element,
@@ -1205,6 +1213,7 @@ void record_element_animation_names(DOM::Element& element, ReadonlySpan<Utf16Fly
     if (!style_engine || element.style_node_id() == no_style_node)
         return;
 
+    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*style_engine);
     Vector<StyleAtomID> atoms;
     atoms.ensure_capacity(names.size());
     for (auto const& name : names)
@@ -1222,6 +1231,7 @@ void record_element_css_defined_animations(DOM::Element& element, u8 slot, Reado
     if (!style_engine || element.style_node_id() == no_style_node)
         return;
 
+    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*style_engine);
     // The names travel as one buffer of code units with a length each, since a list is almost
     // always a single name and a handle per name would cost more than the names do.
     Vector<u32> lengths;
@@ -1248,6 +1258,7 @@ void record_element_animation_timing_rows(DOM::Element& element, u8 slot, Readon
     if (!style_engine || element.style_node_id() == no_style_node)
         return;
 
+    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*style_engine);
     style_engine->set_element_animation_timing_rows(element.style_node_id(), slot, words, times, linear_points);
 }
 
@@ -1466,6 +1477,7 @@ void record_element_animation_effect_descriptions(DOM::Element& element, u8 slot
     if (!style_engine || element.style_node_id() == no_style_node)
         return;
 
+    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*style_engine);
     Vector<StyleEngineFFI::FfiPublishedAnimationEffect> ffi_effects;
     Vector<StyleEngineFFI::FfiPublishedAnimationKeyframe> ffi_keyframes;
     Vector<StyleEngineFFI::FfiPublishedAnimationDeclaration> ffi_declarations;
@@ -1515,6 +1527,7 @@ void record_animation_timeline_samples(DOM::Document& document, ReadonlySpan<u32
     if (!style_engine)
         return;
 
+    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*style_engine);
     style_engine->set_animation_timeline_samples(identities, words, times);
 }
 
@@ -1529,6 +1542,7 @@ void record_element_custom_property_names(DOM::Element& element, CustomPropertyD
     if (!style_engine || element.style_node_id() == no_style_node)
         return;
 
+    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*style_engine);
     // OPTIMIZATION: Each environment hands out its declared names sorted and deduplicated, so they are merged
     //               rather than sorted once more for every element that holds that environment.
     ReadonlySpan<StyleAtomID> published;
@@ -1575,6 +1589,7 @@ void record_element_custom_property_names(DOM::Element& element, ReadonlySpan<Ut
     if (!style_engine || element.style_node_id() == no_style_node)
         return;
 
+    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*style_engine);
     Vector<StyleAtomID> atoms;
     atoms.ensure_capacity(names.size());
     for (auto const& name : names)
@@ -1647,6 +1662,7 @@ void record_element_custom_states_changed(DOM::Element& element)
     if (!style_engine || element.style_node_id() == no_style_node || has_pending_initial_features(element))
         return;
 
+    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*style_engine);
     // The engine writes the states into the style mirror the layout frame reads, so a change made
     // beside the frame in flight waits for it.
     element.document().join_frame_in_flight();
@@ -1708,6 +1724,7 @@ void record_element_parts_changed(DOM::Element& element)
     if (!style_engine || element.style_node_id() == no_style_node || has_pending_initial_features(element))
         return;
 
+    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*style_engine);
     // A rule naming a forwarded part names the element under the forwarded name, so the names it
     // is exposed under are what it is published as - and the reach alongside them, because a host
     // usually forwards a name under the one it already had, which moves no name at all.
@@ -2630,6 +2647,7 @@ void record_element_id_changed(DOM::Element& element, Optional<Utf16FlyString> c
     if (!style_engine || element.style_node_id() == no_style_node)
         return;
 
+    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*style_engine);
     auto atom_of = [&](Optional<Utf16FlyString> const& value) -> StyleAtomID {
         return value.has_value() ? intern_id_or_class_atom(*style_engine, element, *value) : 0;
     };
@@ -2650,6 +2668,7 @@ void record_element_class_list_changed(DOM::Element& element, Vector<Utf16FlyStr
     if (!style_engine || element.style_node_id() == no_style_node)
         return;
 
+    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*style_engine);
     // One class delta per class that actually gained or lost membership. A class present on both
     // sides is not a change, and journalling it would be exactly the amplification the engine
     // exists to avoid.

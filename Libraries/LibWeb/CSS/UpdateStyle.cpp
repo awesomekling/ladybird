@@ -124,8 +124,15 @@ void StyleEffectDrain::install(DOM::Document& document, Function<void(StyleDrain
     // What the drain asks of the engine is the pass's output being installed and applied, which the
     // style seal counts apart from the pass's round trips.
     rust_style_seal_set_in_effect_drain(true);
-    ScopeGuard end_effect_drain = [] { rust_style_seal_set_in_effect_drain(false); };
-    StyleDrainScope const scope { document.style_computer().style_engine() };
+    auto& style_engine = document.style_computer().style_engine();
+    style_engine.enter_effect_drain();
+    ScopeGuard end_effect_drain = [&] {
+        style_engine.leave_effect_drain();
+        // Once a batch is drained, nothing the pass published waits for the host.
+        style_engine.set_published_batch_waits(false);
+        rust_style_seal_set_in_effect_drain(false);
+    };
+    StyleDrainScope const scope { style_engine };
     install(scope);
 }
 
@@ -245,8 +252,10 @@ static StyleEngineTransaction take_style_engine_transaction(DOM::Document& docum
     auto published_transaction = style_computer.style_engine().take_style_transaction(root->style_node_id());
     document.style_invalidation_counters().style_update_submission_microseconds += published_transaction.submission_microseconds;
     document.style_invalidation_counters().style_update_bridge_microseconds += published_transaction.bridge_microseconds;
-    if (!published_transaction.reactions.is_empty())
+    if (!published_transaction.reactions.is_empty()) {
         style_computer.style_engine().note_published_transaction_version(published_transaction.version);
+        style_computer.style_engine().set_published_batch_waits(true);
+    }
     for (auto const& answer : published_transaction.reactions) {
         // The complete answer remains in Rust transaction scratch under this node. The identity
         // names both the semantic reaction and the payload that consumes it.
@@ -1088,6 +1097,7 @@ static void update_style(DOM::Document& document, DocumentWithoutBrowsingContext
     // back to document invalidation.
     auto style_engine_transaction = take_style_engine_transaction(document);
     ScopeGuard discard_style_engine_transaction_outputs = [&] {
+        document.style_computer().style_engine().set_published_batch_waits(false);
         StyleEffectDrain::install(document, [](StyleDrainScope const& scope) {
             scope.engine().discard_style_transaction_outputs(scope);
         });

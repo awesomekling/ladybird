@@ -293,6 +293,17 @@ public:
     // with it.
     [[nodiscard]] u32 connected_element_count_at_last_transaction() const { return m_connected_element_count_at_last_transaction; }
 
+    // Whether a style pass is in flight: a batch the engine published waits for the host, or the
+    // host is draining one. An input published now is one the pass did not see (see StyleInputScope).
+    [[nodiscard]] bool pass_is_in_flight() const { return m_published_batch_waits || m_effect_drain_depth != 0; }
+    void set_published_batch_waits(bool waits) { m_published_batch_waits = waits; }
+    void enter_effect_drain() { ++m_effect_drain_depth; }
+    void leave_effect_drain()
+    {
+        VERIFY(m_effect_drain_depth != 0);
+        --m_effect_drain_depth;
+    }
+
     struct PublishedStyleTransaction {
         PublishedTransactionVersion version;
         ReadonlySpan<PublishedStyleDelta> reactions;
@@ -376,6 +387,8 @@ private:
     u64 m_atom_generation { 1 };
     PublishedTransactionVersion m_published_transaction_version { 0, 0 };
     u32 m_connected_element_count_at_last_transaction { 0 };
+    bool m_published_batch_waits { false };
+    u32 m_effect_drain_depth { 0 };
     u64 m_attribute_value_text_requirements_version { 0 };
     HashTable<StyleNodeID> m_nodes_with_pending_initial_features;
     HashTable<StyleNodeID> m_nodes_awaiting_first_style_computation;
