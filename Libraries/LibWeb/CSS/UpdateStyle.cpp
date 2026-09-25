@@ -181,7 +181,7 @@ void StyleEffectDrain::apply(StyleDrainScope const& scope, DOM::Document& docume
             [&](ContainerQueryEffects const& row) {
                 auto container_effects = StyleEngineFFI::style_engine_take_container_effects(scope.engine().rust_handle(), row.style_node.value());
                 ScopeGuard release_container_effects = [&] { StyleEngineFFI::style_engine_native_container_effects_release(container_effects.effects); };
-                StyleComputer::record_container_query_effects(DOM::AbstractElement { *element }, container_effects);
+                StyleComputer::record_container_query_effects(scope, DOM::AbstractElement { *element }, container_effects);
             },
             [&](AnimationPlan const& row) {
                 document.style_computer().apply_settled_animation_plan(DOM::AbstractElement { *element }, row.plan);
@@ -346,7 +346,7 @@ static bool install_composition_sampled_in_pass(StyleDrainScope const& scope, DO
         return true;
     if (!sample.overlay_is_empty && document.is_in_style_stabilization_epoch()
         && (document.style_stabilization_has_style_reactions() || sample.invalidation.requires_base_style_recomputation))
-        document.style_computer().record_transition_stabilization_baseline(abstract_element);
+        document.style_computer().record_transition_stabilization_baseline(scope, abstract_element);
     (void)element.unsafe_layout_node();
     Animations::apply_published_animation_overlay(abstract_element, sample.invalidation, StyleRecordID { sample.style_record }, sample_invalidation == SampleInvalidation::AppliedByCaller);
     return true;
@@ -578,7 +578,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                 }
                 if (document.is_running_update_layout() && container_effects.depends_on_size && reaction.old_style_record != 0
                     && element->style_record_identity().value() == reaction.old_style_record && awaits_layout_basis) {
-                    StyleComputer::record_container_query_effects(DOM::AbstractElement { *element }, container_effects);
+                    StyleComputer::record_container_query_effects(scope, DOM::AbstractElement { *element }, container_effects);
                     StyleEngineFFI::style_engine_note_host_step(StyleEngineFFI::FfiStyleHostStep::AwaitsLayoutBasis);
                     continue;
                 }
@@ -672,7 +672,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
             auto engine_record_comparison = DOM::Element::EngineRecordComparison::AtInstallation;
             auto apply_engine_computed_records = [&](DOM::Element::EnginePseudoElementRecords const& pseudo_element_records, DOM::Element::EnginePseudoElementDamages const* pseudo_element_damages = nullptr) {
                 auto& style_engine = document.style_computer().style_engine();
-                document.style_computer().pin_transition_stabilization_baseline_if_a_later_pass_may_need_it(DOM::AbstractElement { *element });
+                document.style_computer().pin_transition_stabilization_baseline_if_a_later_pass_may_need_it(scope, DOM::AbstractElement { *element });
                 // A first record answers the element's recorded arrival; nothing is left for a
                 // later transaction to plan. Neither is anything for a record retried after the
                 // ancestors applied before it installed: it reads them as they now stand, as the
@@ -757,7 +757,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                 auto const row_sampled_in_pass = StyleEngineFFI::style_engine_take_row_sampled_in_pass(document.style_computer().style_engine().rust_handle(), reaction.style_node);
                 auto const transition_debt = row_effect_debt & StyleEngine::SettledRowTransitionDebt;
                 if (row_effect_debt & StyleEngine::SettledRowOwesAnAnimationPlan)
-                    animation_plan = document.style_computer().take_settled_animation_plan(StyleNodeID { reaction.style_node }, NumericLimits<u8>::max());
+                    animation_plan = document.style_computer().take_settled_animation_plan(scope, StyleNodeID { reaction.style_node }, NumericLimits<u8>::max());
                 bool const has_animations_or_plan = animation_plan.has_value() || element->has_relevant_animations()
                     || element->has_associated_animations();
                 if (!engine_computed_record_environment_is_installable(*element, StyleRecordID { reaction.new_style_record })
@@ -775,7 +775,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                     row_effects.append(StyleEffectDrain::DiscardContainerQueryEffects { StyleNodeID { reaction.style_node } });
                     for (size_t kind = 0; kind < pseudo_element_records.size(); ++kind) {
                         if (pseudo_element_records[kind].has_value())
-                            (void)document.style_computer().take_settled_animation_plan(StyleNodeID { reaction.style_node }, static_cast<u8>(kind));
+                            (void)document.style_computer().take_settled_animation_plan(scope, StyleNodeID { reaction.style_node }, static_cast<u8>(kind));
                     }
                     document.style_computer().style_engine().record_derived_element_style_input_change(StyleNodeID { reaction.style_node }, StyleEngine::RecomputeStyle);
                 } else {
@@ -812,7 +812,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                             return;
                         if (!pseudo_element_records[kind].has_value() || !*pseudo_element_records[kind])
                             return;
-                        auto pseudo_plan = document.style_computer().take_settled_animation_plan(StyleNodeID { reaction.style_node }, static_cast<u8>(kind));
+                        auto pseudo_plan = document.style_computer().take_settled_animation_plan(scope, StyleNodeID { reaction.style_node }, static_cast<u8>(kind));
                         if (!pseudo_plan.has_value())
                             return;
                         DOM::AbstractElement pseudo { *element, static_cast<PseudoElement>(kind) };
@@ -837,7 +837,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                     // element holds by then is the after-change one. A row that owes the whole step
                     // pins the record it moved away from first.
                     if (transition_debt == 2 && document.is_in_style_stabilization_epoch() && settled.has_style())
-                        (void)document.style_computer().record_transition_stabilization_baseline(settled, StyleRecordID { reaction.old_style_record });
+                        (void)document.style_computer().record_transition_stabilization_baseline(scope, settled, StyleRecordID { reaction.old_style_record });
                     bool const compares_after_sample = engine_record_comparison == DOM::Element::EngineRecordComparison::AfterSample;
                     auto const row_sample_invalidation = compares_after_sample ? SampleInvalidation::AppliedByCaller : SampleInvalidation::Applied;
                     bool const installed_pass_sample = row_sampled_in_pass.present && settled.has_style()
@@ -864,7 +864,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                         || (transition_debt == 0 && reaction.old_style_record != 0 && element->associated_shadow_host_pseudo_element().has_value())) {
                         DOM::AbstractElement settled { *element };
                         if (settled.has_style()) {
-                            auto step_invalidation = document.style_computer().run_transition_step_for_installed_record(
+                            auto step_invalidation = document.style_computer().run_transition_step_for_installed_record(scope,
                                 settled, StyleRecordID { reaction.old_style_record });
                             if (!step_invalidation.is_none()) {
                                 row_effects.append(StyleEffectDrain::ElementInvalidation { StyleNodeID { reaction.style_node }, step_invalidation });
@@ -1264,10 +1264,10 @@ static Optional<RequiredInvalidationAfterStyleChange> install_targeted_record_de
     auto invalidation = element.apply_engine_computed_style_record(scope, StyleRecordID { answer.record.style_record }, pseudo_element_records, answer.record.uses_substitution, answer.row_facts, did_change_custom_properties,
         samples_over_the_record ? DOM::Element::EngineRecordComparison::AfterSample : DOM::Element::EngineRecordComparison::AtInstallation);
     if (!!old_style_record && element.associated_shadow_host_pseudo_element().has_value())
-        invalidation |= style_computer.run_transition_step_for_installed_record({ element }, old_style_record);
+        invalidation |= style_computer.run_transition_step_for_installed_record(scope, { element }, old_style_record);
     auto container_effects = StyleEngineFFI::style_engine_take_container_effects(engine.rust_handle(), element.style_node_id().value());
     ScopeGuard release_container_effects = [&] { StyleEngineFFI::style_engine_native_container_effects_release(container_effects.effects); };
-    StyleComputer::record_container_query_effects(DOM::AbstractElement { element }, container_effects);
+    StyleComputer::record_container_query_effects(scope, DOM::AbstractElement { element }, container_effects);
     engine.acknowledge_engine_computed_record(element.style_node_id());
     if (samples_over_the_record) {
         sample_animations_for_installed_record(DOM::AbstractElement { element }, SampleInvalidation::AppliedByCaller);
