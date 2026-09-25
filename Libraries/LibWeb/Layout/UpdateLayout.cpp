@@ -90,12 +90,17 @@ Layout::RustFFI::FfiLayoutUpdateHostCallbacks Document::layout_update_host_callb
             auto& document = *static_cast<Document*>(context);
             if (Layout::attach_owed_generated_image(document, slot, style_node, pseudo_element, item, pseudo_element_box))
                 document.m_owed_image_provider_arrived_with_image = true; },
-        .finish_update_layout = [](void* context) {
+        .finish_update_layout = [](void* context, Layout::RustFFI::FfiLayoutUpdateEnd end) {
             auto& document = *static_cast<Document*>(context);
             document.style_computer().end_style_record_view_epoch();
             document.end_style_stabilization_epoch();
             Layout::RustFFI::layout_arena_end_update_layout(document.layout_node_arena().handle());
             document.release_held_invalidation_marks();
+
+            // A frame taken back in the middle of main-thread code tells the document nothing that can run script there:
+            // its messages and the resnap wait for the next layout update to end, which runs before anything reads them.
+            if (end == Layout::RustFFI::FfiLayoutUpdateEnd::FrameTakenBack)
+                return;
 
             // Whatever the pass told the document takes effect before the read that joined for it. That
             // includes the web font faces it reached while they wait on their load.
@@ -141,11 +146,16 @@ void Document::update_layout(UpdateLayoutReason reason, ThrottledAnimationSampli
     }
 }
 
-void Document::update_style_and_layout_once(UpdateLayoutReason reason, ThrottledAnimationSamplingScope animation_sampling_scope)
+bool Document::submit_layout_for_rendering_update()
+{
+    return update_style_and_layout_once(UpdateLayoutReason::HTMLEventLoopRenderingUpdate, ThrottledAnimationSamplingScope::Document, LayoutPassSubmission::MaySubmit);
+}
+
+bool Document::update_style_and_layout_once(UpdateLayoutReason reason, ThrottledAnimationSamplingScope animation_sampling_scope, LayoutPassSubmission pass_submission)
 {
     auto navigable = this->navigable();
     if (!navigable || navigable->active_document().ptr() != this)
-        return;
+        return false;
 
     // Internal layout dependencies do not observe compositor animation values.
     if (reason != UpdateLayoutReason::HTMLEventLoopRenderingUpdate
@@ -183,8 +193,9 @@ void Document::update_style_and_layout_once(UpdateLayoutReason reason, Throttled
         .reason_is_inspect_devtools_layout_data = reason == UpdateLayoutReason::InspectDevToolsLayoutData,
         .is_template_contents_document = m_created_for_appropriate_template_contents,
         .reason_name = ffi_utf16_view(to_string(reason)),
+        .may_submit_pass = pass_submission == LayoutPassSubmission::MaySubmit,
     };
-    Layout::RustFFI::layout_arena_update_layout(arena.handle(), &inputs);
+    return Layout::RustFFI::layout_arena_update_layout(arena.handle(), &inputs) == Layout::RustFFI::FfiLayoutUpdateOutcome::PassSubmitted;
 }
 
 }
