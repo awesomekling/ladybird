@@ -222,7 +222,9 @@ bool FrameScheduler::submit()
 
 void FrameScheduler::submit_layout(Vector<GC::Ref<DOM::Document>> documents, size_t document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp)
 {
-    submit_pass(FrameTicket::SubmittedPass::Kind::Layout, move(documents), document_index, frame_timestamp);
+    // NB: The document submitted its layout pass as a flight under the same condition.
+    auto kind = Layout::RustFFI::rust_stage_thread_submits_flight() ? FrameTicket::SubmittedPass::Kind::Flight : FrameTicket::SubmittedPass::Kind::Layout;
+    submit_pass(kind, move(documents), document_index, frame_timestamp);
 }
 
 void FrameScheduler::submit_style(Vector<GC::Ref<DOM::Document>> documents, size_t document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp)
@@ -279,10 +281,13 @@ void FrameScheduler::commit()
     //     style pass's frame ends the document's style update here: its drain installs what the pass computed.
     if (m_ticket->submitted_pass.has_value() && m_ticket->submitted_pass->kind == FrameTicket::SubmittedPass::Kind::Style)
         m_ticket->submitted_pass->documents[m_ticket->submitted_pass->document_index]->finish_submitted_style_update();
-    // A flight always runs its style pass first, and ends the document's style update here as a style pass's frame does.
+    // A flight that began with the style pass ends the document's style update here as a style pass's frame does. One
+    // that began with the layout pass took its layout frame back already.
     if (m_ticket->submitted_pass.has_value() && m_ticket->submitted_pass->kind == FrameTicket::SubmittedPass::Kind::Flight) {
-        m_ticket->submitted_pass->flight_outcome = Layout::RustFFI::rust_flight_take_outcome();
-        m_ticket->submitted_pass->documents[m_ticket->submitted_pass->document_index]->finish_submitted_style_update();
+        auto outcome = Layout::RustFFI::rust_flight_take_outcome();
+        m_ticket->submitted_pass->flight_outcome = outcome;
+        if (outcome.began == Layout::RustFFI::FfiFlightStage::Style)
+            m_ticket->submitted_pass->documents[m_ticket->submitted_pass->document_index]->finish_submitted_style_update();
     }
     // A clock tick's document adopts what the tick installed before anything reads it, and then takes in what was
     // marked beside the tick, as the end of a layout pass's frame does: the next drain writes it.

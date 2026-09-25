@@ -1796,6 +1796,9 @@ bool Internals::hold_next_recording_frame(Utf16String const& point, GC::Ptr<DOM:
 
 bool Internals::hold_next_layout_frame(Utf16String const& point, GC::Ptr<DOM::Document> document)
 {
+    // A flight runs the layout pass as its layout stage: that is held before it runs, and the flight once it has run.
+    if (Layout::RustFFI::rust_stage_thread_submits_flight())
+        return hold_next_submitted_stage(point == "before-run"sv ? "flight:layout"sv : "flight"sv, point, document);
     return hold_next_submitted_stage("layout"sv, point, document);
 }
 

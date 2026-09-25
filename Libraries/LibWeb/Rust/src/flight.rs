@@ -12,6 +12,7 @@
 //! on the path a rendering update that submitted that stage on its own would have taken.
 
 use crate::css::style::bridge::StylePassJob;
+use crate::layout::update_layout::{LayoutPassJob, LayoutPassTakeBack};
 use std::cell::Cell;
 use std::ffi::c_void;
 use std::sync::{Arc, Mutex};
@@ -48,54 +49,101 @@ pub enum FfiFlightEndReason {
 
 const FLIGHT_END_REASON_COUNT: usize = FfiFlightEndReason::StageRunsOnMain as usize + 1;
 
-/// Where a flight ended: the last stage it ran (a flight always runs its first), and why it ran no
-/// further.
+/// Where a flight began and ended: the first stage it ran, the last (a flight always runs its
+/// first), and why it ran no further.
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct FfiFlightOutcome {
+    pub began: FfiFlightStage,
     pub reached: FfiFlightStage,
     pub end: FfiFlightEndReason,
 }
 
 /// The stages a flight runs, as the main thread prepared them.
 pub(crate) struct Flight {
+    began: FfiFlightStage,
     style: Option<StylePassJob>,
+    layout: Option<LayoutPassJob>,
+}
+
+/// What the main thread runs as it takes a flight back, for the stages the flight ran.
+struct FlightTakeBack {
+    layout: Option<LayoutPassTakeBack>,
 }
 
 impl Flight {
     /// A flight that runs the style pass `style` and goes on from there.
     pub(crate) fn from_style_pass(style: StylePassJob) -> Self {
-        Self { style: Some(style) }
+        Self {
+            began: FfiFlightStage::Style,
+            style: Some(style),
+            layout: None,
+        }
+    }
+
+    /// A flight that runs the rest of the layout round `layout` has readied, and goes on from there.
+    pub(crate) fn from_layout_pass(layout: LayoutPassJob) -> Self {
+        Self {
+            began: FfiFlightStage::Rounds,
+            style: None,
+            layout: Some(layout),
+        }
     }
 
     /// The furthest stage the flight may run, which the frame in flight holds the document for.
     fn reach(&self) -> &'static str {
-        "style"
+        if self.layout.is_some() { "layout" } else { "style" }
+    }
+
+    fn take_back(&self) -> FlightTakeBack {
+        FlightTakeBack {
+            layout: self.layout.as_ref().map(LayoutPassJob::take_back),
+        }
     }
 
     /// Runs the flight's stages, on the stage thread.
     fn run(mut self) -> FfiFlightOutcome {
-        let mut reached = FfiFlightStage::Style;
-        let mut next = FfiFlightStage::Style;
+        let began = self.began;
+        let mut reached = began;
+        let mut next = began;
         loop {
             let end = match next {
                 FfiFlightStage::Style => {
                     crate::stage_thread::hold_before_flight_stage("flight:style");
-                    let style = self.style.take().expect("a flight begins with its style pass");
+                    let style = self.style.take().expect("a flight that begins with style has its pass");
                     style.run();
                     reached = FfiFlightStage::Style;
                     next = FfiFlightStage::StyleRenderHalf;
                     None
                 }
+                FfiFlightStage::Rounds => {
+                    crate::stage_thread::hold_before_flight_stage("flight:layout");
+                    let layout = self
+                        .layout
+                        .take()
+                        .expect("a flight that begins with layout has its pass");
+                    layout.run();
+                    reached = FfiFlightStage::Rounds;
+                    next = FfiFlightStage::PaintPrep;
+                    None
+                }
                 FfiFlightStage::StyleRenderHalf
-                | FfiFlightStage::Rounds
                 | FfiFlightStage::PaintPrep
                 | FfiFlightStage::Record
                 | FfiFlightStage::Present => Some(FfiFlightEndReason::StageRunsOnMain),
             };
             if let Some(end) = end {
-                return FfiFlightOutcome { reached, end };
+                return FfiFlightOutcome { began, reached, end };
             }
+        }
+    }
+}
+
+impl FlightTakeBack {
+    /// Ends, on the main thread, what each stage the flight ran left for it, in the order it ran them.
+    fn finish(self) {
+        if let Some(layout) = self.layout {
+            layout.finish();
         }
     }
 }
@@ -119,6 +167,7 @@ pub(crate) unsafe fn submit(arena: *mut c_void, flight: Flight) {
     let outcome = Arc::new(Mutex::new(None));
     let outcome_of_stage = outcome.clone();
     let reach = flight.reach();
+    let take_back = flight.take_back();
     // SAFETY: Guaranteed by the caller.
     unsafe {
         crate::stage_thread::submit_flight(
@@ -129,6 +178,7 @@ pub(crate) unsafe fn submit(arena: *mut c_void, flight: Flight) {
                 *outcome_of_stage.lock().expect("a flight that ran left its outcome") = Some(ran);
             },
             move || {
+                take_back.finish();
                 let outcome = outcome
                     .lock()
                     .expect("a flight that ran left its outcome")
@@ -154,7 +204,7 @@ pub extern "C" fn rust_flight_take_outcome() -> FfiFlightOutcome {
         .expect("a flight was taken back before its consume-commit")
 }
 
-/// Whether the rendering update submits its style pass as a flight.
+/// Whether the rendering update submits its style pass, and its layout pass, as a flight.
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_stage_thread_submits_flight() -> bool {
     crate::stage_thread::submits_flight()

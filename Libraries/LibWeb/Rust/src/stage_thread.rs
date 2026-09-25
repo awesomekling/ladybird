@@ -421,9 +421,9 @@ pub(crate) unsafe fn submit_stage_with_take_back(
 pub(crate) const FLIGHT_STAGE: &str = "flight";
 
 /// Whether the rendering update submits its stages as one flight: under `LIBWEB_STAGE_OVERLAP`
-/// naming `flight`, where it submits its style pass.
+/// naming `flight` with the style and layout passes, which a flight begins with.
 pub(crate) fn submits_flight() -> bool {
-    submits("style") && stage_overlaps(FLIGHT_STAGE)
+    submits("style") && submits("layout") && stage_overlaps(FLIGHT_STAGE)
 }
 
 /// Like [`submit_stage_with_take_back`], for a flight that may run the stages up to `reach`: the
@@ -1150,12 +1150,13 @@ fn count_forced_join() {
     SUBMITTED.with_borrow(|submitted| {
         FORCED_JOINS.with_borrow_mut(|counts| {
             for (index, stage) in submitted.iter().enumerate() {
-                if submitted[..index].iter().any(|earlier| earlier.label == stage.label) {
+                // A flight is counted as the stage whose hold it has.
+                if submitted[..index].iter().any(|earlier| earlier.role == stage.role) {
                     continue;
                 }
-                match counts.iter_mut().find(|(label, _)| *label == stage.label) {
+                match counts.iter_mut().find(|(label, _)| *label == stage.role) {
                     Some((_, count)) => *count += 1,
-                    None => counts.push((stage.label, 1)),
+                    None => counts.push((stage.role, 1)),
                 }
             }
         });
