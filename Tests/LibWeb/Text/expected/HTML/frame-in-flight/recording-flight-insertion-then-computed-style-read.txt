@@ -1,0 +1,9 @@
+element: held as armed: true
+element: computed color: rgb(0, 128, 0)
+element: offsetWidth: 123
+fragment: held as armed: true
+fragment: computed color: rgb(0, 128, 0)
+fragment: offsetWidth: 123
+template: held as armed: true
+template: computed color: rgb(0, 128, 0)
+template: offsetWidth: 123

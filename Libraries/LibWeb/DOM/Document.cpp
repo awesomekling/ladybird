@@ -2431,9 +2431,10 @@ void Document::apply_commit_messages()
 bool Document::layout_is_up_to_date() const
 {
     // Beside the recording in flight, which went in flight only once the layout was up to date, what was marked since
-    // is in the journal, which draining would take the recording in for, or in the tree update flags.
+    // is in the journals, which draining would take the recording in for, or in the tree update flags. A mark made
+    // beside the frame waits in the held journal until the frame is taken in.
     if (m_layout_node_arena && Layout::RustFFI::rust_stage_thread_reads_beside_recording_of(m_layout_node_arena->handle())) {
-        if (!m_invalidation_journal->is_empty())
+        if (!m_invalidation_journal->is_empty() || !m_held_invalidation_journal->is_empty())
             return false;
         if (!navigable() || navigable()->active_document().ptr() != this)
             return true;
@@ -2825,9 +2826,10 @@ void Document::prepare_for_rendering()
 void Document::update_paint_and_hit_testing_properties_if_needed()
 {
     // Beside the recording in flight, the paint properties are those it was prepared with until something is marked
-    // or a visual context update is asked for: the recording changes none of them.
+    // (in the held journal, if beside the frame) or a visual context update is asked for: the recording changes none
+    // of them.
     if (m_layout_node_arena && Layout::RustFFI::rust_stage_thread_reads_beside_recording_of(m_layout_node_arena->handle())
-        && m_invalidation_journal->is_empty() && !m_needs_accumulated_visual_contexts_update)
+        && m_invalidation_journal->is_empty() && m_held_invalidation_journal->is_empty() && !m_needs_accumulated_visual_contexts_update)
         return;
 
     // NB: Called during paint property resolution.
