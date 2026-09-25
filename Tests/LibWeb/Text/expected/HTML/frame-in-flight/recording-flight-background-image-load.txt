@@ -1,0 +1,4 @@
+held as armed: true
+forced joins of the recording: 0
+recording still in flight after the load: true
+background image: true

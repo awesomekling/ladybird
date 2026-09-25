@@ -452,13 +452,27 @@ NodeWithStyle::ImageObserver::~ImageObserver()
     image_style_value_finalize();
 }
 
+static void push_layer_image_paint_facts_and_repaint(NodeWithStyle& owner)
+{
+    Painting::push_layer_image_paint_facts(owner);
+    if (Painting::has_committed_box(owner))
+        Painting::set_needs_repaint(owner, InvalidateDisplayList::PaintCommands);
+}
+
 void NodeWithStyle::ImageObserver::image_style_value_did_update(CSS::ImageStyleValue&)
 {
     VERIFY(m_owner);
 
-    Painting::push_layer_image_paint_facts(*m_owner);
-    if (Painting::has_committed_box(*m_owner))
-        Painting::set_needs_repaint(*m_owner, InvalidateDisplayList::PaintCommands);
+    // Beside a recording that owns the arena, the owner's facts are pushed once the frame has been taken in. By then
+    // its row may be gone, and its slot may hold another shell: only a shell still alive in its own slot is pushed.
+    if (HTML::FrameScheduler::arena_changes_wait_for_frame(m_owner->document())) {
+        HTML::main_thread_event_loop().frame_scheduler().defer_arena_change(GC::create_function(m_owner->document().heap(), [owner = m_owner, slot = slot_id(m_owner.ptr())] {
+            if (owner && owner->node_arena().node_if_live(slot) == owner.ptr())
+                push_layer_image_paint_facts_and_repaint(*owner);
+        }));
+        return;
+    }
+    push_layer_image_paint_facts_and_repaint(*m_owner);
 }
 
 NodeWithStyle::~NodeWithStyle()
