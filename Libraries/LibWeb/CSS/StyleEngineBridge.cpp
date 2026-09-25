@@ -422,6 +422,16 @@ void StyleEngine::unpin_style_record(StyleRecordID style_record) const
     StyleEngineFFI::style_record_host_pins_unpin(m_host_style_record_pins, style_record.value());
 }
 
+void StyleEngine::begin_pin_waiting_for_frame() const
+{
+    StyleEngineFFI::style_record_host_pins_begin_pin_waiting_for_frame(m_host_style_record_pins);
+}
+
+void StyleEngine::end_pin_waiting_for_frame() const
+{
+    StyleEngineFFI::style_record_host_pins_end_pin_waiting_for_frame(m_host_style_record_pins);
+}
+
 void StyleEngine::begin_style_record_view_epoch()
 {
     ++m_style_record_view_epoch_depth;

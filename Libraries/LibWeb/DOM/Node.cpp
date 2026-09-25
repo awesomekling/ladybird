@@ -63,6 +63,7 @@
 #include <LibWeb/Editing/EditingHistory.h>
 #include <LibWeb/HTML/CustomElements/CustomElementReactionNames.h>
 #include <LibWeb/HTML/CustomElements/CustomElementRegistry.h>
+#include <LibWeb/HTML/EventLoop/EventLoop.h>
 #include <LibWeb/HTML/EventLoop/FrameScheduler.h>
 #include <LibWeb/HTML/FormAssociatedElement.h>
 #include <LibWeb/HTML/HTMLAreaElement.h>
@@ -1370,11 +1371,21 @@ static void pin_bound_box_style_record_for_detachment(Node& node, Optional<CSS::
     else
         return;
     auto generated_for = pseudo_element.has_value() ? Layout::Node::encode_generated_for(*pseudo_element) : 0;
+    auto& document = node.document();
+    if (!HTML::FrameScheduler::arena_changes_wait_for_frame(document)) {
+        if (auto* arena = document.layout_node_arena_if_created())
+            Layout::RustFFI::layout_arena_pin_bound_box_style_record_for_detachment(arena->handle(), style_node.value(), generated_for);
+        return;
+    }
     // Beside a recording that owns the arena, the pin waits for the frame with the rest of the removal's arena changes,
-    // ahead of the identity change that unbinds the row.
-    HTML::FrameScheduler::change_arena(node.document(), [style_node, generated_for](Layout::NodeArena& arena) {
-        Layout::RustFFI::layout_arena_pin_bound_box_style_record_for_detachment(arena.handle(), style_node.value(), generated_for);
-    });
+    // ahead of the identity change that unbinds the row. The removal lets go of the record's other pins before then,
+    // and the box is read until its row is freed, so the style engine reclaims no record until the pin has landed.
+    document.style_computer().style_engine().begin_pin_waiting_for_frame();
+    HTML::main_thread_event_loop().frame_scheduler().defer_arena_change(GC::create_function(document.heap(), [document = GC::Ref { document }, style_node, generated_for] {
+        if (auto* arena = document->layout_node_arena_if_created())
+            Layout::RustFFI::layout_arena_pin_bound_box_style_record_for_detachment(arena->handle(), style_node.value(), generated_for);
+        document->style_computer().style_engine().end_pin_waiting_for_frame();
+    }));
 }
 
 class RemovalStyleRecordPins {

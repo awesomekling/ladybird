@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<style>
+    @keyframes slide {
+        from { margin-left: 0px; }
+        to { margin-left: 100px; }
+    }
+    .animated { width: 50px; height: 20px; overflow: auto; animation: slide 1000s linear infinite; }
+</style>
+<div id="container"></div>
+<script>
+    // Animated elements leave the tree beside a frame that owns the arena, and a selector query then hands their
+    // removal to the style engine. Their boxes stay in the layout tree until the next layout update, and the style
+    // drain before it reads them with the animation records they were styled with.
+    asyncTest(async done => {
+        for (let i = 0; i < 20; ++i) {
+            const element = document.createElement("div");
+            element.className = "animated";
+            element.textContent = `${i}`;
+            container.appendChild(element);
+        }
+        await twoFrames();
+        const result = await whileFrameInFlight("before-run", () => {
+            container.style.width = "300px";
+        }, frame => {
+            for (const child of [...container.children])
+                child.remove();
+            document.querySelector("body div:nth-last-child(2 of .animated)");
+            container.style.paddingTop = "1px";
+            return frame;
+        });
+        println(`held as armed: ${heldAsArmed(result, "before-run")}`);
+        await twoFrames();
+        println(`children: ${container.children.length}`);
+        println(`container height: ${container.offsetHeight}`);
+        done();
+    });
+</script>

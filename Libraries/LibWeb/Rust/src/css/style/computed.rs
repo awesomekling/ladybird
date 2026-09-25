@@ -1825,7 +1825,7 @@ impl ComputedGroupSets {
 
     /// Reclaims the retired slots whose records the host no longer pins, once its table is lent.
     pub(crate) fn reclaim_retired_animation_overlays(&mut self) {
-        if self.retired_animation_overlay_slots.is_empty() || self.host_pins.is_beside_flight() {
+        if self.retired_animation_overlay_slots.is_empty() || self.host_pins.defers_reclamation() {
             return;
         }
         let host_pins = self.host_pins;
@@ -3526,9 +3526,10 @@ impl ComputedGroupSets {
     }
 
     pub(super) fn reclaim_unreachable_if_needed(&mut self) -> Option<ComputedGroupRetention> {
-        // Beside a pass in flight the host may pin any record it holds; the sweep waits for the
-        // document thread to take the pass back.
-        if self.style_record_view_epoch_depth != 0 || self.host_pins.is_beside_flight() {
+        // Beside a pass in flight the host may pin any record it holds, and a pin it promised may
+        // wait for the frame in flight; the sweep waits for the document thread to take the pass
+        // back, and for the pin to land.
+        if self.style_record_view_epoch_depth != 0 || self.host_pins.defers_reclamation() {
             return None;
         }
         if self.style_records_interned_since_reclamation < self.next_reclamation_after {
@@ -4506,6 +4507,48 @@ mod tests {
         sets.reclaim_retired_animation_overlays();
         assert!(!sets.style_record_is_held(first.style_record_identity.raw()));
         assert!(sets.style_record_is_held(second.style_record_identity.raw()));
+    }
+
+    #[test]
+    fn a_pin_waiting_for_the_frame_defers_what_the_engine_would_reclaim() {
+        let mut sets = ComputedGroupSets::default();
+        let pins = host_pins_lent_to(&mut sets);
+        let node = StyleNodeID::from_raw(1).unwrap();
+        let target = ComputedStyleTarget::new(node, u8::MAX);
+        let animated_overlay = crate::css::animated_overlay::AnimatedOverlay::default();
+        let mut overlay_metadata = metadata(0, 0, 0);
+        overlay_metadata.animation_overlay_identity = 1;
+        overlay_metadata.animated_overlay = HostShared::new(std::ptr::from_ref(&animated_overlay));
+        let overlay = sets
+            .publish_unowned(Some(target), &[], 0, 0, overlay_metadata)
+            .style_record_identity
+            .raw();
+        let unowned = sets
+            .publish_unowned(None, &[], 0, 1, metadata(0, 0, 0))
+            .style_record_identity
+            .raw();
+        sets.next_reclamation_after = 0;
+
+        // The node leaves the tree while the pin its box takes waits for the frame in flight.
+        pins.begin_pin_waiting_for_frame();
+        sets.remove(node);
+        assert!(sets.reclaim_unreachable_if_needed().is_none());
+        sets.reclaim_retired_animation_overlays();
+        assert!(sets.style_record_is_held(overlay));
+        assert!(sets.style_record_is_held(unowned));
+
+        // The pin lands, and holds the overlay once the engine reads the table again.
+        pins.pin(overlay);
+        pins.end_pin_waiting_for_frame();
+        sets.reclaim_retired_animation_overlays();
+        assert!(sets.reclaim_unreachable_if_needed().is_some());
+        assert!(sets.style_record_is_held(overlay));
+        assert!(!sets.style_record_is_held(unowned));
+
+        pins.unpin(overlay);
+        sets.reclaim_retired_animation_overlays();
+        assert!(!sets.style_record_is_held(overlay));
+        assert_eq!(sets.live_animation_overlay_records(), 0);
     }
 
     #[test]
