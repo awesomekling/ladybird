@@ -48,6 +48,7 @@
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleSheetState.h>
 #include <LibWeb/Compositor/CompositorFrame.h>
+#include <LibWeb/Compositor/NavigablePresenter.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Event.h>
 #include <LibWeb/DOM/EventTarget.h>
@@ -1825,6 +1826,29 @@ Utf16String Internals::frame_scheduler_state() const
         return "committed-tail-pending"_utf16;
     }
     VERIFY_NOT_REACHED();
+}
+
+void Internals::set_render_presents(bool enabled)
+{
+    Compositor::set_render_presents_for_testing(enabled);
+}
+
+void Internals::reset_render_presents()
+{
+    Compositor::set_render_presents_for_testing({});
+}
+
+WebIDL::UnsignedLongLong Internals::presented_scene_epoch()
+{
+    // NB: Read beside the frame in flight, which would be taken in by presenter().
+    auto navigable = window().associated_document().navigable();
+    return navigable ? navigable->presenter_beside_frame_in_flight().presented_scene_epoch() : 0;
+}
+
+WebIDL::UnsignedLongLong Internals::hit_test_scene_epoch()
+{
+    auto navigable = window().associated_document().navigable();
+    return navigable ? navigable->presenter_beside_frame_in_flight().adopted_scene_epoch() : 0;
 }
 
 bool Internals::rendering_update_awaits_pass() const

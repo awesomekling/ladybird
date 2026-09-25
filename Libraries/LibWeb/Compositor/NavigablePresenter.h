@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <AK/Atomic.h>
 #include <AK/AtomicRefCounted.h>
 #include <AK/NonnullRefPtr.h>
 #include <AK/NumericLimits.h>
@@ -31,6 +32,8 @@ class NavigablePresenter;
 // Whether the frame a navigable presents is sealed when the rendering update begins it (LIBWEB_RENDER_PRESENTS=1),
 // rather than read from its document where the frame is finished.
 WEB_API bool render_presents();
+// Test only: overrides LIBWEB_RENDER_PRESENTS for the frames begun from now on, or stops overriding it.
+WEB_API void set_render_presents_for_testing(Optional<bool>);
 
 // Where a frame's keyboard scroll state goes with the epoch of a display list not recorded yet.
 inline constexpr u64 keyboard_scroll_epoch_placeholder = NumericLimits<u64>::max();
@@ -135,6 +138,8 @@ public:
     u64 render_state_generation { 0 };
     RefPtr<CompositorFrameSink> frame_sink;
     bool is_presented_by_frame_in_flight { false };
+    // The epoch of the scene the frame in flight presented, if it carried one.
+    Optional<u64> presented_scene_epoch;
     // What the frame in flight published, for the main thread to take in.
     Optional<PublishedDisplayList> published;
 };
@@ -181,6 +186,17 @@ public:
         m_lent_to_frame_in_flight = false;
     }
 
+    // How many scenes (display lists and visual context trees) this presenter has handed its compositor context. Read
+    // from any thread: the render side hands them over beside the main thread.
+    u64 presented_scene_epoch() const { return m_presented_scene_epoch.load(); }
+    // Called once a frame that carries a scene has been handed over. Returns the scene's epoch.
+    u64 did_present_scene() { return m_presented_scene_epoch.fetch_add(1) + 1; }
+    // Main thread only: the epoch of the last scene the main thread took in, which its hit-test list was made with.
+    // Until it takes in the frame that presented a later one, what is on screen is ahead of what it hit tests.
+    u64 adopted_scene_epoch() const { return m_adopted_scene_epoch; }
+    void did_adopt_scene(u64 epoch) { m_adopted_scene_epoch = epoch; }
+    bool has_scene_to_adopt() const { return presented_scene_epoch() > m_adopted_scene_epoch; }
+
     // Builds the frame that brings the compositor context up to date with `published` (or, if the frame recorded
     // nothing, with its source's tree and scroll state). Reaches no document but through `source`.
     CompositorFrame build_frame(PresentationInputs&, PresentationSource&, Optional<PublishedDisplayList> published);
@@ -195,6 +211,8 @@ private:
     Compositing::DisplayListResourceSet m_compositor_display_list_resources;
     Compositing::DisplayListResourceSet m_compositor_display_list_command_resources;
     bool m_lent_to_frame_in_flight { false };
+    Atomic<u64> m_presented_scene_epoch { 0 };
+    u64 m_adopted_scene_epoch { 0 };
 };
 
 }

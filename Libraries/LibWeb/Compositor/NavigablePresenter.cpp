@@ -9,13 +9,20 @@
 
 namespace Web::Compositor {
 
+static Optional<bool> s_render_presents_for_testing;
+
 bool render_presents()
 {
     static bool const enabled = [] {
         auto value = Core::Environment::get("LIBWEB_RENDER_PRESENTS"sv);
         return value.has_value() && *value == "1"sv;
     }();
-    return enabled;
+    return s_render_presents_for_testing.value_or(enabled);
+}
+
+void set_render_presents_for_testing(Optional<bool> enabled)
+{
+    s_render_presents_for_testing = enabled;
 }
 
 static Compositing::DisplayListResourceSet resources_to_hand_compositor(Compositing::DisplayListResourceStorage const& resource_storage, Compositing::DisplayListResourceSet const& paint_command_cache_source_resources, Compositing::DisplayListResourceSet const& display_list_command_resources, Compositing::AccumulatedVisualContextTree const& visual_context_tree)

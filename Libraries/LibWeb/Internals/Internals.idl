@@ -261,6 +261,14 @@ interface Internals {
     // The frame scheduler's state: "idle", "main-half", "in-flight", "consuming" or
     // "committed-tail-pending".
     DOMString frameSchedulerState();
+    // Whether the frame in flight presents the frames begun from now on (LIBWEB_RENDER_PRESENTS=1), overriding the
+    // environment until resetRenderPresents(). A test that sets it resets it.
+    undefined setRenderPresents(boolean enabled);
+    undefined resetRenderPresents();
+    // How many scenes this window's navigable has handed its compositor context, read without taking in the frame in
+    // flight; and the epoch of the last one the main thread took in, which its hit-test list was made with.
+    unsigned long long presentedSceneEpoch();
+    unsigned long long hitTestSceneEpoch();
     // Whether the rendering update has submitted its style or layout pass (under LIBWEB_STAGE_OVERLAP naming "style" or
     // "layout") and goes on with the rest, which submits its recordings, once the main thread has taken the pass back
     // between tasks.
