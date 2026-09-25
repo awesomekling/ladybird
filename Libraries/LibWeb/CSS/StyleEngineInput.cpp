@@ -321,7 +321,9 @@ void record_element_connected(DOM::Element& element)
     element.document().style_computer().register_style_node(element.style_node_id(), element);
     // The name the document knows the element by arrives with the identity. A box built for one of
     // the element's pseudo-elements answers by it even when the element itself has no box.
-    style_engine->set_element_unique_node_id(element.style_node_id(), static_cast<u64>(element.unique_id().value()));
+    style_engine->publish_input([style_node = element.style_node_id(), unique_node_id = static_cast<u64>(element.unique_id().value())](StyleInputScope const& input) {
+        input.engine().set_element_unique_node_id(style_node, unique_node_id);
+    });
     element.publish_style_recomputes_on_environment_move();
     element.publish_size_container_query_facts();
     Layout::publish_table_spans(element);
@@ -447,7 +449,9 @@ void record_subtree_connecting(DOM::Node& root)
                 auto identity = identities[next_element_identity++];
                 element->set_style_node_id(identity);
                 style_computer.register_style_node(identity, *element);
-                style_engine.set_element_unique_node_id(identity, static_cast<u64>(element->unique_id().value()));
+                style_engine.publish_input([identity, unique_node_id = static_cast<u64>(element->unique_id().value())](StyleInputScope const& input) {
+                    input.engine().set_element_unique_node_id(identity, unique_node_id);
+                });
                 element->publish_style_recomputes_on_environment_move();
                 element->publish_size_container_query_facts();
                 Layout::publish_table_spans(*element);
