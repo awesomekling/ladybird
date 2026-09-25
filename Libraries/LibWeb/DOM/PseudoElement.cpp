@@ -55,8 +55,9 @@ Layout::NodeWithStyle* SyntheticPseudoElement::unsafe_layout_node() const
 {
     if (!m_originating_element)
         return nullptr;
+    // An originating element with no StyleNodeID has no rows, and is not asked for them: see Node::unsafe_layout_node().
     auto* arena = m_originating_element->document().layout_node_arena_if_created();
-    if (!arena)
+    if (!arena || m_originating_element->style_node_id() == 0)
         return nullptr;
     return static_cast<Layout::NodeWithStyle*>(Layout::RustFFI::layout_arena_bound_pseudo_element_shell(arena->handle(), m_originating_element->style_node_id().value(), Layout::Node::encode_generated_for(m_type)));
 }
