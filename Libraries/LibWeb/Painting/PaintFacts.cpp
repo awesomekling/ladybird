@@ -10,6 +10,7 @@
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/InvalidationJournal.h>
 #include <LibWeb/HTML/DecodedImageData.h>
+#include <LibWeb/HTML/EventLoop/FrameScheduler.h>
 #include <LibWeb/HTML/HTMLAreaElement.h>
 #include <LibWeb/HTML/HTMLCanvasElement.h>
 #include <LibWeb/HTML/HTMLImageElement.h>
@@ -141,6 +142,13 @@ static void push_navigable_container_paint_facts_onto(HTML::NavigableContainer c
 // The facts are read from the container as it is at the drain.
 void push_navigable_container_paint_facts(HTML::NavigableContainer const& navigable_container)
 {
+    // Beside a recording that owns the arena, the box is looked up and its facts noted once the frame has been taken in.
+    if (HTML::FrameScheduler::arena_changes_wait_for_frame(navigable_container.document())) {
+        HTML::main_thread_event_loop().frame_scheduler().defer_arena_change(GC::create_function(navigable_container.heap(), [navigable_container = GC::Ref { navigable_container }] {
+            push_navigable_container_paint_facts(navigable_container);
+        }));
+        return;
+    }
     auto const* layout_node = navigable_container.unsafe_layout_node();
     if (!layout_node || layout_node->kind() != Layout::RustFFI::NodeKind::NavigableContainerViewport)
         return;
@@ -340,6 +348,13 @@ static void push_video_paint_facts_onto(HTML::HTMLVideoElement const& video_elem
 
 void push_video_paint_facts(HTML::HTMLVideoElement const& video_element)
 {
+    // Beside a recording that owns the arena, the box is looked up and its facts pushed once the frame has been taken in.
+    if (HTML::FrameScheduler::arena_changes_wait_for_frame(video_element.document())) {
+        HTML::main_thread_event_loop().frame_scheduler().defer_arena_change(GC::create_function(video_element.heap(), [video_element = GC::Ref { video_element }] {
+            push_video_paint_facts(video_element);
+        }));
+        return;
+    }
     auto const* layout_node = video_element.unsafe_layout_node();
     if (!layout_node || layout_node->kind() != Layout::RustFFI::NodeKind::VideoBox)
         return;
