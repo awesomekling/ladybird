@@ -1670,6 +1670,9 @@ GC::Ref<JS::Object> Internals::get_rendering_scheduler_counters() const
     }
     object->define_direct_property("doors"_utf16_fly_string, doors, JS::default_attributes);
     object->define_direct_property("finishedFrameConsumerCalls"_utf16_fly_string, JS::Value(counters.finished_frame_consumer_calls), JS::default_attributes);
+    object->define_direct_property("renderingTaskBlockedOnFrameNanoseconds"_utf16_fly_string, JS::Value(counters.rendering_task_blocked_on_frame_nanoseconds), JS::default_attributes);
+    object->define_direct_property("renderingTasksHeld"_utf16_fly_string, JS::Value(counters.rendering_tasks_held), JS::default_attributes);
+    object->define_direct_property("renderingTasksAheadOfQueue"_utf16_fly_string, JS::Value(counters.rendering_tasks_ahead_of_queue), JS::default_attributes);
     object->define_direct_property("layoutOverlapEligibleUpdates"_utf16_fly_string, JS::Value(counters.layout_overlap_eligible_updates), JS::default_attributes);
     auto layout_overlap_blocked_updates = JS::Object::create(realm, nullptr);
     for (size_t blocker = 0; blocker < counters.layout_overlap_blocked_updates.size(); ++blocker) {
@@ -1777,6 +1780,21 @@ bool Internals::frame_in_flight_references_are_alive() const
 void Internals::set_manual_rendering_opportunities(bool enabled)
 {
     page().client().set_manual_rendering_opportunities(enabled);
+}
+
+void Internals::set_rendering_opportunity_hold(bool enabled)
+{
+    HTML::EventLoop::set_holds_rendering_opportunities_for_testing(enabled);
+}
+
+void Internals::reset_rendering_opportunity_hold()
+{
+    HTML::EventLoop::set_holds_rendering_opportunities_for_testing({});
+}
+
+bool Internals::rendering_task_held() const
+{
+    return HTML::main_thread_event_loop().rendering_task_held();
 }
 
 void Internals::inject_rendering_opportunity(double frame_time_ms)

@@ -74,6 +74,15 @@ GC::Ptr<Task> TaskQueue::take_first_runnable()
     if (m_event_loop->execution_paused())
         return nullptr;
 
+    if (m_event_loop->rendering_task_runs_ahead_of_queue() && !m_event_loop->running_rendering_task()) {
+        bool const tasks_queued_ahead = !m_tasks.is_empty() && m_tasks.first()->source() != Task::Source::Rendering;
+        if (auto task = take_first_runnable_matching([](auto const& task) { return task.source() == Task::Source::Rendering; })) {
+            if (tasks_queued_ahead)
+                m_event_loop->did_run_rendering_task_ahead_of_queue();
+            return task;
+        }
+    }
+
     for (auto it = m_tasks.begin(); it != m_tasks.end();) {
         auto& task = *it;
 

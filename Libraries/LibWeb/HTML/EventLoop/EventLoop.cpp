@@ -59,18 +59,62 @@ EventLoop::EventLoop(Type type)
     m_task_queue = GC::Heap::the().allocate<TaskQueue>(*this);
 
     m_rendering_task_function = GC::create_function(GC::Heap::the(), [this] {
-        VERIFY(m_rendering_task_queued);
-        // The previous rendering update's frame and tail come first. The tail hands its pages the rendering opportunity
-        // this task was queued for again, and while the task still counts as queued, that queues no second one.
-        m_frame_scheduler->finish_frame_now();
-        m_rendering_task_queued = false;
-        update_the_rendering();
+        run_rendering_task();
     });
 }
 
 EventLoop::~EventLoop() = default;
 
 bool EventLoop::s_a_frame_is_in_flight { false };
+
+static Optional<bool> s_holds_rendering_opportunities_for_testing;
+
+bool EventLoop::holds_rendering_opportunities()
+{
+    if (s_holds_rendering_opportunities_for_testing.has_value())
+        return *s_holds_rendering_opportunities_for_testing;
+    static bool const holds = [] {
+        auto const* value = getenv("LIBWEB_RENDERING_OPPORTUNITY_HOLD");
+        return value && *value && StringView { value, strlen(value) } != "0"sv;
+    }();
+    return holds;
+}
+
+void EventLoop::set_holds_rendering_opportunities_for_testing(Optional<bool> holds)
+{
+    s_holds_rendering_opportunities_for_testing = holds;
+}
+
+void EventLoop::run_rendering_task()
+{
+    VERIFY(m_rendering_task_queued);
+    VERIFY(!m_rendering_task_held);
+    m_rendering_task_runs_ahead = false;
+    // The previous rendering update's frame and tail come first. The tail hands its pages the rendering opportunity
+    // this task was queued for again, and while the task still counts as queued, that queues no second one.
+    // A frame the render side is still working on is not waited for where rendering opportunities are held: the task
+    // holds its opportunity instead, and the step 1 that takes the frame in and runs its tail queues it again.
+    if (holds_rendering_opportunities() && !m_frame_scheduler->finish_finished_frames()) {
+        m_rendering_task_held = true;
+        ++m_rendering_scheduler_counters.rendering_tasks_held;
+        return;
+    }
+    m_rendering_scheduler_counters.rendering_task_blocked_on_frame_nanoseconds += m_frame_scheduler->finish_frame_now();
+    m_rendering_task_queued = false;
+    update_the_rendering();
+}
+
+void EventLoop::queue_held_rendering_task_if_frame_finished()
+{
+    if (!m_rendering_task_held || m_frame_scheduler->has_unfinished_frame())
+        return;
+    // The held rendering update goes right after the frame it waited for (normally taken in, with its tail run, by
+    // this step 1's finished frame consumer), ahead of the tasks queued while it was held.
+    VERIFY(m_rendering_task_queued);
+    m_rendering_task_held = false;
+    m_rendering_task_runs_ahead = true;
+    queue_a_task(Task::Source::Rendering, this, nullptr, *m_rendering_task_function);
+}
 
 StringView EventLoop::frame_lockstep_reason_name(FrameLockstepReason reason)
 {
@@ -261,6 +305,10 @@ void EventLoop::process()
         TemporaryChange at_step_one { m_calling_finished_frame_consumer, true };
         m_finished_frame_consumer->function()();
     }
+
+    // AD-HOC: A rendering task that held its rendering opportunity while a frame was in flight is queued again once
+    //         the render side has finished that frame.
+    queue_held_rendering_task_if_frame_finished();
 
     // Some algorithms request that steps or states only occur once the event loop has reached step 1.
     // Invoke a set of tasks that these algorithms request us to in order to achieve this.
@@ -484,8 +532,9 @@ bool EventLoop::rendering_opportunity(HighResolutionTime::DOMHighResTimeStamp fr
 
     // NB: A rendering update whose frame has not been taken in, or whose tail has not run, does not hold the opportunity
     //     back: the rendering task queued for it finishes that frame first, as a rendering update in lockstep would
-    //     have. Held back, the opportunity would reach the rendering task queue only behind the tasks queued after it,
-    //     and one granted by hand would be lost.
+    //     have, or, where rendering opportunities are held, holds the opportunity itself until that frame has
+    //     finished. Held back here, the opportunity would reach the rendering task queue only behind the tasks queued
+    //     after it, and one granted by hand would be lost.
     m_rendering_update_requested = false;
 
     if (m_rendering_task_queued)
@@ -1484,6 +1533,8 @@ EventLoop::PauseHandle EventLoop::pause(UpdateTheRendering should_update_the_ren
                 return task.source() == Task::Source::Rendering;
             });
             m_rendering_task_queued = false;
+            m_rendering_task_held = false;
+            m_rendering_task_runs_ahead = false;
         }
         m_last_render_opportunity_time = max(m_last_render_opportunity_time, HighResolutionTime::unsafe_shared_current_time());
         TemporaryChange synchronous_rendering_update { m_running_synchronous_rendering_update, true };
