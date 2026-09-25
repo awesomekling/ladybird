@@ -2464,9 +2464,9 @@ pub(crate) unsafe fn compute_root_layout(
     crate::stage_thread::run_stage(move || run_root_layout_stage(input, scratch))
 }
 
-/// Commits a computed root layout to the arena without the host. The host half, which pays what
-/// the commit owes the host, notifies it and then settles the arena, is left to
-/// [`PendingLayoutCommit::finish`].
+/// Commits a computed root layout to the arena without the host. The arena half is settled by
+/// [`PendingLayoutCommit::settle_ahead_of_host`], and the host half, which pays what the commit owes
+/// the host and notifies it, is left to [`DeferredLayoutCommitHostHalf::deliver`].
 ///
 /// # Safety
 ///
@@ -2497,31 +2497,37 @@ pub(crate) struct PendingLayoutCommit {
     notifications: commit::CommitNotifications,
 }
 
+/// The host half of a commit whose arena half has already settled, so the frame could go on without
+/// the document thread. What the commit owes the host and the notifications it produced wait here,
+/// in order, for the frame's next join.
+#[must_use]
+pub(crate) struct DeferredLayoutCommitHostHalf {
+    arena_handle: *mut c_void,
+    handbacks: crate::layout::layout_node_arena::HostHandbacks,
+    notifications: commit::CommitNotifications,
+}
+
 impl PendingLayoutCommit {
-    /// Pays the host what the commit owes it, delivers the commit's notifications and then settles
-    /// the arena-local bookkeeping every layout entry owes its caller: cache maintenance and the
-    /// reset of the update flags the committed subtree satisfied. The reset follows the host code,
-    /// so what that code marks inside the subtree is satisfied as well.
+    /// Settles the arena-local bookkeeping every layout entry owes its caller before the commit's
+    /// host half runs: cache maintenance and the reset of the update flags the committed subtree
+    /// satisfied. The frame goes on from the settled arena without a join. Whatever the host code
+    /// marks inside the subtree once its half runs is left for another pass.
     ///
     /// # Safety
     ///
-    /// The arena must still be live, with no borrow taken during the pass still in use.
-    pub(crate) unsafe fn finish(self, main_thread: &crate::stage::MainThread) {
+    /// The arena must still be live, with no borrow taken during the pass still in use, and the
+    /// frame must deliver the returned host half, in commit order, before the host half of any
+    /// later commit.
+    pub(crate) unsafe fn settle_ahead_of_host(self) -> DeferredLayoutCommitHostHalf {
         let Self {
             arena_handle,
             root,
             entry,
             notifications,
         } = self;
-        let host = LayoutHost::of(main_thread);
-        // The boxes the commit gave or took reach the host first, as they did while it ran.
         // SAFETY: Guaranteed by the caller; commit's mutable borrow has ended.
-        unsafe { LayoutNodeArena::from_handle(arena_handle) }.finish_paying_host_handbacks(main_thread);
-        // SAFETY: The host and shells remain live, and commit's mutable borrow has ended.
-        unsafe { notifications.notify_host(main_thread, &host) };
-        // SAFETY: Host callbacks have returned; borrow the arena again for the epilogue, which
-        // performs no host callbacks.
         let arena = unsafe { LayoutNodeArena::from_handle(arena_handle) };
+        let handbacks = arena.take_host_handbacks_ahead_of_payment();
         // SAFETY: The scratch lives beside the arena for as long as the handle does.
         unsafe { LayoutScratch::from_handle(arena_handle) }.clear_inline_item_stashes();
         arena.end_layout_pass();
@@ -2538,52 +2544,7 @@ impl PendingLayoutCommit {
                 arena.schedule_scrollable_overflow_recalculation(root);
             }
         }
-        arena.end_active_layout_pass(main_thread);
-    }
-}
-
-/// The host half of a partial relayout boundary's commit whose arena half has already settled, so
-/// the next boundary's pass could start without the document thread. What the commit owes the host
-/// and the notifications it produced wait here, in order, for the join that ends the run of passes.
-#[must_use]
-pub(crate) struct DeferredLayoutCommitHostHalf {
-    arena_handle: *mut c_void,
-    handbacks: crate::layout::layout_node_arena::HostHandbacks,
-    notifications: commit::CommitNotifications,
-}
-
-impl PendingLayoutCommit {
-    /// Settles the arena-local bookkeeping of a partial relayout boundary's commit before its host
-    /// half runs, so the next boundary's pass starts from the settled arena without a join. The
-    /// update flags the committed subtree satisfied are reset ahead of the host code; whatever
-    /// that code marks inside the subtree is left for another pass.
-    ///
-    /// # Safety
-    ///
-    /// As for [`Self::finish`], and the frame must deliver the returned host half, in commit
-    /// order, before the host half of any later commit.
-    pub(crate) unsafe fn settle_ahead_of_host(self) -> DeferredLayoutCommitHostHalf {
-        let Self {
-            arena_handle,
-            root,
-            entry,
-            notifications,
-        } = self;
-        assert!(
-            matches!(entry, CommittedEntry::Subtree),
-            "only a partial relayout boundary's commit settles ahead of its host half"
-        );
-        // SAFETY: Guaranteed by the caller; commit's mutable borrow has ended.
-        let arena = unsafe { LayoutNodeArena::from_handle(arena_handle) };
-        let handbacks = arena.take_host_handbacks_ahead_of_payment();
-        // SAFETY: The scratch lives beside the arena for as long as the handle does.
-        unsafe { LayoutScratch::from_handle(arena_handle) }.clear_inline_item_stashes();
-        arena.end_layout_pass();
-        arena.reset_layout_update_flags_in_subtree(root);
-        // As in finish: the subtree's new size may affect ancestor scrollable overflow.
-        debug_assert!(!node_facts::kind_is_svg_box(arena.data(root).kind.get()));
-        arena.schedule_scrollable_overflow_recalculation(root);
-        arena.end_active_layout_pass_ahead_of_host();
+        arena.end_active_layout_pass();
         DeferredLayoutCommitHostHalf {
             arena_handle,
             handbacks,
@@ -2593,8 +2554,8 @@ impl PendingLayoutCommit {
 }
 
 impl DeferredLayoutCommitHostHalf {
-    /// Pays the host what the commit owed it and delivers the commit's notifications, as
-    /// [`PendingLayoutCommit::finish`] would have before settling the arena.
+    /// Pays the host what the commit owed it and delivers the commit's notifications, then names
+    /// the owners of the trace lines the pass left.
     ///
     /// # Safety
     ///
@@ -2611,6 +2572,8 @@ impl DeferredLayoutCommitHostHalf {
             .finish_paying_taken_host_handbacks(main_thread, handbacks);
         // SAFETY: The host and shells remain live, and no arena borrow is active.
         unsafe { notifications.notify_host(main_thread, &host) };
+        // SAFETY: Host callbacks have returned.
+        unsafe { LayoutNodeArena::from_handle(arena_handle) }.name_layout_trace_owners(main_thread);
     }
 }
 
@@ -2635,7 +2598,7 @@ fn finish_entry_pass(
 }
 
 /// Commits the finished entry pass rooted at `commit_root` to the arena. What the commit owes the
-/// host waits in the handback span it opens, which [`PendingLayoutCommit::finish`] pays.
+/// host waits in the handback span it opens, which [`DeferredLayoutCommitHostHalf::deliver`] pays.
 ///
 /// # Safety
 ///
@@ -2768,7 +2731,7 @@ pub(crate) unsafe fn compute_subtree_layout_fragments(
 }
 
 /// Commits a computed partial relayout boundary to the arena without the host, leaving the host
-/// half to [`PendingLayoutCommit::finish`].
+/// half to [`DeferredLayoutCommitHostHalf::deliver`].
 ///
 /// # Safety
 ///
