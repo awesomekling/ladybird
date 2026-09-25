@@ -216,6 +216,8 @@ thread_local! {
     static STYLE_ENGINE_ENTRANCES_ONLY_WAIT: Cell<u32> = const { Cell::new(0) };
     // On the calling thread, how deep it is in work a stage joined it for.
     static RUNNING_JOIN_WORK: Cell<u32> = const { Cell::new(0) };
+    // On the calling thread, how many forced joins took a style pass back.
+    static STYLE_PASS_FORCED_JOINS: Cell<u64> = const { Cell::new(0) };
     // On the calling thread, the call sites that forced a join already logged.
     static FORCED_JOIN_SITES: RefCell<std::collections::HashSet<(&'static str, usize, u32)>> =
         RefCell::new(std::collections::HashSet::new());
@@ -649,6 +651,9 @@ pub(crate) fn join_frame_in_flight_at(arena: *mut c_void, file: &'static str, li
     let Some(label) = label else {
         return;
     };
+    if label == "style" {
+        STYLE_PASS_FORCED_JOINS.with(|joins| joins.set(joins.get() + 1));
+    }
     let first_time = FORCED_JOIN_SITES.with(|sites| sites.borrow_mut().insert((file, line as usize, column)));
     if first_time {
         // A style engine entrance names itself, and a C++ call site has no column.
@@ -664,6 +669,26 @@ pub(crate) fn join_frame_in_flight_at(arena: *mut c_void, file: &'static str, li
     let host = FRAME_SCHEDULER_HOST.get().expect("a submitted frame has a scheduler");
     // SAFETY: Called on the main thread, with the frame taken back.
     unsafe { (host.consume_commit)() }
+}
+
+/// Test only: how many forced joins on the calling thread took a style pass back.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_stage_thread_style_pass_forced_joins() -> u64 {
+    STYLE_PASS_FORCED_JOINS.with(Cell::get)
+}
+
+/// Whether the frame in flight is a style pass that owns the style engine `engine`, and nothing else:
+/// the one frame beside which a main-side write to that engine's document can queue its style inputs
+/// for the pass's drain instead of joining it.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_stage_thread_only_style_pass_in_flight_for(engine: *const c_void) -> bool {
+    SUBMITTED.with(|submitted| {
+        let submitted = submitted.borrow();
+        !submitted.is_empty()
+            && submitted
+                .iter()
+                .all(|stage| stage.label == "style" && stage.style_engine == engine as usize)
+    })
 }
 
 /// Called where the main thread enters the style engine `engine` (`entry` names the entrance): if a

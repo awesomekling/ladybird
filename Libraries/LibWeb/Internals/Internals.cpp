@@ -1805,6 +1805,11 @@ bool Internals::rendering_update_awaits_pass() const
     return HTML::main_thread_event_loop().frame_scheduler().awaits_pass();
 }
 
+u64 Internals::style_pass_forced_joins() const
+{
+    return Layout::RustFFI::rust_stage_thread_style_pass_forced_joins();
+}
+
 void Internals::update_compositor_animations()
 {
     window().associated_document().update_compositor_animations();

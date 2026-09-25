@@ -1,4 +1,5 @@
 custom properties: held as armed: true
+custom properties: writes joined the pass: false
 custom properties: color: rgb(0, 128, 0)
 custom properties: fill: rgb(0, 0, 255)
 custom properties: registered: 12px

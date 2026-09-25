@@ -98,6 +98,14 @@ async function whileStyleInFlight(point, mutate, during, doc = null) {
     });
 }
 
+// Whether running `write` took a style pass in flight back (a forced join) instead of leaving its style input to wait
+// for the pass's drain. False wherever no style pass is in flight.
+function writeJoinedStylePass(write) {
+    const before = internals.stylePassForcedJoins();
+    write();
+    return internals.stylePassForcedJoins() !== before;
+}
+
 // Whether the style pass was held where it was armed and was in flight while it was (true wherever none was held).
 function styleHeldAsArmed(frame, point) {
     return !frame.heldAt || (frame.heldAt === point && frame.state === "in-flight");

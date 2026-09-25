@@ -315,6 +315,12 @@ public:
     // flight, in the order the host published them.
     void publish_input(Function<void(StyleInputScope const&)>&&);
 
+    // While the host takes a submitted pass back and drains it, what was recorded and published beside the pass
+    // waits for the next transaction: an operation that the drain interrupted must not have half of its input
+    // taken by the drain's waves.
+    void begin_holding_input_recorded_beside_pass();
+    void end_holding_input_recorded_beside_pass();
+
     struct PublishedStyleTransaction {
         PublishedTransactionVersion version;
         ReadonlySpan<PublishedStyleDelta> reactions;
@@ -408,6 +414,7 @@ private:
     PublishedTransactionVersion m_published_transaction_version { 0, 0 };
     u32 m_connected_element_count_at_last_transaction { 0 };
     bool m_published_batch_waits { false };
+    bool m_holds_input_recorded_beside_pass { false };
     i64 m_submitted_style_transaction_microseconds { 0 };
     u32 m_effect_drain_depth { 0 };
     Vector<Function<void(StyleInputScope const&)>> m_inputs_queued_during_pass;
