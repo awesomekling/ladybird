@@ -51,6 +51,7 @@
         internals.gc();
         container.textContent = "after";
         println(`removed, then collected: container laid out: ${container.offsetHeight > 0}`);
+        println(`layout passes held: ${layoutHoldsWereHeld(2)}`);
         done();
     });
 </script>

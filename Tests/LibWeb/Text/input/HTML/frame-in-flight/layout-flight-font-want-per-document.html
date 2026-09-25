@@ -32,6 +32,7 @@
         await faceB.loaded;
         println(`face A: ${faceA.status}`);
         println(`face B: ${faceB.status}`);
+        println(`layout passes held: ${layoutHoldsWereHeld(1)}`);
         done();
     });
 </script>

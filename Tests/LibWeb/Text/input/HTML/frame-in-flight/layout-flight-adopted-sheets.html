@@ -29,6 +29,7 @@
         println(`color: ${getComputedStyle(target).color}`);
         document.adoptedStyleSheets = [second, first];
         println(`color after reordering: ${getComputedStyle(target).color}`);
+        println(`layout passes held: ${layoutHoldsWereHeld(1)}`);
         done();
     });
 </script>

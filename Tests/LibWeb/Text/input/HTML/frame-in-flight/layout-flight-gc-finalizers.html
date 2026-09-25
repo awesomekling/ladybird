@@ -32,8 +32,10 @@
             range.selectNodeContents(host);
             doomed.push(range);
 
+            // A document whose resize observers observe anything lays out in place, so this one observes nothing any more.
             const resizeObserver = new ResizeObserver(() => {});
             resizeObserver.observe(host);
+            resizeObserver.unobserve(host);
             doomed.push(resizeObserver);
             const intersectionObserver = new IntersectionObserver(() => {});
             intersectionObserver.observe(host);
@@ -91,6 +93,7 @@
 
         await twoFrames();
         println(`container laid out: ${container.offsetHeight > 0}`);
+        println(`layout passes held: ${layoutHoldsWereHeld(2)}`);
         done();
     });
 </script>

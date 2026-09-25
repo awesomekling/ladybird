@@ -48,6 +48,7 @@
         println(`beside a recording: still in flight after the change: ${deleted.stillInFlight}`);
         await twoFrames();
         println(`beside a recording: the text width is back: ${text.offsetWidth === widthWithoutFace}`);
+        println(`layout passes held: ${layoutHoldsWereHeld(1)}`);
         done();
     });
 </script>

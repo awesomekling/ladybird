@@ -32,6 +32,7 @@
         box.style.width = "90px";
         await twoFrames();
         println(`rendering resumed: ${document.visibilityState}, ${box.offsetWidth}`);
+        println(`layout passes held: ${layoutHoldsWereHeld(1)}`);
         done();
     });
 </script>

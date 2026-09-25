@@ -60,6 +60,7 @@
         println(`read: shown had a box: ${read.width}`);
         await twoFrames();
         report("read");
+        println(`layout passes held: ${layoutHoldsWereHeld(3)}`);
         done();
     });
 </script>

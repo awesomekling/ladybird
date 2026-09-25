@@ -35,6 +35,7 @@
         println(`fresh height: ${fresh.offsetHeight}`);
         println(`removed element class: ${removed.className}`);
         println(`container height: ${container.offsetHeight}`);
+        println(`layout passes held: ${layoutHoldsWereHeld(1)}`);
         done();
     });
 </script>

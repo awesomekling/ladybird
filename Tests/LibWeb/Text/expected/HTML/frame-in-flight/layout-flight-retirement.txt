@@ -8,3 +8,4 @@ removal: iframes left: 0
 window close: held as armed: true
 window close: closed: true
 window close: opener laid out: 300
+layout passes held: true
