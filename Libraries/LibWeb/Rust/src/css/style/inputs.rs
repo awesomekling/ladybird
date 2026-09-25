@@ -507,6 +507,12 @@ impl RetainedState {
         self.atoms.intern_qualified(namespace, name)
     }
 
+    /// Takes the qualified atom the host acquired for `namespace` and `name`; see
+    /// `style_engine_acquire_host_qualified_atom`.
+    pub fn adopt_qualified_atom(&mut self, namespace: StyleAtomID, name: StyleAtomID, atom: StyleAtomID) {
+        self.atoms.adopt_qualified(namespace, name, atom);
+    }
+
     /// Record what a custom property's name atom spells, and the fly string it is.
     ///
     /// # Safety

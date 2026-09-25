@@ -9,6 +9,7 @@
     #container.narrow { width: 200px; }
     #container.narrow > .item:last-child { color: rgb(0, 128, 0); }
     .item:first-child + .item { color: rgb(0, 0, 255); }
+    [data-late="on"] { color: rgb(128, 0, 128); }
 </style>
 <div id="container"><div id="first" class="item">first</div><div id="second" class="item" data-size="small">second</div></div>
 <script>
@@ -23,20 +24,25 @@
         const inserted = await whileStyleInFlight("before-run", () => {
             first.classList.add("tall");
         }, frame => {
-            // NB: A name the document carries already: the first use of an attribute name still joins the pass.
             const joined = writeJoinedStylePass(() => {
                 container.classList.add("narrow");
                 second.setAttribute("data-size", "big");
+            });
+            // Names no element has carried yet, one a rule matches and one nothing does.
+            const firstUseJoined = writeJoinedStylePass(() => {
+                first.setAttribute("data-late", "on");
+                first.setAttribute("data-never-matched", "yes");
             });
             const third = document.createElement("div");
             third.id = "third";
             third.className = "item";
             third.textContent = "third";
             const insertionJoined = writeJoinedStylePass(() => container.appendChild(third));
-            return { ...frame, joined, insertionJoined };
+            return { ...frame, joined, firstUseJoined, insertionJoined };
         });
         println(`insertion: held as armed: ${styleHeldAsArmed(inserted, "before-run")}`);
         println(`insertion: attribute changes joined the pass: ${inserted.joined}`);
+        println(`insertion: first-seen attribute names joined the pass: ${inserted.firstUseJoined}`);
         println(`insertion: the insertion joined the pass: ${inserted.insertionJoined}`);
         await twoFrames();
         println(`insertion: container height: ${container.offsetHeight}`);

@@ -395,6 +395,7 @@ private:
     bool refresh_attribute_value_text_requirements();
     [[nodiscard]] bool attribute_name_requires_value_text(StyleAtomID);
     void publish_attribute_value_text(StyleAtomID, Utf16View, bool affects_selector_catalog);
+    StyleAtomID acquire_qualified_atom(StyleAtomID namespace_atom, StyleAtomID name_atom);
 
     void* m_impl { nullptr };
     void* m_host_style_record_pins { nullptr };
