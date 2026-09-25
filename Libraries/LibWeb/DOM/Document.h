@@ -520,7 +520,16 @@ public:
     };
     void update_layout(UpdateLayoutReason);
     void update_layout(UpdateLayoutReason, ThrottledAnimationSamplingScope);
-    void update_style_and_layout_once(UpdateLayoutReason, ThrottledAnimationSamplingScope);
+    enum class LayoutPassSubmission : u8 {
+        Wait,
+        MaySubmit,
+    };
+    // Returns true if the update's full layout pass was submitted to run beside the main thread. The update then ends
+    // once the frame in flight is taken back.
+    bool update_style_and_layout_once(UpdateLayoutReason, ThrottledAnimationSamplingScope, LayoutPassSubmission = LayoutPassSubmission::Wait);
+    // The rendering update's layout update, whose full layout pass runs beside the main thread under
+    // LIBWEB_STAGE_OVERLAP=layout. Returns true if it does; the rendering update goes on once the frame is taken back.
+    [[nodiscard]] bool submit_layout_for_rendering_update();
     void note_content_visibility_auto_style() { m_may_have_content_visibility_auto_style = true; }
     void update_layout_if_needed_for_node(Node const&, UpdateLayoutReason);
     [[nodiscard]] u64 partial_layout_count() const;

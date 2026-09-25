@@ -59,12 +59,29 @@ unsafe extern "C" fn layout_arena_end_update_layout(arena: *mut c_void) {
 /// document thread between `layout_arena_begin_update_layout` and its end, and `inputs` must
 /// remain valid for the call.
 #[unsafe(no_mangle)]
-unsafe extern "C" fn layout_arena_update_layout(arena: *mut c_void, inputs: *const FfiLayoutUpdateInputs) {
+unsafe extern "C" fn layout_arena_update_layout(
+    arena: *mut c_void,
+    inputs: *const FfiLayoutUpdateInputs,
+) -> FfiLayoutUpdateOutcome {
     assert!(!arena.is_null(), "layout node arena handle is null");
     assert!(!inputs.is_null());
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     abort_on_panic(|| {
         // SAFETY: Guaranteed by the entry point's contract.
-        unsafe { update_layout(&main_thread, arena, &*inputs) };
+        unsafe { update_layout(&main_thread, arena, &*inputs) }
+    })
+}
+
+/// Runs the rest of the layout frame of the document `arena` names once the document thread has
+/// taken back the frame in flight that ran its full layout pass `laid_out`, and ends the update.
+/// The document thread runs it where it takes the frame back, ahead of anything else that reaches
+/// the arena.
+pub(super) fn finish_layout_frame_taken_back(arena: *mut c_void, frame: LayoutFrame, laid_out: LaidOutPass) {
+    // SAFETY: Only the take-back of the frame the update submitted calls this, on the document
+    // thread, for the arena whose update is still running.
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+    abort_on_panic(|| {
+        // SAFETY: As above.
+        unsafe { finish_layout_frame(&main_thread, frame, laid_out) }
     });
 }

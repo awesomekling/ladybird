@@ -227,6 +227,9 @@ struct SubmittedStage {
     style_engine: usize,
     from_stage: Receiver<StageOutcome>,
     outcome: Option<StageOutcome>,
+    // What the main thread runs once it has taken the stage back, before anything else reaches
+    // what the stage owned.
+    on_taken_back: Option<Box<dyn FnOnce()>>,
 }
 
 impl SubmittedStage {
@@ -301,6 +304,36 @@ pub(crate) fn submits(label: &'static str) -> bool {
 /// Until the frame is taken back, nothing but `stage` may reach what `stage` holds: every
 /// main-thread path to it has to go through [`join_frame_in_flight`] first.
 pub(crate) unsafe fn submit_stage(label: &'static str, arena: *mut c_void, stage: impl FnOnce() + Send + 'static) {
+    // SAFETY: Guaranteed by the caller.
+    unsafe { submit(label, arena, stage, None) }
+}
+
+/// Like [`submit_stage`], and has the main thread run `on_taken_back` once it has taken the stage
+/// back: at the top of the event loop, or in the forced join that takes it back first. It runs
+/// ahead of the frame scheduler's consume-commit, in submission order.
+///
+/// # Safety
+///
+/// As for [`submit_stage`].
+pub(crate) unsafe fn submit_stage_with_take_back(
+    label: &'static str,
+    arena: *mut c_void,
+    stage: impl FnOnce() + Send + 'static,
+    on_taken_back: impl FnOnce() + 'static,
+) {
+    // SAFETY: Guaranteed by the caller.
+    unsafe { submit(label, arena, stage, Some(Box::new(on_taken_back))) }
+}
+
+/// # Safety
+///
+/// As for [`submit_stage`].
+unsafe fn submit(
+    label: &'static str,
+    arena: *mut c_void,
+    stage: impl FnOnce() + Send + 'static,
+    on_taken_back: Option<Box<dyn FnOnce()>>,
+) {
     let thread = stage_thread().expect("only a stage thread runs submitted stages");
     debug_assert!(submits(label), "the stage {label} is not submitted");
     let (to_caller, from_stage) = channel::<StageOutcome>();
@@ -334,6 +367,7 @@ pub(crate) unsafe fn submit_stage(label: &'static str, arena: *mut c_void, stage
             style_engine: style_engine_of_stage(label, arena),
             from_stage,
             outcome: None,
+            on_taken_back,
         });
     });
     tsan::release(thread);
@@ -565,14 +599,19 @@ pub(crate) fn take_frame_in_flight() -> bool {
     }
     let thread = stage_thread().expect("only a stage thread runs submitted stages");
     let mut panic = None;
+    let mut on_taken_back = Vec::new();
     for mut stage in stages {
         if let Err(payload) = stage.wait() {
             panic.get_or_insert(payload);
         }
+        on_taken_back.extend(stage.on_taken_back.take());
     }
     tsan::acquire(thread);
     if let Some(payload) = panic {
         std::panic::resume_unwind(payload);
+    }
+    for take_back in on_taken_back {
+        take_back();
     }
     true
 }
@@ -869,6 +908,27 @@ impl MainJoins<'_> {
     }
 }
 
+/// A value a submitted stage owns although the compiler cannot check that it may cross threads.
+pub(crate) struct FrameOwns<F>(F);
+// SAFETY: Whoever wraps a value vouches that nothing it holds is reachable from a third thread,
+// and that the main thread reaches it only once it has taken the frame back.
+unsafe impl<F> Send for FrameOwns<F> {}
+impl<F> FrameOwns<F> {
+    /// # Safety
+    ///
+    /// Nothing `value` holds may be reachable from a thread other than the main thread and the
+    /// stage thread, the main thread may reach it only once it has taken back the frame the
+    /// value goes into, and `value` has to be safe to use and drop on either thread.
+    pub(crate) unsafe fn new(value: F) -> Self {
+        Self(value)
+    }
+
+    // Taken through a method, so a closure captures the wrapper rather than its field.
+    pub(crate) fn into_inner(self) -> F {
+        self.0
+    }
+}
+
 /// A value a stage takes along although the compiler cannot check that it may cross threads.
 pub(crate) struct CallerWaits<F>(F);
 // SAFETY: Whoever wraps a value vouches that nothing it holds is reachable from a third thread,
@@ -993,6 +1053,7 @@ mod tests {
                     style_engine,
                     from_stage,
                     outcome: None,
+                    on_taken_back: None,
                 })
             });
         };
