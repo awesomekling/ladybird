@@ -1971,9 +1971,11 @@ mod tests {
                 submitted.push(SubmittedStage {
                     label,
                     role: label,
+                    hold_labels: vec![label],
                     arena,
                     owns_arena: true,
                     style_engine: 0,
+                    style_engine_released: None,
                     from_stage,
                     outcome: None,
                     on_taken_back: None,
