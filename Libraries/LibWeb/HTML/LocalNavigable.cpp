@@ -6814,6 +6814,13 @@ Compositor::NavigablePresenter& LocalNavigable::presenter(SourceLocation locatio
     if (m_presenter->is_lent_to_frame_in_flight())
         Layout::RustFFI::rust_stage_thread_join_frame_in_flight(reinterpret_cast<u8 const*>(location.filename().characters_without_null_termination()), location.filename().length(), location.line_number());
     VERIFY(!m_presenter->is_lent_to_frame_in_flight());
+    // LIBWEB_RENDER_CLOCK_FRAMES: So do the render clock's ticks while the main thread lends them the document's arena.
+    if (auto document = active_document(); document && document->layout_node_arena_if_created()) {
+        auto* arena = document->layout_node_arena_if_created()->handle();
+        if (Layout::RustFFI::rust_clock_lend_holds(arena))
+            Layout::RustFFI::layout_arena_join_frame_owning_arena(arena, reinterpret_cast<u8 const*>(location.filename().characters_without_null_termination()), location.filename().length(), location.line_number());
+        VERIFY(!Layout::RustFFI::rust_clock_lend_holds(arena));
+    }
     return *m_presenter;
 }
 
