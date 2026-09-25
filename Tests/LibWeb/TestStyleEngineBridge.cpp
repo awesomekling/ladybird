@@ -11,6 +11,7 @@
 #include <LibWeb/CSS/RustDeclarationBlock.h>
 #include <LibWeb/CSS/StyleEngineBridge.h>
 #include <LibWeb/CSS/StyleValues/StyleValue.h>
+#include <LibWeb/ValueParserRustFFI.h>
 
 TEST_CASE(interned_atoms_are_released_with_the_style_engine)
 {
@@ -115,6 +116,16 @@ TEST_CASE(reclaimed_custom_property_atoms_republish_their_names)
     EXPECT_EQ(counter_value(engine, "customPropertyNamesPublished"sv), 2ull);
 }
 
+// Records an element's inline style the way the host does: as a snapshot of the block that crosses with the next
+// transaction.
+static void record_inline_style_properties(Web::CSS::StyleEngine& engine, Web::CSS::StyleNodeID node, Web::CSS::RustDeclarationBlock const* declarations)
+{
+    auto const* snapshot = declarations ? Web::CSS::Parser::ValueParserFFI::rust_declaration_block_snapshot(declarations->handle()) : nullptr;
+    if (snapshot && Web::CSS::Parser::ValueParserFFI::rust_declaration_data_defines_a_css_transition(snapshot))
+        engine.note_css_transitions_may_observe_style_changes();
+    engine.record_inline_style_properties(node, snapshot);
+}
+
 TEST_CASE(inline_custom_declaration_names_survive_without_computed_environments)
 {
     Web::CSS::StyleEngine engine(Web::CSS::StyleEngine::DeviceClass::ForegroundDesktop);
@@ -124,7 +135,7 @@ TEST_CASE(inline_custom_declaration_names_survive_without_computed_environments)
     {
         Web::CSS::RustDeclarationBlock declarations { {}, {} };
         declarations.set_custom(name, { Web::CSS::Important::No, Web::CSS::PropertyID::Custom, Web::CSS::property_initial_value(Web::CSS::PropertyID::Width) });
-        engine.set_element_inline_style_properties(root, &declarations);
+        record_inline_style_properties(engine, root, &declarations);
     }
 
     for (u32 index = 0; index < 256; ++index) {
