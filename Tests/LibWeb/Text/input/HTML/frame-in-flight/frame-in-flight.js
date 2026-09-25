@@ -68,6 +68,41 @@ async function whileLayoutInFlight(point, mutate, during, doc = null) {
     });
 }
 
+// whileStyleInFlight(point, mutate, during) is whileLayoutInFlight for the first style pass a rendering update submits
+// under LIBWEB_STAGE_OVERLAP naming "style", held at `point` ("before-run" or "before-completion"): `mutate` runs in a
+// rAF callback and has to leave style to do, and `during` runs in a task while that pass is held. With `doc`, only that
+// document's pass is held. `during` gets { heldAt, state }: heldAt is "" wherever no style pass was submitted, and
+// `during` then runs after the rendering update. A test prints the same output in every mode, and checks the in-flight
+// facts only when heldAt is set (styleHeldAsArmed).
+async function whileStyleInFlight(point, mutate, during, doc = null) {
+    if (document.readyState !== "complete")
+        await new Promise(resolve => window.addEventListener("load", resolve, { once: true }));
+    return new Promise((resolve, reject) => {
+        requestAnimationFrame(() => {
+            const armed = internals.holdNextStyleFrame(point, doc);
+            mutate();
+            setTimeout(async () => {
+                try {
+                    // Returns "" at once if no style pass was submitted.
+                    const heldAt = armed ? internals.waitForHeldFrame() : "";
+                    const frame = { heldAt, state: internals.frameSchedulerState() };
+                    const result = await during(frame);
+                    internals.releaseHeldFrame();
+                    resolve(result);
+                } catch (e) {
+                    internals.releaseHeldFrame();
+                    reject(e);
+                }
+            }, 0);
+        });
+    });
+}
+
+// Whether the style pass was held where it was armed and was in flight while it was (true wherever none was held).
+function styleHeldAsArmed(frame, point) {
+    return !frame.heldAt || (frame.heldAt === point && frame.state === "in-flight");
+}
+
 // Whether the layout pass was held where it was armed and was in flight while it was (true wherever none was held).
 function layoutHeldAsArmed(frame, point) {
     return !frame.heldAt || (frame.heldAt === point && frame.state === "in-flight");
