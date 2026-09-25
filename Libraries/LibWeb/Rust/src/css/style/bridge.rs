@@ -1449,6 +1449,26 @@ pub unsafe extern "C" fn style_record_host_pins_unpin(pins: *const c_void, style
     unsafe { &*pins.cast::<super::host_pins::HostStyleRecordPins>() }.unpin(style_record);
 }
 
+/// Promises a pin the document thread takes once the frame in flight is taken in. Until
+/// [`style_record_host_pins_end_pin_waiting_for_frame`] says it has landed, the engine reclaims no
+/// record.
+///
+/// # Safety
+/// As for [`style_record_host_pins_pin`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_record_host_pins_begin_pin_waiting_for_frame(pins: *const c_void) {
+    unsafe { &*pins.cast::<super::host_pins::HostStyleRecordPins>() }.begin_pin_waiting_for_frame();
+}
+
+/// Ends a wait [`style_record_host_pins_begin_pin_waiting_for_frame`] began.
+///
+/// # Safety
+/// As for [`style_record_host_pins_pin`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_record_host_pins_end_pin_waiting_for_frame(pins: *const c_void) {
+    unsafe { &*pins.cast::<super::host_pins::HostStyleRecordPins>() }.end_pin_waiting_for_frame();
+}
+
 /// Lends the document thread's pin table to the engine, which reads it wherever it would reclaim a
 /// style record while the document thread waits on it.
 ///

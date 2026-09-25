@@ -132,6 +132,10 @@ public:
     // live in a table beside the engine, so taking or releasing one never waits for a style pass.
     void pin_style_record(StyleRecordID style_record) const;
     void unpin_style_record(StyleRecordID style_record) const;
+    // A pin the document thread takes once the frame in flight is taken in, for a record it cannot
+    // name before then. Until the pin lands, the engine reclaims no record.
+    void begin_pin_waiting_for_frame() const;
+    void end_pin_waiting_for_frame() const;
     void begin_style_record_view_epoch();
     void end_style_record_view_epoch();
     void decide_transitions(StyleRecordID before_style_record, void const* after_longhand_table, void const* after_animated_overlay, StyleValueFFI::FfiTransitionInput&, StyleValueFFI::FfiTransitionAction*) const;
