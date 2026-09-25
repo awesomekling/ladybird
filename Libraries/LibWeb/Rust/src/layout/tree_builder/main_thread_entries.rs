@@ -29,7 +29,11 @@ unsafe extern "C" fn rust_detach_top_layer_element_layout_subtree(arena: *mut c_
     // SAFETY: Guaranteed by the entry point's contract.
     unsafe {
         super::layout_node_arena::paying_host_handbacks(&main_thread, arena, || {
-            detach_top_layer_element_layout_subtree(arena.cast(), style_node);
+            // The clear retires the layout tree update marks of the boxes it gives up, which the
+            // document thread holds.
+            super::super::tree_update_marks::lend_to_stale_box_clear(arena, || {
+                detach_top_layer_element_layout_subtree(arena.cast(), style_node);
+            });
         });
     }
 }
