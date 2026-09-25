@@ -897,9 +897,21 @@ impl StyleNodeTree {
 
     // -- Identity lifecycle ------------------------------------------------------------------
 
-    /// Allocate an element identity. Reuses a slot only once the epoch that could still observe its
-    /// previous occupant has retired.
+    /// Allocate an element identity: grant it and mint it at once.
+    #[cfg(test)]
     pub fn allocate_element(&mut self, memory: &mut MemoryController) -> StyleNodeID {
+        let node = self.grant_element(memory);
+        self.mint_element(node, memory);
+        node
+    }
+
+    /// Hand the host an element identity to mint on its own. Reuses a slot only once the epoch that
+    /// could still observe its previous occupant has retired.
+    ///
+    /// The slot is readied here rather than when the identity is minted: the host writes to an
+    /// identity as soon as it mints it, before the mint crosses, and nothing it writes may be undone
+    /// by the mint.
+    pub fn grant_element(&mut self, memory: &mut MemoryController) -> StyleNodeID {
         let (index, capacity_before_growth) = match self.free_element_indexes.pop() {
             Some(index) => {
                 self.parent[index as usize] = None;
@@ -932,7 +944,6 @@ impl StyleNodeTree {
                 (index, Some(capacity_before_growth))
             }
         };
-        self.live.set(index as usize, true);
         self.relation_only.set(index as usize, false);
         self.child_needs_layout_tree_update.set(index as usize, false);
         self.disabled_form_control.set(index as usize, false);
@@ -945,8 +956,20 @@ impl StyleNodeTree {
             let current = self.identity_capacity_bytes();
             self.record_capacity_change(memory, capacity_before_growth, current);
         }
-        self.connected_element_count += 1;
         StyleNodeID::element(index)
+    }
+
+    /// Bring an element identity the host minted into the tree. It clears nothing: the grant readied
+    /// the slot, and whatever the host wrote to the identity since it minted it stands.
+    pub fn mint_element(&mut self, node: StyleNodeID, memory: &mut MemoryController) {
+        let index = node.element_index().expect("mint_element requires an element identity");
+        assert!(
+            (index as usize) < self.parent.len() && !self.live.contains(index as usize),
+            "minting an identity that was not granted"
+        );
+        let (_, growth) = self.live.set(index as usize, true);
+        self.record_capacity_change(memory, 0, growth);
+        self.connected_element_count += 1;
     }
 
     /// Retire an element identity. The slot stays reserved until [`Self::release_retired_identities`]
@@ -1014,9 +1037,18 @@ impl StyleNodeTree {
         self.pending_reuse.len()
     }
 
-    /// Allocate a text identity. Like an element's, it is reused only once the epoch that could
-    /// still observe its previous occupant has retired.
+    /// Allocate a text identity: grant it and mint it at once.
+    #[cfg(test)]
     pub fn allocate_text(&mut self, memory: &mut MemoryController) -> StyleNodeID {
+        let node = self.grant_text(memory);
+        self.mint_text(node, memory);
+        node
+    }
+
+    /// Hand the host a text identity to mint on its own, readied the way [`Self::grant_element`]
+    /// readies an element's. Like an element's, it is reused only once the epoch that could still
+    /// observe its previous occupant has retired.
+    pub fn grant_text(&mut self, memory: &mut MemoryController) -> StyleNodeID {
         let before = self.text_capacity_bytes();
         let index = match self.text.free_indexes.pop() {
             Some(index) => index,
@@ -1029,7 +1061,6 @@ impl StyleNodeTree {
                 index
             }
         };
-        self.text.live.set(index as usize, true);
         self.text.marks.clear(index as usize);
         self.text.is_ascii_whitespace.set(index as usize, false);
         self.text.is_in_user_agent_shadow_tree.set(index as usize, false);
@@ -1039,6 +1070,18 @@ impl StyleNodeTree {
         let current = self.text_capacity_bytes();
         self.record_capacity_change(memory, before, current);
         StyleNodeID::text(index)
+    }
+
+    /// Bring a text identity the host minted into the tree. Like [`Self::mint_element`], it clears
+    /// nothing.
+    pub fn mint_text(&mut self, node: StyleNodeID, memory: &mut MemoryController) {
+        let index = node.text_index().expect("mint_text requires a text identity");
+        assert!(
+            (index as usize) < self.text.parent.len() && !self.text.live.contains(index as usize),
+            "minting an identity that was not granted"
+        );
+        let (_, growth) = self.text.live.set(index as usize, true);
+        self.record_capacity_change(memory, 0, growth);
     }
 
     /// Retire text identities. A text node has no staged relations, so it leaves the tree as soon as

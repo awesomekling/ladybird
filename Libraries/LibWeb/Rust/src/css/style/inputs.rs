@@ -3127,26 +3127,57 @@ impl StyleEngineState {
         self.settle_program();
     }
 
-    /// Mint `out.len()` text identities in one call.
+    /// Grant and mint `out.len()` text identities in one call, for an engine with no host.
+    #[cfg(test)]
     pub fn allocate_text_style_nodes(&mut self, out: &mut [u32], counters: &mut Counters) {
+        self.grant_text_style_nodes(out);
+        let nodes: Vec<StyleNodeID> = out.iter().map(|&raw| StyleNodeID::from_raw(raw).unwrap()).collect();
+        self.mint_text_style_nodes(&nodes, counters);
+    }
+
+    /// Grant and mint `out.len()` element identities in one call, for an engine with no host.
+    #[cfg(test)]
+    pub fn allocate_style_nodes(&mut self, out: &mut [u32], counters: &mut Counters) {
+        self.grant_style_nodes(out);
+        let nodes: Vec<StyleNodeID> = out.iter().map(|&raw| StyleNodeID::from_raw(raw).unwrap()).collect();
+        self.mint_style_nodes(&nodes, counters);
+    }
+
+    /// Hand the host `out.len()` text identities to mint on its own. See [`Self::grant_style_nodes`].
+    pub fn grant_text_style_nodes(&mut self, out: &mut [u32]) {
         for slot in out.iter_mut() {
-            let node = self.retained.tree.allocate_text(&mut self.retained.memory);
-            counters.bump(Counter::StyleNodesAllocated);
-            *slot = node.raw();
+            *slot = self.retained.tree.grant_text(&mut self.retained.memory).raw();
         }
     }
 
-    /// Mint `out.len()` element identities in one call. Identity allocation is batched because a
-    /// call per element is exactly the boundary shape this design rules out.
+    /// Hand the host `out.len()` element identities to mint on its own.
+    ///
+    /// The host names a node the moment it connects and writes to the name at once, while the
+    /// engine may be in the middle of a pass. So it mints from identities granted to it ahead of
+    /// time, and the mint crosses with the input transaction, in order with what it wrote since.
+    pub fn grant_style_nodes(&mut self, out: &mut [u32]) {
+        for slot in out.iter_mut() {
+            *slot = self.retained.tree.grant_element(&mut self.retained.memory).raw();
+        }
+    }
+
+    /// Bring text identities the host minted into the tree.
+    pub fn mint_text_style_nodes(&mut self, nodes: &[StyleNodeID], counters: &mut Counters) {
+        for &node in nodes {
+            self.retained.tree.mint_text(node, &mut self.retained.memory);
+            counters.bump(Counter::StyleNodesAllocated);
+        }
+    }
+
+    /// Bring element identities the host minted into the tree.
     ///
     /// A freshly minted element holds no custom-property environment yet: installing its style
     /// gives it one.
-    pub fn allocate_style_nodes(&mut self, out: &mut [u32], counters: &mut Counters) {
-        for slot in out.iter_mut() {
-            let node = self.retained.tree.allocate_element(&mut self.retained.memory);
+    pub fn mint_style_nodes(&mut self, nodes: &[StyleNodeID], counters: &mut Counters) {
+        for &node in nodes {
+            self.retained.tree.mint_element(node, &mut self.retained.memory);
             self.retained.element_custom_property_data.insert(node, None);
             counters.bump(Counter::StyleNodesAllocated);
-            *slot = node.raw();
         }
         self.publish_budget_inputs();
     }
