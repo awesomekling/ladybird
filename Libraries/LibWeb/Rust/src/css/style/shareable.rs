@@ -78,6 +78,7 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
         element_custom_property_data,
         pseudo_element_custom_property_data,
         sampled_custom_property_environments,
+        sampled_pseudo_element_custom_property_environments,
         environment_move_recompute_nodes,
         font_resolution,
         font_face_snapshot,
@@ -222,6 +223,7 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
     assert_member_is_sync(element_custom_property_data);
     assert_member_is_sync(pseudo_element_custom_property_data);
     assert_member_is_sync(sampled_custom_property_environments);
+    assert_member_is_sync(sampled_pseudo_element_custom_property_environments);
     assert_member_is_sync(environment_move_recompute_nodes);
     // The published `@font-face` table is the one piece of document state a font resolution reads,
     // so it has to be shareable for the stage's own thread to resolve from it.

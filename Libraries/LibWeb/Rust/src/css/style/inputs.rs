@@ -2012,6 +2012,7 @@ impl StyleEngineState {
                 element_custom_property_data: HashMap::default(),
                 pseudo_element_custom_property_data: HashMap::default(),
                 sampled_custom_property_environments: HashMap::default(),
+                sampled_pseudo_element_custom_property_environments: HashMap::default(),
                 environment_move_recompute_nodes: HashSet::default(),
                 font_resolution: None,
                 font_face_snapshot: None,
@@ -2907,6 +2908,9 @@ impl StyleEngineState {
                     self.host.retired_custom_property_data.extend(held.data);
                 }
                 self.retained.sampled_custom_property_environments.remove(&node);
+                self.retained
+                    .sampled_pseudo_element_custom_property_environments
+                    .retain(|(owner, _), _| *owner != node);
                 self.retained.environment_move_recompute_nodes.remove(&node);
                 self.retained.size_container_queries.retire(node);
             }

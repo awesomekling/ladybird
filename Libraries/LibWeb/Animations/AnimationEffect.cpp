@@ -955,25 +955,26 @@ void apply_published_animation_overlay(CSS::StyleDrainScope const& scope, DOM::A
         Painting::repaint_after_style_change(*repaint_layout_node, invalidation);
 }
 
-// The environment a sample composed an element's animated custom properties into, viewed as the
-// element's, or the element's record's environment again where the sample animated none; and what
-// that moves, recorded for the next transaction.
-void install_sampled_custom_property_environment(CSS::StyleDrainScope const& scope, DOM::Element& element, CSS::StyleEngineFFI::FfiRowSampledInPass const& sample)
+// The environment a sample composed an element's or pseudo-element's animated custom properties
+// into, viewed as its own, or its record's environment again where the sample animated none; and
+// what that moves, recorded for the next transaction.
+void install_sampled_custom_property_environment(CSS::StyleDrainScope const& scope, DOM::AbstractElement abstract_element, CSS::StyleEngineFFI::FfiRowSampledInPass const& sample)
 {
-    auto data = element.custom_property_data({});
+    auto& element = const_cast<DOM::Element&>(abstract_element.element());
+    auto data = element.custom_property_data(abstract_element.pseudo_element());
     RefPtr<CSS::CustomPropertyData const> base = data;
-    if (data && data->is_animation_overlay_for({ element }))
+    if (data && data->is_animation_overlay_for(abstract_element))
         base = data->parent();
     RefPtr<CSS::CustomPropertyData const> installed = base;
     if (sample.custom_property_environment != 0) {
         VERIFY(sample.custom_property_store);
-        installed = CSS::CustomPropertyData::view_animation_overlay(sample.custom_property_store, sample.custom_property_environment, base, { element });
+        installed = CSS::CustomPropertyData::view_animation_overlay(sample.custom_property_store, sample.custom_property_environment, base, abstract_element);
     }
-    element.replace_custom_property_data(scope, {}, installed);
+    element.replace_custom_property_data(scope, abstract_element.pseudo_element(), installed);
     auto& style_engine = scope.engine();
     if (sample.custom_property_reactions & 1)
         style_engine.record_derived_element_style_input_change(element.style_node_id(), CSS::StyleEngine::PublishedStyle | CSS::StyleEngine::RecomputeStyle);
-    if (sample.custom_property_reactions & 2) {
+    if (!abstract_element.pseudo_element().has_value() && (sample.custom_property_reactions & 2)) {
         style_engine.record_flat_tree_descendant_style_input_changes(
             element.style_node_id(),
             CSS::StyleEngine::InheritedStyle,
@@ -1012,7 +1013,7 @@ static bool install_engine_sample_of_installed_record(CSS::StyleDrainScope const
     if (sample.uses_tree_counting_function)
         target->set_style_uses_tree_counting_function();
     if (sample.custom_property_environment_moved)
-        install_sampled_custom_property_environment(scope, *target, sample);
+        install_sampled_custom_property_environment(scope, element, sample);
     // The sample moved nothing the record composed.
     if (sample.style_record == data.style_record_before_update.value())
         return true;

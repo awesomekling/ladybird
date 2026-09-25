@@ -321,7 +321,7 @@ static bool install_composition_sampled_in_pass(StyleDrainScope const& scope, DO
     if (sample.uses_tree_counting_function)
         element.set_style_uses_tree_counting_function();
     if (sample.custom_property_environment_moved)
-        Animations::install_sampled_custom_property_environment(scope, element, sample);
+        Animations::install_sampled_custom_property_environment(scope, DOM::AbstractElement { element }, sample);
     // A keyframe-borne `inherit` on a non-inherited property leaves the same mark on the parent a
     // full style computation does.
     if (auto style_groups = sample.keyframes_inherited_non_inherited_style_groups; style_groups != 0) {
@@ -387,10 +387,13 @@ static PseudoElementSamplesTakenByEngine take_pseudo_element_samples_before_inst
 static void apply_pseudo_element_samples_taken_by_engine(StyleDrainScope const& scope, DOM::Element& element, PseudoElementSamplesTakenByEngine const& taken)
 {
     bool any_sample = false;
-    for (auto const& sample : taken.samples) {
+    for (u8 kind = 0; kind < taken.samples.size(); ++kind) {
+        auto const& sample = taken.samples[kind];
         if (!sample.present)
             continue;
         any_sample = true;
+        if (sample.custom_property_environment_moved)
+            Animations::install_sampled_custom_property_environment(scope, DOM::AbstractElement { element, static_cast<PseudoElement>(kind) }, sample);
         if (sample.substitution_marks & ComputedValuesFFI::SUBSTITUTION_MARK_VAR)
             element.set_style_uses_var_css_function();
         if (sample.substitution_marks & ComputedValuesFFI::SUBSTITUTION_MARK_ATTR)
