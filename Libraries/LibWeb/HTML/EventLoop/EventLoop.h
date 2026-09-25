@@ -172,9 +172,11 @@ public:
     static bool holds_rendering_opportunities();
     static void set_holds_rendering_opportunities_for_testing(Optional<bool>);
     bool rendering_task_held() const { return m_rendering_task_held; }
-    // Whether the queued rendering task runs before the other tasks queued ahead of it. Asked by the task queue.
-    bool rendering_task_runs_ahead_of_queue() const { return m_rendering_task_queued && m_rendering_task_runs_ahead; }
-    void did_run_rendering_task_ahead_of_queue() { ++m_rendering_scheduler_counters.rendering_tasks_ahead_of_queue; }
+    // Whether the queued rendering task runs before the other tasks queued ahead of it. Asked by the task queue. Where
+    // rendering opportunities are held, a held rendering task does once it is queued again, and so does one that has
+    // waited a frame interval behind other tasks, but not twice without another task in between.
+    bool rendering_task_runs_ahead_of_queue() const;
+    void did_run_rendering_task_ahead_of_queue();
     bool running_synchronous_rendering_update() const { return m_running_synchronous_rendering_update; }
 
     // Whether the layout of the running rendering update may run beside the main thread, decided once all of its
@@ -347,6 +349,8 @@ private:
     // opportunity: it counts as queued, and is queued again once that frame has been taken in.
     bool m_rendering_task_held { false };
     bool m_rendering_task_runs_ahead { false };
+    bool m_rendering_task_ran_ahead_since_last_task { false };
+    u64 m_rendering_task_queued_at_nanoseconds { 0 };
     bool m_rendering_update_requested { false };
 
     RenderingSchedulerCounters m_rendering_scheduler_counters;
