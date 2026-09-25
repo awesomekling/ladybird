@@ -227,7 +227,9 @@ void FrameScheduler::submit_layout(Vector<GC::Ref<DOM::Document>> documents, siz
 
 void FrameScheduler::submit_style(Vector<GC::Ref<DOM::Document>> documents, size_t document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp)
 {
-    submit_pass(FrameTicket::SubmittedPass::Kind::Style, move(documents), document_index, frame_timestamp);
+    // NB: The document submitted its style pass as a flight under the same condition.
+    auto kind = Layout::RustFFI::rust_stage_thread_submits_flight() ? FrameTicket::SubmittedPass::Kind::Flight : FrameTicket::SubmittedPass::Kind::Style;
+    submit_pass(kind, move(documents), document_index, frame_timestamp);
 }
 
 void FrameScheduler::submit_pass(FrameTicket::SubmittedPass::Kind kind, Vector<GC::Ref<DOM::Document>> documents, size_t document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp)
@@ -277,6 +279,11 @@ void FrameScheduler::commit()
     //     style pass's frame ends the document's style update here: its drain installs what the pass computed.
     if (m_ticket->submitted_pass.has_value() && m_ticket->submitted_pass->kind == FrameTicket::SubmittedPass::Kind::Style)
         m_ticket->submitted_pass->documents[m_ticket->submitted_pass->document_index]->finish_submitted_style_update();
+    // A flight always runs its style pass first, and ends the document's style update here as a style pass's frame does.
+    if (m_ticket->submitted_pass.has_value() && m_ticket->submitted_pass->kind == FrameTicket::SubmittedPass::Kind::Flight) {
+        m_ticket->submitted_pass->flight_outcome = Layout::RustFFI::rust_flight_take_outcome();
+        m_ticket->submitted_pass->documents[m_ticket->submitted_pass->document_index]->finish_submitted_style_update();
+    }
     // A clock tick's document adopts what the tick installed before anything reads it, and then takes in what was
     // marked beside the tick, as the end of a layout pass's frame does: the next drain writes it.
     if (m_ticket->submitted_pass.has_value() && m_ticket->submitted_pass->kind == FrameTicket::SubmittedPass::Kind::Clock) {
@@ -389,6 +396,8 @@ void FrameScheduler::run_tail()
             m_event_loop.resume_rendering_update_after_style({}, submitted_pass->documents, 0, submitted_pass->frame_timestamp);
         } else if (submitted_pass->kind == FrameTicket::SubmittedPass::Kind::Style)
             m_event_loop.resume_rendering_update_after_style({}, submitted_pass->documents, submitted_pass->document_index, submitted_pass->frame_timestamp);
+        else if (submitted_pass->kind == FrameTicket::SubmittedPass::Kind::Flight)
+            resume_rendering_update_after_flight(*submitted_pass);
         else
             m_event_loop.resume_rendering_update_after_layout({}, submitted_pass->documents, submitted_pass->document_index, submitted_pass->frame_timestamp);
         return;
@@ -399,6 +408,29 @@ void FrameScheduler::run_tail()
     auto start_nanoseconds = MonotonicTime::now().nanoseconds();
     m_event_loop.run_rendering_update_tail({}, painted_local_roots);
     m_event_loop.did_consume_frame_tail(MonotonicTime::now().nanoseconds() - start_nanoseconds);
+}
+
+// A flight that ended goes on as the rendering update would have gone on had it submitted the last stage the flight ran
+// on its own.
+void FrameScheduler::resume_rendering_update_after_flight(FrameTicket::SubmittedPass const& flight)
+{
+    using Layout::RustFFI::FfiFlightStage;
+    auto reached = flight.flight_outcome->reached;
+    switch (reached) {
+    case FfiFlightStage::Style:
+    case FfiFlightStage::StyleRenderHalf:
+        m_event_loop.resume_rendering_update_after_style({}, flight.documents, flight.document_index, flight.frame_timestamp);
+        return;
+    case FfiFlightStage::Rounds:
+    case FfiFlightStage::PaintPrep:
+        m_event_loop.resume_rendering_update_after_layout({}, flight.documents, flight.document_index, flight.frame_timestamp);
+        return;
+    case FfiFlightStage::Record:
+    case FfiFlightStage::Present:
+        break;
+    }
+    // FIXME: A flight that ran its recording goes on with the tail of its rendering update.
+    VERIFY_NOT_REACHED();
 }
 
 bool FrameScheduler::arena_changes_wait_for_frame(DOM::Document const& document)

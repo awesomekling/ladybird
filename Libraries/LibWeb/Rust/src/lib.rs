@@ -16,6 +16,7 @@ mod rust_panic;
 
 pub mod clock_frames;
 mod encoding_detection;
+pub mod flight;
 mod font_seal;
 pub use libcompositing_rust::fast_hash;
 

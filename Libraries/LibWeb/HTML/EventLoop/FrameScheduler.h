@@ -18,6 +18,7 @@
 #include <LibWeb/Forward.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
 #include <LibWeb/HTML/LocalNavigable.h>
+#include <LibWeb/Layout/LayoutRustFFI.h>
 
 namespace Web::HTML {
 
@@ -56,11 +57,16 @@ public:
             Layout,
             // A clock lease's tick (LIBWEB_RENDER_CLOCK_FRAMES), which goes on at step 16 for every document.
             Clock,
+            // A flight (LIBWEB_STAGE_OVERLAP naming flight): the style pass and the stages after it, up to the first
+            // one that needs the main thread. The rendering update goes on where the flight ended.
+            Flight,
         };
         Kind kind { Kind::Layout };
         Vector<GC::Ref<DOM::Document>> documents;
         size_t document_index { 0 };
         HighResolutionTime::DOMHighResTimeStamp frame_timestamp { 0 };
+        // Where the flight ended, once consume-commit has taken it in.
+        Optional<Layout::RustFFI::FfiFlightOutcome> flight_outcome {};
     };
     Optional<SubmittedPass> submitted_pass;
 };
@@ -191,6 +197,7 @@ private:
     void submit_pass(FrameTicket::SubmittedPass::Kind, Vector<GC::Ref<DOM::Document>> documents, size_t document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp);
     void commit();
     void run_tail();
+    void resume_rendering_update_after_flight(FrameTicket::SubmittedPass const&);
     // Takes in the frame in flight, waiting for it if it has not finished, and runs its tail. Returns how long it
     // waited for the render side.
     u64 finish_one_frame();

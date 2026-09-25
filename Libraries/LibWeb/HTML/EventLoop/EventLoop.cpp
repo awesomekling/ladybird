@@ -204,6 +204,7 @@ void EventLoop::did_submit_frame()
     s_a_frame_is_in_flight = true;
     m_frame_submitted_at_nanoseconds = MonotonicTime::now().nanoseconds();
     ++m_rendering_scheduler_counters.frames_submitted;
+    ++m_frames_submitted_by_rendering_update;
 }
 
 void EventLoop::did_consume_frame_commit(u64 nanoseconds)
@@ -1228,6 +1229,9 @@ void EventLoop::end_rendering_update()
     auto update_start_time = m_rendering_update_start_time;
     auto update_end_time = HighResolutionTime::unsafe_shared_current_time();
     m_rendering_scheduler_counters.update_microseconds += static_cast<u64>((update_end_time - update_start_time) * 1000.0);
+    auto& by_frames_submitted = m_rendering_scheduler_counters.rendering_updates_by_frames_submitted;
+    ++by_frames_submitted[min(m_frames_submitted_by_rendering_update, by_frames_submitted.size() - 1)];
+    m_frames_submitted_by_rendering_update = 0;
 
     for (auto const& page : pages_of_local_roots())
         page->client().did_finish_rendering_update();
