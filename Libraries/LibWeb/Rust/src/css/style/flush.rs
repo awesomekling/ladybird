@@ -2965,7 +2965,9 @@ impl StyleEngineState {
                 // would compute it where it applies the row: one the checks above tie to its
                 // ancestors, and a recomputation the host would otherwise run itself. An
                 // ancestor this wave publishes and only the host settles is not installed yet,
-                // so the wave stops before such a row instead, and the next wave drives it.
+                // so the wave stops before such a row instead, and the next wave drives it. An
+                // animated row is driven too: the host samples it over the record it installs, and
+                // it no longer computes a row the pass leaves it.
                 const DRIVEN_AGAIN_REACTIONS: u8 = transaction::STYLE_REACTION_RECOMPUTE_STYLE
                     | transaction::STYLE_REACTION_RECOMPUTE_DESCENDANT_STYLES
                     | transaction::STYLE_REACTION_ANCESTOR_BECAME_VISIBLE
@@ -2974,12 +2976,7 @@ impl StyleEngineState {
                 let declined = !skip_hidden && engine_computed_delta.is_none() && direct_inherited_delta.is_none();
                 let armed =
                     retry_after_ancestor || answer_was_taken || pass.rows_after_installed_ancestors.contains(&node);
-                let driven_again = declined
-                    && (armed
-                        || (reaction & DRIVEN_AGAIN_REACTIONS != 0
-                            && self.retained.computed_group_sets.adjustment_facts(node)
-                                & bridge::element_adjustment_fact::HAS_ANIMATIONS
-                                == 0));
+                let driven_again = declined && (armed || reaction & DRIVEN_AGAIN_REACTIONS != 0);
                 if driven_again && {
                     let mut ancestor = self.tree.flat_tree_parent(node);
                     loop {
