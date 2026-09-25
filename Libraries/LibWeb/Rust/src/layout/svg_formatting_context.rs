@@ -147,6 +147,15 @@ pub struct FfiSvgAttributeFacts {
     pub stroke_reference_atom: u32,
     /// The `startOffset` of a `<textPath>`, against the length of the path it follows.
     pub text_path_start_offset: FfiSvgNumberPercentage,
+    /// An `<svg>`'s `width` and `height` where they are a `<length>`, which its natural size is
+    /// negotiated from.
+    pub natural_width: FfiSvgLengthValue,
+    pub natural_height: FfiSvgLengthValue,
+    /// The natural aspect ratio an `<svg>`'s active SVG view or viewBox gives it, which the
+    /// negotiation falls back to where its width and height do not both give it one.
+    pub has_view_box_aspect_ratio: bool,
+    pub view_box_aspect_ratio_numerator: CssPixels,
+    pub view_box_aspect_ratio_denominator: CssPixels,
 }
 
 pub const SVG_GEOMETRY_KIND_NONE: u8 = 0;
@@ -1072,43 +1081,7 @@ impl<'pass> SvgFormattingContext<'pass> {
     }
 
     fn length_resolution_context(&self, node: Node) -> crate::css::style_compute::FfiLengthResolutionContext {
-        let style = self.style(node);
-        let root_style = self.document_element_style(node).unwrap_or(style);
-        let viewport_width = self.callbacks.initial_containing_block_inline_size.to_double();
-        let viewport_height = self.callbacks.initial_containing_block_block_size.to_double();
-        crate::css::style_compute::FfiLengthResolutionContext {
-            viewport_width,
-            viewport_height,
-            font_metrics: Self::font_metrics_for_length_resolution(style),
-            root_font_metrics: Self::font_metrics_for_length_resolution(root_style),
-            // Only the out-flag below consumes these, and this resolution reports no dependency.
-            font_metrics_depend_on_viewport_metrics: false,
-            root_font_metrics_depend_on_viewport_metrics: false,
-            // A container unit with no size-query container above it resolves against the small
-            // viewport size.
-            // FIXME: Take a size-query container ancestor into account.
-            has_container_width_basis: true,
-            has_container_height_basis: true,
-            container_width_basis: viewport_width,
-            container_height_basis: viewport_height,
-            container_width_basis_depends_on_viewport_metrics: false,
-            container_height_basis_depends_on_viewport_metrics: false,
-            subject_inline_axis_is_horizontal: style.writing_mode() == writing_mode::HORIZONTAL_TB,
-            resolved_viewport_relative_length: std::ptr::null_mut(),
-        }
-    }
-
-    /// The style of the document element, which a root-relative length resolves against.
-    fn document_element_style(&self, node: Node) -> Option<StyleValues<'pass>> {
-        let mut ancestor = node;
-        while !ancestor.is_invalid() {
-            let data = self.callbacks.node_data(ancestor);
-            if node_facts::has_flag(data, NodeFlag::IsDocumentElement) {
-                return self.callbacks.arena().style_payloads(ancestor).map(StyleValues::new);
-            }
-            ancestor = data.parent.get();
-        }
-        None
+        svg_length_resolution_context(&self.callbacks, node)
     }
 
     /// The character data an SVG text content element renders: its direct child text, as written.
@@ -1999,4 +1972,86 @@ impl<'pass> SvgFormattingContext<'pass> {
         used.has_definite_inline_size.set(true);
         used.has_definite_block_size.set(true);
     }
+}
+
+/// What a length an SVG element's attribute gives resolves against: the element's own style, the
+/// document element's, and the viewport.
+fn svg_length_resolution_context(
+    callbacks: &LayoutPass<'_>,
+    node: Node,
+) -> crate::css::style_compute::FfiLengthResolutionContext {
+    let style = StyleValues::for_node(callbacks, node);
+    let root_style = document_element_style(callbacks, node).unwrap_or(style);
+    let viewport_width = callbacks.initial_containing_block_inline_size.to_double();
+    let viewport_height = callbacks.initial_containing_block_block_size.to_double();
+    crate::css::style_compute::FfiLengthResolutionContext {
+        viewport_width,
+        viewport_height,
+        font_metrics: SvgFormattingContext::font_metrics_for_length_resolution(style),
+        root_font_metrics: SvgFormattingContext::font_metrics_for_length_resolution(root_style),
+        // Only the out-flag below consumes these, and this resolution reports no dependency.
+        font_metrics_depend_on_viewport_metrics: false,
+        root_font_metrics_depend_on_viewport_metrics: false,
+        // A container unit with no size-query container above it resolves against the small
+        // viewport size.
+        // FIXME: Take a size-query container ancestor into account.
+        has_container_width_basis: true,
+        has_container_height_basis: true,
+        container_width_basis: viewport_width,
+        container_height_basis: viewport_height,
+        container_width_basis_depends_on_viewport_metrics: false,
+        container_height_basis_depends_on_viewport_metrics: false,
+        subject_inline_axis_is_horizontal: style.writing_mode() == writing_mode::HORIZONTAL_TB,
+        resolved_viewport_relative_length: std::ptr::null_mut(),
+    }
+}
+
+/// The style of the document element, which a root-relative length resolves against.
+fn document_element_style<'pass>(callbacks: &LayoutPass<'pass>, node: Node) -> Option<StyleValues<'pass>> {
+    let mut ancestor = node;
+    while !ancestor.is_invalid() {
+        let data = callbacks.node_data(ancestor);
+        if node_facts::has_flag(data, NodeFlag::IsDocumentElement) {
+            return callbacks.arena().style_payloads(ancestor).map(StyleValues::new);
+        }
+        ancestor = data.parent.get();
+    }
+    None
+}
+
+// https://www.w3.org/TR/SVG2/coords.html#SizingSVGInCSS
+/// The natural size of an `<svg>` root's box, negotiated from the attributes its element published.
+pub(crate) fn svg_root_natural_size(
+    callbacks: &LayoutPass<'_>,
+    node: Node,
+) -> (Option<CssPixels>, Option<CssPixels>, Option<(CssPixels, CssPixels)>) {
+    let attributes = callbacks.arena().svg_attribute_facts(node);
+    // The intrinsic dimensions must also be determined from the width and height sizing properties. If either width or
+    // height are not specified, the used value is the initial value 'auto'. 'auto' and percentage lengths must not be
+    // used to determine an intrinsic width or intrinsic height.
+    let resolve = |length: FfiSvgLengthValue| {
+        (length.kind == SVG_LENGTH_KIND_LENGTH).then(|| {
+            let context = svg_length_resolution_context(callbacks, node);
+            let absolutized =
+                crate::css::style_compute::absolutize_length_for_calc(length.value, length.unit as usize, &context);
+            CssPixels::nearest_value_for(absolutized.px)
+        })
+    };
+    let width = resolve(attributes.natural_width);
+    let height = resolve(attributes.natural_height);
+    // The intrinsic aspect ratio must be calculated using the following algorithm. If the algorithm returns null, then
+    // there is no intrinsic aspect ratio.
+    let aspect_ratio = match (width, height) {
+        // 1. If the width and height sizing properties on the ‘svg’ element are both absolute values: return width /
+        //    height.
+        (Some(width), Some(height)) => {
+            (width != CssPixels::default() && height != CssPixels::default()).then_some((width, height))
+        }
+        // 2.-4. What the active SVG view or the viewBox gives it, if anything.
+        _ => attributes.has_view_box_aspect_ratio.then_some((
+            attributes.view_box_aspect_ratio_numerator,
+            attributes.view_box_aspect_ratio_denominator,
+        )),
+    };
+    (width, height, aspect_ratio)
 }

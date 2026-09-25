@@ -1250,6 +1250,10 @@ impl LayoutNodeArena {
         if !super::node_facts::node_may_have_replaced_content_facts_including_size_containment(data) {
             return;
         }
+        // The pass negotiates an <svg> root's natural size itself.
+        if data.kind.get() == NodeKind::SVGSVGBox {
+            return;
+        }
         let mut enrolled_nodes = self.nodes_enrolled_for_replaced_content_facts_sync.borrow_mut();
         if !enrolled_nodes.contains(&node) {
             enrolled_nodes.push(node);
