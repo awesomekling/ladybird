@@ -225,7 +225,12 @@ interface Internals {
     // queued behind it (the layout update of a document painted after it) releases it and leaves
     // the hold armed for the recordings submitted after that stage.
     boolean holdNextRecordingFrame(optional DOMString point = "before-run", optional Document? document = null);
-    // Blocks (bounded) until a recording is held and returns where, or "" if none is.
+    // Like holdNextRecordingFrame(), for the next full layout pass a rendering update submits, under
+    // LIBWEB_STAGE_THREAD=overlap with LIBWEB_STAGE_OVERLAP naming "layout". It holds the pass at
+    // "before-run" or "before-completion" (laid out, before the main thread hears of it).
+    boolean holdNextLayoutFrame(optional DOMString point = "before-run", optional Document? document = null);
+    // Blocks (bounded) until the stage a hold is armed for is held and returns where, or "" if none
+    // is. Returns "" at once if no such stage has been submitted, since none can be while it blocks.
     DOMString waitForHeldFrame();
     undefined releaseHeldFrame();
     // Whether a frame is in flight and holds this document.

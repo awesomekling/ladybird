@@ -416,8 +416,8 @@ fn lock_stage_hold() -> (std::sync::MutexGuard<'static, StageHold>, &'static Con
 
 /// Makes the stage thread wait at `point` of the next submitted run of the stage `label` names
 /// (for the arena `arena` only, unless it is null), until [`rust_stage_thread_release_held_stage`]
-/// or a main-thread wait for the stage releases it. Returns false, and holds nothing, unless stages
-/// are submitted.
+/// or a main-thread wait for the stage releases it. Returns false, and holds nothing, unless the
+/// rendering update submits the stage `label` names.
 ///
 /// # Safety
 ///
@@ -434,6 +434,9 @@ pub unsafe extern "C" fn rust_stage_thread_hold_next_submitted_stage(
     }
     // SAFETY: Guaranteed by the caller.
     let label = unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(label, label_length)) };
+    if !overlapping_stages().iter().any(|stage| stage == label) {
+        return false;
+    }
     let (mut hold, _) = lock_stage_hold();
     hold.armed = Some(ArmedHold {
         label: label.to_owned(),
@@ -454,7 +457,8 @@ pub extern "C" fn rust_stage_thread_release_held_stage() {
 }
 
 /// Test only: waits up to `timeout_ms` for the stage thread to hold a run. Returns where it holds
-/// it, if it does.
+/// it, if it does. Returns false at once if the calling thread has submitted no run the hold is
+/// armed for, since it submits none while it waits.
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_stage_thread_wait_for_held_stage(timeout_ms: u32, held_at: &mut FfiStageHoldPoint) -> bool {
     let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms.into());
@@ -465,7 +469,16 @@ pub extern "C" fn rust_stage_thread_wait_for_held_stage(timeout_ms: u32, held_at
             return true;
         }
         let now = std::time::Instant::now();
-        if hold.armed.is_none() || now >= deadline {
+        let Some(armed) = &hold.armed else {
+            return false;
+        };
+        let submitted_armed_run = SUBMITTED.with(|submitted| {
+            submitted
+                .borrow()
+                .iter()
+                .any(|stage| stage.label == armed.label && (armed.arena == 0 || armed.arena == stage.arena))
+        });
+        if !submitted_armed_run || now >= deadline {
             return false;
         }
         hold = changed
