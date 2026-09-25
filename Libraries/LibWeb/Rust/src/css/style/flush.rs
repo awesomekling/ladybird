@@ -3072,6 +3072,20 @@ impl StyleEngineState {
                         Err(reason) => engine_sample_check::note_declined(&format!("settled row: {reason}")),
                     }
                 }
+                // The report compares the transition step the pass decides for a row that owes the
+                // whole step with the one the host decides when it installs the row.
+                if engine_sample_check::is_reporting()
+                    && let Some((old_style_record, new_style_record)) = engine_computed_delta
+                    && self.retained.nodes_owing_a_transition_registration.get(&node) == Some(&false)
+                {
+                    let installed = match self.retained.rows_sampled_in_pass.get(&node) {
+                        Some(sampled) => Some(sampled.style_record),
+                        None => (!animates).then_some(new_style_record.raw()),
+                    };
+                    if let Some(installed) = installed {
+                        self.decide_settled_row_transition_step(node, old_style_record.raw(), installed, layout_arena);
+                    }
+                }
                 let (old_style_record, new_style_record, damage, gap) = if skip_hidden {
                     (0, 0, FfiStyleDeltaDamage::None, FfiStyleDeltaGap::SkippedHidden)
                 } else {

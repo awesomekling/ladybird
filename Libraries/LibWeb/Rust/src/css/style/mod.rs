@@ -103,6 +103,7 @@ pub(crate) mod seal;
 mod sorted_merge;
 mod style_invalidation;
 mod transition_baselines;
+pub(crate) mod transition_step;
 mod weak_pool;
 pub(crate) use transition_baselines::InheritedAnimatedValue;
 #[cfg(not(feature = "style-recording"))]
@@ -981,6 +982,11 @@ pub struct RetainedState {
     /// Per transition target, the before-change style its transitions are decided against for the
     /// rest of the style stabilization epoch, pinned until the epoch commits.
     transition_baselines: HashMap<(StyleNodeID, u8), u64>,
+    /// The transitions each element holds, which a row's transition step decides over.
+    element_transitions: transition_step::ElementTransitions,
+    /// What the pass decided for the transition step of each row that owes one, which the report
+    /// compares with the host's decision.
+    transition_step_decisions: HashMap<StyleNodeID, Option<Vec<(u16, transition_step::TransitionStepDecision)>>>,
     /// What each tree scope's registered counter styles are, as one identity per scope. A record
     /// whose `content` or `list-style-type` names an overridable counter style is only the answer
     /// while the registry it named is the one in place, so the record carries the identity and a

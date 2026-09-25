@@ -2055,6 +2055,8 @@ impl StyleEngineState {
                 rows_sampled_in_pass: HashMap::default(),
                 next_engine_animation_overlay_identity: 0,
                 transition_baselines: HashMap::default(),
+                element_transitions: Default::default(),
+                transition_step_decisions: HashMap::default(),
                 counter_style_environment_identities: HashMap::default(),
                 nodes_owing_animation_definitions: HashMap::default(),
                 animation_definitions_being_applied: None,
@@ -2928,6 +2930,7 @@ impl StyleEngineState {
             }
             self.retained.css_defined_animations.retire(&retired_nodes);
             self.retained.animation_timing_rows.retire(&retired_nodes);
+            self.retained.element_transitions.retire(&retired_nodes);
             self.retained.animation_effect_descriptions.retire(&retired_nodes);
             self.retained
                 .deferred_pseudo_element_observable_nodes

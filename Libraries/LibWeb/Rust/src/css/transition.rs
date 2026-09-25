@@ -369,59 +369,73 @@ pub unsafe extern "C" fn rust_decide_transitions(
     if properties.is_empty() {
         return;
     }
-    let style_engine = unsafe { style_engine.cast::<crate::css::style::StyleEngine>().as_ref() };
-    let before_style_view = style_engine
-        .expect("transition decisions require a style engine")
-        .style_record_view(before_style_record)
-        .expect("the transition baseline style record must remain live");
-    let before_style = {
-        let style = &before_style_view;
-        (
-            unsafe {
-                style
-                    .longhand_table
-                    .as_ref()
-                    .expect("a transition baseline style record must carry a longhand table")
-            },
-            unsafe { style.animated_overlay.as_ref() },
-        )
-    };
+    let style_engine = unsafe { style_engine.cast::<crate::css::style::StyleEngine>().as_ref() }
+        .expect("transition decisions require a style engine");
     let after_table = unsafe {
         after_longhand_table
             .cast::<crate::css::computed_longhand_table::ComputedLonghandTable>()
             .as_ref()
-    };
+    }
+    .expect("transition decisions require an after-change table");
     let after_overlay = unsafe {
         after_animated_overlay
             .cast::<crate::css::animated_overlay::AnimatedOverlay>()
             .as_ref()
     };
-    let after_table = after_table.expect("transition decisions require an after-change table");
+    let actions = unsafe { std::slice::from_raw_parts_mut(actions, properties.len()) };
+    decide_transitions(
+        style_engine,
+        before_style_record,
+        after_table,
+        after_overlay,
+        &input.context,
+        input.target_key,
+        properties,
+        actions,
+    );
+}
+
+/// The decision for every property, over a before-change record and an after-change style, the
+/// way `rust_decide_transitions` makes it for the host and the style pass makes it for a row it
+/// settled.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn decide_transitions(
+    engine: &crate::css::style::RetainedState,
+    before_style_record: u64,
+    after_table: &crate::css::computed_longhand_table::ComputedLonghandTable,
+    after_overlay: Option<&crate::css::animated_overlay::AnimatedOverlay>,
+    context: &crate::css::animation::FfiAnimationContext,
+    target_key: u64,
+    properties: &mut [FfiTransitionPropertyInput],
+    actions: &mut [FfiTransitionAction],
+) {
+    let before_style_view = engine
+        .style_record_view(before_style_record)
+        .expect("the transition baseline style record must remain live");
+    let before_style = (
+        unsafe {
+            before_style_view
+                .longhand_table
+                .as_ref()
+                .expect("a transition baseline style record must carry a longhand table")
+        },
+        unsafe { before_style_view.animated_overlay.as_ref() },
+    );
     // Only an element's own record inherits from its inheritance parent.
-    let target = (input.target_key & 0xff == u64::from(u8::MAX))
-        .then(|| crate::css::style::tree::StyleNodeID::from_raw((input.target_key >> 8) as u32))
+    let target = (target_key & 0xff == u64::from(u8::MAX))
+        .then(|| crate::css::style::tree::StyleNodeID::from_raw((target_key >> 8) as u32))
         .flatten();
-    for (index, property) in properties.iter_mut().enumerate() {
+    for (property, action) in properties.iter_mut().zip(actions.iter_mut()) {
         let inherited_animation = target
             .filter(|_| {
                 after_overlay
                     .and_then(|overlay| overlay.get(property.property_id))
                     .is_none_or(|entry| !entry.inherited)
             })
-            .and_then(|target| {
-                style_engine
-                    .expect("transition decisions require a style engine")
-                    .inherited_animated_value(target, after_table, property.property_id)
-            });
+            .and_then(|target| engine.inherited_animated_value(target, after_table, property.property_id));
         let values_originate_from_current_color =
             prepare_transition_values(before_style, after_table, after_overlay, inherited_animation, property);
-        unsafe {
-            actions.add(index).write(decide_transition(
-                &input.context,
-                property,
-                values_originate_from_current_color,
-            ));
-        };
+        *action = decide_transition(context, property, values_originate_from_current_color);
     }
 }
 

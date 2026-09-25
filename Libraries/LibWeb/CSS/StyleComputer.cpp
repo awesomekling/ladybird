@@ -1341,6 +1341,9 @@ void StyleComputer::start_needed_transitions(StyleDrainScope const& scope, Compu
         new_style.animated_overlay(Badge<StyleComputer> {}),
         input,
         actions.data());
+    // The engine sample report compares this with the step the pass decided for an element's row.
+    if (!pseudo_element.has_value() && style_node_id != 0)
+        StyleEngineFFI::style_engine_check_transition_step(scope.engine().rust_handle(), style_node_id.value(), actions.data(), actions.size());
     auto retain_style_value = [](StyleValueFFI::StyleValueData const* value) -> RefPtr<StyleValue const> {
         if (!value)
             return {};

@@ -14,7 +14,7 @@
 use std::io::Write;
 use std::sync::OnceLock;
 
-fn is_reporting() -> bool {
+pub(crate) fn is_reporting() -> bool {
     static MODE: OnceLock<bool> = OnceLock::new();
     *MODE.get_or_init(|| !matches!(std::env::var("LIBWEB_ENGINE_SAMPLE_CHECK").as_deref(), Err(_) | Ok("0")))
 }
