@@ -91,6 +91,7 @@ pub(super) struct PreparedCustomFunctions {
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn style_engine_reset_custom_functions(engine: *mut c_void) {
+    crate::stage_thread::join_frame_for_style_engine_entrance(engine, "style_engine_reset_custom_functions");
     let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
     engine.document_function_snapshot = DocumentFunctionSnapshot::default();
 }
@@ -103,6 +104,7 @@ unsafe extern "C" fn style_engine_publish_custom_function(
     definition_scope: usize,
     tree_scope: u32,
 ) {
+    crate::stage_thread::join_frame_for_style_engine_entrance(engine, "style_engine_publish_custom_function");
     let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
     unsafe {
         engine

@@ -2252,6 +2252,11 @@ impl LayoutNodeArena {
         self.needs_full_layout_tree_update.set(value);
     }
 
+    /// The style engine the arena's nodes take their style from, or null before it has one.
+    pub(crate) fn style_engine_handle(&self) -> *mut c_void {
+        self.style_engine.get().0
+    }
+
     fn style_engine(&self) -> *mut c_void {
         let style_engine = self.style_engine.get().0;
         assert!(!style_engine.is_null(), "layout node arena has no style record host");

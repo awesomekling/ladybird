@@ -219,6 +219,9 @@ struct SubmittedStage {
     label: &'static str,
     // The arena the stage owns while it runs, as the handle the main thread knows it by.
     arena: usize,
+    // The style engine the stage reads and writes while it runs, as the handle the main thread
+    // knows it by, or 0 for a stage that never reaches one.
+    style_engine: usize,
     from_stage: Receiver<StageOutcome>,
     outcome: Option<StageOutcome>,
 }
@@ -316,6 +319,7 @@ pub(crate) unsafe fn submit_stage(label: &'static str, arena: *mut c_void, stage
         submitted.borrow_mut().push(SubmittedStage {
             label,
             arena: arena as usize,
+            style_engine: style_engine_of_stage(label, arena),
             from_stage,
             outcome: None,
         });
@@ -325,6 +329,17 @@ pub(crate) unsafe fn submit_stage(label: &'static str, arena: *mut c_void, stage
         // The stage thread only goes away if the process is going away.
         std::process::abort();
     }
+}
+
+/// The style engine a submitted stage reaches: the arena's, for a layout pass (it pins style
+/// records, reads the style mirror and evaluates size containers) and a style stage. The recording
+/// reaches none.
+fn style_engine_of_stage(label: &'static str, arena: *mut c_void) -> usize {
+    if label != "layout" && label != "style" {
+        return 0;
+    }
+    // SAFETY: The stage has not been sent yet, so the main thread still owns the arena.
+    unsafe { &*arena.cast::<crate::layout::LayoutNodeArena>() }.style_engine_handle() as usize
 }
 
 /// Where in a submitted run of a stage a test's hold makes the stage thread wait.
@@ -566,8 +581,10 @@ pub(crate) fn join_frame_in_flight_at(arena: *mut c_void, file: &'static str, li
     };
     let first_time = FORCED_JOIN_SITES.with(|sites| sites.borrow_mut().insert((file, line as usize, column)));
     if first_time {
-        // A C++ call site has no column.
-        if column == 0 {
+        // A style engine entrance names itself, and a C++ call site has no column.
+        if line == 0 {
+            eprintln!("STAGE OVERLAP: forced join of {label} at style engine entrance {file}");
+        } else if column == 0 {
             eprintln!("STAGE OVERLAP: forced join of {label} at {file}:{line}");
         } else {
             eprintln!("STAGE OVERLAP: forced join of {label} at {file}:{line}:{column}");
@@ -577,6 +594,33 @@ pub(crate) fn join_frame_in_flight_at(arena: *mut c_void, file: &'static str, li
     let host = FRAME_SCHEDULER_HOST.get().expect("a submitted frame has a scheduler");
     // SAFETY: Called on the main thread, with the frame taken back.
     unsafe { (host.consume_commit)() }
+}
+
+/// Called where the main thread enters the style engine `engine` (`entry` names the entrance): if a
+/// stage of the frame in flight reaches that engine, waits for the frame and takes it in first, as
+/// [`join_frame_in_flight`] does for an access to an arena. The style engine has no other guard: a
+/// frame's layout pass reads the style mirror and records and writes size container state, and
+/// nothing on the main thread may read or write the engine beside it. A join here is a main-side
+/// operation that entered the engine with no door of its own, and the forced-join log names it by
+/// its entrance.
+pub(crate) fn join_frame_for_style_engine_entrance(engine: *const c_void, entry: &'static str) {
+    if engine.is_null() || RUNNING_JOIN_WORK.with(Cell::get) != 0 {
+        return;
+    }
+    if let Some(arena) = arena_of_submitted_stage_reaching(engine) {
+        join_frame_in_flight_at(arena as *mut c_void, entry, 0, 0);
+    }
+}
+
+/// The arena of the calling thread's submitted stage that reaches the style engine `engine`.
+fn arena_of_submitted_stage_reaching(engine: *const c_void) -> Option<usize> {
+    SUBMITTED.with(|submitted| {
+        submitted
+            .borrow()
+            .iter()
+            .find(|stage| stage.style_engine == engine as usize)
+            .map(|stage| stage.arena)
+    })
 }
 
 /// Test only: waits up to `timeout_ms` for every stage of the main thread's frame in flight to
@@ -871,6 +915,30 @@ mod tests {
             static THREAD: &'static StageThread = Box::leak(Box::new(StageThread::spawn()));
         }
         THREAD.with(|thread| *thread)
+    }
+
+    #[test]
+    fn a_style_engine_entrance_finds_only_the_stage_that_reaches_its_engine() {
+        let engine = 0x1000usize;
+        let submit = |label: &'static str, arena: usize, style_engine: usize| {
+            let (_, from_stage) = channel::<StageOutcome>();
+            SUBMITTED.with(|submitted| {
+                submitted.borrow_mut().push(SubmittedStage {
+                    label,
+                    arena,
+                    style_engine,
+                    from_stage,
+                    outcome: None,
+                })
+            });
+        };
+        // A recording reaches no style engine.
+        submit("recording", 0x10, 0);
+        assert_eq!(arena_of_submitted_stage_reaching(engine as *const c_void), None);
+        submit("layout", 0x20, engine);
+        assert_eq!(arena_of_submitted_stage_reaching(engine as *const c_void), Some(0x20));
+        assert_eq!(arena_of_submitted_stage_reaching(0x2000 as *const c_void), None);
+        SUBMITTED.with(|submitted| submitted.borrow_mut().clear());
     }
 
     #[test]

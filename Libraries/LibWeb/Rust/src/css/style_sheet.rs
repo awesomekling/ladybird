@@ -541,6 +541,7 @@ pub unsafe extern "C" fn rust_style_sheet_publish_conditions(
     engine: *mut c_void,
     environment: FfiMediaEnvironment,
 ) {
+    crate::stage_thread::join_frame_for_style_engine_entrance(engine, "rust_style_sheet_publish_conditions");
     sheet.publish_conditions(unsafe { &mut *engine.cast() }, unsafe { environment.borrow() });
 }
 
@@ -605,6 +606,7 @@ pub unsafe extern "C" fn rust_style_sheet_publish_layer_order(
     context: *mut c_void,
     prepare: unsafe extern "C" fn(*mut c_void),
 ) -> bool {
+    crate::stage_thread::join_frame_for_style_engine_entrance(engine, "rust_style_sheet_publish_layer_order");
     let sheets = if count == 0 {
         &[][..]
     } else {
