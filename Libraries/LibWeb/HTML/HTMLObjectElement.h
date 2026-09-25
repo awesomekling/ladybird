@@ -35,6 +35,12 @@ public:
 
     Utf16String type() const { return get_attribute_value(HTML::AttributeNames::type); }
 
+    Representation representation() const { return m_representation; }
+
+    // The natural size of the SVG document the element represents as its content navigable's, if
+    // its document element is an <svg>.
+    CSS::SizeWithAspectRatio natural_size_of_content_svg_document() const;
+
     // ^FormAssociatedElement
     virtual bool is_form_associated_element() const override { return true; }
 

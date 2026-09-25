@@ -37,6 +37,7 @@
 #include <LibWeb/Layout/Box.h>
 #include <LibWeb/Loader/ResourceLoader.h>
 #include <LibWeb/MimeSniff/Resource.h>
+#include <LibWeb/SVG/SVGSVGElement.h>
 #include <LibWebCommon/MimeSniff/MimeType.h>
 
 namespace Web::HTML {
@@ -558,8 +559,9 @@ void HTMLObjectElement::update_layout_and_child_objects(Representation represent
 
     m_representation = representation;
     // The representation decides which box the element asks for, and the build reads that from
-    // the mirror.
+    // the mirror, as it does what the box is sized from.
     CSS::record_element_construction_facts(*this);
+    CSS::record_element_replaced_content_input(*this);
 
     if (auto parent_element = this->parent_element())
         parent_element->set_needs_layout_tree_update(true, DOM::SetNeedsLayoutTreeUpdateReason::HTMLObjectElementUpdateLayoutAndChildObjects);
@@ -570,6 +572,20 @@ i32 HTMLObjectElement::default_tab_index_value() const
 {
     // See the base function for the spec comments.
     return 0;
+}
+
+CSS::SizeWithAspectRatio HTMLObjectElement::natural_size_of_content_svg_document() const
+{
+    auto const* content_document = content_document_without_origin_check();
+    if (!content_document)
+        return {};
+    auto const* root = as_if<SVG::SVGSVGElement>(content_document->document_element());
+    if (!root)
+        return {};
+    auto resolution_context = root->layout_node()
+        ? CSS::Length::ResolutionContext::for_layout_node(*root->layout_node())
+        : CSS::Length::ResolutionContext::for_document(*content_document);
+    return SVG::SVGSVGElement::negotiate_natural_metrics(*root, resolution_context);
 }
 
 GC::Ptr<DecodedImageData> HTMLObjectElement::image_data() const

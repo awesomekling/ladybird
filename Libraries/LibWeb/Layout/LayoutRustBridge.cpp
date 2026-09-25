@@ -381,10 +381,6 @@ void register_layout_host(NodeArena& arena, DOM::Document& document)
                 document.commit_messages().append(messages[index]);
             // The pass that produced them reads back what they change before it ends.
             document.apply_commit_messages(); },
-        .build_replaced_content_facts = [](void*, void* node_shell, RustFFI::FfiReplacedContentFacts* facts) {
-            auto const& node = *static_cast<Node const*>(node_shell);
-            if (auto const* box = as_if<Box>(node))
-                *facts = box->build_replaced_content_facts_for_arena(); },
     };
     RustFFI::layout_arena_set_layout_host_callbacks(arena.handle(), callbacks);
     RustFFI::layout_arena_set_document_is_decoded_svg(arena.handle(), document.is_decoded_svg());
