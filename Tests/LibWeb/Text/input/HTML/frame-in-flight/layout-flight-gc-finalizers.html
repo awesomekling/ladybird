@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<div id="container"></div>
+<script>
+    // Collections while a layout pass is in flight, of every kind of object whose finalizer reaches its document: none
+    // of them may reach the pass, since taking it back runs its effects, which allocate in the middle of the collection.
+    function makeDoomed() {
+        const doomed = [];
+        for (let i = 0; i < 5; ++i) {
+            const host = document.createElement("div");
+            host.attachShadow({ mode: "open" }).innerHTML = `<style>p { color: green }</style><p>shadow ${i}</p>`;
+            doomed.push(host);
+
+            const img = document.createElement("img");
+            img.src = "../../../Assets/120.png";
+            doomed.push(img);
+
+            const canvas = document.createElement("canvas");
+            canvas.getContext("2d").fillRect(0, 0, 10, 10);
+            doomed.push(canvas);
+
+            const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+            svg.innerHTML = `<defs><pattern id="p${i}" width="4" height="4"></pattern></defs><use href="#p${i}"/>`;
+            doomed.push(svg);
+
+            const animated = document.createElement("div");
+            animated.animate([{ opacity: 0 }, { opacity: 1 }], 1000);
+            doomed.push(animated);
+
+            const range = document.createRange();
+            range.selectNodeContents(host);
+            doomed.push(range);
+
+            const resizeObserver = new ResizeObserver(() => {});
+            resizeObserver.observe(host);
+            doomed.push(resizeObserver);
+            const intersectionObserver = new IntersectionObserver(() => {});
+            intersectionObserver.observe(host);
+            doomed.push(intersectionObserver);
+
+            doomed.push(document.createNodeIterator(host));
+        }
+        return doomed;
+    }
+
+    asyncTest(async done => {
+        // An iframe's document is collected once the iframe is removed and forgotten.
+        let iframe = document.createElement("iframe");
+        iframe.srcdoc = "<p>inner</p>";
+        container.appendChild(iframe);
+        await new Promise(resolve => iframe.addEventListener("load", resolve, { once: true }));
+
+        let doomed = null;
+        const frame = await whileLayoutInFlight("before-run", () => {
+            doomed = makeDoomed();
+            for (let i = 0; i < 10; ++i) {
+                const div = document.createElement("div");
+                div.textContent = `item ${i}`;
+                container.appendChild(div);
+            }
+        }, frame => {
+            const joinsBefore = internals.forcedJoinCount("layout");
+            doomed = null;
+            internals.gc();
+            internals.gc();
+            return {
+                ...frame,
+                stillInFlight: internals.frameSchedulerState() === "in-flight",
+                reachedPass: internals.forcedJoinCount("layout") !== joinsBefore,
+            };
+        });
+        println(`held as armed: ${layoutHeldAsArmed(frame, "before-run")}`);
+        println(`the collection left the pass in flight: ${!frame.heldAt || frame.stillInFlight}`);
+        println(`the collection did not reach the pass: ${!frame.reachedPass}`);
+
+        // The iframe is removed in one frame and its document collected while the next one's layout pass is in flight.
+        iframe.remove();
+        iframe = null;
+        await twoFrames();
+        const iframeFrame = await whileLayoutInFlight("before-run", () => {
+            container.appendChild(document.createElement("div")).textContent = "after the iframe";
+        }, frame => {
+            const joinsBefore = internals.forcedJoinCount("layout");
+            internals.gc();
+            internals.gc();
+            return { ...frame, reachedPass: internals.forcedJoinCount("layout") !== joinsBefore };
+        });
+        println(`iframe document: held as armed: ${layoutHeldAsArmed(iframeFrame, "before-run")}`);
+        println(`iframe document: the collection did not reach the pass: ${!iframeFrame.reachedPass}`);
+
+        await twoFrames();
+        println(`container laid out: ${container.offsetHeight > 0}`);
+        done();
+    });
+</script>
