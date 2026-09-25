@@ -1,0 +1,2 @@
+a tick that moved the clip needed the main thread: true
+the clip is where the width at currentTime puts it: true

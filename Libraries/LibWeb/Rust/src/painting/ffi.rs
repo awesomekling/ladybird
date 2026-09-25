@@ -986,6 +986,7 @@ fn fresh_visual_context_tree_build(
         structural_epoch_changed: true,
         requires_display_list_recording: true,
         structural_epoch: state.structural_epoch(),
+        tree_changed: true,
     }
 }
 
@@ -1080,6 +1081,10 @@ fn update_accumulated_visual_contexts_stage(
                 }
                 let structural_epoch_changed = outcome.delta.structural_epoch_changed;
                 let requires_display_list_recording = outcome.delta.requires_display_list_recording;
+                let tree_changed = outcome.delta.payload_changed
+                    || structural_epoch_changed
+                    || outcome.delta.tombstoned_any_node
+                    || requires_display_list_recording;
                 state.dirty_boxes.clear();
                 state.last_tree_inputs = Some(inputs);
                 let structural_epoch = state.structural_epoch();
@@ -1090,6 +1095,7 @@ fn update_accumulated_visual_contexts_stage(
                     structural_epoch_changed,
                     requires_display_list_recording,
                     structural_epoch,
+                    tree_changed,
                 };
             }
             IncrementalUpdateResult::NeedsFullBuild(fallback_reason) => {
@@ -1600,6 +1606,47 @@ pub(crate) unsafe fn record_for_clock_tick(arena_handle: *mut c_void) -> bool {
     let arena = unsafe { arena_from_handle(arena_handle) };
     leave_pending_recording(arena, viewport, should_paint_overlay, true, frame_generation, output);
     true
+}
+
+/// Updates the visual contexts a clock tick's layout left behind, on the render side, as the main
+/// thread's rendering update does before it records. Returns whether the tick can show its frame
+/// without the main thread: the update changed nothing of the tree, whose copy the compositor keeps
+/// in step with the main thread's frames, and nothing a box records of it. Where it returns false,
+/// the tree may have moved on already, and the main thread's next frame takes it to the compositor.
+///
+/// # Safety
+///
+/// `arena_handle` must be a live arena that the calling tick owns, with the main thread idle.
+pub(crate) unsafe fn settle_visual_contexts_for_clock_tick(arena_handle: *mut c_void) -> bool {
+    // SAFETY: Guaranteed by the caller.
+    let arena = unsafe { arena_from_handle(arena_handle) };
+    // What resolves SVG paint servers and filters reaches the DOM.
+    if arena.svg_paint_resources().needs_sync() {
+        return false;
+    }
+    let viewport = {
+        let paint_state = arena.paint_state().borrow();
+        let Some(clock) = paint_state.clock_recording.as_ref() else {
+            return false;
+        };
+        let state = &paint_state.visual_context;
+        if state.tree.is_none()
+            || state.dirty_boxes.global_reason
+                != crate::painting::visual_context::dirty::VisualContextGlobalRebuildReason::None
+        {
+            return false;
+        }
+        if state.dirty_boxes.boxes.is_empty() && state.dirty_boxes.removed.is_empty() {
+            return true;
+        }
+        clock.viewport
+    };
+    if !arena.paintable_row_is_populated(viewport) {
+        return false;
+    }
+    // SAFETY: Guaranteed by the caller; no borrow of the arena is live here.
+    let outcome = update_accumulated_visual_contexts_stage(unsafe { arena_from_handle_mut(arena_handle) }, viewport);
+    !outcome.performed_full_build && !outcome.tree_changed
 }
 
 /// Publishes the arena's pending recording from the presentation stage of the frame in flight

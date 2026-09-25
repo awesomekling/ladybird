@@ -118,10 +118,11 @@ unsafe extern "C" fn layout_arena_take_in_clock_layout_frame(arena: *mut c_void)
     let Some(frame) = crate::clock_frames::take_laid_out_clock_layout_frame(arena) else {
         return false;
     };
+    let shown_on_render_side = crate::clock_frames::rust_clock_lease_presented_since_adoption(arena);
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     abort_on_panic(|| {
         // SAFETY: As above.
-        unsafe { take_in_clock_layout_frame(&main_thread, frame) }
+        unsafe { take_in_clock_layout_frame(&main_thread, frame, shown_on_render_side) }
     });
     // SAFETY: As above; the update has ended.
     let frame = unsafe { make_clock_layout_frame(&main_thread, arena) };

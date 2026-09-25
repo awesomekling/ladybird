@@ -46,6 +46,8 @@ pub struct FfiVisualContextUpdateOutcome {
     pub structural_epoch_changed: bool,
     pub requires_display_list_recording: bool,
     pub structural_epoch: u64,
+    /// Whether the update changed the tree at all: a node's payload, or its structure.
+    pub tree_changed: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

@@ -1574,6 +1574,7 @@ GC::Ref<JS::Object> Internals::get_render_clock_counters() const
     define("ticksLaidOut"sv, counters.ticks_laid_out);
     define("ticksPresented"sv, counters.ticks_presented);
     define("ticksNeedingMain"sv, counters.ticks_needing_main);
+    define("ticksMovingVisualContexts"sv, counters.ticks_moving_visual_contexts);
     return object;
 }
 

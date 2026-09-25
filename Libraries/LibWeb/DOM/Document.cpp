@@ -2223,7 +2223,11 @@ void Document::apply_layout_commit_effects(Layout::RustFFI::FfiLayoutCommitEffec
         if (box)
             Painting::set_scroll_offset(*box, clamped.offset);
     }
-    if (effects.layout_committed) {
+    // What a render clock's ticks laid out, they showed already: their visual contexts are up to date, and the frame
+    // they presented holds the display list.
+    if (effects.layout_committed && effects.shown_on_render_side) {
+        schedule_scroll_container_resnap();
+    } else if (effects.layout_committed) {
         set_needs_accumulated_visual_contexts_update(true);
         set_needs_to_record_display_list();
         schedule_scroll_container_resnap();
