@@ -30,7 +30,7 @@ Gfx::SystemFallbackFontKey key_for(u32 code_point)
 }
 
 struct RenderSideFontService {
-    NonnullOwnPtr<WebView::FontService> font_service;
+    NonnullRefPtr<WebView::FontService> font_service;
     NonnullRefPtr<WebView::RendererFontServiceConnection> connection;
 };
 
