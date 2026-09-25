@@ -59,10 +59,12 @@ pub struct FfiLayoutUpdateHostCallbacks {
     /// Readies the document for a layout tree build, and answers with the document's style node,
     /// which the build walks from.
     pub prepare_layout_tree_build: unsafe extern "C" fn(*mut c_void) -> u32,
-    /// Pays the host half of the tree build walk the second argument holds, then installs the
-    /// build's viewport as the document's layout root in place of the third.
-    pub finish_layout_tree_build:
-        unsafe extern "C" fn(*mut c_void, *mut c_void, NodeSlotId) -> FfiLayoutTreeBuildOutcome,
+    /// Makes the shells the tree build walk the second argument holds owes the document, and
+    /// answers with the build's outcome.
+    pub finish_layout_tree_build: unsafe extern "C" fn(*mut c_void, *mut c_void) -> FfiLayoutTreeBuildOutcome,
+    /// Gives the document's new layout tree, which a tree build placed in place of the one before,
+    /// a new paint state.
+    pub renew_paint_state: unsafe extern "C" fn(*mut c_void),
     /// Marks the list owners the frame found showing stale list-item counters for a layout tree
     /// rebuild, named by their style nodes.
     pub rebuild_list_owners_with_stale_item_counters: unsafe extern "C" fn(*mut c_void, *const u32, usize),
@@ -175,7 +177,8 @@ pub(crate) struct LayoutUpdateHost {
     prepare_for_rendering: unsafe extern "C" fn(*mut c_void),
     root_background_source: unsafe extern "C" fn(*mut c_void) -> FfiRootBackgroundSource,
     prepare_layout_tree_build: unsafe extern "C" fn(*mut c_void) -> u32,
-    finish_layout_tree_build: unsafe extern "C" fn(*mut c_void, *mut c_void, NodeSlotId) -> FfiLayoutTreeBuildOutcome,
+    finish_layout_tree_build: unsafe extern "C" fn(*mut c_void, *mut c_void) -> FfiLayoutTreeBuildOutcome,
+    renew_paint_state: unsafe extern "C" fn(*mut c_void),
     rebuild_list_owners_with_stale_item_counters: unsafe extern "C" fn(*mut c_void, *const u32, usize),
     read_selection:
         unsafe extern "C" fn(*mut c_void, *mut c_void, unsafe extern "C" fn(*mut c_void, *const FfiSelectionSnapshot)),
@@ -201,6 +204,7 @@ impl From<FfiLayoutUpdateHostCallbacks> for LayoutUpdateHost {
             root_background_source: host.root_background_source,
             prepare_layout_tree_build: host.prepare_layout_tree_build,
             finish_layout_tree_build: host.finish_layout_tree_build,
+            renew_paint_state: host.renew_paint_state,
             rebuild_list_owners_with_stale_item_counters: host.rebuild_list_owners_with_stale_item_counters,
             read_selection: host.read_selection,
             apply_layout_commit_effects: host.apply_layout_commit_effects,
@@ -253,11 +257,24 @@ impl LayoutUpdateHost {
         walked: WalkedLayoutTreeBuild,
     ) -> FfiLayoutTreeBuildOutcome {
         let mut walk = Some(walked.walk);
-        let outcome = unsafe {
-            (self.finish_layout_tree_build)(self.context, (&raw mut walk).cast(), walked.replaced_layout_root)
-        };
+        let outcome = unsafe { (self.finish_layout_tree_build)(self.context, (&raw mut walk).cast()) };
         assert!(walk.is_none(), "the host pays the layout tree build walk it is handed");
         outcome
+    }
+
+    /// Pays what a tree build owed the document thread beyond its own join, then renews the
+    /// document's paint state if the build replaced its layout tree.
+    fn pay_tree_build_host_half(
+        &self,
+        main_thread: &crate::stage::MainThread,
+        arena: &LayoutNodeArena,
+        host_half: TreeBuildHostHalf,
+    ) {
+        let replaced_layout_tree = host_half.replaced_layout_tree();
+        host_half.pay(main_thread, arena);
+        if replaced_layout_tree {
+            unsafe { (self.renew_paint_state)(self.context) }
+        }
     }
 
     fn rebuild_list_owners_with_stale_item_counters(&self, _: &crate::stage::MainThread, list_owners: &[StyleNodeID]) {
@@ -403,16 +420,15 @@ enum FrameJoin {
     /// loop over its elements, and a tree update mark is set on the DOM node, which widens it to
     /// what the node's layout node and its document ask for.
     Style,
-    /// The host half of a layout tree build whose walk the frame has run, all of which is the
-    /// document's C++ and GC-side objects: the shells of its new rows, the retirement of the
-    /// shells of the tree a new viewport replaced, and the document paint state of the new one.
-    /// The shells of the rows the walk freed, the box presence it changed and the DOM nodes its
-    /// commit messages resolve to wait for the next join, and the style resources and generated
-    /// image providers of its new rows for the frame to be over. When a pass
-    /// follows, the join answers with its sources, which the document reads from its root and body
-    /// elements' style and from the shells of replaced content. A partial relayout's build also
-    /// answers with the facts after it, since the build can resize this document's viewport
-    /// through its embedding document.
+    /// The host half of a layout tree build whose walk the frame has run: the shells of its new
+    /// rows, which are the document's C++ objects. The shells of the rows the walk freed (the
+    /// tree a new viewport replaced among them), the box presence it changed, the DOM nodes its
+    /// commit messages resolve to and a new viewport's paint state wait for the next join, and
+    /// the style resources and generated image providers of its new rows for the frame to be
+    /// over. When a pass follows, the join answers with its sources, which the document reads
+    /// from its root and body elements' style and from the shells of replaced content. A partial
+    /// relayout's build also answers with the facts after it, since the build can resize this
+    /// document's viewport through its embedding document.
     BuildLayoutTree,
     /// The host halves of the partial relayout boundaries' commits the frame settled ahead of
     /// them, in commit order, and of the last pass's commit, then the container queries the commit
@@ -464,12 +480,10 @@ impl LayoutPassSources {
     }
 }
 
-/// A tree build walk the frame has run, the document it walked, and the layout root the build may
-/// have replaced.
+/// A tree build walk the frame has run, and the document it walked.
 struct WalkedLayoutTreeBuild {
     walk: LayoutTreeBuildWalk,
     document_style_node: StyleNodeID,
-    replaced_layout_root: NodeSlotId,
 }
 
 /// What the style join readied for the rest of its round.
@@ -579,7 +593,7 @@ impl LayoutFrame<'_> {
         self.joins.join(|main_thread| {
             if let Some(owed) = owed_tree_build_host_half {
                 // SAFETY: The frame runs for the update the arena is in, and no borrow spans a join.
-                owed.pay(main_thread, unsafe { arena(arena_handle) });
+                host.pay_tree_build_host_half(main_thread, unsafe { arena(arena_handle) }, owed);
             }
             work(main_thread, &host)
         })
@@ -640,7 +654,6 @@ impl LayoutFrame<'_> {
             .tree_build_document_style_node
             .take()
             .expect("the style join readies the tree build");
-        let replaced_layout_root = self.arena().layout_root();
         // SAFETY: The frame runs for the update the arena is in, and the style join published the
         // document's style for the build.
         let (walk, host_half) = unsafe { walk_layout_tree_build(self.inputs.arena_handle, document_style_node) };
@@ -648,7 +661,6 @@ impl LayoutFrame<'_> {
             walk,
             document_style_node: StyleNodeID::from_raw(document_style_node)
                 .expect("the document has a style node when it builds a layout tree"),
-            replaced_layout_root,
         };
         (walked, host_half)
     }
@@ -1150,10 +1162,10 @@ unsafe fn update_layout(
             let arena_handle = frame.inputs.arena_handle;
             let (messages, owed_tree_build_host_half) = frame.run();
             joins.join(|main_thread| {
-                if let Some(owed) = owed_tree_build_host_half {
-                    owed.pay(main_thread, arena(arena_handle));
-                }
                 let host = layout_update_host(main_thread);
+                if let Some(owed) = owed_tree_build_host_half {
+                    host.pay_tree_build_host_half(main_thread, arena(arena_handle), owed);
+                }
                 // The frame runs for the update the arena is in, and is over.
                 messages.apply(main_thread, &host, arena(arena_handle));
                 host.finish_update_layout(main_thread);
