@@ -414,15 +414,17 @@ enum FrameJoin {
     /// its commit messages resolve to, a new viewport's paint state) waits for the next join, and
     /// the style resources and generated image providers of its new rows for the frame to be over.
     BuildLayoutTree,
-    /// Whether the last pass's commit left style work pending, which is the container queries the
-    /// commit made pending (the document's query container elements), then the facts after them.
-    /// What derives from the commit, the frame does after the join, and what the document only
-    /// reads once the frame is over, the frame leaves in its messages.
-    AfterLayoutCommit,
     /// Whether style or layout work is still pending once the loop has run out of rounds, after the
     /// marks a last build left, as the style join would have set them. A loop that stabilizes has
     /// these facts from the join that ended it already.
     FinalFacts,
+    /// The frame's last join, which pays what the frame still owes first, as every join does. When
+    /// the frame found its last commit stable from what it owns, the join then asks whether the host
+    /// halves left style or layout work pending: the container queries the commits made pending
+    /// (the document's query container elements), the other style work, the top layer changes and
+    /// the layout tree update marks they made. If so, the frame runs another round. Otherwise the
+    /// join applies the frame's messages and ends the update on the document side.
+    FrameEnd,
 }
 
 /// What a layout frame is started with. The document drains its invalidation journal into the
@@ -545,29 +547,6 @@ enum OwedHostHalf {
     Commit(DeferredLayoutCommitHostHalf),
 }
 
-/// Pays what the frame owed the document thread, in the order the frame made it owe it.
-///
-/// # Safety
-///
-/// As for [`arena`], on the document thread, with no borrow of the arena held across the call.
-unsafe fn pay_owed_host_halves(
-    main_thread: &crate::stage::MainThread,
-    host: &LayoutUpdateHost,
-    arena_handle: *mut c_void,
-    owed_host_halves: Vec<OwedHostHalf>,
-) {
-    for owed in owed_host_halves {
-        match owed {
-            // SAFETY: Guaranteed by the caller.
-            OwedHostHalf::TreeBuild(owed) => {
-                host.pay_tree_build_host_half(main_thread, unsafe { arena(arena_handle) }, owed)
-            }
-            // SAFETY: Guaranteed by the caller.
-            OwedHostHalf::Commit(owed) => unsafe { owed.deliver(main_thread) },
-        }
-    }
-}
-
 /// The style and layout stabilization loop of one layout update, run as one stage.
 struct LayoutFrame<'a> {
     inputs: FrameInputs,
@@ -603,8 +582,17 @@ impl LayoutFrame<'_> {
         let arena_handle = self.inputs.arena_handle;
         let owed_host_halves = self.owed_host_halves.take();
         self.joins.join(|main_thread| {
-            // SAFETY: The frame runs for the update the arena is in, and no borrow spans a join.
-            unsafe { pay_owed_host_halves(main_thread, &host, arena_handle, owed_host_halves) };
+            // What the frame owed, in the order it made it owe it.
+            for owed in owed_host_halves {
+                match owed {
+                    // SAFETY: The frame runs for the update the arena is in, and no borrow spans a join.
+                    OwedHostHalf::TreeBuild(owed) => {
+                        host.pay_tree_build_host_half(main_thread, unsafe { arena(arena_handle) }, owed);
+                    }
+                    // SAFETY: As above.
+                    OwedHostHalf::Commit(owed) => unsafe { owed.deliver(main_thread) },
+                }
+            }
             work(main_thread, &host)
         })
     }
@@ -711,11 +699,11 @@ impl LayoutFrame<'_> {
             .reconcile_stale_list_item_counters_after_tree_build(walked.document_style_node);
     }
 
-    /// What derives from a layout commit, once the AfterLayoutCommit join has finished it: the
-    /// rendering preparation, the selection states of the boxes it built are stamped again from the
-    /// round's selection, the searchable text is dropped, and after a tree change the boxes with
-    /// `content-visibility: auto` are collected again for the document's paint state, and the
-    /// document's viewport clients are to be told the viewport rect.
+    /// What derives from a layout commit, once its arena half has settled: the rendering preparation,
+    /// the selection states of the boxes it built are stamped again from the round's selection, the
+    /// searchable text is dropped, and after a tree change the boxes with `content-visibility: auto`
+    /// are collected again for the document's paint state, and the document's viewport clients are
+    /// to be told the viewport rect.
     fn note_layout_commit(
         &mut self,
         layout_tree_changed: bool,
@@ -783,14 +771,52 @@ impl LayoutFrame<'_> {
             .expect("the join ahead of a layout pass reads its sources")
     }
 
-    /// Runs the frame's rounds, and hands back its messages together with what the tree builds and
-    /// commits no join followed still owe the document thread.
-    fn run(mut self) -> (FrameMessages, Vec<OwedHostHalf>) {
-        let messages = self.run_rounds();
-        (messages, self.owed_host_halves.take())
+    /// Whether what the frame owns shows layout work its last commit left for another round. What
+    /// the host halves of the commits leave pending, the join that ends the frame asks the document.
+    fn commit_left_layout_work(&self, facts: &FfiLayoutUpdateDocumentFacts) -> bool {
+        facts.document_is_active && !self.arena().layout_is_up_to_date(false)
     }
 
-    fn run_rounds(&mut self) -> FrameMessages {
+    /// Ends the frame in its last join, which applies the frame's messages and ends the update on
+    /// the document side.
+    fn end(mut self) {
+        let ended = self.end_unless_host_left_work(false);
+        debug_assert!(ended);
+    }
+
+    /// Ends the frame as [`Self::end`] does, unless `after_commit` and the host halves of the
+    /// frame's commits left style or layout work pending, in which case the frame goes on with
+    /// another round. Answers whether the frame has ended.
+    fn end_unless_host_left_work(&mut self, after_commit: bool) -> bool {
+        let arena_handle = self.inputs.arena_handle;
+        let mut messages = Some(std::mem::take(&mut self.messages));
+        let messages_slot = &mut messages;
+        self.join(FrameJoin::FrameEnd, |main_thread, host| {
+            // SAFETY: The frame runs for the update the arena is in.
+            let arena = unsafe { arena(arena_handle) };
+            if after_commit {
+                let facts = host.document_facts(main_thread);
+                if host.needs_style_update_after_layout(main_thread)
+                    || facts.top_layer_work_pending
+                    || !layout_is_up_to_date(arena, &facts)
+                {
+                    return;
+                }
+            }
+            let messages = messages_slot.take().expect("the frame's messages are applied once");
+            messages.apply(main_thread, host, arena);
+            host.finish_update_layout(main_thread);
+        });
+        match messages {
+            Some(messages) => {
+                self.messages = messages;
+                false
+            }
+            None => true,
+        }
+    }
+
+    fn run(mut self) {
         // Size-query dependencies point from a descendant to an ancestor query container. They are
         // therefore acyclic, and a coherent style/layout pass can settle at least one more level of
         // a nested dependency chain. One pass per connected element is a conservative exact bound.
@@ -827,14 +853,14 @@ impl LayoutFrame<'_> {
 
             if !self.round_lays_out(&facts) {
                 self.messages.prepare_for_rendering = true;
-                return std::mem::take(&mut self.messages);
+                return self.end();
             }
 
             let mut registered_partial_relayout_roots = self.arena().take_partial_relayout_boundary_roots();
 
             // NOTE: If this is a document hosting <template> contents, layout is unnecessary.
             if self.inputs.is_template_contents_document {
-                return std::mem::take(&mut self.messages);
+                return self.end();
             }
 
             let mut needs_layout_tree_rebuild = self.needs_layout_tree_rebuild(&facts);
@@ -845,7 +871,12 @@ impl LayoutFrame<'_> {
                 &mut registered_partial_relayout_roots,
                 &mut needs_layout_tree_rebuild,
             ) {
-                PartialRelayout::Done => return std::mem::take(&mut self.messages),
+                PartialRelayout::Done => {
+                    if self.end_unless_host_left_work(true) {
+                        return;
+                    }
+                    continue;
+                }
                 PartialRelayout::NeedsAnotherLayoutPass => continue,
                 PartialRelayout::NotEligible => {}
             }
@@ -920,30 +951,18 @@ impl LayoutFrame<'_> {
             self.messages.full_layouts_performed += 1;
             self.arena().note_full_layout();
 
-            let Joined {
-                value: needs_style_update_after_layout,
-                facts,
-            } = self.join(FrameJoin::AfterLayoutCommit, |main_thread, host| Joined {
-                value: host.needs_style_update_after_layout(main_thread),
-                facts: host.document_facts(main_thread),
-            });
             self.note_layout_commit(true, &facts, root_background_source);
             self.inputs.trace.layout(layout_started);
 
-            if needs_style_update_after_layout {
+            // Layout-only invalidations still need to be flushed before we can exit.
+            if self.commit_left_layout_work(&facts) {
                 continue;
             }
 
-            // A zone rebuild requested during layout tree construction runs as another pass.
-            if facts.top_layer_work_pending {
-                continue;
-            }
-
-            // Layout-only invalidations still need to be flushed before we can exit. The refresh
-            // join has just answered the final facts, and nothing has run on the document thread
-            // since, so the loop has stabilized.
-            if layout_is_up_to_date(self.arena(), &facts) {
-                return std::mem::take(&mut self.messages);
+            // The last join asks what the host halves left, and nothing else runs on the document
+            // thread until then, so if they left nothing the loop has stabilized.
+            if self.end_unless_host_left_work(true) {
+                return;
             }
         }
 
@@ -961,7 +980,7 @@ impl LayoutFrame<'_> {
         if needs_style_update_after_layout || !layout_is_up_to_date(self.arena(), &facts) {
             self.messages.stabilization_bound_failed = true;
         }
-        std::mem::take(&mut self.messages)
+        self.end();
     }
 
     /// Attempts to satisfy the pending layout update by re-laying out only the registered partial
@@ -1065,15 +1084,8 @@ impl LayoutFrame<'_> {
 
         self.arena().note_partial_layout();
 
-        let Joined {
-            value: needs_style_update_after_layout,
-            facts,
-        } = self.join(FrameJoin::AfterLayoutCommit, |main_thread, host| Joined {
-            value: host.needs_style_update_after_layout(main_thread),
-            facts: host.document_facts(main_thread),
-        });
-        self.note_layout_commit(layout_tree_was_built_in_partial_branch, &facts, root_background_source);
-        if needs_style_update_after_layout || !layout_is_up_to_date(self.arena(), &facts) {
+        self.note_layout_commit(layout_tree_was_built_in_partial_branch, facts, root_background_source);
+        if self.commit_left_layout_work(facts) {
             return PartialRelayout::NeedsAnotherLayoutPass;
         }
         PartialRelayout::Done
@@ -1164,15 +1176,7 @@ unsafe fn update_layout(
                 selection: None,
                 owed_host_halves: Cell::default(),
             };
-            let arena_handle = frame.inputs.arena_handle;
-            let (messages, owed_host_halves) = frame.run();
-            joins.join(|main_thread| {
-                let host = layout_update_host(main_thread);
-                pay_owed_host_halves(main_thread, &host, arena_handle, owed_host_halves);
-                // The frame runs for the update the arena is in, and is over.
-                messages.apply(main_thread, &host, arena(arena_handle));
-                host.finish_update_layout(main_thread);
-            });
+            frame.run();
         });
     }
 }
