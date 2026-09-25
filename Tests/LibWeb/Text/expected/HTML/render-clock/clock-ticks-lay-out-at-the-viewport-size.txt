@@ -1,0 +1,4 @@
+before the zoom: true
+after the zoom: true
+ticks a lease took: true
+rendering updates meanwhile: 0

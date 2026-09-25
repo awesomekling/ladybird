@@ -604,10 +604,14 @@ pub extern "C" fn rust_clock_lease_set_paused(arena: *mut c_void, paused: bool) 
     }
 }
 
-/// Hands the lease of `arena` the layout frame its render clock ticks lay out in.
+/// Hands the lease of `arena` the layout frame its render clock ticks lay out in. A frame the ticks
+/// laid out in stays until the main thread takes it in.
 pub(crate) fn set_clock_layout_frame(arena: *mut c_void, frame: ClockLayoutFrame) {
     if let Some(lease) = clock_lease_for(arena as usize) {
-        *lease.layout_frame.lock().expect("clock lease layout frame") = Some(frame);
+        let mut current = lease.layout_frame.lock().expect("clock lease layout frame");
+        if !current.as_ref().is_some_and(ClockLayoutFrame::laid_out) {
+            *current = Some(frame);
+        }
     }
 }
 

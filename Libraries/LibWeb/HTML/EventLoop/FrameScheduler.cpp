@@ -791,6 +791,10 @@ void FrameScheduler::main_thread_will_idle()
         auto plan = clock_lease_plan(*hold.document);
         bool ticks = plan.has_value() && plan->effects == hold.effects && publish_clock_lease_targets(hold);
         Layout::RustFFI::rust_clock_lease_set_paused(arena->handle(), !ticks);
+        // The ticks lay out with the document as it stands now: a resize or a selection change since the last frame
+        // was laid out by a read, but nothing painted it yet.
+        if (ticks)
+            Layout::RustFFI::layout_arena_renew_clock_layout_frame(arena->handle());
         any_ticks |= ticks;
     }
     if (any_ticks)
