@@ -808,6 +808,9 @@ Document::JoinScope::JoinScope(Document& document, UpdateLayoutReason reason)
     : m_document(document)
     , m_reason(reason)
 {
+    // A read of render state waits for the frame in flight before it asks anything, and the
+    // cleanliness check below already asks the style engine.
+    m_document.join_frame_in_flight();
     auto& counters = m_document.m_join_counters[to_underlying(m_reason)];
     ++counters.calls;
 
@@ -2252,6 +2255,9 @@ void Document::update_layout_if_needed_for_node(Node const& node, UpdateLayoutRe
 
 void Document::flush_deferred_style_change_event()
 {
+    // This is the first style engine entrance of most DOM and CSSOM mutations, so it is their door:
+    // a mutation made beside this document's frame in flight waits for it before it changes anything.
+    join_frame_in_flight();
     auto& style_engine = style_computer().style_engine();
     if (!style_engine.has_deferred_geometry_transaction())
         return;

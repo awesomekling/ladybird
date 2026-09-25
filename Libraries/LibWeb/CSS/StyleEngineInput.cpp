@@ -566,6 +566,9 @@ void republish_presentational_hints(DOM::Element& element)
     auto* style_engine = style_engine_for(element);
     if (!style_engine || element.style_node_id() == no_style_node)
         return;
+    // The hints are collected and published in several calls into the style mirror the layout
+    // frame reads, so a change made beside the frame in flight waits for it first.
+    element.document().join_frame_in_flight();
     StyleComputer::collect_presentational_hint_properties({ element });
     // The hints moved, and so does the style they are cascaded into.
     record_element_declarations_changed(element, ElementDeclarationKind::SvgPresentationAttribute, true, true);
