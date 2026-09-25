@@ -1,0 +1,6 @@
+held as armed: true
+forced joins of the layout pass: 0
+layout pass still in flight after the writes: true
+styled: 80x25
+sized: 120x15
+container height: 60

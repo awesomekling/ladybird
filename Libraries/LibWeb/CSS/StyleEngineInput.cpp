@@ -1957,8 +1957,9 @@ static void record_element_inline_style_properties(DOM::Element& element)
     // The declarations cross with the next transaction. Like a DOM mutation, recording them waits
     // for a frame in flight that reaches the style engine, so no transaction carrying them is
     // applied beside one. A recording reaches none, and the declarations are recorded beside it.
-    // Beside a style pass they are recorded as they are, and wait for its drain.
-    if (!Layout::RustFFI::rust_stage_thread_only_style_pass_in_flight_for(style_engine->rust_handle()))
+    // Beside a style pass they are recorded as they are, and wait for its drain. Beside a layout
+    // pass they are recorded as they are too: its frame applied every transaction before it.
+    if (!Layout::RustFFI::rust_stage_thread_only_style_pass_in_flight_for(style_engine->rust_handle()) && !style_engine->layout_pass_is_in_flight())
         element.document().join_frame_reaching_style_engine();
     auto const inline_style = element.inline_style();
     // What the block holds now: an edit made before the transaction crosses records a write of its own.
@@ -2344,10 +2345,11 @@ static RefPtr<SharedCompiledStyleSheet> shared_compiled_style_sheet_for(StyleShe
 // Beside a style pass alone the engine is the pass's. A sheet change that compiles into it or takes a sheet in or out
 // waits for the pass's drain as published input, and reads the sheet as it is then. A change that goes to the engine
 // before that joins the pass, which publishes what waits first, so the changes reach the engine in their order.
-static bool leave_sheet_change_beside_style_pass(DOM::Document& document, Function<void()> change)
+// Beside a layout pass, which reads what the engine holds, the change waits for the pass to be taken back the same way.
+static bool leave_sheet_change_beside_pass(DOM::Document& document, Function<void()> change)
 {
     auto& style_engine = document.style_computer().style_engine();
-    if (!Layout::RustFFI::rust_stage_thread_only_style_pass_in_flight_for(style_engine.rust_handle()))
+    if (!Layout::RustFFI::rust_stage_thread_only_style_pass_in_flight_for(style_engine.rust_handle()) && !style_engine.layout_pass_is_in_flight())
         return false;
     style_engine.publish_input([change = move(change)](StyleInputScope const&) { change(); });
     return true;
@@ -2371,7 +2373,7 @@ static void detach_shared_compiled_style_sheet_now(SharedCompiledStyleSheet& she
 
 static void detach_shared_compiled_style_sheet(SharedCompiledStyleSheet& sheet, u64 occurrence, TreeScopeID tree_scope, StyleComputer& style_computer)
 {
-    auto leave_beside_pass = leave_sheet_change_beside_style_pass(style_computer.document(), [sheet = NonnullRefPtr { sheet }, occurrence, tree_scope, style_computer = GC::Root { style_computer }] {
+    auto leave_beside_pass = leave_sheet_change_beside_pass(style_computer.document(), [sheet = NonnullRefPtr { sheet }, occurrence, tree_scope, style_computer = GC::Root { style_computer }] {
         detach_shared_compiled_style_sheet_now(*sheet, occurrence, tree_scope, *style_computer);
     });
     if (!leave_beside_pass)
@@ -2428,7 +2430,7 @@ static void record_style_rule_inserted_in_now(u64 identity, bool changes_environ
 
 static void record_style_rule_inserted_in(u64 identity, bool changes_environment, StyleSheetState& sheet, DOM::Document& document)
 {
-    auto leave_beside_pass = leave_sheet_change_beside_style_pass(document, [identity, changes_environment, sheet = NonnullRefPtr { sheet }, document = GC::Root { document }] {
+    auto leave_beside_pass = leave_sheet_change_beside_pass(document, [identity, changes_environment, sheet = NonnullRefPtr { sheet }, document = GC::Root { document }] {
         record_style_rule_inserted_in_now(identity, changes_environment, *sheet, *document);
     });
     if (!leave_beside_pass)
@@ -2650,7 +2652,7 @@ static void record_stylesheet_attached_now(StyleSheetState& sheet, DOM::Node& do
 
 void record_stylesheet_attached(StyleSheetState& sheet, DOM::Node& document_or_shadow_root, StyleSheetState* before)
 {
-    auto leave_beside_pass = leave_sheet_change_beside_style_pass(document_or_shadow_root.document(), [sheet = NonnullRefPtr { sheet }, document_or_shadow_root = GC::Root { document_or_shadow_root }, before = RefPtr { before }] {
+    auto leave_beside_pass = leave_sheet_change_beside_pass(document_or_shadow_root.document(), [sheet = NonnullRefPtr { sheet }, document_or_shadow_root = GC::Root { document_or_shadow_root }, before = RefPtr { before }] {
         record_stylesheet_attached_now(*sheet, *document_or_shadow_root, before);
     });
     if (!leave_beside_pass)
@@ -2770,7 +2772,7 @@ void record_stylesheet_rule_conditions(StyleSheetState& sheet, DOM::Document& do
     if (!engine_sheet)
         return;
     document.flush_deferred_style_change_event();
-    auto leave_beside_pass = leave_sheet_change_beside_style_pass(document, [engine_sheet = NonnullRefPtr { *engine_sheet }, document = GC::Root { document }] {
+    auto leave_beside_pass = leave_sheet_change_beside_pass(document, [engine_sheet = NonnullRefPtr { *engine_sheet }, document = GC::Root { document }] {
         record_stylesheet_rule_conditions_now(*engine_sheet, *document);
     });
     if (!leave_beside_pass)
@@ -2820,7 +2822,7 @@ static void record_stylesheet_detached_now(StyleSheetState& sheet, DOM::Node& do
 void record_stylesheet_detached(StyleSheetState& sheet, DOM::Node& document_or_shadow_root)
 {
     // NB: A sheet whose attachment waits beside the pass has no engine sheet yet, so its detachment waits behind it.
-    auto leave_beside_pass = leave_sheet_change_beside_style_pass(document_or_shadow_root.document(), [sheet = NonnullRefPtr { sheet }, document_or_shadow_root = GC::Root { document_or_shadow_root }] {
+    auto leave_beside_pass = leave_sheet_change_beside_pass(document_or_shadow_root.document(), [sheet = NonnullRefPtr { sheet }, document_or_shadow_root = GC::Root { document_or_shadow_root }] {
         record_stylesheet_detached_now(*sheet, *document_or_shadow_root);
     });
     if (!leave_beside_pass)
