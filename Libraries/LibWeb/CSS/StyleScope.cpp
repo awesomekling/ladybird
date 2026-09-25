@@ -659,10 +659,28 @@ void StyleScope::publish_cascade_layer_order(StyleSheetState* pending_attachment
     if (pending_attachment && !pending_attachment->disabled() && pending_attachment->native_media_list().matches())
         sheets.append(pending_attachment->native_sheet().handle());
 
+    m_published_layer_ranks.clear();
     m_has_published_named_layer_order = Parser::ValueParserFFI::rust_style_sheet_publish_layer_order(
         sheets.data(), sheets.size(), document().style_computer().style_engine().rust_handle(),
         style_engine_tree_scope().value(), m_has_published_named_layer_order, &document(),
-        [](void* document) { static_cast<DOM::Document*>(document)->flush_deferred_style_change_event(); });
+        [](void* document) { static_cast<DOM::Document*>(document)->flush_deferred_style_change_event(); },
+        &m_published_layer_ranks,
+        [](void* ranks, u16 const* name, size_t length) {
+            auto& published_layer_ranks = *static_cast<HashMap<Utf16FlyString, u32>*>(ranks);
+            published_layer_ranks.set(Utf16FlyString::from_utf16(Utf16View { reinterpret_cast<char16_t const*>(name), length }), published_layer_ranks.size());
+        });
+}
+
+// The rank of a layer in the order this scope published, as the engine ranks it: a named layer by
+// its place in the order, and the implicit outer layer or an undeclared name after every named layer.
+// A rule lookup reads the host's copy, not the engine's, so it asks no engine state while a style
+// pass is in flight.
+u32 StyleScope::published_layer_index(Utf16FlyString const& qualified_layer_name) const
+{
+    auto const unlayered = static_cast<u32>(m_published_layer_ranks.size());
+    if (qualified_layer_name.is_empty())
+        return unlayered;
+    return m_published_layer_ranks.get(qualified_layer_name).value_or(unlayered);
 }
 
 // The `@keyframes` this scope defines, as the rule cache just built resolved them.
@@ -946,8 +964,6 @@ void StyleScope::build_counter_style_cache()
     auto collect_counter_style_definitions = [&](CSS::CascadeOrigin cascade_origin, CSS::StyleSheetState const& style_sheet) {
         if (!style_sheet.native_media_list().matches())
             return;
-        auto& style_engine = document().style_computer().style_engine();
-        auto const tree_scope = style_engine_tree_scope();
         auto const origin_priority = [&]() -> u8 {
             switch (cascade_origin) {
             case CSS::CascadeOrigin::UserAgent:
@@ -965,11 +981,9 @@ void StyleScope::build_counter_style_cache()
             if (rule.type() != RustRule::Type::CounterStyle)
                 return;
             auto name = Utf16FlyString { rule.name() };
-            auto qualified_layer_name = Utf16FlyString::from_utf16(layer_prefix);
-            auto const layer = qualified_layer_name.is_empty() ? 0 : style_engine.intern_atom(qualified_layer_name).value();
             CounterStylePriority priority {
                 .origin = origin_priority,
-                .layer = style_engine.layer_index(tree_scope, layer),
+                .layer = published_layer_index(Utf16FlyString::from_utf16(layer_prefix)),
             };
             if (auto existing = counter_style_priorities.get(name); existing.has_value()) {
                 if (existing->origin > priority.origin || (existing->origin == priority.origin && existing->layer > priority.layer))
@@ -1208,12 +1222,6 @@ Optional<StyleScope::FunctionDefinitionAndScope> StyleScope::get_function_defini
         auto const get_function_definition_for_cascade_origin = [&](CSS::CascadeOrigin cascade_origin) {
             RustCompiledFunction const* cascade_origin_result = nullptr;
             u32 existing_layer_index = 0;
-            auto& style_engine = scope.document().style_computer().style_engine();
-            auto const tree_scope = scope.style_engine_tree_scope();
-            auto layer_index_of = [&](Utf16FlyString const& qualified_layer_name) {
-                auto const layer = qualified_layer_name.is_empty() ? 0 : style_engine.intern_atom(qualified_layer_name);
-                return style_engine.layer_index(tree_scope, layer.value());
-            };
 
             auto cached_rules = scope.rule_cache().function_rules_by_name.get(name);
             if (!cached_rules.has_value())
@@ -1223,7 +1231,7 @@ Optional<StyleScope::FunctionDefinitionAndScope> StyleScope::get_function_defini
                 if (cached_rule.cascade_origin != cascade_origin)
                     continue;
 
-                auto layer_index = layer_index_of(cached_rule.qualified_layer_name);
+                auto layer_index = scope.published_layer_index(cached_rule.qualified_layer_name);
                 if (!cascade_origin_result || layer_index >= existing_layer_index) {
                     cascade_origin_result = &cached_rule.rule;
                     existing_layer_index = layer_index;
