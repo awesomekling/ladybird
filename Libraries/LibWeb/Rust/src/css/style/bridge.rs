@@ -5039,28 +5039,35 @@ fn sort_style_deltas_for_direct_application(engine: &StyleEngine, deltas: &mut [
     });
 }
 
-/// A row the batch joins for an element the rows need styled before them, with `reaction`.
-fn inheritance_prerequisite_delta(node: StyleNodeID, reaction: u8) -> FfiStyleDelta {
+/// A row the batch joins for an element its rows need styled before them, with the record the
+/// engine settled for it.
+fn inheritance_prerequisite_delta(
+    engine: &StyleEngine,
+    node: StyleNodeID,
+    style_record: u64,
+    pseudo_kind: u8,
+) -> FfiStyleDelta {
+    let is_element = pseudo_kind == u8::MAX;
     FfiStyleDelta {
         style_node: node.raw(),
         match_answer: 0,
         old_style_record: 0,
-        new_style_record: 0,
-        damage: FfiStyleDeltaDamage::None,
-        reaction,
+        new_style_record: style_record,
+        damage: FfiStyleDeltaDamage::Full,
+        reaction: super::transaction::STYLE_REACTION_RECOMPUTE_STYLE,
         inherited_style_groups: 0,
-        pseudo_kind: u8::MAX,
-        gap: FfiStyleDeltaGap::Materialize,
-        uses_substitution: false,
+        pseudo_kind,
+        gap: FfiStyleDeltaGap::Computed,
+        uses_substitution: is_element && engine.nodes_with_substituted_records.contains(&node),
         record_damage: FfiStyleInvalidationField::JoinedForInheritance as u32,
-        row_facts: 0,
+        row_facts: if is_element { engine.style_row_facts(node) } else { 0 },
         explicit_inheritance_debt: 0,
         row_effect_debt: 0,
     }
 }
 
 /// Closes a published batch over the elements its rows inherit from and the host holds no style
-/// for, and over the elements between two of its rows.
+/// for.
 fn close_style_deltas_over_inheritance(engine: &mut StyleEngine, deltas: &mut Vec<FfiStyleDelta>) {
     let mut rows: HashSet<StyleNodeID> = deltas
         .iter()
@@ -5071,54 +5078,58 @@ fn close_style_deltas_over_inheritance(engine: &mut StyleEngine, deltas: &mut Ve
     // A reaction can name an element created by editing after its new inheritance parent was
     // inserted. Close the batch over unstyled inheritance prerequisites, which are bounded by
     // the reaction paths rather than discovered by a document traversal.
-    let mut index = 0;
-    while index < deltas.len() {
-        let node = StyleNodeID::from_raw(deltas[index].style_node).expect("a style delta must name an element");
-        index += 1;
+    for delta in deltas.iter() {
+        let node = StyleNodeID::from_raw(delta.style_node).expect("a style delta must name an element");
         let mut ancestor = engine.tree.inheritance_parent(node);
         while let Some(prerequisite) = ancestor {
-            if engine.host.held_style_records.contains_key(&prerequisite) {
+            if engine.host.held_style_records.contains_key(&prerequisite) || !rows.insert(prerequisite) {
                 break;
             }
-            if rows.insert(prerequisite) {
-                deltas.push(inheritance_prerequisite_delta(
-                    prerequisite,
-                    super::transaction::STYLE_REACTION_RECOMPUTE_STYLE,
-                ));
-                closure.push(prerequisite);
-            }
+            closure.push(prerequisite);
             ancestor = engine.tree.inheritance_parent(prerequisite);
         }
     }
-
-    // A published descendant may have an inheritance ancestor in the batch while the nodes
-    // between them have no selector reaction of their own. Keep zero-bit scheduling slots for
-    // that gap so derived inheritance bits can reach the descendant before its published
-    // reaction is consumed.
-    let row_count_before_gaps = deltas.len();
-    let mut gap = Vec::new();
-    for index in 0..row_count_before_gaps {
-        let node = StyleNodeID::from_raw(deltas[index].style_node).expect("a style delta must name an element");
-        gap.clear();
-        let mut ancestor = engine.tree.inheritance_parent(node);
-        while let Some(between) = ancestor {
-            if rows.contains(&between) {
-                for &node in &gap {
-                    if rows.insert(node) {
-                        deltas.push(inheritance_prerequisite_delta(node, 0));
-                        closure.push(node);
-                    }
-                }
-                break;
-            }
-            gap.push(between);
-            ancestor = engine.tree.inheritance_parent(between);
-        }
+    if closure.is_empty() {
+        return;
     }
-    if !closure.is_empty() {
-        engine
-            .complete_published_match_answers_for_closure(&closure)
-            .expect("the rows a batch joins for inheritance have complete match answers");
+    engine
+        .complete_published_match_answers_for_closure(&closure)
+        .expect("the rows a batch joins for inheritance have complete match answers");
+
+    // Each joined element settles before the host installs the batch, as a row the engine computed,
+    // over the ones it inherits from before it.
+    closure.sort_unstable_by(|first, second| engine.tree.compare_style_reaction_order(*first, *second));
+    let engine_on_stage = &mut *engine;
+    let settled = crate::stage_thread::run_stage(move || {
+        closure
+            .into_iter()
+            .map(|node| {
+                let super::publication::RecordDemandAnswer::Record(answer) =
+                    engine_on_stage.answer_record_demand(node, None, false, true, false, 0)
+                else {
+                    unreachable!("an element's record demand is always answered");
+                };
+                (node, answer)
+            })
+            .collect::<Vec<_>>()
+    });
+    for (node, answer) in settled {
+        deltas.push(inheritance_prerequisite_delta(
+            engine,
+            node,
+            answer.style_record,
+            u8::MAX,
+        ));
+        for kind in 0..RETRY_PSEUDO_RECORD_SLOTS {
+            if answer.pseudo_records_present & (1 << kind) != 0 {
+                deltas.push(inheritance_prerequisite_delta(
+                    engine,
+                    node,
+                    answer.pseudo_records[kind],
+                    kind as u8,
+                ));
+            }
+        }
     }
 }
 
@@ -6148,12 +6159,8 @@ pub enum FfiStyleHostStep {
     /// Pseudo-element records settled after the host installed and sampled the element's.
     PseudoSettle,
     DeclinedRow,
-    /// A row the engine left for the host to ask for its record.
-    HostRecordDemand,
     InheritedCustomPropertyRefresh,
     EnvironmentMove,
-    MaterializeGap,
-    AwaitsLayoutBasis,
 }
 
 impl FfiStyleHostStep {
@@ -6166,11 +6173,8 @@ impl FfiStyleHostStep {
             Self::InLoopRecordDemand => "host:in_loop_record_demand",
             Self::PseudoSettle => "host:pseudo_settle",
             Self::DeclinedRow => "host:declined_row",
-            Self::HostRecordDemand => "host:host_record_demand",
             Self::InheritedCustomPropertyRefresh => "host:inherited_custom_property_refresh",
             Self::EnvironmentMove => "host:environment_move",
-            Self::MaterializeGap => "host:materialize_gap",
-            Self::AwaitsLayoutBasis => "host:awaits_layout_basis",
         }
     }
 }

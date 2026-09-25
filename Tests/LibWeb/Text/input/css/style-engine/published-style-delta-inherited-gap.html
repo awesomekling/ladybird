@@ -17,7 +17,6 @@
 
         const counters = internals.getStyleInvalidationCounters();
         println(`child list position: ${getComputedStyle(childElement).listStylePosition}`);
-        println(`materialized gaps: ${counters.styleEngineMaterializedGaps}`);
         println(`record deltas applied: ${counters.styleEngineRecordDeltasApplied}`);
         println(`longhand evaluations: ${counters.computedLonghandEvaluations}`);
     });
