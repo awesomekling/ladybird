@@ -182,7 +182,7 @@ public:
     bool pin_transition_stabilization_baseline_if_a_later_pass_may_need_it(StyleDrainScope const&, DOM::AbstractElement) const;
     // Runs the whole transition step for an installed record, against the record the element moved
     // away from. Returns what publishing a started transition's values invalidates.
-    [[nodiscard]] RequiredInvalidationAfterStyleChange run_transition_step_for_installed_record(StyleDrainScope const&, DOM::AbstractElement, StyleRecordID before_change_style_record) const;
+    [[nodiscard]] RequiredInvalidationAfterStyleChange run_transition_step_for_installed_record(StyleDrainScope const&, DOM::AbstractElement, StyleRecordID before_change_style_record, StyleEngineFFI::FfiTransitionStepDecidedInPass const* decided = nullptr) const;
     void commit_transition_stabilization_epoch();
     void for_each_provisional_transition_effect(DOM::AbstractElement const&, Function<void(Animations::KeyframeEffect&)> const&) const;
     void for_each_provisional_transition_effect_on_element(DOM::Element const&, Function<void(Animations::KeyframeEffect&)> const&) const;
@@ -199,7 +199,7 @@ private:
     // animations settle on the values it already holds is left alone.
     bool publish_animated_custom_properties(StyleDrainScope const&, ComputedStyleWorkingSet&, DOM::AbstractElement) const;
     void invalidate_animated_custom_property_readers(StyleDrainScope const&, DOM::AbstractElement) const;
-    void start_needed_transitions(StyleDrainScope const&, ComputedStyleWorkingSet&, DOM::AbstractElement, StyleRecordID before_change_style_record) const;
+    void start_needed_transitions(StyleDrainScope const&, ComputedStyleWorkingSet&, DOM::AbstractElement, StyleRecordID before_change_style_record, StyleEngineFFI::FfiTransitionStepDecidedInPass const*) const;
     [[nodiscard]] bool has_provisional_transition_states(DOM::AbstractElement) const;
     void finalize_style(ComputedStyleWorkingSet&, DOM::AbstractElement, ComputedValuesFFI::FfiStyleFinalizationMode) const;
 

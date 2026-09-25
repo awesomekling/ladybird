@@ -867,8 +867,13 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                         || (transition_debt == 0 && reaction.old_style_record != 0 && element->associated_shadow_host_pseudo_element().has_value())) {
                         DOM::AbstractElement settled { *element };
                         if (settled.has_style()) {
+                            // A step the pass decided is applied as it decided it, its composition
+                            // already installed.
+                            auto const decided = transition_debt == 2
+                                ? StyleEngineFFI::style_engine_take_transition_step_decided_in_pass(scope.engine().rust_handle(), reaction.style_node)
+                                : StyleEngineFFI::FfiTransitionStepDecidedInPass {};
                             auto step_invalidation = document.style_computer().run_transition_step_for_installed_record(scope,
-                                settled, StyleRecordID { reaction.old_style_record });
+                                settled, StyleRecordID { reaction.old_style_record }, decided.present ? &decided : nullptr);
                             if (!step_invalidation.is_none()) {
                                 row_effects.append(StyleEffectDrain::ElementInvalidation { StyleNodeID { reaction.style_node }, step_invalidation });
                                 transaction_invalidation |= step_invalidation;

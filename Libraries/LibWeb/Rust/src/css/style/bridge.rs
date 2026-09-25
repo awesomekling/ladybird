@@ -1751,49 +1751,50 @@ pub unsafe extern "C" fn style_engine_set_element_transitions(
     unsafe { engine.set_element_transitions(node, slot, transitions) };
 }
 
-/// Compare the transition step the host decided for an element with the one the pass decided, for
-/// the engine sample report.
-///
-/// # Safety
-/// `engine` must be a live style engine, and `actions` must point to `count` transition actions.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_check_transition_step(
-    engine: *mut c_void,
-    node: u32,
-    actions: *const c_void,
-    count: usize,
-) {
-    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
-    let Some(node) = StyleNodeID::from_raw(node) else {
-        return;
-    };
-    let actions = match count {
-        0 => &[][..],
-        _ => unsafe {
-            std::slice::from_raw_parts(actions.cast::<crate::css::transition::FfiTransitionAction>(), count)
-        },
-    };
-    engine.check_transition_step(node, actions);
+/// One property's decision in a transition step the pass decided: the action, as
+/// `FfiTransitionActionKind`, and for a transition it starts, the values it runs from and to.
+#[repr(C)]
+pub struct FfiTransitionStepAction {
+    pub property_id: u16,
+    pub kind: u8,
+    pub delay: f64,
+    pub active_duration: f64,
+    pub reversing_shortening_factor: f64,
+    pub start_value: *const c_void,
+    pub end_value: *const c_void,
 }
 
-/// Compare the composition the host's transition step left for an element with the one the pass
-/// composed, for the engine sample report.
+/// The transition step the pass decided for a row, borrowed until the next take.
+#[repr(C)]
+pub struct FfiTransitionStepDecidedInPass {
+    pub present: bool,
+    pub actions: *const FfiTransitionStepAction,
+    pub action_count: usize,
+}
+
+/// Take the transition step the pass decided for an element's row, which the host applies instead
+/// of deciding it: the pass already composed the transitions it starts into the row's composition.
 ///
 /// # Safety
-/// `engine` must be a live style engine, and `overlay` a live animated overlay or null.
+/// `engine` must be a live style engine.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_check_transition_step_composition(
+pub unsafe extern "C" fn style_engine_take_transition_step_decided_in_pass(
     engine: *mut c_void,
     node: u32,
-    overlay: *const c_void,
-) {
+) -> FfiTransitionStepDecidedInPass {
     let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
-    let Some(node) = StyleNodeID::from_raw(node) else {
-        return;
-    };
-    engine.check_transition_step_composition(node, unsafe {
-        overlay.cast::<crate::css::animated_overlay::AnimatedOverlay>().as_ref()
-    });
+    match StyleNodeID::from_raw(node).and_then(|node| engine.take_transition_step_decided_in_pass(node)) {
+        Some(step) => FfiTransitionStepDecidedInPass {
+            present: true,
+            actions: step.actions().as_ptr(),
+            action_count: step.actions().len(),
+        },
+        None => FfiTransitionStepDecidedInPass {
+            present: false,
+            actions: std::ptr::null(),
+            action_count: 0,
+        },
+    }
 }
 
 /// The transform reference box the last committed layout left for `node`, which the animation

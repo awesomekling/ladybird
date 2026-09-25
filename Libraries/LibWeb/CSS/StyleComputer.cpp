@@ -1039,7 +1039,7 @@ static void collect_dimension_attribute(Vector<StyleProperty>& properties, DOM::
 // whole of what the step needs. A transition the step starts layers its current
 // values into the working set to keep the frame from jumping; publishing that is the same animation
 // overlay publication an animation sampling performs, on the same element, against the same base.
-RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_installed_record(StyleDrainScope const& scope, DOM::AbstractElement abstract_element, StyleRecordID before_change_style_record) const
+RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_installed_record(StyleDrainScope const& scope, DOM::AbstractElement abstract_element, StyleRecordID before_change_style_record, StyleEngineFFI::FfiTransitionStepDecidedInPass const* decided) const
 {
     auto installed_style = abstract_element.computed_style();
     if (!installed_style)
@@ -1078,9 +1078,12 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_inst
     auto const* installed_overlay = static_cast<ComputedValuesFFI::AnimatedOverlay const*>(scope.engine().style_record_view(installed_style_record).animated_overlay);
     if (installed_overlay)
         new_style->install_animated_overlay_from_rust(Badge<StyleComputer> {}, ComputedValuesFFI::rust_animated_overlay_clone(installed_overlay));
-    start_needed_transitions(scope, *new_style, abstract_element, before_change_style_record);
+    start_needed_transitions(scope, *new_style, abstract_element, before_change_style_record, decided);
     // Starting a transition associates a new animation with the element.
     abstract_element.element().publish_animation_timing_rows();
+    // The row installed the composition the pass left for a step it decided.
+    if (decided)
+        return {};
 
     // A C++ computation publishes the working set with whatever the started transitions layered
     // into it, whether or not a layered value differs from the base: the overlay is what says the
@@ -1135,7 +1138,7 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_inst
 }
 
 // https://drafts.csswg.org/css-transitions/#starting
-void StyleComputer::start_needed_transitions(StyleDrainScope const& scope, ComputedStyleWorkingSet& new_style, DOM::AbstractElement abstract_element, StyleRecordID before_change_style_record) const
+void StyleComputer::start_needed_transitions(StyleDrainScope const& scope, ComputedStyleWorkingSet& new_style, DOM::AbstractElement abstract_element, StyleRecordID before_change_style_record, StyleEngineFFI::FfiTransitionStepDecidedInPass const* decided) const
 {
     auto had_pending_animated_style_update = m_document->needs_animated_style_update();
 
@@ -1335,15 +1338,42 @@ void StyleComputer::start_needed_transitions(StyleDrainScope const& scope, Compu
     };
     Vector<StyleValueFFI::FfiTransitionAction> actions;
     actions.resize(prepared_transitions.size());
-    m_style_engine.decide_transitions(
-        before_change_style_record,
-        new_style.computed_longhand_table(),
-        new_style.animated_overlay(Badge<StyleComputer> {}),
-        input,
-        actions.data());
-    // The engine sample report compares this with the step the pass decided for an element's row.
-    if (!pseudo_element.has_value() && style_node_id != 0)
-        StyleEngineFFI::style_engine_check_transition_step(scope.engine().rust_handle(), style_node_id.value(), actions.data(), actions.size());
+    if (decided) {
+        // The pass decided the step over the same styles and transitions, and handed over what each
+        // transition it starts runs from and to.
+        ReadonlySpan<StyleEngineFFI::FfiTransitionStepAction> decided_actions { decided->actions, decided->action_count };
+        VERIFY(decided_actions.size() == ffi_properties.size());
+        for (size_t index = 0; index < ffi_properties.size(); ++index) {
+            auto& property = ffi_properties[index];
+            StyleEngineFFI::FfiTransitionStepAction const* decided_action = nullptr;
+            for (auto const& action : decided_actions) {
+                if (action.property_id == property.property_id)
+                    decided_action = &action;
+            }
+            VERIFY(decided_action);
+            auto kind = static_cast<StyleValueFFI::FfiTransitionActionKind>(decided_action->kind);
+            actions[index] = {
+                .property_id = decided_action->property_id,
+                .kind = kind,
+                .delay = decided_action->delay,
+                .active_duration = decided_action->active_duration,
+                .reversing_shortening_factor = decided_action->reversing_shortening_factor,
+            };
+            auto const* start_value = static_cast<StyleValueFFI::StyleValueData const*>(decided_action->start_value);
+            property.after_change_value = static_cast<StyleValueFFI::StyleValueData const*>(decided_action->end_value);
+            if (kind == StyleValueFFI::FfiTransitionActionKind::CancelRemoveAndStartReversing || kind == StyleValueFFI::FfiTransitionActionKind::CancelRemoveAndStartInterrupted)
+                property.current_value = start_value;
+            else
+                property.before_change_value = start_value;
+        }
+    } else {
+        m_style_engine.decide_transitions(
+            before_change_style_record,
+            new_style.computed_longhand_table(),
+            new_style.animated_overlay(Badge<StyleComputer> {}),
+            input,
+            actions.data());
+    }
     auto retain_style_value = [](StyleValueFFI::StyleValueData const* value) -> RefPtr<StyleValue const> {
         if (!value)
             return {};
@@ -1441,6 +1471,17 @@ void StyleComputer::start_needed_transitions(StyleDrainScope const& scope, Compu
         }
     }
 
+    // The pass composed what a step it decided starts into the row's composition.
+    if (decided) {
+        if (!newly_started_transition_effects.is_empty()) {
+            abstract_element.element().publish_animation_timing_rows();
+            m_document->page().client().request_frame();
+            if (!had_pending_animated_style_update)
+                m_document->clear_needs_animated_style_update();
+        }
+        return;
+    }
+
     // A transition action is provisional until the stabilization epoch commits, but the style
     // published by this pass must already reflect that decision. Rebuild the effect stack without
     // transitions which are being removed, then layer any proposed replacements on top.
@@ -1483,9 +1524,6 @@ void StyleComputer::start_needed_transitions(StyleDrainScope const& scope, Compu
         if (!had_pending_animated_style_update)
             m_document->clear_needs_animated_style_update();
     }
-    // The engine sample report compares this with the composition the pass left for an element's row.
-    if (!pseudo_element.has_value() && style_node_id != 0)
-        StyleEngineFFI::style_engine_check_transition_step_composition(scope.engine().rust_handle(), style_node_id.value(), new_style.animated_overlay(Badge<StyleComputer> {}));
 }
 
 bool StyleComputer::has_provisional_transition_states(DOM::AbstractElement abstract_element) const

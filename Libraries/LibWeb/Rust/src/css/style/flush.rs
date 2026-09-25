@@ -3072,18 +3072,32 @@ impl StyleEngineState {
                         Err(reason) => engine_sample_check::note_declined(&format!("settled row: {reason}")),
                     }
                 }
-                // The report compares the transition step the pass decides for a row that owes the
-                // whole step with the one the host decides when it installs the row.
-                if engine_sample_check::is_reporting()
-                    && let Some((old_style_record, new_style_record)) = engine_computed_delta
+                // A row that owes the whole transition step has it decided here, over the
+                // composition the row installs, which the host would decide it over.
+                if let Some((old_style_record, new_style_record)) = engine_computed_delta
                     && self.retained.nodes_owing_a_transition_registration.get(&node) == Some(&false)
                 {
+                    self.forget_transition_step_decided_in_pass(node);
+                    // The host decides the step over its own sample of a row that animates or
+                    // starts to, where the pass did not sample it.
                     let installed = match self.retained.rows_sampled_in_pass.get(&node) {
                         Some(sampled) => Some(sampled.style_record),
-                        None => (!animates).then_some(new_style_record.raw()),
+                        None => (!animates
+                            && !self
+                                .retained
+                                .nodes_owing_animation_definitions
+                                .contains_key(&(node, u8::MAX)))
+                        .then_some(new_style_record.raw()),
                     };
                     if let Some(installed) = installed {
-                        self.decide_settled_row_transition_step(node, old_style_record.raw(), installed, layout_arena);
+                        self.decide_settled_row_transition_step(
+                            node,
+                            old_style_record.raw(),
+                            new_style_record.raw(),
+                            installed,
+                            layout_arena,
+                            counters,
+                        );
                     }
                 }
                 let (old_style_record, new_style_record, damage, gap) = if skip_hidden {
