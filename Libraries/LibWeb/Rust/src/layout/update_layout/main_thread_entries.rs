@@ -72,16 +72,16 @@ unsafe extern "C" fn layout_arena_update_layout(
     })
 }
 
-/// Runs the rest of the layout frame of the document `arena` names once the document thread has
-/// taken back the frame in flight that ran its full layout pass `laid_out`, and ends the update.
+/// Ends the layout frame of the document `arena` names once the document thread has taken back the
+/// frame in flight that ran its round, and ends the update.
 /// The document thread runs it where it takes the frame back, ahead of anything else that reaches
 /// the arena.
-pub(super) fn finish_layout_frame_taken_back(arena: *mut c_void, frame: LayoutFrame, laid_out: LaidOutPass) {
+pub(super) fn finish_layout_frame_taken_back(arena: *mut c_void, frame: LayoutFrame) {
     // SAFETY: Only the take-back of the frame the update submitted calls this, on the document
     // thread, for the arena whose update is still running.
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     abort_on_panic(|| {
         // SAFETY: As above.
-        unsafe { finish_layout_frame(&main_thread, frame, laid_out) }
+        unsafe { finish_layout_frame(&main_thread, frame) }
     });
 }

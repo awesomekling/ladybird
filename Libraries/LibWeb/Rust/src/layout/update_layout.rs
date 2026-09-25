@@ -903,9 +903,10 @@ impl LayoutFrame {
     }
 
     /// Runs the frame's loop from the document thread. Each round's style runs here, with no stage
-    /// run outstanding, and each step after it runs as a stage of its own. With `stop_at_pass`, the
-    /// loop stops at the first full layout pass a round readies and answers it, and the frame has
-    /// not ended; otherwise the pass runs in place, and the loop goes on until the frame has ended.
+    /// run outstanding, and each step after it runs as a stage of its own. With `stop_at_round`, the
+    /// loop stops once the style of the first round that lays out has run, and answers the facts
+    /// the rest of that round runs with, for it to go in flight, and the frame has not ended;
+    /// otherwise the loop goes on until the frame has ended.
     ///
     /// # Safety
     ///
@@ -913,8 +914,8 @@ impl LayoutFrame {
     unsafe fn drive(
         &mut self,
         main_thread: &crate::stage::MainThread,
-        stop_at_pass: bool,
-    ) -> Option<PendingLayoutPass> {
+        stop_at_round: bool,
+    ) -> Option<FfiLayoutUpdateDocumentFacts> {
         let mut step = FrameStep::NeedsStyle;
         loop {
             // SAFETY (for the steps below): Guaranteed by the caller, and the document thread
@@ -933,9 +934,11 @@ impl LayoutFrame {
                 },
                 FrameStep::NeedsStyle => {
                     let facts = unsafe { self.run_style_round(main_thread) };
+                    if stop_at_round && self.round_lays_out_in_frame(&facts) {
+                        return Some(facts);
+                    }
                     unsafe { self.run_stage(main_thread, move |frame, _| frame.run_round(facts)) }
                 }
-                FrameStep::PassReady(pass) if stop_at_pass => return Some(pass),
                 FrameStep::PassReady(pass) => unsafe {
                     self.run_stage(main_thread, move |frame, _| {
                         let laid_out = pass.run();
@@ -1023,6 +1026,30 @@ impl LayoutFrame {
         self.tree_build_document_style_node = round_after_style.tree_build_document_style_node;
         self.selection = round_after_style.selection;
         facts
+    }
+
+    /// Whether the rest of a round with these facts lays out, rather than ending the frame at once.
+    fn round_lays_out_in_frame(&self, facts: &FfiLayoutUpdateDocumentFacts) -> bool {
+        self.round_lays_out(facts) && !self.inputs.is_template_contents_document
+    }
+
+    /// Runs the rest of a round whose style the document thread has run, its tree build and its
+    /// layout pass, without the document thread: the round the frame in flight runs. Answers where
+    /// the frame would go on, which the document thread leaves to the next layout update once it
+    /// takes the frame back.
+    ///
+    /// # Safety
+    ///
+    /// Nothing but the frame may reach the arena until this returns.
+    unsafe fn run_round_through_pass(&mut self, facts: FfiLayoutUpdateDocumentFacts) -> FrameStep {
+        match self.run_round(facts) {
+            FrameStep::PassReady(pass) => {
+                // SAFETY: Guaranteed by the caller.
+                let laid_out = unsafe { pass.run() };
+                self.finish_round(laid_out)
+            }
+            step => step,
+        }
     }
 
     /// Runs the rest of a round whose style the document thread has run, up to its full layout
@@ -1329,69 +1356,75 @@ unsafe fn update_layout(
         owed_host_halves: Cell::default(),
     };
     // SAFETY: Guaranteed by the caller.
-    let Some(pass) = (unsafe { frame.drive(main_thread, submits_pass) }) else {
+    let Some(facts) = (unsafe { frame.drive(main_thread, submits_pass) }) else {
         return FfiLayoutUpdateOutcome::Finished;
     };
-    // What the frame owes the document thread (the host half of the round's tree build) is paid
-    // before the pass goes in flight, as tasks run beside the pass and read some of it (the boxes
-    // of the shells) without waiting.
-    // SAFETY: Guaranteed by the caller, and nothing is in flight yet.
-    unsafe {
-        pay_owed_host_halves(
-            main_thread,
-            &layout_update_host(main_thread),
-            arena_handle,
-            frame.owed_host_halves.take(),
-        );
-    }
-    let laid_out = std::sync::Arc::new(std::sync::Mutex::new(None));
-    let laid_out_by_stage = laid_out.clone();
-    // SAFETY: The pass reaches only the arena, which the frame in flight owns until the document
-    // thread takes it back, and every document-thread path to the arena joins the frame first.
-    let pass = unsafe { crate::stage_thread::FrameOwns::new(pass) };
+    // The style round paid what the frame owed. What the round in flight comes to owe (its tree
+    // build's host half, its commits' host halves) is paid as the frame is taken back: tasks that
+    // run beside the flight and would read it reach it through the arena's doors, which join.
+    debug_assert!(
+        frame.owed_host_halves.get_mut().is_empty(),
+        "the style round pays what the frame owed"
+    );
+    let taken_back = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let taken_back_by_stage = taken_back.clone();
+    // SAFETY: The frame reaches only the arena, which the frame in flight owns until the document
+    // thread takes it back, and every document-thread path to the arena, the style mirror its tree
+    // build walks and the tree update marks it holds joins the frame first.
+    let frame = unsafe { crate::stage_thread::FrameOwns::new(frame) };
     // SAFETY: As above.
     unsafe {
         crate::stage_thread::submit_stage_with_take_back(
             "layout",
             arena_handle,
             move || {
-                let laid_out = pass.into_inner().run();
-                *laid_out_by_stage.lock().expect("a pass that ran left its result") =
-                    Some(crate::stage_thread::FrameOwns::new(laid_out));
+                let mut frame = frame.into_inner();
+                // Where the frame would go on from here is the next layout update's to find: the
+                // take-back ends it wherever the document thread is.
+                // The frame in flight owns the arena, as the safety comment above says.
+                let _ = frame.run_round_through_pass(facts);
+                *taken_back_by_stage.lock().expect("a frame that ran left itself") =
+                    Some(crate::stage_thread::FrameOwns::new(frame));
             },
             move || {
-                let laid_out = laid_out
+                let frame = taken_back
                     .lock()
-                    .expect("a pass that ran left its result")
+                    .expect("a frame that ran left itself")
                     .take()
-                    .expect("the frame is taken back once its pass has run")
+                    .expect("the frame is taken back once its round has run")
                     .into_inner();
-                main_thread_entries::finish_layout_frame_taken_back(arena_handle, frame, laid_out);
+                main_thread_entries::finish_layout_frame_taken_back(arena_handle, frame);
             },
         );
     }
     FfiLayoutUpdateOutcome::PassSubmitted
 }
 
-/// Ends the round of a layout frame whose full layout pass the document thread has taken back, and
-/// then the update. Whatever the round leaves pending, the next layout update does: the frame is
-/// taken back wherever the document thread reaches what it owns, which can be in the middle of a
-/// DOM mutation, so it runs no style update.
+/// Ends a layout frame whose round the document thread has taken back, and then the update: takes
+/// back the tree update marks, pays what the round owes, and applies the frame's messages.
+/// Whatever the round leaves pending (another build, another round), the next layout update does:
+/// the frame is taken back wherever the document thread reaches what it owns, which can be in the
+/// middle of a DOM mutation, so it runs no style update.
 ///
 /// # Safety
 ///
-/// On the document thread, which has just taken back the frame in flight that ran the pass.
-unsafe fn finish_layout_frame(main_thread: &crate::stage::MainThread, frame: LayoutFrame, laid_out: LaidOutPass) {
-    // SAFETY: The frame and its pass are the document thread's again, and it waits for the stage.
-    let resumed = unsafe { crate::stage_thread::CallerWaits::new((frame, laid_out)) };
-    let mut frame = crate::stage_thread::run_stage(move || {
-        let (mut frame, laid_out) = resumed.into_inner();
-        frame.note_laid_out_pass(laid_out);
-        // SAFETY: The frame goes back to the document thread, which waits for it.
-        unsafe { crate::stage_thread::CallerWaits::new(frame) }
-    })
-    .into_inner();
-    // SAFETY: The stage has returned, and the frame runs for the update the arena is in.
+/// On the document thread, which has just taken back the frame in flight that ran the round.
+unsafe fn finish_layout_frame(main_thread: &crate::stage::MainThread, mut frame: LayoutFrame) {
+    let host = frame.inputs.host;
+    // SAFETY: The frame is the document thread's again, and it runs for the update the arena is in.
+    unsafe {
+        pay_owed_host_halves(
+            main_thread,
+            &host,
+            frame.inputs.arena_handle,
+            frame.owed_host_halves.take(),
+        );
+    }
+    // The list owners the round's build found showing stale counters are marked for the build of
+    // the next layout update, as the next style round would have marked them.
+    let list_owners_to_rebuild = std::mem::take(&mut frame.list_owners_to_rebuild);
+    host.rebuild_list_owners_with_stale_item_counters(main_thread, &list_owners_to_rebuild);
+    // SAFETY: As above.
     let over = unsafe { frame.take_in_end(main_thread, FrameEnd::Over(FfiLayoutUpdateEnd::FrameTakenBack)) };
     debug_assert!(over, "a frame taken back is over");
 }
