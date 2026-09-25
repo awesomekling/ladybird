@@ -56,6 +56,7 @@
 #include <LibWeb/CSS/StyleComputeFFI.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleDrainScope.h>
+#include <LibWeb/CSS/StyleEffectDrain.h>
 #include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/CSS/StyleInputScope.h>
 #include <LibWeb/CSS/StyleProperty.h>
@@ -453,6 +454,11 @@ void StyleComputer::for_each_provisional_transition_effect_on_element(DOM::Eleme
     }
 }
 
+static void release_transition_baselines(StyleDrainScope const& scope)
+{
+    scope.engine().release_transition_baselines();
+}
+
 void StyleComputer::commit_transition_stabilization_epoch()
 {
     for (auto const& state : m_provisional_transition_states) {
@@ -510,7 +516,8 @@ void StyleComputer::commit_transition_stabilization_epoch()
     m_provisional_transition_state_indices_by_target.clear();
     for (auto& element : elements_with_provisional_rows)
         element->publish_animation_timing_rows();
-    style_engine().release_transition_baselines();
+    // The before-change styles the epoch's drains pinned are released with the last of them.
+    StyleEffectDrain::install(document(), release_transition_baselines);
 }
 
 template<size_t length>
