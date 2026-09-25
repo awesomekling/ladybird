@@ -145,6 +145,12 @@ pub extern "C" fn rust_stage_thread_wants_frame_scheduler_host() -> bool {
     stage_thread_mode() == Some(StageThreadMode::Overlap) && FRAME_SCHEDULER_HOST.get().is_none()
 }
 
+/// Whether the rendering update submits its layout pass rather than laying out in place.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_stage_thread_submits_layout() -> bool {
+    submits("layout")
+}
+
 /// Installs the main thread's frame scheduler host. The first host installed stays.
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_stage_thread_set_frame_scheduler_host(host: FfiFrameSchedulerHost) {

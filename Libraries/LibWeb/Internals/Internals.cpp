@@ -1592,6 +1592,14 @@ void Internals::dump_join_counters() const
     window().associated_document().dump_join_counters();
 }
 
+Utf16String Internals::layout_overlap_blocker() const
+{
+    auto blocker = window().associated_document().layout_overlap_blocker();
+    if (!blocker.has_value())
+        return {};
+    return Utf16String::from_utf16(DOM::to_string(*blocker));
+}
+
 GC::Ref<JS::Object> Internals::get_rendering_scheduler_counters() const
 {
     auto& realm = HTML::relevant_realm(window());
@@ -1662,6 +1670,13 @@ GC::Ref<JS::Object> Internals::get_rendering_scheduler_counters() const
     }
     object->define_direct_property("doors"_utf16_fly_string, doors, JS::default_attributes);
     object->define_direct_property("finishedFrameConsumerCalls"_utf16_fly_string, JS::Value(counters.finished_frame_consumer_calls), JS::default_attributes);
+    object->define_direct_property("layoutOverlapEligibleUpdates"_utf16_fly_string, JS::Value(counters.layout_overlap_eligible_updates), JS::default_attributes);
+    auto layout_overlap_blocked_updates = JS::Object::create(realm, nullptr);
+    for (size_t blocker = 0; blocker < counters.layout_overlap_blocked_updates.size(); ++blocker) {
+        auto name = Utf16FlyString::from_utf16(DOM::to_string(static_cast<DOM::LayoutOverlapBlocker>(blocker)));
+        layout_overlap_blocked_updates->define_direct_property(name, JS::Value(counters.layout_overlap_blocked_updates[blocker]), JS::default_attributes);
+    }
+    object->define_direct_property("layoutOverlapBlockedUpdates"_utf16_fly_string, layout_overlap_blocked_updates, JS::default_attributes);
     object->define_direct_property("frameCompletionsPosted"_utf16_fly_string, JS::Value(HTML::FrameCompletion::the().posted_count()), JS::default_attributes);
     object->define_direct_property("frameCompletionsDelivered"_utf16_fly_string, JS::Value(HTML::FrameCompletion::the().delivered_count()), JS::default_attributes);
 

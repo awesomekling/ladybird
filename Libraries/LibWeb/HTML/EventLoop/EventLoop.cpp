@@ -655,6 +655,7 @@ void EventLoop::update_the_rendering()
     auto frames_submitted_before_update = m_rendering_scheduler_counters.frames_submitted;
     ++m_rendering_scheduler_counters.updates_run;
     bool frame_in_flight = false;
+    m_rendering_update_may_overlap_layout = false;
     ScopeGuard const guard = [this, &frame_in_flight, update_start_nanoseconds, frames_submitted_before_update] {
         // The main half ends here, with the submission of the frame if there is one.
         m_rendering_scheduler_counters.main_half_nanoseconds += MonotonicTime::now().nanoseconds() - update_start_nanoseconds;
@@ -766,6 +767,17 @@ void EventLoop::update_the_rendering()
     for (auto& document : docs) {
         auto now = relative_frame_timestamp_for(*document);
         run_animation_frame_callbacks(*document, now);
+    }
+
+    // Every animation frame callback of the rendering update has run, and its microtasks with it, so nothing script
+    // does before the layout pass can change the decision anymore.
+    if (Layout::RustFFI::rust_stage_thread_submits_layout()) {
+        auto blocker = layout_overlap_blocker_for_rendering_update(docs);
+        m_rendering_update_may_overlap_layout = !blocker.has_value();
+        if (blocker.has_value())
+            ++m_rendering_scheduler_counters.layout_overlap_blocked_updates[to_underlying(*blocker)];
+        else
+            ++m_rendering_scheduler_counters.layout_overlap_eligible_updates;
     }
 
     // FIXME: 15. Let unsafeStyleAndLayoutStartTime be the unsafe shared current time.
@@ -994,6 +1006,18 @@ void EventLoop::update_the_rendering()
         return;
 
     finish_rendering_update_steps(docs_for_tail);
+}
+
+Optional<DOM::LayoutOverlapBlocker> EventLoop::layout_overlap_blocker_for_rendering_update(ReadonlySpan<GC::Root<DOM::Document>> docs) const
+{
+    // A rendering update run on top of script (EventLoop::pause()) cannot yield to the event loop.
+    if (m_running_synchronous_rendering_update)
+        return DOM::LayoutOverlapBlocker::SynchronousRenderingUpdate;
+    for (auto const& document : docs) {
+        if (auto blocker = document->layout_overlap_blocker(); blocker.has_value())
+            return blocker;
+    }
+    return {};
 }
 
 void EventLoop::run_rendering_update_tail(Badge<FrameScheduler>, ReadonlySpan<GC::Ref<LocalNavigable>> painted_local_roots, ReadonlySpan<GC::Ref<DOM::Document>> docs)
