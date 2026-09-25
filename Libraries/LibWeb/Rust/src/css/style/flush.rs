@@ -3068,11 +3068,12 @@ impl StyleEngineState {
                         .scratch
                         .root_element_inputs()
                         .and_then(|root| self.retained.assigned_root_element_font_metrics(root));
-                    let published = crate::css::style_compute::sample_settled_row(self, node, None, root, layout_arena)
-                        .and_then(|sample| {
-                            self.publish_settled_row_sample(node, None, sample, counters)
-                                .map_err(String::from)
-                        });
+                    let published =
+                        crate::css::style_compute::sample_settled_row(self, node, None, true, root, layout_arena)
+                            .and_then(|sample| {
+                                self.publish_settled_row_sample(node, None, sample, counters)
+                                    .map_err(String::from)
+                            });
                     match published {
                         Ok(_) => engine_sample_check::note_taken("settled row sample"),
                         Err(reason) => engine_sample_check::note_declined(&format!("settled row: {reason}")),

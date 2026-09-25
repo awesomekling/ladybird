@@ -23,6 +23,7 @@
 #include <LibWeb/CSS/StyleValues/StyleValueList.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
+#include <LibWeb/DOM/ShadowRoot.h>
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/BoxViews.h>
@@ -953,6 +954,68 @@ void apply_published_animation_overlay(CSS::StyleDrainScope const& scope, DOM::A
         Painting::repaint_after_style_change(*repaint_layout_node, invalidation);
 }
 
+// The engine samples the animations of an element or pseudo-element over the record the host holds
+// for it, from the timing rows, descriptions and environments it holds, and publishes the
+// composition as its record. What the sample found out is recorded on the element and its parent
+// as the host's own sample records it. Returns false where the engine cannot sample it, and the
+// host does.
+static bool install_engine_sample_of_installed_record(CSS::StyleDrainScope const& scope, DOM::AbstractElement element, AnimationUpdateContext::ElementData const& data)
+{
+    GC::Ref<DOM::Element> target = element.element();
+    auto& document = target->document();
+    // Publishing can replace the record the element's layout node would be built from on first
+    // use, so it is built while that record is live.
+    if (!element.pseudo_element().has_value())
+        (void)target->unsafe_layout_node();
+    auto* layout_node_arena = document.layout_node_arena_if_created();
+    auto const sample = CSS::StyleEngineFFI::style_engine_sample_installed_record(scope.engine().rust_handle(), target->style_node_id().value(),
+        CSS::pseudo_element_to_ffi(element.pseudo_element()), data.style_record_before_update.value(), layout_node_arena ? layout_node_arena->handle() : nullptr);
+    if (!sample.present)
+        return false;
+    // The sample moved nothing the record composed.
+    if (sample.style_record == data.style_record_before_update.value())
+        return true;
+    if (sample.rebuilt_every_group)
+        document.style_invalidation_counters().animated_style_full_builds++;
+    else
+        document.style_invalidation_counters().animated_style_overlay_builds++;
+    if (sample.substitution_marks & CSS::ComputedValuesFFI::SUBSTITUTION_MARK_VAR)
+        target->set_style_uses_var_css_function();
+    if (sample.substitution_marks & CSS::ComputedValuesFFI::SUBSTITUTION_MARK_ATTR)
+        target->set_style_uses_attr_css_function();
+    if (sample.substitution_marks & CSS::ComputedValuesFFI::SUBSTITUTION_MARK_IF)
+        target->set_style_uses_if_css_function();
+    if (sample.substitution_marks & CSS::ComputedValuesFFI::SUBSTITUTION_MARK_INHERIT)
+        target->set_style_uses_inherit_css_function();
+    if (sample.substitution_marks & CSS::ComputedValuesFFI::SUBSTITUTION_MARK_DASHED_FUNCTION)
+        target->set_style_uses_custom_function();
+    if (sample.uses_tree_counting_function)
+        target->set_style_uses_tree_counting_function();
+    // A keyframe-borne `inherit` on a non-inherited property leaves the same mark on the parent a
+    // full style computation does.
+    if (auto style_groups = sample.keyframes_inherited_non_inherited_style_groups; style_groups != 0) {
+        if (style_groups == NumericLimits<u32>::max())
+            style_groups = CSS::ComputedValues::all_style_groups;
+        if (auto* parent = target->parent()) {
+            parent->add_children_explicitly_inherited_non_inherited_style_groups(style_groups);
+            auto parent_style_node = is<DOM::Element>(*parent) ? as<DOM::Element>(*parent).style_node_id()
+                : is<DOM::ShadowRoot>(*parent)                 ? as<DOM::ShadowRoot>(*parent).style_node_id()
+                                                               : CSS::StyleNodeID {};
+            if (parent_style_node != 0)
+                CSS::StyleEngineFFI::style_engine_note_children_explicitly_inherit(scope.engine().rust_handle(), parent_style_node.value());
+        }
+    }
+    // What the sample's container units read of the element's containers.
+    auto container_effects = CSS::StyleEngineFFI::style_engine_take_container_effects(scope.engine().rust_handle(), target->style_node_id().value());
+    ScopeGuard release_container_effects = [&] { CSS::StyleEngineFFI::style_engine_native_container_effects_release(container_effects.effects); };
+    CSS::StyleComputer::record_container_query_effects(scope, element, container_effects);
+    if (!sample.overlay_is_empty && document.is_in_style_stabilization_epoch()
+        && (document.style_stabilization_has_style_reactions() || sample.invalidation.requires_base_style_recomputation))
+        document.style_computer().record_transition_stabilization_baseline(scope, element);
+    apply_published_animation_overlay(scope, element, sample.invalidation, CSS::StyleRecordID { sample.style_record }, data.caller_applies_invalidation);
+    return true;
+}
+
 void AnimationUpdateContext::publish_animation_inputs_before_sample(DOM::Element& element)
 {
     auto& document = element.document();
@@ -1017,9 +1080,11 @@ AnimationUpdateContext::~AnimationUpdateContext()
             if (!effects_to_collect.contains_slow(dirty_effect))
                 effects_to_collect.append(dirty_effect);
         }
-        // FIXME: The pass samples an element's effect stack itself; this host sample is still
-        //        asked for from outside it, by animation updates and by rows the pass declined.
+        // FIXME: The pass samples an element's effect stack itself; this sample is still asked for
+        //        from outside it, by animation updates and by rows the pass declined.
         auto const scope = CSS::StyleDrainScope::not_yet_drained(target->document().style_computer().style_engine());
+        if (install_engine_sample_of_installed_record(scope, element, it.value))
+            continue;
         // With no effect left, collecting still clears the composition the style was reconstructed with.
         target->document().style_computer().collect_animations_into(scope, element, effects_to_collect.span(), *style, CSS::StyleComputer::AnimationRefresh::Yes);
         auto& style_computer = target->document().style_computer();

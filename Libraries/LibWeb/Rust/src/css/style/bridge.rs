@@ -3838,6 +3838,8 @@ pub struct FfiRowSampledInPass {
     /// `1` where the element's own style reads custom properties, and `2` where a name its
     /// descendants inherit moved: what the host records for the next transaction.
     pub custom_property_reactions: u8,
+    /// Whether building the composition rebuilt every style group.
+    pub rebuilt_every_group: bool,
 }
 
 /// Takes what the pass published for a row whose animations it sampled, so that exactly one
@@ -3874,6 +3876,49 @@ pub unsafe extern "C" fn style_engine_take_pseudo_element_sampled_in_pass(
     row_sampled_in_pass(engine, published)
 }
 
+/// Sample the animations of an element, or of one of its pseudo-elements, over the record the host
+/// holds for it, from the engine's own inputs, and publish the composition as its record. `present`
+/// is false where the engine cannot, and the host samples it itself; an answer naming
+/// `style_record` again says the sample moved nothing.
+///
+/// # Safety
+/// `engine` must be live, and `layout_arena` the document's live layout arena or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_sample_installed_record(
+    engine: *mut c_void,
+    node: u32,
+    pseudo_kind: u8,
+    style_record: u64,
+    layout_arena: *mut c_void,
+) -> FfiRowSampledInPass {
+    engine_entrance(engine, "style_engine_sample_installed_record");
+    abort_on_panic(|| {
+        let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+        let Some(style_node) = StyleNodeID::from_raw(node) else {
+            return row_sampled_in_pass(engine, None);
+        };
+        let pseudo = (pseudo_kind != u8::MAX).then_some(pseudo_kind);
+        let layout_arena = unsafe { super::animations::LentLayoutArena::lend(layout_arena) };
+        match engine.sample_installed_record(style_node, pseudo, style_record, layout_arena) {
+            Ok(Some(published)) => {
+                super::engine_sample_check::note_taken("installed record sample");
+                row_sampled_in_pass(engine, Some(published))
+            }
+            Ok(None) => {
+                super::engine_sample_check::note_taken("installed record sample");
+                let mut unchanged = row_sampled_in_pass(engine, None);
+                unchanged.present = true;
+                unchanged.style_record = style_record;
+                unchanged
+            }
+            Err(reason) => {
+                super::engine_sample_check::note_declined(&format!("installed record: {reason}"));
+                row_sampled_in_pass(engine, None)
+            }
+        }
+    })
+}
+
 fn row_sampled_in_pass(
     engine: &StyleEngine,
     published: Option<super::engine_sample::SettledRowPublication>,
@@ -3891,6 +3936,7 @@ fn row_sampled_in_pass(
             custom_property_environment: 0,
             custom_property_store: std::ptr::null(),
             custom_property_reactions: 0,
+            rebuilt_every_group: false,
         },
         Some(published) => FfiRowSampledInPass {
             present: true,
@@ -3909,6 +3955,7 @@ fn row_sampled_in_pass(
             custom_property_reactions: published.custom_properties.map_or(0, |moved| {
                 u8::from(moved.element_reads) | (u8::from(moved.inherited_names_moved) << 1)
             }),
+            rebuilt_every_group: published.rebuilt_every_group,
         },
     }
 }
