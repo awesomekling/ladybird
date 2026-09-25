@@ -5,6 +5,7 @@
  */
 
 use super::*;
+use crate::css::style::tree::ReplacedContentInput;
 
 pub(crate) fn node_may_have_replaced_content_facts(data: &NodeData) -> bool {
     kind_is_replaced_box(data.kind.get())
@@ -32,7 +33,8 @@ pub(crate) fn node_may_have_replaced_content_facts_including_size_containment(da
 }
 
 /// Whether the node's replaced-content facts need something only the DOM knows. The rest follow
-/// from the node's kind and computed style, see [`style_derived_replaced_content_facts`].
+/// from the node's kind, its computed style and what its element published as the input of its
+/// replaced content, see [`derived_replaced_content_facts`].
 pub(crate) fn node_replaced_content_facts_need_host(data: &NodeData) -> bool {
     let kind = data.kind.get();
     // An SVG <image> reports its image's sizes whether or not it is size-contained.
@@ -59,7 +61,6 @@ pub(crate) fn node_replaced_content_facts_need_host(data: &NodeData) -> bool {
             | NodeKind::ImageBox
             | NodeKind::NavigableContainerViewport
             | NodeKind::SVGSVGBox
-            | NodeKind::TextAreaBox
             | NodeKind::TextInputBox
             | NodeKind::VideoBox
     )
@@ -77,8 +78,8 @@ fn style_has_size_containment(style: ComputedValuesView<'_>) -> bool {
 }
 
 /// The replaced-content facts of a node whose facts need no host: a size-contained box, a
-/// checkbox, radio button or slider, or a kind with no natural size.
-pub(crate) fn style_derived_replaced_content_facts(data: &NodeData) -> FfiReplacedContentFacts {
+/// checkbox, radio button, slider or textarea, or a kind with no natural size.
+pub(crate) fn derived_replaced_content_facts(data: &NodeData, input: ReplacedContentInput) -> FfiReplacedContentFacts {
     debug_assert!(!node_replaced_content_facts_need_host(data));
     let mut facts = FfiReplacedContentFacts::default();
     let Some(style) = node_style_view(data) else {
@@ -115,17 +116,29 @@ pub(crate) fn style_derived_replaced_content_facts(data: &NodeData) -> FfiReplac
         );
         return facts;
     }
+    let zero_advance = CssPixels::nearest_value_for_f32(style.font_zero_advance());
     match data.kind.get() {
         NodeKind::CheckBox => set_auto_content_size(CssPixels::from_integer(13), CssPixels::from_integer(13)),
         NodeKind::RadioButton => set_auto_content_size(CssPixels::from_integer(12), CssPixels::from_integer(12)),
         NodeKind::RangeInputBox => {
             // AD-HOC: A slider has no in-flow content to size itself from, so provide a default content-box size for
             //         when its `width` or `height` is `auto`: 20ch by 16px.
-            let zero_advance = CssPixels::nearest_value_for_f32(style.font_zero_advance());
             set_auto_content_size(
                 CssPixels::nearest_value_for(20.0 * zero_advance.to_double()),
                 CssPixels::from_integer(16),
             );
+        }
+        NodeKind::TextAreaBox => {
+            let ReplacedContentInput::TextArea { cols, rows } = input else {
+                panic!("a textarea publishes its cols and rows as it arrives");
+            };
+            let inline_size = CssPixels::nearest_value_for(f64::from(cols) * zero_advance.to_double());
+            let block_size = CssPixels::nearest_value_for(f64::from(rows) * style.line_height().to_double());
+            if style.writing_mode() == crate::css::css_enums::writing_mode::HORIZONTAL_TB {
+                set_auto_content_size(inline_size, block_size);
+            } else {
+                set_auto_content_size(block_size, inline_size);
+            }
         }
         _ => {}
     }

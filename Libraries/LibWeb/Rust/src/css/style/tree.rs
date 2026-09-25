@@ -613,6 +613,30 @@ impl Iterator for FlatTreeChildren<'_> {
     }
 }
 
+/// What an element's own attributes give the natural size of its replaced content, which its box
+/// resolves against its style. See `bridge::FfiReplacedContentInputKind`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ReplacedContentInput {
+    #[default]
+    None,
+    /// A `<textarea>`'s `cols` and `rows`: its natural size is that many `ch` by that many `lh`.
+    TextArea { cols: u32, rows: u32 },
+}
+
+impl ReplacedContentInput {
+    #[must_use]
+    pub fn from_raw(kind: u8, _flags: u8, values: [u32; 4]) -> Self {
+        use super::bridge::FfiReplacedContentInputKind as Kind;
+        match kind {
+            kind if kind == Kind::TextArea as u8 => Self::TextArea {
+                cols: values[0],
+                rows: values[1],
+            },
+            _ => Self::None,
+        }
+    }
+}
+
 /// The spans a table cell or table column takes from its attributes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TableSpans {
@@ -673,6 +697,10 @@ pub struct StyleNodeTree {
     /// context's column handling reads. Every other element spans one of each, which is what the
     /// absence of an entry means.
     table_spans: HashMap<StyleNodeID, TableSpans>,
+    /// What an element's own attributes give the natural size of its replaced content, where that
+    /// size follows from them and the element's style. Every other element has none, which is what
+    /// the absence of an entry means.
+    replaced_content_inputs: HashMap<StyleNodeID, ReplacedContentInput>,
     /// The list owners whose items were renumbered without a rebuild, because nothing they render
     /// showed the `list-item` counter's value then. Their built counters are stale until a later
     /// build either rebuilds them or finds one of them rendering that value.
@@ -734,6 +762,7 @@ impl StyleNodeTree {
             unique_node_ids: Vec::new(),
             dom_paint_facts: HashMap::default(),
             table_spans: HashMap::default(),
+            replaced_content_inputs: HashMap::default(),
             list_owners_with_stale_item_counters: HashSet::default(),
             connected_element_count: 0,
             pending_reuse: Vec::new(),
@@ -862,6 +891,7 @@ impl StyleNodeTree {
         self.set_unique_node_id_at(index, 0);
         self.dom_paint_facts.remove(&StyleNodeID::element(index));
         self.table_spans.remove(&StyleNodeID::element(index));
+        self.replaced_content_inputs.remove(&StyleNodeID::element(index));
         if let Some(capacity_before_growth) = capacity_before_growth {
             let current = self.identity_capacity_bytes();
             self.record_capacity_change(memory, capacity_before_growth, current);
@@ -914,6 +944,7 @@ impl StyleNodeTree {
             self.set_unique_node_id_at(index, 0);
             self.dom_paint_facts.remove(&node);
             self.table_spans.remove(&node);
+            self.replaced_content_inputs.remove(&node);
             // An identity can be minted again for another element, which is no stale list owner.
             self.list_owners_with_stale_item_counters.remove(&node);
             self.parent[index as usize] = None;
@@ -1162,6 +1193,31 @@ impl StyleNodeTree {
             self.table_spans.remove(&node);
         } else {
             self.table_spans.insert(node, spans);
+        }
+        let current = self.identity_capacity_bytes();
+        self.record_capacity_change(memory, before, current);
+    }
+
+    // -- Replaced content inputs -----------------------------------------------------------------
+
+    /// What the element's own attributes give the natural size of its replaced content.
+    #[must_use]
+    pub fn replaced_content_input(&self, node: StyleNodeID) -> ReplacedContentInput {
+        self.replaced_content_inputs.get(&node).copied().unwrap_or_default()
+    }
+
+    /// Record what the element's own attributes give the natural size of its replaced content.
+    pub fn set_replaced_content_input(
+        &mut self,
+        node: StyleNodeID,
+        input: ReplacedContentInput,
+        memory: &mut MemoryController,
+    ) {
+        let before = self.identity_capacity_bytes();
+        if input == ReplacedContentInput::None {
+            self.replaced_content_inputs.remove(&node);
+        } else {
+            self.replaced_content_inputs.insert(node, input);
         }
         let current = self.identity_capacity_bytes();
         self.record_capacity_change(memory, before, current);
@@ -2097,6 +2153,7 @@ impl StyleNodeTree {
                 self.previous_sibling,
                 self.dom_paint_facts,
                 self.table_spans,
+                self.replaced_content_inputs,
                 self.list_owners_with_stale_item_counters,
             ];
             cached [];

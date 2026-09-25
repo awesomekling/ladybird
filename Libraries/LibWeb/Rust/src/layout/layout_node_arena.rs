@@ -22,7 +22,7 @@ use super::update_layout::FfiLayoutTreeBuildStats;
 use super::used_values::SizeConstraint;
 use crate::css::style::bridge::ElementBoxKind;
 use crate::css::style::fast_hash::{FastMap as HashMap, FastSet as HashSet};
-use crate::css::style::tree::StyleNodeID;
+use crate::css::style::tree::{ReplacedContentInput, StyleNodeID};
 use crate::css::style::{
     PublishedBoxFacts, PublishedTextSource, StyleEngine, TextStyleParentFacts,
     layout_style::{AnonymousStyleKind, AnonymousStyleOverrides, DerivedStyleRecord, LayoutStyle},
@@ -2498,6 +2498,18 @@ impl LayoutNodeArena {
                 unsafe { &*style_engine.cast::<StyleEngine>() }.element_construction_facts(style_node)
             }
             _ => 0,
+        }
+    }
+
+    /// What the element the row was built for gives the natural size of its replaced content
+    /// through its attributes. An anonymous row, and a row in an arena that names no style
+    /// mirror, has none.
+    pub(crate) fn replaced_content_input(&self, id: NodeSlotId) -> ReplacedContentInput {
+        match self.node_style_node(id) {
+            Some(style_node) if style_node.element_index().is_some() && !self.style_engine().is_null() => {
+                self.with_style_store(|engine| engine.element_replaced_content_input(style_node))
+            }
+            _ => ReplacedContentInput::None,
         }
     }
 
@@ -6605,8 +6617,9 @@ pub(crate) struct EnrolledContentSources {
     /// The enrolled replaced nodes the facts were read for, whether or not they are still live.
     enrolled_replaced_node_count: usize,
     replaced_content_facts: Vec<(NodeSlotId, FfiReplacedContentFacts)>,
-    /// The enrolled nodes whose facts follow from their kind and style, which the arena half derives.
-    style_derived_nodes: Vec<NodeSlotId>,
+    /// The enrolled nodes whose facts follow from their kind, style and replaced content input,
+    /// which the arena half derives.
+    derived_nodes: Vec<(NodeSlotId, ReplacedContentInput)>,
 }
 
 /// The host half of the enrolled content sync. It reads the replaced-content facts of the nodes
@@ -6634,7 +6647,7 @@ pub(crate) unsafe fn read_enrolled_content_sources(
         .borrow()
         .clone();
     let mut replaced_content_facts = Vec::with_capacity(enrolled_replaced_nodes.len());
-    let mut style_derived_nodes = Vec::new();
+    let mut derived_nodes = Vec::new();
     for &node in &enrolled_replaced_nodes {
         {
             let arena = unsafe { &*arena.cast::<LayoutNodeArena>() };
@@ -6642,7 +6655,7 @@ pub(crate) unsafe fn read_enrolled_content_sources(
                 continue;
             }
             if !super::node_facts::node_replaced_content_facts_need_host(arena.data(node)) {
-                style_derived_nodes.push(node);
+                derived_nodes.push((node, arena.replaced_content_input(node)));
                 continue;
             }
         }
@@ -6664,7 +6677,7 @@ pub(crate) unsafe fn read_enrolled_content_sources(
         pass_was_running: false,
         enrolled_replaced_node_count: enrolled_replaced_nodes.len(),
         replaced_content_facts,
-        style_derived_nodes,
+        derived_nodes,
     }
 }
 
@@ -6698,18 +6711,19 @@ pub(crate) unsafe fn apply_enrolled_content_sources(arena: *mut c_void, sources:
     }
 
     let mut live_replaced_nodes =
-        Vec::with_capacity(sources.replaced_content_facts.len() + sources.style_derived_nodes.len());
-    let style_derived_facts = sources.style_derived_nodes.into_iter().map(|node| {
+        Vec::with_capacity(sources.replaced_content_facts.len() + sources.derived_nodes.len());
+    let derived_facts = sources.derived_nodes.into_iter().map(|(node, input)| {
         // SAFETY: As above.
-        let facts = super::node_facts::style_derived_replaced_content_facts(unsafe {
-            (*arena.cast::<LayoutNodeArena>()).data(node)
-        });
+        let facts = super::node_facts::derived_replaced_content_facts(
+            unsafe { (*arena.cast::<LayoutNodeArena>()).data(node) },
+            input,
+        );
         (node, facts)
     });
     let replaced_content_facts: Vec<_> = sources
         .replaced_content_facts
         .into_iter()
-        .chain(style_derived_facts)
+        .chain(derived_facts)
         .collect();
     for (node, facts) in replaced_content_facts {
         live_replaced_nodes.push(node);

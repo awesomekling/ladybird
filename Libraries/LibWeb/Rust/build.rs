@@ -2998,6 +2998,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut style_engine_config = base_config.clone();
     style_engine_config.namespaces = Some(vec!["Web".to_string(), "CSS".to_string(), "StyleEngineFFI".to_string()]);
     style_engine_config.export.include = vec![
+        // Named by no exported signature: a host fact write points at one.
+        "FfiReplacedContentInput".to_string(),
         "FfiStyleInvalidationField".to_string(),
         "FfiStyleRowFact".to_string(),
         "FfiStyleSheetResourceContextEntry".to_string(),

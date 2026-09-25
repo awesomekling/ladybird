@@ -1239,6 +1239,14 @@ impl RetainedState {
         self.tree.set_table_spans(node, spans, &mut self.memory);
     }
 
+    pub fn element_replaced_content_input(&self, node: StyleNodeID) -> super::tree::ReplacedContentInput {
+        self.tree.replaced_content_input(node)
+    }
+
+    pub fn set_element_replaced_content_input(&mut self, node: StyleNodeID, input: super::tree::ReplacedContentInput) {
+        self.tree.set_replaced_content_input(node, input, &mut self.memory);
+    }
+
     pub fn set_element_form_control_disabled_facts(&mut self, node: StyleNodeID, facts: u8) {
         self.tree.set_form_control_disabled_facts(node, facts, &mut self.memory);
     }
