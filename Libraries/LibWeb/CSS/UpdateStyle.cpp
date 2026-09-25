@@ -298,32 +298,6 @@ static void sample_animations_for_installed_record(DOM::AbstractElement abstract
     context.elements.set(abstract_element, move(data));
 }
 
-// The environment a style pass composed an element's animated custom properties into, viewed as the
-// element's, or the element's record's environment again where the sample animated none; and what
-// that moves, recorded for the next transaction.
-static void install_sampled_custom_property_environment(StyleDrainScope const& scope, DOM::Element& element, StyleEngineFFI::FfiRowSampledInPass const& sample)
-{
-    auto data = element.custom_property_data({});
-    RefPtr<CustomPropertyData const> base = data;
-    if (data && data->is_animation_overlay_for({ element }))
-        base = data->parent();
-    RefPtr<CustomPropertyData const> installed = base;
-    if (sample.custom_property_environment != 0) {
-        VERIFY(sample.custom_property_store);
-        installed = CustomPropertyData::view_animation_overlay(sample.custom_property_store, sample.custom_property_environment, base, { element });
-    }
-    element.replace_custom_property_data(scope, {}, installed);
-    auto& style_engine = element.document().style_computer().style_engine();
-    if (sample.custom_property_reactions & 1)
-        style_engine.record_derived_element_style_input_change(element.style_node_id(), StyleEngine::PublishedStyle | StyleEngine::RecomputeStyle);
-    if (sample.custom_property_reactions & 2) {
-        style_engine.record_flat_tree_descendant_style_input_changes(
-            element.style_node_id(),
-            StyleEngine::InheritedStyle,
-            RequiredInvalidationAfterStyleChange::all_inherited_style_groups);
-    }
-}
-
 // The pass sampled the element's animations over the record the row settled and published the
 // composition, which the rows after it already read: install it as the host's own sample would
 // have, and record what the sample found out on the element and its parent.
@@ -347,7 +321,7 @@ static bool install_composition_sampled_in_pass(StyleDrainScope const& scope, DO
     if (sample.uses_tree_counting_function)
         element.set_style_uses_tree_counting_function();
     if (sample.custom_property_environment_moved)
-        install_sampled_custom_property_environment(scope, element, sample);
+        Animations::install_sampled_custom_property_environment(scope, element, sample);
     // A keyframe-borne `inherit` on a non-inherited property leaves the same mark on the parent a
     // full style computation does.
     if (auto style_groups = sample.keyframes_inherited_non_inherited_style_groups; style_groups != 0) {

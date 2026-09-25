@@ -21,6 +21,7 @@
 namespace Web::CSS::StyleEngineFFI {
 
 struct FfiAnimationInvalidation;
+struct FfiRowSampledInPass;
 
 }
 
@@ -84,6 +85,7 @@ struct AnimationUpdateContext {
 };
 
 void apply_published_animation_overlay(CSS::StyleDrainScope const&, DOM::AbstractElement, CSS::StyleEngineFFI::FfiAnimationInvalidation const&, CSS::StyleRecordID new_style_record, bool caller_applies_invalidation);
+void install_sampled_custom_property_environment(CSS::StyleDrainScope const&, DOM::Element&, CSS::StyleEngineFFI::FfiRowSampledInPass const&);
 
 // https://www.w3.org/TR/web-animations-1/#the-animationeffect-interface
 class AnimationEffect : public Bindings::GCAllocatedWrappable {

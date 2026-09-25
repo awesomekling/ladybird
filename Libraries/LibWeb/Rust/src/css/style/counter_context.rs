@@ -1163,7 +1163,7 @@ impl StyleEngine {
         pseudo: Option<u8>,
         style_record: u64,
         layout_arena: super::animations::LentLayoutArena,
-    ) -> Result<Option<super::engine_sample::SettledRowPublication>, String> {
+    ) -> Result<super::engine_sample::SettledRowPublication, String> {
         self.state
             .sample_installed_record(node, pseudo, style_record, layout_arena, &mut self.counters)
     }
