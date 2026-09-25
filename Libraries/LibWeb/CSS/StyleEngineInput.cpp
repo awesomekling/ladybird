@@ -57,6 +57,7 @@
 #include <LibWeb/SVG/SVGPatternElement.h>
 #include <LibWeb/SVG/SVGSVGElement.h>
 #include <LibWeb/SVG/SVGSwitchElement.h>
+#include <LibWeb/StyleDrainScopedFFI.h>
 #include <LibWeb/StyleEngineRustFFI.h>
 
 namespace Web::CSS {
@@ -96,10 +97,12 @@ static void publish_element_input(StyleEngine& style_engine, DOM::Element& eleme
 }
 
 // Publish an input about the element the way publish_element_input() does, except that inside a drain it goes to
-// the engine at once: the drain records it for the animations it installs, and its later waves sample them.
-static void publish_element_input_or_apply_in_drain(StyleEngine& style_engine, DOM::Element& element, Function<void(StyleInputScope const&, StyleNodeID)>&& input)
+// the engine at once, under the drain's scope: the drain records it for the animations it installs, and its later
+// waves sample them. `input` takes either scope.
+template<typename Input>
+static void publish_element_input_or_apply_in_drain(StyleEngine& style_engine, DOM::Element& element, Input&& input)
 {
-    style_engine.publish_input_or_apply_in_drain([element = GC::Root<DOM::Element> { element }, input = move(input)](StyleInputScope const& scope) {
+    style_engine.publish_input_or_apply_in_drain([element = GC::Root<DOM::Element> { element }, input = forward<Input>(input)](auto const& scope) {
         if (element->style_node_id() != no_style_node)
             input(scope, element->style_node_id());
     });
@@ -1415,8 +1418,8 @@ void record_element_css_defined_animations(DOM::Element& element, u8 slot, Reado
         for (size_t index = 0; index < view.length_in_code_units(); ++index)
             units.unchecked_append(static_cast<u16>(view.code_unit_at(index)));
     }
-    publish_element_input_or_apply_in_drain(*style_engine, element, [slot, lengths = move(lengths), units = move(units), definition_words = Vector<u64> { definition_words }](StyleInputScope const& input, StyleNodeID node) {
-        input.engine().set_element_css_defined_animations(node, slot, lengths, units, definition_words);
+    publish_element_input_or_apply_in_drain(*style_engine, element, [slot, lengths = move(lengths), units = move(units), definition_words = Vector<u64> { definition_words }](auto const& scope, StyleNodeID node) {
+        scope.engine().set_element_css_defined_animations(scope, node, slot, lengths, units, definition_words);
     });
 }
 
@@ -1431,8 +1434,8 @@ void record_element_animation_timing_rows(DOM::Element& element, u8 slot, Readon
     if (!style_engine || element.style_node_id() == no_style_node)
         return;
 
-    publish_element_input_or_apply_in_drain(*style_engine, element, [slot, words = Vector<u32> { words }, times = Vector<u64> { times }, linear_points = Vector<u64> { linear_points }](StyleInputScope const& input, StyleNodeID node) {
-        input.engine().set_element_animation_timing_rows(node, slot, words, times, linear_points);
+    publish_element_input_or_apply_in_drain(*style_engine, element, [slot, words = Vector<u32> { words }, times = Vector<u64> { times }, linear_points = Vector<u64> { linear_points }](auto const& scope, StyleNodeID node) {
+        scope.engine().set_element_animation_timing_rows(scope, node, slot, words, times, linear_points);
     });
 }
 
@@ -1683,9 +1686,9 @@ void record_element_animation_effect_descriptions(DOM::Element& element, u8 slot
         ffi_effects.append(row);
     }
 
-    publish_element_input_or_apply_in_drain(*style_engine, element, [slot, ffi_effects = move(ffi_effects), ffi_keyframes = move(ffi_keyframes), ffi_declarations = move(ffi_declarations), ffi_custom_declarations = move(ffi_custom_declarations), ffi_points = move(ffi_points), base_url_bytes = move(base_url_bytes), key_frame_sets = move(key_frame_sets)](StyleInputScope const& input, StyleNodeID node) {
-        StyleEngineFFI::style_engine_set_element_animation_effect_descriptions(
-            input.engine().rust_handle(), node.value(), slot,
+    publish_element_input_or_apply_in_drain(*style_engine, element, [slot, ffi_effects = move(ffi_effects), ffi_keyframes = move(ffi_keyframes), ffi_declarations = move(ffi_declarations), ffi_custom_declarations = move(ffi_custom_declarations), ffi_points = move(ffi_points), base_url_bytes = move(base_url_bytes), key_frame_sets = move(key_frame_sets)](auto const& scope, StyleNodeID node) {
+        StyleEngineFFI::style_engine_set_element_animation_effect_descriptions(scope,
+            scope.engine().rust_handle(), node.value(), slot,
             ffi_effects.data(), ffi_effects.size(),
             ffi_keyframes.data(), ffi_keyframes.size(),
             ffi_declarations.data(), ffi_declarations.size(),
@@ -1705,8 +1708,8 @@ void record_animation_timeline_samples(DOM::Document& document, ReadonlySpan<u32
     if (!style_engine)
         return;
 
-    style_engine->publish_input_or_apply_in_drain([identities = Vector<u32> { identities }, words = Vector<u32> { words }, times = Vector<u64> { times }](StyleInputScope const& input) {
-        input.engine().set_animation_timeline_samples(identities, words, times);
+    style_engine->publish_input_or_apply_in_drain([identities = Vector<u32> { identities }, words = Vector<u32> { words }, times = Vector<u64> { times }](auto const& scope) {
+        scope.engine().set_animation_timeline_samples(scope, identities, words, times);
     });
 }
 
@@ -1759,7 +1762,7 @@ void record_element_custom_property_names(DOM::Element& element, CustomPropertyD
         merge_names(reference_atoms);
     }
     publish_element_input(*style_engine, element, [published = Vector<StyleAtomID> { published }, uses_unnamed, uses_custom_functions](StyleInputScope const& input, StyleNodeID node) {
-        input.engine().set_element_custom_property_names(node, published, uses_unnamed, uses_custom_functions);
+        input.engine().set_element_custom_property_names(input, node, published, uses_unnamed, uses_custom_functions);
     });
 }
 
@@ -1774,7 +1777,7 @@ void record_element_custom_property_names(DOM::Element& element, ReadonlySpan<Ut
     for (auto const& name : names)
         atoms.unchecked_append(style_engine->intern_atom(name));
     publish_element_input(*style_engine, element, [atoms = move(atoms), uses_unnamed, uses_custom_functions](StyleInputScope const& input, StyleNodeID node) {
-        input.engine().set_element_custom_property_names(node, atoms, uses_unnamed, uses_custom_functions);
+        input.engine().set_element_custom_property_names(input, node, atoms, uses_unnamed, uses_custom_functions);
     });
 }
 

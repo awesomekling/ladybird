@@ -125,14 +125,14 @@ void StyleEffectDrain::install(DOM::Document& document, Function<void(StyleDrain
     // style seal counts apart from the pass's round trips.
     rust_style_seal_set_in_effect_drain(true);
     auto& style_engine = document.style_computer().style_engine();
-    style_engine.enter_effect_drain();
+    StyleDrainScope const scope { style_engine };
+    style_engine.enter_effect_drain(scope);
     ScopeGuard end_effect_drain = [&] {
         style_engine.leave_effect_drain();
         // Once a batch is drained, nothing the pass published waits for the host.
         style_engine.set_published_batch_waits(false);
         rust_style_seal_set_in_effect_drain(false);
     };
-    StyleDrainScope const scope { style_engine };
     install(scope);
 }
 
@@ -145,15 +145,15 @@ void StyleEffectDrain::apply(StyleDrainScope const& scope, DOM::Document& docume
 {
     for (auto const& effect : m_effects) {
         if (auto const* row = effect.get_pointer<RestoreRowDebts>()) {
-            scope.engine().restore_row_debts(row->style_node, row->explicit_inheritance_debt, row->row_effect_debt);
+            scope.engine().restore_row_debts(scope, row->style_node, row->explicit_inheritance_debt, row->row_effect_debt);
             continue;
         }
         if (auto const* row = effect.get_pointer<AcknowledgeRecord>()) {
-            scope.engine().acknowledge_engine_computed_record(row->style_node);
+            scope.engine().acknowledge_engine_computed_record(scope, row->style_node);
             continue;
         }
         if (auto const* row = effect.get_pointer<DiscardContainerQueryEffects>()) {
-            StyleEngineFFI::style_engine_native_container_effects_release(StyleEngineFFI::style_engine_take_container_effects(scope.engine().rust_handle(), row->style_node.value()).effects);
+            StyleEngineFFI::style_engine_native_container_effects_release(scope, StyleEngineFFI::style_engine_take_container_effects(scope, scope.engine().rust_handle(), row->style_node.value()).effects);
             continue;
         }
         auto element = document.style_computer().element_for_style_node(effect.visit([](auto const& row) { return row.style_node; }));
@@ -180,8 +180,8 @@ void StyleEffectDrain::apply(StyleDrainScope const& scope, DOM::Document& docume
                 element->republish_animation_name_registry();
             },
             [&](ContainerQueryEffects const& row) {
-                auto container_effects = StyleEngineFFI::style_engine_take_container_effects(scope.engine().rust_handle(), row.style_node.value());
-                ScopeGuard release_container_effects = [&] { StyleEngineFFI::style_engine_native_container_effects_release(container_effects.effects); };
+                auto container_effects = StyleEngineFFI::style_engine_take_container_effects(scope, scope.engine().rust_handle(), row.style_node.value());
+                ScopeGuard release_container_effects = [&] { StyleEngineFFI::style_engine_native_container_effects_release(scope, container_effects.effects); };
                 StyleComputer::record_container_query_effects(scope, DOM::AbstractElement { *element }, container_effects);
             },
             [&](AnimationPlan const& row) {
@@ -423,8 +423,8 @@ static void apply_pseudo_element_samples_taken_by_engine(StyleDrainScope const& 
     if (!any_sample)
         return;
     // What the samples' container units read of the element's containers.
-    auto container_effects = StyleEngineFFI::style_engine_take_container_effects(scope.engine().rust_handle(), element.style_node_id().value());
-    ScopeGuard release_container_effects = [&] { StyleEngineFFI::style_engine_native_container_effects_release(container_effects.effects); };
+    auto container_effects = StyleEngineFFI::style_engine_take_container_effects(scope, scope.engine().rust_handle(), element.style_node_id().value());
+    ScopeGuard release_container_effects = [&] { StyleEngineFFI::style_engine_native_container_effects_release(scope, container_effects.effects); };
     StyleComputer::record_container_query_effects(scope, DOM::AbstractElement { element }, container_effects);
 }
 
@@ -553,8 +553,8 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                         element->set_style_depends_on_viewport_metrics();
                 }
                 // What the settled pseudo-elements' container units read of the element's containers.
-                auto container_effects = StyleEngineFFI::style_engine_take_container_effects(scope.engine().rust_handle(), published_reaction.style_node);
-                ScopeGuard release_container_effects = [&] { StyleEngineFFI::style_engine_native_container_effects_release(container_effects.effects); };
+                auto container_effects = StyleEngineFFI::style_engine_take_container_effects(scope, scope.engine().rust_handle(), published_reaction.style_node);
+                ScopeGuard release_container_effects = [&] { StyleEngineFFI::style_engine_native_container_effects_release(scope, container_effects.effects); };
                 StyleComputer::record_container_query_effects(scope, DOM::AbstractElement { *element }, container_effects);
                 u8 const kinds_sampled_by_engine = published_reaction.inherited_style_groups;
                 auto pseudo_samples = take_pseudo_element_samples_before_installation(scope, *element, kinds_sampled_by_engine);
@@ -688,7 +688,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                 // ancestors applied before it installed: it reads them as they now stand, as the
                 // computation it stands for would have.
                 if (!element->has_style() || retried_after_installed_ancestors)
-                    style_engine.consume_recorded_element_style_input_change(reaction.style_node);
+                    style_engine.consume_recorded_element_style_input_change(scope, reaction.style_node);
                 // A row that moved nothing names the record the element held when the transaction
                 // published it. An ancestor applied before it can have republished that record over
                 // a moved custom-property environment since, and the element holds the republished
@@ -867,7 +867,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                     // A descendant may read this row only after its effect decisions have
                     // published their final composition. Keep the old composition pinned until
                     // that point so transition selection can still read its before-change style.
-                    document.style_computer().style_engine().set_sampled_composition_identity(
+                    document.style_computer().style_engine().set_sampled_composition_identity(scope,
                         StyleNodeID { reaction.style_node }, element->style_record_identity());
                     if (defer_pseudos) {
                         if (old_originating_style) {
@@ -1366,10 +1366,10 @@ static Optional<RequiredInvalidationAfterStyleChange> install_targeted_record_de
         samples_over_the_record ? DOM::Element::EngineRecordComparison::AfterSample : DOM::Element::EngineRecordComparison::AtInstallation);
     if (!!old_style_record && element.associated_shadow_host_pseudo_element().has_value())
         invalidation |= style_computer.run_transition_step_for_installed_record(scope, { element }, old_style_record);
-    auto container_effects = StyleEngineFFI::style_engine_take_container_effects(engine.rust_handle(), element.style_node_id().value());
-    ScopeGuard release_container_effects = [&] { StyleEngineFFI::style_engine_native_container_effects_release(container_effects.effects); };
+    auto container_effects = StyleEngineFFI::style_engine_take_container_effects(scope, engine.rust_handle(), element.style_node_id().value());
+    ScopeGuard release_container_effects = [&] { StyleEngineFFI::style_engine_native_container_effects_release(scope, container_effects.effects); };
     StyleComputer::record_container_query_effects(scope, DOM::AbstractElement { element }, container_effects);
-    engine.acknowledge_engine_computed_record(element.style_node_id());
+    engine.acknowledge_engine_computed_record(scope, element.style_node_id());
     if (samples_over_the_record) {
         sample_animations_for_installed_record(scope, DOM::AbstractElement { element }, SampleInvalidation::AppliedByCaller);
         invalidation = element.compare_engine_computed_style_record_after_sample(scope, old_style_record, invalidation);

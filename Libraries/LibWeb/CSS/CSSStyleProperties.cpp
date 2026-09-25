@@ -43,6 +43,7 @@
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/BoxModelMetrics.h>
 #include <LibWeb/Painting/BoxViews.h>
+#include <LibWeb/StyleDrainScopedFFI.h>
 #include <LibWeb/StyleEngineRustFFI.h>
 #include <LibWebCommon/Infra/Strings.h>
 

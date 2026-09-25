@@ -19,6 +19,12 @@ class StyleEngine;
 // while one is in flight. What the drain itself tells the engine about the rows it installs takes
 // the drain's StyleDrainScope instead.
 //
+// An entry both publish (dual) takes either scope. The animation inputs are dual: between passes and
+// beside one they are published input, but the drain records them itself for the animations it
+// installs and its later waves sample those animations, so inside a drain they go to the engine at
+// once, under the drain's scope (StyleEngine::publish_input_or_apply_in_drain()). A StyleInputScope is
+// never made inside a drain: that would admit every input publication there, not only these.
+//
 // Appending to an input journal the next transaction takes (the host's recorded input, the engine's
 // deferred element inputs), interning into the engine's catalogs (atoms, attribute value texts,
 // selector queries) and granting the host style node identities to mint change no answer of a pass,

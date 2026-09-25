@@ -30,9 +30,7 @@
 
 namespace Web::CSS {
 
-extern "C" void style_engine_prepare_root_font_resolution(void*, u64);
 extern "C" void rust_style_seal_note_font_match_reached_document_thread();
-extern "C" void style_engine_publish_font_face_snapshot(void*, void const*, uintptr_t);
 extern "C" void rust_font_face_snapshot_view(void const*, FontFaceSnapshotView*);
 extern "C" void style_engine_reset_custom_functions(void*);
 extern "C" void style_engine_publish_custom_function(void*, void const*, FlatPtr, FlatPtr, u32);
@@ -51,16 +49,6 @@ void StyleEngine::publish_input(Function<void(StyleInputScope const&)>&& input)
     // A layout pass taken back publishes what waited for it as its frame ends, and code the take-back runs before
     // that may publish too: what waited goes first.
     publish_inputs_queued_during_pass();
-    StyleInputScope const scope { *this };
-    input(scope);
-}
-
-void StyleEngine::publish_input_or_apply_in_drain(Function<void(StyleInputScope const&)>&& input)
-{
-    if (m_effect_drain_depth == 0) {
-        publish_input(move(input));
-        return;
-    }
     StyleInputScope const scope { *this };
     input(scope);
 }
@@ -181,18 +169,26 @@ StyleEngine::StyleEngine(DeviceClass device_class, StyleComputer* style_computer
 void StyleEngine::prepare_root_font_resolution(u64 font_environment_generation)
 {
     publish_font_faces();
-    style_engine_prepare_root_font_resolution(m_impl, font_environment_generation);
+    publish_input_or_apply_in_drain([this, font_environment_generation](auto const& scope) {
+        StyleEngineFFI::style_engine_prepare_root_font_resolution(scope, m_impl, font_environment_generation);
+    });
 }
 
 // The document's `@font-face` table, handed to the engine for the generation it is about to
 // compute against. Publishing here and before a transaction covers every entry into the stage.
+//
+// Dual (see StyleInputScope): a font change beside a pass is already left as published input, and inside
+// a drain its later waves resolve against the table, so it goes to the engine at once there. Beside a
+// pass that finished and waits for its drain it waits too: every transaction republishes the table.
 void StyleEngine::publish_font_faces()
 {
     if (!m_style_computer)
         return;
-    auto& font_computer = m_style_computer->document().font_computer();
-    font_computer.font_cascade_memo().publish_font_feature_values(font_computer.published_font_feature_values());
-    style_engine_publish_font_face_snapshot(m_impl, font_computer.published_font_faces(), reinterpret_cast<uintptr_t>(&font_computer.font_cascade_memo()));
+    publish_input_or_apply_in_drain([this](auto const& scope) {
+        auto& font_computer = m_style_computer->document().font_computer();
+        font_computer.font_cascade_memo().publish_font_feature_values(font_computer.published_font_feature_values());
+        StyleEngineFFI::style_engine_publish_font_face_snapshot(scope, m_impl, font_computer.published_font_faces(), reinterpret_cast<size_t>(&font_computer.font_cascade_memo()));
+    });
 }
 
 StyleEngine::~StyleEngine()
@@ -375,9 +371,9 @@ u64 StyleEngine::style_record_custom_property_environment(StyleRecordID style_re
     return environment;
 }
 
-StyleEngine::SettledAnimationDefinitions StyleEngine::take_settled_animation_definitions(StyleNodeID node, u8 pseudo_kind)
+StyleEngine::SettledAnimationDefinitions StyleEngine::take_settled_animation_definitions(StyleDrainScope const& scope, StyleNodeID node, u8 pseudo_kind)
 {
-    auto taken = StyleEngineFFI::style_engine_take_settled_animation_definitions(m_impl, node.value(), pseudo_kind);
+    auto taken = StyleEngineFFI::style_engine_take_settled_animation_definitions(scope, m_impl, node.value(), pseudo_kind);
     return {
         .definitions = { static_cast<ComputedValuesFFI::FfiComputedAnimation const*>(taken.definitions), taken.count },
         .owed = taken.owed,
@@ -439,9 +435,9 @@ double StyleEngine::ensure_random_base_value(StyleNodeID node, Utf16View name, b
     return bit_cast<double>(ensure_random_base_value(node, code_units.span(), element_shared));
 }
 
-void StyleEngine::set_element_custom_property_data(StyleNodeID node, CustomPropertyData const* data, bool is_animation_overlay, bool declares)
+void StyleEngine::set_element_custom_property_data(StyleDrainScope const& scope, StyleNodeID node, CustomPropertyData const* data, bool is_animation_overlay, bool declares)
 {
-    StyleEngineFFI::style_engine_set_element_custom_property_data(
+    StyleEngineFFI::style_engine_set_element_custom_property_data(scope,
         m_impl, node.value(), data, data ? data->rust_store() : nullptr, data ? data->identity() : 0, is_animation_overlay, declares, nullptr, nullptr, 0);
 }
 
@@ -971,9 +967,9 @@ void StyleEngine::submit_recorded_input()
         publish_required_attribute_value_texts(*this, *m_style_computer);
 }
 
-void StyleEngine::apply_transaction(StyleInputScope const&, InputTransaction const& transaction)
+void StyleEngine::apply_transaction(StyleInputScope const& input, InputTransaction const& transaction)
 {
-    StyleEngineFFI::style_engine_apply_transaction(m_impl, &transaction);
+    StyleEngineFFI::style_engine_apply_transaction(input, m_impl, &transaction);
 }
 
 void StyleEngine::flush()
@@ -1020,9 +1016,9 @@ bool StyleEngine::take_diagnostic_style_transaction(StyleNodeID root, Function<v
     return true;
 }
 
-void StyleEngine::discard_style_transaction_outputs(StyleDrainScope const&)
+void StyleEngine::discard_style_transaction_outputs(StyleDrainScope const& scope)
 {
-    StyleEngineFFI::style_engine_discard_style_transaction_outputs(m_impl);
+    StyleEngineFFI::style_engine_discard_style_transaction_outputs(scope, m_impl);
 }
 
 namespace {

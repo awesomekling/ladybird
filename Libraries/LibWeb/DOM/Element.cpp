@@ -150,6 +150,7 @@
 #include <LibWeb/SVG/SVGAElement.h>
 #include <LibWeb/SVG/SVGElement.h>
 #include <LibWeb/Selection/Selection.h>
+#include <LibWeb/StyleDrainScopedFFI.h>
 #include <LibWeb/StyleEngineRustFFI.h>
 #include <LibWeb/StyleValueRustFFI.h>
 #include <LibWeb/TrustedTypes/RequireTrustedTypesForDirective.h>
@@ -1585,7 +1586,7 @@ static CSS::StyleComputer::ComputedStyleInvalidation compute_required_invalidati
     // The engine reads what the move damages from the two records and its own facts of the element,
     // and answers a record it computed with it.
     auto packed = answered_damage.value_or_lazy_evaluated([&] {
-        return CSS::StyleEngineFFI::style_engine_element_record_damage(
+        return CSS::StyleEngineFFI::style_engine_element_record_damage(scope,
             scope.engine().rust_handle(),
             abstract_element.element().style_node_id().value(),
             style_record_delta.old_style_record.value(),
@@ -1679,7 +1680,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
             }
         }
         auto record_damage = [&](bool with_counter_styles_changed) {
-            return CSS::StyleEngineFFI::style_engine_pseudo_element_record_damage(
+            return CSS::StyleEngineFFI::style_engine_pseudo_element_record_damage(scope,
                 scope.engine().rust_handle(),
                 style_node_id().value(),
                 to_underlying(pseudo_element),
@@ -1763,7 +1764,7 @@ void Element::settle_pseudo_elements_in_next_pass(CSS::StyleDrainScope const& sc
     Array<u64, 8> held_pseudo_records {};
     for (size_t kind = 0; kind < held_pseudo_records.size(); ++kind)
         held_pseudo_records[kind] = style_record_identity(static_cast<CSS::PseudoElement>(kind)).value();
-    scope.engine().settle_pseudo_elements_in_next_pass(style_node_id(), old_is_list_item, held_pseudo_records);
+    scope.engine().settle_pseudo_elements_in_next_pass(scope, style_node_id(), old_is_list_item, held_pseudo_records);
 }
 
 // A sample of the element's animations moved what its pseudo-elements, and the elements backing its
@@ -2526,7 +2527,7 @@ void Element::clear_computed_styles_from_display_none_descendants(CSS::StyleDrai
         element->m_style_record_identity = 0;
         element->m_installed_display_is_contents = false;
         element->m_installed_display_is_list_item = false;
-        scope.engine().set_element_container_query_inputs(element->style_node_id(), {});
+        scope.engine().set_element_container_query_inputs(scope, element->style_node_id(), {});
 
         element->for_each_synthetic_pseudo_element([&](CSS::PseudoElement, SyntheticPseudoElement& pseudo_element) {
             pseudo_element.clear_computed_style();
@@ -5188,7 +5189,7 @@ void Element::replace_style_record(CSS::StyleDrainScope const& scope, CSS::Style
     // What the element holds is what the rows and samples after it in the drain read: a document
     // element's record resolves `rem`, for one.
     if (style_node_id() != 0)
-        scope.engine().set_element_container_query_inputs(style_node_id(), style_record_identity);
+        scope.engine().set_element_container_query_inputs(scope, style_node_id(), style_record_identity);
     if (auto* layout_node = unsafe_layout_node())
         layout_node->set_style_record_identity(style_record_identity);
 }
@@ -5204,7 +5205,7 @@ void Element::clear_style_record_on_removal()
     if (auto style_node = style_node_id(); style_node != 0) {
         document().style_computer().style_engine().publish_input([element = GC::Root<Element> { *this }, style_node](CSS::StyleInputScope const& input) {
             if (element->style_node_id() == style_node)
-                input.engine().set_element_container_query_inputs(style_node, {});
+                input.engine().set_element_container_query_inputs(input, style_node, {});
         });
     }
     if (auto* layout_node = unsafe_layout_node())
@@ -5247,7 +5248,7 @@ void Element::refresh_computed_style(CSS::StyleDrainScope const& scope, Optional
 
     replace_style_record(scope, style_record_identity);
     if (style_node_id() != 0 && scope.engine().style_record_view(style_record_identity).animation_overlay_identity != 0)
-        scope.engine().set_sampled_composition_identity(style_node_id(), style_record_identity);
+        scope.engine().set_sampled_composition_identity(scope, style_node_id(), style_record_identity);
     VERIFY(has_style());
 }
 
@@ -5404,7 +5405,7 @@ void Element::install_custom_property_data(CSS::StyleDrainScope const& scope, Op
             bool const is_animation_overlay = data && data->is_animation_overlay_for({ *this });
             auto base = is_animation_overlay ? data->parent() : data;
             auto animation_base = is_animation_overlay ? base : nullptr;
-            CSS::StyleEngineFFI::style_engine_set_element_custom_property_data(
+            CSS::StyleEngineFFI::style_engine_set_element_custom_property_data(scope,
                 style_engine.rust_handle(), style_node.value(), data.ptr(), data ? data->rust_store() : nullptr,
                 data ? data->identity() : 0, is_animation_overlay, base && base->declared_count() > 0, animation_base.ptr(),
                 animation_base ? animation_base->rust_store() : nullptr, animation_base ? animation_base->identity() : 0);
@@ -5420,7 +5421,7 @@ void Element::install_custom_property_data(CSS::StyleDrainScope const& scope, Op
         auto animation_base = is_animation_overlay ? base : nullptr;
         auto originating_data = custom_property_data({});
         bool const declares_own = base && !(originating_data && originating_data->inheritable(document()).ptr() == base.ptr());
-        CSS::StyleEngineFFI::style_engine_set_pseudo_element_custom_property_data(
+        CSS::StyleEngineFFI::style_engine_set_pseudo_element_custom_property_data(scope,
             style_engine.rust_handle(), style_node.value(), to_underlying(pseudo_element.value()), data.ptr(),
             data ? data->rust_store() : nullptr, data ? data->identity() : 0, is_animation_overlay, declares_own,
             animation_base.ptr(), animation_base ? animation_base->rust_store() : nullptr, animation_base ? animation_base->identity() : 0);
@@ -5449,7 +5450,7 @@ void Element::publish_style_recomputes_on_environment_move() const
     auto& style_engine = const_cast<CSS::StyleEngine&>(document().style_computer().style_engine());
     style_engine.publish_input([element = GC::Root<Element> { const_cast<Element&>(*this) }](CSS::StyleInputScope const& input) {
         if (element->style_node_id() != 0)
-            CSS::StyleEngineFFI::style_engine_note_element_recomputes_on_environment_move(input.engine().rust_handle(), element->style_node_id().value());
+            CSS::StyleEngineFFI::style_engine_note_element_recomputes_on_environment_move(input, input.engine().rust_handle(), element->style_node_id().value());
     });
 }
 
@@ -5467,9 +5468,9 @@ void Element::publish_size_container_query_facts() const
             return;
         auto* style_engine = input.engine().rust_handle();
         if (is_size_query_container)
-            CSS::StyleEngineFFI::style_engine_note_size_query_container(style_engine, style_node.value());
+            CSS::StyleEngineFFI::style_engine_note_size_query_container(input, style_engine, style_node.value());
         if (style_depends_on_size_container_query)
-            CSS::StyleEngineFFI::style_engine_note_style_depends_on_size_container_query(style_engine, style_node.value());
+            CSS::StyleEngineFFI::style_engine_note_style_depends_on_size_container_query(input, style_engine, style_node.value());
     });
 }
 

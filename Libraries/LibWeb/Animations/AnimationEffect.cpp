@@ -30,6 +30,7 @@
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/SVG/SVGElement.h>
+#include <LibWeb/StyleDrainScopedFFI.h>
 #include <LibWeb/StyleEngineRustFFI.h>
 #include <LibWeb/WebIDL/ExceptionOr.h>
 
@@ -850,7 +851,7 @@ void apply_published_animation_overlay(CSS::StyleDrainScope const& scope, DOM::A
     // The pseudo-elements inherit from the composition: the next pass settles them over it, as the ordinary
     // transaction settles the descendants below.
     if (!element.pseudo_element().has_value() && invalidation.inherited_style_changed() && !CSS::deferring_engine_pseudo_installation()) {
-        target->document().style_computer().style_engine().set_sampled_composition_identity(target->style_node_id(), target->style_record_identity());
+        target->document().style_computer().style_engine().set_sampled_composition_identity(scope, target->style_node_id(), target->style_record_identity());
         target->settle_pseudo_elements_over_moved_composition(scope);
     }
 
@@ -1008,12 +1009,12 @@ static bool install_engine_sample_of_installed_record(CSS::StyleDrainScope const
                 : is<DOM::ShadowRoot>(*parent)                 ? as<DOM::ShadowRoot>(*parent).style_node_id()
                                                                : CSS::StyleNodeID {};
             if (parent_style_node != 0)
-                CSS::StyleEngineFFI::style_engine_note_children_explicitly_inherit(scope.engine().rust_handle(), parent_style_node.value());
+                CSS::StyleEngineFFI::style_engine_note_children_explicitly_inherit(scope, scope.engine().rust_handle(), parent_style_node.value());
         }
     }
     // What the sample's container units read of the element's containers.
-    auto container_effects = CSS::StyleEngineFFI::style_engine_take_container_effects(scope.engine().rust_handle(), target->style_node_id().value());
-    ScopeGuard release_container_effects = [&] { CSS::StyleEngineFFI::style_engine_native_container_effects_release(container_effects.effects); };
+    auto container_effects = CSS::StyleEngineFFI::style_engine_take_container_effects(scope, scope.engine().rust_handle(), target->style_node_id().value());
+    ScopeGuard release_container_effects = [&] { CSS::StyleEngineFFI::style_engine_native_container_effects_release(scope, container_effects.effects); };
     CSS::StyleComputer::record_container_query_effects(scope, element, container_effects);
     if (!sample.overlay_is_empty && document.is_in_style_stabilization_epoch()
         && (document.style_stabilization_has_style_reactions() || sample.invalidation.requires_base_style_recomputation))

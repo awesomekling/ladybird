@@ -24,6 +24,7 @@
 #include <LibWeb/CSS/StyleRecordID.h>
 #include <LibWeb/ComputedValuesRustFFI.h>
 #include <LibWeb/Export.h>
+#include <LibWeb/StyleDrainScopedFFI.h>
 #include <LibWeb/StyleEngineRustFFI.h>
 
 namespace Web::CSS::Parser::ValueParserFFI {
@@ -69,7 +70,7 @@ public:
 #include <LibWeb/StyleEngineBridgeGenerated.h>
 
     [[nodiscard]] double ensure_random_base_value(StyleNodeID, Utf16View name, bool element_shared);
-    void set_element_custom_property_data(StyleNodeID, CustomPropertyData const*, bool is_animation_overlay = false, bool declares = false);
+    void set_element_custom_property_data(StyleDrainScope const&, StyleNodeID, CustomPropertyData const*, bool is_animation_overlay = false, bool declares = false);
 
     // The host names a node the moment it connects, from identities the engine granted it ahead of
     // time, and the mint crosses with the next transaction ahead of everything written to the identity
@@ -125,7 +126,7 @@ public:
         bool owed { false };
         bool in_display_none_subtree { false };
     };
-    [[nodiscard]] SettledAnimationDefinitions take_settled_animation_definitions(StyleNodeID node, u8 pseudo_kind);
+    [[nodiscard]] SettledAnimationDefinitions take_settled_animation_definitions(StyleDrainScope const&, StyleNodeID node, u8 pseudo_kind);
     [[nodiscard]] StyleRecordView style_record_view(StyleRecordID style_record) const;
     // The document thread's own pins, which keep a record from reclamation for its readers. They
     // live in a table beside the engine, so taking or releasing one never waits for a style pass.
@@ -291,17 +292,18 @@ public:
 
     // Whether a style pass is in flight: a batch the engine published waits for the host, or the
     // host is draining one. An input published now is one the pass did not see (see StyleInputScope).
-    [[nodiscard]] bool pass_is_in_flight() const { return m_published_batch_waits || m_effect_drain_depth != 0; }
+    [[nodiscard]] bool pass_is_in_flight() const { return m_published_batch_waits || !m_effect_drain_scopes.is_empty(); }
     void set_published_batch_waits(bool waits)
     {
         m_published_batch_waits = waits;
         publish_inputs_queued_during_pass();
     }
-    void enter_effect_drain() { ++m_effect_drain_depth; }
+    // The drain installs a batch under its scope; publish_input_or_apply_in_drain() hands the innermost one on.
+    void enter_effect_drain(StyleDrainScope const& scope) { m_effect_drain_scopes.append(&scope); }
     void leave_effect_drain()
     {
-        VERIFY(m_effect_drain_depth != 0);
-        --m_effect_drain_depth;
+        VERIFY(!m_effect_drain_scopes.is_empty());
+        m_effect_drain_scopes.take_last();
         publish_inputs_queued_during_pass();
     }
 
@@ -312,9 +314,18 @@ public:
     // Publish a style input: at once between passes, and once the pass has drained while one is in
     // flight, in the order the host published them. Beside a layout pass it waits for the pass the same way.
     void publish_input(Function<void(StyleInputScope const&)>&&);
-    // Publish an input the drain records too, and whose later waves read: at once inside a drain, and as
-    // publish_input() otherwise.
-    void publish_input_or_apply_in_drain(Function<void(StyleInputScope const&)>&&);
+    // Publish an input the drain records too, and whose later waves read: at once inside a drain, under
+    // the drain's scope, and as publish_input() otherwise. `input` takes either scope (a dual entry, see
+    // StyleInputScope).
+    template<typename Input>
+    void publish_input_or_apply_in_drain(Input&& input)
+    {
+        if (m_effect_drain_scopes.is_empty()) {
+            publish_input(forward<Input>(input));
+            return;
+        }
+        input(*m_effect_drain_scopes.last());
+    }
 
     // The layout frame's end: what was published beside its pass reaches the engine, ahead of anything published
     // after it.
@@ -435,7 +446,7 @@ private:
     i64 m_submitted_style_transaction_microseconds { 0 };
     bool m_submitted_pass_in_flight { false };
     HashTable<StyleNodeID> m_style_nodes_retired_beside_pass;
-    u32 m_effect_drain_depth { 0 };
+    Vector<StyleDrainScope const*> m_effect_drain_scopes;
     Vector<Function<void(StyleInputScope const&)>> m_inputs_queued_during_pass;
     u64 m_attribute_value_text_requirements_version { 0 };
     HashTable<StyleNodeID> m_nodes_with_pending_initial_features;
