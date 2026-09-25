@@ -60,7 +60,6 @@ Layout::RustFFI::FfiLayoutUpdateHostCallbacks Document::layout_update_host_callb
         .prepare_for_rendering = [](void* context) { static_cast<Document*>(context)->prepare_for_rendering(); },
         .root_background_source = [](void* context) { return Painting::rust_root_background_source(*static_cast<Document*>(context)); },
         .prepare_layout_tree_build = [](void* context) -> u32 { return static_cast<Document*>(context)->prepare_layout_tree_build(); },
-        .finish_layout_tree_build = [](void* context, void* walk) -> Layout::RustFFI::FfiLayoutTreeBuildOutcome { return Layout::pay_layout_tree_build(*static_cast<Document*>(context), walk); },
         .renew_paint_state = [](void* context) {
             auto& document = *static_cast<Document*>(context);
             document.m_paint_state = make<Painting::DocumentPaintState>(document.layout_node_arena()); },

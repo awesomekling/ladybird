@@ -21,7 +21,7 @@ use super::node_data::NodeSlotId;
 use super::node_facts;
 use super::partial_relayout::FfiPartialRelayoutHostFacts;
 use super::tree_builder::{
-    FfiGeneratedContentItem, FfiLayoutTreeBuildOutcome, FfiPseudoElement, LayoutTreeBuildWalk, TreeBuildHostHalf,
+    FfiGeneratedContentItem, FfiLayoutTreeBuildOutcome, FfiPseudoElement, TreeBuildHostHalf, make_shells_owed_to_host,
     walk_layout_tree_build,
 };
 use super::viewport_propagation::FfiViewportPropagationFacts;
@@ -59,9 +59,6 @@ pub struct FfiLayoutUpdateHostCallbacks {
     /// Readies the document for a layout tree build, and answers with the document's style node,
     /// which the build walks from.
     pub prepare_layout_tree_build: unsafe extern "C" fn(*mut c_void) -> u32,
-    /// Makes the shells the tree build walk the second argument holds owes the document, and
-    /// answers with the build's outcome.
-    pub finish_layout_tree_build: unsafe extern "C" fn(*mut c_void, *mut c_void) -> FfiLayoutTreeBuildOutcome,
     /// Gives the document's new layout tree, which a tree build placed in place of the one before,
     /// a new paint state.
     pub renew_paint_state: unsafe extern "C" fn(*mut c_void),
@@ -177,7 +174,6 @@ pub(crate) struct LayoutUpdateHost {
     prepare_for_rendering: unsafe extern "C" fn(*mut c_void),
     root_background_source: unsafe extern "C" fn(*mut c_void) -> FfiRootBackgroundSource,
     prepare_layout_tree_build: unsafe extern "C" fn(*mut c_void) -> u32,
-    finish_layout_tree_build: unsafe extern "C" fn(*mut c_void, *mut c_void) -> FfiLayoutTreeBuildOutcome,
     renew_paint_state: unsafe extern "C" fn(*mut c_void),
     rebuild_list_owners_with_stale_item_counters: unsafe extern "C" fn(*mut c_void, *const u32, usize),
     read_selection:
@@ -203,7 +199,6 @@ impl From<FfiLayoutUpdateHostCallbacks> for LayoutUpdateHost {
             prepare_for_rendering: host.prepare_for_rendering,
             root_background_source: host.root_background_source,
             prepare_layout_tree_build: host.prepare_layout_tree_build,
-            finish_layout_tree_build: host.finish_layout_tree_build,
             renew_paint_state: host.renew_paint_state,
             rebuild_list_owners_with_stale_item_counters: host.rebuild_list_owners_with_stale_item_counters,
             read_selection: host.read_selection,
@@ -249,17 +244,6 @@ impl LayoutUpdateHost {
 
     fn prepare_layout_tree_build(&self, _: &crate::stage::MainThread) -> u32 {
         unsafe { (self.prepare_layout_tree_build)(self.context) }
-    }
-
-    fn finish_layout_tree_build(
-        &self,
-        _: &crate::stage::MainThread,
-        walked: WalkedLayoutTreeBuild,
-    ) -> FfiLayoutTreeBuildOutcome {
-        let mut walk = Some(walked.walk);
-        let outcome = unsafe { (self.finish_layout_tree_build)(self.context, (&raw mut walk).cast()) };
-        assert!(walk.is_none(), "the host pays the layout tree build walk it is handed");
-        outcome
     }
 
     /// Pays what a tree build owed the document thread beyond its own join, then renews the
@@ -420,15 +404,17 @@ enum FrameJoin {
     /// loop over its elements, and a tree update mark is set on the DOM node, which widens it to
     /// what the node's layout node and its document ask for.
     Style,
-    /// The host half of a layout tree build whose walk the frame has run: the shells of its new
-    /// rows, which are the document's C++ objects. The shells of the rows the walk freed (the
-    /// tree a new viewport replaced among them), the box presence it changed, the DOM nodes its
-    /// commit messages resolve to and a new viewport's paint state wait for the next join, and
-    /// the style resources and generated image providers of its new rows for the frame to be
-    /// over. When a pass follows, the join answers with its sources, which the document reads
-    /// from its root and body elements' style and from the shells of replaced content. A partial
-    /// relayout's build also answers with the facts after it, since the build can resize this
-    /// document's viewport through its embedding document.
+    /// What a layout tree build the frame has walked needs the document for before the pass that
+    /// follows it: the shells of its new rows whose making tells the document something the pass
+    /// reads (a scroll container's scroll offset, whether an empty text keeps its line box), then
+    /// the pass's sources, which the document reads from its root and body elements' style and
+    /// from the shells of replaced content. A build no pass follows has no such join. A partial
+    /// relayout's build also answers with the facts after it, having paid the build's host half
+    /// first, since that can resize this document's viewport through its embedding document.
+    /// Otherwise the host half (the shells of the rows the walk freed and of the new rows it owes,
+    /// the box presence it changed, the DOM nodes its commit messages resolve to, a new viewport's
+    /// paint state) waits for the next join, and the style resources and generated image
+    /// providers of its new rows for the frame to be over.
     BuildLayoutTree,
     /// The host halves of the partial relayout boundaries' commits the frame settled ahead of
     /// them, in commit order, and of the last pass's commit, then the container queries the commit
@@ -482,7 +468,7 @@ impl LayoutPassSources {
 
 /// A tree build walk the frame has run, and the document it walked.
 struct WalkedLayoutTreeBuild {
-    walk: LayoutTreeBuildWalk,
+    outcome: FfiLayoutTreeBuildOutcome,
     document_style_node: StyleNodeID,
 }
 
@@ -656,9 +642,9 @@ impl LayoutFrame<'_> {
             .expect("the style join readies the tree build");
         // SAFETY: The frame runs for the update the arena is in, and the style join published the
         // document's style for the build.
-        let (walk, host_half) = unsafe { walk_layout_tree_build(self.inputs.arena_handle, document_style_node) };
+        let (outcome, host_half) = unsafe { walk_layout_tree_build(self.inputs.arena_handle, document_style_node) };
         let walked = WalkedLayoutTreeBuild {
-            walk,
+            outcome,
             document_style_node: StyleNodeID::from_raw(document_style_node)
                 .expect("the document has a style node when it builds a layout tree"),
         };
@@ -828,22 +814,24 @@ impl LayoutFrame<'_> {
             if needs_layout_tree_rebuild {
                 let arena_handle = self.inputs.arena_handle;
                 let (walked, host_half) = self.walk_layout_tree_build();
-                let needs_another_build_pass = walked.walk.needs_another_build_pass();
+                let needs_another_build_pass = walked.outcome.needs_another_build_pass;
                 if !needs_another_build_pass {
                     self.reconcile_stale_list_item_counters(&walked);
                 }
                 let pass_follows = !needs_another_build_pass && self.list_owners_to_rebuild.is_empty();
-                let (outcome, pass_sources) = self.join(FrameJoin::BuildLayoutTree, |main_thread, host| {
-                    let outcome = host.finish_layout_tree_build(main_thread, walked);
-                    // SAFETY: The frame runs for the update the arena is in.
-                    let pass_sources =
-                        pass_follows.then(|| unsafe { LayoutPassSources::read(main_thread, host, arena_handle) });
-                    (outcome, pass_sources)
+                // Only a pass that follows needs the document thread before the next join: the
+                // shells whose making tells the document what the pass reads, then its sources.
+                // The rest of the host half waits for the join after them.
+                let pass_sources = pass_follows.then(|| {
+                    self.join(FrameJoin::BuildLayoutTree, |main_thread, host| {
+                        // SAFETY: The frame runs for the update the arena is in.
+                        make_shells_owed_to_host(main_thread, unsafe { arena(arena_handle) });
+                        // SAFETY: As above.
+                        unsafe { LayoutPassSources::read(main_thread, host, arena_handle) }
+                    })
                 });
                 self.owe_tree_build_host_half(host_half);
-                self.note_layout_tree_build(&outcome);
-                debug_assert_eq!(outcome.needs_another_build_pass, needs_another_build_pass);
-                debug_assert_eq!(outcome.needs_another_build_pass, needs_another_build_pass);
+                self.note_layout_tree_build(&walked.outcome);
                 if needs_another_build_pass {
                     continue;
                 }
@@ -969,27 +957,26 @@ impl LayoutFrame<'_> {
             let tree_build_started = self.inputs.trace.now();
             let arena_handle = self.inputs.arena_handle;
             let (walked, host_half) = self.walk_layout_tree_build();
-            let needs_another_build_pass = walked.walk.needs_another_build_pass();
+            let needs_another_build_pass = walked.outcome.needs_another_build_pass;
             self.reconcile_stale_list_item_counters(&walked);
             let counters_were_stale = !self.list_owners_to_rebuild.is_empty();
             let pass_follows = !counters_were_stale && !needs_another_build_pass;
+            // The facts after the build are read once its host half is paid, which the join below
+            // does first, as the host half can resize this document's viewport through its
+            // embedding document.
+            self.owe_tree_build_host_half(host_half);
             let Joined {
-                value: (outcome, pass_sources),
+                value: pass_sources,
                 facts: facts_after_build,
             } = self.join(FrameJoin::BuildLayoutTree, |main_thread, host| {
-                let outcome = host.finish_layout_tree_build(main_thread, walked);
                 let facts = host.document_facts(main_thread);
                 Joined {
-                    value: (
-                        outcome,
-                        // SAFETY: The frame runs for the update the arena is in.
-                        pass_follows.then(|| unsafe { LayoutPassSources::read(main_thread, host, arena_handle) }),
-                    ),
+                    // SAFETY: The frame runs for the update the arena is in.
+                    value: pass_follows.then(|| unsafe { LayoutPassSources::read(main_thread, host, arena_handle) }),
                     facts,
                 }
             });
-            self.owe_tree_build_host_half(host_half);
-            self.note_layout_tree_build(&outcome);
+            self.note_layout_tree_build(&walked.outcome);
             *facts = facts_after_build;
             *needs_layout_tree_rebuild = false;
             if !pass_follows {

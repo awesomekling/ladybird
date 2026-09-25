@@ -2928,15 +2928,10 @@ struct TreeBuildStageOutput {
     replaced_layout_tree: bool,
 }
 
-/// A finished layout tree build walk whose shells have not been made yet. The document thread
-/// makes them with `rust_pay_layout_tree_build`, which answers with the build's outcome.
-#[must_use]
-pub(crate) struct LayoutTreeBuildWalk(FfiLayoutTreeBuildOutcome);
-
-/// What a finished layout tree build walk owes the host besides its shells, and what it found out
-/// for the document. The walk's frame pays it on the document thread in its next join after the
-/// walk's own, since no host code runs in between: the layout pass that may follow the build reads
-/// only the arena.
+/// What a finished layout tree build walk owes the host, and what it found out for the document.
+/// The walk's frame pays it on the document thread in its next join, since no host code runs in
+/// between and the layout pass that may follow the build reads only the arena, once the shells
+/// the build owes are made.
 #[must_use]
 pub(crate) struct TreeBuildHostHalf {
     reports: Vec<crate::layout::commit::FfiCommitMessage>,
@@ -2947,17 +2942,8 @@ pub(crate) struct TreeBuildHostHalf {
 // The walk's handbacks name the shells they owe by id, so the walk crosses back on its own terms.
 const _: () = {
     const fn assert_send<T: Send>() {}
-    assert_send::<LayoutTreeBuildWalk>();
     assert_send::<TreeBuildHostHalf>();
 };
-
-impl LayoutTreeBuildWalk {
-    /// Whether the build asked for another build pass, which the outcome its host half answers
-    /// with says as well.
-    pub(crate) fn needs_another_build_pass(&self) -> bool {
-        self.0.needs_another_build_pass
-    }
-}
 
 impl TreeBuildHostHalf {
     /// Whether the build placed a new viewport, whose tree the document gives a new paint state
@@ -2970,6 +2956,7 @@ impl TreeBuildHostHalf {
     /// lost, the host-owned objects of the rows it freed, and the style changes of the shells of
     /// the boxes it kept. Then what the build found out goes to the document, in the order the
     /// build found it out; nothing can clear a DOM update flag again once the walk is complete.
+    /// Last come the shells the build owes, if no pass has followed it to make them first.
     pub(crate) fn pay(self, main_thread: &crate::stage::MainThread, arena: &LayoutNodeArena) {
         // A layout pass that ran since may have queued handbacks its commit pays; they stay queued.
         arena.pay_handbacks_ahead_of_queued(main_thread, self.handbacks);
@@ -2980,11 +2967,21 @@ impl TreeBuildHostHalf {
                 crate::layout::LayoutHost::of(main_thread).deliver_commit_messages(main_thread, &self.reports);
             };
         }
+        make_shells_owed_to_host(main_thread, arena);
     }
 }
 
-/// Runs the layout tree build walk of the document `document_style_node` names, as a stage. Its
-/// shells are left to `rust_pay_layout_tree_build`, and the rest of its host half to the caller.
+/// Makes the shells of the new rows whose making tells the document something a layout pass
+/// reads, such as the scroll offset a scroll container holds or whether an empty text keeps its
+/// line box, unless a reader has made them already.
+pub(crate) fn make_shells_owed_to_host(main_thread: &crate::stage::MainThread, arena: &LayoutNodeArena) {
+    for row in arena.take_shells_owed_to_host() {
+        arena.node_shell(main_thread, row);
+    }
+}
+
+/// Runs the layout tree build walk of the document `document_style_node` names, as a stage, and
+/// answers with its outcome and the host half it leaves the caller to pay.
 ///
 /// # Safety
 ///
@@ -2993,7 +2990,7 @@ impl TreeBuildHostHalf {
 pub(crate) unsafe fn walk_layout_tree_build(
     arena_handle: *mut c_void,
     document_style_node: u32,
-) -> (LayoutTreeBuildWalk, TreeBuildHostHalf) {
+) -> (FfiLayoutTreeBuildOutcome, TreeBuildHostHalf) {
     // SAFETY: Guaranteed by the caller.
     let arena = unsafe { LayoutNodeArena::from_handle_mut(arena_handle) };
     arena.run_stage(|arena| {
@@ -3006,7 +3003,7 @@ pub(crate) unsafe fn walk_layout_tree_build(
             replaced_layout_tree,
         } = run_tree_build_stage(&host, document_style_node);
         (
-            LayoutTreeBuildWalk(outcome),
+            outcome,
             TreeBuildHostHalf {
                 reports,
                 handbacks,
