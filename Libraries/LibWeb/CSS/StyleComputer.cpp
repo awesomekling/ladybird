@@ -1036,6 +1036,20 @@ static void collect_dimension_attribute(Vector<StyleProperty>& properties, DOM::
     properties.append({ .property_id = property_id, .value = parsed_value.release_nonnull() });
 }
 
+// The engine's sample of an installed record, over the effects its timing rows name.
+static StyleEngineFFI::FfiRowSampledInPass resample_installed_record_after_host_step(StyleDrainScope const& scope, DOM::AbstractElement abstract_element, StyleRecordID installed_style_record)
+{
+    auto& element = abstract_element.element();
+    if (!abstract_element.pseudo_element().has_value())
+        (void)element.unsafe_layout_node();
+    auto* layout_node_arena = element.document().layout_node_arena_if_created();
+    auto resampled = StyleEngineFFI::style_engine_sample_installed_record(scope.engine().rust_handle(), element.style_node_id().value(),
+        pseudo_element_to_ffi(abstract_element.pseudo_element()), installed_style_record.value(), layout_node_arena ? layout_node_arena->handle() : nullptr);
+    if (resampled.present && resampled.custom_property_environment_moved)
+        Animations::install_sampled_custom_property_environment(scope, element, resampled);
+    return resampled;
+}
+
 // The whole transition step for an element's record, run once the record is installed, whether
 // the engine settled it or the host computed it.
 //
@@ -1129,6 +1143,13 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_inst
             document().style_invalidation_counters().animated_style_overlay_builds++;
         animated_property_invalidation = engine_composition.invalidation;
         new_style_record = StyleRecordID { engine_composition.style_record };
+    } else if (auto resampled = resample_installed_record_after_host_step(scope, abstract_element, installed_style_record); resampled.present) {
+        // The host decided a step the engine could not; the engine samples the installed record
+        // again over the effects the step left, which its timing rows now name.
+        if (resampled.style_record == installed_style_record.value())
+            return {};
+        animated_property_invalidation = resampled.invalidation;
+        new_style_record = StyleRecordID { resampled.style_record };
     } else {
         auto animated_properties = new_style->animated_properties_snapshot();
         bool const has_animated_properties = animated_properties && !animated_properties->is_empty();
