@@ -1005,6 +1005,8 @@ void install_sampled_custom_property_environment(CSS::StyleDrainScope const& sco
     }
 }
 
+static void install_taken_engine_sample(CSS::StyleDrainScope const&, DOM::AbstractElement, CSS::StyleRecordID style_record_before_update, bool caller_applies_invalidation, CSS::StyleEngineFFI::FfiRowSampledInPass const&, InstalledInArena);
+
 // The engine samples the animations of an element or pseudo-element over the record the host holds
 // for it, from the timing rows, descriptions and environments it holds, and publishes the
 // composition as its record. What the sample found out is recorded on the element and its parent
@@ -1023,6 +1025,17 @@ static bool install_engine_sample_of_installed_record(CSS::StyleDrainScope const
         CSS::pseudo_element_to_ffi(element.pseudo_element()), data.style_record_before_update.value(), layout_node_arena ? layout_node_arena->handle() : nullptr);
     if (!sample.present)
         return false;
+    install_taken_engine_sample(scope, element, data.style_record_before_update, data.caller_applies_invalidation, sample, InstalledInArena::No);
+    return true;
+}
+
+// Install what an engine sample of an element's animations over the record `style_record_before_update` published,
+// and record what the sample found out on the element and its parent. Where the render side installed the sample's
+// record in the arena already, the element adopts it.
+static void install_taken_engine_sample(CSS::StyleDrainScope const& scope, DOM::AbstractElement element, CSS::StyleRecordID style_record_before_update, bool caller_applies_invalidation, CSS::StyleEngineFFI::FfiRowSampledInPass const& sample, InstalledInArena installed_in_arena)
+{
+    GC::Ref<DOM::Element> target = element.element();
+    auto& document = target->document();
     if (sample.substitution_marks & CSS::ComputedValuesFFI::SUBSTITUTION_MARK_VAR)
         target->set_style_uses_var_css_function();
     if (sample.substitution_marks & CSS::ComputedValuesFFI::SUBSTITUTION_MARK_ATTR)
@@ -1038,8 +1051,8 @@ static bool install_engine_sample_of_installed_record(CSS::StyleDrainScope const
     if (sample.custom_property_environment_moved)
         install_sampled_custom_property_environment(scope, element, sample);
     // The sample moved nothing the record composed.
-    if (sample.style_record == data.style_record_before_update.value())
-        return true;
+    if (sample.style_record == style_record_before_update.value())
+        return;
     if (sample.rebuilt_every_group)
         document.style_invalidation_counters().animated_style_full_builds++;
     else
@@ -1065,9 +1078,15 @@ static bool install_engine_sample_of_installed_record(CSS::StyleDrainScope const
     if (!sample.overlay_is_empty && document.is_in_style_stabilization_epoch()
         && (document.style_stabilization_has_style_reactions() || sample.invalidation.requires_base_style_recomputation))
         document.style_computer().record_transition_stabilization_baseline(scope, element);
-    if (!install_animation_sample_in_arena(scope, element, sample.invalidation, CSS::StyleRecordID { sample.style_record }, data.caller_applies_invalidation))
-        apply_published_animation_overlay(scope, element, sample.invalidation, CSS::StyleRecordID { sample.style_record }, data.caller_applies_invalidation);
-    return true;
+    if (installed_in_arena == InstalledInArena::Yes)
+        apply_animation_overlay(scope, element, sample.invalidation, CSS::StyleRecordID { sample.style_record }, caller_applies_invalidation, InstalledInArena::Yes);
+    else if (!install_animation_sample_in_arena(scope, element, sample.invalidation, CSS::StyleRecordID { sample.style_record }, caller_applies_invalidation))
+        apply_published_animation_overlay(scope, element, sample.invalidation, CSS::StyleRecordID { sample.style_record }, caller_applies_invalidation);
+}
+
+void adopt_clock_tick_sample(CSS::StyleDrainScope const& scope, DOM::AbstractElement element, CSS::StyleRecordID style_record_before_tick, CSS::StyleEngineFFI::FfiRowSampledInPass const& sample, bool installed_in_arena)
+{
+    install_taken_engine_sample(scope, element, style_record_before_tick, false, sample, installed_in_arena ? InstalledInArena::Yes : InstalledInArena::No);
 }
 
 void AnimationUpdateContext::publish_animation_inputs_before_sample(DOM::Element& element)

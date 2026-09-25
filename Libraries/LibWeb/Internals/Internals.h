@@ -214,6 +214,8 @@ public:
     GC::Ref<JS::Object> style_invalidation_counters_object() const;
     void reset_style_invalidation_counters();
     GC::Ref<JS::Object> join_counters_object() const;
+    u64 clock_ticks_presented() const;
+    bool clock_frames_enabled() const;
     void reset_join_counters();
     void dump_join_counters() const;
     Utf16String layout_overlap_blocker() const;
@@ -221,6 +223,8 @@ public:
     void reset_rendering_scheduler_counters();
     bool hold_next_recording_frame(Utf16String const& point, GC::Ptr<DOM::Document> document);
     bool hold_next_layout_frame(Utf16String const& point, GC::Ptr<DOM::Document> document);
+
+    bool hold_next_clock_tick(Utf16String const& point, GC::Ptr<DOM::Document> document);
     bool hold_next_style_frame(Utf16String const& point, GC::Ptr<DOM::Document> document);
     Utf16String wait_for_held_frame();
     void release_held_frame();

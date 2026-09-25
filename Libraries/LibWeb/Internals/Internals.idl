@@ -207,6 +207,11 @@ interface Internals {
     // once. Each holds calls, joins, cleanReads, nested, totalNanoseconds,
     // cleanReadNanoseconds, maxNanoseconds and nanosecondsSinceMutation (summed over the joins).
     [ImplementedAs=join_counters_object] object getJoinCounters();
+    // LIBWEB_RENDER_CLOCK_FRAMES: the clock lease ticks the main thread adopted that installed a sample.
+    unsigned long long clockTicksPresented();
+    // Whether rendering updates tick clock leases: LIBWEB_RENDER_CLOCK_FRAMES is set, and the stage thread runs the
+    // clock stage beside the main thread.
+    boolean clockFramesEnabled();
     undefined resetJoinCounters();
     // Prints the reasons that blocked this document the longest to the debug log.
     undefined dumpJoinCounters();
@@ -229,6 +234,9 @@ interface Internals {
     // LIBWEB_STAGE_THREAD=overlap with LIBWEB_STAGE_OVERLAP naming "layout". It holds the pass at
     // "before-run" or "before-completion" (laid out, before the main thread hears of it).
     boolean holdNextLayoutFrame(optional DOMString point = "before-run", optional Document? document = null);
+    // Like holdNextRecordingFrame(), for the next clock lease tick a rendering update submits under
+    // LIBWEB_RENDER_CLOCK_FRAMES ("before-run" or "before-completion").
+    boolean holdNextClockTick(optional DOMString point = "before-run", optional Document? document = null);
     // Like holdNextLayoutFrame(), for the first style pass a rendering update submits, under
     // LIBWEB_STAGE_THREAD=overlap with LIBWEB_STAGE_OVERLAP naming "style". It holds the pass at
     // "before-run" or "before-completion" (styled, before the main thread hears of it).

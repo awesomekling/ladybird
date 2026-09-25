@@ -7,16 +7,27 @@
 #include <AK/AnyOf.h>
 #include <AK/Time.h>
 #include <LibCore/EventLoop.h>
+#include <LibWeb/Animations/Animation.h>
+#include <LibWeb/Animations/AnimationEffect.h>
+#include <LibWeb/Animations/DocumentTimeline.h>
+#include <LibWeb/Animations/KeyframeEffect.h>
+#include <LibWeb/CSS/StyleComputer.h>
+#include <LibWeb/CSS/StyleEffectDrain.h>
 #include <LibWeb/Compositor/NavigablePresenter.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
 #include <LibWeb/HTML/EventLoop/FrameCompletion.h>
 #include <LibWeb/HTML/EventLoop/FrameInFlightReferences.h>
 #include <LibWeb/HTML/EventLoop/FrameScheduler.h>
+#include <LibWeb/HTML/Scripting/Environments.h>
+#include <LibWeb/HTML/Window.h>
+#include <LibWeb/HighResolutionTime/TimeOrigin.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
 #include <LibWeb/Layout/Node.h>
+#include <LibWeb/Namespace.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/PendingDisplayListRecording.h>
+#include <LibWeb/StyleEngineRustFFI.h>
 
 namespace Web::HTML {
 
@@ -180,6 +191,9 @@ void FrameScheduler::commit()
     //     style pass's frame ends the document's style update here: its drain installs what the pass computed.
     if (m_ticket->submitted_pass.has_value() && m_ticket->submitted_pass->kind == FrameTicket::SubmittedPass::Kind::Style)
         m_ticket->submitted_pass->documents[m_ticket->submitted_pass->document_index]->finish_submitted_style_update();
+    // A clock tick's document adopts what the tick installed before anything reads it.
+    if (m_ticket->submitted_pass.has_value() && m_ticket->submitted_pass->kind == FrameTicket::SubmittedPass::Kind::Clock)
+        adopt_clock_tick(m_ticket->submitted_pass->documents[m_ticket->submitted_pass->document_index]);
     // NB: Each navigable's recording is published and its resources are added to its resource storage before its
     //     compositor frame is built and handed off, so a compositor frame never reaches its sink ahead of the
     //     resources it references. The canvases it shows were flushed before the recording was prepared, and the next
@@ -278,7 +292,12 @@ void FrameScheduler::run_tail()
         // The rest of the rendering update is a main half of its own, with a new ticket for its recordings.
         m_ticket = make<FrameTicket>();
         m_state = State::MainHalf;
-        if (submitted_pass->kind == FrameTicket::SubmittedPass::Kind::Style)
+        if (submitted_pass->kind == FrameTicket::SubmittedPass::Kind::Clock) {
+            // The next leased document ticks, and then the rendering update goes on at step 16 for every document.
+            if (tick_clock_leases(submitted_pass->documents, submitted_pass->document_index + 1, submitted_pass->frame_timestamp, true))
+                return;
+            m_event_loop.resume_rendering_update_after_style({}, submitted_pass->documents, 0, submitted_pass->frame_timestamp);
+        } else if (submitted_pass->kind == FrameTicket::SubmittedPass::Kind::Style)
             m_event_loop.resume_rendering_update_after_style({}, submitted_pass->documents, submitted_pass->document_index, submitted_pass->frame_timestamp);
         else
             m_event_loop.resume_rendering_update_after_layout({}, submitted_pass->documents, submitted_pass->document_index, submitted_pass->frame_timestamp);
@@ -326,9 +345,269 @@ void FrameScheduler::apply_deferred_arena_changes()
         change->function()();
 }
 
+// What a clock lease of a document ticks, and until when.
+struct ClockLeasePlan {
+    Vector<GC::Ref<Animations::KeyframeEffect>> effects;
+    // The timeline time at which the document has something observable to do: an event, a phase change, the end of an
+    // effect. No tick samples at or past it.
+    double deadline { AK::Infinity<double> };
+};
+
+// The next time, in the local time of `effect`, at which its phase or current iteration changes.
+static Optional<double> next_boundary_in_local_time(Animations::KeyframeEffect const& effect, double local_time)
+{
+    if (effect.start_delay().type != Animations::TimeValue::Type::Milliseconds
+        || effect.iteration_duration().type != Animations::TimeValue::Type::Milliseconds
+        || effect.active_duration().type != Animations::TimeValue::Type::Milliseconds)
+        return {};
+    auto start_delay = effect.start_delay().value;
+    auto iteration_duration = effect.iteration_duration().value;
+    auto active_end = start_delay + effect.active_duration().value;
+    if (local_time < start_delay)
+        return start_delay;
+    if (!(iteration_duration > 0) || local_time >= active_end)
+        return {};
+    auto next_iteration_start = start_delay + (floor((local_time - start_delay) / iteration_duration) + 1) * iteration_duration;
+    return min(next_iteration_start, active_end);
+}
+
+// Whether a clock lease can tick the running animations of `document`, and which of their effects it ticks. The lease
+// ticks only what the main thread would do nothing else for until the deadline: the running, non-pending animations
+// of the document timeline that animate no property that can change the layout tree's shape or what the main thread
+// observes of it, on elements that have a box.
+static Optional<ClockLeasePlan> clock_lease_plan(DOM::Document& document)
+{
+    if (!Layout::RustFFI::rust_stage_thread_submits_clock())
+        return {};
+    if (!document.is_fully_active() || document.hidden() || document.is_decoded_svg())
+        return {};
+    auto navigable = document.navigable();
+    if (!navigable || navigable->active_document().ptr() != &document || !document.layout_node_arena_if_created())
+        return {};
+    if (document.needs_animated_style_update() || !document.layout_is_up_to_date() || document.layout_overlap_blocker().has_value())
+        return {};
+    if (auto window = document.window(); !window || window->has_animation_frame_callbacks())
+        return {};
+    auto timeline = document.timeline();
+    auto timeline_time = timeline->current_time();
+    if (!timeline_time.has_value() || timeline_time->type != Animations::TimeValue::Type::Milliseconds)
+        return {};
+
+    ClockLeasePlan plan;
+    for (auto const& associated_timeline : document.associated_animation_timelines()) {
+        for (auto& animation : associated_timeline->associated_animations()) {
+            if (animation.play_state() != Bindings::AnimationPlayState::Running)
+                continue;
+            if (animation.pending() || associated_timeline.ptr() != timeline.ptr() || !(animation.playback_rate() > 0))
+                return {};
+            auto effect = animation.effect();
+            if (!effect || !is<Animations::KeyframeEffect>(*effect))
+                return {};
+            auto& keyframe_effect = static_cast<Animations::KeyframeEffect&>(*effect);
+            auto target = keyframe_effect.target();
+            if (!target || &target->document() != &document || !target->is_connected() || keyframe_effect.pseudo_element_type().has_value())
+                return {};
+            if (target->namespace_uri() != Namespace::HTML || !target->unsafe_layout_node())
+                return {};
+            if (auto const* key_frame_set = keyframe_effect.key_frame_set()) {
+                for (auto const& keyframe : key_frame_set->keyframes_by_key) {
+                    for (auto const& [property, value] : keyframe.properties) {
+                        switch (property.id()) {
+                        case CSS::PropertyID::Custom:
+                        case CSS::PropertyID::Display:
+                        case CSS::PropertyID::Visibility:
+                        case CSS::PropertyID::ContentVisibility:
+                            return {};
+                        default:
+                            break;
+                        }
+                    }
+                }
+            }
+            auto local_time = keyframe_effect.local_time();
+            if (!local_time.has_value() || local_time->type != Animations::TimeValue::Type::Milliseconds)
+                return {};
+            auto boundary = next_boundary_in_local_time(keyframe_effect, local_time->value);
+            if (!boundary.has_value())
+                return {};
+            plan.deadline = min(plan.deadline, timeline_time->value + (*boundary - local_time->value) / animation.playback_rate());
+            // What the compositor or the offscreen throttle runs, the main thread does not sample per frame either.
+            if (keyframe_effect.is_compositor_driven() || keyframe_effect.is_compositor_replaced() || keyframe_effect.can_skip_per_frame_style_update())
+                continue;
+            plan.effects.append(keyframe_effect);
+        }
+    }
+    if (plan.effects.is_empty() || !(plan.deadline > timeline_time->value))
+        return {};
+    return plan;
+}
+
+void FrameScheduler::revoke_clock_lease(size_t index)
+{
+    auto hold = m_clock_leases.take(index);
+    if (auto* arena = hold.document->layout_node_arena_if_created())
+        Layout::RustFFI::rust_clock_lease_revoke(arena->handle());
+    // The main thread samples the effects again, at the time it moves their timeline to.
+    for (auto effect : hold.effects) {
+        effect->set_is_clock_driven(false);
+        if (effect->target() && effect->associated_animation())
+            effect->target()->document().set_needs_animated_style_update(*effect);
+    }
+}
+
+void FrameScheduler::grant_clock_leases()
+{
+    if (!Layout::RustFFI::rust_clock_frames_enabled())
+        return;
+    auto documents = m_synchronous_update ? Vector<GC::Root<DOM::Document>> {} : m_event_loop.documents_in_this_event_loop_matching([](auto&) { return true; });
+    for (size_t index = m_clock_leases.size(); index-- > 0;) {
+        if (!documents.first_matching([&](auto const& document) { return document.ptr() == m_clock_leases[index].document.ptr(); }).has_value())
+            revoke_clock_lease(index);
+    }
+    for (auto& document : documents) {
+        auto plan = clock_lease_plan(*document);
+        auto held = m_clock_leases.find_first_index_if([&](auto const& hold) { return hold.document.ptr() == document.ptr(); });
+        if (!plan.has_value()) {
+            if (held.has_value())
+                revoke_clock_lease(*held);
+            continue;
+        }
+        if (held.has_value()) {
+            for (auto effect : m_clock_leases[*held].effects)
+                effect->set_is_clock_driven(false);
+            m_clock_leases[*held].effects = plan->effects;
+        } else {
+            m_clock_leases.append({ *document, plan->effects });
+        }
+        for (auto effect : plan->effects)
+            effect->set_is_clock_driven(true);
+        auto timeline = document->timeline();
+        auto timeline_time = timeline->current_time()->value;
+        // NB: The default document timeline's origin time is zero: its time is the document's relative time.
+        auto now = HighResolutionTime::unsafe_shared_current_time();
+        auto timeline_zero = now - HighResolutionTime::relative_high_resolution_time(now, relevant_global_object(*document));
+        Layout::RustFFI::rust_clock_lease_grant(document->layout_node_arena_if_created()->handle(), timeline->style_engine_identity(), timeline_zero, timeline_time, plan->deadline);
+    }
+}
+
+void FrameScheduler::prepare_clock_ticks(ReadonlySpan<GC::Root<DOM::Document>> docs, HighResolutionTime::DOMHighResTimeStamp frame_timestamp)
+{
+    for (size_t index = m_clock_leases.size(); index-- > 0;) {
+        m_clock_leases[index].ticked = false;
+        // Only a rendering update that submits its frame ticks a lease.
+        if (m_synchronous_update || !m_ticket) {
+            revoke_clock_lease(index);
+            continue;
+        }
+        auto document = m_clock_leases[index].document;
+        bool renders = docs.first_matching([&](auto const& doc) { return doc.ptr() == document.ptr(); }).has_value();
+        auto* arena = document->layout_node_arena_if_created();
+        // Anything the main thread did since the grant that its own rendering update has to see ends the lease: the
+        // plan finds it, or finds other effects to tick.
+        auto plan = renders && arena && Layout::RustFFI::rust_clock_lease_is_live(arena->handle()) ? clock_lease_plan(*document) : Optional<ClockLeasePlan> {};
+        if (!plan.has_value() || plan->effects != m_clock_leases[index].effects) {
+            revoke_clock_lease(index);
+            continue;
+        }
+        // NB: The default document timeline's origin time is zero: its time is the document's relative time.
+        auto time = max(0.0, HighResolutionTime::relative_high_resolution_time(frame_timestamp, relevant_global_object(*document)));
+        if (!(time < plan->deadline))
+            revoke_clock_lease(index);
+    }
+}
+
+bool FrameScheduler::tick_clock_leases(Vector<GC::Ref<DOM::Document>> const& docs, size_t first_document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp, bool may_submit)
+{
+    if (may_submit && submit_clock_tick(docs, first_document_index, frame_timestamp))
+        return true;
+    // A lease this rendering update did not tick ends: the update samples its effects itself.
+    for (size_t index = m_clock_leases.size(); index-- > 0;) {
+        if (!exchange(m_clock_leases[index].ticked, false))
+            revoke_clock_lease(index);
+    }
+    return false;
+}
+
+bool FrameScheduler::submit_clock_tick(Vector<GC::Ref<DOM::Document>> const& docs, size_t first_document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp)
+{
+    if (m_state != State::MainHalf || !m_ticket || !m_ticket->navigables.is_empty())
+        return false;
+    for (size_t document_index = first_document_index; document_index < docs.size(); ++document_index) {
+        auto document = docs[document_index];
+        auto held = m_clock_leases.find_first_index_if([&](auto const& hold) { return hold.document.ptr() == document.ptr(); });
+        auto* arena = document->layout_node_arena_if_created();
+        if (!held.has_value() || !arena)
+            continue;
+        auto time = document->timeline()->current_time();
+        if (!time.has_value() || time->type != Animations::TimeValue::Type::Milliseconds) {
+            revoke_clock_lease(*held);
+            continue;
+        }
+        // The tick samples each element over the record it holds now, and its layout node is built while that record
+        // is live.
+        Vector<u32> style_nodes;
+        Vector<u64> style_records;
+        for (auto effect : m_clock_leases[*held].effects) {
+            auto target = effect->target();
+            if (!target || style_nodes.contains_slow(target->style_node_id().value()))
+                continue;
+            (void)target->unsafe_layout_node();
+            style_nodes.append(target->style_node_id().value());
+            style_records.append(DOM::AbstractElement { *target }.style_record_identity().value());
+        }
+        Layout::RustFFI::rust_clock_lease_set_targets(arena->handle(), style_nodes.data(), style_records.data(), style_nodes.size());
+        if (!Layout::RustFFI::rust_clock_lease_submit_tick(arena->handle(), time->value)) {
+            revoke_clock_lease(*held);
+            continue;
+        }
+        m_clock_leases[*held].ticked = true;
+        submit_pass(FrameTicket::SubmittedPass::Kind::Clock, docs, document_index, frame_timestamp);
+        return true;
+    }
+    return false;
+}
+
+void FrameScheduler::adopt_clock_tick(DOM::Document& document)
+{
+    auto* arena = document.layout_node_arena_if_created();
+    if (!arena)
+        return;
+    bool installed_any = false;
+    CSS::StyleEffectDrain::install(document, [&](CSS::StyleDrainScope const& scope) {
+        u32 style_node = 0;
+        u64 style_record_before = 0;
+        bool installed_in_arena = false;
+        CSS::StyleEngineFFI::FfiRowSampledInPass sample {};
+        while (CSS::StyleEngineFFI::style_engine_clock_tick_take_entry(arena->handle(), &style_node, &style_record_before, &installed_in_arena, &sample)) {
+            auto element = document.style_computer().element_for_style_node(CSS::StyleNodeID { style_node });
+            // An element that left the document, or that the main thread restyled beside the tick, takes nothing.
+            if (!element || !element->is_connected() || DOM::AbstractElement { *element }.style_record_identity().value() != style_record_before)
+                continue;
+            if (!sample.present)
+                continue;
+            Animations::adopt_clock_tick_sample(scope, DOM::AbstractElement { *element }, CSS::StyleRecordID { style_record_before }, sample, installed_in_arena);
+            installed_any = true;
+        }
+    });
+    // What no element adopted leaves the arena's log, with its pins.
+    Layout::RustFFI::rust_clock_lease_drop_unadopted(arena->handle());
+    if (installed_any)
+        Layout::RustFFI::rust_clock_ticks_note_presented();
+    // A tick that could not sample every effect, or reached the deadline, ends the lease: the rendering update samples
+    // the effects itself.
+    if (Layout::RustFFI::rust_clock_lease_tick_outcome(arena->handle()) != Layout::RustFFI::FfiClockTickOutcome::Presented) {
+        if (auto held = m_clock_leases.find_first_index_if([&](auto const& hold) { return hold.document.ptr() == &document; }); held.has_value())
+            revoke_clock_lease(*held);
+    }
+}
+
 void FrameScheduler::visit_edges(JS::Cell::Visitor& visitor)
 {
     visitor.visit(m_deferred_arena_changes);
+    for (auto& hold : m_clock_leases) {
+        visitor.visit(hold.document);
+        visitor.visit(hold.effects);
+    }
     if (!m_ticket)
         return;
     for (auto& submitted : m_ticket->navigables) {

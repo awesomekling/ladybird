@@ -14,6 +14,7 @@ mod rust_allocator;
 #[path = "../../../RustPanic.rs"]
 mod rust_panic;
 
+pub mod clock_frames;
 mod encoding_detection;
 mod font_seal;
 pub use libcompositing_rust::fast_hash;

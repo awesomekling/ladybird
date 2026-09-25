@@ -832,6 +832,10 @@ void EventLoop::update_the_rendering()
         document->evaluate_media_queries_and_report_changes();
     }
 
+    // LIBWEB_RENDER_CLOCK_FRAMES: A clock lease this rendering update cannot tick ends before step 11, which then
+    // samples the lease's effects itself.
+    m_frame_scheduler->prepare_clock_ticks(docs, frame_timestamp);
+
     // 11. For each doc of docs, update animations and send events for doc, passing in relative high resolution time given frameTimestamp and doc's relevant global object as the timestamp [WEBANIMATIONS]
     for (auto& document : docs) {
         document->update_animations_and_send_events(relative_frame_timestamp_for(frame_timestamp, *document));
@@ -873,6 +877,14 @@ void EventLoop::update_the_rendering()
     documents.ensure_capacity(docs.size());
     for (auto& document : docs)
         documents.unchecked_append(*document);
+
+    // LIBWEB_RENDER_CLOCK_FRAMES: Each leased document's tick samples the effects step 11 left to its lease, beside the
+    // main thread, and the rendering update goes on at step 16 once every document has adopted its tick.
+    if (m_frame_scheduler->tick_clock_leases(documents, 0, frame_timestamp, m_rendering_update_may_overlap_layout)) {
+        frame_in_flight = true;
+        return;
+    }
+
     frame_in_flight = run_rendering_update_from_step_16(documents, 0, frame_timestamp, LayoutSubmission::MaySubmit);
 }
 
@@ -1219,6 +1231,10 @@ void EventLoop::end_rendering_update()
 
     for (auto const& page : pages_of_local_roots())
         page->client().did_finish_rendering_update();
+
+    // LIBWEB_RENDER_CLOCK_FRAMES: The next rendering update of a document that has nothing but its animations to show
+    // ticks them under a clock lease.
+    m_frame_scheduler->grant_clock_leases();
 
     auto const& current = m_rendering_scheduler_counters;
     auto const& previous = m_rendering_scheduler_counters_at_last_update;

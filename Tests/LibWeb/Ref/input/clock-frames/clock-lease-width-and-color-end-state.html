@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html class="reftest-wait">
+<link rel="match" href="../../expected/clock-frames/clock-lease-width-and-color-end-state-ref.html">
+<style>
+    body { margin: 0; }
+    #box {
+        width: 50px;
+        height: 40px;
+        background-color: rgb(0, 0, 0);
+        animation: grow 400ms linear forwards;
+    }
+    #after { width: fit-content; height: 20px; background-color: green; }
+    #row { display: flex; }
+    @keyframes grow {
+        from { width: 50px; background-color: rgb(0, 0, 0); }
+        to { width: 250px; background-color: rgb(0, 0, 200); }
+    }
+</style>
+<div id="row"><div id="box"></div><div id="after">after</div></div>
+<script>
+    // Under LIBWEB_RENDER_CLOCK_FRAMES, a clock lease ticks the animation until it ends, and the main thread takes
+    // over for its end. What the ticks installed in the layout arena leaves nothing behind the end state shows.
+    // Timers only: an animation frame callback would end the lease.
+    const box = document.getElementById("box");
+    const ticksBefore = window.internals ? internals.clockTicksPresented() : 0;
+    box.addEventListener("animationend", () => {
+        // Under the variable, no tick at all fails the match.
+        if (window.internals && internals.clockFramesEnabled() && internals.clockTicksPresented() === ticksBefore)
+            document.getElementById("after").style.backgroundColor = "red";
+        setTimeout(() => document.documentElement.classList.remove("reftest-wait"), 50);
+    });
+</script>
