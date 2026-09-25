@@ -418,15 +418,6 @@ enum FrameJoin {
     /// loop over its elements, and a tree update mark is set on the DOM node, which widens it to
     /// what the node's layout node and its document ask for.
     Style,
-    /// What a layout tree build the frame has walked needs the document for before the pass that
-    /// follows it: the pass's sources, the replaced content facts the document still reads from
-    /// the shell of an object's box showing an SVG document. A build no pass follows has no such
-    /// join. The build's host half
-    /// (the shells of the rows the walk freed and of the new rows whose making tells the document
-    /// something, the box presence it changed, the DOM nodes its commit messages resolve to, a new
-    /// viewport's paint state) waits for the next join, and the style resources and generated
-    /// image providers of its new rows for the frame to be over.
-    BuildLayoutTree,
     /// Whether style or layout work is still pending once the loop has run out of rounds, after the
     /// marks a last build left, as the style join would have set them. A loop that stabilizes has
     /// these facts from the document thread's take-in of the frame's end already.
@@ -444,9 +435,8 @@ struct FrameInputs {
     trace: UpdateLayoutTrace,
 }
 
-/// What a layout pass reads from the document ahead of it: the replaced content enrolled for sync.
-/// The join the pass follows reads it, so the pass itself prepares the arena without the document
-/// thread.
+/// What a layout pass takes ahead of it: what the facts of the replaced content enrolled for sync
+/// are derived from, read in the frame once the round's tree build, if any, has run.
 struct LayoutPassSources {
     content: EnrolledContentSources,
 }
@@ -454,7 +444,7 @@ struct LayoutPassSources {
 impl LayoutPassSources {
     /// # Safety
     ///
-    /// As for [`arena`], on the document thread.
+    /// As for [`arena`].
     unsafe fn read(arena_handle: *mut c_void) -> Self {
         // SAFETY: Guaranteed by the caller.
         unsafe {
@@ -819,8 +809,11 @@ impl LayoutFrame {
         }
     }
 
-    /// Walks the tree build the style join readied, in the frame. Its host half is left to the
-    /// BuildLayoutTree join.
+    /// Walks the tree build the style join readied, in the frame. Its host half (the shells of the
+    /// rows the walk freed and of the new rows whose making tells the document something, the box
+    /// presence it changed, the DOM nodes its commit messages resolve to, a new viewport's paint
+    /// state) is left to the next join, and the style resources and generated image providers of
+    /// its new rows to the end of the frame.
     fn walk_layout_tree_build(&mut self) -> (WalkedLayoutTreeBuild, TreeBuildHostHalf) {
         let document_style_node = self
             .tree_build_document_style_node
@@ -1021,7 +1014,6 @@ impl LayoutFrame {
             let mut needs_layout_tree_rebuild = self.needs_layout_tree_rebuild(&facts);
 
             match self.try_partial_relayout(
-                joins,
                 &facts,
                 &mut registered_partial_relayout_roots,
                 &mut needs_layout_tree_rebuild,
@@ -1042,14 +1034,8 @@ impl LayoutFrame {
                     self.reconcile_stale_list_item_counters(&walked);
                 }
                 let pass_follows = !needs_another_build_pass && self.list_owners_to_rebuild.is_empty();
-                // Only the sources of a pass that follows are read on the document thread; the
-                // host half waits for the join after them.
-                let pass_sources = pass_follows.then(|| {
-                    self.join(joins, FrameJoin::BuildLayoutTree, |_, _| {
-                        // SAFETY: The frame runs for the update the arena is in.
-                        unsafe { LayoutPassSources::read(arena_handle) }
-                    })
-                });
+                // SAFETY: The frame runs for the update the arena is in.
+                let pass_sources = pass_follows.then(|| unsafe { LayoutPassSources::read(arena_handle) });
                 self.owe_tree_build_host_half(host_half);
                 self.note_layout_tree_build(&walked.outcome);
                 if needs_another_build_pass {
@@ -1134,7 +1120,6 @@ impl LayoutFrame {
     /// the full layout path without rebuilding again; `facts` then holds the facts after the build.
     fn try_partial_relayout(
         &mut self,
-        joins: &crate::stage_thread::MainJoins<'_>,
         facts: &FfiLayoutUpdateDocumentFacts,
         registered_partial_relayout_roots: &mut Vec<NodeSlotId>,
         needs_layout_tree_rebuild: &mut bool,
@@ -1160,16 +1145,11 @@ impl LayoutFrame {
             self.reconcile_stale_list_item_counters(&walked);
             let counters_were_stale = !self.list_owners_to_rebuild.is_empty();
             let pass_follows = !counters_were_stale && !needs_another_build_pass;
-            // As after a full layout's build, only the sources of a pass that follows are read on
-            // the document thread, and the host half waits for the join after them. What paying
-            // it changes (it can resize this document's viewport through its embedding document)
-            // is left for that join to find.
-            let pass_sources = pass_follows.then(|| {
-                self.join(joins, FrameJoin::BuildLayoutTree, |_, _| {
-                    // SAFETY: The frame runs for the update the arena is in.
-                    unsafe { LayoutPassSources::read(arena_handle) }
-                })
-            });
+            // As after a full layout's build, the host half waits for the next join, which finds
+            // what paying it changes (it can resize this document's viewport through its embedding
+            // document).
+            // SAFETY: The frame runs for the update the arena is in.
+            let pass_sources = pass_follows.then(|| unsafe { LayoutPassSources::read(arena_handle) });
             self.owe_tree_build_host_half(host_half);
             self.note_layout_tree_build(&walked.outcome);
             *needs_layout_tree_rebuild = false;
