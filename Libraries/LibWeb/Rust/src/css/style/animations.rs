@@ -1529,8 +1529,11 @@ pub(crate) fn composite_order(a: &AnimationTimingRow, b: &AnimationTimingRow) ->
 /// The current time each of the document's animation timelines was sampled at when the style
 /// update began. A timeline's time is a cached value that only the rendering loop moves, so one
 /// sample serves the whole update.
-#[derive(Default)]
-pub(crate) struct AnimationTimelineSamples {
+///
+/// The engine keeps the samples the host published, but no sample reads them there: each entry
+/// point that samples takes the samples it samples at from its caller, and hands them down.
+#[derive(Clone, Default)]
+pub struct AnimationTimelineSamples {
     samples: HashMap<u32, Option<TimeValue>>,
 }
 
@@ -1555,6 +1558,18 @@ impl AnimationTimelineSamples {
     #[must_use]
     pub(crate) fn sample(&self, identity: u32) -> Option<Option<TimeValue>> {
         self.samples.get(&identity).copied()
+    }
+
+    /// Whether every timeline both sample sets name was sampled at the same time. A timeline the
+    /// update associates later is sampled as it is associated, so either set may name more.
+    #[must_use]
+    pub(crate) fn agree_with(&self, other: &Self) -> bool {
+        self.samples.iter().all(|(identity, sample)| {
+            other
+                .samples
+                .get(identity)
+                .is_none_or(|other_sample| other_sample == sample)
+        })
     }
 }
 

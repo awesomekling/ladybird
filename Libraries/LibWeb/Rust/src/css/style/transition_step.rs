@@ -183,6 +183,7 @@ impl RetainedState {
         old_style_record: u64,
         installed_style_record: u64,
         committed_boxes: super::animations::CommittedTransformReferenceBoxes,
+        timeline_samples: &super::animations::AnimationTimelineSamples,
     ) -> Result<TransitionStep, &'static str> {
         const IN_DISPLAY_NONE_SUBTREE: u8 = 1 << 2;
         let pseudo_kind = pseudo.unwrap_or(u8::MAX);
@@ -265,7 +266,7 @@ impl RetainedState {
             let row = rows
                 .iter()
                 .find(|row| row.effect_identity() == transition.running_effect_identity())?;
-            let time = row_timeline_time(row, &self.animation_timeline_samples)?;
+            let time = row_timeline_time(row, timeline_samples)?;
             row_plays_unfinished(row, time)?.then_some((row, time))
         };
         // A running transition whose effect script replaced reverses with the easing of the effect
@@ -434,6 +435,7 @@ impl StyleEngineState {
     /// when it installs the row, and compose what the transitions it starts and removes leave of the
     /// composition the row installs: the host then applies the decisions, and installs the
     /// composition as the row's. A step the engine cannot decide or compose is left to the host.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn decide_settled_row_transition_step(
         &mut self,
         node: StyleNodeID,
@@ -441,6 +443,7 @@ impl StyleEngineState {
         settled_style_record: u64,
         installed_style_record: u64,
         committed_boxes: super::animations::CommittedTransformReferenceBoxes,
+        timeline_samples: &super::animations::AnimationTimelineSamples,
         counters: &mut super::Counters,
     ) {
         match self.decide_and_compose_transition_step(
@@ -450,6 +453,7 @@ impl StyleEngineState {
             settled_style_record,
             installed_style_record,
             committed_boxes,
+            timeline_samples,
             counters,
         ) {
             Ok((step, _)) => {
@@ -474,6 +478,7 @@ impl StyleEngineState {
         settled_style_record: u64,
         installed_style_record: u64,
         committed_boxes: super::animations::CommittedTransformReferenceBoxes,
+        timeline_samples: &super::animations::AnimationTimelineSamples,
         counters: &mut super::Counters,
     ) -> Option<u64> {
         // The host runs the step of a pseudo-element that had a record, or whose new one
@@ -492,6 +497,7 @@ impl StyleEngineState {
             settled_style_record,
             installed_style_record,
             committed_boxes,
+            timeline_samples,
             counters,
         ) {
             Ok((step, composition)) => {
@@ -512,6 +518,7 @@ impl StyleEngineState {
     /// for it, as the host would decide it now, and publish what the step leaves of it: the host
     /// takes the decisions and installs the composition. `Ok(None)` where the step moves nothing
     /// the record composed; or why the engine cannot.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn decide_installed_record_transition_step(
         &mut self,
         node: StyleNodeID,
@@ -519,6 +526,7 @@ impl StyleEngineState {
         before_change_style_record: u64,
         installed_style_record: u64,
         committed_boxes: super::animations::CommittedTransformReferenceBoxes,
+        timeline_samples: &super::animations::AnimationTimelineSamples,
         counters: &mut super::Counters,
     ) -> Result<Option<super::engine_sample::SettledRowPublication>, String> {
         let pseudo_kind = pseudo.unwrap_or(u8::MAX);
@@ -536,6 +544,7 @@ impl StyleEngineState {
             settled_style_record,
             installed_style_record,
             committed_boxes,
+            timeline_samples,
             counters,
         )?;
         match pseudo {
@@ -580,10 +589,17 @@ impl StyleEngineState {
         settled_style_record: u64,
         installed_style_record: u64,
         committed_boxes: super::animations::CommittedTransformReferenceBoxes,
+        timeline_samples: &super::animations::AnimationTimelineSamples,
         counters: &mut super::Counters,
     ) -> Result<(TransitionStepForHost, Option<u64>), String> {
-        let step =
-            self.decide_transition_step(node, pseudo, old_style_record, installed_style_record, committed_boxes)?;
+        let step = self.decide_transition_step(
+            node,
+            pseudo,
+            old_style_record,
+            installed_style_record,
+            committed_boxes,
+            timeline_samples,
+        )?;
         if step.started.is_empty() && step.removed.is_empty() {
             return Ok((step.for_host, None));
         }
@@ -596,6 +612,7 @@ impl StyleEngineState {
             removed,
             &step.started,
             committed_boxes,
+            timeline_samples,
         )?;
         let composition = self.publish_transition_step_composition(
             node,

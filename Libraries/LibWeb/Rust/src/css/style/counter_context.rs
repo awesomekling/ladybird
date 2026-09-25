@@ -519,24 +519,28 @@ impl StyleEngine {
         root: StyleNodeID,
         emit: impl FnMut(StyleTransactionVersion, ProgramVersion, &[PublishedStyleDeltaRecord]),
     ) -> bool {
+        let timeline_samples = self.state.animation_timeline_samples().clone();
         self.state.take_style_transaction(
             root,
             emit,
             &mut self.counters,
             super::animations::CommittedTransformReferenceBoxes::NONE,
+            &timeline_samples,
         )
     }
 
-    /// Take the pending style transaction with the committed boxes its pass samples against.
+    /// Take the pending style transaction with the committed boxes and timeline samples its pass
+    /// samples against.
     #[inline]
     pub(crate) fn take_style_transaction_with_committed_boxes(
         &mut self,
         root: StyleNodeID,
         committed_boxes: super::animations::CommittedTransformReferenceBoxes,
+        timeline_samples: &super::animations::AnimationTimelineSamples,
         emit: impl FnMut(StyleTransactionVersion, ProgramVersion, &[PublishedStyleDeltaRecord]),
     ) -> bool {
         self.state
-            .take_style_transaction(root, emit, &mut self.counters, committed_boxes)
+            .take_style_transaction(root, emit, &mut self.counters, committed_boxes, timeline_samples)
     }
 
     #[inline]
@@ -1149,6 +1153,7 @@ impl StyleEngine {
         before_change_style_record: u64,
         installed_style_record: u64,
         layout_arena: super::animations::CommittedTransformReferenceBoxes,
+        timeline_samples: &super::animations::AnimationTimelineSamples,
     ) -> Result<Option<super::engine_sample::SettledRowPublication>, String> {
         self.state.decide_installed_record_transition_step(
             node,
@@ -1156,6 +1161,7 @@ impl StyleEngine {
             before_change_style_record,
             installed_style_record,
             layout_arena,
+            timeline_samples,
             &mut self.counters,
         )
     }
@@ -1168,9 +1174,16 @@ impl StyleEngine {
         pseudo: Option<u8>,
         style_record: u64,
         layout_arena: super::animations::CommittedTransformReferenceBoxes,
+        timeline_samples: &super::animations::AnimationTimelineSamples,
     ) -> Result<super::engine_sample::SettledRowPublication, String> {
-        self.state
-            .sample_installed_record(node, pseudo, style_record, layout_arena, &mut self.counters)
+        self.state.sample_installed_record(
+            node,
+            pseudo,
+            style_record,
+            layout_arena,
+            timeline_samples,
+            &mut self.counters,
+        )
     }
 
     /// Publish the immutable computed-group payloads of one element's base style. This assigns

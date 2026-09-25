@@ -1517,6 +1517,7 @@ impl StyleEngineState {
         &mut self,
         rows: &[PublishedStyleDeltaRecord],
         committed_boxes: super::animations::CommittedTransformReferenceBoxes,
+        timeline_samples: &super::animations::AnimationTimelineSamples,
         counters: &mut Counters,
     ) -> Vec<PublishedStyleDeltaRecord> {
         let owed = std::mem::take(&mut self.retained.pseudo_settles_owed);
@@ -1543,8 +1544,14 @@ impl StyleEngineState {
             self.forget_pseudo_elements_sampled_in_pass(node);
             let (mut settled, uses_substitution) =
                 self.settle_pseudo_records_after_host_record(node, old_is_list_item, counters);
-            let (sampled, _) =
-                self.sample_settled_pseudo_elements(node, &mut settled, &held, committed_boxes, counters);
+            let (sampled, _) = self.sample_settled_pseudo_elements(
+                node,
+                &mut settled,
+                &held,
+                committed_boxes,
+                timeline_samples,
+                counters,
+            );
             for (kind, &record) in settled.pseudo_records.iter().enumerate() {
                 if (settled.pseudo_records_present >> kind) & 1 != 0 && record != 0 {
                     self.name_settled_pseudo_element_environment(node, kind as u8, record);

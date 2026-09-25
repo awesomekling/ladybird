@@ -3835,12 +3835,21 @@ pub unsafe extern "C" fn style_engine_sample_installed_record(
         };
         let pseudo = (pseudo_kind != u8::MAX).then_some(pseudo_kind);
         let layout_arena = unsafe { super::animations::CommittedTransformReferenceBoxes::lend(layout_arena) };
+        // The host samples at the times it published.
+        let timeline_samples = engine.animation_timeline_samples().clone();
         let owns_slot = engine
             .computed_group_sets
             .owns_animation_overlay_slot(super::computed::ComputedStyleTarget::new(style_node, pseudo_kind));
         let sampled = match owns_slot {
-            true => engine.sample_installed_record(style_node, pseudo, style_record, layout_arena),
-            false => sample_record_without_overlay_slot(engine, style_node, pseudo_kind, style_record, layout_arena),
+            true => engine.sample_installed_record(style_node, pseudo, style_record, layout_arena, &timeline_samples),
+            false => sample_record_without_overlay_slot(
+                engine,
+                style_node,
+                pseudo_kind,
+                style_record,
+                layout_arena,
+                &timeline_samples,
+            ),
         };
         match sampled {
             Ok(published) => {
@@ -3864,6 +3873,7 @@ fn sample_record_without_overlay_slot(
     pseudo_kind: u8,
     style_record: u64,
     layout_arena: super::animations::CommittedTransformReferenceBoxes,
+    timeline_samples: &super::animations::AnimationTimelineSamples,
 ) -> Result<super::engine_sample::SettledRowPublication, String> {
     let pseudo = (pseudo_kind != u8::MAX).then_some(pseudo_kind);
     let sample = crate::css::style_compute::sample_settled_row(
@@ -3874,6 +3884,7 @@ fn sample_record_without_overlay_slot(
         Some(style_record),
         None,
         layout_arena,
+        timeline_samples,
     )?;
     if !sample.animated_custom_properties.is_empty() {
         return Err("a sample without an overlay slot that animates custom properties".into());
@@ -3988,12 +3999,15 @@ pub unsafe extern "C" fn style_engine_decide_transition_step_for_installed_recor
         };
         let pseudo = (pseudo_kind != u8::MAX).then_some(pseudo_kind);
         let layout_arena = unsafe { super::animations::CommittedTransformReferenceBoxes::lend(layout_arena) };
+        // The host steps at the times it published.
+        let timeline_samples = engine.animation_timeline_samples().clone();
         match engine.decide_installed_record_transition_step(
             style_node,
             pseudo,
             before_change_style_record,
             installed_style_record,
             layout_arena,
+            &timeline_samples,
         ) {
             Ok(published) => {
                 super::engine_sample_check::note_taken("installed record transition step");
@@ -5020,7 +5034,11 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
     let engine_on_stage = &mut *engine;
     // SAFETY: The host passes its document's live layout arena, or null, and blocks on the stage.
     let committed_boxes = unsafe { super::animations::CommittedTransformReferenceBoxes::lend(layout_arena) };
-    let output = crate::stage_thread::run_stage(move || run_style_pass(engine_on_stage, root, committed_boxes));
+    // The pass samples at the times the host published for this update.
+    let timeline_samples = engine_on_stage.animation_timeline_samples().clone();
+    let output = crate::stage_thread::run_stage(move || {
+        run_style_pass(engine_on_stage, root, committed_boxes, &timeline_samples)
+    });
     finish_style_transaction(engine, root, output)
 }
 
@@ -5065,12 +5083,14 @@ pub unsafe extern "C" fn style_engine_submit_style_transaction(
     let snapshot = unsafe {
         super::animations::CommittedTransformReferenceBoxSnapshot::take(layout_arena, engine.state.animated_nodes())
     };
+    // It takes along the times the host published for this update as well, which it samples at.
+    let timeline_samples = engine.animation_timeline_samples().clone();
     let pass = move || {
         // SAFETY: The frame in flight owns the engine until the main thread takes it back.
         let engine = unsafe { &mut *engine_on_stage.into_inner() };
         // SAFETY: The pass owns the snapshot for as long as it runs.
         let committed_boxes = unsafe { super::animations::CommittedTransformReferenceBoxes::taken_along(&snapshot) };
-        let output = run_style_pass(engine, root, committed_boxes);
+        let output = run_style_pass(engine, root, committed_boxes, &timeline_samples);
         engine.host.submitted_style_pass_output = Some((root, Box::new(output)));
     };
     // SAFETY: As above.
@@ -5158,12 +5178,14 @@ fn run_style_pass(
     engine: &mut StyleEngine,
     root: StyleNodeID,
     committed_boxes: super::animations::CommittedTransformReferenceBoxes,
+    timeline_samples: &super::animations::AnimationTimelineSamples,
 ) -> FfiStyleTransactionOutput {
     let mut output = FfiStyleTransactionOutput::default();
     let emitted = &mut output;
     let scoped = engine.take_style_transaction_with_committed_boxes(
         root,
         committed_boxes,
+        timeline_samples,
         |transaction_version, program_version, answers| {
             assert!(
                 emitted.answers.is_empty(),
