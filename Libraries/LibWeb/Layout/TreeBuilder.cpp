@@ -262,11 +262,6 @@ u32 prepare_layout_tree_build(DOM::Document& document)
     return document.style_node_id().value();
 }
 
-RustFFI::FfiLayoutTreeBuildOutcome pay_layout_tree_build(DOM::Document& document, void* walk)
-{
-    return RustFFI::rust_pay_layout_tree_build(document.layout_node_arena().handle(), walk);
-}
-
 void detach_top_layer_element_layout_subtree(DOM::Element& element)
 {
     RustFFI::rust_detach_top_layer_element_layout_subtree(
