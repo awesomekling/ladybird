@@ -1485,6 +1485,32 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
     true
 }
 
+/// Publishes the arena's pending recording from the presentation stage of the frame in flight
+/// (LIBWEB_RENDER_PRESENTS=1), as `layout_arena_publish_recording` does on the main thread. Returns
+/// the generation of the hit-test list the recording made, or 0 if there was nothing to publish.
+///
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, owned by the frame in flight whose
+/// presentation stage calls this; the callbacks in `publish` are called synchronously with their
+/// context, which the host lent that stage.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_publish_recording_in_frame(
+    arena: *mut c_void,
+    publish: crate::painting::host::FfiRecordingPublishCallbacks,
+) -> u64 {
+    let arena = unsafe { arena_from_handle(arena) };
+    let Some(pending) = arena.paint_state().borrow_mut().pending_recording.take() else {
+        return 0;
+    };
+    let publish = crate::painting::host::RecordingPublishHost::from(publish);
+    // SAFETY: Guaranteed by the caller: this is the frame's presentation stage.
+    let presentation = unsafe { crate::painting::host::FramePresentation::new() };
+    // NB: The published-rows verifier keeps its baseline per thread, on the main thread; it sees this
+    //     publication as the rows the next main-side publication finds.
+    crate::painting::record::publish::publish_recording(arena, pending, &presentation, &publish)
+}
+
 /// Runs `handoff(context)`, which hands a navigable's finished frame to its compositor frame sink,
 /// as a render stage: on the stage thread under `LIBWEB_STAGE_THREAD=lockstep` or `overlap`, here
 /// otherwise.

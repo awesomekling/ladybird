@@ -55,6 +55,9 @@ public:
     // Sends what the compositor must receive before `frame`, and returns the sink that hands `frame` over, from any
     // thread. Null if there is no compositor to hand it to.
     RefPtr<CompositorFrameSink> prepare_to_submit_frame(CompositorFrame const&);
+    // Sends what the compositor must receive before a frame the render side presents later, and returns the sink the
+    // render side hands it to. What is queued for the compositor after this reaches it after that frame.
+    RefPtr<CompositorFrameSink> prepare_to_submit_frame_from_render_side();
     void add_video_sink(Media::VideoSinkHandle);
     void remove_video_sink(Media::VideoSinkHandle);
     void set_video_sink_ticking(Media::VideoSinkHandle, bool should_tick);

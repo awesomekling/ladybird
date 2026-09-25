@@ -6544,6 +6544,8 @@ void LocalNavigable::destroy_compositor_context()
     // A frame in flight may hand a frame to the context once it is taken in, so the context is retired first.
     if (has_compositor_context())
         Layout::RustFFI::rust_retire_compositor_context(compositor_context().id().value());
+    // The retirement took in a frame in flight that presents to the context.
+    VERIFY(!m_presenter->is_lent_to_frame_in_flight());
     clear_parent_compositor_context();
     m_compositor_context.clear();
 }
@@ -6565,6 +6567,7 @@ void LocalNavigable::repaint_after_compositor_process_reconnect()
         // What a frame in flight hands the context goes to the compositor process that went away, and the retained
         // display list below is forgotten, so the frame is taken in first.
         Layout::RustFFI::rust_retire_compositor_context(compositor_context().id().value());
+        VERIFY(!m_presenter->is_lent_to_frame_in_flight());
         if (auto parent = this->parent()) {
             if (auto* local_parent = as_if<LocalNavigable>(*parent)) {
                 if (local_parent->has_compositor_context())
@@ -6579,7 +6582,7 @@ void LocalNavigable::repaint_after_compositor_process_reconnect()
 
         m_needs_repaint = true;
         m_needs_to_record_display_list = true;
-        m_presenter->forget_compositor_display_list();
+        presenter().forget_compositor_display_list();
     }
 
     for (auto const& child_navigable : child_navigables())
@@ -6731,7 +6734,7 @@ Optional<LocalNavigable::PendingCompositorFrame> LocalNavigable::begin_composito
         paint_config.canvas_fill_rect = Gfx::IntRect { {}, viewport_size };
     }
 
-    auto const& compositor_display_list_paint_config = m_presenter->compositor_display_list_paint_config();
+    auto const& compositor_display_list_paint_config = presenter().compositor_display_list_paint_config();
     auto should_record_display_list = m_needs_to_record_display_list
         || !compositor_display_list_paint_config.has_value()
         || !(compositor_display_list_paint_config.value() == paint_config);
@@ -6751,7 +6754,7 @@ Optional<LocalNavigable::PendingCompositorFrame> LocalNavigable::begin_composito
         .presentation = {},
     };
     if (should_record_display_list) {
-        auto recording = document->begin_display_list_recording(paint_config, m_presenter->resource_storage(), Painting::PaintCommandCacheMode::ReadWrite, run);
+        auto recording = document->begin_display_list_recording(paint_config, presenter().resource_storage(), Painting::PaintCommandCacheMode::ReadWrite, run);
         if (!recording.has_value())
             return {};
         pending_frame.recording = make<Painting::PendingDisplayListRecording>(recording.release_value());
@@ -6780,7 +6783,7 @@ RefPtr<Compositor::Presentation> LocalNavigable::seal_presentation(PendingCompos
         visual_context_tree = pending_frame.recording->visual_context_tree;
     } else if (visual_context_tree_needs_compositor_update) {
         visual_context_tree = document_paint_state.visual_context_tree(document);
-        Painting::add_published_svg_filter_image_frames(document, m_presenter->resource_storage());
+        Painting::add_published_svg_filter_image_frames(document, presenter().resource_storage());
     }
     // An update the frame takes to the compositor is taken now; what changes the tree after this is the next frame's.
     if (visual_context_tree_needs_compositor_update)
@@ -6805,8 +6808,12 @@ RefPtr<Compositor::Presentation> LocalNavigable::seal_presentation(PendingCompos
         document_paint_state.display_list_used_as_paint_command_cache_source()));
 }
 
-Compositor::NavigablePresenter& LocalNavigable::presenter()
+Compositor::NavigablePresenter& LocalNavigable::presenter(SourceLocation location)
 {
+    // The frame in flight presents from the presenter until it is taken in.
+    if (m_presenter->is_lent_to_frame_in_flight())
+        Layout::RustFFI::rust_stage_thread_join_frame_in_flight(reinterpret_cast<u8 const*>(location.filename().characters_without_null_termination()), location.filename().length(), location.line_number());
+    VERIFY(!m_presenter->is_lent_to_frame_in_flight());
     return *m_presenter;
 }
 
@@ -6856,6 +6863,9 @@ Optional<Compositor::CompositorFrame> LocalNavigable::finish_compositor_frame(Pe
     if (should_record_display_list) {
         auto* paint_command_cache_source = sealed ? sealed->paint_command_cache_source.ptr() : document_paint_state.display_list_used_as_paint_command_cache_source();
         published = Painting::publish_rust_display_list_recording(*pending_frame.recording, paint_command_cache_source, inputs.paint_command_cache_source_resources, *source);
+        // NB: A sealed source reaches no document when the recording is published, so the trace is taken here.
+        if (sealed)
+            Painting::take_recording_trace_if_pending(document);
         document->adopt_published_recording(*pending_frame.recording, *published);
         VERIFY(document->has_committed_viewport_box());
         if (published->becomes_paint_command_cache_source)
@@ -6863,7 +6873,7 @@ Optional<Compositor::CompositorFrame> LocalNavigable::finish_compositor_frame(Pe
     }
 
     VERIFY(document->has_committed_viewport_box());
-    auto frame = m_presenter->build_frame(inputs, *source, move(published));
+    auto frame = presenter().build_frame(inputs, *source, move(published));
     // The recording painted an SVG-as-image the main thread had not rendered yet as an empty image. It renders the
     // image before the next recording, which paints it.
     if (should_record_display_list && Painting::last_recording_missed_vector_images(*document))
@@ -6921,8 +6931,76 @@ Optional<LocalNavigable::PendingCompositorFrame> LocalNavigable::begin_painting_
     return pending_frame;
 }
 
+// The presentation stage of the frame in flight: publishes the navigable's recording, builds its compositor frame from
+// the presenter lent to it and hands the frame to the compositor. Reaches no document: the presentation was sealed
+// where the rendering update began the frame.
+static void present_from_frame_in_flight(void* context)
+{
+    auto& presentation = *static_cast<Compositor::Presentation*>(context);
+    Optional<Compositor::PublishedDisplayList> published;
+    if (presentation.recording) {
+        published = Painting::publish_rust_display_list_recording_in_frame(*presentation.recording, presentation.paint_command_cache_source.ptr(), presentation.inputs.paint_command_cache_source_resources, presentation.source);
+        if (published->becomes_paint_command_cache_source)
+            presentation.inputs.paint_command_cache_source_resources = published->command_resources;
+        presentation.published = published;
+    }
+    auto frame = presentation.presenter->build_frame(presentation.inputs, presentation.source, move(published));
+    presentation.frame_sink->submit(move(frame));
+}
+
+bool LocalNavigable::submit_presentation(PendingCompositorFrame& pending_frame)
+{
+    auto presentation = pending_frame.presentation;
+    if (!presentation || !Layout::RustFFI::rust_stage_thread_submits_presentation() || !has_compositor_context())
+        return false;
+    // The frame in flight presents what it records; a recording made in place is finished here.
+    auto* recording = pending_frame.recording.ptr();
+    if (recording && recording->run != Painting::RecordingRun::InSubmittedFrame)
+        return false;
+    auto frame_sink = compositor_context().prepare_to_submit_frame_from_render_side();
+    if (!frame_sink)
+        return false;
+    presentation->presenter = presenter();
+    presentation->recording = recording;
+    if (recording)
+        presentation->render_state_generation = Layout::RustFFI::layout_arena_render_state_generation(recording->arena);
+    presentation->frame_sink = move(frame_sink);
+    presentation->is_presented_by_frame_in_flight = true;
+    m_presenter->lend_to_frame_in_flight();
+    Layout::RustFFI::rust_stage_thread_submit_presentation(recording ? recording->arena : nullptr, present_from_frame_in_flight, presentation.ptr());
+    return true;
+}
+
+// Takes in what the frame in flight presented: what its publication made, as finish_compositor_frame() does for a frame
+// finished here.
+void LocalNavigable::adopt_presented_frame(PendingCompositorFrame& pending_frame)
+{
+    auto& presentation = *pending_frame.presentation;
+    m_presenter->take_back_from_frame_in_flight();
+    if (!presentation.published.has_value())
+        return;
+    auto document = pending_frame.document;
+    auto& recording = *pending_frame.recording;
+    // A task beside the frame in flight retired the render state the recording was made for. The compositor has the
+    // frame already; the document takes nothing of it in, and what was marked beside it is what the next drain writes.
+    if (Layout::RustFFI::layout_arena_presented_frame_was_retired(recording.arena, presentation.render_state_generation) || !document->has_paint_state()) {
+        document->release_held_invalidation_marks();
+        return;
+    }
+    Painting::take_recording_trace_if_pending(document);
+    document->adopt_published_recording(recording, *presentation.published);
+    // The recording painted an SVG-as-image the main thread had not rendered yet as an empty image. It renders the
+    // image before the next recording, which paints it.
+    if (Painting::last_recording_missed_vector_images(*document))
+        document->set_needs_repaint(Badge<HTML::LocalNavigable> {}, InvalidateDisplayList::PaintCommands);
+}
+
 void LocalNavigable::finish_painting_next_frame(PendingCompositorFrame& pending_frame)
 {
+    if (pending_frame.presentation && pending_frame.presentation->is_presented_by_frame_in_flight) {
+        adopt_presented_frame(pending_frame);
+        return;
+    }
     auto frame = finish_compositor_frame(pending_frame);
     if (!frame.has_value())
         return;

@@ -296,7 +296,9 @@ void Internals::send_mismatched_visual_context_tree_update_to_compositor()
     document.update_paint_and_hit_testing_properties_if_needed();
 
     // Send a bare visual-context-tree update carrying that new structural epoch *without* re-recording the display list —
-    // deliberately reproducing the peer inconsistency behind issue #10368.
+    // deliberately reproducing the peer inconsistency behind issue #10368. A frame in flight that presents to the context
+    // is taken in first, so it does not land after this one.
+    (void)navigable->presenter();
     Compositor::CompositorFrame frame;
     frame.context_id = navigable->compositor_context().id();
     frame.visual_context_tree_update = Compositor::CompositorFrame::VisualContextTreeUpdate {

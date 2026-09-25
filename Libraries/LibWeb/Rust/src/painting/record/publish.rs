@@ -5,7 +5,7 @@
  */
 
 use crate::layout::LayoutNodeArena;
-use crate::painting::host::RecordingPublishHost;
+use crate::painting::host::{PublishesToHost, RecordingPublishHost};
 use crate::painting::paint_state::PendingRecording;
 use crate::painting::record::resources::RecordingResourceManifest;
 use crate::painting::record::{RecordingOutput, RecordingResult};
@@ -13,7 +13,7 @@ use crate::painting::record::{RecordingOutput, RecordingResult};
 pub(crate) fn publish_recording(
     arena: &LayoutNodeArena,
     pending: PendingRecording,
-    main_thread: &crate::stage::MainThread,
+    main_thread: &impl PublishesToHost,
     publish: &RecordingPublishHost,
 ) -> u64 {
     let PendingRecording {

@@ -587,22 +587,43 @@ impl From<FfiRecordingPublishCallbacks> for RecordingPublishHost {
     }
 }
 
+/// Proof that the caller may hand resources to a recording publication's host: the main thread, or
+/// the presentation stage of the frame in flight, which the navigable's resource storage is lent to.
+pub(crate) trait PublishesToHost {}
+
+impl PublishesToHost for crate::stage::MainThread<'_> {}
+
+/// The presentation stage of the frame in flight: it owns the arena whose recording it publishes,
+/// and the host lends it the resource storage the publication adds to until the frame is taken in.
+pub(crate) struct FramePresentation {
+    not_send_or_sync: std::marker::PhantomData<*const ()>,
+}
+
+impl FramePresentation {
+    /// # Safety
+    ///
+    /// Only the presentation stage of the frame in flight may mint this, while it runs.
+    pub(crate) unsafe fn new() -> Self {
+        Self {
+            not_send_or_sync: std::marker::PhantomData,
+        }
+    }
+}
+
+impl PublishesToHost for FramePresentation {}
+
 impl RecordingPublishHost {
-    pub(crate) fn add_font(&self, _: &crate::stage::MainThread, font: &libgfx_rust::font::FontHandle) {
+    pub(crate) fn add_font(&self, _: &impl PublishesToHost, font: &libgfx_rust::font::FontHandle) {
         // SAFETY: The C++ host registers the live font synchronously.
         unsafe { (self.add_font)(self.context, font.as_raw()) };
     }
 
-    pub(crate) fn add_image_frame(
-        &self,
-        _: &crate::stage::MainThread,
-        frame: &libgfx_rust::image_frame::ImageFrameHandle,
-    ) {
+    pub(crate) fn add_image_frame(&self, _: &impl PublishesToHost, frame: &libgfx_rust::image_frame::ImageFrameHandle) {
         // SAFETY: The C++ host copies the live frame synchronously.
         unsafe { (self.add_image_frame)(self.context, frame.as_raw()) };
     }
 
-    pub(crate) fn add_video_sink(&self, _: &crate::stage::MainThread, resource_id: u64, sink_handle: u64) {
+    pub(crate) fn add_video_sink(&self, _: &impl PublishesToHost, resource_id: u64, sink_handle: u64) {
         // SAFETY: The C++ host registers the sink synchronously.
         unsafe { (self.add_video_sink)(self.context, resource_id, sink_handle) };
     }

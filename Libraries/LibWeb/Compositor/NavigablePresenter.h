@@ -18,7 +18,15 @@
 #include <LibWeb/Export.h>
 #include <LibWeb/HTML/PaintConfig.h>
 
+namespace Web::Painting {
+
+struct PendingDisplayListRecording;
+
+}
+
 namespace Web::Compositor {
+
+class NavigablePresenter;
 
 // Whether the frame a navigable presents is sealed when the rendering update begins it (LIBWEB_RENDER_PRESENTS=1),
 // rather than read from its document where the frame is finished.
@@ -118,6 +126,17 @@ public:
     PresentationInputs inputs;
     // The paint command cache source a recording that is identical to it returns.
     RefPtr<Compositing::DisplayList> paint_command_cache_source;
+
+    // What the frame in flight presents with, once the rendering update has handed it the presentation: the presenter
+    // it presents from (lent to it until the frame is taken in), the recording it publishes (owned by the frame
+    // scheduler's ticket), and the sink it hands the frame to.
+    RefPtr<NavigablePresenter> presenter;
+    Painting::PendingDisplayListRecording* recording { nullptr };
+    u64 render_state_generation { 0 };
+    RefPtr<CompositorFrameSink> frame_sink;
+    bool is_presented_by_frame_in_flight { false };
+    // What the frame in flight published, for the main thread to take in.
+    Optional<PublishedDisplayList> published;
 };
 
 // What a navigable presents to its compositor context from: the resource storage its recordings add to, and the
@@ -148,6 +167,20 @@ public:
     // Forgets what the compositor context holds: a new compositor process holds nothing.
     void forget_compositor_display_list();
 
+    // Main thread only: whether the frame in flight presents from this presenter, which it owns until the main thread
+    // takes the frame in.
+    bool is_lent_to_frame_in_flight() const { return m_lent_to_frame_in_flight; }
+    void lend_to_frame_in_flight()
+    {
+        VERIFY(!m_lent_to_frame_in_flight);
+        m_lent_to_frame_in_flight = true;
+    }
+    void take_back_from_frame_in_flight()
+    {
+        VERIFY(m_lent_to_frame_in_flight);
+        m_lent_to_frame_in_flight = false;
+    }
+
     // Builds the frame that brings the compositor context up to date with `published` (or, if the frame recorded
     // nothing, with its source's tree and scroll state). Reaches no document but through `source`.
     CompositorFrame build_frame(PresentationInputs&, PresentationSource&, Optional<PublishedDisplayList> published);
@@ -161,6 +194,7 @@ private:
     u64 m_compositor_display_list_visual_context_tree_structural_epoch { 0 };
     Compositing::DisplayListResourceSet m_compositor_display_list_resources;
     Compositing::DisplayListResourceSet m_compositor_display_list_command_resources;
+    bool m_lent_to_frame_in_flight { false };
 };
 
 }

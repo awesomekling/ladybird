@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/AnyOf.h>
 #include <AK/Time.h>
 #include <LibCore/EventLoop.h>
 #include <LibWeb/Compositor/NavigablePresenter.h>
@@ -89,7 +90,15 @@ void FrameScheduler::add_to_ticket(LocalNavigable& navigable, LocalNavigable::Pe
         held_compositor_context = navigable.compositor_context().id().value();
         Layout::RustFFI::rust_frame_hold_compositor_context(*held_compositor_context);
     }
+    // Under LIBWEB_RENDER_PRESENTS=1, the frame in flight presents the frame once it has recorded it. Frames reach their
+    // compositor contexts in paint order, so once one frame of the ticket is presented by consume-commit instead, so
+    // are the frames after it.
+    bool const earlier_frame_is_presented_by_commit = any_of(m_ticket->navigables, [](auto const& entry) {
+        return !entry.frame.presentation || !entry.frame.presentation->is_presented_by_frame_in_flight;
+    });
     m_ticket->navigables.append({ navigable, move(frame), held_compositor_context });
+    if (!earlier_frame_is_presented_by_commit)
+        navigable.submit_presentation(m_ticket->navigables.last().frame);
 }
 
 bool FrameScheduler::submit()
