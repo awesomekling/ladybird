@@ -63,10 +63,11 @@ void Animation::set_effect(GC::Ptr<AnimationEffect> new_effect, ShouldInvalidate
         return;
 
     // NB: The old effect's element is recomputed and the new one's rows are published in several calls into the style
-    //     mirror the layout frame reads, so a change made beside the frame in flight waits for it first.
+    //     mirror the layout frame reads, so a change made beside a frame in flight that reaches the style engine waits
+    //     for it first. A recording reaches none.
     for (auto effect : { old_effect, new_effect }) {
         if (effect && effect->target())
-            effect->target()->document().join_frame_in_flight();
+            effect->target()->document().join_frame_reaching_style_engine();
     }
 
     // 3. If animation has a pending pause task, reschedule that task to run as soon as animation is ready.
