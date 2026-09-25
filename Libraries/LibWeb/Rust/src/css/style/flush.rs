@@ -3086,11 +3086,13 @@ impl StyleEngineState {
                     }
                 }
                 // A row that owes the whole transition step has it decided here, over the
-                // composition the row installs, which the host would decide it over.
+                // composition the row installs, which the host would decide it over. A row settled
+                // any other way, such as one driven again over its installed ancestors, has the
+                // host decide its step over the record it installs.
+                self.forget_transition_step_decided_in_pass(node);
                 if let Some((old_style_record, new_style_record)) = engine_computed_delta
                     && self.retained.nodes_owing_a_transition_registration.get(&node) == Some(&false)
                 {
-                    self.forget_transition_step_decided_in_pass(node);
                     // The host decides the step over its own sample of a row that animates or
                     // starts to, where the pass did not sample it.
                     let installed = match self.retained.rows_sampled_in_pass.get(&node) {
