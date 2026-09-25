@@ -939,6 +939,9 @@ pub enum FfiHostFactKind {
     ElementConstructionFacts = 9,
     /// `data` is a snapshot of the element's inline style declarations, or null for none.
     ElementInlineStyleProperties = 10,
+    /// The document takes the atom `facts` the host acquired for the raw name `data`, with the
+    /// reference the acquisition took. See `style_engine_acquire_host_atom`.
+    AdoptAtom = 11,
 }
 
 /// One write the host made to a fact of the mirror, which the engine applies with the next
@@ -1946,6 +1949,7 @@ unsafe fn apply_host_fact_writes(engine: &mut StyleEngine, writes: &[FfiHostFact
             FfiHostFactKind::ElementConstructionFacts => {
                 operations::set_element_construction_facts(engine, write.node, write.facts, write.value);
             }
+            FfiHostFactKind::AdoptAtom => engine.adopt_atom(write.data, StyleAtomID(write.facts)),
             FfiHostFactKind::ElementInlineStyleProperties => {
                 // SAFETY: The caller vouches that the write transfers one reference to the snapshot.
                 let data = (write.data != 0).then(|| unsafe {
@@ -4489,6 +4493,48 @@ pub unsafe extern "C" fn style_engine_intern_atom(engine: *mut c_void, raw: usiz
     let result = engine.intern_atom(raw);
     record_interned_atom(engine, raw, result);
     result.0
+}
+
+/// Acquires the process-global atom for a name the host holds, for the document to adopt with its
+/// next transaction (`FfiHostFactKind::AdoptAtom`). Touches no engine: the table is shared by every
+/// document and locked. `recording_stream` is the one the document's engine records under, or zero.
+///
+/// # Safety
+/// `raw` must be the one-word identity of an interned string the caller holds a reference to.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_acquire_host_atom(recording_stream: u64, raw: usize) -> u32 {
+    let atom = super::atoms::acquire_raw_for_adoption(raw);
+    // A replay interns the name where the host acquired it, which is where the atom was numbered.
+    #[cfg(feature = "style-recording")]
+    if recording_stream != 0 {
+        let token = super::record_replay::atom_pointer_token(raw);
+        super::record_replay::record_engine_event(recording_stream, EventKind::InternAtom, |payload| {
+            payload.write_u64(token);
+            payload.write_u32(atom.0);
+        });
+    }
+    #[cfg(not(feature = "style-recording"))]
+    let _ = recording_stream;
+    atom.0
+}
+
+/// Gives up an atom `style_engine_acquire_host_atom` acquired whose adoption never crossed.
+///
+/// # Safety
+/// `raw` and `atom` must be an acquisition that was not adopted.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_release_host_atom(raw: usize, atom: u32) {
+    super::atoms::release_raw_without_adoption(raw, StyleAtomID(atom));
+}
+
+/// The recording stream the engine records under, or zero. It is fixed when the engine is created.
+///
+/// # Safety
+/// `engine` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_recording_stream(engine: *const c_void) -> u64 {
+    let engine = unsafe { &*engine.cast::<StyleEngine>() };
+    engine.recording_id().unwrap_or(0)
 }
 
 pub(crate) fn intern_native_text(engine: &mut StyleEngine, units: &[u16]) -> StyleAtomID {

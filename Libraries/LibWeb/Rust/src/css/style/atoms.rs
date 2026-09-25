@@ -153,6 +153,25 @@ fn global_atoms() -> &'static Mutex<GlobalAtoms> {
     GLOBAL_ATOMS.get_or_init(|| Mutex::new(GlobalAtoms::default()))
 }
 
+/// Acquire the process-global atom for a name the host holds, for a document to adopt with its next
+/// transaction ([`DocumentAtoms::adopt_cpp_raw`]). The reference taken here is the one the adoption
+/// hands to the document, so the atom cannot be reclaimed and handed to another name in between.
+/// No document is touched: the table is shared by every document and locked.
+pub(super) fn acquire_raw_for_adoption(raw: usize) -> StyleAtomID {
+    global_atoms()
+        .lock()
+        .expect("process-global style atom lock is poisoned")
+        .acquire_raw(raw, RawAtomLifetime::RetainedFlyString)
+}
+
+/// Give up the reference [`acquire_raw_for_adoption`] took for an adoption that never happened.
+pub(super) fn release_raw_without_adoption(raw: usize, atom: StyleAtomID) {
+    global_atoms()
+        .lock()
+        .expect("process-global style atom lock is poisoned")
+        .release_raw(raw, atom);
+}
+
 #[derive(Clone, Copy)]
 enum AtomScope {
     #[cfg(test)]
@@ -289,6 +308,30 @@ impl DocumentAtoms {
     pub(super) fn intern_cpp_raw(&mut self, raw: usize) -> StyleAtomID {
         self.cpp_memoized_raws.insert(raw);
         self.intern_raw(raw)
+    }
+
+    /// Take into the document an atom the host acquired for it ([`acquire_raw_for_adoption`]), with
+    /// the reference the acquisition took. A document that interned the name itself meanwhile holds
+    /// a reference of its own already, and the acquisition's is given back.
+    pub(super) fn adopt_cpp_raw(&mut self, raw: usize, atom: StyleAtomID) {
+        self.cpp_memoized_raws.insert(raw);
+        match self.raw.entry(raw) {
+            Entry::Occupied(held) => {
+                assert_eq!(
+                    *held.get(),
+                    atom,
+                    "a raw name has one process-global atom while it is held"
+                );
+                match self.scope {
+                    #[cfg(test)]
+                    AtomScope::Document => {}
+                    AtomScope::Process(_) => release_raw_without_adoption(raw, atom),
+                }
+            }
+            Entry::Vacant(vacant) => {
+                vacant.insert(atom);
+            }
+        }
     }
 
     pub(super) fn intern_qualified(&mut self, namespace: StyleAtomID, name: StyleAtomID) -> StyleAtomID {

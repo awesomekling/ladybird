@@ -499,6 +499,11 @@ impl RetainedState {
         self.atoms.intern_cpp_raw(raw)
     }
 
+    /// Take into the document an atom the host acquired for one of its names.
+    pub fn adopt_atom(&mut self, raw: usize, atom: StyleAtomID) {
+        self.atoms.adopt_cpp_raw(raw, atom);
+    }
+
     /// Keep the atom a render-side publication names live for as long as the publication does.
     ///
     /// A published SVG reference names an id that may name no element at all, and an atom nothing
