@@ -1,0 +1,5 @@
+held as armed: true
+forced joins of the layout pass: 0
+layout pass still in flight after the adoption: true
+color: rgb(0, 0, 255)
+color after reordering: rgb(255, 0, 0)
