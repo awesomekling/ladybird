@@ -276,7 +276,7 @@ interface Internals {
     // The frame scheduler's state: "idle", "main-half", "in-flight", "consuming" or
     // "committed-tail-pending".
     DOMString frameSchedulerState();
-    // Whether the frame in flight presents the frames begun from now on (LIBWEB_RENDER_PRESENTS=1), overriding the
+    // Whether the frame in flight presents the frames begun from now on (unless LIBWEB_RENDER_PRESENTS=0), overriding the
     // environment until resetRenderPresents(). A test that sets it resets it.
     undefined setRenderPresents(boolean enabled);
     undefined resetRenderPresents();
