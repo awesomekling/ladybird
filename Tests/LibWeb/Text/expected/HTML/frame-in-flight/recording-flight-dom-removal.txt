@@ -1,0 +1,8 @@
+held as armed: true
+forced joins of the recording: 0
+recording still in flight after the removals: true
+container height: 20
+container text: first
+moved height: 10
+moved parent: target
+list children: 0

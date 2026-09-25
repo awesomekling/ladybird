@@ -27,6 +27,7 @@
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/Node.h>
 #include <LibWeb/HTML/AttributeNames.h>
+#include <LibWeb/HTML/EventLoop/FrameScheduler.h>
 #include <LibWeb/HTML/HTMLElement.h>
 #include <LibWeb/Layout/Box.h>
 #include <LibWeb/Layout/ImageProvider.h>
@@ -353,8 +354,10 @@ void publish_svg_style_references(DOM::Element& element)
 
 void clear_svg_attribute_facts(DOM::Document& document, CSS::StyleNodeID style_node)
 {
-    if (auto* arena = document.layout_node_arena_if_created())
-        RustFFI::layout_arena_clear_style_node_svg_attribute_facts(arena->handle(), style_node.value());
+    // Beside a recording that owns the arena, the facts leave with the rest of the removal's arena changes.
+    HTML::FrameScheduler::change_arena(document, [style_node](NodeArena& arena) {
+        RustFFI::layout_arena_clear_style_node_svg_attribute_facts(arena.handle(), style_node.value());
+    });
 }
 
 void register_layout_host(NodeArena& arena, DOM::Document& document)

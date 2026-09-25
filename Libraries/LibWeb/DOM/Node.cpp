@@ -63,6 +63,7 @@
 #include <LibWeb/Editing/EditingHistory.h>
 #include <LibWeb/HTML/CustomElements/CustomElementReactionNames.h>
 #include <LibWeb/HTML/CustomElements/CustomElementRegistry.h>
+#include <LibWeb/HTML/EventLoop/FrameScheduler.h>
 #include <LibWeb/HTML/FormAssociatedElement.h>
 #include <LibWeb/HTML/HTMLAreaElement.h>
 #include <LibWeb/HTML/HTMLDocument.h>
@@ -1359,9 +1360,6 @@ bool Node::list_item_box_change_renumbers_list(Element const& list_item)
 // found by the node's identity, so no shell is made just to pin it.
 static void pin_bound_box_style_record_for_detachment(Node& node, Optional<CSS::PseudoElement> pseudo_element = {})
 {
-    auto* arena = node.document().layout_node_arena_if_created();
-    if (!arena)
-        return;
     CSS::StyleNodeID style_node;
     if (auto const* element = as_if<Element>(node))
         style_node = element->style_node_id();
@@ -1370,7 +1368,11 @@ static void pin_bound_box_style_record_for_detachment(Node& node, Optional<CSS::
     else
         return;
     auto generated_for = pseudo_element.has_value() ? Layout::Node::encode_generated_for(*pseudo_element) : 0;
-    Layout::RustFFI::layout_arena_pin_bound_box_style_record_for_detachment(arena->handle(), style_node.value(), generated_for);
+    // Beside a recording that owns the arena, the pin waits for the frame with the rest of the removal's arena changes,
+    // ahead of the identity change that unbinds the row.
+    HTML::FrameScheduler::change_arena(node.document(), [style_node, generated_for](Layout::NodeArena& arena) {
+        Layout::RustFFI::layout_arena_pin_bound_box_style_record_for_detachment(arena.handle(), style_node.value(), generated_for);
+    });
 }
 
 class RemovalStyleRecordPins {
@@ -1526,8 +1528,7 @@ void Node::update_layout_tree_for_removal(Node& parent, LayoutSubtreeRemoval rem
 // retires their StyleNodeIDs, so anything the removal does to them has to happen before.
 void Node::detach_remaining_layout_nodes_for_removal()
 {
-    auto* arena = document().layout_node_arena_if_created();
-    if (!arena)
+    if (!document().layout_node_arena_if_created())
         return;
     for_each_shadow_including_inclusive_descendant([&](Node& node) {
         // A pseudo-element's box is found through its generator's identity, and a box that escaped
@@ -1541,7 +1542,11 @@ void Node::detach_remaining_layout_nodes_for_removal()
             style_node = text->style_node_id();
         else
             return TraversalDecision::Continue;
-        Layout::RustFFI::rust_detach_remaining_layout_rows_for_removal(arena->handle(), style_node.value());
+        // Beside a recording that owns the arena, the rows stay bound under the node's identity until the frame has
+        // been taken in, and are detached then, ahead of the identity change.
+        HTML::FrameScheduler::change_arena(document(), [style_node](Layout::NodeArena& arena) {
+            Layout::RustFFI::rust_detach_remaining_layout_rows_for_removal(arena.handle(), style_node.value());
+        });
         return TraversalDecision::Continue;
     });
 }
@@ -1673,7 +1678,9 @@ void Node::remove(bool suppress_observers)
     if (was_tracked_by_style_engine) {
         // A suppressed-observer removal may be the first half of a compound mutation that immediately reinserts
         // this node. Keep the old parent on the conservative rebuild path so the later insertion can relocate it.
-        auto layout_subtree_removal = suppress_observers ? LayoutSubtreeRemoval::RebuildParent : LayoutSubtreeRemoval::DetachInPlace;
+        // A removal beside a recording that owns the arena takes that path too: the recording reads the boxes, so
+        // they stay in place until the parent's rebuild.
+        auto layout_subtree_removal = suppress_observers || HTML::FrameScheduler::arena_changes_wait_for_frame(document()) ? LayoutSubtreeRemoval::RebuildParent : LayoutSubtreeRemoval::DetachInPlace;
         // Layout goes first: the removed rows resolve their DOM nodes through StyleNodeIDs the style engine retires.
         update_layout_tree_for_removal(*parent, layout_subtree_removal, AncestorsMayHaveFirstLetter::Yes);
         detach_remaining_layout_nodes_for_removal();
