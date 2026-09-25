@@ -1,0 +1,3 @@
+held as armed: true
+still held in the task: true
+after: rgb(0, 128, 0)

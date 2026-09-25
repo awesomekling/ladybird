@@ -221,9 +221,9 @@ interface Internals {
     // will hold one; it never does in the other modes. It holds the recording at `point`:
     // "before-run", "mid-recording" (holding the arena's paint state and scratch) or
     // "before-completion" (finished, before the main thread hears of it); with a document, only
-    // that document's recording. A main-thread wait for the recording releases it too, and a stage
-    // queued behind it (the layout update of a document painted after it) releases it and leaves
-    // the hold armed for the recordings submitted after that stage.
+    // that document's recording. A main-thread wait for the recording releases it too; a stage the
+    // main thread would queue behind it (the layout update of a document painted after it) runs on
+    // the main thread instead.
     boolean holdNextRecordingFrame(optional DOMString point = "before-run", optional Document? document = null);
     // Like holdNextRecordingFrame(), for the next full layout pass a rendering update submits, under
     // LIBWEB_STAGE_THREAD=overlap with LIBWEB_STAGE_OVERLAP naming "layout". It holds the pass at

@@ -453,7 +453,7 @@ struct ArmedHold {
 #[derive(Default)]
 struct StageHold {
     armed: Option<ArmedHold>,
-    // Runs submitted before this one are not held: the main thread has queued a stage behind them.
+    // Runs submitted before this one are not held: they were submitted before the hold was armed.
     first_holdable_run: u64,
     // The hold the stage thread is holding a run for.
     holding: Option<ArmedHold>,
@@ -555,15 +555,32 @@ fn release_hold_on(label: &'static str) {
     }
 }
 
-/// Called before the main thread queues a stage behind the submitted ones: releases the run the
-/// stage thread is holding, and leaves the hold armed for the runs submitted from now on, so that
-/// the last run of the frame is the one that holds.
-fn release_hold_for_queued_stage() {
+/// Called before the main thread queues a stage behind the submitted ones. A held run stays held
+/// until its test releases it, whatever the main thread queues behind it, so this waits until an
+/// armed hold holds its run, or until no submitted run it could hold is left. Returns whether the
+/// stage thread holds a run, which the queued stage would wait behind.
+fn stage_thread_holds_run_for_queued_stage() -> bool {
     let (mut hold, changed) = lock_stage_hold();
-    hold.first_holdable_run = NEXT_SUBMITTED_RUN.load(Ordering::Relaxed);
-    if let Some(holding) = hold.holding.take() {
-        hold.armed = Some(holding);
-        changed.notify_all();
+    loop {
+        if hold.holding.is_some() {
+            return true;
+        }
+        let Some(armed) = &hold.armed else {
+            return false;
+        };
+        let armed_run_pending = SUBMITTED.with_borrow_mut(|submitted| {
+            submitted.iter_mut().any(|stage| {
+                stage.label == armed.label && (armed.arena == 0 || armed.arena == stage.arena) && !stage.poll()
+            })
+        });
+        if !armed_run_pending {
+            return false;
+        }
+        // The stage thread gets to the run's hold point, or finishes the run, without this thread.
+        hold = changed
+            .wait_timeout(hold, std::time::Duration::from_millis(1))
+            .expect("the stage hold is never poisoned")
+            .0;
     }
 }
 
@@ -1149,6 +1166,12 @@ unsafe fn run_stage_on<R: Send>(
     if std::thread::current().id() == thread.id {
         return stage(&MainJoins(JoinTarget::InPlace(main_thread)));
     }
+    // This stage would queue behind the submitted ones, and a run a test holds there stays held, so
+    // the stage runs right here instead, as it does without a stage thread. It reaches nothing a
+    // submitted stage owns, and a wait for the held run in it lets that run go on as anywhere.
+    if has_frame_in_flight() && stage_thread_holds_run_for_queued_stage() {
+        return stage(&MainJoins(JoinTarget::InPlace(main_thread)));
+    }
 
     let (to_caller, from_stage) = channel::<CallerMessage>();
     let mut outcome: Option<Result<R, Box<dyn Any + Send>>> = None;
@@ -1176,10 +1199,6 @@ unsafe fn run_stage_on<R: Send>(
     // SAFETY: The job borrows from the calling thread's frame. It drops everything it captured
     // before it replies, and this function does not return before the reply arrives.
     let job = unsafe { std::mem::transmute::<Box<dyn FnOnce() + Send + '_>, Job>(job) };
-    // This stage queues behind the submitted ones, so a held one has to go on.
-    if has_frame_in_flight() {
-        release_hold_for_queued_stage();
-    }
     tsan::release(thread);
     if thread.jobs.send(StageMessage::Run(job)).is_err() {
         // The stage thread only goes away if the process is going away.
