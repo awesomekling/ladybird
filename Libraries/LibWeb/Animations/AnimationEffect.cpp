@@ -14,6 +14,7 @@
 #include <LibWeb/CSS/CSSNumericValue.h>
 #include <LibWeb/CSS/ComputedStyleWorkingSet.h>
 #include <LibWeb/CSS/ComputedValues.h>
+#include <LibWeb/CSS/CustomPropertyData.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/CSS/StyleComputer.h>
@@ -954,6 +955,32 @@ void apply_published_animation_overlay(CSS::StyleDrainScope const& scope, DOM::A
         Painting::repaint_after_style_change(*repaint_layout_node, invalidation);
 }
 
+// The environment a sample composed an element's animated custom properties into, viewed as the
+// element's, or the element's record's environment again where the sample animated none; and what
+// that moves, recorded for the next transaction.
+void install_sampled_custom_property_environment(CSS::StyleDrainScope const& scope, DOM::Element& element, CSS::StyleEngineFFI::FfiRowSampledInPass const& sample)
+{
+    auto data = element.custom_property_data({});
+    RefPtr<CSS::CustomPropertyData const> base = data;
+    if (data && data->is_animation_overlay_for({ element }))
+        base = data->parent();
+    RefPtr<CSS::CustomPropertyData const> installed = base;
+    if (sample.custom_property_environment != 0) {
+        VERIFY(sample.custom_property_store);
+        installed = CSS::CustomPropertyData::view_animation_overlay(sample.custom_property_store, sample.custom_property_environment, base, { element });
+    }
+    element.replace_custom_property_data(scope, {}, installed);
+    auto& style_engine = scope.engine();
+    if (sample.custom_property_reactions & 1)
+        style_engine.record_derived_element_style_input_change(element.style_node_id(), CSS::StyleEngine::PublishedStyle | CSS::StyleEngine::RecomputeStyle);
+    if (sample.custom_property_reactions & 2) {
+        style_engine.record_flat_tree_descendant_style_input_changes(
+            element.style_node_id(),
+            CSS::StyleEngine::InheritedStyle,
+            CSS::RequiredInvalidationAfterStyleChange::all_inherited_style_groups);
+    }
+}
+
 // The engine samples the animations of an element or pseudo-element over the record the host holds
 // for it, from the timing rows, descriptions and environments it holds, and publishes the
 // composition as its record. What the sample found out is recorded on the element and its parent
@@ -972,13 +999,6 @@ static bool install_engine_sample_of_installed_record(CSS::StyleDrainScope const
         CSS::pseudo_element_to_ffi(element.pseudo_element()), data.style_record_before_update.value(), layout_node_arena ? layout_node_arena->handle() : nullptr);
     if (!sample.present)
         return false;
-    // The sample moved nothing the record composed.
-    if (sample.style_record == data.style_record_before_update.value())
-        return true;
-    if (sample.rebuilt_every_group)
-        document.style_invalidation_counters().animated_style_full_builds++;
-    else
-        document.style_invalidation_counters().animated_style_overlay_builds++;
     if (sample.substitution_marks & CSS::ComputedValuesFFI::SUBSTITUTION_MARK_VAR)
         target->set_style_uses_var_css_function();
     if (sample.substitution_marks & CSS::ComputedValuesFFI::SUBSTITUTION_MARK_ATTR)
@@ -991,6 +1011,15 @@ static bool install_engine_sample_of_installed_record(CSS::StyleDrainScope const
         target->set_style_uses_custom_function();
     if (sample.uses_tree_counting_function)
         target->set_style_uses_tree_counting_function();
+    if (sample.custom_property_environment_moved)
+        install_sampled_custom_property_environment(scope, *target, sample);
+    // The sample moved nothing the record composed.
+    if (sample.style_record == data.style_record_before_update.value())
+        return true;
+    if (sample.rebuilt_every_group)
+        document.style_invalidation_counters().animated_style_full_builds++;
+    else
+        document.style_invalidation_counters().animated_style_overlay_builds++;
     // A keyframe-borne `inherit` on a non-inherited property leaves the same mark on the parent a
     // full style computation does.
     if (auto style_groups = sample.keyframes_inherited_non_inherited_style_groups; style_groups != 0) {

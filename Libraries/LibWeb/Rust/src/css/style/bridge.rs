@@ -3900,16 +3900,9 @@ pub unsafe extern "C" fn style_engine_sample_installed_record(
         let pseudo = (pseudo_kind != u8::MAX).then_some(pseudo_kind);
         let layout_arena = unsafe { super::animations::LentLayoutArena::lend(layout_arena) };
         match engine.sample_installed_record(style_node, pseudo, style_record, layout_arena) {
-            Ok(Some(published)) => {
+            Ok(published) => {
                 super::engine_sample_check::note_taken("installed record sample");
                 row_sampled_in_pass(engine, Some(published))
-            }
-            Ok(None) => {
-                super::engine_sample_check::note_taken("installed record sample");
-                let mut unchanged = row_sampled_in_pass(engine, None);
-                unchanged.present = true;
-                unchanged.style_record = style_record;
-                unchanged
             }
             Err(reason) => {
                 super::engine_sample_check::note_declined(&format!("installed record: {reason}"));

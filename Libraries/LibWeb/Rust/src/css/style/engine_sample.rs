@@ -1130,7 +1130,8 @@ impl super::StyleEngineState {
     /// Sample the animations of an element or one of its pseudo-elements over the record the host
     /// holds for it, from the timing rows, descriptions and environments the engine holds, and
     /// publish the composition as its record, for the host to install in place of its own sample.
-    /// `Ok(None)` where the sample moves nothing the record composed; or why the engine cannot.
+    /// Where the sample moves nothing the record composed, the answer names the record again with
+    /// what the sample found out; or why the engine cannot.
     pub(crate) fn sample_installed_record(
         &mut self,
         node: StyleNodeID,
@@ -1138,28 +1139,36 @@ impl super::StyleEngineState {
         style_record: u64,
         layout_arena: super::animations::LentLayoutArena,
         counters: &mut super::Counters,
-    ) -> Result<Option<SettledRowPublication>, String> {
+    ) -> Result<SettledRowPublication, String> {
         // A composition the engine published over the record since, which the host has not
         // installed, is the host's to publish again.
         if self.assigned_style_record_of(node, pseudo) != Some(style_record) {
             return Err("a record the engine has moved past".into());
         }
-        // Custom properties an earlier sample composed are in an environment the host installs
-        // itself.
-        if pseudo.is_none()
-            && (self.retained.sampled_custom_property_environments.contains_key(&node)
-                || self.retained.element_custom_property_animation_base(node).is_some())
-        {
-            return Err("an element whose custom properties an earlier sample composed".into());
-        }
         // The effects the element holds now are sampled, as the host's own sample collects them,
         // whether or not a plan its row left is applied yet.
         let sample = crate::css::style_compute::sample_settled_row(self, node, pseudo, false, None, layout_arena)?;
-        if !sample.animated_custom_properties.is_empty() {
-            return Err("a sample that animates custom properties".into());
+        // A pseudo-element's animated custom properties are composed into an environment the host
+        // builds.
+        if pseudo.is_some() && !sample.animated_custom_properties.is_empty() {
+            return Err("a pseudo-element sample that animates custom properties".into());
         }
-        if !self.animation_overlay_changed(style_record, sample.style.overlay) {
-            return Ok(None);
+        // A sample that moves nothing the record composed may still move the custom properties
+        // the element's environment animates, which the publication composes.
+        if sample.animated_custom_properties.is_empty()
+            && !self.retained.sampled_custom_property_environments.contains_key(&node)
+            && !self.animation_overlay_changed(style_record, sample.style.overlay)
+        {
+            return Ok(SettledRowPublication {
+                style_record,
+                custom_properties: None,
+                invalidation: bridge::FfiAnimationInvalidation::default(),
+                overlay_is_empty: unsafe { sample.style.overlay.as_ref() }.is_none_or(|overlay| overlay.is_empty()),
+                substitution_marks: sample.substitution_marks,
+                keyframes_inherited_non_inherited_style_groups: sample.keyframes_inherited_non_inherited_style_groups,
+                uses_tree_counting_function: sample.uses_tree_counting_function,
+                rebuilt_every_group: false,
+            });
         }
         let published = self.publish_settled_row_sample(node, pseudo, sample, counters)?;
         // The host installs the composition as it returns, so no batch keeps it alive for a row.
@@ -1178,7 +1187,7 @@ impl super::StyleEngineState {
             None => self.retained.rows_sampled_in_pass.remove(&node),
             Some(kind) => self.retained.pseudo_elements_sampled_in_pass.remove(&(node, kind)),
         };
-        Ok(Some(published))
+        Ok(published)
     }
 
     /// Forget what the engine sampled and decided for an element's pseudo-elements that no
