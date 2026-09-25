@@ -187,7 +187,7 @@ void FrameScheduler::add_to_ticket(LocalNavigable& navigable, LocalNavigable::Pe
         held_compositor_context = navigable.compositor_context().id().value();
         Layout::RustFFI::rust_frame_hold_compositor_context(*held_compositor_context);
     }
-    // Under LIBWEB_RENDER_PRESENTS=1, the frame in flight presents the frame once it has recorded it. Frames reach their
+    // Unless LIBWEB_RENDER_PRESENTS=0, the frame in flight presents the frame once it has recorded it. Frames reach their
     // compositor contexts in paint order, so once one frame of the ticket is presented by consume-commit instead, so
     // are the frames after it.
     bool const earlier_frame_is_presented_by_commit = any_of(m_ticket->navigables, [](auto const& entry) {

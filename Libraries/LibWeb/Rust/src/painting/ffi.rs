@@ -1603,7 +1603,7 @@ pub(crate) unsafe fn record_for_clock_tick(arena_handle: *mut c_void) -> bool {
 }
 
 /// Publishes the arena's pending recording from the presentation stage of the frame in flight
-/// (LIBWEB_RENDER_PRESENTS=1), as `layout_arena_publish_recording` does on the main thread. Returns
+/// (unless LIBWEB_RENDER_PRESENTS=0), as `layout_arena_publish_recording` does on the main thread. Returns
 /// the generation of the hit-test list the recording made, or 0 if there was nothing to publish.
 ///
 /// # Safety

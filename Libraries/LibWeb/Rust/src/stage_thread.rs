@@ -564,7 +564,7 @@ pub(crate) fn running_inside_stage() -> bool {
 const PRESENTATION_STAGE: &str = "present";
 
 /// Whether the rendering update presents its frames from the frame in flight: when it submits its
-/// recordings, and LIBWEB_RENDER_PRESENTS=1 asks for it (which the host checks).
+/// recordings, and presenting from the Rendering thread is on, unless LIBWEB_RENDER_PRESENTS=0 (which the host checks).
 fn submits_presentation() -> bool {
     submits("recording")
 }

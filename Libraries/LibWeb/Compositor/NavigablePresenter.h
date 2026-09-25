@@ -29,8 +29,8 @@ namespace Web::Compositor {
 
 class NavigablePresenter;
 
-// Whether the frame a navigable presents is sealed when the rendering update begins it (LIBWEB_RENDER_PRESENTS=1),
-// rather than read from its document where the frame is finished.
+// Whether the frame a navigable presents is sealed when the rendering update begins it and presented from the Rendering
+// thread, rather than read from its document where the frame is finished (LIBWEB_RENDER_PRESENTS=0).
 WEB_API bool render_presents();
 // Test only: overrides LIBWEB_RENDER_PRESENTS for the frames begun from now on, or stops overriding it.
 WEB_API void set_render_presents_for_testing(Optional<bool>);

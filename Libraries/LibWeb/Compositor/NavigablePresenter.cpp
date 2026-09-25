@@ -15,7 +15,7 @@ bool render_presents()
 {
     static bool const enabled = [] {
         auto value = Core::Environment::get("LIBWEB_RENDER_PRESENTS"sv);
-        return value.has_value() && *value == "1"sv;
+        return !value.has_value() || *value != "0"sv;
     }();
     return s_render_presents_for_testing.value_or(enabled);
 }
