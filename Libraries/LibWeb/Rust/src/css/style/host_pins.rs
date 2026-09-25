@@ -86,6 +86,14 @@ impl HostPinsLend {
         }
     }
 
+    /// The table itself, whatever the engine may read of it now.
+    pub(crate) fn handle(self) -> Option<HostPinsHandle> {
+        match self {
+            Self::NoHost => None,
+            Self::Lent(handle) | Self::BesideFlight(handle) => Some(handle),
+        }
+    }
+
     pub(crate) fn is_beside_flight(self) -> bool {
         matches!(self, Self::BesideFlight(_))
     }
@@ -123,5 +131,14 @@ impl HostPinsHandle {
     /// engine that holds the handle.
     pub(crate) unsafe fn new(pins: *mut HostStyleRecordPins) -> Self {
         Self(NonNull::new(pins).expect("a host pin table handle is not null"))
+    }
+
+    /// The table, for the document thread's own pins.
+    ///
+    /// # Safety
+    /// The caller must be the document thread, or run while the document thread waits on it.
+    pub(crate) unsafe fn pins(&self) -> &HostStyleRecordPins {
+        // SAFETY: Guaranteed by the caller; the table outlives every holder of the handle.
+        unsafe { self.0.as_ref() }
     }
 }

@@ -416,6 +416,12 @@ impl LayoutStyle {
 }
 
 impl StyleEngine {
+    /// The document thread's style-record pin table, which the layout arena pins its host's
+    /// records in without entering the engine.
+    pub(crate) fn host_style_record_pins(&self) -> Option<super::host_pins::HostPinsHandle> {
+        self.computed_group_sets.host_pins_handle()
+    }
+
     pub(crate) fn pin_layout_style_record(&mut self, record: u64) {
         self.pin_style_record(record);
         self.record_boundary_call(super::record_replay::EventKind::PinStyleRecord, |payload| {

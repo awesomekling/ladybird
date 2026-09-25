@@ -1857,6 +1857,11 @@ impl ComputedGroupSets {
         self.host_pins = host_pins;
     }
 
+    /// The document thread's pin table, for its readers outside the engine to pin in.
+    pub(crate) fn host_pins_handle(&self) -> Option<super::host_pins::HostPinsHandle> {
+        self.host_pins.handle()
+    }
+
     /// Stops lending the host's pins while a pass runs beside the document thread.
     pub(crate) fn begin_pass_beside_host_pins(&mut self) {
         self.host_pins = self.host_pins.beside_flight();
