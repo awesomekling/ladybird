@@ -4623,20 +4623,24 @@ Vector<GC::Ref<RegisteredObserver>> const* Node::registered_observer_list() cons
 
 Element const* Node::first_letter_owner_for_layout_subtree_from(Node const& inclusive_ancestor) const
 {
-    auto const* layout_subtree_root = unsafe_layout_node();
-    if (!layout_subtree_root)
-        return nullptr;
-
+    // NB: The boxes are looked up only once an ancestor has ::first-letter style, which is a question for the style
+    //     side: a mutation beside a frame in flight that holds the boxes asks the frame for them only then.
+    Optional<Layout::Node const*> layout_subtree_root;
     for (auto const* ancestor = &inclusive_ancestor; ancestor; ancestor = ancestor->parent_or_shadow_host_node()) {
         auto const* element = as_if<Element>(*ancestor);
         if (!element || !element->has_style(CSS::PseudoElement::FirstLetter))
             continue;
 
+        if (!layout_subtree_root.has_value())
+            layout_subtree_root = unsafe_layout_node();
+        if (!*layout_subtree_root)
+            return nullptr;
+
         auto const* first_letter_layout_node = element->pseudo_element_unsafe_layout_node(CSS::PseudoElement::FirstLetter);
         if (!first_letter_layout_node)
             return element;
         for (auto const* layout_ancestor = first_letter_layout_node; layout_ancestor; layout_ancestor = layout_ancestor->parent()) {
-            if (layout_ancestor == layout_subtree_root)
+            if (layout_ancestor == *layout_subtree_root)
                 return element;
         }
     }
