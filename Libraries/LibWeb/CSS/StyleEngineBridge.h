@@ -319,6 +319,9 @@ public:
     // The layout frame's end: what was published beside its pass reaches the engine, ahead of anything published
     // after it.
     void publish_inputs_waiting_for_layout_pass() { publish_inputs_queued_during_pass(); }
+    // Whether anything was recorded or published beside the layout pass in flight, which the frame that submitted
+    // the pass did not apply before it.
+    [[nodiscard]] bool has_input_beside_layout_pass() const { return has_recorded_input() || !m_inputs_queued_during_pass.is_empty(); }
 
     // While the host takes a submitted pass back and drains it, what was recorded and published beside the pass
     // waits for the next transaction: an operation that the drain interrupted must not have half of its input
