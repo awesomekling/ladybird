@@ -528,17 +528,22 @@ enum OwedHostHalf {
     Commit(DeferredLayoutCommitHostHalf),
 }
 
-/// Pays what the frame owed the document thread, in the order the frame made it owe it.
+/// Takes back the layout tree update marks the frame lent a tree build, then pays what the frame
+/// owed the document thread, in the order the frame made it owe it.
 ///
 /// # Safety
 ///
-/// As for [`arena`], on the document thread, with no borrow of the arena held across the call.
+/// As for [`arena`], on the document thread, with no borrow of the arena held across the call and
+/// no stage of the frame reaching the arena meanwhile.
 unsafe fn pay_owed_host_halves(
     main_thread: &crate::stage::MainThread,
     host: &LayoutUpdateHost,
     arena_handle: *mut c_void,
     owed_host_halves: Vec<OwedHostHalf>,
 ) {
+    // What the build owes the document can mark nodes for another build.
+    // SAFETY: Guaranteed by the caller.
+    unsafe { super::tree_update_marks::take_back_from_frame(arena_handle) };
     for owed in owed_host_halves {
         match owed {
             // SAFETY: Guaranteed by the caller.
@@ -1010,6 +1015,10 @@ impl LayoutFrame {
             .arena()
             .with_style_store(|engine| engine.tree().connected_element_count());
         let round_after_style = self.ready_round_after_style(main_thread, &host, &facts);
+        if round_after_style.tree_build_document_style_node.is_some() {
+            // SAFETY: Guaranteed by the caller.
+            unsafe { super::tree_update_marks::lend_to_frame(self.inputs.arena_handle) };
+        }
         self.pass_sources = round_after_style.pass_sources;
         self.tree_build_document_style_node = round_after_style.tree_build_document_style_node;
         self.selection = round_after_style.selection;

@@ -1756,11 +1756,6 @@ impl LayoutNodeArena {
         self.layout_tree_update_marks.borrow().reuse_reasons(node)
     }
 
-    /// Where the document thread lends the tree build its layout tree update marks.
-    pub(super) fn lent_layout_tree_update_marks(&mut self) -> &mut LayoutTreeUpdateMarks {
-        self.layout_tree_update_marks.get_mut()
-    }
-
     /// The layout tree update marks the tree build holds, for host work it joins the document
     /// thread for while it holds them.
     pub(super) fn layout_tree_update_marks_held_by_the_build(&self) -> std::cell::RefMut<'_, LayoutTreeUpdateMarks> {

@@ -2985,36 +2985,32 @@ impl TreeBuildHostHalf {
 /// # Safety
 ///
 /// `arena_handle` must be a live handle whose owner waits for this call or makes it itself, with
-/// the document's style published for a build that may create the viewport.
+/// the document's style published for a build that may create the viewport, and the document's
+/// layout tree update marks lent to the arena, which the walk reads and retires.
 pub(crate) unsafe fn walk_layout_tree_build(
     arena_handle: *mut c_void,
     document_style_node: u32,
 ) -> (FfiLayoutTreeBuildOutcome, TreeBuildHostHalf) {
     // SAFETY: Guaranteed by the caller.
     let arena = unsafe { LayoutNodeArena::from_handle_mut(arena_handle) };
-    let walk = |arena: &mut LayoutNodeArena| {
-        arena.run_stage(|arena| {
-            // The host is made on the stage's side from the arena the stage holds alone.
-            let host = dom_tree_builder_host(std::ptr::from_mut(arena).cast());
-            let TreeBuildStageOutput {
-                outcome,
+    arena.run_stage(|arena| {
+        // The host is made on the stage's side from the arena the stage holds alone.
+        let host = dom_tree_builder_host(std::ptr::from_mut(arena).cast());
+        let TreeBuildStageOutput {
+            outcome,
+            reports,
+            handbacks,
+            replaced_layout_tree,
+        } = run_tree_build_stage(&host, document_style_node);
+        (
+            outcome,
+            TreeBuildHostHalf {
                 reports,
                 handbacks,
                 replaced_layout_tree,
-            } = run_tree_build_stage(&host, document_style_node);
-            (
-                outcome,
-                TreeBuildHostHalf {
-                    reports,
-                    handbacks,
-                    replaced_layout_tree,
-                },
-            )
-        })
-    };
-    // The walk reads the document thread's layout tree update marks, and retires what it answers.
-    // SAFETY: Guaranteed by the caller.
-    unsafe { super::tree_update_marks::lend_to_tree_build(arena_handle, arena, walk) }
+            },
+        )
+    })
 }
 
 /// The layout tree build stage: the walk that turns the style mirror's flat tree into layout
