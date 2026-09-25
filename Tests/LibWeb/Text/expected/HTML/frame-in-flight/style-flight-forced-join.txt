@@ -1,0 +1,14 @@
+reads: held as armed: true
+reads: color: rgb(0, 128, 0)
+reads: width after a class change: 150px
+reads: background after an attribute change: rgb(0, 0, 255)
+reads: matches: true
+reads: ::before content after a class change: "before"
+reads: offsetWidth: 150
+finished pass: held as armed: true
+finished pass: color: rgb(255, 0, 0)
+finished pass: font weights after a removal: 700, 400
+finished pass: width: 100px
+finished pass: querySelectorAll: 1
+finished pass: closest: true
+after: rgb(255, 0, 0), 100, 700
