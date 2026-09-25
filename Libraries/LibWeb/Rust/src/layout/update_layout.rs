@@ -962,13 +962,14 @@ impl LayoutFrame {
         main_thread: &crate::stage::MainThread,
         step: impl FnOnce(&mut Self, &crate::stage_thread::MainJoins<'_>) -> FrameStep,
     ) -> FrameStep {
+        let arena_handle = self.inputs.arena_handle;
         // SAFETY: The frame and the step reach the arena and the document only while the document
         // thread waits for the stage, or through the joins it runs on that thread.
         let frame = unsafe { crate::stage_thread::CallerWaits::new(self) };
         let step = unsafe { crate::stage_thread::CallerWaits::new(step) };
         // SAFETY: As above, for the work the frame's joins hand the document thread.
         let next = unsafe {
-            crate::stage_thread::run_stage_with_joins(main_thread, move |joins| {
+            crate::stage_thread::run_document_stage_with_joins(main_thread, arena_handle, move |joins| {
                 let next = (step.into_inner())(frame.into_inner(), joins);
                 // SAFETY: The step goes back to the document thread, which waits for the stage.
                 crate::stage_thread::CallerWaits::new(next)

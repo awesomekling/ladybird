@@ -1068,8 +1068,45 @@ fn runs_waited_for_stage_in_place() -> bool {
         && stage_thread().is_some_and(|thread| std::thread::current().id() != thread.id)
 }
 
+/// Whether a stage the caller waits for, for the document whose arena is `arena`, runs right here: with the stages
+/// overlapping, when no stage of the frame in flight is that document's. The frame's stages reach only their own
+/// documents' arenas and style engines, so the stage reaches nothing they own, and queued behind them it would only
+/// wait for another document's stages (a parent document's layout behind its iframe's recording).
+fn runs_waited_for_document_stage_in_place(arena: *const c_void) -> bool {
+    stage_thread_mode() == Some(StageThreadMode::Overlap)
+        && stage_thread().is_some_and(|thread| std::thread::current().id() != thread.id)
+        && SUBMITTED.with_borrow(|submitted| submitted.iter().all(|stage| stage.arena != arena as usize))
+}
+
+/// Runs `stage`, a stage for the document whose arena is `arena`, as [`run_stage`] does, or right here when no stage
+/// of the frame in flight is that document's.
+pub(crate) fn run_document_stage<R: Send>(arena: *const c_void, stage: impl FnOnce() -> R + Send) -> R {
+    if runs_waited_for_document_stage_in_place(arena) {
+        return run_in_place(stage);
+    }
+    run_stage(stage)
+}
+
+/// Runs `stage`, a stage for the document whose arena is `arena`, as [`run_stage_with_joins`] does, or right here when
+/// no stage of the frame in flight is that document's.
+///
+/// # Safety
+///
+/// As for [`run_stage_with_joins`].
+pub(crate) unsafe fn run_document_stage_with_joins<R: Send>(
+    main_thread: &MainThread<'_>,
+    arena: *const c_void,
+    stage: impl FnOnce(&MainJoins<'_>) -> R + Send,
+) -> R {
+    if runs_waited_for_document_stage_in_place(arena) {
+        return run_in_place(|| stage(&MainJoins(JoinTarget::InPlace(Some(main_thread)))));
+    }
+    // SAFETY: Guaranteed by the caller.
+    unsafe { run_stage_with_joins(main_thread, stage) }
+}
+
 /// Runs `stage` right here, where nothing it starts is submitted and nothing it reaches joins a frame, as for the
-/// work a stage joins its caller for: there is no frame in flight, and a stage waited for is not one.
+/// work a stage joins its caller for: a stage waited for is not one, and nothing it reaches is the frame's.
 fn run_in_place<R>(stage: impl FnOnce() -> R) -> R {
     struct LeaveInPlaceStage;
     impl Drop for LeaveInPlaceStage {
