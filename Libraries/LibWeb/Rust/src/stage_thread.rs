@@ -665,6 +665,12 @@ pub(crate) fn take_frame_in_flight() -> bool {
     true
 }
 
+/// Whether the calling thread runs work a stage of the frame in flight joined it for, which reaches
+/// what the frame holds as the stage does.
+pub(crate) fn running_join_work() -> bool {
+    RUNNING_JOIN_WORK.with(Cell::get) != 0
+}
+
 /// Called where main-thread code reaches render-owned state: if the frame in flight owns the arena
 /// `arena` (or any, for a null `arena`), waits for the frame, takes it back and runs the frame
 /// scheduler's consume-commit, so the access finds the document as the frame left it. Work a

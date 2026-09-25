@@ -554,6 +554,9 @@ unsafe fn pay_owed_host_halves(
             OwedHostHalf::Commit(owed) => unsafe { owed.deliver(main_thread) },
         }
     }
+    // What the document thread wrote to the marks beside the frame, it wrote after all of that.
+    // SAFETY: Guaranteed by the caller. The marks are handed back.
+    unsafe { super::tree_update_marks::write_marks_waiting_for_frame(arena_handle) };
 }
 
 /// How a layout frame ends.

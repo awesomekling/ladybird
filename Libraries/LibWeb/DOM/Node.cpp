@@ -104,6 +104,8 @@
 
 namespace Web::DOM {
 
+static bool subtree_may_need_layout_tree_update(Node const&);
+
 static bool final_direct_list_item_does_not_renumber_existing_content(Element const& list_item)
 {
     auto list_owner = list_item.parent_element();
@@ -1081,7 +1083,7 @@ void Node::insert_nodes_before(ReadonlySpan<GC::Ref<Node>> nodes, GC::Ptr<Node> 
         }
         set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::NodeInsertBefore);
         for (auto& inserted_node : nodes) {
-            auto inserted_subtree_already_needs_layout_tree_update = inserted_node->needs_layout_tree_update() || inserted_node->child_needs_layout_tree_update();
+            auto inserted_subtree_already_needs_layout_tree_update = subtree_may_need_layout_tree_update(inserted_node);
             inserted_node->set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::NodeInsertBefore);
 
             // An inserted subtree may already need a layout tree update, for example after being adopted from another
@@ -2092,7 +2094,7 @@ WebIDL::ExceptionOr<void> Node::move_node(Node& new_parent, Node* child)
         }
     }
     if (is_connected()) {
-        auto moved_subtree_already_needs_layout_tree_update = needs_layout_tree_update() || child_needs_layout_tree_update();
+        auto moved_subtree_already_needs_layout_tree_update = subtree_may_need_layout_tree_update(*this);
         set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::NodeInsertBefore);
         new_parent.set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::NodeInsertBefore);
         if (moved_subtree_already_needs_layout_tree_update)
@@ -2528,6 +2530,17 @@ static void* layout_tree_update_marks_of(Document const& document)
 {
     auto const* arena = document.layout_node_arena_if_created();
     return arena ? arena->handle() : nullptr;
+}
+
+// Whether the node or a flat-tree descendant of it may hold a layout tree update mark. Beside a frame in flight that
+// holds the marks, the answer is that they may.
+static bool subtree_may_need_layout_tree_update(Node const& node)
+{
+    auto style_node = style_node_id_of(node);
+    auto* marks = layout_tree_update_marks_of(node.document());
+    if (!style_node || !marks)
+        return false;
+    return Layout::RustFFI::layout_arena_subtree_may_need_layout_tree_update(marks, style_node.value());
 }
 
 bool Node::needs_layout_tree_update() const

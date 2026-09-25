@@ -50,6 +50,10 @@ pub(crate) struct HostTables {
     pub(super) layout_tree_update_marks: RefCell<super::tree_update_marks::LayoutTreeUpdateMarks>,
     /// Whether the tree build holds the marks, in the arena, for its walk.
     pub(super) layout_tree_update_marks_are_lent: Cell<bool>,
+    /// What the document thread wrote to the marks beside the frame they are lent to, in order,
+    /// written once the frame has handed them back.
+    pub(super) layout_tree_update_mark_writes_waiting_for_frame:
+        RefCell<Vec<super::tree_update_marks::MarkWriteWaitingForFrame>>,
 }
 
 impl HostTables {

@@ -6795,7 +6795,7 @@ pub unsafe extern "C" fn layout_arena_merge_layout_tree_update_mark(
         return false;
     };
     // SAFETY: As above.
-    unsafe { with_document_marks(arena, |marks| marks.merge(style_node, value, reuse_reason)) }
+    unsafe { super::tree_update_marks::merge_document_mark(arena, style_node, value, reuse_reason) }
 }
 
 /// Retire every layout tree update mark the node `style_node` names holds. An identity newly handed
@@ -6812,7 +6812,7 @@ pub unsafe extern "C" fn layout_arena_clear_layout_tree_update_marks(arena: *mut
         return;
     };
     // SAFETY: As above.
-    unsafe { with_document_marks(arena, |marks| marks.clear(style_node)) }
+    unsafe { super::tree_update_marks::clear_document_marks(arena, style_node) }
 }
 
 /// Whether a flat-tree descendant of the node `style_node` names holds a layout tree update mark.
@@ -6848,7 +6848,23 @@ pub unsafe extern "C" fn layout_arena_set_child_needs_layout_tree_update(
         return false;
     };
     // SAFETY: As above.
-    unsafe { with_document_marks(arena, |marks| marks.set_child_needs(style_node, value)) }
+    unsafe { super::tree_update_marks::set_document_child_needs(arena, style_node, value) }
+}
+
+/// Whether the node `style_node` names or a flat-tree descendant of it may hold a layout tree
+/// update mark: exactly, or that they may while a frame in flight holds the marks.
+///
+/// # Safety
+///
+/// The arena must remain valid for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_subtree_may_need_layout_tree_update(arena: *mut c_void, style_node: u32) -> bool {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    let Some(style_node) = StyleNodeID::from_raw(style_node) else {
+        return false;
+    };
+    // SAFETY: As above.
+    unsafe { super::tree_update_marks::subtree_may_hold_document_marks(arena, style_node) }
 }
 
 #[unsafe(no_mangle)]
