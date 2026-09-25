@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<script src="include.js"></script>
+<style>
+    body { margin: 0; }
+    #stage { position: relative; width: 400px; height: 300px; }
+    #anchor {
+        anchor-name: --a;
+        position: absolute;
+        left: 20px;
+        top: 30px;
+        width: 50px;
+        height: 20px;
+    }
+    .filler {
+        anchor-name: --other;
+        position: absolute;
+        left: 200px;
+        top: 150px;
+        width: 10px;
+        height: 10px;
+    }
+    #consumer {
+        position: absolute;
+        position-anchor: --a;
+        left: anchor(right, 5px);
+        top: anchor(top, 5px);
+        width: 60px;
+        height: 25px;
+    }
+</style>
+<div id="stage">
+    <div id="fillers"></div>
+    <div id="anchor"></div>
+    <div id="consumer"></div>
+</div>
+<script>
+    // A removed anchor withdraws its names while its style identity still names it. Elements
+    // inserted after the removal may be given that identity again, and none of them registers
+    // the name the consumer anchors to.
+    function rectToString(rect) {
+        return `${rect.left},${rect.top},${rect.width},${rect.height}`;
+    }
+
+    function animationFrame() {
+        return new Promise(resolve => requestAnimationFrame(() => resolve()));
+    }
+
+    promiseTest(async () => {
+        const consumer = document.getElementById("consumer");
+        document.body.offsetHeight;
+        const before = rectToString(consumer.getBoundingClientRect());
+
+        document.getElementById("anchor").remove();
+        document.body.offsetHeight;
+        const afterRemoval = rectToString(consumer.getBoundingClientRect());
+
+        // Let the retired identity become reusable, then insert more elements than the identities
+        // granted before that, all named differently, so that one of them is given it again.
+        await animationFrame();
+        await animationFrame();
+        const fillers = document.getElementById("fillers");
+        for (let i = 0; i < 300; ++i) {
+            const filler = document.createElement("div");
+            filler.className = "filler";
+            fillers.appendChild(filler);
+        }
+        document.body.offsetHeight;
+        await animationFrame();
+        // Lay the consumer out again, resolving its anchor() functions anew.
+        document.getElementById("stage").style.width = "401px";
+        document.body.offsetHeight;
+        const afterReuse = rectToString(consumer.getBoundingClientRect());
+
+        println(`before=${before}`);
+        println(`after-removal=${afterRemoval}`);
+        println(`after-reuse=${afterReuse}`);
+    });
+</script>

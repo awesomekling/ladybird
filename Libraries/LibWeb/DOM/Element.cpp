@@ -3214,15 +3214,6 @@ void Element::removed_from(IsSubtreeRoot is_subtree_root, Node* old_ancestor, No
             document().element_with_id_was_removed({}, *this);
         if (m_has_name)
             document().element_with_name_was_removed({}, *this);
-        if (has_anchor_names(*this) && style_node_id() != 0) {
-            // The engine withdraws the names as it takes the removal in, after a pass in flight.
-            document().style_computer().style_engine().publish_input([document = GC::Root<Document> { document() }, style_node = style_node_id()](CSS::StyleInputScope const& input) {
-                (void)register_anchor_names_in_engine(input, *document, style_node, {}, false);
-            });
-            // Positioned boxes anywhere may hold geometry resolved against these names, which
-            // the partial relayout planner's subtree check can no longer see.
-            document().record_partial_relayout_escape(PartialRelayoutEscapeReason::AnchorNamesUnregisteredByElementRemoval);
-        }
     }
 
     play_or_cancel_animations_after_display_property_change();

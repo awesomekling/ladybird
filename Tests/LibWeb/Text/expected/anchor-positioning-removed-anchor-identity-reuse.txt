@@ -1,0 +1,3 @@
+before=70,30,60,25
+after-removal=5,5,60,25
+after-reuse=5,5,60,25
