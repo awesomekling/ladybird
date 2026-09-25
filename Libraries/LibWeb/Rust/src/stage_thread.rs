@@ -221,6 +221,8 @@ thread_local! {
     // On the calling thread, the call sites that forced a join already logged.
     static FORCED_JOIN_SITES: RefCell<std::collections::HashSet<(&'static str, usize, u32)>> =
         RefCell::new(std::collections::HashSet::new());
+    // On the calling thread, how many forced joins took in a frame with a stage of each label.
+    static FORCED_JOINS: RefCell<Vec<(&'static str, u64)>> = const { RefCell::new(Vec::new()) };
 }
 
 type StageOutcome = Result<(), Box<dyn Any + Send>>;
@@ -665,6 +667,7 @@ pub(crate) fn join_frame_in_flight_at(arena: *mut c_void, file: &'static str, li
             eprintln!("STAGE OVERLAP: forced join of {label} at {file}:{line}:{column}");
         }
     }
+    count_forced_join();
     take_frame_in_flight();
     let host = FRAME_SCHEDULER_HOST.get().expect("a submitted frame has a scheduler");
     // SAFETY: Called on the main thread, with the frame taken back.
@@ -688,6 +691,40 @@ pub extern "C" fn rust_stage_thread_only_style_pass_in_flight_for(engine: *const
             && submitted
                 .iter()
                 .all(|stage| stage.label == "style" && stage.style_engine == engine as usize)
+    })
+}
+
+/// Counts a forced join against the label of each stage of the frame in flight it takes in.
+fn count_forced_join() {
+    SUBMITTED.with_borrow(|submitted| {
+        FORCED_JOINS.with_borrow_mut(|counts| {
+            for (index, stage) in submitted.iter().enumerate() {
+                if submitted[..index].iter().any(|earlier| earlier.label == stage.label) {
+                    continue;
+                }
+                match counts.iter_mut().find(|(label, _)| *label == stage.label) {
+                    Some((_, count)) => *count += 1,
+                    None => counts.push((stage.label, 1)),
+                }
+            }
+        });
+    });
+}
+
+/// How many forced joins on the calling thread took in a frame with a stage labelled `label`.
+///
+/// # Safety
+///
+/// `label` must point to `label_length` bytes of UTF-8.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_stage_thread_forced_joins(label: *const u8, label_length: usize) -> u64 {
+    // SAFETY: Guaranteed by the caller.
+    let label = unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(label, label_length)) };
+    FORCED_JOINS.with_borrow(|counts| {
+        counts
+            .iter()
+            .find(|(counted, _)| *counted == label)
+            .map_or(0, |(_, count)| *count)
     })
 }
 

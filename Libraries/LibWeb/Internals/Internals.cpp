@@ -1756,6 +1756,12 @@ void Internals::release_held_frame()
     Layout::RustFFI::rust_stage_thread_release_held_stage();
 }
 
+u64 Internals::forced_join_count(Utf16String const& stage) const
+{
+    auto label = stage.to_utf8();
+    return Layout::RustFFI::rust_stage_thread_forced_joins(label.bytes().data(), label.bytes().size());
+}
+
 bool Internals::frame_in_flight_holds_document() const
 {
     auto const& document = window().associated_document();
