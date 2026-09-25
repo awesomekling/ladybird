@@ -813,7 +813,9 @@ void record_element_form_control_disabled_facts(DOM::Element& element)
     auto* style_engine = style_engine_for(element);
     if (!style_engine || element.style_node_id() == no_style_node || has_pending_initial_features(element))
         return;
-    style_engine->set_element_form_control_disabled_facts(element.style_node_id(), element_form_control_disabled_facts(element));
+    publish_element_input(*style_engine, element, [facts = element_form_control_disabled_facts(element)](StyleInputScope const& input, StyleNodeID node) {
+        input.engine().set_element_form_control_disabled_facts(node, facts);
+    });
 }
 
 bool event_dispatch_is_disabled(DOM::Document& document, DOM::NodeIdentity identity)
@@ -1123,8 +1125,11 @@ static void record_element_initial_features(DOM::Element& element)
         });
     }
 
-    if (auto facts = element_form_control_disabled_facts(element); facts != 0)
-        style_engine->set_element_form_control_disabled_facts(element.style_node_id(), facts);
+    if (auto facts = element_form_control_disabled_facts(element); facts != 0) {
+        publish_element_input(*style_engine, element, [facts](StyleInputScope const& input, StyleNodeID node) {
+            input.engine().set_element_form_control_disabled_facts(node, facts);
+        });
+    }
 
     if (!element.part_names().is_empty())
         record_element_parts_changed(element);
@@ -1258,17 +1263,21 @@ void record_slot_assignment_changed(HTML::HTMLSlotElement& slot)
     // membership test here, rather than `style_engine_for`.
     if (slot.style_node_id() == no_style_node || !slot.document().style_engine_tracks_tree())
         return;
-    auto* style_engine = &slot.document().style_computer().style_engine();
-
-    auto const& assigned = slot.assigned_nodes_internal();
-    Vector<StyleNodeID, 8> identities;
-    identities.ensure_capacity(assigned.size());
-    for (auto const& slottable : assigned) {
-        auto identity = slottable.visit([](auto const& node) { return node->style_node_id(); });
-        if (identity != no_style_node)
-            identities.unchecked_append(identity);
-    }
-    style_engine->set_slot_assigned_nodes(slot.style_node_id(), identities.span());
+    // Beside a style pass, the list is the one assigned when the pass has drained, of the members that have an
+    // identity then.
+    slot.document().style_computer().style_engine().publish_input([slot = GC::Root<HTML::HTMLSlotElement> { slot }](StyleInputScope const& input) {
+        if (slot->style_node_id() == no_style_node)
+            return;
+        auto const& assigned = slot->assigned_nodes_internal();
+        Vector<StyleNodeID, 8> identities;
+        identities.ensure_capacity(assigned.size());
+        for (auto const& slottable : assigned) {
+            auto identity = slottable.visit([](auto const& node) { return node->style_node_id(); });
+            if (identity != no_style_node)
+                identities.unchecked_append(identity);
+        }
+        input.engine().set_slot_assigned_nodes(slot->style_node_id(), identities.span());
+    });
 }
 
 // The document's top layer, published whole whenever its membership changes.
@@ -1280,14 +1289,17 @@ void record_top_layer_elements_changed(DOM::Document& document)
 {
     if (!document.style_engine_tracks_tree())
         return;
-    auto const& elements = document.top_layer_elements();
-    Vector<StyleNodeID, 8> identities;
-    identities.ensure_capacity(elements.size());
-    for (auto const& element : elements) {
-        if (element->style_node_id() != no_style_node)
-            identities.unchecked_append(element->style_node_id());
-    }
-    document.style_computer().style_engine().set_top_layer_elements(identities.span());
+    // Beside a style pass, the top layer is published as it is when the pass has drained.
+    document.style_computer().style_engine().publish_input([document = GC::Root<DOM::Document> { document }](StyleInputScope const& input) {
+        auto const& elements = document->top_layer_elements();
+        Vector<StyleNodeID, 8> identities;
+        identities.ensure_capacity(elements.size());
+        for (auto const& element : elements) {
+            if (element->style_node_id() != no_style_node)
+                identities.unchecked_append(element->style_node_id());
+        }
+        input.engine().set_top_layer_elements(identities.span());
+    });
 }
 
 // Assignment runs inside the insertion that connects a node, which happens before the subtree it
@@ -1801,7 +1813,9 @@ void record_element_directionality(DOM::Element& element)
         return;
 
     auto const directionality = element.directionality() == DOM::Element::Directionality::Rtl ? "rtl"sv : "ltr"sv;
-    style_engine->set_element_directionality(element.style_node_id(), style_engine->intern_text_atom(Utf16View { directionality }));
+    publish_element_input(*style_engine, element, [atom = style_engine->intern_text_atom(Utf16View { directionality })](StyleInputScope const& input, StyleNodeID node) {
+        input.engine().set_element_directionality(node, atom);
+    });
 }
 
 void record_element_custom_states_changed(DOM::Element& element)
