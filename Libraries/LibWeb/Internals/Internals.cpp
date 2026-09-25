@@ -1731,6 +1731,21 @@ GC::Ref<JS::Object> Internals::get_rendering_scheduler_counters() const
         layout_overlap_blocked_updates->define_direct_property(name, JS::Value(counters.layout_overlap_blocked_updates[blocker]), JS::default_attributes);
     }
     object->define_direct_property("layoutOverlapBlockedUpdates"_utf16_fly_string, layout_overlap_blocked_updates, JS::default_attributes);
+    auto rendering_updates_by_frames_submitted = JS::Array::create_from<u64>(realm, counters.rendering_updates_by_frames_submitted.span(), [](u64 updates) { return JS::Value(updates); });
+    object->define_direct_property("renderingUpdatesByFramesSubmitted"_utf16_fly_string, rendering_updates_by_frames_submitted, JS::default_attributes);
+    // Flights by why they ended, and by the last stage they ran.
+    static constexpr Array flight_end_reasons { "done"sv, "stageRunsOnMain"sv };
+    static constexpr Array flight_stages { "style"sv, "styleRenderHalf"sv, "rounds"sv, "paintPrep"sv, "record"sv, "present"sv };
+    auto flight_ends = JS::Object::create(realm, nullptr);
+    for (size_t reason = 0; reason < flight_end_reasons.size(); ++reason) {
+        auto by_stage = JS::Object::create(realm, nullptr);
+        for (size_t stage = 0; stage < flight_stages.size(); ++stage) {
+            auto count = Layout::RustFFI::rust_flight_ends(static_cast<Layout::RustFFI::FfiFlightEndReason>(reason), static_cast<Layout::RustFFI::FfiFlightStage>(stage));
+            by_stage->define_direct_property(Utf16FlyString::from_utf8(flight_stages[stage]), JS::Value(count), JS::default_attributes);
+        }
+        flight_ends->define_direct_property(Utf16FlyString::from_utf8(flight_end_reasons[reason]), by_stage, JS::default_attributes);
+    }
+    object->define_direct_property("flightEnds"_utf16_fly_string, flight_ends, JS::default_attributes);
     object->define_direct_property("frameCompletionsPosted"_utf16_fly_string, JS::Value(HTML::FrameCompletion::the().posted_count()), JS::default_attributes);
     object->define_direct_property("frameCompletionsDelivered"_utf16_fly_string, JS::Value(HTML::FrameCompletion::the().delivered_count()), JS::default_attributes);
 
@@ -1791,6 +1806,9 @@ bool Internals::hold_next_clock_tick(Utf16String const& point, GC::Ptr<DOM::Docu
 
 bool Internals::hold_next_style_frame(Utf16String const& point, GC::Ptr<DOM::Document> document)
 {
+    // A flight runs the style pass first: its style is held before it runs, and the flight once it has run.
+    if (Layout::RustFFI::rust_stage_thread_submits_flight())
+        return hold_next_submitted_stage(point == "before-run"sv ? "flight:style"sv : "flight"sv, point, document);
     return hold_next_submitted_stage("style"sv, point, document);
 }
 

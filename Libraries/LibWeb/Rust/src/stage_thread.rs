@@ -145,7 +145,7 @@ pub(crate) fn reads_beside_recording_of(arena: *const c_void) -> bool {
             .iter()
             .filter(|stage| stage.arena == arena as usize)
             .peekable();
-        stages.peek().is_some() && stages.all(|stage| stage.label == "recording")
+        stages.peek().is_some() && stages.all(|stage| stage.role == "recording")
     })
 }
 
@@ -290,6 +290,9 @@ type StageOutcome = Result<(), Box<dyn Any + Send>>;
 /// A stage the calling thread has submitted and not taken back yet.
 struct SubmittedStage {
     label: &'static str,
+    // The stage whose hold on the document this one has: its own label, or for a flight, the label
+    // of the furthest stage it may run (see [`submit_flight`]).
+    role: &'static str,
     // The arena of the document the stage runs for, as the handle the main thread knows it by.
     arena: usize,
     // Whether the stage owns `arena` while it runs. A style pass does not: it reaches only its
@@ -393,7 +396,7 @@ fn inputs_wait_for_take_back(label: &str) -> bool {
 /// main-thread path to it has to go through [`join_frame_in_flight`] first.
 pub(crate) unsafe fn submit_stage(label: &'static str, arena: *mut c_void, stage: impl FnOnce() + Send + 'static) {
     // SAFETY: Guaranteed by the caller.
-    unsafe { submit(label, arena, stage, None) }
+    unsafe { submit(label, label, arena, stage, None) }
 }
 
 /// Like [`submit_stage`], and has the main thread run `on_taken_back` once it has taken the stage
@@ -410,7 +413,34 @@ pub(crate) unsafe fn submit_stage_with_take_back(
     on_taken_back: impl FnOnce() + 'static,
 ) {
     // SAFETY: Guaranteed by the caller.
-    unsafe { submit(label, arena, stage, Some(Box::new(on_taken_back))) }
+    unsafe { submit(label, label, arena, stage, Some(Box::new(on_taken_back))) }
+}
+
+/// The label of a flight: one stage run that runs the stages of a rendering update one after
+/// another (see `crate::flight`).
+pub(crate) const FLIGHT_STAGE: &str = "flight";
+
+/// Whether the rendering update submits its stages as one flight: under `LIBWEB_STAGE_OVERLAP`
+/// naming `flight`, where it submits its style pass.
+pub(crate) fn submits_flight() -> bool {
+    submits("style") && stage_overlaps(FLIGHT_STAGE)
+}
+
+/// Like [`submit_stage_with_take_back`], for a flight that may run the stages up to `reach`: the
+/// frame holds the document as a submitted stage `reach` would, which holds it as every stage
+/// before it does.
+///
+/// # Safety
+///
+/// As for [`submit_stage`].
+pub(crate) unsafe fn submit_flight(
+    reach: &'static str,
+    arena: *mut c_void,
+    stage: impl FnOnce() + Send + 'static,
+    on_taken_back: impl FnOnce() + 'static,
+) {
+    // SAFETY: Guaranteed by the caller.
+    unsafe { submit(FLIGHT_STAGE, reach, arena, stage, Some(Box::new(on_taken_back))) }
 }
 
 /// # Safety
@@ -418,13 +448,16 @@ pub(crate) unsafe fn submit_stage_with_take_back(
 /// As for [`submit_stage`].
 unsafe fn submit(
     label: &'static str,
+    role: &'static str,
     arena: *mut c_void,
     stage: impl FnOnce() + Send + 'static,
     on_taken_back: Option<Box<dyn FnOnce()>>,
 ) {
     let thread = stage_thread().expect("only a stage thread runs submitted stages");
     debug_assert!(
-        submits(label) || (label == PRESENTATION_STAGE && submits_presentation()),
+        submits(label)
+            || (label == PRESENTATION_STAGE && submits_presentation())
+            || (label == FLIGHT_STAGE && submits_flight()),
         "the stage {label} is not submitted"
     );
     let (to_caller, from_stage) = channel::<StageOutcome>();
@@ -457,9 +490,10 @@ unsafe fn submit(
     SUBMITTED.with(|submitted| {
         submitted.borrow_mut().push(SubmittedStage {
             label,
+            role,
             arena: arena as usize,
-            owns_arena: label != "style",
-            style_engine: style_engine_of_stage(label, arena),
+            owns_arena: role != "style",
+            style_engine: style_engine_of_stage(role, arena),
             from_stage,
             outcome: None,
             on_taken_back,
@@ -564,6 +598,7 @@ pub unsafe extern "C" fn rust_stage_thread_submit_presentation(
     // SAFETY: Guaranteed by the caller.
     unsafe {
         submit(
+            PRESENTATION_STAGE,
             PRESENTATION_STAGE,
             arena,
             move || {
@@ -708,7 +743,9 @@ pub unsafe extern "C" fn rust_stage_thread_hold_next_submitted_stage(
     }
     // SAFETY: Guaranteed by the caller.
     let label = unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(label, label_length)) };
-    if !stage_overlaps(label) {
+    // A hold on a stage of a flight is named after the flight, as "flight:style".
+    let submitted_label = label.split_once(':').map_or(label, |(flight, _)| flight);
+    if !stage_overlaps(submitted_label) {
         return false;
     }
     let (mut hold, _) = lock_stage_hold();
@@ -747,10 +784,9 @@ pub extern "C" fn rust_stage_thread_wait_for_held_stage(timeout_ms: u32, held_at
             return false;
         };
         let submitted_armed_run = SUBMITTED.with(|submitted| {
-            submitted
-                .borrow()
-                .iter()
-                .any(|stage| stage.label == armed.label && (armed.arena == 0 || armed.arena == stage.arena))
+            submitted.borrow().iter().any(|stage| {
+                hold_names_stage(&armed.label, stage.label) && (armed.arena == 0 || armed.arena == stage.arena)
+            })
         });
         if !submitted_armed_run || now >= deadline {
             return false;
@@ -766,7 +802,11 @@ pub extern "C" fn rust_stage_thread_wait_for_held_stage(timeout_ms: u32, held_at
 /// thread has not reached yet. A hold for another stage stays armed.
 fn release_hold_on(label: &'static str) {
     let (mut hold, changed) = lock_stage_hold();
-    if hold.armed.as_ref().is_some_and(|armed| armed.label == label) {
+    if hold
+        .armed
+        .as_ref()
+        .is_some_and(|armed| hold_names_stage(&armed.label, label))
+    {
         hold.armed = None;
     }
     if hold.holding.take().is_some() {
@@ -789,7 +829,9 @@ fn stage_thread_holds_run_for_queued_stage() -> bool {
         };
         let armed_run_pending = SUBMITTED.with_borrow_mut(|submitted| {
             submitted.iter_mut().any(|stage| {
-                stage.label == armed.label && (armed.arena == 0 || armed.arena == stage.arena) && !stage.poll()
+                hold_names_stage(&armed.label, stage.label)
+                    && (armed.arena == 0 || armed.arena == stage.arena)
+                    && !stage.poll()
             })
         });
         if !armed_run_pending {
@@ -803,15 +845,33 @@ fn stage_thread_holds_run_for_queued_stage() -> bool {
     }
 }
 
+/// Whether a hold armed for `armed` holds a run of the submitted stage `label`: one armed for the
+/// stage itself, or for one of the stages of a flight ("flight:style").
+fn hold_names_stage(armed: &str, label: &str) -> bool {
+    armed == label || armed.strip_prefix(label).is_some_and(|rest| rest.starts_with(':'))
+}
+
 /// On the stage thread, at `point` of a submitted run: waits while a hold is armed for it.
 /// Anywhere else, does nothing.
 pub(crate) fn hold_here(point: FfiStageHoldPoint) {
+    hold_at(point, None);
+}
+
+/// On the stage thread, before a flight runs its stage `stage` (a label such as "flight:style"):
+/// waits while a hold is armed for that stage at [`FfiStageHoldPoint::BeforeRun`].
+pub(crate) fn hold_before_flight_stage(stage: &'static str) {
+    hold_at(FfiStageHoldPoint::BeforeRun, Some(stage));
+}
+
+fn hold_at(point: FfiStageHoldPoint, flight_stage: Option<&'static str>) {
     let Some(run) = RUNNING_SUBMITTED_RUN.with(Cell::get) else {
         return;
     };
     let (mut hold, changed) = lock_stage_hold();
     let holds_run = hold.armed.as_ref().is_some_and(|armed| {
-        armed.label == run.label && armed.point == point && (armed.arena == 0 || armed.arena == run.arena)
+        armed.label == flight_stage.unwrap_or(run.label)
+            && armed.point == point
+            && (armed.arena == 0 || armed.arena == run.arena)
     });
     if !holds_run || run.number < hold.first_holdable_run {
         return;
@@ -936,17 +996,17 @@ fn join_frame_in_flight_for_stage(
     if RUNNING_JOIN_WORK.with(Cell::get) != 0 {
         return;
     }
-    let label = SUBMITTED.with(|submitted| {
+    let reached_stage = SUBMITTED.with(|submitted| {
         submitted
             .borrow()
             .iter()
             .find(|stage| reached(stage))
-            .map(|stage| stage.label)
+            .map(|stage| (stage.label, stage.role))
     });
-    let Some(label) = label else {
+    let Some((label, role)) = reached_stage else {
         return;
     };
-    if label == "style" {
+    if role == "style" {
         STYLE_PASS_FORCED_JOINS.with(|joins| joins.set(joins.get() + 1));
     }
     let first_time = FORCED_JOIN_SITES.with(|sites| sites.borrow_mut().insert((file, line as usize, column)));
@@ -1018,7 +1078,7 @@ pub extern "C" fn rust_stage_thread_only_style_pass_in_flight_for(engine: *const
         !submitted.is_empty()
             && submitted
                 .iter()
-                .all(|stage| stage.label == "style" && stage.style_engine == engine as usize)
+                .all(|stage| stage.role == "style" && stage.style_engine == engine as usize)
     })
 }
 
@@ -1030,7 +1090,7 @@ pub extern "C" fn rust_stage_thread_layout_pass_in_flight_for(engine: *const c_v
     SUBMITTED.with_borrow(|submitted| {
         submitted
             .iter()
-            .any(|stage| inputs_wait_for_take_back(stage.label) && stage.style_engine == engine as usize)
+            .any(|stage| inputs_wait_for_take_back(stage.role) && stage.style_engine == engine as usize)
     })
 }
 
@@ -1039,7 +1099,7 @@ pub(crate) fn layout_pass_in_flight_for_arena(arena: *mut c_void) -> bool {
     SUBMITTED.with_borrow(|submitted| {
         submitted
             .iter()
-            .any(|stage| inputs_wait_for_take_back(stage.label) && stage.arena == arena as usize)
+            .any(|stage| inputs_wait_for_take_back(stage.role) && stage.arena == arena as usize)
     })
 }
 
@@ -1070,7 +1130,7 @@ pub extern "C" fn rust_stage_thread_arena_changes_wait_for_frame(arena: *mut c_v
             .iter()
             .filter(|stage| stage.arena == arena as usize)
             .peekable();
-        owners.peek().is_some() && owners.all(|stage| stage.style_engine == 0 || inputs_wait_for_take_back(stage.label))
+        owners.peek().is_some() && owners.all(|stage| stage.style_engine == 0 || inputs_wait_for_take_back(stage.role))
     })
 }
 
@@ -1081,7 +1141,7 @@ pub(crate) fn only_style_pass_in_flight_for_arena(arena: *mut c_void) -> bool {
         !submitted.is_empty()
             && submitted
                 .iter()
-                .all(|stage| stage.label == "style" && stage.arena == arena as usize)
+                .all(|stage| stage.role == "style" && stage.arena == arena as usize)
     })
 }
 
@@ -1583,6 +1643,7 @@ mod tests {
             SUBMITTED.with(|submitted| {
                 submitted.borrow_mut().push(SubmittedStage {
                     label,
+                    role: label,
                     arena,
                     owns_arena: label != "style",
                     style_engine,

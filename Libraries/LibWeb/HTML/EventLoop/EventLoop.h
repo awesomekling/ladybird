@@ -133,6 +133,9 @@ public:
         // first thing that kept them in place. Counted only where the render side submits layout.
         u64 layout_overlap_eligible_updates { 0 };
         Array<u64, DOM::layout_overlap_blocker_count> layout_overlap_blocked_updates {};
+        // Rendering updates by how many frames they submitted (their hops to the render side): none, 1, 2, 3, and 4 or
+        // more.
+        Array<u64, 5> rendering_updates_by_frames_submitted {};
     };
 
     enum class Type {
@@ -360,6 +363,8 @@ private:
     RenderingSchedulerCounters m_rendering_scheduler_counters_at_last_update;
     double m_last_rendering_update_end_time { 0 };
     u64 m_frame_submitted_at_nanoseconds { 0 };
+    // The frames the rendering update running now has submitted so far.
+    u64 m_frames_submitted_by_rendering_update { 0 };
     static bool s_a_frame_is_in_flight;
 
     GC::Ptr<GC::Function<void()>> m_rendering_task_function;

@@ -5184,6 +5184,11 @@ pub unsafe extern "C" fn style_engine_submit_style_transaction(
 ) {
     // SAFETY: Guaranteed by the caller.
     let pass = unsafe { prepare_style_pass(engine, root, computation_inputs, layout_arena) };
+    if crate::stage_thread::submits_flight() {
+        // SAFETY: As above.
+        unsafe { crate::flight::submit(layout_arena, crate::flight::Flight::from_style_pass(pass)) };
+        return;
+    }
     // SAFETY: As above.
     unsafe { crate::stage_thread::submit_stage("style", layout_arena, move || pass.run()) };
 }
