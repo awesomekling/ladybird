@@ -1759,7 +1759,8 @@ void Internals::release_held_frame()
 
 bool Internals::frame_in_flight_holds_document() const
 {
-    return HTML::frame_in_flight_holds(window().associated_document());
+    auto const& document = window().associated_document();
+    return HTML::frame_in_flight_holds(document) || HTML::main_thread_event_loop().frame_scheduler().pass_in_flight_holds(document);
 }
 
 bool Internals::frame_in_flight_references_are_alive() const
@@ -1800,9 +1801,9 @@ Utf16String Internals::frame_scheduler_state() const
     VERIFY_NOT_REACHED();
 }
 
-bool Internals::rendering_update_awaits_layout_pass() const
+bool Internals::rendering_update_awaits_pass() const
 {
-    return HTML::main_thread_event_loop().frame_scheduler().awaits_layout_pass();
+    return HTML::main_thread_event_loop().frame_scheduler().awaits_pass();
 }
 
 void Internals::update_compositor_animations()

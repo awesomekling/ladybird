@@ -151,6 +151,12 @@ pub extern "C" fn rust_stage_thread_submits_layout() -> bool {
     submits("layout")
 }
 
+/// Whether the rendering update submits its first style pass rather than running it in place.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_stage_thread_submits_style() -> bool {
+    submits("style")
+}
+
 /// Installs the main thread's frame scheduler host. The first host installed stays.
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_stage_thread_set_frame_scheduler_host(host: FfiFrameSchedulerHost) {

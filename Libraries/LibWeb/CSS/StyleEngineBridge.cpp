@@ -1001,9 +1001,10 @@ Vector<CollectedStyleSheetResourceContext> collect_style_sheet_resource_contexts
 
 }
 
-StyleEngine::PublishedStyleTransaction StyleEngine::take_style_transaction(StyleNodeID root)
+// Readies the document's inputs to a style transaction and lends them to `take`, which hands them to the engine
+// with the document's layout arena.
+void StyleEngine::lend_style_transaction_inputs(Function<void(StyleEngineFFI::FfiDocumentStyleComputationInputs const&, void* layout_arena)> const& take)
 {
-    auto submission_started_at = MonotonicTime::now();
     submit_recorded_input();
     publish_font_faces();
     style_engine_reset_custom_functions(m_impl);
@@ -1109,9 +1110,41 @@ StyleEngine::PublishedStyleTransaction StyleEngine::take_style_transaction(Style
     // committed.
     auto* layout_node_arena = m_style_computer ? m_style_computer->document().layout_node_arena_if_created() : nullptr;
     auto* layout_arena = layout_node_arena ? layout_node_arena->handle() : nullptr;
-    auto bridge_started_at = MonotonicTime::now();
-    auto view = StyleEngineFFI::style_engine_take_style_transaction(m_impl, root.value(), computation_inputs, layout_arena);
+    take(computation_inputs, layout_arena);
+}
+
+StyleEngine::PublishedStyleTransaction StyleEngine::take_style_transaction(StyleNodeID root)
+{
+    auto submission_started_at = MonotonicTime::now();
+    StyleEngineFFI::FfiStyleTransactionView view {};
+    MonotonicTime bridge_started_at = submission_started_at;
+    lend_style_transaction_inputs([&](auto const& computation_inputs, void* layout_arena) {
+        bridge_started_at = MonotonicTime::now();
+        view = StyleEngineFFI::style_engine_take_style_transaction(m_impl, root.value(), computation_inputs, layout_arena);
+    });
     auto bridge_microseconds = (MonotonicTime::now() - bridge_started_at).to_truncated_microseconds();
+    return publish_style_transaction_view(view, (bridge_started_at - submission_started_at).to_truncated_microseconds(), bridge_microseconds);
+}
+
+void StyleEngine::submit_style_transaction(StyleNodeID root)
+{
+    auto submission_started_at = MonotonicTime::now();
+    lend_style_transaction_inputs([&](auto const& computation_inputs, void* layout_arena) {
+        StyleEngineFFI::style_engine_submit_style_transaction(m_impl, root.value(), computation_inputs, layout_arena);
+    });
+    m_submitted_style_transaction_microseconds = (MonotonicTime::now() - submission_started_at).to_truncated_microseconds();
+}
+
+StyleEngine::PublishedStyleTransaction StyleEngine::finish_submitted_style_transaction()
+{
+    auto bridge_started_at = MonotonicTime::now();
+    auto view = StyleEngineFFI::style_engine_finish_submitted_style_transaction(m_impl);
+    auto bridge_microseconds = (MonotonicTime::now() - bridge_started_at).to_truncated_microseconds();
+    return publish_style_transaction_view(view, exchange(m_submitted_style_transaction_microseconds, 0), bridge_microseconds);
+}
+
+StyleEngine::PublishedStyleTransaction StyleEngine::publish_style_transaction_view(StyleEngineFFI::FfiStyleTransactionView const& view, i64 submission_microseconds, i64 bridge_microseconds)
+{
     if (view.reclaimed_style_atom_count != 0) {
         HashTable<StyleAtomID> reclaimed_atoms;
         reclaimed_atoms.ensure_capacity(view.reclaimed_style_atom_count);
@@ -1144,7 +1177,7 @@ StyleEngine::PublishedStyleTransaction StyleEngine::take_style_transaction(Style
         .reactions = { view.answers, view.count },
         .is_scoped = view.scoped,
         .only_derived_child_reactions = view.only_derived_child_reactions,
-        .submission_microseconds = static_cast<u64>((bridge_started_at - submission_started_at).to_truncated_microseconds()),
+        .submission_microseconds = static_cast<u64>(submission_microseconds),
         .bridge_microseconds = static_cast<u64>(bridge_microseconds),
     };
 }

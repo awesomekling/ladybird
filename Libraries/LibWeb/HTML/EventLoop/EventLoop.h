@@ -257,6 +257,9 @@ public:
     // Goes on with the rendering update whose layout pass the frame scheduler has taken back, at step 16 for the document
     // the pass laid out.
     void resume_rendering_update_after_layout(Badge<FrameScheduler>, Vector<GC::Ref<DOM::Document>> const& docs, size_t document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp);
+    // Goes on with the rendering update whose first style pass the frame scheduler has taken back and whose style update
+    // it has finished, at step 16 for the document the pass styled. Its layout pass may still be submitted.
+    void resume_rendering_update_after_style(Badge<FrameScheduler>, Vector<GC::Ref<DOM::Document>> const& docs, size_t document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp);
 
 private:
     explicit EventLoop(Type);
@@ -267,8 +270,12 @@ private:
     void update_the_rendering();
     enum class LayoutSubmission : u8 {
         Wait,
+        // The style update has run; the layout pass may still be submitted.
+        MaySubmitLayout,
+        // The first style pass or the layout pass may be submitted.
         MaySubmit,
     };
+    void resume_rendering_update(Vector<GC::Ref<DOM::Document>> const& docs, size_t document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp, LayoutSubmission);
     bool run_rendering_update_from_step_16(Vector<GC::Ref<DOM::Document>> const& docs, size_t first_document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp, LayoutSubmission);
     void finish_rendering_update_steps(ReadonlySpan<GC::Ref<DOM::Document>> docs);
     void end_rendering_update();
@@ -315,6 +322,7 @@ private:
     bool m_running_rendering_task { false };
     bool m_running_synchronous_rendering_update { false };
     bool m_rendering_update_may_overlap_layout { false };
+    bool m_rendering_update_may_overlap_style { false };
     bool m_rendering_task_queued { false };
     bool m_rendering_update_requested { false };
 

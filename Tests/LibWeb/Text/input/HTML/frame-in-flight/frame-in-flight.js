@@ -20,7 +20,7 @@ async function whileFrameInFlight(point, mutate, during, doc = null) {
             mutate();
             setTimeout(async () => {
                 try {
-                    while (armed && internals.renderingUpdateAwaitsLayoutPass()) {
+                    while (armed && internals.renderingUpdateAwaitsPass()) {
                         internals.waitForFrameToFinish();
                         await nextTask();
                     }

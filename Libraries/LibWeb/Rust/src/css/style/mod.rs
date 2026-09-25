@@ -1230,6 +1230,9 @@ pub struct HostState {
     /// Borrowed FFI result storage for the most recently published style transaction.
     ffi_style_transaction_output: bridge::FfiStyleTransactionOutput,
     ffi_style_transaction_output_memory: MemoryLease,
+    /// The root and output of a style pass the main thread submitted, which the pass leaves here
+    /// for the main thread to take once it has taken the frame back.
+    submitted_style_pass_output: Option<(StyleNodeID, Box<bridge::FfiStyleTransactionOutput>)>,
     /// Borrowed FFI result storage for the most recent style-node query.
     ffi_style_node_query: Vec<u32>,
     ffi_style_node_query_memory: MemoryLease,

@@ -4805,6 +4805,70 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
     finish_style_transaction(engine, root, output)
 }
 
+/// Takes the pending style transaction as [`style_engine_take_style_transaction`] does, and hands
+/// its pass to the stage thread instead of waiting for it: the pass runs beside the main thread
+/// and owns the engine and the layout arena `layout_arena` until the main thread takes the frame
+/// back. [`style_engine_finish_submitted_style_transaction`] then returns its answers.
+///
+/// # Safety
+/// `engine` must be live and `root` a styled node's raw ID; `layout_arena` must be the document's
+/// live layout arena. Until the frame is taken back, every main-thread path to the engine or the
+/// arena must join the frame first, as the engine's entrances and the arena's doors do.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_submit_style_transaction(
+    engine: *mut c_void,
+    root: u32,
+    computation_inputs: FfiDocumentStyleComputationInputs,
+    layout_arena: *mut c_void,
+) {
+    engine_entrance(engine, "style_engine_take_style_transaction");
+    assert!(
+        !layout_arena.is_null(),
+        "a submitted style pass owns its document's layout arena"
+    );
+    let root = StyleNodeID::from_raw(root).expect("a submitted style pass has a root");
+    let engine_handle = engine;
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    assert!(
+        engine.host.submitted_style_pass_output.is_none(),
+        "one style pass is in flight at a time"
+    );
+    // SAFETY: Guaranteed by the caller.
+    unsafe { begin_style_transaction(engine, computation_inputs) };
+    // SAFETY: Guaranteed by the caller: the frame in flight owns the engine and the arena.
+    let engine_on_stage = unsafe { crate::stage_thread::FrameOwns::new(engine_handle.cast::<StyleEngine>()) };
+    // SAFETY: As above.
+    let lent_arena = unsafe { super::animations::LentLayoutArena::lend(layout_arena) };
+    let pass = move || {
+        // SAFETY: The frame in flight owns the engine until the main thread takes it back.
+        let engine = unsafe { &mut *engine_on_stage.into_inner() };
+        let output = run_style_pass(engine, root, lent_arena);
+        engine.host.submitted_style_pass_output = Some((root, Box::new(output)));
+    };
+    // SAFETY: As above.
+    unsafe { crate::stage_thread::submit_stage("style", layout_arena, pass) };
+}
+
+/// The answers of the style pass [`style_engine_submit_style_transaction`] submitted, once the
+/// main thread has taken its frame back.
+///
+/// # Safety
+/// `engine` must be live, with no frame in flight that owns it. The answer slice stays valid as
+/// for [`style_engine_take_style_transaction`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_finish_submitted_style_transaction(
+    engine: *mut c_void,
+) -> FfiStyleTransactionView {
+    engine_entrance(engine, "style_engine_finish_submitted_style_transaction");
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    let (root, output) = engine
+        .host
+        .submitted_style_pass_output
+        .take()
+        .expect("the submitted style pass has run");
+    finish_style_transaction(engine, root, *output)
+}
+
 /// Freezes a style transaction's inputs in the engine before its pass runs.
 ///
 /// # Safety

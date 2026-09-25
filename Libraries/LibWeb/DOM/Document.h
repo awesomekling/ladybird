@@ -530,6 +530,11 @@ public:
     // The rendering update's layout update, whose full layout pass runs beside the main thread under
     // LIBWEB_STAGE_OVERLAP=layout. Returns true if it does; the rendering update goes on once the frame is taken back.
     [[nodiscard]] bool submit_layout_for_rendering_update();
+    // The rendering update's style update, whose first pass runs beside the main thread under
+    // LIBWEB_STAGE_OVERLAP=style. Returns true if it does; the rendering update goes on once the frame is taken back.
+    [[nodiscard]] bool submit_style_for_rendering_update();
+    // Runs the rest of the style update submit_style_for_rendering_update() submitted, once its frame is taken back.
+    void finish_submitted_style_update();
     void update_layout_if_needed_for_node(Node const&, UpdateLayoutReason);
     [[nodiscard]] u64 partial_layout_count() const;
     [[nodiscard]] u64 full_layout_count() const;
