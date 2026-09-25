@@ -9,8 +9,8 @@
 <div id="box" class="item"></div>
 <div id="list"><div class="item">a</div><div class="item">b</div></div>
 <script>
-    // Selector queries the DOM answers alone and a first-seen id, made while the style pass is in flight: none of them
-    // waits for the pass, and the next style update sees each of them.
+    // Selector queries the DOM answers alone, a first-seen id and sheet conditions, made while the style pass is in
+    // flight: none of them waits for the pass, and the next style update sees each of them.
     asyncTest(async done => {
         const element = box;
         let height = 20;
@@ -39,6 +39,13 @@
         await besidePass("a first-seen id", () => {
             element.id = "renamed";
         }, () => `width ${element.offsetWidth}, by id: ${document.getElementById("renamed") === element}`);
+        let constructed;
+        await besidePass("a constructed sheet with a media list", () => {
+            constructed = new CSSStyleSheet({ media: "print" });
+        }, () => constructed.media.mediaText);
+        await besidePass("a style element's media", () => {
+            base.media = "print";
+        }, () => `width ${element.offsetWidth}`);
         done();
     });
 </script>
