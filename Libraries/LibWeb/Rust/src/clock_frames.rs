@@ -925,6 +925,18 @@ pub extern "C" fn rust_clock_lend_holds(arena: *mut c_void) -> bool {
     crate::stage_thread::has_lent(arena)
 }
 
+/// Whether a tick beside the main thread's tasks left something for the documents to adopt since
+/// they last took the ticks in.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_clock_lend_has_ticks_to_adopt() -> bool {
+    TICKS_TO_ADOPT.load(Ordering::Acquire)
+        || registry()
+            .lock()
+            .expect("clock lease registry")
+            .values()
+            .any(|lease| !lease.entries.lock().expect("clock lease entries").is_empty())
+}
+
 /// Takes back every arena the main thread lent while it ran a task, and leaves what the ticks
 /// sampled for the documents to adopt, as they do when the main thread wakes. Returns whether a
 /// tick left something to adopt since the main thread last took the ticks in, installed or put
