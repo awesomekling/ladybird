@@ -21,6 +21,7 @@ use super::update_layout::FfiLayoutTreeBuildStats;
 use super::used_values::SizeConstraint;
 use crate::css::style::bridge::ElementBoxKind;
 use crate::css::style::fast_hash::{FastMap as HashMap, FastSet as HashSet};
+use crate::css::style::host_pins::HostPinsHandle;
 use crate::css::style::tree::{NaturalSize, ReplacedContentInput, StyleNodeID};
 use crate::css::style::{
     PublishedBoxFacts, PublishedTextSource, StyleEngine, TextStyleParentFacts,
@@ -653,7 +654,9 @@ pub(crate) struct FreedSubtree {
     rows_with_image_observers: Vec<NodeSlotId>,
     paintable_row_resets: Vec<crate::painting::paintable_rows::PaintableRowReset>,
     arena_pinned_style_records: Vec<u64>,
+    host_pinned_style_records: Vec<u64>,
     style_engine: *mut c_void,
+    host_style_record_pins: Option<HostPinsHandle>,
 }
 
 /// Who hears that a shell's style changed: the host at once, which only the main thread can ask,
@@ -760,15 +763,61 @@ impl FreedSubtree {
         for reset in self.paintable_row_resets {
             reset.invoke_callback_on_main_thread(&main_thread);
         }
-        Self::unpin_arena_pinned_style_records(self.style_engine, self.arena_pinned_style_records);
+        Self::unpin_style_records(
+            self.style_engine,
+            self.host_style_record_pins,
+            self.arena_pinned_style_records,
+            self.host_pinned_style_records,
+        );
     }
 
-    fn unpin_arena_pinned_style_records(style_engine: *mut c_void, arena_pinned_style_records: Vec<u64>) {
-        if !style_engine.is_null() {
-            for style_record in arena_pinned_style_records {
-                // SAFETY: Registration and unregistration keep the style engine live.
-                unsafe { &mut *style_engine.cast::<StyleEngine>() }.unpin_layout_style_record(style_record);
-            }
+    fn unpin_style_records(
+        style_engine: *mut c_void,
+        host_style_record_pins: Option<HostPinsHandle>,
+        arena_pinned_style_records: Vec<u64>,
+        host_pinned_style_records: Vec<u64>,
+    ) {
+        if style_engine.is_null() {
+            return;
+        }
+        for style_record in host_pinned_style_records {
+            unpin_host_style_record(style_engine, host_style_record_pins, style_record);
+        }
+        if arena_pinned_style_records.is_empty() {
+            return;
+        }
+        // The arena's own pins are the engine's, which a style pass in flight owns.
+        crate::stage_thread::join_frame_for_style_engine_entrance(style_engine, "freed subtree style record pins");
+        for style_record in arena_pinned_style_records {
+            // SAFETY: Registration and unregistration keep the style engine live.
+            unsafe { &mut *style_engine.cast::<StyleEngine>() }.unpin_layout_style_record(style_record);
+        }
+    }
+}
+
+/// Pins a record for the host's readers in the document thread's table, or with the engine when
+/// no document thread has one (an engine a test drives).
+fn pin_host_style_record(style_engine: *mut c_void, host_style_record_pins: Option<HostPinsHandle>, record: u64) {
+    match host_style_record_pins {
+        // SAFETY: The arena's owner is the document thread, or runs while it waits.
+        Some(pins) => unsafe { pins.pins() }.pin(record),
+        None => {
+            crate::stage_thread::join_frame_for_style_engine_entrance(style_engine, "host style record pin");
+            // SAFETY: Registration and unregistration keep the style engine live.
+            unsafe { &mut *style_engine.cast::<StyleEngine>() }.pin_layout_style_record(record);
+        }
+    }
+}
+
+/// Releases a pin [`pin_host_style_record`] took.
+fn unpin_host_style_record(style_engine: *mut c_void, host_style_record_pins: Option<HostPinsHandle>, record: u64) {
+    match host_style_record_pins {
+        // SAFETY: As for `pin_host_style_record`.
+        Some(pins) => unsafe { pins.pins() }.unpin(record),
+        None => {
+            crate::stage_thread::join_frame_for_style_engine_entrance(style_engine, "host style record unpin");
+            // SAFETY: Registration and unregistration keep the style engine live.
+            unsafe { &mut *style_engine.cast::<StyleEngine>() }.unpin_layout_style_record(record);
         }
     }
 }
@@ -922,6 +971,9 @@ pub(crate) struct LayoutNodeArena {
     /// The style engine whose mirror the arena's rows are built from, or null before the document
     /// registers it.
     style_engine: Cell<StyleEngineLink>,
+    /// The document thread's style-record pin table, which the host's pins on rows go into: they
+    /// never enter the engine, so they never wait for a style pass in flight.
+    host_style_record_pins: Cell<Option<HostPinsHandle>>,
     /// Whether the host listens for box presence. The callback itself is in the host tables,
     /// which only the main thread reaches; this says whether a change is worth handing back.
     host_hears_box_presence: Cell<bool>,
@@ -1088,6 +1140,7 @@ impl LayoutNodeArena {
             may_have_auto_content_visibility: Cell::new(false),
             may_have_scroll_snap_areas: Cell::new(false),
             style_engine: Cell::new(StyleEngineLink(std::ptr::null_mut())),
+            host_style_record_pins: Cell::new(None),
             host_hears_box_presence: Cell::new(false),
             host_handbacks: RefCell::new(HostHandbacks::default()),
             host_handback_spans: Cell::new(0),
@@ -1362,6 +1415,7 @@ impl LayoutNodeArena {
         let mut rows_with_image_observers = Vec::new();
         let mut paintable_row_resets = Vec::new();
         let mut arena_pinned_style_records = Vec::new();
+        let mut host_pinned_style_records = Vec::new();
         for slot in slots_in_pre_order {
             shells.extend(self.data(slot).shell.get());
             if self.rows_with_owned_image_provider.get_mut().remove(&slot) {
@@ -1376,7 +1430,7 @@ impl LayoutNodeArena {
             }
             let host_pinned_style_record = self.style_records_pinned_by_host[slot.slot_index() as usize].get();
             if host_pinned_style_record != 0 {
-                arena_pinned_style_records.push(host_pinned_style_record);
+                host_pinned_style_records.push(host_pinned_style_record);
             }
             self.unlink_children_of_node_being_freed(slot);
             if let Some(reset) = self.free_unlinked_slot(slot) {
@@ -1389,7 +1443,9 @@ impl LayoutNodeArena {
             rows_with_image_observers,
             paintable_row_resets,
             arena_pinned_style_records,
+            host_pinned_style_records,
             style_engine: self.style_engine.get().0,
+            host_style_record_pins: self.host_style_record_pins.get(),
         }
     }
 
@@ -2035,7 +2091,7 @@ impl LayoutNodeArena {
             return;
         }
         self.style_records_pinned_by_host[id.slot_index() as usize].set(record);
-        self.with_style_engine(|engine| engine.pin_layout_style_record(record));
+        pin_host_style_record(self.style_engine.get().0, self.host_style_record_pins.get(), record);
     }
 
     /// Release the pin the host holds on `slot`'s style record, if it holds one.
@@ -2045,7 +2101,7 @@ impl LayoutNodeArena {
         if record == 0 {
             return;
         }
-        self.with_style_engine(|engine| engine.unpin_layout_style_record(record));
+        unpin_host_style_record(self.style_engine.get().0, self.host_style_record_pins.get(), record);
     }
 
     /// The style record the host has pinned for `slot`, or zero.
@@ -2055,10 +2111,12 @@ impl LayoutNodeArena {
 
     pub(crate) fn set_style_engine(&self, style_engine: *mut c_void) {
         self.style_engine.set(StyleEngineLink(style_engine));
+        self.host_style_record_pins.set(None);
         if !style_engine.is_null() {
             // SAFETY: The registered style engine outlives this arena's live nodes.
-            unsafe { &mut *style_engine.cast::<StyleEngine>() }
-                .install_layout_style_snapshots(self.layout_style_snapshots.clone());
+            let engine = unsafe { &mut *style_engine.cast::<StyleEngine>() };
+            engine.install_layout_style_snapshots(self.layout_style_snapshots.clone());
+            self.host_style_record_pins.set(engine.host_style_record_pins());
         }
     }
 
@@ -3619,7 +3677,9 @@ impl LayoutNodeArena {
             rows_with_image_observers,
             paintable_row_resets,
             arena_pinned_style_records,
+            host_pinned_style_records,
             style_engine,
+            host_style_record_pins,
         } = freed;
         for shell in shells {
             self.hand_back(HostHandback::Shell(shell));
@@ -3633,7 +3693,12 @@ impl LayoutNodeArena {
         for reset in paintable_row_resets {
             self.hand_back(HostHandback::PaintableRowReset(reset));
         }
-        FreedSubtree::unpin_arena_pinned_style_records(style_engine, arena_pinned_style_records);
+        FreedSubtree::unpin_style_records(
+            style_engine,
+            host_style_record_pins,
+            arena_pinned_style_records,
+            host_pinned_style_records,
+        );
     }
 
     /// Records that `row` is gaining or losing its committed box. The paint state is borrowed for
