@@ -5037,13 +5037,14 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
 
 /// Takes the pending style transaction as [`style_engine_take_style_transaction`] does, and hands
 /// its pass to the stage thread instead of waiting for it: the pass runs beside the main thread
-/// and owns the engine and the layout arena `layout_arena` until the main thread takes the frame
-/// back. [`style_engine_finish_submitted_style_transaction`] then returns its answers.
+/// and owns the engine until the main thread takes the frame back. It does not own the layout
+/// arena `layout_arena`, which it never reaches.
+/// [`style_engine_finish_submitted_style_transaction`] then returns its answers.
 ///
 /// # Safety
 /// `engine` must be live and `root` a styled node's raw ID; `layout_arena` must be the document's
-/// live layout arena. Until the frame is taken back, every main-thread path to the engine or the
-/// arena must join the frame first, as the engine's entrances and the arena's doors do.
+/// live layout arena. Until the frame is taken back, every main-thread path to the engine must
+/// join the frame first, as the engine's entrances and the arena's style engine accesses do.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_submit_style_transaction(
     engine: *mut c_void,
@@ -5054,7 +5055,7 @@ pub unsafe extern "C" fn style_engine_submit_style_transaction(
     engine_entrance(engine, "style_engine_take_style_transaction");
     assert!(
         !layout_arena.is_null(),
-        "a submitted style pass owns its document's layout arena"
+        "a submitted style pass is submitted for its document's layout arena"
     );
     let root = StyleNodeID::from_raw(root).expect("a submitted style pass has a root");
     let engine_handle = engine;
@@ -5067,7 +5068,7 @@ pub unsafe extern "C" fn style_engine_submit_style_transaction(
     // SAFETY: Guaranteed by the caller.
     unsafe { begin_style_transaction(engine, computation_inputs) };
     engine.host.atom_sweep_waits_for_host = true;
-    // SAFETY: Guaranteed by the caller: the frame in flight owns the engine and the arena.
+    // SAFETY: Guaranteed by the caller: the frame in flight owns the engine.
     let engine_on_stage = unsafe { crate::stage_thread::FrameOwns::new(engine_handle.cast::<StyleEngine>()) };
     // The pass never reaches the arena, which the main thread goes on writing beside it: it takes
     // along the committed boxes of the nodes it may sample against them.

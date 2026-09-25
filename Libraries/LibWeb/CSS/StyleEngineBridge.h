@@ -344,10 +344,16 @@ public:
     PublishedStyleTransaction take_style_transaction(StyleNodeID root);
     // Takes pending inputs as take_style_transaction() does, and hands the transaction's pass to the render side
     // instead of waiting for it (LIBWEB_STAGE_OVERLAP=style). Until the frame in flight is taken back, the pass owns
-    // the engine and the document's layout arena, and every engine entrance joins the frame first.
+    // the engine, and every engine entrance joins the frame first. The document's layout arena stays the main
+    // thread's.
     void submit_style_transaction(StyleNodeID root);
     // The transaction submit_style_transaction() submitted, once its frame has been taken back.
     PublishedStyleTransaction finish_submitted_style_transaction();
+    // A node removed beside a submitted pass gives up its style node identity while the pass may still answer for
+    // it. The identity is not issued again before the next transaction, so the drain of the pass skips its answers.
+    void note_style_node_retired(StyleNodeID);
+    [[nodiscard]] bool style_node_was_retired_beside_pass(StyleNodeID style_node) const { return m_style_nodes_retired_beside_pass.contains(style_node); }
+    void forget_style_nodes_retired_beside_pass() { m_style_nodes_retired_beside_pass.clear(); }
     void discard_style_transaction_outputs(StyleDrainScope const&);
 
     using RuleMatch = StyleEngineFFI::FfiRuleMatch;
@@ -421,6 +427,8 @@ private:
     bool m_published_batch_waits { false };
     bool m_holds_input_recorded_beside_pass { false };
     i64 m_submitted_style_transaction_microseconds { 0 };
+    bool m_submitted_pass_in_flight { false };
+    HashTable<StyleNodeID> m_style_nodes_retired_beside_pass;
     u32 m_effect_drain_depth { 0 };
     Vector<Function<void(StyleInputScope const&)>> m_inputs_queued_during_pass;
     u64 m_attribute_value_text_requirements_version { 0 };

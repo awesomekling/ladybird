@@ -1261,8 +1261,9 @@ pub enum FfiLayoutFrameState {
 ///
 /// As for [`arena`], on the document thread.
 unsafe fn frame_state(arena_handle: *mut c_void) -> FfiLayoutFrameState {
-    // A frame in flight owns the arena, so this is asked without reading it.
-    if crate::stage_thread::frame_in_flight_owns(arena_handle) {
+    // A frame in flight may own the arena, so this is asked without reading it. A style pass does
+    // not own it, but the document's frame is in flight all the same.
+    if crate::stage_thread::document_frame_in_flight(arena_handle) {
         return FfiLayoutFrameState::InFlight;
     }
     // SAFETY: Guaranteed by the caller.
@@ -1417,7 +1418,7 @@ pub unsafe extern "C" fn layout_arena_join_frame_in_flight(
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: The caller passes a string that lives for the rest of the process.
     let file = unsafe { crate::stage_thread::call_site_file(file, file_length) };
-    crate::stage_thread::join_frame_in_flight_at(arena, file, line, 0);
+    crate::stage_thread::join_document_frame_in_flight_at(arena, file, line, 0);
 }
 
 /// Waits for the document's frame in flight only if one of its stages reaches the document's style
@@ -1477,9 +1478,10 @@ pub unsafe extern "C" fn layout_arena_begin_update_layout(arena: *mut c_void) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
     let arena_ref = unsafe { LayoutNodeArena::from_handle(arena) };
-    // The borrow above has joined a frame in flight that owns the arena; a layout update never runs under one.
+    // The borrow above has joined a frame in flight that owns the arena, and the style update ahead of
+    // it one that reaches the document's style engine; a layout update never runs under either.
     assert!(
-        !crate::stage_thread::frame_in_flight_owns(arena),
+        !crate::stage_thread::document_frame_in_flight(arena),
         "update_layout nested in a frame in flight"
     );
     arena_ref.begin_update_layout();

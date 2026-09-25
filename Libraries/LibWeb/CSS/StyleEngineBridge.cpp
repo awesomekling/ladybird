@@ -1169,10 +1169,18 @@ void StyleEngine::submit_style_transaction(StyleNodeID root)
         StyleEngineFFI::style_engine_submit_style_transaction(m_impl, root.value(), computation_inputs, layout_arena);
     });
     m_submitted_style_transaction_microseconds = (MonotonicTime::now() - submission_started_at).to_truncated_microseconds();
+    m_submitted_pass_in_flight = true;
+}
+
+void StyleEngine::note_style_node_retired(StyleNodeID style_node)
+{
+    if (m_submitted_pass_in_flight)
+        m_style_nodes_retired_beside_pass.set(style_node);
 }
 
 StyleEngine::PublishedStyleTransaction StyleEngine::finish_submitted_style_transaction()
 {
+    m_submitted_pass_in_flight = false;
     auto bridge_started_at = MonotonicTime::now();
     // What was recorded beside the pass is held (see begin_holding_input_recorded_beside_pass()), and it may name an
     // atom the pass found unused.

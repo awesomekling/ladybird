@@ -260,12 +260,18 @@ static StyleEngineTransaction accept_style_engine_transaction(DOM::Document& doc
         style_computer.style_engine().note_published_transaction_version(published_transaction.version);
         style_computer.style_engine().set_published_batch_waits(true);
     }
+    auto& style_engine = style_computer.style_engine();
     for (auto const& answer : published_transaction.reactions) {
         // The complete answer remains in Rust transaction scratch under this node. The identity
         // names both the semantic reaction and the payload that consumes it.
-        VERIFY(style_computer.element_for_style_node(answer.style_node));
+        if (!style_computer.element_for_style_node(answer.style_node)) {
+            // NB: The element was removed beside the submitted pass that answered it, and has no row to install.
+            VERIFY(style_engine.style_node_was_retired_beside_pass(StyleNodeID { answer.style_node }));
+            continue;
+        }
         transaction.reactions.append(answer);
     }
+    style_engine.forget_style_nodes_retired_beside_pass();
 
     transaction.only_derived_child_reactions = published_transaction.only_derived_child_reactions;
 
