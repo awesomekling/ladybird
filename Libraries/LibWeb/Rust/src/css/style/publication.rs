@@ -1302,6 +1302,20 @@ impl RetainedState {
         pseudo_kind: u8,
     ) -> Option<&animations::SettledAnimationPlan> {
         self.animation_definitions_being_applied = self.nodes_owing_animation_definitions.remove(&(node, pseudo_kind));
+        if let Some(plan) = &self.animation_definitions_being_applied {
+            // The host takes a reference to each set a definition names, so it must be one a scope
+            // still publishes.
+            assert!(
+                plan.definitions()
+                    .iter()
+                    .all(|definition| definition.keyframe_set.is_null()
+                        || self
+                            .animation_keyframes
+                            .description(definition.keyframe_set as usize)
+                            .is_some()),
+                "a settled animation plan names a keyframe set no scope publishes"
+            );
+        }
         self.animation_definitions_being_applied.as_ref()
     }
 

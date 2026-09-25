@@ -2097,13 +2097,12 @@ impl AnimationKeyframes {
 ///
 /// The plan owns everything its definitions name - each name, and each computed
 /// `animation-timing-function` - so none of it depends on the table the drive built them from, or
-/// on the record that table went into, surviving the batch.
+/// on the record that table went into, surviving the batch. The keyframe set each definition names
+/// is the host's, which only holds the sets its scopes publish now: the plan resolves its names
+/// again whenever a scope's row is replaced, so it never names a set the host has let go of.
 pub(crate) struct SettledAnimationPlan {
     definitions: Box<[crate::css::style_compute::FfiComputedAnimation]>,
-    #[expect(
-        dead_code,
-        reason = "the names the definitions point at, owned for as long as they are"
-    )]
+    /// The names the definitions point at, owned for as long as they are.
     names: Box<[CssString]>,
     #[expect(
         dead_code,
@@ -2111,12 +2110,17 @@ pub(crate) struct SettledAnimationPlan {
     )]
     timing_functions: Box<[crate::css::style_value::RetainedStyleValueData]>,
     element_display_is_none: bool,
+    /// Where the definitions' names resolve: the scope the winning `animation-name` declaration
+    /// was written in, then the element's own.
+    declaration_scope: Option<TreeScopeID>,
+    element_tree_scope: TreeScopeID,
 }
 
 // SAFETY: Every pointer a definition holds addresses something the plan owns and only ever shares -
 //         one of its own names, one of its own retained timing functions - except the keyframe-set
 //         identity, which is a host pointer this side never dereferences and only hands back, as
-//         `PublishedKeyframesSet` holds one.
+//         `PublishedKeyframesSet` holds one, and which `resolve_keyframes_again` keeps one the
+//         table publishes.
 unsafe impl Send for SettledAnimationPlan {}
 unsafe impl Sync for SettledAnimationPlan {}
 
@@ -2128,12 +2132,27 @@ impl SettledAnimationPlan {
         names: Box<[CssString]>,
         timing_functions: Box<[crate::css::style_value::RetainedStyleValueData]>,
         element_display_is_none: bool,
+        declaration_scope: Option<TreeScopeID>,
+        element_tree_scope: TreeScopeID,
     ) -> Self {
         Self {
             definitions,
             names,
             timing_functions,
             element_display_is_none,
+            declaration_scope,
+            element_tree_scope,
+        }
+    }
+
+    /// Name the keyframe sets the table publishes now. A plan can be owed across a scope's
+    /// republication, and the host lets go of the sets the scope published before, so the pointers
+    /// the plan was built with may name freed sets by the time the host takes it.
+    pub(crate) fn resolve_keyframes_again(&mut self, keyframes: &AnimationKeyframes) {
+        for (definition, name) in self.definitions.iter_mut().zip(self.names.iter()) {
+            definition.keyframe_set = keyframes
+                .resolve_in_declaration_scope(self.declaration_scope, self.element_tree_scope, name)
+                .map_or(std::ptr::null(), |set| set.pointer as *const std::ffi::c_void);
         }
     }
 
@@ -2626,5 +2645,102 @@ mod tests {
             match_existing_animations(&[name("a"), name("b")], &[name("b")]),
             vec![1]
         );
+    }
+
+    /// Publish one scope's `@keyframes` as the host does, each name's set identified by `identity`.
+    fn publish(keyframes: &mut AnimationKeyframes, tree_scope: TreeScopeID, sets: &[(&str, u64)]) {
+        let name_lengths = sets
+            .iter()
+            .map(|(name, _)| name.encode_utf16().count() as u32)
+            .collect::<Vec<_>>();
+        let name_units = sets
+            .iter()
+            .flat_map(|(name, _)| name.encode_utf16())
+            .collect::<Vec<_>>();
+        let effects = sets
+            .iter()
+            .map(|&(_, identity)| super::super::bridge::FfiPublishedAnimationEffect {
+                identity,
+                generation: 0,
+                flags: 0,
+                first_keyframe: 0,
+                keyframe_count: 0,
+                base_url_offset: 0,
+                base_url_length: 0,
+            })
+            .collect::<Vec<_>>();
+        unsafe {
+            keyframes.set(
+                tree_scope,
+                0,
+                &name_lengths,
+                &name_units,
+                PublishedEffectBuffers {
+                    effects: &effects,
+                    keyframes: &[],
+                    declarations: &[],
+                    custom_declarations: &[],
+                    linear_points: &[],
+                    base_url_bytes: &[],
+                },
+            );
+        }
+    }
+
+    #[test]
+    fn an_owed_plan_names_the_keyframe_sets_a_republication_leaves() {
+        let mut keyframes = AnimationKeyframes::default();
+        publish(
+            &mut keyframes,
+            TreeScopeID::DOCUMENT,
+            &[("fade", 0x1000), ("tint", 0x2000)],
+        );
+        let names = vec![name("fade"), name("tint")].into_boxed_slice();
+        let definitions = names
+            .iter()
+            .map(|name| crate::css::style_compute::FfiComputedAnimation {
+                duration_is_auto: false,
+                duration: 1000.0,
+                timing_function: std::ptr::null(),
+                iteration_count: 1.0,
+                direction: 0,
+                play_state: 0,
+                delay: 0.0,
+                fill_mode: 0,
+                composition: 0,
+                name: name.as_ptr(),
+                timeline_kind: crate::css::style_compute::FfiAnimationTimelineKind::Document,
+                scroll_scroller: 0,
+                scroll_axis: 0,
+                matched_existing_index: NO_MATCHED_ANIMATION,
+                keyframe_set: keyframes
+                    .resolve_in_declaration_scope(None, TreeScopeID::DOCUMENT, name)
+                    .map_or(std::ptr::null(), |set| set.pointer as *const std::ffi::c_void),
+            })
+            .collect::<Vec<_>>()
+            .into_boxed_slice();
+        let mut plan = SettledAnimationPlan::new(definitions, names, Box::new([]), false, None, TreeScopeID::DOCUMENT);
+        let sets = |plan: &SettledAnimationPlan| {
+            plan.definitions()
+                .iter()
+                .map(|definition| definition.keyframe_set as usize)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(sets(&plan), vec![0x1000, 0x2000]);
+
+        // A rebuilt rule cache publishes new sets for the same names; the host lets go of the old ones.
+        publish(
+            &mut keyframes,
+            TreeScopeID::DOCUMENT,
+            &[("fade", 0x3000), ("tint", 0x4000)],
+        );
+        plan.resolve_keyframes_again(&keyframes);
+        assert_eq!(sets(&plan), vec![0x3000, 0x4000]);
+        assert!(sets(&plan).iter().all(|&set| keyframes.description(set).is_some()));
+
+        // A name no scope defines any more has no keyframes.
+        publish(&mut keyframes, TreeScopeID::DOCUMENT, &[("tint", 0x5000)]);
+        plan.resolve_keyframes_again(&keyframes);
+        assert_eq!(sets(&plan), vec![0, 0x5000]);
     }
 }
