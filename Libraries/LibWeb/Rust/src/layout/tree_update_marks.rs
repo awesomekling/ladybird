@@ -14,7 +14,8 @@
 //! lends them as its style round readies a tree build, and takes them back, with what the build
 //! retired, the next time the document thread pays what the frame owes it. The stale box clear a
 //! top layer member's detach runs outside a build borrows them the same way. A frame in flight that
-//! holds them is joined by whatever reaches them beside it, and its take-back hands them back.
+//! holds them is joined by whatever reads them beside it, and its take-back hands them back. A
+//! write beside it (a retirement, a fold, a child bit) waits for the take-back instead.
 
 use super::LayoutNodeArena;
 use super::host_tables::HostTables;
@@ -43,6 +44,156 @@ pub(crate) unsafe fn with_document_marks<R>(
         return access(&mut arena.layout_tree_update_marks_held_by_the_build());
     }
     access(&mut host_tables.layout_tree_update_marks.borrow_mut())
+}
+
+/// A write to the marks the document thread made beside the frame they are lent to.
+pub(crate) enum MarkWriteWaitingForFrame {
+    Clear(StyleNodeID),
+    Merge {
+        node: StyleNodeID,
+        value: bool,
+        reuse_reason: u8,
+    },
+    SetChildNeeds {
+        node: StyleNodeID,
+        value: bool,
+    },
+}
+
+/// Whether a write to the marks of the document whose arena `handle` names waits for the frame in
+/// flight: the frame holds them, and the calling thread is not running work it joined it for.
+/// Such a write runs where joining the frame would have run it, once what the frame owed the
+/// document thread is paid (see [`write_marks_waiting_for_frame`]). Anything that reads a mark
+/// beside the frame joins it, which runs the waiting writes first.
+fn mark_writes_wait_for_frame(host_tables: &HostTables, handle: *mut c_void) -> bool {
+    host_tables.layout_tree_update_marks_are_lent.get()
+        && crate::stage_thread::frame_in_flight_owns(handle)
+        && !crate::stage_thread::running_join_work()
+}
+
+/// Retires the marks the node `style_node` names holds in the document whose arena `handle` names,
+/// or has the retirement wait for the frame that holds them.
+///
+/// # Safety
+///
+/// As for [`with_document_marks`].
+pub(crate) unsafe fn clear_document_marks(handle: *mut c_void, style_node: StyleNodeID) {
+    // SAFETY: Guaranteed by the caller.
+    let host_tables = unsafe { HostTables::beside_frame(handle) };
+    if mark_writes_wait_for_frame(host_tables, handle) {
+        host_tables
+            .layout_tree_update_mark_writes_waiting_for_frame
+            .borrow_mut()
+            .push(MarkWriteWaitingForFrame::Clear(style_node));
+        return;
+    }
+    // SAFETY: Guaranteed by the caller.
+    unsafe { with_document_marks(handle, |marks| marks.clear(style_node)) }
+}
+
+/// Folds a mark into the one the node `style_node` names holds in the document whose arena `handle`
+/// names, answering whether its own bit changed. Beside the frame that holds the marks the fold
+/// waits for it, and the answer is that it changed: the build in flight retires the marks it
+/// answers, so the fold is a transition once the frame hands them back, and what the mark site
+/// widens from a transition it widens again at worst.
+///
+/// # Safety
+///
+/// As for [`with_document_marks`].
+pub(crate) unsafe fn merge_document_mark(
+    handle: *mut c_void,
+    style_node: StyleNodeID,
+    value: bool,
+    reuse_reason: u8,
+) -> bool {
+    // SAFETY: Guaranteed by the caller.
+    let host_tables = unsafe { HostTables::beside_frame(handle) };
+    if mark_writes_wait_for_frame(host_tables, handle) {
+        host_tables
+            .layout_tree_update_mark_writes_waiting_for_frame
+            .borrow_mut()
+            .push(MarkWriteWaitingForFrame::Merge {
+                node: style_node,
+                value,
+                reuse_reason,
+            });
+        return true;
+    }
+    // SAFETY: Guaranteed by the caller.
+    unsafe { with_document_marks(handle, |marks| marks.merge(style_node, value, reuse_reason)) }
+}
+
+/// Records whether a flat-tree descendant of the node `style_node` names holds a mark, answering
+/// what was recorded before. Beside the frame that holds the marks the write waits for it, and the
+/// answer is that nothing was, so an ancestor walk that stops where the bit was set goes on.
+///
+/// # Safety
+///
+/// As for [`with_document_marks`].
+pub(crate) unsafe fn set_document_child_needs(handle: *mut c_void, style_node: StyleNodeID, value: bool) -> bool {
+    // SAFETY: Guaranteed by the caller.
+    let host_tables = unsafe { HostTables::beside_frame(handle) };
+    if mark_writes_wait_for_frame(host_tables, handle) {
+        host_tables
+            .layout_tree_update_mark_writes_waiting_for_frame
+            .borrow_mut()
+            .push(MarkWriteWaitingForFrame::SetChildNeeds {
+                node: style_node,
+                value,
+            });
+        return false;
+    }
+    // SAFETY: Guaranteed by the caller.
+    unsafe { with_document_marks(handle, |marks| marks.set_child_needs(style_node, value)) }
+}
+
+/// Whether the node `style_node` names or a flat-tree descendant of it may hold a mark. Beside the
+/// frame that holds the marks the answer is that they may, rather than waiting for the frame to
+/// hand them back.
+///
+/// # Safety
+///
+/// As for [`with_document_marks`].
+pub(crate) unsafe fn subtree_may_hold_document_marks(handle: *mut c_void, style_node: StyleNodeID) -> bool {
+    // SAFETY: Guaranteed by the caller.
+    let host_tables = unsafe { HostTables::beside_frame(handle) };
+    if mark_writes_wait_for_frame(host_tables, handle) {
+        return true;
+    }
+    // SAFETY: Guaranteed by the caller.
+    unsafe { with_document_marks(handle, |marks| marks.needs(style_node) || marks.child_needs(style_node)) }
+}
+
+/// Makes the writes to the marks that waited for the frame that held them, in order.
+///
+/// # Safety
+///
+/// `handle` must be a live handle from `layout_arena_create`, on the document thread, with the
+/// marks handed back.
+pub(crate) unsafe fn write_marks_waiting_for_frame(handle: *mut c_void) {
+    // SAFETY: Guaranteed by the caller.
+    let host_tables = unsafe { HostTables::beside_frame(handle) };
+    let writes = host_tables.layout_tree_update_mark_writes_waiting_for_frame.take();
+    if writes.is_empty() {
+        return;
+    }
+    debug_assert!(!host_tables.layout_tree_update_marks_are_lent.get());
+    let mut marks = host_tables.layout_tree_update_marks.borrow_mut();
+    for write in writes {
+        match write {
+            MarkWriteWaitingForFrame::Clear(node) => marks.clear(node),
+            MarkWriteWaitingForFrame::Merge {
+                node,
+                value,
+                reuse_reason,
+            } => {
+                marks.merge(node, value, reuse_reason);
+            }
+            MarkWriteWaitingForFrame::SetChildNeeds { node, value } => {
+                marks.set_child_needs(node, value);
+            }
+        }
+    }
 }
 
 /// Joins the frame in flight if it holds the document's marks, so that its take-back hands them

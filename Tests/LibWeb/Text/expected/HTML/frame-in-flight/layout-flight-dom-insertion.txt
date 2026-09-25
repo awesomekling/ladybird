@@ -6,3 +6,4 @@ fresh height: 16
 first text: first and more
 second connected: true
 container height: 84
+toggled height: 16
