@@ -259,7 +259,7 @@ void FrameScheduler::run_tail()
 bool FrameScheduler::arena_changes_wait_for_frame(DOM::Document const& document)
 {
     auto const* arena = document.layout_node_arena_if_created();
-    return arena && Layout::RustFFI::rust_stage_thread_only_recordings_own(arena->handle());
+    return arena && Layout::RustFFI::rust_stage_thread_arena_changes_wait_for_frame(arena->handle());
 }
 
 void FrameScheduler::defer_arena_change(GC::Ref<GC::Function<void()>> change)
