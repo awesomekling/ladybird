@@ -30,9 +30,12 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread::ThreadId;
 
 use crate::css::style::StyleEngine;
-use crate::css::style::bridge::{FfiRowSampledInPass, sample_installed_record_for_clock_tick};
+use crate::css::style::bridge::{
+    FfiRowSampledInPass, FfiStyleInvalidationField, sample_installed_record_for_clock_tick,
+};
 use crate::css::style::tree::StyleNodeID;
 use crate::layout::LayoutNodeArena;
+use crate::layout::node_data::NodeSlotId;
 use crate::layout::update_layout::ClockLayoutFrame;
 
 /// Whether clock frames are on: `LIBWEB_RENDER_CLOCK_FRAMES` set to anything but empty or `0`.
@@ -100,6 +103,16 @@ pub struct ClockLease {
     /// The layout frame the render clock's ticks lay out in, which the main thread takes in when
     /// it wakes.
     layout_frame: Mutex<Option<ClockLayoutFrame>>,
+    /// The rows the last tick's samples repaint, and whether they hit test differently.
+    repaints: Mutex<Vec<(NodeSlotId, bool)>>,
+    /// Whether the render side can show what the last tick installed without the main thread: no
+    /// sample moved what only the main thread derives (descendants' styles, visual contexts).
+    presentable: AtomicBool,
+    /// Whether the last tick found nothing left for the host to adopt.
+    tick_started_fresh: AtomicBool,
+    /// Whether the render side presented every tick the host has not adopted yet, so that adopting
+    /// them repaints nothing.
+    presented_since_adoption: AtomicBool,
     outcome: Mutex<Option<FfiClockTickOutcome>>,
 }
 
@@ -171,6 +184,10 @@ impl ClockLease {
         let mut outcome = FfiClockTickOutcome::Presented;
         let mut targets = self.targets.lock().expect("clock lease targets");
         let mut entries = self.entries.lock().expect("clock lease entries");
+        let mut repaints = self.repaints.lock().expect("clock lease repaints");
+        repaints.clear();
+        self.tick_started_fresh.store(entries.is_empty(), Ordering::Release);
+        let mut presentable = true;
         for target in targets.iter_mut() {
             // SAFETY: As above; the borrow ends with the call.
             let sampled = unsafe {
@@ -184,6 +201,7 @@ impl ClockLease {
             };
             let Some(sample) = sampled else {
                 outcome = FfiClockTickOutcome::NeedsMain;
+                presentable = false;
                 entries.push(ClockTickEntry {
                     style_node: target.style_node,
                     style_record_before: target.style_record,
@@ -202,6 +220,12 @@ impl ClockLease {
             let needs_relayout = level >= 2;
             let installed_in_arena = !needs_layout_tree_rebuild
                 && arena.install_animation_sample(target.style_node, sample.style_record, needs_relayout);
+            presentable &= installed_in_arena && render_side_shows(&sample);
+            if level >= 1 && installed_in_arena {
+                let affects_hit_testing =
+                    sample.invalidation.invalidation & FfiStyleInvalidationField::AffectsHitTesting as u32 != 0;
+                repaints.push((arena.bound_row(target.style_node), affects_hit_testing));
+            }
             target.style_record = sample.style_record;
             // Ticks the host has not adopted yet fold into one entry per target, over the record the
             // host holds: the arena's log keeps only the last record too.
@@ -221,6 +245,7 @@ impl ClockLease {
                 installed_in_arena,
             });
         }
+        self.presentable.store(presentable, Ordering::Release);
         outcome
     }
 
@@ -244,6 +269,51 @@ impl ClockLease {
         Some(frame.laid_out())
     }
 
+    /// Shows what the tick installed and laid out: repaints the rows its samples repaint, records
+    /// the display list again and has the host present it. Returns false where the render side
+    /// cannot show it, and the main thread has to.
+    ///
+    /// # Safety
+    ///
+    /// As for [`Self::lay_out`].
+    unsafe fn present(&self) -> bool {
+        if !self.presentable.load(Ordering::Acquire) {
+            return false;
+        }
+        let Some(present) = PRESENT.get() else {
+            return false;
+        };
+        // SAFETY: The caller owns the arena.
+        let arena = unsafe { &*(self.arena as *const LayoutNodeArena) };
+        {
+            use crate::painting::record::damage::PaintDamage;
+            let _writer = crate::painting::published_immutable::enter_writer("clock tick");
+            for &(row, affects_hit_testing) in self.repaints.lock().expect("clock lease repaints").iter() {
+                if row.is_invalid() {
+                    continue;
+                }
+                let damage = if affects_hit_testing {
+                    PaintDamage::ALL_PRODUCERS
+                } else {
+                    PaintDamage::ALL_DRAW
+                };
+                arena.push_paint_damage_for_repaint(row, damage);
+            }
+        }
+        // SAFETY: As above.
+        if !unsafe { crate::painting::ffi::record_for_clock_tick(self.arena as *mut c_void) } {
+            return false;
+        }
+        if present(self.arena as *mut c_void) {
+            return true;
+        }
+        // Nothing presents the recording; the main thread records the frame again.
+        let mut paint_state = arena.paint_state().borrow_mut();
+        paint_state.pending_recording = None;
+        paint_state.pending_recording_trace = None;
+        false
+    }
+
     fn take_entry(&self) -> Option<ClockTickEntry> {
         let mut entries = self.entries.lock().expect("clock lease entries");
         if entries.is_empty() {
@@ -251,6 +321,29 @@ impl ClockLease {
         }
         Some(entries.remove(0))
     }
+}
+
+/// Whether what `sample` changes is all the render side shows without the main thread: its own
+/// row's style, layout and paint. What moves descendants' styles, visual contexts, stacking
+/// contexts or scroll snapping, the main thread derives.
+fn render_side_shows(sample: &FfiRowSampledInPass) -> bool {
+    use FfiStyleInvalidationField as Field;
+    let invalidation = sample.invalidation.invalidation;
+    let visual_context = (invalidation >> Field::VisualContextShift as u32) & Field::LevelMask as u32;
+    let inherited_groups = (invalidation >> Field::InheritedGroupsShift as u32) & Field::InheritedGroupsMask as u32;
+    let main_only = Field::RebuildStackingContext as u32
+        | Field::ResnapScrollContainer as u32
+        | Field::RecomputeDescendants as u32
+        | Field::RepaintTextDecorations as u32
+        | Field::NonInheritedInheritanceSource as u32
+        | Field::RepaintSelection as u32;
+    visual_context == 0
+        && inherited_groups == 0
+        && invalidation & main_only == 0
+        && !sample.invalidation.requires_base_style_recomputation
+        && !sample.custom_property_environment_moved
+        && sample.custom_property_reactions == 0
+        && sample.keyframes_inherited_non_inherited_style_groups == 0
 }
 
 /// One sample for what `earlier` and `later`, taken over the record `earlier` installed, did: the
@@ -368,6 +461,10 @@ pub extern "C" fn rust_clock_lease_grant(
         targets: Mutex::default(),
         entries: Mutex::default(),
         layout_frame: Mutex::default(),
+        repaints: Mutex::default(),
+        presentable: AtomicBool::new(false),
+        tick_started_fresh: AtomicBool::new(false),
+        presented_since_adoption: AtomicBool::new(false),
         outcome: Mutex::default(),
     });
     if let Some(previous) = registry()
@@ -487,6 +584,8 @@ pub unsafe extern "C" fn rust_clock_lease_submit_tick(arena: *mut c_void, time: 
         return false;
     };
     *lease.outcome.lock().expect("clock lease outcome") = None;
+    // The host shows what this tick installs itself.
+    lease.presented_since_adoption.store(false, Ordering::Release);
     let tick = move || {
         // SAFETY: The stage owns the arena, as below.
         unsafe { lease.run_tick(time) };
@@ -508,6 +607,13 @@ pub extern "C" fn rust_clock_lease_tick_outcome(arena: *mut c_void) -> FfiClockT
     lease
         .and_then(|lease| *lease.outcome.lock().expect("clock lease outcome"))
         .unwrap_or(FfiClockTickOutcome::Revoked)
+}
+
+/// Whether the render side presented every tick of the lease of `arena` the host has not adopted
+/// yet: adopting them repaints nothing.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_clock_lease_presented_since_adoption(arena: *mut c_void) -> bool {
+    clock_lease_for(arena as usize).is_some_and(|lease| lease.presented_since_adoption.load(Ordering::Acquire))
 }
 
 /// Counts a tick the host adopted that installed a sample.
@@ -678,6 +784,8 @@ pub struct FfiRenderClockCounters {
     pub ticks_installed: u64,
     /// Ticks after which a layout frame on the render side held what the main thread takes in.
     pub ticks_laid_out: u64,
+    /// Ticks the render side presented, without the main thread.
+    pub ticks_presented: u64,
     /// Ticks that ended their lease: past its deadline, or with a sample only the main thread takes.
     pub ticks_needing_main: u64,
 }
@@ -694,6 +802,7 @@ struct RenderClockCounters {
     ticks_dropped_stale: AtomicU64,
     ticks_installed: AtomicU64,
     ticks_laid_out: AtomicU64,
+    ticks_presented: AtomicU64,
     ticks_needing_main: AtomicU64,
 }
 
@@ -708,11 +817,23 @@ static COUNTERS: RenderClockCounters = RenderClockCounters {
     ticks_dropped_stale: AtomicU64::new(0),
     ticks_installed: AtomicU64::new(0),
     ticks_laid_out: AtomicU64::new(0),
+    ticks_presented: AtomicU64::new(0),
     ticks_needing_main: AtomicU64::new(0),
 };
 
 fn count(counter: &AtomicU64) {
     counter.fetch_add(1, Ordering::Relaxed);
+}
+
+/// Presents the display list a render clock tick recorded for the document of an arena: publishes
+/// it and hands the frame to the compositor. Runs on the stage thread, with the main thread idle.
+static PRESENT: OnceLock<extern "C" fn(*mut c_void) -> bool> = OnceLock::new();
+
+/// Has the render clock call `present(arena)` to present what a tick recorded. The first one set
+/// stays.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_render_clock_set_present(present: extern "C" fn(*mut c_void) -> bool) {
+    let _ = PRESENT.set(present);
 }
 
 /// What the main thread does for a lease a render clock tick ended. Runs on the stage thread.
@@ -826,16 +947,28 @@ fn run_render_clock_tick(context: u64, slot: &ClockSlot) {
                 return (outcome, false);
             }
             // SAFETY: As above.
-            match unsafe { lease.lay_out() } {
-                Some(laid_out) => (outcome, laid_out),
-                None => (FfiClockTickOutcome::NeedsMain, false),
+            let Some(laid_out) = (unsafe { lease.lay_out() }) else {
+                return (FfiClockTickOutcome::NeedsMain, false);
+            };
+            // A tick that moved nothing shows nothing new.
+            let moved_nothing = !laid_out && lease.repaints.lock().is_ok_and(|repaints| repaints.is_empty());
+            // SAFETY: As above.
+            if !moved_nothing && !unsafe { lease.present() } {
+                return (FfiClockTickOutcome::NeedsMain, laid_out);
             }
+            (outcome, laid_out)
         })));
     });
     let Some(Ok((outcome, laid_out))) = tick else {
         // A tick has nobody to hand a panic to.
         std::process::abort();
     };
+    let presented = outcome == FfiClockTickOutcome::Presented;
+    if lease.tick_started_fresh.load(Ordering::Acquire) {
+        lease.presented_since_adoption.store(presented, Ordering::Release);
+    } else if !presented {
+        lease.presented_since_adoption.store(false, Ordering::Release);
+    }
     if lease.entries.lock().is_ok_and(|entries| !entries.is_empty()) {
         TICKS_TO_ADOPT.store(true, Ordering::Release);
     }
@@ -845,6 +978,7 @@ fn run_render_clock_tick(context: u64, slot: &ClockSlot) {
         if laid_out {
             count(&COUNTERS.ticks_laid_out);
         }
+        count(&COUNTERS.ticks_presented);
         return;
     }
     count(&COUNTERS.ticks_needing_main);
@@ -868,6 +1002,7 @@ pub extern "C" fn rust_render_clock_counters() -> FfiRenderClockCounters {
         ticks_dropped_stale: load(&COUNTERS.ticks_dropped_stale),
         ticks_installed: load(&COUNTERS.ticks_installed),
         ticks_laid_out: load(&COUNTERS.ticks_laid_out),
+        ticks_presented: load(&COUNTERS.ticks_presented),
         ticks_needing_main: load(&COUNTERS.ticks_needing_main),
     }
 }

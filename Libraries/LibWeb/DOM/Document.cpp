@@ -153,6 +153,7 @@
 #include <LibWeb/HTML/DocumentState.h>
 #include <LibWeb/HTML/DragEvent.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
+#include <LibWeb/HTML/EventLoop/FrameScheduler.h>
 #include <LibWeb/HTML/EventNames.h>
 #include <LibWeb/HTML/Focus.h>
 #include <LibWeb/HTML/HTMLAllCollection.h>
@@ -8605,9 +8606,12 @@ void Document::update_animations_and_send_events(double timestamp)
             continue;
         if (animation.effect() && is<Animations::KeyframeEffect>(*animation.effect())) {
             auto& effect = static_cast<Animations::KeyframeEffect&>(*animation.effect());
-            // A clock lease ticks the effect in the rendering updates this pump drives.
+            // A clock lease ticks the effect in the rendering updates this pump drives, or a render clock ticks it
+            // without the main thread, which then needs no rendering update for it.
             if (effect.is_clock_driven()) {
                 effect.clear_per_frame_animation_tick_was_skipped();
+                if (HTML::main_thread_event_loop().frame_scheduler().render_clock_ticks(*this))
+                    continue;
                 ++m_style_invalidation_counters.animation_frame_pump_requests;
                 page().client().request_frame();
                 break;

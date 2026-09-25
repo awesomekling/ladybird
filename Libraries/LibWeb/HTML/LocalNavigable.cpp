@@ -7006,8 +7006,75 @@ void LocalNavigable::adopt_presented_frame(PendingCompositorFrame& pending_frame
         document->set_needs_repaint(Badge<HTML::LocalNavigable> {}, InvalidateDisplayList::PaintCommands);
 }
 
+Optional<LocalNavigable::RenderClockFrameKit> LocalNavigable::seal_render_clock_frame_kit()
+{
+    if (!m_last_painted_frame_for_render_clock.has_value() || !is_local_root() || !has_compositor_context() || m_presenter->is_lent_to_frame_in_flight())
+        return {};
+    auto document = active_document();
+    auto& last = *m_last_painted_frame_for_render_clock;
+    if (!document || last.recording->document.ptr() != document.ptr() || !document->has_paint_state() || !document->has_committed_viewport_box())
+        return {};
+    // A tree update the compositor has not had yet goes with the next frame the main thread paints.
+    if (document->paint_state().visual_context_tree_needs_compositor_update())
+        return {};
+    PendingCompositorFrame frame {
+        .document = *document,
+        .paint_config = last.paint_config,
+        .keyboard_scroll_state = last.keyboard_scroll_state,
+        .recording = make<Painting::PendingDisplayListRecording>(*last.recording),
+        .presentation = {},
+    };
+    frame.recording->run = Painting::RecordingRun::InSubmittedFrame;
+    auto presentation = seal_presentation(frame);
+    if (!presentation)
+        return {};
+    auto frame_sink = compositor_context().prepare_to_submit_frame_from_render_side();
+    if (!frame_sink)
+        return {};
+    presentation->inputs.present_viewport_rect = page().css_to_device_rect(viewport_rect()).to_type<int>();
+    presentation->presenter = m_presenter;
+    presentation->frame_sink = move(frame_sink);
+    presentation->is_presented_by_frame_in_flight = true;
+    return RenderClockFrameKit { .presentation = presentation.release_nonnull(), .recording = frame.recording.release_nonnull(), .presented = false };
+}
+
+void LocalNavigable::present_render_clock_frame(RenderClockFrameKit& kit)
+{
+    auto& presentation = *kit.presentation;
+    presentation.recording = kit.recording.ptr();
+    presentation.published.clear();
+    presentation.presented_scene_epoch.clear();
+    kit.recording->timer.start();
+    present_from_frame_in_flight(&presentation);
+    // The next tick's recording is identical to what this one published where it changes nothing.
+    if (presentation.published.has_value() && presentation.published->becomes_paint_command_cache_source)
+        presentation.paint_command_cache_source = presentation.published->display_list;
+    kit.presented = true;
+}
+
+void LocalNavigable::adopt_render_clock_frame_kit(RenderClockFrameKit& kit)
+{
+    if (!exchange(kit.presented, false))
+        return;
+    auto& presentation = *kit.presentation;
+    if (presentation.presented_scene_epoch.has_value())
+        m_presenter->did_adopt_scene(*presentation.presented_scene_epoch);
+    auto document = kit.recording->document;
+    if (!presentation.published.has_value() || !document->has_paint_state() || active_document() != document)
+        return;
+    document->adopt_published_recording(*kit.recording, *presentation.published);
+}
+
 void LocalNavigable::finish_painting_next_frame(PendingCompositorFrame& pending_frame)
 {
+    // A render clock kit is sealed as this frame was.
+    if (pending_frame.recording && Layout::RustFFI::rust_clock_frames_enabled()) {
+        m_last_painted_frame_for_render_clock = LastPaintedFrame {
+            .paint_config = pending_frame.paint_config,
+            .keyboard_scroll_state = pending_frame.keyboard_scroll_state,
+            .recording = make<Painting::PendingDisplayListRecording>(*pending_frame.recording),
+        };
+    }
     if (pending_frame.presentation && pending_frame.presentation->is_presented_by_frame_in_flight) {
         adopt_presented_frame(pending_frame);
         return;

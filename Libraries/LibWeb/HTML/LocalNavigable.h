@@ -310,6 +310,25 @@ public:
     // (LIBWEB_RENDER_PRESENTS=1). Returns false if the frame is finished and presented here instead.
     bool submit_presentation(PendingCompositorFrame&);
     void adopt_presented_frame(PendingCompositorFrame&);
+
+    // LIBWEB_RENDER_CLOCK_FRAMES: What a clock lease's ticks present the navigable's frames with while the main thread
+    // idles: a presentation sealed as the frame the navigable last painted was, and a recording to publish, as its
+    // recording was published. Whoever holds a kit keeps the document alive.
+    struct RenderClockFrameKit {
+        AK_ALLOC_WITH_KMALLOC;
+
+        NonnullRefPtr<Compositor::Presentation> presentation;
+        NonnullOwnPtr<Painting::PendingDisplayListRecording> recording;
+        // Whether a tick presented from the kit since the main thread last took it in.
+        bool presented { false };
+    };
+    Optional<RenderClockFrameKit> seal_render_clock_frame_kit();
+    // On the render side, with the main thread idle: publishes what a tick recorded, and hands the frame to the
+    // compositor.
+    static void present_render_clock_frame(RenderClockFrameKit&);
+    // Takes in what the ticks presented from the kit: the scene, and the recording they published last.
+    void adopt_render_clock_frame_kit(RenderClockFrameKit&);
+
     void render_screenshot(Gfx::PaintingSurface&, PaintConfig, Function<void()>&& callback);
     // The presenter, once the frame in flight that presents from it has been taken in.
     Compositor::NavigablePresenter& presenter(SourceLocation = SourceLocation::current());
@@ -619,6 +638,13 @@ private:
     PendingAsyncScrollOperation& ensure_pending_async_scroll_operation(Compositing::AsyncScrollOperationID);
     // The latest publication of the compositor's async scroll updates this navigable adopted.
     u64 m_adopted_async_scroll_sequence { 0 };
+    // LIBWEB_RENDER_CLOCK_FRAMES: the frame the navigable last painted, which a render clock kit is sealed as.
+    struct LastPaintedFrame {
+        PaintConfig paint_config;
+        Compositing::KeyboardScrollState keyboard_scroll_state;
+        NonnullOwnPtr<Painting::PendingDisplayListRecording> recording;
+    };
+    Optional<LastPaintedFrame> m_last_painted_frame_for_render_clock;
 
     struct MainThreadSmoothScroll {
         Compositing::AsyncScrollNodeStableID stable_node_id;

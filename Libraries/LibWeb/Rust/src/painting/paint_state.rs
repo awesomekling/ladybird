@@ -20,6 +20,13 @@ pub(crate) struct PendingRecordingTrace {
     pub(crate) should_paint_overlay: bool,
 }
 
+/// What a clock lease's tick records its document's display list with.
+#[derive(Clone)]
+pub(crate) struct ClockRecording {
+    pub(crate) viewport: NodeSlotId,
+    pub(crate) inputs: crate::painting::record::RecordingInputs<'static>,
+}
+
 #[derive(Default)]
 pub struct PaintState {
     pub(crate) trace_recordings: bool,
@@ -38,6 +45,9 @@ pub struct PaintState {
     // publication or discarding decides what stays.
     pub(crate) paint_order_tree: std::cell::RefCell<crate::painting::record::order_tree::PaintOrderTree>,
     pub(crate) selection: Option<crate::painting::selection::SelectionRange>,
+    // LIBWEB_RENDER_CLOCK_FRAMES: the inputs of the last recording the main thread published, which
+    // a clock lease's ticks record again with while the main thread idles.
+    pub(crate) clock_recording: Option<ClockRecording>,
     pub(crate) selection_pseudo_styles: std::collections::HashMap<
         NodeSlotId,
         std::sync::Arc<crate::painting::record::paint::text::SelectionStyleAnswer>,

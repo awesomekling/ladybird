@@ -85,7 +85,8 @@ struct AnimationUpdateContext {
 void apply_published_animation_overlay(CSS::StyleDrainScope const&, DOM::AbstractElement, CSS::StyleEngineFFI::FfiAnimationInvalidation const&, CSS::StyleRecordID new_style_record, bool caller_applies_invalidation);
 // Adopt a sample a clock tick took of an element's animations over the record `style_record_before_tick`, which the
 // arena took ahead of the host where `installed_in_arena` says so.
-void adopt_clock_tick_sample(CSS::StyleDrainScope const&, DOM::AbstractElement, CSS::StyleRecordID style_record_before_tick, CSS::StyleEngineFFI::FfiRowSampledInPass const&, bool installed_in_arena);
+// `presented_on_render_side`: the render side showed the sample already, so adopting it repaints nothing.
+void adopt_clock_tick_sample(CSS::StyleDrainScope const&, DOM::AbstractElement, CSS::StyleRecordID style_record_before_tick, CSS::StyleEngineFFI::FfiRowSampledInPass const&, bool installed_in_arena, bool presented_on_render_side);
 void install_sampled_custom_property_environment(CSS::StyleDrainScope const&, DOM::AbstractElement, CSS::StyleEngineFFI::FfiRowSampledInPass const&);
 
 // https://www.w3.org/TR/web-animations-1/#the-animationeffect-interface

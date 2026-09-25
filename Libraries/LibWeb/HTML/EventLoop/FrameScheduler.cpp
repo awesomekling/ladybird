@@ -5,6 +5,7 @@
  */
 
 #include <AK/AnyOf.h>
+#include <AK/HashMap.h>
 #include <AK/Mutex.h>
 #include <AK/NeverDestroyed.h>
 #include <AK/Time.h>
@@ -52,10 +53,35 @@ static RenderClockNeedsMain& render_clock_needs_main()
     return *s_needs_main;
 }
 
+// The kits the render clock's ticks present with, by the layout arena of their document. The main thread changes them
+// only while no tick runs, and a tick reads them only while the main thread idles.
+static Mutex& render_clock_kits_mutex()
+{
+    static NeverDestroyed<Mutex> s_mutex;
+    return *s_mutex;
+}
+
+static HashMap<void*, LocalNavigable::RenderClockFrameKit*>& render_clock_kits()
+{
+    static NeverDestroyed<HashMap<void*, LocalNavigable::RenderClockFrameKit*>> s_kits;
+    return *s_kits;
+}
+
 static void install_render_clock_host()
 {
     if (!Layout::RustFFI::rust_clock_frames_enabled())
         return;
+    Layout::RustFFI::rust_render_clock_set_present([](void* arena) -> bool {
+        LocalNavigable::RenderClockFrameKit* kit = nullptr;
+        {
+            MutexLocker locker(render_clock_kits_mutex());
+            kit = render_clock_kits().get(arena).value_or(nullptr);
+        }
+        if (!kit)
+            return false;
+        LocalNavigable::present_render_clock_frame(*kit);
+        return true;
+    });
     static Core::EventLoopIdleObserver const s_idle_observer {
         .will_block = [] {
             if (s_frame_scheduler_with_host)
@@ -534,8 +560,9 @@ static Optional<ClockLeasePlan> clock_lease_plan(DOM::Document& document)
 void FrameScheduler::revoke_clock_lease(size_t index)
 {
     auto hold = m_clock_leases.take(index);
-    // What the render clock's ticks laid out goes in before the lease that holds it ends.
+    // What the render clock's ticks laid out and presented goes in before the lease that holds it ends.
     take_in_clock_layout_frame(*hold.document);
+    replace_render_clock_kit(hold, {});
     if (auto* arena = hold.document->layout_node_arena_if_created())
         Layout::RustFFI::rust_clock_lease_revoke(arena->handle());
     if (hold.render_clock_context.has_value())
@@ -587,10 +614,36 @@ void FrameScheduler::grant_clock_leases()
         auto& hold = *m_clock_leases.find_if([&](auto const& hold) { return hold.document.ptr() == document.ptr(); });
         publish_clock_lease_targets(hold);
         update_render_clock(hold, context_id ? Optional<Compositing::CompositorContextId> { context_id } : OptionalNone {});
-        // The render clock's ticks lay out what their samples leave in a frame of their own.
-        if (hold.render_clock_context.has_value())
+        // The render clock's ticks lay out what their samples leave in a frame of their own, and present it as the frame
+        // the navigable just painted was presented.
+        OwnPtr<LocalNavigable::RenderClockFrameKit> kit;
+        if (hold.render_clock_context.has_value()) {
             Layout::RustFFI::layout_arena_renew_clock_layout_frame(document->layout_node_arena_if_created()->handle());
+            if (auto sealed = document->navigable()->seal_render_clock_frame_kit(); sealed.has_value())
+                kit = make<LocalNavigable::RenderClockFrameKit>(sealed.release_value());
+        }
+        replace_render_clock_kit(hold, move(kit));
     }
+}
+
+// Takes in what the ticks presented from the lease's kit, and has them present from `kit` from now on.
+void FrameScheduler::replace_render_clock_kit(ClockLeaseHold& hold, OwnPtr<LocalNavigable::RenderClockFrameKit> kit)
+{
+    auto* arena = hold.document->layout_node_arena_if_created();
+    if (hold.render_clock_kit) {
+        if (auto navigable = hold.document->navigable())
+            navigable->adopt_render_clock_frame_kit(*hold.render_clock_kit);
+    }
+    {
+        MutexLocker locker(render_clock_kits_mutex());
+        if (arena) {
+            if (kit)
+                render_clock_kits().set(arena->handle(), kit.ptr());
+            else
+                render_clock_kits().remove(arena->handle());
+        }
+    }
+    hold.render_clock_kit = move(kit);
 }
 
 // Arms the render clock for the compositor context `context` of the lease's document, or disarms it without one.
@@ -675,8 +728,13 @@ void FrameScheduler::main_thread_did_wake()
             continue;
         auto time = Layout::RustFFI::rust_clock_lease_time(arena->handle());
         adopt_clock_tick(*document);
-        // The style the ticks installed is the document's now, and so is what they laid out with it.
+        // The style the ticks installed is the document's now, and so is what they laid out with it, and what they
+        // presented.
         take_in_clock_layout_frame(*document);
+        if (index < m_clock_leases.size() && m_clock_leases[index].document.ptr() == document.ptr() && m_clock_leases[index].render_clock_kit) {
+            if (auto navigable = document->navigable())
+                navigable->adopt_render_clock_frame_kit(*m_clock_leases[index].render_clock_kit);
+        }
         if (!isnan(time)) {
             if (auto current = document->timeline()->current_time(); current.has_value() && current->type == Animations::TimeValue::Type::Milliseconds && current->value < time)
                 document->timeline()->update_current_time(time);
@@ -751,6 +809,11 @@ bool FrameScheduler::submit_clock_tick(Vector<GC::Ref<DOM::Document>> const& doc
         auto* arena = document->layout_node_arena_if_created();
         if (!held.has_value() || !arena)
             continue;
+        // A render clock ticks the lease at the display's ticks, not the rendering update.
+        if (m_clock_leases[*held].render_clock_context.has_value()) {
+            m_clock_leases[*held].ticked = true;
+            continue;
+        }
         auto time = document->timeline()->current_time();
         if (!time.has_value() || time->type != Animations::TimeValue::Type::Milliseconds) {
             revoke_clock_lease(*held);
@@ -774,6 +837,8 @@ void FrameScheduler::adopt_clock_tick(DOM::Document& document)
     if (!arena)
         return;
     bool installed_any = false;
+    // What the render side presented already, adopting repaints nothing of.
+    bool const presented_on_render_side = Layout::RustFFI::rust_clock_lease_presented_since_adoption(arena->handle());
     CSS::StyleEffectDrain::install(document, [&](CSS::StyleDrainScope const& scope) {
         u32 style_node = 0;
         u64 style_record_before = 0;
@@ -786,7 +851,7 @@ void FrameScheduler::adopt_clock_tick(DOM::Document& document)
                 continue;
             if (!sample.present)
                 continue;
-            Animations::adopt_clock_tick_sample(scope, DOM::AbstractElement { *element }, CSS::StyleRecordID { style_record_before }, sample, installed_in_arena);
+            Animations::adopt_clock_tick_sample(scope, DOM::AbstractElement { *element }, CSS::StyleRecordID { style_record_before }, sample, installed_in_arena, presented_on_render_side);
             installed_any = true;
         }
     });
