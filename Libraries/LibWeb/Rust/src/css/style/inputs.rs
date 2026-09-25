@@ -1472,6 +1472,15 @@ impl RetainedState {
                 published_buffers,
             );
         }
+        // The host drops the sets the scope published before, so a plan still owed names what the
+        // table publishes now.
+        for plan in self
+            .nodes_owing_animation_definitions
+            .values_mut()
+            .chain(self.animation_definitions_being_applied.as_mut())
+        {
+            plan.resolve_keyframes_again(&self.animation_keyframes);
+        }
     }
 
     /// The `@keyframes` the document's style scopes define.

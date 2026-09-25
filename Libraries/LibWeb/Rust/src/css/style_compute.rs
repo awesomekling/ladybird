@@ -6520,6 +6520,8 @@ pub(crate) fn build_settled_animation_plan(
         names,
         timing_functions,
         effective_display(table, None).is_none(),
+        declaration_scope,
+        element_tree_scope,
     )
 }
 
