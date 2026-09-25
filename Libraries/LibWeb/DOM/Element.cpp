@@ -5234,9 +5234,10 @@ void Element::replace_style_record(CSS::StyleRecordID style_record_identity)
         return;
     m_style_record_identity = style_record_identity;
     if (style_node_id() != 0) {
-        auto& style_engine = document().style_computer().style_engine();
-        [[maybe_unused]] auto const input = CSS::StyleInputScope::between_passes(style_engine);
-        style_engine.set_element_container_query_inputs(style_node_id(), style_record_identity);
+        // FIXME: What the element holds is what the drain installs, and the rows and samples after it in
+        //        the drain read it (a document element's font metrics resolve `rem`): this belongs under
+        //        the drain's StyleDrainScope, which the callers do not pass yet.
+        document().style_computer().style_engine().set_element_container_query_inputs(style_node_id(), style_record_identity);
     }
     if (auto* layout_node = unsafe_layout_node())
         layout_node->set_style_record_identity(style_record_identity);
@@ -5478,8 +5479,10 @@ void Element::publish_style_recomputes_on_environment_move() const
     if (!m_style_uses_if_css_function && !m_style_uses_inherit_css_function && !m_style_uses_custom_function && !m_style_depends_on_style_container_query)
         return;
     auto& style_engine = const_cast<CSS::StyleEngine&>(document().style_computer().style_engine());
-    [[maybe_unused]] auto const input = CSS::StyleInputScope::between_passes(style_engine);
-    CSS::StyleEngineFFI::style_engine_note_element_recomputes_on_environment_move(style_engine.rust_handle(), style_node.value());
+    style_engine.publish_input([element = GC::Root<Element> { const_cast<Element&>(*this) }](CSS::StyleInputScope const& input) {
+        if (element->style_node_id() != 0)
+            CSS::StyleEngineFFI::style_engine_note_element_recomputes_on_environment_move(input.engine().rust_handle(), element->style_node_id().value());
+    });
 }
 
 void Element::publish_size_container_query_facts() const
@@ -5490,12 +5493,16 @@ void Element::publish_size_container_query_facts() const
     if (!m_is_size_query_container && !m_style_depends_on_size_container_query)
         return;
     auto& engine = const_cast<CSS::StyleEngine&>(document().style_computer().style_engine());
-    [[maybe_unused]] auto const input = CSS::StyleInputScope::between_passes(engine);
-    auto* style_engine = engine.rust_handle();
-    if (m_is_size_query_container)
-        CSS::StyleEngineFFI::style_engine_note_size_query_container(style_engine, style_node.value());
-    if (m_style_depends_on_size_container_query)
-        CSS::StyleEngineFFI::style_engine_note_style_depends_on_size_container_query(style_engine, style_node.value());
+    engine.publish_input([element = GC::Root<Element> { const_cast<Element&>(*this) }, is_size_query_container = m_is_size_query_container, style_depends_on_size_container_query = m_style_depends_on_size_container_query](CSS::StyleInputScope const& input) {
+        auto style_node = element->style_node_id();
+        if (style_node == 0)
+            return;
+        auto* style_engine = input.engine().rust_handle();
+        if (is_size_query_container)
+            CSS::StyleEngineFFI::style_engine_note_size_query_container(style_engine, style_node.value());
+        if (style_depends_on_size_container_query)
+            CSS::StyleEngineFFI::style_engine_note_style_depends_on_size_container_query(style_engine, style_node.value());
+    });
 }
 
 RefPtr<CSS::CustomPropertyData const> Element::custom_property_data(Optional<CSS::PseudoElement> pseudo_element) const

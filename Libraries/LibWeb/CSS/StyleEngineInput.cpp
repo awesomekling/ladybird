@@ -75,6 +75,16 @@ static StyleEngine* style_engine_for(DOM::Node& node)
     return &node.document().style_computer().style_engine();
 }
 
+// Publish an input about the element: at once between passes, and once the pass in flight has drained
+// otherwise, if the element still has an identity then.
+static void publish_element_input(StyleEngine& style_engine, DOM::Element& element, Function<void(StyleInputScope const&, StyleNodeID)>&& input)
+{
+    style_engine.publish_input([element = GC::Root<DOM::Element> { element }, input = move(input)](StyleInputScope const& scope) {
+        if (element->style_node_id() != no_style_node)
+            input(scope, element->style_node_id());
+    });
+}
+
 // A relation is only nameable if the element on its other end already has an identity. Naming a
 // node the engine has never seen would be worse than naming none: it would assert on a relation
 // column that was never allocated.
@@ -329,7 +339,6 @@ void record_text_connected(DOM::Text& text)
     if (!style_engine || text.style_node_id() != no_style_node)
         return;
 
-    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*style_engine);
     StyleNodeID identity;
     style_engine->mint_text_style_nodes({ &identity, 1 });
     text.set_style_node_id(identity);
@@ -388,7 +397,6 @@ void record_subtree_connecting(DOM::Node& root)
         return;
     auto& style_computer = root.document().style_computer();
     auto& style_engine = style_computer.style_engine();
-    [[maybe_unused]] auto const input = StyleInputScope::between_passes(style_engine);
     struct Arrival {
         GC::Ref<DOM::Node> node;
         TreeScopeID tree_scope;
@@ -485,7 +493,6 @@ enum class InvalidateLanguageCache {
 template<typename PublishFeature, typename PublishEmptiness>
 static void publish_element_selector_features(StyleEngine& style_engine, DOM::Element& element, StyleNodeID node, PublishFeature publish_feature, PublishEmptiness publish_emptiness, InvalidateLanguageCache invalidate_language_cache)
 {
-    [[maybe_unused]] auto const input = StyleInputScope::between_passes(style_engine);
     // Slot identity and namespace never change during an element's lifetime.
     auto is_slot = is<HTML::HTMLSlotElement>(element);
     StyleAtomID namespace_atom;
@@ -819,7 +826,6 @@ void configure_isolated_selector_query_engine(StyleEngine& style_engine, DOM::Do
 
 StyleNodeID populate_isolated_selector_query_engine(StyleEngine& style_engine, DOM::ParentNode& root, Function<void(GC::Ref<DOM::Element>, StyleNodeID)> const& publish_identity)
 {
-    [[maybe_unused]] auto const input = StyleInputScope::between_passes(style_engine);
     Optional<StyleNodeID> non_element_root_identity;
     if (!is<DOM::Element>(root) && !is<DOM::Document>(root)) {
         non_element_root_identity = style_engine.mint_style_node();
@@ -930,7 +936,6 @@ StyleNodeID populate_isolated_selector_query_engine(StyleEngine& style_engine, D
 // own name, so an element's name has to be folded the same way for the two to name one atom.
 static StyleAtomID intern_id_or_class_atom(StyleEngine& style_engine, DOM::Element const& element, Utf16FlyString const& name)
 {
-    [[maybe_unused]] auto const input = StyleInputScope::between_passes(style_engine);
     if (element.document().in_quirks_mode())
         return style_engine.intern_atom(name.to_ascii_lowercase());
     return style_engine.intern_atom(name);
@@ -947,7 +952,6 @@ static void record_element_initial_features(DOM::Element& element)
     if (!style_engine || element.style_node_id() == no_style_node)
         return;
 
-    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*style_engine);
     publish_element_selector_features(
         *style_engine,
         element,
@@ -1202,6 +1206,11 @@ static void record_element_disconnecting(DOM::Element& element, TreeScopeID tree
     element.set_style_node_id(no_style_node);
 }
 
+// FIXME: The animation publications below are read by the samples the host takes as it installs a
+//        pass, which run between a transaction and its drain as well as in it. They publish at once
+//        while the pass is in flight; they belong under the drain's StyleDrainScope once the sample
+//        step runs inside the drain.
+
 // The animation names an element's computed style references.
 //
 // Not an input: the element was recomputed by whatever moved its `animation-name`. This is the index
@@ -1213,7 +1222,6 @@ void record_element_animation_names(DOM::Element& element, ReadonlySpan<Utf16Fly
     if (!style_engine || element.style_node_id() == no_style_node)
         return;
 
-    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*style_engine);
     Vector<StyleAtomID> atoms;
     atoms.ensure_capacity(names.size());
     for (auto const& name : names)
@@ -1231,7 +1239,6 @@ void record_element_css_defined_animations(DOM::Element& element, u8 slot, Reado
     if (!style_engine || element.style_node_id() == no_style_node)
         return;
 
-    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*style_engine);
     // The names travel as one buffer of code units with a length each, since a list is almost
     // always a single name and a handle per name would cost more than the names do.
     Vector<u32> lengths;
@@ -1258,7 +1265,6 @@ void record_element_animation_timing_rows(DOM::Element& element, u8 slot, Readon
     if (!style_engine || element.style_node_id() == no_style_node)
         return;
 
-    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*style_engine);
     style_engine->set_element_animation_timing_rows(element.style_node_id(), slot, words, times, linear_points);
 }
 
@@ -1477,7 +1483,6 @@ void record_element_animation_effect_descriptions(DOM::Element& element, u8 slot
     if (!style_engine || element.style_node_id() == no_style_node)
         return;
 
-    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*style_engine);
     Vector<StyleEngineFFI::FfiPublishedAnimationEffect> ffi_effects;
     Vector<StyleEngineFFI::FfiPublishedAnimationKeyframe> ffi_keyframes;
     Vector<StyleEngineFFI::FfiPublishedAnimationDeclaration> ffi_declarations;
@@ -1527,7 +1532,6 @@ void record_animation_timeline_samples(DOM::Document& document, ReadonlySpan<u32
     if (!style_engine)
         return;
 
-    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*style_engine);
     style_engine->set_animation_timeline_samples(identities, words, times);
 }
 
@@ -1542,7 +1546,6 @@ void record_element_custom_property_names(DOM::Element& element, CustomPropertyD
     if (!style_engine || element.style_node_id() == no_style_node)
         return;
 
-    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*style_engine);
     // OPTIMIZATION: Each environment hands out its declared names sorted and deduplicated, so they are merged
     //               rather than sorted once more for every element that holds that environment.
     ReadonlySpan<StyleAtomID> published;
@@ -1580,7 +1583,9 @@ void record_element_custom_property_names(DOM::Element& element, CustomPropertyD
         quick_sort(reference_atoms);
         merge_names(reference_atoms);
     }
-    style_engine->set_element_custom_property_names(element.style_node_id(), published, uses_unnamed, uses_custom_functions);
+    publish_element_input(*style_engine, element, [published = Vector<StyleAtomID> { published }, uses_unnamed, uses_custom_functions](StyleInputScope const& input, StyleNodeID node) {
+        input.engine().set_element_custom_property_names(node, published, uses_unnamed, uses_custom_functions);
+    });
 }
 
 void record_element_custom_property_names(DOM::Element& element, ReadonlySpan<Utf16FlyString> names, bool uses_unnamed, bool uses_custom_functions)
@@ -1589,12 +1594,13 @@ void record_element_custom_property_names(DOM::Element& element, ReadonlySpan<Ut
     if (!style_engine || element.style_node_id() == no_style_node)
         return;
 
-    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*style_engine);
     Vector<StyleAtomID> atoms;
     atoms.ensure_capacity(names.size());
     for (auto const& name : names)
         atoms.unchecked_append(style_engine->intern_atom(name));
-    style_engine->set_element_custom_property_names(element.style_node_id(), atoms, uses_unnamed, uses_custom_functions);
+    publish_element_input(*style_engine, element, [atoms = move(atoms), uses_unnamed, uses_custom_functions](StyleInputScope const& input, StyleNodeID node) {
+        input.engine().set_element_custom_property_names(node, atoms, uses_unnamed, uses_custom_functions);
+    });
 }
 
 // An element's heading level, which `:heading()` tests. It follows from what the element is plus
@@ -1662,16 +1668,17 @@ void record_element_custom_states_changed(DOM::Element& element)
     if (!style_engine || element.style_node_id() == no_style_node || has_pending_initial_features(element))
         return;
 
-    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*style_engine);
-    // The engine writes the states into the style mirror the layout frame reads, so a change made
-    // beside the frame in flight waits for it.
-    element.document().join_frame_in_flight();
     Vector<StyleAtomID> atoms;
     if (auto states = element.custom_state_set()) {
         for (auto const& state : states->states())
             atoms.append(style_engine->intern_atom(state));
     }
-    style_engine->set_element_custom_states(element.style_node_id(), atoms);
+    publish_element_input(*style_engine, element, [document = GC::Root<DOM::Document> { element.document() }, atoms = move(atoms)](StyleInputScope const& input, StyleNodeID node) {
+        // The engine writes the states into the style mirror the layout frame reads, so a change made
+        // beside the frame in flight waits for it.
+        document->join_frame_in_flight();
+        input.engine().set_element_custom_states(node, atoms);
+    });
 }
 
 // Walk the chain of hosts outwards, carrying the names the element is addressable by at each level.
@@ -1724,7 +1731,6 @@ void record_element_parts_changed(DOM::Element& element)
     if (!style_engine || element.style_node_id() == no_style_node || has_pending_initial_features(element))
         return;
 
-    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*style_engine);
     // A rule naming a forwarded part names the element under the forwarded name, so the names it
     // is exposed under are what it is published as - and the reach alongside them, because a host
     // usually forwards a name under the one it already had, which moves no name at all.
@@ -1732,15 +1738,16 @@ void record_element_parts_changed(DOM::Element& element)
     Vector<StyleNodeID> pair_hosts;
     auto const exposing_host = collect_part_exposure(element, pair_names, pair_hosts);
 
-    // As for custom states, the parts go into the style mirror the layout frame reads.
-    element.document().join_frame_in_flight();
     Vector<StyleAtomID> pair_atoms;
     pair_atoms.ensure_capacity(pair_names.size());
     for (auto const& name : pair_names)
         pair_atoms.unchecked_append(style_engine->intern_atom(name));
-    style_engine->set_element_parts(element.style_node_id(), pair_atoms, pair_hosts);
-
-    style_engine->set_element_part_exposure(element.style_node_id(), exposing_host);
+    publish_element_input(*style_engine, element, [document = GC::Root<DOM::Document> { element.document() }, pair_atoms = move(pair_atoms), pair_hosts = move(pair_hosts), exposing_host](StyleInputScope const& input, StyleNodeID node) {
+        // As for custom states, the parts go into the style mirror the layout frame reads.
+        document->join_frame_in_flight();
+        input.engine().set_element_parts(node, pair_atoms, pair_hosts);
+        input.engine().set_element_part_exposure(node, exposing_host);
+    });
 }
 
 void record_element_emptiness_changed(DOM::Element& element, DOM::Node const& changing_child, bool counted_before, bool counts_after)
@@ -2647,7 +2654,6 @@ void record_element_id_changed(DOM::Element& element, Optional<Utf16FlyString> c
     if (!style_engine || element.style_node_id() == no_style_node)
         return;
 
-    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*style_engine);
     auto atom_of = [&](Optional<Utf16FlyString> const& value) -> StyleAtomID {
         return value.has_value() ? intern_id_or_class_atom(*style_engine, element, *value) : 0;
     };
@@ -2668,7 +2674,6 @@ void record_element_class_list_changed(DOM::Element& element, Vector<Utf16FlyStr
     if (!style_engine || element.style_node_id() == no_style_node)
         return;
 
-    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*style_engine);
     // One class delta per class that actually gained or lost membership. A class present on both
     // sides is not a change, and journalling it would be exactly the amplification the engine
     // exists to avoid.

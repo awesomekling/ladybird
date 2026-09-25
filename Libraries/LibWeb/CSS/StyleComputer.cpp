@@ -317,7 +317,6 @@ void StyleComputer::unregister_style_node(StyleNodeID style_node_id)
         if (auto* svg_element = as_if<SVG::SVGElement>(m_element_style_nodes[index].ptr()))
             Layout::clear_svg_attribute_facts(svg_element->document(), style_node_id);
         m_element_style_nodes[index] = nullptr;
-        [[maybe_unused]] auto const input = StyleInputScope::between_passes(m_style_engine);
         m_style_engine.consume_recorded_element_style_input_change(style_node_id);
     }
 }
