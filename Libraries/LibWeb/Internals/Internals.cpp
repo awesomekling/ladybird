@@ -1697,12 +1697,12 @@ void Internals::reset_rendering_scheduler_counters()
     Layout::RustFFI::rust_reset_frame_retirement_counters();
 }
 
-bool Internals::hold_next_recording_frame(Utf16String const& point, GC::Ptr<DOM::Document> document)
+static bool hold_next_submitted_stage(StringView label, Utf16String const& point, GC::Ptr<DOM::Document> document)
 {
     Layout::RustFFI::FfiStageHoldPoint hold_point;
     if (point == "before-run"sv)
         hold_point = Layout::RustFFI::FfiStageHoldPoint::BeforeRun;
-    else if (point == "mid-recording"sv)
+    else if (point == "mid-recording"sv && label == "recording"sv)
         hold_point = Layout::RustFFI::FfiStageHoldPoint::MidRecording;
     else if (point == "before-completion"sv)
         hold_point = Layout::RustFFI::FfiStageHoldPoint::BeforeCompletion;
@@ -1710,14 +1710,23 @@ bool Internals::hold_next_recording_frame(Utf16String const& point, GC::Ptr<DOM:
         return false;
     void* arena = nullptr;
     if (document) {
-        // A document without an arena has no recording to hold.
+        // A document without an arena has no stage to hold.
         auto* node_arena = document->layout_node_arena_if_created();
         if (!node_arena)
             return false;
         arena = node_arena->handle();
     }
-    constexpr auto label = "recording"sv;
     return Layout::RustFFI::rust_stage_thread_hold_next_submitted_stage(reinterpret_cast<u8 const*>(label.characters_without_null_termination()), label.length(), hold_point, arena);
+}
+
+bool Internals::hold_next_recording_frame(Utf16String const& point, GC::Ptr<DOM::Document> document)
+{
+    return hold_next_submitted_stage("recording"sv, point, document);
+}
+
+bool Internals::hold_next_layout_frame(Utf16String const& point, GC::Ptr<DOM::Document> document)
+{
+    return hold_next_submitted_stage("layout"sv, point, document);
 }
 
 Utf16String Internals::wait_for_held_frame()

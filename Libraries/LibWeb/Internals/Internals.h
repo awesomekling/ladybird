@@ -220,6 +220,7 @@ public:
     GC::Ref<JS::Object> get_rendering_scheduler_counters() const;
     void reset_rendering_scheduler_counters();
     bool hold_next_recording_frame(Utf16String const& point, GC::Ptr<DOM::Document> document);
+    bool hold_next_layout_frame(Utf16String const& point, GC::Ptr<DOM::Document> document);
     Utf16String wait_for_held_frame();
     void release_held_frame();
     bool frame_in_flight_holds_document() const;
