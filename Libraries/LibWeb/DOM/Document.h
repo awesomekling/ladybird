@@ -39,6 +39,7 @@
 #include <LibWeb/CSS/StyleScope.h>
 #include <LibWeb/DOM/AnchorNameMap.h>
 #include <LibWeb/DOM/HoverEventData.h>
+#include <LibWeb/DOM/LayoutOverlapBlocker.h>
 #include <LibWeb/DOM/ParentNode.h>
 #include <LibWeb/DOM/Range.h>
 #include <LibWeb/DOM/ShadowRoot.h>
@@ -1352,6 +1353,13 @@ public:
     [[nodiscard]] size_t broadcast_active_resize_observations();
     [[nodiscard]] bool has_active_resize_observations();
     [[nodiscard]] bool has_skipped_resize_observations();
+
+    // Why this document's step 16 of the rendering update cannot run beside the main thread, if it cannot: resize
+    // observations, pending view transition operations, scroll-state() containers, the first determination of a
+    // content-visibility: auto element's proximity to the viewport and scroll timelines all read the layout the pass
+    // produces and decide within the rendering update whether it lays out again, so no task may run between the pass
+    // and them.
+    [[nodiscard]] Optional<LayoutOverlapBlocker> layout_overlap_blocker();
 
     void register_shadow_root(Badge<DOM::ShadowRoot>, DOM::ShadowRoot&);
     void unregister_shadow_root(Badge<DOM::ShadowRoot>, DOM::ShadowRoot&);

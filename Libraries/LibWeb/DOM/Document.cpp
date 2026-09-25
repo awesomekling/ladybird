@@ -45,6 +45,7 @@
 #include <LibWeb/Animations/AnimationPlaybackEvent.h>
 #include <LibWeb/Animations/AnimationTimeline.h>
 #include <LibWeb/Animations/DocumentTimeline.h>
+#include <LibWeb/Animations/ScrollTimeline.h>
 #include <LibWeb/Animations/TimeValue.h>
 #include <LibWeb/Bindings/CSS.h>
 #include <LibWeb/Bindings/Document.h>
@@ -9258,6 +9259,40 @@ bool Document::has_skipped_resize_observations()
     return false;
 }
 
+Optional<LayoutOverlapBlocker> Document::layout_overlap_blocker()
+{
+    for (auto const& observer : m_resize_observers) {
+        if (observer && !observer->observation_targets().is_empty())
+            return LayoutOverlapBlocker::ResizeObservation;
+    }
+
+    if (m_active_view_transition)
+        return LayoutOverlapBlocker::ViewTransition;
+
+    if (m_scroll_state_query_containers.has_containers())
+        return LayoutOverlapBlocker::ScrollStateContainer;
+
+    // NB: An element that has content-visibility: auto only after this rendering update's layout is not in the paint
+    //     state yet. Its first determination runs after the pass all the same, and loops in place from there.
+    if (document_element()) {
+        for (auto box_slot : paint_state().boxes_with_auto_content_visibility()) {
+            auto* layout_node = Painting::layout_node_for_committed_slot(layout_node_arena(), box_slot);
+            if (!layout_node)
+                continue;
+            auto* element = as_if<Element>(layout_node->dom_node());
+            if (element && element->proximity_to_the_viewport() == ProximityToTheViewport::NotDetermined)
+                return LayoutOverlapBlocker::ContentVisibilityAutoFirstDetermination;
+        }
+    }
+
+    for (auto const& timeline : m_associated_animation_timelines) {
+        if (is<Animations::ScrollTimeline>(*timeline))
+            return LayoutOverlapBlocker::ScrollTimeline;
+    }
+
+    return {};
+}
+
 GC::Ref<WebIDL::ObservableArray> Document::adopted_style_sheets() const
 {
     if (!m_adopted_style_sheets)
@@ -11138,6 +11173,18 @@ Utf16View to_string(UpdateLayoutReason reason)
         return #e##sv;
         ENUMERATE_UPDATE_LAYOUT_REASONS(ENUMERATE_UPDATE_LAYOUT_REASON)
 #undef ENUMERATE_UPDATE_LAYOUT_REASON
+    }
+    VERIFY_NOT_REACHED();
+}
+
+Utf16View to_string(LayoutOverlapBlocker blocker)
+{
+    switch (blocker) {
+#define ENUMERATE_LAYOUT_OVERLAP_BLOCKER(e) \
+    case LayoutOverlapBlocker::e:           \
+        return #e##sv;
+        ENUMERATE_LAYOUT_OVERLAP_BLOCKERS(ENUMERATE_LAYOUT_OVERLAP_BLOCKER)
+#undef ENUMERATE_LAYOUT_OVERLAP_BLOCKER
     }
     VERIFY_NOT_REACHED();
 }

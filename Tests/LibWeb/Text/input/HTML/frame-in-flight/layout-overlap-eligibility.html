@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style>
+    #scroller { container-type: scroll-state; height: 50px; overflow: auto; }
+    @container scroll-state(scrollable: bottom) { #scrolled { color: green; } }
+</style>
+<div id="target" style="width: 50px; height: 50px"></div>
+<script>
+    // A rendering update lays out beside the main thread only if nothing after its layout pass has to run with no task
+    // in between. Each document says what keeps it in place.
+    function nextFrame() {
+        return new Promise(resolve => requestAnimationFrame(() => resolve()));
+    }
+
+    function blocker() {
+        return internals.layoutOverlapBlocker() || "none";
+    }
+
+    asyncTest(async done => {
+        await nextFrame();
+        println(`plain document: ${blocker()}`);
+
+        const observer = new ResizeObserver(() => {});
+        observer.observe(target);
+        println(`resize observation: ${blocker()}`);
+        observer.disconnect();
+        println(`resize observer disconnected: ${blocker()}`);
+
+        const transition = document.startViewTransition(() => {});
+        println(`view transition: ${blocker()}`);
+        await transition.finished;
+        println(`view transition finished: ${blocker()}`);
+
+        const auto = document.createElement("div");
+        auto.style.contentVisibility = "auto";
+        auto.textContent = "auto";
+        document.body.appendChild(auto);
+        auto.offsetWidth;
+        println(`content-visibility: auto, first determination pending: ${blocker()}`);
+        await nextFrame();
+        await nextFrame();
+        println(`content-visibility: auto, determined: ${blocker()}`);
+        auto.remove();
+
+        const animation = target.animate({ opacity: [0, 1] }, { timeline: new ScrollTimeline({ source: document.scrollingElement }) });
+        println(`scroll timeline: ${blocker()}`);
+        animation.cancel();
+
+        const scroller = document.createElement("div");
+        scroller.id = "scroller";
+        scroller.innerHTML = `<div id="scrolled" style="height: 200px">scrolled</div>`;
+        document.body.appendChild(scroller);
+        getComputedStyle(scroller.firstChild).color;
+        println(`scroll-state container: ${blocker()}`);
+
+        done();
+    });
+</script>

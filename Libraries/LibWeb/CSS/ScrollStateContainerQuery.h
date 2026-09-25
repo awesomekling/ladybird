@@ -50,6 +50,9 @@ public:
     // whether any did.
     bool snapshot_post_layout_state(DOM::Document&, Snapshot);
 
+    // Whether any element has been queried as a scroll-state() container.
+    bool has_containers() const { return !m_containers.is_empty(); }
+
     void visit_edges(GC::Cell::Visitor&);
 
 private:

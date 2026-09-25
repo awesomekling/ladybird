@@ -210,6 +210,10 @@ interface Internals {
     undefined resetJoinCounters();
     // Prints the reasons that blocked this document the longest to the debug log.
     undefined dumpJoinCounters();
+    // What keeps this document's layout in a rendering update in place rather than beside the main
+    // thread ("ResizeObservation", "ViewTransition", "ScrollStateContainer",
+    // "ContentVisibilityAutoFirstDetermination", "ScrollTimeline"), or "" if nothing does.
+    DOMString layoutOverlapBlocker();
     object getRenderingSchedulerCounters();
     undefined resetRenderingSchedulerCounters();
     // Under LIBWEB_STAGE_THREAD=overlap, holds the next recording submitted to the render side

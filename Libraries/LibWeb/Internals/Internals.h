@@ -216,6 +216,7 @@ public:
     GC::Ref<JS::Object> join_counters_object() const;
     void reset_join_counters();
     void dump_join_counters() const;
+    Utf16String layout_overlap_blocker() const;
     GC::Ref<JS::Object> get_rendering_scheduler_counters() const;
     void reset_rendering_scheduler_counters();
     bool hold_next_recording_frame(Utf16String const& point, GC::Ptr<DOM::Document> document);

@@ -16,6 +16,7 @@
 #include <LibGC/Ptr.h>
 #include <LibGC/Weak.h>
 #include <LibJS/Forward.h>
+#include <LibWeb/DOM/LayoutOverlapBlocker.h>
 #include <LibWeb/Export.h>
 #include <LibWeb/HTML/EventLoop/TaskQueue.h>
 #include <LibWebCommon/HighResolutionTime/DOMHighResTimeStamp.h>
@@ -118,6 +119,10 @@ public:
         // What the DOM side journaled while a frame was in flight, which it could do without waiting for the frame.
         Array<u64, to_underlying(JournalEntryKind::Count)> journal_entries_during_flight {};
         u64 finished_frame_consumer_calls { 0 };
+        // Rendering updates whose layout the render side could lay out beside main, and the ones it could not, by the
+        // first thing that kept them in place. Counted only where the render side submits layout.
+        u64 layout_overlap_eligible_updates { 0 };
+        Array<u64, DOM::layout_overlap_blocker_count> layout_overlap_blocked_updates {};
     };
 
     enum class Type {
@@ -154,6 +159,13 @@ public:
     bool rendering_opportunity(HighResolutionTime::DOMHighResTimeStamp frame_time, RenderingOpportunitySource);
     bool rendering_task_queued_or_running() const { return m_rendering_task_queued || m_running_rendering_task; }
     bool running_synchronous_rendering_update() const { return m_running_synchronous_rendering_update; }
+
+    // Whether the layout of the running rendering update may run beside the main thread, decided once all of its
+    // animation frame callbacks and their microtasks have run (step 14).
+    bool rendering_update_may_overlap_layout() const { return m_rendering_update_may_overlap_layout; }
+    // What keeps the layout of a rendering update over docs in place, if anything. The whole rendering update decides
+    // together: once one document's layout has been submitted, tasks run before every later document's step 16.
+    [[nodiscard]] Optional<DOM::LayoutOverlapBlocker> layout_overlap_blocker_for_rendering_update(ReadonlySpan<GC::Root<DOM::Document>> docs) const;
 
     // https://html.spec.whatwg.org/multipage/browsing-the-web.html#termination-nesting-level
     size_t termination_nesting_level() const { return m_termination_nesting_level; }
@@ -294,6 +306,7 @@ private:
 
     bool m_running_rendering_task { false };
     bool m_running_synchronous_rendering_update { false };
+    bool m_rendering_update_may_overlap_layout { false };
     bool m_rendering_task_queued { false };
     bool m_rendering_update_requested { false };
 
