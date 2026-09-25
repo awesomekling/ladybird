@@ -7065,6 +7065,61 @@ void LocalNavigable::adopt_render_clock_frame_kit(RenderClockFrameKit& kit)
     document->adopt_published_recording(*kit.recording, *presentation.published);
 }
 
+namespace {
+
+// The presentation of what a document's flight records, sealed where the flight was submitted but for what the flight
+// prepares: the visual context tree and scroll state the recording was made against.
+struct FlightPresentation {
+    AK_ALLOC_WITH_KMALLOC;
+
+    NonnullRefPtr<Compositor::Presentation> presentation;
+    Optional<Compositor::AsyncScrollingStamp> async_scrolling_stamp;
+    Compositing::ScrollStateSnapshot scroll_state_snapshot;
+    // What the recording the flight presents is published with, but for the visual context tree the flight made it
+    // against. The present stage makes the recording.
+    GC::Ref<DOM::Document> document;
+    void* arena { nullptr };
+    Compositing::DisplayListResourceStorage& resource_storage;
+    Optional<Color> surface_clear_color;
+    DevicePixelRect device_viewport_rect;
+    Painting::BlockingWheelEventRegionState wheel_event_region_state;
+    u64 hit_test_display_list_invalidations { 0 };
+    OwnPtr<Painting::PendingDisplayListRecording> recording;
+};
+
+}
+
+// The present stage of a flight, on the render side: presents what the flight recorded as the presentation stage of a
+// frame in flight does, from what the flight prepared.
+static void present_from_flight(void* context, void const* visual_context_tree, Gfx::FloatPoint const* scroll_offsets, size_t scroll_offset_count, bool scroll_state_refreshed)
+{
+    auto& flight = *static_cast<FlightPresentation*>(context);
+    auto tree = Compositing::AccumulatedVisualContextTree::adopt_rust_handle(visual_context_tree);
+    flight.recording = make<Painting::PendingDisplayListRecording>(Painting::PendingDisplayListRecording {
+        .document = flight.document,
+        .arena = flight.arena,
+        .resource_storage = flight.resource_storage,
+        .visual_context_tree = tree,
+        .cache_mode = Painting::PaintCommandCacheMode::ReadWrite,
+        .run = Painting::RecordingRun::InSubmittedFrame,
+        .surface_clear_color = flight.surface_clear_color,
+        .device_viewport_rect = flight.device_viewport_rect,
+        .wheel_event_region_state = flight.wheel_event_region_state,
+        .hit_test_display_list_invalidations = flight.hit_test_display_list_invalidations,
+        .timer = Core::ElapsedTimer::start_new(Core::TimerType::Precise),
+    });
+    flight.presentation->recording = flight.recording.ptr();
+    auto scroll_state_snapshot = flight.scroll_state_snapshot;
+    if (scroll_state_refreshed) {
+        auto adopted_async_scroll_sequence = scroll_state_snapshot.adopted_async_scroll_sequence();
+        scroll_state_snapshot.assign_device_offsets({ scroll_offsets, scroll_offset_count });
+        scroll_state_snapshot.set_adopted_async_scroll_sequence(adopted_async_scroll_sequence);
+    }
+    // NB: The flight updated the visual contexts, which the frame takes to the compositor.
+    flight.presentation->source = Compositor::SealedPresentationSource { move(tree), flight.async_scrolling_stamp, true, move(scroll_state_snapshot) };
+    present_from_frame_in_flight(flight.presentation.ptr());
+}
+
 // What the recording that a document's flight makes after its layout reads of the navigable, sealed where the flight
 // was submitted.
 struct LocalNavigable::FlightPaintSeal {
@@ -7074,9 +7129,11 @@ struct LocalNavigable::FlightPaintSeal {
     Painting::FlightRecordingSeal recording;
     u64 hit_test_display_list_invalidations { 0 };
     bool handed_accumulated_visual_contexts_update { false };
+    // Where the render side presents, how the flight presents what it records. The presenter is lent to the flight.
+    OwnPtr<FlightPresentation> presentation;
 };
 
-bool LocalNavigable::seal_flight_paint(DOM::Document& document)
+bool LocalNavigable::seal_flight_paint(DOM::Document& document, bool may_present)
 {
     VERIFY(!m_flight_paint_seal);
     // The flight paints the navigable as step 22 of the rendering update would, and only where nothing painted beside
@@ -7118,12 +7175,64 @@ bool LocalNavigable::seal_flight_paint(DOM::Document& document)
     // The canvases the rendering update drew so far show in the recording, as step 22 flushes them before it paints.
     page().prepare_canvas_contexts_for_compositing();
     auto hit_test_display_list_invalidations = document.hit_test_display_list_invalidations();
-    auto recording = Painting::seal_rust_display_list_recording_for_flight(document, presenter().resource_storage(), paint_config, overlay_inputs);
+
+    // Where the render side presents, the flight presents what it records too, unless what its layout leaves the document
+    // to do could ask for another layout first. What is known to ask for one already keeps the flight from presenting.
+    OwnPtr<FlightPresentation> flight_presentation;
+    if (may_present && Compositor::render_presents() && Layout::RustFFI::rust_stage_thread_submits_presentation() && m_keyboard_scroll_state_of_last_frame.has_value()) {
+        if (auto frame_sink = compositor_context().prepare_to_submit_frame_from_render_side()) {
+            auto& document_paint_state = document.paint_state();
+            Compositing::ScrollStateSnapshot scroll_state_snapshot { document_paint_state.scroll_state_snapshot() };
+            scroll_state_snapshot.set_adopted_async_scroll_sequence(m_adopted_async_scroll_sequence);
+            Optional<Compositor::AsyncScrollingStamp> async_scrolling_stamp = Compositor::AsyncScrollingStamp {
+                .wheel_event_listener_state_generation = page().wheel_event_listener_state_generation(),
+                .device_pixels_per_css_pixel = page().client().device_pixels_per_css_pixel(),
+            };
+            auto presentation = adopt_ref(*new Compositor::Presentation(
+                Compositor::SealedPresentationSource { {}, async_scrolling_stamp, true, scroll_state_snapshot },
+                Compositor::PresentationInputs {
+                    .context_id = compositor_context().id(),
+                    .paint_config = paint_config,
+                    .keyboard_scroll_state = *m_keyboard_scroll_state_of_last_frame,
+                    .paint_command_cache_source_resources = document_paint_state.paint_command_cache_source_referenced_resources(),
+                    .present_viewport_rect = page().css_to_device_rect(viewport_rect()).to_type<int>(),
+                },
+                document_paint_state.display_list_used_as_paint_command_cache_source()));
+            auto* arena = document.layout_node_arena().handle();
+            presentation->presenter = presenter();
+            presentation->render_state_generation = Layout::RustFFI::layout_arena_render_state_generation(arena);
+            presentation->frame_sink = move(frame_sink);
+            presentation->is_presented_by_frame_in_flight = true;
+            // The recording's viewport and wheel regions are filled in once they are sealed below.
+            flight_presentation = make<FlightPresentation>(FlightPresentation {
+                .presentation = move(presentation),
+                .async_scrolling_stamp = async_scrolling_stamp,
+                .scroll_state_snapshot = move(scroll_state_snapshot),
+                .document = document,
+                .arena = arena,
+                .resource_storage = presenter().resource_storage(),
+                .surface_clear_color = is_top_level_traversable() ? Optional<Color> { document.canvas_background_color_as_last_laid_out() } : Optional<Color> {},
+                .device_viewport_rect = {},
+                .wheel_event_region_state = {},
+                .hit_test_display_list_invalidations = hit_test_display_list_invalidations,
+                .recording = {},
+            });
+        }
+    }
+
+    auto recording = Painting::seal_rust_display_list_recording_for_flight(document, presenter().resource_storage(), paint_config, overlay_inputs,
+        flight_presentation ? present_from_flight : nullptr, flight_presentation.ptr());
+    if (flight_presentation) {
+        flight_presentation->device_viewport_rect = recording.device_viewport_rect;
+        flight_presentation->wheel_event_region_state = recording.wheel_event_region_state;
+        m_presenter->lend_to_frame_in_flight();
+    }
     m_flight_paint_seal = make<FlightPaintSeal>(FlightPaintSeal {
         .paint_config = paint_config,
         .recording = recording,
         .hit_test_display_list_invalidations = hit_test_display_list_invalidations,
         .handed_accumulated_visual_contexts_update = document.hand_accumulated_visual_contexts_update_to_flight(),
+        .presentation = move(flight_presentation),
     });
     // What asks for another paint beside the flight asks for the next one.
     m_needs_repaint = false;
@@ -7137,6 +7246,30 @@ bool LocalNavigable::finish_flight_paint(DOM::Document& document, FlightPaintEnd
     VERIFY(seal);
     if (document.has_paint_state())
         document.take_in_flight_paint(seal->handed_accumulated_visual_contexts_update);
+
+    // A flight that presented handed its frame to the compositor already: the navigable takes in what it presented, as
+    // it does a frame the frame in flight presented. A flight sealed to present that did not gives the presenter back.
+    if (auto presentation = move(seal->presentation)) {
+        if (end == FlightPaintEnd::Presented || end == FlightPaintEnd::PresentedAheadOfMoreWork) {
+            VERIFY(presentation->recording);
+            if (document.has_paint_state())
+                document.paint_state().did_update_visual_context_tree_in_compositor();
+            PendingCompositorFrame presented_frame {
+                .document = document,
+                .paint_config = seal->paint_config,
+                .keyboard_scroll_state = presentation->presentation->inputs.keyboard_scroll_state,
+                .recording = move(presentation->recording),
+                .presentation = presentation->presentation,
+            };
+            finish_painting_next_frame(presented_frame);
+            // The frame shows what the flight laid out. Should the layout's host halves have left more work, or a task
+            // beside the flight have changed what it laid out, the rendering update paints again.
+            if (end == FlightPaintEnd::PresentedAheadOfMoreWork || !document.has_paint_state() || !document.layout_is_up_to_date())
+                m_needs_repaint = m_needs_to_record_display_list = true;
+            return true;
+        }
+        m_presenter->take_back_from_frame_in_flight();
+    }
     auto paint_again = [&] {
         m_needs_repaint = true;
         m_needs_to_record_display_list = true;
@@ -7212,6 +7345,7 @@ bool LocalNavigable::finish_flight_paint(DOM::Document& document, FlightPaintEnd
 void LocalNavigable::finish_painting_next_frame(PendingCompositorFrame& pending_frame)
 {
     // A render clock kit is sealed as this frame was.
+    m_keyboard_scroll_state_of_last_frame = pending_frame.keyboard_scroll_state;
     if (pending_frame.recording && Layout::RustFFI::rust_clock_frames_enabled()) {
         m_last_painted_frame_for_render_clock = LastPaintedFrame {
             .paint_config = pending_frame.paint_config,

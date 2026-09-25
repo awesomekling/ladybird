@@ -77,7 +77,11 @@ struct FlightRecordingSeal {
 };
 // Resolves what the recording reads on the main thread, as begin_rust_display_list_recording() does, and seals it for
 // the next flight of the document, which records once it has laid the document out.
-WEB_API FlightRecordingSeal seal_rust_display_list_recording_for_flight(DOM::Document&, Compositing::DisplayListResourceStorage&, HTML::PaintConfig const&, InspectorOverlayInputs const&);
+// With `present`, the flight presents what it records through it, called on the render side with `present_context`,
+// the visual context tree the recording was made against (a reference it owns) and the scroll state snapshot the flight
+// refreshed, if it did.
+using FlightPresent = void (*)(void* context, void const* visual_context_tree, Gfx::FloatPoint const* scroll_offsets, size_t scroll_offset_count, bool scroll_state_refreshed);
+WEB_API FlightRecordingSeal seal_rust_display_list_recording_for_flight(DOM::Document&, Compositing::DisplayListResourceStorage&, HTML::PaintConfig const&, InspectorOverlayInputs const&, FlightPresent present = nullptr, void* present_context = nullptr);
 // Publishes the recording in its arena and returns its display list, which is the paint command cache source if the
 // recording is identical to it. Reaches the document only through `source`.
 WEB_API Compositor::PublishedDisplayList publish_rust_display_list_recording(PendingDisplayListRecording&, Compositing::DisplayList* paint_command_cache_source, Compositing::DisplayListResourceSet const& paint_command_cache_source_resources, Compositor::PresentationSource&);

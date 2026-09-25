@@ -836,6 +836,18 @@ impl LayoutFrame {
             && !self.arena().may_have_auto_content_visibility()
     }
 
+    /// Whether what the frame owes the document thread leaves it no style or layout work: no tree
+    /// build's host half, and commits whose host halves ask for nothing again.
+    fn owes_the_host_no_work(&self) -> bool {
+        let owed = self.owed_host_halves.take();
+        let owes_no_work = owed.iter().all(|owed| match owed {
+            OwedHostHalf::TreeBuild(_) => false,
+            OwedHostHalf::Commit(commit) => commit.leaves_the_host_no_work(),
+        });
+        self.owed_host_halves.set(owed);
+        owes_no_work
+    }
+
     fn note_layout_commit(&mut self, layout_tree_changed: bool) {
         self.prepare_for_rendering_after_commit();
         if let Some(selection) = &self.selection {
@@ -1544,6 +1556,18 @@ pub(crate) struct LayoutPassJob {
     ran: std::sync::Arc<std::sync::Mutex<Option<crate::stage_thread::FrameOwns<LayoutFrame>>>>,
 }
 
+/// How far a frame made from the arena after a layout round in flight may go before the round is
+/// taken back.
+pub(crate) struct RoundInFlight {
+    /// The round left the document laid out as far as the arena knows, with nothing for the
+    /// document thread to do but pay the host halves: the document may be recorded from the arena,
+    /// and the recording stands unless paying them leaves more work.
+    pub(crate) may_be_painted: bool,
+    /// Paying the host halves leaves no work either, as far as they tell: the recording may be
+    /// presented before the round is taken back.
+    pub(crate) may_be_presented: bool,
+}
+
 /// What the document thread runs once it has taken back the frame of a [`LayoutPassJob`].
 pub(crate) struct LayoutPassTakeBack {
     arena_handle: *mut c_void,
@@ -1596,11 +1620,9 @@ impl LayoutPassJob {
         }
     }
 
-    /// Runs the rest of the frame's round, on the stage that owns the arena. Answers whether the
-    /// round left the document laid out as far as the arena knows, with nothing for the document
-    /// thread to do but pay the host halves: then the document may be painted from the arena before
-    /// the frame is taken back, unless paying them leaves more work.
-    pub(crate) fn run(self) -> bool {
+    /// Runs the rest of the frame's round, on the stage that owns the arena, and answers how far a
+    /// frame made from the arena before the frame is taken back may go.
+    pub(crate) fn run(self) -> RoundInFlight {
         let Self { frame, facts, ran, .. } = self;
         let mut frame = frame.into_inner();
         // Where the frame would go on from here is the next layout update's to find: the take-back
@@ -1609,10 +1631,14 @@ impl LayoutPassJob {
         let step = unsafe { frame.run_round_through_pass(facts) };
         let may_be_painted =
             matches!(step, FrameStep::Ended(FrameEnd::UnlessHostLeftWork)) && frame.may_be_painted_before_take_back();
+        let may_be_presented = may_be_painted && frame.owes_the_host_no_work();
         // SAFETY: As above.
         *ran.lock().expect("a frame that ran left itself") =
             Some(unsafe { crate::stage_thread::FrameOwns::new(frame) });
-        may_be_painted
+        RoundInFlight {
+            may_be_painted,
+            may_be_presented,
+        }
     }
 }
 

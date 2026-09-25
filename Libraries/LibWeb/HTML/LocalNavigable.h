@@ -337,8 +337,9 @@ public:
     Compositing::DisplayListResourceStorage& display_list_resource_storage();
 
     // LIBWEB_STAGE_OVERLAP naming flight: seals what the recording that the document's flight makes after its layout
-    // reads, if the navigable may be painted that way. Returns whether it sealed it.
-    bool seal_flight_paint(DOM::Document&);
+    // reads, if the navigable may be painted that way, and with `may_present`, how the flight presents it where the
+    // render side presents. Returns whether it sealed it.
+    bool seal_flight_paint(DOM::Document&, bool may_present);
     // Takes in the paint of the document's flight once the flight has been taken back: publishes the recording the
     // flight made, and hands off its compositor frame if the recording stands. Returns whether it painted a frame.
     enum class FlightPaintEnd : u8 {
@@ -347,6 +348,10 @@ public:
         Recorded,
         // The flight recorded, and paying its layout's host halves left more work.
         RecordedAheadOfMoreWork,
+        // The flight recorded and presented what it recorded.
+        Presented,
+        // The flight presented what it recorded, and paying its layout's host halves left more work.
+        PresentedAheadOfMoreWork,
     };
     bool finish_flight_paint(DOM::Document&, FlightPaintEnd);
     bool has_sealed_flight_paint() const { return m_flight_paint_seal; }
@@ -613,6 +618,9 @@ private:
 
     struct FlightPaintSeal;
     OwnPtr<FlightPaintSeal> m_flight_paint_seal;
+    // The keyboard scroll state of the last frame the navigable handed off, which a frame a flight presents before its
+    // layout is taken back goes with.
+    Optional<Compositing::KeyboardScrollState> m_keyboard_scroll_state_of_last_frame;
     bool m_pending_set_browser_zoom_request { false };
     bool m_should_show_line_box_borders { false };
     bool m_force_dark_enabled { false };

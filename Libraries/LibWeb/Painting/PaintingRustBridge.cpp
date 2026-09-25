@@ -715,7 +715,7 @@ Optional<PendingDisplayListRecording> begin_rust_display_list_recording(DOM::Doc
     };
 }
 
-FlightRecordingSeal seal_rust_display_list_recording_for_flight(DOM::Document& document, Compositing::DisplayListResourceStorage& resource_storage, HTML::PaintConfig const& config, InspectorOverlayInputs const& overlay_inputs)
+FlightRecordingSeal seal_rust_display_list_recording_for_flight(DOM::Document& document, Compositing::DisplayListResourceStorage& resource_storage, HTML::PaintConfig const& config, InspectorOverlayInputs const& overlay_inputs, FlightPresent present, void* present_context)
 {
     auto* arena = layout_arena_handle(document);
     RecordingPublishContext publish_context { resource_storage, document };
@@ -725,7 +725,7 @@ FlightRecordingSeal seal_rust_display_list_recording_for_flight(DOM::Document& d
     read_host_recording_inputs(host, document, PaintCommandCacheMode::ReadWrite, config, overlay_inputs, ReadAheadOfLayout::Yes);
     reconcile_navigable_container_paint_facts(document);
     Layout::RustFFI::layout_arena_resolve_painted_vector_images(arena, &host.inputs, vector_image_callbacks(publish_context));
-    Layout::RustFFI::layout_arena_seal_flight_paint(arena, host.inputs);
+    Layout::RustFFI::layout_arena_seal_flight_paint(arena, host.inputs, present, present_context);
     return {
         .device_viewport_rect = host.device_viewport_rect,
         .wheel_event_region_state = host.wheel_event_region_state,

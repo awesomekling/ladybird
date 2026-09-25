@@ -699,6 +699,13 @@ pub(crate) struct HostHandbacks {
 }
 
 impl HostHandbacks {
+    /// Whether the handbacks only reset the host's view of paintable rows, which leaves it no work.
+    pub(crate) fn only_reset_paintable_rows(&self) -> bool {
+        self.handbacks
+            .iter()
+            .all(|handback| matches!(handback, HostHandback::PaintableRowReset(_)))
+    }
+
     fn push(&mut self, handback: HostHandback) {
         match handback {
             HostHandback::BoxPresence(node) => {

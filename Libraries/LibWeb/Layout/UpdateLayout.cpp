@@ -59,8 +59,9 @@ Layout::RustFFI::FfiLayoutUpdateHostCallbacks Document::layout_update_host_callb
         .prepare_for_rendering = [](void* context) { static_cast<Document*>(context)->prepare_for_rendering(); },
         .seal_flight_paint = [](void* context) {
             auto& document = *static_cast<Document*>(context);
+            // A document that is to update its style after the layout lays out again before it shows anything.
             if (auto navigable = document.navigable())
-                navigable->seal_flight_paint(document); },
+                navigable->seal_flight_paint(document, !document.needs_style_update_after_layout()); },
         .prepare_layout_tree_build = [](void* context) -> u32 { return static_cast<Document*>(context)->prepare_layout_tree_build(); },
         .renew_paint_state = [](void* context) {
             auto& document = *static_cast<Document*>(context);
