@@ -1,0 +1,12 @@
+fresh subtree: held as armed: true
+fresh subtree: forced joins of the recording: 0
+fresh subtree: recording still in flight: true
+fresh subtree: container height: 70
+fresh subtree: inserted width: 300
+removed: container height: 50
+reinserted: held as armed: true
+reinserted: forced joins of the recording: 0
+reinserted: recording still in flight: true
+reinserted: container height: 65
+reinserted: moved top: 0
+reinserted: span laid out: true

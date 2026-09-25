@@ -274,6 +274,7 @@ public:
     // The StyleNodeID a row bound to this DOM node records, or 0 for a node that has none.
     static CSS::StyleNodeID style_node_of(DOM::Node const*);
     static void dom_node_style_node_changed(DOM::Node&, CSS::StyleNodeID old_style_node);
+    static void apply_dom_node_style_node_change(DOM::Node&, CSS::StyleNodeID old_style_node, CSS::StyleNodeID new_style_node);
 
     void clear_committed_box();
     void prepare_for_detach_from_layout_tree();

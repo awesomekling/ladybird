@@ -12,6 +12,7 @@
 #include <LibWeb/HTML/EventLoop/FrameInFlightReferences.h>
 #include <LibWeb/HTML/EventLoop/FrameScheduler.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
+#include <LibWeb/Layout/Node.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/PendingDisplayListRecording.h>
 
@@ -183,6 +184,7 @@ void FrameScheduler::commit()
             m_ticket->painted_local_roots.append(navigable);
     }
     release_holds_for_frame_in_flight();
+    apply_deferred_style_node_changes();
     m_state = state_after;
     if (counts_as_a_frame)
         m_event_loop.did_consume_frame_commit(MonotonicTime::now().nanoseconds() - start_nanoseconds);
@@ -253,8 +255,23 @@ void FrameScheduler::run_tail()
     m_event_loop.did_consume_frame_tail(MonotonicTime::now().nanoseconds() - start_nanoseconds);
 }
 
+void FrameScheduler::defer_style_node_change(DOM::Node& node, CSS::StyleNodeID old_style_node, CSS::StyleNodeID new_style_node)
+{
+    m_deferred_style_node_changes.append({ node, old_style_node, new_style_node });
+}
+
+void FrameScheduler::apply_deferred_style_node_changes()
+{
+    // A change applied here can defer no other: nothing is in flight anymore.
+    auto changes = move(m_deferred_style_node_changes);
+    for (auto const& change : changes)
+        Layout::Node::apply_dom_node_style_node_change(change.node, change.old_style_node, change.new_style_node);
+}
+
 void FrameScheduler::visit_edges(JS::Cell::Visitor& visitor)
 {
+    for (auto const& change : m_deferred_style_node_changes)
+        visitor.visit(change.node);
     if (!m_ticket)
         return;
     for (auto& submitted : m_ticket->navigables) {

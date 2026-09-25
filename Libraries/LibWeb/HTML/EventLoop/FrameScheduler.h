@@ -12,6 +12,7 @@
 #include <AK/kmalloc.h>
 #include <LibGC/Ptr.h>
 #include <LibJS/Heap/Cell.h>
+#include <LibWeb/CSS/StyleEngineIdentifiers.h>
 #include <LibWeb/Forward.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
 #include <LibWeb/HTML/LocalNavigable.h>
@@ -126,6 +127,11 @@ public:
     // events) waits for the next rendering update or layout update to apply it.
     void consume_commit(EventLoop::FrameConsumeSite);
 
+    // A node's style identity changed beside a recording in flight that holds its document's arena, which the recording
+    // owns until it is taken in. The arena learns of the change once the frame has been taken in, right after its
+    // consume-commit, where waiting for the frame at the change would have put it.
+    void defer_style_node_change(DOM::Node&, CSS::StyleNodeID old_style_node, CSS::StyleNodeID new_style_node);
+
     EventLoop& event_loop() { return m_event_loop; }
 
     void visit_edges(JS::Cell::Visitor&);
@@ -134,11 +140,20 @@ private:
     void submit_pass(FrameTicket::SubmittedPass::Kind, Vector<GC::Ref<DOM::Document>> documents, size_t document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp);
     void commit();
     void run_tail();
+    void apply_deferred_style_node_changes();
 
     EventLoop& m_event_loop;
     State m_state { State::Idle };
     bool m_synchronous_update { false };
     OwnPtr<FrameTicket> m_ticket;
+
+    struct DeferredStyleNodeChange {
+        GC::Ref<DOM::Node> node;
+        CSS::StyleNodeID old_style_node;
+        CSS::StyleNodeID new_style_node;
+    };
+    // In the order the changes were made, which is the order the arena takes them in.
+    Vector<DeferredStyleNodeChange> m_deferred_style_node_changes;
 };
 
 }
