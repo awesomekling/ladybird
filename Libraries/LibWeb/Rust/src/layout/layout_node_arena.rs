@@ -2075,7 +2075,7 @@ impl LayoutNodeArena {
     /// frame in flight and lands after it, the way a main-side read of render state waits for it:
     /// a frame never sees half of a write, and nothing writes under a frame that is reading. The
     /// wait happens as the writer borrows the arena ([`Self::from_handle`] joins an overlapping
-    /// stage), and the frame's last join has ended the update by the time it returns. What is left
+    /// stage), and the frame's end has been taken in by the time it returns. What is left
     /// to check here is where waiting is impossible: a writer inside the frame itself, in a join
     /// or with the stages in lockstep, must not write while a stage is on the stack. Every write
     /// made inside the returned scope is attributed to `writer`.
