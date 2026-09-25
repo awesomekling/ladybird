@@ -4635,8 +4635,8 @@ Vector<GC::Ref<RegisteredObserver>> const* Node::registered_observer_list() cons
 
 Element const* Node::first_letter_owner_for_layout_subtree_from(Node const& inclusive_ancestor) const
 {
-    // NB: Look the boxes up only once an ancestor has ::first-letter style, so an insertion without such an ancestor
-    //     does not reach the layout tree here.
+    // NB: The boxes are looked up only once an ancestor has ::first-letter style, which is a question for the style
+    //     side: a mutation beside a frame in flight that holds the boxes asks the frame for them only then.
     Optional<Layout::Node const*> layout_subtree_root;
     for (auto const* ancestor = &inclusive_ancestor; ancestor; ancestor = ancestor->parent_or_shadow_host_node()) {
         auto const* element = as_if<Element>(*ancestor);
