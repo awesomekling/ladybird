@@ -3124,9 +3124,13 @@ impl StyleEngineState {
 
     /// Mint `out.len()` element identities in one call. Identity allocation is batched because a
     /// call per element is exactly the boundary shape this design rules out.
+    ///
+    /// A freshly minted element holds no custom-property environment yet: installing its style
+    /// gives it one.
     pub fn allocate_style_nodes(&mut self, out: &mut [u32], counters: &mut Counters) {
         for slot in out.iter_mut() {
             let node = self.retained.tree.allocate_element(&mut self.retained.memory);
+            self.retained.element_custom_property_data.insert(node, None);
             counters.bump(Counter::StyleNodesAllocated);
             *slot = node.raw();
         }
