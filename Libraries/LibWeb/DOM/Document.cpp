@@ -1757,21 +1757,6 @@ u32 Document::prepare_layout_tree_build()
     return Layout::prepare_layout_tree_build(*this);
 }
 
-// The build records the root it placed in the arena itself, so what is left for the document is to
-// retire the tree that was replaced and give the new one a paint state.
-Layout::RustFFI::FfiLayoutTreeBuildOutcome Document::finish_layout_tree_build(void* walk, Compositing::RustFFI::NodeSlotId replaced_root)
-{
-    auto outcome = Layout::pay_layout_tree_build(*this, walk);
-    if (replaced_root.index == outcome.viewport.index)
-        return outcome;
-    if (auto* replaced_layout_root = layout_node_arena().node_if_live(replaced_root)) {
-        replaced_layout_root->prepare_subtree_for_detach_from_layout_tree();
-        layout_node_arena().free_subtree(replaced_root);
-    }
-    m_paint_state = make<Painting::DocumentPaintState>(layout_node_arena());
-    return outcome;
-}
-
 void Document::tear_down_layout_tree()
 {
     auto* layout_root = m_layout_node_arena ? layout_node_arena().node_if_live(layout_root_slot()) : nullptr;

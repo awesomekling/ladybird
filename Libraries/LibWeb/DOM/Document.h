@@ -1660,7 +1660,6 @@ private:
     virtual void finalize() override final;
 
     u32 prepare_layout_tree_build();
-    Layout::RustFFI::FfiLayoutTreeBuildOutcome finish_layout_tree_build(void* walk, Compositing::RustFFI::NodeSlotId replaced_root);
     void tear_down_layout_tree();
     void process_pending_top_layer_layout_changes();
 

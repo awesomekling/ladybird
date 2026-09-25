@@ -2925,6 +2925,7 @@ struct TreeBuildStageOutput {
     outcome: FfiLayoutTreeBuildOutcome,
     reports: Vec<crate::layout::commit::FfiCommitMessage>,
     handbacks: super::layout_node_arena::HostHandbacks,
+    replaced_layout_tree: bool,
 }
 
 /// A finished layout tree build walk whose shells have not been made yet. The document thread
@@ -2940,6 +2941,7 @@ pub(crate) struct LayoutTreeBuildWalk(FfiLayoutTreeBuildOutcome);
 pub(crate) struct TreeBuildHostHalf {
     reports: Vec<crate::layout::commit::FfiCommitMessage>,
     handbacks: super::layout_node_arena::HostHandbacks,
+    replaced_layout_tree: bool,
 }
 
 // The walk's handbacks name the shells they owe by id, so the walk crosses back on its own terms.
@@ -2958,6 +2960,12 @@ impl LayoutTreeBuildWalk {
 }
 
 impl TreeBuildHostHalf {
+    /// Whether the build placed a new viewport, whose tree the document gives a new paint state
+    /// once this is paid.
+    pub(crate) fn replaced_layout_tree(&self) -> bool {
+        self.replaced_layout_tree
+    }
+
     /// Pays what the walk let go of, as it would have while the walk ran: the boxes nodes gained or
     /// lost, the host-owned objects of the rows it freed, and the style changes of the shells of
     /// the boxes it kept. Then what the build found out goes to the document, in the order the
@@ -2995,8 +3003,16 @@ pub(crate) unsafe fn walk_layout_tree_build(
             outcome,
             reports,
             handbacks,
+            replaced_layout_tree,
         } = run_tree_build_stage(&host, document_style_node);
-        (LayoutTreeBuildWalk(outcome), TreeBuildHostHalf { reports, handbacks })
+        (
+            LayoutTreeBuildWalk(outcome),
+            TreeBuildHostHalf {
+                reports,
+                handbacks,
+                replaced_layout_tree,
+            },
+        )
     })
 }
 
@@ -3013,8 +3029,9 @@ fn run_tree_build_stage(host: &DomTreeBuilderHost, document_style_node: u32) -> 
         document_needs_full_layout_tree_update: host.layout().arena().needs_full_layout_tree_update(),
         ..Default::default()
     };
-    // Whether the document already had a viewport, read before the build replaces it.
-    let document_had_layout_node = !host.layout().arena().layout_root().is_invalid();
+    // The document's viewport before the build, which the build may replace.
+    let replaced_layout_root = host.layout().arena().layout_root();
+    let document_had_layout_node = !replaced_layout_root.is_invalid();
 
     update_layout_tree_from(
         host,
@@ -3126,6 +3143,15 @@ fn run_tree_build_stage(host: &DomTreeBuilderHost, document_style_node: u32) -> 
         arena.release_style_record_pinned_for_build(record);
     }
     arena.release_published_document_style();
+    // A new viewport retires the tree it replaced, whatever of it the build did not take over, and
+    // the document's paint state with it, which the host half renews.
+    let replaced_layout_tree = replaced_layout_root.index != viewport.index;
+    if replaced_layout_tree && arena.slot_is_live(replaced_layout_root) {
+        prepare_subtree_for_detach(host.arena.cast(), replaced_layout_root);
+        free_subtree_and_hand_back(host.arena, replaced_layout_root);
+    }
+    // SAFETY: The stage holds the arena alone, and no borrow above outlives the free.
+    let arena = unsafe { &*host.arena };
     let handbacks = arena.take_tree_build_handbacks();
 
     super::tree_build_seal::end_build();
@@ -3138,6 +3164,7 @@ fn run_tree_build_stage(host: &DomTreeBuilderHost, document_style_node: u32) -> 
         },
         reports: state.reports,
         handbacks,
+        replaced_layout_tree,
     }
 }
 
