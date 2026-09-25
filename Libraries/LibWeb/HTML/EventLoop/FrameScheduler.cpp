@@ -111,6 +111,17 @@ bool FrameScheduler::submit()
     return true;
 }
 
+void FrameScheduler::submit_layout(Vector<GC::Ref<DOM::Document>> documents, size_t document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp)
+{
+    VERIFY(m_state == State::MainHalf);
+    // Only a main half with a ticket submits, and the layout pass comes before any recording.
+    VERIFY(m_ticket);
+    VERIFY(m_ticket->navigables.is_empty());
+    m_ticket->layout_pass = FrameTicket::LayoutPass { move(documents), document_index, frame_timestamp };
+    m_state = State::InFlight;
+    m_event_loop.did_submit_frame();
+}
+
 void FrameScheduler::consume_commit(EventLoop::FrameConsumeSite site)
 {
     // A completion posted for the frame taken in here has nothing left to deliver.
@@ -135,6 +146,7 @@ void FrameScheduler::commit()
     bool const counts_as_a_frame = m_state == State::InFlight;
     auto start_nanoseconds = MonotonicTime::now().nanoseconds();
     m_state = State::Consuming;
+    // NB: The layout pass's frame has nothing to publish: its take-back ended the document's layout update already.
     // NB: Each navigable's recording is published and its resources are added to its resource storage before its
     //     compositor frame is built and handed off, so a compositor frame never reaches its sink ahead of the
     //     resources it references. The canvases it shows were flushed before the recording was prepared, and the next
@@ -172,26 +184,43 @@ void FrameScheduler::consume_finished_frame()
         m_event_loop.call_finished_frame_consumer_again();
         return;
     }
+    if (m_ticket->layout_pass.has_value()) {
+        // The tail of a layout pass's frame is the rest of its rendering update, a main half whose forced joins take in
+        // the recordings it submits, so it does not run as a consume-tail. It ends like the rendering task it goes on
+        // with.
+        run_tail();
+        m_event_loop.perform_a_microtask_checkpoint();
+        return;
+    }
     m_event_loop.run_consume_tail([this] { run_tail(); });
 }
 
 void FrameScheduler::finish_frame_now()
 {
-    if (m_state == State::InFlight) {
-        Layout::RustFFI::rust_stage_thread_take_frame_in_flight();
-        consume_commit(EventLoop::FrameConsumeSite::ForcedJoin);
-    }
-    // NB: The tail is the rest of the previous rendering update, which the rendering update starting now has to
-    //     follow. It runs here, where a lockstep frame would have run it too.
-    if (m_state == State::CommittedTailPending)
+    // NB: The tail of a layout pass's frame goes on with its rendering update, which can submit the recording.
+    while (m_state != State::Idle) {
+        if (m_state == State::InFlight) {
+            Layout::RustFFI::rust_stage_thread_take_frame_in_flight();
+            consume_commit(EventLoop::FrameConsumeSite::ForcedJoin);
+        }
+        // NB: The tail is the rest of the previous rendering update, which the rendering update starting now has to
+        //     follow. It runs here, where a lockstep frame would have run it too.
+        VERIFY(m_state == State::CommittedTailPending);
         run_tail();
-    VERIFY(m_state == State::Idle);
+    }
 }
 
 void FrameScheduler::run_tail()
 {
     VERIFY(m_state == State::CommittedTailPending);
     // NB: The stack is a conservative root, so what the ticket held stays alive in these locals.
+    if (auto layout_pass = move(m_ticket->layout_pass); layout_pass.has_value()) {
+        // The rest of the rendering update is a main half of its own, with a new ticket for its recordings.
+        m_ticket = make<FrameTicket>();
+        m_state = State::MainHalf;
+        m_event_loop.resume_rendering_update_after_layout({}, layout_pass->documents, layout_pass->document_index, layout_pass->frame_timestamp);
+        return;
+    }
     auto painted_local_roots = move(m_ticket->painted_local_roots);
     m_ticket = nullptr;
     m_state = State::Idle;
@@ -211,6 +240,8 @@ void FrameScheduler::visit_edges(JS::Cell::Visitor& visitor)
             visitor.visit(submitted.frame.recording->document);
     }
     visitor.visit(m_ticket->painted_local_roots);
+    if (m_ticket->layout_pass.has_value())
+        visitor.visit(m_ticket->layout_pass->documents);
 }
 
 }

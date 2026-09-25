@@ -254,6 +254,9 @@ public:
     void note_frame_painted(Badge<FrameScheduler>) { ++m_rendering_scheduler_counters.paints; }
     // The steps of a rendering update after its frame: the screenshots of the frame and the end of the update.
     void run_rendering_update_tail(Badge<FrameScheduler>, ReadonlySpan<GC::Ref<LocalNavigable>> painted_local_roots);
+    // Goes on with the rendering update whose layout pass the frame scheduler has taken back, at step 16 for the document
+    // the pass laid out.
+    void resume_rendering_update_after_layout(Badge<FrameScheduler>, Vector<GC::Ref<DOM::Document>> const& docs, size_t document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp);
 
 private:
     explicit EventLoop(Type);
@@ -262,6 +265,11 @@ private:
 
     void process_input_events() const;
     void update_the_rendering();
+    enum class LayoutSubmission : u8 {
+        Wait,
+        MaySubmit,
+    };
+    bool run_rendering_update_from_step_16(Vector<GC::Ref<DOM::Document>> const& docs, size_t first_document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp, LayoutSubmission);
     void finish_rendering_update_steps(ReadonlySpan<GC::Ref<DOM::Document>> docs);
     void end_rendering_update();
 
