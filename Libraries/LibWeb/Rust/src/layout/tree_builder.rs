@@ -2956,9 +2956,7 @@ impl TreeBuildHostHalf {
     /// lost, the host-owned objects of the rows it freed, and the style changes of the shells of
     /// the boxes it kept. Then what the build found out goes to the document, in the order the
     /// build found it out; nothing can clear a DOM update flag again once the walk is complete.
-    /// Last come the shells of the new rows whose making tells the document something, unless a
-    /// reader has made them already. Nothing a layout pass reads waits for them: the build stamps
-    /// the rows with the scroll offsets they hold and whether an empty text keeps its line box.
+    /// The new rows owe no shell: a reader that wants one makes it.
     pub(crate) fn pay(self, main_thread: &crate::stage::MainThread, arena: &LayoutNodeArena) {
         // A layout pass that ran since may have queued handbacks its commit pays; they stay queued.
         arena.pay_handbacks_ahead_of_queued(main_thread, self.handbacks);
@@ -2968,9 +2966,6 @@ impl TreeBuildHostHalf {
             unsafe {
                 crate::layout::LayoutHost::of(main_thread).deliver_commit_messages(main_thread, &self.reports);
             };
-        }
-        for row in arena.take_shells_owed_to_host() {
-            arena.node_shell(main_thread, row);
         }
     }
 }
@@ -3135,6 +3130,7 @@ fn run_tree_build_stage(host: &DomTreeBuilderHost, document_style_node: u32) -> 
     );
     let viewport = arena.layout_root();
     assert!(!viewport.is_invalid(), "a layout tree build places the viewport");
+    arena.settle_built_scroll_containers();
 
     for record in state.pinned_style_records {
         arena.release_style_record_pinned_for_build(record);
@@ -3596,7 +3592,7 @@ fn stamp_nested_list_marker_row(
     layout_host
         .arena()
         .set_node_flag(slot, NodeFlag::ListMarkerIsInside, marker_position_is_inside);
-    layout_host.owe_styled_shell(slot, None);
+    layout_host.note_style_of_built_row(slot, None);
     slot
 }
 
@@ -3678,7 +3674,7 @@ fn stamp_pseudo_element_box_row(
     layout_host
         .arena()
         .stamp_pseudo_element_row(slot, kind, generator, pseudo_kind);
-    layout_host.owe_styled_shell(slot, None);
+    layout_host.note_style_of_built_row(slot, None);
     if decision == FfiPseudoElementDecision::Contents {
         layout_host
             .arena()
@@ -4219,8 +4215,8 @@ impl TreeBuilderHost {
         let slot = unsafe { &mut *self.arena }.allocate_unbound();
         self.arena().stamp_anonymous_box(slot, node_kind, derived);
         self.arena().refresh_insets_use_anchor_functions_flag(slot);
-        if node_kind == NodeKind::InlineNode {
-            self.arena().defer_shell(slot);
+        if node_kind == NodeKind::InlineNode && self.arena().style_resources_attach_can_change_anything(slot) {
+            self.arena().defer_style_resources(slot, false);
         }
         UnplacedLayoutNode::new(slot)
     }
@@ -4252,7 +4248,7 @@ impl TreeBuilderHost {
         }
         self.arena().take_over_rows_of_bound_node(slot);
         self.arena().adopt_published_document_style(slot);
-        self.arena().defer_shell(slot);
+        self.arena().note_built_scroll_container(slot);
         slot
     }
 
@@ -4305,7 +4301,7 @@ impl TreeBuilderHost {
             // SAFETY: No arena borrow survives the writes above.
             unsafe { &mut *self.arena }.set_raw_table_column_span(slot, spans.raw_column_span);
         }
-        self.owe_styled_shell(slot, Some(style_node));
+        self.note_style_of_built_row(slot, Some(style_node));
         slot
     }
 
@@ -4316,12 +4312,11 @@ impl TreeBuilderHost {
         slot
     }
 
-    /// A styled row's shell is owed only where materialising one tells the host something about
-    /// the row's style: a scroll snap type, or a box that may be the scroll container snapping
-    /// happens in, which the root element's box stands in for the viewport as. An element's
-    /// `::selection` style goes to the rows it paints through without one.
-    fn owe_styled_shell(&self, slot: NodeSlotId, element: Option<StyleNodeID>) {
-        // The commits collect the boxes with `content-visibility: auto` once a row has one.
+    /// What giving a row its style tells the rest of the document: whether it may have boxes with
+    /// `content-visibility: auto` or scroll snap areas, which scroll containers snapping may
+    /// happen in, with the root element's box standing in for the viewport, and what an element's
+    /// `::selection` style paints selected text with. None of it needs the row's shell.
+    fn note_style_of_built_row(&self, slot: NodeSlotId, element: Option<StyleNodeID>) {
         self.arena().note_style_of_row(slot);
         if let Some(element) = element
             && self.arena().with_style_store(|engine| {
@@ -4330,13 +4325,13 @@ impl TreeBuilderHost {
         {
             crate::painting::selection::note_built_row_selection_pseudo_style(self.arena(), slot, element);
         }
-        let owes_shell = self.arena().node_flags(slot) & NodeFlag::IsDocumentElement as u32 != 0
-            || self.style(slot).is_none_or(|style| {
-                style.misc_reset().scroll_snap_strictness != crate::css::css_enums::scroll_snap_strictness::NONE
-                    || node_facts::kind_and_style_make_scroll_container(self.data(slot).kind.get(), Some(style))
-            });
-        if owes_shell {
-            self.arena().defer_shell(slot);
+        if self.arena().node_flags(slot) & NodeFlag::IsDocumentElement as u32 != 0 {
+            let viewport = self.arena().bound_viewport_row();
+            if !viewport.is_invalid() {
+                self.arena().note_built_scroll_container(viewport);
+            }
+        } else if node_facts::kind_and_style_make_scroll_container(self.data(slot).kind.get(), self.style(slot)) {
+            self.arena().note_built_scroll_container(slot);
         }
     }
 

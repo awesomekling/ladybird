@@ -230,6 +230,7 @@
 #include <LibWeb/Painting/HitTestDisplayList.h>
 #include <LibWeb/Painting/PaintableTypes.h>
 #include <LibWeb/Painting/PaintingRustBridge.h>
+#include <LibWeb/Painting/ScrollSnap.h>
 #include <LibWeb/Painting/Scrolling.h>
 #include <LibWeb/Platform/EventLoopPlugin.h>
 #include <LibWeb/ResizeObserver/ResizeObserver.h>
@@ -10277,6 +10278,7 @@ void Document::schedule_accumulated_visual_context_update(Element& element, Accu
 
 Compositing::SnappedAreas const& Document::snapped_areas_of_scroll_container(Compositing::AsyncScrollNodeStableID const& stable_node_id) const
 {
+    Painting::take_built_scroll_snap_containers(const_cast<Document&>(*this));
     static NeverDestroyed<Compositing::SnappedAreas const> no_snapped_areas;
     auto snapped_areas = m_scroll_container_snapped_areas.find(stable_node_id);
     if (snapped_areas == m_scroll_container_snapped_areas.end())
@@ -10286,6 +10288,7 @@ Compositing::SnappedAreas const& Document::snapped_areas_of_scroll_container(Com
 
 void Document::set_snapped_areas_of_scroll_container(Compositing::AsyncScrollNodeStableID const& stable_node_id, Compositing::SnappedAreas snapped_areas)
 {
+    Painting::take_built_scroll_snap_containers(*this);
     if (snapped_areas.is_empty()) {
         m_scroll_container_snapped_areas.remove(stable_node_id);
         return;
@@ -10311,6 +10314,8 @@ void Document::register_scroll_snap_container(Layout::Node const& snap_container
 
 Vector<Compositing::RustFFI::NodeSlotId> Document::collect_scroll_snap_containers()
 {
+    Painting::take_built_scroll_snap_containers(*this);
+
     // A registered box whose layout node a style or layout update dropped is no longer a box of this document.
     m_scroll_snap_containers.remove_all_matching([&](auto registered_slot) {
         return !layout_node_arena().node_if_live(registered_slot);

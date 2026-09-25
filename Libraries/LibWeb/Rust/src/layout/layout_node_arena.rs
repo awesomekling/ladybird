@@ -917,6 +917,8 @@ pub(crate) struct LayoutNodeArena {
     document_style_node: Cell<Option<StyleNodeID>>,
     /// Whether a row has ever been given a style with `content-visibility: auto`.
     may_have_auto_content_visibility: Cell<bool>,
+    /// Whether a row has ever been given a style with a scroll snap type.
+    may_have_scroll_snap_areas: Cell<bool>,
     /// The style engine whose mirror the arena's rows are built from, or null before the document
     /// registers it.
     style_engine: Cell<StyleEngineLink>,
@@ -1034,9 +1036,12 @@ pub(crate) struct LayoutNodeArena {
     pub(crate) boxes_needing_scrollable_overflow_recalculation: RefCell<Vec<NodeSlotId>>,
     pub(crate) needs_full_scrollable_overflow_recalculation: Cell<bool>,
     text_nodes_enrolled_for_content_sync: RefCell<HashSet<NodeSlotId>>,
-    /// The rows a running tree build owes the host a shell once the build is over, as the shell's
-    /// construction tells the host something about the row.
-    shells_owed_to_host: RefCell<Vec<NodeSlotId>>,
+    /// The scroll containers a running tree build gave a style, which may be where scroll
+    /// snapping happens once the build is over.
+    built_scroll_containers: RefCell<Vec<NodeSlotId>>,
+    /// The scroll containers finished tree builds gave a style, each with whether it was a scroll
+    /// snap container then, until the document's scroll snap bookkeeping takes them.
+    built_scroll_snap_containers_for_host: RefCell<Vec<(NodeSlotId, bool)>>,
     /// The image resources the tree builds owe the host for the rows they stamped, in the order the
     /// builds came to owe them, until the frame the builds ran in takes them.
     image_resources_owed_to_host: RefCell<Vec<(NodeSlotId, OwedImageResources)>>,
@@ -1081,6 +1086,7 @@ impl LayoutNodeArena {
             bound_viewport_row: Cell::new(NodeSlotId::INVALID),
             document_style_node: Cell::new(None),
             may_have_auto_content_visibility: Cell::new(false),
+            may_have_scroll_snap_areas: Cell::new(false),
             style_engine: Cell::new(StyleEngineLink(std::ptr::null_mut())),
             host_hears_box_presence: Cell::new(false),
             host_handbacks: RefCell::new(HostHandbacks::default()),
@@ -1147,7 +1153,8 @@ impl LayoutNodeArena {
             boxes_needing_scrollable_overflow_recalculation: RefCell::new(Vec::new()),
             needs_full_scrollable_overflow_recalculation: Cell::new(false),
             text_nodes_enrolled_for_content_sync: RefCell::new(HashSet::default()),
-            shells_owed_to_host: RefCell::new(Vec::new()),
+            built_scroll_containers: RefCell::new(Vec::new()),
+            built_scroll_snap_containers_for_host: RefCell::new(Vec::new()),
             image_resources_owed_to_host: RefCell::new(Vec::new()),
             image_boxes_awaiting_owned_provider: RefCell::new(HashSet::default()),
             published_document_style: Cell::new(None),
@@ -1615,16 +1622,26 @@ impl LayoutNodeArena {
     }
 
     /// Notes that `slot` was given a style with `content-visibility: auto`, if it was, so the
-    /// commits from then on collect the boxes with it.
+    /// commits from then on collect the boxes with it, and with a scroll snap type, so the
+    /// document from then on re-snaps its scroll containers after a layout change.
     pub(crate) fn note_style_of_row(&self, slot: NodeSlotId) {
-        if !self.may_have_auto_content_visibility.get()
-            && self.style_payloads(slot).is_some_and(|payloads| {
-                ComputedValuesView::new(&payloads.groups).content_visibility()
-                    == crate::css::css_enums::content_visibility::AUTO
-            })
-        {
+        if self.may_have_auto_content_visibility.get() && self.may_have_scroll_snap_areas.get() {
+            return;
+        }
+        let Some(payloads) = self.style_payloads(slot) else {
+            return;
+        };
+        let style = ComputedValuesView::new(&payloads.groups);
+        if style.content_visibility() == crate::css::css_enums::content_visibility::AUTO {
             self.may_have_auto_content_visibility.set(true);
         }
+        if style.misc_reset().scroll_snap_strictness != crate::css::css_enums::scroll_snap_strictness::NONE {
+            self.may_have_scroll_snap_areas.set(true);
+        }
+    }
+
+    pub(crate) fn may_have_scroll_snap_areas(&self) -> bool {
+        self.may_have_scroll_snap_areas.get()
     }
 
     pub(crate) fn may_have_auto_content_visibility(&self) -> bool {
@@ -5467,10 +5484,10 @@ impl LayoutNodeArena {
         self.data(id).generated_for.get()
     }
 
-    /// Owes the host `id`'s shell once the running build is over, so that the build itself only
-    /// stamps rows. A reader that asks for the shell before then materialises it on demand.
-    pub(crate) fn defer_shell(&self, id: NodeSlotId) {
-        self.shells_owed_to_host.borrow_mut().push(id);
+    /// Notes that the running build gave the scroll container `id` a style, which decides whether
+    /// scroll snapping happens in it once the build is over.
+    pub(crate) fn note_built_scroll_container(&self, id: NodeSlotId) {
+        self.built_scroll_containers.borrow_mut().push(id);
     }
 
     /// Owes the host the attachment of `id`'s style resources once the running frame is over.
@@ -5571,12 +5588,27 @@ impl LayoutNodeArena {
         })
     }
 
-    /// The rows the finished build owes a shell. A row the build freed again, such as whitespace
-    /// table fixup removed, is owed nothing.
-    pub(crate) fn take_shells_owed_to_host(&self) -> Vec<NodeSlotId> {
-        let mut owed = std::mem::take(&mut *self.shells_owed_to_host.borrow_mut());
-        owed.retain(|&row| self.slot_is_live(row));
-        owed
+    /// Decides, once a build is over, whether each scroll container it gave a style is a scroll
+    /// snap container, which the viewport's answer needs the root element's box for. A row the
+    /// build freed again, such as whitespace table fixup removed, is left out.
+    pub(crate) fn settle_built_scroll_containers(&self) {
+        let built = std::mem::take(&mut *self.built_scroll_containers.borrow_mut());
+        let mut settled = self.built_scroll_snap_containers_for_host.borrow_mut();
+        for row in built {
+            if !self.slot_is_live(row) || settled.iter().any(|&(settled_row, _)| settled_row == row) {
+                continue;
+            }
+            let axes = crate::painting::scroll_snap::snap_axes_of_scroll_container(self, row);
+            settled.push((row, axes.x || axes.y));
+        }
+    }
+
+    /// The scroll containers finished builds gave a style, each with whether it was a scroll snap
+    /// container then. A later build can still free a row, so only the live ones are handed out.
+    pub(crate) fn take_built_scroll_snap_containers(&self) -> Vec<(NodeSlotId, bool)> {
+        let mut built = std::mem::take(&mut *self.built_scroll_snap_containers_for_host.borrow_mut());
+        built.retain(|&(row, _)| self.slot_is_live(row));
+        built
     }
 
     /// The image resources the finished builds owe the host, in the order they came to owe them.
@@ -6416,6 +6448,38 @@ pub unsafe extern "C" fn layout_arena_set_node_style(
         arena.refresh_style_flags(id);
     }
     arena.enroll_node_for_svg_paint_resources_sync(id);
+}
+
+/// # Safety
+///
+/// The arena must be live on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_may_have_scroll_snap_areas(arena: *mut c_void) -> bool {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    // SAFETY: As above.
+    unsafe { LayoutNodeArena::from_handle(arena) }.may_have_scroll_snap_areas()
+}
+
+/// Hands the host the scroll containers finished layout tree builds gave a style, each with
+/// whether it was a scroll snap container then.
+///
+/// # Safety
+///
+/// The arena must be live on the document thread, and `callback` must be callable with `context`
+/// for the duration of this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_take_built_scroll_snap_containers(
+    arena: *mut c_void,
+    context: *mut c_void,
+    callback: unsafe extern "C" fn(*mut c_void, NodeSlotId, bool),
+) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    // SAFETY: As above.
+    let built = unsafe { LayoutNodeArena::from_handle(arena) }.take_built_scroll_snap_containers();
+    for (row, is_scroll_snap_container) in built {
+        // SAFETY: Guaranteed by the caller.
+        unsafe { callback(context, row, is_scroll_snap_container) };
+    }
 }
 
 /// # Safety
