@@ -93,6 +93,9 @@ public:
     // Whether the ticket is taking the main half's frames: a frame begun after one the render side records is finished
     // after it too, so frames reach their compositor contexts in paint order.
     bool ticket_takes_frames() const { return m_ticket && !m_ticket->navigables.is_empty(); }
+    // Whether the rendering update waits for its layout pass to be taken back, and goes on with the rest (its
+    // recordings) once it is.
+    bool awaits_layout_pass() const { return m_ticket && m_ticket->layout_pass.has_value(); }
     void add_to_ticket(LocalNavigable&, LocalNavigable::PendingCompositorFrame&&);
     // Ends the main half. Returns true if a frame is in flight, in which case the tail runs once it has been taken in.
     bool submit();

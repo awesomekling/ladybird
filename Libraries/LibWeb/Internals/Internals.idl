@@ -246,6 +246,9 @@ interface Internals {
     // The frame scheduler's state: "idle", "main-half", "in-flight", "consuming" or
     // "committed-tail-pending".
     DOMString frameSchedulerState();
+    // Whether the rendering update has submitted its layout pass (under LIBWEB_STAGE_OVERLAP naming "layout") and
+    // goes on with the rest, which submits its recordings, once the main thread has taken the pass back between tasks.
+    boolean renderingUpdateAwaitsLayoutPass();
     undefined updateCompositorAnimations();
     boolean runEmptyAnimationStyleUpdateForTesting();
     undefined armCompositorAnimationTimersForTesting();

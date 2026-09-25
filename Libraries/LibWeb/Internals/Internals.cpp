@@ -1795,6 +1795,11 @@ Utf16String Internals::frame_scheduler_state() const
     VERIFY_NOT_REACHED();
 }
 
+bool Internals::rendering_update_awaits_layout_pass() const
+{
+    return HTML::main_thread_event_loop().frame_scheduler().awaits_layout_pass();
+}
+
 void Internals::update_compositor_animations()
 {
     window().associated_document().update_compositor_animations();
