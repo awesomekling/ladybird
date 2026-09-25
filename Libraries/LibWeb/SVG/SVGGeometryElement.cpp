@@ -9,6 +9,7 @@
 #include <LibWeb/CSS/RustDeclarationBlock.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleEngineInput.h>
+#include <LibWeb/CSS/StyleReadDemand.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/Window.h>
@@ -84,9 +85,13 @@ WebIDL::ExceptionOr<float> SVGGeometryElement::get_total_length()
     auto is_detached = style_node_id() == CSS::StyleNodeID {};
     auto& style_document = is_detached ? HTML::relevant_window(*this).associated_document() : document();
     auto& style_computer = style_document.style_computer();
-    auto record = is_detached
-        ? declared_only_style_record(style_computer, style_document, *this)
-        : CSS::StyleRecordID { style_computer.style_engine().answer_record_demand(style_node_id(), {}, false, false, true).record.style_record };
+    CSS::StyleRecordID record;
+    if (is_detached) {
+        record = declared_only_style_record(style_computer, style_document, *this);
+    } else {
+        DOM::Document::JoinScope join { style_document, DOM::UpdateLayoutReason::SVGPathLength };
+        record = CSS::StyleRecordID { CSS::answer_style_read_demand(join, style_computer.style_engine(), { .node = style_node_id() }).record.style_record };
+    }
     auto view = style_computer.computed_style_record_view(record);
     // NB: The view holds its own pin on the record the engine pinned for us.
     if (is_detached && !!record)

@@ -3944,69 +3944,126 @@ pub unsafe extern "C" fn style_engine_answer_record_demand(
 ) -> FfiRecordDemandAnswer {
     engine_entrance(engine, "style_engine_answer_record_demand");
     abort_on_panic(|| {
-        let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
-        let Some(node) = StyleNodeID::from_raw(node) else {
-            return FfiRecordDemandAnswer {
-                record: FfiEngineComputedRecord::default(),
-                is_absent: true,
-                is_provisional: false,
-                row_facts: 0,
-                row_effect_debt: 0,
-            };
-        };
-        let mut result = match engine.answer_record_demand(
+        answer_record_demand_for_host(
+            unsafe { &mut *engine.cast::<StyleEngine>() },
             node,
-            (pseudo_kind != u8::MAX).then_some(pseudo_kind),
+            pseudo_kind,
             exclude_inline_style,
             targeted,
             read_only,
             parent_highlight,
-        ) {
-            super::publication::RecordDemandAnswer::Record(answer) => FfiRecordDemandAnswer {
-                record: FfiEngineComputedRecord {
-                    style_record: answer.style_record,
-                    uses_substitution: engine.nodes_with_substituted_records.contains(&node),
-                    explicit_inheritance_debt: 0,
-                    pseudo_records_present: answer.pseudo_records_present,
-                    pseudo_records: answer.pseudo_records,
-                },
-                is_absent: false,
-                is_provisional: answer.provisional,
-                row_facts: 0,
-                row_effect_debt: 0,
-            },
-            super::publication::RecordDemandAnswer::Absent => FfiRecordDemandAnswer {
-                record: FfiEngineComputedRecord::default(),
-                is_absent: true,
-                is_provisional: false,
-                row_facts: 0,
-                row_effect_debt: 0,
-            },
-        };
-        result.row_facts = engine.style_row_facts(node);
-        if take_row_debts && !result.is_absent {
-            result.record.explicit_inheritance_debt = engine.take_explicit_inheritance_debt(node);
-            result.row_effect_debt = u32::from(engine.take_settled_row_effect_debt(node));
-        }
-        engine.record_boundary_call(EventKind::AnswerRecordDemand, |payload| {
-            payload.write_u32(node.raw());
-            payload.write_u8(pseudo_kind);
-            payload.write_bool(exclude_inline_style);
-            payload.write_bool(targeted);
-            payload.write_bool(read_only);
-            payload.write_u64(parent_highlight);
-            payload.write_u64(result.record.style_record);
-            payload.write_bool(result.is_absent);
-            payload.write_bool(result.record.uses_substitution);
-            payload.write_u8(result.record.pseudo_records_present);
-            for record in result.record.pseudo_records {
-                payload.write_u64(record);
-            }
-            // Where a declined demand once named its cause; kept so recordings keep their format.
-            payload.write_bytes(&[]);
-        });
-        result
+            take_row_debts,
+        )
     })
+}
+
+/// Answer a style read the host has to answer synchronously, as a CSSOM read does, in a style
+/// stage run of its own: the host has joined the frame in flight, and the engine computes the
+/// answer where it computes every other record. `pseudo_kind == u8::MAX` selects the originating
+/// element.
+///
+/// # Safety
+/// `engine` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_answer_read_demand(
+    engine: *mut c_void,
+    node: u32,
+    pseudo_kind: u8,
+    exclude_inline_style: bool,
+    targeted: bool,
+    read_only: bool,
+    parent_highlight: u64,
+) -> FfiRecordDemandAnswer {
+    engine_entrance(engine, "style_engine_answer_read_demand");
+    abort_on_panic(|| {
+        let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+        crate::stage_thread::run_stage(move || {
+            answer_record_demand_for_host(
+                engine,
+                node,
+                pseudo_kind,
+                exclude_inline_style,
+                targeted,
+                read_only,
+                parent_highlight,
+                false,
+            )
+        })
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn answer_record_demand_for_host(
+    engine: &mut StyleEngine,
+    node: u32,
+    pseudo_kind: u8,
+    exclude_inline_style: bool,
+    targeted: bool,
+    read_only: bool,
+    parent_highlight: u64,
+    take_row_debts: bool,
+) -> FfiRecordDemandAnswer {
+    let Some(node) = StyleNodeID::from_raw(node) else {
+        return FfiRecordDemandAnswer {
+            record: FfiEngineComputedRecord::default(),
+            is_absent: true,
+            is_provisional: false,
+            row_facts: 0,
+            row_effect_debt: 0,
+        };
+    };
+    let mut result = match engine.answer_record_demand(
+        node,
+        (pseudo_kind != u8::MAX).then_some(pseudo_kind),
+        exclude_inline_style,
+        targeted,
+        read_only,
+        parent_highlight,
+    ) {
+        super::publication::RecordDemandAnswer::Record(answer) => FfiRecordDemandAnswer {
+            record: FfiEngineComputedRecord {
+                style_record: answer.style_record,
+                uses_substitution: engine.nodes_with_substituted_records.contains(&node),
+                explicit_inheritance_debt: 0,
+                pseudo_records_present: answer.pseudo_records_present,
+                pseudo_records: answer.pseudo_records,
+            },
+            is_absent: false,
+            is_provisional: answer.provisional,
+            row_facts: 0,
+            row_effect_debt: 0,
+        },
+        super::publication::RecordDemandAnswer::Absent => FfiRecordDemandAnswer {
+            record: FfiEngineComputedRecord::default(),
+            is_absent: true,
+            is_provisional: false,
+            row_facts: 0,
+            row_effect_debt: 0,
+        },
+    };
+    result.row_facts = engine.style_row_facts(node);
+    if take_row_debts && !result.is_absent {
+        result.record.explicit_inheritance_debt = engine.take_explicit_inheritance_debt(node);
+        result.row_effect_debt = u32::from(engine.take_settled_row_effect_debt(node));
+    }
+    engine.record_boundary_call(EventKind::AnswerRecordDemand, |payload| {
+        payload.write_u32(node.raw());
+        payload.write_u8(pseudo_kind);
+        payload.write_bool(exclude_inline_style);
+        payload.write_bool(targeted);
+        payload.write_bool(read_only);
+        payload.write_u64(parent_highlight);
+        payload.write_u64(result.record.style_record);
+        payload.write_bool(result.is_absent);
+        payload.write_bool(result.record.uses_substitution);
+        payload.write_u8(result.record.pseudo_records_present);
+        for record in result.record.pseudo_records {
+            payload.write_u64(record);
+        }
+        // Where a declined demand once named its cause; kept so recordings keep their format.
+        payload.write_bytes(&[]);
+    });
+    result
 }
 
 /// The record of an element no rule reaches, computed from its presentational hints and its

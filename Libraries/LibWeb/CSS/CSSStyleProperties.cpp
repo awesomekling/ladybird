@@ -19,6 +19,7 @@
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleEffectDrain.h>
 #include <LibWeb/CSS/StyleEngineInput.h>
+#include <LibWeb/CSS/StyleReadDemand.h>
 #include <LibWeb/CSS/StyleSheetInvalidation.h>
 #include <LibWeb/CSS/StyleSheetState.h>
 #include <LibWeb/CSS/StyleValues/ColorFunctionStyleValue.h>
@@ -651,28 +652,40 @@ static RefPtr<ComputedValues const> compute_pseudo_element_style_for_cssom(DOM::
         document.end_style_stabilization_epoch();
     };
     auto& style_computer = abstract_element.document().style_computer();
+    // The read's records are answered by the engine, in stage runs of its own, under the join the read makes.
+    DOM::Document::JoinScope join { document, DOM::UpdateLayoutReason::ResolvedCSSStyleDeclarationProperty };
 
     Optional<StyleRecordID> highlight_parent_style_record { StyleRecordID {} };
     if (is_highlight_pseudo_element(*pseudo_element) && document.selection_styles_are_observable()) {
         auto highlight_parent = abstract_element.highlight_inheritance_parent();
         highlight_parent_style_record = highlight_parent.has_value() ? highlight_parent->style_record_identity() : StyleRecordID {};
     }
-    RefPtr<ComputedValues const> target_style;
-    auto compute = [&](StyleDrainScope const& scope, DOM::AbstractElement target) -> RefPtr<ComputedValues const> {
+    // The environments the read's records were resolved over, which install inside the drain once
+    // every record is answered, as those of a style update's rows do.
+    struct EnvironmentInstallation {
+        DOM::AbstractElement target;
+        RefPtr<CustomPropertyData const> custom_property_data;
+    };
+    Vector<EnvironmentInstallation> environment_installations;
+    auto compute = [&](DOM::AbstractElement target) -> RefPtr<ComputedValues const> {
         // A read-only answer is independent of the element's installed style. Copy its record
         // before the demand slot is reused by another style read.
         auto kind = *target.pseudo_element();
         if (kind < PseudoElement::KnownPseudoElementCount) {
-            auto demand = kind == PseudoElement::Selection
-                ? StyleEngineFFI::style_engine_answer_record_demand(style_computer.style_engine().rust_handle(), target.element().style_node_id().value(), to_underlying(kind), false, false, true, highlight_parent_style_record.value_or(StyleRecordID {}).value(), false)
-                : style_computer.style_engine().answer_record_demand(target.element().style_node_id(), to_underlying(kind), false, false, true);
+            auto demand = answer_style_read_demand(join, style_computer.style_engine(),
+                {
+                    .node = target.element().style_node_id(),
+                    .pseudo_kind = to_underlying(kind),
+                    .parent_highlight = kind == PseudoElement::Selection ? highlight_parent_style_record.value_or(StyleRecordID {}) : StyleRecordID {},
+                });
             if (demand.is_absent && first_is_one_of(kind, PseudoElement::Before, PseudoElement::After)
                 && !target.element().style_depends_on_size_container_query()) {
                 // A private absence does not replace the published match answer. Settle that
                 // answer before leaving C++'s negative pseudo computation out of this read.
-                auto published = style_computer.style_engine().answer_record_demand(target.element().style_node_id(), to_underlying(kind), false, false, false);
+                auto published = answer_style_read_demand(join, style_computer.style_engine(),
+                    { .node = target.element().style_node_id(), .pseudo_kind = to_underlying(kind), .read_only = false });
                 if (published.is_absent) {
-                    target.set_custom_property_data(scope, nullptr);
+                    environment_installations.append({ target, nullptr });
                     highlight_parent_style_record = StyleRecordID {};
                     return {};
                 }
@@ -686,7 +699,7 @@ static RefPtr<ComputedValues const> compute_pseudo_element_style_for_cssom(DOM::
                     bool environment_is_installable = false;
                     auto custom_property_data = target.element().custom_property_environment_of_engine_record(record, environment_is_installable);
                     if (environment_is_installable) {
-                        target.set_custom_property_data(scope, move(custom_property_data));
+                        environment_installations.append({ target, move(custom_property_data) });
                         highlight_parent_style_record = record;
                         return ComputedValues::Builder { *view }.build();
                     }
@@ -696,21 +709,21 @@ static RefPtr<ComputedValues const> compute_pseudo_element_style_for_cssom(DOM::
         return {};
     };
 
-    // The environments the read's records were resolved over install inside the drain, as those
-    // of a style update's rows do.
+    Vector<RefPtr<ComputedValues const>> ancestor_styles;
+    // A highlight pseudo-element inherits from its parent element's, which nothing keeps current while selection
+    // styles are unobservable, so the chain is computed outermost first.
+    if (is_highlight_pseudo_element(*pseudo_element) && !document.selection_styles_are_observable()) {
+        highlight_parent_style_record = StyleRecordID {};
+        Vector<DOM::AbstractElement> ancestors;
+        for (auto ancestor = abstract_element.element().element_to_inherit_style_from({}); ancestor; ancestor = ancestor->element_to_inherit_style_from({}))
+            ancestors.append({ *ancestor, pseudo_element });
+        for (auto& ancestor : ancestors.in_reverse())
+            ancestor_styles.append(compute(ancestor));
+    }
+    auto target_style = compute(abstract_element);
     StyleEffectDrain::install(document, [&](StyleDrainScope const& scope) {
-        Vector<RefPtr<ComputedValues const>> ancestor_styles;
-        // A highlight pseudo-element inherits from its parent element's, which nothing keeps current while selection
-        // styles are unobservable, so the chain is computed outermost first.
-        if (is_highlight_pseudo_element(*pseudo_element) && !document.selection_styles_are_observable()) {
-            highlight_parent_style_record = StyleRecordID {};
-            Vector<DOM::AbstractElement> ancestors;
-            for (auto ancestor = abstract_element.element().element_to_inherit_style_from({}); ancestor; ancestor = ancestor->element_to_inherit_style_from({}))
-                ancestors.append({ *ancestor, pseudo_element });
-            for (auto& ancestor : ancestors.in_reverse())
-                ancestor_styles.append(compute(scope, ancestor));
-        }
-        target_style = compute(scope, abstract_element);
+        for (auto& installation : environment_installations)
+            installation.target.set_custom_property_data(scope, move(installation.custom_property_data));
     });
     return target_style;
 }
@@ -861,7 +874,8 @@ Optional<StyleProperty> CSSStyleProperties::get_direct_property(PropertyNameAndI
                 && first_is_one_of(*pseudo, PseudoElement::Before, PseudoElement::After, PseudoElement::FirstLetter, PseudoElement::Marker, PseudoElement::Backdrop)) {
                 auto& style_computer = abstract_element.document().style_computer();
                 auto& engine = style_computer.style_engine();
-                auto demand = engine.answer_record_demand(abstract_element.element().style_node_id(), to_underlying(*pseudo), false, false, true);
+                DOM::Document::JoinScope join { abstract_element.document(), DOM::UpdateLayoutReason::ResolvedCSSStyleDeclarationProperty };
+                auto demand = answer_style_read_demand(join, engine, { .node = abstract_element.element().style_node_id(), .pseudo_kind = to_underlying(*pseudo) });
                 if (demand.record.style_record) {
                     auto identity = engine.style_record_custom_property_environment(StyleRecordID { demand.record.style_record });
                     RefPtr<CustomPropertyData const> data;
