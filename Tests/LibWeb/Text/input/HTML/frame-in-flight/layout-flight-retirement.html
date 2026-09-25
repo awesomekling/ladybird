@@ -17,6 +17,8 @@
     asyncTest(async done => {
         if (!frame.contentDocument?.getElementById("inner"))
             await loaded();
+        // What the load left this document to lay out goes first, so that the next layout pass is the iframe's.
+        await twoFrames();
 
         const navigated = await whileLayoutInFlight("before-run", mutateChild, frameInFlight => {
             frame.srcdoc = "<body><div id=inner>second</div>";
