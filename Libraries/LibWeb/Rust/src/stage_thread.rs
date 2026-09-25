@@ -127,10 +127,11 @@ fn overlapping_stages() -> &'static [String] {
 }
 
 /// Whether a main-side read of a document's committed geometry may be answered beside a recording of that document
-/// in flight instead of taking the recording in (`LIBWEB_READS_BESIDE_RECORDING=1`). The recording writes no geometry.
+/// in flight instead of taking the recording in (unless `LIBWEB_READS_BESIDE_RECORDING=0`). The recording writes no
+/// geometry.
 fn reads_beside_recording_enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| std::env::var_os("LIBWEB_READS_BESIDE_RECORDING").is_some_and(|value| value == "1"))
+    *ENABLED.get_or_init(|| std::env::var_os("LIBWEB_READS_BESIDE_RECORDING").is_none_or(|value| value != "0"))
 }
 
 /// Whether the frame in flight holds the document whose arena is `arena` only for its recordings, and a read of that
