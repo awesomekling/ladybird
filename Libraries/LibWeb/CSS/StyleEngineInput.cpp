@@ -164,13 +164,19 @@ static StyleNodeID identity_of_shadow_root(DOM::ShadowRoot& shadow_root, StyleEn
     }
     // A shadow root built from the document's styles rather than its own decides with the author
     // origin from there, which is otherwise bounded by the scope it is attached to.
-    if (shadow_root.uses_document_style_sheets())
-        style_engine.set_tree_scope_uses_document_sheets(tree_scope_of(shadow_root));
+    if (shadow_root.uses_document_style_sheets()) {
+        style_engine.publish_input([tree_scope = tree_scope_of(shadow_root)](StyleInputScope const& input) {
+            input.engine().set_tree_scope_uses_document_sheets(tree_scope);
+        });
+    }
     // The host link is established every time rather than only when the identity is minted, because
     // the two can be asked for in either order: a root whose identity was taken while its host had
     // none would otherwise stay unlinked once the host arrived.
-    if (auto host = shadow_root.host(); host && host->style_node_id() != no_style_node)
-        style_engine.set_shadow_root(host->style_node_id(), shadow_root.style_node_id());
+    if (auto host = shadow_root.host(); host && host->style_node_id() != no_style_node) {
+        style_engine.publish_input([host = host->style_node_id(), root = shadow_root.style_node_id()](StyleInputScope const& input) {
+            input.engine().set_shadow_root(host, root);
+        });
+    }
     return shadow_root.style_node_id();
 }
 
@@ -279,8 +285,11 @@ static void record_element_arrival_delta(DOM::Element& element, StyleEngine& sty
     // it. A sheet adopted into a shadow tree names that root, so the root can be identified first,
     // and the link is what lets a `:host` or `::slotted()` rule in that tree reach the host instead
     // of the document.
-    if (auto shadow_root = element.shadow_root(); shadow_root && shadow_root->style_node_id() != no_style_node)
-        style_engine.set_shadow_root(element.style_node_id(), shadow_root->style_node_id());
+    if (auto shadow_root = element.shadow_root(); shadow_root && shadow_root->style_node_id() != no_style_node) {
+        style_engine.publish_input([host = element.style_node_id(), root = shadow_root->style_node_id()](StyleInputScope const& input) {
+            input.engine().set_shadow_root(host, root);
+        });
+    }
     style_engine.record_tree_delta({
         .node = element.style_node_id().value(),
         .old_connected = false,
