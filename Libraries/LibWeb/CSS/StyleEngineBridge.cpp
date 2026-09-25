@@ -330,24 +330,27 @@ void const* StyleEngine::held_style_record_payloads(StyleRecordID style_record) 
 
 StyleRecordDependencyFlag StyleEngine::style_record_dependency_flags(StyleRecordID style_record) const
 {
-    auto* facts = epoch_style_record_facts(style_record);
-    if (facts && facts->dependency_flags.has_value())
-        return static_cast<StyleRecordDependencyFlag>(*facts->dependency_flags);
-    if (facts && facts->view.has_value() && facts->view->present)
-        return static_cast<StyleRecordDependencyFlag>(facts->view->dependency_flags);
+    if (auto* facts = epoch_style_record_facts(style_record)) {
+        if (facts->dependency_flags.has_value())
+            return static_cast<StyleRecordDependencyFlag>(*facts->dependency_flags);
+        if (facts->view.has_value() && facts->view->present)
+            return static_cast<StyleRecordDependencyFlag>(facts->view->dependency_flags);
+    }
+    // NB: Entering the engine can take a style pass in flight back, and finishing that pass ends the epoch, so the
+    //     facts are looked up again afterwards.
     auto dependency_flags = StyleEngineFFI::style_engine_style_record_dependency_flags(m_impl, style_record.value());
-    if (facts)
+    if (auto* facts = epoch_style_record_facts(style_record))
         facts->dependency_flags = dependency_flags;
     return static_cast<StyleRecordDependencyFlag>(dependency_flags);
 }
 
 u64 StyleEngine::style_record_custom_property_environment(StyleRecordID style_record) const
 {
-    auto* facts = epoch_style_record_facts(style_record);
-    if (facts && facts->custom_property_environment.has_value())
+    if (auto* facts = epoch_style_record_facts(style_record); facts && facts->custom_property_environment.has_value())
         return *facts->custom_property_environment;
+    // NB: Entering the engine can end the epoch (see style_record_dependency_flags()).
     auto environment = StyleEngineFFI::style_engine_style_record_custom_property_environment(m_impl, style_record.value());
-    if (facts)
+    if (auto* facts = epoch_style_record_facts(style_record))
         facts->custom_property_environment = environment;
     return environment;
 }
@@ -364,11 +367,11 @@ StyleEngine::SettledAnimationDefinitions StyleEngine::take_settled_animation_def
 
 StyleEngine::StyleRecordView StyleEngine::style_record_view(StyleRecordID style_record) const
 {
-    auto* facts = epoch_style_record_facts(style_record);
-    if (facts && facts->view.has_value())
+    if (auto* facts = epoch_style_record_facts(style_record); facts && facts->view.has_value())
         return *facts->view;
+    // NB: Entering the engine can end the epoch (see style_record_dependency_flags()).
     auto view = StyleEngineFFI::style_engine_style_record_view(m_impl, style_record.value());
-    if (facts)
+    if (auto* facts = epoch_style_record_facts(style_record))
         facts->view = view;
     return view;
 }
