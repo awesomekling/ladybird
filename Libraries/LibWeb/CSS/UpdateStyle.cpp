@@ -375,45 +375,6 @@ static bool engine_computed_record_environment_is_installable(DOM::Element& elem
     return installable;
 }
 
-static RefPtr<CustomPropertyData const> custom_property_environment_base(DOM::Element& element, RefPtr<CustomPropertyData const> data)
-{
-    if (data && data->is_animation_overlay_for({ element }))
-        return data->parent();
-    return data;
-}
-
-// An element's custom properties moved. Every styled descendant holds the environment it inherits
-// by identity, and the style engine, which keeps what each holds, moves them: each takes the moved
-// one directly, and only the descendants whose style reads the environment are recorded to compute
-// again. What is left here is to install the records the move republished over the moved ones.
-static void propagate_custom_property_environment_move(StyleDrainScope const& scope, DOM::Document& document, DOM::Element& origin, RefPtr<CustomPropertyData const> old_origin_data, HashTable<StyleNodeID>& republished_nodes)
-{
-    // Nothing inherits from an element with nothing below it in the flat tree.
-    if (!origin.first_element_child() && !origin.shadow_root() && !is<HTML::HTMLSlotElement>(origin))
-        return;
-    auto old_base = custom_property_environment_base(origin, move(old_origin_data));
-    auto new_base = custom_property_environment_base(origin, origin.custom_property_data({}));
-    struct MovedRecord {
-        StyleNodeID node;
-        StyleRecordID record;
-    };
-    Vector<MovedRecord> moved_records;
-    StyleEngineFFI::style_engine_move_custom_property_environment(
-        scope.engine().rust_handle(), origin.style_node_id().value(),
-        old_base ? old_base->identity() : 0, new_base ? new_base->identity() : 0,
-        [](void* context, u32 node, u64 record) {
-            static_cast<Vector<MovedRecord>*>(context)->append({ StyleNodeID { node }, StyleRecordID { record } });
-        },
-        &moved_records);
-    for (auto const& [node, record] : moved_records) {
-        auto element = document.style_computer().element_for_style_node(node);
-        if (element && record != element->style_record_identity()) {
-            element->refresh_computed_style(scope, {}, record);
-            republished_nodes.set(node);
-        }
-    }
-}
-
 // What an element held as a style row began, which the engine derives the children's reactions
 // from with what the row leaves it holding.
 struct StyleRowStart {
@@ -586,8 +547,6 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
             }();
             auto const row_start = style_row_start(*element);
             DOM::begin_style_row_counter_style_invalidation(*element);
-            // The environment the element held before the row, when the row moves it.
-            RefPtr<CustomPropertyData const> old_custom_property_data;
             auto const* previous_inherited_box_values = element->style_group<ComputedValues::InheritedBoxValues>();
             auto const previous_visibility = previous_inherited_box_values
                 ? Optional<Visibility> { static_cast<Visibility>(previous_inherited_box_values->visibility) }
@@ -629,7 +588,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                 Optional<DOM::Element::EngineRecordDamage> engine_record_damage;
                 if (reaction.record_damage & to_underlying(StyleEngineFFI::FfiStyleInvalidationField::EngineComputed))
                     engine_record_damage = DOM::Element::EngineRecordDamage { StyleRecordID { reaction.old_style_record }, reaction.record_damage };
-                invalidation = element->apply_engine_computed_style_record(scope, new_style_record, pseudo_element_records, reaction.uses_substitution, row_facts, did_change_custom_properties, engine_record_comparison, engine_record_damage, pseudo_element_damages, &row_effects, &old_custom_property_data);
+                invalidation = element->apply_engine_computed_style_record(scope, new_style_record, pseudo_element_records, reaction.uses_substitution, row_facts, did_change_custom_properties, engine_record_comparison, engine_record_damage, pseudo_element_damages, &row_effects);
                 // What the row's container conditions read of its containers, recorded as the host
                 // records it for a row it computes.
                 row_effects.append(StyleEffectDrain::ContainerQueryEffects { StyleNodeID { reaction.style_node } });
@@ -834,20 +793,19 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
             row_effects.append(StyleEffectDrain::ElementInvalidation { StyleNodeID { reaction.style_node }, effects });
             transaction_invalidation |= effects;
 
-            // The environment moved: the element's descendants take it here, and the ones that read
-            // a moved name are recorded for their own computation. The engine derives no reactions
-            // for the move. Where the engine moved them as it settled the row, their records follow
-            // the row in the batch.
-            if (did_change_custom_properties && !(reaction.record_damage & to_underlying(StyleEngineFFI::FfiStyleInvalidationField::EnvironmentMovedInPass))) {
-                StyleEngineFFI::style_engine_note_host_step(StyleEngineFFI::FfiStyleHostStep::EnvironmentMove);
-                propagate_custom_property_environment_move(scope, document, *element, old_custom_property_data, republished_nodes);
-            }
+            // The environment moved. Where the engine moved the descendants' environments as it
+            // settled the row, their records follow the row in the batch. Otherwise the row reports
+            // the move, and the next transaction's pass computes the children over the moved
+            // environment.
+            bool const reports_environment_move = did_change_custom_properties && !(reaction.record_damage & to_underlying(StyleEngineFFI::FfiStyleInvalidationField::EnvironmentMovedInPass));
             // The children of a row the engine derived them for have their reactions in the batch
             // already. A row that installed another record than the one the engine derived them
             // from, or whose move the host compared itself, derives them here.
-            if (engine_derived_children && !row_computed_damage_itself && element->style_record_identity().value() == reaction.new_style_record)
+            if (engine_derived_children && !row_computed_damage_itself && !reports_environment_move && element->style_record_identity().value() == reaction.new_style_record)
                 continue;
             u32 facts = style_row_start_facts(*element, row_start);
+            if (reports_environment_move)
+                facts |= StyleEngine::DidChangeCustomProperties;
             if (invalidation.is_none())
                 facts |= StyleEngine::InvalidationIsNone;
             if (invalidation.needs_layout_tree_rebuild())

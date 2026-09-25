@@ -5142,34 +5142,6 @@ pub unsafe extern "C" fn style_engine_element_custom_property_data(
     data
 }
 
-/// Moves the custom-property environments below `origin`, whose own moved from `old_base` to
-/// `new_base`, and hands `moved_record` each record the move republished, for the host to install
-/// once the move is done.
-///
-/// # Safety
-/// `engine` must be live, and `moved_record` must be callable with `context`.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_move_custom_property_environment(
-    engine: *mut c_void,
-    origin: u32,
-    old_base: u64,
-    new_base: u64,
-    moved_record: unsafe extern "C" fn(*mut c_void, u32, u64),
-    context: *mut c_void,
-) {
-    engine_entrance(engine, "style_engine_move_custom_property_environment");
-    let Some(origin) = StyleNodeID::from_raw(origin) else {
-        return;
-    };
-    let moved_records = {
-        let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
-        engine.move_custom_property_environment(origin, old_base, new_base)
-    };
-    for (node, record) in moved_records {
-        unsafe { moved_record(context, node.raw(), record) };
-    }
-}
-
 /// Notes that the element's style reads what a moved custom-property environment can change other
 /// than through `var()`.
 ///
@@ -6116,7 +6088,6 @@ pub enum FfiStyleHostStep {
     PseudoSettle,
     DeclinedRow,
     InheritedCustomPropertyRefresh,
-    EnvironmentMove,
 }
 
 impl FfiStyleHostStep {
@@ -6129,7 +6100,6 @@ impl FfiStyleHostStep {
             Self::PseudoSettle => "host:pseudo_settle",
             Self::DeclinedRow => "host:declined_row",
             Self::InheritedCustomPropertyRefresh => "host:inherited_custom_property_refresh",
-            Self::EnvironmentMove => "host:environment_move",
         }
     }
 }

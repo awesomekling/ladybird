@@ -8,7 +8,6 @@
 
 use super::computed::{ComputedStyleTarget, FinalStyleRecordID};
 use super::inputs::HeldCustomPropertyEnvironment;
-use super::record_replay::EventKind;
 use super::transaction::STYLE_REACTION_RECOMPUTE_STYLE;
 use super::{StyleEngineState, StyleNodeID, custom_property_environments};
 
@@ -42,48 +41,6 @@ fn is_engine_environment(environment: u64) -> bool {
 }
 
 impl StyleEngineState {
-    /// An element's custom properties moved from the environment `old_base` to `new_base`, both
-    /// without the animation overlay the element may hold over them. Every styled descendant holds
-    /// the environment it inherits by identity, so each takes the moved one here, directly, and only
-    /// the descendants whose style reads the environment are recorded to compute again. The walk is
-    /// the propagation, in the flat tree the engine would have derived reactions over.
-    ///
-    /// Returns the records the walk moved to their new environments, for the host to install.
-    pub(crate) fn move_custom_property_environment(
-        &mut self,
-        origin: StyleNodeID,
-        old_base: u64,
-        new_base: u64,
-    ) -> Vec<(StyleNodeID, u64)> {
-        let mut moved_records = Vec::new();
-        self.move_custom_property_environments_below(origin, old_base, new_base, &mut moved_records);
-        moved_records
-    }
-
-    fn move_custom_property_environments_below(
-        &mut self,
-        parent: StyleNodeID,
-        old_parent_base: u64,
-        new_parent_base: u64,
-        moved_records: &mut Vec<(StyleNodeID, u64)>,
-    ) {
-        let children = self.flat_tree_element_children(parent);
-        if children.is_empty() {
-            return;
-        }
-        let old_parent_inheritable = self.inheritable_environment(old_parent_base);
-        let new_parent_inheritable = self.inheritable_environment(new_parent_base);
-        for child in children {
-            self.move_custom_property_environment_of(
-                child,
-                parent,
-                old_parent_inheritable,
-                new_parent_inheritable,
-                moved_records,
-            );
-        }
-    }
-
     /// The elements that inherit from `parent` in the flat tree, in its order: its light children
     /// no slot takes, its shadow root's children, and the elements assigned to it as a slot.
     fn flat_tree_element_children(&self, parent: StyleNodeID) -> Vec<StyleNodeID> {
@@ -130,107 +87,6 @@ impl StyleEngineState {
     fn environment_move_needs_recompute(&mut self, node: StyleNodeID) -> bool {
         self.retained.element_recomputes_on_environment_move(node)
             || self.retained.node_style_reads_custom_properties(node)
-    }
-
-    /// Record the element to compute again. Its descendants are this walk's, or that
-    /// computation's, to reach.
-    fn recompute_after_environment_move(&mut self, node: StyleNodeID) {
-        self.record_derived_element_style_input(node, STYLE_REACTION_RECOMPUTE_STYLE, 0);
-        self.record_boundary_call(EventKind::RecordDerivedElementStyleInput, |payload| {
-            payload.write_u32(node.raw());
-            payload.write_u8(STYLE_REACTION_RECOMPUTE_STYLE);
-            payload.write_u8(0);
-        });
-    }
-
-    fn move_custom_property_environment_of(
-        &mut self,
-        element: StyleNodeID,
-        parent: StyleNodeID,
-        old_parent_inheritable: u64,
-        new_parent_inheritable: u64,
-        moved_records: &mut Vec<(StyleNodeID, u64)>,
-    ) {
-        // An unstyled subtree materializes against whatever it inherits then.
-        let Some(&held_record) = self.host.held_style_records.get(&element) else {
-            return;
-        };
-        // An element whose row this batch installs later holds a record the engine computed over
-        // the moved environment already. The row installs it, and moves the environment below the
-        // element in turn; republishing the element's record here would leave its row's record and
-        // the one the element held before it to nobody.
-        let assigned_record = self
-            .retained
-            .computed_group_sets
-            .assigned_final_style_record(super::computed::ComputedStyleTarget::new(element, u8::MAX))
-            .map_or(0, |record| record.raw());
-        if assigned_record != held_record {
-            return;
-        }
-        let (existing, is_animation_overlay, existing_declares) = self
-            .retained
-            .element_custom_property_data
-            .get(&element)
-            .and_then(Option::as_ref)
-            .map_or((0, false, false), |held| {
-                (held.identity, held.is_animation_overlay, held.declares)
-            });
-        // An element's animations sampled custom properties over what its style resolves to; the
-        // computation composes them over the moved environment.
-        if is_animation_overlay {
-            self.recompute_after_environment_move(element);
-            return;
-        }
-        // An element declaring no custom property of its own holds the environment it inherits,
-        // whichever identity it holds it by; its cascade declaring some now is a computation's to
-        // find.
-        let holds_inherited_environment = existing == old_parent_inheritable
-            || (!existing_declares && !self.retained.node_declares_custom_properties(element));
-        // The element declares custom properties of its own over the environment it inherits,
-        // which its computation resolves over the moved one.
-        if !holds_inherited_environment {
-            self.recompute_after_environment_move(element);
-            return;
-        }
-        if self.environment_move_needs_recompute(element) {
-            self.recompute_after_environment_move(element);
-            return;
-        }
-        if new_parent_inheritable == existing {
-            return;
-        }
-        // The environment the element takes: one the engine resolved, which the host views from its
-        // store, or the one its parent holds, whose host object it shares.
-        let Some(moved) = self.held_environment_for(new_parent_inheritable, parent) else {
-            self.recompute_after_environment_move(element);
-            return;
-        };
-        if self.move_pseudo_element_environments(element, existing, moved.as_ref()) {
-            self.recompute_after_environment_move(element);
-        }
-        if new_parent_inheritable != 0 {
-            self.retained
-                .computed_group_sets
-                .set_node_custom_property_environment(element, new_parent_inheritable);
-        }
-        let retired = self.retained.element_custom_property_data.insert(element, moved);
-        self.host
-            .retired_custom_property_data
-            .extend(retired.flatten().and_then(|held| held.data));
-        if let Some(record) = self
-            .retained
-            .republish_record_environment(element, new_parent_inheritable)
-        {
-            self.record_boundary_call(EventKind::RepublishRecordEnvironment, |payload| {
-                payload.write_u32(element.raw());
-                payload.write_u64(new_parent_inheritable);
-                payload.write_u64(record);
-            });
-            if record != held_record {
-                moved_records.push((element, record));
-            }
-        }
-        self.move_custom_property_environments_below(element, existing, new_parent_inheritable, moved_records);
     }
 
     /// What an element holds for `environment`, taken from its parent: `None` for the empty one,
@@ -447,7 +303,7 @@ impl StyleEngineState {
         }
     }
 
-    /// `move_custom_property_environment_of`, in the pass: the element either computes again in
+    /// Move one element below a row whose environment moved: the element either computes again in
     /// the pass or takes the moved environment in a record the pass republishes.
     fn move_custom_property_environment_in_pass_of(
         &mut self,

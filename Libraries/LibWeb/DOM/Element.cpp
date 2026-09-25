@@ -2345,7 +2345,7 @@ void Element::republish_animation_name_registry()
     CSS::record_element_animation_names(*this, indexable_animation_names(*style));
 }
 
-CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_record(CSS::StyleDrainScope const& scope, CSS::StyleRecordID new_style_record, EnginePseudoElementRecords const& pseudo_element_records, bool uses_substitution, u32 row_facts, bool& did_change_custom_properties, EngineRecordComparison comparison, Optional<EngineRecordDamage> engine_record_damage, EnginePseudoElementDamages const* pseudo_element_damages, CSS::StyleEffectDrain* effect_drain, RefPtr<CSS::CustomPropertyData const>* replaced_custom_property_data)
+CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_record(CSS::StyleDrainScope const& scope, CSS::StyleRecordID new_style_record, EnginePseudoElementRecords const& pseudo_element_records, bool uses_substitution, u32 row_facts, bool& did_change_custom_properties, EngineRecordComparison comparison, Optional<EngineRecordDamage> engine_record_damage, EnginePseudoElementDamages const* pseudo_element_damages, CSS::StyleEffectDrain* effect_drain)
 {
     VERIFY(parent());
     auto old_style_record = style_record_identity();
@@ -2428,8 +2428,6 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
             current_environment = current_environment->parent();
         auto const current_identity = current_environment ? current_environment->identity() : 0;
         if (current_identity != scope.engine().style_record_custom_property_environment(new_style_record)) {
-            if (replaced_custom_property_data)
-                *replaced_custom_property_data = held_environment;
             held_custom_property_environment = install_custom_property_environment(move(held_environment));
             did_change_custom_properties = true;
         } else {
