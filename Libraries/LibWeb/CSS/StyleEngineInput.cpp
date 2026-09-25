@@ -2719,18 +2719,26 @@ void record_stylesheet_rule_conditions(StyleSheetState& sheet)
     });
 }
 
+static void record_stylesheet_rule_conditions_now(StyleSheetState& engine_sheet, DOM::Document& document)
+{
+    // Imported rules inherit the conditions of every enclosing import. Starting at an imported
+    // sheet would lose those gates and could re-enable rules beneath a non-matching import.
+    MediaEnvironmentSnapshot environment { document };
+    Parser::ValueParserFFI::rust_style_sheet_publish_conditions(
+        engine_sheet.native_sheet().handle(), document.style_computer().style_engine().rust_handle(), environment.ffi_environment());
+}
+
 void record_stylesheet_rule_conditions(StyleSheetState& sheet, DOM::Document& document)
 {
     auto* engine_sheet = sheet.owner_import() ? owning_engine_sheet(sheet) : &sheet;
     if (!engine_sheet)
         return;
     document.flush_deferred_style_change_event();
-    auto& style_computer = document.style_computer();
-    // Imported rules inherit the conditions of every enclosing import. Starting at an imported
-    // sheet would lose those gates and could re-enable rules beneath a non-matching import.
-    MediaEnvironmentSnapshot environment { document };
-    Parser::ValueParserFFI::rust_style_sheet_publish_conditions(
-        engine_sheet->native_sheet().handle(), style_computer.style_engine().rust_handle(), environment.ffi_environment());
+    auto leave_beside_pass = leave_sheet_change_beside_style_pass(document, [engine_sheet = NonnullRefPtr { *engine_sheet }, document = GC::Root { document }] {
+        record_stylesheet_rule_conditions_now(*engine_sheet, *document);
+    });
+    if (!leave_beside_pass)
+        record_stylesheet_rule_conditions_now(*engine_sheet, document);
 }
 
 void record_stylesheet_conditions(StyleSheetState& sheet, DOM::Node& document_or_shadow_root, bool conditions_hold)
