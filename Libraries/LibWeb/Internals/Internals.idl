@@ -237,8 +237,9 @@ interface Internals {
     // is. Returns "" at once if no such stage has been submitted, since none can be while it blocks.
     DOMString waitForHeldFrame();
     undefined releaseHeldFrame();
-    // How many forced joins (main-thread accesses that waited for the frame in flight and took it in) took in a frame
-    // with a stage `stage` names ("recording", "layout" or "style") on this thread so far.
+    // How many forced joins (main-thread accesses that waited for the frame in flight and took it in, or, from inside a
+    // garbage collection, only waited for it) reached a frame with a stage `stage` names ("recording", "layout" or
+    // "style") on this thread so far.
     unsigned long long forcedJoinCount(DOMString stage);
     // Whether a frame is in flight and holds this document.
     boolean frameInFlightHoldsDocument();

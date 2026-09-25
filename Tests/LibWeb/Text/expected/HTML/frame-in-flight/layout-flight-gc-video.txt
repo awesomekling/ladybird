@@ -1,3 +1,4 @@
 held as armed: true
 the collection left the pass in flight: true
+the collection did not reach the pass: true
 container laid out: true

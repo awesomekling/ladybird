@@ -30,6 +30,7 @@ static void install_frame_scheduler_host(FrameScheduler& scheduler)
     Layout::RustFFI::rust_stage_thread_set_frame_scheduler_host({
         .frame_completion_notify = [] { FrameCompletion::the().post(); },
         .consume_commit = [] { s_frame_scheduler_with_host->consume_commit(EventLoop::FrameConsumeSite::ForcedJoin); },
+        .tearing_down_cells = [] { return GC::Heap::the().is_tearing_down_cells(); },
     });
     scheduler.event_loop().set_finished_frame_consumer(GC::create_function(GC::Heap::the(), [&scheduler] {
         scheduler.consume_finished_frame();

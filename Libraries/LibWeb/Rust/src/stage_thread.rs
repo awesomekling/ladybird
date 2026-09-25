@@ -135,6 +135,9 @@ pub struct FfiFrameSchedulerHost {
     /// Takes in the frame whose stages a forced join has just waited for (consume-commit). Runs on
     /// the main thread, with no stage in flight.
     pub consume_commit: unsafe extern "C" fn(),
+    /// Whether the main thread's garbage collector is finalizing or destroying cells, where nothing
+    /// may take a frame in: its consume runs script and allocates. Runs on the main thread.
+    pub tearing_down_cells: unsafe extern "C" fn() -> bool,
 }
 
 static FRAME_SCHEDULER_HOST: OnceLock<FfiFrameSchedulerHost> = OnceLock::new();
@@ -223,6 +226,9 @@ thread_local! {
         RefCell::new(std::collections::HashSet::new());
     // On the calling thread, how many forced joins took in a frame with a stage of each label.
     static FORCED_JOINS: RefCell<Vec<(&'static str, u64)>> = const { RefCell::new(Vec::new()) };
+    // On the calling thread, the call sites a garbage collection reached the frame in flight from, each logged once.
+    static SITES_REACHED_FROM_COLLECTION: RefCell<std::collections::HashSet<(&'static str, u32)>> =
+        RefCell::new(std::collections::HashSet::new());
 }
 
 type StageOutcome = Result<(), Box<dyn Any + Send>>;
@@ -707,10 +713,45 @@ fn join_frame_in_flight_for_stage(
         }
     }
     count_forced_join();
-    take_frame_in_flight();
     let host = FRAME_SCHEDULER_HOST.get().expect("a submitted frame has a scheduler");
+    // SAFETY: Called on the main thread.
+    if unsafe { (host.tearing_down_cells)() } {
+        refuse_join_while_tearing_down_cells(file, line);
+        return;
+    }
+    take_frame_in_flight();
     // SAFETY: Called on the main thread, with the frame taken back.
     unsafe { (host.consume_commit)() }
+}
+
+/// A finalizer or a cell's destructor reached the frame in flight. Taking the frame in there would
+/// run its consume, which runs script and allocates in the middle of the collection, so no such
+/// code may need the frame: it defers its work to the next frame, or drops what a collected cell no
+/// longer needs. Should one reach it anyway, it only waits for the frame's stages to finish, so it
+/// does not race them, and leaves the frame for its consume at the top of the event loop.
+fn refuse_join_while_tearing_down_cells(file: &'static str, line: u32) {
+    debug_assert!(
+        false,
+        "a garbage collection reached the frame in flight at {file}:{line}, and may not take it in"
+    );
+    if SITES_REACHED_FROM_COLLECTION.with_borrow_mut(|sites| sites.insert((file, line))) {
+        eprintln!(
+            "STAGE OVERLAP: a garbage collection reached the frame in flight at {file}:{line}; only waiting for it"
+        );
+    }
+    wait_for_submitted_stages();
+}
+
+/// Waits for every stage of the calling thread's frame in flight to finish, and leaves the frame in
+/// flight for its consume.
+fn wait_for_submitted_stages() {
+    let waited = SUBMITTED.with_borrow_mut(|submitted| {
+        submitted.iter_mut().for_each(SubmittedStage::wait_until_finished);
+        !submitted.is_empty()
+    });
+    if let Some(thread) = stage_thread().filter(|_| waited) {
+        tsan::acquire(thread);
+    }
 }
 
 /// Test only: how many forced joins on the calling thread took a style pass back.
