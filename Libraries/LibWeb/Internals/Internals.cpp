@@ -1554,6 +1554,17 @@ void Internals::set_render_clock_suspended(bool suspended)
     HTML::main_thread_event_loop().frame_scheduler().set_render_clock_suspended(suspended);
 }
 
+GC::Ref<WebIDL::Promise> Internals::inject_clock_tick(double frame_time_ms)
+{
+    auto promise = WebIDL::create_promise_for(window());
+    auto frame_time = window().associated_document().relevant_settings_object().time_origin() + frame_time_ms;
+    HTML::main_thread_event_loop().frame_scheduler().inject_render_clock_tick(frame_time, [window = GC::Root { window() }, promise = GC::Root { promise }](bool ticked) {
+        HTML::TemporaryExecutionContext execution_context { window->principal_realm() };
+        WebIDL::resolve_promise(*promise, JS::Value(ticked));
+    });
+    return promise;
+}
+
 GC::Ref<JS::Object> Internals::get_render_clock_counters() const
 {
     auto& realm = HTML::relevant_realm(window());
@@ -1866,9 +1877,9 @@ bool Internals::frame_in_flight_references_are_alive() const
     return HTML::frame_in_flight_references_are_alive();
 }
 
-void Internals::set_manual_rendering_opportunities(bool enabled)
+void Internals::set_manual_rendering_opportunities(bool enabled, bool with_clock_ticks)
 {
-    page().client().set_manual_rendering_opportunities(enabled);
+    page().client().set_manual_rendering_opportunities(enabled, with_clock_ticks);
 }
 
 void Internals::set_rendering_opportunity_hold(bool enabled)

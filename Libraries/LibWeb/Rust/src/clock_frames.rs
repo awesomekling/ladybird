@@ -31,7 +31,7 @@
 
 use std::collections::HashMap;
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread::ThreadId;
 
@@ -1013,10 +1013,65 @@ pub extern "C" fn rust_render_clock_main_did_wake() -> bool {
 fn take_arenas_back() {
     let gate = idle_gate();
     let mut holder = gate.holder.lock().expect("render clock idle gate");
-    while *holder == ArenaHolder::Tick {
+    // A tick a test injected while the main thread idled runs before it takes the arenas back.
+    while *holder == ArenaHolder::Tick
+        || (matches!(*holder, ArenaHolder::Idle(_)) && INJECTED_TICKS_PENDING.load(Ordering::Acquire) > 0)
+    {
         holder = gate.tick_ended.wait(holder).expect("render clock idle gate");
     }
     *holder = ArenaHolder::Main;
+}
+
+// The ticks a test injected that the stage thread has not run yet.
+static INJECTED_TICKS_PENDING: AtomicUsize = AtomicUsize::new(0);
+
+/// Wakes the main thread from its event loop. Runs on the stage thread.
+static WAKE_MAIN: OnceLock<extern "C" fn()> = OnceLock::new();
+
+/// Has the render clock call `wake_main()` on the stage thread where a tick a test injected ended, for the main
+/// thread to go on with what waits for it. The first one set stays.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_render_clock_set_wake_main(wake_main: extern "C" fn()) {
+    let _ = WAKE_MAIN.set(wake_main);
+}
+
+/// Hands the stage thread a display tick at `frame_time_nanoseconds` (monotonic time) for the compositor context
+/// `context`, as the render clock hands it one, for a test that drives the ticks itself. Call it where the main thread
+/// has just let render clock ticks in (see [`rust_render_clock_main_will_idle`]): the main thread waits for the tick
+/// before it takes the arenas back, and the tick wakes it when it ends. Returns false where the stage thread is gone.
+///
+/// # Safety
+///
+/// `sender` came from [`rust_render_clock_sender_create`], on the thread that owns it.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_render_clock_inject_tick(
+    sender: *mut ClockSender,
+    context: u64,
+    frame_time_nanoseconds: i64,
+) -> bool {
+    // SAFETY: Guaranteed by the caller.
+    let sender = unsafe { &mut *sender };
+    INJECTED_TICKS_PENDING.fetch_add(1, Ordering::AcqRel);
+    let sent = sender.jobs.send(move || {
+        run_render_clock_tick_at(context, frame_time_nanoseconds);
+        end_injected_tick();
+    });
+    if !sent {
+        end_injected_tick();
+    }
+    sent
+}
+
+fn end_injected_tick() {
+    let gate = idle_gate();
+    {
+        let _holder = gate.holder.lock().expect("render clock idle gate");
+        INJECTED_TICKS_PENDING.fetch_sub(1, Ordering::AcqRel);
+    }
+    gate.tick_ended.notify_all();
+    if let Some(wake_main) = WAKE_MAIN.get() {
+        wake_main();
+    }
 }
 
 /// Where the render clock's display ticks wait for the stage thread: one per compositor context.
@@ -1227,6 +1282,11 @@ pub unsafe extern "C" fn rust_render_clock_post_tick(
 fn run_render_clock_tick(context: u64, slot: &ClockSlot) {
     slot.queued.store(false, Ordering::Release);
     let frame_time_nanoseconds = slot.frame_time_nanoseconds.load(Ordering::Acquire);
+    run_render_clock_tick_at(context, frame_time_nanoseconds);
+}
+
+/// Runs the display tick at `frame_time_nanoseconds` for the lease of `context` on the stage thread.
+fn run_render_clock_tick_at(context: u64, frame_time_nanoseconds: i64) {
     count(&COUNTERS.ticks_run);
     // The stage thread runs any job while a stage it runs waits for a join, which may be this one:
     // the main thread is not idle then, and the stage owns what the tick would reach.

@@ -793,15 +793,18 @@ void PageClient::did_finish_rendering_update()
     request_rendering_opportunity_if_needed();
 }
 
-void PageClient::set_manual_rendering_opportunities(bool enabled)
+void PageClient::set_manual_rendering_opportunities(bool enabled, bool with_clock_ticks)
 {
-    if (m_manual_rendering_opportunities == enabled)
+    with_clock_ticks &= enabled;
+    if (m_manual_rendering_opportunities == enabled && m_manual_clock_ticks == with_clock_ticks)
         return;
 
+    // Frames and display ticks come from the test alone, or from the display alone: the leases the render clock or the
+    // test ticked end, and the rendering update that follows grants them anew.
+    Web::HTML::main_thread_event_loop().frame_scheduler().revoke_all_clock_leases();
     m_manual_rendering_opportunities = enabled;
+    m_manual_clock_ticks = with_clock_ticks;
     if (enabled) {
-        // Frames come from the test alone: no render clock ticks a lease beside them.
-        Web::HTML::main_thread_event_loop().frame_scheduler().revoke_all_clock_leases();
         m_frame_timer->stop();
         m_frame_timer_purpose = FrameTimerPurpose::Inactive;
         m_compositor_rendering_opportunity_outstanding = false;
@@ -829,7 +832,11 @@ void PageClient::inject_rendering_opportunity(double frame_time)
 
 bool PageClient::arm_render_clock(Compositing::CompositorContextId context_id)
 {
-    if (m_manual_rendering_opportunities || !client().compositor_process_connection())
+    // Under manual rendering opportunities, the display ticks come from the test alone (internals.injectClockTick()), if
+    // it hands any.
+    if (m_manual_rendering_opportunities)
+        return m_manual_clock_ticks;
+    if (!client().compositor_process_connection())
         return false;
     auto* render_clock = client().render_clock();
     if (!render_clock)
@@ -840,6 +847,8 @@ bool PageClient::arm_render_clock(Compositing::CompositorContextId context_id)
 
 void PageClient::disarm_render_clock(Compositing::CompositorContextId context_id)
 {
+    if (m_manual_rendering_opportunities)
+        return;
     if (auto* render_clock = client().render_clock())
         render_clock->disarm(context_id);
 }

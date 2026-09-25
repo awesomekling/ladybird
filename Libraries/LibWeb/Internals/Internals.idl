@@ -219,6 +219,10 @@ interface Internals {
     object getRenderClockCounters();
     // Leaves clock leases to the main thread's rendering updates, with no render clock armed, while suspended.
     undefined setRenderClockSuspended(boolean suspended);
+    // Hands the leases a render clock ticks a display tick at frameTimeMs (like injectRenderingOpportunity()) once the
+    // main thread goes idle, as the render clock would. Resolves with whether a lease took it, once it has run. With
+    // setManualRenderingOpportunities(true, true), no display tick but these reaches the leases.
+    Promise<boolean> injectClockTick(double frameTimeMs);
     undefined resetJoinCounters();
     // Prints the reasons that blocked this document the longest to the debug log.
     undefined dumpJoinCounters();
@@ -261,7 +265,8 @@ interface Internals {
     // Whether each document a frame in flight holds, and its navigable, page and window, are alive
     // (true if none is in flight).
     boolean frameInFlightReferencesAreAlive();
-    undefined setManualRenderingOpportunities(boolean enabled);
+    // With withClockTicks, the leases a render clock would tick take the display ticks injectClockTick() hands them.
+    undefined setManualRenderingOpportunities(boolean enabled, optional boolean withClockTicks = false);
     // Whether a rendering task that finds the previous rendering update's frame in flight holds its rendering
     // opportunity instead of waiting for the frame, overriding LIBWEB_RENDERING_OPPORTUNITY_HOLD until
     // resetRenderingOpportunityHold(). A test that sets it resets it.

@@ -20,6 +20,12 @@
 #include <LibWeb/HTML/LocalNavigable.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
 
+namespace Web::Layout::RustFFI {
+
+struct ClockSender;
+
+}
+
 namespace Web::HTML {
 
 // A rendering update's frame, submitted to the render side. The main thread goes back to its event loop while the
@@ -156,6 +162,9 @@ public:
     void render_clock_needs_main();
     // For tests: whether leases are left to the main thread's rendering updates, with no render clock armed.
     void set_render_clock_suspended(bool);
+    // For tests: hands the leases a render clock ticks a display tick at `frame_time` (unsafe shared current time, ms)
+    // once the main thread goes idle, and calls `on_end` once it has run, with whether a lease took it.
+    void inject_render_clock_tick(double frame_time, Function<void(bool)> on_end);
 
     // Whether the frame in flight runs the style or layout pass of `document`. The ticket keeps its documents alive.
     bool pass_in_flight_holds(DOM::Document const&) const;
@@ -263,6 +272,15 @@ private:
     // How many restores took the arenas back since the main thread last woke, and how long they took.
     u32 m_clock_lend_restores { 0 };
     u64 m_clock_lend_restore_nanoseconds { 0 };
+
+    // The display ticks tests injected, waiting for the main thread to go idle, and those the render side runs now.
+    struct InjectedClockTick {
+        double frame_time { 0 };
+        Function<void(bool)> on_end;
+    };
+    Vector<InjectedClockTick> m_injected_clock_ticks;
+    Vector<Function<void(bool)>> m_injected_clock_ticks_in_flight;
+    Layout::RustFFI::ClockSender* m_injected_clock_tick_sender { nullptr };
 
     // In the order the changes were made, which is the order the arena takes them in.
     Vector<GC::Ref<GC::Function<void()>>> m_deferred_arena_changes;
