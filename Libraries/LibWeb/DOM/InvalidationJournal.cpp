@@ -525,6 +525,13 @@ void InvalidationJournal::drain()
             return;
         auto location = SourceLocation::current();
         Layout::RustFFI::layout_arena_join_frame_owning_arena(arena->handle(), reinterpret_cast<u8 const*>(location.filename().characters_without_null_termination()), location.filename().length(), location.line_number());
+        // Taking the frame in hands the document what was marked beside it, in the journal it drains from now on, and
+        // this journal holds the marks made beside the next frame. What the drain was asked for is in the other one:
+        // an up-to-date answer read after this drain would hide those marks from the read.
+        if (m_holds_next_generation) {
+            m_document.drain_invalidation_journal();
+            return;
+        }
     }
     if (is_empty() || m_draining)
         return;
