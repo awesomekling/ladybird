@@ -1,8 +1,11 @@
 insertion: held as armed: true
+insertion: inserting a sheet and a rule joined the pass: false
 insertion: read beside the pass: 120px rgb(0, 128, 0) rgba(0, 0, 0, 0) 15px
 replaceSync: held as armed: true
+replaceSync: adopting joined the pass: false
 replaceSync: after: 140px rgb(0, 128, 0) rgb(255, 255, 0) 15px
 removal: held as armed: true
 removal: disabling joined the pass: false
+removal: removing a sheet joined the pass: false
 removal: after: 784px rgb(0, 0, 0) rgba(0, 0, 0, 0) 0px, 50
 restored: 140px rgb(0, 128, 0) rgb(255, 255, 0) 15px
