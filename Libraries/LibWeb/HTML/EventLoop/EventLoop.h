@@ -112,6 +112,9 @@ public:
         // Main's own share of a rendering update: up to the submission, then the two halves of consuming the frame.
         // A lockstep frame's main half is the whole update.
         u64 main_half_nanoseconds { 0 };
+        // The part of the main half that runs the script-observable steps before style and layout (7 to 14: autofocus,
+        // resize, scroll, media queries, animations, fullscreen and animation frame callbacks).
+        u64 observable_steps_nanoseconds { 0 };
         u64 consume_commit_nanoseconds { 0 };
         u64 consume_tail_nanoseconds { 0 };
         u64 submit_to_consume_nanoseconds { 0 };

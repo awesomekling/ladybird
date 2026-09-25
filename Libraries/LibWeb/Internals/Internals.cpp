@@ -1639,6 +1639,7 @@ GC::Ref<JS::Object> Internals::get_rendering_scheduler_counters() const
     object->define_direct_property("frameInFlightNanoseconds"_utf16_fly_string, JS::Value(counters.frame_in_flight_nanoseconds), JS::default_attributes);
     object->define_direct_property("overlapTaskNanoseconds"_utf16_fly_string, JS::Value(counters.overlap_task_nanoseconds), JS::default_attributes);
     object->define_direct_property("mainHalfNanoseconds"_utf16_fly_string, JS::Value(counters.main_half_nanoseconds), JS::default_attributes);
+    object->define_direct_property("observableStepsNanoseconds"_utf16_fly_string, JS::Value(counters.observable_steps_nanoseconds), JS::default_attributes);
     object->define_direct_property("consumeCommitNanoseconds"_utf16_fly_string, JS::Value(counters.consume_commit_nanoseconds), JS::default_attributes);
     object->define_direct_property("consumeTailNanoseconds"_utf16_fly_string, JS::Value(counters.consume_tail_nanoseconds), JS::default_attributes);
     object->define_direct_property("submitToConsumeNanoseconds"_utf16_fly_string, JS::Value(counters.submit_to_consume_nanoseconds), JS::default_attributes);
