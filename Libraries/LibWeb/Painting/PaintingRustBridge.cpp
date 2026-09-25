@@ -657,8 +657,15 @@ static void read_host_recording_inputs(HostRecordingInputs& host, DOM::Document&
         //     another canvas once it has laid out (see LocalNavigable::finish_flight_paint()).
         auto color_scheme = read_ahead_of_layout == ReadAheadOfLayout::Yes ? document.canvas_color_scheme_as_last_laid_out() : document.canvas_color_scheme();
         bool opaque_canvas = false;
-        if (auto container_element = document.navigable()->container(); container_element && container_element->layout_node()) {
-            auto container_scheme = container_element->layout_node()->color_scheme();
+        // NB: The container's document laid out ahead of this one's, which a flight reads ahead of its layout.
+        auto container_layout_node = [&]() -> Layout::NodeWithStyle const* {
+            auto container_element = document.navigable()->container();
+            if (!container_element)
+                return nullptr;
+            return read_ahead_of_layout == ReadAheadOfLayout::Yes ? container_element->unsafe_layout_node() : container_element->layout_node();
+        };
+        if (auto const* container_node = container_layout_node()) {
+            auto container_scheme = container_node->color_scheme();
             if (container_scheme == CSS::PreferredColorScheme::Auto)
                 container_scheme = CSS::PreferredColorScheme::Light;
             opaque_canvas = container_scheme != color_scheme;

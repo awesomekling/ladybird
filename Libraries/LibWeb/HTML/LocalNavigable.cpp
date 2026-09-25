@@ -7078,10 +7078,16 @@ struct LocalNavigable::FlightPaintSeal {
 bool LocalNavigable::seal_flight_paint(DOM::Document& document)
 {
     VERIFY(!m_flight_paint_seal);
-    // The flight paints a top-level navigable with nothing but its own document to show, as step 22 of the rendering
-    // update would, and only where nothing painted beside the main thread's own steps would differ.
-    if (has_been_destroyed() || !has_compositor_context() || !is_top_level_traversable() || active_document().ptr() != &document)
+    // The flight paints the navigable as step 22 of the rendering update would, and only where nothing painted beside
+    // the main thread's own steps would differ.
+    if (has_been_destroyed() || !has_compositor_context() || active_document().ptr() != &document)
         return false;
+    if (!is_local_root()) {
+        // Nested navigables paint transparent bitmaps for their parent compositor context.
+        auto parent = this->parent();
+        if (!parent || !as<LocalNavigable>(*parent).has_compositor_context())
+            return false;
+    }
     // NB: Whether the document opts out of force-dark depends on its root's box, which the flight has yet to lay out.
     if (has_inclusive_ancestor_with_visibility_hidden() || is_svg_page() || m_should_show_line_box_borders || m_should_show_caret_hit_test_debug_overlay || m_force_dark_enabled)
         return false;
@@ -7097,8 +7103,10 @@ bool LocalNavigable::seal_flight_paint(DOM::Document& document)
     paint_config.force_dark_foreground_threshold = m_force_dark_foreground_threshold;
     paint_config.force_dark_background_threshold = m_force_dark_background_threshold;
     paint_config.should_show_line_box_borders = m_should_show_line_box_borders;
-    auto viewport_size = page().css_to_device_rect(viewport_rect()).size().to_type<int>();
-    paint_config.canvas_fill_rect = Gfx::IntRect { {}, viewport_size };
+    if (is_local_root()) {
+        auto viewport_size = page().css_to_device_rect(viewport_rect()).size().to_type<int>();
+        paint_config.canvas_fill_rect = Gfx::IntRect { {}, viewport_size };
+    }
 
     Painting::InspectorOverlayInputs overlay_inputs;
     auto const& palette = page().palette();
@@ -7138,7 +7146,9 @@ bool LocalNavigable::finish_flight_paint(DOM::Document& document, FlightPaintEnd
 
     // https://drafts.csswg.org/css-color-adjust-1/#color-scheme-effect
     // On the root element, the used color scheme additionally must affect the surface color of the canvas, and the viewport’s scrollbars.
-    auto canvas_background_color = document.canvas_background_color_as_last_laid_out();
+    Optional<Color> canvas_background_color;
+    if (is_top_level_traversable())
+        canvas_background_color = document.canvas_background_color_as_last_laid_out();
 
     // NB: The flight recorded against the visual context tree it updated, which nothing has changed since: the frame
     //     in flight owned the arena until now.
@@ -7174,7 +7184,8 @@ bool LocalNavigable::finish_flight_paint(DOM::Document& document, FlightPaintEnd
         paint_again();
         return false;
     }
-    page().client().page_did_change_background_color(canvas_background_color);
+    if (canvas_background_color.has_value())
+        page().client().page_did_change_background_color(*canvas_background_color);
 
     // Keyboard eligibility reads the DOM and the layout tree as this frame paints them, which they are again now.
     auto keyboard_scroll_state = is_top_level_traversable()
