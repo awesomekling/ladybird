@@ -505,6 +505,66 @@ impl StyleEngineState {
         }
     }
 
+    /// Decide the transition step of an element or pseudo-element over the record the host installed
+    /// for it, as the host would decide it now, and publish what the step leaves of it: the host
+    /// takes the decisions and installs the composition. `Ok(None)` where the step moves nothing
+    /// the record composed; or why the engine cannot.
+    pub(crate) fn decide_installed_record_transition_step(
+        &mut self,
+        node: StyleNodeID,
+        pseudo: Option<u8>,
+        before_change_style_record: u64,
+        installed_style_record: u64,
+        layout_arena: super::animations::LentLayoutArena,
+        counters: &mut super::Counters,
+    ) -> Result<Option<super::engine_sample::SettledRowPublication>, String> {
+        let pseudo_kind = pseudo.unwrap_or(u8::MAX);
+        if self.assigned_style_record_of(node, pseudo) != Some(installed_style_record) {
+            return Err("a record the engine has moved past".into());
+        }
+        let settled_style_record = self
+            .retained
+            .computed_group_sets
+            .base_style_record_of(installed_style_record);
+        let (step, composition) = self.decide_and_compose_transition_step(
+            node,
+            pseudo,
+            before_change_style_record,
+            settled_style_record,
+            installed_style_record,
+            layout_arena,
+            counters,
+        )?;
+        match pseudo {
+            None => self.retained.transition_steps_decided_in_pass.insert(node, step),
+            Some(kind) => self
+                .retained
+                .pseudo_element_transition_steps_decided_in_pass
+                .insert((node, kind), step),
+        };
+        let Some(composition) = composition else {
+            return Ok(None);
+        };
+        // The host installs the composition as it returns, so no batch keeps it alive for a row.
+        if let Some(index) = self
+            .retained
+            .batch_pinned_compositions
+            .iter()
+            .rposition(|&pinned| pinned == (node, composition))
+        {
+            self.retained.batch_pinned_compositions.swap_remove(index);
+            self.retained.computed_group_sets.unpin_style_record(composition);
+        }
+        let published = match pseudo {
+            None => self.retained.rows_sampled_in_pass.remove(&node),
+            Some(_) => self
+                .retained
+                .pseudo_elements_sampled_in_pass
+                .remove(&(node, pseudo_kind)),
+        };
+        Ok(published)
+    }
+
     /// Decide a step and compose what the transitions it starts and removes leave of the
     /// composition installed, published as the target's record over the one the engine settled:
     /// the decisions for the host, and the published composition where the step moved it.
