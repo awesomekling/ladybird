@@ -195,7 +195,7 @@ void FrameScheduler::begin_main_half(bool synchronous)
 
 Painting::RecordingRun FrameScheduler::recording_run() const
 {
-    if (m_state == State::MainHalf && m_ticket)
+    if (m_state == State::MainHalf && m_ticket && !m_ticket->records_in_place)
         return Painting::RecordingRun::InSubmittedFrame;
     return Painting::RecordingRun::Now;
 }
@@ -484,6 +484,11 @@ void FrameScheduler::resume_rendering_update_after_flight(FrameTicket::Submitted
         return;
     case FfiFlightStage::Rounds:
     case FfiFlightStage::PaintPrep:
+        // A flight that recorded after its layout, and whose recording did not stand, recorded this rendering update's
+        // frame already: the frame the document records again for what changed since goes as a frame it would have
+        // painted in place.
+        if (flight.flight_outcome->end == Layout::RustFFI::FfiFlightEndReason::HostLeftWork)
+            m_ticket->records_in_place = true;
         m_event_loop.resume_rendering_update_after_layout({}, flight.documents, flight.document_index, flight.frame_timestamp);
         return;
     // NB: Consume-commit handed off the frame the flight recorded. The rest of the rendering update runs as after the

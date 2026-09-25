@@ -75,6 +75,11 @@ public:
         Optional<Layout::RustFFI::FfiFlightOutcome> flight_outcome {};
     };
     Optional<SubmittedPass> submitted_pass;
+
+    // Whether the rest of the rendering update records in place instead of submitting its recordings: after a flight
+    // whose recording did not stand, the rendering update records again at once rather than leave another frame in
+    // flight a task later.
+    bool records_in_place { false };
 };
 
 // Runs the rendering update's frame beside the main thread under LIBWEB_STAGE_THREAD=overlap. One rendering update is
