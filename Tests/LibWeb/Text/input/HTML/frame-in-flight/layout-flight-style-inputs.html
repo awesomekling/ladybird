@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<style id="base">
+    #box { height: 10px; }
+    [data-size="wide"] { width: 120px; }
+</style>
+<div id="container" style="width: 300px"><div id="box"></div><div id="sized">sized</div><div id="styled">styled</div></div>
+<script>
+    // Style inputs beside a layout pass in flight: a style sheet attached, a rule inserted, an inline style edited
+    // and an attribute value a selector reads. Each is recorded or published beside the pass instead of taking it
+    // in, and the next style update takes all of them.
+    asyncTest(async done => {
+        const result = await whileLayoutInFlight("before-run", () => {
+            box.style.height = "20px";
+        }, frame => {
+            const joinsBefore = internals.forcedJoinCount("layout");
+            const sheet = document.createElement("style");
+            sheet.textContent = "#styled { height: 25px; }";
+            document.head.appendChild(sheet);
+            base.sheet.insertRule("#sized { height: 15px; }", base.sheet.cssRules.length);
+            styled.style.width = "80px";
+            sized.setAttribute("data-size", "wide");
+            return {
+                ...frame,
+                joins: internals.forcedJoinCount("layout") - joinsBefore,
+                stillInFlight: !frame.heldAt || internals.frameInFlightHoldsDocument(),
+            };
+        });
+        println(`held as armed: ${layoutHeldAsArmed(result, "before-run")}`);
+        println(`forced joins of the layout pass: ${result.joins}`);
+        println(`layout pass still in flight after the writes: ${result.stillInFlight}`);
+        println(`styled: ${styled.offsetWidth}x${styled.offsetHeight}`);
+        println(`sized: ${sized.offsetWidth}x${sized.offsetHeight}`);
+        println(`container height: ${container.offsetHeight}`);
+        done();
+    });
+</script>

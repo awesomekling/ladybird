@@ -589,8 +589,9 @@ StyleAtomID StyleEngine::intern_attribute_value(StyleAtomID name, Utf16String co
 {
     auto atom = intern_atom(Utf16FlyString { value });
     // Beside a style pass the engine is the pass's: the text, and whether the name asks for it, wait for its drain
-    // with the attribute change that names the value.
-    if (Layout::RustFFI::rust_stage_thread_only_style_pass_in_flight_for(m_impl)) {
+    // with the attribute change that names the value. Beside a layout pass, which reads what the engine holds, they
+    // wait for the pass to be taken back.
+    if (Layout::RustFFI::rust_stage_thread_only_style_pass_in_flight_for(m_impl) || layout_pass_is_in_flight()) {
         publish_input([name, atom, value](StyleInputScope const& input) {
             auto& engine = input.engine();
             if (auto readers = engine.attribute_value_text_readers(name))
