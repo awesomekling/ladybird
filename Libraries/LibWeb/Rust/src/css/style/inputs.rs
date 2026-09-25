@@ -1515,6 +1515,14 @@ impl RetainedState {
 
     /// Lend out the effects the host described for one of an element's animation lists; see
     /// `AnimationEffectDescriptions::take`.
+    pub(crate) fn element_has_animation_effect_descriptions(
+        &self,
+        node: StyleNodeID,
+        slot: animations::AnimationSlot,
+    ) -> bool {
+        self.animation_effect_descriptions.contains(node, slot)
+    }
+
     pub(crate) fn take_element_animation_effect_descriptions(
         &mut self,
         node: StyleNodeID,
@@ -2037,6 +2045,7 @@ impl StyleEngineState {
                 batch_pinned_compositions: Vec::new(),
                 nodes_owing_an_animation_sample: HashSet::default(),
                 rows_sampled_in_pass: HashMap::default(),
+                pseudo_elements_sampled_in_pass: HashMap::default(),
                 next_engine_animation_overlay_identity: 0,
                 transition_baselines: HashMap::default(),
                 element_transitions: Default::default(),
@@ -2874,6 +2883,9 @@ impl StyleEngineState {
             self.retained.engine_row_child_facts.remove(&node);
             self.retained.nodes_owing_an_animation_sample.remove(&node);
             self.retained.rows_sampled_in_pass.remove(&node);
+            self.retained
+                .pseudo_elements_sampled_in_pass
+                .retain(|(owner, _), _| *owner != node);
             self.retained.release_transition_baselines_of(node);
             self.retained
                 .nodes_owing_animation_definitions

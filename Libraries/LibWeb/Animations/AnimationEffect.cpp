@@ -953,6 +953,18 @@ void apply_published_animation_overlay(CSS::StyleDrainScope const& scope, DOM::A
         Painting::repaint_after_style_change(*repaint_layout_node, invalidation);
 }
 
+void AnimationUpdateContext::publish_animation_inputs_before_sample(DOM::Element& element)
+{
+    auto& document = element.document();
+    if (&document == s_document_with_open_batch_publication && s_open_batch_publication_published) {
+        element.publish_animation_timing_rows();
+        return;
+    }
+    document.publish_animation_environment_for_style_update();
+    if (&document == s_document_with_open_batch_publication)
+        s_open_batch_publication_published = true;
+}
+
 AnimationUpdateContext::~AnimationUpdateContext()
 {
     // Building the overlay below is a style computation, and it samples each effect from the timing
@@ -966,9 +978,7 @@ AnimationUpdateContext::~AnimationUpdateContext()
             for (auto& it : elements)
                 it.key.element().publish_animation_timing_rows();
         } else {
-            document.publish_animation_environment_for_style_update();
-            if (&document == s_document_with_open_batch_publication)
-                s_open_batch_publication_published = true;
+            publish_animation_inputs_before_sample(elements.begin()->key.element());
         }
     }
 

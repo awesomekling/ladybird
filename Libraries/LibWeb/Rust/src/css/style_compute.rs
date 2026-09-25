@@ -3429,13 +3429,15 @@ unsafe extern "C" fn settled_row_overlay(context: *mut c_void) -> *mut c_void {
     context
 }
 
-/// Sample the animations of an element whose row the pass settled, over the record the row
-/// settled and before the host installs it: the effects the element's timing rows select, the
-/// environments its new record and its parent's were published with, and the length contexts and
-/// fonts the engine builds; or why the engine cannot.
+/// Sample the animations of an element whose row the pass settled, or of one of its synthetic
+/// pseudo-elements the engine settled over the element's composition, over the record the engine
+/// settled and before the host installs it: the effects the timing rows select, the environments
+/// the new record and its parent's were published with, and the length contexts and fonts the
+/// engine builds; or why the engine cannot.
 pub(crate) fn sample_settled_row(
     engine: &mut crate::css::style::StyleEngineState,
     node: crate::css::style::tree::StyleNodeID,
+    pseudo: Option<u8>,
     root: Option<crate::css::style::animations::RootElementFontMetrics>,
     layout_arena: crate::css::style::animations::LentLayoutArena,
 ) -> Result<SettledRowSample, String> {
@@ -3444,20 +3446,28 @@ pub(crate) fn sample_settled_row(
     };
     use crate::css::cascaded_properties::NO_PSEUDO_ELEMENT;
 
-    let slot = animation_slot(NO_PSEUDO_ELEMENT);
+    let pseudo_kind = pseudo.unwrap_or(NO_PSEUDO_ELEMENT);
+    let slot = animation_slot(pseudo_kind);
     let style_record = engine
-        .assigned_style_record_of(node, None)
+        .assigned_style_record_of(node, pseudo)
         .ok_or("a row without a record")?;
-    // A row that leaves an animation plan samples the stack the plan leaves.
-    let planned = match engine.element_settled_animation_plan(node) {
+    // A row that leaves an animation plan samples the stack the plan leaves. A pseudo-element's
+    // plan is applied before its records are settled.
+    let planned = match pseudo
+        .is_none()
+        .then(|| engine.element_settled_animation_plan(node))
+        .flatten()
+    {
         Some(plan) => {
             Some(plan_effect_stack(engine, node, plan).map_err(|reason| format!("animation plan: {reason}"))?)
         }
         None => None,
     };
-    let environments = engine
-        .settled_row_custom_property_environments(node)
-        .map_err(|reason| format!("custom property environments: {reason}"))?;
+    let environments = match pseudo {
+        None => engine.settled_row_custom_property_environments(node),
+        Some(kind) => engine.settled_pseudo_element_custom_property_environments(node, kind, style_record),
+    }
+    .map_err(|reason| format!("custom property environments: {reason}"))?;
     let (table, record_overlay) = {
         let view = engine.style_record_view(style_record).ok_or("a record with no view")?;
         (
@@ -3475,7 +3485,7 @@ pub(crate) fn sample_settled_row(
     let input = FfiHostAnimationSample {
         style_engine: std::ptr::null_mut(),
         style_node: node.raw(),
-        pseudo_kind: NO_PSEUDO_ELEMENT,
+        pseudo_kind,
         identities: std::ptr::null(),
         generations: std::ptr::null(),
         current_keys: std::ptr::null(),
@@ -3608,7 +3618,7 @@ pub(crate) fn sample_settled_row(
     let animated_display_before_box_type_transformation = unsafe { overlay.as_ref() }
         .filter(|sampled| sampled.get(property_id::DISPLAY).is_some())
         .map(|sampled| effective_display(unsafe { &*table.cast::<ComputedLonghandTable>() }, Some(sampled)).encoded());
-    let finalized = unsafe { finalize_engine_sample(engine, node, None, table.cast(), record_overlay, overlay) };
+    let finalized = unsafe { finalize_engine_sample(engine, node, pseudo, table.cast(), record_overlay, overlay) };
     let table = match finalized {
         Ok(table) => table,
         Err(reason) => {
@@ -6519,7 +6529,7 @@ fn animation_timeline_descriptor(value: &StyleValueData) -> (FfiAnimationTimelin
 
 /// Which of an element's animation lists a computation belongs to, in the host's own numbering:
 /// zero for the element itself, and the pseudo-element's value plus one for each pseudo-element.
-fn animation_slot(pseudo_kind: u8) -> crate::css::style::animations::AnimationSlot {
+pub(crate) fn animation_slot(pseudo_kind: u8) -> crate::css::style::animations::AnimationSlot {
     match pseudo_kind == crate::css::cascaded_properties::NO_PSEUDO_ELEMENT {
         true => 0,
         false => pseudo_kind.saturating_add(1),

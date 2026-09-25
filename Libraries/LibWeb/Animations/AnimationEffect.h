@@ -75,6 +75,10 @@ struct AnimationUpdateContext {
         bool m_previous_published { false };
     };
 
+    // Publish what an element's animations are sampled from, as a context about to sample the element
+    // does: the document's animation environment once per open batch, the element's timing rows after.
+    static void publish_animation_inputs_before_sample(DOM::Element&);
+
     // NOTE: This is lazily populated by KeyframeEffects as their respective animations are applied to an element.
     HashMap<DOM::AbstractElement, ElementData> elements;
 };

@@ -210,6 +210,9 @@ pub struct FfiEngineComputedRecord {
     /// element's, as a bit per kind; a present slot holding zero is a removal.
     pub pseudo_records_present: u8,
     pub pseudo_records: [u64; RETRY_PSEUDO_RECORD_SLOTS],
+    /// The synthetic pseudo-element kinds whose animations the engine sampled as it settled them,
+    /// as a bit per kind: their named records are the compositions, and the host samples the rest.
+    pub pseudo_samples_taken: u8,
 }
 
 /// One synchronous record demand: the row's record, or the absence of a pseudo-element that
@@ -3812,6 +3815,34 @@ pub unsafe extern "C" fn style_engine_take_row_sampled_in_pass(engine: *mut c_vo
     crate::stage_thread::join_frame_for_style_engine_entrance(engine, "style_engine_take_row_sampled_in_pass");
     let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
     let published = StyleNodeID::from_raw(node).and_then(|node| engine.take_row_sampled_in_pass(node));
+    row_sampled_in_pass(engine, published)
+}
+
+/// Takes what the engine published for a synthetic pseudo-element whose animations it sampled as
+/// it settled it, so that exactly one installation applies it.
+///
+/// # Safety
+/// `engine` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_take_pseudo_element_sampled_in_pass(
+    engine: *mut c_void,
+    node: u32,
+    pseudo_kind: u8,
+) -> FfiRowSampledInPass {
+    crate::stage_thread::join_frame_for_style_engine_entrance(
+        engine,
+        "style_engine_take_pseudo_element_sampled_in_pass",
+    );
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    let published =
+        StyleNodeID::from_raw(node).and_then(|node| engine.take_pseudo_element_sampled_in_pass(node, pseudo_kind));
+    row_sampled_in_pass(engine, published)
+}
+
+fn row_sampled_in_pass(
+    engine: &StyleEngine,
+    published: Option<super::engine_sample::SettledRowPublication>,
+) -> FfiRowSampledInPass {
     match published {
         None => FfiRowSampledInPass {
             present: false,
@@ -4171,6 +4202,7 @@ fn answer_record_demand_for_host(
                 explicit_inheritance_debt: 0,
                 pseudo_records_present: answer.pseudo_records_present,
                 pseudo_records: answer.pseudo_records,
+                pseudo_samples_taken: 0,
             },
             is_absent: false,
             is_provisional: answer.provisional,
@@ -4286,6 +4318,8 @@ pub unsafe extern "C" fn style_engine_settle_pseudo_records_after_host_record(
     node: u32,
     old_is_list_item: bool,
     take_explicit_inheritance_debt: bool,
+    sample_animations: bool,
+    layout_arena: *mut c_void,
 ) -> FfiEngineComputedRecord {
     engine_entrance(engine, "style_engine_settle_pseudo_records_after_host_record");
     abort_on_panic(|| {
@@ -4293,7 +4327,17 @@ pub unsafe extern "C" fn style_engine_settle_pseudo_records_after_host_record(
         let Some(style_node) = StyleNodeID::from_raw(node) else {
             return FfiEngineComputedRecord::default();
         };
-        let (settled, uses_substitution) = engine.settle_pseudo_records_after_host_record(style_node, old_is_list_item);
+        let (mut settled, uses_substitution) =
+            engine.settle_pseudo_records_after_host_record(style_node, old_is_list_item);
+        // A replay settles without sampling, so it compares what the settle named.
+        let settled_present = settled.pseudo_records_present;
+        // SAFETY: The host lends the document's layout arena for this call.
+        let pseudo_samples_taken = match sample_animations {
+            true => engine.sample_settled_pseudo_elements(style_node, &mut settled, unsafe {
+                super::animations::LentLayoutArena::lend(layout_arena)
+            }),
+            false => 0,
+        };
         let result = FfiEngineComputedRecord {
             style_record: settled.style_record,
             uses_substitution,
@@ -4304,12 +4348,13 @@ pub unsafe extern "C" fn style_engine_settle_pseudo_records_after_host_record(
             },
             pseudo_records_present: settled.pseudo_records_present,
             pseudo_records: settled.pseudo_records,
+            pseudo_samples_taken,
         };
         engine.record_boundary_call(EventKind::SettlePseudoRecordsAfterHostRecord, |payload| {
             payload.write_u32(node);
             payload.write_bool(old_is_list_item);
             payload.write_u64(result.style_record);
-            payload.write_u8(result.pseudo_records_present);
+            payload.write_u8(settled_present);
         });
         result
     })
