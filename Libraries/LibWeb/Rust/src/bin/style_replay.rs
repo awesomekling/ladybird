@@ -687,24 +687,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .into());
                     }
                 }
-                EventKind::CompletePublishedMatchAnswersForClosure => {
-                    let engine = read_engine(&mut event.payload, &live_engines)?;
-                    let nodes = event.payload.read_u32_vec()?;
-                    let expected = event.payload.read_bool()?;
-                    let actual = unsafe {
-                        bridge::style_engine_complete_published_match_answers_for_closure(
-                            engine,
-                            nodes.as_ptr(),
-                            nodes.len(),
-                        )
-                    };
-                    if actual != expected {
-                        return Err(format!(
-                            "published match closure completion diverged: expected {expected}, got {actual}"
-                        )
-                        .into());
-                    }
-                }
                 EventKind::ForEachFlatTreeDescendant => {
                     let engine = read_engine(&mut event.payload, &live_engines)?;
                     let root = event.payload.read_u32()?;

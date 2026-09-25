@@ -746,9 +746,9 @@ bool StyleEngine::take_diagnostic_style_transaction(StyleNodeID root, Function<v
             // A pseudo-element record is part of its element's reaction.
             if (reaction.pseudo_kind != NumericLimits<u8>::max())
                 continue;
-            // A row that joined the pass for a reaction another row derived for it is no row the
-            // transaction planned.
-            if (reaction.record_damage & to_underlying(StyleEngineFFI::FfiStyleInvalidationField::JoinedByDerivation))
+            // A row that joined the pass for a reaction another row derived for it, or the batch for
+            // an element its rows inherit from, is no row the transaction planned.
+            if (reaction.record_damage & (to_underlying(StyleEngineFFI::FfiStyleInvalidationField::JoinedByDerivation) | to_underlying(StyleEngineFFI::FfiStyleInvalidationField::JoinedForInheritance)))
                 continue;
             reaction_nodes.append(StyleNodeID { reaction.style_node });
         }
@@ -963,11 +963,6 @@ StyleEngine::PublishedStyleTransaction StyleEngine::take_style_transaction(Style
         .submission_microseconds = static_cast<u64>((bridge_started_at - submission_started_at).to_truncated_microseconds()),
         .bridge_microseconds = static_cast<u64>(bridge_microseconds),
     };
-}
-
-void StyleEngine::sort_style_deltas_for_direct_application(Span<PublishedStyleDelta> deltas) const
-{
-    StyleEngineFFI::style_engine_sort_style_deltas_for_direct_application(m_impl, deltas.data(), deltas.size());
 }
 
 bool StyleEngine::has_pending_transaction() const

@@ -107,6 +107,9 @@ pub enum FfiStyleInvalidationField {
     /// The engine derived the children's reactions from the row's move away from no record: the
     /// host applying the row to an element without style derives nothing more.
     ChildrenDerivedOverNoRecord = 1 << 27,
+    /// The row is no row the transaction planned: it joined the batch for an element a row
+    /// inherits from that has no style, or for one between two rows of the batch.
+    JoinedForInheritance = 1 << 28,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -4514,6 +4517,22 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
         .collect();
     output.style_atoms_swept = std::mem::take(&mut engine.host.style_atoms_swept);
     output.only_derived_child_reactions = engine.take_only_derived_child_reactions();
+    // The rows of a style update are matched in one cold matching batch, begun with the first of
+    // its transactions that publishes rows and ended as the update discards its outputs. A batch
+    // covering more than one sixteenth of the connected elements is dense enough that packing the
+    // scope once is cheaper than repeatedly reconstructing cold facts while matching its rows.
+    if !output.answers.is_empty() && engine.host.update_cold_matching_batch.is_none() {
+        let broad = !output.scoped || output.answers.len() * 16 > engine.connected_element_count() as usize;
+        let has_traversal = if broad {
+            engine.begin_cold_matching_batch(root)
+        } else {
+            engine.begin_adaptive_cold_matching_batch(root);
+            true
+        };
+        engine.host.update_cold_matching_batch = Some(has_traversal);
+    }
+    close_style_deltas_over_inheritance(engine, &mut output.answers);
+    sort_style_deltas_for_direct_application(engine, &mut output.answers);
     if engine.recording_id().is_some() {
         engine.record_boundary_call(EventKind::StyleDeltaBatch, |payload| {
             payload.write_u32(root.raw());
@@ -4556,20 +4575,6 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
         });
         engine.forget_recording_atom_mappings(output.reclaimed_style_atoms.iter().map(|reclaimed| reclaimed.atom));
     }
-    // The rows of a style update are matched in one cold matching batch, begun with the first of
-    // its transactions that publishes rows and ended as the update discards its outputs. A batch
-    // covering more than one sixteenth of the connected elements is dense enough that packing the
-    // scope once is cheaper than repeatedly reconstructing cold facts while matching its rows.
-    if !output.answers.is_empty() && engine.host.update_cold_matching_batch.is_none() {
-        let broad = !output.scoped || output.answers.len() * 16 > engine.connected_element_count() as usize;
-        let has_traversal = if broad {
-            engine.begin_cold_matching_batch(root)
-        } else {
-            engine.begin_adaptive_cold_matching_batch(root);
-            true
-        };
-        engine.host.update_cold_matching_batch = Some(has_traversal);
-    }
     engine.install_ffi_style_transaction_output(output);
     let output = &engine.host.ffi_style_transaction_output;
     FfiStyleTransactionView {
@@ -4585,23 +4590,10 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
     }
 }
 
-/// Orders a completed reaction batch for direct application in C++.
-///
-/// # Safety
-/// `engine` must be live, and `deltas` must name `count` writable entries.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_sort_style_deltas_for_direct_application(
-    engine: *const c_void,
-    deltas: *mut FfiStyleDelta,
-    count: usize,
-) {
-    super::seal::note_engine_call("style_engine_sort_style_deltas_for_direct_application");
-    if count == 0 {
-        return;
-    }
-    assert!(!deltas.is_null(), "a non-empty delta span must have storage");
-    let engine = unsafe { &*engine.cast::<StyleEngine>() };
-    let deltas = unsafe { std::slice::from_raw_parts_mut(deltas, count) };
+/// Orders a completed reaction batch for direct application in C++: each inheritance branch
+/// contiguously in preorder. Besides making every parent ready before its descendants, this lets a
+/// parent's derived reaction merge into an unconsumed child reaction in the same batch.
+fn sort_style_deltas_for_direct_application(engine: &StyleEngine, deltas: &mut [FfiStyleDelta]) {
     // An element's own delta leads the pseudo-element deltas settled beside it.
     let pseudo_rank = |delta: &FfiStyleDelta| {
         if delta.pseudo_kind == u8::MAX {
@@ -4632,6 +4624,89 @@ pub unsafe extern "C" fn style_engine_sort_style_deltas_for_direct_application(
             .compare_style_reaction_order(first_node, second_node)
             .then_with(|| pseudo_rank(first).cmp(&pseudo_rank(second)))
     });
+}
+
+/// A row the batch joins for an element the rows need styled before them, with `reaction`.
+fn inheritance_prerequisite_delta(node: StyleNodeID, reaction: u8) -> FfiStyleDelta {
+    FfiStyleDelta {
+        style_node: node.raw(),
+        match_answer: 0,
+        old_style_record: 0,
+        new_style_record: 0,
+        damage: FfiStyleDeltaDamage::None,
+        reaction,
+        inherited_style_groups: 0,
+        pseudo_kind: u8::MAX,
+        gap: FfiStyleDeltaGap::Materialize,
+        uses_substitution: false,
+        record_damage: FfiStyleInvalidationField::JoinedForInheritance as u32,
+        row_facts: 0,
+        explicit_inheritance_debt: 0,
+        row_effect_debt: 0,
+    }
+}
+
+/// Closes a published batch over the elements its rows inherit from and the host holds no style
+/// for, and over the elements between two of its rows.
+fn close_style_deltas_over_inheritance(engine: &mut StyleEngine, deltas: &mut Vec<FfiStyleDelta>) {
+    let mut rows: HashSet<StyleNodeID> = deltas
+        .iter()
+        .filter_map(|delta| StyleNodeID::from_raw(delta.style_node))
+        .collect();
+    let mut closure = Vec::new();
+
+    // A reaction can name an element created by editing after its new inheritance parent was
+    // inserted. Close the batch over unstyled inheritance prerequisites, which are bounded by
+    // the reaction paths rather than discovered by a document traversal.
+    let mut index = 0;
+    while index < deltas.len() {
+        let node = StyleNodeID::from_raw(deltas[index].style_node).expect("a style delta must name an element");
+        index += 1;
+        let mut ancestor = engine.tree.inheritance_parent(node);
+        while let Some(prerequisite) = ancestor {
+            if engine.host.held_style_records.contains_key(&prerequisite) {
+                break;
+            }
+            if rows.insert(prerequisite) {
+                deltas.push(inheritance_prerequisite_delta(
+                    prerequisite,
+                    super::transaction::STYLE_REACTION_RECOMPUTE_STYLE,
+                ));
+                closure.push(prerequisite);
+            }
+            ancestor = engine.tree.inheritance_parent(prerequisite);
+        }
+    }
+
+    // A published descendant may have an inheritance ancestor in the batch while the nodes
+    // between them have no selector reaction of their own. Keep zero-bit scheduling slots for
+    // that gap so derived inheritance bits can reach the descendant before its published
+    // reaction is consumed.
+    let row_count_before_gaps = deltas.len();
+    let mut gap = Vec::new();
+    for index in 0..row_count_before_gaps {
+        let node = StyleNodeID::from_raw(deltas[index].style_node).expect("a style delta must name an element");
+        gap.clear();
+        let mut ancestor = engine.tree.inheritance_parent(node);
+        while let Some(between) = ancestor {
+            if rows.contains(&between) {
+                for &node in &gap {
+                    if rows.insert(node) {
+                        deltas.push(inheritance_prerequisite_delta(node, 0));
+                        closure.push(node);
+                    }
+                }
+                break;
+            }
+            gap.push(between);
+            ancestor = engine.tree.inheritance_parent(between);
+        }
+    }
+    if !closure.is_empty() {
+        engine
+            .complete_published_match_answers_for_closure(&closure)
+            .expect("the rows a batch joins for inheritance have complete match answers");
+    }
 }
 
 /// Keeps the custom-property environment an element now holds. A null `data` records that the
