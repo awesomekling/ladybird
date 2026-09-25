@@ -294,6 +294,9 @@ struct SubmittedStage {
     // The stage whose hold on the document this one has: its own label, or for a flight, the label
     // of the furthest stage it may run (see [`submit_flight`]).
     role: &'static str,
+    // The labels a test's hold may name to hold this run: its own, and those of the stages of a
+    // flight it may run ("flight:style").
+    hold_labels: Vec<&'static str>,
     // The arena of the document the stage runs for, as the handle the main thread knows it by.
     arena: usize,
     // Whether the stage owns `arena` while it runs. A style pass does not: it reaches only its
@@ -344,7 +347,7 @@ impl SubmittedStage {
     /// Waits for the stage to finish without taking its outcome, which stays for the frame's
     /// consume.
     fn wait_until_finished(&mut self) {
-        release_hold_on(self.label);
+        release_hold_on(&self.hold_labels);
         self.recall();
         if self.outcome.is_none() {
             self.outcome = Some(self.from_stage.recv().unwrap_or_else(|_| std::process::abort()));
@@ -353,7 +356,7 @@ impl SubmittedStage {
 
     fn wait(&mut self) -> StageOutcome {
         // A held stage would never finish while the main thread waits for it.
-        release_hold_on(self.label);
+        release_hold_on(&self.hold_labels);
         self.recall();
         match self.outcome.take() {
             Some(outcome) => outcome,
@@ -419,7 +422,7 @@ fn inputs_wait_for_take_back(label: &str) -> bool {
 /// main-thread path to it has to go through [`join_frame_in_flight`] first.
 pub(crate) unsafe fn submit_stage(label: &'static str, arena: *mut c_void, stage: impl FnOnce() + Send + 'static) {
     // SAFETY: Guaranteed by the caller.
-    unsafe { submit(label, label, arena, stage, None) }
+    unsafe { submit(label, label, vec![label], arena, stage, None) }
 }
 
 /// Like [`submit_stage`], and has the main thread run `on_taken_back` once it has taken the stage
@@ -436,7 +439,7 @@ pub(crate) unsafe fn submit_stage_with_take_back(
     on_taken_back: impl FnOnce() + 'static,
 ) {
     // SAFETY: Guaranteed by the caller.
-    unsafe { submit(label, label, arena, stage, Some(Box::new(on_taken_back))) }
+    unsafe { submit(label, label, vec![label], arena, stage, Some(Box::new(on_taken_back))) }
 }
 
 /// The label of a flight: one stage run that runs the stages of a rendering update one after
@@ -451,19 +454,32 @@ pub(crate) fn submits_flight() -> bool {
 
 /// Like [`submit_stage_with_take_back`], for a flight that may run the stages up to `reach`: the
 /// frame holds the document as a submitted stage `reach` would, which holds it as every stage
-/// before it does.
+/// before it does. A test's hold on one of `stage_holds`, the stages the flight may run, holds it.
 ///
 /// # Safety
 ///
 /// As for [`submit_stage`].
 pub(crate) unsafe fn submit_flight(
     reach: &'static str,
+    stage_holds: &[&'static str],
     arena: *mut c_void,
     stage: impl FnOnce() + Send + 'static,
     on_taken_back: impl FnOnce() + 'static,
 ) {
+    let hold_labels = std::iter::once(FLIGHT_STAGE)
+        .chain(stage_holds.iter().copied())
+        .collect();
     // SAFETY: Guaranteed by the caller.
-    unsafe { submit(FLIGHT_STAGE, reach, arena, stage, Some(Box::new(on_taken_back))) }
+    unsafe {
+        submit(
+            FLIGHT_STAGE,
+            reach,
+            hold_labels,
+            arena,
+            stage,
+            Some(Box::new(on_taken_back)),
+        );
+    }
 }
 
 /// # Safety
@@ -472,6 +488,7 @@ pub(crate) unsafe fn submit_flight(
 unsafe fn submit(
     label: &'static str,
     role: &'static str,
+    hold_labels: Vec<&'static str>,
     arena: *mut c_void,
     stage: impl FnOnce() + Send + 'static,
     on_taken_back: Option<Box<dyn FnOnce()>>,
@@ -506,6 +523,7 @@ unsafe fn submit(
         tsan::release(thread);
         hold_here(FfiStageHoldPoint::BeforeCompletion);
         RUNNING_SUBMITTED_RUN.with(|running| running.set(None));
+        RUNNING_FLIGHT_STAGE.with(|running| running.set(None));
         // The caller keeps the receiver until it has taken this reply.
         let _ = to_caller.send(outcome);
         frame_completion_notify();
@@ -519,6 +537,7 @@ unsafe fn submit(
         submitted.push(SubmittedStage {
             label,
             role,
+            hold_labels,
             arena: arena as usize,
             owns_arena: role != "style",
             style_engine: style_engine_of_stage(role, arena),
@@ -621,6 +640,7 @@ pub(crate) unsafe fn lend_arena(
         submitted.push(SubmittedStage {
             label: LEND_STAGE,
             role: LEND_STAGE,
+            hold_labels: vec![LEND_STAGE],
             arena: arena as usize,
             owns_arena: true,
             // SAFETY: Guaranteed by the caller; the main thread still owns the arena.
@@ -697,6 +717,7 @@ pub unsafe extern "C" fn rust_stage_thread_submit_presentation(
         submit(
             PRESENTATION_STAGE,
             PRESENTATION_STAGE,
+            vec![PRESENTATION_STAGE],
             arena,
             move || {
                 let context = context.into_inner();
@@ -787,6 +808,8 @@ static NEXT_SUBMITTED_RUN: AtomicU64 = AtomicU64::new(1);
 thread_local! {
     // On the stage thread, the submitted run it is running.
     static RUNNING_SUBMITTED_RUN: Cell<Option<SubmittedRun>> = const { Cell::new(None) };
+    // On the stage thread, the stage of the flight it is running, as a hold names it ("flight:record").
+    static RUNNING_FLIGHT_STAGE: Cell<Option<&'static str>> = const { Cell::new(None) };
 }
 
 /// Which run a test's hold is armed for.
@@ -840,9 +863,13 @@ pub unsafe extern "C" fn rust_stage_thread_hold_next_submitted_stage(
     }
     // SAFETY: Guaranteed by the caller.
     let label = unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(label, label_length)) };
-    // A hold on a stage of a flight is named after the flight, as "flight:style".
-    let submitted_label = label.split_once(':').map_or(label, |(flight, _)| flight);
-    if !stage_overlaps(submitted_label) {
+    // A hold on a stage of a flight is named after the flight, as "flight:style", and a hold may name
+    // the stages it holds the first run of, as "recording|flight:record".
+    let overlaps = label.split('|').any(|stage| {
+        let submitted_label = stage.split_once(':').map_or(stage, |(flight, _)| flight);
+        stage_overlaps(submitted_label)
+    });
+    if !overlaps {
         return false;
     }
     let (mut hold, _) = lock_stage_hold();
@@ -882,7 +909,7 @@ pub extern "C" fn rust_stage_thread_wait_for_held_stage(timeout_ms: u32, held_at
         };
         let submitted_armed_run = SUBMITTED.with(|submitted| {
             submitted.borrow().iter().any(|stage| {
-                hold_names_stage(&armed.label, stage.label) && (armed.arena == 0 || armed.arena == stage.arena)
+                hold_names_stage(&armed.label, &stage.hold_labels) && (armed.arena == 0 || armed.arena == stage.arena)
             })
         });
         if !submitted_armed_run || now >= deadline {
@@ -897,12 +924,12 @@ pub extern "C" fn rust_stage_thread_wait_for_held_stage(timeout_ms: u32, held_at
 
 /// Releases the run the stage thread is holding, and disarms a hold for `label` that the stage
 /// thread has not reached yet. A hold for another stage stays armed.
-fn release_hold_on(label: &'static str) {
+fn release_hold_on(hold_labels: &[&'static str]) {
     let (mut hold, changed) = lock_stage_hold();
     if hold
         .armed
         .as_ref()
-        .is_some_and(|armed| hold_names_stage(&armed.label, label))
+        .is_some_and(|armed| hold_names_stage(&armed.label, hold_labels))
     {
         hold.armed = None;
     }
@@ -926,7 +953,7 @@ fn stage_thread_holds_run_for_queued_stage() -> bool {
         };
         let armed_run_pending = SUBMITTED.with_borrow_mut(|submitted| {
             submitted.iter_mut().any(|stage| {
-                hold_names_stage(&armed.label, stage.label)
+                hold_names_stage(&armed.label, &stage.hold_labels)
                     && (armed.arena == 0 || armed.arena == stage.arena)
                     && !stage.poll()
             })
@@ -942,10 +969,10 @@ fn stage_thread_holds_run_for_queued_stage() -> bool {
     }
 }
 
-/// Whether a hold armed for `armed` holds a run of the submitted stage `label`: one armed for the
-/// stage itself, or for one of the stages of a flight ("flight:style").
-fn hold_names_stage(armed: &str, label: &str) -> bool {
-    armed == label || armed.strip_prefix(label).is_some_and(|rest| rest.starts_with(':'))
+/// Whether a hold armed for `armed` holds a run of a submitted stage a hold may name by one of
+/// `hold_labels`. A hold names the stages it holds the first run of, as "recording|flight:record".
+fn hold_names_stage(armed: &str, hold_labels: &[&'static str]) -> bool {
+    armed.split('|').any(|armed| hold_labels.contains(&armed))
 }
 
 /// On the stage thread, at `point` of a submitted run: waits while a hold is armed for it.
@@ -955,9 +982,17 @@ pub(crate) fn hold_here(point: FfiStageHoldPoint) {
 }
 
 /// On the stage thread, before a flight runs its stage `stage` (a label such as "flight:style"):
-/// waits while a hold is armed for that stage at [`FfiStageHoldPoint::BeforeRun`].
+/// waits while a hold is armed for that stage at [`FfiStageHoldPoint::BeforeRun`]. A hold in the
+/// middle of the recording names the stage too, until the flight runs the next one.
 pub(crate) fn hold_before_flight_stage(stage: &'static str) {
+    RUNNING_FLIGHT_STAGE.with(|running| running.set(Some(stage)));
     hold_at(FfiStageHoldPoint::BeforeRun, Some(stage));
+}
+
+/// On the stage thread, once a flight has run up to its stage `stage`: waits while a hold is armed
+/// for that stage at [`FfiStageHoldPoint::BeforeCompletion`].
+pub(crate) fn hold_before_flight_completion(stage: &'static str) {
+    hold_at(FfiStageHoldPoint::BeforeCompletion, Some(stage));
 }
 
 fn hold_at(point: FfiStageHoldPoint, flight_stage: Option<&'static str>) {
@@ -966,7 +1001,14 @@ fn hold_at(point: FfiStageHoldPoint, flight_stage: Option<&'static str>) {
     };
     let (mut hold, changed) = lock_stage_hold();
     let holds_run = hold.armed.as_ref().is_some_and(|armed| {
-        armed.label == flight_stage.unwrap_or(run.label)
+        let held_label = flight_stage
+            .or_else(|| {
+                (point == FfiStageHoldPoint::MidRecording)
+                    .then(|| RUNNING_FLIGHT_STAGE.with(Cell::get))
+                    .flatten()
+            })
+            .unwrap_or(run.label);
+        armed.label.split('|').any(|stage| stage == held_label)
             && armed.point == point
             && (armed.arena == 0 || armed.arena == run.arena)
     });
@@ -1760,6 +1802,7 @@ mod tests {
                 submitted.borrow_mut().push(SubmittedStage {
                     label,
                     role: label,
+                    hold_labels: vec![label],
                     arena,
                     owns_arena: label != "style",
                     style_engine,

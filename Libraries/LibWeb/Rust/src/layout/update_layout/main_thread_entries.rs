@@ -135,3 +135,15 @@ unsafe extern "C" fn layout_arena_take_in_clock_layout_frame(arena: *mut c_void)
 extern "C" fn layout_arena_clock_layout_frame_laid_out(arena: *mut c_void) -> bool {
     crate::clock_frames::clock_layout_frame_laid_out(arena)
 }
+
+/// Ends the layout frame a flight ran and recorded the document after, as
+/// [`finish_layout_frame_taken_back`] does. Answers whether the recording stands.
+pub(super) fn finish_layout_frame_recorded_in_flight(arena: *mut c_void, frame: LayoutFrame) -> bool {
+    // SAFETY: Only the take-back of the flight the update submitted calls this, on the document
+    // thread, for the arena whose update is still running.
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+    abort_on_panic(|| {
+        // SAFETY: As above.
+        unsafe { super::finish_layout_frame_recorded_in_flight(&main_thread, frame) }
+    })
+}

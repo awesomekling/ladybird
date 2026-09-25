@@ -466,7 +466,19 @@ public:
 
     Color background_color() const;
     Color canvas_background_color() const;
+    Color canvas_background_color_as_last_laid_out() const;
+    u64 hit_test_display_list_invalidations() const { return m_hit_test_display_list_invalidations; }
+    // Whether something the document shows keeps its flight from recording it after its layout: what only the main
+    // thread paints (inspector overlays, a caret, a focused text control or area) or what the rendering update's steps
+    // after its layout can change before its paint (resize observers, animations, view transitions, scroll-state
+    // queries, nested navigables).
+    bool flight_paint_is_blocked() const;
+    // Takes in what the document's flight prepared of its paint state.
+    void take_in_flight_paint();
     CSS::PreferredColorScheme canvas_color_scheme() const;
+    // The canvas color scheme as the root's box last laid out shows it, which a flight's seal reads ahead of the layout
+    // the flight runs.
+    CSS::PreferredColorScheme canvas_color_scheme_as_last_laid_out() const;
     CSS::ImageRendering background_image_rendering() const;
 
     Optional<Color> normal_link_color() const;

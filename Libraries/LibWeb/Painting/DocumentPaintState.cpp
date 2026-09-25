@@ -96,6 +96,15 @@ void DocumentPaintState::update_accumulated_visual_contexts(DOM::Document& docum
     m_visual_context_tree_needs_compositor_update = true;
 }
 
+void DocumentPaintState::did_update_accumulated_visual_contexts_in_flight(Layout::RustFFI::FfiVisualContextUpdateOutcome const& outcome)
+{
+    if (outcome.performed_full_build)
+        ++m_accumulated_visual_context_tree_build_count;
+    else
+        ++m_accumulated_visual_context_tree_incremental_update_count;
+    m_visual_context_tree_needs_compositor_update = true;
+}
+
 void DocumentPaintState::update_visual_viewport_accumulated_visual_context(DOM::Document& document)
 {
     if (!has_visual_context_tree()) {

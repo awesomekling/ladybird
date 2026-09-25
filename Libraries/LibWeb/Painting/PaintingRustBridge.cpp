@@ -526,14 +526,43 @@ bool last_recording_missed_vector_images(DOM::Document const& document)
     return Layout::RustFFI::layout_arena_last_recording_missed_vector_images(layout_arena_handle(document));
 }
 
-Optional<PendingDisplayListRecording> begin_rust_display_list_recording(DOM::Document& document, Compositing::DisplayList const& placeholder_display_list, Compositing::DisplayListResourceStorage& resource_storage, PaintCommandCacheMode cache_mode, HTML::PaintConfig const& config, InspectorOverlayInputs const& overlay_inputs, RecordingRun run)
-{
-    auto* arena = layout_arena_handle(document);
-    RecordingPublishContext publish_context { resource_storage, document };
-    auto device_pixels_per_css_pixel = document.page().client().device_pixels_per_css_pixel();
-    auto device_viewport_rect = document.page().css_to_device_rect(document.viewport_rect());
-    auto wheel_event_region_state = document.paint_state().collect_root_blocking_wheel_event_regions(document);
+namespace {
+
+// What a recording reads of the host, with the storage the pointers in its inputs point into.
+struct HostRecordingInputs {
+    AK_MAKE_NONCOPYABLE(HostRecordingInputs);
+    AK_MAKE_NONMOVABLE(HostRecordingInputs);
+
+public:
+    HostRecordingInputs() = default;
+
     Layout::RustFFI::FfiRecordingInputs inputs {};
+    Vector<Layout::RustFFI::FfiGridOverlayInput> grid_overlays;
+    OverlayLabelFonts grid_label_fonts;
+    Vector<Layout::RustFFI::FfiFlexOverlayInput> flex_overlays;
+    ByteString inspector_highlight_label_text;
+    OverlayLabelFonts inspector_label_fonts;
+    Vector<u8> focused_area_path_bytes;
+    DevicePixelRect device_viewport_rect;
+    BlockingWheelEventRegionState wheel_event_region_state;
+};
+
+}
+
+// Whether the recording inputs are read ahead of the layout that the recording follows, for a flight.
+enum class ReadAheadOfLayout : u8 {
+    No,
+    Yes,
+};
+
+static void read_host_recording_inputs(HostRecordingInputs& host, DOM::Document& document, PaintCommandCacheMode cache_mode, HTML::PaintConfig const& config, InspectorOverlayInputs const& overlay_inputs, ReadAheadOfLayout read_ahead_of_layout = ReadAheadOfLayout::No)
+{
+    auto device_pixels_per_css_pixel = document.page().client().device_pixels_per_css_pixel();
+    host.device_viewport_rect = document.page().css_to_device_rect(document.viewport_rect());
+    auto const& device_viewport_rect = host.device_viewport_rect;
+    host.wheel_event_region_state = document.paint_state().collect_root_blocking_wheel_event_regions(document);
+    auto const& wheel_event_region_state = host.wheel_event_region_state;
+    auto& inputs = host.inputs;
     if (overlay_inputs.highlighted_layout_node) {
         inputs.has_inspector_highlight = true;
         inputs.inspector_highlight_paintable = committed_row_slot(*overlay_inputs.highlighted_layout_node);
@@ -541,8 +570,8 @@ Optional<PendingDisplayListRecording> begin_rust_display_list_recording(DOM::Doc
     inputs.tooltip_color = overlay_inputs.tooltip_color;
     inputs.tooltip_text_color = overlay_inputs.tooltip_text_color;
     inputs.tooltip_border_color = overlay_inputs.tooltip_border_color;
-    Vector<Layout::RustFFI::FfiGridOverlayInput> ffi_grid_overlays;
-    OverlayLabelFonts grid_label_fonts;
+    auto& ffi_grid_overlays = host.grid_overlays;
+    auto& grid_label_fonts = host.grid_label_fonts;
     if (!overlay_inputs.grid_highlights.is_empty()) {
         grid_label_fonts = overlay_label_fonts(10.0f, device_pixels_per_css_pixel);
         inputs.grid_label_fonts = grid_label_fonts.ffi();
@@ -561,7 +590,7 @@ Optional<PendingDisplayListRecording> begin_rust_display_list_recording(DOM::Doc
     }
     inputs.grid_overlays = ffi_grid_overlays.data();
     inputs.grid_overlay_count = ffi_grid_overlays.size();
-    Vector<Layout::RustFFI::FfiFlexOverlayInput> ffi_flex_overlays;
+    auto& ffi_flex_overlays = host.flex_overlays;
     for (auto const& highlight : overlay_inputs.flex_highlights) {
         ffi_flex_overlays.append({
             .paintable = committed_row_slot(*highlight.layout_node),
@@ -571,8 +600,8 @@ Optional<PendingDisplayListRecording> begin_rust_display_list_recording(DOM::Doc
     inputs.flex_overlays = ffi_flex_overlays.data();
     inputs.flex_overlay_count = ffi_flex_overlays.size();
     inputs.caret_debug_rect = overlay_inputs.caret_debug_rect;
-    ByteString inspector_highlight_label_text;
-    OverlayLabelFonts inspector_label_fonts;
+    auto& inspector_highlight_label_text = host.inspector_highlight_label_text;
+    auto& inspector_label_fonts = host.inspector_label_fonts;
     if (overlay_inputs.highlighted_layout_node) {
         auto const& layout_node = *overlay_inputs.highlighted_layout_node;
         auto border_rect = absolute_border_box_rect(layout_node);
@@ -621,10 +650,12 @@ Optional<PendingDisplayListRecording> begin_rust_display_list_recording(DOM::Doc
     }
     inputs.caret = resolve_document_caret_paint(document);
     inputs.focused_text_control = resolve_focused_text_control_selection(document);
-    Vector<u8> focused_area_path_bytes;
+    auto& focused_area_path_bytes = host.focused_area_path_bytes;
     inputs.focused_area_outline = resolve_focused_area_outline(document, focused_area_path_bytes);
     {
-        auto color_scheme = document.canvas_color_scheme();
+        // NB: The root's style is final ahead of the layout, and a flight's recording is dropped if the root's box shows
+        //     another canvas once it has laid out (see LocalNavigable::finish_flight_paint()).
+        auto color_scheme = read_ahead_of_layout == ReadAheadOfLayout::Yes ? document.canvas_color_scheme_as_last_laid_out() : document.canvas_color_scheme();
         bool opaque_canvas = false;
         if (auto container_element = document.navigable()->container(); container_element && container_element->layout_node()) {
             auto container_scheme = container_element->layout_node()->color_scheme();
@@ -639,6 +670,17 @@ Optional<PendingDisplayListRecording> begin_rust_display_list_recording(DOM::Doc
         inputs.bitmap_rect = bitmap_rect;
         inputs.background_color = document.background_color();
     }
+}
+
+Optional<PendingDisplayListRecording> begin_rust_display_list_recording(DOM::Document& document, Compositing::DisplayList const& placeholder_display_list, Compositing::DisplayListResourceStorage& resource_storage, PaintCommandCacheMode cache_mode, HTML::PaintConfig const& config, InspectorOverlayInputs const& overlay_inputs, RecordingRun run)
+{
+    auto* arena = layout_arena_handle(document);
+    RecordingPublishContext publish_context { resource_storage, document };
+    HostRecordingInputs host;
+    read_host_recording_inputs(host, document, cache_mode, config, overlay_inputs);
+    auto& inputs = host.inputs;
+    auto const& device_viewport_rect = host.device_viewport_rect;
+    auto const& wheel_event_region_state = host.wheel_event_region_state;
     reconcile_navigable_container_paint_facts(document);
     // Rendering an SVG-as-image lays out and records its document, so it happens here on the main
     // thread before the recording starts; the recording only looks the renders up.
@@ -663,6 +705,25 @@ Optional<PendingDisplayListRecording> begin_rust_display_list_recording(DOM::Doc
         .device_viewport_rect = device_viewport_rect,
         .wheel_event_region_state = wheel_event_region_state,
         .timer = rust_timer,
+    };
+}
+
+FlightRecordingSeal seal_rust_display_list_recording_for_flight(DOM::Document& document, Compositing::DisplayListResourceStorage& resource_storage, HTML::PaintConfig const& config, InspectorOverlayInputs const& overlay_inputs)
+{
+    auto* arena = layout_arena_handle(document);
+    RecordingPublishContext publish_context { resource_storage, document };
+    // The flight updates the visual contexts for these inputs, as a recording prepared here would.
+    publish_visual_context_tree_inputs(document);
+    HostRecordingInputs host;
+    read_host_recording_inputs(host, document, PaintCommandCacheMode::ReadWrite, config, overlay_inputs, ReadAheadOfLayout::Yes);
+    reconcile_navigable_container_paint_facts(document);
+    Layout::RustFFI::layout_arena_resolve_painted_vector_images(arena, &host.inputs, vector_image_callbacks(publish_context));
+    Layout::RustFFI::layout_arena_seal_flight_paint(arena, host.inputs);
+    return {
+        .device_viewport_rect = host.device_viewport_rect,
+        .wheel_event_region_state = host.wheel_event_region_state,
+        .canvas_color = host.inputs.canvas_color,
+        .background_color = host.inputs.background_color,
     };
 }
 

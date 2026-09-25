@@ -336,6 +336,21 @@ public:
     Compositor::NavigablePresenter const& presenter_beside_frame_in_flight() const { return *m_presenter; }
     Compositing::DisplayListResourceStorage& display_list_resource_storage();
 
+    // LIBWEB_STAGE_OVERLAP naming flight: seals what the recording that the document's flight makes after its layout
+    // reads, if the navigable may be painted that way. Returns whether it sealed it.
+    bool seal_flight_paint(DOM::Document&);
+    // Takes in the paint of the document's flight once the flight has been taken back: publishes the recording the
+    // flight made, and hands off its compositor frame if the recording stands. Returns whether it painted a frame.
+    enum class FlightPaintEnd : u8 {
+        NotRecorded,
+        // The flight recorded, and the recording stands unless what ran beside the flight changed what it shows.
+        Recorded,
+        // The flight recorded, and paying its layout's host halves left more work.
+        RecordedAheadOfMoreWork,
+    };
+    bool finish_flight_paint(DOM::Document&, FlightPaintEnd);
+    bool has_sealed_flight_paint() const { return m_flight_paint_seal; }
+
     bool needs_repaint() const { return m_needs_repaint; }
     void set_needs_repaint() { m_needs_repaint = true; }
     bool needs_to_record_display_list() const { return m_needs_to_record_display_list; }
@@ -595,6 +610,9 @@ private:
     bool m_is_svg_page { false };
     bool m_needs_repaint { true };
     bool m_needs_to_record_display_list { true };
+
+    struct FlightPaintSeal;
+    OwnPtr<FlightPaintSeal> m_flight_paint_seal;
     bool m_pending_set_browser_zoom_request { false };
     bool m_should_show_line_box_borders { false };
     bool m_force_dark_enabled { false };

@@ -7065,6 +7065,137 @@ void LocalNavigable::adopt_render_clock_frame_kit(RenderClockFrameKit& kit)
     document->adopt_published_recording(*kit.recording, *presentation.published);
 }
 
+// What the recording that a document's flight makes after its layout reads of the navigable, sealed where the flight
+// was submitted.
+struct LocalNavigable::FlightPaintSeal {
+    AK_ALLOC_WITH_KMALLOC;
+
+    PaintConfig paint_config;
+    Painting::FlightRecordingSeal recording;
+    u64 hit_test_display_list_invalidations { 0 };
+};
+
+bool LocalNavigable::seal_flight_paint(DOM::Document& document)
+{
+    VERIFY(!m_flight_paint_seal);
+    // The flight paints a top-level navigable with nothing but its own document to show, as step 22 of the rendering
+    // update would, and only where nothing painted beside the main thread's own steps would differ.
+    if (has_been_destroyed() || !has_compositor_context() || !is_top_level_traversable() || active_document().ptr() != &document)
+        return false;
+    // NB: Whether the document opts out of force-dark depends on its root's box, which the flight has yet to lay out.
+    if (has_inclusive_ancestor_with_visibility_hidden() || is_svg_page() || m_should_show_line_box_borders || m_should_show_caret_hit_test_debug_overlay || m_force_dark_enabled)
+        return false;
+    if (m_presenter->is_lent_to_frame_in_flight())
+        return false;
+    if (document.font_computer().should_defer_initial_paint() || !document.has_paint_state() || !document.has_committed_viewport_box())
+        return false;
+    if (document.flight_paint_is_blocked())
+        return false;
+
+    PaintConfig paint_config { .paint_overlay = true, .should_show_caret_hit_test_debug_overlay = m_should_show_caret_hit_test_debug_overlay };
+    paint_config.force_dark_enabled = false;
+    paint_config.force_dark_foreground_threshold = m_force_dark_foreground_threshold;
+    paint_config.force_dark_background_threshold = m_force_dark_background_threshold;
+    paint_config.should_show_line_box_borders = m_should_show_line_box_borders;
+    auto viewport_size = page().css_to_device_rect(viewport_rect()).size().to_type<int>();
+    paint_config.canvas_fill_rect = Gfx::IntRect { {}, viewport_size };
+
+    Painting::InspectorOverlayInputs overlay_inputs;
+    auto const& palette = page().palette();
+    overlay_inputs.tooltip_color = palette.color(Gfx::ColorRole::Tooltip);
+    overlay_inputs.tooltip_text_color = palette.color(Gfx::ColorRole::TooltipText);
+    overlay_inputs.tooltip_border_color = palette.threed_shadow1();
+
+    // The canvases the rendering update drew so far show in the recording, as step 22 flushes them before it paints.
+    page().prepare_canvas_contexts_for_compositing();
+    auto hit_test_display_list_invalidations = document.hit_test_display_list_invalidations();
+    auto recording = Painting::seal_rust_display_list_recording_for_flight(document, presenter().resource_storage(), paint_config, overlay_inputs);
+    m_flight_paint_seal = make<FlightPaintSeal>(FlightPaintSeal {
+        .paint_config = paint_config,
+        .recording = recording,
+        .hit_test_display_list_invalidations = hit_test_display_list_invalidations,
+    });
+    // What asks for another paint beside the flight asks for the next one.
+    m_needs_repaint = false;
+    m_needs_to_record_display_list = false;
+    return true;
+}
+
+bool LocalNavigable::finish_flight_paint(DOM::Document& document, FlightPaintEnd end)
+{
+    auto seal = move(m_flight_paint_seal);
+    VERIFY(seal);
+    if (document.has_paint_state())
+        document.take_in_flight_paint();
+    auto paint_again = [&] {
+        m_needs_repaint = true;
+        m_needs_to_record_display_list = true;
+    };
+    if (end == FlightPaintEnd::NotRecorded || !document.has_paint_state()) {
+        paint_again();
+        return false;
+    }
+
+    // https://drafts.csswg.org/css-color-adjust-1/#color-scheme-effect
+    // On the root element, the used color scheme additionally must affect the surface color of the canvas, and the viewport’s scrollbars.
+    auto canvas_background_color = document.canvas_background_color_as_last_laid_out();
+
+    // NB: The flight recorded against the visual context tree it updated, which nothing has changed since: the frame
+    //     in flight owned the arena until now.
+    auto recording = make<Painting::PendingDisplayListRecording>(Painting::PendingDisplayListRecording {
+        .document = document,
+        .arena = document.layout_node_arena().handle(),
+        .resource_storage = presenter().resource_storage(),
+        .visual_context_tree = document.paint_state().visual_context_tree_without_update(document),
+        .cache_mode = Painting::PaintCommandCacheMode::ReadWrite,
+        .run = Painting::RecordingRun::InSubmittedFrame,
+        .surface_clear_color = canvas_background_color,
+        .device_viewport_rect = seal->recording.device_viewport_rect,
+        .wheel_event_region_state = seal->recording.wheel_event_region_state,
+        .hit_test_display_list_invalidations = seal->hit_test_display_list_invalidations,
+        .timer = Core::ElapsedTimer::start_new(Core::TimerType::Precise),
+    });
+    if (Painting::discard_retired_rust_display_list_recording(*recording)) {
+        paint_again();
+        return false;
+    }
+
+    // The recording does not stand if paying the layout's host halves left more work, if a task beside the flight tore
+    // down what it recorded for or changed what it laid out, or if the layout gave the root a box showing another canvas
+    // than the one the flight read ahead of it. It is published all the same, for the paint caches it filled to stay in
+    // step with the display list they point into, and shows nowhere: the rendering update paints what is there now.
+    auto shows_sealed_canvas = [&] {
+        return CSS::SystemColor::canvas(document.canvas_color_scheme_as_last_laid_out()) == seal->recording.canvas_color && document.background_color() == seal->recording.background_color;
+    };
+    bool const stands = end == FlightPaintEnd::Recorded && !has_been_destroyed() && has_compositor_context() && active_document().ptr() == &document
+        && document.layout_is_up_to_date() && shows_sealed_canvas();
+    if (!stands) {
+        (void)document.finish_display_list_recording(*recording);
+        paint_again();
+        return false;
+    }
+    page().client().page_did_change_background_color(canvas_background_color);
+
+    // Keyboard eligibility reads the DOM and the layout tree as this frame paints them, which they are again now.
+    auto keyboard_scroll_state = is_top_level_traversable()
+        ? page().take_keyboard_scroll_state_for_compositor(Compositor::keyboard_scroll_epoch_placeholder)
+        : Compositing::KeyboardScrollState {};
+    PendingCompositorFrame pending_frame {
+        .document = document,
+        .paint_config = seal->paint_config,
+        .keyboard_scroll_state = move(keyboard_scroll_state),
+        .recording = move(recording),
+        .presentation = {},
+    };
+    if (Compositor::render_presents()) {
+        pending_frame.presentation = seal_presentation(pending_frame);
+        if (pending_frame.presentation)
+            pending_frame.presentation->inputs.present_viewport_rect = page().css_to_device_rect(viewport_rect()).to_type<int>();
+    }
+    finish_painting_next_frame(pending_frame);
+    return true;
+}
+
 void LocalNavigable::finish_painting_next_frame(PendingCompositorFrame& pending_frame)
 {
     // A render clock kit is sealed as this frame was.

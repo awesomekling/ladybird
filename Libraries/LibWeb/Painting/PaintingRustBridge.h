@@ -66,6 +66,18 @@ struct InspectorOverlayInputs {
 // Resolves what the recording reads on the main thread and has the render side record it. Returns nothing if there is
 // nothing to record; otherwise finish_rust_display_list_recording() finishes it once the render side has recorded it.
 WEB_API Optional<PendingDisplayListRecording> begin_rust_display_list_recording(DOM::Document&, Compositing::DisplayList const& placeholder_display_list, Compositing::DisplayListResourceStorage&, PaintCommandCacheMode, HTML::PaintConfig const&, InspectorOverlayInputs const&, RecordingRun);
+// What the main thread seals of a recording that a flight makes after its layout (LIBWEB_STAGE_OVERLAP naming flight),
+// beyond what it hands the flight.
+struct FlightRecordingSeal {
+    DevicePixelRect device_viewport_rect;
+    BlockingWheelEventRegionState wheel_event_region_state;
+    // The canvas the recording paints, read ahead of the layout.
+    Color canvas_color;
+    Color background_color;
+};
+// Resolves what the recording reads on the main thread, as begin_rust_display_list_recording() does, and seals it for
+// the next flight of the document, which records once it has laid the document out.
+WEB_API FlightRecordingSeal seal_rust_display_list_recording_for_flight(DOM::Document&, Compositing::DisplayListResourceStorage&, HTML::PaintConfig const&, InspectorOverlayInputs const&);
 // Publishes the recording in its arena and returns its display list, which is the paint command cache source if the
 // recording is identical to it. Reaches the document only through `source`.
 WEB_API Compositor::PublishedDisplayList publish_rust_display_list_recording(PendingDisplayListRecording&, Compositing::DisplayList* paint_command_cache_source, Compositing::DisplayListResourceSet const& paint_command_cache_source_resources, Compositor::PresentationSource&);

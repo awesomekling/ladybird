@@ -1649,6 +1649,194 @@ pub(crate) unsafe fn settle_visual_contexts_for_clock_tick(arena_handle: *mut c_
     !outcome.performed_full_build && !outcome.tree_changed
 }
 
+/// What a flight's recording reads of the host, which the main thread sealed where it submitted the
+/// flight, ahead of the layout the flight runs first. What the recording reads of the paint state
+/// (the visual context tree inputs, the root background source and the SVG-as-image renders) the
+/// flight takes from the arena once it has prepared it.
+pub(crate) struct FlightPaintSeal {
+    inputs: crate::painting::record::RecordingInputs<'static>,
+    frame_generation: u64,
+}
+
+/// What preparing and recording a flight's paint left for the main thread to take in.
+#[derive(Default)]
+pub(crate) struct FlightPaintProducts {
+    pub(crate) visual_context_update: crate::painting::host::FfiVisualContextUpdateOutcome,
+    pub(crate) scroll_state_snapshot: Option<Vec<libgfx_rust::FloatPoint>>,
+}
+
+/// Why a flight did not record.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum FlightPaintStop {
+    /// The document's SVG paint resources wait for the main thread to synchronize them.
+    SvgPaintResources,
+    /// The recording would paint an SVG-as-image render the main thread has not made.
+    VectorImages,
+    /// The document has no viewport box to record.
+    NoViewport,
+}
+
+thread_local! {
+    // On the main thread, the paint sealed for the flight about to be submitted, and its arena.
+    static SEALED_FLIGHT_PAINT: std::cell::RefCell<Option<(usize, FlightPaintSeal)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Seals what the next flight of the arena records with, from the host inputs of a recording as
+/// `layout_arena_record_display_list` takes them. The SVG-as-image renders the recording paints are
+/// resolved into the arena before this.
+///
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, on the document thread, with no frame in
+/// flight; the input arrays and buffers must stay valid for this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_seal_flight_paint(
+    arena_handle: *mut c_void,
+    inputs: crate::painting::host::FfiRecordingInputs,
+) {
+    // The paint state parts are the flight's to fill in once it has prepared them.
+    // SAFETY: Guaranteed by the caller; the owned copy outlives the borrow.
+    let inputs = unsafe {
+        inputs.borrow_recording_inputs(
+            crate::painting::host::FfiVisualContextTreeInputs::default(),
+            crate::painting::host::FfiRootBackgroundSource::default(),
+            std::sync::Arc::default(),
+        )
+    }
+    .into_owned();
+    // SAFETY: Guaranteed by the caller.
+    let frame_generation = unsafe { crate::layout::frame_retirement::frame_generation(arena_handle) };
+    SEALED_FLIGHT_PAINT.with_borrow_mut(|sealed| {
+        *sealed = Some((
+            arena_handle as usize,
+            FlightPaintSeal {
+                inputs,
+                frame_generation,
+            },
+        ));
+    });
+}
+
+/// Drops the paint sealed for a flight that was not submitted.
+#[unsafe(no_mangle)]
+pub extern "C" fn layout_arena_discard_sealed_flight_paint() {
+    SEALED_FLIGHT_PAINT.with_borrow_mut(Option::take);
+}
+
+/// Takes the paint sealed for the flight of the arena `arena_handle`, if one was.
+pub(crate) fn take_sealed_flight_paint(arena_handle: *mut c_void) -> Option<FlightPaintSeal> {
+    SEALED_FLIGHT_PAINT.with_borrow_mut(|sealed| match sealed.take() {
+        Some((arena, seal)) if arena == arena_handle as usize => Some(seal),
+        _ => None,
+    })
+}
+
+/// Prepares the arena's paint state for the recording a flight makes after its layout, and records:
+/// the visual context update, the scroll state refresh and the recording, as the main thread would
+/// run them before a recording it submits. The recording is left pending in the arena, as a
+/// submitted recording leaves it.
+///
+/// # Safety
+///
+/// `arena_handle` must be a live arena the frame in flight owns, with no borrow of it held.
+pub(crate) unsafe fn paint_in_flight(
+    arena_handle: *mut c_void,
+    seal: FlightPaintSeal,
+) -> Result<FlightPaintProducts, FlightPaintStop> {
+    // SAFETY: Guaranteed by the caller.
+    let arena = unsafe { &mut *arena_handle.cast::<LayoutNodeArena>() };
+    let viewport = arena.layout_root();
+    if arena.svg_paint_resources().needs_sync() {
+        return Err(FlightPaintStop::SvgPaintResources);
+    }
+    if !arena.paintable_row_is_populated(viewport) || arena.stacking_context_entries(viewport).is_none() {
+        return Err(FlightPaintStop::NoViewport);
+    }
+    let FlightPaintSeal {
+        mut inputs,
+        frame_generation,
+    } = seal;
+    // The renders the main thread resolved as it sealed the flight are the ones the layout before it
+    // predicted: the layout the flight ran may paint others. This is checked before anything is
+    // prepared, so a flight that does not record leaves the paint state to the main thread.
+    let resolved = arena.paint_state().borrow().vector_image_display_lists.clone();
+    let prediction_inputs = crate::painting::record::vector_images::FirstPaintPredictionInputs {
+        device_pixels_per_css_pixel: arena.visual_context_tree_inputs().device_pixels_per_css_pixel,
+        root_background_source: arena.paint_state().borrow().root_background_source,
+        css_viewport_rect: inputs.css_viewport_rect,
+        document_declares_light_or_dark_color_scheme: inputs.document_declares_light_or_dark_color_scheme,
+        image_color_scheme_fallback: inputs.image_color_scheme_fallback,
+    };
+    let predicted = crate::painting::record::vector_images::predict_first_paint_renders(arena, &prediction_inputs);
+    if predicted.iter().any(|request| resolved.get(request).is_none()) {
+        return Err(FlightPaintStop::VectorImages);
+    }
+    let visual_context_update = update_accumulated_visual_contexts_stage(arena, viewport);
+    let scroll_state_snapshot = {
+        let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::ScrollStateRefresh);
+        let paintable_rows = arena.paintable_rows();
+        let mut paint_state = arena.paint_state().borrow_mut();
+        let state = &mut paint_state.visual_context;
+        state.needs_to_refresh_scroll_state.then(|| {
+            state.needs_to_refresh_scroll_state = false;
+            crate::painting::visual_context::refresh::refresh_scroll_state(&paintable_rows, &mut state.scroll_state);
+            let mut snapshot = state
+                .scroll_state
+                .snapshot(arena.visual_context_tree_inputs().device_pixels_per_css_pixel);
+            // https://drafts.csswg.org/css-position/#sticky-pos
+            if let Some(tree) = state.tree.as_deref() {
+                tree.resolve_sticky_offsets_in_place(&mut snapshot);
+            }
+            snapshot
+        })
+    };
+    {
+        let paint_state = arena.paint_state().borrow();
+        let tree_inputs = paint_state
+            .visual_context
+            .last_tree_inputs
+            .expect("a recording follows a visual context update");
+        inputs.device_pixels_per_css_pixel = tree_inputs.device_pixels_per_css_pixel;
+        inputs.uncaptured.viewport_wheel_overflow_x = tree_inputs.viewport_wheel_overflow_x;
+        inputs.uncaptured.viewport_wheel_overflow_y = tree_inputs.viewport_wheel_overflow_y;
+        inputs.uncaptured.root_background_source = paint_state
+            .root_background_source
+            .expect("a recording follows paint preparation");
+        inputs.vector_image_display_lists = resolved;
+    }
+    {
+        let mut paint_state = arena.paint_state().borrow_mut();
+        assert!(
+            paint_state.pending_recording.is_none(),
+            "a frame was dropped: its recording was not published before the next one started"
+        );
+        paint_state.pending_recording_trace = None;
+    }
+    let should_paint_overlay = inputs.should_paint_overlay;
+    let publishes_recording = inputs.publishes_recording;
+    let output = record_display_list_stage(RecordingStageInput {
+        // SAFETY: The frame in flight owns the arena, and no borrow of it is held here.
+        arena: unsafe { &mut *arena_handle.cast::<LayoutNodeArena>() },
+        viewport,
+        inputs,
+    });
+    // SAFETY: The stage has returned its borrow.
+    let arena = unsafe { &*arena_handle.cast::<LayoutNodeArena>() };
+    leave_pending_recording(
+        arena,
+        viewport,
+        should_paint_overlay,
+        publishes_recording,
+        frame_generation,
+        output,
+    );
+    Ok(FlightPaintProducts {
+        visual_context_update,
+        scroll_state_snapshot,
+    })
+}
+
 /// Publishes the arena's pending recording from the presentation stage of the frame in flight
 /// (unless LIBWEB_RENDER_PRESENTS=0), as `layout_arena_publish_recording` does on the main thread. Returns
 /// the generation of the hit-test list the recording made, or 0 if there was nothing to publish.
