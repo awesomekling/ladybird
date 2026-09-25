@@ -6788,6 +6788,10 @@ Optional<Compositor::CompositorFrame> LocalNavigable::finish_compositor_frame(Pe
     // A task beside the frame in flight retired the document's render state, and what was recorded for it is gone.
     if (should_record_display_list && Painting::discard_retired_rust_display_list_recording(*pending_frame.recording))
         return {};
+    // A task beside the frame in flight tore the document's layout tree down (it stopped being active, say), and a
+    // frame that recorded nothing has no render state left to be built from.
+    if (!document->has_paint_state())
+        return {};
 
     RefPtr<Compositing::DisplayList> display_list;
     Compositing::DisplayListResourceSet display_list_command_resources;

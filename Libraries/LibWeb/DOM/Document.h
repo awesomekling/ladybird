@@ -596,6 +596,7 @@ public:
 
     Painting::DocumentPaintState& paint_state();
     Painting::DocumentPaintState const& paint_state() const;
+    [[nodiscard]] bool has_paint_state() const { return m_paint_state; }
     Compositing::AccumulatedVisualContextTree visual_context_tree() const;
     u64 visual_context_tree_structural_epoch() const;
     Compositing::ScrollStateSnapshot const& scroll_state_snapshot() const;
