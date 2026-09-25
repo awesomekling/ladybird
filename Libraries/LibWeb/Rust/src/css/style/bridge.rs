@@ -5837,7 +5837,10 @@ pub unsafe extern "C" fn style_engine_note_size_container_needs_evaluation_after
 pub unsafe extern "C" fn style_engine_has_size_containers_needing_evaluation_after_layout(
     engine: *const c_void,
 ) -> bool {
-    engine_entrance(engine, "style_engine_has_size_containers_needing_evaluation_after_layout");
+    engine_entrance(
+        engine,
+        "style_engine_has_size_containers_needing_evaluation_after_layout",
+    );
     let engine = unsafe { &*engine.cast::<StyleEngine>() };
     engine.has_size_containers_needing_evaluation_after_layout()
 }
