@@ -27,7 +27,7 @@
 use std::ffi::c_void;
 
 use crate::abort_on_panic as abort_on_boundary_panic;
-use crate::css::custom_properties::{CustomPropertyRegistry, CustomPropertyStore};
+use crate::css::custom_properties::CustomPropertyRegistry;
 use crate::css::host_shared::{HostShared, SharedPayload};
 use crate::css::selector::CompiledSelector;
 use crate::css::selector::RustSelector;
@@ -3411,52 +3411,6 @@ pub(crate) fn publish_computed_groups_from_inputs(
     result
 }
 
-/// Replaces only the animation overlay on an already-published target. Recording falls back to
-/// `style_engine_publish_computed_groups`, which captures the complete base-style input.
-///
-/// # Safety
-/// `engine` must be live. `animated_overlay` must be null when `animation_overlay_identity` is
-/// zero and otherwise point at a live animation overlay. `payloads` must contain live group
-/// payloads for a non-empty overlay.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_publish_animation_overlay(
-    engine: *mut c_void,
-    node: u32,
-    pseudo_kind: u8,
-    animation_overlay_identity: u64,
-    animated_overlay: *const c_void,
-    payloads: *const *const c_void,
-    payload_count: usize,
-) -> FfiStyleRecordDelta {
-    engine_entrance(engine, "style_engine_publish_animation_overlay");
-    let Some(node) = StyleNodeID::from_raw(node) else {
-        return FfiStyleRecordDelta::default();
-    };
-    if animation_overlay_identity != 0 && animated_overlay.is_null() {
-        return FfiStyleRecordDelta::default();
-    }
-    if payload_count != 0 && payloads.is_null() {
-        return FfiStyleRecordDelta::default();
-    }
-    let payloads = match payload_count {
-        0 => &[],
-        _ => SharedPayload::from_pointer_slice(unsafe { std::slice::from_raw_parts(payloads, payload_count) }),
-    };
-    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
-    let Some(publication) = engine.publish_animation_overlay_impl(
-        super::computed::ComputedStyleTarget::new(node, pseudo_kind),
-        animation_overlay_identity,
-        HostShared::new(animated_overlay).cast(),
-        payloads,
-    ) else {
-        return FfiStyleRecordDelta::default();
-    };
-    FfiStyleRecordDelta {
-        old_style_record: publication.previous_style_record.raw(),
-        new_style_record: publication.style_record.raw(),
-    }
-}
-
 /// Return the record the engine holds assigned to an element or one of its pseudo-elements,
 /// composed with the animation overlay it holds, or 0 while it holds none.
 ///
@@ -3715,152 +3669,6 @@ pub unsafe extern "C" fn style_engine_pseudo_element_record_damage(
         originating_style_record,
         counter_styles_changed,
     )
-}
-
-/// Returns whether a candidate animation overlay changes any effective value in a style record.
-///
-/// # Safety
-/// `engine` and `animated_overlay` must be live for this call, and the style record must remain
-/// pinned or assigned.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_animation_overlay_changed(
-    engine: *const c_void,
-    old_style_record: u64,
-    animated_overlay: *const c_void,
-) -> bool {
-    engine_entrance(engine, "style_engine_animation_overlay_changed");
-    let engine = unsafe { &*engine.cast::<StyleEngine>() };
-    engine.animation_overlay_changed(old_style_record, animated_overlay.cast())
-}
-
-/// What the host hands over to have an element's sampled animation overlay composed into the
-/// payloads of its overlay record.
-#[repr(C)]
-pub struct FfiAnimationOverlayPayloadInput {
-    pub style_node: u32,
-    pub pseudo_kind: u8,
-    /// The element's current style record, whose base the overlay composes over.
-    pub style_record: u64,
-    /// The longhand table the overlay was sampled over.
-    pub longhand_table: *const c_void,
-    pub animated_overlay: *const c_void,
-    pub used_color_scheme: u8,
-    pub display_before_box_type_transformation_raw: u32,
-    pub callback_context: *mut c_void,
-    /// The animated style's platform font, as a `ComputedValuesFFI::FfiFontGroupBuildInputs`, asked
-    /// for only where the font group is rebuilt.
-    pub font_group_inputs: Option<unsafe extern "C" fn(*mut c_void, *mut c_void)>,
-}
-
-/// The payloads of an element's overlay record, borrowed from `storage` until it is released with
-/// `style_engine_release_animation_overlay_payloads`. `payloads` is null where the engine holds no
-/// record to compose over.
-#[repr(C)]
-pub struct FfiAnimationOverlayPayloads {
-    pub payloads: *const *const c_void,
-    pub payload_count: usize,
-    pub rebuilt_every_group: bool,
-    pub storage: *mut c_void,
-}
-
-/// Compose an element's sampled animation overlay into the payloads of its overlay record; see
-/// `StyleEngine::build_animation_overlay_payloads`.
-///
-/// # Safety
-/// `engine`, `input` and everything it points to must be live for the call.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_build_animation_overlay_payloads(
-    engine: *const c_void,
-    input: *const FfiAnimationOverlayPayloadInput,
-) -> FfiAnimationOverlayPayloads {
-    engine_entrance(engine, "style_engine_build_animation_overlay_payloads");
-    let engine = unsafe { &*engine.cast::<StyleEngine>() };
-    let input = unsafe { &*input };
-    let missing = FfiAnimationOverlayPayloads {
-        payloads: std::ptr::null(),
-        payload_count: 0,
-        rebuilt_every_group: false,
-        storage: std::ptr::null_mut(),
-    };
-    let Some(node) = StyleNodeID::from_raw(input.style_node) else {
-        return missing;
-    };
-    let table = unsafe {
-        &*input
-            .longhand_table
-            .cast::<crate::css::computed_longhand_table::ComputedLonghandTable>()
-    };
-    let overlay = unsafe {
-        input
-            .animated_overlay
-            .cast::<crate::css::animated_overlay::AnimatedOverlay>()
-            .as_ref()
-    };
-    let mut font = || {
-        let mut inputs = std::mem::MaybeUninit::<crate::css::table_group_builder::FfiFontGroupBuildInputs>::uninit();
-        let inputs = unsafe {
-            (input.font_group_inputs.expect("the host resolves the animated font"))(
-                input.callback_context,
-                inputs.as_mut_ptr().cast(),
-            );
-            inputs.assume_init()
-        };
-        Some(inputs)
-    };
-    let Some(payloads) = (unsafe {
-        engine.build_animation_overlay_payloads(
-            node,
-            input.pseudo_kind,
-            input.style_record,
-            table,
-            overlay,
-            input.used_color_scheme,
-            input.display_before_box_type_transformation_raw,
-            &mut font,
-        )
-    }) else {
-        return missing;
-    };
-    let payloads = Box::new(payloads);
-    FfiAnimationOverlayPayloads {
-        payloads: payloads.payloads.as_ptr(),
-        payload_count: payloads.payloads.len(),
-        rebuilt_every_group: payloads.rebuilt_every_group,
-        storage: Box::into_raw(payloads).cast(),
-    }
-}
-
-/// Give back the payloads `style_engine_build_animation_overlay_payloads` built.
-///
-/// # Safety
-/// `storage` must be the storage of an unreleased build, or null.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_release_animation_overlay_payloads(storage: *mut c_void) {
-    super::seal::note_engine_call("style_engine_release_animation_overlay_payloads");
-    if storage.is_null() {
-        return;
-    }
-    drop(unsafe { Box::from_raw(storage.cast::<super::animations::AnimationOverlayPayloads>()) });
-}
-
-/// Computes property-dependent damage for the sparse changed values in an animation overlay.
-///
-/// # Safety
-/// `engine`, `animated_overlay`, and every group payload must be live for this call, and the style
-/// record must remain pinned or assigned.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_compare_animation_overlay(
-    engine: *const c_void,
-    old_style_record: u64,
-    animated_overlay: *const c_void,
-    payloads: *const *const c_void,
-    payload_count: usize,
-    is_document_element: bool,
-) -> FfiAnimationInvalidation {
-    engine_entrance(engine, "style_engine_compare_animation_overlay");
-    let engine = unsafe { &*engine.cast::<StyleEngine>() };
-    let payloads = SharedPayload::from_pointer_slice(unsafe { std::slice::from_raw_parts(payloads, payload_count) });
-    engine.compare_animation_overlay(old_style_record, animated_overlay.cast(), payloads, is_document_element)
 }
 
 /// What the pass published for a row whose animations it sampled itself; `present` is false for a
@@ -5722,61 +5530,6 @@ pub unsafe extern "C" fn style_engine_pseudo_elements_with_custom_property_data(
     engine_entrance(engine, "style_engine_pseudo_elements_with_custom_property_data");
     let engine = unsafe { &*engine.cast::<StyleEngine>() };
     StyleNodeID::from_raw(node).map_or(0, |node| engine.pseudo_elements_with_custom_property_data(node))
-}
-
-/// Keep the sampled custom-property values of an animation as a published input. Its environment
-/// identity is already installed on the element. Return the reactions derived from the element's
-/// retained declarations and from which sampled names its descendants inherit.
-///
-/// # Safety
-/// `store` must be a live raw `Arc` pointer to a `CustomPropertyStore`.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_publish_animated_custom_property_store(
-    engine: *mut c_void,
-    node: u32,
-    environment: u64,
-    store: *const c_void,
-    is_pseudo: bool,
-) -> u8 {
-    engine_entrance(engine, "style_engine_publish_animated_custom_property_store");
-    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
-    let Some(node) = StyleNodeID::from_raw(node) else {
-        return 0;
-    };
-    unsafe { engine.custom_property_environments.retain(environment, store) };
-    if !is_pseudo {
-        if store.is_null() {
-            engine.retained.sampled_custom_property_environments.remove(&node);
-        } else {
-            engine
-                .retained
-                .sampled_custom_property_environments
-                .insert(node, environment);
-        }
-    }
-    // SAFETY: The document owns the published registry for the lifetime of this input call.
-    let registry = unsafe {
-        engine
-            .document_style_computation_inputs
-            .custom_property_registry
-            .as_pointer()
-            .cast::<CustomPropertyRegistry>()
-            .as_ref()
-    };
-    let inheriting_name_was_sampled = if store.is_null() {
-        // Removing an overlay may expose any inherited value it covered.
-        true
-    } else {
-        let sample = unsafe { &*store.cast::<CustomPropertyStore>() };
-        sample.declared_names.iter().any(|name| {
-            let entry = sample.own_values.get(name).expect("sampled name has a value");
-            registry
-                .and_then(|registry| registry.registration_facts(&entry.name))
-                .is_none_or(|registration| registration.inherits)
-        })
-    };
-    u8::from(is_pseudo || engine.node_style_reads_custom_properties(node))
-        | (u8::from(inheriting_name_was_sampled) << 1)
 }
 
 /// Installs the authoritative release order recorded for the next replay transaction.

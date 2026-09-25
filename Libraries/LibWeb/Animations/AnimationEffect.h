@@ -46,15 +46,9 @@ Bindings::OptionalEffectTiming to_optional_effect_timing(Bindings::EffectTiming 
 // This object lives for the duration of an animation update, and is used to store per-element data about animated CSS properties.
 struct AnimationUpdateContext {
     struct ElementData {
-        ElementData();
-        ElementData(CSS::StyleRecordID, RefPtr<CSS::ComputedStyleWorkingSet>);
-        ElementData(ElementData&&);
-        ElementData& operator=(ElementData&&);
-        ~ElementData();
-
+        // The record the element held when the update asked for it; none for an element with no
+        // style to sample.
         CSS::StyleRecordID style_record_before_update;
-        RefPtr<CSS::ComputedStyleWorkingSet> target_style;
-        GC::ConservativeVector<GC::Ref<KeyframeEffect>> effects;
         // The caller compares the element's style before and after this update itself, and marks
         // what layout and paint need from that one comparison.
         bool caller_applies_invalidation { false };

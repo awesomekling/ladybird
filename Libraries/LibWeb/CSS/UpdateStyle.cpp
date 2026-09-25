@@ -297,11 +297,8 @@ static void sample_animations_for_installed_record(DOM::AbstractElement abstract
     auto record = abstract_element.style_record_identity();
     if (!record)
         return;
-    auto& style_computer = abstract_element.document().style_computer();
     Animations::AnimationUpdateContext context;
-    Animations::AnimationUpdateContext::ElementData data { record, style_computer.reconstruct_computed_properties_for_animation(record) };
-    data.caller_applies_invalidation = sample_invalidation == SampleInvalidation::AppliedByCaller;
-    context.elements.set(abstract_element, move(data));
+    context.elements.set(abstract_element, { .style_record_before_update = record, .caller_applies_invalidation = sample_invalidation == SampleInvalidation::AppliedByCaller });
 }
 
 // The pass sampled the element's animations over the record the row settled and published the

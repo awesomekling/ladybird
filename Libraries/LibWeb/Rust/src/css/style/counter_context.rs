@@ -1230,23 +1230,6 @@ impl StyleEngine {
         self.state.end_style_record_view_epoch(&mut self.counters);
     }
 
-    #[inline]
-    pub(super) fn publish_animation_overlay_impl(
-        &mut self,
-        target: computed::ComputedStyleTarget,
-        source_identity: u64,
-        animated_overlay: crate::css::host_shared::HostShared<crate::css::animated_overlay::AnimatedOverlay>,
-        payloads: &[crate::css::host_shared::SharedPayload],
-    ) -> Option<computed::AnimationOverlayUpdate> {
-        self.state.publish_animation_overlay_impl(
-            target,
-            source_identity,
-            animated_overlay,
-            payloads,
-            &mut self.counters,
-        )
-    }
-
     #[cfg(feature = "style-recording")]
     #[inline]
     pub(crate) fn publish_exact_cascade_winners(

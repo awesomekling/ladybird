@@ -314,14 +314,6 @@ StyleEngine::StyleRecordDelta StyleEngine::publish_computed_groups(StyleNodeID n
     return { StyleRecordID { delta.old_style_record }, StyleRecordID { delta.new_style_record } };
 }
 
-Optional<StyleEngine::StyleRecordDelta> StyleEngine::publish_animation_overlay(StyleNodeID node, u8 pseudo_kind, u64 animation_overlay_identity, void const* animated_overlay, ReadonlySpan<void const*> payloads)
-{
-    auto delta = StyleEngineFFI::style_engine_publish_animation_overlay(m_impl, node.value(), pseudo_kind, animation_overlay_identity, animated_overlay, payloads.data(), payloads.size());
-    if (delta.new_style_record == 0)
-        return {};
-    return StyleRecordDelta { StyleRecordID { delta.old_style_record }, StyleRecordID { delta.new_style_record } };
-}
-
 void const* StyleEngine::style_record_payloads(StyleRecordID style_record) const
 {
     return StyleEngineFFI::style_engine_style_record_payloads(m_impl, style_record.value());
@@ -358,16 +350,6 @@ u64 StyleEngine::style_record_custom_property_environment(StyleRecordID style_re
     if (facts)
         facts->custom_property_environment = environment;
     return environment;
-}
-
-bool StyleEngine::animation_overlay_changed(StyleRecordID old_style_record, void const* animated_overlay) const
-{
-    return StyleEngineFFI::style_engine_animation_overlay_changed(m_impl, old_style_record.value(), animated_overlay);
-}
-
-StyleEngineFFI::FfiAnimationInvalidation StyleEngine::compare_animation_overlay(StyleRecordID old_style_record, void const* animated_overlay, ReadonlySpan<void const*> payloads, bool is_document_element) const
-{
-    return StyleEngineFFI::style_engine_compare_animation_overlay(m_impl, old_style_record.value(), animated_overlay, payloads.data(), payloads.size(), is_document_element);
 }
 
 StyleEngine::SettledAnimationDefinitions StyleEngine::take_settled_animation_definitions(StyleNodeID node, u8 pseudo_kind)
