@@ -957,6 +957,31 @@ pub enum FfiHostFactKind {
     MintElement = 12,
     /// The host minted the text identity `node` from its grant.
     MintText = 13,
+    /// `data` points at an `FfiReplacedContentInput`: what the element gives the natural size of
+    /// its replaced content.
+    ElementReplacedContentInput = 14,
+}
+
+/// Which element an `FfiReplacedContentInput` holds the values of.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum FfiReplacedContentInputKind {
+    None = 0,
+    /// A `<textarea>`: `first` is its `cols`, and `second` its `rows`.
+    TextArea = 1,
+}
+
+/// What an element gives the natural size of its replaced content, which layout resolves against
+/// the style of the element's box. What `flags` and the values mean depends on `kind`.
+#[derive(Clone, Copy, Debug)]
+#[repr(C)]
+pub struct FfiReplacedContentInput {
+    pub kind: FfiReplacedContentInputKind,
+    pub flags: u8,
+    pub first: u32,
+    pub second: u32,
+    pub third: u32,
+    pub fourth: u32,
 }
 
 /// One write the host made to a fact of the mirror, which the engine applies with the next
@@ -1981,8 +2006,9 @@ pub unsafe extern "C" fn style_engine_apply_transaction(engine: *mut c_void, tra
 /// it stands for, so a replay applies it on its own.
 ///
 /// # Safety
-/// Every `TextData` write must carry a raw `AK::Utf16String`, and every `ElementInlineStyleProperties`
-/// write null or an Arc-owned `DeclarationBlockData`, whose reference it transfers.
+/// Every `TextData` write must carry a raw `AK::Utf16String`, every `ElementInlineStyleProperties`
+/// write null or an Arc-owned `DeclarationBlockData`, whose reference it transfers, and every
+/// `ElementReplacedContentInput` write a pointer to an `FfiReplacedContentInput` live for the call.
 unsafe fn apply_host_fact_writes(engine: &mut StyleEngine, writes: &[FfiHostFactWrite]) {
     let mut index = 0;
     while index < writes.len() {
@@ -2053,6 +2079,20 @@ unsafe fn apply_host_fact_writes(engine: &mut StyleEngine, writes: &[FfiHostFact
             }
             FfiHostFactKind::ElementConstructionFacts => {
                 operations::set_element_construction_facts(engine, write.node, write.facts, write.value);
+            }
+            FfiHostFactKind::ElementReplacedContentInput => {
+                // SAFETY: The caller vouches that the write points at an input that outlives the call.
+                let input = unsafe { &*(write.data as *const FfiReplacedContentInput) };
+                operations::set_element_replaced_content_input(
+                    engine,
+                    write.node,
+                    input.kind as u8,
+                    input.flags,
+                    input.first,
+                    input.second,
+                    input.third,
+                    input.fourth,
+                );
             }
             FfiHostFactKind::AdoptAtom => engine.adopt_atom(write.data, StyleAtomID(write.facts)),
             FfiHostFactKind::ElementInlineStyleProperties => {

@@ -210,6 +210,7 @@ public:
     void record_adjustment_facts(StyleNodeID, u32 facts);
     void record_associated_pseudo_kind(StyleNodeID, u8 pseudo_kind_plus_one);
     void record_construction_facts(StyleNodeID, u32 facts, u8 box_kind);
+    void record_replaced_content_input(StyleNodeID, StyleEngineFFI::FfiReplacedContentInput const&);
     // A snapshot of the element's inline style declarations, or null for none. The write takes the
     // snapshot's reference.
     void record_inline_style_properties(StyleNodeID, Parser::ValueParserFFI::DeclarationBlockData const*);
@@ -418,6 +419,7 @@ private:
     size_t m_pending_atom_adoption_count { 0 };
     // What each `TextData` write holds, by the index its `data` names until the writes cross.
     Vector<Utf16String> m_host_fact_text_data;
+    Vector<StyleEngineFFI::FfiReplacedContentInput> m_host_fact_replaced_content_inputs;
     // The identities the engine granted and the host has yet to mint, and how many more the host asks
     // for with the next transaction.
     Vector<StyleNodeID> m_granted_style_nodes;

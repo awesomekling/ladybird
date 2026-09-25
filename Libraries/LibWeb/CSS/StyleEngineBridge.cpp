@@ -740,6 +740,12 @@ void StyleEngine::record_construction_facts(StyleNodeID node, u32 facts, u8 box_
     record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::ElementConstructionFacts, .value = box_kind, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = facts, .data = 0 });
 }
 
+void StyleEngine::record_replaced_content_input(StyleNodeID node, StyleEngineFFI::FfiReplacedContentInput const& input)
+{
+    record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::ElementReplacedContentInput, .value = 0, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = 0, .data = m_host_fact_replaced_content_inputs.size() });
+    m_host_fact_replaced_content_inputs.append(input);
+}
+
 void StyleEngine::record_inline_style_properties(StyleNodeID node, Parser::ValueParserFFI::DeclarationBlockData const* declarations)
 {
     record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::ElementInlineStyleProperties, .value = 0, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = 0, .data = bit_cast<FlatPtr>(declarations) });
@@ -854,11 +860,15 @@ void StyleEngine::submit_recorded_input()
     // What the engine calls back into while it applies these records the next transaction's.
     auto host_fact_writes = move(m_host_fact_writes);
     auto host_fact_text_data = move(m_host_fact_text_data);
+    auto host_fact_replaced_content_inputs = move(m_host_fact_replaced_content_inputs);
     m_pending_atom_adoption_count = 0;
-    // Each text data write hands the engine one reference to what it holds.
+    // Each text data write hands the engine one reference to what it holds, and each replaced
+    // content input write lends it the input for the call.
     for (auto& write : host_fact_writes) {
         if (write.kind == StyleEngineFFI::FfiHostFactKind::TextData)
             write.data = host_fact_text_data[write.data].to_raw_leaked();
+        else if (write.kind == StyleEngineFFI::FfiHostFactKind::ElementReplacedContentInput)
+            write.data = bit_cast<FlatPtr>(&host_fact_replaced_content_inputs[write.data]);
     }
     // The grant answers the transaction. It is taken aside until the call returns, because the host may
     // mint from what it was granted before while the engine calls back into it.

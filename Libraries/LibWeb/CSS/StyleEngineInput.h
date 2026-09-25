@@ -224,6 +224,7 @@ WEB_API u32 element_style_adjustment_facts(DOM::Element const&);
 WEB_API u32 element_box_type_adjustment_facts(DOM::Element const&);
 WEB_API void record_element_adjustment_facts(DOM::Element&);
 WEB_API void record_element_construction_facts(DOM::Element&);
+WEB_API void record_element_replaced_content_input(DOM::Element&);
 WEB_API bool record_element_presentational_hint_properties(DOM::Element&, ReadonlySpan<StyleProperty>);
 WEB_API void republish_presentational_hints(DOM::Element&);
 WEB_API void record_element_animation_names(DOM::Element&, ReadonlySpan<Utf16FlyString>);
