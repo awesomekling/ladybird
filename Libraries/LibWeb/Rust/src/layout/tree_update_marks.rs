@@ -11,8 +11,9 @@
 //! The DOM writes and reads the marks at any time, a frame in flight included, and a mark must never
 //! wait for that frame. So the document thread owns them, beside the arena in its host tables, and
 //! lends them to the arena for the one stage that reads them: the tree build takes them in as its
-//! walk begins and hands them back, with what it retired, once the walk is over. No frame is in
-//! flight while a tree build walks, so the arena holds no marks when one is.
+//! walk begins and hands them back, with what it retired, once the walk is over. The stale box clear
+//! a top layer member's detach runs outside a build borrows them the same way. No frame is in
+//! flight while either walks, so the arena holds no marks when one is.
 
 use super::LayoutNodeArena;
 use super::host_tables::HostTables;
@@ -64,6 +65,33 @@ pub(crate) unsafe fn lend_to_tree_build<R>(
     host_tables
         .layout_tree_update_marks
         .replace(std::mem::take(arena.lent_layout_tree_update_marks()));
+    host_tables.layout_tree_update_marks_are_lent.set(false);
+    result
+}
+
+/// Lends the document's layout tree update marks to the arena for `clear`, the stale box clear a
+/// top layer member's detach runs at DOM mutation time, outside any tree build: it retires the marks
+/// of the nodes whose boxes it clears, which the member's next mark must find retired to be the
+/// transition that queues it for the build.
+///
+/// # Safety
+///
+/// `handle` must be a live handle from `layout_arena_create`, on the document thread.
+pub(crate) unsafe fn lend_to_stale_box_clear<R>(handle: *mut c_void, clear: impl FnOnce() -> R) -> R {
+    // SAFETY: Guaranteed by the caller. The host tables sit beside the arena, not in it.
+    let host_tables = unsafe { HostTables::beside_frame(handle) };
+    // Host work a tree build joined the document thread for finds the marks lent already.
+    if host_tables.layout_tree_update_marks_are_lent.get() {
+        return clear();
+    }
+    // SAFETY: Guaranteed by the caller. No frame is in flight once the arena is borrowed.
+    let arena = unsafe { LayoutNodeArena::from_handle(handle) };
+    *arena.layout_tree_update_marks_held_by_the_build() = host_tables.layout_tree_update_marks.take();
+    host_tables.layout_tree_update_marks_are_lent.set(true);
+    let result = clear();
+    host_tables
+        .layout_tree_update_marks
+        .replace(std::mem::take(&mut *arena.layout_tree_update_marks_held_by_the_build()));
     host_tables.layout_tree_update_marks_are_lent.set(false);
     result
 }
