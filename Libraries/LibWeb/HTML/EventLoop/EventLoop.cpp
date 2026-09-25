@@ -999,9 +999,19 @@ bool EventLoop::run_rendering_update_from_step_16(Vector<GC::Ref<DOM::Document>>
 
         auto now = relative_frame_timestamp_for(frame_timestamp, *document);
         document->run_the_update_intersection_observations_steps(now);
+    }
 
-        // AD-HOC: Whether a video sink is ticked depends on whether the element would be painted, which is only known
-        //         once layout is settled, so it is decided here rather than at the points that invalidate it.
+    // AD-HOC: Whether a video sink is ticked depends on whether the element would be painted, which is only known
+    //         once layout is settled, so it is decided here rather than at the points that invalidate it. A page's
+    //         media elements live in any of its documents, so this waits until step 19 has laid out every one of them:
+    //         a task that ran while a layout pass was in flight may have left an earlier document's layout stale.
+    Vector<GC::Ref<Page>, 1> synced_pages;
+    for (auto& document : docs) {
+        if (!document->navigable() || document->navigable()->active_document().ptr() != document.ptr())
+            continue;
+        if (synced_pages.contains_slow(GC::Ref { document->page() }))
+            continue;
+        synced_pages.append(document->page());
         document->page().sync_media_element_video_sink_ticking();
     }
 
