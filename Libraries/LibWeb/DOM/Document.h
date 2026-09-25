@@ -1468,6 +1468,8 @@ public:
     // record_display_list() in two halves, for a recording the render side runs in a submitted frame.
     Optional<Painting::PendingDisplayListRecording> begin_display_list_recording(HTML::PaintConfig, Compositing::DisplayListResourceStorage&, Painting::PaintCommandCacheMode, Painting::RecordingRun);
     NonnullRefPtr<Compositing::DisplayList> finish_display_list_recording(Painting::PendingDisplayListRecording&);
+    // Takes in what publishing `recording` made: the hit-test list and the paint command cache source.
+    void adopt_published_recording(Painting::PendingDisplayListRecording const&, Compositor::PublishedDisplayList const&);
     Painting::HitTestDisplayList const* hit_test_display_list() const { return m_hit_test_display_list.ptr(); }
     Painting::HitTestDisplayList const* ensure_hit_test_display_list();
     Optional<Painting::HitTestResult> hit_test(CSSPixelPoint);

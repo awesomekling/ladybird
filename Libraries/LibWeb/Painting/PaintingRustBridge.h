@@ -11,6 +11,7 @@
 #include <LibCompositing/DisplayList/DisplayListResourceStorage.h>
 #include <LibGfx/Filter.h>
 #include <LibWeb/CSS/StyleValues/AbstractImageStyleValue.h>
+#include <LibWeb/Compositor/NavigablePresenter.h>
 #include <LibWeb/Export.h>
 #include <LibWeb/Forward.h>
 #include <LibWeb/HTML/PaintConfig.h>
@@ -65,7 +66,30 @@ struct InspectorOverlayInputs {
 // Resolves what the recording reads on the main thread and has the render side record it. Returns nothing if there is
 // nothing to record; otherwise finish_rust_display_list_recording() finishes it once the render side has recorded it.
 WEB_API Optional<PendingDisplayListRecording> begin_rust_display_list_recording(DOM::Document&, Compositing::DisplayList const& placeholder_display_list, Compositing::DisplayListResourceStorage&, PaintCommandCacheMode, HTML::PaintConfig const&, InspectorOverlayInputs const&, RecordingRun);
-WEB_API NonnullRefPtr<Compositing::DisplayList> finish_rust_display_list_recording(PendingDisplayListRecording&);
+// Publishes the recording in its arena and returns its display list, which is the paint command cache source if the
+// recording is identical to it. Reaches the document only through `source`.
+WEB_API Compositor::PublishedDisplayList publish_rust_display_list_recording(PendingDisplayListRecording&, Compositing::DisplayList* paint_command_cache_source, Compositing::DisplayListResourceSet const& paint_command_cache_source_resources, Compositor::PresentationSource&);
+
+// Takes the trace of the document's last recording, if one was asked for.
+WEB_API void take_recording_trace_if_pending(DOM::Document&);
+
+// A presentation source that reads the document as it stands, on the main thread.
+class WEB_API DocumentPresentationSource final : public Compositor::PresentationSource {
+public:
+    DocumentPresentationSource(DOM::Document&, u64 adopted_async_scroll_sequence);
+
+    virtual Compositing::AccumulatedVisualContextTree published_display_list_visual_context_tree() override;
+    virtual Optional<Compositor::AsyncScrollingStamp> async_scrolling_stamp() override;
+    virtual void did_publish_recording() override;
+    virtual Compositing::AccumulatedVisualContextTree visual_context_tree(Compositing::DisplayListResourceStorage&) override;
+    virtual bool visual_context_tree_needs_compositor_update() override;
+    virtual void did_update_visual_context_tree_in_compositor() override;
+    virtual Compositing::ScrollStateSnapshot scroll_state_snapshot() override;
+
+private:
+    GC::Ref<DOM::Document> m_document;
+    u64 m_adopted_async_scroll_sequence { 0 };
+};
 // Discards the recording if its document retired the render state it was made for since the recording began, and
 // returns whether it did. The recording is not finished then.
 WEB_API bool discard_retired_rust_display_list_recording(PendingDisplayListRecording&);

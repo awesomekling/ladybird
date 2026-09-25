@@ -10400,23 +10400,28 @@ Optional<Painting::PendingDisplayListRecording> Document::begin_display_list_rec
 NonnullRefPtr<Compositing::DisplayList> Document::finish_display_list_recording(Painting::PendingDisplayListRecording& recording)
 {
     VERIFY(recording.document.ptr() == this);
-    auto display_list = Painting::finish_rust_display_list_recording(recording);
+    auto& document_paint_state = paint_state();
+    Painting::DocumentPresentationSource source { *this, 0 };
+    auto published = Painting::publish_rust_display_list_recording(recording, document_paint_state.display_list_used_as_paint_command_cache_source(), document_paint_state.paint_command_cache_source_referenced_resources(), source);
+    adopt_published_recording(recording, published);
+    return published.display_list;
+}
+
+void Document::adopt_published_recording(Painting::PendingDisplayListRecording const& recording, Compositor::PublishedDisplayList const& published)
+{
+    VERIFY(recording.document.ptr() == this);
     // What was marked beside a recording in the frame in flight is what the next drain writes.
     if (recording.run == Painting::RecordingRun::InSubmittedFrame)
         release_held_invalidation_marks();
     auto& document_paint_state = paint_state();
 
-    bool const recording_returned_the_paint_command_cache_source = display_list == document_paint_state.display_list_used_as_paint_command_cache_source();
     // NB: A hit-test list invalidated after the recording was prepared stays invalidated.
     if (recording.hit_test_display_list_invalidations == m_hit_test_display_list_invalidations
-        && (!recording_returned_the_paint_command_cache_source || !m_hit_test_display_list || !m_hit_test_display_list->is_current()))
+        && (!published.is_paint_command_cache_source || !m_hit_test_display_list || !m_hit_test_display_list->is_current()))
         m_hit_test_display_list = Painting::HitTestDisplayList::create_from_rust_recording(recording.visual_context_tree.structural_epoch(), layout_node_arena(), *m_chrome_widget_registry);
 
-    if (recording.cache_mode == Painting::PaintCommandCacheMode::ReadWrite && !recording_returned_the_paint_command_cache_source) {
-        document_paint_state.set_display_list_used_as_paint_command_cache_source(display_list, recording.resource_storage.collect_referenced_resources(*display_list));
-    }
-
-    return display_list;
+    if (published.becomes_paint_command_cache_source)
+        document_paint_state.set_display_list_used_as_paint_command_cache_source(published.display_list, published.command_resources);
 }
 
 void Document::set_caret_hit_test_debug_rect(Optional<CSSPixelRect> rect)
