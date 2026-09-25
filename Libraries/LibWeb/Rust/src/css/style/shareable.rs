@@ -75,7 +75,6 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
         driven_viewport,
         document_resource_contexts,
         custom_property_registry,
-        frozen_longhand_inputs,
         element_custom_property_data,
         pseudo_element_custom_property_data,
         sampled_custom_property_environments,
@@ -215,7 +214,6 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
     assert_member_is_sync(driven_viewport);
     assert_member_is_sync(document_resource_contexts);
     assert_member_is_sync(custom_property_registry);
-    assert_member_is_sync(frozen_longhand_inputs);
     assert_member_is_sync(element_custom_property_data);
     assert_member_is_sync(pseudo_element_custom_property_data);
     assert_member_is_sync(sampled_custom_property_environments);

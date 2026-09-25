@@ -333,20 +333,6 @@ double StyleEngine::ensure_random_base_value(StyleNodeID node, Utf16View name, b
     return bit_cast<double>(ensure_random_base_value(node, code_units.span(), element_shared));
 }
 
-void StyleEngine::freeze_longhand_inputs(ReadonlySpan<StyleNodeID> nodes)
-{
-    Vector<u32> raw_nodes;
-    raw_nodes.ensure_capacity(nodes.size());
-    for (auto node : nodes)
-        raw_nodes.unchecked_append(node.value());
-    StyleEngineFFI::style_engine_freeze_longhand_inputs(m_impl, raw_nodes.data(), raw_nodes.size());
-}
-
-StyleEngineFFI::FfiFrozenLonghandInputRow StyleEngine::frozen_longhand_input(StyleNodeID node) const
-{
-    return StyleEngineFFI::style_engine_frozen_longhand_input(m_impl, node.value());
-}
-
 void StyleEngine::set_element_custom_property_data(StyleNodeID node, CustomPropertyData const* data, bool is_animation_overlay, bool declares)
 {
     StyleEngineFFI::style_engine_set_element_custom_property_data(
