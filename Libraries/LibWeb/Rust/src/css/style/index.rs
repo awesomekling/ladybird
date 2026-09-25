@@ -5430,7 +5430,6 @@ impl ElementFactStore {
     }
 
     /// Whether a borrowed primary view (an active or prepared traversal) shares the fact rows.
-    #[cfg(test)]
     pub(super) fn primary_rows_are_shared(&self) -> bool {
         Arc::strong_count(&self.rows) != 1
     }

@@ -11483,6 +11483,55 @@ fn atom_sweep_waits_for_an_active_matching_traversal() {
 }
 
 #[test]
+fn a_submitted_pass_sweep_releases_the_primary_view_it_lent_the_next_pass() {
+    let (mut engine, nodes) = nested_document();
+    let target = StyleAtomID(200);
+    add_target_rule(&mut engine, StyleSheetObjectID(1), target);
+    add_feature(&mut engine, nodes[1], LocalFeatureKey::Class(target));
+    assert!(!take_every_wave(&mut engine, nodes[0], |_, _, _| {}));
+    for raw in 0x1000..0x1100 {
+        engine.intern_atom(raw);
+    }
+    engine.record_input(
+        InputKey::ElementStyleInput(nodes[1]),
+        InputValue::ElementStyleInput {
+            reaction: 0,
+            inherited_style_groups: 0,
+        },
+        InputValue::ElementStyleInput {
+            reaction: transaction::STYLE_REACTION_RECOMPUTE_STYLE,
+            inherited_style_groups: 0,
+        },
+    );
+
+    // A submitted pass leaves its sweep to its finish, and lends the next pass the primary rows.
+    engine.host.atom_sweep_waits_for_host = true;
+    assert!(engine.take_style_transaction(nodes[0], |_, _, _| {}));
+    assert_eq!(engine.counters().get(Counter::AtomSweeps), 0);
+    if !engine.facts.primary_rows_are_shared() {
+        let batch = engine.facts.primary_view();
+        engine
+            .memory
+            .reserve_required(MemoryCategory::BatchScratch, batch.capacity_bytes());
+        let mut prepared = engine
+            .prepared_batch_matching_traversal
+            .take()
+            .unwrap_or_else(|| PreparedBatchMatchingTraversal::new(nodes[0]));
+        prepared.batch = Some(batch);
+        engine.prepared_batch_matching_traversal = Some(prepared);
+    }
+    assert!(engine.facts.primary_rows_are_shared());
+
+    engine.settle_atom_sweep_of_submitted_pass(false);
+    assert_eq!(engine.counters().get(Counter::AtomSweeps), 1);
+    assert!(!engine.host.reclaimed_style_atoms.is_empty());
+    assert!(!engine.facts.primary_rows_are_shared());
+    assert!(engine.begin_cold_matching_batch(nodes[0]));
+    assert_eq!(engine.match_element(nodes[1]).unwrap().len(), 1);
+    engine.end_cold_matching_batch();
+}
+
+#[test]
 fn replay_forces_a_recorded_atom_sweep_without_reclaims() {
     let mut engine = StyleEngine::new(DeviceClass::ForegroundDesktop);
     engine.host.replay_reclaimed_style_atoms = Some(Vec::new());

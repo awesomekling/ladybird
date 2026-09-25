@@ -2118,6 +2118,18 @@ impl StyleEngineState {
             counters.bump(Counter::AtomSweepsDeferredForActiveTraversal);
             return;
         }
+        // A submitted pass leaves its sweep to its finish, after it lent the next pass a view of
+        // the primary rows. The sweep needs them unshared: the view goes, and the next pass
+        // materializes its batch from the swept facts.
+        if self.retained.facts.primary_rows_are_shared()
+            && let Some(prepared) = self.retained.prepared_batch_matching_traversal.as_mut()
+            && prepared.batch.is_some()
+        {
+            let capacity_bytes = prepared.capacity_bytes();
+            prepared.batch = None;
+            let released = capacity_bytes - prepared.capacity_bytes();
+            self.retained.memory.release(MemoryCategory::BatchScratch, released);
+        }
         let replay_reclaimed = self.host.replay_reclaimed_style_atoms.take();
         self.host.style_atoms_swept = true;
         self.retained.facts.sweep_auxiliary_catalogs_without_sync();
