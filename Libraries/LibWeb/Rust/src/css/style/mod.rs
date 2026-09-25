@@ -1166,6 +1166,9 @@ pub struct RetainedState {
 pub struct HostState {
     /// The style pass the host is installing wave by wave, between two of its waves.
     pub(super) suspended_style_pass: Option<Box<flush::StylePass>>,
+    /// The cold matching batch of the style update the host is installing, once one of its
+    /// transactions published rows: whether it holds a traversal the update ends.
+    pub(super) update_cold_matching_batch: Option<bool>,
     /// The font resolver the host installed. A step that misses the cache returns `NeedsInput`;
     /// the round outside the step resolves from the published table and the node is retried.
     /// This is not a host service: it reads no document, and carries no context that could.

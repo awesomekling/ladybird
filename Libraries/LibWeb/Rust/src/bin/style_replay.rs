@@ -723,56 +723,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .into());
                     }
                 }
-                EventKind::BeginColdMatchingBatch => {
-                    let engine = read_engine(&mut event.payload, &live_engines)?;
-                    let root = event.payload.read_u32()?;
-                    let expected = event.payload.read_bool()?;
-                    let start = Instant::now();
-                    let actual = unsafe { bridge::style_engine_begin_cold_matching_batch(engine, root) };
-                    let elapsed = start.elapsed();
-                    boundary_time += elapsed;
-                    record_boundary_timing(
-                        &options.selection,
-                        active_phase.as_ref(),
-                        elapsed,
-                        &mut selected_boundary_time,
-                        &mut phase_times,
-                    );
-                    if actual != expected {
-                        return Err(
-                            format!("cold matching batch result diverged: expected {expected}, got {actual}").into(),
-                        );
-                    }
-                }
-                EventKind::BeginAdaptiveColdMatchingBatch => {
-                    let engine = read_engine(&mut event.payload, &live_engines)?;
-                    let root = event.payload.read_u32()?;
-                    let start = Instant::now();
-                    unsafe { bridge::style_engine_begin_adaptive_cold_matching_batch(engine, root) };
-                    let elapsed = start.elapsed();
-                    boundary_time += elapsed;
-                    record_boundary_timing(
-                        &options.selection,
-                        active_phase.as_ref(),
-                        elapsed,
-                        &mut selected_boundary_time,
-                        &mut phase_times,
-                    );
-                }
-                EventKind::EndColdMatchingBatch => {
-                    let engine = read_engine(&mut event.payload, &live_engines)?;
-                    let start = Instant::now();
-                    unsafe { bridge::style_engine_end_cold_matching_batch(engine) };
-                    let elapsed = start.elapsed();
-                    boundary_time += elapsed;
-                    record_boundary_timing(
-                        &options.selection,
-                        active_phase.as_ref(),
-                        elapsed,
-                        &mut selected_boundary_time,
-                        &mut phase_times,
-                    );
-                }
                 EventKind::SettlePseudoRecordsAfterHostRecord => {
                     let engine = read_engine(&mut event.payload, &live_engines)?;
                     let node = event.payload.read_u32()?;

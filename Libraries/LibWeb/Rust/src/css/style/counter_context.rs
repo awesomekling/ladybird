@@ -611,6 +611,9 @@ impl StyleEngine {
 
     #[inline]
     pub(super) fn discard_style_transaction_outputs(&mut self) {
+        if self.state.host.update_cold_matching_batch.take() == Some(true) {
+            self.end_cold_matching_batch();
+        }
         self.state.discard_style_transaction_outputs(&mut self.counters);
     }
 
