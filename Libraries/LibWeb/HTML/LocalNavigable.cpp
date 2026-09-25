@@ -25,6 +25,7 @@
 #include <LibWeb/CSS/VisualViewport.h>
 #include <LibWeb/Compositor/CompositorFrame.h>
 #include <LibWeb/Compositor/CompositorHost.h>
+#include <LibWeb/Compositor/NavigablePresenter.h>
 #include <LibWeb/ContentSecurityPolicy/BlockingAlgorithms.h>
 #include <LibWeb/ContentSecurityPolicy/Directives/DirectiveOperations.h>
 #include <LibWeb/ContentSecurityPolicy/PolicyList.h>
@@ -677,6 +678,7 @@ LocalNavigable::LocalNavigable(
     : Navigable(page)
     , m_event_handler({}, *this)
     , m_is_svg_page(is_svg_page)
+    , m_presenter(Compositor::NavigablePresenter::create())
 {
     all_local_navigables().set(*this);
 
@@ -6638,23 +6640,6 @@ void LocalNavigable::set_should_show_caret_hit_test_debug_overlay(bool value)
         child_navigable->set_should_show_caret_hit_test_debug_overlay(value);
 }
 
-static Compositing::DisplayListResourceSet command_resources_of_display_list(Compositing::DisplayListResourceStorage const& resource_storage, Painting::DocumentPaintState const& document_paint_state, Compositing::DisplayList const& display_list)
-{
-    if (document_paint_state.display_list_used_as_paint_command_cache_source() == &display_list)
-        return document_paint_state.paint_command_cache_source_referenced_resources();
-    return resource_storage.collect_referenced_resources(display_list);
-}
-
-static Compositing::DisplayListResourceSet compositor_display_list_resources(Compositing::DisplayListResourceStorage const& resource_storage, Painting::DocumentPaintState const& document_paint_state, Compositing::DisplayListResourceSet const& display_list_command_resources, Compositing::AccumulatedVisualContextTree const& visual_context_tree)
-{
-    auto resources = display_list_command_resources;
-    // A recording downgraded to cache-read-only leaves the retained source and the cached ranges
-    // into it live, so the resources they reference must survive the pruning that follows.
-    document_paint_state.append_paint_command_cache_source_resources(resources);
-    resources.include(resource_storage.collect_referenced_resources(visual_context_tree));
-    return resources;
-}
-
 // A page listing 'dark' already offers a dark theme of its own; a page saying 'only' wants its colors kept as
 // written either way — CSS Color Adjust puts UA overrides like force-dark behind exactly that keyword.
 static bool lists_a_dark_scheme(ReadonlySpan<Utf16FlyString> schemes)
@@ -6709,8 +6694,6 @@ bool LocalNavigable::record_display_list_and_scroll_state(PaintConfig paint_conf
     return true;
 }
 
-static constexpr u64 keyboard_scroll_epoch_placeholder = NumericLimits<u64>::max();
-
 // Records the active document's display list if it is out of date, and returns the frame that brings the compositor
 // context up to date with it.
 Optional<Compositor::CompositorFrame> LocalNavigable::record_compositor_frame(PaintConfig paint_config)
@@ -6757,7 +6740,7 @@ Optional<LocalNavigable::PendingCompositorFrame> LocalNavigable::begin_composito
     // recording starts: with an overlapping render stage, tasks can change both while the recording runs. The epoch of
     // the display list it goes with is only known after the recording, so a placeholder marks where it goes.
     auto keyboard_scroll_state = is_top_level_traversable()
-        ? page().take_keyboard_scroll_state_for_compositor(keyboard_scroll_epoch_placeholder)
+        ? page().take_keyboard_scroll_state_for_compositor(Compositor::keyboard_scroll_epoch_placeholder)
         : Compositing::KeyboardScrollState {};
 
     PendingCompositorFrame pending_frame {
@@ -6765,6 +6748,7 @@ Optional<LocalNavigable::PendingCompositorFrame> LocalNavigable::begin_composito
         .paint_config = paint_config,
         .keyboard_scroll_state = move(keyboard_scroll_state),
         .recording = {},
+        .presentation = {},
     };
     if (should_record_display_list) {
         auto recording = document->begin_display_list_recording(paint_config, m_presenter->resource_storage(), Painting::PaintCommandCacheMode::ReadWrite, run);
@@ -6774,104 +6758,112 @@ Optional<LocalNavigable::PendingCompositorFrame> LocalNavigable::begin_composito
         // NB: What asks for another recording once this one is prepared asks for the next one.
         m_needs_to_record_display_list = false;
     }
+    if (Compositor::render_presents())
+        pending_frame.presentation = seal_presentation(pending_frame);
     return pending_frame;
+}
+
+// Seals what the frame is presented from as the document stands now, where its recording is cut from it: what changes
+// beside the frame in flight goes to the next frame.
+RefPtr<Compositor::Presentation> LocalNavigable::seal_presentation(PendingCompositorFrame& pending_frame)
+{
+    auto& document = *pending_frame.document;
+    if (!document.has_paint_state())
+        return {};
+    auto& document_paint_state = document.paint_state();
+    auto visual_context_tree_needs_compositor_update = document_paint_state.visual_context_tree_needs_compositor_update();
+    // NB: A recording's publication adds the filter images its tree references to the storage. The tree a frame that
+    //     records nothing sends has its filter images added now, as reading it live would. (With a recording in flight,
+    //     reaching the arena for them would take the recording in before this frame is in the ticket.)
+    Optional<Compositing::AccumulatedVisualContextTree> visual_context_tree;
+    if (pending_frame.recording) {
+        visual_context_tree = pending_frame.recording->visual_context_tree;
+    } else if (visual_context_tree_needs_compositor_update) {
+        visual_context_tree = document_paint_state.visual_context_tree(document);
+        Painting::add_published_svg_filter_image_frames(document, m_presenter->resource_storage());
+    }
+    // An update the frame takes to the compositor is taken now; what changes the tree after this is the next frame's.
+    if (visual_context_tree_needs_compositor_update)
+        document_paint_state.did_update_visual_context_tree_in_compositor();
+
+    Compositing::ScrollStateSnapshot scroll_state_snapshot { document_paint_state.scroll_state_snapshot() };
+    scroll_state_snapshot.set_adopted_async_scroll_sequence(m_adopted_async_scroll_sequence);
+    Optional<Compositor::AsyncScrollingStamp> async_scrolling_stamp = Compositor::AsyncScrollingStamp {
+        .wheel_event_listener_state_generation = page().wheel_event_listener_state_generation(),
+        .device_pixels_per_css_pixel = page().client().device_pixels_per_css_pixel(),
+    };
+
+    return adopt_ref(*new Compositor::Presentation(
+        Compositor::SealedPresentationSource { move(visual_context_tree), async_scrolling_stamp, visual_context_tree_needs_compositor_update, move(scroll_state_snapshot) },
+        Compositor::PresentationInputs {
+            .context_id = compositor_context().id(),
+            .paint_config = pending_frame.paint_config,
+            .keyboard_scroll_state = pending_frame.keyboard_scroll_state,
+            .paint_command_cache_source_resources = document_paint_state.paint_command_cache_source_referenced_resources(),
+            .present_viewport_rect = {},
+        },
+        document_paint_state.display_list_used_as_paint_command_cache_source()));
+}
+
+Compositor::NavigablePresenter& LocalNavigable::presenter()
+{
+    return *m_presenter;
+}
+
+Compositing::DisplayListResourceStorage& LocalNavigable::display_list_resource_storage()
+{
+    return presenter().resource_storage();
 }
 
 Optional<Compositor::CompositorFrame> LocalNavigable::finish_compositor_frame(PendingCompositorFrame& pending_frame)
 {
     auto document = pending_frame.document;
-    auto const& paint_config = pending_frame.paint_config;
-    auto& keyboard_scroll_state = pending_frame.keyboard_scroll_state;
     bool const should_record_display_list = pending_frame.recording != nullptr;
+    auto* sealed = pending_frame.presentation.ptr();
+    // The seal took the tree update the frame would have sent; a frame that sends nothing leaves it to the next one.
+    auto leave_sealed_tree_update_to_next_frame = [&] {
+        if (sealed && sealed->source.visual_context_tree_needs_compositor_update() && document->has_paint_state())
+            document->paint_state().did_update_visual_context_values();
+    };
     // A task beside the frame in flight retired the document's render state, and what was recorded for it is gone.
-    if (should_record_display_list && Painting::discard_retired_rust_display_list_recording(*pending_frame.recording))
+    if (should_record_display_list && Painting::discard_retired_rust_display_list_recording(*pending_frame.recording)) {
+        leave_sealed_tree_update_to_next_frame();
         return {};
+    }
     // A task beside the frame in flight tore the document's layout tree down (it stopped being active, say), and a
     // frame that recorded nothing has no render state left to be built from.
     if (!document->has_paint_state())
         return {};
 
-    auto& presenter = *m_presenter;
-    auto& resource_storage = presenter.resource_storage();
-    RefPtr<Compositing::DisplayList> display_list;
-    Compositing::DisplayListResourceSet display_list_command_resources;
-    Compositing::DisplayListResourceSet display_list_resources;
-    Compositing::DisplayListResourceTransaction resource_transaction;
-    Optional<Compositing::AccumulatedVisualContextTree> visual_context_tree;
     auto& document_paint_state = document->paint_state();
-    // Reading the tree synchronizes SVG paint resources first, which can publish a filter image the recording (and
-    // the frame before it) never saw. The image the tree references goes into the storage before the tree is sent.
-    auto current_visual_context_tree = [&] {
-        auto tree = document_paint_state.visual_context_tree(*document);
-        Painting::add_published_svg_filter_image_frames(*document, resource_storage);
-        return tree;
-    };
-    bool compositor_display_list_is_unchanged = false;
+    Optional<Painting::DocumentPresentationSource> document_source;
+    Compositor::PresentationSource* source = sealed ? &sealed->source : nullptr;
+    if (!source) {
+        document_source.emplace(*document, m_adopted_async_scroll_sequence);
+        source = &*document_source;
+    }
+    auto inputs = sealed
+        ? sealed->inputs
+        : Compositor::PresentationInputs {
+              .context_id = compositor_context().id(),
+              .paint_config = pending_frame.paint_config,
+              .keyboard_scroll_state = pending_frame.keyboard_scroll_state,
+              .paint_command_cache_source_resources = document_paint_state.paint_command_cache_source_referenced_resources(),
+              .present_viewport_rect = {},
+          };
+
+    Optional<Compositor::PublishedDisplayList> published;
     if (should_record_display_list) {
-        display_list = document->finish_display_list_recording(*pending_frame.recording);
+        auto* paint_command_cache_source = sealed ? sealed->paint_command_cache_source.ptr() : document_paint_state.display_list_used_as_paint_command_cache_source();
+        published = Painting::publish_rust_display_list_recording(*pending_frame.recording, paint_command_cache_source, inputs.paint_command_cache_source_resources, *source);
+        document->adopt_published_recording(*pending_frame.recording, *published);
         VERIFY(document->has_committed_viewport_box());
-        compositor_display_list_is_unchanged = presenter.compositor_display_list() == display_list;
-        if (!compositor_display_list_is_unchanged) {
-            visual_context_tree = current_visual_context_tree();
-            display_list_command_resources = command_resources_of_display_list(resource_storage, document_paint_state, *display_list);
-            display_list_resources = compositor_display_list_resources(resource_storage, document_paint_state, display_list_command_resources, *visual_context_tree);
-            resource_transaction = resource_storage.create_transaction(
-                presenter.compositor_display_list_resources(),
-                display_list_resources);
-        }
+        if (published->becomes_paint_command_cache_source)
+            inputs.paint_command_cache_source_resources = published->command_resources;
     }
 
     VERIFY(document->has_committed_viewport_box());
-    auto visual_context_tree_needs_compositor_update = document_paint_state.visual_context_tree_needs_compositor_update();
-
-    Compositing::ScrollStateSnapshot scroll_state_snapshot { document_paint_state.scroll_state_snapshot() };
-    scroll_state_snapshot.set_adopted_async_scroll_sequence(m_adopted_async_scroll_sequence);
-
-    // Keyboard eligibility belongs to this publication, not to the cached paint commands. Refresh it even if
-    // recording was skipped or returned the same display list, and send it with the corresponding scroll state.
-    auto& published_display_list = display_list ? *display_list : *presenter.compositor_display_list();
-    if (keyboard_scroll_state.visual_context_tree_structural_epoch == keyboard_scroll_epoch_placeholder)
-        keyboard_scroll_state.visual_context_tree_structural_epoch = published_display_list.compatible_visual_context_tree_structural_epoch();
-    auto async_scrolling_metadata = published_display_list.async_scrolling_metadata().value_or({});
-    async_scrolling_metadata.keyboard_scroll_state = keyboard_scroll_state;
-    published_display_list.set_async_scrolling_metadata(move(async_scrolling_metadata));
-
-    Compositor::CompositorFrame frame;
-    frame.context_id = compositor_context().id();
-    if (should_record_display_list && !compositor_display_list_is_unchanged) {
-        frame.display_list_update = Compositor::CompositorFrame::DisplayListUpdate {
-            .display_list = *display_list,
-            .visual_context_tree = visual_context_tree.release_value(),
-            .resource_transaction = move(resource_transaction),
-            .scroll_state_snapshot = move(scroll_state_snapshot),
-        };
-        document_paint_state.did_update_visual_context_tree_in_compositor();
-        presenter.did_hand_display_list_to_compositor(*display_list, paint_config, move(display_list_command_resources), move(display_list_resources));
-    } else {
-        if (compositor_display_list_is_unchanged) {
-            presenter.set_compositor_display_list_paint_config(paint_config);
-            // NB: A tree update below retains what the updated tree references, which can be more than the
-            //     compositor holds yet.
-            if (!visual_context_tree_needs_compositor_update && resource_storage.has_resources_added_since_last_retain())
-                resource_storage.retain_only(presenter.compositor_display_list_resources());
-        }
-        if (visual_context_tree_needs_compositor_update) {
-            auto updated_visual_context_tree = current_visual_context_tree();
-            VERIFY(updated_visual_context_tree.structural_epoch() == presenter.compositor_display_list_visual_context_tree_structural_epoch());
-            auto updated_display_list_resources = compositor_display_list_resources(resource_storage, document_paint_state, presenter.compositor_display_list_command_resources(), updated_visual_context_tree);
-            auto updated_resource_transaction = resource_storage.create_transaction(presenter.compositor_display_list_resources(), updated_display_list_resources);
-            frame.visual_context_tree_update = Compositor::CompositorFrame::VisualContextTreeUpdate {
-                .visual_context_tree = move(updated_visual_context_tree),
-                .resource_transaction = move(updated_resource_transaction),
-            };
-            document_paint_state.did_update_visual_context_tree_in_compositor();
-            presenter.did_hand_visual_context_tree_to_compositor(move(updated_display_list_resources));
-        }
-        frame.scroll_state_update = Compositor::CompositorFrame::ScrollStateUpdate {
-            .scroll_state_snapshot = move(scroll_state_snapshot),
-            .keyboard_scroll_state = move(keyboard_scroll_state),
-        };
-    }
+    auto frame = m_presenter->build_frame(inputs, *source, move(published));
     // The recording painted an SVG-as-image the main thread had not rendered yet as an empty image. It renders the
     // image before the next recording, which paints it.
     if (should_record_display_list && Painting::last_recording_missed_vector_images(*document))
@@ -6923,7 +6915,10 @@ Optional<LocalNavigable::PendingCompositorFrame> LocalNavigable::begin_painting_
 
     m_needs_repaint = false;
 
-    return begin_compositor_frame(paint_config, run);
+    auto pending_frame = begin_compositor_frame(paint_config, run);
+    if (pending_frame.has_value() && pending_frame->presentation)
+        pending_frame->presentation->inputs.present_viewport_rect = page().css_to_device_rect(this->viewport_rect()).to_type<int>();
+    return pending_frame;
 }
 
 void LocalNavigable::finish_painting_next_frame(PendingCompositorFrame& pending_frame)
@@ -6931,7 +6926,8 @@ void LocalNavigable::finish_painting_next_frame(PendingCompositorFrame& pending_
     auto frame = finish_compositor_frame(pending_frame);
     if (!frame.has_value())
         return;
-    frame->present_viewport_rect = page().css_to_device_rect(this->viewport_rect()).to_type<int>();
+    if (!pending_frame.presentation)
+        frame->present_viewport_rect = page().css_to_device_rect(this->viewport_rect()).to_type<int>();
     submit_compositor_frame(frame.release_value());
 }
 

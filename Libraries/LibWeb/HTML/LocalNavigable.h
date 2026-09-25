@@ -21,7 +21,6 @@
 #include <LibWeb/Bindings/CSS.h>
 #include <LibWeb/Bindings/Navigation.h>
 #include <LibWeb/Compositor/CompositorHost.h>
-#include <LibWeb/Compositor/NavigablePresenter.h>
 #include <LibWeb/DOM/DocumentLoadEventDelayer.h>
 #include <LibWeb/Export.h>
 #include <LibWeb/Forward.h>
@@ -301,12 +300,15 @@ public:
         PaintConfig paint_config;
         Compositing::KeyboardScrollState keyboard_scroll_state;
         OwnPtr<Painting::PendingDisplayListRecording> recording;
+        // What the frame is presented from, sealed where it was begun (LIBWEB_RENDER_PRESENTS=1).
+        RefPtr<Compositor::Presentation> presentation;
     };
     Optional<PendingCompositorFrame> begin_painting_next_frame(Painting::RecordingRun);
     void finish_painting_next_frame(PendingCompositorFrame&);
     void render_screenshot(Gfx::PaintingSurface&, PaintConfig, Function<void()>&& callback);
-    Compositor::NavigablePresenter& presenter() { return *m_presenter; }
-    Compositing::DisplayListResourceStorage& display_list_resource_storage() { return presenter().resource_storage(); }
+    // The presenter, once the frame in flight that presents from it has been taken in.
+    Compositor::NavigablePresenter& presenter();
+    Compositing::DisplayListResourceStorage& display_list_resource_storage();
 
     bool needs_repaint() const { return m_needs_repaint; }
     void set_needs_repaint() { m_needs_repaint = true; }
@@ -440,6 +442,7 @@ private:
     void destroy_compositor_context();
     Optional<Compositor::CompositorFrame> record_compositor_frame(PaintConfig);
     Optional<PendingCompositorFrame> begin_compositor_frame(PaintConfig, Painting::RecordingRun);
+    RefPtr<Compositor::Presentation> seal_presentation(PendingCompositorFrame&);
     Optional<Compositor::CompositorFrame> finish_compositor_frame(PendingCompositorFrame&);
     void submit_compositor_frame(Compositor::CompositorFrame&&);
 
@@ -572,7 +575,7 @@ private:
     i32 m_force_dark_foreground_threshold { default_force_dark_foreground_threshold };
     i32 m_force_dark_background_threshold { default_force_dark_background_threshold };
     bool m_should_show_caret_hit_test_debug_overlay { false };
-    NonnullRefPtr<Compositor::NavigablePresenter> m_presenter { Compositor::NavigablePresenter::create() };
+    NonnullRefPtr<Compositor::NavigablePresenter> m_presenter;
     OwnPtr<Compositor::CompositorContextHandle> m_compositor_context;
     RefPtr<Core::Timer> m_async_scroll_hover_update_timer;
     Vector<PendingUserScrollendTarget> m_pending_user_scrollend_targets;

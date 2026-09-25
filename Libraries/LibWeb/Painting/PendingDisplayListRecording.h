@@ -34,6 +34,8 @@ struct PendingDisplayListRecording {
     AK_ALLOC_WITH_KMALLOC;
 
     GC::Ref<DOM::Document> document;
+    // The document's layout node arena, as its handle. The document keeps it alive.
+    void* arena { nullptr };
     Compositing::DisplayListResourceStorage& resource_storage;
     Compositing::AccumulatedVisualContextTree visual_context_tree;
     PaintCommandCacheMode cache_mode;

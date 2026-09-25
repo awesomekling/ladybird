@@ -49,6 +49,10 @@ class CompositorConnection;
 class CompositorContextHandle;
 class CompositorHost;
 class CompositorHostBase;
+class NavigablePresenter;
+class PresentationSource;
+struct PublishedDisplayList;
+class Presentation;
 
 }
 
