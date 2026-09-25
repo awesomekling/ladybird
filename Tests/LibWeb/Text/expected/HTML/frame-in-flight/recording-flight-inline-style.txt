@@ -1,0 +1,6 @@
+held as armed: true
+forced joins of the recording: 0
+recording still in flight after the edits: true
+container width: 200
+second height: 30
+second width: 100
