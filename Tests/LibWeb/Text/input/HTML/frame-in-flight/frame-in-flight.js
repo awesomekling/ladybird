@@ -3,8 +3,8 @@
 // whileFrameInFlight(point, mutate, during) runs `mutate` in a rAF callback, so the rendering update paints, and holds
 // the recording that update submits at `point` ("before-run", "mid-recording" or "before-completion"). `during`
 // then runs in a task while that frame is held there, and gets { armed, heldAt, state }. With `doc`, only that
-// document's recording is held (with iframes, hold the one the rendering update paints last: a main-thread wait for
-// the render side, such as the layout update of a document painted after it, lets a held recording go on). Where frames are not
+// document's recording is held (a main-thread wait for that recording, such as its document's layout update, lets it
+// go on; the layout update of a document painted after it runs beside it). Where frames are not
 // submitted (default and lockstep modes), nothing is armed and `during` runs after the rendering update: a test prints
 // the same output in every mode, and checks the in-flight facts only when `armed` is set.
 // It starts once the document has loaded: the load task lays the document out, which waits for the frame in flight.
