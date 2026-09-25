@@ -11,7 +11,7 @@ use super::bridge::element_adjustment_fact;
 use super::computed;
 use super::publication::drive_font_metric;
 use super::tree::StyleNodeID;
-use super::{RetainedState, bridge};
+use super::{RetainedState, bridge, custom_property_environments, engine_sample_check, inputs};
 use crate::css::animated_overlay::AnimatedOverlay;
 use crate::css::computed_longhand_table::ComputedLonghandTable;
 use crate::css::computed_value_types::{FontValues, STYLE_GROUP_INDEX_FONT, STYLE_GROUP_INDEX_INHERITED_BOX};
@@ -611,6 +611,18 @@ impl RetainedState {
     }
 }
 
+/// The custom-property environment the engine named for a pseudo-element it settled, which the
+/// pseudo-element takes once the host installs its record.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct NamedPseudoElementEnvironment {
+    identity: u64,
+    /// Whether it is not simply the environment the element passes on.
+    declares: bool,
+    /// Whether it is the environment the element holds, which the host resolved: the pseudo-element
+    /// holds the host's object for it too.
+    views_element_environment: bool,
+}
+
 /// What the engine's own sample of an element leaves for the overlay record: the table after the
 /// animated box-type finalization, and the overlay.
 pub(crate) struct EngineSampledStyle {
@@ -1080,8 +1092,6 @@ impl super::StyleEngineState {
         committed_boxes: super::animations::CommittedTransformReferenceBoxes,
         counters: &mut super::Counters,
     ) -> (u8, u8) {
-        use super::engine_sample_check;
-
         let mut sampled = 0u8;
         let mut stepped = 0u8;
         for (kind, &held_style_record) in held_style_records.iter().enumerate() {
@@ -1234,6 +1244,147 @@ impl super::StyleEngineState {
         self.retained
             .pseudo_element_transition_steps_decided_in_pass
             .retain(|(owner, _), _| *owner != node);
+        self.retained
+            .pseudo_element_environments_named_in_settle
+            .retain(|(owner, _), _| *owner != node);
+    }
+
+    /// The custom-property environment a settled pseudo-element record was resolved over, which the
+    /// pseudo-element holds once its record is installed, named by the engine itself rather than
+    /// installed by the host: an environment the engine resolved, by identity, or the environment
+    /// its element passes on. A pseudo-element declares custom properties of its own where that is
+    /// neither the element's environment nor its inherited projection.
+    ///
+    /// The pseudo-element takes it once the host installs the record. The host names it where the
+    /// engine does not: for a pseudo-element holding an animation overlay, which a new base
+    /// re-layers, and for one inheriting an environment the host resolved that its element passes
+    /// on as a projection of its own.
+    pub(crate) fn name_settled_pseudo_element_environment(
+        &mut self,
+        node: StyleNodeID,
+        pseudo_kind: u8,
+        style_record: u64,
+    ) {
+        match self.settled_pseudo_element_environment(node, pseudo_kind, style_record) {
+            Some(named) => {
+                self.retained
+                    .pseudo_element_environments_named_in_settle
+                    .insert((node, pseudo_kind), named);
+            }
+            None => engine_sample_check::note_declined("pseudo-element environment: named by the host"),
+        }
+    }
+
+    fn settled_pseudo_element_environment(
+        &mut self,
+        node: StyleNodeID,
+        pseudo_kind: u8,
+        style_record: u64,
+    ) -> Option<Option<NamedPseudoElementEnvironment>> {
+        let key = (node, pseudo_kind);
+        if self
+            .retained
+            .pseudo_element_custom_property_data
+            .get(&key)
+            .is_some_and(|held| held.is_animation_overlay)
+        {
+            return None;
+        }
+        let environment = self
+            .retained
+            .computed_group_sets
+            .style_record_custom_property_environment(style_record)?;
+        let element_held = self
+            .retained
+            .element_custom_property_data
+            .get(&node)
+            .and_then(Option::as_ref);
+        let element_environment = element_held.map_or(0, |held| held.identity);
+        let named = match environment {
+            0 => None,
+            environment if environment & custom_property_environments::ENGINE_ENVIRONMENT_IDENTITY_BIT != 0 => {
+                let inputs = self.retained.document_style_computation_inputs;
+                let inherited = match self.retained.custom_property_environments.store(element_environment) {
+                    Some(_) => self
+                        .retained
+                        .inheritable_custom_property_environment(element_environment, &inputs),
+                    None => element_environment,
+                };
+                Some(NamedPseudoElementEnvironment {
+                    identity: environment,
+                    declares: environment != element_environment && environment != inherited,
+                    views_element_environment: false,
+                })
+            }
+            // One the host resolved is what the element passes on: its own environment, where no
+            // registration keeps a name of it from inheriting.
+            _ => {
+                let element_held = element_held.filter(|held| held.data.is_some())?;
+                let inputs = self.retained.document_style_computation_inputs;
+                let identity = element_held.identity;
+                if self.retained.custom_property_environments.store(identity).is_some()
+                    && self.retained.inheritable_custom_property_environment(identity, &inputs) != identity
+                {
+                    return None;
+                }
+                Some(NamedPseudoElementEnvironment {
+                    identity,
+                    declares: false,
+                    views_element_environment: true,
+                })
+            }
+        };
+        Some(named)
+    }
+
+    /// The host installs the record of a pseudo-element the engine settled: it takes the
+    /// environment the engine named for it, if any. Returns whether it did, and the host installs
+    /// none.
+    pub(crate) fn take_pseudo_element_environment_named_in_settle(
+        &mut self,
+        node: StyleNodeID,
+        pseudo_kind: u8,
+    ) -> bool {
+        let key = (node, pseudo_kind);
+        let Some(named) = self.retained.pseudo_element_environments_named_in_settle.remove(&key) else {
+            return false;
+        };
+        // The host's object for an environment it resolved is the one the element holds.
+        let data = match named {
+            Some(named) if named.views_element_environment => {
+                let Some(data) = self
+                    .retained
+                    .element_custom_property_data
+                    .get(&node)
+                    .and_then(Option::as_ref)
+                    .filter(|held| held.identity == named.identity)
+                    .and_then(|held| held.data.as_ref())
+                    .map(inputs::RetainedCustomPropertyData::share)
+                else {
+                    return false;
+                };
+                Some(data)
+            }
+            _ => None,
+        };
+        let retired = match named {
+            Some(named) => self.retained.pseudo_element_custom_property_data.insert(
+                key,
+                inputs::HeldCustomPropertyEnvironment {
+                    identity: named.identity,
+                    is_animation_overlay: false,
+                    declares: named.declares,
+                    data,
+                    animation_base: None,
+                },
+            ),
+            None => self.retained.pseudo_element_custom_property_data.remove(&key),
+        };
+        self.host
+            .retired_custom_property_data
+            .extend(retired.and_then(|held| held.data));
+        engine_sample_check::note_taken("pseudo-element environment named in settle");
+        true
     }
 
     /// Take what the engine published for a pseudo-element whose animations it sampled as it

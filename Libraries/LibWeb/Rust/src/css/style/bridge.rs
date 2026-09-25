@@ -4454,6 +4454,13 @@ pub unsafe extern "C" fn style_engine_settle_pseudo_records_after_host_record(
             }
             false => (0, 0),
         };
+        // The engine names the environment each settled pseudo-element holds once its record is
+        // installed.
+        for kind in 0..RETRY_PSEUDO_RECORD_SLOTS {
+            if (settled.pseudo_records_present >> kind) & 1 != 0 && settled.pseudo_records[kind] != 0 {
+                engine.name_settled_pseudo_element_environment(style_node, kind as u8, settled.pseudo_records[kind]);
+            }
+        }
         let result = FfiEngineComputedRecord {
             style_record: settled.style_record,
             uses_substitution,
@@ -4475,6 +4482,26 @@ pub unsafe extern "C" fn style_engine_settle_pseudo_records_after_host_record(
         });
         result
     })
+}
+
+/// The host installs the record of a synthetic pseudo-element the engine settled: the
+/// pseudo-element takes the custom-property environment the engine named for it as it settled it.
+/// Returns false where the engine named none, and the host installs the environment itself.
+///
+/// # Safety
+/// `engine` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_take_pseudo_element_environment_named_in_settle(
+    engine: *mut c_void,
+    node: u32,
+    pseudo_kind: u8,
+) -> bool {
+    engine_entrance(engine, "style_engine_take_pseudo_element_environment_named_in_settle");
+    let Some(node) = StyleNodeID::from_raw(node) else {
+        return false;
+    };
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    engine.take_pseudo_element_environment_named_in_settle(node, pseudo_kind)
 }
 
 /// The store of an environment the engine resolved, with one strong reference transferred to the

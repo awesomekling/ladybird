@@ -1767,16 +1767,19 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
         if (new_pseudo_element_style) {
             set_computed_style(scope, pseudo_element, style_record_delta.new_style_record);
             // The custom-property environment the record was resolved over: its element's inheritable
-            // environment, or the one its own custom declarations resolved to over that.
-            auto environment = scope.engine().style_record_custom_property_environment(*engine_record);
-            RefPtr<CSS::CustomPropertyData const> data;
-            if (CSS::StyleEngine::is_engine_custom_property_environment(environment)) {
-                data = style_computer.engine_custom_property_environment(environment);
-            } else if (environment != 0) {
-                auto element_data = custom_property_data({});
-                data = element_data ? element_data->inheritable(document()) : nullptr;
+            // environment, or the one its own custom declarations resolved to over that. The engine
+            // named it as it settled the record, where it could.
+            if (!CSS::StyleEngineFFI::style_engine_take_pseudo_element_environment_named_in_settle(scope.engine().rust_handle(), style_node_id().value(), to_underlying(pseudo_element))) {
+                auto environment = scope.engine().style_record_custom_property_environment(*engine_record);
+                RefPtr<CSS::CustomPropertyData const> data;
+                if (CSS::StyleEngine::is_engine_custom_property_environment(environment)) {
+                    data = style_computer.engine_custom_property_environment(environment);
+                } else if (environment != 0) {
+                    auto element_data = custom_property_data({});
+                    data = element_data ? element_data->inheritable(document()) : nullptr;
+                }
+                set_custom_property_data(scope, pseudo_element, move(data));
             }
-            set_custom_property_data(scope, pseudo_element, move(data));
             if (!!old_style_record || !new_pseudo_element_style->transition_delay_and_duration_are_single_zero()) {
                 // A step the engine decided as it settled the pseudo-element is applied as it decided
                 // it, its composition already installed.

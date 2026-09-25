@@ -982,6 +982,11 @@ pub struct RetainedState {
     /// their element's composition, with what it published for them: the host installs the
     /// composition rather than sampling again.
     pseudo_elements_sampled_in_pass: HashMap<(StyleNodeID, u8), engine_sample::SettledRowPublication>,
+    /// The custom-property environments the engine named for synthetic pseudo-elements as it
+    /// settled their records, which each takes once the host installs its record; `None` for one
+    /// holding none.
+    pseudo_element_environments_named_in_settle:
+        HashMap<(StyleNodeID, u8), Option<engine_sample::NamedPseudoElementEnvironment>>,
     /// The identity the next overlay the engine composes itself is published under, which the
     /// high bit keeps apart from the host's.
     next_engine_animation_overlay_identity: u64,

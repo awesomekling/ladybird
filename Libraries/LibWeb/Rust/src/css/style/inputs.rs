@@ -2047,6 +2047,7 @@ impl StyleEngineState {
                 nodes_owing_an_animation_sample: HashSet::default(),
                 rows_sampled_in_pass: HashMap::default(),
                 pseudo_elements_sampled_in_pass: HashMap::default(),
+                pseudo_element_environments_named_in_settle: HashMap::default(),
                 next_engine_animation_overlay_identity: 0,
                 transition_baselines: HashMap::default(),
                 element_transitions: Default::default(),
