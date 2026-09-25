@@ -9,6 +9,7 @@
 #include <AK/Demangle.h>
 #include <LibWeb/CSS/ComputedStyleWorkingSet.h>
 #include <LibWeb/CSS/StyleComputer.h>
+#include <LibWeb/CSS/StyleInputScope.h>
 #include <LibWeb/CSS/StyleValues/AbstractImageStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CursorStyleValue.h>
 #include <LibWeb/CSS/StyleValues/ImageStyleValue.h>
@@ -98,8 +99,11 @@ void publish_dom_paint_facts(DOM::Node const& dom_node)
     if (facts != 0)
         document.set_may_have_dom_paint_facts();
     auto identity = dom_node.is_document() ? document.style_node_id() : Node::style_node_of(&dom_node);
-    if (identity.value() != 0)
-        document.style_computer().style_engine().set_node_dom_paint_facts(identity, facts);
+    if (identity.value() != 0) {
+        document.style_computer().style_engine().publish_input([identity, facts](CSS::StyleInputScope const& input) {
+            input.engine().set_node_dom_paint_facts(identity, facts);
+        });
+    }
     document.invalidation_journal().note_dom_paint_facts(DOM::NodeIdentity::of(dom_node), facts);
 }
 

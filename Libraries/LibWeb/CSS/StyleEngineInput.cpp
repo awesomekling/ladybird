@@ -158,7 +158,9 @@ static StyleNodeID identity_of_shadow_root(DOM::ShadowRoot& shadow_root, StyleEn
         // nothing the engine can enumerate. It is named here rather than where a scope is numbered,
         // because numbering must not mint a place in the tree: a sheet detaching from a scope whose
         // root has already left would otherwise give that root a new identity on its way out.
-        style_engine.set_tree_scope_root(tree_scope_of(shadow_root), shadow_root.style_node_id());
+        style_engine.publish_input([tree_scope = tree_scope_of(shadow_root), root = shadow_root.style_node_id()](StyleInputScope const& input) {
+            input.engine().set_tree_scope_root(tree_scope, root);
+        });
     }
     // A shadow root built from the document's styles rather than its own decides with the author
     // origin from there, which is otherwise bounded by the scope it is attached to.
@@ -460,7 +462,9 @@ void record_subtree_connecting(DOM::Node& root)
                 auto& shadow_root = as<DOM::ShadowRoot>(*arrival.node);
                 shadow_root.set_style_node_id(identity);
                 style_computer.register_style_node(identity, shadow_root);
-                style_engine.set_tree_scope_root(arrival.tree_scope, identity);
+                style_engine.publish_input([tree_scope = arrival.tree_scope, identity](StyleInputScope const& input) {
+                    input.engine().set_tree_scope_root(tree_scope, identity);
+                });
             }
         }
     }
