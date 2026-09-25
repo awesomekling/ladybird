@@ -5,3 +5,4 @@ finished while hidden: true
 taken back while hidden: true
 laid out while hidden: 80
 rendering resumed: visible, 90
+layout passes held: true

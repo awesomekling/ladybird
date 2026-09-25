@@ -47,6 +47,7 @@
         await twoFrames();
         println(`child in flight: child viewport width: ${child.defaultView.innerWidth}`);
         println(`child in flight: child box: ${inner(child).offsetWidth}x${inner(child).offsetHeight}`);
+        println(`layout passes held: ${layoutHoldsWereHeld(3)}`);
         done();
     });
 

@@ -989,6 +989,26 @@ pub extern "C" fn rust_stage_thread_wait_for_held_stage(timeout_ms: u32, held_at
     }
 }
 
+/// Whether a hold is armed for a stage the frame in flight has not submitted yet, while other stages
+/// of it are in flight: the style pass a rendering update submits before its layout pass, which it
+/// submits once the main thread has taken the style pass back between tasks.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_stage_thread_armed_hold_awaits_submission() -> bool {
+    let (hold, _) = lock_stage_hold();
+    if hold.holding.is_some() {
+        return false;
+    }
+    let Some(armed) = &hold.armed else {
+        return false;
+    };
+    SUBMITTED.with_borrow(|submitted| {
+        !submitted.is_empty()
+            && !submitted.iter().any(|stage| {
+                hold_names_stage(&armed.label, &stage.hold_labels) && (armed.arena == 0 || armed.arena == stage.arena)
+            })
+    })
+}
+
 /// Releases the run the stage thread is holding, and disarms a hold for `label` that the stage
 /// thread has not reached yet. A hold for another stage stays armed.
 fn release_hold_on(hold_labels: &[&'static str]) {

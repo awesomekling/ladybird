@@ -28,6 +28,7 @@
         println(`held as armed: ${layoutHeldAsArmed(frame, "before-completion")}`);
         await twoFrames();
         println(`video document laid out: ${videoDocument.body.offsetHeight > 0}`);
+        println(`layout passes held: ${layoutHoldsWereHeld(1)}`);
         done();
     });
 </script>

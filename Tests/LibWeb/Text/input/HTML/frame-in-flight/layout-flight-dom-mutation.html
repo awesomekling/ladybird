@@ -50,6 +50,7 @@
         println(`replacement: fourth width: ${document.getElementById("fourth").offsetWidth}`);
         println(`replacement: children: ${container.children.length}`);
         println(`replacement: span laid out: ${container.querySelector("span").getClientRects().length > 0}`);
+        println(`layout passes held: ${layoutHoldsWereHeld(3)}`);
         done();
     });
 </script>

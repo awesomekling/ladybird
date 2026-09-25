@@ -33,6 +33,7 @@
         println(`styled: ${styled.offsetWidth}x${styled.offsetHeight}`);
         println(`sized: ${sized.offsetWidth}x${sized.offsetHeight}`);
         println(`container height: ${container.offsetHeight}`);
+        println(`layout passes held: ${layoutHoldsWereHeld(1)}`);
         done();
     });
 </script>

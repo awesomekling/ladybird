@@ -29,6 +29,7 @@
         await twoFrames();
         println(`resized: ${sizes.join(",")}`);
         observer.disconnect();
+        println(`layout passes held: ${layoutHoldsWereHeld(1)}`);
         done();
     });
 </script>

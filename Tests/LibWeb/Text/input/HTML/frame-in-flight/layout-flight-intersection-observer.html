@@ -54,6 +54,7 @@
         println(`moved in: ${seen.join(",")}`);
         println(`disconnected beside the pass: ${seenByOther.join(",")}`);
         observer.disconnect();
+        println(`layout passes held: ${layoutHoldsWereHeld(2)}`);
         done();
     });
 </script>

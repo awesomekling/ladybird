@@ -14,3 +14,4 @@ read: shown: 0x0
 read: children laid out: kept,list
 read: list items: 2, list height > 0: true
 read: tree matches a full rebuild: true
+layout passes held: true

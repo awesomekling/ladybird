@@ -26,6 +26,7 @@
                 flights += count;
         println(`the held flight stopped after its layout: ${!result.heldAt || flights === 0 || ends.preempted.rounds === 1}`);
         println(`width after: ${text.offsetWidth === result.width}`);
+        println(`layout passes held: ${layoutHoldsWereHeld(1)}`);
         done();
     });
 </script>

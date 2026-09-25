@@ -43,6 +43,14 @@ async function whileFrameInFlight(point, mutate, during, doc = null) {
     });
 }
 
+let layoutHoldsHeld = 0;
+
+// Where the rendering update submits its layout pass, whether whileLayoutInFlight held as many layout passes as
+// `count`, so that a test checks it is not vacuous in every mode (true wherever none is submitted).
+function layoutHoldsWereHeld(count) {
+    return !internals.submitsLayoutPass() || layoutHoldsHeld === count;
+}
+
 // whileLayoutInFlight(point, mutate, during) is whileFrameInFlight for the full layout pass a rendering update submits
 // under LIBWEB_STAGE_OVERLAP=layout, held at `point` ("before-run" or "before-completion"): `mutate` runs in a rAF
 // callback and has to leave layout to do, and `during` runs in a task while that pass is held. With `doc`, only that
@@ -61,8 +69,15 @@ async function whileLayoutInFlight(point, mutate, during, doc = null) {
             mutate();
             setTimeout(async () => {
                 try {
+                    // A rendering update that submits its style pass first submits the layout pass once the main
+                    // thread has taken the style pass back between tasks.
+                    while (armed && internals.heldFrameAwaitsSubmission()) {
+                        internals.waitForFrameToFinish();
+                        await nextTask();
+                    }
                     // Returns "" at once if no layout pass was submitted.
                     const heldAt = armed ? internals.waitForHeldFrame() : "";
+                    if (heldAt) layoutHoldsHeld++;
                     const frame = { heldAt, state: internals.frameSchedulerState() };
                     const result = await during(frame);
                     internals.releaseHeldFrame();

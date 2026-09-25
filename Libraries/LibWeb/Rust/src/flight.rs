@@ -147,8 +147,14 @@ impl Flight {
     fn stage_holds(&self) -> &'static [&'static str] {
         match (self.began, self.paint.is_some()) {
             (FfiFlightStage::Style, _) => &["flight:style"],
-            (_, true) => &["flight:layout", "flight:record", "flight:recorded", "flight:present"],
-            (_, false) => &["flight:layout"],
+            (_, true) => &[
+                "flight:layout",
+                "flight:laid-out",
+                "flight:record",
+                "flight:recorded",
+                "flight:present",
+            ],
+            (_, false) => &["flight:layout", "flight:laid-out"],
         }
     }
 
@@ -241,6 +247,9 @@ impl Flight {
                 FfiFlightStage::StyleRenderHalf | FfiFlightStage::Record => Some(FfiFlightEndReason::StageRunsOnMain),
             };
             if let Some(end) = end {
+                if reached >= FfiFlightStage::Rounds {
+                    crate::stage_thread::hold_before_flight_completion("flight:laid-out");
+                }
                 if reached >= FfiFlightStage::Record {
                     crate::stage_thread::hold_before_flight_completion("flight:recorded");
                 }

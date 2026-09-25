@@ -25,6 +25,8 @@
         await loaded();
         println(`navigation: held as armed: ${layoutHeldAsArmed(navigated, "before-run")}`);
         println(`navigation: new document: ${frame.contentDocument.body.textContent}`);
+        // What the navigation left this document to lay out goes first, so that the next layout pass is the iframe's.
+        await twoFrames();
 
         const opened = await whileLayoutInFlight("before-completion", mutateChild, frameInFlight => {
             const doc = frame.contentDocument;
@@ -63,6 +65,7 @@
         internals.gc();
         println(`window close: closed: ${popup.closed}`);
         println(`window close: opener laid out: ${document.body.offsetWidth}`);
+        println(`layout passes held: ${layoutHoldsWereHeld(4)}`);
         done();
     });
 </script>

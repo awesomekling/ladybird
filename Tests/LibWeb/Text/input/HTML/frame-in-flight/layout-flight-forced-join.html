@@ -39,6 +39,7 @@
 
         await twoFrames();
         println(`after: box: ${box.offsetWidth}x${box.offsetHeight}`);
+        println(`layout passes held: ${layoutHoldsWereHeld(2)}`);
         done();
     });
 </script>

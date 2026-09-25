@@ -7,3 +7,4 @@ finished pass: getBoundingClientRect height: 60
 finished pass: scrollHeight: 120
 finished pass: hit test: true
 after: box: 180x60
+layout passes held: true
