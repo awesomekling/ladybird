@@ -984,12 +984,10 @@ pub struct RetainedState {
     transition_baselines: HashMap<(StyleNodeID, u8), u64>,
     /// The transitions each element holds, which a row's transition step decides over.
     element_transitions: transition_step::ElementTransitions,
-    /// What the pass decided for the transition step of each row that owes one, which the report
-    /// compares with the host's decision.
-    transition_step_decisions: HashMap<StyleNodeID, Option<Vec<(u16, transition_step::TransitionStepDecision)>>>,
-    /// What the pass composed for the transition step of each row it decided one for, which the
-    /// report compares with the host's composition.
-    transition_step_compositions: HashMap<StyleNodeID, Box<crate::css::animated_overlay::AnimatedOverlay>>,
+    /// The transition steps the pass decided, which the host applies where it installs the rows.
+    transition_steps_decided_in_pass: HashMap<StyleNodeID, transition_step::TransitionStepForHost>,
+    /// The step the host took last, which what it was handed points into.
+    taken_transition_step: Option<transition_step::TransitionStepForHost>,
     /// What each tree scope's registered counter styles are, as one identity per scope. A record
     /// whose `content` or `list-style-type` names an overridable counter style is only the answer
     /// while the registry it named is the one in place, so the record carries the identity and a

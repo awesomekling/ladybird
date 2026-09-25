@@ -15,6 +15,7 @@ use super::animations::{
     row_timeline_time,
 };
 use super::bridge::FfiPublishedTransition;
+use super::bridge::FfiTransitionStepAction;
 use super::tree::StyleNodeID;
 use super::{RetainedState, StyleEngineState, engine_sample_check};
 use crate::css::animated_overlay::{AnimatedOverlay, overlay_wins};
@@ -107,52 +108,32 @@ fn effective_value(
     table.get(property_id).map_or(std::ptr::null(), |value| value.pointer())
 }
 
-/// An overlay's entries, by property: what the report compares of two compositions.
-fn overlay_entries(overlay: Option<&AnimatedOverlay>) -> Vec<(u16, &StyleValueData, bool, bool)> {
-    let mut entries = overlay.map_or(Vec::new(), |overlay| {
-        overlay
-            .entries()
-            .iter()
-            .map(|entry| {
-                (
-                    entry.property,
-                    entry.value(),
-                    entry.inherited,
-                    entry.result_of_transition,
-                )
-            })
-            .collect()
-    });
-    entries.sort_by_key(|entry| entry.0);
-    entries
-}
-
-/// What the pass decided for a row's transition step: the decision for each property, and the
-/// transitions it starts.
+/// What the pass decided for a row's transition step: the transitions it starts, and what the host
+/// applies.
 #[derive(Default)]
 struct TransitionStep {
-    decisions: Vec<(u16, TransitionStepDecision)>,
     started: Vec<StartedTransition>,
     removes_a_transition: bool,
+    for_host: TransitionStepForHost,
 }
 
-/// What the step decided for one property, compared with the host's decision.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct TransitionStepDecision {
-    kind: FfiTransitionActionKind,
-    delay: f64,
-    active_duration: f64,
-    reversing_shortening_factor: f64,
+/// A transition step the pass decided, which the host applies where it installs the row: the
+/// decision for each property, and what a transition it starts runs from and to, which the step
+/// keeps alive.
+#[derive(Default)]
+pub(crate) struct TransitionStepForHost {
+    actions: Vec<FfiTransitionStepAction>,
+    _values: Vec<RetainedStyleValueData>,
 }
 
-impl From<&FfiTransitionAction> for TransitionStepDecision {
-    fn from(action: &FfiTransitionAction) -> Self {
-        Self {
-            kind: action.kind,
-            delay: action.delay,
-            active_duration: action.active_duration,
-            reversing_shortening_factor: action.reversing_shortening_factor,
-        }
+// SAFETY: The actions' values point into `_values`, which own a reference to each.
+unsafe impl Send for TransitionStepForHost {}
+unsafe impl Sync for TransitionStepForHost {}
+
+impl TransitionStepForHost {
+    #[must_use]
+    pub(crate) fn actions(&self) -> &[FfiTransitionStepAction] {
+        &self.actions
     }
 }
 
@@ -323,6 +304,7 @@ impl RetainedState {
                 reversing_shortening_factor: 1.0,
             })
             .collect::<Vec<_>>();
+        crate::css::ffi_stats::rust_style_ffi_note_transition_decision();
         crate::css::transition::decide_transitions(
             self,
             before_style_record,
@@ -336,7 +318,17 @@ impl RetainedState {
         // What the step starts, as `CSSTransition` builds it, for the composition the step leaves.
         let mut removes_a_transition = false;
         let mut started = Vec::new();
+        let mut for_host = TransitionStepForHost::default();
         for (property, action) in properties.iter().zip(&actions) {
+            for_host.actions.push(FfiTransitionStepAction {
+                property_id: action.property_id,
+                kind: action.kind as u8,
+                delay: action.delay,
+                active_duration: action.active_duration,
+                reversing_shortening_factor: action.reversing_shortening_factor,
+                start_value: std::ptr::null(),
+                end_value: std::ptr::null(),
+            });
             let (start_value, end_value) = match action.kind {
                 FfiTransitionActionKind::None => continue,
                 FfiTransitionActionKind::Remove | FfiTransitionActionKind::Cancel => {
@@ -363,6 +355,11 @@ impl RetainedState {
             let retain = |value: *const StyleValueData| unsafe {
                 RetainedStyleValueData::from_retained_pointer(crate::css::style_value::rust_style_value_retain(value))
             };
+            let for_host_action = for_host.actions.last_mut().expect("the action was just pushed");
+            for_host_action.start_value = start_value.cast();
+            for_host_action.end_value = end_value.cast();
+            for_host._values.push(retain(start_value));
+            for_host._values.push(retain(end_value));
             started.push(StartedTransition {
                 effect: PublishedEffect::for_css_transition(action.property_id, retain(start_value), retain(end_value)),
                 row: AnimationTimingRow::for_new_css_transition(
@@ -376,115 +373,125 @@ impl RetainedState {
             });
         }
         Ok(TransitionStep {
-            decisions: actions
-                .iter()
-                .map(|action| (action.property_id, TransitionStepDecision::from(action)))
-                .collect(),
             started,
             removes_a_transition,
+            for_host,
         })
     }
 }
 
 impl StyleEngineState {
-    /// Decide the transition step of a row that owes the whole step, for the report to compare
-    /// with the host's decision when the host runs the step.
+    /// Decide the transition step of a row that owes the whole step, which the host would decide
+    /// when it installs the row, and compose what the transitions it starts layer over the
+    /// composition the row installs: the host then applies the decisions, and installs the
+    /// composition as the row's. A step the engine cannot decide or compose is left to the host.
     pub(crate) fn decide_settled_row_transition_step(
         &mut self,
         node: StyleNodeID,
         old_style_record: u64,
+        settled_style_record: u64,
         installed_style_record: u64,
         layout_arena: super::animations::LentLayoutArena,
+        counters: &mut super::Counters,
     ) {
         let step = match self.decide_transition_step(node, old_style_record, installed_style_record, layout_arena) {
             Ok(step) => step,
             Err(reason) => {
                 engine_sample_check::note_declined(&format!("transition step: {reason}"));
-                self.retained.transition_step_decisions.insert(node, None);
                 return;
             }
         };
-        self.retained
-            .transition_step_decisions
-            .insert(node, Some(step.decisions));
-        if step.started.is_empty() {
-            return;
-        }
-        // The host's step collects the element's effects again when it removes a transition.
-        if step.removes_a_transition {
-            engine_sample_check::note_declined("transition step composition: a step that removes a transition");
-            return;
-        }
-        match crate::css::style_compute::sample_transition_step(
-            self,
-            node,
-            installed_style_record,
-            &step.started,
-            layout_arena,
-        ) {
-            Ok(overlay) => {
-                self.retained.transition_step_compositions.insert(node, overlay);
+        if !step.started.is_empty() {
+            // The host's step collects the element's effects again when it removes a transition.
+            if step.removes_a_transition {
+                engine_sample_check::note_declined("transition step: a step that removes a transition");
+                return;
             }
-            Err(reason) => engine_sample_check::note_declined(&format!("transition step composition: {reason}")),
+            let published = crate::css::style_compute::sample_transition_step(
+                self,
+                node,
+                installed_style_record,
+                &step.started,
+                layout_arena,
+            )
+            .and_then(|overlay| {
+                self.publish_transition_step_composition(
+                    node,
+                    settled_style_record,
+                    installed_style_record,
+                    overlay,
+                    counters,
+                )
+                .map_err(String::from)
+            });
+            if let Err(reason) = published {
+                engine_sample_check::note_declined(&format!("transition step: {reason}"));
+                return;
+            }
+        } else if step.removes_a_transition {
+            engine_sample_check::note_declined("transition step: a step that removes a transition");
+            return;
         }
+        engine_sample_check::note_taken("transition step");
+        self.retained
+            .transition_steps_decided_in_pass
+            .insert(node, step.for_host);
     }
 
-    /// Compare the composition the host's step left for an element with the one the pass composed.
-    pub(crate) fn check_transition_step_composition(
+    /// Publish the composition a step left as the element's record, as the pass publishes its
+    /// sample of the row: over the record the row settled, with what the sample the step was
+    /// layered over found out.
+    fn publish_transition_step_composition(
         &mut self,
         node: StyleNodeID,
-        host_overlay: Option<&AnimatedOverlay>,
-    ) {
-        if !engine_sample_check::is_reporting() {
-            return;
+        settled_style_record: u64,
+        installed_style_record: u64,
+        overlay: Box<AnimatedOverlay>,
+        counters: &mut super::Counters,
+    ) -> Result<(), &'static str> {
+        use crate::css::property_metadata::property_id;
+
+        // Publishing the step's composition does not compose the element's animated custom
+        // properties again, nor its animated display.
+        if self.retained.sampled_custom_property_environments.contains_key(&node) {
+            return Err("a composition over animated custom properties");
         }
-        let Some(composed) = self.retained.transition_step_compositions.remove(&node) else {
-            return;
+        if overlay.get(property_id::DISPLAY).is_some() {
+            return Err("a composition that animates display");
+        }
+        let table = self
+            .style_record_view(installed_style_record)
+            .and_then(|view| unsafe { view.longhand_table.as_ref() })
+            .ok_or("an installed record with no table")?;
+        let previous = self.retained.rows_sampled_in_pass.get(&node).copied();
+        let sample = crate::css::style_compute::SettledRowSample {
+            style_record: settled_style_record,
+            keyframes_inherited_non_inherited_style_groups: previous
+                .map_or(0, |previous| previous.keyframes_inherited_non_inherited_style_groups),
+            uses_tree_counting_function: previous.is_some_and(|previous| previous.uses_tree_counting_function),
+            substitution_marks: previous.map_or(0, |previous| previous.substitution_marks),
+            animated_display_before_box_type_transformation: None,
+            animated_custom_properties: Vec::new(),
+            style: super::engine_sample::EngineSampledStyle {
+                table: unsafe { crate::css::computed_longhand_table::rust_computed_longhand_table_retain(table) }
+                    .cast_mut(),
+                overlay: Box::into_raw(overlay),
+            },
         };
-        let host = overlay_entries(host_overlay);
-        let pass = overlay_entries(Some(&composed));
-        let agrees = host.len() == pass.len()
-            && host
-                .iter()
-                .zip(&pass)
-                .all(|(host, pass)| host.0 == pass.0 && host.2 == pass.2 && host.3 == pass.3 && host.1 == pass.1);
-        match agrees {
-            true => engine_sample_check::note_taken("transition step composition agrees"),
-            false => engine_sample_check::note_declined(&format!(
-                "transition step composition differs: host {:?} pass {:?}",
-                host.iter().map(|entry| (entry.0, entry.2, entry.3)).collect::<Vec<_>>(),
-                pass.iter().map(|entry| (entry.0, entry.2, entry.3)).collect::<Vec<_>>()
-            )),
-        }
+        self.publish_settled_row_sample(node, sample, counters)?;
+        Ok(())
     }
 
-    /// Compare the step the host decided for an element with the one the pass decided.
-    pub(crate) fn check_transition_step(&mut self, node: StyleNodeID, host_actions: &[FfiTransitionAction]) {
-        if !engine_sample_check::is_reporting() {
-            return;
-        }
-        let Some(decided) = self.retained.transition_step_decisions.remove(&node) else {
-            engine_sample_check::note_declined("transition step: the pass decided no step");
-            return;
-        };
-        let Some(decided) = decided else {
-            return;
-        };
-        let differs = host_actions.len() != decided.len()
-            || host_actions.iter().any(|action| {
-                !decided.iter().any(|(property_id, decision)| {
-                    *property_id == action.property_id && *decision == TransitionStepDecision::from(action)
-                })
-            });
-        match differs {
-            false => engine_sample_check::note_taken("transition step agrees"),
-            true => engine_sample_check::note_declined(&format!(
-                "transition step differs: host {:?} pass {decided:?}",
-                host_actions
-                    .iter()
-                    .map(|action| (action.property_id, TransitionStepDecision::from(action)))
-                    .collect::<Vec<_>>()
-            )),
-        }
+    /// Take the step the pass decided for a row, so that exactly one installation applies it. What
+    /// it points at stays alive until the next take.
+    pub(crate) fn take_transition_step_decided_in_pass(&mut self, node: StyleNodeID) -> Option<&TransitionStepForHost> {
+        let step = self.retained.transition_steps_decided_in_pass.remove(&node)?;
+        self.retained.taken_transition_step = Some(step);
+        self.retained.taken_transition_step.as_ref()
+    }
+
+    /// A row the pass decides the step of again leaves no earlier decision behind.
+    pub(crate) fn forget_transition_step_decided_in_pass(&mut self, node: StyleNodeID) {
+        self.retained.transition_steps_decided_in_pass.remove(&node);
     }
 }
