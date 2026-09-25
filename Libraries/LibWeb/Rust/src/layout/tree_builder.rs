@@ -6,13 +6,13 @@
 
 use super::*;
 
+use super::tree_update_marks::layout_tree_update_reuse_reason;
 use crate::abort_on_panic;
 use crate::css::css_enums::{float, positioning, white_space_collapse};
 use crate::css::style::StyleEngine;
 use crate::css::style::bridge::{ElementBoxKind, element_adjustment_fact};
 use crate::css::style::layout_style::{AnonymousStyleKind, AnonymousStyleOverrides};
 use crate::css::style::tree::StyleNodeID;
-use crate::css::style::tree::layout_tree_update_reuse_reason;
 use crate::layout::layout_node_arena::{LayoutNodeArena, StaleWalkFacts, prepare_subtree_for_detach};
 use crate::layout::node_data::{
     GENERATED_FOR_AFTER, GENERATED_FOR_BACKDROP, GENERATED_FOR_BEFORE, GENERATED_FOR_FIRST_LETTER,
@@ -815,7 +815,7 @@ fn resolve_layout_node_reuse(host: &DomTreeBuilderHost, kind: PrincipalNodeKind,
         let Some(element) = StyleNodeID::from_raw(style_node) else {
             return (0, false, false);
         };
-        let reasons = engine.tree().layout_tree_update_reuse_reasons(element);
+        let reasons = layout.arena().layout_tree_update_reuse_reasons(element);
         let insert_children = reasons & layout_tree_update_reuse_reason::CHILD_LIST_INSERTION != 0
             && may_reuse_layout_node_for_child_list_insertion(&layout, engine, kind, element);
         let update_pseudo_elements = reasons & layout_tree_update_reuse_reason::PSEUDO_ELEMENT_CHANGE != 0
@@ -1001,7 +1001,7 @@ impl ChildListInsertionReuse<'_> {
     }
 
     fn needs_layout_tree_update(&self, node: StyleNodeID) -> bool {
-        self.engine.tree().needs_layout_tree_update(node)
+        self.arena().needs_layout_tree_update(Some(node))
     }
 
     fn is_out_of_flow(&self, node: LayoutNode) -> bool {
@@ -1149,7 +1149,7 @@ impl ChildListInsertionReuse<'_> {
         for child in self.dom_children() {
             if !self.box_of(child).is_invalid() {
                 has_pending_collapsing_whitespace = false;
-                if self.needs_layout_tree_update(child) || self.engine.tree().child_needs_layout_tree_update(child) {
+                if self.needs_layout_tree_update(child) || self.arena().child_needs_layout_tree_update(Some(child)) {
                     return false;
                 }
                 continue;

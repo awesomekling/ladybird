@@ -2513,20 +2513,30 @@ static CSS::StyleNodeID style_node_id_of(Node const& node)
     return {};
 }
 
+// The tree update marks are layout tree state: the arena holds them for the build that reads them.
+// A document that has made no arena has made no mark either.
+static void* layout_tree_update_marks_of(Document const& document)
+{
+    auto const* arena = document.layout_node_arena_if_created();
+    return arena ? arena->handle() : nullptr;
+}
+
 bool Node::needs_layout_tree_update() const
 {
     auto style_node = style_node_id_of(*this);
-    if (!style_node)
+    auto* marks = layout_tree_update_marks_of(document());
+    if (!style_node || !marks)
         return false;
-    return document().style_computer().style_engine().needs_layout_tree_update(style_node);
+    return Layout::RustFFI::layout_arena_needs_layout_tree_update(marks, style_node.value());
 }
 
 u8 Node::layout_tree_update_reuse_reasons() const
 {
     auto style_node = style_node_id_of(*this);
-    if (!style_node)
+    auto* marks = layout_tree_update_marks_of(document());
+    if (!style_node || !marks)
         return 0;
-    return document().style_computer().style_engine().layout_tree_update_reuse_reasons(style_node);
+    return Layout::RustFFI::layout_arena_layout_tree_update_reuse_reasons(marks, style_node.value());
 }
 
 void Node::set_needs_layout_tree_update(bool value, SetNeedsLayoutTreeUpdateReason reason)
@@ -2551,9 +2561,9 @@ void Node::set_needs_layout_tree_update(bool value, SetNeedsLayoutTreeUpdateReas
     else if (value && reason == SetNeedsLayoutTreeUpdateReason::PseudoElementChange)
         reuse_reason = PseudoElementChange;
     // NB: Every pending reason must permit reuse. Once a full rebuild is requested, later
-    //     incremental changes cannot narrow it again. The mirror folds both, and answers whether
+    //     incremental changes cannot narrow it again. The arena folds both, and answers whether
     //     this mark was a transition -- which is what the widenings below hang off.
-    if (!document().style_computer().style_engine().merge_layout_tree_update_mark(style_node, value, reuse_reason))
+    if (!Layout::RustFFI::layout_arena_merge_layout_tree_update_mark(document().layout_node_arena().handle(), style_node.value(), value, reuse_reason))
         return;
     if (value)
         document().note_render_state_mutation();
@@ -2611,9 +2621,10 @@ void Node::set_needs_layout_tree_update(bool value, SetNeedsLayoutTreeUpdateReas
 bool Node::child_needs_layout_tree_update() const
 {
     auto style_node = style_node_id_of(*this);
-    if (!style_node)
+    auto* marks = layout_tree_update_marks_of(document());
+    if (!style_node || !marks)
         return false;
-    return document().style_computer().style_engine().child_needs_layout_tree_update(style_node);
+    return Layout::RustFFI::layout_arena_child_needs_layout_tree_update(marks, style_node.value());
 }
 
 void Node::set_child_needs_layout_tree_update(bool value)
@@ -2621,7 +2632,7 @@ void Node::set_child_needs_layout_tree_update(bool value)
     auto style_node = style_node_id_of(*this);
     if (!style_node)
         return;
-    (void)document().style_computer().style_engine().set_child_needs_layout_tree_update(style_node, value);
+    (void)Layout::RustFFI::layout_arena_set_child_needs_layout_tree_update(document().layout_node_arena().handle(), style_node.value(), value);
 }
 
 void Node::apply_layout_tree_update_mark(SetNeedsLayoutTreeUpdateReason reason)
@@ -2634,7 +2645,7 @@ void Node::apply_layout_tree_update_mark(SetNeedsLayoutTreeUpdateReason reason)
         return element && element->rendered_in_top_layer();
     };
     bool update_is_inside_top_layer_member = is_rendered_top_layer_element(*this);
-    auto& style_engine = document().style_computer().style_engine();
+    auto* marks = document().layout_node_arena().handle();
     for (auto* ancestor = flat_tree_parent(); ancestor; ancestor = ancestor->flat_tree_parent()) {
         if (!update_is_inside_top_layer_member && is_rendered_top_layer_element(*ancestor))
             update_is_inside_top_layer_member = true;
@@ -2642,7 +2653,7 @@ void Node::apply_layout_tree_update_mark(SetNeedsLayoutTreeUpdateReason reason)
         // An ancestor the style tree has not named is on no path the build walks by identity.
         if (!ancestor_style_node)
             continue;
-        if (style_engine.set_child_needs_layout_tree_update(ancestor_style_node, true))
+        if (Layout::RustFFI::layout_arena_set_child_needs_layout_tree_update(marks, ancestor_style_node.value(), true))
             break;
     }
     if (update_is_inside_top_layer_member)

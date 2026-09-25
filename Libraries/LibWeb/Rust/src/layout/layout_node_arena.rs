@@ -17,6 +17,7 @@ use super::svg_formatting_context::FfiSvgAttributeFacts;
 /// How many interned names one SVG element's publication can name.
 const PUBLISHED_REFERENCE_ATOM_COUNT: usize = 5;
 use super::tree_builder::FfiLayoutTreeBuildOutcome;
+use super::tree_update_marks::LayoutTreeUpdateMarks;
 use super::update_layout::FfiLayoutTreeBuildStats;
 use super::used_values::SizeConstraint;
 use crate::css::style::bridge::ElementBoxKind;
@@ -885,6 +886,9 @@ pub(crate) struct LayoutNodeArena {
     /// what a caret and a selection are painted inside. At most one control is focused, so this
     /// holds one control's shadow tree and is empty the rest of the time.
     identities_in_focused_text_control: HashSet<StyleNodeID>,
+    /// What the DOM asks the next layout tree build to rebuild, written where the DOM changes and
+    /// retired by the build that answers it.
+    layout_tree_update_marks: RefCell<LayoutTreeUpdateMarks>,
     /// The rows that own an image provider, for a row whose image comes from its style rather than
     /// from a DOM element. The provider is made for the row and is of no use without it, so the
     /// arena hands it back when the row is freed, rather than leaving it on a shell that the arena
@@ -1061,6 +1065,7 @@ impl LayoutNodeArena {
             pseudo_element_scroll_offsets: HashMap::default(),
             element_scroll_offsets: HashMap::default(),
             identities_in_focused_text_control: HashSet::default(),
+            layout_tree_update_marks: RefCell::new(LayoutTreeUpdateMarks::default()),
             rows_with_owned_image_provider: RefCell::new(HashSet::default()),
             rows_with_image_observers: RefCell::new(HashSet::default()),
             shadow_including_parent_elements: RefCell::new(Vec::new()),
@@ -1633,23 +1638,35 @@ impl LayoutNodeArena {
 
     /// The reasons the node's layout tree update mark permits reusing its box, if any.
     pub(crate) fn layout_tree_update_reuse_reasons(&self, node: StyleNodeID) -> u8 {
-        self.with_style_store(|engine| engine.tree().layout_tree_update_reuse_reasons(node))
+        self.layout_tree_update_marks.borrow().reuse_reasons(node)
+    }
+
+    /// Fold one layout tree update mark into the node's, answering whether its own bit changed.
+    pub(crate) fn merge_layout_tree_update_mark(&self, node: StyleNodeID, value: bool, reuse_reason: u8) -> bool {
+        self.layout_tree_update_marks
+            .borrow_mut()
+            .merge(node, value, reuse_reason)
+    }
+
+    /// Record whether a flat-tree descendant of the node holds a layout tree update mark,
+    /// answering what was recorded before.
+    pub(crate) fn set_child_needs_layout_tree_update(&self, node: StyleNodeID, value: bool) -> bool {
+        self.layout_tree_update_marks.borrow_mut().set_child_needs(node, value)
     }
 
     /// Retires the tree update marks a node gives up along with its stale box. A shadow root has
     /// no box of its own, so the mark it gives up is its host's as well; only the node's own
     /// child mark goes, as the host may still have other children to update.
     pub(crate) fn retire_layout_tree_update_marks_of_cleared_node(&self, node: StyleNodeID) {
-        self.with_style_engine(|engine| {
-            let mut current = node;
-            while engine.merge_layout_tree_update_mark(current, false, 0) {
-                let Some(host) = engine.tree().host_of(current) else {
-                    break;
-                };
-                current = host;
-            }
-            engine.set_child_needs_layout_tree_update(node, false);
-        });
+        let mut marks = self.layout_tree_update_marks.borrow_mut();
+        let mut current = node;
+        while marks.merge(current, false, 0) {
+            let Some(host) = self.with_style_store(|engine| engine.tree().host_of(current)) else {
+                break;
+            };
+            current = host;
+        }
+        marks.set_child_needs(node, false);
     }
 
     /// Whether any element holds a box for one of its pseudo-elements, which is what says a walk
@@ -1883,6 +1900,7 @@ impl LayoutNodeArena {
             .retain(|&(generator, _), _| generator != style_node);
         self.element_scroll_offsets.remove(&style_node);
         self.identities_in_focused_text_control.remove(&style_node);
+        self.layout_tree_update_marks.get_mut().clear(style_node);
         loop {
             let row = self.first_rows_by_style_node.borrow().head(style_node);
             if row.is_invalid() {
@@ -2388,16 +2406,16 @@ impl LayoutNodeArena {
         let Some(style_node) = style_node else {
             return;
         };
-        self.with_style_engine(|engine| engine.clear_layout_tree_update_marks(style_node));
+        self.layout_tree_update_marks.borrow_mut().clear(style_node);
     }
 
-    /// Whether the style mirror holds a layout tree update mark on `style_node` itself. An
-    /// anonymous row names no node and answers no.
+    /// Whether `style_node` itself holds a layout tree update mark. An anonymous row names no node
+    /// and answers no.
     pub(crate) fn needs_layout_tree_update(&self, style_node: Option<StyleNodeID>) -> bool {
         let Some(style_node) = style_node else {
             return false;
         };
-        self.with_style_engine(|engine| engine.needs_layout_tree_update(style_node))
+        self.layout_tree_update_marks.borrow().needs(style_node)
     }
 
     /// The element above `element` in the shadow-including tree, and whether the step to it crossed
@@ -2445,13 +2463,13 @@ impl LayoutNodeArena {
         self.with_style_engine(|engine| engine.text_style_parent_facts(style_node))
     }
 
-    /// Whether the style mirror holds a layout tree update mark on a flat-tree descendant of
-    /// `style_node`. An anonymous row names no node and answers no.
+    /// Whether a flat-tree descendant of `style_node` holds a layout tree update mark. An anonymous
+    /// row names no node and answers no.
     pub(crate) fn child_needs_layout_tree_update(&self, style_node: Option<StyleNodeID>) -> bool {
         let Some(style_node) = style_node else {
             return false;
         };
-        self.with_style_engine(|engine| engine.child_needs_layout_tree_update(style_node))
+        self.layout_tree_update_marks.borrow().child_needs(style_node)
     }
 
     /// The element type facts the style store holds for `style_node`. A text node, an anonymous
@@ -6466,6 +6484,99 @@ pub unsafe extern "C" fn layout_arena_set_needs_full_layout_tree_update(arena: *
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
     unsafe { LayoutNodeArena::from_handle(arena) }.set_needs_full_layout_tree_update(value);
+}
+
+/// Whether the node `style_node` names holds a layout tree update mark of its own.
+///
+/// # Safety
+///
+/// The arena must remain valid for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_needs_layout_tree_update(arena: *mut c_void, style_node: u32) -> bool {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    // SAFETY: As above.
+    unsafe { LayoutNodeArena::from_handle(arena) }.needs_layout_tree_update(StyleNodeID::from_raw(style_node))
+}
+
+/// Which narrower rebuilds the marks the node `style_node` names has collected still permit.
+///
+/// # Safety
+///
+/// The arena must remain valid for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_layout_tree_update_reuse_reasons(arena: *mut c_void, style_node: u32) -> u8 {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    let Some(style_node) = StyleNodeID::from_raw(style_node) else {
+        return 0;
+    };
+    // SAFETY: As above.
+    unsafe { LayoutNodeArena::from_handle(arena) }.layout_tree_update_reuse_reasons(style_node)
+}
+
+/// Fold a layout tree update mark into the one the node `style_node` names holds, answering
+/// whether its own bit changed: the transition the mark site widens the rebuild from.
+///
+/// # Safety
+///
+/// The arena must remain valid for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_merge_layout_tree_update_mark(
+    arena: *mut c_void,
+    style_node: u32,
+    value: bool,
+    reuse_reason: u8,
+) -> bool {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    let Some(style_node) = StyleNodeID::from_raw(style_node) else {
+        return false;
+    };
+    // SAFETY: As above.
+    unsafe { LayoutNodeArena::from_handle(arena) }.merge_layout_tree_update_mark(style_node, value, reuse_reason)
+}
+
+/// Retire every layout tree update mark the node `style_node` names holds. An identity newly handed
+/// to a node holds none, whatever the node that held it before left behind.
+///
+/// # Safety
+///
+/// The arena must remain valid for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_clear_layout_tree_update_marks(arena: *mut c_void, style_node: u32) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    // SAFETY: As above.
+    unsafe { LayoutNodeArena::from_handle(arena) }.clear_layout_tree_update_marks(StyleNodeID::from_raw(style_node));
+}
+
+/// Whether a flat-tree descendant of the node `style_node` names holds a layout tree update mark.
+///
+/// # Safety
+///
+/// The arena must remain valid for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_child_needs_layout_tree_update(arena: *mut c_void, style_node: u32) -> bool {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    // SAFETY: As above.
+    unsafe { LayoutNodeArena::from_handle(arena) }.child_needs_layout_tree_update(StyleNodeID::from_raw(style_node))
+}
+
+/// Record whether a flat-tree descendant of the node `style_node` names holds a layout tree update
+/// mark, answering what was recorded before. The mark's ancestor walk stops where it was already.
+///
+/// # Safety
+///
+/// The arena must remain valid for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_set_child_needs_layout_tree_update(
+    arena: *mut c_void,
+    style_node: u32,
+    value: bool,
+) -> bool {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    let Some(style_node) = StyleNodeID::from_raw(style_node) else {
+        return false;
+    };
+    // SAFETY: As above.
+    unsafe { LayoutNodeArena::from_handle(arena) }.set_child_needs_layout_tree_update(style_node, value)
 }
 
 #[unsafe(no_mangle)]

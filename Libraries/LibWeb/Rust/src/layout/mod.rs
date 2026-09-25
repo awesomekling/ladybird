@@ -55,6 +55,7 @@ mod trace;
 mod tree_build_seal;
 mod tree_builder;
 mod tree_mutation;
+mod tree_update_marks;
 mod update_layout;
 pub mod used_values;
 mod viewport_propagation;

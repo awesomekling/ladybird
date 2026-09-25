@@ -921,36 +921,6 @@ impl RetainedState {
         self.computed_group_sets.box_kind(node)
     }
 
-    /// Whether a flat-tree descendant of the node holds a layout tree update mark.
-    #[must_use]
-    pub fn child_needs_layout_tree_update(&self, node: StyleNodeID) -> bool {
-        self.tree.child_needs_layout_tree_update(node)
-    }
-
-    /// Record whether a flat-tree descendant of the node holds a layout tree update mark, answering
-    /// what the column said before.
-    pub fn set_child_needs_layout_tree_update(&mut self, node: StyleNodeID, value: bool) -> bool {
-        self.tree
-            .set_child_needs_layout_tree_update(node, value, &mut self.memory)
-    }
-
-    /// Whether the layout tree build has to rebuild what the node produces.
-    #[must_use]
-    pub fn needs_layout_tree_update(&self, node: StyleNodeID) -> bool {
-        self.tree.needs_layout_tree_update(node)
-    }
-
-    /// Which narrower rebuilds the marks collected on the node still permit.
-    #[must_use]
-    pub fn layout_tree_update_reuse_reasons(&self, node: StyleNodeID) -> u8 {
-        self.tree.layout_tree_update_reuse_reasons(node)
-    }
-
-    /// Retire the layout tree update marks the node holds, own and child alike.
-    pub fn clear_layout_tree_update_marks(&mut self, node: StyleNodeID) {
-        self.tree.clear_layout_tree_update_marks(node);
-    }
-
     /// Whether the text node's data is nothing but ASCII whitespace.
     #[must_use]
     pub fn text_is_ascii_whitespace(&self, node: StyleNodeID) -> bool {
@@ -1044,12 +1014,6 @@ impl RetainedState {
             self.tree
                 .set_list_owner_has_stale_item_counters(owner, false, &mut self.memory);
         }
-    }
-
-    /// Fold one layout tree update mark into the node's, answering whether its own bit changed.
-    pub fn merge_layout_tree_update_mark(&mut self, node: StyleNodeID, value: bool, reuse_reason: u8) -> bool {
-        self.tree
-            .merge_layout_tree_update_mark(node, value, reuse_reason, &mut self.memory)
     }
 
     /// The box facts the element's published style record holds. `None` while the element has no

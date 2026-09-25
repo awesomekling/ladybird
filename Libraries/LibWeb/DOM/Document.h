@@ -903,6 +903,7 @@ public:
 
     [[nodiscard]] Layout::NodeArena& layout_node_arena();
     [[nodiscard]] Layout::NodeArena* layout_node_arena_if_created() { return m_layout_node_arena; }
+    [[nodiscard]] Layout::NodeArena const* layout_node_arena_if_created() const { return m_layout_node_arena; }
     Painting::ChromeWidgetRegistry& chrome_widget_registry() { return *m_chrome_widget_registry; }
     Painting::ChromeWidgetRegistry const& chrome_widget_registry() const { return *m_chrome_widget_registry; }
 
