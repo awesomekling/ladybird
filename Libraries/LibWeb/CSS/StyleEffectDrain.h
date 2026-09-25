@@ -20,8 +20,16 @@ namespace Web::CSS {
 // The host effects a style batch's rows leave, as messages naming each row's element by style node.
 // The host applies them once the whole batch is installed, in the order the batch applied the rows,
 // which is flat-tree order. Nothing a later row of the batch computes may depend on one of them.
+//
+// They come in two halves by who reads them. The render half is what the engine's later waves, the
+// tree build and layout read: engine commits, layout node styles, tree invalidation, inheritance
+// marks, anchor names and container feedback. The main half is what only the main thread reads:
+// the CSS animation objects and their bookkeeping. The render half applies before the main half,
+// each in row order, and nothing in the render half reads the main half.
 class StyleEffectDrain {
 public:
+    // -- The render half ----------------------------------------------------------------------
+
     // The element and its layout node already hold the record; what applying it to the layout node
     // adds (style resources, anonymous reinheritance, repaint) is render state.
     struct LayoutNodeStyle {
@@ -34,7 +42,9 @@ public:
         RequiredInvalidationAfterStyleChange invalidation;
     };
     // A row whose record read a non-inherited property straight from the parent, through an
-    // explicit `inherit`, owes the parent the mark C++ writes beside such a computation.
+    // explicit `inherit`, owes the parent the mark C++ writes beside such a computation. The engine
+    // took its own mark as it published the row; this is the host's, which the facts the host
+    // hands the engine for the next wave read.
     struct ExplicitInheritance {
         StyleNodeID style_node;
         u32 style_groups { 0 };
@@ -44,29 +54,10 @@ public:
     struct AnchorNames {
         StyleNodeID style_node;
     };
-    // Which animations a row's record references, as the index a `@keyframes` rule finds its
-    // elements by holds them. A row with an animation plan exists because the declarations naming
-    // them moved.
-    struct AnimationNames {
-        StyleNodeID style_node;
-    };
     // What a row's container conditions read of its containers. The engine records what it reads of
-    // it as the drain takes it; the host mirrors the rest on the elements for the commit, as it
-    // does for a row it computes.
+    // it as the drain takes it; the host mirrors the rest on the elements through the commit
+    // messages, as it does for a row it computes.
     struct ContainerQueryEffects {
-        StyleNodeID style_node;
-    };
-    // The animation plan a row leaves for the element's CSS animations. The pass sampled the element
-    // over the effect stack the plan leaves and published the composition the rows after it read,
-    // so the animations the plan starts, retimes and cancels are nothing the batch reads.
-    struct AnimationPlan {
-        StyleNodeID style_node;
-        StyleComputer::SettledAnimationPlan plan;
-    };
-    // A row whose display left or entered none, ignoring animations, terminates or resumes the
-    // animations of its subtree. The rows of the batch read the animations' published timing, which
-    // moves only once the batch is installed.
-    struct DisplayNoneAnimations {
         StyleNodeID style_node;
     };
     // The debts the engine took as it published a row the batch did not install, which the node
@@ -86,9 +77,33 @@ public:
     struct DiscardContainerQueryEffects {
         StyleNodeID style_node;
     };
-    using Effect = Variant<LayoutNodeStyle, ElementInvalidation, ExplicitInheritance, AnchorNames, AnimationNames, ContainerQueryEffects, AnimationPlan, DisplayNoneAnimations, RestoreRowDebts, AcknowledgeRecord, DiscardContainerQueryEffects>;
+    using RenderEffect = Variant<LayoutNodeStyle, ElementInvalidation, ExplicitInheritance, AnchorNames, ContainerQueryEffects, RestoreRowDebts, AcknowledgeRecord, DiscardContainerQueryEffects>;
 
-    void append(Effect effect) { m_effects.append(move(effect)); }
+    // -- The main half ------------------------------------------------------------------------
+
+    // Which animations a row's record references, as the index a `@keyframes` rule finds its
+    // elements by holds them. A row with an animation plan exists because the declarations naming
+    // them moved.
+    struct AnimationNames {
+        StyleNodeID style_node;
+    };
+    // The animation plan a row leaves for the element's CSS animations. The pass sampled the element
+    // over the effect stack the plan leaves and published the composition the rows after it read,
+    // so the animations the plan starts, retimes and cancels are nothing the batch reads.
+    struct AnimationPlan {
+        StyleNodeID style_node;
+        StyleComputer::SettledAnimationPlan plan;
+    };
+    // A row whose display left or entered none, ignoring animations, terminates or resumes the
+    // animations of its subtree. The rows of the batch read the animations' published timing, which
+    // moves only once the batch is installed.
+    struct DisplayNoneAnimations {
+        StyleNodeID style_node;
+    };
+    using MainEffect = Variant<AnimationNames, AnimationPlan, DisplayNoneAnimations>;
+
+    void append(RenderEffect effect) { m_render_effects.append(move(effect)); }
+    void append(MainEffect effect) { m_main_effects.append(move(effect)); }
     void apply(DOM::Document&);
     void apply(StyleDrainScope const&, DOM::Document&);
 
@@ -96,7 +111,11 @@ public:
     static void install(DOM::Document&, Function<void(StyleDrainScope const&)> const& install);
 
 private:
-    Vector<Effect> m_effects;
+    void apply_render_half(StyleDrainScope const&, DOM::Document&);
+    void apply_main_half(StyleDrainScope const&, DOM::Document&);
+
+    Vector<RenderEffect> m_render_effects;
+    Vector<MainEffect> m_main_effects;
 };
 
 }
