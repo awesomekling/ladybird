@@ -320,7 +320,7 @@ void StyleComputer::unregister_style_node(StyleNodeID style_node_id)
         m_style_engine.note_style_node_retired(style_node_id);
         m_element_style_nodes[index] = nullptr;
         m_style_engine.publish_input([style_node_id](StyleInputScope const& input) {
-            input.engine().consume_recorded_element_style_input_change(style_node_id);
+            input.engine().consume_recorded_element_style_input_change(input, style_node_id);
         });
     }
 }
@@ -424,7 +424,7 @@ bool StyleComputer::record_transition_stabilization_baseline(StyleDrainScope con
     // A row the engine settled is drained once its record is installed, so the style the element
     // holds is already the after-change one. The row names the style it moved away from.
     auto style_record_identity = before_change_style_record.value_or_lazy_evaluated([&] { return abstract_element.style_record_identity(); });
-    return scope.engine().record_transition_baseline(style_node_id, pseudo_element_to_ffi(abstract_element.pseudo_element()), style_record_identity);
+    return scope.engine().record_transition_baseline(scope, style_node_id, pseudo_element_to_ffi(abstract_element.pseudo_element()), style_record_identity);
 }
 
 // A provisionally started transition already contributed to the style published by the pass that
@@ -446,7 +446,7 @@ void StyleComputer::for_each_provisional_transition_effect_on_element(DOM::Eleme
 
 static void release_transition_baselines(StyleDrainScope const& scope)
 {
-    scope.engine().release_transition_baselines();
+    scope.engine().release_transition_baselines(scope);
 }
 
 void StyleComputer::commit_transition_stabilization_epoch()
@@ -564,9 +564,9 @@ static void* layout_arena_handle(DOM::Document& document)
 // keyframe or transition resolves a percentage translation against. The stage asks the layout arena
 // by identity rather than following the element's layout-node pointer: the box is an earlier stage's
 // committed output, and the pointer is a live read of a later stage's objects.
-static void apply_committed_transform_reference_box(StyleDrainScope const&, DOM::AbstractElement abstract_element, StyleValueFFI::FfiAnimationContext& animation_context)
+static void apply_committed_transform_reference_box(StyleDrainScope const& scope, DOM::AbstractElement abstract_element, StyleValueFFI::FfiAnimationContext& animation_context)
 {
-    auto committed = StyleEngineFFI::layout_arena_committed_transform_reference_box(
+    auto committed = StyleEngineFFI::layout_arena_committed_transform_reference_box(scope,
         layout_arena_handle(abstract_element.document()), abstract_element.element().style_node_id().value());
     if (!committed.has_box)
         return;
@@ -618,7 +618,7 @@ static void marshal_animation_definitions(ReadonlySpan<ComputedValuesFFI::FfiCom
 // storage and into the batch, which applies it once every record is installed.
 Optional<StyleComputer::SettledAnimationPlan> StyleComputer::take_settled_animation_plan(StyleDrainScope const& scope, StyleNodeID style_node, u8 pseudo_kind) const
 {
-    auto taken = scope.engine().take_settled_animation_definitions(style_node, pseudo_kind);
+    auto taken = scope.engine().take_settled_animation_definitions(scope, style_node, pseudo_kind);
     if (!taken.owed)
         return {};
     SettledAnimationPlan plan;
@@ -796,7 +796,7 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_inst
 
     // https://drafts.csswg.org/css-transitions-2/#defining-before-change-style
     (void)record_transition_stabilization_baseline(scope, abstract_element, before_change_style_record);
-    if (auto baseline = scope.engine().transition_baseline(abstract_element.element().style_node_id(), pseudo_element_to_ffi(abstract_element.pseudo_element())); baseline != 0)
+    if (auto baseline = scope.engine().transition_baseline(scope, abstract_element.element().style_node_id(), pseudo_element_to_ffi(abstract_element.pseudo_element())); baseline != 0)
         before_change_style_record = StyleRecordID { baseline };
 
     // A transition starts from the before-change style. The newly installed record may itself
@@ -1270,11 +1270,11 @@ bool StyleComputer::has_provisional_transition_states(DOM::AbstractElement abstr
 // What an evaluation of an element's container conditions read of its containers, recorded for the
 // commit: the containers it asked about, the facts that re-evaluate it after layout, and that the
 // element's style depends on its containers, which bounds the scan that re-styles it when they move.
-void StyleComputer::record_container_query_effects(StyleDrainScope const&, DOM::AbstractElement abstract_element, StyleEngineFFI::FfiNativeContainerMatchResult const& match_result)
+void StyleComputer::record_container_query_effects(StyleDrainScope const& scope, DOM::AbstractElement abstract_element, StyleEngineFFI::FfiNativeContainerMatchResult const& match_result)
 {
-    auto effect_count = StyleEngineFFI::style_engine_native_container_effect_count(match_result.effects);
+    auto effect_count = StyleEngineFFI::style_engine_native_container_effect_count(scope, match_result.effects);
     for (size_t effect_index = 0; effect_index < effect_count; ++effect_index) {
-        auto effect = StyleEngineFFI::style_engine_native_container_effect(match_result.effects, effect_index);
+        auto effect = StyleEngineFFI::style_engine_native_container_effect(scope, match_result.effects, effect_index);
         auto identity = DOM::NodeIdentity::of_style_node(StyleNodeID { effect.style_node });
         switch (effect.kind) {
         case StyleEngineFFI::FfiContainerEffectKind::SizeContainerUsage:

@@ -50,6 +50,7 @@
 #include <LibWeb/CSS/Time.h>
 #include <LibWeb/CSS/URL.h>
 #include <LibWeb/Export.h>
+#include <LibWeb/StyleDrainScopedFFI.h>
 #include <LibWeb/StyleEngineRustFFI.h>
 #include <LibWebCommon/CSS/PreferredColorScheme.h>
 

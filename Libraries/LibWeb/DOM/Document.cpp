@@ -2065,7 +2065,7 @@ void Document::set_needs_container_query_evaluation_after_layout(Element const& 
 {
     style_computer().style_engine().publish_input([query_container = GC::Root<Element> { const_cast<Element&>(query_container) }](CSS::StyleInputScope const& input) {
         if (query_container->style_node_id() != 0)
-            CSS::StyleEngineFFI::style_engine_note_size_container_needs_evaluation_after_layout(input.engine().rust_handle(), query_container->style_node_id().value());
+            CSS::StyleEngineFFI::style_engine_note_size_container_needs_evaluation_after_layout(input, input.engine().rust_handle(), query_container->style_node_id().value());
     });
 }
 
