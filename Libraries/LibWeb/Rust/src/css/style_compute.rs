@@ -3641,15 +3641,21 @@ pub(crate) struct StartedTransition {
 /// The composition a transition step that starts transitions leaves: the style the row installed,
 /// with the values the started transitions have the moment they start layered over it, as the
 /// host's step collects them. Or why the engine cannot compose it.
+///
+/// A step that removes transitions collects the element's effects again without them instead, over
+/// what the installed composition inherited, and layers what it starts over that: `removed` names
+/// the effects of the transitions it removes.
 pub(crate) fn sample_transition_step(
     engine: &mut crate::css::style::StyleEngineState,
     node: crate::css::style::tree::StyleNodeID,
     installed_style_record: u64,
+    removed: Option<&[u64]>,
     started: &[StartedTransition],
     layout_arena: crate::css::style::animations::LentLayoutArena,
 ) -> Result<Box<AnimatedOverlay>, String> {
     use crate::css::animated_overlay::{
-        rust_animated_overlay_clone, rust_animated_overlay_create, rust_animated_overlay_free,
+        rust_animated_overlay_clone, rust_animated_overlay_clone_inherited, rust_animated_overlay_create,
+        rust_animated_overlay_free,
     };
     use crate::css::cascaded_properties::NO_PSEUDO_ELEMENT;
     use crate::css::style::animations;
@@ -3666,10 +3672,12 @@ pub(crate) fn sample_transition_step(
             view.animated_overlay.cast::<AnimatedOverlay>().as_ptr(),
         )
     };
-    // The step layers what it starts over the composition the row installed, all of it.
-    let overlay = match record_overlay.is_null() {
-        true => rust_animated_overlay_create(),
-        false => unsafe { rust_animated_overlay_clone(record_overlay) },
+    // The step layers what it starts over the composition the row installed, all of it, or over
+    // what the composition inherited where it collects the element's effects again.
+    let overlay = match (record_overlay.is_null(), removed.is_some()) {
+        (true, _) => rust_animated_overlay_create(),
+        (false, false) => unsafe { rust_animated_overlay_clone(record_overlay) },
+        (false, true) => unsafe { rust_animated_overlay_clone_inherited(record_overlay) },
     };
     let input = FfiHostAnimationSample {
         style_engine: std::ptr::null_mut(),
@@ -3695,12 +3703,57 @@ pub(crate) fn sample_transition_step(
         length_contexts: None,
         layout_arena: layout_arena.as_ptr(),
     };
-    let effects = started.iter().map(|started| &started.effect);
+    let slot = animations::ELEMENT_ANIMATION_SLOT;
+    let descriptions = match removed {
+        Some(_) => engine.take_element_animation_effect_descriptions(node, slot),
+        None => None,
+    };
     let composed = (|| {
         let mut selected = Vec::with_capacity(started.len());
         let mut preparation_effects = Vec::with_capacity(started.len());
         let mut selected_keys = Vec::with_capacity(started.len());
-        for (started, effect) in started.iter().zip(effects) {
+        // The effects the element holds but for the transitions the step removes, in composite
+        // order, as `get_animations_internal()` lists them for the host's step.
+        if let Some(removed) = removed {
+            let rows = engine.element_animation_timing_rows(node, slot);
+            let linear_points = engine.element_animation_timing_row_linear_points(node, slot);
+            let samples = engine.animation_timeline_samples();
+            let described = descriptions.as_deref().unwrap_or(&[]);
+            for row in rows {
+                if !row.is_associated() || removed.contains(&row.effect_identity()) {
+                    continue;
+                }
+                let timeline_time = match row.has_hold_time() {
+                    true => None,
+                    false => animations::row_timeline_time(row, samples).ok_or("a timeline with no sample")?,
+                };
+                let Some(current_key) = animations::row_current_key(row, linear_points, timeline_time)
+                    .ok_or("a row the engine cannot decide")?
+                else {
+                    continue;
+                };
+                let description = described
+                    .iter()
+                    .find(|description| description.identity == row.effect_identity())
+                    .ok_or("an effect with no description")?;
+                if description.keyframes.len() < 2 {
+                    continue;
+                }
+                selected.push(crate::css::animation::SelectedEffect {
+                    effect: description,
+                    current_key,
+                    easing_from_animation: None,
+                    composite_from_animation: 0,
+                });
+                preparation_effects.push(crate::css::animation::FfiAnimationPreparationEffect {
+                    identity: description.identity,
+                    generation: description.generation,
+                });
+                selected_keys.push(current_key);
+            }
+        }
+        for started in started {
+            let effect = &started.effect;
             let Some(current_key) = animations::row_current_key(&started.row, started.easing.linear_points(), None)
                 .ok_or("a started transition's timing")?
             else {
@@ -3734,10 +3787,13 @@ pub(crate) fn sample_transition_step(
         let animated_custom_properties =
             unsafe { AnimatedCustomPropertyResults::take(result.animated_custom_properties_storage) };
         if !animated_custom_properties.is_empty() {
-            return Err("a started transition of a custom property".to_string());
+            return Err("a step over animated custom properties".to_string());
         }
         Ok(())
     })();
+    if let Some(descriptions) = descriptions {
+        engine.restore_element_animation_effect_descriptions(node, slot, descriptions);
+    }
     match composed {
         Ok(()) => Ok(unsafe { Box::from_raw(overlay) }),
         Err(reason) => {

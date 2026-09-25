@@ -113,7 +113,8 @@ fn effective_value(
 #[derive(Default)]
 struct TransitionStep {
     started: Vec<StartedTransition>,
-    removes_a_transition: bool,
+    /// The effects of the transitions it removes.
+    removed: Vec<u64>,
     for_host: TransitionStepForHost,
 }
 
@@ -316,7 +317,7 @@ impl RetainedState {
             &mut actions,
         );
         // What the step starts, as `CSSTransition` builds it, for the composition the step leaves.
-        let mut removes_a_transition = false;
+        let mut removed = Vec::new();
         let mut started = Vec::new();
         let mut for_host = TransitionStepForHost::default();
         for (property, action) in properties.iter().zip(&actions) {
@@ -332,17 +333,17 @@ impl RetainedState {
             let (start_value, end_value) = match action.kind {
                 FfiTransitionActionKind::None => continue,
                 FfiTransitionActionKind::Remove | FfiTransitionActionKind::Cancel => {
-                    removes_a_transition = true;
+                    removed.push(property.property_id);
                     continue;
                 }
                 FfiTransitionActionKind::Start => (property.before_change_value, property.after_change_value),
                 FfiTransitionActionKind::RemoveAndStart => {
-                    removes_a_transition = true;
+                    removed.push(property.property_id);
                     (property.before_change_value, property.after_change_value)
                 }
                 FfiTransitionActionKind::CancelRemoveAndStartReversing
                 | FfiTransitionActionKind::CancelRemoveAndStartInterrupted => {
-                    removes_a_transition = true;
+                    removed.push(property.property_id);
                     (property.current_value, property.after_change_value)
                 }
             };
@@ -372,9 +373,18 @@ impl RetainedState {
                 easing,
             });
         }
+        let removed = removed
+            .iter()
+            .filter_map(|property_id| {
+                transitions
+                    .iter()
+                    .find(|transition| transition.property_id == *property_id)
+                    .map(|transition| transition.effect_identity)
+            })
+            .collect();
         Ok(TransitionStep {
             started,
-            removes_a_transition,
+            removed,
             for_host,
         })
     }
@@ -382,7 +392,7 @@ impl RetainedState {
 
 impl StyleEngineState {
     /// Decide the transition step of a row that owes the whole step, which the host would decide
-    /// when it installs the row, and compose what the transitions it starts layer over the
+    /// when it installs the row, and compose what the transitions it starts and removes leave of the
     /// composition the row installs: the host then applies the decisions, and installs the
     /// composition as the row's. A step the engine cannot decide or compose is left to the host.
     pub(crate) fn decide_settled_row_transition_step(
@@ -401,16 +411,25 @@ impl StyleEngineState {
                 return;
             }
         };
-        if !step.started.is_empty() {
-            // The host's step collects the element's effects again when it removes a transition.
-            if step.removes_a_transition {
-                engine_sample_check::note_declined("transition step: a step that removes a transition");
-                return;
-            }
+        // A step that removes a transition collects the element's effects again without it, which
+        // the host does once it applied the row's animation plan, and the published rows are the
+        // effects from before.
+        if !step.removed.is_empty()
+            && self
+                .retained
+                .nodes_owing_animation_definitions
+                .contains_key(&(node, u8::MAX))
+        {
+            engine_sample_check::note_declined("transition step: a step that removes a transition beside a plan");
+            return;
+        }
+        if !step.started.is_empty() || !step.removed.is_empty() {
+            let removed = (!step.removed.is_empty()).then_some(&step.removed[..]);
             let published = crate::css::style_compute::sample_transition_step(
                 self,
                 node,
                 installed_style_record,
+                removed,
                 &step.started,
                 layout_arena,
             )
@@ -428,9 +447,6 @@ impl StyleEngineState {
                 engine_sample_check::note_declined(&format!("transition step: {reason}"));
                 return;
             }
-        } else if step.removes_a_transition {
-            engine_sample_check::note_declined("transition step: a step that removes a transition");
-            return;
         }
         engine_sample_check::note_taken("transition step");
         self.retained
