@@ -226,9 +226,9 @@ struct StyleEngineTransaction {
     bool only_derived_child_reactions { false };
 };
 
-static StyleEngineTransaction take_style_engine_transaction(DOM::Document& document)
+// Readies the document for a style transaction. Returns the root to take it for, if there is one.
+static Optional<StyleNodeID> begin_style_engine_transaction(DOM::Document& document)
 {
-    StyleEngineTransaction transaction;
     auto& style_computer = document.style_computer();
     // One element's computed style answers for another only while the inputs it was keyed on still
     // mean what they meant. A transaction boundary is exactly where they stop doing so: a
@@ -245,10 +245,15 @@ static StyleEngineTransaction take_style_engine_transaction(DOM::Document& docum
     auto* root = document.document_element();
     if (!root || root->style_node_id() == 0) {
         style_computer.style_engine().flush();
-        return transaction;
+        return {};
     }
+    return root->style_node_id();
+}
 
-    auto published_transaction = style_computer.style_engine().take_style_transaction(root->style_node_id());
+static StyleEngineTransaction accept_style_engine_transaction(DOM::Document& document, StyleEngine::PublishedStyleTransaction const& published_transaction)
+{
+    StyleEngineTransaction transaction;
+    auto& style_computer = document.style_computer();
     document.style_invalidation_counters().style_update_submission_microseconds += published_transaction.submission_microseconds;
     document.style_invalidation_counters().style_update_bridge_microseconds += published_transaction.bridge_microseconds;
     if (!published_transaction.reactions.is_empty()) {
@@ -265,6 +270,14 @@ static StyleEngineTransaction take_style_engine_transaction(DOM::Document& docum
     transaction.only_derived_child_reactions = published_transaction.only_derived_child_reactions;
 
     return transaction;
+}
+
+static StyleEngineTransaction take_style_engine_transaction(DOM::Document& document)
+{
+    auto root = begin_style_engine_transaction(document);
+    if (!root.has_value())
+        return {};
+    return accept_style_engine_transaction(document, document.style_computer().style_engine().take_style_transaction(*root));
 }
 
 enum class SampleInvalidation {
@@ -855,52 +868,99 @@ static void restore_unsettled_row_debts(DOM::Document& document, ReadonlySpan<St
     drain.apply(document);
 }
 
-static void update_style(DOM::Document& document, DocumentWithoutBrowsingContext document_without_browsing_context)
+// A style update of a document. Its first transaction's pass can run beside the main thread
+// (LIBWEB_STAGE_OVERLAP=style): the update then lives on the heap between begin() and finish(), and
+// every scope it holds open stays open while the pass is in flight.
+class StyleUpdate {
+    AK_ALLOC_WITH_KMALLOC;
+    AK_MAKE_NONCOPYABLE(StyleUpdate);
+    AK_MAKE_NONMOVABLE(StyleUpdate);
+
+public:
+    explicit StyleUpdate(DOM::Document& document)
+        : m_document(document)
+        , m_started_at(MonotonicTime::now())
+    {
+        auto& timing_counters = document.style_invalidation_counters();
+        m_submission_before = timing_counters.style_update_submission_microseconds;
+        m_bridge_before = timing_counters.style_update_bridge_microseconds;
+        m_apply_before = timing_counters.style_update_apply_microseconds;
+    }
+
+    ~StyleUpdate();
+
+    // Runs the update up to its first transaction. Returns false if the update has nothing to take.
+    bool begin(DocumentWithoutBrowsingContext);
+    // Takes the first transaction in place and runs the rest of the update.
+    void take_and_finish();
+    // Submits the first transaction's pass. Returns false, and submits nothing, if the document has no root to take
+    // it for: the update then finishes in place.
+    bool submit();
+    // Runs the rest of the update once the frame of its submitted pass has been taken back.
+    void finish_submitted();
+
+private:
+    void finish(StyleEngineTransaction);
+
+    DOM::Document& m_document;
+    MonotonicTime m_started_at;
+    u64 m_submission_before { 0 };
+    u64 m_bridge_before { 0 };
+    u64 m_apply_before { 0 };
+    bool m_began_style_update { false };
+    bool m_began_complete_style_update { false };
+    bool m_took_transaction { false };
+};
+
+StyleUpdate::~StyleUpdate()
 {
-    auto style_update_started_at = MonotonicTime::now();
+    auto& document = m_document;
+    if (m_took_transaction) {
+        document.style_computer().style_engine().set_published_batch_waits(false);
+        StyleEffectDrain::install(document, [](StyleDrainScope const& scope) {
+            scope.engine().discard_style_transaction_outputs(scope);
+        });
+    }
+    if (m_began_complete_style_update)
+        finish_complete_style_update(document);
+    if (m_began_style_update) {
+        document.end_style_stabilization_epoch();
+        document.style_computer().end_style_record_view_epoch();
+        document.style_computer().end_style_update();
+    }
     auto& timing_counters = document.style_invalidation_counters();
-    auto const submission_before = timing_counters.style_update_submission_microseconds;
-    auto const bridge_before = timing_counters.style_update_bridge_microseconds;
-    auto const apply_before = timing_counters.style_update_apply_microseconds;
-    ScopeGuard record_style_update_time = [&] {
-        auto whole = (MonotonicTime::now() - style_update_started_at).to_truncated_microseconds();
-        auto measured = timing_counters.style_update_submission_microseconds - submission_before
-            + timing_counters.style_update_bridge_microseconds - bridge_before
-            + timing_counters.style_update_apply_microseconds - apply_before;
-        timing_counters.style_update_microseconds += whole;
-        // NB: Counters are read only to attribute time, never to choose style work. The
-        //     intervals are disjoint; rounding each down leaves fractional time here too.
-        timing_counters.style_update_remainder_microseconds += whole - measured;
-    };
+    auto whole = (MonotonicTime::now() - m_started_at).to_truncated_microseconds();
+    auto measured = timing_counters.style_update_submission_microseconds - m_submission_before
+        + timing_counters.style_update_bridge_microseconds - m_bridge_before
+        + timing_counters.style_update_apply_microseconds - m_apply_before;
+    timing_counters.style_update_microseconds += whole;
+    // NB: Counters are read only to attribute time, never to choose style work. The
+    //     intervals are disjoint; rounding each down leaves fractional time here too.
+    timing_counters.style_update_remainder_microseconds += whole - measured;
+}
+
+bool StyleUpdate::begin(DocumentWithoutBrowsingContext document_without_browsing_context)
+{
+    auto& document = m_document;
+    auto& timing_counters = document.style_invalidation_counters();
     // NOTE: If our parent document needs a relayout, we must do that *first*. This is required as it may cause the
     // viewport to change which will can affect media query evaluation and the value of the `vw` unit.
     if (auto navigable = document.navigable(); navigable && navigable->container() && &navigable->container()->document() != &document)
         navigable->container()->document().update_layout(DOM::UpdateLayoutReason::ChildDocumentStyleUpdate);
 
     if (!document.browsing_context() && document_without_browsing_context == DocumentWithoutBrowsingContext::Skip)
-        return;
+        return false;
 
     // NOTE: If this is a document hosting <template> contents, style update is unnecessary.
     if (document.created_for_appropriate_template_contents())
-        return;
+        return false;
 
     auto submission_started_at = MonotonicTime::now();
     document.style_computer().begin_style_update();
-    ScopeGuard end_style_update = [&] {
-        document.style_computer().end_style_update();
-    };
-
     document.style_computer().begin_style_record_view_epoch();
-    ScopeGuard end_style_record_view_epoch = [&] {
-        document.style_computer().end_style_record_view_epoch();
-    };
-
     document.synchronize_dirty_style_attributes();
-
     document.begin_style_stabilization_epoch();
-    ScopeGuard end_stabilization_epoch = [&] {
-        document.end_style_stabilization_epoch();
-    };
+    m_began_style_update = true;
 
     // Fetch the viewport rect once, instead of repeatedly, during style computation.
     document.update_style_computer_viewport_rect();
@@ -925,7 +985,7 @@ static void update_style(DOM::Document& document, DocumentWithoutBrowsingContext
     document.style_computer().style_engine().prepare_root_font_resolution(
         document.font_computer().environment_generation());
     StyleValueFFI::rust_style_ffi_complete_style_update_begin();
-    ScopeGuard leave_complete_style_update = [&] { finish_complete_style_update(document); };
+    m_began_complete_style_update = true;
 
     // The user-agent and user sheets have no author-sheet attachment event, so compare their
     // identities before deciding whether there is a transaction to take. Rendering opportunities
@@ -938,7 +998,7 @@ static void update_style(DOM::Document& document, DocumentWithoutBrowsingContext
         && !document.style_computer().style_engine().has_pending_transaction()) {
         document.sample_animation_effects_needing_style_update();
         if (!document.style_computer().style_engine().has_pending_transaction())
-            return;
+            return false;
     }
 
     // Publish each tree scope's counter-style registry before the engine answers any rows.
@@ -948,20 +1008,52 @@ static void update_style(DOM::Document& document, DocumentWithoutBrowsingContext
     document.for_each_shadow_root([](DOM::ShadowRoot& shadow_root) {
         (void)shadow_root.style_scope().counter_style_environment_identity();
     });
+    return true;
+}
 
+void StyleUpdate::take_and_finish()
+{
     // A style flush is a transaction boundary. Everything recorded since the last one crosses into
     // StyleEngine as one flat batch, is normalized there, and is routed into the region its
     // transpose programs reach. A transaction that could not be proven narrower publishes a
     // complete document reaction batch. Only a transaction that cannot complete its answers falls
     // back to document invalidation.
-    auto style_engine_transaction = take_style_engine_transaction(document);
-    ScopeGuard discard_style_engine_transaction_outputs = [&] {
-        document.style_computer().style_engine().set_published_batch_waits(false);
-        StyleEffectDrain::install(document, [](StyleDrainScope const& scope) {
-            scope.engine().discard_style_transaction_outputs(scope);
-        });
-    };
+    auto style_engine_transaction = take_style_engine_transaction(m_document);
+    m_took_transaction = true;
+    finish(move(style_engine_transaction));
+}
 
+bool StyleUpdate::submit()
+{
+    auto root = begin_style_engine_transaction(m_document);
+    m_took_transaction = true;
+    if (!root.has_value()) {
+        finish({});
+        return false;
+    }
+    auto& style_engine = m_document.style_computer().style_engine();
+    style_engine.submit_style_transaction(*root);
+    // Inputs published beside the pass are ones it does not see: they wait for its drain.
+    style_engine.set_published_batch_waits(true);
+    return true;
+}
+
+void StyleUpdate::finish_submitted()
+{
+    VERIFY(m_took_transaction);
+    auto& style_engine = m_document.style_computer().style_engine();
+    auto style_engine_transaction = accept_style_engine_transaction(m_document, style_engine.finish_submitted_style_transaction());
+    // An empty batch leaves nothing waiting for the host: the inputs published beside the pass go through now, as
+    // they would have before a transaction taken in place.
+    if (style_engine_transaction.reactions.is_empty())
+        style_engine.set_published_batch_waits(false);
+    finish(move(style_engine_transaction));
+}
+
+void StyleUpdate::finish(StyleEngineTransaction style_engine_transaction)
+{
+    auto& document = m_document;
+    auto& timing_counters = document.style_invalidation_counters();
     if (!style_engine_transaction.reactions.is_empty())
         document.note_style_stabilization_has_style_reactions();
     document.sample_animation_effects_needing_style_update();
@@ -1055,6 +1147,37 @@ static void update_style(DOM::Document& document, DocumentWithoutBrowsingContext
     document.set_has_completed_style_update();
     apply_document_style_invalidation_after_style_change(document, invalidation);
     document.sample_animation_effects_needing_style_update();
+}
+
+static void update_style(DOM::Document& document, DocumentWithoutBrowsingContext document_without_browsing_context)
+{
+    StyleUpdate update { document };
+    if (update.begin(document_without_browsing_context))
+        update.take_and_finish();
+}
+
+// The style update whose first pass is in flight, which it owns. At most one frame is in flight per event loop.
+static StyleUpdate* s_submitted_style_update = nullptr;
+
+static bool submit_style_update(DOM::Document& document)
+{
+    VERIFY(!s_submitted_style_update);
+    auto update = make<StyleUpdate>(document);
+    if (!update->begin(DocumentWithoutBrowsingContext::Skip))
+        return false;
+    if (!update->submit())
+        return false;
+    s_submitted_style_update = update.leak_ptr();
+    return true;
+}
+
+static void finish_submitted_style_update(DOM::Document& document)
+{
+    VERIFY(s_submitted_style_update);
+    auto update = adopt_own(*exchange(s_submitted_style_update, nullptr));
+    // What was marked beside the pass is what the next drain writes.
+    document.release_held_invalidation_marks();
+    update->finish_submitted();
 }
 
 // What a targeted materialization of one element found, reported to the engine the way a reaction
@@ -1501,6 +1624,18 @@ void Document::update_style()
     join_frame_in_flight();
     update_selection_style_observability();
     CSS::update_style(*this);
+}
+
+bool Document::submit_style_for_rendering_update()
+{
+    join_frame_in_flight();
+    update_selection_style_observability();
+    return CSS::submit_style_update(*this);
+}
+
+void Document::finish_submitted_style_update()
+{
+    CSS::finish_submitted_style_update(*this);
 }
 
 bool Document::update_style_for_element(AbstractElement const& abstract_element)

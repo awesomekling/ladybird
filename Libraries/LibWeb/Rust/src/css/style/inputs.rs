@@ -2143,6 +2143,7 @@ impl StyleEngineState {
                 sheet_rule_replacement: None,
                 ffi_style_transaction_output: bridge::FfiStyleTransactionOutput::default(),
                 ffi_style_transaction_output_memory: MemoryLease::new(MemoryCategory::BridgeBuffer),
+                submitted_style_pass_output: None,
                 ffi_style_node_query: Vec::new(),
                 ffi_style_node_query_memory: MemoryLease::new(MemoryCategory::BridgeBuffer),
                 reclaimed_style_atoms: Vec::new(),

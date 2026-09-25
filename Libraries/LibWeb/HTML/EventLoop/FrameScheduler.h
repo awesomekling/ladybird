@@ -45,14 +45,19 @@ public:
     // The local roots whose frames consume-commit has handed off, for the tail's screenshots.
     Vector<GC::Ref<LocalNavigable>> painted_local_roots;
 
-    // A frame that runs a document's full layout pass instead, and where the rendering update goes on once the frame is
-    // taken back: step 16 for documents[document_index], which the pass laid out.
-    struct LayoutPass {
+    // A frame that runs a document's full layout pass or first style pass instead, and where the rendering update goes
+    // on once the frame is taken back: step 16 for documents[document_index], which the pass laid out or styled.
+    struct SubmittedPass {
+        enum class Kind : u8 {
+            Style,
+            Layout,
+        };
+        Kind kind { Kind::Layout };
         Vector<GC::Ref<DOM::Document>> documents;
         size_t document_index { 0 };
         HighResolutionTime::DOMHighResTimeStamp frame_timestamp { 0 };
     };
-    Optional<LayoutPass> layout_pass;
+    Optional<SubmittedPass> submitted_pass;
 };
 
 // Runs the rendering update's frame beside the main thread under LIBWEB_STAGE_THREAD=overlap. One rendering update is
@@ -93,9 +98,9 @@ public:
     // Whether the ticket is taking the main half's frames: a frame begun after one the render side records is finished
     // after it too, so frames reach their compositor contexts in paint order.
     bool ticket_takes_frames() const { return m_ticket && !m_ticket->navigables.is_empty(); }
-    // Whether the rendering update waits for its layout pass to be taken back, and goes on with the rest (its
+    // Whether the rendering update waits for its style or layout pass to be taken back, and goes on with the rest (its
     // recordings) once it is.
-    bool awaits_layout_pass() const { return m_ticket && m_ticket->layout_pass.has_value(); }
+    bool awaits_pass() const { return m_ticket && m_ticket->submitted_pass.has_value(); }
     void add_to_ticket(LocalNavigable&, LocalNavigable::PendingCompositorFrame&&);
     // Ends the main half. Returns true if a frame is in flight, in which case the tail runs once it has been taken in.
     bool submit();
@@ -103,6 +108,12 @@ public:
     // submitted. Once the frame is taken back, its tail goes on with the rendering update at step 16 for that document,
     // as a main half of its own that may submit the recording.
     void submit_layout(Vector<GC::Ref<DOM::Document>> documents, size_t document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp);
+    // Ends the main half with a frame that runs the first style pass of documents[document_index], which the document
+    // has submitted. Consume-commit finishes the document's style update; the tail then goes on with the rendering
+    // update at step 16 for that document, as a main half of its own that may submit the layout pass and the recording.
+    void submit_style(Vector<GC::Ref<DOM::Document>> documents, size_t document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp);
+    // Whether the frame in flight runs the style or layout pass of `document`. The ticket keeps its documents alive.
+    bool pass_in_flight_holds(DOM::Document const&) const;
 
     // The event loop's finished frame consumer, called at step 1 once the render side has posted a frame completion:
     // takes in a finished frame, and runs the tail of a frame that is taken in, where the event loop lets it.
@@ -120,6 +131,7 @@ public:
     void visit_edges(JS::Cell::Visitor&);
 
 private:
+    void submit_pass(FrameTicket::SubmittedPass::Kind, Vector<GC::Ref<DOM::Document>> documents, size_t document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp);
     void commit();
     void run_tail();
 

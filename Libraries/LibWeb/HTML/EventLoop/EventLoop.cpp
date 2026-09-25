@@ -667,6 +667,7 @@ void EventLoop::update_the_rendering()
     ++m_rendering_scheduler_counters.updates_run;
     bool frame_in_flight = false;
     m_rendering_update_may_overlap_layout = false;
+    m_rendering_update_may_overlap_style = false;
     ScopeGuard const guard = [this, &frame_in_flight, update_start_nanoseconds, frames_submitted_before_update] {
         // The main half ends here, with the submission of the frame if there is one.
         m_rendering_scheduler_counters.main_half_nanoseconds += MonotonicTime::now().nanoseconds() - update_start_nanoseconds;
@@ -776,9 +777,14 @@ void EventLoop::update_the_rendering()
 
     // Every animation frame callback of the rendering update has run, and its microtasks with it, so nothing script
     // does before the layout pass can change the decision anymore.
-    if (Layout::RustFFI::rust_stage_thread_submits_layout()) {
+    // NB: The style pass is submitted under the same conditions as the layout pass: a task that runs beside it runs
+    //     before the step 16 it belongs to.
+    bool const submits_layout = Layout::RustFFI::rust_stage_thread_submits_layout();
+    bool const submits_style = Layout::RustFFI::rust_stage_thread_submits_style();
+    if (submits_layout || submits_style) {
         auto blocker = layout_overlap_blocker_for_rendering_update(docs);
-        m_rendering_update_may_overlap_layout = !blocker.has_value();
+        m_rendering_update_may_overlap_layout = submits_layout && !blocker.has_value();
+        m_rendering_update_may_overlap_style = submits_style && !blocker.has_value();
         if (blocker.has_value())
             ++m_rendering_scheduler_counters.layout_overlap_blocked_updates[to_underlying(*blocker)];
         else
@@ -796,6 +802,16 @@ void EventLoop::update_the_rendering()
 
 void EventLoop::resume_rendering_update_after_layout(Badge<FrameScheduler>, Vector<GC::Ref<DOM::Document>> const& docs, size_t document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp)
 {
+    resume_rendering_update(docs, document_index, frame_timestamp, LayoutSubmission::Wait);
+}
+
+void EventLoop::resume_rendering_update_after_style(Badge<FrameScheduler>, Vector<GC::Ref<DOM::Document>> const& docs, size_t document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp)
+{
+    resume_rendering_update(docs, document_index, frame_timestamp, LayoutSubmission::MaySubmitLayout);
+}
+
+void EventLoop::resume_rendering_update(Vector<GC::Ref<DOM::Document>> const& docs, size_t document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp, LayoutSubmission layout_submission)
+{
     VERIFY(!m_running_rendering_task);
     m_running_rendering_task = true;
     bool frame_in_flight = false;
@@ -805,7 +821,7 @@ void EventLoop::resume_rendering_update_after_layout(Badge<FrameScheduler>, Vect
         if (!frame_in_flight)
             end_rendering_update();
     };
-    frame_in_flight = run_rendering_update_from_step_16(docs, document_index, frame_timestamp, LayoutSubmission::Wait);
+    frame_in_flight = run_rendering_update_from_step_16(docs, document_index, frame_timestamp, layout_submission);
 }
 
 // The steps of a rendering update from step 16 on, from the document at first_document_index. Returns true if a frame is
@@ -819,7 +835,13 @@ bool EventLoop::run_rendering_update_from_step_16(Vector<GC::Ref<DOM::Document>>
         // A rendering update that may overlap its layout lets the first document whose layout update runs a full
         // layout pass run the pass beside the main thread, and goes on at this step once the frame scheduler has taken
         // it back.
-        if (layout_submission == LayoutSubmission::MaySubmit && m_rendering_update_may_overlap_layout && document->submit_layout_for_rendering_update()) {
+        // The first style update of such a rendering update runs its first pass beside the main thread the same way,
+        // and the rendering update goes on at this step, style finished, once the frame scheduler has taken it back.
+        if (layout_submission == LayoutSubmission::MaySubmit && m_rendering_update_may_overlap_style && document->submit_style_for_rendering_update()) {
+            m_frame_scheduler->submit_style(docs, document_index, frame_timestamp);
+            return true;
+        }
+        if (layout_submission != LayoutSubmission::Wait && m_rendering_update_may_overlap_layout && document->submit_layout_for_rendering_update()) {
             m_frame_scheduler->submit_layout(docs, document_index, frame_timestamp);
             return true;
         }

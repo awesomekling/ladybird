@@ -332,6 +332,12 @@ public:
     //     explicit discard. Consume them synchronously before asking the engine anything else.
     bool take_diagnostic_style_transaction(StyleNodeID root, Function<void(ReadonlySpan<StyleNodeID>)>&&);
     PublishedStyleTransaction take_style_transaction(StyleNodeID root);
+    // Takes pending inputs as take_style_transaction() does, and hands the transaction's pass to the render side
+    // instead of waiting for it (LIBWEB_STAGE_OVERLAP=style). Until the frame in flight is taken back, the pass owns
+    // the engine and the document's layout arena, and every engine entrance joins the frame first.
+    void submit_style_transaction(StyleNodeID root);
+    // The transaction submit_style_transaction() submitted, once its frame has been taken back.
+    PublishedStyleTransaction finish_submitted_style_transaction();
     void discard_style_transaction_outputs(StyleDrainScope const&);
 
     using RuleMatch = StyleEngineFFI::FfiRuleMatch;
@@ -369,6 +375,8 @@ private:
     void apply_transaction(StyleInputScope const&, InputTransaction const&);
     void submit_recorded_input();
     void publish_inputs_queued_during_pass();
+    void lend_style_transaction_inputs(Function<void(StyleEngineFFI::FfiDocumentStyleComputationInputs const&, void* layout_arena)> const&);
+    PublishedStyleTransaction publish_style_transaction_view(StyleEngineFFI::FfiStyleTransactionView const&, i64 submission_microseconds, i64 bridge_microseconds);
     void record_host_fact_write(StyleEngineFFI::FfiHostFactWrite);
     void mint_style_nodes(Span<StyleNodeID>, Vector<StyleNodeID>& granted, size_t& grant_request, StyleEngineFFI::FfiHostFactKind, u8 value);
     bool refresh_attribute_value_text_requirements();
@@ -400,6 +408,7 @@ private:
     PublishedTransactionVersion m_published_transaction_version { 0, 0 };
     u32 m_connected_element_count_at_last_transaction { 0 };
     bool m_published_batch_waits { false };
+    i64 m_submitted_style_transaction_microseconds { 0 };
     u32 m_effect_drain_depth { 0 };
     Vector<Function<void(StyleInputScope const&)>> m_inputs_queued_during_pass;
     u64 m_attribute_value_text_requirements_version { 0 };

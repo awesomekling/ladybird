@@ -230,7 +230,7 @@ public:
     void inject_rendering_opportunity(double frame_time_ms);
     bool wait_for_frame_to_finish();
     Utf16String frame_scheduler_state() const;
-    bool rendering_update_awaits_layout_pass() const;
+    bool rendering_update_awaits_pass() const;
     void update_compositor_animations();
     bool run_empty_animation_style_update_for_testing();
     void arm_compositor_animation_timers_for_testing();

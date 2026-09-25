@@ -113,13 +113,31 @@ bool FrameScheduler::submit()
 
 void FrameScheduler::submit_layout(Vector<GC::Ref<DOM::Document>> documents, size_t document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp)
 {
+    submit_pass(FrameTicket::SubmittedPass::Kind::Layout, move(documents), document_index, frame_timestamp);
+}
+
+void FrameScheduler::submit_style(Vector<GC::Ref<DOM::Document>> documents, size_t document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp)
+{
+    submit_pass(FrameTicket::SubmittedPass::Kind::Style, move(documents), document_index, frame_timestamp);
+}
+
+void FrameScheduler::submit_pass(FrameTicket::SubmittedPass::Kind kind, Vector<GC::Ref<DOM::Document>> documents, size_t document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp)
+{
     VERIFY(m_state == State::MainHalf);
-    // Only a main half with a ticket submits, and the layout pass comes before any recording.
+    // Only a main half with a ticket submits, and the pass comes before any recording.
     VERIFY(m_ticket);
     VERIFY(m_ticket->navigables.is_empty());
-    m_ticket->layout_pass = FrameTicket::LayoutPass { move(documents), document_index, frame_timestamp };
+    m_ticket->submitted_pass = FrameTicket::SubmittedPass { kind, move(documents), document_index, frame_timestamp };
     m_state = State::InFlight;
     m_event_loop.did_submit_frame();
+}
+
+bool FrameScheduler::pass_in_flight_holds(DOM::Document const& document) const
+{
+    if (m_state != State::InFlight || !m_ticket || !m_ticket->submitted_pass.has_value())
+        return false;
+    auto const& pass = *m_ticket->submitted_pass;
+    return pass.documents[pass.document_index].ptr() == &document;
 }
 
 void FrameScheduler::consume_commit(EventLoop::FrameConsumeSite site)
@@ -146,7 +164,10 @@ void FrameScheduler::commit()
     bool const counts_as_a_frame = m_state == State::InFlight;
     auto start_nanoseconds = MonotonicTime::now().nanoseconds();
     m_state = State::Consuming;
-    // NB: The layout pass's frame has nothing to publish: its take-back ended the document's layout update already.
+    // NB: The layout pass's frame has nothing to publish: its take-back ended the document's layout update already. The
+    //     style pass's frame ends the document's style update here: its drain installs what the pass computed.
+    if (m_ticket->submitted_pass.has_value() && m_ticket->submitted_pass->kind == FrameTicket::SubmittedPass::Kind::Style)
+        m_ticket->submitted_pass->documents[m_ticket->submitted_pass->document_index]->finish_submitted_style_update();
     // NB: Each navigable's recording is published and its resources are added to its resource storage before its
     //     compositor frame is built and handed off, so a compositor frame never reaches its sink ahead of the
     //     resources it references. The canvases it shows were flushed before the recording was prepared, and the next
@@ -184,8 +205,8 @@ void FrameScheduler::consume_finished_frame()
         m_event_loop.call_finished_frame_consumer_again();
         return;
     }
-    if (m_ticket->layout_pass.has_value()) {
-        // The tail of a layout pass's frame is the rest of its rendering update, a main half whose forced joins take in
+    if (m_ticket->submitted_pass.has_value()) {
+        // The tail of a style or layout pass's frame is the rest of its rendering update, a main half whose forced joins take in
         // the recordings it submits, so it does not run as a consume-tail. It ends like the rendering task it goes on
         // with.
         run_tail();
@@ -197,7 +218,7 @@ void FrameScheduler::consume_finished_frame()
 
 void FrameScheduler::finish_frame_now()
 {
-    // NB: The tail of a layout pass's frame goes on with its rendering update, which can submit the recording.
+    // NB: The tail of a style or layout pass's frame goes on with its rendering update, which can submit the recording.
     while (m_state != State::Idle) {
         if (m_state == State::InFlight) {
             Layout::RustFFI::rust_stage_thread_take_frame_in_flight();
@@ -214,11 +235,14 @@ void FrameScheduler::run_tail()
 {
     VERIFY(m_state == State::CommittedTailPending);
     // NB: The stack is a conservative root, so what the ticket held stays alive in these locals.
-    if (auto layout_pass = move(m_ticket->layout_pass); layout_pass.has_value()) {
+    if (auto submitted_pass = move(m_ticket->submitted_pass); submitted_pass.has_value()) {
         // The rest of the rendering update is a main half of its own, with a new ticket for its recordings.
         m_ticket = make<FrameTicket>();
         m_state = State::MainHalf;
-        m_event_loop.resume_rendering_update_after_layout({}, layout_pass->documents, layout_pass->document_index, layout_pass->frame_timestamp);
+        if (submitted_pass->kind == FrameTicket::SubmittedPass::Kind::Style)
+            m_event_loop.resume_rendering_update_after_style({}, submitted_pass->documents, submitted_pass->document_index, submitted_pass->frame_timestamp);
+        else
+            m_event_loop.resume_rendering_update_after_layout({}, submitted_pass->documents, submitted_pass->document_index, submitted_pass->frame_timestamp);
         return;
     }
     auto painted_local_roots = move(m_ticket->painted_local_roots);
@@ -240,8 +264,8 @@ void FrameScheduler::visit_edges(JS::Cell::Visitor& visitor)
             visitor.visit(submitted.frame.recording->document);
     }
     visitor.visit(m_ticket->painted_local_roots);
-    if (m_ticket->layout_pass.has_value())
-        visitor.visit(m_ticket->layout_pass->documents);
+    if (m_ticket->submitted_pass.has_value())
+        visitor.visit(m_ticket->submitted_pass->documents);
 }
 
 }
