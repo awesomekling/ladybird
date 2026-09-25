@@ -3,13 +3,14 @@
 <script src="frame-in-flight.js"></script>
 <style id="base">
     #box { width: 100px; height: 20px; }
+    #renamed { width: 150px; }
     .item { height: 10px; }
 </style>
 <div id="box" class="item"></div>
 <div id="list"><div class="item">a</div><div class="item">b</div></div>
 <script>
-    // Selector queries the DOM answers alone, made while the style pass is in flight: none of them waits for the pass,
-    // and the next style update sees each of them.
+    // Selector queries the DOM answers alone and a first-seen id, made while the style pass is in flight: none of them
+    // waits for the pass, and the next style update sees each of them.
     asyncTest(async done => {
         const element = box;
         let height = 20;
@@ -35,6 +36,9 @@
                 list.firstChild.closest("#list") === list,
             ];
         }, () => answers.join(" "));
+        await besidePass("a first-seen id", () => {
+            element.id = "renamed";
+        }, () => `width ${element.offsetWidth}, by id: ${document.getElementById("renamed") === element}`);
         done();
     });
 </script>

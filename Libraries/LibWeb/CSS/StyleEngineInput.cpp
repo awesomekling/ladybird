@@ -1117,8 +1117,11 @@ static void record_element_initial_features(DOM::Element& element)
         },
         InvalidateLanguageCache::Yes);
 
-    if (auto const& id = element.id(); id.has_value())
-        style_engine->set_element_id_name(element.style_node_id(), style_engine->intern_atom(*id));
+    if (auto const& id = element.id(); id.has_value()) {
+        publish_element_input(*style_engine, element, [name = style_engine->intern_atom(*id)](StyleInputScope const& input, StyleNodeID node) {
+            input.engine().set_element_id_name(node, name);
+        });
+    }
 
     if (auto facts = element_form_control_disabled_facts(element); facts != 0)
         style_engine->set_element_form_control_disabled_facts(element.style_node_id(), facts);
@@ -2861,7 +2864,9 @@ void record_element_id_changed(DOM::Element& element, Optional<Utf16FlyString> c
 
     // `getElementById` is case-sensitive in every mode, so the name the inverse index is keyed by
     // is the one written rather than the one a quirks-mode selector folds it to.
-    style_engine->set_element_id_name(element.style_node_id(), new_value.has_value() ? style_engine->intern_atom(*new_value) : StyleAtomID {});
+    publish_element_input(*style_engine, element, [name = new_value.has_value() ? style_engine->intern_atom(*new_value) : StyleAtomID {}](StyleInputScope const& input, StyleNodeID node) {
+        input.engine().set_element_id_name(node, name);
+    });
 }
 
 void record_element_class_list_changed(DOM::Element& element, Vector<Utf16FlyString> const& old_classes, Vector<Utf16FlyString> const& new_classes)
