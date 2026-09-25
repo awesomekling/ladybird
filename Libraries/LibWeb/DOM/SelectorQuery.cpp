@@ -295,17 +295,9 @@ static bool pseudo_class_matching_is_covered_by_version_counters(CSS::PseudoClas
     }
 }
 
-SelectorQuery::SelectorQuery(Document& document, CSS::SelectorList&& selectors)
+SelectorQuery::SelectorQuery(CSS::SelectorList&& selectors)
     : m_selectors(move(selectors))
 {
-    // An early script can compile a query before the first sheet attaches, which is otherwise what
-    // tells the engine whether HTML name folding applies in this document.
-    CSS::record_document_kind(document);
-    Vector<void const*> selector_handles;
-    selector_handles.ensure_capacity(m_selectors.size());
-    for (auto const& selector : m_selectors)
-        selector_handles.unchecked_append(&selector->rust_selector());
-    m_engine_query = document.style_computer().style_engine().compile_selector_query(selector_handles);
     m_can_match_in_dom = m_selectors.size() == 1
         && CSS::SelectorFFI::rust_selector_supports_simple_dom_matching(&m_selectors.first()->rust_selector());
     m_can_match_locally_in_dom = all_of(m_selectors, [&](auto const& selector) {
@@ -346,6 +338,25 @@ SelectorQuery::SelectorQuery(Document& document, CSS::SelectorList&& selectors)
 SelectorQuery::~SelectorQuery()
 {
     CSS::StyleEngine::destroy_selector_query(m_engine_query);
+}
+
+void* SelectorQuery::engine_query(Document& document) const
+{
+    if (m_engine_query)
+        return m_engine_query;
+    // An early script can compile a query before the first sheet attaches, which is otherwise what
+    // tells the engine whether HTML name folding applies in this document.
+    CSS::record_document_kind(document);
+    Vector<void const*> selector_handles;
+    selector_handles.ensure_capacity(m_selectors.size());
+    for (auto const& selector : m_selectors)
+        selector_handles.unchecked_append(&selector->rust_selector());
+    auto& engine = document.style_computer().style_engine();
+    m_engine_query = engine.compile_selector_query(selector_handles);
+    // The query can be the first to demand an attribute's value text, which the compile publishes: the engine is
+    // prepared against it again before the query matches.
+    engine.prepare_selector_query();
+    return m_engine_query;
 }
 
 static uintptr_t interned_name_identity(Utf16FlyString const& name)
@@ -447,7 +458,8 @@ bool SelectorQuery::matches_in_style_engine(Element const& element, ParentNode c
     if (GC::Ptr<ShadowRoot const> root = as_if<ShadowRoot>(element.root()))
         shadow_root = root->style_node_id();
 
-    auto result = const_cast<Document&>(element.document()).style_computer().style_engine().selector_query_matches(m_engine_query, element.style_node_id(), scope_root, shadow_root);
+    auto& document = const_cast<Document&>(element.document());
+    auto result = document.style_computer().style_engine().selector_query_matches(engine_query(document), element.style_node_id(), scope_root, shadow_root);
     VERIFY(result.has_value());
     return *result;
 }
@@ -550,7 +562,7 @@ GC::Ptr<Element> SelectorQuery::query_first(ParentNode& root) const
     if (!subtree_query.has_query_root)
         return cache_result(nullptr);
     CSS::StyleNodeID matched;
-    if (document.style_computer().style_engine().selector_query_first(m_engine_query, subtree_query.query_root, subtree_query.include_root, subtree_query.scope_root, subtree_query.shadow_root, true, matched)) {
+    if (document.style_computer().style_engine().selector_query_first(engine_query(document), subtree_query.query_root, subtree_query.include_root, subtree_query.scope_root, subtree_query.shadow_root, true, matched)) {
         if (!matched.value())
             return cache_result(nullptr);
         auto element = document.style_computer().element_for_style_node(matched);
@@ -606,7 +618,7 @@ GC::Ref<NodeList> SelectorQuery::query_all(ParentNode& root) const
             return create_node_list(elements);
 
         Vector<CSS::StyleNodeID> matches;
-        if (!document.style_computer().style_engine().selector_query_all(m_engine_query, subtree_query.query_root, subtree_query.include_root, subtree_query.scope_root, subtree_query.shadow_root, true, matches)) {
+        if (!document.style_computer().style_engine().selector_query_all(engine_query(document), subtree_query.query_root, subtree_query.include_root, subtree_query.scope_root, subtree_query.shadow_root, true, matches)) {
             collect_matches(root, [&](auto& element) { return matches_in_style_engine(element, root); }, elements);
         } else {
             elements.ensure_capacity(matches.size());

@@ -1633,7 +1633,7 @@ static JsonObject serialize_devtools_applied_rule(DOM::Document& document, CSSRu
         specificities.must_append(selector->specificity());
         SelectorList selector_query_list;
         selector_query_list.append(selector);
-        auto selector_query = DOM::SelectorQuery::create(document, move(selector_query_list));
+        auto selector_query = DOM::SelectorQuery::create(move(selector_query_list));
         if (selector_query->matches(element.element(), document))
             matched_selector_indexes.must_append(index);
     }

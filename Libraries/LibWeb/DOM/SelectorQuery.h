@@ -24,9 +24,9 @@ class IsolatedSelectorQueryEngine;
 // Documents cache these per selector string, so one SelectorQuery may be reused by many queries.
 class SelectorQuery : public RefCounted<SelectorQuery> {
 public:
-    static NonnullRefPtr<SelectorQuery> create(Document& document, CSS::SelectorList&& selectors)
+    static NonnullRefPtr<SelectorQuery> create(CSS::SelectorList&& selectors)
     {
-        return adopt_ref(*new SelectorQuery(document, move(selectors)));
+        return adopt_ref(*new SelectorQuery(move(selectors)));
     }
 
     ~SelectorQuery();
@@ -47,13 +47,16 @@ public:
     GC::Ptr<Element const> closest(Element const&) const;
 
 private:
-    SelectorQuery(Document&, CSS::SelectorList&&);
+    explicit SelectorQuery(CSS::SelectorList&&);
 
+    void* engine_query(Document&) const;
     bool matches_simple_selector_in_dom(Element const&) const;
     bool matches_in_style_engine(Element const&, ParentNode const& scope) const;
 
     CSS::SelectorList m_selectors;
-    void* m_engine_query { nullptr };
+    // Compiled into the document's style engine the first time a match needs the engine, not before: a query the DOM
+    // matches alone must not enter the engine, which a style pass in flight owns.
+    mutable void* m_engine_query { nullptr };
     mutable u64 m_last_use { 0 };
     bool m_can_match_in_dom { false };
     bool m_can_match_locally_in_dom { false };
