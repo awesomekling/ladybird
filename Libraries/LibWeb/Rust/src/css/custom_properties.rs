@@ -657,13 +657,6 @@ impl CustomPropertyStore {
             .or_else(|| self.parent.as_ref()?.get(name_raw))
     }
 
-    pub(crate) fn get_named(&self, name: &[u16]) -> Option<(usize, &CustomPropertyEntry)> {
-        if let Some(&raw) = self.own_names.get(name) {
-            return self.own_values.get(&raw).map(|entry| (raw, entry));
-        }
-        self.parent.as_ref()?.get_named(name)
-    }
-
     fn get_by_name_with_owner(&self, name: &[u16]) -> Option<(&CustomPropertyEntry, &CustomPropertyStore)> {
         self.own_names
             .get(name)

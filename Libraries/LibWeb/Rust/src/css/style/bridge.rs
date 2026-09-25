@@ -4137,36 +4137,6 @@ unsafe fn with_declared_only_declarations<R>(
     body(&declarations)
 }
 
-/// Resolve a hypothetical parent's custom-property declaration against its published registry
-/// snapshot and store. The returned style value transfers one strong reference to the host.
-///
-/// # Safety
-/// All pointers must be live for the call, and `store` and `registry` must have their respective
-/// Rust custom-property types.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_answer_hypothetical_parent_custom_property(
-    engine: *mut c_void,
-    root: u32,
-    store: *const c_void,
-    registry: *const c_void,
-    name: *const u16,
-    name_length: usize,
-) -> *const c_void {
-    engine_entrance(engine, "style_engine_answer_hypothetical_parent_custom_property");
-    abort_on_panic(|| {
-        let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
-        let Some(root) = StyleNodeID::from_raw(root) else {
-            return std::ptr::null();
-        };
-        if name.is_null() {
-            return std::ptr::null();
-        }
-        let name = unsafe { std::slice::from_raw_parts(name, name_length) };
-        unsafe { engine.answer_hypothetical_parent_custom_property(root, store, registry, name) }
-            .unwrap_or(std::ptr::null())
-    })
-}
-
 /// Settle the synthetic pseudo-element records of an element whose record C++ has just installed.
 /// A kind the answer does not name keeps the record it has.
 ///
