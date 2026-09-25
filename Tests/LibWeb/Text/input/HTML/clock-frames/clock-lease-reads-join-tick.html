@@ -23,7 +23,7 @@
         const animation = box.getAnimations()[0];
         // The rendering updates tick the lease, not a render clock.
         internals.setRenderClockSuspended(true);
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await nextTask();
 
         const armed = internals.holdNextClockTick("before-completion");
         let heldAt = "";

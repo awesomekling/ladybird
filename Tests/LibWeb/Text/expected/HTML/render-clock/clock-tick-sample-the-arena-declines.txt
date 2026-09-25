@@ -1,3 +1,6 @@
+ticks before and past the flip taken: true
+the tick past the flip needed the main thread: true
+no tick after it: true
 text-transform after the flip: uppercase
 text after the flip: TEXT
-width at the end: 900
+width is the one composed at currentTime: true

@@ -851,8 +851,10 @@ void FrameScheduler::main_thread_will_idle()
 
 void FrameScheduler::inject_render_clock_tick(double frame_time, Function<void(bool)> on_end)
 {
-    // Without a render clock host, the main thread never lets a tick in.
-    if (!Layout::RustFFI::rust_stage_thread_submits_clock() || s_frame_scheduler_with_host != this) {
+    // Without a render clock host, the main thread never lets a tick in, and without a lease a render clock would tick,
+    // no lease takes it.
+    bool const render_clock_ticks_a_lease = any_of(m_clock_leases, [](auto const& hold) { return hold.render_clock_context.has_value(); });
+    if (!Layout::RustFFI::rust_stage_thread_submits_clock() || s_frame_scheduler_with_host != this || !render_clock_ticks_a_lease) {
         Core::deferred_invoke([on_end = move(on_end)] { on_end(false); });
         return;
     }

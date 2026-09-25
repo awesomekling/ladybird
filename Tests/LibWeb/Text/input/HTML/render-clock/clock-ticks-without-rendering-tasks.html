@@ -26,12 +26,20 @@
         const box = document.getElementById("box");
         const animation = box.getAnimations()[0];
         const enabled = internals.clockFramesEnabled();
-        await new Promise(resolve => setTimeout(resolve, 100));
+        const ticksPresented = () => internals.getRenderClockCounters().ticksPresented;
+        // The first frame the render clock presents, and then ten more, however long the display takes to tick.
+        const waitForFrames = async count => {
+            const target = ticksPresented() + count;
+            do
+                await new Promise(resolve => setTimeout(resolve, 10));
+            while (enabled && ticksPresented() < target);
+        };
+        await waitForFrames(1);
 
-        const presentedBefore = internals.getRenderClockCounters().ticksPresented;
+        const presentedBefore = ticksPresented();
         const updatesBefore = internals.getRenderingSchedulerCounters().updatesRun;
-        await new Promise(resolve => setTimeout(resolve, 400));
-        const presented = internals.getRenderClockCounters().ticksPresented - presentedBefore;
+        await waitForFrames(10);
+        const presented = ticksPresented() - presentedBefore;
         const updates = internals.getRenderingSchedulerCounters().updatesRun - updatesBefore;
 
         const time = animation.currentTime;
