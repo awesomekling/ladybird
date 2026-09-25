@@ -1338,7 +1338,12 @@ mod tests {
         assert_eq!(compiled.get(), 9);
         source.publish_conditions(&mut engine, borrowed_environment);
         unsafe extern "C" fn prepare(_: *mut c_void) {}
+        unsafe extern "C" fn record_layer(context: *mut c_void, name: *const u16, length: usize) {
+            let recorded = unsafe { &mut *context.cast::<Vec<Vec<u16>>>() };
+            recorded.push(unsafe { std::slice::from_raw_parts(name, length) }.to_vec());
+        }
         let sheets = [Rc::as_ptr(&source)];
+        let mut recorded_layers = Vec::<Vec<u16>>::new();
         assert!(unsafe {
             crate::css::style_sheet::rust_style_sheet_publish_layer_order(
                 sheets.as_ptr(),
@@ -1348,8 +1353,22 @@ mod tests {
                 false,
                 std::ptr::null_mut(),
                 prepare,
+                (&raw mut recorded_layers).cast(),
+                record_layer,
             )
         });
+        // The host's copy of the order ranks every named layer as the engine does.
+        assert_eq!(recorded_layers, layers);
+        for (rank, name) in recorded_layers.iter().enumerate() {
+            let layer = crate::css::style::bridge::intern_native_text(&mut engine, name);
+            assert_eq!(
+                engine.layer_index(
+                    crate::css::style::tree::TreeScopeID(0),
+                    crate::css::style::program::CascadeLayerID(layer.0)
+                ) as usize,
+                rank
+            );
+        }
         let next = crate::css::rule::mutation::successor(&source, import_identity, |identity| unsafe {
             crate::css::style::bridge::style_engine_native_rule_id((&raw const engine).cast(), identity)
         });

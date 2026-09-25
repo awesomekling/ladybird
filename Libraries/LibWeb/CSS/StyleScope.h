@@ -124,6 +124,7 @@ public:
     [[nodiscard]] bool has_valid_rule_cache() const { return m_style_cache && m_style_cache->rule_cache; }
     void invalidate_style_cache();
     void publish_cascade_layer_order(StyleSheetState* pending_attachment = nullptr);
+    [[nodiscard]] u32 published_layer_index(Utf16FlyString const& qualified_layer_name) const;
     void publish_animation_keyframes();
     void unpublish_animation_keyframes();
     void invalidate_user_style_sheet();
@@ -178,6 +179,8 @@ public:
     bool m_is_doing_counter_style_cache_update : 1 { false };
     bool m_has_published_named_layer_order : 1 { false };
     u64 m_published_layer_order_generation { 0 };
+    // The named layers of the order this scope last published, by qualified name, with their rank.
+    HashMap<Utf16FlyString, u32> m_published_layer_ranks;
     u64 m_counter_style_environment_identity { 0 };
     HashMap<Utf16FlyString, NonnullRefPtr<CSS::CounterStyle const>> m_registered_counter_styles;
 

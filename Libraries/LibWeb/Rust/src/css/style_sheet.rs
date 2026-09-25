@@ -593,10 +593,14 @@ fn cascade_layer_order<'a>(sheets: impl IntoIterator<Item = &'a NativeStyleSheet
 
 /// Publish the layer order of the host's ordered, active author sheets.
 ///
+/// The host keeps its own copy of the order it published: record_layer receives every named layer
+/// in rank order, so a host lookup of a rule's layer asks no engine state.
+///
 /// # Safety
 /// Sheets and engine must be live. prepare must flush host changes without destroying them.
-/// The engine is not borrowed during prepare.
+/// The engine is not borrowed during prepare or record_layer.
 #[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
 pub unsafe extern "C" fn rust_style_sheet_publish_layer_order(
     sheets: *const *const NativeStyleSheet,
     count: usize,
@@ -605,6 +609,8 @@ pub unsafe extern "C" fn rust_style_sheet_publish_layer_order(
     previously_had_layers: bool,
     context: *mut c_void,
     prepare: unsafe extern "C" fn(*mut c_void),
+    layer_context: *mut c_void,
+    record_layer: unsafe extern "C" fn(*mut c_void, *const u16, usize),
 ) -> bool {
     crate::stage_thread::join_frame_for_style_engine_entrance(engine, "rust_style_sheet_publish_layer_order");
     let sheets = if count == 0 {
@@ -630,6 +636,9 @@ pub unsafe extern "C" fn rust_style_sheet_publish_layer_order(
             })
             .collect();
         crate::css::style::bridge::operations::set_layer_order(engine, tree_scope, &layers);
+    }
+    for name in names.iter().filter(|name| !name.is_empty()) {
+        unsafe { record_layer(layer_context, name.as_ptr(), name.len()) };
     }
     has_layers
 }
