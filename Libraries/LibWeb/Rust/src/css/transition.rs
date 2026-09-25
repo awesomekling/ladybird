@@ -437,7 +437,10 @@ pub unsafe extern "C" fn rust_transition_length_resolution_context(
     style_record: u64,
     context: *mut crate::css::animation::FfiAnimationLengthResolutionContext,
 ) -> bool {
-    crate::stage_thread::join_frame_for_style_engine_entrance(style_engine, "rust_transition_length_resolution_context");
+    crate::stage_thread::join_frame_for_style_engine_entrance(
+        style_engine,
+        "rust_transition_length_resolution_context",
+    );
     let style_engine = unsafe { &*style_engine.cast::<crate::css::style::StyleEngine>() };
     let Some(length) = style_engine.transition_length_resolution_context(style_record) else {
         return false;

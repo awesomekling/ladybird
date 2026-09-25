@@ -7006,7 +7006,10 @@ pub unsafe extern "C" fn rust_substitute_compositor_keyframe_value(
     property_id: u16,
     value: *const crate::css::style_value::StyleValueData,
 ) -> *const crate::css::style_value::StyleValueData {
-    crate::stage_thread::join_frame_for_style_engine_entrance(style_engine, "rust_substitute_compositor_keyframe_value");
+    crate::stage_thread::join_frame_for_style_engine_entrance(
+        style_engine,
+        "rust_substitute_compositor_keyframe_value",
+    );
     let engine = unsafe { &*style_engine.cast::<crate::css::style::StyleEngine>() };
     let written = unsafe {
         crate::css::style_value::RetainedStyleValueData::from_retained_pointer(
