@@ -1135,6 +1135,19 @@ impl StyleEngine {
             .settle_pseudo_records_after_host_record(node, old_is_list_item, &mut self.counters)
     }
 
+    /// Sample the animations of an element or pseudo-element over the record the host holds.
+    #[inline]
+    pub(crate) fn sample_installed_record(
+        &mut self,
+        node: StyleNodeID,
+        pseudo: Option<u8>,
+        style_record: u64,
+        layout_arena: super::animations::LentLayoutArena,
+    ) -> Result<Option<super::engine_sample::SettledRowPublication>, String> {
+        self.state
+            .sample_installed_record(node, pseudo, style_record, layout_arena, &mut self.counters)
+    }
+
     /// Sample the animations of the pseudo-elements the engine just settled for an element.
     #[inline]
     pub(crate) fn sample_settled_pseudo_elements(
