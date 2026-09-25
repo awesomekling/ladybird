@@ -149,9 +149,11 @@ static_assert(!IsMoveAssignable<StyleEngine>);
 
 StyleEngine::StyleEngine(DeviceClass device_class, StyleComputer* style_computer)
     : m_impl(StyleEngineFFI::style_engine_create(device_class))
+    , m_host_style_record_pins(StyleEngineFFI::style_record_host_pins_create())
     , m_style_computer(style_computer)
     , m_recording_stream(StyleEngineFFI::style_engine_recording_stream(m_impl))
 {
+    StyleEngineFFI::style_engine_lend_host_style_record_pins(m_impl, m_host_style_record_pins);
     if (m_style_computer) {
         set_pseudo_element_style_deferred(to_underlying(PseudoElement::Selection), true);
         StyleEngineFFI::style_engine_install_font_resolver(m_impl, resolve_fonts);
@@ -186,6 +188,7 @@ StyleEngine::~StyleEngine()
     }
     if (m_impl)
         StyleEngineFFI::style_engine_destroy(m_impl);
+    StyleEngineFFI::style_record_host_pins_destroy(m_host_style_record_pins);
     for (auto const& atom : m_atoms)
         Utf16FlyString::unref_raw(atom.key);
 }
@@ -396,6 +399,16 @@ StyleEngine::EpochStyleRecordFacts* StyleEngine::epoch_style_record_facts(StyleR
     if (m_style_record_view_epoch_depth == 0 || !style_record || (style_record.value() & animation_overlay_tag))
         return nullptr;
     return &m_epoch_style_record_facts.ensure(style_record.value());
+}
+
+void StyleEngine::pin_style_record(StyleRecordID style_record) const
+{
+    StyleEngineFFI::style_record_host_pins_pin(m_host_style_record_pins, style_record.value());
+}
+
+void StyleEngine::unpin_style_record(StyleRecordID style_record) const
+{
+    StyleEngineFFI::style_record_host_pins_unpin(m_host_style_record_pins, style_record.value());
 }
 
 void StyleEngine::begin_style_record_view_epoch()

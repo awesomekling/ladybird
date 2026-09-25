@@ -35,7 +35,8 @@ CSS::ElementBoxKind SVGGeometryElement::box_kind() const
 }
 
 // The style of an element outside the document, where no rule reaches it: the style engine cascades its own
-// presentation attributes and inline style over the initial values. The record comes back pinned for the caller.
+// presentation attributes and inline style over the initial values. Nothing pins the record: the view taken of it
+// right away pins it if it must.
 static CSS::StyleRecordID declared_only_style_record(CSS::StyleComputer& style_computer, DOM::Document const& document, SVGGeometryElement& element)
 {
     auto hints = CSS::StyleComputer::collect_presentational_hint_properties({ element });
@@ -93,9 +94,6 @@ WebIDL::ExceptionOr<float> SVGGeometryElement::get_total_length()
         record = CSS::StyleRecordID { CSS::answer_style_read_demand(join, style_computer.style_engine(), { .node = style_node_id() }).record.style_record };
     }
     auto view = style_computer.computed_style_record_view(record);
-    // NB: The view holds its own pin on the record the engine pinned for us.
-    if (is_detached && !!record)
-        style_computer.unpin_style_record(record);
     if (!view)
         return 0;
     return get_path({ viewport_size.width(), viewport_size.height() }, *view).length();

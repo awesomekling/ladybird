@@ -130,6 +130,10 @@ public:
     };
     [[nodiscard]] SettledAnimationDefinitions take_settled_animation_definitions(StyleNodeID node, u8 pseudo_kind);
     [[nodiscard]] StyleRecordView style_record_view(StyleRecordID style_record) const;
+    // The document thread's own pins, which keep a record from reclamation for its readers. They
+    // live in a table beside the engine, so taking or releasing one never waits for a style pass.
+    void pin_style_record(StyleRecordID style_record) const;
+    void unpin_style_record(StyleRecordID style_record) const;
     void begin_style_record_view_epoch();
     void end_style_record_view_epoch();
     void decide_transitions(StyleRecordID before_style_record, void const* after_longhand_table, void const* after_animated_overlay, StyleValueFFI::FfiTransitionInput&, StyleValueFFI::FfiTransitionAction*) const;
@@ -390,6 +394,7 @@ private:
     void publish_attribute_value_text(StyleAtomID, Utf16View, bool affects_selector_catalog);
 
     void* m_impl { nullptr };
+    void* m_host_style_record_pins { nullptr };
     GC::Ptr<StyleComputer> m_style_computer;
     // The recording stream the engine records under, or zero.
     u64 m_recording_stream { 0 };
