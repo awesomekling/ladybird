@@ -615,12 +615,19 @@ impl RetainedState {
 /// pseudo-element takes once the host installs its record.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct NamedPseudoElementEnvironment {
+    /// Zero for none.
     identity: u64,
     /// Whether it is not simply the environment the element passes on.
     declares: bool,
     /// Whether it is the environment the element holds, which the host resolved: the pseudo-element
     /// holds the host's object for it too.
     views_element_environment: bool,
+    /// For the environment the pseudo-element's sample composed its animated custom properties
+    /// into, the one its record was resolved over, beneath it.
+    animation_base: Option<u64>,
+    /// Whether the sample the engine took as it settled the pseudo-element moved it here, and the
+    /// host installs nothing of the sample's.
+    from_sample: bool,
 }
 
 /// What the engine's own sample of an element leaves for the overlay record: the table after the
@@ -1280,13 +1287,23 @@ impl super::StyleEngineState {
         node: StyleNodeID,
         pseudo_kind: u8,
         style_record: u64,
-    ) -> Option<Option<NamedPseudoElementEnvironment>> {
+    ) -> Option<NamedPseudoElementEnvironment> {
         let key = (node, pseudo_kind);
-        if self
+        // What the sample the engine took as it settled the pseudo-element composed its animated
+        // custom properties into, where it moved them.
+        let sampled = self
             .retained
-            .pseudo_element_custom_property_data
+            .pseudo_elements_sampled_in_pass
             .get(&key)
-            .is_some_and(|held| held.is_animation_overlay)
+            .and_then(|published| published.custom_properties)
+            .map(|moved| moved.environment);
+        // An animation overlay the sample did not move is re-layered over a new base by the host.
+        if sampled.is_none()
+            && self
+                .retained
+                .pseudo_element_custom_property_data
+                .get(&key)
+                .is_some_and(|held| held.is_animation_overlay)
         {
             return None;
         }
@@ -1301,7 +1318,13 @@ impl super::StyleEngineState {
             .and_then(Option::as_ref);
         let element_environment = element_held.map_or(0, |held| held.identity);
         let named = match environment {
-            0 => None,
+            0 => NamedPseudoElementEnvironment {
+                identity: 0,
+                declares: false,
+                views_element_environment: false,
+                animation_base: None,
+                from_sample: false,
+            },
             environment if environment & custom_property_environments::ENGINE_ENVIRONMENT_IDENTITY_BIT != 0 => {
                 let inputs = self.retained.document_style_computation_inputs;
                 let inherited = match self.retained.custom_property_environments.store(element_environment) {
@@ -1310,11 +1333,13 @@ impl super::StyleEngineState {
                         .inheritable_custom_property_environment(element_environment, &inputs),
                     None => element_environment,
                 };
-                Some(NamedPseudoElementEnvironment {
+                NamedPseudoElementEnvironment {
                     identity: environment,
                     declares: environment != element_environment && environment != inherited,
                     views_element_environment: false,
-                })
+                    animation_base: None,
+                    from_sample: false,
+                }
             }
             // One the host resolved is what the element passes on: its own environment, where no
             // registration keeps a name of it from inheriting.
@@ -1327,14 +1352,44 @@ impl super::StyleEngineState {
                 {
                     return None;
                 }
-                Some(NamedPseudoElementEnvironment {
+                NamedPseudoElementEnvironment {
                     identity,
                     declares: false,
                     views_element_environment: true,
-                })
+                    animation_base: None,
+                    from_sample: false,
+                }
             }
         };
-        Some(named)
+        match sampled {
+            None => Some(named),
+            Some(0) => Some(NamedPseudoElementEnvironment {
+                from_sample: true,
+                ..named
+            }),
+            // The engine views what the sample composed over an environment it resolved itself.
+            Some(sampled) => {
+                if named.views_element_environment || !self.sampled_environment_is_over(sampled, named.identity) {
+                    return None;
+                }
+                Some(NamedPseudoElementEnvironment {
+                    identity: sampled,
+                    declares: named.declares,
+                    views_element_environment: false,
+                    animation_base: Some(named.identity),
+                    from_sample: true,
+                })
+            }
+        }
+    }
+
+    /// Whether the engine named the environment of a pseudo-element it settled from the sample it
+    /// took of it, so that the host installs nothing of the sample's.
+    pub(crate) fn pseudo_element_environment_named_from_sample(&self, node: StyleNodeID, pseudo_kind: u8) -> bool {
+        self.retained
+            .pseudo_element_environments_named_in_settle
+            .get(&(node, pseudo_kind))
+            .is_some_and(|named| named.from_sample)
     }
 
     /// The host installs the record of a pseudo-element the engine settled: it takes the
@@ -1351,7 +1406,7 @@ impl super::StyleEngineState {
         };
         // The host's object for an environment it resolved is the one the element holds.
         let data = match named {
-            Some(named) if named.views_element_environment => {
+            named if named.views_element_environment => {
                 let Some(data) = self
                     .retained
                     .element_custom_property_data
@@ -1367,23 +1422,101 @@ impl super::StyleEngineState {
             }
             _ => None,
         };
-        let retired = match named {
-            Some(named) => self.retained.pseudo_element_custom_property_data.insert(
-                key,
-                inputs::HeldCustomPropertyEnvironment {
-                    identity: named.identity,
-                    is_animation_overlay: false,
-                    declares: named.declares,
-                    data,
-                    animation_base: None,
-                },
-            ),
-            None => self.retained.pseudo_element_custom_property_data.remove(&key),
+        let retired = match named.identity {
+            0 => self.retained.pseudo_element_custom_property_data.remove(&key),
+            identity => {
+                let animation_base = named.animation_base.map(|base| {
+                    inputs::AnimationBaseEnvironment::resolved_by_engine(
+                        base,
+                        self.retained
+                            .custom_property_environments
+                            .store(base)
+                            .unwrap_or(std::ptr::null()),
+                    )
+                });
+                self.retained.pseudo_element_custom_property_data.insert(
+                    key,
+                    inputs::HeldCustomPropertyEnvironment {
+                        identity,
+                        is_animation_overlay: animation_base.is_some(),
+                        declares: named.declares,
+                        data,
+                        animation_base,
+                    },
+                )
+            }
         };
         self.host
             .retired_custom_property_data
             .extend(retired.and_then(|held| held.data));
-        engine_sample_check::note_taken("pseudo-element environment named in settle");
+        engine_sample_check::note_taken(match (named.from_sample, named.animation_base.is_some()) {
+            (true, true) => "pseudo-element environment named in settle: sampled overlay",
+            (true, false) => "pseudo-element environment named in settle: sample cleared the overlay",
+            (false, _) => "pseudo-element environment named in settle: record environment",
+        });
+        true
+    }
+
+    /// A sample of a synthetic pseudo-element over the record the host holds moved its
+    /// custom-property environment: to `sampled`, the one the engine composed its animated custom
+    /// properties into, or, with zero, back to the one beneath. The pseudo-element takes it here,
+    /// where the host would have installed its view of it, and the host views it by identity.
+    ///
+    /// Returns false where the host installs it: over an environment the host resolved, whose
+    /// object the engine does not hold.
+    pub(crate) fn install_sampled_pseudo_element_environment(
+        &mut self,
+        node: StyleNodeID,
+        pseudo_kind: u8,
+        sampled: u64,
+    ) -> bool {
+        let key = (node, pseudo_kind);
+        let (base, declares) = match self.retained.pseudo_element_custom_property_data.get(&key) {
+            None => (0, false),
+            Some(held) if held.is_animation_overlay => match held.animation_base.as_ref() {
+                Some(base) => (base.environment(), held.declares),
+                None => return false,
+            },
+            Some(held) => (held.identity, held.declares),
+        };
+        if base != 0 && base & custom_property_environments::ENGINE_ENVIRONMENT_IDENTITY_BIT == 0 {
+            engine_sample_check::note_declined("pseudo-element sampled environment: over a host environment");
+            return false;
+        }
+        let retired = match (sampled, base) {
+            (0, 0) => self.retained.pseudo_element_custom_property_data.remove(&key),
+            (0, base) => self.retained.pseudo_element_custom_property_data.insert(
+                key,
+                inputs::HeldCustomPropertyEnvironment {
+                    identity: base,
+                    is_animation_overlay: false,
+                    declares,
+                    data: None,
+                    animation_base: None,
+                },
+            ),
+            (sampled, base) => {
+                let base_store = self
+                    .retained
+                    .custom_property_environments
+                    .store(base)
+                    .unwrap_or(std::ptr::null());
+                self.retained.pseudo_element_custom_property_data.insert(
+                    key,
+                    inputs::HeldCustomPropertyEnvironment {
+                        identity: sampled,
+                        is_animation_overlay: true,
+                        declares,
+                        data: None,
+                        animation_base: Some(inputs::AnimationBaseEnvironment::resolved_by_engine(base, base_store)),
+                    },
+                )
+            }
+        };
+        self.host
+            .retired_custom_property_data
+            .extend(retired.and_then(|held| held.data));
+        engine_sample_check::note_taken("pseudo-element sampled environment installed by the engine");
         true
     }
 

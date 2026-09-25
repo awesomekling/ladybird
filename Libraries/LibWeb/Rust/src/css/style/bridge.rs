@@ -3705,6 +3705,9 @@ pub struct FfiRowSampledInPass {
     /// `1` where the element's own style reads custom properties, and `2` where a name its
     /// descendants inherit moved: what the host records for the next transaction.
     pub custom_property_reactions: u8,
+    /// Whether the engine named the environment the sample moved the pseudo-element to itself, as
+    /// it settled it: the host installs nothing of it and only records the reactions.
+    pub custom_property_environment_named: bool,
     /// Whether building the composition rebuilt every style group.
     pub rebuilt_every_group: bool,
 }
@@ -3738,9 +3741,42 @@ pub unsafe extern "C" fn style_engine_take_pseudo_element_sampled_in_pass(
         "style_engine_take_pseudo_element_sampled_in_pass",
     );
     let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
-    let published =
-        StyleNodeID::from_raw(node).and_then(|node| engine.take_pseudo_element_sampled_in_pass(node, pseudo_kind));
-    row_sampled_in_pass(engine, published)
+    let Some(node) = StyleNodeID::from_raw(node) else {
+        return row_sampled_in_pass(engine, None);
+    };
+    let published = engine.take_pseudo_element_sampled_in_pass(node, pseudo_kind);
+    let mut sampled = row_sampled_in_pass(engine, published);
+    sampled.custom_property_environment_named = engine.pseudo_element_environment_named_from_sample(node, pseudo_kind);
+    sampled
+}
+
+/// The pseudo-element whose animations composed their custom properties into an environment the
+/// engine resolved, for the host to view it as that pseudo-element's animation overlay. Returns
+/// false for any other environment.
+///
+/// # Safety
+/// `engine` must be live, and `node` and `pseudo_kind` writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_sampled_pseudo_element_environment_owner(
+    engine: *const c_void,
+    environment: u64,
+    node: *mut u32,
+    pseudo_kind: *mut u8,
+) -> bool {
+    engine_entrance(engine, "style_engine_sampled_pseudo_element_environment_owner");
+    let engine = unsafe { &*engine.cast::<StyleEngine>() };
+    let Some(&(owner, kind)) = engine
+        .sampled_pseudo_element_custom_property_environments
+        .iter()
+        .find_map(|(key, &sampled)| (sampled == environment).then_some(key))
+    else {
+        return false;
+    };
+    unsafe {
+        *node = owner.raw();
+        *pseudo_kind = kind;
+    }
+    true
 }
 
 /// Sample the animations of an element, or of one of its pseudo-elements, over the record the host
@@ -3776,7 +3812,13 @@ pub unsafe extern "C" fn style_engine_sample_installed_record(
         match sampled {
             Ok(published) => {
                 super::engine_sample_check::note_taken("installed record sample");
-                row_sampled_in_pass(engine, Some(published))
+                let mut sampled = row_sampled_in_pass(engine, Some(published));
+                // A synthetic pseudo-element takes the environment its sample moved it to here.
+                if let (true, Some(pseudo_kind), Some(moved)) = (owns_slot, pseudo, published.custom_properties) {
+                    sampled.custom_property_environment_named =
+                        engine.install_sampled_pseudo_element_environment(style_node, pseudo_kind, moved.environment);
+                }
+                sampled
             }
             Err(reason) => {
                 super::engine_sample_check::note_declined(&format!("installed record: {reason}"));
@@ -3960,6 +4002,7 @@ fn row_sampled_in_pass(
             custom_property_environment: 0,
             custom_property_store: std::ptr::null(),
             custom_property_reactions: 0,
+            custom_property_environment_named: false,
             rebuilt_every_group: false,
         },
         Some(published) => FfiRowSampledInPass {
@@ -3979,6 +4022,7 @@ fn row_sampled_in_pass(
             custom_property_reactions: published.custom_properties.map_or(0, |moved| {
                 u8::from(moved.element_reads) | (u8::from(moved.inherited_names_moved) << 1)
             }),
+            custom_property_environment_named: false,
             rebuilt_every_group: published.rebuilt_every_group,
         },
     }

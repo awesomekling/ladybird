@@ -939,16 +939,19 @@ void apply_published_animation_overlay(CSS::StyleDrainScope const& scope, DOM::A
 void install_sampled_custom_property_environment(CSS::StyleDrainScope const& scope, DOM::AbstractElement abstract_element, CSS::StyleEngineFFI::FfiRowSampledInPass const& sample)
 {
     auto& element = const_cast<DOM::Element&>(abstract_element.element());
-    auto data = element.custom_property_data(abstract_element.pseudo_element());
-    RefPtr<CSS::CustomPropertyData const> base = data;
-    if (data && data->is_animation_overlay_for(abstract_element))
-        base = data->parent();
-    RefPtr<CSS::CustomPropertyData const> installed = base;
-    if (sample.custom_property_environment != 0) {
-        VERIFY(sample.custom_property_store);
-        installed = CSS::CustomPropertyData::view_animation_overlay(sample.custom_property_store, sample.custom_property_environment, base, abstract_element);
+    // The engine named what a pseudo-element's sample moved it to as it settled it.
+    if (!sample.custom_property_environment_named) {
+        auto data = element.custom_property_data(abstract_element.pseudo_element());
+        RefPtr<CSS::CustomPropertyData const> base = data;
+        if (data && data->is_animation_overlay_for(abstract_element))
+            base = data->parent();
+        RefPtr<CSS::CustomPropertyData const> installed = base;
+        if (sample.custom_property_environment != 0) {
+            VERIFY(sample.custom_property_store);
+            installed = CSS::CustomPropertyData::view_animation_overlay(sample.custom_property_store, sample.custom_property_environment, base, abstract_element);
+        }
+        element.replace_custom_property_data(scope, abstract_element.pseudo_element(), installed);
     }
-    element.replace_custom_property_data(scope, abstract_element.pseudo_element(), installed);
     auto& style_engine = scope.engine();
     if (sample.custom_property_reactions & 1)
         style_engine.record_derived_element_style_input_change(element.style_node_id(), CSS::StyleEngine::PublishedStyle | CSS::StyleEngine::RecomputeStyle);
