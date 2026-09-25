@@ -1,0 +1,3 @@
+frames presented during the task: true
+animation frame callbacks during the task: 0
+animation frame callbacks after the task: true
