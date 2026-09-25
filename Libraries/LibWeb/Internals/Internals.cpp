@@ -1756,7 +1756,7 @@ GC::Ref<JS::Object> Internals::get_rendering_scheduler_counters() const
     auto rendering_updates_by_frames_submitted = JS::Array::create_from<u64>(realm, counters.rendering_updates_by_frames_submitted.span(), [](u64 updates) { return JS::Value(updates); });
     object->define_direct_property("renderingUpdatesByFramesSubmitted"_utf16_fly_string, rendering_updates_by_frames_submitted, JS::default_attributes);
     // Flights by why they ended, and by the last stage they ran.
-    static constexpr Array flight_end_reasons { "done"sv, "stageRunsOnMain"sv };
+    static constexpr Array flight_end_reasons { "done"sv, "stageRunsOnMain"sv, "paintNotSealed"sv, "roundLeftWork"sv, "svgPaintResources"sv, "vectorImages"sv, "noViewport"sv, "hostLeftWork"sv };
     static constexpr Array flight_stages { "style"sv, "styleRenderHalf"sv, "rounds"sv, "paintPrep"sv, "record"sv, "present"sv };
     auto flight_ends = JS::Object::create(realm, nullptr);
     for (size_t reason = 0; reason < flight_end_reasons.size(); ++reason) {
@@ -1794,7 +1794,7 @@ static bool hold_next_submitted_stage(StringView label, Utf16String const& point
     Layout::RustFFI::FfiStageHoldPoint hold_point;
     if (point == "before-run"sv)
         hold_point = Layout::RustFFI::FfiStageHoldPoint::BeforeRun;
-    else if (point == "mid-recording"sv && label == "recording"sv)
+    else if (point == "mid-recording"sv && label.starts_with("recording"sv))
         hold_point = Layout::RustFFI::FfiStageHoldPoint::MidRecording;
     else if (point == "before-completion"sv)
         hold_point = Layout::RustFFI::FfiStageHoldPoint::BeforeCompletion;
@@ -1813,6 +1813,14 @@ static bool hold_next_submitted_stage(StringView label, Utf16String const& point
 
 bool Internals::hold_next_recording_frame(Utf16String const& point, GC::Ptr<DOM::Document> document)
 {
+    // A flight that goes on from the layout pass records in its record stage: whichever of the two records first is held.
+    if (Layout::RustFFI::rust_stage_thread_submits_flight()) {
+        if (point == "before-run"sv)
+            return hold_next_submitted_stage("recording|flight:record"sv, point, document);
+        if (point == "mid-recording"sv)
+            return hold_next_submitted_stage("recording|flight:record"sv, point, document);
+        return hold_next_submitted_stage("recording|flight:recorded"sv, point, document);
+    }
     return hold_next_submitted_stage("recording"sv, point, document);
 }
 
@@ -1949,7 +1957,9 @@ WebIDL::UnsignedLongLong Internals::hit_test_scene_epoch()
 
 bool Internals::rendering_update_awaits_pass() const
 {
-    return HTML::main_thread_event_loop().frame_scheduler().awaits_pass();
+    // A flight that records after its layout pass is the recording the rendering update goes on to make.
+    auto const& frame_scheduler = HTML::main_thread_event_loop().frame_scheduler();
+    return frame_scheduler.awaits_pass() && !frame_scheduler.pass_in_flight_records();
 }
 
 u64 Internals::style_pass_forced_joins() const

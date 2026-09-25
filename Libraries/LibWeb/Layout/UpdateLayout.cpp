@@ -57,6 +57,10 @@ Layout::RustFFI::FfiLayoutUpdateHostCallbacks Document::layout_update_host_callb
             }; },
         .needs_style_update_after_layout = [](void* context) -> bool { return static_cast<Document*>(context)->needs_style_update_after_layout(); },
         .prepare_for_rendering = [](void* context) { static_cast<Document*>(context)->prepare_for_rendering(); },
+        .seal_flight_paint = [](void* context) {
+            auto& document = *static_cast<Document*>(context);
+            if (auto navigable = document.navigable())
+                navigable->seal_flight_paint(document); },
         .prepare_layout_tree_build = [](void* context) -> u32 { return static_cast<Document*>(context)->prepare_layout_tree_build(); },
         .renew_paint_state = [](void* context) {
             auto& document = *static_cast<Document*>(context);

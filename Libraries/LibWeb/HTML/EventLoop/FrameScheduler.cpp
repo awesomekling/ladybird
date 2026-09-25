@@ -271,6 +271,15 @@ void FrameScheduler::submit_pass(FrameTicket::SubmittedPass::Kind kind, Vector<G
     m_event_loop.did_submit_frame();
 }
 
+bool FrameScheduler::pass_in_flight_records() const
+{
+    if (!awaits_pass() || m_ticket->submitted_pass->kind != FrameTicket::SubmittedPass::Kind::Flight)
+        return false;
+    auto const& pass = *m_ticket->submitted_pass;
+    auto navigable = pass.documents[pass.document_index]->navigable();
+    return navigable && navigable->has_sealed_flight_paint();
+}
+
 bool FrameScheduler::pass_in_flight_holds(DOM::Document const& document) const
 {
     if (m_state != State::InFlight || !m_ticket || !m_ticket->submitted_pass.has_value())
@@ -312,8 +321,23 @@ void FrameScheduler::commit()
     if (m_ticket->submitted_pass.has_value() && m_ticket->submitted_pass->kind == FrameTicket::SubmittedPass::Kind::Flight) {
         auto outcome = Layout::RustFFI::rust_flight_take_outcome();
         m_ticket->submitted_pass->flight_outcome = outcome;
+        auto document = m_ticket->submitted_pass->documents[m_ticket->submitted_pass->document_index];
         if (outcome.began == Layout::RustFFI::FfiFlightStage::Style)
-            m_ticket->submitted_pass->documents[m_ticket->submitted_pass->document_index]->finish_submitted_style_update();
+            document->finish_submitted_style_update();
+        // A flight that went on from the layout pass to record the document hands its frame off here, as the frame of a
+        // recording in flight is.
+        if (auto navigable = document->navigable(); navigable && navigable->has_sealed_flight_paint()) {
+            using FlightPaintEnd = LocalNavigable::FlightPaintEnd;
+            auto end = FlightPaintEnd::NotRecorded;
+            if (outcome.reached >= Layout::RustFFI::FfiFlightStage::Record)
+                end = FlightPaintEnd::Recorded;
+            else if (outcome.end == Layout::RustFFI::FfiFlightEndReason::HostLeftWork)
+                end = FlightPaintEnd::RecordedAheadOfMoreWork;
+            if (navigable->finish_flight_paint(*document, end)) {
+                m_event_loop.note_frame_painted({});
+                m_ticket->painted_local_roots.append(*navigable);
+            }
+        }
     }
     // A clock tick's document adopts what the tick installed before anything reads it, and then takes in what was
     // marked beside the tick, as the end of a layout pass's frame does: the next drain writes it.
@@ -417,8 +441,11 @@ void FrameScheduler::run_tail()
     VERIFY(m_state == State::CommittedTailPending);
     // NB: The stack is a conservative root, so what the ticket held stays alive in these locals.
     if (auto submitted_pass = move(m_ticket->submitted_pass); submitted_pass.has_value()) {
-        // The rest of the rendering update is a main half of its own, with a new ticket for its recordings.
+        // The rest of the rendering update is a main half of its own, with a new ticket for its recordings. A flight that
+        // recorded painted its local root already, whose screenshots wait for the end of the rendering update.
+        auto painted_local_roots = move(m_ticket->painted_local_roots);
         m_ticket = make<FrameTicket>();
+        m_ticket->painted_local_roots = move(painted_local_roots);
         m_state = State::MainHalf;
         if (submitted_pass->kind == FrameTicket::SubmittedPass::Kind::Clock) {
             // The next leased document ticks, and then the rendering update goes on at step 16 for every document.
@@ -456,11 +483,13 @@ void FrameScheduler::resume_rendering_update_after_flight(FrameTicket::Submitted
     case FfiFlightStage::PaintPrep:
         m_event_loop.resume_rendering_update_after_layout({}, flight.documents, flight.document_index, flight.frame_timestamp);
         return;
+    // NB: Consume-commit handed off the frame the flight recorded. The rest of the rendering update runs as after the
+    //     layout pass, and paints again only what was marked beside the flight.
     case FfiFlightStage::Record:
     case FfiFlightStage::Present:
-        break;
+        m_event_loop.resume_rendering_update_after_layout({}, flight.documents, flight.document_index, flight.frame_timestamp);
+        return;
     }
-    // FIXME: A flight that ran its recording goes on with the tail of its rendering update.
     VERIFY_NOT_REACHED();
 }
 

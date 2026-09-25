@@ -50,6 +50,9 @@ pub struct FfiLayoutUpdateHostCallbacks {
     pub document_facts: unsafe extern "C" fn(*mut c_void) -> FfiLayoutUpdateDocumentFacts,
     pub needs_style_update_after_layout: unsafe extern "C" fn(*mut c_void) -> bool,
     pub prepare_for_rendering: unsafe extern "C" fn(*mut c_void),
+    /// Seals what the recording the flight about to be submitted makes after its layout reads, if
+    /// the document may be recorded that way (see `layout_arena_seal_flight_paint`).
+    pub seal_flight_paint: unsafe extern "C" fn(*mut c_void),
     /// Readies the document for a layout tree build, and answers with the document's style node,
     /// which the build walks from.
     pub prepare_layout_tree_build: unsafe extern "C" fn(*mut c_void) -> u32,
@@ -136,6 +139,9 @@ pub struct FfiLayoutCommitEffects {
     /// visual contexts and recorded and presented the frame (`LIBWEB_RENDER_CLOCK_FRAMES`): the
     /// document has nothing to paint again for them.
     pub shown_on_render_side: bool,
+    /// Whether the flight that ran the frame recorded the document after it, which the document
+    /// publishes: the visual contexts, display list and repaint a commit asks for are that recording.
+    pub recorded_in_flight: bool,
 }
 
 /// A scroll offset a commit's overflow measurement brought back into the range its box now allows,
@@ -194,6 +200,7 @@ pub(crate) struct LayoutUpdateHost {
     document_facts: unsafe extern "C" fn(*mut c_void) -> FfiLayoutUpdateDocumentFacts,
     needs_style_update_after_layout: unsafe extern "C" fn(*mut c_void) -> bool,
     prepare_for_rendering: unsafe extern "C" fn(*mut c_void),
+    seal_flight_paint: unsafe extern "C" fn(*mut c_void),
     prepare_layout_tree_build: unsafe extern "C" fn(*mut c_void) -> u32,
     renew_paint_state: unsafe extern "C" fn(*mut c_void),
     rebuild_list_owners_with_stale_item_counters: unsafe extern "C" fn(*mut c_void, *const u32, usize),
@@ -218,6 +225,7 @@ impl From<FfiLayoutUpdateHostCallbacks> for LayoutUpdateHost {
             document_facts: host.document_facts,
             needs_style_update_after_layout: host.needs_style_update_after_layout,
             prepare_for_rendering: host.prepare_for_rendering,
+            seal_flight_paint: host.seal_flight_paint,
             prepare_layout_tree_build: host.prepare_layout_tree_build,
             renew_paint_state: host.renew_paint_state,
             rebuild_list_owners_with_stale_item_counters: host.rebuild_list_owners_with_stale_item_counters,
@@ -256,6 +264,10 @@ impl LayoutUpdateHost {
 
     fn prepare_for_rendering(&self, _: &crate::stage::MainThread) {
         unsafe { (self.prepare_for_rendering)(self.context) }
+    }
+
+    fn seal_flight_paint(&self, _: &crate::stage::MainThread) {
+        unsafe { (self.seal_flight_paint)(self.context) }
     }
 
     fn prepare_layout_tree_build(&self, _: &crate::stage::MainThread) -> u32 {
@@ -492,6 +504,8 @@ struct FrameMessages {
     /// that image boxes show. Until then an image box that owns its provider has no image, and the
     /// host lays it out again if the image it is handed is already there.
     owed_image_resources: Vec<(NodeSlotId, OwedImageResources)>,
+    /// Whether the flight that ran the frame recorded the document after it.
+    recorded_in_flight: bool,
 }
 
 impl FrameMessages {
@@ -520,6 +534,7 @@ impl FrameMessages {
                     clamped_scroll_offsets: self.clamped_scroll_offsets.as_ptr(),
                     clamped_scroll_offsets_count: self.clamped_scroll_offsets.len(),
                     shown_on_render_side: self.shown_on_render_side,
+                    recorded_in_flight: self.recorded_in_flight,
                 },
             );
         }
@@ -810,6 +825,17 @@ impl LayoutFrame {
     /// searchable text is dropped, and after a tree change the boxes with `content-visibility: auto`
     /// are collected again for the document's paint state, and the document's viewport clients are
     /// to be told the viewport rect.
+    /// Whether nothing the frame leaves for the document thread changes what a recording made from
+    /// the arena now would show: no scroll offsets to store, no image resources to attach, no list
+    /// owners to rebuild, and no boxes whose relevance to the user the rendering update determines.
+    fn may_be_painted_before_take_back(&self) -> bool {
+        self.messages.clamped_scroll_offsets.is_empty()
+            && self.messages.owed_image_resources.is_empty()
+            && !self.messages.prepare_for_rendering
+            && self.list_owners_to_rebuild.is_empty()
+            && !self.arena().may_have_auto_content_visibility()
+    }
+
     fn note_layout_commit(&mut self, layout_tree_changed: bool) {
         self.prepare_for_rendering_after_commit();
         if let Some(selection) = &self.selection {
@@ -1478,8 +1504,17 @@ unsafe fn update_layout(
         return FfiLayoutUpdateOutcome::Finished;
     };
     if crate::stage_thread::submits_flight() {
+        // The flight goes on to record the document once it has laid it out, if the document seals what
+        // that reads now, with its style and the rest of the round's host steps done.
+        crate::painting::ffi::layout_arena_discard_sealed_flight_paint();
+        host.seal_flight_paint(main_thread);
         // SAFETY: As below.
-        unsafe { crate::flight::submit(arena_handle, crate::flight::Flight::from_layout_pass(pass)) };
+        unsafe {
+            crate::flight::submit(
+                arena_handle,
+                crate::flight::Flight::from_layout_pass(arena_handle, pass),
+            );
+        }
         return FfiLayoutUpdateOutcome::PassSubmitted;
     }
     let take_back = pass.take_back();
@@ -1490,7 +1525,9 @@ unsafe fn update_layout(
         crate::stage_thread::submit_stage_with_take_back(
             "layout",
             arena_handle,
-            move || pass.run(),
+            move || {
+                let _ = pass.run();
+            },
             move || take_back.finish(),
         );
     }
@@ -1559,31 +1596,48 @@ impl LayoutPassJob {
         }
     }
 
-    /// Runs the rest of the frame's round, on the stage that owns the arena.
-    pub(crate) fn run(self) {
+    /// Runs the rest of the frame's round, on the stage that owns the arena. Answers whether the
+    /// round left the document laid out as far as the arena knows, with nothing for the document
+    /// thread to do but pay the host halves: then the document may be painted from the arena before
+    /// the frame is taken back, unless paying them leaves more work.
+    pub(crate) fn run(self) -> bool {
         let Self { frame, facts, ran, .. } = self;
         let mut frame = frame.into_inner();
         // Where the frame would go on from here is the next layout update's to find: the take-back
         // ends it wherever the document thread is.
         // SAFETY: The frame in flight owns the arena, as LayoutPassJob::prepare requires.
-        let _ = unsafe { frame.run_round_through_pass(facts) };
+        let step = unsafe { frame.run_round_through_pass(facts) };
+        let may_be_painted =
+            matches!(step, FrameStep::Ended(FrameEnd::UnlessHostLeftWork)) && frame.may_be_painted_before_take_back();
         // SAFETY: As above.
         *ran.lock().expect("a frame that ran left itself") =
             Some(unsafe { crate::stage_thread::FrameOwns::new(frame) });
+        may_be_painted
     }
 }
 
 impl LayoutPassTakeBack {
     /// Ends the frame the stage ran, on the document thread, which has taken the frame back.
     pub(crate) fn finish(self) {
-        let frame = self
-            .ran
+        let frame = self.take_frame();
+        main_thread_entries::finish_layout_frame_taken_back(self.arena_handle, frame);
+    }
+
+    /// Ends the frame the stage ran, after which the flight recorded the document, on the document
+    /// thread, which has taken the frame back. Answers whether the recording stands: unless paying
+    /// the host halves left style or layout work, which the recording does not show.
+    pub(crate) fn finish_after_recording(self) -> bool {
+        let frame = self.take_frame();
+        main_thread_entries::finish_layout_frame_recorded_in_flight(self.arena_handle, frame)
+    }
+
+    fn take_frame(&self) -> LayoutFrame {
+        self.ran
             .lock()
             .expect("a frame that ran left itself")
             .take()
             .expect("the frame is taken back once its round has run")
-            .into_inner();
-        main_thread_entries::finish_layout_frame_taken_back(self.arena_handle, frame);
+            .into_inner()
     }
 }
 
@@ -1614,6 +1668,39 @@ unsafe fn finish_layout_frame(main_thread: &crate::stage::MainThread, mut frame:
     // SAFETY: As above.
     let over = unsafe { frame.take_in_end(main_thread, FrameEnd::Over(FfiLayoutUpdateEnd::FrameTakenBack)) };
     debug_assert!(over, "a frame taken back is over");
+}
+
+/// Ends a layout frame whose round a flight has run and recorded the document after, as
+/// [`finish_layout_frame`] ends one. Answers whether the recording stands: the frame is over only if
+/// paying what the round owes leaves no style or layout work, as a frame that ends on the document
+/// thread checks. Otherwise the next layout update runs that work, and the document records again.
+///
+/// # Safety
+///
+/// As for [`finish_layout_frame`].
+unsafe fn finish_layout_frame_recorded_in_flight(
+    main_thread: &crate::stage::MainThread,
+    mut frame: LayoutFrame,
+) -> bool {
+    let host = frame.inputs.host;
+    let arena_handle = frame.inputs.arena_handle;
+    debug_assert!(
+        frame.list_owners_to_rebuild.is_empty(),
+        "a round that left list owners to rebuild is not recorded"
+    );
+    // SAFETY: The frame is the document thread's again, and it runs for the update the arena is in.
+    unsafe { pay_owed_host_halves(main_thread, &host, arena_handle, frame.owed_host_halves.take()) };
+    // SAFETY: As above.
+    let arena = unsafe { arena(arena_handle) };
+    let facts = host.document_facts(main_thread);
+    let recording_stands = !host.needs_style_update_after_layout(main_thread)
+        && !facts.top_layer_work_pending
+        && layout_is_up_to_date(arena, &facts);
+    let mut messages = std::mem::take(&mut frame.messages);
+    messages.recorded_in_flight = recording_stands;
+    messages.apply(main_thread, &host, arena);
+    host.finish_update_layout(main_thread, FfiLayoutUpdateEnd::FrameTakenBack);
+    recording_stands
 }
 
 /// Where the layout frame of the document stands, seen from the document thread. Asking does not

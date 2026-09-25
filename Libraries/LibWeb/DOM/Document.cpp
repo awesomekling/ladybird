@@ -1872,14 +1872,26 @@ Color Document::canvas_background_color() const
     return CSS::SystemColor::canvas(canvas_color_scheme()).blend(background_color());
 }
 
+Color Document::canvas_background_color_as_last_laid_out() const
+{
+    return CSS::SystemColor::canvas(canvas_color_scheme_as_last_laid_out()).blend(background_color());
+}
+
 CSS::PreferredColorScheme Document::canvas_color_scheme() const
+{
+    if (auto* html_element = this->html_element(); html_element && html_element->unsafe_layout_node())
+        VERIFY(layout_is_up_to_date());
+    return canvas_color_scheme_as_last_laid_out();
+}
+
+CSS::PreferredColorScheme Document::canvas_color_scheme_as_last_laid_out() const
 {
     auto color_scheme = CSS::PreferredColorScheme::Light;
     auto root_color_scheme_is_normal = true;
     auto root_color_scheme_was_computed = false;
-    if (auto* html_element = this->html_element(); html_element && html_element->layout_node()) {
+    if (auto* html_element = this->html_element(); html_element && html_element->unsafe_layout_node()) {
         root_color_scheme_was_computed = true;
-        auto const& layout_node = *html_element->layout_node();
+        auto const& layout_node = *html_element->unsafe_layout_node();
         root_color_scheme_is_normal = layout_node.color_schemes().is_empty();
         if (layout_node.color_scheme() == CSS::PreferredColorScheme::Dark) {
             color_scheme = CSS::PreferredColorScheme::Dark;
@@ -2231,10 +2243,14 @@ void Document::apply_layout_commit_effects(Layout::RustFFI::FfiLayoutCommitEffec
     if (effects.layout_committed && effects.shown_on_render_side) {
         schedule_scroll_container_resnap();
     } else if (effects.layout_committed) {
-        set_needs_accumulated_visual_contexts_update(true);
-        set_needs_to_record_display_list();
+        // A flight that recorded the document after its layout updated the visual contexts and recorded what the
+        // commit asks for, and that recording is the repaint.
+        if (!effects.recorded_in_flight) {
+            set_needs_accumulated_visual_contexts_update(true);
+            set_needs_to_record_display_list();
+            m_document->set_needs_repaint();
+        }
         schedule_scroll_container_resnap();
-        m_document->set_needs_repaint();
     }
 
     // Broadcast the current viewport rect to any new committed boxes, so they know whether they're visible or not.
@@ -2809,6 +2825,49 @@ void Document::prepare_for_rendering()
         set_needs_to_record_display_list();
         m_document->set_needs_repaint();
     }
+}
+
+bool Document::flight_paint_is_blocked() const
+{
+    // What only the main thread paints.
+    if (highlighted_layout_node() || !m_flexbox_highlights.is_empty() || !m_grid_highlights.is_empty())
+        return true;
+    // A caret reads the layout it paints over, which the flight has yet to run.
+    if (cursor_position())
+        return true;
+    if (auto focused = focused_area(); focused && (is<HTML::FormAssociatedTextControlElement>(*focused) || is<HTML::HTMLAreaElement>(*focused)))
+        return true;
+    if (auto navigable = this->navigable(); navigable && navigable->event_handler().middle_button_scroll_handler().has_value())
+        return true;
+    for (auto const* navigable_container : HTML::NavigableContainer::all_instances()) {
+        if (&navigable_container->document() == this)
+            return true;
+    }
+
+    // What the steps of the rendering update after its layout can change before its paint.
+    for (auto const& observer : m_resize_observers) {
+        if (observer)
+            return true;
+    }
+    for (auto const& timeline : m_associated_animation_timelines) {
+        if (!timeline->associated_animations().is_empty())
+            return true;
+    }
+    if (!m_layout_nodes_with_forced_compositor_effects_layer.is_empty() || !m_layout_nodes_with_forced_compositor_background_color_frame.is_empty())
+        return true;
+    if (m_active_view_transition || m_scroll_state_query_containers.has_containers())
+        return true;
+    return false;
+}
+
+void Document::take_in_flight_paint()
+{
+    auto& state = paint_state();
+    auto paint = Layout::RustFFI::rust_flight_take_paint(&state.scroll_state_snapshot_for_flight(), [](void* sink, Gfx::FloatPoint const* offsets, size_t count) {
+        static_cast<Compositing::ScrollStateSnapshot*>(sink)->assign_device_offsets({ offsets, count });
+    });
+    if (paint.prepared)
+        state.did_update_accumulated_visual_contexts_in_flight(paint.visual_context_update);
 }
 
 void Document::update_paint_and_hit_testing_properties_if_needed()

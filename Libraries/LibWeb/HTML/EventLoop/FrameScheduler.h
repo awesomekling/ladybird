@@ -118,6 +118,9 @@ public:
     // Whether the rendering update waits for its style or layout pass to be taken back, and goes on with the rest (its
     // recordings) once it is.
     bool awaits_pass() const { return m_ticket && m_ticket->submitted_pass.has_value(); }
+    // Whether the pass in flight is a flight that goes on to record its document: the recording the rendering update
+    // goes on to make is in the frame in flight already.
+    bool pass_in_flight_records() const;
     void add_to_ticket(LocalNavigable&, LocalNavigable::PendingCompositorFrame&&);
     // Ends the main half. Returns true if a frame is in flight, in which case the tail runs once it has been taken in.
     bool submit();

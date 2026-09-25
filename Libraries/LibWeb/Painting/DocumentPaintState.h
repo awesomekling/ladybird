@@ -41,6 +41,10 @@ public:
     // context tree is settled; every other consumer reaches the scroll state through that update.
     void refresh_scroll_state(DOM::Document&);
     void did_update_visual_context_values() { m_visual_context_tree_needs_compositor_update = true; }
+    // What the document's flight prepared of the paint state: its visual context update, and the scroll state
+    // snapshot it refreshed, which it hands the snapshot through this.
+    void did_update_accumulated_visual_contexts_in_flight(Layout::RustFFI::FfiVisualContextUpdateOutcome const&);
+    Compositing::ScrollStateSnapshot& scroll_state_snapshot_for_flight() { return m_scroll_state_snapshot; }
 
     void update_accumulated_visual_contexts(DOM::Document&);
     void update_visual_viewport_accumulated_visual_context(DOM::Document&);
