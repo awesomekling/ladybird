@@ -685,6 +685,12 @@ bool discard_retired_rust_display_list_recording(PendingDisplayListRecording& re
     return true;
 }
 
+void add_published_svg_filter_image_frames(DOM::Document const& document, Compositing::DisplayListResourceStorage& resource_storage)
+{
+    RecordingPublishContext publish_context { resource_storage, document };
+    Layout::RustFFI::layout_arena_publish_svg_filter_image_frames(layout_arena_handle(document), recording_publish_callbacks(publish_context));
+}
+
 NonnullRefPtr<Compositing::DisplayList> finish_rust_display_list_recording(PendingDisplayListRecording& recording)
 {
     auto& document = *recording.document;

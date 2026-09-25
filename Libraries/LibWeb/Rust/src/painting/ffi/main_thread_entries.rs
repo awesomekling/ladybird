@@ -318,6 +318,28 @@ unsafe extern "C" fn layout_arena_publish_recording(
     sequence
 }
 
+/// Hands the image frames of the published SVG filters to the host's resource storage. A visual
+/// context tree read after a recording was published can reference a filter image the recording
+/// never saw (the read synchronizes SVG paint resources first), and the frame it references has to
+/// be in the storage before the tree is sent.
+///
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`; the callbacks in `publish` are
+/// called synchronously with their context.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_publish_svg_filter_image_frames(
+    arena: *mut c_void,
+    publish: crate::painting::host::FfiRecordingPublishCallbacks,
+) {
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+    let arena = unsafe { arena_from_handle(arena) };
+    let publish = crate::painting::host::RecordingPublishHost::from(publish);
+    for frame in arena.svg_paint_resources().published_filter_image_frames() {
+        publish.add_image_frame(&main_thread, &frame);
+    }
+}
+
 /// # Safety
 ///
 /// `arena` must be a live handle from `layout_arena_create`; `describe_node` and `append_text`
