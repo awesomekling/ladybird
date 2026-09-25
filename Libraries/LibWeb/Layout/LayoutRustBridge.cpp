@@ -251,6 +251,23 @@ static RustFFI::FfiSvgAttributeFacts build_svg_attribute_facts(DOM::Element& dom
             reference_fragment = svg_reference_fragment_atom(dom_node, link);
     }
 
+    // What an <svg>'s natural size is negotiated from: its width and height where they are a
+    // <length>, which the pass resolves against the box's style, and the aspect ratio its active
+    // SVG view or viewBox gives it.
+    RustFFI::FfiSvgLengthValue natural_width { .value = 0, .kind = RustFFI::SVG_LENGTH_KIND_NONE, .unit = 0 };
+    RustFFI::FfiSvgLengthValue natural_height { .value = 0, .kind = RustFFI::SVG_LENGTH_KIND_NONE, .unit = 0 };
+    Optional<CSSPixelFraction> view_box_aspect_ratio;
+    if (auto const* svg_element = as_if<SVG::SVGSVGElement>(dom_node)) {
+        auto to_ffi_length = [](Optional<CSS::Length> const& length) -> RustFFI::FfiSvgLengthValue {
+            if (!length.has_value())
+                return { .value = 0, .kind = RustFFI::SVG_LENGTH_KIND_NONE, .unit = 0 };
+            return { .value = length->raw_value(), .kind = RustFFI::SVG_LENGTH_KIND_LENGTH, .unit = static_cast<u8>(to_underlying(length->unit())) };
+        };
+        natural_width = to_ffi_length(svg_element->width_attribute_length());
+        natural_height = to_ffi_length(svg_element->height_attribute_length());
+        view_box_aspect_ratio = SVG::SVGSVGElement::view_box_natural_aspect_ratio(*svg_element);
+    }
+
     // The resources an element's style names. They live with the presentation attributes because
     // both are read as a box is built, but they change with the element's style rather than with
     // an attribute, so they have a republication of their own.
@@ -291,6 +308,11 @@ static RustFFI::FfiSvgAttributeFacts build_svg_attribute_facts(DOM::Element& dom
         .fill_reference_atom = style_references[2].value(),
         .stroke_reference_atom = style_references[3].value(),
         .text_path_start_offset = to_ffi_number_percentage(start_offset),
+        .natural_width = natural_width,
+        .natural_height = natural_height,
+        .has_view_box_aspect_ratio = view_box_aspect_ratio.has_value(),
+        .view_box_aspect_ratio_numerator = view_box_aspect_ratio.has_value() ? view_box_aspect_ratio->numerator() : 0,
+        .view_box_aspect_ratio_denominator = view_box_aspect_ratio.has_value() ? view_box_aspect_ratio->denominator() : 0,
     };
 }
 

@@ -43,7 +43,7 @@ pub(crate) fn node_replaced_content_facts_need_host(data: &NodeData, has_owned_i
     }
     match kind {
         NodeKind::ImageBox => has_owned_image_provider,
-        NodeKind::NavigableContainerViewport | NodeKind::SVGSVGBox => true,
+        NodeKind::NavigableContainerViewport => true,
         _ => false,
     }
 }
@@ -654,6 +654,24 @@ impl<'pass> NodeFacts<'pass> {
     }
 
     fn replaced_content(&self) -> crate::layout::FfiReplacedContentFacts {
+        // An <svg> root's natural size resolves the lengths its element published against its style and the viewport,
+        // so the pass negotiates it rather than reading synced facts.
+        if self.data().kind.get() == NodeKind::SVGSVGBox {
+            let mut facts = derived_replaced_content_facts(self.data(), ReplacedContentInput::None);
+            if !self.node_has_size_containment() {
+                let (width, height, aspect_ratio) =
+                    super::svg_formatting_context::svg_root_natural_size(&self.callbacks, self.node);
+                set_auto_content_facts(
+                    &mut facts,
+                    AutoContentSize {
+                        width,
+                        height,
+                        aspect_ratio,
+                    },
+                );
+            }
+            return facts;
+        }
         let Some(facts) = self.callbacks.replaced_content_facts(self.node) else {
             // The kind check is cheap enough for release builds; the style
             // half of the enrollment predicate is debug-only because this
