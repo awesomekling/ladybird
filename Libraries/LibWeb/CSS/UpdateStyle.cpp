@@ -349,7 +349,7 @@ static bool install_composition_sampled_in_pass(StyleDrainScope const& scope, DO
         && (document.style_stabilization_has_style_reactions() || sample.invalidation.requires_base_style_recomputation))
         document.style_computer().record_transition_stabilization_baseline(scope, abstract_element);
     (void)element.unsafe_layout_node();
-    Animations::apply_published_animation_overlay(abstract_element, sample.invalidation, StyleRecordID { sample.style_record }, sample_invalidation == SampleInvalidation::AppliedByCaller);
+    Animations::apply_published_animation_overlay(scope, abstract_element, sample.invalidation, StyleRecordID { sample.style_record }, sample_invalidation == SampleInvalidation::AppliedByCaller);
     return true;
 }
 
@@ -409,7 +409,7 @@ static void propagate_custom_property_environment_move(StyleDrainScope const& sc
     for (auto const& [node, record] : moved_records) {
         auto element = document.style_computer().element_for_style_node(node);
         if (element && record != element->style_record_identity()) {
-            element->refresh_computed_style({}, record);
+            element->refresh_computed_style(scope, {}, record);
             republished_nodes.set(node);
         }
     }
@@ -529,7 +529,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
             // record the engine republished over it.
             if (published_reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::EnvironmentMoved) {
                 if (auto record = scope.engine().acknowledge_environment_move(StyleNodeID { published_reaction.style_node }); record != 0 && record != element->style_record_identity().value()) {
-                    element->refresh_computed_style({}, StyleRecordID { record });
+                    element->refresh_computed_style(scope, {}, StyleRecordID { record });
                     republished_nodes.set(StyleNodeID { published_reaction.style_node });
                 }
                 continue;

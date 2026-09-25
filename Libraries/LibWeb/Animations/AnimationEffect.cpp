@@ -851,11 +851,11 @@ static ReadonlySpan<CSS::ComputedValuesFFI::FfiAnimatedOverlayEntry> animated_ov
 // over the element's record invalidated: the element's and its layout node's style, the pseudo-element
 // styles and descendants that inherit from it, and, unless the caller compares the element's style
 // itself, what layout and paint need.
-void apply_published_animation_overlay(DOM::AbstractElement element, CSS::StyleEngineFFI::FfiAnimationInvalidation const& animated_property_invalidation, CSS::StyleRecordID new_style_record, bool caller_applies_invalidation)
+void apply_published_animation_overlay(CSS::StyleDrainScope const& scope, DOM::AbstractElement element, CSS::StyleEngineFFI::FfiAnimationInvalidation const& animated_property_invalidation, CSS::StyleRecordID new_style_record, bool caller_applies_invalidation)
 {
     GC::Ref<DOM::Element> target = element.element();
     auto invalidation = CSS::decode_style_invalidation(animated_property_invalidation.invalidation);
-    target->refresh_computed_style(element.pseudo_element(), new_style_record);
+    target->refresh_computed_style(scope, element.pseudo_element(), new_style_record);
     if (auto* svg_element = as_if<SVG::SVGElement>(*target); svg_element && !element.pseudo_element().has_value())
         svg_element->note_svg_paint_resource_description_may_have_changed();
 
@@ -1033,7 +1033,7 @@ AnimationUpdateContext::~AnimationUpdateContext()
                 target->document().style_computer().record_transition_stabilization_baseline(scope, element);
             }
         });
-        apply_published_animation_overlay(element, animated_property_invalidation, publication.new_style_record, it.value.caller_applies_invalidation);
+        apply_published_animation_overlay(scope, element, animated_property_invalidation, publication.new_style_record, it.value.caller_applies_invalidation);
     }
 }
 
