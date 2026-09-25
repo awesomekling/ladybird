@@ -37,12 +37,14 @@
 #include <LibWeb/HTML/HTMLHeadingElement.h>
 #include <LibWeb/HTML/HTMLImageElement.h>
 #include <LibWeb/HTML/HTMLInputElement.h>
+#include <LibWeb/HTML/HTMLObjectElement.h>
 #include <LibWeb/HTML/HTMLSelectElement.h>
 #include <LibWeb/HTML/HTMLSlotElement.h>
 #include <LibWeb/HTML/HTMLTableCellElement.h>
 #include <LibWeb/HTML/HTMLTableElement.h>
 #include <LibWeb/HTML/HTMLTextAreaElement.h>
 #include <LibWeb/HTML/HTMLVideoElement.h>
+#include <LibWeb/Layout/ImageProvider.h>
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/SVG/SVGClipPathElement.h>
 #include <LibWeb/SVG/SVGElement.h>
@@ -829,6 +831,14 @@ static StyleEngineFFI::FfiReplacedContentInput natural_size_input(SizeWithAspect
     return input;
 }
 
+// An image box's natural size: its image's, or zero while no image is available.
+static StyleEngineFFI::FfiReplacedContentInput image_natural_size_input(Layout::ImageProvider const& image_provider)
+{
+    if (!image_provider.is_image_available())
+        return natural_size_input({ 0, 0, {} });
+    return natural_size_input({ image_provider.intrinsic_width(), image_provider.intrinsic_height(), image_provider.intrinsic_aspect_ratio() });
+}
+
 // What the element gives the natural size of its replaced content, which layout resolves against
 // the style of the element's box: what its attributes say, or the size of what it has loaded.
 void record_element_replaced_content_input(DOM::Element& element)
@@ -840,7 +850,20 @@ void record_element_replaced_content_input(DOM::Element& element)
         style_engine->record_replaced_content_input(element.style_node_id(), { .kind = StyleEngineFFI::FfiReplacedContentInputKind::TextArea, .present = 0, .first = static_cast<u32>(text_area->cols()), .second = static_cast<u32>(text_area->rows()), .third = 0, .fourth = 0 });
         return;
     }
+    if (auto const* image = as_if<HTML::HTMLImageElement>(element)) {
+        style_engine->record_replaced_content_input(element.style_node_id(), image_natural_size_input(*image));
+        return;
+    }
+    if (auto const* object = as_if<HTML::HTMLObjectElement>(element)) {
+        style_engine->record_replaced_content_input(element.style_node_id(), image_natural_size_input(*object));
+        return;
+    }
     if (auto const* input = as_if<HTML::HTMLInputElement>(element)) {
+        // An image button's box is an image box, which no size attribute sizes.
+        if (input->type_state() == HTML::HTMLInputElement::TypeAttributeState::ImageButton) {
+            style_engine->record_replaced_content_input(element.style_node_id(), image_natural_size_input(*input));
+            return;
+        }
         auto kind = StyleEngineFFI::FfiReplacedContentInputKind::Input;
         switch (input->type_state()) {
         case HTML::HTMLInputElement::TypeAttributeState::Text:

@@ -34,16 +34,18 @@ pub(crate) fn node_may_have_replaced_content_facts_including_size_containment(da
 
 /// Whether the node's replaced-content facts need something only the DOM knows. The rest follow
 /// from the node's kind, its computed style and what its element published as the input of its
-/// replaced content, see [`derived_replaced_content_facts`].
-pub(crate) fn node_replaced_content_facts_need_host(data: &NodeData) -> bool {
+/// replaced content, see [`derived_replaced_content_facts`]. `has_owned_image_provider` says
+/// whether an image box shows an image the box owns rather than its element's.
+pub(crate) fn node_replaced_content_facts_need_host(data: &NodeData, has_owned_image_provider: bool) -> bool {
     let kind = data.kind.get();
     if node_style_view(data).is_some_and(|style| style_has_size_containment(style)) {
         return false;
     }
-    matches!(
-        kind,
-        NodeKind::ImageBox | NodeKind::NavigableContainerViewport | NodeKind::SVGSVGBox
-    )
+    match kind {
+        NodeKind::ImageBox => has_owned_image_provider,
+        NodeKind::NavigableContainerViewport | NodeKind::SVGSVGBox => true,
+        _ => false,
+    }
 }
 
 // https://drafts.csswg.org/css-contain-2/#containment-size
@@ -58,10 +60,9 @@ fn style_has_size_containment(style: ComputedValuesView<'_>) -> bool {
 }
 
 /// The replaced-content facts of a node whose facts need no host: a size-contained box, a
-/// checkbox, radio button, slider, textarea, text input, canvas, video or SVG image, or a kind
-/// with no natural size.
+/// checkbox, radio button, slider, textarea, text input, canvas, video, SVG image or an image box
+/// showing its element's image, or a kind with no natural size.
 pub(crate) fn derived_replaced_content_facts(data: &NodeData, input: ReplacedContentInput) -> FfiReplacedContentFacts {
-    debug_assert!(!node_replaced_content_facts_need_host(data));
     let mut facts = FfiReplacedContentFacts::default();
     // An SVG <image> runs the default sizing algorithm over its own geometry, so it publishes the natural size exactly as
     // its image reports it - absent, rather than zero, while nothing has decoded - together with the default object
@@ -209,6 +210,12 @@ fn derived_auto_content_size(
         NodeKind::VideoBox => {
             let ReplacedContentInput::NaturalSize(natural_size) = input else {
                 panic!("a video publishes its natural size as it arrives");
+            };
+            natural_size_facts(natural_size)
+        }
+        NodeKind::ImageBox => {
+            let ReplacedContentInput::NaturalSize(natural_size) = input else {
+                panic!("an image box's element publishes its image's natural size as it arrives");
             };
             natural_size_facts(natural_size)
         }
