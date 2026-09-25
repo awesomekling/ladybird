@@ -70,6 +70,8 @@ WEB_API NonnullRefPtr<Compositing::DisplayList> finish_rust_display_list_recordi
 // Discards the recording if its document retired the render state it was made for since the recording began, and
 // returns whether it did. The recording is not finished then.
 WEB_API bool discard_retired_rust_display_list_recording(PendingDisplayListRecording&);
+// A visual context tree read after the recording was published can reference SVG filter images it never saw.
+WEB_API void add_published_svg_filter_image_frames(DOM::Document const&, Compositing::DisplayListResourceStorage&);
 WEB_API bool last_recording_missed_vector_images(DOM::Document const&);
 WEB_API Utf16String serialize_painting_dump(DOM::Document const&, Compositing::AccumulatedVisualContextTree const&, Compositing::DisplayList const&, Compositing::DisplayListResourceStorage const&);
 

@@ -6758,13 +6758,20 @@ Optional<Compositor::CompositorFrame> LocalNavigable::finish_compositor_frame(Pe
     Compositing::DisplayListResourceTransaction resource_transaction;
     Optional<Compositing::AccumulatedVisualContextTree> visual_context_tree;
     auto& document_paint_state = document->paint_state();
+    // Reading the tree synchronizes SVG paint resources first, which can publish a filter image the recording (and
+    // the frame before it) never saw. The image the tree references goes into the storage before the tree is sent.
+    auto current_visual_context_tree = [&] {
+        auto tree = document_paint_state.visual_context_tree(*document);
+        Painting::add_published_svg_filter_image_frames(*document, m_display_list_resource_storage);
+        return tree;
+    };
     bool compositor_display_list_is_unchanged = false;
     if (should_record_display_list) {
         display_list = document->finish_display_list_recording(*pending_frame.recording);
         VERIFY(document->has_committed_viewport_box());
         compositor_display_list_is_unchanged = m_compositor_display_list == display_list;
         if (!compositor_display_list_is_unchanged) {
-            visual_context_tree = document_paint_state.visual_context_tree(*document);
+            visual_context_tree = current_visual_context_tree();
             display_list_command_resources = command_resources_of_display_list(m_display_list_resource_storage, document_paint_state, *display_list);
             display_list_resources = compositor_display_list_resources(m_display_list_resource_storage, document_paint_state, display_list_command_resources, *visual_context_tree);
             resource_transaction = m_display_list_resource_storage.create_transaction(
@@ -6807,11 +6814,13 @@ Optional<Compositor::CompositorFrame> LocalNavigable::finish_compositor_frame(Pe
     } else {
         if (compositor_display_list_is_unchanged) {
             m_compositor_display_list_paint_config = paint_config;
-            if (m_display_list_resource_storage.has_resources_added_since_last_retain())
+            // NB: A tree update below retains what the updated tree references, which can be more than the
+            //     compositor holds yet.
+            if (!visual_context_tree_needs_compositor_update && m_display_list_resource_storage.has_resources_added_since_last_retain())
                 m_display_list_resource_storage.retain_only(m_compositor_display_list_resources);
         }
         if (visual_context_tree_needs_compositor_update) {
-            auto updated_visual_context_tree = document_paint_state.visual_context_tree(*document);
+            auto updated_visual_context_tree = current_visual_context_tree();
             VERIFY(updated_visual_context_tree.structural_epoch() == m_compositor_display_list_visual_context_tree_structural_epoch);
             auto updated_display_list_resources = compositor_display_list_resources(m_display_list_resource_storage, document_paint_state, m_compositor_display_list_command_resources, updated_visual_context_tree);
             auto updated_resource_transaction = m_display_list_resource_storage.create_transaction(m_compositor_display_list_resources, updated_display_list_resources);
