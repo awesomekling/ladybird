@@ -519,20 +519,24 @@ impl StyleEngine {
         root: StyleNodeID,
         emit: impl FnMut(StyleTransactionVersion, ProgramVersion, &[PublishedStyleDeltaRecord]),
     ) -> bool {
-        self.state
-            .take_style_transaction(root, emit, &mut self.counters, super::animations::LentLayoutArena::NONE)
+        self.state.take_style_transaction(
+            root,
+            emit,
+            &mut self.counters,
+            super::animations::CommittedTransformReferenceBoxes::NONE,
+        )
     }
 
-    /// Take the pending style transaction with the document's layout arena lent to its pass.
+    /// Take the pending style transaction with the committed boxes its pass samples against.
     #[inline]
-    pub(crate) fn take_style_transaction_lending_layout_arena(
+    pub(crate) fn take_style_transaction_with_committed_boxes(
         &mut self,
         root: StyleNodeID,
-        layout_arena: super::animations::LentLayoutArena,
+        committed_boxes: super::animations::CommittedTransformReferenceBoxes,
         emit: impl FnMut(StyleTransactionVersion, ProgramVersion, &[PublishedStyleDeltaRecord]),
     ) -> bool {
         self.state
-            .take_style_transaction(root, emit, &mut self.counters, layout_arena)
+            .take_style_transaction(root, emit, &mut self.counters, committed_boxes)
     }
 
     #[inline]
@@ -1143,7 +1147,7 @@ impl StyleEngine {
         pseudo: Option<u8>,
         before_change_style_record: u64,
         installed_style_record: u64,
-        layout_arena: super::animations::LentLayoutArena,
+        layout_arena: super::animations::CommittedTransformReferenceBoxes,
     ) -> Result<Option<super::engine_sample::SettledRowPublication>, String> {
         self.state.decide_installed_record_transition_step(
             node,
@@ -1162,7 +1166,7 @@ impl StyleEngine {
         node: StyleNodeID,
         pseudo: Option<u8>,
         style_record: u64,
-        layout_arena: super::animations::LentLayoutArena,
+        layout_arena: super::animations::CommittedTransformReferenceBoxes,
     ) -> Result<super::engine_sample::SettledRowPublication, String> {
         self.state
             .sample_installed_record(node, pseudo, style_record, layout_arena, &mut self.counters)
@@ -1175,7 +1179,7 @@ impl StyleEngine {
         node: StyleNodeID,
         settled: &mut publication::RetriedEngineRecord,
         held_style_records: &[u64; bridge::RETRY_PSEUDO_RECORD_SLOTS],
-        layout_arena: super::animations::LentLayoutArena,
+        layout_arena: super::animations::CommittedTransformReferenceBoxes,
     ) -> (u8, u8) {
         self.state
             .sample_settled_pseudo_elements(node, settled, held_style_records, layout_arena, &mut self.counters)

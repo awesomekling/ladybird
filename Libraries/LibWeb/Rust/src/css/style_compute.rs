@@ -3057,9 +3057,14 @@ pub unsafe extern "C" fn rust_sample_animation_effects(
         let Some(descriptions) = engine.take_element_animation_effect_descriptions(node, slot) else {
             return FfiHostAnimationSampleResult::with_outcome(FfiHostAnimationSampleOutcome::Cleared);
         };
+        // SAFETY: The host passes its document's live layout arena, or null.
+        let transform_reference_box =
+            unsafe { crate::css::style::animations::committed_transform_reference_box(input.layout_arena, node) };
         let result = match input.samples_whole_stack {
-            true => unsafe { sample_whole_effect_stack(input, engine, node, &descriptions) },
-            false => unsafe { sample_described_animation_effects(input, engine, node, &descriptions) },
+            true => unsafe { sample_whole_effect_stack(input, engine, node, &descriptions, transform_reference_box) },
+            false => unsafe {
+                sample_described_animation_effects(input, engine, node, &descriptions, transform_reference_box)
+            },
         };
         engine.restore_element_animation_effect_descriptions(node, slot, descriptions);
         result
@@ -3221,6 +3226,7 @@ unsafe fn sample_whole_effect_stack(
     engine: &mut crate::css::style::StyleEngineState,
     node: crate::css::style::tree::StyleNodeID,
     descriptions: &[crate::css::style::animations::PublishedEffect],
+    transform_reference_box: Option<(f64, f64)>,
 ) -> FfiHostAnimationSampleResult {
     use crate::css::style::engine_sample_check;
 
@@ -3233,10 +3239,13 @@ unsafe fn sample_whole_effect_stack(
         Ok(prepared) => prepared,
         Err(reason) => {
             engine_sample_check::note_declined(&format!("whole sample: {reason}"));
-            return unsafe { sample_described_animation_effects(input, engine, node, descriptions) };
+            return unsafe {
+                sample_described_animation_effects(input, engine, node, descriptions, transform_reference_box)
+            };
         }
     };
-    let mut result = unsafe { sample_described_animation_effects(&run_input, engine, node, descriptions) };
+    let mut result =
+        unsafe { sample_described_animation_effects(&run_input, engine, node, descriptions, transform_reference_box) };
     // What the engine's length contexts leave on the containers they resolve a unit against - that
     // they are size containers in use, and to be evaluated again once laid out - the host records
     // from the engine's notes.
@@ -3441,7 +3450,7 @@ pub(crate) fn sample_settled_row(
     samples_plan: bool,
     record: Option<u64>,
     root: Option<crate::css::style::animations::RootElementFontMetrics>,
-    layout_arena: crate::css::style::animations::LentLayoutArena,
+    committed_boxes: crate::css::style::animations::CommittedTransformReferenceBoxes,
 ) -> Result<SettledRowSample, String> {
     use crate::css::animated_overlay::{
         rust_animated_overlay_clone_inherited, rust_animated_overlay_create, rust_animated_overlay_free,
@@ -3450,6 +3459,7 @@ pub(crate) fn sample_settled_row(
 
     let pseudo_kind = pseudo.unwrap_or(NO_PSEUDO_ELEMENT);
     let slot = animation_slot(pseudo_kind);
+    let transform_reference_box = committed_boxes.transform_reference_box(node)?;
     // The record the engine assigned, unless the caller names the one the host holds.
     let style_record = match record {
         Some(record) => record,
@@ -3509,7 +3519,8 @@ pub(crate) fn sample_settled_row(
         callback_context: overlay.cast(),
         prepare_overlay_for_mutation: Some(settled_row_overlay),
         length_contexts: None,
-        layout_arena: layout_arena.as_ptr(),
+        // The engine resolved the transform reference box itself.
+        layout_arena: std::ptr::null_mut(),
     };
     let descriptions = engine.take_element_animation_effect_descriptions(node, slot);
     let sampled = match (planned, descriptions) {
@@ -3521,7 +3532,15 @@ pub(crate) fn sample_settled_row(
         (None, Some(descriptions)) => {
             let sampled = prepare_engine_sample(&input, engine, node, &descriptions, environments, root).map(
                 |(run, run_input)| {
-                    let result = unsafe { sample_described_animation_effects(&run_input, engine, node, &descriptions) };
+                    let result = unsafe {
+                        sample_described_animation_effects(
+                            &run_input,
+                            engine,
+                            node,
+                            &descriptions,
+                            transform_reference_box,
+                        )
+                    };
                     (Some(run), result)
                 },
             );
@@ -3587,6 +3606,7 @@ pub(crate) fn sample_settled_row(
                             &preparation_effects,
                             &selected_keys,
                             cacheable,
+                            transform_reference_box,
                         )
                     };
                     Ok((Some(run), result))
@@ -3667,7 +3687,7 @@ pub(crate) fn sample_transition_step(
     installed_style_record: u64,
     removed: Option<&[u64]>,
     started: &[StartedTransition],
-    layout_arena: crate::css::style::animations::LentLayoutArena,
+    committed_boxes: crate::css::style::animations::CommittedTransformReferenceBoxes,
 ) -> Result<Box<AnimatedOverlay>, String> {
     use crate::css::animated_overlay::{
         rust_animated_overlay_clone, rust_animated_overlay_clone_inherited, rust_animated_overlay_create,
@@ -3677,6 +3697,7 @@ pub(crate) fn sample_transition_step(
     use crate::css::style::animations;
 
     let pseudo_kind = pseudo.unwrap_or(NO_PSEUDO_ELEMENT);
+    let transform_reference_box = committed_boxes.transform_reference_box(node)?;
     let environments = match pseudo {
         None => engine.settled_row_custom_property_environments(node),
         Some(kind) => engine.settled_pseudo_element_custom_property_environments(node, kind, installed_style_record),
@@ -3720,7 +3741,8 @@ pub(crate) fn sample_transition_step(
         callback_context: overlay.cast(),
         prepare_overlay_for_mutation: Some(settled_row_overlay),
         length_contexts: None,
-        layout_arena: layout_arena.as_ptr(),
+        // The engine resolved the transform reference box itself.
+        layout_arena: std::ptr::null_mut(),
     };
     let slot = animation_slot(pseudo_kind);
     // A row that leaves an animation plan steps over the effects the plan leaves: the host applies
@@ -3859,6 +3881,7 @@ pub(crate) fn sample_transition_step(
                 &preparation_effects,
                 &selected_keys,
                 false,
+                transform_reference_box,
             )
         };
         let animated_custom_properties =
@@ -3980,6 +4003,7 @@ unsafe fn sample_described_animation_effects(
     engine: &mut crate::css::style::StyleEngineState,
     node: crate::css::style::tree::StyleNodeID,
     descriptions: &[crate::css::style::animations::PublishedEffect],
+    transform_reference_box: Option<(f64, f64)>,
 ) -> FfiHostAnimationSampleResult {
     use crate::css::animation as anim;
 
@@ -4024,6 +4048,7 @@ unsafe fn sample_described_animation_effects(
             &preparation_effects,
             &selected_keys,
             true,
+            transform_reference_box,
         )
     }
 }
@@ -4034,6 +4059,7 @@ unsafe fn sample_described_animation_effects(
 ///
 /// # Safety
 /// As `sample_described_animation_effects`.
+#[allow(clippy::too_many_arguments)]
 unsafe fn compose_selected_animation_effects(
     input: &FfiHostAnimationSample,
     engine: &mut crate::css::style::StyleEngineState,
@@ -4042,6 +4068,7 @@ unsafe fn compose_selected_animation_effects(
     preparation_effects: &[crate::css::animation::FfiAnimationPreparationEffect],
     selected_keys: &[f64],
     cacheable: bool,
+    transform_reference_box: Option<(f64, f64)>,
 ) -> FfiHostAnimationSampleResult {
     use crate::css::animation as anim;
     use FfiHostAnimationSampleOutcome::{Cleared, Evaluated, Unchanged};
@@ -4064,9 +4091,6 @@ unsafe fn compose_selected_animation_effects(
     let current_color = table
         .effective_value(overlay, crate::css::property_metadata::property_id::COLOR, true)
         .value;
-    // SAFETY: The host passes its document's live layout arena, or null.
-    let transform_reference_box =
-        unsafe { crate::css::style::animations::committed_transform_reference_box(input.layout_arena, node) };
     let with_transform_reference_box = |mut context: anim::FfiAnimationContext| {
         if let Some((width, height)) = transform_reference_box {
             context.has_transform_reference_box = true;

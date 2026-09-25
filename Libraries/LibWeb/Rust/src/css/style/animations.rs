@@ -212,6 +212,11 @@ pub(crate) struct CssDefinedAnimations {
 type CssDefinedAnimationRow = (Box<[CssString]>, Box<[AppliedAnimationDefinition]>);
 
 impl CssDefinedAnimations {
+    /// The elements that have a row, once per slot.
+    pub(crate) fn nodes(&self) -> impl Iterator<Item = StyleNodeID> + '_ {
+        self.rows.keys().map(|(node, _)| *node)
+    }
+
     /// Replace one list. An empty list drops the row, so an element that stops animating stops
     /// costing anything.
     pub(crate) fn set(
@@ -1353,6 +1358,11 @@ pub(crate) struct AnimationTimingRows {
 }
 
 impl AnimationTimingRows {
+    /// The elements that have a row, once per slot.
+    pub(crate) fn nodes(&self) -> impl Iterator<Item = StyleNodeID> + '_ {
+        self.rows.keys().map(|(node, _)| *node)
+    }
+
     /// Replace one list, from the three buffers the host packs it into. An empty list drops the row.
     pub(crate) fn set(
         &mut self,
@@ -1959,6 +1969,11 @@ pub(crate) struct AnimationEffectDescriptions {
 }
 
 impl AnimationEffectDescriptions {
+    /// The elements that have a row, once per slot.
+    pub(crate) fn nodes(&self) -> impl Iterator<Item = StyleNodeID> + '_ {
+        self.rows.keys().map(|(node, _)| *node)
+    }
+
     /// Replace one list from the flat buffers the host packs it into. An empty list drops the row.
     ///
     /// # Safety
@@ -2408,28 +2423,76 @@ pub(crate) unsafe fn committed_transform_reference_box(
     Some((rect.width.to_double(), rect.height.to_double()))
 }
 
-/// The document's layout arena, which the host lends a style pass for the one call it blocks on, so
-/// a sample the pass takes resolves a percentage translation against the boxes the last layout
-/// committed. The engine never keeps it past the call.
+/// Where a style pass finds the transform reference boxes the last committed layout left, which a
+/// sample the pass takes resolves a percentage translation against.
+///
+/// A pass the host blocks on reads them from the document's layout arena, which the host lends it
+/// for the call. A submitted pass runs beside the main thread, which writes the arena as the DOM
+/// changes, so it never reaches the arena: it takes along the boxes of the nodes the engine knows
+/// to be animated, taken as the pass is submitted, and a node it has no box for is one whose sample
+/// or transition step the engine leaves to the host.
 #[derive(Clone, Copy)]
-pub struct LentLayoutArena(*mut std::ffi::c_void);
+pub struct CommittedTransformReferenceBoxes(Source);
+
+#[derive(Clone, Copy)]
+enum Source {
+    LentArena(*mut std::ffi::c_void),
+    TakenAlong(*const CommittedTransformReferenceBoxSnapshot),
+}
 
 // SAFETY: The host blocks on the call it lends the arena for, and the pass only reads the rows the
-// last layout committed.
-unsafe impl Send for LentLayoutArena {}
+// last layout committed. A snapshot is owned by the submitted pass that reads it.
+unsafe impl Send for CommittedTransformReferenceBoxes {}
 
-impl LentLayoutArena {
+impl CommittedTransformReferenceBoxes {
     /// No arena: a document that has none, which has no committed boxes.
-    pub(crate) const NONE: Self = Self(std::ptr::null_mut());
+    pub(crate) const NONE: Self = Self(Source::LentArena(std::ptr::null_mut()));
 
     /// # Safety
     /// `arena` must be the document's live layout arena, or null, for as long as the call lasts.
     pub(crate) unsafe fn lend(arena: *mut std::ffi::c_void) -> Self {
-        Self(arena)
+        Self(Source::LentArena(arena))
     }
 
-    pub(crate) fn as_ptr(self) -> *mut std::ffi::c_void {
-        self.0
+    /// # Safety
+    /// `snapshot` must outlive every use of the returned value.
+    pub(crate) unsafe fn taken_along(snapshot: &CommittedTransformReferenceBoxSnapshot) -> Self {
+        Self(Source::TakenAlong(snapshot))
+    }
+
+    /// The committed transform reference box of `node`, as [`committed_transform_reference_box`]
+    /// answers it, or an error where the pass took no box along for the node.
+    pub(crate) fn transform_reference_box(self, node: StyleNodeID) -> Result<Option<(f64, f64)>, &'static str> {
+        match self.0 {
+            // SAFETY: Guaranteed by `lend`'s caller.
+            Source::LentArena(arena) => Ok(unsafe { committed_transform_reference_box(arena, node) }),
+            // SAFETY: Guaranteed by `taken_along`'s caller.
+            Source::TakenAlong(snapshot) => unsafe { &*snapshot }
+                .boxes
+                .get(&node)
+                .copied()
+                .ok_or("a node the submitted pass took no transform reference box along for"),
+        }
+    }
+}
+
+/// The committed transform reference boxes a submitted style pass takes along, by node.
+#[derive(Default)]
+pub(crate) struct CommittedTransformReferenceBoxSnapshot {
+    boxes: HashMap<StyleNodeID, Option<(f64, f64)>>,
+}
+
+impl CommittedTransformReferenceBoxSnapshot {
+    /// The boxes of `nodes` the arena `arena` holds.
+    ///
+    /// # Safety
+    /// `arena` must be the document's live layout arena, or null, and no stage may own it.
+    pub(crate) unsafe fn take(arena: *mut std::ffi::c_void, nodes: impl Iterator<Item = StyleNodeID>) -> Self {
+        let boxes = nodes
+            // SAFETY: Guaranteed by the caller.
+            .map(|node| (node, unsafe { committed_transform_reference_box(arena, node) }))
+            .collect();
+        Self { boxes }
     }
 }
 

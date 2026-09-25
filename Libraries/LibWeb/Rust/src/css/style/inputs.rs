@@ -1575,6 +1575,20 @@ impl RetainedState {
         self.animation_timing_rows.linear_points(node, slot)
     }
 
+    /// The elements the engine knows to be animated: those with animations or transitions the host
+    /// published, or animations a pass decided on. A pass samples these against the transform
+    /// reference boxes the last layout committed.
+    pub(crate) fn animated_nodes(&self) -> impl Iterator<Item = StyleNodeID> + '_ {
+        self.animation_timing_rows
+            .nodes()
+            .chain(self.animation_effect_descriptions.nodes())
+            .chain(self.css_defined_animations.nodes())
+            .chain(self.element_transitions.nodes())
+            .chain(self.nodes_owing_animation_definitions.keys().map(|(node, _)| *node))
+            .chain(self.nodes_owing_an_animation_sample.iter().copied())
+            .chain(self.nodes_owing_a_transition_registration.keys().copied())
+    }
+
     /// The timing of one effect, named by the identity the stage looks its description up by.
     #[must_use]
     pub(crate) fn element_animation_timing_rows_for_effect(

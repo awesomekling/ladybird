@@ -57,6 +57,11 @@ pub(crate) struct ElementTransitions {
 }
 
 impl ElementTransitions {
+    /// The elements that have a row, once per slot.
+    pub(crate) fn nodes(&self) -> impl Iterator<Item = StyleNodeID> + '_ {
+        self.rows.keys().map(|(node, _)| *node)
+    }
+
     /// Replace one list. An empty list drops the row.
     ///
     /// # Safety
@@ -177,7 +182,7 @@ impl RetainedState {
         pseudo: Option<u8>,
         old_style_record: u64,
         installed_style_record: u64,
-        layout_arena: super::animations::LentLayoutArena,
+        committed_boxes: super::animations::CommittedTransformReferenceBoxes,
     ) -> Result<TransitionStep, &'static str> {
         const IN_DISPLAY_NONE_SUBTREE: u8 = 1 << 2;
         let pseudo_kind = pseudo.unwrap_or(u8::MAX);
@@ -248,9 +253,7 @@ impl RetainedState {
             context.has_length_resolution_context = true;
             context.length_resolution_context = length_resolution_context;
         }
-        if let Some((width, height)) =
-            unsafe { super::animations::committed_transform_reference_box(layout_arena.as_ptr(), node) }
-        {
+        if let Some((width, height)) = committed_boxes.transform_reference_box(node)? {
             context.has_transform_reference_box = true;
             context.transform_reference_box_width = width;
             context.transform_reference_box_height = height;
@@ -437,7 +440,7 @@ impl StyleEngineState {
         old_style_record: u64,
         settled_style_record: u64,
         installed_style_record: u64,
-        layout_arena: super::animations::LentLayoutArena,
+        committed_boxes: super::animations::CommittedTransformReferenceBoxes,
         counters: &mut super::Counters,
     ) {
         match self.decide_and_compose_transition_step(
@@ -446,7 +449,7 @@ impl StyleEngineState {
             old_style_record,
             settled_style_record,
             installed_style_record,
-            layout_arena,
+            committed_boxes,
             counters,
         ) {
             Ok((step, _)) => {
@@ -470,7 +473,7 @@ impl StyleEngineState {
         old_style_record: u64,
         settled_style_record: u64,
         installed_style_record: u64,
-        layout_arena: super::animations::LentLayoutArena,
+        committed_boxes: super::animations::CommittedTransformReferenceBoxes,
         counters: &mut super::Counters,
     ) -> Option<u64> {
         // The host runs the step of a pseudo-element that had a record, or whose new one
@@ -488,7 +491,7 @@ impl StyleEngineState {
             old_style_record,
             settled_style_record,
             installed_style_record,
-            layout_arena,
+            committed_boxes,
             counters,
         ) {
             Ok((step, composition)) => {
@@ -515,7 +518,7 @@ impl StyleEngineState {
         pseudo: Option<u8>,
         before_change_style_record: u64,
         installed_style_record: u64,
-        layout_arena: super::animations::LentLayoutArena,
+        committed_boxes: super::animations::CommittedTransformReferenceBoxes,
         counters: &mut super::Counters,
     ) -> Result<Option<super::engine_sample::SettledRowPublication>, String> {
         let pseudo_kind = pseudo.unwrap_or(u8::MAX);
@@ -532,7 +535,7 @@ impl StyleEngineState {
             before_change_style_record,
             settled_style_record,
             installed_style_record,
-            layout_arena,
+            committed_boxes,
             counters,
         )?;
         match pseudo {
@@ -576,10 +579,11 @@ impl StyleEngineState {
         old_style_record: u64,
         settled_style_record: u64,
         installed_style_record: u64,
-        layout_arena: super::animations::LentLayoutArena,
+        committed_boxes: super::animations::CommittedTransformReferenceBoxes,
         counters: &mut super::Counters,
     ) -> Result<(TransitionStepForHost, Option<u64>), String> {
-        let step = self.decide_transition_step(node, pseudo, old_style_record, installed_style_record, layout_arena)?;
+        let step =
+            self.decide_transition_step(node, pseudo, old_style_record, installed_style_record, committed_boxes)?;
         if step.started.is_empty() && step.removed.is_empty() {
             return Ok((step.for_host, None));
         }
@@ -591,7 +595,7 @@ impl StyleEngineState {
             installed_style_record,
             removed,
             &step.started,
-            layout_arena,
+            committed_boxes,
         )?;
         let composition = self.publish_transition_step_composition(
             node,
