@@ -81,3 +81,14 @@ TEST_CASE(dynamic_matches_reuse_platform_faces_without_merging_equal_metadata)
     EXPECT_EQ(first.face_id, repeated.face_id);
     EXPECT_NE(first.face_id, distinct.face_id);
 }
+
+TEST_CASE(code_points_one_face_covers_share_its_face)
+{
+    auto font_service = WebView::FontService::create({});
+
+    // A page in a script no primary font covers asks for each of its characters. The fallback face
+    // that covers them is brokered once, not once per character.
+    auto first = font_service->match_font_for_code_point('A', 400, 5, 0, false);
+    auto second = font_service->match_font_for_code_point('B', 400, 5, 0, false);
+    EXPECT_EQ(first.face_id, second.face_id);
+}
