@@ -2799,6 +2799,7 @@ impl StyleEngineState {
                 } else if reaction == transaction::STYLE_REACTION_INHERITED_CUSTOM_PROPERTIES
                     && !parent_inputs_moved.display
                     && !self.node_style_reads_custom_properties(node)
+                    && self.holds_parent_environment_in_pass(node)
                 {
                     // The environment move already gave a non-consumer the moved environment and
                     // the record over it. There is no element record to recompute or compare

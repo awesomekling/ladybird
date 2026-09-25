@@ -259,6 +259,25 @@ impl StyleEngineState {
             })
     }
 
+    /// Whether an element holds the environment its parent hands down, as a style pass reads what
+    /// both hold: a move of the parent's environment gave it the moved one. The host walks below a
+    /// parent holding an animation overlay, and a row whose move the pass did not make reports it,
+    /// leaving the element on the environment it held before.
+    pub(super) fn holds_parent_environment_in_pass(&mut self, element: StyleNodeID) -> bool {
+        if self.host.environment_moves_in_flight.contains_key(&element) {
+            return true;
+        }
+        let Some(parent) = self.retained.tree.flat_tree_parent(element) else {
+            return false;
+        };
+        let (parent_environment, _, parent_is_animation_overlay) = self.held_environment_in_pass(parent);
+        let (environment, declares, is_animation_overlay) = self.held_environment_in_pass(element);
+        !parent_is_animation_overlay
+            && !is_animation_overlay
+            && !declares
+            && environment == self.inheritable_environment(parent_environment)
+    }
+
     /// A row the pass settled moves the element's custom-property environment to `new_base`: the
     /// pass moves the environments below it here, as the host's walk would once it installs the
     /// row, and leaves what the host holds to the host. Whether the pass moved them: the host walks

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<style>
+    @property --spin {
+        syntax: "<number>";
+        inherits: false;
+        initial-value: 0;
+    }
+    @keyframes spin {
+        from { --spin: 0; }
+        to { --spin: 1; }
+    }
+    @keyframes fade {
+        from { opacity: 0.5; }
+        to { opacity: 1; }
+    }
+    .spinning {
+        animation: spin 100s linear infinite paused;
+    }
+    .fading {
+        animation: fade 100s linear infinite paused;
+    }
+</style>
+<div id="outer" class="spinning" style="--tone: held">
+    <div id="spinner" class="spinning"><span id="spinnerChild">S</span></div>
+    <div id="fader" class="fading"><span id="faderChild">F</span></div>
+</div>
+<script src="../../include.js"></script>
+<script>
+    test(() => {
+        document.body.offsetWidth;
+
+        // #outer holds an animation overlay, so the pass does not move the environments below it
+        // as it settles #outer's row; the row reports the move instead. The animated children
+        // read no custom property and still hold the environment they inherited before, so the
+        // next pass computes them over the moved one rather than leaving them for the host.
+        outer.style.setProperty("--tone", "moved");
+        document.body.offsetWidth;
+
+        for (const element of [outer, spinner, spinnerChild, fader, faderChild])
+            println(`${element.id}: ${getComputedStyle(element).getPropertyValue("--tone")}`);
+    });
+</script>
