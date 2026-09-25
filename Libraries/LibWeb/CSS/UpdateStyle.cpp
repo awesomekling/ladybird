@@ -1805,6 +1805,7 @@ static bool updates_element_style_beside_recording(Document const& document)
 
 bool Document::update_style_for_element(AbstractElement const& abstract_element)
 {
+    HTML::ClockLendReadScope clock_lend_read_scope;
     if (!updates_element_style_beside_recording(*this))
         join_frame_in_flight();
     else
@@ -1816,6 +1817,7 @@ bool Document::update_style_for_element(AbstractElement const& abstract_element)
 
 bool Document::update_style_for_element(AbstractElement const& abstract_element, StyleUpdateMode mode)
 {
+    HTML::ClockLendReadScope clock_lend_read_scope;
     if (!updates_element_style_beside_recording(*this))
         join_frame_in_flight();
     else

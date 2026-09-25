@@ -1,0 +1,5 @@
+frames presented before the write: true
+the read sees the write: 30
+the task stopped lending: true
+frames presented after the write: 0
+height after the task: 30

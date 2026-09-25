@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<style>
+    #box {
+        width: 100px;
+        height: 20px;
+        animation: grow 20s linear;
+    }
+    @keyframes grow {
+        from {
+            width: 100px;
+        }
+        to {
+            width: 2100px;
+        }
+    }
+</style>
+<div id="box"></div>
+<div id="other">other</div>
+<script src="../../include.js"></script>
+<script>
+    // Under LIBWEB_RENDER_CLOCK_FRAMES, the render clock presents frames beside a long task only while the task has
+    // changed nothing they would show. Once the task writes something and a read lays it out, no frame shows it
+    // before the task is over: the render clock presents nothing more until then.
+    asyncTest(async done => {
+        const box = document.getElementById("box");
+        const other = document.getElementById("other");
+        const enabled = internals.clockFramesEnabled();
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        const countersBefore = internals.getRenderClockCounters();
+        const start = performance.now();
+        let presentedBeforeWrite = 0;
+        while (enabled && performance.now() - start < 10000) {
+            presentedBeforeWrite = internals.getRenderClockCounters().ticksPresented - countersBefore.ticksPresented;
+            if (presentedBeforeWrite >= 2)
+                break;
+        }
+
+        other.style.height = "30px";
+        const otherHeight = other.getBoundingClientRect().height;
+        const countersAtWrite = internals.getRenderClockCounters();
+        const writeTime = performance.now();
+        while (performance.now() - writeTime < 200) { }
+        const countersAfter = internals.getRenderClockCounters();
+
+        println(`frames presented before the write: ${!enabled || presentedBeforeWrite >= 2}`);
+        println(`the read sees the write: ${otherHeight}`);
+        println(`the task stopped lending: ${!enabled || countersAfter.lendsSuspendedWrite - countersBefore.lendsSuspendedWrite === 1}`);
+        println(`frames presented after the write: ${countersAfter.ticksPresented - countersAtWrite.ticksPresented}`);
+        await new Promise(resolve => requestAnimationFrame(resolve));
+        println(`height after the task: ${other.getBoundingClientRect().height}`);
+        done();
+    });
+</script>

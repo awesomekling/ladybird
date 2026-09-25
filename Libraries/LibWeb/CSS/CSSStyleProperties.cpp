@@ -38,6 +38,7 @@
 #include <LibWeb/CSS/StyleValues/UnresolvedStyleValue.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
+#include <LibWeb/HTML/EventLoop/FrameScheduler.h>
 #include <LibWeb/HTML/LocalNavigable.h>
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/Page/Page.h>
@@ -446,6 +447,7 @@ static NonnullRefPtr<StyleValue const> style_value_for_touch_action(TouchActionD
 // https://drafts.csswg.org/cssom/#dom-cssstyledeclaration-getpropertyvalue
 Utf16String CSSStyleProperties::get_property_value(Utf16FlyString const& property_name) const
 {
+    HTML::ClockLendReadScope clock_lend_read_scope;
     if (auto property = PropertyNameAndID::from_name(property_name); property.has_value()) {
         if (is_computed() && !property->is_custom_property()) {
             if (auto serialized = serialized_computed_value_from_stored_handle(property->id()); serialized.has_value())
@@ -858,6 +860,7 @@ Optional<StyleProperty> CSSStyleProperties::get_direct_property(PropertyNameAndI
     if (is_computed()) {
         if (!owner_node().has_value())
             return {};
+        HTML::ClockLendReadScope clock_lend_read_scope;
 
         auto abstract_element = *owner_node();
 
