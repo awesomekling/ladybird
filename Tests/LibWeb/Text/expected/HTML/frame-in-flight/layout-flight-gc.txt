@@ -1,0 +1,4 @@
+collected, then removed: held as armed: true
+collected, then removed: container height: 0
+removed, then collected: held as armed: true
+removed, then collected: container laid out: true
