@@ -207,8 +207,9 @@ void Animatable::associate_with_animation(GC::Ref<Animation> animation)
     if (impl.associated_animations.contains_slow(animation))
         return;
     // The association publishes the element's facts and animation rows to the style mirror the
-    // layout frame reads, so an association made beside the frame in flight waits for it first.
-    as<DOM::Element>(*this).document().join_frame_in_flight();
+    // layout frame reads, so an association made beside a frame in flight that reaches the style
+    // engine waits for it first. A recording reaches none.
+    as<DOM::Element>(*this).document().join_frame_reaching_style_engine();
     impl.associated_animations.append(animation);
     impl.is_sorted_by_composite_order = false;
     // The style engine computes no record for an element whose animations compose its style.

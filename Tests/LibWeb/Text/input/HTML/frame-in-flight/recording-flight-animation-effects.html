@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<div id="container" style="width: 300px"><div id="first" style="height: 10px">first</div><div id="second" style="width: 100px">second</div></div>
+<script>
+    // Keyframe effects created and changed beside a recording in flight: their timing goes to the style mirror, which
+    // the recording does not read, so the change goes on beside it instead of taking it in, and the next rendering
+    // update samples the effects.
+    asyncTest(async done => {
+        let animation;
+        const result = await whileFrameInFlight("before-run", () => {
+            first.style.height = "20px";
+        }, frame => {
+            const joinsBefore = internals.forcedJoinCount("recording");
+            animation = second.animate([{ width: "40px" }, { width: "40px" }], { duration: 100000 });
+            animation.effect.setKeyframes([{ width: "60px" }, { width: "60px" }]);
+            animation.effect.composite = "replace";
+            return {
+                ...frame,
+                joins: internals.forcedJoinCount("recording") - joinsBefore,
+                stillInFlight: !frame.armed || internals.frameInFlightHoldsDocument(),
+            };
+        });
+        println(`held as armed: ${heldAsArmed(result, "before-run")}`);
+        println(`forced joins of the recording: ${result.joins}`);
+        println(`recording still in flight after the changes: ${result.stillInFlight}`);
+        await twoFrames();
+        println(`second width: ${second.offsetWidth}`);
+        println(`animations: ${second.getAnimations().length}`);
+        done();
+    });
+</script>

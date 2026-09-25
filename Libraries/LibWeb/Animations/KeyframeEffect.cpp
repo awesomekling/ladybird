@@ -911,9 +911,9 @@ Optional<CSS::PseudoElement> KeyframeEffect::pseudo_element_type() const
 void KeyframeEffect::invalidate_animation_preparation()
 {
     // The republication writes the style mirror the layout frame reads, so a change made beside
-    // the frame in flight waits for it first.
+    // a frame in flight that reaches the style engine waits for it first. A recording reaches none.
     if (m_target_element)
-        m_target_element->document().join_frame_in_flight();
+        m_target_element->document().join_frame_reaching_style_engine();
     ++m_animation_preparation_generation;
     if (m_target_element)
         m_target_element->publish_animation_timing_rows();
