@@ -910,6 +910,8 @@ pub(crate) struct LayoutNodeArena {
     anchor_name_elements: RefCell<HashMap<(u32, usize), Vec<StyleNodeID>>>,
     /// The viewport row the document is bound to. The document has no identity of its own.
     bound_viewport_row: Cell<NodeSlotId>,
+    /// The style node the document's viewport box was last built for.
+    document_style_node: Cell<Option<StyleNodeID>>,
     /// The style engine whose mirror the arena's rows are built from, or null before the document
     /// registers it.
     style_engine: Cell<StyleEngineLink>,
@@ -1071,6 +1073,7 @@ impl LayoutNodeArena {
             shadow_including_parent_elements: RefCell::new(Vec::new()),
             anchor_name_elements: RefCell::new(HashMap::default()),
             bound_viewport_row: Cell::new(NodeSlotId::INVALID),
+            document_style_node: Cell::new(None),
             style_engine: Cell::new(StyleEngineLink(std::ptr::null_mut())),
             host_hears_box_presence: Cell::new(false),
             host_handbacks: RefCell::new(HostHandbacks::default()),
@@ -1591,6 +1594,16 @@ impl LayoutNodeArena {
 
     pub(crate) fn bound_viewport_row(&self) -> NodeSlotId {
         self.bound_viewport_row.get()
+    }
+
+    /// The style node the document's viewport box was last built for; the document element is
+    /// its first DOM child.
+    pub(crate) fn document_style_node(&self) -> Option<StyleNodeID> {
+        self.document_style_node.get()
+    }
+
+    pub(crate) fn set_document_style_node(&self, document_style_node: Option<StyleNodeID>) {
+        self.document_style_node.set(document_style_node);
     }
 
     /// Everything the host did as it configured a pseudo-element's principal box: what the box is

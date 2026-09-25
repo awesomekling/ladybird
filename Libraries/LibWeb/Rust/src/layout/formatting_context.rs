@@ -925,9 +925,6 @@ pub struct FfiLayoutHostCallbacks {
     pub deliver_commit_messages: unsafe extern "C" fn(*mut c_void, *const commit::FfiCommitMessage, usize),
     /// Fills the replaced-content facts of a live box shell ahead of a pass.
     pub build_replaced_content_facts: unsafe extern "C" fn(*mut c_void, *mut c_void, *mut FfiReplacedContentFacts),
-    /// The document element and body facts the viewport propagation decides from.
-    pub viewport_propagation_facts:
-        unsafe extern "C" fn(*mut c_void) -> viewport_propagation::FfiViewportPropagationFacts,
 }
 
 #[derive(Clone, Copy)]
@@ -935,14 +932,13 @@ pub struct FfiLayoutHostCallbacks {
 ///
 /// ```compile_fail
 /// fn layout_stage(host: &libweb_rust::layout::formatting_context::LayoutHost) {
-///     host.viewport_propagation_facts();
+///     unsafe { host.build_replaced_content_facts(std::ptr::null_mut(), std::ptr::null_mut()) };
 /// }
 /// ```
 pub(crate) struct LayoutHost {
     context: *mut c_void,
     deliver_commit_messages: unsafe extern "C" fn(*mut c_void, *const commit::FfiCommitMessage, usize),
     build_replaced_content_facts: unsafe extern "C" fn(*mut c_void, *mut c_void, *mut FfiReplacedContentFacts),
-    viewport_propagation_facts: unsafe extern "C" fn(*mut c_void) -> viewport_propagation::FfiViewportPropagationFacts,
 }
 
 impl From<FfiLayoutHostCallbacks> for LayoutHost {
@@ -951,7 +947,6 @@ impl From<FfiLayoutHostCallbacks> for LayoutHost {
             context: host.context,
             deliver_commit_messages: host.deliver_commit_messages,
             build_replaced_content_facts: host.build_replaced_content_facts,
-            viewport_propagation_facts: host.viewport_propagation_facts,
         }
     }
 }
@@ -964,14 +959,6 @@ impl LayoutHost {
             .and_then(|host_tables| host_tables.layout_host.get())
             .expect("layout node arena has no layout host")
             .into()
-    }
-
-    fn viewport_propagation_facts(
-        &self,
-        _: &crate::stage::MainThread,
-    ) -> viewport_propagation::FfiViewportPropagationFacts {
-        // SAFETY: The C++ host answers synchronously from its live document.
-        unsafe { (self.viewport_propagation_facts)(self.context) }
     }
 
     pub(crate) unsafe fn build_replaced_content_facts(
@@ -2382,30 +2369,9 @@ fn run_root_layout_stage(stage: LayoutStageInput<'_>, scratch: &LayoutScratch) -
     LayoutStageOutput(pass_fragments)
 }
 
-/// The root and body styles the viewport takes over, as the document answers them now.
-///
-/// # Safety
-///
-/// `arena_handle` must be a live handle with a registered layout host, used on the document
-/// thread.
-pub(crate) unsafe fn read_viewport_propagation_facts(
-    main_thread: &crate::stage::MainThread,
-    arena_handle: *mut c_void,
-) -> viewport_propagation::FfiViewportPropagationFacts {
-    let host = LayoutHost::of(main_thread);
-    seal::note_host_call(
-        // SAFETY: Guaranteed by the caller.
-        unsafe { LayoutNodeArena::from_handle(arena_handle) }.layout_pass_is_running(),
-        "viewport_propagation_facts",
-    );
-    crate::layout::tree_build_seal::note_host_call("viewport_propagation_facts");
-    // SAFETY: The document answers from its elements' style records without entering the arena.
-    host.viewport_propagation_facts(main_thread)
-}
-
 /// The arena half ahead of a root layout, from what the document answered for it beforehand:
-/// propagates the root and body styles to the viewport and syncs enrolled content. It needs no
-/// host, and the shells whose style it changes hear of it when the pass's commit pays its
+/// propagates the root and body styles, as their published style records have them, to the
+/// viewport and syncs enrolled content. It needs no host, and the shells whose style it changes hear of it when the pass's commit pays its
 /// handbacks, which must be followed by `end_layout_pass_preparation_handbacks`.
 ///
 /// # Safety
@@ -2415,7 +2381,6 @@ pub(crate) unsafe fn read_viewport_propagation_facts(
 pub(crate) unsafe fn prepare_root_layout_from_sources(
     arena_handle: *mut c_void,
     root: NodeSlotId,
-    propagation_facts: &viewport_propagation::FfiViewportPropagationFacts,
     content: super::layout_node_arena::EnrolledContentSources,
 ) {
     assert!(!arena_handle.is_null(), "layout node arena handle is null");
@@ -2423,10 +2388,11 @@ pub(crate) unsafe fn prepare_root_layout_from_sources(
     // SAFETY: Guaranteed by the caller; the propagation borrows the arena only for its own call.
     let arena = unsafe { LayoutNodeArena::from_handle(arena_handle) };
     arena.begin_layout_pass_preparation_handbacks();
+    let propagation_facts = viewport_propagation::viewport_propagation_facts(arena);
     viewport_propagation::propagate_root_styles_to_viewport(
         arena,
         root,
-        propagation_facts,
+        &propagation_facts,
         ShellStyleChangeNotice::Handback,
     );
     // The style rewrites enroll the affected boxes' text children for content sync, so the sync

@@ -40,14 +40,12 @@
 //!   with the main thread capability through `LayoutNodeArena::finish_paying_taken_host_handbacks` once
 //!   commit has returned.
 //!
-//! **Inputs synced before a pass, never during one.** These are host calls, and they are the
-//! two `note_host_call` sites that remain; each passes `layout_pass_is_running()`, so a call
-//! from inside a pass would still be reported. Neither has ever fired inside one:
+//! **Inputs synced before a pass, never during one.** This is a host call, and the one
+//! `note_host_call` site that remains; it passes `layout_pass_is_running()`, so a call from
+//! inside a pass would still be reported. It has never fired inside one:
 //!
 //! - `build_replaced_content_facts` - the intrinsic size of an enrolled replaced box, synced into
 //!   the arena ahead of the pass.
-//! - `viewport_propagation_facts` - the document element and body facts the viewport propagation
-//!   decides from, read once at the layout entry before the pass begins.
 //!
 //! **The shared resource service.** Fonts and text shaping (`libgfx_rust::text_layout`, the
 //! thread-local shaping cache) are the one purity exception a render thread is meant to keep.

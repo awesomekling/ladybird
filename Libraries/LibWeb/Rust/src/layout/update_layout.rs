@@ -13,7 +13,6 @@ use super::LayoutNodeArena;
 use super::formatting_context::{
     DeferredLayoutCommitHostHalf, PendingLayoutCommit, commit_root_layout_to_arena, commit_subtree_layout_to_arena,
     compute_root_layout, compute_subtree_layout_fragments, prepare_root_layout_from_sources,
-    read_viewport_propagation_facts,
 };
 use super::layout_node_arena::{
     EnrolledContentSources, OwedImageResources, apply_enrolled_content_sources, read_enrolled_content_sources,
@@ -24,7 +23,6 @@ use super::partial_relayout::FfiPartialRelayoutHostFacts;
 use super::tree_builder::{
     FfiGeneratedContentItem, FfiLayoutTreeBuildOutcome, FfiPseudoElement, TreeBuildHostHalf, walk_layout_tree_build,
 };
-use super::viewport_propagation::FfiViewportPropagationFacts;
 use crate::abort_on_panic;
 use crate::css::ffi_support::FfiUtf16View;
 use crate::css::style::tree::StyleNodeID;
@@ -464,13 +462,11 @@ struct FrameInputs {
     trace: UpdateLayoutTrace,
 }
 
-/// What a layout pass reads from the document ahead of it: the root and body styles the viewport
-/// takes over, the replaced content enrolled for sync, and the boxes the root background is painted
-/// from, which the rendering preparation after the pass's commit reads. The join the pass follows
-/// reads them, so the pass itself prepares the arena, and its commit prepares for rendering,
-/// without the document thread.
+/// What a layout pass reads from the document ahead of it: the replaced content enrolled for sync,
+/// and the boxes the root background is painted from, which the rendering preparation after the
+/// pass's commit reads. The join the pass follows reads them, so the pass itself prepares the
+/// arena, and its commit prepares for rendering, without the document thread.
 struct LayoutPassSources {
-    propagation_facts: FfiViewportPropagationFacts,
     content: EnrolledContentSources,
     root_background_source: FfiRootBackgroundSource,
 }
@@ -483,7 +479,6 @@ impl LayoutPassSources {
         // SAFETY: Guaranteed by the caller.
         unsafe {
             Self {
-                propagation_facts: read_viewport_propagation_facts(main_thread, arena_handle),
                 content: read_enrolled_content_sources(main_thread, arena_handle),
                 root_background_source: host.root_background_source(main_thread),
             }
@@ -647,7 +642,6 @@ impl PendingLayoutPass {
             layout_root,
             sources:
                 LayoutPassSources {
-                    propagation_facts,
                     content,
                     root_background_source,
                 },
@@ -656,7 +650,7 @@ impl PendingLayoutPass {
         } = self;
         // SAFETY (for the three steps below): Guaranteed by the caller; the viewport box stays live
         // between them, and no row was freed since the sources were read.
-        unsafe { prepare_root_layout_from_sources(arena_handle, layout_root, &propagation_facts, content) };
+        unsafe { prepare_root_layout_from_sources(arena_handle, layout_root, content) };
         let output = unsafe {
             compute_root_layout(
                 arena_handle,

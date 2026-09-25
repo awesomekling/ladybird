@@ -4233,6 +4233,8 @@ impl TreeBuilderHost {
     /// publishes under the document's identity rather than on the row's.
     fn create_document_box(&self, document_style_node: u32) -> NodeSlotId {
         let slot = self.stamp_dom_box(NodeKind::Viewport, None);
+        self.arena()
+            .set_document_style_node(StyleNodeID::from_raw(document_style_node));
         if let Some(document_style_node) = StyleNodeID::from_raw(document_style_node) {
             let (unique_node_id, dom_paint_facts) = self.arena().with_style_store(|engine| {
                 (
