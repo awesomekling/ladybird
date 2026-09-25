@@ -152,7 +152,8 @@
     [173, "TransitionBaseline"],
     [174, "ReleaseTransitionBaselines"],
     [176, "RestoreRowDebts"],
-    [177, "GrantStyleNodes"]
+    [177, "GrantStyleNodes"],
+    [178, "AcknowledgeEnvironmentMove"]
   ],
   "operations": [
     { "event": "RecordContainerQueryInput", "ffi": "style_engine_record_container_query_input", "cpp": "record_container_query_input", "return": "void", "args": [["node", "style_node"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.record_container_query_input(node);" },
@@ -239,6 +240,7 @@
     { "event": "PrepareSharedExactCascadeState", "ffi": "style_engine_prepare_shared_exact_cascade_state", "cpp": "prepare_shared_exact_cascade_state", "return": "void", "args": [["node", "style_node"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.prepare_shared_exact_cascade_state(node);" },
     { "event": "RetainExactCascadeState", "ffi": "style_engine_retain_exact_cascade_state", "cpp": "retain_exact_cascade_state", "return": "void", "args": [["node", "style_node"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.retain_exact_cascade_state(node);" },
     { "event": "ExactCascadeStateIsCurrent", "ffi": "style_engine_exact_cascade_state_is_current", "cpp": "exact_cascade_state_is_current", "return": "bool", "receiver": "const", "replay": false, "args": [["node", "style_node"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return false; }; let result = engine.exact_cascade_state_is_current(node);" },
+    { "event": "AcknowledgeEnvironmentMove", "ffi": "style_engine_acknowledge_environment_move", "cpp": "acknowledge_environment_move", "return": "u64", "args": [["node", "style_node"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return 0; }; let result = engine.acknowledge_environment_move(node);" },
     { "event": "AcknowledgeEngineComputedRecord", "ffi": "style_engine_acknowledge_engine_computed_record", "cpp": "acknowledge_engine_computed_record", "return": "void", "args": [["node", "style_node"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.acknowledge_engine_computed_record(node);" },
     { "event": "DiscardPendingExactCascadeState", "ffi": "style_engine_discard_pending_exact_cascade_state", "cpp": "discard_pending_exact_cascade_state", "return": "void", "args": [["node", "style_node"], ["pseudo_kind", "u8"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.discard_pending_exact_cascade_state(crate::css::style::computed::ComputedStyleTarget::new(node, pseudo_kind));" },
     { "event": "RecordTransitionBaseline", "ffi": "style_engine_record_transition_baseline", "cpp": "record_transition_baseline", "return": "bool", "args": [["node", "style_node"], ["pseudo_kind", "u8"], ["style_record", "style_record"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return false; }; let result = engine.record_transition_baseline(node, pseudo_kind, style_record);" },

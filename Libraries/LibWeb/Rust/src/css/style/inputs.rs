@@ -2126,6 +2126,7 @@ impl StyleEngineState {
                 ffi_style_node_query_memory: MemoryLease::new(MemoryCategory::BridgeBuffer),
                 reclaimed_style_atoms: Vec::new(),
                 retired_custom_property_data: Vec::new(),
+                environment_moves_in_flight: HashMap::default(),
                 style_atoms_swept: false,
                 replay_reclaimed_style_atoms: None,
             },

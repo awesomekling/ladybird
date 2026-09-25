@@ -3275,10 +3275,11 @@ impl StyleEngineState {
                 // The children read the row's move from what the element holds when the host
                 // applies it, which is no record when its style was cleared on entry to display:none
                 // while the engine kept the record.
-                let held_style_record = self.host.held_style_records.get(&node).copied().unwrap_or(0);
-                // A row whose custom-property environment moved moves its descendants' with it
-                // where the host installs it, and a child settled before that reads the environment
-                // it had: the children of such a row stay the host's too.
+                let held_style_record = self.held_style_record_in_pass(node);
+                // A row whose custom-property environment moved moves its descendants' with it: the
+                // pass moves them here, and a descendant settled after it reads the moved one. Where
+                // the host walks below the row instead, once it installs it, a child settled before
+                // that reads the environment it had: the children of such a row stay the host's too.
                 let environment_moved = held_style_record != 0
                     && held_style_record != new_style_record
                     && self
@@ -3289,8 +3290,7 @@ impl StyleEngineState {
                             .retained
                             .computed_group_sets
                             .style_record_custom_property_environment(new_style_record);
-                if !awaits_host
-                    && !environment_moved
+                let derives_children = !awaits_host
                     && new_style_record != 0
                     && (held_style_record == 0 || held_style_record == old_style_record)
                     && matches!(
@@ -3305,8 +3305,18 @@ impl StyleEngineState {
                         .iter()
                         .all(|&(_, old_pseudo_record, new_pseudo_record, pseudo_damage)| {
                             pseudo_damage != 0 || old_pseudo_record == new_pseudo_record
-                        })
-                {
+                        });
+                let mut environment_move = environment_move::EnvironmentMoveInPass::default();
+                let moved_environment_in_pass = environment_moved
+                    && derives_children
+                    && self.move_custom_property_environment_in_pass(
+                        node,
+                        self.retained
+                            .computed_group_sets
+                            .style_record_custom_property_environment(new_style_record),
+                        &mut environment_move,
+                    );
+                if derives_children && (!environment_moved || moved_environment_in_pass) {
                     let row_child_facts = child_reactions::EngineRowChildFacts {
                         old_style_record: held_style_record,
                         new_style_record,
@@ -3325,6 +3335,16 @@ impl StyleEngineState {
                     };
                     derived.clear();
                     self.derive_engine_row_child_reactions(node, style_delta.reaction, &row_child_facts, &mut derived);
+                    // A descendant whose style reads the moved environment computes again over it.
+                    derived.extend(
+                        environment_move
+                            .recompute
+                            .iter()
+                            .map(|&descendant| (descendant, transaction::STYLE_REACTION_RECOMPUTE_STYLE, 0, false)),
+                    );
+                    if moved_environment_in_pass {
+                        style_delta.record_damage |= bridge::FfiStyleInvalidationField::EnvironmentMovedInPass as u32;
+                    }
                     for &(child, child_reaction, groups, display_moved) in &derived {
                         let later_row = row_positions.get(&child).map(|&position| position > published_index);
                         if child_reaction == 0 {
@@ -3379,6 +3399,27 @@ impl StyleEngineState {
                     };
                     self.retained.engine_row_child_facts.insert(node, row_child_facts);
                 }
+                // The host installs each record the environment move republished after the row, and
+                // before any row below it.
+                let environment_move_rows = environment_move
+                    .republished
+                    .iter()
+                    .map(|&(element, held, republished)| PublishedStyleDeltaRecord {
+                        style_node: element.raw(),
+                        match_answer: 0,
+                        old_style_record: held,
+                        new_style_record: republished,
+                        damage: FfiStyleDeltaDamage::Full,
+                        reaction: 0,
+                        inherited_style_groups: 0,
+                        pseudo_kind: u8::MAX,
+                        gap: FfiStyleDeltaGap::EnvironmentMoved,
+                        uses_substitution: false,
+                        record_damage: 0,
+                        row_facts: 0,
+                        explicit_inheritance_debt: 0,
+                        row_effect_debt: 0,
+                    });
                 if let Some(record_deltas) = &mut record_deltas {
                     let mut node_deltas = vec![style_delta];
                     for &(kind, old_pseudo_record, new_pseudo_record, pseudo_damage) in &pseudo_rows {
@@ -3399,6 +3440,7 @@ impl StyleEngineState {
                             row_effect_debt: 0,
                         });
                     }
+                    node_deltas.extend(environment_move_rows);
                     record_deltas[published_index] = Some(node_deltas);
                 } else {
                     if style_deltas.len() == style_deltas.capacity() {
@@ -3434,6 +3476,16 @@ impl StyleEngineState {
                                 explicit_inheritance_debt: 0,
                                 row_effect_debt: 0,
                             });
+                        }
+                        for environment_move_row in environment_move_rows {
+                            if style_deltas.len() == style_deltas.capacity() {
+                                style_deltas.reserve(1);
+                                style_delta_memory.resize_required_to(
+                                    &mut self.retained.memory,
+                                    capacity::ShallowCapacityBytes::shallow_capacity_bytes(&*style_deltas),
+                                );
+                            }
+                            style_deltas.push(environment_move_row);
                         }
                     }
                 }

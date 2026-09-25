@@ -922,6 +922,9 @@ bool StyleEngine::take_diagnostic_style_transaction(StyleNodeID root, Function<v
             // an element its rows inherit from, is no row the transaction planned.
             if (reaction.record_damage & (to_underlying(StyleEngineFFI::FfiStyleInvalidationField::JoinedByDerivation) | to_underlying(StyleEngineFFI::FfiStyleInvalidationField::JoinedForInheritance)))
                 continue;
+            // Nor is a record an environment move republished as the pass settled a row above it.
+            if (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::EnvironmentMoved)
+                continue;
             reaction_nodes.append(StyleNodeID { reaction.style_node });
         }
     };
