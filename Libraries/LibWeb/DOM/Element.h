@@ -385,6 +385,10 @@ public:
     u64 animation_style_generation() const { return m_animation_style_generation; }
     u64 animation_subtree_style_generation() const { return m_animation_subtree_style_generation; }
     [[nodiscard]] bool has_style(Optional<CSS::PseudoElement> pseudo_element = {}) const { return !!style_record_identity(pseudo_element); }
+    // What the display of the record the element holds is, read without the engine: a style pass in flight owns the
+    // engine's record store, and a DOM mutation beside it asks these.
+    [[nodiscard]] bool installed_display_is_contents() const { return m_installed_display_is_contents; }
+    [[nodiscard]] bool installed_display_is_list_item() const { return m_installed_display_is_list_item; }
     [[nodiscard]] void const* style_record_payloads(Optional<CSS::PseudoElement> = {}) const;
     template<typename StyleGroup>
     StyleGroup const* style_group(Optional<CSS::PseudoElement> pseudo_element = {}) const
@@ -992,6 +996,8 @@ private:
     bool m_fullscreen_flag : 1 { false };
     bool m_uses_document_global_custom_element_registry : 1 { false };
     bool m_has_name : 1 { false };
+    bool m_installed_display_is_contents : 1 { false };
+    bool m_installed_display_is_list_item : 1 { false };
     mutable bool m_style_attribute_is_dirty : 1 { false };
 
     mutable Optional<Utf16String> m_lang_value;

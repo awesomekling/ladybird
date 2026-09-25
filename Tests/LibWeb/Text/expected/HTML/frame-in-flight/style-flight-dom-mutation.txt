@@ -1,5 +1,6 @@
 insertion: held as armed: true
 insertion: attribute changes joined the pass: false
+insertion: the insertion joined the pass: false
 insertion: container height: 75
 insertion: first: 200x25 rgb(0, 0, 0)
 insertion: second: 200x40 rgb(0, 0, 255)
