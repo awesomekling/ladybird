@@ -3882,11 +3882,15 @@ Layout::Node const* Node::unsafe_layout_node() const
     auto* arena = m_document->layout_node_arena_if_created();
     Layout::Node const* layout_node = nullptr;
     if (arena) {
-        if (auto const* element = as_if<Element>(*this))
-            layout_node = static_cast<Layout::Node const*>(Layout::RustFFI::layout_arena_bound_shell(arena->handle(), element->style_node_id().value()));
-        else if (auto const* text = as_if<Text>(*this))
-            layout_node = static_cast<Layout::Node const*>(Layout::RustFFI::layout_arena_bound_shell(arena->handle(), text->style_node_id().value()));
-        else if (is_document())
+        // A node with no StyleNodeID has no row. It is not asked for, as the ask reaches the arena, which a frame in
+        // flight may own.
+        if (auto const* element = as_if<Element>(*this)) {
+            if (element->style_node_id() != 0)
+                layout_node = static_cast<Layout::Node const*>(Layout::RustFFI::layout_arena_bound_shell(arena->handle(), element->style_node_id().value()));
+        } else if (auto const* text = as_if<Text>(*this)) {
+            if (text->style_node_id() != 0)
+                layout_node = static_cast<Layout::Node const*>(Layout::RustFFI::layout_arena_bound_shell(arena->handle(), text->style_node_id().value()));
+        } else if (is_document())
             layout_node = static_cast<Layout::Node const*>(Layout::RustFFI::layout_arena_bound_viewport_shell(arena->handle()));
     }
     return layout_node;
