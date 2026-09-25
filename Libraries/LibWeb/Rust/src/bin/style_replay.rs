@@ -753,7 +753,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     // A demand no longer declines; older recordings name no cause either.
                     let _ = event.payload.read_bytes()?;
                     let actual = unsafe {
-                        bridge::style_engine_answer_record_demand(
+                        bridge::style_engine_answer_read_demand(
                             engine,
                             node,
                             pseudo_kind,
@@ -761,7 +761,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             targeted,
                             read_only,
                             parent_highlight,
-                            false,
                         )
                     };
                     if actual.record.style_record != expected_record

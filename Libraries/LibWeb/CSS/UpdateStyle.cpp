@@ -1141,12 +1141,20 @@ static void apply_targeted_style_invalidation(StyleDrainScope const& scope, DOM:
     apply_document_style_invalidation_after_style_change(element.document(), effects);
 }
 
+// The engine answers a targeted read's demand for one element's record, or for one of its
+// pseudo-elements', in a style stage run of its own, before the host installs the answer.
+static StyleEngineFFI::FfiRecordDemandAnswer answer_targeted_record_demand(DOM::Element& element, Optional<PseudoElement> pseudo_element = {})
+{
+    auto& engine = element.document().style_computer().style_engine();
+    return StyleEngineFFI::style_engine_answer_read_demand(engine.rust_handle(), element.style_node_id().value(),
+        pseudo_element.has_value() ? to_underlying(*pseudo_element) : NumericLimits<u8>::max(), false, true, pseudo_element.has_value(), 0);
+}
+
 // Install the engine's answer for a targeted demand of one element.
-static Optional<RequiredInvalidationAfterStyleChange> install_targeted_record_demand_answer(StyleDrainScope const& scope, DOM::Element& element, bool& did_change_custom_properties)
+static Optional<RequiredInvalidationAfterStyleChange> install_targeted_record_demand_answer(StyleDrainScope const& scope, DOM::Element& element, StyleEngineFFI::FfiRecordDemandAnswer const& answer, bool& did_change_custom_properties)
 {
     auto& style_computer = element.document().style_computer();
     auto& engine = scope.engine();
-    auto answer = engine.answer_record_demand(element.style_node_id(), {}, false, true);
 
     // The engine answers every element of the document it hosts, over the custom-property
     // environment its installed ancestors hold. Should an answer not install, the element keeps
@@ -1189,63 +1197,72 @@ static Optional<RequiredInvalidationAfterStyleChange> install_targeted_record_de
     return invalidation;
 }
 
-static RequiredInvalidationAfterStyleChange materialize_style_for_targeted_update(StyleDrainScope const& scope, DOM::Element& element, bool& did_change_custom_properties)
+// A targeted read of an unstyled hidden animation target installs its base record first. Sample its
+// effects over that record now: the document's ordinary animation tick skips hidden descendants.
+static void sample_animations_of_newly_styled_target(DOM::Element& element)
 {
-    // A targeted update only reaches connected elements, and every one of them has a parent.
-    bool const was_unstyled = !element.has_style();
-    auto invalidation = install_targeted_record_demand_answer(scope, element, did_change_custom_properties);
-    if (invalidation.has_value()) {
-        // A scoped read of an unstyled hidden animation target installs its
-        // base record first. Sample its effects over that record now: the
-        // document's ordinary animation tick skips hidden descendants.
-        if (was_unstyled && element.has_relevant_animations()) {
-            Animations::AnimationUpdateContext context;
-            for (auto& animation : element.associated_animations_in_composite_order()) {
-                if (animation->is_idle() || !animation->effect() || !is<Animations::KeyframeEffect>(*animation->effect()))
-                    continue;
-                auto& effect = static_cast<Animations::KeyframeEffect&>(*animation->effect());
-                if (effect.target().ptr() != &element || effect.pseudo_element_type().has_value())
-                    continue;
-                effect.update_computed_properties_for_style(context, DOM::AbstractElement { element });
-            }
-        }
-        auto const* box_values = element.style_group<ComputedValues::BoxValues>();
-        if (box_values && box_values->is_scroll_state_container && element.style_depends_on_size_container_query()) {
-            DOM::Element::EnginePseudoElementRecords pseudo_records {};
-            bool settled_pseudo = false;
-            u32 row_facts = 0;
-            for (auto kind : { PseudoElement::Before, PseudoElement::After, PseudoElement::FirstLetter, PseudoElement::Marker }) {
-                auto answer = scope.engine().answer_record_demand(element.style_node_id(), to_underlying(kind), false, true, true);
-                pseudo_records[to_underlying(kind)] = StyleRecordID { answer.record.style_record };
-                row_facts = answer.row_facts;
-                settled_pseudo = true;
-            }
-            if (settled_pseudo)
-                *invalidation |= element.apply_engine_computed_style_record(scope, element.style_record_identity(), pseudo_records, false, row_facts, did_change_custom_properties);
-            // The container's pseudo rules can change after its descendants finish style and
-            // layout and the scroll-state snapshot is published.
-            invalidation->recompute_descendant_styles = true;
-        }
-        return *invalidation;
+    Animations::AnimationUpdateContext context;
+    for (auto& animation : element.associated_animations_in_composite_order()) {
+        if (animation->is_idle() || !animation->effect() || !is<Animations::KeyframeEffect>(*animation->effect()))
+            continue;
+        auto& effect = static_cast<Animations::KeyframeEffect&>(*animation->effect());
+        if (effect.target().ptr() != &element || effect.pseudo_element_type().has_value())
+            continue;
+        effect.update_computed_properties_for_style(context, DOM::AbstractElement { element });
     }
-    return {};
 }
 
+// The pseudo-elements a scroll-state container's pseudo rules can style.
+static constexpr Array scroll_state_container_pseudo_elements { PseudoElement::Before, PseudoElement::After, PseudoElement::FirstLetter, PseudoElement::Marker };
+
 // Install the records a targeted read demands for the inheritance chain, from its topmost stale
-// element down, inside the effect drain. False when the walk stops at a display:none element.
-static bool install_targeted_styles(StyleDrainScope const& scope, GC::RootVector<GC::Ref<DOM::Element>>& inheritance_chain, size_t topmost_element_to_recompute, StyleUpdateMode mode)
+// element down. Each record is answered by the engine before a drain installs it. False when the
+// walk stops at a display:none element.
+static bool install_targeted_styles(DOM::Document& document, GC::RootVector<GC::Ref<DOM::Element>>& inheritance_chain, size_t topmost_element_to_recompute, StyleUpdateMode mode)
 {
     bool descendant_style_recompute_needed = false;
     for (size_t i = topmost_element_to_recompute + 1; i > 0; --i) {
         auto& element = inheritance_chain[i - 1];
+        bool const was_unstyled = !element->has_style();
         bool did_change_custom_properties = false;
         auto const row_start = style_row_start(*element);
-        DOM::begin_style_row_counter_style_invalidation(*element);
-        auto invalidation = materialize_style_for_targeted_update(scope, element, did_change_custom_properties);
-        auto const counter_style_invalidation = DOM::end_style_row_counter_style_invalidation(*element);
-        apply_targeted_style_invalidation(scope, element, row_start, invalidation, counter_style_invalidation, did_change_custom_properties, descendant_style_recompute_needed);
-
-        descendant_style_recompute_needed |= invalidation.recompute_descendant_styles;
+        auto const answer = answer_targeted_record_demand(*element);
+        Optional<RequiredInvalidationAfterStyleChange> installed;
+        bool reads_scroll_state_pseudo_elements = false;
+        auto finish_element = [&](StyleDrainScope const& scope) {
+            auto invalidation = installed.value_or({});
+            auto const counter_style_invalidation = DOM::end_style_row_counter_style_invalidation(*element);
+            apply_targeted_style_invalidation(scope, element, row_start, invalidation, counter_style_invalidation, did_change_custom_properties, descendant_style_recompute_needed);
+            descendant_style_recompute_needed |= invalidation.recompute_descendant_styles;
+        };
+        StyleEffectDrain::install(document, [&](StyleDrainScope const& scope) {
+            DOM::begin_style_row_counter_style_invalidation(*element);
+            installed = install_targeted_record_demand_answer(scope, element, answer, did_change_custom_properties);
+            if (installed.has_value()) {
+                if (was_unstyled && element->has_relevant_animations())
+                    sample_animations_of_newly_styled_target(element);
+                auto const* box_values = element->style_group<ComputedValues::BoxValues>();
+                reads_scroll_state_pseudo_elements = box_values && box_values->is_scroll_state_container && element->style_depends_on_size_container_query();
+            }
+            if (!reads_scroll_state_pseudo_elements)
+                finish_element(scope);
+        });
+        if (reads_scroll_state_pseudo_elements) {
+            DOM::Element::EnginePseudoElementRecords pseudo_records {};
+            u32 row_facts = 0;
+            for (auto kind : scroll_state_container_pseudo_elements) {
+                auto pseudo_answer = answer_targeted_record_demand(element, kind);
+                pseudo_records[to_underlying(kind)] = StyleRecordID { pseudo_answer.record.style_record };
+                row_facts = pseudo_answer.row_facts;
+            }
+            StyleEffectDrain::install(document, [&](StyleDrainScope const& scope) {
+                *installed |= element->apply_engine_computed_style_record(scope, element->style_record_identity(), pseudo_records, false, row_facts, did_change_custom_properties);
+                // The container's pseudo rules can change after its descendants finish style and
+                // layout and the scroll-state snapshot is published.
+                installed->recompute_descendant_styles = true;
+                finish_element(scope);
+            });
+        }
 
         VERIFY(element->has_style());
         auto const* box_values = element->style_group<ComputedValues::BoxValues>();
@@ -1256,7 +1273,7 @@ static bool install_targeted_styles(StyleDrainScope const& scope, GC::RootVector
             descendant_style_recompute_needed = false;
         }
 
-        if (did_change_custom_properties || invalidation.needs_layout_tree_rebuild())
+        if (did_change_custom_properties || (installed.has_value() && installed->needs_layout_tree_rebuild()))
             descendant_style_recompute_needed = true;
     }
     return true;
@@ -1487,11 +1504,7 @@ static bool update_style_for_element(DOM::Document& document, DOM::AbstractEleme
             return abstract_element.has_style();
     }
 
-    bool stopped_at_display_none = false;
-    StyleEffectDrain::install(document, [&](StyleDrainScope const& scope) {
-        stopped_at_display_none = !install_targeted_styles(scope, inheritance_chain, *topmost_element_to_recompute, mode);
-    });
-    if (stopped_at_display_none)
+    if (!install_targeted_styles(document, inheritance_chain, *topmost_element_to_recompute, mode))
         return false;
     return abstract_element.has_style();
 }

@@ -222,8 +222,6 @@ pub struct FfiRecordDemandAnswer {
     pub is_provisional: bool,
     /// The node's `FfiStyleRowFact` word as the demand leaves it.
     pub row_facts: u32,
-    /// The node's settled row effect debt, when the caller asked to take it with the record.
-    pub row_effect_debt: u32,
 }
 
 /// One record slot per synthetic pseudo-element kind in a retried record.
@@ -4082,37 +4080,6 @@ pub unsafe fn replay_republish_record_environment(engine: *mut c_void, node: u32
         .unwrap_or(0)
 }
 
-/// Settle one node from current retained inputs, leaving other nodes' queued inputs intact.
-/// `pseudo_kind == u8::MAX` selects the originating element.
-///
-/// # Safety
-/// `engine` must be live.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_answer_record_demand(
-    engine: *mut c_void,
-    node: u32,
-    pseudo_kind: u8,
-    exclude_inline_style: bool,
-    targeted: bool,
-    read_only: bool,
-    parent_highlight: u64,
-    take_row_debts: bool,
-) -> FfiRecordDemandAnswer {
-    engine_entrance(engine, "style_engine_answer_record_demand");
-    abort_on_panic(|| {
-        answer_record_demand_for_host(
-            unsafe { &mut *engine.cast::<StyleEngine>() },
-            node,
-            pseudo_kind,
-            exclude_inline_style,
-            targeted,
-            read_only,
-            parent_highlight,
-            take_row_debts,
-        )
-    })
-}
-
 /// Answer a style read the host has to answer synchronously, as a CSSOM read does, in a style
 /// stage run of its own: the host has joined the frame in flight, and the engine computes the
 /// answer where it computes every other record. `pseudo_kind == u8::MAX` selects the originating
@@ -4142,7 +4109,6 @@ pub unsafe extern "C" fn style_engine_answer_read_demand(
                 targeted,
                 read_only,
                 parent_highlight,
-                false,
             )
         })
     })
@@ -4157,7 +4123,6 @@ fn answer_record_demand_for_host(
     targeted: bool,
     read_only: bool,
     parent_highlight: u64,
-    take_row_debts: bool,
 ) -> FfiRecordDemandAnswer {
     let Some(node) = StyleNodeID::from_raw(node) else {
         return FfiRecordDemandAnswer {
@@ -4165,7 +4130,6 @@ fn answer_record_demand_for_host(
             is_absent: true,
             is_provisional: false,
             row_facts: 0,
-            row_effect_debt: 0,
         };
     };
     let mut result = match engine.answer_record_demand(
@@ -4187,21 +4151,15 @@ fn answer_record_demand_for_host(
             is_absent: false,
             is_provisional: answer.provisional,
             row_facts: 0,
-            row_effect_debt: 0,
         },
         super::publication::RecordDemandAnswer::Absent => FfiRecordDemandAnswer {
             record: FfiEngineComputedRecord::default(),
             is_absent: true,
             is_provisional: false,
             row_facts: 0,
-            row_effect_debt: 0,
         },
     };
     result.row_facts = engine.style_row_facts(node);
-    if take_row_debts && !result.is_absent {
-        result.record.explicit_inheritance_debt = engine.take_explicit_inheritance_debt(node);
-        result.row_effect_debt = u32::from(engine.take_settled_row_effect_debt(node));
-    }
     engine.record_boundary_call(EventKind::AnswerRecordDemand, |payload| {
         payload.write_u32(node.raw());
         payload.write_u8(pseudo_kind);
@@ -6154,8 +6112,6 @@ pub enum FfiStyleHostStep {
     Row,
     RetriedAfterAncestors,
     RetriedMaterialization,
-    /// A row whose declarations or environment moved under it, asked for again in the loop.
-    InLoopRecordDemand,
     /// Pseudo-element records settled after the host installed and sampled the element's.
     PseudoSettle,
     DeclinedRow,
@@ -6170,7 +6126,6 @@ impl FfiStyleHostStep {
             Self::Row => "host:row",
             Self::RetriedAfterAncestors => "host:retried_after_ancestors",
             Self::RetriedMaterialization => "host:retried_materialization",
-            Self::InLoopRecordDemand => "host:in_loop_record_demand",
             Self::PseudoSettle => "host:pseudo_settle",
             Self::DeclinedRow => "host:declined_row",
             Self::InheritedCustomPropertyRefresh => "host:inherited_custom_property_refresh",
