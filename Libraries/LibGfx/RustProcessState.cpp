@@ -23,7 +23,8 @@ void ladybird_gfx_decoded_image_frame_release(void*);
 void ladybird_gfx_process_note_host_reaching_call(u8 const* name, size_t length);
 void ladybird_gfx_process_set_host_reaching_call_hook(void (*hook)(u8 const*, size_t));
 void ladybird_gfx_process_note_wanted_pending_face(u64 face_id);
-void ladybird_gfx_process_take_wanted_pending_faces(void* context, void (*visit)(void*, u64, bool));
+u64 ladybird_gfx_process_set_wanted_face_owner(u64 owner);
+void ladybird_gfx_process_take_wanted_pending_faces(u64 owner, void* context, void (*visit)(void*, u64, bool));
 void ladybird_gfx_process_requeue_wanted_pending_face(u64 face_id);
 u64 ladybird_gfx_process_next_path_identity();
 void ladybird_gfx_process_register_image_frame(u64 id, void const* frame);
@@ -46,8 +47,11 @@ struct ProcessState {
     // A face a completed cascade wanted. A want that the document thread could not turn into a
     // load is kept for one more drain: the face may simply not have been reachable yet, and a
     // frozen cascade only ever wants a face once.
+    // The owner is the document whose stage wanted the face (0: none said), so that one document's
+    // layout end does not take the faces another document's stage, running beside it, noted.
     struct WantedFace {
         u64 face_id { 0 };
+        u64 owner { 0 };
         bool has_been_retried { false };
     };
     Vector<WantedFace> wanted_pending_faces;
@@ -65,6 +69,9 @@ struct ProcessState {
 };
 
 Singleton<ProcessState> s_process_state;
+
+// The document whose stage this thread runs, which every want noted here goes to.
+thread_local u64 t_wanted_face_owner { 0 };
 
 ProcessState& process_state()
 {
@@ -103,23 +110,34 @@ extern "C" void ladybird_gfx_process_note_wanted_pending_face(u64 face_id)
 {
     auto& state = process_state();
     MutexLocker locker(state.mutex);
-    state.wanted_pending_faces.append({ face_id, false });
+    state.wanted_pending_faces.append({ face_id, t_wanted_face_owner, false });
 }
 
 extern "C" void ladybird_gfx_process_requeue_wanted_pending_face(u64 face_id)
 {
     auto& state = process_state();
     MutexLocker locker(state.mutex);
-    state.wanted_pending_faces.append({ face_id, true });
+    state.wanted_pending_faces.append({ face_id, t_wanted_face_owner, true });
 }
 
-extern "C" void ladybird_gfx_process_take_wanted_pending_faces(void* context, void (*visit)(void*, u64, bool))
+extern "C" u64 ladybird_gfx_process_set_wanted_face_owner(u64 owner)
+{
+    return exchange(t_wanted_face_owner, owner);
+}
+
+// Takes the wants of `owner`'s stages, and those no stage owned.
+extern "C" void ladybird_gfx_process_take_wanted_pending_faces(u64 owner, void* context, void (*visit)(void*, u64, bool))
 {
     auto& state = process_state();
     Vector<ProcessState::WantedFace> wanted;
     {
         MutexLocker locker(state.mutex);
-        wanted = move(state.wanted_pending_faces);
+        state.wanted_pending_faces.remove_all_matching([&](auto const& face) {
+            if (face.owner != owner && face.owner != 0)
+                return false;
+            wanted.append(face);
+            return true;
+        });
     }
     for (auto const& face : wanted)
         visit(context, face.face_id, face.has_been_retried);

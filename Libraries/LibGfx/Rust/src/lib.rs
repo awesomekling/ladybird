@@ -71,7 +71,12 @@ mod process_state_test_stubs {
         WANTED.lock().unwrap().push((face_id, true));
     }
     #[unsafe(no_mangle)]
+    extern "C" fn ladybird_gfx_process_set_wanted_face_owner(_owner: u64) -> u64 {
+        0
+    }
+    #[unsafe(no_mangle)]
     extern "C" fn ladybird_gfx_process_take_wanted_pending_faces(
+        _owner: u64,
         context: *mut c_void,
         visit: extern "C" fn(*mut c_void, u64, bool),
     ) {
