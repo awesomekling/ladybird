@@ -312,12 +312,20 @@ public:
         publish_inputs_queued_during_pass();
     }
 
+    // Whether a layout pass that reads this engine is in flight. What the host publishes beside it waits for the
+    // pass to be taken back, and is published as its frame ends (see publish_inputs_waiting_for_layout_pass()).
+    [[nodiscard]] bool layout_pass_is_in_flight() const;
+
     // Publish a style input: at once between passes, and once the pass has drained while one is in
-    // flight, in the order the host published them.
+    // flight, in the order the host published them. Beside a layout pass it waits for the pass the same way.
     void publish_input(Function<void(StyleInputScope const&)>&&);
     // Publish an input the drain records too, and whose later waves read: at once inside a drain, and as
     // publish_input() otherwise.
     void publish_input_or_apply_in_drain(Function<void(StyleInputScope const&)>&&);
+
+    // The layout frame's end: what was published beside its pass reaches the engine, ahead of anything published
+    // after it.
+    void publish_inputs_waiting_for_layout_pass() { publish_inputs_queued_during_pass(); }
 
     // While the host takes a submitted pass back and drains it, what was recorded and published beside the pass
     // waits for the next transaction: an operation that the drain interrupted must not have half of its input

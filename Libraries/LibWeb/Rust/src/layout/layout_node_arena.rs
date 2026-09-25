@@ -6210,8 +6210,12 @@ pub unsafe extern "C" fn layout_arena_join_frame_for_dom_tree_mutation(arena: *m
     let location = std::panic::Location::caller();
     // A style pass alone in flight is the exception: what the mutation writes to the style mirror
     // goes through the engine's own entrances, which leave their inputs for the pass's drain or
-    // join the pass, and the rows it frees or marks are no longer the pass's to read.
-    if !crate::stage_thread::only_style_pass_in_flight_for_arena(arena) {
+    // join the pass, and the rows it frees or marks are no longer the pass's to read. So is a
+    // layout pass: the inputs wait for it to be taken back, and the rows it owns wait at the
+    // arena's own doors.
+    if !crate::stage_thread::only_style_pass_in_flight_for_arena(arena)
+        && !crate::stage_thread::layout_pass_in_flight_for_arena(arena)
+    {
         crate::stage_thread::join_frame_reaching_style_engine_at(
             arena,
             location.file(),

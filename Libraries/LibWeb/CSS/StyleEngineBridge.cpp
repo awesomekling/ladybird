@@ -37,12 +37,20 @@ extern "C" void rust_font_face_snapshot_view(void const*, FontFaceSnapshotView*)
 extern "C" void style_engine_reset_custom_functions(void*);
 extern "C" void style_engine_publish_custom_function(void*, void const*, FlatPtr, FlatPtr, u32);
 
+bool StyleEngine::layout_pass_is_in_flight() const
+{
+    return Layout::RustFFI::rust_stage_thread_layout_pass_in_flight_for(m_impl);
+}
+
 void StyleEngine::publish_input(Function<void(StyleInputScope const&)>&& input)
 {
-    if (pass_is_in_flight()) {
+    if (pass_is_in_flight() || layout_pass_is_in_flight()) {
         m_inputs_queued_during_pass.append(move(input));
         return;
     }
+    // A layout pass taken back publishes what waited for it as its frame ends, and code the take-back runs before
+    // that may publish too: what waited goes first.
+    publish_inputs_queued_during_pass();
     StyleInputScope const scope { *this };
     input(scope);
 }
@@ -72,7 +80,7 @@ void StyleEngine::end_holding_input_recorded_beside_pass()
 
 void StyleEngine::publish_inputs_queued_during_pass()
 {
-    while (!pass_is_in_flight() && !m_holds_input_recorded_beside_pass && !m_inputs_queued_during_pass.is_empty()) {
+    while (!pass_is_in_flight() && !m_holds_input_recorded_beside_pass && !m_inputs_queued_during_pass.is_empty() && !layout_pass_is_in_flight()) {
         auto input = m_inputs_queued_during_pass.take_first();
         StyleInputScope const scope { *this };
         input(scope);
@@ -894,6 +902,11 @@ void StyleEngine::submit_recorded_input()
     // The recorded input is the next transaction's journal. While a pass is in flight it stays there.
     if (pass_is_in_flight() || m_holds_input_recorded_beside_pass)
         return;
+    // A layout pass reads what the engine holds, and whoever submits the recorded input goes on to ask the engine
+    // about it, which takes the pass back anyway: it is taken back first, and the recorded input goes in whole
+    // after what was published beside the pass.
+    if (m_style_computer && layout_pass_is_in_flight())
+        m_style_computer->document().join_frame_reaching_style_engine();
     StyleInputScope const input { *this };
     if (m_style_computer)
         publish_pending_element_features(*this, *m_style_computer);
@@ -1265,8 +1278,9 @@ bool StyleEngine::pending_transaction_may_affect_layout_geometry()
 bool StyleEngine::has_deferred_geometry_transaction() const
 {
     // The submitted pass took the transaction a geometry read deferred with the rest of its inputs, and only a
-    // geometry read, which takes the pass back first, defers another one.
-    if (Layout::RustFFI::rust_stage_thread_only_style_pass_in_flight_for(m_impl))
+    // geometry read, which takes the pass back first, defers another one. A layout pass is submitted once the
+    // frame's style rounds have applied every transaction, a deferred one included.
+    if (Layout::RustFFI::rust_stage_thread_only_style_pass_in_flight_for(m_impl) || layout_pass_is_in_flight())
         return false;
     return StyleEngineFFI::style_engine_has_deferred_geometry_transaction(m_impl);
 }

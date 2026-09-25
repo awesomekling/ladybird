@@ -791,6 +791,26 @@ pub extern "C" fn rust_stage_thread_only_style_pass_in_flight_for(engine: *const
     })
 }
 
+/// Whether a layout pass that reads the style engine `engine` is in flight: what the host publishes to
+/// that engine beside it waits for the pass to be taken back (see `StyleEngine::publish_input`).
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_stage_thread_layout_pass_in_flight_for(engine: *const c_void) -> bool {
+    SUBMITTED.with_borrow(|submitted| {
+        submitted
+            .iter()
+            .any(|stage| stage.label == "layout" && stage.style_engine == engine as usize)
+    })
+}
+
+/// As [`rust_stage_thread_layout_pass_in_flight_for`], for the document the arena `arena` belongs to.
+pub(crate) fn layout_pass_in_flight_for_arena(arena: *mut c_void) -> bool {
+    SUBMITTED.with_borrow(|submitted| {
+        submitted
+            .iter()
+            .any(|stage| stage.label == "layout" && stage.arena == arena as usize)
+    })
+}
+
 /// Like [`join_frame_in_flight_at`], for a main-side write to the style engine of the document the
 /// arena `arena` belongs to: joins the frame in flight only if one of its stages for that arena
 /// reaches the style engine (a style or layout pass). A recording reads nothing of the style
@@ -807,17 +827,18 @@ pub(crate) fn join_frame_reaching_style_engine_at(arena: *mut c_void, file: &'st
     }
 }
 
-/// Whether the frame in flight owns the arena `arena` with stages that reach no style engine (its
-/// recordings) only. A main-side change the arena would take in beside such a frame can wait for
-/// the frame's take-back instead of joining it.
+/// Whether the frame in flight owns the arena `arena` with its recordings, which reach no style
+/// engine, and its layout pass, beside which what the document publishes to its style engine waits
+/// (see [`rust_stage_thread_layout_pass_in_flight_for`]), only. A main-side change the arena would
+/// take in beside such a frame can wait for the frame's take-back instead of joining it.
 #[unsafe(no_mangle)]
-pub extern "C" fn rust_stage_thread_only_recordings_own(arena: *mut c_void) -> bool {
+pub extern "C" fn rust_stage_thread_arena_changes_wait_for_frame(arena: *mut c_void) -> bool {
     SUBMITTED.with_borrow(|submitted| {
         let mut owners = submitted
             .iter()
             .filter(|stage| stage.arena == arena as usize)
             .peekable();
-        owners.peek().is_some() && owners.all(|stage| stage.style_engine == 0)
+        owners.peek().is_some() && owners.all(|stage| stage.style_engine == 0 || stage.label == "layout")
     })
 }
 

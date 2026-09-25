@@ -129,8 +129,9 @@ public:
     void consume_commit(EventLoop::FrameConsumeSite);
 
     // Whether a main-side change to the arena of `document` waits for the frame in flight instead of joining it: only
-    // recordings own the arena, and they read nothing of the style engine, so what the document goes on to do beside
-    // them reaches the arena through the changes deferred here alone.
+    // recordings, which read nothing of the style engine, and a layout pass, beside which what the document publishes
+    // to its style engine waits for the pass, own the arena, so what the document goes on to do beside them reaches
+    // the arena through the changes deferred here alone.
     static bool arena_changes_wait_for_frame(DOM::Document const&);
 
     // A change to an arena that waits for the frame in flight (see arena_changes_wait_for_frame()), which the recording

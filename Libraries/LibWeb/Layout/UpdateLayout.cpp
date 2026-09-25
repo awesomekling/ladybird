@@ -94,6 +94,7 @@ Layout::RustFFI::FfiLayoutUpdateHostCallbacks Document::layout_update_host_callb
             document.end_style_stabilization_epoch();
             Layout::RustFFI::layout_arena_end_update_layout(document.layout_node_arena().handle());
             document.release_held_invalidation_marks();
+            document.style_computer().style_engine().publish_inputs_waiting_for_layout_pass();
 
             // A frame taken back in the middle of main-thread code tells the document nothing that can run script there:
             // its messages and the resnap wait for the next layout update to end, which runs before anything reads them.
