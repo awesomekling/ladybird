@@ -17,6 +17,7 @@
 #include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleEngineInput.h>
+#include <LibWeb/CSS/StyleInputScope.h>
 #include <LibWeb/CSS/StyleScope.h>
 #include <LibWeb/CSS/StyleSheetImport.h>
 #include <LibWeb/CSS/StyleSheetInvalidation.h>
@@ -946,6 +947,7 @@ void StyleScope::build_counter_style_cache()
         if (!style_sheet.native_media_list().matches())
             return;
         auto& style_engine = document().style_computer().style_engine();
+        [[maybe_unused]] auto const input = StyleInputScope::between_passes(style_engine);
         auto const tree_scope = style_engine_tree_scope();
         auto const origin_priority = [&]() -> u8 {
             switch (cascade_origin) {
@@ -1183,6 +1185,7 @@ Optional<StyleScope::FunctionDefinitionAndScope> StyleScope::get_function_defini
             RustCompiledFunction const* cascade_origin_result = nullptr;
             u32 existing_layer_index = 0;
             auto& style_engine = scope.document().style_computer().style_engine();
+            [[maybe_unused]] auto const input = StyleInputScope::between_passes(style_engine);
             auto const tree_scope = scope.style_engine_tree_scope();
             auto layer_index_of = [&](Utf16FlyString const& qualified_layer_name) {
                 auto const layer = qualified_layer_name.is_empty() ? 0 : style_engine.intern_atom(qualified_layer_name);

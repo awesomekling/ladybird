@@ -50,6 +50,7 @@
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleEffectDrain.h>
 #include <LibWeb/CSS/StyleEngineInput.h>
+#include <LibWeb/CSS/StyleInputScope.h>
 #include <LibWeb/CSS/StyleInvalidation.h>
 #include <LibWeb/CSS/StylePropertyMap.h>
 #include <LibWeb/CSS/StyleSheetInvalidation.h>
@@ -5231,8 +5232,11 @@ void Element::replace_style_record(CSS::StyleRecordID style_record_identity)
     if (old_style_record_identity == style_record_identity)
         return;
     m_style_record_identity = style_record_identity;
-    if (style_node_id() != 0)
-        document().style_computer().style_engine().set_element_container_query_inputs(style_node_id(), style_record_identity);
+    if (style_node_id() != 0) {
+        auto& style_engine = document().style_computer().style_engine();
+        [[maybe_unused]] auto const input = CSS::StyleInputScope::between_passes(style_engine);
+        style_engine.set_element_container_query_inputs(style_node_id(), style_record_identity);
+    }
     if (auto* layout_node = unsafe_layout_node())
         layout_node->set_style_record_identity(style_record_identity);
 }
@@ -5473,6 +5477,7 @@ void Element::publish_style_recomputes_on_environment_move() const
     if (!m_style_uses_if_css_function && !m_style_uses_inherit_css_function && !m_style_uses_custom_function && !m_style_depends_on_style_container_query)
         return;
     auto& style_engine = const_cast<CSS::StyleEngine&>(document().style_computer().style_engine());
+    [[maybe_unused]] auto const input = CSS::StyleInputScope::between_passes(style_engine);
     CSS::StyleEngineFFI::style_engine_note_element_recomputes_on_environment_move(style_engine.rust_handle(), style_node.value());
 }
 
@@ -5483,7 +5488,9 @@ void Element::publish_size_container_query_facts() const
         return;
     if (!m_is_size_query_container && !m_style_depends_on_size_container_query)
         return;
-    auto* style_engine = const_cast<CSS::StyleEngine&>(document().style_computer().style_engine()).rust_handle();
+    auto& engine = const_cast<CSS::StyleEngine&>(document().style_computer().style_engine());
+    [[maybe_unused]] auto const input = CSS::StyleInputScope::between_passes(engine);
+    auto* style_engine = engine.rust_handle();
     if (m_is_size_query_container)
         CSS::StyleEngineFFI::style_engine_note_size_query_container(style_engine, style_node.value());
     if (m_style_depends_on_size_container_query)

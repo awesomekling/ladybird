@@ -17,6 +17,7 @@
 #include <LibWeb/CSS/Display.h>
 #include <LibWeb/CSS/LengthBox.h>
 #include <LibWeb/CSS/StyleComputer.h>
+#include <LibWeb/CSS/StyleInputScope.h>
 #include <LibWeb/CSS/StyleValues/AnchorStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CalculatedStyleValue.h>
 #include <LibWeb/CSS/ValueType.h>
@@ -110,7 +111,9 @@ static CSS::StyleAtomID svg_reference_fragment_atom(DOM::Element& element, Optio
     if (!url.has_value() || !url->fragment().has_value())
         return {};
     auto fragment = SVG::decode_fragment_identifier(*url->fragment());
-    return element.document().style_computer().style_engine().intern_atom(Utf16FlyString::from_utf16(fragment.utf16_view()));
+    auto& style_engine = element.document().style_computer().style_engine();
+    [[maybe_unused]] auto const input = CSS::StyleInputScope::between_passes(style_engine);
+    return style_engine.intern_atom(Utf16FlyString::from_utf16(fragment.utf16_view()));
 }
 
 // The same, for a reference a graphics element's style carries rather than its `href`.
@@ -126,7 +129,9 @@ static CSS::StyleAtomID svg_style_reference_fragment_atom(DOM::Element& element,
     if (!fragment_offset.has_value())
         return {};
     auto fragment = SVG::decode_fragment_identifier(url->url().substring_view(fragment_offset.value() + 1));
-    return element.document().style_computer().style_engine().intern_atom(Utf16FlyString::from_utf16(fragment.utf16_view()));
+    auto& style_engine = element.document().style_computer().style_engine();
+    [[maybe_unused]] auto const input = CSS::StyleInputScope::between_passes(style_engine);
+    return style_engine.intern_atom(Utf16FlyString::from_utf16(fragment.utf16_view()));
 }
 
 static Optional<CSS::URL> svg_paint_url(Optional<CSS::SVGPaint> const& paint)

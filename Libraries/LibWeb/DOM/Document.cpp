@@ -75,6 +75,7 @@
 #include <LibWeb/CSS/SelectorMatching.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleEngineInput.h>
+#include <LibWeb/CSS/StyleInputScope.h>
 #include <LibWeb/CSS/StyleSheetIdentifier.h>
 #include <LibWeb/CSS/StyleSheetImport.h>
 #include <LibWeb/CSS/StyleSheetList.h>
@@ -2061,7 +2062,9 @@ void Document::record_partial_relayout_escape(PartialRelayoutEscapeReason reason
 // committed their boxes.
 void Document::set_needs_container_query_evaluation_after_layout(Element const& query_container)
 {
-    CSS::StyleEngineFFI::style_engine_note_size_container_needs_evaluation_after_layout(style_computer().style_engine().rust_handle(), query_container.style_node_id().value());
+    auto& style_engine = style_computer().style_engine();
+    [[maybe_unused]] auto const input = CSS::StyleInputScope::between_passes(style_engine);
+    CSS::StyleEngineFFI::style_engine_note_size_container_needs_evaluation_after_layout(style_engine.rust_handle(), query_container.style_node_id().value());
 }
 
 bool Document::has_size_containers_needing_evaluation_after_layout() const
@@ -10934,6 +10937,7 @@ void Document::did_change_custom_property_registrations(Optional<Utf16FlyString>
     // name. CSS.registerProperty() has no rule, so publish the equivalent named input explicitly.
     if (registered_property_set_change.has_value()) {
         auto& style_engine = style_computer().style_engine();
+        [[maybe_unused]] auto const input = CSS::StyleInputScope::between_passes(style_engine);
         style_engine.record_custom_property_registration_change(style_engine.intern_atom(*registered_property_set_change));
     }
 }
