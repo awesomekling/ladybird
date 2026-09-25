@@ -16,9 +16,14 @@
     // A read of layout geometry that finds the document dirty beside a recording of it in flight starts its style
     // update beside the recording, which reaches no style engine, and takes the recording in once: where the update
     // installs a style in a box the recording reads, or else for its layout.
-    function readBesideRecording(mutate, read) {
+    // The rendering update records a change that lays nothing out: where a flight runs layout and recording in one, a
+    // change that lays out goes into the flight, and a read has to wait for its layout.
+    let repaints = 0;
+    async function readBesideRecording(mutate, read) {
+        box.style.height = `${box.offsetHeight + 1}px`;
+        await twoFrames();
         return whileFrameInFlight("mid-recording", () => {
-            box.style.height = `${box.offsetHeight + 1}px`;
+            box.style.backgroundColor = ++repaints % 2 ? "green" : "blue";
         }, frame => {
             mutate();
             const before = internals.getJoinCounters().totals;
