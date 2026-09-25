@@ -82,6 +82,7 @@ use crate::layout::node_data::NodeSlotId;
 pub use crate::layout::node_data::STYLE_GROUP_COUNT;
 pub(crate) use crate::layout::text_queries::MainThreadFfiEntry as TextQueriesMainThreadFfiEntry;
 pub(crate) use crate::layout::trace::MainThreadFfiEntry as TraceMainThreadFfiEntry;
+pub(crate) use crate::layout::viewport_propagation::root_background_source;
 pub(crate) use abspos_inputs::{AbsposAlignment, StaticPositionAlignment};
 pub(crate) use formatting_context::{
     ChildLayoutOutcome, DerivedBaselines, FormattingContextRun, LayoutHost, LayoutMode, Node, SizingAxis,

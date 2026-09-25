@@ -27,7 +27,6 @@ use crate::abort_on_panic;
 use crate::css::ffi_support::FfiUtf16View;
 use crate::css::style::tree::StyleNodeID;
 use crate::layout::used_values::FfiCssPixelPoint;
-use crate::painting::host::FfiRootBackgroundSource;
 use crate::painting::paintable_data::FfiSelectionSnapshot;
 use crate::painting::selection::SelectionSnapshot;
 use std::cell::Cell;
@@ -51,9 +50,6 @@ pub struct FfiLayoutUpdateHostCallbacks {
     pub document_facts: unsafe extern "C" fn(*mut c_void) -> FfiLayoutUpdateDocumentFacts,
     pub needs_style_update_after_layout: unsafe extern "C" fn(*mut c_void) -> bool,
     pub prepare_for_rendering: unsafe extern "C" fn(*mut c_void),
-    /// The root element and body boxes the root background is painted from, and whether the body's
-    /// background properties are the ones used.
-    pub root_background_source: unsafe extern "C" fn(*mut c_void) -> FfiRootBackgroundSource,
     /// Readies the document for a layout tree build, and answers with the document's style node,
     /// which the build walks from.
     pub prepare_layout_tree_build: unsafe extern "C" fn(*mut c_void) -> u32,
@@ -196,7 +192,6 @@ pub(crate) struct LayoutUpdateHost {
     document_facts: unsafe extern "C" fn(*mut c_void) -> FfiLayoutUpdateDocumentFacts,
     needs_style_update_after_layout: unsafe extern "C" fn(*mut c_void) -> bool,
     prepare_for_rendering: unsafe extern "C" fn(*mut c_void),
-    root_background_source: unsafe extern "C" fn(*mut c_void) -> FfiRootBackgroundSource,
     prepare_layout_tree_build: unsafe extern "C" fn(*mut c_void) -> u32,
     renew_paint_state: unsafe extern "C" fn(*mut c_void),
     rebuild_list_owners_with_stale_item_counters: unsafe extern "C" fn(*mut c_void, *const u32, usize),
@@ -221,7 +216,6 @@ impl From<FfiLayoutUpdateHostCallbacks> for LayoutUpdateHost {
             document_facts: host.document_facts,
             needs_style_update_after_layout: host.needs_style_update_after_layout,
             prepare_for_rendering: host.prepare_for_rendering,
-            root_background_source: host.root_background_source,
             prepare_layout_tree_build: host.prepare_layout_tree_build,
             renew_paint_state: host.renew_paint_state,
             rebuild_list_owners_with_stale_item_counters: host.rebuild_list_owners_with_stale_item_counters,
@@ -260,10 +254,6 @@ impl LayoutUpdateHost {
 
     fn prepare_for_rendering(&self, _: &crate::stage::MainThread) {
         unsafe { (self.prepare_for_rendering)(self.context) }
-    }
-
-    fn root_background_source(&self, _: &crate::stage::MainThread) -> FfiRootBackgroundSource {
-        unsafe { (self.root_background_source)(self.context) }
     }
 
     fn prepare_layout_tree_build(&self, _: &crate::stage::MainThread) -> u32 {
@@ -462,25 +452,22 @@ struct FrameInputs {
     trace: UpdateLayoutTrace,
 }
 
-/// What a layout pass reads from the document ahead of it: the replaced content enrolled for sync,
-/// and the boxes the root background is painted from, which the rendering preparation after the
-/// pass's commit reads. The join the pass follows reads them, so the pass itself prepares the
-/// arena, and its commit prepares for rendering, without the document thread.
+/// What a layout pass reads from the document ahead of it: the replaced content enrolled for sync.
+/// The join the pass follows reads it, so the pass itself prepares the arena without the document
+/// thread.
 struct LayoutPassSources {
     content: EnrolledContentSources,
-    root_background_source: FfiRootBackgroundSource,
 }
 
 impl LayoutPassSources {
     /// # Safety
     ///
     /// As for [`arena`], on the document thread.
-    unsafe fn read(main_thread: &crate::stage::MainThread, host: &LayoutUpdateHost, arena_handle: *mut c_void) -> Self {
+    unsafe fn read(main_thread: &crate::stage::MainThread, arena_handle: *mut c_void) -> Self {
         // SAFETY: Guaranteed by the caller.
         unsafe {
             Self {
                 content: read_enrolled_content_sources(main_thread, arena_handle),
-                root_background_source: host.root_background_source(main_thread),
             }
         }
     }
@@ -640,11 +627,7 @@ impl PendingLayoutPass {
         let Self {
             arena_handle,
             layout_root,
-            sources:
-                LayoutPassSources {
-                    content,
-                    root_background_source,
-                },
+            sources: LayoutPassSources { content },
             facts,
             started,
         } = self;
@@ -673,7 +656,6 @@ impl PendingLayoutPass {
         arena.note_full_layout();
         LaidOutPass {
             commit_host_half,
-            root_background_source,
             facts,
             started,
         }
@@ -684,7 +666,6 @@ impl PendingLayoutPass {
 /// the frame still owes the document thread.
 struct LaidOutPass {
     commit_host_half: DeferredLayoutCommitHostHalf,
-    root_background_source: FfiRootBackgroundSource,
     facts: FfiLayoutUpdateDocumentFacts,
     started: Option<Instant>,
 }
@@ -770,7 +751,7 @@ impl LayoutFrame {
         }
         RoundAfterStyle {
             // SAFETY: The frame runs for the update the arena is in.
-            pass_sources: Some(unsafe { LayoutPassSources::read(main_thread, host, self.inputs.arena_handle) }),
+            pass_sources: Some(unsafe { LayoutPassSources::read(main_thread, self.inputs.arena_handle) }),
             selection,
             ..RoundAfterStyle::default()
         }
@@ -821,13 +802,8 @@ impl LayoutFrame {
     /// searchable text is dropped, and after a tree change the boxes with `content-visibility: auto`
     /// are collected again for the document's paint state, and the document's viewport clients are
     /// to be told the viewport rect.
-    fn note_layout_commit(
-        &mut self,
-        layout_tree_changed: bool,
-        facts: &FfiLayoutUpdateDocumentFacts,
-        root_background_source: FfiRootBackgroundSource,
-    ) {
-        self.prepare_for_rendering_after_commit(root_background_source);
+    fn note_layout_commit(&mut self, layout_tree_changed: bool, facts: &FfiLayoutUpdateDocumentFacts) {
+        self.prepare_for_rendering_after_commit();
         if let Some(selection) = &self.selection {
             // SAFETY: The frame runs for the update the arena is in, and no borrow of it is held here.
             selection.apply(unsafe { LayoutNodeArena::from_handle_mut(self.inputs.arena_handle) });
@@ -848,15 +824,16 @@ impl LayoutFrame {
         }
     }
 
-    /// The rendering preparation a commit asks for: the root background source the pass sources
-    /// read is taken over, and the overflow the commit left unmeasured is measured. The scroll
+    /// The rendering preparation a commit asks for: the root background source is taken over, and
+    /// the overflow the commit left unmeasured is measured. The scroll
     /// offsets that measurement clamps are left for the document to store once the frame is over.
     ///
     /// The commit has the document update its accumulated visual contexts and record its display
     /// list again, which covers everything else the preparation can ask for, so what it answers
     /// with is not needed.
-    fn prepare_for_rendering_after_commit(&mut self, root_background_source: FfiRootBackgroundSource) {
+    fn prepare_for_rendering_after_commit(&mut self) {
         let arena = self.arena();
+        let root_background_source = super::root_background_source(arena);
         let (background_source_changed, clamped) =
             crate::painting::ffi::prepare_root_background_and_overflow(arena, root_background_source);
         let clamped: Vec<_> = clamped
@@ -1037,9 +1014,9 @@ impl LayoutFrame {
                 // Only the sources of a pass that follows are read on the document thread; the
                 // host half waits for the join after them.
                 let pass_sources = pass_follows.then(|| {
-                    self.join(joins, FrameJoin::BuildLayoutTree, |main_thread, host| {
+                    self.join(joins, FrameJoin::BuildLayoutTree, |main_thread, _| {
                         // SAFETY: The frame runs for the update the arena is in.
-                        unsafe { LayoutPassSources::read(main_thread, host, arena_handle) }
+                        unsafe { LayoutPassSources::read(main_thread, arena_handle) }
                     })
                 });
                 self.owe_tree_build_host_half(host_half);
@@ -1114,13 +1091,12 @@ impl LayoutFrame {
     fn note_laid_out_pass(&mut self, laid_out: LaidOutPass) -> FfiLayoutUpdateDocumentFacts {
         let LaidOutPass {
             commit_host_half,
-            root_background_source,
             facts,
             started,
         } = laid_out;
         self.owe_host_half(OwedHostHalf::Commit(commit_host_half));
         self.messages.full_layouts_performed += 1;
-        self.note_layout_commit(true, &facts, root_background_source);
+        self.note_layout_commit(true, &facts);
         self.inputs.trace.layout(started);
         facts
     }
@@ -1168,7 +1144,7 @@ impl LayoutFrame {
                 let facts = host.document_facts(main_thread);
                 Joined {
                     // SAFETY: The frame runs for the update the arena is in.
-                    value: pass_follows.then(|| unsafe { LayoutPassSources::read(main_thread, host, arena_handle) }),
+                    value: pass_follows.then(|| unsafe { LayoutPassSources::read(main_thread, arena_handle) }),
                     facts,
                 }
             });
@@ -1200,11 +1176,7 @@ impl LayoutFrame {
         }
 
         let arena_handle = self.inputs.arena_handle;
-        let LayoutPassSources {
-            content,
-            root_background_source,
-            ..
-        } = self.take_pass_sources();
+        let LayoutPassSources { content } = self.take_pass_sources();
         // SAFETY (for the steps below): The frame runs for the update the arena is in, the
         // planned boundaries and the viewport box stay live across them, and no row was freed
         // since the sources were read.
@@ -1227,7 +1199,7 @@ impl LayoutFrame {
 
         self.arena().note_partial_layout();
 
-        self.note_layout_commit(layout_tree_was_built_in_partial_branch, facts, root_background_source);
+        self.note_layout_commit(layout_tree_was_built_in_partial_branch, facts);
         if self.commit_left_layout_work(facts) {
             return PartialRelayout::NeedsAnotherLayoutPass;
         }

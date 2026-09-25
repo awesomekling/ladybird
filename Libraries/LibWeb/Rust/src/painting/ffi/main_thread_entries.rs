@@ -155,13 +155,14 @@ unsafe extern "C" fn layout_arena_paintable_layout_node_shell(arena: *mut c_void
 #[unsafe(no_mangle)]
 unsafe extern "C" fn layout_arena_prepare_for_rendering(
     arena: *mut c_void,
-    root_background_source: crate::painting::host::FfiRootBackgroundSource,
     visual_context_update_pending: bool,
 ) -> FfiRenderingPreparationOutcome {
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let arena = unsafe { arena_from_handle_mut(arena) };
-    let (background_source_changed, clamped) =
-        arena.run_stage(|arena| prepare_root_background_and_overflow(arena, root_background_source));
+    let (background_source_changed, clamped) = arena.run_stage(|arena| {
+        let root_background_source = crate::layout::root_background_source(arena);
+        prepare_root_background_and_overflow(arena, root_background_source)
+    });
     crate::painting::scrollable_overflow::hand_over_clamped_scroll_offsets(arena, &main_thread, clamped);
     arena.run_stage(|arena| {
         finish_rendering_preparation(arena, background_source_changed, visual_context_update_pending)
