@@ -21,6 +21,8 @@
     asyncTest(async done => {
         const box = document.getElementById("box");
         const animation = box.getAnimations()[0];
+        // The rendering updates tick the lease, not a render clock.
+        internals.setRenderClockSuspended(true);
         await new Promise(resolve => setTimeout(resolve, 100));
 
         const armed = internals.holdNextClockTick("before-completion");
@@ -44,6 +46,7 @@
         internals.releaseHeldFrame();
         if (armed)
             internals.setManualRenderingOpportunities(false);
+        internals.setRenderClockSuspended(false);
 
         if (internals.clockFramesEnabled()) {
             println(`held at: ${heldAt}`);

@@ -10,6 +10,7 @@
 #include <AK/OwnPtr.h>
 #include <AK/Vector.h>
 #include <AK/kmalloc.h>
+#include <LibCompositing/Types.h>
 #include <LibGC/Function.h>
 #include <LibGC/Ptr.h>
 #include <LibJS/Heap/Cell.h>
@@ -128,6 +129,18 @@ public:
     // the next leased document ticks, and then the rendering update goes on at step 16. Where no lease is left to tick,
     // ends every lease the rendering update did not tick, and returns false.
     bool tick_clock_leases(Vector<GC::Ref<DOM::Document>> const& docs, size_t first_document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp, bool may_submit);
+    // Whether a render clock ticks the lease of `document`, without the main thread.
+    bool render_clock_ticks(DOM::Document const&) const;
+    // Ends every clock lease: the compositor went away, or the process is going.
+    void revoke_all_clock_leases();
+    // The main thread's outermost event loop is about to block: the render clock may tick the leases until it wakes.
+    void main_thread_will_idle();
+    // The main thread woke: the documents adopt what the render clock's ticks installed while it idled.
+    void main_thread_did_wake();
+    // A render clock tick ended a lease; the rendering update takes over.
+    void render_clock_needs_main();
+    // For tests: whether leases are left to the main thread's rendering updates, with no render clock armed.
+    void set_render_clock_suspended(bool);
 
     // Whether the frame in flight runs the style or layout pass of `document`. The ticket keeps its documents alive.
     bool pass_in_flight_holds(DOM::Document const&) const;
@@ -189,7 +202,11 @@ private:
         Vector<GC::Ref<Animations::KeyframeEffect>> effects;
         // Whether the rendering update running now ticked the lease.
         bool ticked { false };
+        // The compositor context at whose display ticks a render clock ticks the lease, if one does.
+        Optional<Compositing::CompositorContextId> render_clock_context {};
     };
+    void update_render_clock(ClockLeaseHold&, Optional<Compositing::CompositorContextId>);
+    bool publish_clock_lease_targets(ClockLeaseHold const&);
     bool submit_clock_tick(Vector<GC::Ref<DOM::Document>> const& docs, size_t first_document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp);
     void revoke_clock_lease(size_t index);
     void adopt_clock_tick(DOM::Document&);
@@ -200,6 +217,7 @@ private:
     OwnPtr<FrameTicket> m_ticket;
 
     Vector<ClockLeaseHold> m_clock_leases;
+    bool m_render_clock_suspended { false };
 
     // In the order the changes were made, which is the order the arena takes them in.
     Vector<GC::Ref<GC::Function<void()>>> m_deferred_arena_changes;

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<style>
+    #box {
+        width: 100px;
+        height: 20px;
+        animation: grow 20s linear;
+    }
+    @keyframes grow {
+        from {
+            width: 100px;
+        }
+        to {
+            width: 2100px;
+        }
+    }
+</style>
+<div id="box"></div>
+<script src="../../include.js"></script>
+<script>
+    // The Compositor delivers no display ticks for a hidden page's context, so the render clock ticks nothing while the
+    // page is hidden, and ticks its animation again once it is visible.
+    asyncTest(async done => {
+        const enabled = internals.clockFramesEnabled();
+        const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+        const ticks = () => internals.getRenderClockCounters().ticksInstalled;
+
+        let before = ticks();
+        await wait(200);
+        println(`visible: ticks advance: ${!enabled || ticks() > before}`);
+
+        await setSystemVisibilityState("hidden");
+        // A tick already in the air may still land.
+        await wait(50);
+        before = ticks();
+        const received = internals.clockTicksReceived();
+        await wait(300);
+        println(`hidden: ticks advance: ${ticks() > before}`);
+        println(`hidden: ticks received: ${internals.clockTicksReceived() > received}`);
+
+        await setSystemVisibilityState("visible");
+        before = ticks();
+        await wait(300);
+        println(`visible again: ticks advance: ${!enabled || ticks() > before}`);
+        done();
+    });
+</script>

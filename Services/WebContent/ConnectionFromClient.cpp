@@ -75,6 +75,7 @@
 #include <LibWeb/HTML/Storage.h>
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/HTML/WorkerAgentParent.h>
+#include <LibWeb/Layout/LayoutRustFFI.h>
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Loader/ContentBlocker.h>
@@ -513,6 +514,42 @@ void ConnectionFromClient::connect_to_compositor_process(IPC::TransportHandle ha
         m_compositor_connection->transport().set_peer_pid(response->compositor_pid());
     }
 #endif
+
+    // LIBWEB_RENDER_CLOCK_FRAMES: The render clock's channel follows, on connect and on reconnect alike: a reconnect
+    // swaps the channel, not the clock's thread.
+    attach_render_clock();
+}
+
+void ConnectionFromClient::attach_render_clock()
+{
+    if (!Web::Layout::RustFFI::rust_clock_frames_enabled())
+        return;
+    if (!m_render_clock) {
+        // The sender is made and used on the clock thread, which posts every tick.
+        struct Sender {
+            AK_ALLOC_WITH_KMALLOC;
+            Web::Layout::RustFFI::ClockSender* sender { nullptr };
+            bool created { false };
+            ~Sender() { Web::Layout::RustFFI::rust_render_clock_sender_destroy(sender); }
+        };
+        auto render_clock = Web::Compositor::RenderClock::create([sender = make<Sender>()](Compositing::CompositorContextId context_id, i64 frame_time_nanoseconds, double) {
+            if (!exchange(sender->created, true))
+                sender->sender = Web::Layout::RustFFI::rust_render_clock_sender_create();
+            if (sender->sender)
+                (void)Web::Layout::RustFFI::rust_render_clock_post_tick(sender->sender, context_id.value(), frame_time_nanoseconds);
+        });
+        if (render_clock.is_error()) {
+            dbgln("WebContent: Unable to create the render clock: {}", render_clock.error());
+            return;
+        }
+        m_render_clock = render_clock.release_value();
+    }
+    auto handle = m_render_clock->attach();
+    if (handle.is_error()) {
+        dbgln("WebContent: Unable to attach the render clock: {}", handle.error());
+        return;
+    }
+    m_compositor_connection->offer_render_clock_channel(handle.release_value());
 }
 
 void ConnectionFromClient::compositor_process_reconnected()

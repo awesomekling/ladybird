@@ -1543,6 +1543,38 @@ bool Internals::clock_frames_enabled() const
     return Layout::RustFFI::rust_stage_thread_submits_clock();
 }
 
+u64 Internals::clock_ticks_received() const
+{
+    auto counters = Layout::RustFFI::rust_render_clock_counters();
+    return counters.ticks_posted + counters.ticks_folded;
+}
+
+void Internals::set_render_clock_suspended(bool suspended)
+{
+    HTML::main_thread_event_loop().frame_scheduler().set_render_clock_suspended(suspended);
+}
+
+GC::Ref<JS::Object> Internals::get_render_clock_counters() const
+{
+    auto& realm = HTML::relevant_realm(window());
+    auto counters = Layout::RustFFI::rust_render_clock_counters();
+    auto object = JS::Object::create(realm, nullptr);
+    auto define = [&](StringView name, u64 value) {
+        object->define_direct_property(Utf16FlyString::from_utf8(name), JS::Value(static_cast<double>(value)), JS::default_attributes);
+    };
+    define("ticksPosted"sv, counters.ticks_posted);
+    define("ticksFolded"sv, counters.ticks_folded);
+    define("ticksRun"sv, counters.ticks_run);
+    define("ticksDroppedNested"sv, counters.ticks_dropped_nested);
+    define("ticksDroppedMainBusy"sv, counters.ticks_dropped_main_busy);
+    define("ticksDroppedWithoutLease"sv, counters.ticks_dropped_without_lease);
+    define("ticksDroppedPaused"sv, counters.ticks_dropped_paused);
+    define("ticksDroppedStale"sv, counters.ticks_dropped_stale);
+    define("ticksInstalled"sv, counters.ticks_installed);
+    define("ticksNeedingMain"sv, counters.ticks_needing_main);
+    return object;
+}
+
 GC::Ref<JS::Object> Internals::join_counters_object() const
 {
     auto& realm = HTML::relevant_realm(window());
