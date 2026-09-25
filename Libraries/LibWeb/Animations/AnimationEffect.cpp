@@ -939,8 +939,11 @@ void apply_published_animation_overlay(CSS::StyleDrainScope const& scope, DOM::A
 void install_sampled_custom_property_environment(CSS::StyleDrainScope const& scope, DOM::AbstractElement abstract_element, CSS::StyleEngineFFI::FfiRowSampledInPass const& sample)
 {
     auto& element = const_cast<DOM::Element&>(abstract_element.element());
-    // The engine named what a pseudo-element's sample moved it to as it settled it.
-    if (!sample.custom_property_environment_named) {
+    // The engine takes what the sample moved the element to itself where it can, and named what a
+    // pseudo-element's sample moved it to as it settled it.
+    if (!sample.custom_property_environment_named
+        && !CSS::StyleEngineFFI::style_engine_install_sampled_custom_property_environment(scope.engine().rust_handle(), element.style_node_id().value(),
+            CSS::pseudo_element_to_ffi(abstract_element.pseudo_element()), sample.custom_property_environment)) {
         auto data = element.custom_property_data(abstract_element.pseudo_element());
         RefPtr<CSS::CustomPropertyData const> base = data;
         if (data && data->is_animation_overlay_for(abstract_element))
