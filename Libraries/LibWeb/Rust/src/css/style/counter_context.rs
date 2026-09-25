@@ -1126,6 +1126,26 @@ impl StyleEngine {
             .settle_pseudo_records_after_host_record(node, old_is_list_item, &mut self.counters)
     }
 
+    /// Decide the transition step of an element or pseudo-element over the record the host installed.
+    #[inline]
+    pub(crate) fn decide_installed_record_transition_step(
+        &mut self,
+        node: StyleNodeID,
+        pseudo: Option<u8>,
+        before_change_style_record: u64,
+        installed_style_record: u64,
+        layout_arena: super::animations::LentLayoutArena,
+    ) -> Result<Option<super::engine_sample::SettledRowPublication>, String> {
+        self.state.decide_installed_record_transition_step(
+            node,
+            pseudo,
+            before_change_style_record,
+            installed_style_record,
+            layout_arena,
+            &mut self.counters,
+        )
+    }
+
     /// Sample the animations of an element or pseudo-element over the record the host holds.
     #[inline]
     pub(crate) fn sample_installed_record(

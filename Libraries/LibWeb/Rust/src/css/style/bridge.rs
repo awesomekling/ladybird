@@ -3919,6 +3919,55 @@ pub unsafe extern "C" fn style_engine_sample_installed_record(
     })
 }
 
+/// Decide the transition step of an element, or of one of its pseudo-elements, over the record the
+/// host installed for it, from `before_change_style_record`, as the host would decide it now, and
+/// publish the composition the step leaves as its record. The host takes the decisions as it takes
+/// a step the pass decided. `present` is false where the engine cannot decide it, and the host
+/// does; an answer naming `installed_style_record` again says the step moved nothing composed.
+///
+/// # Safety
+/// `engine` must be live, and `layout_arena` the document's live layout arena or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_decide_transition_step_for_installed_record(
+    engine: *mut c_void,
+    node: u32,
+    pseudo_kind: u8,
+    before_change_style_record: u64,
+    installed_style_record: u64,
+    layout_arena: *mut c_void,
+) -> FfiRowSampledInPass {
+    engine_entrance(engine, "style_engine_decide_transition_step_for_installed_record");
+    abort_on_panic(|| {
+        let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+        let Some(style_node) = StyleNodeID::from_raw(node) else {
+            return row_sampled_in_pass(engine, None);
+        };
+        let pseudo = (pseudo_kind != u8::MAX).then_some(pseudo_kind);
+        let layout_arena = unsafe { super::animations::LentLayoutArena::lend(layout_arena) };
+        match engine.decide_installed_record_transition_step(
+            style_node,
+            pseudo,
+            before_change_style_record,
+            installed_style_record,
+            layout_arena,
+        ) {
+            Ok(published) => {
+                super::engine_sample_check::note_taken("installed record transition step");
+                let mut answer = row_sampled_in_pass(engine, published);
+                if !answer.present {
+                    answer.present = true;
+                    answer.style_record = installed_style_record;
+                }
+                answer
+            }
+            Err(reason) => {
+                super::engine_sample_check::note_declined(&format!("installed record transition step: {reason}"));
+                row_sampled_in_pass(engine, None)
+            }
+        }
+    })
+}
+
 fn row_sampled_in_pass(
     engine: &StyleEngine,
     published: Option<super::engine_sample::SettledRowPublication>,

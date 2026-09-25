@@ -1084,11 +1084,35 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_inst
     auto const* installed_overlay = static_cast<ComputedValuesFFI::AnimatedOverlay const*>(scope.engine().style_record_view(installed_style_record).animated_overlay);
     if (installed_overlay)
         new_style->install_animated_overlay_from_rust(Badge<StyleComputer> {}, ComputedValuesFFI::rust_animated_overlay_clone(installed_overlay));
-    start_needed_transitions(scope, *new_style, abstract_element, before_change_style_record, decided);
+    // The engine decides a step the pass did not, over the same two records, and publishes the
+    // composition it leaves; the host applies the decisions as it applies the pass's.
+    StyleEngineFFI::FfiRowSampledInPass engine_composition {};
+    StyleEngineFFI::FfiTransitionStepDecidedInPass engine_decided {};
+    if (!decided) {
+        auto& element = abstract_element.element();
+        // Publishing can replace the record the element's layout node would be built from on first
+        // use, so it is built while that record is live.
+        if (!abstract_element.pseudo_element().has_value())
+            (void)element.unsafe_layout_node();
+        auto* layout_node_arena = document().layout_node_arena_if_created();
+        engine_composition = StyleEngineFFI::style_engine_decide_transition_step_for_installed_record(scope.engine().rust_handle(),
+            element.style_node_id().value(), pseudo_element_to_ffi(abstract_element.pseudo_element()), before_change_style_record.value(),
+            installed_style_record.value(), layout_node_arena ? layout_node_arena->handle() : nullptr);
+        if (engine_composition.present) {
+            engine_decided = abstract_element.pseudo_element().has_value()
+                ? StyleEngineFFI::style_engine_take_pseudo_element_transition_step_decided_in_pass(scope.engine().rust_handle(), element.style_node_id().value(), pseudo_element_to_ffi(abstract_element.pseudo_element()))
+                : StyleEngineFFI::style_engine_take_transition_step_decided_in_pass(scope.engine().rust_handle(), element.style_node_id().value());
+            VERIFY(engine_decided.present);
+        }
+    }
+    start_needed_transitions(scope, *new_style, abstract_element, before_change_style_record, decided ? decided : engine_composition.present ? &engine_decided
+                                                                                                                                             : nullptr);
     // Starting a transition associates a new animation with the element.
     abstract_element.element().publish_animation_timing_rows();
     // The row installed the composition the pass left for a step it decided.
     if (decided)
+        return {};
+    if (engine_composition.present && engine_composition.style_record == installed_style_record.value())
         return {};
 
     // A C++ computation publishes the working set with whatever the started transitions layered
@@ -1096,18 +1120,30 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_inst
     // element holds a transition. A record the row installed without an overlay holds none, so this
     // does the same. An installed overlay is published when the step changed it, including when it
     // cancelled the last running transition.
-    auto animated_properties = new_style->animated_properties_snapshot();
-    bool const has_animated_properties = animated_properties && !animated_properties->is_empty();
-    if (installed_overlay) {
-        if (!scope.engine().animation_overlay_changed(installed_style_record, new_style->animated_overlay()))
+    StyleEngineFFI::FfiAnimationInvalidation animated_property_invalidation {};
+    StyleRecordID new_style_record;
+    if (engine_composition.present) {
+        if (engine_composition.rebuilt_every_group)
+            document().style_invalidation_counters().animated_style_full_builds++;
+        else
+            document().style_invalidation_counters().animated_style_overlay_builds++;
+        animated_property_invalidation = engine_composition.invalidation;
+        new_style_record = StyleRecordID { engine_composition.style_record };
+    } else {
+        auto animated_properties = new_style->animated_properties_snapshot();
+        bool const has_animated_properties = animated_properties && !animated_properties->is_empty();
+        if (installed_overlay) {
+            if (!scope.engine().animation_overlay_changed(installed_style_record, new_style->animated_overlay()))
+                return {};
+        } else if (!has_animated_properties) {
             return {};
-    } else if (!has_animated_properties) {
-        return {};
+        }
+        auto [host_invalidation, publication] = publish_sampled_animation_overlay(abstract_element, *new_style, installed_style_record);
+        animated_property_invalidation = host_invalidation;
+        new_style_record = publication.new_style_record;
     }
-
-    auto [animated_property_invalidation, publication] = publish_sampled_animation_overlay(abstract_element, *new_style, installed_style_record);
     auto& element = abstract_element.element();
-    element.refresh_computed_style(scope, abstract_element.pseudo_element(), publication.new_style_record);
+    element.refresh_computed_style(scope, abstract_element.pseudo_element(), new_style_record);
     if (auto* svg_element = as_if<SVG::SVGElement>(element))
         svg_element->note_svg_paint_resource_description_may_have_changed();
     // Box-type, overflow and text-alignment adjustments consume the unadjusted base values, which
