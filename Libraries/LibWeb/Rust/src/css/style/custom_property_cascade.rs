@@ -1006,6 +1006,29 @@ impl RetainedState {
         store.unwrap_or(std::ptr::null())
     }
 
+    /// The environment a child of an element holding `parent` inherits, where it is `parent` or
+    /// one already built; `None` for a projection nobody built yet.
+    pub(super) fn built_inheritable_custom_property_environment(
+        &self,
+        parent: u64,
+        inputs: &bridge::FfiDocumentStyleComputationInputs,
+    ) -> Option<u64> {
+        if parent == 0 || inputs.custom_property_registry.is_none() {
+            return Some(parent);
+        }
+        let registry = unsafe {
+            &*inputs
+                .custom_property_registry
+                .as_pointer()
+                .cast::<CustomPropertyRegistry>()
+        };
+        if !registry.has_non_inheriting_registrations() {
+            return Some(parent);
+        }
+        let key = Self::environment_inputs(parent, inputs.custom_property_registration_generation, &[]);
+        self.custom_property_environments.memoized(&key)
+    }
+
     pub(super) fn inheritable_custom_property_environment(
         &mut self,
         parent: u64,
