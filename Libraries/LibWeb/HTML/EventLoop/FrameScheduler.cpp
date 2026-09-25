@@ -722,8 +722,11 @@ void FrameScheduler::grant_clock_leases()
             revoke_clock_lease(index);
     }
     for (auto& document : documents) {
-        auto plan = clock_lease_plan(*document);
         auto held = m_clock_leases.find_first_index_if([&](auto const& hold) { return hold.document.ptr() == document.ptr(); });
+        // A lease whose document this rendering update did not render goes on as it was granted.
+        if (held.has_value() && !exchange(m_clock_leases[*held].renders_in_update, true))
+            continue;
+        auto plan = clock_lease_plan(*document);
         if (!plan.has_value()) {
             if (held.has_value())
                 revoke_clock_lease(*held);
@@ -1100,6 +1103,12 @@ void FrameScheduler::prepare_clock_ticks(ReadonlySpan<GC::Root<DOM::Document>> d
         }
         auto document = m_clock_leases[index].document;
         bool renders = docs.first_matching([&](auto const& doc) { return doc.ptr() == document.ptr(); }).has_value();
+        // A document the rendering update leaves out only because its navigable has no rendering opportunity now
+        // renders at its own, as another top-level traversable's does: its lease goes on until then.
+        auto navigable = document->navigable();
+        m_clock_leases[index].renders_in_update = renders || !document->is_fully_active() || document->hidden() || document->is_render_blocked() || !navigable || navigable->has_a_rendering_opportunity();
+        if (!m_clock_leases[index].renders_in_update)
+            continue;
         auto* arena = document->layout_node_arena_if_created();
         // Anything the main thread did since the grant that its own rendering update has to see ends the lease: the
         // plan finds it, or finds other effects to tick.
@@ -1144,7 +1153,7 @@ bool FrameScheduler::tick_clock_leases(Vector<GC::Ref<DOM::Document>> const& doc
         return true;
     // A lease this rendering update did not tick ends: the update samples its effects itself.
     for (size_t index = m_clock_leases.size(); index-- > 0;) {
-        if (!exchange(m_clock_leases[index].ticked, false))
+        if (!exchange(m_clock_leases[index].ticked, false) && m_clock_leases[index].renders_in_update)
             revoke_clock_lease(index);
     }
     return false;
