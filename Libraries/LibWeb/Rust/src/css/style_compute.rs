@@ -3439,6 +3439,7 @@ pub(crate) fn sample_settled_row(
     node: crate::css::style::tree::StyleNodeID,
     pseudo: Option<u8>,
     samples_plan: bool,
+    record: Option<u64>,
     root: Option<crate::css::style::animations::RootElementFontMetrics>,
     layout_arena: crate::css::style::animations::LentLayoutArena,
 ) -> Result<SettledRowSample, String> {
@@ -3449,9 +3450,13 @@ pub(crate) fn sample_settled_row(
 
     let pseudo_kind = pseudo.unwrap_or(NO_PSEUDO_ELEMENT);
     let slot = animation_slot(pseudo_kind);
-    let style_record = engine
-        .assigned_style_record_of(node, pseudo)
-        .ok_or("a row without a record")?;
+    // The record the engine assigned, unless the caller names the one the host holds.
+    let style_record = match record {
+        Some(record) => record,
+        None => engine
+            .assigned_style_record_of(node, pseudo)
+            .ok_or("a row without a record")?,
+    };
     // A row that leaves an animation plan samples the stack the plan leaves, where the caller asks
     // for it. A pseudo-element's plan is applied before its records are settled.
     let planned = match (pseudo.is_none() && samples_plan)

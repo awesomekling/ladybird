@@ -1091,6 +1091,7 @@ impl super::StyleEngineState {
                         Some(pseudo_kind),
                         false,
                         None,
+                        None,
                         layout_arena,
                     )
                     .and_then(|sample| {
@@ -1140,14 +1141,17 @@ impl super::StyleEngineState {
         layout_arena: super::animations::LentLayoutArena,
         counters: &mut super::Counters,
     ) -> Result<SettledRowPublication, String> {
-        // A composition the engine published over the record since, which the host has not
-        // installed, is the host's to publish again.
-        if self.assigned_style_record_of(node, pseudo) != Some(style_record) {
-            return Err("a record the engine has moved past".into());
-        }
         // The effects the element holds now are sampled, as the host's own sample collects them,
         // whether or not a plan its row left is applied yet.
-        let sample = crate::css::style_compute::sample_settled_row(self, node, pseudo, false, None, layout_arena)?;
+        let sample = crate::css::style_compute::sample_settled_row(
+            self,
+            node,
+            pseudo,
+            false,
+            Some(style_record),
+            None,
+            layout_arena,
+        )?;
         // A pseudo-element's animated custom properties are composed into an environment the host
         // builds.
         if pseudo.is_some() && !sample.animated_custom_properties.is_empty() {
@@ -1155,8 +1159,15 @@ impl super::StyleEngineState {
         }
         // A sample that moves nothing the record composed may still move the custom properties
         // the element's environment animates, which the publication composes.
+        // A composition the engine published over the record's base since, which the record does
+        // not name, is published again even where the values have not moved.
+        let assigned = self.assigned_style_record_of(node, pseudo);
+        let engine_holds_a_stale_composition = assigned.is_some_and(|assigned| {
+            assigned != style_record && self.computed_group_sets.base_style_record_of(assigned) == style_record
+        });
         if sample.animated_custom_properties.is_empty()
             && !self.retained.sampled_custom_property_environments.contains_key(&node)
+            && !engine_holds_a_stale_composition
             && !self.animation_overlay_changed(style_record, sample.style.overlay)
         {
             return Ok(SettledRowPublication {
