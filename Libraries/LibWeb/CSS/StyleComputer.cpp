@@ -1046,7 +1046,7 @@ static StyleEngineFFI::FfiRowSampledInPass resample_installed_record_after_host_
     auto resampled = StyleEngineFFI::style_engine_sample_installed_record(scope.engine().rust_handle(), element.style_node_id().value(),
         pseudo_element_to_ffi(abstract_element.pseudo_element()), installed_style_record.value(), layout_node_arena ? layout_node_arena->handle() : nullptr);
     if (resampled.present && resampled.custom_property_environment_moved)
-        Animations::install_sampled_custom_property_environment(scope, element, resampled);
+        Animations::install_sampled_custom_property_environment(scope, abstract_element, resampled);
     return resampled;
 }
 

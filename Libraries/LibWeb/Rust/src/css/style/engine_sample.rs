@@ -651,15 +651,6 @@ impl RetainedState {
         pseudo_kind: u8,
         style_record: u64,
     ) -> Result<SampleCustomPropertyEnvironments, &'static str> {
-        // Custom properties an earlier sample of the pseudo-element composed are in an environment
-        // the host built over its own.
-        if self
-            .pseudo_element_custom_property_data
-            .get(&(node, pseudo_kind))
-            .is_some_and(|held| held.animation_base.is_some())
-        {
-            return Err("a pseudo-element whose custom properties an earlier sample composed");
-        }
         let store_of = |environment: u64| match environment {
             0 => Ok(std::ptr::null()),
             environment => self
@@ -681,10 +672,24 @@ impl RetainedState {
         let inherited = self
             .built_inheritable_custom_property_environment(element_environment, &self.document_style_computation_inputs)
             .ok_or("an element environment whose inherited projection nobody built")?;
-        let store = store_of(environment)?;
+        let base_store = store_of(environment)?;
+        // What an earlier sample composed the pseudo-element's animated custom properties into, over
+        // the environment its record resolved, is the one its own values substitute under.
+        let composed = self
+            .sampled_pseudo_element_custom_property_environments
+            .get(&(node, pseudo_kind))
+            .copied()
+            .filter(|&sampled| self.sampled_environment_is_over(sampled, environment))
+            .and_then(|sampled| self.custom_property_environments.store(sampled))
+            .or_else(|| {
+                // One the host composed over the same environment.
+                let (store, held_base, held_base_store, _) =
+                    self.pseudo_element_custom_property_sample_inputs(node, pseudo_kind)?;
+                (held_base == environment && store != held_base_store && !store.is_null()).then_some(store)
+            });
         Ok(SampleCustomPropertyEnvironments {
-            store,
-            base_store: store,
+            store: composed.unwrap_or(base_store),
+            base_store,
             inheritance_store: store_of(element_environment)?,
             element_declares_own: environment != 0 && environment != element_environment && environment != inherited,
             base_is_engine: environment & ENGINE_CUSTOM_PROPERTY_ENVIRONMENT_TAG != 0,
@@ -859,6 +864,90 @@ impl RetainedState {
             inherited_names_moved,
         }))
     }
+
+    /// Compose what a sample animated of a synthetic pseudo-element's custom properties into an
+    /// environment of the engine's own over `base_environment`, the one its record was published
+    /// with, for the host to view as the pseudo-element's. A pseudo-element has no descendants, and
+    /// its element computes again under it, as under one the host composed. `None` where that leaves
+    /// the pseudo-element's environment as it is.
+    pub(crate) fn publish_sampled_pseudo_element_custom_properties(
+        &mut self,
+        node: StyleNodeID,
+        pseudo_kind: u8,
+        base_environment: u64,
+        animated: &[(
+            crate::css::retained_fly_string::RetainedUtf16FlyString,
+            crate::css::style_value::RetainedStyleValueData,
+        )],
+    ) -> Result<Option<SampledCustomPropertyEnvironment>, &'static str> {
+        use crate::css::custom_properties::CustomPropertyStore;
+
+        let base_store = match base_environment {
+            0 => std::ptr::null(),
+            environment => self
+                .custom_property_environments
+                .store(environment)
+                .ok_or("a base environment without a store")?,
+        };
+        let key = (node, pseudo_kind);
+        let sampled = self
+            .sampled_pseudo_element_custom_property_environments
+            .get(&key)
+            .copied();
+        let held = self
+            .pseudo_element_custom_property_data
+            .get(&key)
+            .map(|held| held.identity);
+        // A sample that animates what the environment already holds, over the same base, moves
+        // nothing the pseudo-element does not hold already.
+        if let Some(sampled) = sampled
+            && !animated.is_empty()
+            && self.sampled_environment_is_over(sampled, base_environment)
+            && self
+                .custom_property_environments
+                .store(sampled)
+                .is_some_and(|store| unsafe { CustomPropertyStore::composes_exactly(store, animated) })
+        {
+            if held == Some(sampled) {
+                return Ok(None);
+            }
+            return Ok(Some(SampledCustomPropertyEnvironment {
+                environment: sampled,
+                element_reads: true,
+                inherited_names_moved: false,
+            }));
+        }
+        // Nothing to compose, over a pseudo-element holding no composition, moves nothing either.
+        let holds_composition = sampled.is_some()
+            || self
+                .pseudo_element_custom_property_data
+                .get(&key)
+                .is_some_and(|held| held.animation_base.is_some());
+        if animated.is_empty() && !holds_composition {
+            return Ok(None);
+        }
+        let environment = match animated.is_empty() {
+            true => {
+                self.sampled_pseudo_element_custom_property_environments.remove(&key);
+                0
+            }
+            false => {
+                let store = unsafe { CustomPropertyStore::animation_overlay_over(base_store, animated) };
+                let environment = unsafe {
+                    self.custom_property_environments
+                        .adopt_engine_environment(store, base_environment)
+                };
+                self.sampled_pseudo_element_custom_property_environments
+                    .insert(key, environment);
+                environment
+            }
+        };
+        Ok(Some(SampledCustomPropertyEnvironment {
+            environment,
+            element_reads: true,
+            inherited_names_moved: false,
+        }))
+    }
 }
 
 impl super::StyleEngineState {
@@ -885,11 +974,6 @@ impl super::StyleEngineState {
         let style_record = sample.style_record;
         let overlay = unsafe { &*sample.style.overlay };
         let table = unsafe { &*sample.style.table };
-        // A pseudo-element's animated custom properties are composed into an environment the host
-        // builds.
-        if pseudo.is_some() && !sample.animated_custom_properties.is_empty() {
-            return Err("a pseudo-element sample that animates custom properties");
-        }
         let base_environment = match pseudo {
             None => self.retained.element_base_custom_property_environment(node)?,
             Some(_) => self
@@ -1015,7 +1099,12 @@ impl super::StyleEngineState {
                 base_environment,
                 &sample.animated_custom_properties,
             )?,
-            Some(_) => None,
+            Some(kind) => self.retained.publish_sampled_pseudo_element_custom_properties(
+                node,
+                kind,
+                base_environment,
+                &sample.animated_custom_properties,
+            )?,
         };
         let published = SettledRowPublication {
             style_record,
@@ -1152,11 +1241,6 @@ impl super::StyleEngineState {
             None,
             layout_arena,
         )?;
-        // A pseudo-element's animated custom properties are composed into an environment the host
-        // builds.
-        if pseudo.is_some() && !sample.animated_custom_properties.is_empty() {
-            return Err("a pseudo-element sample that animates custom properties".into());
-        }
         // A sample that moves nothing the record composed may still move the custom properties
         // the element's environment animates, which the publication composes.
         // A composition the engine published over the record's base since, which the record does
@@ -1165,8 +1249,15 @@ impl super::StyleEngineState {
         let engine_holds_a_stale_composition = assigned.is_some_and(|assigned| {
             assigned != style_record && self.computed_group_sets.base_style_record_of(assigned) == style_record
         });
+        let holds_sampled_custom_properties = match pseudo {
+            None => self.retained.sampled_custom_property_environments.contains_key(&node),
+            Some(kind) => self
+                .retained
+                .sampled_pseudo_element_custom_property_environments
+                .contains_key(&(node, kind)),
+        };
         if sample.animated_custom_properties.is_empty()
-            && !self.retained.sampled_custom_property_environments.contains_key(&node)
+            && !holds_sampled_custom_properties
             && !engine_holds_a_stale_composition
             && !self.animation_overlay_changed(style_record, sample.style.overlay)
         {
