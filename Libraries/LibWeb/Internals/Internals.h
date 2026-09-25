@@ -218,6 +218,7 @@ public:
     bool clock_frames_enabled() const;
     u64 clock_ticks_received() const;
     GC::Ref<JS::Object> get_render_clock_counters() const;
+    GC::Ref<WebIDL::Promise> inject_clock_tick(double frame_time_ms);
     void set_render_clock_suspended(bool);
     void reset_join_counters();
     void dump_join_counters() const;
@@ -234,7 +235,7 @@ public:
     u64 forced_join_count(Utf16String const& stage) const;
     bool frame_in_flight_holds_document() const;
     bool frame_in_flight_references_are_alive() const;
-    void set_manual_rendering_opportunities(bool enabled);
+    void set_manual_rendering_opportunities(bool enabled, bool with_clock_ticks);
     void set_rendering_opportunity_hold(bool enabled);
     void reset_rendering_opportunity_hold();
     bool rendering_task_held() const;

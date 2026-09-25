@@ -68,10 +68,17 @@ RENDER_STAGE_ALLOWED = {
     **render_stage_entries(MAIN_THREAD_ONLY, ["flight.rs:TAKEN_BACK_OUTCOME", "flight.rs:FLIGHT_ENDS"]),
     **render_stage_entries(PRESENTED_COUNTER, ["clock_frames.rs:CLOCK_TICKS_PRESENTED"]),
     **render_stage_entries(
-        CLOCK_HANDOFF, ["clock_frames.rs:GATE", "clock_frames.rs:TICKS_TO_ADOPT", "clock_frames.rs:LENT_TO_BUSY_MAIN"]
+        CLOCK_HANDOFF,
+        [
+            "clock_frames.rs:GATE",
+            "clock_frames.rs:TICKS_TO_ADOPT",
+            "clock_frames.rs:LENT_TO_BUSY_MAIN",
+            "clock_frames.rs:INJECTED_TICKS_PENDING",
+        ],
     ),
     **render_stage_entries(
-        BUILT_ONCE, ["clock_frames.rs:NEEDS_MAIN", "clock_frames.rs:PRESENT", "clock_frames.rs:LEND_TAKEN_BACK"]
+        BUILT_ONCE,
+        ["clock_frames.rs:NEEDS_MAIN", "clock_frames.rs:PRESENT", "clock_frames.rs:LEND_TAKEN_BACK", "clock_frames.rs:WAKE_MAIN"],
     ),
     **render_stage_entries(
         GROW_ONLY,

@@ -218,7 +218,7 @@ private:
     virtual void will_begin_rendering_update() override;
     virtual bool has_rendering_opportunity() const override;
     virtual void did_finish_rendering_update() override;
-    virtual void set_manual_rendering_opportunities(bool enabled) override;
+    virtual void set_manual_rendering_opportunities(bool enabled, bool with_clock_ticks) override;
     virtual void inject_rendering_opportunity(double frame_time) override;
     virtual bool arm_render_clock(Compositing::CompositorContextId) override;
     virtual void disarm_render_clock(Compositing::CompositorContextId) override;
@@ -402,6 +402,9 @@ private:
     bool m_rendering_opportunity_granted { false };
     bool m_rendering_opportunity_for_current_update { false };
     bool m_manual_rendering_opportunities { false };
+    // Whether the leases a render clock would tick take the display ticks the test injects, under manual rendering
+    // opportunities.
+    bool m_manual_clock_ticks { false };
     Optional<double> m_granted_rendering_opportunity_time;
     Web::HTML::EventLoop::RenderingOpportunitySource m_granted_rendering_opportunity_source { Web::HTML::EventLoop::RenderingOpportunitySource::LocalTimer };
     Queue<PendingDOMMutation> m_pending_dom_mutations;

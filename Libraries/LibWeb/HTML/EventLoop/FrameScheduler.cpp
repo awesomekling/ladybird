@@ -109,6 +109,14 @@ static void install_render_clock_host()
         MutexLocker locker(needs_main.mutex);
         needs_main.event_loop = Core::EventLoop::current_weak();
     }
+    Layout::RustFFI::rust_render_clock_set_wake_main([] {
+        auto& needs_main = render_clock_needs_main();
+        MutexLocker locker(needs_main.mutex);
+        if (!needs_main.event_loop)
+            return;
+        if (auto event_loop = needs_main.event_loop->take(); event_loop.is_alive())
+            event_loop->wake();
+    });
     Layout::RustFFI::rust_render_clock_set_needs_main([](u64) {
         auto& needs_main = render_clock_needs_main();
         MutexLocker locker(needs_main.mutex);
@@ -154,7 +162,10 @@ FrameScheduler::FrameScheduler(EventLoop& event_loop)
 {
 }
 
-FrameScheduler::~FrameScheduler() = default;
+FrameScheduler::~FrameScheduler()
+{
+    Layout::RustFFI::rust_render_clock_sender_destroy(m_injected_clock_tick_sender);
+}
 
 bool FrameScheduler::submits_frames()
 {
@@ -759,6 +770,14 @@ void FrameScheduler::main_thread_will_idle()
     // until the main thread wakes.
     m_clock_lend_suspended = true;
     take_back_clock_lend_for_adoption();
+    // A tick a test injected finds no lease to take it.
+    if (m_clock_leases.is_empty() && !m_injected_clock_ticks.is_empty()) {
+        auto ticks = move(m_injected_clock_ticks);
+        Core::deferred_invoke([ticks = move(ticks)] mutable {
+            for (auto& tick : ticks)
+                tick.on_end(false);
+        });
+    }
     // Nothing ticks beside a frame in flight: the main thread takes it back first.
     if (m_clock_leases.is_empty() || m_state != State::Idle || Layout::RustFFI::rust_stage_thread_has_frame_in_flight())
         return;
@@ -776,6 +795,37 @@ void FrameScheduler::main_thread_will_idle()
     }
     if (any_ticks)
         Layout::RustFFI::rust_render_clock_main_will_idle();
+
+    // The ticks a test injected run now, as the render clock's would, and the main thread waits for them when it wakes.
+    if (m_injected_clock_ticks.is_empty())
+        return;
+    auto ticks = move(m_injected_clock_ticks);
+    if (any_ticks && !m_injected_clock_tick_sender)
+        m_injected_clock_tick_sender = Layout::RustFFI::rust_render_clock_sender_create();
+    for (auto& tick : ticks) {
+        bool injected = false;
+        for (auto& hold : m_clock_leases) {
+            if (!any_ticks || !m_injected_clock_tick_sender || !hold.render_clock_context.has_value())
+                continue;
+            auto frame_time_nanoseconds = static_cast<i64>(tick.frame_time * 1'000'000.0);
+            injected |= Layout::RustFFI::rust_render_clock_inject_tick(m_injected_clock_tick_sender, hold.render_clock_context->value(), frame_time_nanoseconds);
+        }
+        if (injected) {
+            m_injected_clock_ticks_in_flight.append(move(tick.on_end));
+            continue;
+        }
+        Core::deferred_invoke([on_end = move(tick.on_end)] { on_end(false); });
+    }
+}
+
+void FrameScheduler::inject_render_clock_tick(double frame_time, Function<void(bool)> on_end)
+{
+    // Without a render clock host, the main thread never lets a tick in.
+    if (!Layout::RustFFI::rust_stage_thread_submits_clock() || s_frame_scheduler_with_host != this) {
+        Core::deferred_invoke([on_end = move(on_end)] { on_end(false); });
+        return;
+    }
+    m_injected_clock_ticks.append({ frame_time, move(on_end) });
 }
 
 void FrameScheduler::main_thread_did_wake()
@@ -786,6 +836,14 @@ void FrameScheduler::main_thread_did_wake()
     m_clock_lend_restore_nanoseconds = 0;
     if (Layout::RustFFI::rust_render_clock_main_did_wake())
         adopt_render_clock_ticks();
+    // The ticks a test injected have run: what waits for them goes on once the documents adopted them.
+    if (!m_injected_clock_ticks_in_flight.is_empty()) {
+        auto ends = move(m_injected_clock_ticks_in_flight);
+        Core::deferred_invoke([ends = move(ends)] mutable {
+            for (auto& end : ends)
+                end(true);
+        });
+    }
     // The render clock goes on ticking the leases while the main thread runs its tasks.
     lend_clock_leases_to_busy_main(false);
 }
