@@ -14,12 +14,6 @@ pub(crate) struct SubstitutionAttributeSnapshot<'a> {
     pub names_are_ascii_case_insensitive: bool,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct FrozenLonghandInputRow {
-    pub(crate) adjustment_facts: u32,
-    pub(crate) tree_counting_inputs: u64,
-}
-
 unsafe extern "C" {
     fn web_css_custom_property_data_reference(data: *const std::ffi::c_void);
     fn web_css_custom_property_data_unreference(data: *const std::ffi::c_void);
@@ -133,29 +127,6 @@ impl RetainedState {
             }
         }
         (count << 32) | index
-    }
-
-    pub(crate) fn freeze_longhand_inputs(&mut self, nodes: &[StyleNodeID]) {
-        self.frozen_longhand_inputs.clear();
-        self.frozen_longhand_inputs.reserve(nodes.len());
-        for &node in nodes {
-            if self.frozen_longhand_inputs.contains_key(&node) || !self.tree().is_live(node) {
-                continue;
-            }
-            let adjustment_facts = self.element_adjustment_facts(node);
-            let tree_counting_inputs = self.element_tree_counting_inputs(node);
-            self.frozen_longhand_inputs.insert(
-                node,
-                FrozenLonghandInputRow {
-                    adjustment_facts,
-                    tree_counting_inputs,
-                },
-            );
-        }
-    }
-
-    pub(crate) fn frozen_longhand_input(&self, node: StyleNodeID) -> Option<FrozenLonghandInputRow> {
-        self.frozen_longhand_inputs.get(&node).copied()
     }
 
     /// Keep the custom-property environment an element now holds. A null `data` records that the
@@ -2032,7 +2003,6 @@ impl StyleEngineState {
                 driven_viewport: (0.0, 0.0),
                 document_resource_contexts: Default::default(),
                 custom_property_registry,
-                frozen_longhand_inputs: HashMap::default(),
                 element_custom_property_data: HashMap::default(),
                 pseudo_element_custom_property_data: HashMap::default(),
                 sampled_custom_property_environments: HashMap::default(),

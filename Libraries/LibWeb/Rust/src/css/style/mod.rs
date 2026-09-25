@@ -888,10 +888,6 @@ pub struct RetainedState {
     document_resource_contexts: resource_contexts::DocumentResourceContexts,
     /// Immutable registry generation used by custom-property style queries during a transaction.
     custom_property_registry: std::sync::Arc<crate::css::custom_properties::CustomPropertyRegistry>,
-    /// Independent per-element longhand inputs frozen once for the reaction batch. Same-update
-    /// parent results are deliberately absent: the preorder driver supplies those from retained
-    /// result rows as it advances.
-    frozen_longhand_inputs: HashMap<StyleNodeID, inputs::FrozenLonghandInputRow>,
     /// The custom-property environment each element holds, kept so a row that inherits custom
     /// properties is not the reason a walk to the element it inherits from happens. This is the only
     /// copy: the host reads an element's environment from here. `None` records an element holding

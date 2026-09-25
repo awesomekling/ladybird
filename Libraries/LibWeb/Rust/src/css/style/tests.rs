@@ -2509,26 +2509,6 @@ fn a_node_scoped_acknowledgement_leaves_other_inputs_queued() {
     );
 }
 
-#[test]
-fn longhand_input_rows_are_frozen_for_one_reaction_batch() {
-    let (mut engine, nodes) = linear_document();
-    discard_transaction(&mut engine);
-    engine.set_element_adjustment_facts(nodes[1], 0x25);
-    engine.freeze_longhand_inputs(&[nodes[1], nodes[1]]);
-
-    let frozen = engine.frozen_longhand_input(nodes[1]).unwrap();
-    assert_eq!(frozen.adjustment_facts, 0x25);
-    assert_eq!(
-        frozen.tree_counting_inputs,
-        engine.element_tree_counting_inputs(nodes[1])
-    );
-
-    engine.set_element_adjustment_facts(nodes[1], 0x52);
-    assert_eq!(engine.frozen_longhand_input(nodes[1]).unwrap(), frozen);
-    engine.freeze_longhand_inputs(&[nodes[1]]);
-    assert_eq!(engine.frozen_longhand_input(nodes[1]).unwrap().adjustment_facts, 0x52);
-}
-
 /// Builds `root -> outer -> inner -> target`.
 fn attach_shadow_tree(
     engine: &mut StyleEngine,
