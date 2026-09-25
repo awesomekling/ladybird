@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<style>
+    #box {
+        width: 100px;
+        height: 20px;
+        animation: grow 20s linear;
+    }
+    @keyframes grow {
+        from {
+            width: 100px;
+        }
+        to {
+            width: 2100px;
+        }
+    }
+</style>
+<div id="box"></div>
+<script src="../../include.js"></script>
+<script>
+    // Under LIBWEB_RENDER_CLOCK_FRAMES, the render clock goes on presenting an animation beside a long task that runs
+    // where the main thread never idled since the lease was granted: messages kept its event loop busy.
+    asyncTest(async done => {
+        const enabled = internals.clockFramesEnabled();
+        const channel = new MessageChannel();
+        let messagesSinceLease = 0;
+        let lent = false;
+        let start = performance.now();
+        await new Promise(resolve => {
+            channel.port1.onmessage = () => {
+                if (enabled && internals.renderClockTicks(document))
+                    ++messagesSinceLease;
+                // Not a timing test: the messages go on until the lease has been granted for a while, and the main
+                // thread lends the arenas to the ticks beside the task running now.
+                if ((messagesSinceLease < 20 || (enabled && !internals.clockLendActive())) && performance.now() - start < 10000) {
+                    channel.port2.postMessage(0);
+                    return;
+                }
+                lent = !enabled || internals.clockLendActive();
+                resolve();
+            };
+            channel.port2.postMessage(0);
+        });
+
+        const countersBefore = internals.getRenderClockCounters();
+        const wanted = 5;
+        start = performance.now();
+        let presented = 0;
+        while (enabled && performance.now() - start < 10000) {
+            presented = internals.getRenderClockCounters().ticksPresented - countersBefore.ticksPresented;
+            if (presented >= wanted)
+                break;
+        }
+        println(`the lease was granted: ${!enabled || messagesSinceLease >= 20}`);
+        println(`the task began lent: ${lent}`);
+        println(`frames presented during the task: ${!enabled || presented >= wanted}`);
+        done();
+    });
+</script>

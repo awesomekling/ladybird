@@ -161,6 +161,10 @@ public:
     // The main thread woke: the documents adopt what the render clock's ticks installed while it idled, and the render
     // clock goes on ticking the leases while the main thread runs its tasks.
     void main_thread_did_wake();
+    // The main thread's outermost event loop went round without blocking: its tasks keep it busy. The documents adopt
+    // what the render clock's ticks installed beside the tasks it ran, as they would had it idled, and the ticks go on
+    // beside the next ones.
+    void main_thread_did_not_block();
     // Something the main thread reached took back the arena of a leased document mid-task: the document's rows hold its
     // own records again, laid out at its own time.
     void clock_lend_taken_back(void* arena);
