@@ -29,6 +29,7 @@
 #include <LibWeb/CSS/SelectorMatching.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleEngineInput.h>
+#include <LibWeb/CSS/StyleInputScope.h>
 #include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
 #include <LibWeb/DOM/AccessibilityTreeNode.h>
 #include <LibWeb/DOM/Attr.h>
@@ -626,7 +627,9 @@ void Node::record_style_environment_change()
     document().bump_style_environment_version();
 
     if (is_document()) {
-        document().style_computer().style_engine().record_environment_change();
+        document().style_computer().style_engine().publish_input([](CSS::StyleInputScope const& input) {
+            input.engine().record_environment_change();
+        });
         return;
     }
 
