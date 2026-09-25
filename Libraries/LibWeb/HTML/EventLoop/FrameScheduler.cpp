@@ -992,7 +992,10 @@ void FrameScheduler::lend_clock_leases_to_busy_main(bool relend)
 {
     if (m_clock_leases.is_empty() || m_clock_lend_suspended || m_render_clock_suspended || m_state != State::Idle)
         return;
-    if (!Layout::RustFFI::rust_clock_frames_enabled() || Layout::RustFFI::rust_clock_lend_is_active() || Layout::RustFFI::rust_stage_thread_has_frame_in_flight())
+    if (!Layout::RustFFI::rust_clock_frames_enabled() || Layout::RustFFI::rust_stage_thread_has_frame_in_flight())
+        return;
+    // A lend again lends what a read took back; the others are still lent.
+    if (!relend && Layout::RustFFI::rust_clock_lend_is_active())
         return;
     // A tick would show what the task changed since the ticks last had the arenas, before the task is over.
     if (relend) {
@@ -1008,7 +1011,7 @@ void FrameScheduler::lend_clock_leases_to_busy_main(bool relend)
     Vector<void*> arenas;
     for (auto& hold : m_clock_leases) {
         auto* arena = hold.document->layout_node_arena_if_created();
-        if (!arena)
+        if (!arena || Layout::RustFFI::rust_clock_lend_holds(arena->handle()))
             continue;
         auto plan = hold.render_clock_context.has_value() && hold.render_clock_kit ? clock_lease_plan(*hold.document) : Optional<ClockLeasePlan> {};
         // A lend again goes on ticking from the samples the documents have not adopted yet.

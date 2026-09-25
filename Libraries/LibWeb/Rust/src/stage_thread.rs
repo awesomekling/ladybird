@@ -746,6 +746,39 @@ pub(crate) fn take_lent_arenas() -> bool {
     true
 }
 
+/// Takes back the arenas the calling thread lent that `reached` names, and runs what follows each
+/// take-back, as a join does. The others stay lent.
+fn take_lent_arenas_reached(reached: impl Fn(&SubmittedStage) -> bool) {
+    let lends = SUBMITTED.with_borrow_mut(|submitted| {
+        let (lends, others) = std::mem::take(submitted)
+            .into_iter()
+            .partition::<Vec<_>, _>(|stage| stage.is_lend() && reached(stage));
+        *submitted = others;
+        lends
+    });
+    let mut on_taken_back = Vec::new();
+    for mut lend in lends {
+        // A lend's outcome is the recall's own, which cannot fail.
+        let _ = lend.wait();
+        on_taken_back.extend(lend.on_taken_back.take());
+    }
+    if let Some(thread) = stage_thread().filter(|_| !on_taken_back.is_empty()) {
+        tsan::acquire(thread);
+    }
+    for take_back in on_taken_back {
+        take_back();
+    }
+}
+
+/// Whether the calling thread has lent the arena `arena` and not taken it back yet.
+pub(crate) fn has_lent(arena: *mut c_void) -> bool {
+    SUBMITTED.with_borrow(|submitted| {
+        submitted
+            .iter()
+            .any(|stage| stage.is_lend() && stage.arena == arena as usize && stage.outcome.is_none())
+    })
+}
+
 /// Whether the rendering update presents its frames from the frame in flight: when it submits its
 /// recordings, and presenting from the Rendering thread is on, unless LIBWEB_RENDER_PRESENTS=0 (which the host checks).
 fn submits_presentation() -> bool {
@@ -1247,7 +1280,8 @@ fn join_frame_in_flight_for_stage(
             wait_for_submitted_stages();
             return;
         }
-        take_frame_in_flight();
+        // The others stay lent: what reached this one reaches nothing of theirs.
+        take_lent_arenas_reached(reached);
         return;
     }
     if role == "style" {

@@ -760,58 +760,86 @@ enum ArenaHolder {
     /// Nobody: the main thread is blocked in its outermost event loop, and a render clock tick may
     /// start. The tick acts for the thread named.
     Idle(ThreadId),
-    /// A render clock tick, which the main thread waits for when it wakes.
+    /// The main thread, which runs a task, but for the arenas it lent the ticks: a tick of one of
+    /// those may start, and acts for the thread named.
+    Lent(ThreadId),
+    /// A render clock tick, which the main thread waits for when it wakes or takes a lent arena
+    /// back.
     Tick,
 }
 
+struct GateState {
+    holder: ArenaHolder,
+    /// The arenas the main thread lent the ticks while it runs a task, for [`ArenaHolder::Lent`].
+    lent: Vec<usize>,
+}
+
 struct IdleGate {
-    holder: Mutex<ArenaHolder>,
+    state: Mutex<GateState>,
     tick_ended: Condvar,
 }
 
 fn idle_gate() -> &'static IdleGate {
     static GATE: OnceLock<IdleGate> = OnceLock::new();
     GATE.get_or_init(|| IdleGate {
-        holder: Mutex::new(ArenaHolder::Main),
+        state: Mutex::new(GateState {
+            holder: ArenaHolder::Main,
+            lent: Vec::new(),
+        }),
         tick_ended: Condvar::new(),
     })
 }
 
-/// A render clock tick's hold on the arenas, taken where the main thread is idle.
+/// A render clock tick's hold on the arenas, taken where the main thread is idle, or has lent the
+/// tick's arena.
 struct IdleTick {
-    caller: ThreadId,
+    /// What the tick holds the arenas in place of, and gives them back to when it ends.
+    before: ArenaHolder,
 }
 
 impl IdleTick {
-    /// Takes the arenas for a tick, or returns `None` where the main thread holds them.
-    fn begin() -> Option<Self> {
-        let mut holder = idle_gate().holder.lock().expect("render clock idle gate");
-        let ArenaHolder::Idle(caller) = *holder else {
-            return None;
-        };
-        *holder = ArenaHolder::Tick;
-        Some(Self { caller })
+    /// Takes the arenas for a tick that reaches `arena`, or returns `None` where the main thread
+    /// holds that one.
+    fn begin(arena: usize) -> Option<Self> {
+        let mut state = idle_gate().state.lock().expect("render clock idle gate");
+        let before = state.holder;
+        match before {
+            ArenaHolder::Idle(_) => {}
+            ArenaHolder::Lent(_) if state.lent.contains(&arena) => {}
+            _ => return None,
+        }
+        state.holder = ArenaHolder::Tick;
+        Some(Self { before })
+    }
+
+    /// The thread the tick acts for.
+    fn caller(&self) -> ThreadId {
+        match self.before {
+            ArenaHolder::Idle(caller) | ArenaHolder::Lent(caller) => caller,
+            ArenaHolder::Main | ArenaHolder::Tick => unreachable!("a tick holds the arenas for a thread"),
+        }
+    }
+
+    /// Whether the main thread runs a task beside the tick.
+    fn is_beside_task(&self) -> bool {
+        matches!(self.before, ArenaHolder::Lent(_))
     }
 }
 
 impl Drop for IdleTick {
     fn drop(&mut self) {
         let gate = idle_gate();
-        let mut holder = gate.holder.lock().expect("render clock idle gate");
-        if *holder == ArenaHolder::Tick {
-            *holder = ArenaHolder::Idle(self.caller);
+        let mut state = gate.state.lock().expect("render clock idle gate");
+        if state.holder == ArenaHolder::Tick {
+            state.holder = self.before;
         }
-        drop(holder);
+        drop(state);
         gate.tick_ended.notify_all();
     }
 }
 
 // Whether a render clock tick installed something since the main thread last woke.
 static TICKS_TO_ADOPT: AtomicBool = AtomicBool::new(false);
-
-// Whether the main thread lent the arenas to the ticks while it runs a task, rather than while it
-// idles.
-static LENT_TO_BUSY_MAIN: AtomicBool = AtomicBool::new(false);
 
 /// What the main thread does once it has taken back an arena it lent while it ran a task: puts back
 /// the records it holds over the rows the ticks sampled. Runs on the main thread.
@@ -858,8 +886,7 @@ pub unsafe extern "C" fn rust_clock_lend_to_busy_main(arena: *mut c_void, relend
         unsafe { &mut *engine }.begin_clock_lend_beside_host_pins();
     }
     let recall = move || {
-        take_arenas_back();
-        LENT_TO_BUSY_MAIN.store(false, Ordering::Release);
+        take_arena_back(arena as usize);
         if !engine.is_null() {
             // SAFETY: The main thread owns the engine again, which outlives the lend of its arena.
             unsafe { &mut *engine }.finish_clock_lend_beside_host_pins();
@@ -873,11 +900,13 @@ pub unsafe extern "C" fn rust_clock_lend_to_busy_main(arena: *mut c_void, relend
     // SAFETY: Guaranteed by the caller; the lend stands in the frame in flight before a tick can
     // reach the arena.
     unsafe { crate::stage_thread::lend_arena(arena, recall, taken_back) };
-    LENT_TO_BUSY_MAIN.store(true, Ordering::Release);
+    // A tick of this arena may start from now on, and only now: until here the main thread still
+    // owned it, lending the others.
     let caller = std::thread::current().id();
-    let mut holder = idle_gate().holder.lock().expect("render clock idle gate");
-    if *holder == ArenaHolder::Main {
-        *holder = ArenaHolder::Idle(caller);
+    let mut state = idle_gate().state.lock().expect("render clock idle gate");
+    state.lent.push(arena as usize);
+    if state.holder == ArenaHolder::Main {
+        state.holder = ArenaHolder::Lent(caller);
     }
     count(if relend { &COUNTERS.relends } else { &COUNTERS.lends });
     true
@@ -887,6 +916,13 @@ pub unsafe extern "C" fn rust_clock_lend_to_busy_main(arena: *mut c_void, relend
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_clock_lend_is_active() -> bool {
     crate::stage_thread::has_lent_arena()
+}
+
+/// Whether the main thread lent the arena `arena` to the ticks while it runs a task, and has not
+/// taken it back yet: what took back the others reached nothing of it.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_clock_lend_holds(arena: *mut c_void) -> bool {
+    crate::stage_thread::has_lent(arena)
 }
 
 /// Takes back every arena the main thread lent while it ran a task, and leaves what the ticks
@@ -1026,9 +1062,9 @@ pub extern "C" fn rust_render_clock_main_will_idle() {
         return;
     }
     let caller = std::thread::current().id();
-    let mut holder = idle_gate().holder.lock().expect("render clock idle gate");
-    if *holder == ArenaHolder::Main {
-        *holder = ArenaHolder::Idle(caller);
+    let mut state = idle_gate().state.lock().expect("render clock idle gate");
+    if state.holder == ArenaHolder::Main {
+        state.holder = ArenaHolder::Idle(caller);
     }
 }
 
@@ -1046,14 +1082,29 @@ pub extern "C" fn rust_render_clock_main_did_wake() -> bool {
 
 fn take_arenas_back() {
     let gate = idle_gate();
-    let mut holder = gate.holder.lock().expect("render clock idle gate");
+    let mut state = gate.state.lock().expect("render clock idle gate");
     // A tick a test injected while the main thread idled runs before it takes the arenas back.
-    while *holder == ArenaHolder::Tick
-        || (matches!(*holder, ArenaHolder::Idle(_)) && INJECTED_TICKS_PENDING.load(Ordering::Acquire) > 0)
+    while state.holder == ArenaHolder::Tick
+        || (matches!(state.holder, ArenaHolder::Idle(_)) && INJECTED_TICKS_PENDING.load(Ordering::Acquire) > 0)
     {
-        holder = gate.tick_ended.wait(holder).expect("render clock idle gate");
+        state = gate.tick_ended.wait(state).expect("render clock idle gate");
     }
-    *holder = ArenaHolder::Main;
+    state.holder = ArenaHolder::Main;
+    state.lent.clear();
+}
+
+/// Takes back the arena `arena` the main thread lent while it runs a task. The ticks of the others
+/// it lent go on.
+fn take_arena_back(arena: usize) {
+    let gate = idle_gate();
+    let mut state = gate.state.lock().expect("render clock idle gate");
+    while state.holder == ArenaHolder::Tick {
+        state = gate.tick_ended.wait(state).expect("render clock idle gate");
+    }
+    state.lent.retain(|&lent| lent != arena);
+    if matches!(state.holder, ArenaHolder::Lent(_)) && state.lent.is_empty() {
+        state.holder = ArenaHolder::Main;
+    }
 }
 
 // The ticks a test injected that the stage thread has not run yet.
@@ -1099,7 +1150,7 @@ pub unsafe extern "C" fn rust_render_clock_inject_tick(
 fn end_injected_tick() {
     let gate = idle_gate();
     {
-        let _holder = gate.holder.lock().expect("render clock idle gate");
+        let _state = gate.state.lock().expect("render clock idle gate");
         INJECTED_TICKS_PENDING.fetch_sub(1, Ordering::AcqRel);
     }
     gate.tick_ended.notify_all();
@@ -1330,20 +1381,24 @@ fn run_render_clock_tick_at(context: u64, frame_time_nanoseconds: i64) {
         count(&COUNTERS.ticks_dropped_nested);
         return;
     }
-    let Some(idle_tick) = IdleTick::begin() else {
-        count(&COUNTERS.ticks_dropped_main_busy);
-        return;
-    };
-    let beside_task = LENT_TO_BUSY_MAIN.load(Ordering::Acquire);
-    if beside_task {
-        count(&COUNTERS.ticks_mid_task);
-    }
-    // Only the main thread grants and revokes, and it is idle: the lease stays as it is found, and
-    // so does its arena, which revoking it comes before the end of.
     let Some(lease) = clock_lease_for_context(context) else {
         count(&COUNTERS.ticks_dropped_without_lease);
         return;
     };
+    let Some(idle_tick) = IdleTick::begin(lease.arena) else {
+        count(&COUNTERS.ticks_dropped_main_busy);
+        return;
+    };
+    // Only the main thread grants and revokes, and it holds none of the lease's arena now: the lease
+    // stays as it is found, and so does its arena, which revoking it takes back first.
+    if lease.is_revoked() {
+        count(&COUNTERS.ticks_dropped_without_lease);
+        return;
+    }
+    let beside_task = idle_tick.is_beside_task();
+    if beside_task {
+        count(&COUNTERS.ticks_mid_task);
+    }
     if lease.paused.load(Ordering::Acquire) {
         count(&COUNTERS.ticks_dropped_paused);
         return;
@@ -1358,7 +1413,7 @@ fn run_render_clock_tick_at(context: u64, frame_time_nanoseconds: i64) {
         return;
     }
     let mut tick = None;
-    crate::stage_thread::run_detached_for(idle_tick.caller, lease.arena, || {
+    crate::stage_thread::run_detached_for(idle_tick.caller(), lease.arena, || {
         tick = Some(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             // A task pins and unpins its host's records beside the tick, which may read none of them.
             if beside_task {
@@ -1501,10 +1556,11 @@ mod tests {
     #[test]
     fn idle_gate_lets_a_tick_in_only_while_the_main_thread_is_idle_and_waits_for_it() {
         take_arenas_back();
-        assert!(IdleTick::begin().is_none());
-        *idle_gate().holder.lock().unwrap() = ArenaHolder::Idle(std::thread::current().id());
-        let tick = IdleTick::begin().expect("the main thread is idle");
-        assert!(IdleTick::begin().is_none());
+        assert!(IdleTick::begin(1).is_none());
+        idle_gate().state.lock().unwrap().holder = ArenaHolder::Idle(std::thread::current().id());
+        let tick = IdleTick::begin(1).expect("the main thread is idle");
+        assert!(!tick.is_beside_task());
+        assert!(IdleTick::begin(2).is_none());
         let woke = Arc::new(AtomicBool::new(false));
         let waker = {
             let woke = Arc::clone(&woke);
@@ -1518,6 +1574,35 @@ mod tests {
         drop(tick);
         waker.join().unwrap();
         assert!(woke.load(Ordering::SeqCst));
-        assert!(IdleTick::begin().is_none());
+        assert!(IdleTick::begin(1).is_none());
+
+        // The gate is the process's, so the lend test runs here, after the idle one.
+        idle_gate_lets_a_tick_in_only_on_an_arena_lent_to_it_while_a_task_runs();
+    }
+
+    fn lend(arena: usize) {
+        let mut state = idle_gate().state.lock().unwrap();
+        state.lent.push(arena);
+        if state.holder == ArenaHolder::Main {
+            state.holder = ArenaHolder::Lent(std::thread::current().id());
+        }
+    }
+
+    fn idle_gate_lets_a_tick_in_only_on_an_arena_lent_to_it_while_a_task_runs() {
+        take_arenas_back();
+        lend(1);
+        // An arena the main thread has yet to lend is still its own.
+        assert!(IdleTick::begin(2).is_none());
+        let tick = IdleTick::begin(1).expect("arena 1 is lent");
+        assert!(tick.is_beside_task());
+        drop(tick);
+        lend(2);
+        // Taking one arena back leaves the other lent.
+        take_arena_back(1);
+        assert!(IdleTick::begin(1).is_none());
+        drop(IdleTick::begin(2).expect("arena 2 is still lent"));
+        take_arena_back(2);
+        assert!(IdleTick::begin(2).is_none());
+        assert!(idle_gate().state.lock().unwrap().holder == ArenaHolder::Main);
     }
 }

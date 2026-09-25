@@ -72,7 +72,6 @@ RENDER_STAGE_ALLOWED = {
         [
             "clock_frames.rs:GATE",
             "clock_frames.rs:TICKS_TO_ADOPT",
-            "clock_frames.rs:LENT_TO_BUSY_MAIN",
             "clock_frames.rs:INJECTED_TICKS_PENDING",
         ],
     ),
