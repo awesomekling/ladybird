@@ -46,11 +46,7 @@ pub(crate) fn node_replaced_content_facts_need_host(data: &NodeData) -> bool {
     }
     matches!(
         kind,
-        NodeKind::CanvasBox
-            | NodeKind::ImageBox
-            | NodeKind::NavigableContainerViewport
-            | NodeKind::SVGSVGBox
-            | NodeKind::VideoBox
+        NodeKind::ImageBox | NodeKind::NavigableContainerViewport | NodeKind::SVGSVGBox | NodeKind::VideoBox
     )
 }
 
@@ -66,7 +62,7 @@ fn style_has_size_containment(style: ComputedValuesView<'_>) -> bool {
 }
 
 /// The replaced-content facts of a node whose facts need no host: a size-contained box, a
-/// checkbox, radio button, slider, textarea or text input, or a kind with no natural size.
+/// checkbox, radio button, slider, textarea, text input or canvas, or a kind with no natural size.
 pub(crate) fn derived_replaced_content_facts(data: &NodeData, input: ReplacedContentInput) -> FfiReplacedContentFacts {
     debug_assert!(!node_replaced_content_facts_need_host(data));
     let mut facts = FfiReplacedContentFacts::default();
@@ -78,6 +74,14 @@ pub(crate) fn derived_replaced_content_facts(data: &NodeData, input: ReplacedCon
         facts.auto_content_width = width;
         facts.has_auto_content_height = true;
         facts.auto_content_height = height;
+        if data.kind.get() == NodeKind::CanvasBox
+            && !style_has_size_containment(style)
+            && width != CssPixels::default()
+            && height != CssPixels::default()
+        {
+            facts.auto_content_aspect_ratio_numerator = width;
+            facts.auto_content_aspect_ratio_denominator = height;
+        }
     }
     if style.appearance() == crate::css::css_enums::appearance::NONE
         && let ReplacedContentInput::Input {
@@ -135,6 +139,15 @@ fn derived_auto_content_size(
             };
             let block_size = CssPixels::nearest_value_for(f64::from(rows) * style.line_height().to_double());
             Some(in_writing_mode(style, characters_to_px(style, cols), block_size))
+        }
+        NodeKind::CanvasBox => {
+            let ReplacedContentInput::Canvas { width, height } = input else {
+                panic!("a canvas publishes its width and height as it arrives");
+            };
+            Some((
+                CssPixels::from_integer(i64::from(width)),
+                CssPixels::from_integer(i64::from(height)),
+            ))
         }
         NodeKind::TextInputBox => {
             let ReplacedContentInput::Input { size, .. } = input else {

@@ -31,6 +31,7 @@
 #include <LibWeb/HTML/HTMLBRElement.h>
 #include <LibWeb/HTML/HTMLBodyElement.h>
 #include <LibWeb/HTML/HTMLButtonElement.h>
+#include <LibWeb/HTML/HTMLCanvasElement.h>
 #include <LibWeb/HTML/HTMLFieldSetElement.h>
 #include <LibWeb/HTML/HTMLHeadingElement.h>
 #include <LibWeb/HTML/HTMLImageElement.h>
@@ -832,6 +833,10 @@ void record_element_replaced_content_input(DOM::Element& element)
             break;
         }
         style_engine->record_replaced_content_input(element.style_node_id(), { .kind = kind, .first = static_cast<u32>(input->size()), .second = 0, .third = 0, .fourth = 0 });
+        return;
+    }
+    if (auto const* canvas = as_if<HTML::HTMLCanvasElement>(element)) {
+        style_engine->record_replaced_content_input(element.style_node_id(), { .kind = StyleEngineFFI::FfiReplacedContentInputKind::Canvas, .first = static_cast<u32>(canvas->width()), .second = static_cast<u32>(canvas->height()), .third = 0, .fourth = 0 });
         return;
     }
 }
@@ -2770,9 +2775,10 @@ void record_element_attribute_changed(DOM::Element& element, Utf16FlyString cons
     else if (name == HTML::AttributeNames::contenteditable || name == HTML::AttributeNames::alt)
         record_element_construction_facts(element);
 
-    // What the replaced content of a textarea or an input is sized from.
+    // What the replaced content of a textarea, an input or a canvas is sized from.
     if ((is<HTML::HTMLTextAreaElement>(element) && (name == HTML::AttributeNames::cols || name == HTML::AttributeNames::rows))
-        || (is<HTML::HTMLInputElement>(element) && (name == HTML::AttributeNames::size || name == HTML::AttributeNames::type)))
+        || (is<HTML::HTMLInputElement>(element) && (name == HTML::AttributeNames::size || name == HTML::AttributeNames::type))
+        || (is<HTML::HTMLCanvasElement>(element) && (name == HTML::AttributeNames::width || name == HTML::AttributeNames::height)))
         record_element_replaced_content_input(element);
 
     // Whether an event aimed at this element, or at anything written under it, is dispatched at all.
