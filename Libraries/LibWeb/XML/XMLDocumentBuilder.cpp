@@ -5,6 +5,8 @@
  */
 
 #include <LibGC/Heap.h>
+#include <LibWeb/CSS/StyleComputer.h>
+#include <LibWeb/CSS/StyleEngineBridge.h>
 #include <LibWeb/DOM/CDATASection.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/DocumentType.h>
@@ -349,7 +351,11 @@ void XMLDocumentBuilder::document_end()
     // AD-HOC: Update style first, so any font fetches that the computed styles depend on get started; an in-flight font
     //         fetch delays the load event.
     HTML::main_thread_event_loop().spin_until(GC::create_function(GC::Heap::the(), [&] {
-        m_document->update_style();
+        // NB: A layout pass in flight was submitted by a frame that updated style first, so beside it there is only
+        //     something to update if input arrived beside it. Otherwise this would take the pass back for nothing.
+        auto& style_engine = m_document->style_computer().style_engine();
+        if (!style_engine.layout_pass_is_in_flight() || style_engine.has_input_beside_layout_pass())
+            m_document->update_style();
         return !m_document->anything_is_delaying_the_load_event();
     }));
 
