@@ -25,6 +25,12 @@ EventLoop*& current_event_loop()
     return s_current_event_loop;
 }
 
+EventLoopIdleObserver const*& current_idle_observer()
+{
+    thread_local EventLoopIdleObserver const* s_idle_observer = nullptr;
+    return s_idle_observer;
+}
+
 }
 
 EventLoop::EventLoop()
@@ -197,6 +203,16 @@ EventLoop* StrongEventLoopReference::operator->() const
 {
     VERIFY(is_alive());
     return m_event_loop_weak->m_event_loop;
+}
+
+void set_idle_observer_for_current_thread(EventLoopIdleObserver const* observer)
+{
+    current_idle_observer() = observer;
+}
+
+EventLoopIdleObserver const* idle_observer_for_current_thread()
+{
+    return current_idle_observer();
 }
 
 }

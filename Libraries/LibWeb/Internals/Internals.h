@@ -216,6 +216,9 @@ public:
     GC::Ref<JS::Object> join_counters_object() const;
     u64 clock_ticks_presented() const;
     bool clock_frames_enabled() const;
+    u64 clock_ticks_received() const;
+    GC::Ref<JS::Object> get_render_clock_counters() const;
+    void set_render_clock_suspended(bool);
     void reset_join_counters();
     void dump_join_counters() const;
     Utf16String layout_overlap_blocker() const;

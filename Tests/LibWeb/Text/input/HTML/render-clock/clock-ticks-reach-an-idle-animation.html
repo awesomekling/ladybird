@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<style>
+    #box {
+        width: 100px;
+        height: 20px;
+        animation: grow 20s linear;
+    }
+    @keyframes grow {
+        from {
+            width: 100px;
+            background-color: rgb(0, 0, 0);
+        }
+        to {
+            width: 2100px;
+            background-color: rgb(0, 0, 200);
+        }
+    }
+</style>
+<div id="box"></div>
+<script src="../../include.js"></script>
+<script>
+    // Under LIBWEB_RENDER_CLOCK_FRAMES, the render clock hands the display ticks of the page's compositor context to
+    // the clock lease of an idle page's animation, without the main thread, and the lease's ticks install their
+    // samples. Each read in a task still sees the animation at the time its timeline shows.
+    asyncTest(async done => {
+        const box = document.getElementById("box");
+        const animation = box.getAnimations()[0];
+        const enabled = internals.clockFramesEnabled();
+        const before = internals.getRenderClockCounters();
+        let mismatches = 0;
+        for (let i = 0; i < 8; ++i) {
+            await new Promise(resolve => setTimeout(resolve, 40));
+            const time = animation.currentTime;
+            const width = box.getBoundingClientRect().width;
+            const blue = Number(getComputedStyle(box).backgroundColor.match(/\d+/g)[2]);
+            if (Math.abs(width - (100 + (2000 * time) / 20000)) > 0.5 || Math.abs(blue - (200 * time) / 20000) > 1)
+                ++mismatches;
+        }
+        const after = internals.getRenderClockCounters();
+        println(`mismatches: ${mismatches}`);
+        println(`render clock ticks received: ${!enabled || internals.clockTicksReceived() > 0}`);
+        println(`render clock ticks installed: ${!enabled || after.ticksInstalled > before.ticksInstalled}`);
+        println(`render clock ticks nested in a stage: ${after.ticksDroppedNested - before.ticksDroppedNested}`);
+        done();
+    });
+</script>

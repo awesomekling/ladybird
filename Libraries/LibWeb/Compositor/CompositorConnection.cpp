@@ -173,6 +173,13 @@ void CompositorConnection::ensure_video_presentation_channel()
     dbgln_if(VIDEO_PRESENTATION_CHANNEL_DEBUG, "WebContent: offered the media server's video presentation channel to Compositor");
 }
 
+void CompositorConnection::offer_render_clock_channel(IPC::TransportHandle handle)
+{
+    if (!can_send_message_to_compositor())
+        return;
+    async_offer_render_clock_channel(move(handle));
+}
+
 void CompositorConnection::set_parent_context(Compositing::CompositorContextId context_id, Optional<Compositing::CompositorContextId> parent_context_id)
 {
     if (!can_send_message_to_compositor())

@@ -639,6 +639,10 @@ public:
     virtual void did_finish_rendering_update() { }
     virtual void set_manual_rendering_opportunities([[maybe_unused]] bool enabled) { }
     virtual void inject_rendering_opportunity([[maybe_unused]] double frame_time) { }
+    // LIBWEB_RENDER_CLOCK_FRAMES: Has a render clock tick the clock lease of the compositor context's document at the
+    // context's display ticks, without the main thread, until it is disarmed. Returns false where nothing does.
+    virtual bool arm_render_clock([[maybe_unused]] Compositing::CompositorContextId context_id) { return false; }
+    virtual void disarm_render_clock([[maybe_unused]] Compositing::CompositorContextId context_id) { }
     virtual void page_did_change_title(Utf16String const&) { }
     virtual void page_did_update_editing_history_state(bool, bool) { }
     virtual void page_did_request_refresh() { }

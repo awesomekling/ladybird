@@ -212,6 +212,13 @@ interface Internals {
     // Whether rendering updates tick clock leases: LIBWEB_RENDER_CLOCK_FRAMES is set, and the stage thread runs the
     // clock stage beside the main thread.
     boolean clockFramesEnabled();
+    // LIBWEB_RENDER_CLOCK_FRAMES: the display ticks the render clock handed the stage thread, without the main thread.
+    unsigned long long clockTicksReceived();
+    // What the render clock did with them: ticksPosted, ticksFolded, ticksRun, ticksInstalled, ticksNeedingMain and
+    // why it dropped the others.
+    object getRenderClockCounters();
+    // Leaves clock leases to the main thread's rendering updates, with no render clock armed, while suspended.
+    undefined setRenderClockSuspended(boolean suspended);
     undefined resetJoinCounters();
     // Prints the reasons that blocked this document the longest to the debug log.
     undefined dumpJoinCounters();

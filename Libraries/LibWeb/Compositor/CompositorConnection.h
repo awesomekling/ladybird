@@ -85,6 +85,7 @@ public:
     Compositing::WebGL::ReadPixelsResult read_webgl_pixels(Compositing::CanvasId, Compositing::WebGL::GLint x, Compositing::WebGL::GLint y, Compositing::WebGL::GLsizei width, Compositing::WebGL::GLsizei height, Compositing::WebGL::GLenum format, Compositing::WebGL::GLenum type, Compositing::WebGL::GLsizei buf_size, Core::AnonymousBuffer const& pixels);
     bool read_webgl_buffer_sub_data(Compositing::CanvasId, Compositing::WebGL::GLenum target, Compositing::WebGL::GLintptr offset, Compositing::WebGL::GLintptr size, Core::AnonymousBuffer const& data);
 
+    void offer_render_clock_channel(IPC::TransportHandle);
     void ensure_video_presentation_channel();
     Function<void(Compositing::PageId page_id, Compositing::MouseEvent)> on_mouse_event;
     Function<void(Compositing::PageId page_id, Compositing::KeyEvent)> on_key_event;

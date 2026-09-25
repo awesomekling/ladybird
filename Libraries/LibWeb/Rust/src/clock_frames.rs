@@ -17,7 +17,7 @@
 //! The registry is keyed by the layout arena handle of the document. A caller holding an
 //! [`Arc<ClockLease>`] from [`clock_lease_for`] may tick it on the thread that owns the arena.
 //!
-//! A render clock (`WebView::RenderClock`, a thread of its own) also ticks a lease, at the display
+//! A render clock (`Web::Compositor::RenderClock`, a thread of its own) also ticks a lease, at the display
 //! ticks the compositor delivers for the lease's compositor context, without the main thread: see
 //! [`rust_render_clock_post_tick`]. Such a tick runs on the stage thread only while the main thread
 //! is idle, blocked in its outermost event loop with no frame in flight, and the main thread waits
@@ -91,6 +91,9 @@ pub struct ClockLease {
     /// The timeline time of the last tick, as `f64` bits.
     time: AtomicU64,
     revoked: AtomicBool,
+    /// Whether the render clock leaves the lease alone: the main thread moved what it ticks, and
+    /// its rendering update decides what becomes of the lease.
+    paused: AtomicBool,
     targets: Mutex<Vec<ClockTarget>>,
     entries: Mutex<Vec<ClockTickEntry>>,
     outcome: Mutex<Option<FfiClockTickOutcome>>,
@@ -337,6 +340,7 @@ pub extern "C" fn rust_clock_lease_grant(
         deadline,
         time: AtomicU64::new(time.to_bits()),
         revoked: AtomicBool::new(false),
+        paused: AtomicBool::new(false),
         targets: Mutex::default(),
         entries: Mutex::default(),
         outcome: Mutex::default(),
@@ -390,6 +394,14 @@ pub extern "C" fn rust_clock_lease_revoke(arena: *mut c_void) {
     if let Some(lease) = removed {
         lease.revoked.store(true, Ordering::Release);
         lease.entries.lock().expect("clock lease entries").clear();
+    }
+}
+
+/// Has the render clock leave the lease of `arena` alone, or tick it again.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_clock_lease_set_paused(arena: *mut c_void, paused: bool) {
+    if let Some(lease) = clock_lease_for(arena as usize) {
+        lease.paused.store(paused, Ordering::Release);
     }
 }
 
@@ -605,6 +617,8 @@ pub struct FfiRenderClockCounters {
     pub ticks_dropped_main_busy: u64,
     /// Ticks for a context no live lease holds.
     pub ticks_dropped_without_lease: u64,
+    /// Ticks for a lease the main thread moved what it ticks of.
+    pub ticks_dropped_paused: u64,
     /// Ticks at a time no later than the lease's last.
     pub ticks_dropped_stale: u64,
     /// Ticks that installed their samples for the main thread to adopt.
@@ -621,6 +635,7 @@ struct RenderClockCounters {
     ticks_dropped_nested: AtomicU64,
     ticks_dropped_main_busy: AtomicU64,
     ticks_dropped_without_lease: AtomicU64,
+    ticks_dropped_paused: AtomicU64,
     ticks_dropped_stale: AtomicU64,
     ticks_installed: AtomicU64,
     ticks_needing_main: AtomicU64,
@@ -633,6 +648,7 @@ static COUNTERS: RenderClockCounters = RenderClockCounters {
     ticks_dropped_nested: AtomicU64::new(0),
     ticks_dropped_main_busy: AtomicU64::new(0),
     ticks_dropped_without_lease: AtomicU64::new(0),
+    ticks_dropped_paused: AtomicU64::new(0),
     ticks_dropped_stale: AtomicU64::new(0),
     ticks_installed: AtomicU64::new(0),
     ticks_needing_main: AtomicU64::new(0),
@@ -734,8 +750,12 @@ fn run_render_clock_tick(context: u64, slot: &ClockSlot) {
         count(&COUNTERS.ticks_dropped_without_lease);
         return;
     };
+    if lease.paused.load(Ordering::Acquire) {
+        count(&COUNTERS.ticks_dropped_paused);
+        return;
+    }
     let time = lease.timeline_time_at(frame_time_nanoseconds as f64 / 1.0e6);
-    if !(time > lease.time()) {
+    if time.partial_cmp(&lease.time()) != Some(std::cmp::Ordering::Greater) {
         count(&COUNTERS.ticks_dropped_stale);
         return;
     }
@@ -776,6 +796,7 @@ pub extern "C" fn rust_render_clock_counters() -> FfiRenderClockCounters {
         ticks_dropped_nested: load(&COUNTERS.ticks_dropped_nested),
         ticks_dropped_main_busy: load(&COUNTERS.ticks_dropped_main_busy),
         ticks_dropped_without_lease: load(&COUNTERS.ticks_dropped_without_lease),
+        ticks_dropped_paused: load(&COUNTERS.ticks_dropped_paused),
         ticks_dropped_stale: load(&COUNTERS.ticks_dropped_stale),
         ticks_installed: load(&COUNTERS.ticks_installed),
         ticks_needing_main: load(&COUNTERS.ticks_needing_main),

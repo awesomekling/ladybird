@@ -23,6 +23,7 @@
 #include <LibJS/Forward.h>
 #include <LibWeb/Bindings/Navigation.h>
 #include <LibWeb/Bindings/NavigationType.h>
+#include <LibWeb/Compositor/RenderClock.h>
 #include <LibWeb/ContentSecurityPolicy/Directives/Directive.h>
 #include <LibWeb/Forward.h>
 #include <LibWeb/HTML/SessionHistoryEntry.h>
@@ -71,6 +72,8 @@ public:
     PageHost& page_host() { return *m_page_host; }
     PageHost const& page_host() const { return *m_page_host; }
     Web::Compositor::CompositorConnection* compositor_process_connection() const;
+    // LIBWEB_RENDER_CLOCK_FRAMES: the render clock that ticks clock leases at display ticks, without the main thread.
+    Web::Compositor::RenderClock* render_clock() const { return m_render_clock.ptr(); }
     void did_destroy_compositor_context(Compositing::CompositorContextId);
 
     Function<void(IPC::TransportHandle const&)> on_request_server_connection;
@@ -121,6 +124,7 @@ private:
     virtual void connect_to_compositor_process(IPC::TransportHandle handle) override;
     virtual void set_site_compatibility_data(JsonValue data) override;
     virtual void compositor_process_reconnected() override;
+    void attach_render_clock();
     virtual void update_system_theme(Compositing::PageId page_id, Core::AnonymousBuffer) override;
     virtual void update_screen_rects(Compositing::PageId page_id, Vector<Compositing::DevicePixelRect>, u32) override;
     virtual void populate_navigation(Compositing::PageId page_id, Web::HTML::NavigationPopulationRequest, Web::HTML::NavigationPopulationResult) override;
@@ -321,6 +325,8 @@ private:
 
     RefPtr<TestConnection> m_test_connection;
     RefPtr<Web::Compositor::CompositorConnection> m_compositor_connection;
+    // NB: Destroyed before the Compositor connection and the pages: its thread ticks their documents' leases.
+    OwnPtr<Web::Compositor::RenderClock> m_render_clock;
     NonnullOwnPtr<PageHost> m_page_host;
     OwnPtr<DevToolsDebugger> m_devtools_debugger;
 

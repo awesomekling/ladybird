@@ -40,6 +40,7 @@
 #include <LibWeb/Geolocation/GeolocationPositionError.h>
 #include <LibWeb/HTML/BrowsingContext.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
+#include <LibWeb/HTML/EventLoop/FrameScheduler.h>
 #include <LibWeb/HTML/LocalNavigable.h>
 #include <LibWeb/HTML/LocalTraversableNavigable.h>
 #include <LibWeb/HTML/NavigableContainer.h>
@@ -463,6 +464,9 @@ void PageClient::set_window_size(Compositing::DevicePixelSize size)
 
 void PageClient::compositor_process_lost()
 {
+    // The render clock lost its channel with the Compositor, and everything armed on it. The rendering update that
+    // follows the reconnect grants the leases anew.
+    Web::HTML::main_thread_event_loop().frame_scheduler().revoke_all_clock_leases();
     page().notify_all_webgl_contexts_lost();
     page().detach_all_media_element_video_sinks_after_compositor_lost();
 
@@ -798,6 +802,8 @@ void PageClient::set_manual_rendering_opportunities(bool enabled)
 
     m_manual_rendering_opportunities = enabled;
     if (enabled) {
+        // Frames come from the test alone: no render clock ticks a lease beside them.
+        Web::HTML::main_thread_event_loop().frame_scheduler().revoke_all_clock_leases();
         m_frame_timer->stop();
         m_frame_timer_purpose = FrameTimerPurpose::Inactive;
         m_compositor_rendering_opportunity_outstanding = false;
@@ -821,6 +827,23 @@ void PageClient::inject_rendering_opportunity(double frame_time)
         return;
 
     grant_rendering_opportunity(frame_time, Web::HTML::EventLoop::RenderingOpportunitySource::Manual);
+}
+
+bool PageClient::arm_render_clock(Compositing::CompositorContextId context_id)
+{
+    if (m_manual_rendering_opportunities || !client().compositor_process_connection())
+        return false;
+    auto* render_clock = client().render_clock();
+    if (!render_clock)
+        return false;
+    render_clock->arm(context_id, m_maximum_frames_per_second);
+    return true;
+}
+
+void PageClient::disarm_render_clock(Compositing::CompositorContextId context_id)
+{
+    if (auto* render_clock = client().render_clock())
+        render_clock->disarm(context_id);
 }
 
 void PageClient::set_maximum_frames_per_second(double maximum_frames_per_second)
