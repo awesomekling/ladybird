@@ -624,6 +624,8 @@ pub enum ReplacedContentInput {
     /// An `<input>`'s `size`, and whether its type makes it a text entry widget, whose default
     /// preferred size is that many `ch` by one line.
     Input { size: u32, is_text_entry: bool },
+    /// A `<canvas>`'s `width` and `height`, its natural size in CSS pixels.
+    Canvas { width: u32, height: u32 },
 }
 
 impl ReplacedContentInput {
@@ -638,6 +640,10 @@ impl ReplacedContentInput {
             kind if kind == Kind::Input as u8 || kind == Kind::TextEntryInput as u8 => Self::Input {
                 size: values[0],
                 is_text_entry: kind == Kind::TextEntryInput as u8,
+            },
+            kind if kind == Kind::Canvas as u8 => Self::Canvas {
+                width: values[0],
+                height: values[1],
             },
             _ => Self::None,
         }

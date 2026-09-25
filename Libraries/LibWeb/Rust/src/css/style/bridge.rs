@@ -973,6 +973,8 @@ pub enum FfiReplacedContentInputKind {
     Input = 2,
     /// An `<input>` whose type makes it a text entry widget: `first` is its `size`.
     TextEntryInput = 3,
+    /// A `<canvas>`: `first` is its `width`, and `second` its `height`.
+    Canvas = 4,
 }
 
 /// What an element gives the natural size of its replaced content, which layout resolves against
