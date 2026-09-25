@@ -110,6 +110,9 @@ pub enum FfiStyleInvalidationField {
     /// The row is no row the transaction planned: it joined the batch for an element a row
     /// inherits from that has no style, or for one between two rows of the batch.
     JoinedForInheritance = 1 << 28,
+    /// The row's custom-property environment moved, and the pass moved the environments below it
+    /// as it settled the row: the host walks nothing below it.
+    EnvironmentMovedInPass = 1 << 29,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -138,6 +141,10 @@ pub enum FfiStyleDeltaGap {
     /// The engine computed the new record over the installed ancestors for a row C++ would
     /// otherwise have computed itself. C++ installs it even on an element without a style.
     RetriedMaterialization,
+    /// An ancestor's custom-property environment moved, and the pass republished the element's
+    /// record over the moved one as it settled the ancestor. C++ installs the record, and the element
+    /// takes the moved environment as it acknowledges it.
+    EnvironmentMoved,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -4814,7 +4821,12 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
     // What each element row's node holds now travels with the row, and a computed row takes the
     // debts its computation left: the host settles them as it installs the row, or hands them back.
     for answer in &mut output.answers {
-        if answer.pseudo_kind != u8::MAX || answer.gap == FfiStyleDeltaGap::SkippedHidden {
+        if answer.pseudo_kind != u8::MAX
+            || matches!(
+                answer.gap,
+                FfiStyleDeltaGap::SkippedHidden | FfiStyleDeltaGap::EnvironmentMoved
+            )
+        {
             continue;
         }
         let Some(node) = StyleNodeID::from_raw(answer.style_node) else {
@@ -4846,9 +4858,19 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
     // The rows of a style update are matched in one cold matching batch, begun with the first of
     // its transactions that publishes rows and ended as the update discards its outputs. A batch
     // covering more than one sixteenth of the connected elements is dense enough that packing the
-    // scope once is cheaper than repeatedly reconstructing cold facts while matching its rows.
+    // scope once is cheaper than repeatedly reconstructing cold facts while matching its rows. The
+    // rows the pass joined for reactions its rows derived, and the records an environment move
+    // republished, were matched in the pass or need no matching.
     if !output.answers.is_empty() && engine.host.update_cold_matching_batch.is_none() {
-        let broad = !output.scoped || output.answers.len() * 16 > engine.connected_element_count() as usize;
+        let planned_rows = output
+            .answers
+            .iter()
+            .filter(|answer| {
+                answer.gap != FfiStyleDeltaGap::EnvironmentMoved
+                    && answer.record_damage & FfiStyleInvalidationField::JoinedByDerivation as u32 == 0
+            })
+            .count();
+        let broad = !output.scoped || planned_rows * 16 > engine.connected_element_count() as usize;
         let has_traversal = if broad {
             engine.begin_cold_matching_batch(root)
         } else {
@@ -4921,12 +4943,15 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
 /// contiguously in preorder. Besides making every parent ready before its descendants, this lets a
 /// parent's derived reaction merge into an unconsumed child reaction in the same batch.
 fn sort_style_deltas_for_direct_application(engine: &StyleEngine, deltas: &mut [FfiStyleDelta]) {
-    // An element's own delta leads the pseudo-element deltas settled beside it.
+    // An element's own delta leads the pseudo-element deltas settled beside it, and the record an
+    // environment move republished for it leads both: the element's own row was computed over it.
     let pseudo_rank = |delta: &FfiStyleDelta| {
-        if delta.pseudo_kind == u8::MAX {
+        if delta.gap == FfiStyleDeltaGap::EnvironmentMoved {
             0
+        } else if delta.pseudo_kind == u8::MAX {
+            1
         } else {
-            1 + u16::from(delta.pseudo_kind)
+            2 + u16::from(delta.pseudo_kind)
         }
     };
     // Small batches cost less to compare directly. A large batch names its dependency

@@ -1238,6 +1238,10 @@ pub struct HostState {
     /// belong to the host and are not atomic, and a transaction may run on the stage thread, so
     /// the transaction leaves them here and the bridge releases them on the document thread.
     retired_custom_property_data: Vec<inputs::RetainedCustomPropertyData>,
+    /// The environment moves a style pass made as it settled a row whose custom-property environment
+    /// moved, by the element each moves, until the host acknowledges the element's republished
+    /// record in its drain and the element takes the moved environment.
+    environment_moves_in_flight: HashMap<StyleNodeID, environment_move::EnvironmentMoveInFlight>,
     /// Whether transaction settlement performed an atom sweep, including a sweep that reclaimed
     /// no identities. Recording consumes this alongside the release batch.
     style_atoms_swept: bool,

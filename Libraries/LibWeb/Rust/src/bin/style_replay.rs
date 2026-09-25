@@ -2233,6 +2233,7 @@ fn read_style_transaction_outputs(
                     4 => FfiStyleDeltaGap::SkippedHidden,
                     5 => FfiStyleDeltaGap::RetriedAfterAncestors,
                     6 => FfiStyleDeltaGap::RetriedMaterialization,
+                    7 => FfiStyleDeltaGap::EnvironmentMoved,
                     tag => return Err(format!("unknown style delta gap tag {tag}").into()),
                 },
                 uses_substitution: format_version >= 16 && payload.read_bool()?,

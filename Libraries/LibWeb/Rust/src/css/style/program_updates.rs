@@ -1332,6 +1332,7 @@ impl StyleEngineState {
         self.abandon_suspended_style_pass();
         self.clear_ffi_style_transaction_output();
         self.discard_engine_computed_records(counters);
+        self.discard_environment_moves_in_flight();
         self.retain_prefix_states();
         self.discard_prepared_batch_matching_traversal();
         self.discard_published_match_answers(counters);

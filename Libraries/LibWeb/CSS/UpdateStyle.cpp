@@ -524,6 +524,16 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
             auto element = document.style_computer().element_for_style_node(published_reaction.style_node);
             if (!element)
                 continue;
+            // An ancestor's custom-property environment moved, and the engine moved the element's with
+            // it as it settled the ancestor's row: the element takes the moved environment, and the
+            // record the engine republished over it.
+            if (published_reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::EnvironmentMoved) {
+                if (auto record = scope.engine().acknowledge_environment_move(StyleNodeID { published_reaction.style_node }); record != 0 && record != element->style_record_identity().value()) {
+                    element->refresh_computed_style({}, StyleRecordID { record });
+                    republished_nodes.set(StyleNodeID { published_reaction.style_node });
+                }
+                continue;
+            }
             // A reaction the engine derived for this element while applying an earlier one in
             // this batch joins the element's own reaction where it covers it.
             auto reaction = published_reaction;
@@ -938,8 +948,9 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
 
             // The environment moved: the element's descendants take it here, and the ones that read
             // a moved name are recorded for their own computation. The engine derives no reactions
-            // for the move.
-            if (did_change_custom_properties) {
+            // for the move. Where the engine moved them as it settled the row, their records follow
+            // the row in the batch.
+            if (did_change_custom_properties && !(reaction.record_damage & to_underlying(StyleEngineFFI::FfiStyleInvalidationField::EnvironmentMovedInPass))) {
                 StyleEngineFFI::style_engine_note_host_step(StyleEngineFFI::FfiStyleHostStep::EnvironmentMove);
                 propagate_custom_property_environment_move(scope, document, *element, old_custom_property_data, republished_nodes);
             }
