@@ -124,17 +124,6 @@ CSSContainerRule const* CSSContainerRule::find_parent_container_rule() const
     return m_cached_parent_container_rule.ptr();
 }
 
-bool CSSContainerRule::matches(DOM::AbstractElement const& element) const
-{
-    if (!m_conditions->matches(element))
-        return false;
-
-    if (auto const* parent_container_rule = find_parent_container_rule())
-        return parent_container_rule->matches(element);
-
-    return true;
-}
-
 bool CSSContainerRule::contains_size_feature() const
 {
     if (m_conditions->contains_size_feature())

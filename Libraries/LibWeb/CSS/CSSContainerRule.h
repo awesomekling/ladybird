@@ -32,7 +32,6 @@ public:
     virtual ~CSSContainerRule() override;
 
     virtual Utf16String serialized_condition_text() const override;
-    bool matches(DOM::AbstractElement const&) const;
     bool contains_size_feature() const;
     bool contains_style_feature() const;
 

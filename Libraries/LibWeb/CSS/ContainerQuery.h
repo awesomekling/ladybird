@@ -43,7 +43,6 @@ public:
 
     bool contains_size_feature() const { return m_feature_requirements.contains_size_feature(); }
     bool contains_style_feature() const { return m_feature_requirements.contains_style_feature(); }
-    MatchResult evaluate(DOM::AbstractElement const&, Optional<Utf16FlyString> const& container_name) const;
     Utf16String to_string() const;
 
     void dump(StringBuilder&, int indent_levels = 0) const;
@@ -68,7 +67,6 @@ public:
     Parser::ValueParserFFI::ContainerConditionsData const* handle() const { return m_data; }
 
     Vector<Condition> const& entries() const;
-    bool matches(DOM::AbstractElement const&) const;
     bool contains_size_feature() const;
     bool contains_style_feature() const;
     void mark_element_style_dependencies(DOM::AbstractElement&) const;
@@ -78,9 +76,5 @@ private:
     Parser::ValueParserFFI::ContainerConditionsData const* m_data;
     mutable Optional<Vector<Condition>> m_entries;
 };
-
-bool container_name_matches(DOM::Element const&, Optional<Utf16FlyString> const& container_name);
-void prepare_for_style_query_evaluation();
-bool style_query_cycle_detected();
 
 }
