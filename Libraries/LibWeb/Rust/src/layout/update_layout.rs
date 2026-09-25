@@ -547,11 +547,16 @@ enum OwedHostHalf {
     Commit(DeferredLayoutCommitHostHalf),
 }
 
-/// The style and layout stabilization loop of one layout update, run as one stage.
-struct LayoutFrame<'a> {
+/// The style and layout stabilization loop of one layout update, run as one stage. It holds no
+/// borrow of the stage run it is in: the joins are handed to each step that makes one, so a round
+/// can stop ahead of its full layout pass and go on once the pass has run.
+struct LayoutFrame {
     inputs: FrameInputs,
-    joins: &'a crate::stage_thread::MainJoins<'a>,
     messages: FrameMessages,
+    /// The rounds the loop has started, and the connected element count the last style join
+    /// answered, which bound them.
+    layout_pass: u64,
+    connected_element_count: u32,
     /// The sources the last join read for the layout pass that follows it.
     pass_sources: Option<LayoutPassSources>,
     /// The document style node of the tree build the style join readied.
@@ -572,16 +577,94 @@ struct Joined<T> {
     facts: FfiLayoutUpdateDocumentFacts,
 }
 
-impl LayoutFrame<'_> {
+/// A full layout pass a round has readied. Everything it reads is in hand, so it runs without the
+/// document thread, and what follows its commit is left to [`LayoutFrame::finish_round`].
+struct PendingLayoutPass {
+    arena_handle: *mut c_void,
+    layout_root: NodeSlotId,
+    sources: LayoutPassSources,
+    facts: FfiLayoutUpdateDocumentFacts,
+    started: Option<Instant>,
+}
+
+impl PendingLayoutPass {
+    /// # Safety
+    ///
+    /// The frame must run for the update the arena is in, and nothing but the pass may reach the
+    /// arena until it returns.
+    unsafe fn run(self) -> LaidOutPass {
+        let Self {
+            arena_handle,
+            layout_root,
+            sources:
+                LayoutPassSources {
+                    propagation_facts,
+                    content,
+                    root_background_source,
+                },
+            facts,
+            started,
+        } = self;
+        // SAFETY (for the three steps below): Guaranteed by the caller; the viewport box stays live
+        // between them, and no row was freed since the sources were read.
+        unsafe { prepare_root_layout_from_sources(arena_handle, layout_root, &propagation_facts, content) };
+        let output = unsafe {
+            compute_root_layout(
+                arena_handle,
+                layout_root,
+                facts.viewport_inline_size_raw,
+                facts.viewport_block_size_raw,
+                facts.document_in_quirks_mode,
+                facts.should_collect_devtools_layout_data,
+            )
+        };
+        let pending_commit = unsafe { commit_root_layout_to_arena(arena_handle, layout_root, &output) };
+        drop(output);
+        // SAFETY: Guaranteed by the caller.
+        let arena = unsafe { arena(arena_handle) };
+        arena.evaluate_size_containers_needing_evaluation_after_layout();
+        // SAFETY: Guaranteed by the caller, and the frame delivers the host half at its next join,
+        // in commit order.
+        let commit_host_half = unsafe { pending_commit.settle_ahead_of_host() };
+        arena.end_layout_pass_preparation_handbacks();
+        arena.note_full_layout();
+        LaidOutPass {
+            commit_host_half,
+            root_background_source,
+            facts,
+            started,
+        }
+    }
+}
+
+/// A full layout pass that has run and settled its commit in the arena, whose commit's host half
+/// the frame still owes the document thread.
+struct LaidOutPass {
+    commit_host_half: DeferredLayoutCommitHostHalf,
+    root_background_source: FfiRootBackgroundSource,
+    facts: FfiLayoutUpdateDocumentFacts,
+    started: Option<Instant>,
+}
+
+/// How the round of a full layout pass ends.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RoundEnd {
+    /// The loop has stabilized, and the frame has ended.
+    Stabilized,
+    AnotherRound,
+}
+
+impl LayoutFrame {
     fn join<R: Send>(
         &self,
+        joins: &crate::stage_thread::MainJoins<'_>,
         _: FrameJoin,
         work: impl FnOnce(&crate::stage::MainThread<'_>, &LayoutUpdateHost) -> R,
     ) -> R {
         let host = self.inputs.host;
         let arena_handle = self.inputs.arena_handle;
         let owed_host_halves = self.owed_host_halves.take();
-        self.joins.join(|main_thread| {
+        joins.join(|main_thread| {
             // What the frame owed, in the order it made it owe it.
             for owed in owed_host_halves {
                 match owed {
@@ -779,19 +862,19 @@ impl LayoutFrame<'_> {
 
     /// Ends the frame in its last join, which applies the frame's messages and ends the update on
     /// the document side.
-    fn end(mut self) {
-        let ended = self.end_unless_host_left_work(false);
+    fn end(&mut self, joins: &crate::stage_thread::MainJoins<'_>) {
+        let ended = self.end_unless_host_left_work(joins, false);
         debug_assert!(ended);
     }
 
     /// Ends the frame as [`Self::end`] does, unless `after_commit` and the host halves of the
     /// frame's commits left style or layout work pending, in which case the frame goes on with
     /// another round. Answers whether the frame has ended.
-    fn end_unless_host_left_work(&mut self, after_commit: bool) -> bool {
+    fn end_unless_host_left_work(&mut self, joins: &crate::stage_thread::MainJoins<'_>, after_commit: bool) -> bool {
         let arena_handle = self.inputs.arena_handle;
         let mut messages = Some(std::mem::take(&mut self.messages));
         let messages_slot = &mut messages;
-        self.join(FrameJoin::FrameEnd, |main_thread, host| {
+        self.join(joins, FrameJoin::FrameEnd, |main_thread, host| {
             // SAFETY: The frame runs for the update the arena is in.
             let arena = unsafe { arena(arena_handle) };
             if after_commit {
@@ -816,22 +899,33 @@ impl LayoutFrame<'_> {
         }
     }
 
-    fn run(mut self) {
+    /// Runs the loop to its end, running each full layout pass a round readies in place.
+    fn run(mut self, joins: &crate::stage_thread::MainJoins<'_>) {
+        while let Some(pass) = self.run_rounds(joins) {
+            // SAFETY: The frame runs for the update the arena is in, and waits for the pass.
+            let laid_out = unsafe { pass.run() };
+            if self.finish_round(joins, laid_out) == RoundEnd::Stabilized {
+                return;
+            }
+        }
+    }
+
+    /// Runs the loop's rounds until one readies a full layout pass, or until the loop is over, in
+    /// which case the frame has ended.
+    fn run_rounds(&mut self, joins: &crate::stage_thread::MainJoins<'_>) -> Option<PendingLayoutPass> {
         // Size-query dependencies point from a descendant to an ancestor query container. They are
         // therefore acyclic, and a coherent style/layout pass can settle at least one more level of
         // a nested dependency chain. One pass per connected element is a conservative exact bound.
         // The count is taken after each style update because an initial style update can enroll
         // the elements of a freshly parsed document after the layout update has already started.
-        let mut connected_element_count: u32 = 0;
-        let mut layout_pass: u64 = 0;
-        while layout_pass < ORDINARY_STABILIZATION_ROUND_LIMIT + u64::from(connected_element_count) + 1 {
-            layout_pass += 1;
+        while self.layout_pass < ORDINARY_STABILIZATION_ROUND_LIMIT + u64::from(self.connected_element_count) + 1 {
+            self.layout_pass += 1;
 
             let list_owners_to_rebuild = std::mem::take(&mut self.list_owners_to_rebuild);
             let Joined {
                 value: (element_count, round_after_style),
                 facts,
-            } = self.join(FrameJoin::Style, |main_thread, host| {
+            } = self.join(joins, FrameJoin::Style, |main_thread, host| {
                 host.rebuild_list_owners_with_stale_item_counters(main_thread, &list_owners_to_rebuild);
                 host.update_style(main_thread);
                 host.process_pending_list_item_renumbers(main_thread);
@@ -846,34 +940,37 @@ impl LayoutFrame<'_> {
                     facts,
                 }
             });
-            connected_element_count = element_count;
+            self.connected_element_count = element_count;
             self.pass_sources = round_after_style.pass_sources;
             self.tree_build_document_style_node = round_after_style.tree_build_document_style_node;
             self.selection = round_after_style.selection;
 
             if !self.round_lays_out(&facts) {
                 self.messages.prepare_for_rendering = true;
-                return self.end();
+                self.end(joins);
+                return None;
             }
 
             let mut registered_partial_relayout_roots = self.arena().take_partial_relayout_boundary_roots();
 
             // NOTE: If this is a document hosting <template> contents, layout is unnecessary.
             if self.inputs.is_template_contents_document {
-                return self.end();
+                self.end(joins);
+                return None;
             }
 
             let mut needs_layout_tree_rebuild = self.needs_layout_tree_rebuild(&facts);
 
             let mut facts = facts;
             match self.try_partial_relayout(
+                joins,
                 &mut facts,
                 &mut registered_partial_relayout_roots,
                 &mut needs_layout_tree_rebuild,
             ) {
                 PartialRelayout::Done => {
-                    if self.end_unless_host_left_work(true) {
-                        return;
+                    if self.end_unless_host_left_work(joins, true) {
+                        return None;
                     }
                     continue;
                 }
@@ -895,7 +992,7 @@ impl LayoutFrame<'_> {
                 // Only the sources of a pass that follows are read on the document thread; the
                 // host half waits for the join after them.
                 let pass_sources = pass_follows.then(|| {
-                    self.join(FrameJoin::BuildLayoutTree, |main_thread, host| {
+                    self.join(joins, FrameJoin::BuildLayoutTree, |main_thread, host| {
                         // SAFETY: The frame runs for the update the arena is in.
                         unsafe { LayoutPassSources::read(main_thread, host, arena_handle) }
                     })
@@ -922,55 +1019,20 @@ impl LayoutFrame<'_> {
 
             let layout_root = self.arena().layout_root();
             assert!(!layout_root.is_invalid(), "a full layout pass needs a layout root");
-            let arena_handle = self.inputs.arena_handle;
-            let LayoutPassSources {
-                propagation_facts,
-                content,
-                root_background_source,
-            } = self.take_pass_sources();
-            // SAFETY (for the three steps below): The frame runs for the update the arena is in,
-            // the viewport box stays live between them, and no row was freed since the sources
-            // were read.
-            unsafe { prepare_root_layout_from_sources(arena_handle, layout_root, &propagation_facts, content) };
-            let output = unsafe {
-                compute_root_layout(
-                    arena_handle,
-                    layout_root,
-                    facts.viewport_inline_size_raw,
-                    facts.viewport_block_size_raw,
-                    facts.document_in_quirks_mode,
-                    facts.should_collect_devtools_layout_data,
-                )
-            };
-            let pending_commit = unsafe { commit_root_layout_to_arena(arena_handle, layout_root, &output) };
-            drop(output);
-            self.arena().evaluate_size_containers_needing_evaluation_after_layout();
-            self.settle_commit_ahead_of_host(pending_commit);
-            self.arena().end_layout_pass_preparation_handbacks();
-
-            self.messages.full_layouts_performed += 1;
-            self.arena().note_full_layout();
-
-            self.note_layout_commit(true, &facts, root_background_source);
-            self.inputs.trace.layout(layout_started);
-
-            // Layout-only invalidations still need to be flushed before we can exit.
-            if self.commit_left_layout_work(&facts) {
-                continue;
-            }
-
-            // The last join asks what the host halves left, and nothing else runs on the document
-            // thread until then, so if they left nothing the loop has stabilized.
-            if self.end_unless_host_left_work(true) {
-                return;
-            }
+            return Some(PendingLayoutPass {
+                arena_handle: self.inputs.arena_handle,
+                layout_root,
+                sources: self.take_pass_sources(),
+                facts,
+                started: layout_started,
+            });
         }
 
         let list_owners_to_rebuild = std::mem::take(&mut self.list_owners_to_rebuild);
         let Joined {
             value: needs_style_update_after_layout,
             facts,
-        } = self.join(FrameJoin::FinalFacts, |main_thread, host| {
+        } = self.join(joins, FrameJoin::FinalFacts, |main_thread, host| {
             host.rebuild_list_owners_with_stale_item_counters(main_thread, &list_owners_to_rebuild);
             Joined {
                 value: host.needs_style_update_after_layout(main_thread),
@@ -980,7 +1042,42 @@ impl LayoutFrame<'_> {
         if needs_style_update_after_layout || !layout_is_up_to_date(self.arena(), &facts) {
             self.messages.stabilization_bound_failed = true;
         }
-        self.end();
+        self.end(joins);
+        None
+    }
+
+    /// Ends the round of a full layout pass that has run: what derives from its commit, and whether
+    /// the loop has stabilized, in which case the frame has ended.
+    fn finish_round(&mut self, joins: &crate::stage_thread::MainJoins<'_>, laid_out: LaidOutPass) -> RoundEnd {
+        let facts = self.note_laid_out_pass(laid_out);
+
+        // Layout-only invalidations still need to be flushed before we can exit.
+        if self.commit_left_layout_work(&facts) {
+            return RoundEnd::AnotherRound;
+        }
+
+        // The last join asks what the host halves left, and nothing else runs on the document
+        // thread until then, so if they left nothing the loop has stabilized.
+        if self.end_unless_host_left_work(joins, true) {
+            return RoundEnd::Stabilized;
+        }
+        RoundEnd::AnotherRound
+    }
+
+    /// Takes in a full layout pass that has run: its commit's host half is left for the next join,
+    /// and what derives from the commit is done. Answers the facts the pass ran with.
+    fn note_laid_out_pass(&mut self, laid_out: LaidOutPass) -> FfiLayoutUpdateDocumentFacts {
+        let LaidOutPass {
+            commit_host_half,
+            root_background_source,
+            facts,
+            started,
+        } = laid_out;
+        self.owe_host_half(OwedHostHalf::Commit(commit_host_half));
+        self.messages.full_layouts_performed += 1;
+        self.note_layout_commit(true, &facts, root_background_source);
+        self.inputs.trace.layout(started);
+        facts
     }
 
     /// Attempts to satisfy the pending layout update by re-laying out only the registered partial
@@ -989,6 +1086,7 @@ impl LayoutFrame<'_> {
     /// the full layout path without rebuilding again; `facts` then holds the facts after the build.
     fn try_partial_relayout(
         &mut self,
+        joins: &crate::stage_thread::MainJoins<'_>,
         facts: &mut FfiLayoutUpdateDocumentFacts,
         registered_partial_relayout_roots: &mut Vec<NodeSlotId>,
         needs_layout_tree_rebuild: &mut bool,
@@ -1021,7 +1119,7 @@ impl LayoutFrame<'_> {
             let Joined {
                 value: pass_sources,
                 facts: facts_after_build,
-            } = self.join(FrameJoin::BuildLayoutTree, |main_thread, host| {
+            } = self.join(joins, FrameJoin::BuildLayoutTree, |main_thread, host| {
                 let facts = host.document_facts(main_thread);
                 Joined {
                     // SAFETY: The frame runs for the update the arena is in.
@@ -1168,15 +1266,16 @@ unsafe fn update_layout(
         crate::stage_thread::run_stage_with_joins(main_thread, move |joins| {
             let frame = LayoutFrame {
                 inputs: inputs.into_inner(),
-                joins,
                 messages: FrameMessages::default(),
+                layout_pass: 0,
+                connected_element_count: 0,
                 pass_sources: None,
                 tree_build_document_style_node: None,
                 list_owners_to_rebuild: Vec::new(),
                 selection: None,
                 owed_host_halves: Cell::default(),
             };
-            frame.run();
+            frame.run(joins);
         });
     }
 }
