@@ -639,6 +639,56 @@ impl AnimationTimingRow {
         })
     }
 
+    /// The row `Animation::style_timing_row()` publishes for a CSS transition the moment it starts:
+    /// played, so held at time zero with its play task pending, running the effect
+    /// `CSSTransition` builds - the transition's delay, its duration as one iteration, backwards
+    /// fill and the transition's timing function. The linear stops of `easing` are the row's own,
+    /// from zero.
+    #[must_use]
+    pub(crate) fn for_new_css_transition(
+        owning_node: StyleNodeID,
+        property_id: u16,
+        delay: f64,
+        active_duration: f64,
+        easing: &PublishedEasing,
+    ) -> Self {
+        use timing_row_flag as flag;
+
+        let mut times = [0.0; TIMING_ROW_TIMES];
+        times[TIME_HOLD] = 0.0;
+        times[TIME_START_DELAY] = delay;
+        times[TIME_ITERATION_DURATION] = active_duration;
+        times[TIME_ITERATION_COUNT] = 1.0;
+        times[TIME_PLAYBACK_RATE] = 1.0;
+        times[TIME_EASING_X1] = easing.x1;
+        times[TIME_EASING_Y1] = easing.y1;
+        times[TIME_EASING_X2] = easing.x2;
+        times[TIME_EASING_Y2] = easing.y2;
+        Self {
+            flags: flag::HAS_HOLD_TIME
+                | flag::HAS_TIMELINE
+                | flag::TIMELINE_IS_MONOTONICALLY_INCREASING
+                | flag::HAS_OWNING_ELEMENT
+                | flag::HAS_PENDING_PLAY_TASK
+                | (fill_mode::BACKWARDS << flag::FILL_MODE_SHIFT)
+                | (u32::from(easing.kind) << flag::EASING_KIND_SHIFT)
+                | (u32::from(easing.step_position) << flag::EASING_STEP_POSITION_SHIFT),
+            timeline: 0,
+            easing_interval_count: easing.interval_count,
+            effect_identity: 0,
+            composite_class: animation_class::CSS_TRANSITION,
+            composite_owning_slot: ELEMENT_ANIMATION_SLOT,
+            composite_transition_property: property_id,
+            composite_owning_node: owning_node.raw(),
+            composite_class_key: 0,
+            global_list_order: 0,
+            first_linear_point: 0,
+            linear_point_count: easing.linear_points.len() as u32,
+            times,
+            synthesized_index: None,
+        }
+    }
+
     /// This row, standing for the `index`th animation a plan starts.
     #[must_use]
     pub(crate) fn with_synthesized_index(self, index: u32) -> Self {
@@ -1549,6 +1599,35 @@ pub(crate) struct PublishedEasing {
 }
 
 impl PublishedEasing {
+    /// `linear`, spelled out as `linear(0, 1)` the way the host describes a keyframe that runs it.
+    #[must_use]
+    pub(crate) fn linear() -> Self {
+        Self {
+            kind: 0,
+            linear_points: Box::new([
+                crate::css::easing::FfiLinearEasingPoint {
+                    input: 0.0,
+                    output: 0.0,
+                },
+                crate::css::easing::FfiLinearEasingPoint {
+                    input: 1.0,
+                    output: 1.0,
+                },
+            ]),
+            x1: 0.0,
+            y1: 0.0,
+            x2: 0.0,
+            y2: 0.0,
+            interval_count: 0,
+            step_position: 0,
+        }
+    }
+
+    #[must_use]
+    pub(crate) fn linear_points(&self) -> &[crate::css::easing::FfiLinearEasingPoint] {
+        &self.linear_points
+    }
+
     /// The easing a computed `animation-timing-function` describes, which fills in the hole a
     /// keyframe with no easing of its own keeps. A mirror of `EasingFunction::from_style_value`.
     #[must_use]
@@ -1777,6 +1856,39 @@ pub(crate) struct PublishedEffect {
 }
 
 impl PublishedEffect {
+    /// The effect `CSSTransition` builds for a transition it starts: the start value at the first
+    /// keyframe and the end value at the last, each running `linear` and replacing, described as
+    /// the host describes it.
+    #[must_use]
+    pub(crate) fn for_css_transition(
+        property_id: u16,
+        start_value: crate::css::style_value::RetainedStyleValueData,
+        end_value: crate::css::style_value::RetainedStyleValueData,
+    ) -> Self {
+        let keyframe = |key, declaration| PublishedKeyframe {
+            key,
+            easing: PublishedEasing::linear(),
+            easing_value: crate::css::style_value::RetainedStyleValueData::none(),
+            composite: 0,
+            declaration_range: declaration..declaration + 1,
+            custom_declaration_range: 0..0,
+        };
+        let declaration = |value| PublishedDeclaration {
+            property_id,
+            use_initial: false,
+            value,
+        };
+        Self {
+            identity: 0,
+            generation: 0,
+            flags: effect_flag::IS_TRANSITION,
+            base_url: Box::new([]),
+            keyframes: Box::new([keyframe(0, 0), keyframe(100 * 1000, 1)]),
+            declarations: Box::new([declaration(start_value), declaration(end_value)]),
+            custom_declarations: Box::new([]),
+        }
+    }
+
     #[must_use]
     pub(crate) fn declarations_of(&self, keyframe: &PublishedKeyframe) -> &[PublishedDeclaration] {
         &self.declarations[keyframe.declaration_range.clone()]

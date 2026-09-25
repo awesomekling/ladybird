@@ -987,6 +987,9 @@ pub struct RetainedState {
     /// What the pass decided for the transition step of each row that owes one, which the report
     /// compares with the host's decision.
     transition_step_decisions: HashMap<StyleNodeID, Option<Vec<(u16, transition_step::TransitionStepDecision)>>>,
+    /// What the pass composed for the transition step of each row it decided one for, which the
+    /// report compares with the host's composition.
+    transition_step_compositions: HashMap<StyleNodeID, Box<crate::css::animated_overlay::AnimatedOverlay>>,
     /// What each tree scope's registered counter styles are, as one identity per scope. A record
     /// whose `content` or `list-style-type` names an overridable counter style is only the answer
     /// while the registry it named is the one in place, so the record carries the identity and a

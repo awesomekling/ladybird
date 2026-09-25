@@ -3630,6 +3630,123 @@ pub(crate) fn sample_settled_row(
     })
 }
 
+/// A transition the pass's decision of a row's transition step starts: the effect `CSSTransition`
+/// builds for it and the row it publishes the moment it starts.
+pub(crate) struct StartedTransition {
+    pub(crate) effect: crate::css::style::animations::PublishedEffect,
+    pub(crate) row: crate::css::style::animations::AnimationTimingRow,
+    pub(crate) easing: crate::css::style::animations::PublishedEasing,
+}
+
+/// The composition a transition step that starts transitions leaves: the style the row installed,
+/// with the values the started transitions have the moment they start layered over it, as the
+/// host's step collects them. Or why the engine cannot compose it.
+pub(crate) fn sample_transition_step(
+    engine: &mut crate::css::style::StyleEngineState,
+    node: crate::css::style::tree::StyleNodeID,
+    installed_style_record: u64,
+    started: &[StartedTransition],
+    layout_arena: crate::css::style::animations::LentLayoutArena,
+) -> Result<Box<AnimatedOverlay>, String> {
+    use crate::css::animated_overlay::{
+        rust_animated_overlay_clone, rust_animated_overlay_create, rust_animated_overlay_free,
+    };
+    use crate::css::cascaded_properties::NO_PSEUDO_ELEMENT;
+    use crate::css::style::animations;
+
+    let environments = engine
+        .settled_row_custom_property_environments(node)
+        .map_err(|reason| format!("custom property environments: {reason}"))?;
+    let (table, record_overlay) = {
+        let view = engine
+            .style_record_view(installed_style_record)
+            .ok_or("an installed record with no view")?;
+        (
+            view.longhand_table.cast::<c_void>().as_ptr(),
+            view.animated_overlay.cast::<AnimatedOverlay>().as_ptr(),
+        )
+    };
+    // The step layers what it starts over the composition the row installed, all of it.
+    let overlay = match record_overlay.is_null() {
+        true => rust_animated_overlay_create(),
+        false => unsafe { rust_animated_overlay_clone(record_overlay) },
+    };
+    let input = FfiHostAnimationSample {
+        style_engine: std::ptr::null_mut(),
+        style_node: node.raw(),
+        pseudo_kind: NO_PSEUDO_ELEMENT,
+        identities: std::ptr::null(),
+        generations: std::ptr::null(),
+        current_keys: std::ptr::null(),
+        effect_count: 0,
+        samples_whole_stack: false,
+        style_record: installed_style_record,
+        longhand_table: table,
+        animated_overlay: overlay.cast_const().cast(),
+        custom_property_store: std::ptr::null(),
+        base_custom_property_store: std::ptr::null(),
+        inheritance_custom_property_store: std::ptr::null(),
+        element_declares_own_custom_properties: false,
+        base_custom_property_environment_is_engine: false,
+        inheritance_parent_style_record: 0,
+        kept_length_contexts: std::ptr::null(),
+        callback_context: overlay.cast(),
+        prepare_overlay_for_mutation: Some(settled_row_overlay),
+        length_contexts: None,
+        layout_arena: layout_arena.as_ptr(),
+    };
+    let effects = started.iter().map(|started| &started.effect);
+    let composed = (|| {
+        let mut selected = Vec::with_capacity(started.len());
+        let mut preparation_effects = Vec::with_capacity(started.len());
+        let mut selected_keys = Vec::with_capacity(started.len());
+        for (started, effect) in started.iter().zip(effects) {
+            let Some(current_key) = animations::row_current_key(&started.row, started.easing.linear_points(), None)
+                .ok_or("a started transition's timing")?
+            else {
+                continue;
+            };
+            selected.push(crate::css::animation::SelectedEffect {
+                effect,
+                current_key,
+                easing_from_animation: None,
+                composite_from_animation: 0,
+            });
+            preparation_effects.push(crate::css::animation::FfiAnimationPreparationEffect {
+                identity: 0,
+                generation: 0,
+            });
+            selected_keys.push(current_key);
+        }
+        let descriptions: &[animations::PublishedEffect] = &[];
+        let (_run, run_input) = prepare_engine_sample(&input, engine, node, descriptions, environments, None)?;
+        let result = unsafe {
+            compose_selected_animation_effects(
+                &run_input,
+                engine,
+                node,
+                &selected,
+                &preparation_effects,
+                &selected_keys,
+                false,
+            )
+        };
+        let animated_custom_properties =
+            unsafe { AnimatedCustomPropertyResults::take(result.animated_custom_properties_storage) };
+        if !animated_custom_properties.is_empty() {
+            return Err("a started transition of a custom property".to_string());
+        }
+        Ok(())
+    })();
+    match composed {
+        Ok(()) => Ok(unsafe { Box::from_raw(overlay) }),
+        Err(reason) => {
+            unsafe { rust_animated_overlay_free(overlay) };
+            Err(reason)
+        }
+    }
+}
+
 /// The longhands the animated box-type, overflow and text-alignment adjustments write.
 const ANIMATED_POST_COMPUTE_ADJUSTMENT_PROPERTIES: [u16; 7] = [
     crate::css::property_metadata::property_id::DISPLAY,
