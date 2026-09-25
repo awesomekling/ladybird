@@ -142,7 +142,13 @@ void StyleEffectDrain::apply(DOM::Document& document)
 
 void StyleEffectDrain::apply(StyleDrainScope const& scope, DOM::Document& document)
 {
-    for (auto const& effect : m_effects) {
+    apply_render_half(scope, document);
+    apply_main_half(scope, document);
+}
+
+void StyleEffectDrain::apply_render_half(StyleDrainScope const& scope, DOM::Document& document)
+{
+    for (auto const& effect : m_render_effects) {
         if (auto const* row = effect.get_pointer<RestoreRowDebts>()) {
             scope.engine().restore_row_debts(scope, row->style_node, row->explicit_inheritance_debt, row->row_effect_debt);
             continue;
@@ -174,19 +180,10 @@ void StyleEffectDrain::apply(StyleDrainScope const& scope, DOM::Document& docume
             [&](AnchorNames const&) {
                 element->register_anchor_names(scope);
             },
-            [&](AnimationNames const&) {
-                element->republish_animation_name_registry();
-            },
             [&](ContainerQueryEffects const& row) {
                 auto container_effects = StyleEngineFFI::style_engine_take_container_effects(scope, scope.engine().rust_handle(), row.style_node.value());
                 ScopeGuard release_container_effects = [&] { StyleEngineFFI::style_engine_native_container_effects_release(scope, container_effects.effects); };
                 StyleComputer::record_container_query_effects(scope, DOM::AbstractElement { *element }, container_effects);
-            },
-            [&](AnimationPlan const& row) {
-                document.style_computer().apply_settled_animation_plan(DOM::AbstractElement { *element }, row.plan);
-            },
-            [&](DisplayNoneAnimations const&) {
-                element->apply_display_none_change(scope, true, false);
             },
             [&](RestoreRowDebts const&) {
                 VERIFY_NOT_REACHED();
@@ -198,7 +195,27 @@ void StyleEffectDrain::apply(StyleDrainScope const& scope, DOM::Document& docume
                 VERIFY_NOT_REACHED();
             });
     }
-    m_effects.clear();
+    m_render_effects.clear();
+}
+
+void StyleEffectDrain::apply_main_half(StyleDrainScope const& scope, DOM::Document& document)
+{
+    for (auto const& effect : m_main_effects) {
+        auto element = document.style_computer().element_for_style_node(effect.visit([](auto const& row) { return row.style_node; }));
+        if (!element)
+            continue;
+        effect.visit(
+            [&](AnimationNames const&) {
+                element->republish_animation_name_registry();
+            },
+            [&](AnimationPlan const& row) {
+                document.style_computer().apply_settled_animation_plan(DOM::AbstractElement { *element }, row.plan);
+            },
+            [&](DisplayNoneAnimations const&) {
+                element->apply_display_none_change(scope, true, false);
+            });
+    }
+    m_main_effects.clear();
 }
 
 static void apply_document_style_invalidation_after_style_change(DOM::Document& document, RequiredInvalidationAfterStyleChange const& invalidation)
