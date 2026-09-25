@@ -409,15 +409,8 @@ unsafe fn arena<'a>(arena_handle: *mut c_void) -> &'a LayoutNodeArena {
 /// overlap with script.
 #[derive(Clone, Copy)]
 enum FrameJoin {
-    /// The layout tree update marks of the list owners the last build found showing stale counters,
-    /// then style, then the list item renumbers and top layer changes it leaves, then the facts
-    /// after them. When the round lays out, the join readies what comes next: the tree build, or
-    /// the sources of the layout pass when no tree build comes first. Style is the document's own
-    /// loop over its elements, and a tree update mark is set on the DOM node, which widens it to
-    /// what the node's layout node and its document ask for.
-    Style,
     /// Whether style or layout work is still pending once the loop has run out of rounds, after the
-    /// marks a last build left, as the style join would have set them. A loop that stabilizes has
+    /// marks a last build left, as the style round would have set them. A loop that stabilizes has
     /// these facts from the document thread's take-in of the frame's end already.
     FinalFacts,
 }
@@ -459,7 +452,7 @@ struct WalkedLayoutTreeBuild {
     document_style_node: StyleNodeID,
 }
 
-/// What the style join readied for the rest of its round.
+/// What the style round readied for the rest of its round.
 #[derive(Default)]
 struct RoundAfterStyle {
     pass_sources: Option<LayoutPassSources>,
@@ -570,81 +563,24 @@ enum FrameEnd {
     Over(FfiLayoutUpdateEnd),
 }
 
-/// A layout frame that has ended, which the document thread takes in once the stage has returned.
-#[must_use]
-struct FrameEnding {
-    frame: LayoutFrame,
-    end: FrameEnd,
-}
-
-impl FrameEnding {
-    /// Takes the frame's end in on the document thread: pays what the frame owed, then either
-    /// answers with the frame again if the host halves left it work for another round, or applies
-    /// the frame's messages and ends the update on the document side.
-    ///
-    /// # Safety
-    ///
-    /// As for [`arena`], on the document thread, once the frame's stage has returned.
-    unsafe fn take_in(self, main_thread: &crate::stage::MainThread) -> Option<LayoutFrame> {
-        let Self { frame, end } = self;
-        let host = frame.inputs.host;
-        let arena_handle = frame.inputs.arena_handle;
-        // SAFETY: Guaranteed by the caller.
-        unsafe { pay_owed_host_halves(main_thread, &host, arena_handle, frame.owed_host_halves.take()) };
-        // SAFETY: As above.
-        let arena = unsafe { arena(arena_handle) };
-        let end = match end {
-            FrameEnd::UnlessHostLeftWork => {
-                let facts = host.document_facts(main_thread);
-                if host.needs_style_update_after_layout(main_thread)
-                    || facts.top_layer_work_pending
-                    || !layout_is_up_to_date(arena, &facts)
-                {
-                    return Some(frame);
-                }
-                FfiLayoutUpdateEnd::InUpdate
-            }
-            FrameEnd::Over(end) => end,
-        };
-        frame.messages.apply(main_thread, &host, arena);
-        host.finish_update_layout(main_thread, end);
-        None
-    }
-}
-
-/// Where a layout frame's rounds stop.
-enum RoundsStop {
-    /// A round readied a full layout pass.
-    Pass(PendingLayoutPass),
-    /// The loop is over, and the frame ends as the value says.
-    End(FrameEnd),
-}
-
-/// Where a layout frame's stage run stops.
-enum FrameStop {
-    /// The frame readied a full layout pass for the document thread to submit.
-    Pass(LayoutFrame, PendingLayoutPass),
-    Ended(FrameEnding),
-}
-
 /// The style and layout stabilization loop of one layout update, run as one stage. It holds no
 /// borrow of the stage run it is in: the joins are handed to each step that makes one, so a round
 /// can stop ahead of its full layout pass and go on once the pass has run.
 struct LayoutFrame {
     inputs: FrameInputs,
     messages: FrameMessages,
-    /// The rounds the loop has started, and the connected element count the last style join
+    /// The rounds the loop has started, and the connected element count the last style round
     /// answered, which bound them.
     layout_pass: u64,
     connected_element_count: u32,
     /// The sources the last join read for the layout pass that follows it.
     pass_sources: Option<LayoutPassSources>,
-    /// The document style node of the tree build the style join readied.
+    /// The document style node of the tree build the style round readied.
     tree_build_document_style_node: Option<u32>,
     /// The list owners the last build found showing stale counters, which the next join marks
     /// for a layout tree rebuild.
     list_owners_to_rebuild: Vec<StyleNodeID>,
-    /// The document's selection as the style join of the round read it, if it has one.
+    /// The document's selection as the style round of the round read it, if it has one.
     selection: Option<SelectionSnapshot>,
     /// What the frame's tree builds and commits owe the document thread beyond their own joins, in
     /// the order the frame made them, which the next join pays before its work.
@@ -719,13 +655,14 @@ struct LaidOutPass {
     started: Option<Instant>,
 }
 
-/// How the round of a full layout pass ends.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum RoundEnd {
-    /// The loop has stabilized as far as what the frame owns shows. The frame ends, unless the host
-    /// halves of its commits left work for another round.
-    Stabilized,
-    AnotherRound,
+/// Where a layout frame goes on once a step of it has run.
+enum FrameStep {
+    /// Another round, whose style the document thread runs first, with no stage run outstanding.
+    NeedsStyle,
+    /// A round has readied its full layout pass.
+    PassReady(PendingLayoutPass),
+    /// The loop is over, and the frame ends as the value says.
+    Ended(FrameEnd),
 }
 
 impl LayoutFrame {
@@ -777,7 +714,7 @@ impl LayoutFrame {
             || self.arena().needs_full_layout_tree_update()
     }
 
-    /// Readies what follows the style join on the document thread when the round lays out: the
+    /// Readies what follows the style round on the document thread when the round lays out: the
     /// tree build when one comes first, and otherwise the sources of the layout pass.
     fn ready_round_after_style(
         &self,
@@ -807,7 +744,7 @@ impl LayoutFrame {
         }
     }
 
-    /// Walks the tree build the style join readied, in the frame. Its host half (the shells of the
+    /// Walks the tree build the style round readied, in the frame. Its host half (the shells of the
     /// rows the walk freed and of the new rows whose making tells the document something, the box
     /// presence it changed, the DOM nodes its commit messages resolve to, a new viewport's paint
     /// state) is left to the next join, and the style resources and generated image providers of
@@ -816,8 +753,8 @@ impl LayoutFrame {
         let document_style_node = self
             .tree_build_document_style_node
             .take()
-            .expect("the style join readies the tree build");
-        // SAFETY: The frame runs for the update the arena is in, and the style join published the
+            .expect("the style round readies the tree build");
+        // SAFETY: The frame runs for the update the arena is in, and the style round published the
         // document's style for the build.
         let (outcome, host_half) = unsafe { walk_layout_tree_build(self.inputs.arena_handle, document_style_node) };
         let walked = WalkedLayoutTreeBuild {
@@ -925,143 +862,235 @@ impl LayoutFrame {
         facts.document_is_active && !self.arena().layout_is_up_to_date(false)
     }
 
-    /// Ends the frame, leaving what it still owes and its messages for the document thread to take
-    /// in.
-    fn end(self, end: FrameEnd) -> FrameEnding {
+    /// Takes the frame's end in on the document thread, with no stage run outstanding: pays what
+    /// the frame owed, then either answers false if the host halves left it work for another round,
+    /// or applies the frame's messages, ends the update on the document side, and answers true.
+    ///
+    /// # Safety
+    ///
+    /// As for [`arena`], on the document thread, with no stage run of the frame outstanding.
+    unsafe fn take_in_end(&mut self, main_thread: &crate::stage::MainThread, end: FrameEnd) -> bool {
         debug_assert!(
             self.list_owners_to_rebuild.is_empty(),
             "a join marks the list owners before the frame ends"
         );
-        FrameEnding { frame: self, end }
-    }
-
-    /// Runs the loop to its end, running each full layout pass a round readies in place.
-    fn run(mut self, joins: &crate::stage_thread::MainJoins<'_>) -> FrameEnding {
-        loop {
-            match self.run_rounds(joins) {
-                RoundsStop::Pass(pass) => {
-                    // SAFETY: The frame runs for the update the arena is in, and waits for the pass.
-                    let laid_out = unsafe { pass.run() };
-                    if self.finish_round(laid_out) == RoundEnd::Stabilized {
-                        return self.end(FrameEnd::UnlessHostLeftWork);
-                    }
-                }
-                RoundsStop::End(end) => return self.end(end),
-            }
-        }
-    }
-
-    /// Runs the frame until a round readies a full layout pass, which the document thread submits,
-    /// or until the frame ends.
-    fn run_until_pass(mut self, joins: &crate::stage_thread::MainJoins<'_>) -> FrameStop {
-        match self.run_rounds(joins) {
-            RoundsStop::Pass(pass) => FrameStop::Pass(self, pass),
-            RoundsStop::End(end) => FrameStop::Ended(self.end(end)),
-        }
-    }
-
-    /// Runs the loop's rounds until one readies a full layout pass, or until the loop is over.
-    fn run_rounds(&mut self, joins: &crate::stage_thread::MainJoins<'_>) -> RoundsStop {
-        // Size-query dependencies point from a descendant to an ancestor query container. They are
-        // therefore acyclic, and a coherent style/layout pass can settle at least one more level of
-        // a nested dependency chain. One pass per connected element is a conservative exact bound.
-        // The count is taken after each style update because an initial style update can enroll
-        // the elements of a freshly parsed document after the layout update has already started.
-        while self.layout_pass < ORDINARY_STABILIZATION_ROUND_LIMIT + u64::from(self.connected_element_count) + 1 {
-            self.layout_pass += 1;
-
-            let list_owners_to_rebuild = std::mem::take(&mut self.list_owners_to_rebuild);
-            let Joined {
-                value: (element_count, round_after_style),
-                facts,
-            } = self.join(joins, FrameJoin::Style, |main_thread, host| {
-                host.rebuild_list_owners_with_stale_item_counters(main_thread, &list_owners_to_rebuild);
-                host.update_style(main_thread);
-                host.process_pending_list_item_renumbers(main_thread);
-                host.process_pending_top_layer_layout_changes(main_thread);
+        let host = self.inputs.host;
+        let arena_handle = self.inputs.arena_handle;
+        // SAFETY: Guaranteed by the caller.
+        unsafe { pay_owed_host_halves(main_thread, &host, arena_handle, self.owed_host_halves.take()) };
+        // SAFETY: As above.
+        let arena = unsafe { arena(arena_handle) };
+        let end = match end {
+            FrameEnd::UnlessHostLeftWork => {
                 let facts = host.document_facts(main_thread);
-                Joined {
-                    value: (
-                        self.arena()
-                            .with_style_store(|engine| engine.tree().connected_element_count()),
-                        self.ready_round_after_style(main_thread, host, &facts),
-                    ),
-                    facts,
+                if host.needs_style_update_after_layout(main_thread)
+                    || facts.top_layer_work_pending
+                    || !layout_is_up_to_date(arena, &facts)
+                {
+                    return false;
                 }
-            });
-            self.connected_element_count = element_count;
-            self.pass_sources = round_after_style.pass_sources;
-            self.tree_build_document_style_node = round_after_style.tree_build_document_style_node;
-            self.selection = round_after_style.selection;
-
-            if !self.round_lays_out(&facts) {
-                self.messages.prepare_for_rendering = true;
-                return RoundsStop::End(FrameEnd::Over(FfiLayoutUpdateEnd::InUpdate));
+                FfiLayoutUpdateEnd::InUpdate
             }
+            FrameEnd::Over(end) => end,
+        };
+        std::mem::take(&mut self.messages).apply(main_thread, &host, arena);
+        host.finish_update_layout(main_thread, end);
+        true
+    }
 
-            let mut registered_partial_relayout_roots = self.arena().take_partial_relayout_boundary_roots();
-
-            // NOTE: If this is a document hosting <template> contents, layout is unnecessary.
-            if self.inputs.is_template_contents_document {
-                return RoundsStop::End(FrameEnd::Over(FfiLayoutUpdateEnd::InUpdate));
-            }
-
-            let mut needs_layout_tree_rebuild = self.needs_layout_tree_rebuild(&facts);
-
-            match self.try_partial_relayout(
-                &facts,
-                &mut registered_partial_relayout_roots,
-                &mut needs_layout_tree_rebuild,
-            ) {
-                PartialRelayout::Done => return RoundsStop::End(FrameEnd::UnlessHostLeftWork),
-                PartialRelayout::NeedsAnotherLayoutPass => continue,
-                PartialRelayout::NotEligible => {}
-            }
-            drop(registered_partial_relayout_roots);
-
-            let layout_started = self.inputs.trace.now();
-
-            if needs_layout_tree_rebuild {
-                let arena_handle = self.inputs.arena_handle;
-                let (walked, host_half) = self.walk_layout_tree_build();
-                let needs_another_build_pass = walked.outcome.needs_another_build_pass;
-                if !needs_another_build_pass {
-                    self.reconcile_stale_list_item_counters(&walked);
+    /// Runs the frame's loop from the document thread. Each round's style runs here, with no stage
+    /// run outstanding, and each step after it runs as a stage of its own. With `stop_at_pass`, the
+    /// loop stops at the first full layout pass a round readies and answers it, and the frame has
+    /// not ended; otherwise the pass runs in place, and the loop goes on until the frame has ended.
+    ///
+    /// # Safety
+    ///
+    /// On the document thread, for the update the arena is in.
+    unsafe fn drive(
+        &mut self,
+        main_thread: &crate::stage::MainThread,
+        stop_at_pass: bool,
+    ) -> Option<PendingLayoutPass> {
+        let mut step = FrameStep::NeedsStyle;
+        loop {
+            // SAFETY (for the steps below): Guaranteed by the caller, and the document thread
+            // waits for each stage.
+            step = match step {
+                FrameStep::Ended(end) => {
+                    if unsafe { self.take_in_end(main_thread, end) } {
+                        return None;
+                    }
+                    FrameStep::NeedsStyle
                 }
-                let pass_follows = !needs_another_build_pass && self.list_owners_to_rebuild.is_empty();
-                // SAFETY: The frame runs for the update the arena is in.
-                let pass_sources = pass_follows.then(|| unsafe { LayoutPassSources::read(arena_handle) });
-                self.owe_tree_build_host_half(host_half);
-                self.note_layout_tree_build(&walked.outcome);
-                if needs_another_build_pass {
-                    continue;
+                FrameStep::NeedsStyle if !self.may_start_round() => unsafe {
+                    self.run_stage(main_thread, |frame, joins| {
+                        FrameStep::Ended(frame.run_out_of_rounds(joins))
+                    })
+                },
+                FrameStep::NeedsStyle => {
+                    let facts = unsafe { self.run_style_round(main_thread) };
+                    unsafe { self.run_stage(main_thread, move |frame, _| frame.run_round(facts)) }
                 }
+                FrameStep::PassReady(pass) if stop_at_pass => return Some(pass),
+                FrameStep::PassReady(pass) => unsafe {
+                    self.run_stage(main_thread, move |frame, _| {
+                        let laid_out = pass.run();
+                        frame.finish_round(laid_out)
+                    })
+                },
+            };
+        }
+    }
 
-                // The full layout below covers every boundary the build's invalidation registered.
-                drop(self.arena().take_partial_relayout_boundary_roots());
+    /// Runs a step of the frame as a stage, which may join the document thread.
+    ///
+    /// # Safety
+    ///
+    /// On the document thread, for the update the arena is in.
+    unsafe fn run_stage(
+        &mut self,
+        main_thread: &crate::stage::MainThread,
+        step: impl FnOnce(&mut Self, &crate::stage_thread::MainJoins<'_>) -> FrameStep,
+    ) -> FrameStep {
+        // SAFETY: The frame and the step reach the arena and the document only while the document
+        // thread waits for the stage, or through the joins it runs on that thread.
+        let frame = unsafe { crate::stage_thread::CallerWaits::new(self) };
+        let step = unsafe { crate::stage_thread::CallerWaits::new(step) };
+        // SAFETY: As above, for the work the frame's joins hand the document thread.
+        let next = unsafe {
+            crate::stage_thread::run_stage_with_joins(main_thread, move |joins| {
+                let next = (step.into_inner())(frame.into_inner(), joins);
+                // SAFETY: The step goes back to the document thread, which waits for the stage.
+                crate::stage_thread::CallerWaits::new(next)
+            })
+        };
+        next.into_inner()
+    }
 
-                // The list owners the reconciliation holds on to are marked for another build by
-                // the next style join, after the reset of the full tree update flag.
-                self.arena().set_needs_full_layout_tree_update(false);
-                self.inputs.trace.tree_build(layout_started);
+    /// Whether the loop may start another round. Size-query dependencies point from a descendant to
+    /// an ancestor query container. They are therefore acyclic, and a coherent style/layout pass can
+    /// settle at least one more level of a nested dependency chain. One pass per connected element
+    /// is a conservative exact bound. The count is taken after each style round because an initial
+    /// style update can enroll the elements of a freshly parsed document after the layout update
+    /// has already started.
+    fn may_start_round(&self) -> bool {
+        self.layout_pass < ORDINARY_STABILIZATION_ROUND_LIMIT + u64::from(self.connected_element_count) + 1
+    }
 
-                let Some(pass_sources) = pass_sources else {
-                    continue;
-                };
-                self.pass_sources = Some(pass_sources);
-            }
+    /// Starts a round on the document thread, with no stage run outstanding: pays what the frame
+    /// owes the document thread, then marks the list owners the last build found showing stale
+    /// counters for a layout tree rebuild, runs style and the list item renumbers and top layer
+    /// changes it leaves, and reads the facts after them. When the round lays out, it readies what
+    /// comes next: the tree build, or the sources of the layout pass when no tree build comes
+    /// first. Style is the document's own loop over its elements, and a tree update mark is set on
+    /// the DOM node, which widens it to what the node's layout node and its document ask for.
+    ///
+    /// # Safety
+    ///
+    /// The frame must run for the update the arena is in, and no stage may reach it until this
+    /// returns.
+    unsafe fn run_style_round(&mut self, main_thread: &crate::stage::MainThread) -> FfiLayoutUpdateDocumentFacts {
+        self.layout_pass += 1;
+        let host = self.inputs.host;
+        // SAFETY: Guaranteed by the caller.
+        unsafe {
+            pay_owed_host_halves(
+                main_thread,
+                &host,
+                self.inputs.arena_handle,
+                self.owed_host_halves.take(),
+            );
+        }
+        let list_owners_to_rebuild = std::mem::take(&mut self.list_owners_to_rebuild);
+        host.rebuild_list_owners_with_stale_item_counters(main_thread, &list_owners_to_rebuild);
+        host.update_style(main_thread);
+        host.process_pending_list_item_renumbers(main_thread);
+        host.process_pending_top_layer_layout_changes(main_thread);
+        let facts = host.document_facts(main_thread);
+        self.connected_element_count = self
+            .arena()
+            .with_style_store(|engine| engine.tree().connected_element_count());
+        let round_after_style = self.ready_round_after_style(main_thread, &host, &facts);
+        self.pass_sources = round_after_style.pass_sources;
+        self.tree_build_document_style_node = round_after_style.tree_build_document_style_node;
+        self.selection = round_after_style.selection;
+        facts
+    }
 
-            let layout_root = self.arena().layout_root();
-            assert!(!layout_root.is_invalid(), "a full layout pass needs a layout root");
-            return RoundsStop::Pass(PendingLayoutPass {
-                arena_handle: self.inputs.arena_handle,
-                layout_root,
-                sources: self.take_pass_sources(),
-                facts,
-                started: layout_started,
-            });
+    /// Runs the rest of a round whose style the document thread has run, up to its full layout
+    /// pass, or until the round ends in another round or the end of the frame.
+    fn run_round(&mut self, facts: FfiLayoutUpdateDocumentFacts) -> FrameStep {
+        if !self.round_lays_out(&facts) {
+            self.messages.prepare_for_rendering = true;
+            return FrameStep::Ended(FrameEnd::Over(FfiLayoutUpdateEnd::InUpdate));
         }
 
+        let mut registered_partial_relayout_roots = self.arena().take_partial_relayout_boundary_roots();
+
+        // NOTE: If this is a document hosting <template> contents, layout is unnecessary.
+        if self.inputs.is_template_contents_document {
+            return FrameStep::Ended(FrameEnd::Over(FfiLayoutUpdateEnd::InUpdate));
+        }
+
+        let mut needs_layout_tree_rebuild = self.needs_layout_tree_rebuild(&facts);
+
+        match self.try_partial_relayout(
+            &facts,
+            &mut registered_partial_relayout_roots,
+            &mut needs_layout_tree_rebuild,
+        ) {
+            PartialRelayout::Done => return FrameStep::Ended(FrameEnd::UnlessHostLeftWork),
+            PartialRelayout::NeedsAnotherLayoutPass => return FrameStep::NeedsStyle,
+            PartialRelayout::NotEligible => {}
+        }
+        drop(registered_partial_relayout_roots);
+
+        let layout_started = self.inputs.trace.now();
+
+        if needs_layout_tree_rebuild {
+            let arena_handle = self.inputs.arena_handle;
+            let (walked, host_half) = self.walk_layout_tree_build();
+            let needs_another_build_pass = walked.outcome.needs_another_build_pass;
+            if !needs_another_build_pass {
+                self.reconcile_stale_list_item_counters(&walked);
+            }
+            let pass_follows = !needs_another_build_pass && self.list_owners_to_rebuild.is_empty();
+            // SAFETY: The frame runs for the update the arena is in.
+            let pass_sources = pass_follows.then(|| unsafe { LayoutPassSources::read(arena_handle) });
+            self.owe_tree_build_host_half(host_half);
+            self.note_layout_tree_build(&walked.outcome);
+            if needs_another_build_pass {
+                return FrameStep::NeedsStyle;
+            }
+
+            // The full layout below covers every boundary the build's invalidation registered.
+            drop(self.arena().take_partial_relayout_boundary_roots());
+
+            // The list owners the reconciliation holds on to are marked for another build by
+            // the next style round, after the reset of the full tree update flag.
+            self.arena().set_needs_full_layout_tree_update(false);
+            self.inputs.trace.tree_build(layout_started);
+
+            let Some(pass_sources) = pass_sources else {
+                return FrameStep::NeedsStyle;
+            };
+            self.pass_sources = Some(pass_sources);
+        }
+
+        let layout_root = self.arena().layout_root();
+        assert!(!layout_root.is_invalid(), "a full layout pass needs a layout root");
+        FrameStep::PassReady(PendingLayoutPass {
+            arena_handle: self.inputs.arena_handle,
+            layout_root,
+            sources: self.take_pass_sources(),
+            facts,
+            started: layout_started,
+        })
+    }
+
+    /// Ends a loop that has run out of rounds, noting whether style or layout work is still
+    /// pending.
+    fn run_out_of_rounds(&mut self, joins: &crate::stage_thread::MainJoins<'_>) -> FrameEnd {
         let list_owners_to_rebuild = std::mem::take(&mut self.list_owners_to_rebuild);
         let Joined {
             value: needs_style_update_after_layout,
@@ -1076,22 +1105,23 @@ impl LayoutFrame {
         if needs_style_update_after_layout || !layout_is_up_to_date(self.arena(), &facts) {
             self.messages.stabilization_bound_failed = true;
         }
-        RoundsStop::End(FrameEnd::Over(FfiLayoutUpdateEnd::InUpdate))
+        FrameEnd::Over(FfiLayoutUpdateEnd::InUpdate)
     }
 
     /// Ends the round of a full layout pass that has run: what derives from its commit, and whether
-    /// the loop has stabilized.
-    fn finish_round(&mut self, laid_out: LaidOutPass) -> RoundEnd {
+    /// the loop has stabilized as far as what the frame owns shows. The frame then ends, unless the
+    /// host halves of its commits left work for another round.
+    fn finish_round(&mut self, laid_out: LaidOutPass) -> FrameStep {
         let facts = self.note_laid_out_pass(laid_out);
 
         // Layout-only invalidations still need to be flushed before we can exit.
         if self.commit_left_layout_work(&facts) {
-            return RoundEnd::AnotherRound;
+            return FrameStep::NeedsStyle;
         }
 
         // The document thread asks what the host halves left as it takes in the frame's end, and
         // nothing else runs on it until then, so if they left nothing the loop has stabilized.
-        RoundEnd::Stabilized
+        FrameStep::Ended(FrameEnd::UnlessHostLeftWork)
     }
 
     /// Takes in a full layout pass that has run: its commit's host half is left for the next join,
@@ -1244,11 +1274,12 @@ unsafe fn frame_state(arena_handle: *mut c_void) -> FfiLayoutFrameState {
     }
 }
 
-/// Runs the layout update as one frame: the whole stabilization loop is one stage run, which joins
-/// the document thread for the steps listed in [`FrameJoin`]. Once the stage returns, the document
-/// thread takes in the frame's end: it pays what the frame still owes, resumes the frame for
-/// another round if that left style or layout work pending, and otherwise applies the frame's
-/// messages and ends the update on the document side, so the document is idle once this returns.
+/// Runs the layout update as one frame. The document thread drives the stabilization loop: it runs
+/// the style of each round itself, and the rest of the round as a stage run, which joins the
+/// document thread for the steps listed in [`FrameJoin`]. Once the frame ends, the document thread
+/// takes in its end: it pays what the frame still owes, goes on with another round if that left
+/// style or layout work pending, and otherwise applies the frame's messages and ends the update on
+/// the document side, so the document is idle once this returns.
 /// A frame whose full layout pass is submitted ends that way once the document thread takes it
 /// back instead.
 ///
@@ -1288,33 +1319,9 @@ unsafe fn update_layout(
         selection: None,
         owed_host_halves: Cell::default(),
     };
-    let (frame, pass) = loop {
-        // SAFETY: The frame reaches the arena and the document through the handle only while the
-        // document thread waits for it, or through the joins it runs on that thread, and where it
-        // stops is taken in on that thread once it has returned.
-        let resumed = unsafe { crate::stage_thread::CallerWaits::new(frame) };
-        // SAFETY: As above, for the work the frame's joins hand the document thread.
-        let stopped = unsafe {
-            crate::stage_thread::run_stage_with_joins(main_thread, move |joins| {
-                let frame = resumed.into_inner();
-                let stopped = if submits_pass {
-                    frame.run_until_pass(joins)
-                } else {
-                    FrameStop::Ended(frame.run(joins))
-                };
-                // SAFETY: The frame goes back to the document thread, which waits for it.
-                crate::stage_thread::CallerWaits::new(stopped)
-            })
-        }
-        .into_inner();
-        match stopped {
-            FrameStop::Pass(frame, pass) => break (frame, pass),
-            // SAFETY: The stage has returned, and the frame runs for the update the arena is in.
-            FrameStop::Ended(ending) => match unsafe { ending.take_in(main_thread) } {
-                Some(resumed) => frame = resumed,
-                None => return FfiLayoutUpdateOutcome::Finished,
-            },
-        }
+    // SAFETY: Guaranteed by the caller.
+    let Some(pass) = (unsafe { frame.drive(main_thread, submits_pass) }) else {
+        return FfiLayoutUpdateOutcome::Finished;
     };
     // What the frame owes the document thread (the host half of the round's tree build) is paid
     // before the pass goes in flight, as tasks run beside the pass and read some of it (the boxes
@@ -1368,16 +1375,16 @@ unsafe fn update_layout(
 unsafe fn finish_layout_frame(main_thread: &crate::stage::MainThread, frame: LayoutFrame, laid_out: LaidOutPass) {
     // SAFETY: The frame and its pass are the document thread's again, and it waits for the stage.
     let resumed = unsafe { crate::stage_thread::CallerWaits::new((frame, laid_out)) };
-    let ending = crate::stage_thread::run_stage(move || {
+    let mut frame = crate::stage_thread::run_stage(move || {
         let (mut frame, laid_out) = resumed.into_inner();
         frame.note_laid_out_pass(laid_out);
-        // SAFETY: The frame's end goes back to the document thread, which waits for it.
-        unsafe { crate::stage_thread::CallerWaits::new(frame.end(FrameEnd::Over(FfiLayoutUpdateEnd::FrameTakenBack))) }
+        // SAFETY: The frame goes back to the document thread, which waits for it.
+        unsafe { crate::stage_thread::CallerWaits::new(frame) }
     })
     .into_inner();
     // SAFETY: The stage has returned, and the frame runs for the update the arena is in.
-    let resumed = unsafe { ending.take_in(main_thread) };
-    debug_assert!(resumed.is_none(), "a frame taken back is over");
+    let over = unsafe { frame.take_in_end(main_thread, FrameEnd::Over(FfiLayoutUpdateEnd::FrameTakenBack)) };
+    debug_assert!(over, "a frame taken back is over");
 }
 
 /// Where the layout frame of the document stands, seen from the document thread. Asking does not
