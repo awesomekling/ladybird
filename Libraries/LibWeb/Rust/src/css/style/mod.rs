@@ -77,6 +77,7 @@ mod flush;
 mod fnv;
 mod font_faces;
 mod font_resolution;
+pub(crate) mod host_pins;
 pub mod impact;
 pub mod index;
 mod input_routing;

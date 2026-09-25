@@ -1414,6 +1414,56 @@ pub extern "C" fn style_engine_create(device_class: FfiDeviceClass) -> *mut c_vo
     Box::into_raw(engine).cast()
 }
 
+/// Creates the document thread's style-record pin table. See [`super::host_pins`].
+#[unsafe(no_mangle)]
+pub extern "C" fn style_record_host_pins_create() -> *mut c_void {
+    Box::into_raw(Box::<super::host_pins::HostStyleRecordPins>::default()).cast()
+}
+
+/// # Safety
+/// `pins` must come from [`style_record_host_pins_create`], and the engine it was lent to must
+/// already be destroyed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_record_host_pins_destroy(pins: *mut c_void) {
+    drop(unsafe { Box::from_raw(pins.cast::<super::host_pins::HostStyleRecordPins>()) });
+}
+
+/// Pins a style record for the document thread's readers. Enters no engine, so it never waits for
+/// a pass in flight.
+///
+/// # Safety
+/// `pins` must be a live table from [`style_record_host_pins_create`], on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_record_host_pins_pin(pins: *const c_void, style_record: u64) {
+    unsafe { &*pins.cast::<super::host_pins::HostStyleRecordPins>() }.pin(style_record);
+}
+
+/// Releases a pin [`style_record_host_pins_pin`] took. The engine reclaims the record once it next
+/// reads the table and nothing else holds it.
+///
+/// # Safety
+/// As for [`style_record_host_pins_pin`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_record_host_pins_unpin(pins: *const c_void, style_record: u64) {
+    unsafe { &*pins.cast::<super::host_pins::HostStyleRecordPins>() }.unpin(style_record);
+}
+
+/// Lends the document thread's pin table to the engine, which reads it wherever it would reclaim a
+/// style record while the document thread waits on it.
+///
+/// # Safety
+/// `engine` must be live; `pins` must come from [`style_record_host_pins_create`] and outlive it.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_lend_host_style_record_pins(engine: *mut c_void, pins: *mut c_void) {
+    engine_entrance(engine, "style_engine_lend_host_style_record_pins");
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    // SAFETY: Guaranteed by the caller.
+    let handle = unsafe { super::host_pins::HostPinsHandle::new(pins.cast()) };
+    engine
+        .computed_group_sets
+        .lend_host_pins(super::host_pins::HostPinsLend::Lent(handle));
+}
+
 /// Installs the document's synchronous platform font resolver once.
 ///
 /// # Safety
@@ -4363,8 +4413,8 @@ fn answer_record_demand_for_host(
 
 /// The record of an element no rule reaches, computed from its presentational hints and its
 /// inline style alone over the initial values; see `declared_only_record`. `subject` is the
-/// document's style node. Returns a pinned record the host unpins, or zero when the engine
-/// cannot compute it.
+/// document's style node. Returns a record nothing pins, which no sweep reclaims before the host
+/// next enters the engine, or zero when the engine cannot compute it.
 ///
 /// # Safety
 /// `engine` must be live. `hints` must borrow `hint_count` `FfiDeclaredProperty` entries whose
@@ -4389,9 +4439,13 @@ pub unsafe extern "C" fn style_engine_declared_only_record(
         };
         unsafe {
             with_declared_only_declarations(hint_kind, hints, hint_count, inline_block, |declarations| {
-                engine
-                    .declared_only_record(subject, facts, declarations)
-                    .map_or(0, super::computed::FinalStyleRecordID::raw)
+                let Some(record) = engine.declared_only_record(subject, facts, declarations) else {
+                    return 0;
+                };
+                // The host's pins are its own, in its table; the caller takes one if it reads the
+                // record past a view epoch.
+                engine.unpin_style_record(record.raw());
+                record.raw()
             })
         }
     })
@@ -5009,6 +5063,7 @@ pub unsafe extern "C" fn style_engine_submit_style_transaction(
         engine.host.submitted_style_pass_output.is_none(),
         "one style pass is in flight at a time"
     );
+    engine.computed_group_sets.begin_pass_beside_host_pins();
     // SAFETY: Guaranteed by the caller.
     unsafe { begin_style_transaction(engine, computation_inputs) };
     engine.host.atom_sweep_waits_for_host = true;
@@ -5047,6 +5102,7 @@ pub unsafe extern "C" fn style_engine_finish_submitted_style_transaction(
         .submitted_style_pass_output
         .take()
         .expect("the submitted style pass has run");
+    engine.computed_group_sets.finish_pass_beside_host_pins();
     finish_style_transaction(engine, root, *output)
 }
 

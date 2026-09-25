@@ -5216,6 +5216,7 @@ impl StyleEngineState {
     }
 
     pub(super) fn reclaim_computed_memory_if_needed(&mut self, counters: &mut Counters) {
+        self.retained.computed_group_sets.reclaim_retired_animation_overlays();
         // Recording dictionaries are keyed by computed identities. Reusing an identity for new
         // semantics would make later events refer to the first definition replay saw for it.
         if self.recording_id().is_none()

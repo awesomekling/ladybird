@@ -247,13 +247,13 @@ void const* StyleComputer::style_record_payloads(StyleRecordID style_record_iden
 void StyleComputer::pin_style_record(StyleRecordID style_record_identity) const
 {
     VERIFY(style_record_identity);
-    const_cast<StyleComputer&>(*this).m_style_engine.pin_style_record(style_record_identity);
+    m_style_engine.pin_style_record(style_record_identity);
 }
 
 void StyleComputer::unpin_style_record(StyleRecordID style_record_identity) const
 {
     VERIFY(style_record_identity);
-    const_cast<StyleComputer&>(*this).m_style_engine.unpin_style_record(style_record_identity);
+    m_style_engine.unpin_style_record(style_record_identity);
 }
 
 void StyleComputer::begin_style_record_view_epoch() const
