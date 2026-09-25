@@ -1862,6 +1862,11 @@ impl ComputedGroupSets {
         self.host_pins.handle()
     }
 
+    /// Whether the engine reads the document thread's pin table where it would reclaim a record.
+    pub(crate) fn reads_host_pins(&self) -> bool {
+        self.host_pins.table().is_some()
+    }
+
     /// Stops lending the host's pins while a pass runs beside the document thread.
     pub(crate) fn begin_pass_beside_host_pins(&mut self) {
         self.host_pins = self.host_pins.beside_flight();

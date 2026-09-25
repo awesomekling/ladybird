@@ -422,6 +422,22 @@ impl StyleEngine {
         self.computed_group_sets.host_pins_handle()
     }
 
+    /// Stops lending the host's pins to the engine while the main thread lends the engine to clock
+    /// ticks that run beside its task, which pins and unpins records at any moment.
+    pub(crate) fn begin_clock_lend_beside_host_pins(&mut self) {
+        self.computed_group_sets.begin_pass_beside_host_pins();
+    }
+
+    /// Lends the host's pins again once the main thread has taken the engine back from the ticks.
+    pub(crate) fn finish_clock_lend_beside_host_pins(&mut self) {
+        self.computed_group_sets.finish_pass_beside_host_pins();
+    }
+
+    /// Whether the engine reads the host's pin table, as it may only while the host waits on it.
+    pub(crate) fn reads_host_style_record_pins(&self) -> bool {
+        self.computed_group_sets.reads_host_pins()
+    }
+
     pub(crate) fn pin_layout_style_record(&mut self, record: u64) {
         self.pin_style_record(record);
         self.record_boundary_call(super::record_replay::EventKind::PinStyleRecord, |payload| {
