@@ -645,6 +645,13 @@ static GC::RootVector<GC::Ref<Page>> pages_of_local_roots()
     return pages;
 }
 
+// INTEROP: A compositor timestamp may describe a display tick immediately before a newly created document's
+//          time origin. Keep document-relative rendering timestamps within the DOMHighResTimeStamp domain.
+static HighResolutionTime::DOMHighResTimeStamp relative_frame_timestamp_for(HighResolutionTime::DOMHighResTimeStamp frame_timestamp, DOM::Document const& document)
+{
+    return max(0.0, HighResolutionTime::relative_high_resolution_time(frame_timestamp, relevant_global_object(document)));
+}
+
 // https://html.spec.whatwg.org/multipage/webappapis.html#update-the-rendering
 void EventLoop::update_the_rendering()
 {
@@ -675,12 +682,6 @@ void EventLoop::update_the_rendering()
 
     // 1. Let frameTimestamp be eventLoop's last render opportunity time.
     auto frame_timestamp = m_last_render_opportunity_time;
-
-    // INTEROP: A compositor timestamp may describe a display tick immediately before a newly created document's
-    //          time origin. Keep document-relative rendering timestamps within the DOMHighResTimeStamp domain.
-    auto relative_frame_timestamp_for = [&](DOM::Document const& document) {
-        return max(0.0, HighResolutionTime::relative_high_resolution_time(frame_timestamp, relevant_global_object(document)));
-    };
 
     // 2. Let docs be all fully active Document objects whose relevant agent's event loop is
     //    eventLoop, sorted arbitrarily except that the following conditions must be met:
@@ -757,7 +758,7 @@ void EventLoop::update_the_rendering()
 
     // 11. For each doc of docs, update animations and send events for doc, passing in relative high resolution time given frameTimestamp and doc's relevant global object as the timestamp [WEBANIMATIONS]
     for (auto& document : docs) {
-        document->update_animations_and_send_events(relative_frame_timestamp_for(*document));
+        document->update_animations_and_send_events(relative_frame_timestamp_for(frame_timestamp, *document));
     };
 
     // 12. For each doc of docs, run the fullscreen steps for doc. [FULLSCREEN]
@@ -769,7 +770,7 @@ void EventLoop::update_the_rendering()
 
     // 14. For each doc of docs, run the animation frame callbacks for doc, passing in the relative high resolution time given frameTimestamp and doc's relevant global object as the timestamp.
     for (auto& document : docs) {
-        auto now = relative_frame_timestamp_for(*document);
+        auto now = relative_frame_timestamp_for(frame_timestamp, *document);
         run_animation_frame_callbacks(*document, now);
     }
 
@@ -786,8 +787,43 @@ void EventLoop::update_the_rendering()
 
     // FIXME: 15. Let unsafeStyleAndLayoutStartTime be the unsafe shared current time.
 
+    Vector<GC::Ref<DOM::Document>> documents;
+    documents.ensure_capacity(docs.size());
+    for (auto& document : docs)
+        documents.unchecked_append(*document);
+    frame_in_flight = run_rendering_update_from_step_16(documents, 0, frame_timestamp, LayoutSubmission::MaySubmit);
+}
+
+void EventLoop::resume_rendering_update_after_layout(Badge<FrameScheduler>, Vector<GC::Ref<DOM::Document>> const& docs, size_t document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp)
+{
+    VERIFY(!m_running_rendering_task);
+    m_running_rendering_task = true;
+    bool frame_in_flight = false;
+    ScopeGuard const guard = [this, &frame_in_flight] {
+        m_running_rendering_task = false;
+        // A rendering update whose frame is in flight ends once its tail has run.
+        if (!frame_in_flight)
+            end_rendering_update();
+    };
+    frame_in_flight = run_rendering_update_from_step_16(docs, document_index, frame_timestamp, LayoutSubmission::Wait);
+}
+
+// The steps of a rendering update from step 16 on, from the document at first_document_index. Returns true if a frame is
+// in flight, in which case the frame scheduler goes on with the rendering update once it has taken the frame back.
+bool EventLoop::run_rendering_update_from_step_16(Vector<GC::Ref<DOM::Document>> const& docs, size_t first_document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp, LayoutSubmission layout_submission)
+{
     // 16. For each doc of docs:
-    for (auto& document : docs) {
+    for (size_t document_index = first_document_index; document_index < docs.size(); ++document_index) {
+        auto document = docs[document_index];
+
+        // A rendering update that may overlap its layout lets the first document whose layout update runs a full
+        // layout pass run the pass beside the main thread, and goes on at this step once the frame scheduler has taken
+        // it back.
+        if (layout_submission == LayoutSubmission::MaySubmit && m_rendering_update_may_overlap_layout && document->submit_layout_for_rendering_update()) {
+            m_frame_scheduler->submit_layout(docs, document_index, frame_timestamp);
+            return true;
+        }
+
         // 1. Let resizeObserverDepth be 0.
         size_t resize_observer_depth = 0;
 
@@ -939,7 +975,7 @@ void EventLoop::update_the_rendering()
         //     Re-run layout here since intersection observations need up-to-date geometry.
         document->update_layout(DOM::UpdateLayoutReason::HTMLEventLoopRenderingUpdate);
 
-        auto now = relative_frame_timestamp_for(*document);
+        auto now = relative_frame_timestamp_for(frame_timestamp, *document);
         document->run_the_update_intersection_observations_steps(now);
 
         // AD-HOC: Whether a video sink is ticked depends on whether the element would be painted, which is only known
@@ -1003,13 +1039,9 @@ void EventLoop::update_the_rendering()
 
     // NB: The steps after painting run here, before the frame is submitted, even when the render side records it:
     //     once the main half ends, tasks run beside the frame, and the steps must not see what they change.
-    Vector<GC::Ref<DOM::Document>> painted_docs;
-    painted_docs.ensure_capacity(docs.size());
-    for (auto& document : docs)
-        painted_docs.unchecked_append(*document);
-    finish_rendering_update_steps(painted_docs);
+    finish_rendering_update_steps(docs);
 
-    frame_in_flight = m_frame_scheduler->submit();
+    return m_frame_scheduler->submit();
 }
 
 Optional<DOM::LayoutOverlapBlocker> EventLoop::layout_overlap_blocker_for_rendering_update(ReadonlySpan<GC::Root<DOM::Document>> docs) const

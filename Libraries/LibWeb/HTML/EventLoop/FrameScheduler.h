@@ -44,6 +44,15 @@ public:
 
     // The local roots whose frames consume-commit has handed off, for the tail's screenshots.
     Vector<GC::Ref<LocalNavigable>> painted_local_roots;
+
+    // A frame that runs a document's full layout pass instead, and where the rendering update goes on once the frame is
+    // taken back: step 16 for documents[document_index], which the pass laid out.
+    struct LayoutPass {
+        Vector<GC::Ref<DOM::Document>> documents;
+        size_t document_index { 0 };
+        HighResolutionTime::DOMHighResTimeStamp frame_timestamp { 0 };
+    };
+    Optional<LayoutPass> layout_pass;
 };
 
 // Runs the rendering update's frame beside the main thread under LIBWEB_STAGE_THREAD=overlap. One rendering update is
@@ -87,6 +96,10 @@ public:
     void add_to_ticket(LocalNavigable&, LocalNavigable::PendingCompositorFrame&&);
     // Ends the main half. Returns true if a frame is in flight, in which case the tail runs once it has been taken in.
     bool submit();
+    // Ends the main half with a frame that runs the layout pass of documents[document_index], which the document has
+    // submitted. Once the frame is taken back, its tail goes on with the rendering update at step 16 for that document,
+    // as a main half of its own that may submit the recording.
+    void submit_layout(Vector<GC::Ref<DOM::Document>> documents, size_t document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp);
 
     // The event loop's finished frame consumer, called at step 1 once the render side has posted a frame completion:
     // takes in a finished frame, and runs the tail of a frame that is taken in, where the event loop lets it.
