@@ -89,7 +89,7 @@ void FrameScheduler::add_to_ticket(LocalNavigable& navigable, LocalNavigable::Pe
     m_ticket->navigables.append({ navigable, move(frame), held_compositor_context });
 }
 
-bool FrameScheduler::submit(Vector<GC::Ref<DOM::Document>> documents)
+bool FrameScheduler::submit()
 {
     VERIFY(m_state == State::MainHalf);
     if (!m_ticket || m_ticket->navigables.is_empty()) {
@@ -102,7 +102,6 @@ bool FrameScheduler::submit(Vector<GC::Ref<DOM::Document>> documents)
             navigable->page().process_screenshot_requests();
         return false;
     }
-    m_ticket->documents = move(documents);
     m_state = State::InFlight;
     m_event_loop.did_submit_frame();
     // A forced join during the main half can take in a recording that was submitted before its navigable went into
@@ -193,12 +192,11 @@ void FrameScheduler::run_tail()
 {
     VERIFY(m_state == State::CommittedTailPending);
     // NB: The stack is a conservative root, so what the ticket held stays alive in these locals.
-    auto documents = move(m_ticket->documents);
     auto painted_local_roots = move(m_ticket->painted_local_roots);
     m_ticket = nullptr;
     m_state = State::Idle;
     auto start_nanoseconds = MonotonicTime::now().nanoseconds();
-    m_event_loop.run_rendering_update_tail({}, painted_local_roots, documents);
+    m_event_loop.run_rendering_update_tail({}, painted_local_roots);
     m_event_loop.did_consume_frame_tail(MonotonicTime::now().nanoseconds() - start_nanoseconds);
 }
 
@@ -212,7 +210,6 @@ void FrameScheduler::visit_edges(JS::Cell::Visitor& visitor)
         if (submitted.frame.recording)
             visitor.visit(submitted.frame.recording->document);
     }
-    visitor.visit(m_ticket->documents);
     visitor.visit(m_ticket->painted_local_roots);
 }
 

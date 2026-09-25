@@ -15,13 +15,12 @@ namespace Web::HTML {
 // What a frame in flight references, and what keeps it alive until the frame is consumed. The collector only scans the
 // stack of the thread it runs on, so neither the stage thread's stack nor a heap-owned ticket roots anything by itself.
 //
-// - The navigables whose frames the render side records, their documents, and the documents of the rendering update:
-//   the frame scheduler traces its ticket, and the event loop, which owns the scheduler, traces the scheduler. A
-//   document only references its navigable weakly, so the ticket has to name the navigable itself.
+// - The navigables whose frames the render side records and their documents: the frame scheduler traces its ticket,
+//   and the event loop, which owns the scheduler, traces the scheduler. A document only references its navigable
+//   weakly, so the ticket has to name the navigable itself.
 // - Each document's page and window (whose client and callbacks the frame's tail uses): traced edges of the document.
 // - Observers, observer targets and callbacks: none. Resize and intersection observations run on the main thread,
-//   before the frame is submitted or in its tail. A stage that comes to name one in its output has to put it in the
-//   ticket.
+//   before the frame is submitted. A stage that comes to name one in its output has to put it in the ticket.
 // - The layout arena, the recording, and the images and fonts the recording paints: not on the heap. The frame owns
 //   the arena and the recording, and images and fonts are reference counted resources.
 // - Shared style records, which the frame reads through the style payloads of the arena's rows: owned by the style

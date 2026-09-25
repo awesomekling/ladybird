@@ -42,18 +42,15 @@ public:
     // compositor frame is built and handed off by consume-commit.
     Vector<SubmittedNavigable> navigables;
 
-    // The documents of the rendering update, for the steps after the frame (the tail).
-    Vector<GC::Ref<DOM::Document>> documents;
-
     // The local roots whose frames consume-commit has handed off, for the tail's screenshots.
     Vector<GC::Ref<LocalNavigable>> painted_local_roots;
 };
 
 // Runs the rendering update's frame beside the main thread under LIBWEB_STAGE_THREAD=overlap. One rendering update is
-// a main half (the steps up to the recording, on the main thread), one frame (the recording, on the render side), a
-// consume-commit that takes the frame in (publishes each recording, then builds and hands off its compositor frame, and
-// runs no script) and a tail (the rest of the rendering update, which may run script). At most one frame is in flight,
-// and the next rendering update starts only once the tail of the previous one has run.
+// a main half (every step of it but the recording, on the main thread), one frame (the recording, on the render side),
+// a consume-commit that takes the frame in (publishes each recording, then builds and hands off its compositor frame,
+// and runs no script) and a tail (the screenshots of the frame and the end of the rendering update). At most one frame
+// is in flight, and the next rendering update starts only once the tail of the previous one has run.
 class WEB_API FrameScheduler {
     AK_ALLOC_WITH_KMALLOC;
     AK_MAKE_NONCOPYABLE(FrameScheduler);
@@ -93,7 +90,7 @@ public:
     bool ticket_takes_frames() const { return m_ticket && !m_ticket->navigables.is_empty(); }
     void add_to_ticket(LocalNavigable&, LocalNavigable::PendingCompositorFrame&&);
     // Ends the main half. Returns true if a frame is in flight, in which case the tail runs once it has been taken in.
-    bool submit(Vector<GC::Ref<DOM::Document>> documents);
+    bool submit();
 
     // The event loop's finished frame consumer, called at step 1 once the render side has posted a frame completion:
     // takes in a finished frame, and runs the tail of a frame that is taken in, where the event loop lets it.

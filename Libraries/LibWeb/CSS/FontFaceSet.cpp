@@ -468,17 +468,20 @@ void FontFaceSet::set_is_pending_on_the_environment(bool is_pending_on_the_envir
     // Whenever a FontFaceSet goes from pending on the environment to not pending on the environment, the user agent
     // must run the following steps:
     if (!is_pending_on_the_environment) {
+        // NB: Only the steps after painting in a rendering update set this, and only once the document's layout is up
+        //     to date, so switching to loaded needs no layout update. Asking for one would wait for the document's
+        //     display list recording in flight.
         // 1. If the FontFaceSet is stuck on the environment and its [[LoadingFonts]] list is empty, switch the
         //    FontFaceSet to loaded.
         // FIXME: We also need to mark empty FontFaceSets as loaded, so that the [[ReadyPromise]] gets resolved.
         //        Spec issue: https://github.com/w3c/csswg-drafts/issues/13538#issuecomment-3933951987
         if (m_font_faces.is_empty() || (m_is_stuck_on_the_environment && m_loading_fonts.is_empty()))
-            switch_to_loaded();
+            switch_to_loaded(LayoutIsUpToDate::Yes);
         // AD-HOC: Also switch when nothing has ever entered the LoadingFonts list — an empty set, or a set whose
         //         entries all have deferred unicode-ranges that no rendered codepoint matched. Without this the
         //         ready promise stays pending forever.
         else if (m_loading_fonts.is_empty())
-            switch_to_loaded();
+            switch_to_loaded(LayoutIsUpToDate::Yes);
 
         // 2. If the FontFaceSet is stuck on the environment, unmark it as such.
         m_is_stuck_on_the_environment = false;
@@ -504,7 +507,7 @@ void FontFaceSet::switch_to_loading()
 }
 
 // https://drafts.csswg.org/css-font-loading/#switch-the-fontfaceset-to-loaded
-void FontFaceSet::switch_to_loaded()
+void FontFaceSet::switch_to_loaded(LayoutIsUpToDate layout_is_up_to_date)
 {
     // 1. Let font face set be the given FontFaceSet.
     // 2. If font face set is pending on the environment, mark it as stuck on the environment, and exit this algorithm.
@@ -515,7 +518,7 @@ void FontFaceSet::switch_to_loaded()
 
     // NB: Pending style or layout changes can depend on a recently loaded font or start another deferred font load.
     auto& global = relevant_settings_object().global_object();
-    if (auto* window = HTML::window_from_global_object(global)) {
+    if (auto* window = HTML::window_from_global_object(global); window && layout_is_up_to_date == LayoutIsUpToDate::No) {
         auto& document = window->associated_document();
         if (!document.is_running_update_layout())
             document.update_layout(DOM::UpdateLayoutReason::FontFaceSetReady);

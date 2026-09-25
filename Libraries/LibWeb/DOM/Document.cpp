@@ -9489,6 +9489,10 @@ void Document::remove_an_element_from_the_top_layer_immediately(GC::Ref<Element>
 // https://drafts.csswg.org/css-position-4/#process-top-layer-removals
 void Document::process_top_layer_removals()
 {
+    // NB: Returning early keeps a recording in flight beside the steps that follow painting.
+    if (m_top_layer_pending_removals.is_empty())
+        return;
+
     // Top layer membership is a fact the style mirror keeps for the layout tree build.
     join_frame_for_dom_tree_mutation();
 
