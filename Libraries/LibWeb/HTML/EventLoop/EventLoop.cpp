@@ -19,6 +19,7 @@
 #include <LibWeb/CSS/FontFaceSet.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
+#include <LibWeb/DOM/InvalidationJournal.h>
 #include <LibWeb/HTML/BrowsingContext.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
 #include <LibWeb/HTML/EventLoop/FrameCompletion.h>
@@ -997,15 +998,15 @@ void EventLoop::update_the_rendering()
             navigable->page().process_screenshot_requests();
     }
 
-    Vector<GC::Ref<DOM::Document>> docs_for_tail;
-    docs_for_tail.ensure_capacity(docs.size());
+    // NB: The steps after painting run here, before the frame is submitted, even when the render side records it:
+    //     once the main half ends, tasks run beside the frame, and the steps must not see what they change.
+    Vector<GC::Ref<DOM::Document>> painted_docs;
+    painted_docs.ensure_capacity(docs.size());
     for (auto& document : docs)
-        docs_for_tail.unchecked_append(*document);
-    frame_in_flight = m_frame_scheduler->submit(docs_for_tail);
-    if (frame_in_flight)
-        return;
+        painted_docs.unchecked_append(*document);
+    finish_rendering_update_steps(painted_docs);
 
-    finish_rendering_update_steps(docs_for_tail);
+    frame_in_flight = m_frame_scheduler->submit();
 }
 
 Optional<DOM::LayoutOverlapBlocker> EventLoop::layout_overlap_blocker_for_rendering_update(ReadonlySpan<GC::Root<DOM::Document>> docs) const
@@ -1020,15 +1021,23 @@ Optional<DOM::LayoutOverlapBlocker> EventLoop::layout_overlap_blocker_for_render
     return {};
 }
 
-void EventLoop::run_rendering_update_tail(Badge<FrameScheduler>, ReadonlySpan<GC::Ref<LocalNavigable>> painted_local_roots, ReadonlySpan<GC::Ref<DOM::Document>> docs)
+void EventLoop::run_rendering_update_tail(Badge<FrameScheduler>, ReadonlySpan<GC::Ref<LocalNavigable>> painted_local_roots)
 {
     // 22. (continued) The screenshots of the tab as this frame shows it.
     for (auto navigable : painted_local_roots) {
         if (!navigable->has_been_destroyed())
             navigable->page().process_screenshot_requests();
     }
-    finish_rendering_update_steps(docs);
     end_rendering_update();
+}
+
+// Whether the layout of a painted document is up to date, without waiting for its display list recording if that is
+// in flight: the recording went in flight only once the layout was, and what was marked beside it since is held.
+static bool layout_is_up_to_date_after_painting(DOM::Document& document)
+{
+    if (!frame_in_flight_holds(document))
+        return document.layout_is_up_to_date();
+    return document.invalidation_journal().is_empty() && !document.needs_layout_tree_update() && !document.child_needs_layout_tree_update();
 }
 
 void EventLoop::finish_rendering_update_steps(ReadonlySpan<GC::Ref<DOM::Document>> docs)
@@ -1055,7 +1064,7 @@ void EventLoop::finish_rendering_update_steps(ReadonlySpan<GC::Ref<DOM::Document
         TemporaryExecutionContext context(document->relevant_settings_object(), TemporaryExecutionContext::CallbacksEnabled::Yes);
         document->fonts()->set_is_pending_on_the_environment(document->readiness() == DocumentReadyState::Loading
             || document->has_pending_style_sheet_requests()
-            || !document->layout_is_up_to_date());
+            || !layout_is_up_to_date_after_painting(*document));
     }
 }
 

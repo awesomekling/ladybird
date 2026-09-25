@@ -67,7 +67,11 @@ public:
     void set_is_pending_on_the_environment(bool);
 
     void switch_to_loading();
-    void switch_to_loaded();
+    enum class LayoutIsUpToDate {
+        No,
+        Yes,
+    };
+    void switch_to_loaded(LayoutIsUpToDate = LayoutIsUpToDate::No);
 
 private:
     enum class AllowCSSConnected {

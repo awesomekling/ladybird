@@ -252,8 +252,8 @@ public:
 
     FrameScheduler& frame_scheduler() { return *m_frame_scheduler; }
     void note_frame_painted(Badge<FrameScheduler>) { ++m_rendering_scheduler_counters.paints; }
-    // The steps of a rendering update after its frame: screenshots, top layer removals and the font loading state.
-    void run_rendering_update_tail(Badge<FrameScheduler>, ReadonlySpan<GC::Ref<LocalNavigable>> painted_local_roots, ReadonlySpan<GC::Ref<DOM::Document>> docs);
+    // The steps of a rendering update after its frame: the screenshots of the frame and the end of the update.
+    void run_rendering_update_tail(Badge<FrameScheduler>, ReadonlySpan<GC::Ref<LocalNavigable>> painted_local_roots);
 
 private:
     explicit EventLoop(Type);
