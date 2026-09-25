@@ -307,10 +307,30 @@ struct SubmittedStage {
     // What the main thread runs once it has taken the stage back, before anything else reaches
     // what the stage owned.
     on_taken_back: Option<Box<dyn FnOnce()>>,
+    // For a lend (see [`lend_arena`]), what takes the arena back: the main thread runs it where it
+    // would wait for a stage to finish.
+    recall: Option<Box<dyn FnOnce()>>,
 }
 
 impl SubmittedStage {
+    /// Whether this is a lend of the arena rather than a stage the main thread submitted.
+    fn is_lend(&self) -> bool {
+        self.label == LEND_STAGE
+    }
+
+    /// Takes a lent arena back: the recall ends the lend at once, or once the tick that holds the
+    /// arena now ends.
+    fn recall(&mut self) {
+        if let Some(recall) = self.recall.take() {
+            recall();
+        }
+    }
+
     fn poll(&mut self) -> bool {
+        // A lend is taken back without waiting for anything but a running tick.
+        if self.recall.is_some() {
+            return true;
+        }
         if self.outcome.is_none() {
             match self.from_stage.try_recv() {
                 Ok(outcome) => self.outcome = Some(outcome),
@@ -325,6 +345,7 @@ impl SubmittedStage {
     /// consume.
     fn wait_until_finished(&mut self) {
         release_hold_on(self.label);
+        self.recall();
         if self.outcome.is_none() {
             self.outcome = Some(self.from_stage.recv().unwrap_or_else(|_| std::process::abort()));
         }
@@ -333,6 +354,7 @@ impl SubmittedStage {
     fn wait(&mut self) -> StageOutcome {
         // A held stage would never finish while the main thread waits for it.
         release_hold_on(self.label);
+        self.recall();
         match self.outcome.take() {
             Some(outcome) => outcome,
             None => self.from_stage.recv().unwrap_or_else(|_| std::process::abort()),
@@ -489,7 +511,12 @@ unsafe fn submit(
         frame_completion_notify();
     });
     SUBMITTED.with(|submitted| {
-        submitted.borrow_mut().push(SubmittedStage {
+        let mut submitted = submitted.borrow_mut();
+        debug_assert!(
+            !submitted.iter().any(SubmittedStage::is_lend),
+            "a stage is submitted beside a lent arena"
+        );
+        submitted.push(SubmittedStage {
             label,
             role,
             arena: arena as usize,
@@ -498,6 +525,7 @@ unsafe fn submit(
             from_stage,
             outcome: None,
             on_taken_back,
+            recall: None,
         });
     });
     tsan::release(thread);
@@ -563,6 +591,74 @@ pub(crate) fn running_inside_stage() -> bool {
 
 /// The label of the stage that presents a navigable's frame at the end of the frame in flight.
 const PRESENTATION_STAGE: &str = "present";
+
+/// The label under which a lent arena stands in the frame in flight (see [`lend_arena`]).
+const LEND_STAGE: &str = "clock-lend";
+
+/// Lends the arena `arena` of a document, and its style engine, to work the stage thread runs
+/// beside the main thread's own (`crate::clock_frames`'s render clock ticks), while the main thread
+/// runs a task. The lend stands in the calling thread's frame in flight as a stage that owns the
+/// arena and reaches its style engine, so every main-thread path to either takes it back first, as
+/// it takes back a submitted stage: `recall` takes the arena back, and `on_taken_back` runs once it
+/// has. Only the joins see a lend: nothing waits for it to finish, and nothing defers to it what
+/// it would defer to a frame in flight, so no consume-commit follows its take-back.
+///
+/// # Safety
+///
+/// No stage may be in flight, and until `recall` returns nothing but work that `recall` waits for
+/// may reach what the lend holds.
+pub(crate) unsafe fn lend_arena(
+    arena: *mut c_void,
+    recall: impl FnOnce() + 'static,
+    on_taken_back: impl FnOnce() + 'static,
+) {
+    let (to_caller, from_stage) = channel::<StageOutcome>();
+    SUBMITTED.with_borrow_mut(|submitted| {
+        debug_assert!(
+            submitted.iter().all(SubmittedStage::is_lend),
+            "an arena is lent beside a frame in flight"
+        );
+        submitted.push(SubmittedStage {
+            label: LEND_STAGE,
+            role: LEND_STAGE,
+            arena: arena as usize,
+            owns_arena: true,
+            // SAFETY: Guaranteed by the caller; the main thread still owns the arena.
+            style_engine: unsafe { &*arena.cast::<crate::layout::LayoutNodeArena>() }.style_engine_handle() as usize,
+            from_stage,
+            outcome: None,
+            on_taken_back: Some(Box::new(on_taken_back)),
+            recall: Some(Box::new(move || {
+                recall();
+                let _ = to_caller.send(Ok(()));
+            })),
+        });
+    });
+}
+
+/// Whether the calling thread has lent an arena it has not taken back yet.
+pub(crate) fn has_lent_arena() -> bool {
+    SUBMITTED.with_borrow(|submitted| submitted.iter().any(SubmittedStage::is_lend))
+}
+
+/// Takes back every arena the calling thread lent, without what would follow a join's take-back.
+/// Returns whether any was lent.
+pub(crate) fn take_lent_arenas() -> bool {
+    let lends = SUBMITTED.with_borrow_mut(|submitted| {
+        let (lends, stages) = std::mem::take(submitted)
+            .into_iter()
+            .partition::<Vec<_>, _>(SubmittedStage::is_lend);
+        *submitted = stages;
+        lends
+    });
+    if lends.is_empty() {
+        return false;
+    }
+    for mut lend in lends {
+        lend.recall();
+    }
+    true
+}
 
 /// Whether the rendering update presents its frames from the frame in flight: when it submits its
 /// recordings, and presenting from the Rendering thread is on, unless LIBWEB_RENDER_PRESENTS=0 (which the host checks).
@@ -895,7 +991,7 @@ fn frame_completion_notify() {
 
 /// Whether the calling thread has submitted stages it has not taken back yet.
 pub(crate) fn has_frame_in_flight() -> bool {
-    SUBMITTED.with(|submitted| !submitted.borrow().is_empty())
+    SUBMITTED.with(|submitted| submitted.borrow().iter().any(|stage| !stage.is_lend()))
 }
 
 /// Whether the frame in flight owns the arena `arena`.
@@ -904,14 +1000,18 @@ pub(crate) fn frame_in_flight_owns(arena: *mut c_void) -> bool {
         submitted
             .borrow()
             .iter()
-            .any(|stage| stage.owns_arena && stage.arena == arena as usize)
+            .any(|stage| stage.owns_arena && stage.arena == arena as usize && !stage.is_lend())
     })
 }
 
 /// Whether the frame in flight has a stage for the document whose arena is `arena`, owning the
 /// arena or not.
 pub(crate) fn document_frame_in_flight(arena: *mut c_void) -> bool {
-    SUBMITTED.with_borrow(|submitted| submitted.iter().any(|stage| stage.arena == arena as usize))
+    SUBMITTED.with_borrow(|submitted| {
+        submitted
+            .iter()
+            .any(|stage| stage.arena == arena as usize && !stage.is_lend())
+    })
 }
 
 /// Whether every stage of the frame in flight has finished. Does not wait.
@@ -1007,6 +1107,20 @@ fn join_frame_in_flight_for_stage(
     let Some((label, role)) = reached_stage else {
         return;
     };
+    // A lent arena comes back with nothing to consume.
+    if SUBMITTED.with_borrow(|submitted| submitted.iter().all(SubmittedStage::is_lend)) {
+        // SAFETY: Called on the main thread.
+        if FRAME_SCHEDULER_HOST
+            .get()
+            .is_some_and(|host| unsafe { (host.tearing_down_cells)() })
+        {
+            // A garbage collection only takes the arena back; what follows the take-back runs later.
+            wait_for_submitted_stages();
+            return;
+        }
+        take_frame_in_flight();
+        return;
+    }
     if role == "style" {
         STYLE_PASS_FORCED_JOINS.with(|joins| joins.set(joins.get() + 1));
     }
@@ -1652,6 +1766,7 @@ mod tests {
                     from_stage,
                     outcome: None,
                     on_taken_back: None,
+                    recall: None,
                 })
             });
         };

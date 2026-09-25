@@ -22,6 +22,12 @@
 //! [`rust_render_clock_post_tick`]. Such a tick runs on the stage thread only while the main thread
 //! is idle, blocked in its outermost event loop with no frame in flight, and the main thread waits
 //! for it before it goes on when it wakes (see [`rust_render_clock_main_did_wake`]).
+//!
+//! The main thread also lends the arenas of leased documents to the ticks while it runs a task
+//! (see [`rust_clock_lend_to_busy_main`]): a lent arena stands in its frame in flight, so whatever
+//! reaches the arena or its style engine takes it back first, and puts back the records the host
+//! holds over the rows the ticks sampled, laid out again, so the task reads its document at its own
+//! time however many frames the ticks presented meanwhile.
 
 use std::collections::HashMap;
 use std::ffi::c_void;
@@ -63,6 +69,9 @@ pub(crate) struct ClockTickEntry {
     pub(crate) sample: FfiRowSampledInPass,
     /// Whether the arena took the sample's record ahead of the host.
     pub(crate) installed_in_arena: bool,
+    /// Whether the arena took the sample's record and gave it back, for the host to install: a
+    /// read of the host's mid-task took the arena back from the ticks.
+    restored: bool,
 }
 
 /// How a tick ended.
@@ -118,6 +127,12 @@ pub struct ClockLease {
     /// sample over records only the entries the host has not adopted yet keep alive.
     needs_main: AtomicBool,
     outcome: Mutex<Option<FfiClockTickOutcome>>,
+    /// The records the host holds for the targets, pinned while the main thread lends the arena to
+    /// the ticks mid-task: a sample would otherwise replace one in place, and a take-back puts them
+    /// back over the rows.
+    host_pins: Mutex<Vec<u64>>,
+    /// The records of samples a take-back took out of the arena, pinned until the host adopts them.
+    restored_pins: Mutex<Vec<u64>>,
 }
 
 // SAFETY: `ClockTickEntry` carries a borrowed custom-property store pointer, which only the thread
@@ -211,6 +226,7 @@ impl ClockLease {
                     style_record_before: target.style_record,
                     sample: declined_sample(),
                     installed_in_arena: false,
+                    restored: false,
                 });
                 continue;
             };
@@ -236,10 +252,12 @@ impl ClockLease {
             if let Some(entry) = entries.iter_mut().find(|entry| {
                 entry.style_node == target.style_node
                     && entry.sample.style_record == previous_record
-                    && entry.installed_in_arena
+                    && (entry.installed_in_arena || entry.restored)
                     && installed_in_arena
             }) {
                 entry.sample = folded_sample(&entry.sample, sample);
+                entry.installed_in_arena = true;
+                entry.restored = false;
                 continue;
             }
             entries.push(ClockTickEntry {
@@ -247,6 +265,7 @@ impl ClockLease {
                 style_record_before: previous_record,
                 sample,
                 installed_in_arena,
+                restored: false,
             });
         }
         self.presentable.store(presentable, Ordering::Release);
@@ -316,6 +335,53 @@ impl ClockLease {
         paint_state.pending_recording = None;
         paint_state.pending_recording_trace = None;
         false
+    }
+
+    /// Pins the records the host holds for the targets, in place of the ones pinned before.
+    ///
+    /// # Safety
+    ///
+    /// On the main thread, which owns the arena and its style engine.
+    unsafe fn pin_host_records(&self) {
+        // SAFETY: Guaranteed by the caller.
+        let arena = unsafe { &*(self.arena as *const LayoutNodeArena) };
+        let engine = arena.style_engine_handle().cast::<StyleEngine>();
+        if engine.is_null() {
+            return;
+        }
+        let mut pins = Vec::new();
+        for target in self.targets.lock().expect("clock lease targets").iter() {
+            // SAFETY: As above.
+            unsafe { &mut *engine }.pin_layout_style_record(target.style_record);
+            pins.push(target.style_record);
+        }
+        // The pins taken before go once these hold, as a record held by nothing else goes with its last pin.
+        let previous = std::mem::replace(&mut *self.host_pins.lock().expect("clock lease host pins"), pins);
+        for record in previous {
+            // SAFETY: As above.
+            unsafe { &mut *engine }.unpin_layout_style_record(record);
+        }
+    }
+
+    /// # Safety
+    ///
+    /// As for [`Self::pin_host_records`].
+    unsafe fn unpin_host_records(&self) {
+        let mut pins = std::mem::take(&mut *self.host_pins.lock().expect("clock lease host pins"));
+        pins.append(&mut self.restored_pins.lock().expect("clock lease restored pins"));
+        if pins.is_empty() {
+            return;
+        }
+        // SAFETY: Guaranteed by the caller.
+        let arena = unsafe { &*(self.arena as *const LayoutNodeArena) };
+        let engine = arena.style_engine_handle().cast::<StyleEngine>();
+        if engine.is_null() {
+            return;
+        }
+        for record in pins {
+            // SAFETY: As above.
+            unsafe { &mut *engine }.unpin_layout_style_record(record);
+        }
     }
 
     fn take_entry(&self) -> Option<ClockTickEntry> {
@@ -471,6 +537,8 @@ pub extern "C" fn rust_clock_lease_grant(
         presented_since_adoption: AtomicBool::new(false),
         needs_main: AtomicBool::new(false),
         outcome: Mutex::default(),
+        host_pins: Mutex::default(),
+        restored_pins: Mutex::default(),
     });
     if let Some(previous) = registry()
         .lock()
@@ -478,6 +546,8 @@ pub extern "C" fn rust_clock_lease_grant(
         .insert(arena as usize, lease)
     {
         previous.revoked.store(true, Ordering::Release);
+        // SAFETY: The main thread grants with nothing in flight, and owns the arena.
+        unsafe { previous.unpin_host_records() };
     }
 }
 
@@ -521,6 +591,8 @@ pub extern "C" fn rust_clock_lease_revoke(arena: *mut c_void) {
     if let Some(lease) = removed {
         lease.revoked.store(true, Ordering::Release);
         lease.entries.lock().expect("clock lease entries").clear();
+        // SAFETY: The main thread revokes with the arena taken back.
+        unsafe { lease.unpin_host_records() };
     }
 }
 
@@ -717,6 +789,201 @@ impl Drop for IdleTick {
 // Whether a render clock tick installed something since the main thread last woke.
 static TICKS_TO_ADOPT: AtomicBool = AtomicBool::new(false);
 
+// Whether the main thread lent the arenas to the ticks while it runs a task, rather than while it
+// idles.
+static LENT_TO_BUSY_MAIN: AtomicBool = AtomicBool::new(false);
+
+/// What the main thread does once it has taken back an arena it lent while it ran a task: puts back
+/// the records it holds over the rows the ticks sampled. Runs on the main thread.
+static LEND_TAKEN_BACK: OnceLock<extern "C" fn(*mut c_void)> = OnceLock::new();
+
+/// Has the main thread call `taken_back(arena)` once it has taken back an arena it lent while it
+/// ran a task, from wherever it reached it. The first one set stays.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_render_clock_set_lend_taken_back(taken_back: extern "C" fn(*mut c_void)) {
+    let _ = LEND_TAKEN_BACK.set(taken_back);
+}
+
+/// Lends the arena `arena` of a leased document, and its style engine, to the render clock's ticks
+/// while the main thread runs a task, until whatever reaches either takes it back (see
+/// `crate::stage_thread::lend_arena`). Returns false, having lent nothing, where clock frames are
+/// off or a frame is in flight.
+///
+/// # Safety
+///
+/// `arena` is the live layout arena of a document on the main thread, which holds a lease the
+/// render clock ticks, with nothing in flight.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_clock_lend_to_busy_main(arena: *mut c_void, relend: bool) -> bool {
+    if !enabled() || crate::stage_thread::has_frame_in_flight() {
+        return false;
+    }
+    let Some(lease) = clock_lease_for(arena as usize) else {
+        return false;
+    };
+    // A lend again after a take-back goes on from the samples the host has not adopted yet, over the
+    // records pinned when the task first lent the arena.
+    if !relend {
+        // SAFETY: Guaranteed by the caller.
+        unsafe { lease.pin_host_records() };
+    }
+    let recall = || {
+        take_arenas_back();
+        LENT_TO_BUSY_MAIN.store(false, Ordering::Release);
+    };
+    let taken_back = move || {
+        if let Some(taken_back) = LEND_TAKEN_BACK.get() {
+            taken_back(arena);
+        }
+    };
+    // SAFETY: Guaranteed by the caller; the lend stands in the frame in flight before a tick can
+    // reach the arena.
+    unsafe { crate::stage_thread::lend_arena(arena, recall, taken_back) };
+    LENT_TO_BUSY_MAIN.store(true, Ordering::Release);
+    let caller = std::thread::current().id();
+    let mut holder = idle_gate().holder.lock().expect("render clock idle gate");
+    if *holder == ArenaHolder::Main {
+        *holder = ArenaHolder::Idle(caller);
+    }
+    count(if relend { &COUNTERS.relends } else { &COUNTERS.lends });
+    true
+}
+
+/// Whether the main thread lent an arena to the ticks while it runs a task.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_clock_lend_is_active() -> bool {
+    crate::stage_thread::has_lent_arena()
+}
+
+/// Takes back every arena the main thread lent while it ran a task, and leaves what the ticks
+/// sampled for the documents to adopt, as they do when the main thread wakes. Returns whether a
+/// tick left something to adopt since the main thread last took the ticks in, installed or put
+/// back under a read.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_clock_lend_end_for_adoption() -> bool {
+    crate::stage_thread::take_lent_arenas();
+    let installed = TICKS_TO_ADOPT.swap(false, Ordering::AcqRel);
+    installed
+        || registry()
+            .lock()
+            .expect("clock lease registry")
+            .values()
+            .any(|lease| !lease.entries.lock().expect("clock lease entries").is_empty())
+}
+
+/// Releases the records of the hosts the main thread pinned while it lent their arenas mid-task,
+/// and those of the samples it put back, once the hosts have adopted what the ticks sampled.
+///
+/// # Safety
+///
+/// On the main thread, with no arena lent.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_clock_lend_release_host_pins() {
+    let leases: Vec<_> = registry()
+        .lock()
+        .expect("clock lease registry")
+        .values()
+        .cloned()
+        .collect();
+    for lease in leases {
+        // SAFETY: Guaranteed by the caller.
+        unsafe { lease.unpin_host_records() };
+    }
+}
+
+/// What putting back the host's records over the rows a lease's ticks sampled did.
+#[repr(u8)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FfiClockRestore {
+    /// No tick had sampled anything since the last take-back.
+    Nothing,
+    /// The rows hold the host's records again and are laid out with them.
+    LaidOut,
+    /// The rows hold the host's records again, and only the main thread's layout update lays them
+    /// out.
+    NeedsMain,
+}
+
+/// Puts back the records the host holds over the rows the ticks of the lease of `arena` sampled
+/// ahead of it, and lays the rows out again in the lease's layout frame, which the host then takes
+/// in. The rows' paint follows. What the ticks sampled stays for the host to adopt once its task is
+/// over, with the sampled records pinned until then.
+///
+/// # Safety
+///
+/// `arena` is the live layout arena of a document on the main thread, which has taken it back from
+/// the ticks.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_clock_lease_restore_host_records(arena: *mut c_void) -> FfiClockRestore {
+    count(&COUNTERS.recalls);
+    let Some(lease) = clock_lease_for(arena as usize) else {
+        return FfiClockRestore::Nothing;
+    };
+    let started = std::time::Instant::now();
+    // SAFETY: Guaranteed by the caller.
+    let arena_ref = unsafe { LayoutNodeArena::from_handle(arena) };
+    let restored = arena_ref.restore_animation_adoptions();
+    lease.repaints.lock().expect("clock lease repaints").clear();
+    if restored.is_empty() {
+        return FfiClockRestore::Nothing;
+    }
+    // What the ticks sampled stays for the host to adopt once the task is over, and to install then
+    // itself: the ticks go on from it, and the host catches up with it.
+    for entry in lease.entries.lock().expect("clock lease entries").iter_mut() {
+        if entry.installed_in_arena {
+            entry.installed_in_arena = false;
+            entry.restored = true;
+        }
+    }
+    let rows: Vec<_> = {
+        let mut pins = lease.restored_pins.lock().expect("clock lease restored pins");
+        restored
+            .into_iter()
+            .map(|(row, style_record)| {
+                pins.push(style_record);
+                row
+            })
+            .collect()
+    };
+    count(&COUNTERS.restores);
+    {
+        use crate::painting::record::damage::PaintDamage;
+        let _writer = crate::painting::published_immutable::enter_writer("clock restore");
+        for row in rows {
+            arena_ref.push_paint_damage_for_repaint(row, PaintDamage::ALL_PRODUCERS);
+        }
+    }
+    // SAFETY: The main thread owns the arena, and no tick runs.
+    let laid_out = unsafe { lease.lay_out() }.is_some();
+    COUNTERS
+        .restore_nanoseconds
+        .fetch_add(started.elapsed().as_nanos() as u64, Ordering::Relaxed);
+    if !laid_out {
+        count(&COUNTERS.restores_needing_main);
+        return FfiClockRestore::NeedsMain;
+    }
+    FfiClockRestore::LaidOut
+}
+
+/// Why the main thread lends the arenas to the ticks no more for the rest of a task.
+#[repr(u8)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FfiClockLendSuspension {
+    /// The task changed what a tick would show.
+    Write,
+    /// The task's restores went over budget.
+    Budget,
+}
+
+/// Counts a task that lends the arenas no more.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_clock_lend_note_suspended(reason: FfiClockLendSuspension) {
+    count(match reason {
+        FfiClockLendSuspension::Write => &COUNTERS.lends_suspended_write,
+        FfiClockLendSuspension::Budget => &COUNTERS.lends_suspended_budget,
+    });
+}
+
 /// The main thread is about to block in its outermost event loop. Unless it has a frame in flight,
 /// render clock ticks may reach the arenas of leased documents until it wakes.
 #[unsafe(no_mangle)]
@@ -797,6 +1064,24 @@ pub struct FfiRenderClockCounters {
     pub ticks_needing_main: u64,
     /// Ticks whose layout moved the visual contexts, which ended their lease.
     pub ticks_moving_visual_contexts: u64,
+    /// Ticks that ran while the main thread ran a task beside them.
+    pub ticks_mid_task: u64,
+    /// Times the main thread lent the arenas to the ticks while it ran a task.
+    pub lends: u64,
+    /// Times the main thread lent them again after a read had taken them back.
+    pub relends: u64,
+    /// Times something the main thread reached took them back mid-task.
+    pub recalls: u64,
+    /// Recalls that put the host's records back over rows the ticks had sampled, and laid them out.
+    pub restores: u64,
+    /// Time those restores took, in nanoseconds.
+    pub restore_nanoseconds: u64,
+    /// Restores whose layout only the main thread could run.
+    pub restores_needing_main: u64,
+    /// Tasks that lent nothing more because they changed what a tick would show.
+    pub lends_suspended_write: u64,
+    /// Tasks that lent nothing more because their restores went over budget.
+    pub lends_suspended_budget: u64,
 }
 
 #[derive(Default)]
@@ -815,6 +1100,15 @@ struct RenderClockCounters {
     ticks_presented: AtomicU64,
     ticks_needing_main: AtomicU64,
     ticks_moving_visual_contexts: AtomicU64,
+    ticks_mid_task: AtomicU64,
+    lends: AtomicU64,
+    relends: AtomicU64,
+    recalls: AtomicU64,
+    restores: AtomicU64,
+    restore_nanoseconds: AtomicU64,
+    restores_needing_main: AtomicU64,
+    lends_suspended_write: AtomicU64,
+    lends_suspended_budget: AtomicU64,
 }
 
 static COUNTERS: RenderClockCounters = RenderClockCounters {
@@ -832,6 +1126,15 @@ static COUNTERS: RenderClockCounters = RenderClockCounters {
     ticks_presented: AtomicU64::new(0),
     ticks_needing_main: AtomicU64::new(0),
     ticks_moving_visual_contexts: AtomicU64::new(0),
+    ticks_mid_task: AtomicU64::new(0),
+    lends: AtomicU64::new(0),
+    relends: AtomicU64::new(0),
+    recalls: AtomicU64::new(0),
+    restores: AtomicU64::new(0),
+    restore_nanoseconds: AtomicU64::new(0),
+    restores_needing_main: AtomicU64::new(0),
+    lends_suspended_write: AtomicU64::new(0),
+    lends_suspended_budget: AtomicU64::new(0),
 };
 
 fn count(counter: &AtomicU64) {
@@ -935,6 +1238,9 @@ fn run_render_clock_tick(context: u64, slot: &ClockSlot) {
         count(&COUNTERS.ticks_dropped_main_busy);
         return;
     };
+    if LENT_TO_BUSY_MAIN.load(Ordering::Acquire) {
+        count(&COUNTERS.ticks_mid_task);
+    }
     // Only the main thread grants and revokes, and it is idle: the lease stays as it is found, and
     // so does its arena, which revoking it comes before the end of.
     let Some(lease) = clock_lease_for_context(context) else {
@@ -965,12 +1271,13 @@ fn run_render_clock_tick(context: u64, slot: &ClockSlot) {
             }
             // A sample the arena did not take, the host installs over the record the target held
             // before: only its entry keeps that record alive, and no later tick may sample over it.
+            // One a read put back under a task is pinned, as is the record before it.
             if lease
                 .entries
                 .lock()
                 .expect("clock lease entries")
                 .iter()
-                .any(|entry| !entry.installed_in_arena)
+                .any(|entry| !entry.installed_in_arena && !entry.restored)
             {
                 return (FfiClockTickOutcome::NeedsMain, false);
             }
@@ -1048,6 +1355,15 @@ pub extern "C" fn rust_render_clock_counters() -> FfiRenderClockCounters {
         ticks_presented: load(&COUNTERS.ticks_presented),
         ticks_needing_main: load(&COUNTERS.ticks_needing_main),
         ticks_moving_visual_contexts: load(&COUNTERS.ticks_moving_visual_contexts),
+        ticks_mid_task: load(&COUNTERS.ticks_mid_task),
+        lends: load(&COUNTERS.lends),
+        relends: load(&COUNTERS.relends),
+        recalls: load(&COUNTERS.recalls),
+        restores: load(&COUNTERS.restores),
+        restore_nanoseconds: load(&COUNTERS.restore_nanoseconds),
+        restores_needing_main: load(&COUNTERS.restores_needing_main),
+        lends_suspended_write: load(&COUNTERS.lends_suspended_write),
+        lends_suspended_budget: load(&COUNTERS.lends_suspended_budget),
     }
 }
 

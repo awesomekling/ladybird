@@ -897,6 +897,9 @@ Document::JoinScope::~JoinScope()
         ++counters.joins_that_published_nothing;
     }
     counters.max_nanoseconds = max(counters.max_nanoseconds, elapsed);
+    // LIBWEB_RENDER_CLOCK_FRAMES: A read that took the arenas back from the render clock's ticks mid-task lends them
+    // again once it is over, if the task changed nothing a tick would show.
+    HTML::main_thread_event_loop().frame_scheduler().relend_clock_leases_after_read();
 }
 
 // The style update of a read that starts it beside the recording of the document in flight. It is the style update the
