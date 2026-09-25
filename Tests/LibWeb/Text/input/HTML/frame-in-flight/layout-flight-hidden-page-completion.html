@@ -10,9 +10,8 @@
             box.style.width = "80px";
         }, async frame => {
             // The pass stays held while the page is hidden, unless something joins it.
-            internals.setSystemVisibilityState("hidden");
-            for (let tasks = 0; document.visibilityState !== "hidden" && tasks < 100; ++tasks)
-                await nextTask();
+            // Wait for the visibilitychange event: under load, the UI process's round trip can take any number of tasks.
+            await setSystemVisibilityState("hidden");
             const visibility = document.visibilityState;
             const stateWhenHidden = internals.frameSchedulerState();
             internals.releaseHeldFrame();
@@ -29,7 +28,7 @@
         }
         println(`taken back while hidden: ${internals.frameSchedulerState() === "idle"}`);
         println(`laid out while hidden: ${box.offsetWidth}`);
-        internals.setSystemVisibilityState("visible");
+        await setSystemVisibilityState("visible");
         box.style.width = "90px";
         await twoFrames();
         println(`rendering resumed: ${document.visibilityState}, ${box.offsetWidth}`);
