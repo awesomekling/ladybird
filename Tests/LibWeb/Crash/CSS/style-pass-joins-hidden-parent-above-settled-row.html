@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<!-- The <svg> is the one row in #b's new subtree that is not skipped as hidden. Its style pass stops
+     before it for #b, which #a's color change reaches only once #a settles, after the <span> has
+     already settled. #b has to join the pass before the <svg>, or the pass never goes on to the
+     <div> in #c, and layout reaches that <div> without its style. -->
+<div id="a"><div id="b" style="display: none"></div></div>
+<svg></svg>
+<div id="c"></div>
+<script>
+    document.body.offsetWidth;
+    a.style.color = "green";
+    b.innerHTML = "<span><svg></svg></span><div></div>";
+    c.innerHTML = "<div>visible</div>";
+    document.body.offsetWidth;
+</script>
