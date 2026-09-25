@@ -5994,8 +5994,8 @@ pub unsafe extern "C" fn layout_arena_content_counter_styles_changed(
         return CONTENT_COUNTER_STYLES_NOT_RECORDED;
     };
     // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on the
-    // document thread.
-    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
+    // document thread. The counter styles the build recorded and the style engine are nothing a recording reads.
+    let arena = unsafe { LayoutNodeArena::from_handle_beside_recording(arena) };
     match super::generated_content::content_counter_styles_changed(arena, owner) {
         None => CONTENT_COUNTER_STYLES_NOT_RECORDED,
         Some(false) => CONTENT_COUNTER_STYLES_UNCHANGED,

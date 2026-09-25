@@ -1744,6 +1744,17 @@ void Document::update_style()
     CSS::update_style(*this);
 }
 
+// The style update of a read that starts it beside the recording of this document in flight (see JoinScope): the
+// recording reaches no style engine, and what the update writes to the arena takes the recording in at its doors. Like a
+// style update for one element beside the recording, it can release a record a row names before the row takes its new
+// one, so the engine reclaims no record until the frame is taken in.
+void Document::update_style_beside_recording()
+{
+    HTML::main_thread_event_loop().frame_scheduler().hold_style_records_for_frame(*this);
+    update_selection_style_observability();
+    CSS::update_style(*this);
+}
+
 bool Document::submit_style_for_rendering_update()
 {
     join_frame_in_flight();

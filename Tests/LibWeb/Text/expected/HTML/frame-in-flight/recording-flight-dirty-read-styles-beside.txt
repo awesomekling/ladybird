@@ -1,0 +1,13 @@
+restyled box: held as armed: true
+restyled box: style update started beside the recording: true
+restyled box: style update finished beside the recording: false
+restyled box: took the recording in once: true
+restyled box: read: 23
+restyled box: transitions started: 1
+restyled box: ::before: "b"
+no box restyled: held as armed: true
+no box restyled: style update started beside the recording: true
+no box restyled: style update finished beside the recording: true
+no box restyled: took the recording in once: true
+no box restyled: read: 30
+no box restyled: color: rgb(0, 128, 0)

@@ -2890,14 +2890,15 @@ pub unsafe extern "C" fn layout_arena_published_scroll_offset(
 
 /// The number of layout commits this arena has published. It does not say whether layout is up
 /// to date - a reader asks the arena that - but it does say whether the committed geometry a
-/// reader saw earlier is still the one published.
+/// reader saw earlier is still the one published. A recording commits no layout, so this is asked
+/// beside one.
 ///
 /// # Safety
 ///
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_layout_commit_generation(arena: *mut c_void) -> u64 {
-    unsafe { arena_from_handle(arena) }.layout_commit_generation()
+    unsafe { arena_from_handle_beside_recording(arena) }.layout_commit_generation()
 }
 
 /// # Safety

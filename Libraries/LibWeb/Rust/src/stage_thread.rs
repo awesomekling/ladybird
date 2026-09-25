@@ -149,6 +149,21 @@ pub(crate) fn reads_beside_recording_of(arena: *const c_void) -> bool {
     })
 }
 
+/// Whether a read that finds the document whose arena is `arena` dirty beside a frame that holds it only for its
+/// recordings starts its style update beside them (unless `LIBWEB_STYLE_BESIDE_RECORDING=0`). The recording reaches
+/// no style engine, and what the update writes to the arena takes the frame in at the arena's doors.
+pub(crate) fn styles_beside_recording_of(arena: *const c_void) -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("LIBWEB_STYLE_BESIDE_RECORDING").is_none_or(|value| value != "0"))
+        && reads_beside_recording_of(arena)
+}
+
+/// See [`styles_beside_recording_of`].
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_stage_thread_styles_beside_recording_of(arena: *const c_void) -> bool {
+    styles_beside_recording_of(arena)
+}
+
 /// Whether a recording submitted for an arena lends the main side the rows its layout published.
 pub(crate) fn recordings_lend_published_rows() -> bool {
     reads_beside_recording_enabled()
