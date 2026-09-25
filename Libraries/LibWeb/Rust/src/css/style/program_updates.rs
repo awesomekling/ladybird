@@ -199,6 +199,7 @@ impl RetainedState {
     /// dependencies are unchanged remain interned for one invalidation generation, preserving the
     /// dispatch and prefix work shared by unaffected scopes.
     pub(super) fn invalidate_scope_programs(&mut self) {
+        self.end_matching_traversal_over_dropped_scope_programs();
         for index in 0..self.scope_programs.len() {
             if !self.scope_programs[index]
                 .as_ref()
@@ -241,7 +242,18 @@ impl RetainedState {
         else {
             return;
         };
+        self.end_matching_traversal_over_dropped_scope_programs();
         self.release_scope_program(program);
+    }
+
+    /// A retained matching traversal was prepared against the scope programs being dropped: its prefix contexts and
+    /// ancestor requirements name them. A style update's traversal outlives its pass when the pass is submitted, and
+    /// script beside the pass can drop programs (a published layer order), so the traversal ends here rather than let
+    /// the update's next wave or a demand reuse it over programs that are gone.
+    fn end_matching_traversal_over_dropped_scope_programs(&mut self) {
+        if self.batch_matching_traversal.is_some() {
+            self.end_published_match_answer_completion_batch();
+        }
     }
 
     /// Drop only concrete scope programs that consume `sheet`. The key contains the effective
