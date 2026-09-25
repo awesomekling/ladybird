@@ -130,6 +130,9 @@ public:
     // Before a rendering update moves the documents' timelines to frame_timestamp: ends the leases the rendering update
     // cannot tick, so that the update samples their effects itself.
     void prepare_clock_ticks(ReadonlySpan<GC::Root<DOM::Document>> docs, HighResolutionTime::DOMHighResTimeStamp frame_timestamp);
+    // The time the timeline of `document` reads in the rendering update running now, where a render clock that keeps up
+    // ticks its lease: the time of its last tick, rather than the rendering update's.
+    Optional<double> clock_lease_timeline_time(DOM::Document const&) const;
     // Ends the main half with a frame that ticks the lease of the first leased document from docs[first_document_index]
     // on, if there is one and `may_submit` says so. Once the frame is taken back and the document has adopted the tick,
     // the next leased document ticks, and then the rendering update goes on at step 16. Where no lease is left to tick,
@@ -217,6 +220,9 @@ private:
         bool ticked { false };
         // The compositor context at whose display ticks a render clock ticks the lease, if one does.
         Optional<Compositing::CompositorContextId> render_clock_context {};
+        // The time the document timeline reads in the rendering update running now: that of the render clock's last
+        // tick, where the rendering update leaves the lease to the render clock.
+        Optional<double> timeline_time_for_update {};
         // What the render clock's ticks present the document's frames with.
         OwnPtr<LocalNavigable::RenderClockFrameKit> render_clock_kit {};
         // The document's layout commit generation and published style transaction when the ticks last had its arena,

@@ -839,7 +839,11 @@ void EventLoop::update_the_rendering()
 
     // 11. For each doc of docs, update animations and send events for doc, passing in relative high resolution time given frameTimestamp and doc's relevant global object as the timestamp [WEBANIMATIONS]
     for (auto& document : docs) {
-        document->update_animations_and_send_events(relative_frame_timestamp_for(frame_timestamp, *document));
+        auto timestamp = relative_frame_timestamp_for(frame_timestamp, *document);
+        // LIBWEB_RENDER_CLOCK_FRAMES: A document whose animations a render clock ticks shows its last tick.
+        if (auto clock_time = m_frame_scheduler->clock_lease_timeline_time(*document); clock_time.has_value())
+            timestamp = *clock_time;
+        document->update_animations_and_send_events(timestamp);
     };
 
     // 12. For each doc of docs, run the fullscreen steps for doc. [FULLSCREEN]
