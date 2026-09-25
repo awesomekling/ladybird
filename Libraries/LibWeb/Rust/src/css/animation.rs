@@ -6936,6 +6936,7 @@ pub unsafe extern "C" fn rust_published_animation_current_key(
     is_resolved_out: *mut bool,
     key_out: *mut f64,
 ) -> bool {
+    crate::stage_thread::join_frame_for_style_engine_entrance(style_engine, "rust_published_animation_current_key");
     use crate::css::style::animations;
 
     let engine = unsafe { &*style_engine.cast::<crate::css::style::StyleEngine>() };
@@ -7005,6 +7006,7 @@ pub unsafe extern "C" fn rust_substitute_compositor_keyframe_value(
     property_id: u16,
     value: *const crate::css::style_value::StyleValueData,
 ) -> *const crate::css::style_value::StyleValueData {
+    crate::stage_thread::join_frame_for_style_engine_entrance(style_engine, "rust_substitute_compositor_keyframe_value");
     let engine = unsafe { &*style_engine.cast::<crate::css::style::StyleEngine>() };
     let written = unsafe {
         crate::css::style_value::RetainedStyleValueData::from_retained_pointer(

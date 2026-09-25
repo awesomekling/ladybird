@@ -2213,6 +2213,7 @@ pub unsafe extern "C" fn rust_random_sharing_absolutize(
     engine: *mut core::ffi::c_void,
     node: u32,
 ) -> *const StyleValueData {
+    crate::stage_thread::join_frame_for_style_engine_entrance(engine, "rust_random_sharing_absolutize");
     let data = unsafe { &*value };
     let StyleValueData::RandomValueSharing {
         fixed_value,
