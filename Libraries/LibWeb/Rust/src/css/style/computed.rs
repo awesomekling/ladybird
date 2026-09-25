@@ -3494,9 +3494,46 @@ impl ComputedGroupSets {
         );
     }
 
+    /// Assert that a record the host reads was published: a base record whose longhand table is
+    /// frozen, or an animation overlay whose slot is held. Only such a record is
+    /// immutable, which is what lets the host read one anywhere, outside the drain as well as in it.
+    pub(crate) fn debug_assert_style_record_is_published(&self, raw_style_record: u64) {
+        if !cfg!(debug_assertions) {
+            return;
+        }
+        let style_record = FinalStyleRecordID(raw_style_record);
+        let base_style_record = if let Some(identity) = style_record.base_record() {
+            // NB: A read of a retired generation is refused, in release builds too, by the read.
+            if !self.style_record_generation_is_live(identity, style_record.base_generation()) {
+                return;
+            }
+            identity
+        } else {
+            let overlay = self
+                .animation_overlay_slots_by_record
+                .get(&style_record)
+                .and_then(|slot| self.animation_overlay_slots.get(*slot as usize)?.as_ref());
+            debug_assert!(overlay.is_some(), "a record read is of an overlay that is not held");
+            let Some(overlay) = overlay else {
+                return;
+            };
+            overlay.base_style_record
+        };
+        let table = self
+            .style_records
+            .get_index(base_style_record.index())
+            .and_then(|record| record.longhand_table)
+            .and_then(|identity| self.computed_longhand_tables.get_index(identity.0 as usize));
+        debug_assert!(
+            table.is_none_or(|table| table.table().is_frozen()),
+            "a record read is of a record whose longhand table is not frozen"
+        );
+    }
+
     pub fn style_record_payloads(&self, raw_style_record: u64) -> Option<&[SharedPayload]> {
         let final_style_record = FinalStyleRecordID(raw_style_record);
         self.verify_style_record(final_style_record, "style record payload read");
+        self.debug_assert_style_record_is_published(raw_style_record);
         if raw_style_record & FinalStyleRecordID::ANIMATION_OVERLAY_TAG != 0 {
             let style_record = final_style_record;
             let slot = *self.animation_overlay_slots_by_record.get(&style_record)?;
@@ -3514,6 +3551,7 @@ impl ComputedGroupSets {
 
     pub fn style_record_dependency_flags(&self, raw_style_record: u64) -> Option<u8> {
         let final_style_record = FinalStyleRecordID(raw_style_record);
+        self.debug_assert_style_record_is_published(raw_style_record);
         let (base_style_record, overlay_holds_image_values) =
             if let Some(style_record) = final_style_record.base_record() {
                 assert!(
@@ -3614,6 +3652,7 @@ impl ComputedGroupSets {
     pub(crate) fn style_record_view(&self, raw_style_record: u64) -> Option<StyleRecordView<'_>> {
         let final_style_record = FinalStyleRecordID(raw_style_record);
         self.verify_style_record(final_style_record, "style record view read");
+        self.debug_assert_style_record_is_published(raw_style_record);
         let (base_style_record, payloads, animation_overlay_identity, animated_overlay) =
             if let Some(style_record) = final_style_record.base_record() {
                 assert!(

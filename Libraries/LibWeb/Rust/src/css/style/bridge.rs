@@ -3160,6 +3160,10 @@ pub unsafe extern "C" fn style_engine_assigned_style_record(engine: *const c_voi
 pub unsafe extern "C" fn style_engine_base_style_record_of(engine: *const c_void, style_record: u64) -> u64 {
     super::seal::note_engine_call("style_engine_base_style_record_of");
     let engine = unsafe { &*engine.cast::<StyleEngine>() };
+    engine
+        .retained
+        .computed_group_sets
+        .debug_assert_style_record_is_published(style_record);
     engine.retained.computed_group_sets.base_style_record_of(style_record)
 }
 
@@ -3328,6 +3332,9 @@ pub unsafe extern "C" fn style_engine_style_record_custom_property_environment(
 ) -> u64 {
     super::seal::note_engine_call("style_engine_style_record_custom_property_environment");
     let engine = unsafe { &*engine.cast::<StyleEngine>() };
+    engine
+        .computed_group_sets
+        .debug_assert_style_record_is_published(style_record);
     engine
         .computed_group_sets
         .style_record_custom_property_environment(style_record)
