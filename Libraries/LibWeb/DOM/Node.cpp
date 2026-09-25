@@ -1075,7 +1075,7 @@ void Node::insert_nodes_before(ReadonlySpan<GC::Ref<Node>> nodes, GC::Ptr<Node> 
     auto is_boxless_style_element = (is_html_style_element() || is_svg_style_element()) && !has_layout_box();
     if (is_connected() && !is_boxless_style_element) {
         // NB: Called during DOM insertion, layout is not up to date.
-        if (auto* element = as_if<Element>(*this); element && element->has_style() && CSS::display_from_ffi_display(element->style_group<CSS::ComputedValues::BoxValues>()->display).is_contents() && parent_element()) {
+        if (auto* element = as_if<Element>(*this); element && element->installed_display_is_contents() && parent_element()) {
             parent_element()->set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::NodeInsertBeforeWithDisplayContents);
         }
         set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::NodeInsertBefore);
@@ -1464,10 +1464,9 @@ bool Node::schedule_list_item_renumber_for_removal()
     auto* element = as_if<Element>(*this);
     if (!element)
         return false;
-    auto style = element->computed_style();
     // A removed list item can renumber the list-item counter for its list owner's whole list. Removing the final item
     // from a forward counter does not change any surviving counter value.
-    if ((is_html_li_element() || (style && style->display().is_list_item()))
+    if ((is_html_li_element() || element->installed_display_is_list_item())
         && !final_direct_list_item_does_not_renumber_existing_content(*element)) {
         element->schedule_list_item_renumber_for_list_owner();
         return true;
@@ -2605,7 +2604,7 @@ void Node::set_needs_layout_tree_update(bool value, SetNeedsLayoutTreeUpdateReas
 
         // If this is an element with display: contents, we need to propagate the layout tree update to the parent.
         if (auto* element = as_if<Element>(*this)) {
-            if (element->has_style() && CSS::display_from_ffi_display(element->style_group<CSS::ComputedValues::BoxValues>()->display).is_contents()) {
+            if (element->installed_display_is_contents()) {
                 if (auto parent_element = element->parent_or_shadow_host_element()) {
                     parent_element->set_needs_layout_tree_update(true, reason);
                 }

@@ -32,11 +32,12 @@
             third.id = "third";
             third.className = "item";
             third.textContent = "third";
-            container.appendChild(third);
-            return { ...frame, joined };
+            const insertionJoined = writeJoinedStylePass(() => container.appendChild(third));
+            return { ...frame, joined, insertionJoined };
         });
         println(`insertion: held as armed: ${styleHeldAsArmed(inserted, "before-run")}`);
         println(`insertion: attribute changes joined the pass: ${inserted.joined}`);
+        println(`insertion: the insertion joined the pass: ${inserted.insertionJoined}`);
         await twoFrames();
         println(`insertion: container height: ${container.offsetHeight}`);
         for (const element of container.children)

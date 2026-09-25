@@ -2580,6 +2580,8 @@ void Element::clear_computed_styles_from_display_none_descendants(CSS::StyleDrai
         if (auto* layout_node = element->unsafe_layout_node())
             layout_node->pin_style_record_for_detachment();
         element->m_style_record_identity = 0;
+        element->m_installed_display_is_contents = false;
+        element->m_installed_display_is_list_item = false;
         scope.engine().set_element_container_query_inputs(element->style_node_id(), {});
 
         element->for_each_synthetic_pseudo_element([&](CSS::PseudoElement, SyntheticPseudoElement& pseudo_element) {
@@ -5236,6 +5238,9 @@ void Element::replace_style_record(CSS::StyleDrainScope const& scope, CSS::Style
     if (old_style_record_identity == style_record_identity)
         return;
     m_style_record_identity = style_record_identity;
+    auto display = !!style_record_identity ? Optional<CSS::Display> { CSS::display_from_ffi_display(style_group<CSS::ComputedValues::BoxValues>()->display) } : Optional<CSS::Display> {};
+    m_installed_display_is_contents = display.has_value() && display->is_contents();
+    m_installed_display_is_list_item = display.has_value() && display->is_list_item();
     // What the element holds is what the rows and samples after it in the drain read: a document
     // element's record resolves `rem`, for one.
     if (style_node_id() != 0)
@@ -5250,6 +5255,8 @@ void Element::clear_style_record_on_removal()
     if (!m_style_record_identity)
         return;
     m_style_record_identity = {};
+    m_installed_display_is_contents = false;
+    m_installed_display_is_list_item = false;
     if (auto style_node = style_node_id(); style_node != 0) {
         document().style_computer().style_engine().publish_input([element = GC::Root<Element> { *this }, style_node](CSS::StyleInputScope const& input) {
             if (element->style_node_id() == style_node)
