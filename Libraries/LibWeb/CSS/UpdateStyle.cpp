@@ -531,6 +531,55 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                 }
                 continue;
             }
+            // The pass settled the element's synthetic pseudo-elements over the composition the host
+            // installed for it since the pass that settled the element: the element installs their
+            // records, with what the pass sampled and decided for them.
+            if (published_reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::PseudoElementsSettled) {
+                if (!element->has_style())
+                    continue;
+                row_debts = {};
+                if (published_reaction.explicit_inheritance_debt != 0)
+                    row_effects.append(StyleEffectDrain::ExplicitInheritance { StyleNodeID { published_reaction.style_node }, published_reaction.explicit_inheritance_debt });
+                if (published_reaction.uses_substitution)
+                    element->set_style_uses_var_css_function();
+                DOM::Element::EnginePseudoElementRecords pseudo_element_records {};
+                for (auto next = reaction_index + 1; next < reactions.size() && reactions[next].style_node == published_reaction.style_node && reactions[next].pseudo_kind != NumericLimits<u8>::max(); ++next) {
+                    StyleRecordID record { reactions[next].new_style_record };
+                    pseudo_element_records[reactions[next].pseudo_kind] = record;
+                    if (!!record && has_flag(scope.engine().style_record_dependency_flags(record), StyleRecordDependencyFlag::DependsOnViewportMetrics))
+                        element->set_style_depends_on_viewport_metrics();
+                }
+                // What the settled pseudo-elements' container units read of the element's containers.
+                auto container_effects = StyleEngineFFI::style_engine_take_container_effects(scope.engine().rust_handle(), published_reaction.style_node);
+                ScopeGuard release_container_effects = [&] { StyleEngineFFI::style_engine_native_container_effects_release(container_effects.effects); };
+                StyleComputer::record_container_query_effects(scope, DOM::AbstractElement { *element }, container_effects);
+                u8 const kinds_sampled_by_engine = published_reaction.inherited_style_groups;
+                auto pseudo_samples = take_pseudo_element_samples_before_installation(scope, *element, kinds_sampled_by_engine);
+                DOM::begin_style_row_counter_style_invalidation(*element);
+                bool did_change_custom_properties = false;
+                auto invalidation = element->install_engine_pseudo_element_records_after_sample(
+                    scope, did_change_custom_properties, element->computed_style()->display().is_list_item(), &pseudo_element_records, &row_effects);
+                apply_pseudo_element_samples_taken_by_engine(scope, *element, pseudo_samples);
+                // The CSS animation plans the pass settled beside the records, applied in pseudo tree
+                // order; the host samples what they apply.
+                u8 kinds_sampled_by_host = static_cast<u8>(~kinds_sampled_by_engine);
+                for (auto pseudo_element : { PseudoElement::Marker, PseudoElement::Before, PseudoElement::FirstLetter, PseudoElement::Selection, PseudoElement::After }) {
+                    auto kind = to_underlying(pseudo_element);
+                    if (!pseudo_element_records[kind].has_value() || !*pseudo_element_records[kind])
+                        continue;
+                    if (auto plan = document.style_computer().take_settled_animation_plan(scope, element->style_node_id(), kind); plan.has_value()) {
+                        document.style_computer().apply_settled_animation_plan({ *element, pseudo_element }, *plan);
+                        kinds_sampled_by_host |= 1 << kind;
+                    }
+                }
+                sample_animations_for_installed_pseudos(scope, *element, static_cast<u8>(~kinds_sampled_by_host));
+                row_effects.append(StyleEffectDrain::AcknowledgeRecord { StyleNodeID { published_reaction.style_node } });
+                auto effects = invalidation;
+                effects |= DOM::end_style_row_counter_style_invalidation(*element);
+                row_effects.append(StyleEffectDrain::ElementInvalidation { StyleNodeID { published_reaction.style_node }, effects });
+                transaction_invalidation |= effects;
+                continue;
+            }
             // A reaction the engine derived for this element while applying an earlier one in
             // this batch joins the element's own reaction where it covers it.
             auto reaction = published_reaction;
@@ -817,7 +866,6 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                     // that point so transition selection can still read its before-change style.
                     document.style_computer().style_engine().set_sampled_composition_identity(
                         StyleNodeID { reaction.style_node }, element->style_record_identity());
-                    u8 pseudo_kinds_sampled_by_engine = 0;
                     if (defer_pseudos) {
                         if (old_originating_style) {
                             auto const new_style = element->computed_style();
@@ -825,37 +873,14 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                                 row_effects.append(StyleEffectDrain::DisplayNoneAnimations { StyleNodeID { reaction.style_node } });
                             element->apply_display_none_change(scope, false, !old_originating_style->display().is_none() && new_style->display().is_none());
                         }
-                        StyleEngineFFI::style_engine_note_host_step(StyleEngineFFI::FfiStyleHostStep::PseudoSettle);
-                        // The engine samples the pseudo-elements' animations as it settles them,
-                        // over what the host's installations since the pass moved of their timing.
+                        // The pseudo-elements inherit from the composition installed above: the next
+                        // pass settles them over it, and samples their animations over what the host's
+                        // installations since this pass moved of their timing.
                         Animations::AnimationUpdateContext::publish_animation_inputs_before_sample(*element);
-                        // It decides their transition steps over the records the host holds for them, and
-                        // a sample resolves a percentage translation against the boxes the last layout
-                        // committed.
-                        Array<u64, 8> held_pseudo_records {};
-                        for (size_t kind = 0; kind < held_pseudo_records.size(); ++kind)
-                            held_pseudo_records[kind] = element->style_record_identity(static_cast<PseudoElement>(kind)).value();
-                        auto* layout_node_arena = document.layout_node_arena_if_created();
-                        auto settled_pseudos = StyleEngineFFI::style_engine_settle_pseudo_records_after_host_record(
-                            scope.engine().rust_handle(), reaction.style_node, old_is_list_item, false, true,
-                            held_pseudo_records.data(), layout_node_arena ? layout_node_arena->handle() : nullptr);
-                        pseudo_kinds_sampled_by_engine = settled_pseudos.pseudo_samples_taken;
-                        auto pseudo_samples = take_pseudo_element_samples_before_installation(scope, *element, pseudo_kinds_sampled_by_engine);
-                        DOM::Element::EnginePseudoElementRecords final_pseudo_records {};
-                        for (size_t kind = 0; kind < array_size(settled_pseudos.pseudo_records); ++kind) {
-                            if ((settled_pseudos.pseudo_records_present >> kind) & 1)
-                                final_pseudo_records[kind] = StyleRecordID { settled_pseudos.pseudo_records[kind] };
-                        }
-                        g_deferring_engine_pseudo_installation = previous_pseudo_deferral;
-                        auto pseudo_invalidation = element->install_engine_pseudo_element_records_after_sample(
-                            scope, did_change_custom_properties, old_is_list_item,
-                            old_originating_style ? &*old_originating_style : nullptr,
-                            &final_pseudo_records, &row_effects);
-                        invalidation |= pseudo_invalidation;
-                        apply_pseudo_element_samples_taken_by_engine(scope, *element, pseudo_samples);
+                        element->settle_pseudo_elements_in_next_pass(scope, old_is_list_item);
+                    } else if (element->has_associated_animations() || installed_pseudo_animation_plan) {
+                        sample_animations_for_installed_pseudos(scope, *element);
                     }
-                    if (element->has_associated_animations() || installed_pseudo_animation_plan)
-                        sample_animations_for_installed_pseudos(scope, *element, pseudo_kinds_sampled_by_engine);
                     row_effects.append(StyleEffectDrain::AcknowledgeRecord { StyleNodeID { reaction.style_node } });
                     if (explicit_inheritance_debt != 0)
                         row_effects.append(StyleEffectDrain::ExplicitInheritance { StyleNodeID { reaction.style_node }, explicit_inheritance_debt });

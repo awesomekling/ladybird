@@ -361,8 +361,9 @@ public:
     // The custom-property environment an engine-computed record was published with: the one the
     // element inherits, or one the engine resolved over it. Nothing when it cannot be installed.
     [[nodiscard]] RefPtr<CSS::CustomPropertyData const> custom_property_environment_of_engine_record(CSS::StyleRecordID, bool& installable) const;
-    CSS::RequiredInvalidationAfterStyleChange recompute_pseudo_element_styles(CSS::StyleDrainScope const&);
-    CSS::RequiredInvalidationAfterStyleChange install_engine_pseudo_element_records_after_sample(CSS::StyleDrainScope const&, bool& did_change_custom_properties, bool old_is_list_item, CSS::ComputedValues const* old_originating_style, EnginePseudoElementRecords const*, CSS::StyleEffectDrain* = nullptr);
+    void settle_pseudo_elements_in_next_pass(CSS::StyleDrainScope const&, bool old_is_list_item);
+    void settle_pseudo_elements_over_moved_composition(CSS::StyleDrainScope const&);
+    CSS::RequiredInvalidationAfterStyleChange install_engine_pseudo_element_records_after_sample(CSS::StyleDrainScope const&, bool& did_change_custom_properties, bool old_is_list_item, EnginePseudoElementRecords const*, CSS::StyleEffectDrain* = nullptr);
     void apply_computed_style_to_layout_node_if_needed(CSS::RequiredInvalidationAfterStyleChange const&);
 
     void set_needs_layout_tree_rebuild(SetNeedsLayoutTreeUpdateReason, CSS::LayoutTreeRebuildRoot);
@@ -933,7 +934,7 @@ private:
     Utf16FlyString make_html_uppercased_qualified_name() const;
 
     void exit_fullscreen_on_element_removal();
-    CSS::RequiredInvalidationAfterStyleChange recompute_pseudo_element_styles(CSS::StyleDrainScope const&, bool& did_change_custom_properties, bool had_list_marker, CSS::ComputedValues const* old_originating_style, EnginePseudoElementRecords const* = nullptr, EnginePseudoElementDamages const* = nullptr);
+    CSS::RequiredInvalidationAfterStyleChange recompute_pseudo_element_styles(CSS::StyleDrainScope const&, bool& did_change_custom_properties, bool had_list_marker, EnginePseudoElementRecords const* = nullptr, EnginePseudoElementDamages const* = nullptr);
     void apply_computed_pseudo_element_styles_to_layout_nodes_if_needed(CSS::RequiredInvalidationAfterStyleChange const&);
     void publish_custom_property_names();
     void publish_custom_property_names(RefPtr<CSS::CustomPropertyData const> data);

@@ -103,6 +103,7 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
         engine_row_child_facts,
         batch_pinned_compositions,
         nodes_owing_an_animation_sample,
+        pseudo_settles_owed,
         rows_sampled_in_pass,
         pseudo_elements_sampled_in_pass,
         pseudo_element_environments_named_in_settle,
@@ -246,6 +247,7 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
     assert_member_is_sync(engine_row_child_facts);
     assert_member_is_sync(batch_pinned_compositions);
     assert_member_is_sync(nodes_owing_an_animation_sample);
+    assert_member_is_sync(pseudo_settles_owed);
     assert_member_is_sync(rows_sampled_in_pass);
     assert_member_is_sync(pseudo_elements_sampled_in_pass);
     assert_member_is_sync(pseudo_element_environments_named_in_settle);

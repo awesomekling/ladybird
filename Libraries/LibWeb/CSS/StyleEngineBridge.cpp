@@ -504,11 +504,6 @@ void StyleEngine::note_custom_property_name(StyleAtomID atom, Utf16FlyString con
     Utf16FlyString::unref_raw(raw);
 }
 
-StyleEngineFFI::FfiEngineComputedRecord StyleEngine::settle_pseudo_records_after_host_record(StyleNodeID node, bool old_is_list_item, TakeRowDebts take_row_debts)
-{
-    return StyleEngineFFI::style_engine_settle_pseudo_records_after_host_record(m_impl, node.value(), old_is_list_item, take_row_debts == TakeRowDebts::Yes, false, nullptr, nullptr);
-}
-
 void const* StyleEngine::borrow_engine_custom_property_environment(u64 identity, u64& parent_identity) const
 {
     return StyleEngineFFI::style_engine_borrow_engine_custom_property_environment(m_impl, identity, &parent_identity);

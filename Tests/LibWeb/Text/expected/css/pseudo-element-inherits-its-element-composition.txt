@@ -1,0 +1,4 @@
+::before: rgb(100, 50, 0)
+::marker of a list item: rgb(100, 50, 0)
+::before after a transition starts: rgb(100, 50, 0)
+::before after a seek: rgb(150, 75, 0)

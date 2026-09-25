@@ -975,6 +975,10 @@ pub struct RetainedState {
     /// The nodes whose record the engine derived beneath a composition their animations made: the
     /// host samples those animations again over the new record once the batch is applied.
     nodes_owing_an_animation_sample: HashSet<StyleNodeID>,
+    /// The elements whose synthetic pseudo-elements the next pass settles over the composition
+    /// the host installed for them: the pass that settled the element left them to it, as the
+    /// element's composition was still to come.
+    pseudo_settles_owed: std::collections::BTreeMap<StyleNodeID, publication::OwedPseudoSettle>,
     /// The rows whose animations the pass sampled itself, with what it published for them: the
     /// host installs the composition rather than sampling again, and applies what it left.
     rows_sampled_in_pass: HashMap<StyleNodeID, engine_sample::SettledRowPublication>,

@@ -2090,6 +2090,7 @@ impl StyleEngineState {
                 engine_row_child_facts: HashMap::default(),
                 batch_pinned_compositions: Vec::new(),
                 nodes_owing_an_animation_sample: HashSet::default(),
+                pseudo_settles_owed: Default::default(),
                 rows_sampled_in_pass: HashMap::default(),
                 pseudo_elements_sampled_in_pass: HashMap::default(),
                 pseudo_element_environments_named_in_settle: HashMap::default(),
@@ -2422,6 +2423,7 @@ impl StyleEngineState {
             || self.host.program_staging.is_dirty()
             || self.host.sheet_rule_replacement.is_some()
             || self.host.suspended_style_pass.is_some()
+            || !self.retained.pseudo_settles_owed.is_empty()
     }
 
     #[must_use]
@@ -2946,6 +2948,7 @@ impl StyleEngineState {
             self.retained.children_explicitly_inherit_marks.remove(&node);
             self.retained.engine_row_child_facts.remove(&node);
             self.retained.nodes_owing_an_animation_sample.remove(&node);
+            self.retained.pseudo_settles_owed.remove(&node);
             self.retained.rows_sampled_in_pass.remove(&node);
             self.retained
                 .pseudo_elements_sampled_in_pass
