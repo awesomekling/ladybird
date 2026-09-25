@@ -22,12 +22,15 @@
             const style = document.createElement("style");
             style.id = "inserted";
             style.textContent = "#box { width: 120px; }";
-            document.head.appendChild(style);
-            base.sheet.insertRule(".other { height: 15px; }", base.sheet.cssRules.length);
+            const joined = writeJoinedStylePass(() => {
+                document.head.appendChild(style);
+                base.sheet.insertRule(".other { height: 15px; }", base.sheet.cssRules.length);
+            });
             base.sheet.cssRules[0].style.color = "rgb(0, 128, 0)";
-            return { ...frame, read: describe() };
+            return { ...frame, joined, read: describe() };
         });
         println(`insertion: held as armed: ${styleHeldAsArmed(inserted, "before-run")}`);
+        println(`insertion: inserting a sheet and a rule joined the pass: ${inserted.joined}`);
         println(`insertion: read beside the pass: ${inserted.read}`);
 
         // A constructed sheet adopted and replaced beside the finished pass, then the next style update.
@@ -36,11 +39,14 @@
         const replaced = await whileStyleInFlight("before-completion", () => {
             box.style.height = "40px";
         }, frame => {
-            document.adoptedStyleSheets = [sheet];
+            const joined = writeJoinedStylePass(() => {
+                document.adoptedStyleSheets = [sheet];
+            });
             sheet.replaceSync("#box { background-color: rgb(255, 255, 0); width: 140px; }");
-            return frame;
+            return { ...frame, joined };
         });
         println(`replaceSync: held as armed: ${styleHeldAsArmed(replaced, "before-completion")}`);
+        println(`replaceSync: adopting joined the pass: ${replaced.joined}`);
         await twoFrames();
         println(`replaceSync: after: ${describe()}`);
 
@@ -51,12 +57,15 @@
             const joined = writeJoinedStylePass(() => {
                 sheet.disabled = true;
             });
-            document.getElementById("inserted").remove();
+            const removalJoined = writeJoinedStylePass(() => {
+                document.getElementById("inserted").remove();
+            });
             base.media = "print";
-            return { ...frame, joined };
+            return { ...frame, joined, removalJoined };
         });
         println(`removal: held as armed: ${styleHeldAsArmed(removed, "before-run")}`);
         println(`removal: disabling joined the pass: ${removed.joined}`);
+        println(`removal: removing a sheet joined the pass: ${removed.removalJoined}`);
         await twoFrames();
         println(`removal: after: ${describe()}, ${box.offsetHeight}`);
 
