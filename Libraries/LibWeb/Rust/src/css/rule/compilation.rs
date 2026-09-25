@@ -316,6 +316,7 @@ pub unsafe extern "C" fn rust_style_sheet_compile(
     callbacks: &NativeCompilationCallbacks,
     publication: &NativeStylePublication,
 ) {
+    crate::stage_thread::join_frame_for_style_engine_entrance(publication.engine, "rust_style_sheet_compile");
     unsafe {
         visit_compilation(
             sheet,
@@ -342,6 +343,7 @@ pub unsafe extern "C" fn rust_style_sheet_replace_selectors(
     callbacks: &NativeCompilationCallbacks,
     publication: &NativeStylePublication,
 ) {
+    crate::stage_thread::join_frame_for_style_engine_entrance(publication.engine, "rust_style_sheet_replace_selectors");
     use crate::css::style::StyleEngine;
     let environment = unsafe { environment.borrow() };
     let mut path = Vec::new();

@@ -709,9 +709,11 @@ fn generate_style_engine_boundary(manifest_dir: &Path, out_dir: &Path) -> Result
             } else {
                 rust.push_str(") {\n");
             }
+            // A main-thread entrance waits for a frame in flight that reaches the engine before it
+            // borrows the engine.
             writeln!(
                 rust,
-                "    abort_on_panic(|| {{\n        let engine = unsafe {{ {engine_borrow} }};"
+                "    abort_on_panic(|| {{\n        crate::stage_thread::join_frame_for_style_engine_entrance(engine, \"{ffi}\");\n        let engine = unsafe {{ {engine_borrow} }};"
             )?;
             // The style seal counts every entry point the host calls while an update runs.
             writeln!(rust, "        crate::css::style::seal::note_engine_call(\"{ffi}\");")?;
