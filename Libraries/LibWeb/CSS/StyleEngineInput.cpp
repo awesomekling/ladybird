@@ -16,6 +16,7 @@
 #include <LibWeb/CSS/Invalidation/LanguageInvalidator.h>
 #include <LibWeb/CSS/Selector.h>
 #include <LibWeb/CSS/SelectorMatching.h>
+#include <LibWeb/CSS/Sizing.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/CSS/StyleInputScope.h>
@@ -41,6 +42,7 @@
 #include <LibWeb/HTML/HTMLTableCellElement.h>
 #include <LibWeb/HTML/HTMLTableElement.h>
 #include <LibWeb/HTML/HTMLTextAreaElement.h>
+#include <LibWeb/HTML/HTMLVideoElement.h>
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/SVG/SVGClipPathElement.h>
 #include <LibWeb/SVG/SVGElement.h>
@@ -806,15 +808,35 @@ void record_element_construction_facts(DOM::Element& element)
     style_engine->record_construction_facts(element.style_node_id(), element_construction_facts(element), to_underlying(element.box_kind()));
 }
 
-// What the element's own attributes give the natural size of its replaced content, which layout
-// resolves against the style of the element's box.
+static StyleEngineFFI::FfiReplacedContentInput natural_size_input(SizeWithAspectRatio const& natural_size)
+{
+    using Present = StyleEngineFFI::FfiReplacedContentInputPresent;
+    StyleEngineFFI::FfiReplacedContentInput input { .kind = StyleEngineFFI::FfiReplacedContentInputKind::NaturalSize, .present = 0, .first = 0, .second = 0, .third = 0, .fourth = 0 };
+    if (natural_size.width.has_value()) {
+        input.present |= to_underlying(Present::First);
+        input.first = bit_cast<u32>(natural_size.width->raw_value());
+    }
+    if (natural_size.height.has_value()) {
+        input.present |= to_underlying(Present::Second);
+        input.second = bit_cast<u32>(natural_size.height->raw_value());
+    }
+    if (natural_size.aspect_ratio.has_value()) {
+        input.present |= to_underlying(Present::ThirdAndFourth);
+        input.third = bit_cast<u32>(natural_size.aspect_ratio->numerator().raw_value());
+        input.fourth = bit_cast<u32>(natural_size.aspect_ratio->denominator().raw_value());
+    }
+    return input;
+}
+
+// What the element gives the natural size of its replaced content, which layout resolves against
+// the style of the element's box: what its attributes say, or the size of what it has loaded.
 void record_element_replaced_content_input(DOM::Element& element)
 {
     auto* style_engine = style_engine_for(element);
     if (!style_engine || element.style_node_id() == no_style_node)
         return;
     if (auto const* text_area = as_if<HTML::HTMLTextAreaElement>(element)) {
-        style_engine->record_replaced_content_input(element.style_node_id(), { .kind = StyleEngineFFI::FfiReplacedContentInputKind::TextArea, .first = static_cast<u32>(text_area->cols()), .second = static_cast<u32>(text_area->rows()), .third = 0, .fourth = 0 });
+        style_engine->record_replaced_content_input(element.style_node_id(), { .kind = StyleEngineFFI::FfiReplacedContentInputKind::TextArea, .present = 0, .first = static_cast<u32>(text_area->cols()), .second = static_cast<u32>(text_area->rows()), .third = 0, .fourth = 0 });
         return;
     }
     if (auto const* input = as_if<HTML::HTMLInputElement>(element)) {
@@ -832,11 +854,21 @@ void record_element_replaced_content_input(DOM::Element& element)
         default:
             break;
         }
-        style_engine->record_replaced_content_input(element.style_node_id(), { .kind = kind, .first = static_cast<u32>(input->size()), .second = 0, .third = 0, .fourth = 0 });
+        style_engine->record_replaced_content_input(element.style_node_id(), { .kind = kind, .present = 0, .first = static_cast<u32>(input->size()), .second = 0, .third = 0, .fourth = 0 });
+        return;
+    }
+    if (auto const* video = as_if<HTML::HTMLVideoElement>(element)) {
+        SizeWithAspectRatio natural_size;
+        if (auto size = video->natural_element_size(); size.has_value()) {
+            natural_size = { size->width(), size->height(), {} };
+            if (!size->is_empty())
+                natural_size.aspect_ratio = size->width() / size->height();
+        }
+        style_engine->record_replaced_content_input(element.style_node_id(), natural_size_input(natural_size));
         return;
     }
     if (auto const* canvas = as_if<HTML::HTMLCanvasElement>(element)) {
-        style_engine->record_replaced_content_input(element.style_node_id(), { .kind = StyleEngineFFI::FfiReplacedContentInputKind::Canvas, .first = static_cast<u32>(canvas->width()), .second = static_cast<u32>(canvas->height()), .third = 0, .fourth = 0 });
+        style_engine->record_replaced_content_input(element.style_node_id(), { .kind = StyleEngineFFI::FfiReplacedContentInputKind::Canvas, .present = 0, .first = static_cast<u32>(canvas->width()), .second = static_cast<u32>(canvas->height()), .third = 0, .fourth = 0 });
         return;
     }
 }

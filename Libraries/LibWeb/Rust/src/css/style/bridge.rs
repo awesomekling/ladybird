@@ -975,6 +975,19 @@ pub enum FfiReplacedContentInputKind {
     TextEntryInput = 3,
     /// A `<canvas>`: `first` is its `width`, and `second` its `height`.
     Canvas = 4,
+    /// The natural size of what an element has loaded, such as a video's, in raw fixed-point CSS
+    /// pixels: `first` is its width, `second` its height, and `third` and `fourth` the numerator
+    /// and denominator of its aspect ratio. `present` says which of them it has.
+    NaturalSize = 5,
+}
+
+/// The bits of an `FfiReplacedContentInput`'s `present`, for the kinds whose values can be missing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum FfiReplacedContentInputPresent {
+    First = 1 << 0,
+    Second = 1 << 1,
+    ThirdAndFourth = 1 << 2,
 }
 
 /// What an element gives the natural size of its replaced content, which layout resolves against
@@ -983,6 +996,7 @@ pub enum FfiReplacedContentInputKind {
 #[repr(C)]
 pub struct FfiReplacedContentInput {
     pub kind: FfiReplacedContentInputKind,
+    pub present: u8,
     pub first: u32,
     pub second: u32,
     pub third: u32,
@@ -2092,6 +2106,7 @@ unsafe fn apply_host_fact_writes(engine: &mut StyleEngine, writes: &[FfiHostFact
                     engine,
                     write.node,
                     input.kind as u8,
+                    input.present,
                     input.first,
                     input.second,
                     input.third,

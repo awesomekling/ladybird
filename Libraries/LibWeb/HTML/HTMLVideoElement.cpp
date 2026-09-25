@@ -155,6 +155,7 @@ void HTMLVideoElement::update_natural_dimensions()
 
     set_needs_layout_update(DOM::SetNeedsLayoutReason::HTMLVideoElementNaturalDimensionsChanged);
     m_natural_dimensions = natural_dimensions;
+    CSS::record_element_replaced_content_input(*this);
     Painting::push_video_paint_facts(*this);
 }
 

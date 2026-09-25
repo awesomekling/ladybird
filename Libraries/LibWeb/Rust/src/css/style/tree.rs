@@ -626,13 +626,32 @@ pub enum ReplacedContentInput {
     Input { size: u32, is_text_entry: bool },
     /// A `<canvas>`'s `width` and `height`, its natural size in CSS pixels.
     Canvas { width: u32, height: u32 },
+    /// The natural size of what an element has loaded, such as a video's.
+    NaturalSize(NaturalSize),
+}
+
+/// A natural width, height and aspect ratio, any of which can be missing, as raw fixed-point CSS
+/// pixels.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct NaturalSize {
+    pub width: Option<i32>,
+    pub height: Option<i32>,
+    /// The numerator and denominator.
+    pub aspect_ratio: Option<(i32, i32)>,
 }
 
 impl ReplacedContentInput {
     #[must_use]
-    pub fn from_raw(kind: u8, values: [u32; 4]) -> Self {
-        use super::bridge::FfiReplacedContentInputKind as Kind;
+    pub fn from_raw(kind: u8, present: u8, values: [u32; 4]) -> Self {
+        use super::bridge::{FfiReplacedContentInputKind as Kind, FfiReplacedContentInputPresent as Present};
+        let has = |value: Present| present & value as u8 != 0;
         match kind {
+            kind if kind == Kind::NaturalSize as u8 => Self::NaturalSize(NaturalSize {
+                width: has(Present::First).then_some(values[0].cast_signed()),
+                height: has(Present::Second).then_some(values[1].cast_signed()),
+                aspect_ratio: has(Present::ThirdAndFourth)
+                    .then_some((values[2].cast_signed(), values[3].cast_signed())),
+            }),
             kind if kind == Kind::TextArea as u8 => Self::TextArea {
                 cols: values[0],
                 rows: values[1],
