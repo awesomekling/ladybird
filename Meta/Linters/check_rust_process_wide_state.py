@@ -50,6 +50,7 @@ BUILT_ONCE = "built once and read-only after; every thread shares the same table
 STAGE_THREAD = "the stage thread itself, and the caller waiting on it"
 STYLE_UPDATE_SCOPE = "the document thread's open style update; a stage run carries it to the stage thread and back"
 LOCKED = "process-wide and behind a mutex"
+CLOCK_HANDOFF = "the clock ticks' handoff between the RenderClock, Rendering and main threads: shared by design, behind a mutex, condvar or atomic"
 PRESENTED_COUNTER = "process-wide atomic count of presented frames that tests read; nothing branches on it"
 REPLAY = "style replay capture; replay builds only, or off unless an environment variable turns it on"
 TEST_ONLY = "test only"
@@ -64,6 +65,8 @@ def render_stage_entries(reason, entries):
 RENDER_STAGE_ALLOWED = {
     **render_stage_entries(MAIN_SIDE_COUNTER, ["layout/layout_node_arena.rs:DOOR_COUNTERS"]),
     **render_stage_entries(PRESENTED_COUNTER, ["clock_frames.rs:CLOCK_TICKS_PRESENTED"]),
+    **render_stage_entries(CLOCK_HANDOFF, ["clock_frames.rs:GATE", "clock_frames.rs:TICKS_TO_ADOPT"]),
+    **render_stage_entries(BUILT_ONCE, ["clock_frames.rs:NEEDS_MAIN"]),
     **render_stage_entries(
         GROW_ONLY,
         [

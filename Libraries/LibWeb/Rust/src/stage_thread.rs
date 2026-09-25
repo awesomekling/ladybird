@@ -472,6 +472,60 @@ unsafe fn submit(
     }
 }
 
+/// A way onto the stage thread for a thread that submits no stages: the render clock's, which hands
+/// it the display ticks of the clock leases (see `crate::clock_frames`).
+pub(crate) struct DetachedJobSender {
+    thread: &'static StageThread,
+    jobs: Sender<StageMessage>,
+}
+
+impl DetachedJobSender {
+    /// Queues `job` behind what the stage thread has queued already; nobody waits for it. Returns
+    /// false, having dropped `job`, when the stage thread is gone, which it only is when the
+    /// process is.
+    pub(crate) fn send(&self, job: impl FnOnce() + Send + 'static) -> bool {
+        let thread = self.thread;
+        let job: Job = Box::new(move || {
+            tsan::acquire(thread);
+            job();
+            tsan::release(thread);
+        });
+        tsan::release(thread);
+        self.jobs.send(StageMessage::Run(job)).is_ok()
+    }
+}
+
+/// Runs `work` on the stage thread as a stage the main thread `caller` submitted for the arena
+/// `arena` would run, from a detached job: for that thread, which does not wait for it.
+pub(crate) fn run_detached_for(caller: ThreadId, arena: usize, work: impl FnOnce()) {
+    let waiting_caller = WAITING_CALLER.with(|waiting| waiting.replace(Some(caller)));
+    let wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(arena as u64);
+    work();
+    drop(wanted_face_owner);
+    // Whatever the work left in the stage thread's style update state goes with it.
+    drop(take_style_update_scope());
+    WAITING_CALLER.with(|waiting| waiting.set(waiting_caller));
+}
+
+/// A sender of detached jobs, where the stages overlap the main thread; `None` without a stage
+/// thread (`LIBWEB_STAGE_OVERLAP=none`) or where it runs in lockstep with the main thread.
+pub(crate) fn detached_job_sender() -> Option<DetachedJobSender> {
+    if stage_thread_mode() != Some(StageThreadMode::Overlap) {
+        return None;
+    }
+    let thread = stage_thread()?;
+    Some(DetachedJobSender {
+        thread,
+        jobs: thread.jobs.clone(),
+    })
+}
+
+/// Whether the stage thread is inside a stage the main thread submitted or waits for: a detached
+/// job the stage thread runs while such a stage waits for a join runs nested inside it.
+pub(crate) fn running_inside_stage() -> bool {
+    RUNNING_SUBMITTED_RUN.with(Cell::get).is_some() || WAITING_CALLER.with(Cell::get).is_some()
+}
+
 /// The label of the stage that presents a navigable's frame at the end of the frame in flight.
 const PRESENTATION_STAGE: &str = "present";
 

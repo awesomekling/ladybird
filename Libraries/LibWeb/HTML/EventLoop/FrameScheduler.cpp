@@ -13,12 +13,14 @@
 #include <LibWeb/Animations/KeyframeEffect.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleEffectDrain.h>
+#include <LibWeb/Compositor/CompositorHost.h>
 #include <LibWeb/Compositor/NavigablePresenter.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
 #include <LibWeb/HTML/EventLoop/FrameCompletion.h>
 #include <LibWeb/HTML/EventLoop/FrameInFlightReferences.h>
 #include <LibWeb/HTML/EventLoop/FrameScheduler.h>
+#include <LibWeb/HTML/LocalNavigable.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/HighResolutionTime/TimeOrigin.h>
@@ -496,7 +498,11 @@ void FrameScheduler::grant_clock_leases()
         // NB: The default document timeline's origin time is zero: its time is the document's relative time.
         auto now = HighResolutionTime::unsafe_shared_current_time();
         auto timeline_zero = now - HighResolutionTime::relative_high_resolution_time(now, relevant_global_object(*document));
-        Layout::RustFFI::rust_clock_lease_grant(document->layout_node_arena_if_created()->handle(), timeline->style_engine_identity(), timeline_zero, timeline_time, plan->deadline);
+        // A render clock ticks the lease at the display ticks of the document's compositor context.
+        u64 context_id = 0;
+        if (auto navigable = document->navigable(); navigable && navigable->has_compositor_context())
+            context_id = navigable->compositor_context().id().value();
+        Layout::RustFFI::rust_clock_lease_grant(document->layout_node_arena_if_created()->handle(), context_id, timeline->style_engine_identity(), timeline_zero, timeline_time, plan->deadline);
     }
 }
 

@@ -16,11 +16,18 @@
 //!
 //! The registry is keyed by the layout arena handle of the document. A caller holding an
 //! [`Arc<ClockLease>`] from [`clock_lease_for`] may tick it on the thread that owns the arena.
+//!
+//! A render clock (`WebView::RenderClock`, a thread of its own) also ticks a lease, at the display
+//! ticks the compositor delivers for the lease's compositor context, without the main thread: see
+//! [`rust_render_clock_post_tick`]. Such a tick runs on the stage thread only while the main thread
+//! is idle, blocked in its outermost event loop with no frame in flight, and the main thread waits
+//! for it before it goes on when it wakes (see [`rust_render_clock_main_did_wake`]).
 
 use std::collections::HashMap;
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::thread::ThreadId;
 
 use crate::css::style::StyleEngine;
 use crate::css::style::bridge::{FfiRowSampledInPass, sample_installed_record_for_clock_tick};
@@ -71,6 +78,8 @@ pub enum FfiClockTickOutcome {
 /// A document's clock lease.
 pub struct ClockLease {
     arena: usize,
+    /// The compositor context whose display ticks the render clock hands the lease, or 0.
+    context: u64,
     /// The style engine identity of the document timeline the lease ticks.
     timeline_identity: u32,
     /// The unsafe shared current time, in milliseconds, at which the timeline reads zero: a frame
@@ -180,18 +189,30 @@ impl ClockLease {
             if sample.style_record == target.style_record {
                 continue;
             }
+            let previous_record = target.style_record;
             let level = sample.invalidation.invalidation & 0x3;
             let needs_layout_tree_rebuild = level >= 3;
             let needs_relayout = level >= 2;
             let installed_in_arena = !needs_layout_tree_rebuild
                 && arena.install_animation_sample(target.style_node, sample.style_record, needs_relayout);
+            target.style_record = sample.style_record;
+            // Ticks the host has not adopted yet fold into one entry per target, over the record the
+            // host holds: the arena's log keeps only the last record too.
+            if let Some(entry) = entries.iter_mut().find(|entry| {
+                entry.style_node == target.style_node
+                    && entry.sample.style_record == previous_record
+                    && entry.installed_in_arena
+                    && installed_in_arena
+            }) {
+                entry.sample = folded_sample(&entry.sample, sample);
+                continue;
+            }
             entries.push(ClockTickEntry {
                 style_node: target.style_node,
-                style_record_before: target.style_record,
+                style_record_before: previous_record,
                 sample,
                 installed_in_arena,
             });
-            target.style_record = entries.last().expect("just pushed").sample.style_record;
         }
         outcome
     }
@@ -203,6 +224,33 @@ impl ClockLease {
         }
         Some(entries.remove(0))
     }
+}
+
+/// One sample for what `earlier` and `later`, taken over the record `earlier` installed, did: the
+/// record of `later`, and what either invalidated.
+fn folded_sample(earlier: &FfiRowSampledInPass, later: FfiRowSampledInPass) -> FfiRowSampledInPass {
+    let level = (earlier.invalidation.invalidation & 0x3).max(later.invalidation.invalidation & 0x3);
+    let flags = (earlier.invalidation.invalidation | later.invalidation.invalidation) & !0x3;
+    let later_moved_environment = later.custom_property_environment_moved;
+    let mut folded = later;
+    folded.invalidation.invalidation = flags | level;
+    folded.invalidation.changed_non_inherited_style_groups |= earlier.invalidation.changed_non_inherited_style_groups;
+    folded.invalidation.requires_base_style_recomputation |= earlier.invalidation.requires_base_style_recomputation;
+    folded.invalidation.requires_layout_node_style_application |=
+        earlier.invalidation.requires_layout_node_style_application;
+    folded.invalidation.requires_style_resource_update |= earlier.invalidation.requires_style_resource_update;
+    folded.substitution_marks |= earlier.substitution_marks;
+    folded.keyframes_inherited_non_inherited_style_groups |= earlier.keyframes_inherited_non_inherited_style_groups;
+    folded.uses_tree_counting_function |= earlier.uses_tree_counting_function;
+    folded.custom_property_reactions |= earlier.custom_property_reactions;
+    folded.rebuilt_every_group |= earlier.rebuilt_every_group;
+    if !later_moved_environment && earlier.custom_property_environment_moved {
+        folded.custom_property_environment_moved = true;
+        folded.custom_property_environment = earlier.custom_property_environment;
+        folded.custom_property_store = earlier.custom_property_store;
+        folded.custom_property_environment_named = earlier.custom_property_environment_named;
+    }
+    folded
 }
 
 fn declined_sample() -> FfiRowSampledInPass {
@@ -226,6 +274,19 @@ fn declined_sample() -> FfiRowSampledInPass {
 fn registry() -> &'static Mutex<HashMap<usize, Arc<ClockLease>>> {
     static LEASES: OnceLock<Mutex<HashMap<usize, Arc<ClockLease>>>> = OnceLock::new();
     LEASES.get_or_init(Mutex::default)
+}
+
+/// The live lease the render clock ticks for the compositor context `context`, if one holds it.
+fn clock_lease_for_context(context: u64) -> Option<Arc<ClockLease>> {
+    if context == 0 {
+        return None;
+    }
+    registry()
+        .lock()
+        .expect("clock lease registry")
+        .values()
+        .find(|lease| lease.context == context && !lease.is_revoked())
+        .cloned()
 }
 
 /// The live lease of the document whose layout arena is `arena`, if it holds one.
@@ -256,10 +317,12 @@ pub extern "C" fn rust_stage_thread_submits_clock() -> bool {
 
 /// Grants the document whose layout arena is `arena` a lease over its document timeline, which the
 /// style engine knows as `timeline_identity`, reading zero at `timeline_zero` and now at `time`,
-/// until `deadline` (timeline times, ms). Replaces a lease the document held.
+/// until `deadline` (timeline times, ms). The render clock ticks it at the display ticks of the
+/// compositor context `context`, unless that is 0. Replaces a lease the document held.
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_clock_lease_grant(
     arena: *mut c_void,
+    context: u64,
     timeline_identity: u32,
     timeline_zero: f64,
     time: f64,
@@ -268,6 +331,7 @@ pub extern "C" fn rust_clock_lease_grant(
     assert!(!arena.is_null(), "layout node arena handle is null");
     let lease = Arc::new(ClockLease {
         arena: arena as usize,
+        context,
         timeline_identity,
         timeline_zero,
         deadline,
@@ -415,4 +479,351 @@ pub unsafe extern "C" fn rust_clock_lease_drop_unadopted(arena: *mut c_void) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: Guaranteed by the caller.
     unsafe { LayoutNodeArena::from_handle(arena) }.drop_animation_adoptions();
+}
+
+// The render clock: display ticks delivered to a thread of their own, which hands them to the stage
+// thread for the lease of their compositor context while the main thread is idle.
+
+/// Who may reach the arenas of leased documents now.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ArenaHolder {
+    /// The main thread: it is awake, or it has a frame in flight.
+    Main,
+    /// Nobody: the main thread is blocked in its outermost event loop, and a render clock tick may
+    /// start. The tick acts for the thread named.
+    Idle(ThreadId),
+    /// A render clock tick, which the main thread waits for when it wakes.
+    Tick,
+}
+
+struct IdleGate {
+    holder: Mutex<ArenaHolder>,
+    tick_ended: Condvar,
+}
+
+fn idle_gate() -> &'static IdleGate {
+    static GATE: OnceLock<IdleGate> = OnceLock::new();
+    GATE.get_or_init(|| IdleGate {
+        holder: Mutex::new(ArenaHolder::Main),
+        tick_ended: Condvar::new(),
+    })
+}
+
+/// A render clock tick's hold on the arenas, taken where the main thread is idle.
+struct IdleTick {
+    caller: ThreadId,
+}
+
+impl IdleTick {
+    /// Takes the arenas for a tick, or returns `None` where the main thread holds them.
+    fn begin() -> Option<Self> {
+        let mut holder = idle_gate().holder.lock().expect("render clock idle gate");
+        let ArenaHolder::Idle(caller) = *holder else {
+            return None;
+        };
+        *holder = ArenaHolder::Tick;
+        Some(Self { caller })
+    }
+}
+
+impl Drop for IdleTick {
+    fn drop(&mut self) {
+        let gate = idle_gate();
+        let mut holder = gate.holder.lock().expect("render clock idle gate");
+        if *holder == ArenaHolder::Tick {
+            *holder = ArenaHolder::Idle(self.caller);
+        }
+        drop(holder);
+        gate.tick_ended.notify_all();
+    }
+}
+
+// Whether a render clock tick installed something since the main thread last woke.
+static TICKS_TO_ADOPT: AtomicBool = AtomicBool::new(false);
+
+/// The main thread is about to block in its outermost event loop. Unless it has a frame in flight,
+/// render clock ticks may reach the arenas of leased documents until it wakes.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_render_clock_main_will_idle() {
+    if !enabled() || crate::stage_thread::has_frame_in_flight() {
+        return;
+    }
+    let caller = std::thread::current().id();
+    let mut holder = idle_gate().holder.lock().expect("render clock idle gate");
+    if *holder == ArenaHolder::Main {
+        *holder = ArenaHolder::Idle(caller);
+    }
+}
+
+/// The main thread woke. Waits for a render clock tick that is running to end, and takes the arenas
+/// back. Returns whether a tick installed something since it last woke, which the documents adopt
+/// before anything else reaches them.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_render_clock_main_did_wake() -> bool {
+    if !enabled() {
+        return false;
+    }
+    take_arenas_back();
+    TICKS_TO_ADOPT.swap(false, Ordering::AcqRel)
+}
+
+fn take_arenas_back() {
+    let gate = idle_gate();
+    let mut holder = gate.holder.lock().expect("render clock idle gate");
+    while *holder == ArenaHolder::Tick {
+        holder = gate.tick_ended.wait(holder).expect("render clock idle gate");
+    }
+    *holder = ArenaHolder::Main;
+}
+
+/// Where the render clock's display ticks wait for the stage thread: one per compositor context.
+/// Ticks that arrive while one waits fold into it, with the latest time.
+struct ClockSlot {
+    frame_time_nanoseconds: AtomicI64,
+    queued: AtomicBool,
+}
+
+/// The render clock's way onto the stage thread. Owned by the render clock thread.
+pub struct ClockSender {
+    jobs: crate::stage_thread::DetachedJobSender,
+    slots: HashMap<u64, Arc<ClockSlot>>,
+}
+
+/// What the render clock did with the display ticks it was handed, for tests.
+#[repr(C)]
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+pub struct FfiRenderClockCounters {
+    /// Display ticks posted to the stage thread.
+    pub ticks_posted: u64,
+    /// Display ticks that folded into one already waiting for the stage thread.
+    pub ticks_folded: u64,
+    /// Ticks the stage thread ran.
+    pub ticks_run: u64,
+    /// Ticks that ran inside a stage the main thread submitted or waits for, and were dropped.
+    pub ticks_dropped_nested: u64,
+    /// Ticks that found the main thread holding the arenas, and were dropped.
+    pub ticks_dropped_main_busy: u64,
+    /// Ticks for a context no live lease holds.
+    pub ticks_dropped_without_lease: u64,
+    /// Ticks at a time no later than the lease's last.
+    pub ticks_dropped_stale: u64,
+    /// Ticks that installed their samples for the main thread to adopt.
+    pub ticks_installed: u64,
+    /// Ticks that ended their lease: past its deadline, or with a sample only the main thread takes.
+    pub ticks_needing_main: u64,
+}
+
+#[derive(Default)]
+struct RenderClockCounters {
+    ticks_posted: AtomicU64,
+    ticks_folded: AtomicU64,
+    ticks_run: AtomicU64,
+    ticks_dropped_nested: AtomicU64,
+    ticks_dropped_main_busy: AtomicU64,
+    ticks_dropped_without_lease: AtomicU64,
+    ticks_dropped_stale: AtomicU64,
+    ticks_installed: AtomicU64,
+    ticks_needing_main: AtomicU64,
+}
+
+static COUNTERS: RenderClockCounters = RenderClockCounters {
+    ticks_posted: AtomicU64::new(0),
+    ticks_folded: AtomicU64::new(0),
+    ticks_run: AtomicU64::new(0),
+    ticks_dropped_nested: AtomicU64::new(0),
+    ticks_dropped_main_busy: AtomicU64::new(0),
+    ticks_dropped_without_lease: AtomicU64::new(0),
+    ticks_dropped_stale: AtomicU64::new(0),
+    ticks_installed: AtomicU64::new(0),
+    ticks_needing_main: AtomicU64::new(0),
+};
+
+fn count(counter: &AtomicU64) {
+    counter.fetch_add(1, Ordering::Relaxed);
+}
+
+/// What the main thread does for a lease a render clock tick ended. Runs on the stage thread.
+static NEEDS_MAIN: OnceLock<extern "C" fn(u64)> = OnceLock::new();
+
+/// Has the render clock call `needs_main(context)` on the stage thread where a tick ended the lease
+/// of `context`: the main thread's rendering update takes over there. The first one set stays.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_render_clock_set_needs_main(needs_main: extern "C" fn(u64)) {
+    let _ = NEEDS_MAIN.set(needs_main);
+}
+
+/// A render clock's way onto the stage thread, or null where there is none to tick leases on (the
+/// stages do not overlap, or clock frames are off). The render clock thread owns it, and destroys
+/// it with [`rust_render_clock_sender_destroy`].
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_render_clock_sender_create() -> *mut ClockSender {
+    if !enabled() {
+        return std::ptr::null_mut();
+    }
+    let Some(jobs) = crate::stage_thread::detached_job_sender() else {
+        return std::ptr::null_mut();
+    };
+    Box::into_raw(Box::new(ClockSender {
+        jobs,
+        slots: HashMap::new(),
+    }))
+}
+
+/// # Safety
+///
+/// `sender` is null or came from [`rust_render_clock_sender_create`], on the thread that owns it.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_render_clock_sender_destroy(sender: *mut ClockSender) {
+    if !sender.is_null() {
+        // SAFETY: Guaranteed by the caller.
+        drop(unsafe { Box::from_raw(sender) });
+    }
+}
+
+/// Hands the display tick at `frame_time_nanoseconds` (monotonic time) for the compositor context
+/// `context` to the stage thread, which ticks the lease of that context with it if the main thread
+/// is idle then. Where a tick for the context is still waiting there, it takes this time instead.
+/// Returns false where the stage thread is gone, which it only is when the process is.
+///
+/// # Safety
+///
+/// `sender` came from [`rust_render_clock_sender_create`], on the thread that owns it.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_render_clock_post_tick(
+    sender: *mut ClockSender,
+    context: u64,
+    frame_time_nanoseconds: i64,
+) -> bool {
+    // SAFETY: Guaranteed by the caller.
+    let sender = unsafe { &mut *sender };
+    let slot = sender.slots.entry(context).or_insert_with(|| {
+        Arc::new(ClockSlot {
+            frame_time_nanoseconds: AtomicI64::new(0),
+            queued: AtomicBool::new(false),
+        })
+    });
+    slot.frame_time_nanoseconds
+        .store(frame_time_nanoseconds, Ordering::Release);
+    if slot.queued.swap(true, Ordering::AcqRel) {
+        count(&COUNTERS.ticks_folded);
+        return true;
+    }
+    count(&COUNTERS.ticks_posted);
+    let slot = Arc::clone(slot);
+    sender.jobs.send(move || run_render_clock_tick(context, &slot))
+}
+
+/// Runs a display tick for the lease of `context` on the stage thread.
+fn run_render_clock_tick(context: u64, slot: &ClockSlot) {
+    slot.queued.store(false, Ordering::Release);
+    let frame_time_nanoseconds = slot.frame_time_nanoseconds.load(Ordering::Acquire);
+    count(&COUNTERS.ticks_run);
+    // The stage thread runs any job while a stage it runs waits for a join, which may be this one:
+    // the main thread is not idle then, and the stage owns what the tick would reach.
+    if crate::stage_thread::running_inside_stage() {
+        count(&COUNTERS.ticks_dropped_nested);
+        return;
+    }
+    let Some(idle_tick) = IdleTick::begin() else {
+        count(&COUNTERS.ticks_dropped_main_busy);
+        return;
+    };
+    // Only the main thread grants and revokes, and it is idle: the lease stays as it is found, and
+    // so does its arena, which revoking it comes before the end of.
+    let Some(lease) = clock_lease_for_context(context) else {
+        count(&COUNTERS.ticks_dropped_without_lease);
+        return;
+    };
+    let time = lease.timeline_time_at(frame_time_nanoseconds as f64 / 1.0e6);
+    if !(time > lease.time()) {
+        count(&COUNTERS.ticks_dropped_stale);
+        return;
+    }
+    let mut tick = None;
+    crate::stage_thread::run_detached_for(idle_tick.caller, lease.arena, || {
+        tick = Some(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            // SAFETY: The main thread is idle with nothing in flight, and waits for this tick when
+            // it wakes: the stage thread owns the arena and its engine until `idle_tick` is dropped.
+            unsafe { lease.run_tick(time) }
+        })));
+    });
+    let Some(Ok(outcome)) = tick else {
+        // A tick has nobody to hand a panic to.
+        std::process::abort();
+    };
+    if lease.entries.lock().is_ok_and(|entries| !entries.is_empty()) {
+        TICKS_TO_ADOPT.store(true, Ordering::Release);
+    }
+    drop(idle_tick);
+    if outcome == FfiClockTickOutcome::Presented {
+        count(&COUNTERS.ticks_installed);
+        return;
+    }
+    count(&COUNTERS.ticks_needing_main);
+    if let Some(needs_main) = NEEDS_MAIN.get() {
+        needs_main(context);
+    }
+}
+
+/// What the render clock did with the display ticks it was handed.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_render_clock_counters() -> FfiRenderClockCounters {
+    let load = |counter: &AtomicU64| counter.load(Ordering::Relaxed);
+    FfiRenderClockCounters {
+        ticks_posted: load(&COUNTERS.ticks_posted),
+        ticks_folded: load(&COUNTERS.ticks_folded),
+        ticks_run: load(&COUNTERS.ticks_run),
+        ticks_dropped_nested: load(&COUNTERS.ticks_dropped_nested),
+        ticks_dropped_main_busy: load(&COUNTERS.ticks_dropped_main_busy),
+        ticks_dropped_without_lease: load(&COUNTERS.ticks_dropped_without_lease),
+        ticks_dropped_stale: load(&COUNTERS.ticks_dropped_stale),
+        ticks_installed: load(&COUNTERS.ticks_installed),
+        ticks_needing_main: load(&COUNTERS.ticks_needing_main),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample(record: u64, invalidation: u32, groups: u32) -> FfiRowSampledInPass {
+        let mut sample = declined_sample();
+        sample.present = true;
+        sample.style_record = record;
+        sample.invalidation.invalidation = invalidation;
+        sample.invalidation.changed_non_inherited_style_groups = groups;
+        sample
+    }
+
+    #[test]
+    fn folded_sample_takes_the_later_record_and_what_either_invalidated() {
+        let folded = folded_sample(&sample(1, 0x2 | 0x10, 0b01), sample(2, 0x1 | 0x20, 0b10));
+        assert_eq!(folded.style_record, 2);
+        assert_eq!(folded.invalidation.invalidation & 0x3, 0x2);
+        assert_eq!(folded.invalidation.invalidation & !0x3, 0x30);
+        assert_eq!(folded.invalidation.changed_non_inherited_style_groups, 0b11);
+    }
+
+    #[test]
+    fn idle_gate_lets_a_tick_in_only_while_the_main_thread_is_idle_and_waits_for_it() {
+        take_arenas_back();
+        assert!(IdleTick::begin().is_none());
+        *idle_gate().holder.lock().unwrap() = ArenaHolder::Idle(std::thread::current().id());
+        let tick = IdleTick::begin().expect("the main thread is idle");
+        assert!(IdleTick::begin().is_none());
+        let woke = Arc::new(AtomicBool::new(false));
+        let waker = {
+            let woke = Arc::clone(&woke);
+            std::thread::spawn(move || {
+                take_arenas_back();
+                woke.store(true, Ordering::SeqCst);
+            })
+        };
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        assert!(!woke.load(Ordering::SeqCst), "the main thread waits for the tick");
+        drop(tick);
+        waker.join().unwrap();
+        assert!(woke.load(Ordering::SeqCst));
+        assert!(IdleTick::begin().is_none());
+    }
 }
