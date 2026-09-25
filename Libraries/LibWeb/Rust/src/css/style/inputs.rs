@@ -1319,8 +1319,8 @@ impl RetainedState {
     // -- DOM child sequence ------------------------------------------------------------------
     //
     // Text nodes take identities so that the style tree can describe the DOM child sequence, but
-    // nothing selects, styles or invalidates them. Their arrivals and departures are spliced
-    // directly rather than journaled.
+    // nothing selects, styles or invalidates them. Their arrivals and departures cross as host fact
+    // writes and are spliced in the order the host made them, rather than journaled.
 
     /// Retire text identities as their nodes disconnect.
     pub fn retire_text_style_nodes(&mut self, nodes: &[StyleNodeID]) {

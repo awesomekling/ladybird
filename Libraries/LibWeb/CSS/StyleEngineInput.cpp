@@ -309,7 +309,7 @@ void record_element_connected(DOM::Element& element)
 
     Vector<u32, 192> links;
     append_dom_order_link(links, element);
-    style_engine->link_style_nodes_in_dom_order(links.span());
+    style_engine->record_dom_order_links(links.span());
     republish_assigned_slot_of(element);
 }
 
@@ -331,15 +331,15 @@ void record_text_connected(DOM::Text& text)
     style_engine->allocate_text_style_nodes({ &identity, 1 });
     text.set_style_node_id(identity);
     text.document().style_computer().register_style_node(identity, text);
-    style_engine->set_text_is_ascii_whitespace(identity, text.data().is_ascii_whitespace());
-    style_engine->set_text_is_in_user_agent_shadow_tree(identity, text_is_in_user_agent_shadow_tree(text));
-    style_engine->set_text_is_password_input(identity, text.is_password_input());
-    style_engine->set_text_data(identity, text.data());
+    style_engine->record_text_is_ascii_whitespace(identity, text.data().is_ascii_whitespace());
+    style_engine->record_text_is_in_user_agent_shadow_tree(identity, text_is_in_user_agent_shadow_tree(text));
+    style_engine->record_text_is_password_input(identity, text.is_password_input());
+    style_engine->record_text_data(identity, text.data());
     ensure_dom_order_parent_identity(text.parent(), *style_engine);
 
     Vector<u32, 192> links;
     append_dom_order_link(links, text);
-    style_engine->link_style_nodes_in_dom_order(links.span());
+    style_engine->record_dom_order_links(links.span());
     republish_assigned_slot_of(text);
 }
 
@@ -348,7 +348,7 @@ void record_text_whitespace_state_changed(DOM::Text& text)
     auto* style_engine = style_engine_for(text);
     if (!style_engine || text.style_node_id() == no_style_node)
         return;
-    style_engine->set_text_is_ascii_whitespace(text.style_node_id(), text.data().is_ascii_whitespace());
+    style_engine->record_text_is_ascii_whitespace(text.style_node_id(), text.data().is_ascii_whitespace());
 }
 
 // The characters a text node holds are what its box renders, so the layout tree build reads them
@@ -359,7 +359,7 @@ void record_text_data_changed(DOM::Text& text)
     auto* style_engine = style_engine_for(text);
     if (!style_engine || text.style_node_id() == no_style_node)
         return;
-    style_engine->set_text_data(text.style_node_id(), text.data());
+    style_engine->record_text_data(text.style_node_id(), text.data());
 }
 
 // The document's identity, minted before anything connects under it.
@@ -447,10 +447,10 @@ void record_subtree_connecting(DOM::Node& root)
         for (size_t i = 0; i < text_arrivals.size(); ++i) {
             text_arrivals[i]->set_style_node_id(identities[i]);
             style_computer.register_style_node(identities[i], text_arrivals[i]);
-            style_engine.set_text_is_ascii_whitespace(identities[i], text_arrivals[i]->data().is_ascii_whitespace());
-            style_engine.set_text_is_in_user_agent_shadow_tree(identities[i], text_is_in_user_agent_shadow_tree(*text_arrivals[i]));
-            style_engine.set_text_is_password_input(identities[i], text_arrivals[i]->is_password_input());
-            style_engine.set_text_data(identities[i], text_arrivals[i]->data());
+            style_engine.record_text_is_ascii_whitespace(identities[i], text_arrivals[i]->data().is_ascii_whitespace());
+            style_engine.record_text_is_in_user_agent_shadow_tree(identities[i], text_is_in_user_agent_shadow_tree(*text_arrivals[i]));
+            style_engine.record_text_is_password_input(identities[i], text_arrivals[i]->is_password_input());
+            style_engine.record_text_data(identities[i], text_arrivals[i]->data());
         }
     }
 
@@ -465,7 +465,7 @@ void record_subtree_connecting(DOM::Node& root)
     links.ensure_capacity(dom_order_arrivals.size() * 3);
     for (auto const& node : dom_order_arrivals)
         append_dom_order_link(links, node);
-    style_engine.link_style_nodes_in_dom_order(links.span());
+    style_engine.record_dom_order_links(links.span());
 
     for (auto const& node : dom_order_arrivals)
         republish_assigned_slot_of(*node);
@@ -742,12 +742,12 @@ void record_element_adjustment_facts(DOM::Element& element)
     auto* style_engine = style_engine_for(element);
     if (!style_engine || element.style_node_id() == no_style_node)
         return;
-    style_engine->set_element_adjustment_facts(element.style_node_id(), element_style_adjustment_facts(element));
+    style_engine->record_adjustment_facts(element.style_node_id(), element_style_adjustment_facts(element));
     auto associated_pseudo_kind_plus_one = element.associated_shadow_host_pseudo_element().has_value()
         ? static_cast<u8>(to_underlying(*element.associated_shadow_host_pseudo_element()) + 1)
         : 0;
-    style_engine->set_element_associated_pseudo_kind(element.style_node_id(), associated_pseudo_kind_plus_one);
-    style_engine->set_element_construction_facts(element.style_node_id(), element_construction_facts(element), to_underlying(element.box_kind()));
+    style_engine->record_associated_pseudo_kind(element.style_node_id(), associated_pseudo_kind_plus_one);
+    style_engine->record_construction_facts(element.style_node_id(), element_construction_facts(element), to_underlying(element.box_kind()));
 }
 
 // What the element's `disabled` attribute makes of it. Only the element's own type and attribute
@@ -787,7 +787,7 @@ void record_element_construction_facts(DOM::Element& element)
     auto* style_engine = style_engine_for(element);
     if (!style_engine || element.style_node_id() == no_style_node)
         return;
-    style_engine->set_element_construction_facts(element.style_node_id(), element_construction_facts(element), to_underlying(element.box_kind()));
+    style_engine->record_construction_facts(element.style_node_id(), element_construction_facts(element), to_underlying(element.box_kind()));
 }
 
 void publish_required_attribute_value_texts(StyleEngine& style_engine, StyleComputer& style_computer)
@@ -1018,7 +1018,7 @@ void record_element_moved(DOM::Element& element, DOM::Node* old_parent, DOM::Ele
         // the moved subtree another arrival notification.
         element.for_each_shadow_including_inclusive_descendant([&](auto& node) {
             if (auto* descendant = as_if<DOM::Element>(node); descendant && descendant->namespace_uri() == Namespace::SVG && descendant->style_node_id() != no_style_node) {
-                style_engine->set_element_adjustment_facts(descendant->style_node_id(), element_style_adjustment_facts(*descendant));
+                style_engine->record_adjustment_facts(descendant->style_node_id(), element_style_adjustment_facts(*descendant));
                 style_engine->record_derived_element_style_input_change(descendant->style_node_id(), StyleEngine::RecomputeStyle);
             }
             // A table cell's hints come from the table it is now under.
@@ -1063,11 +1063,11 @@ void record_node_moved_in_dom_order(DOM::Node& node, DOM::Node const& old_parent
     auto identity = dom_order_identity_of(node);
     if (!style_engine || identity == no_style_node)
         return;
-    style_engine->unlink_style_node_from_dom_order(identity, dom_order_parent_of(&old_parent));
+    style_engine->record_dom_order_unlink(identity, dom_order_parent_of(&old_parent));
     ensure_dom_order_parent_identity(node.parent(), *style_engine);
     Vector<u32, 192> links;
     append_dom_order_link(links, node);
-    style_engine->link_style_nodes_in_dom_order(links.span());
+    style_engine->record_dom_order_links(links.span());
 }
 
 void record_element_assigned_slot_changed(DOM::Element& element, DOM::Element* old_slot)
@@ -1866,7 +1866,7 @@ void record_subtree_disconnecting(DOM::Node& root)
     // Only the root leaves a child sequence that stays in the tree. Every node below it leaves with
     // the sequence it belongs to.
     if (auto identity = dom_order_identity_of(root); style_engine && identity != no_style_node)
-        style_engine->unlink_style_node_from_dom_order(identity, dom_order_parent_of(root.parent()));
+        style_engine->record_dom_order_unlink(identity, dom_order_parent_of(root.parent()));
 
     auto root_tree_scope = tree_scope_of(root.root());
     Vector<GC::Ref<DOM::ShadowRoot>> shadow_roots;
@@ -1884,7 +1884,7 @@ void record_subtree_disconnecting(DOM::Node& root)
     };
     for_each_shadow_including_inclusive_descendant_with_scope(root, root_tree_scope, disconnect_element);
     if (!departing_texts.is_empty())
-        style_engine->retire_text_style_nodes(departing_texts.span());
+        style_engine->record_text_retirements(departing_texts.span());
 
     // Only once no element still names a shadow root as its parent can the root give up its own
     // identity.

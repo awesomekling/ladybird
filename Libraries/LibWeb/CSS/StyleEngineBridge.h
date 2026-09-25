@@ -82,9 +82,6 @@ public:
 
     void set_element_parts(StyleNodeID node, ReadonlySpan<StyleAtomID> names, ReadonlySpan<StyleNodeID> hosts);
     void set_element_language(StyleNodeID node, StyleAtomID language, Utf16View tag);
-    // The characters a text node holds. The engine shares the document's storage rather than
-    // copying it, so this costs one reference per publication.
-    void set_text_data(StyleNodeID node, Utf16String const& data);
     // Which longhand properties one of an element's own declarations covers, their canonical
     // specified values and their authored aliases, and whether the inventory has complete
     // continuation semantics.
@@ -188,6 +185,22 @@ public:
     void record_local_feature_delta(StyleEngineFFI::FfiLocalFeatureDelta const&);
     void record_state_delta(StyleEngineFFI::FfiStateDelta const&);
     void record_element_declaration_delta(StyleEngineFFI::FfiElementDeclarationDelta const&);
+    // Writes to the facts of the mirror the DOM holds and nothing selects or invalidates on: the DOM
+    // child sequence, what a text node holds, and what an element is. They cross with the next
+    // transaction, in the order they were made.
+    //
+    // DOM-order links are `(node, parent, previous sibling)` triples of raw identities in tree order,
+    // so that each previous sibling is linked first.
+    void record_dom_order_links(ReadonlySpan<u32> links);
+    void record_dom_order_unlink(StyleNodeID node, StyleNodeID parent);
+    void record_text_retirements(ReadonlySpan<StyleNodeID>);
+    void record_text_is_ascii_whitespace(StyleNodeID, bool);
+    void record_text_is_in_user_agent_shadow_tree(StyleNodeID, bool);
+    void record_text_is_password_input(StyleNodeID, bool);
+    void record_text_data(StyleNodeID, Utf16String const&);
+    void record_adjustment_facts(StyleNodeID, u32 facts);
+    void record_associated_pseudo_kind(StyleNodeID, u8 pseudo_kind_plus_one);
+    void record_construction_facts(StyleNodeID, u32 facts, u8 box_kind);
     enum StyleReaction : u8 {
         PublishedStyle = 1 << 0,
         RecomputeStyle = 1 << 1,
@@ -320,6 +333,7 @@ private:
     bool read_matches(StyleNodeID, Vector<RuleMatch>&, Optional<MatchPurpose>);
     void apply_transaction(InputTransaction const&);
     void submit_recorded_input();
+    void record_host_fact_write(StyleEngineFFI::FfiHostFactWrite);
     bool refresh_attribute_value_text_requirements();
     [[nodiscard]] bool attribute_name_requires_value_text(StyleAtomID);
     void publish_attribute_value_text(StyleAtomID, Utf16View, bool affects_selector_catalog);
@@ -356,6 +370,9 @@ private:
     Vector<StyleEngineFFI::FfiLocalFeatureDelta> m_local_feature_deltas;
     Vector<StyleEngineFFI::FfiStateDelta> m_state_deltas;
     Vector<StyleEngineFFI::FfiElementDeclarationDelta> m_element_declaration_deltas;
+    Vector<StyleEngineFFI::FfiHostFactWrite> m_host_fact_writes;
+    // What each `TextData` write holds, by the index its `data` names until the writes cross.
+    Vector<Utf16String> m_host_fact_text_data;
     bool m_css_transitions_may_observe_style_changes { false };
 };
 
