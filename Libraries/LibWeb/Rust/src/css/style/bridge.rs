@@ -254,6 +254,8 @@ pub struct FfiStyleTransactionView {
     /// The transaction planned nothing but the child reactions the engine derived from the
     /// reactions C++ applied last: one more generation of the same style change, not a new one.
     pub only_derived_child_reactions: bool,
+    /// The elements connected to the document as the transaction was taken.
+    pub connected_element_count: u32,
 }
 
 /// A host-owned object the engine names but never follows.
@@ -452,6 +454,7 @@ impl Default for FfiStyleTransactionView {
             reclaimed_style_atom_count: 0,
             scoped: false,
             only_derived_child_reactions: false,
+            connected_element_count: 0,
             style_atoms_swept: false,
         }
     }
@@ -4804,6 +4807,7 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
         reclaimed_style_atom_count: output.reclaimed_style_atoms.len(),
         scoped: output.scoped,
         only_derived_child_reactions: output.only_derived_child_reactions,
+        connected_element_count: engine.connected_element_count(),
         style_atoms_swept: output.style_atoms_swept,
     }
 }

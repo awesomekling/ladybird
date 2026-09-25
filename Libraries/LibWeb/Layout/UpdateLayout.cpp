@@ -37,7 +37,6 @@ Layout::RustFFI::FfiLayoutUpdateHostCallbacks Document::layout_update_host_callb
 {
     return {
         .context = this,
-        .connected_element_count = [](void* context) -> u32 { return static_cast<Document*>(context)->style_computer().style_engine().connected_element_count(); },
         .update_style = [](void* context) { static_cast<Document*>(context)->update_style(); },
         .process_pending_list_item_renumbers = [](void* context) { static_cast<Document*>(context)->process_pending_list_item_renumbers(); },
         .process_pending_top_layer_layout_changes = [](void* context) { static_cast<Document*>(context)->process_pending_top_layer_layout_changes(); },

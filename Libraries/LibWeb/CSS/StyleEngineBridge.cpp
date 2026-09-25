@@ -1103,6 +1103,7 @@ StyleEngine::PublishedStyleTransaction StyleEngine::take_style_transaction(Style
         });
         ++m_atom_generation;
     }
+    m_connected_element_count_at_last_transaction = view.connected_element_count;
     return {
         .version = { view.transaction_version, view.program_version },
         .reactions = { view.answers, view.count },
