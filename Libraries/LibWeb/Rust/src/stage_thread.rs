@@ -694,6 +694,22 @@ pub extern "C" fn rust_stage_thread_only_style_pass_in_flight_for(engine: *const
     })
 }
 
+/// Like [`join_frame_in_flight_at`], for a main-side write to the style engine of the document the
+/// arena `arena` belongs to: joins the frame in flight only if one of its stages for that arena
+/// reaches the style engine (a style or layout pass). A recording reads nothing of the style
+/// engine, so the write goes on beside it, and whatever else the writer reaches of the arena waits
+/// at the arena's own doors.
+pub(crate) fn join_frame_reaching_style_engine_at(arena: *mut c_void, file: &'static str, line: u32, column: u32) {
+    let reaches_style_engine = SUBMITTED.with_borrow(|submitted| {
+        submitted
+            .iter()
+            .any(|stage| stage.arena == arena as usize && stage.style_engine != 0)
+    });
+    if reaches_style_engine {
+        join_frame_in_flight_at(arena, file, line, column);
+    }
+}
+
 /// Counts a forced join against the label of each stage of the frame in flight it takes in.
 fn count_forced_join() {
     SUBMITTED.with_borrow(|submitted| {

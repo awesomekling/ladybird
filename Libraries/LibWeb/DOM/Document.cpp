@@ -2246,12 +2246,13 @@ void Document::update_layout_if_needed_for_node(Node const& node, UpdateLayoutRe
 void Document::flush_deferred_style_change_event()
 {
     // This is the first style engine entrance of most DOM and CSSOM mutations, so it is their door:
-    // a mutation made beside this document's frame in flight waits for it before it changes anything.
-    // A style pass in flight is the exception: there is no deferred transaction to flush beside it, and
-    // the inputs the mutation records wait for its drain.
+    // a mutation made beside a frame in flight that reads this document's style engine waits for it
+    // before it changes anything. A style pass in flight is the exception: there is no deferred
+    // transaction to flush beside it, and the inputs the mutation records wait for its drain. What
+    // the mutation writes to the arena waits at the arena's doors.
     auto& style_engine = style_computer().style_engine();
     if (!Layout::RustFFI::rust_stage_thread_only_style_pass_in_flight_for(style_engine.rust_handle()))
-        join_frame_in_flight();
+        join_frame_reaching_style_engine();
     if (!style_engine.has_deferred_geometry_transaction())
         return;
 
@@ -2338,6 +2339,13 @@ void Document::join_frame_in_flight(SourceLocation location) const
     // A document with no arena has no frame to be in flight.
     if (m_layout_node_arena)
         Layout::RustFFI::layout_arena_join_frame_in_flight(m_layout_node_arena->handle(), reinterpret_cast<u8 const*>(location.filename().characters_without_null_termination()), location.filename().length(), location.line_number());
+}
+
+void Document::join_frame_reaching_style_engine(SourceLocation location) const
+{
+    // A document with no arena has no frame to be in flight.
+    if (m_layout_node_arena)
+        Layout::RustFFI::layout_arena_join_frame_reaching_style_engine(m_layout_node_arena->handle(), reinterpret_cast<u8 const*>(location.filename().characters_without_null_termination()), location.filename().length(), location.line_number());
 }
 
 void Document::join_frame_for_dom_tree_mutation() const

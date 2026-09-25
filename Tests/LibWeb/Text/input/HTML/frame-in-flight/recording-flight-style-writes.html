@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<style>
+    #container { width: 300px; }
+    #container.narrow { width: 200px; }
+</style>
+<div id="container"><div id="first" style="height: 10px">first</div><div id="second">second</div></div>
+<script>
+    // Writes to the style engine beside a recording in flight: the recording reads nothing of the style engine, so an
+    // attribute change and a selector query go on beside it instead of taking it in, and the next rendering update sees
+    // the change.
+    asyncTest(async done => {
+        const result = await whileFrameInFlight("before-run", () => {
+            first.style.height = "20px";
+        }, frame => {
+            const joinsBefore = internals.forcedJoinCount("recording");
+            container.className = "narrow";
+            second.className = "changed";
+            const queried = document.querySelector("#container > .changed");
+            return {
+                ...frame,
+                joins: internals.forcedJoinCount("recording") - joinsBefore,
+                stillInFlight: !frame.armed || internals.frameInFlightHoldsDocument(),
+                queried: queried.id,
+            };
+        });
+        println(`held as armed: ${heldAsArmed(result, "before-run")}`);
+        println(`forced joins of the recording: ${result.joins}`);
+        println(`recording still in flight after the writes: ${result.stillInFlight}`);
+        println(`query found: ${result.queried}`);
+        await twoFrames();
+        println(`container height: ${container.offsetHeight}`);
+        println(`second width: ${second.offsetWidth}`);
+        done();
+    });
+</script>
