@@ -43,6 +43,7 @@ namespace Web::CSS {
 enum class StyleRecordDependencyFlag : u8;
 
 class StyleComputer;
+class StyleInputScope;
 class RustDeclarationBlock;
 struct StyleProperty;
 
@@ -355,7 +356,7 @@ private:
     using InputTransaction = StyleEngineFFI::FfiStyleInputTransaction;
 
     bool read_matches(StyleNodeID, Vector<RuleMatch>&, Optional<MatchPurpose>);
-    void apply_transaction(InputTransaction const&);
+    void apply_transaction(StyleInputScope const&, InputTransaction const&);
     void submit_recorded_input();
     void record_host_fact_write(StyleEngineFFI::FfiHostFactWrite);
     void mint_style_nodes(Span<StyleNodeID>, Vector<StyleNodeID>& granted, size_t& grant_request, StyleEngineFFI::FfiHostFactKind, u8 value);

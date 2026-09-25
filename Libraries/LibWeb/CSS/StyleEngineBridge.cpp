@@ -230,6 +230,7 @@ void StyleEngine::ensure_granted_style_nodes(size_t element_count, size_t text_c
         return;
     // A grant asked for on the spot crosses alone. A mutation in progress is no place to end a transaction,
     // so what the host recorded so far waits for its own.
+    auto const input = StyleInputScope::between_passes(*this);
     Vector<StyleNodeID> style_node_grant;
     Vector<StyleNodeID> text_style_node_grant;
     if (m_granted_style_nodes.size() < element_count)
@@ -241,7 +242,7 @@ void StyleEngine::ensure_granted_style_nodes(size_t element_count, size_t text_c
     transaction.element_identity_grant_count = style_node_grant.size();
     transaction.text_identity_grant = reinterpret_cast<u32*>(text_style_node_grant.data());
     transaction.text_identity_grant_count = text_style_node_grant.size();
-    apply_transaction(transaction);
+    apply_transaction(input, transaction);
     adopt_identity_grant(m_granted_style_nodes, style_node_grant);
     adopt_identity_grant(m_granted_text_style_nodes, text_style_node_grant);
 }
@@ -833,7 +834,7 @@ bool StyleEngine::has_recorded_input() const
 
 void StyleEngine::submit_recorded_input()
 {
-    [[maybe_unused]] auto const input = StyleInputScope::between_passes(*this);
+    auto const input = StyleInputScope::between_passes(*this);
     if (m_style_computer)
         publish_pending_element_features(*this, *m_style_computer);
     if (!has_recorded_input() && m_host_fact_writes.is_empty() && !m_style_node_grant_request && !m_text_style_node_grant_request) {
@@ -880,7 +881,7 @@ void StyleEngine::submit_recorded_input()
         .text_identity_grant = reinterpret_cast<u32*>(text_style_node_grant.data()),
         .text_identity_grant_count = text_style_node_grant.size(),
     };
-    apply_transaction(transaction);
+    apply_transaction(input, transaction);
     adopt_identity_grant(m_granted_style_nodes, style_node_grant);
     adopt_identity_grant(m_granted_text_style_nodes, text_style_node_grant);
 
@@ -897,7 +898,7 @@ void StyleEngine::submit_recorded_input()
         publish_required_attribute_value_texts(*this, *m_style_computer);
 }
 
-void StyleEngine::apply_transaction(InputTransaction const& transaction)
+void StyleEngine::apply_transaction(StyleInputScope const&, InputTransaction const& transaction)
 {
     StyleEngineFFI::style_engine_apply_transaction(m_impl, &transaction);
 }
