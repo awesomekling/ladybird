@@ -25,6 +25,19 @@
         return promise;
     }
 
+    // Where rendering opportunities are held, a rendering task that finds the previous rendering update's frame still
+    // in flight holds its opportunity until that frame has finished. Each injected frame waits for that frame first,
+    // so its rendering update runs before the next task.
+    async function renderFrame(frameTime) {
+        while (internals.renderingUpdateAwaitsPass()) {
+            internals.waitForFrameToFinish();
+            await nextTask();
+        }
+        internals.waitForFrameToFinish();
+        internals.injectRenderingOpportunity(frameTime);
+        await nextTask();
+    }
+
     asyncTest(async done => {
         const target = document.getElementById("target");
         internals.setManualRenderingOpportunities(true);
@@ -33,8 +46,7 @@
         async function renderFrames(count) {
             for (let i = 0; i < count; ++i) {
                 frameTime += 16;
-                internals.injectRenderingOpportunity(frameTime);
-                await nextTask();
+                await renderFrame(frameTime);
             }
         }
         function compositorMarkerEverAppears() {

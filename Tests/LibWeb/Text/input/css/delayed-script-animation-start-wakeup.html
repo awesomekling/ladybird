@@ -23,8 +23,11 @@
     }
 
     // A rendering update that submitted its layout pass goes on (to the compositor animation update) only once
-    // the main thread has taken the pass back between tasks.
+    // the main thread has taken the pass back between tasks. Where rendering opportunities are held, a rendering task
+    // that finds the previous rendering update's frame still in flight holds its opportunity until that frame has
+    // finished, so each injected frame waits for that frame first.
     async function renderAt(frameTime) {
+        internals.waitForFrameToFinish();
         internals.injectRenderingOpportunity(frameTime);
         await nextTask();
         while (internals.renderingUpdateAwaitsPass()) {
