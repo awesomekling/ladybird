@@ -1,0 +1,12 @@
+held as armed: true
+forced joins of the recording: 0
+recording still in flight after the reads: true
+boundingClientRect beside the recording is the committed one: true
+clientRects beside the recording is the committed one: true
+offsets beside the recording is the committed one: true
+clients beside the recording is the committed one: true
+box: 12,12 292x26
+dirty: held as armed: true
+dirty: took the recording in: true
+dirty: height: 46
+elementFromPoint beside a recording: box

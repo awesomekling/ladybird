@@ -37,6 +37,16 @@ pub(crate) unsafe fn arena_from_handle<'a>(arena: *mut c_void) -> &'a LayoutNode
     unsafe { LayoutNodeArena::from_handle(arena) }
 }
 
+/// Like [`arena_from_handle`], for a read of the layout tree's styles and links that goes on beside a recording of the
+/// arena in flight, which writes none of them (see [`LayoutNodeArena::from_handle_beside_recording`]).
+///
+/// SAFETY: As for [`arena_from_handle`], and the caller reads nothing a recording writes.
+#[track_caller]
+unsafe fn arena_from_handle_beside_recording<'a>(arena: *mut c_void) -> &'a LayoutNodeArena {
+    crate::painting::seal::note_main_side_read(std::panic::Location::caller());
+    unsafe { LayoutNodeArena::from_handle_beside_recording(arena) }
+}
+
 /// SAFETY: `arena` must be a live handle from `layout_arena_create`, exclusively borrowed for
 /// this call on the document thread. No C++ callback may re-enter the arena during the borrow.
 #[track_caller]
@@ -52,6 +62,12 @@ unsafe fn arena_from_handle_mut<'a>(arena: *mut c_void) -> &'a mut LayoutNodeAre
 /// while the view is.
 #[track_caller]
 unsafe fn main_side_paintable_rows<'a>(arena: *mut c_void) -> MainSidePaintableRows<'a> {
+    if crate::stage_thread::reads_beside_recording_of(arena) {
+        crate::painting::seal::note_main_side_read(std::panic::Location::caller());
+        // SAFETY: The recording in flight owns the arena, but reads the rows its layout published and writes none of
+        // them; the view reads nothing else the recording writes.
+        return MainSidePaintableRows::Committed(unsafe { &*arena.cast::<LayoutNodeArena>() }.rows_beside_recording());
+    }
     let shared = unsafe { arena_from_handle(arena) };
     if shared.a_stage_is_running() {
         return MainSidePaintableRows::DuringStage(shared.paintable_rows());
@@ -291,7 +307,7 @@ pub unsafe extern "C" fn layout_arena_node_establishes_an_absolute_positioning_c
     arena: *mut c_void,
     node: NodeSlotId,
 ) -> bool {
-    let arena = unsafe { arena_from_handle(arena) };
+    let arena = unsafe { arena_from_handle_beside_recording(arena) };
     crate::painting::style_queries::establishes_positioning_containing_blocks(arena, node).0
 }
 
@@ -303,7 +319,7 @@ pub unsafe extern "C" fn layout_arena_node_establishes_a_fixed_positioning_conta
     arena: *mut c_void,
     node: NodeSlotId,
 ) -> bool {
-    let arena = unsafe { arena_from_handle(arena) };
+    let arena = unsafe { arena_from_handle_beside_recording(arena) };
     crate::painting::style_queries::establishes_positioning_containing_blocks(arena, node).1
 }
 
@@ -315,7 +331,7 @@ pub unsafe extern "C" fn layout_arena_any_ancestor_establishes_a_fixed_position_
     arena: *mut c_void,
     node: NodeSlotId,
 ) -> bool {
-    let arena = unsafe { arena_from_handle(arena) };
+    let arena = unsafe { arena_from_handle_beside_recording(arena) };
     crate::painting::style_queries::any_ancestor_establishes_a_fixed_position_containing_block(arena, node)
 }
 
@@ -324,7 +340,7 @@ pub unsafe extern "C" fn layout_arena_any_ancestor_establishes_a_fixed_position_
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_node_has_css_transform(arena: *mut c_void, node: NodeSlotId) -> bool {
-    let arena = unsafe { arena_from_handle(arena) };
+    let arena = unsafe { arena_from_handle_beside_recording(arena) };
     let Some(style) = arena.node_style_if_live(node) else {
         return false;
     };
@@ -1436,6 +1452,11 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
     // SAFETY: Guaranteed by the caller.
     let frame_generation = unsafe { crate::layout::frame_retirement::frame_generation(arena_handle) };
     if run == FfiRecordingRun::InSubmittedFrame && crate::stage_thread::submits("recording") {
+        if crate::stage_thread::recordings_lend_published_rows() {
+            // A read of committed geometry beside the recording reads the rows as published now.
+            // SAFETY: No borrow of the arena is live here.
+            let _ = unsafe { arena_from_handle_mut(arena_handle) }.committed_paintable_rows();
+        }
         // The recording outlives this call, so it takes copies of what the host lends.
         let input = RecordingStageInput {
             // SAFETY: No borrow of the arena outlives this point. The submitted frame owns the arena
@@ -2634,6 +2655,12 @@ pub unsafe extern "C" fn layout_arena_paintable_used_grid_tracks(
 /// `visual_context_tree_release`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_main_visual_context_tree_retain(arena: *mut c_void) -> *const c_void {
+    if crate::stage_thread::reads_beside_recording_of(arena) {
+        // Beside the recording in flight, the tree as published with the rows it reads.
+        return unsafe { main_side_paintable_rows(arena) }
+            .visual_context_tree()
+            .map_or(std::ptr::null(), |tree| std::sync::Arc::into_raw(tree).cast());
+    }
     let arena = unsafe { arena_from_handle(arena) };
     let paint_state = arena.paint_state().borrow();
     paint_state

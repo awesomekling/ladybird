@@ -532,6 +532,15 @@ pub(crate) trait PaintableRowsRead: Deref<Target = LayoutNodeArena> {
     /// The visual context tree, as it was when the rows were published.
     fn visual_context_tree(&self) -> Option<std::sync::Arc<VisualContextTree>>;
 
+    /// The absolute rect memoized for a box, if any.
+    fn memoized_absolute_rect(&self, id: NodeSlotId) -> Option<crate::css::css_pixels::CssPixelRect> {
+        LayoutNodeArena::memoized_absolute_rect(self, id)
+    }
+
+    fn memoize_absolute_rect(&self, id: NodeSlotId, rect: crate::css::css_pixels::CssPixelRect) {
+        LayoutNodeArena::memoize_absolute_rect(self, id, rect);
+    }
+
     /// The line root whose committed side data holds an inline box's pieces, read from the same
     /// generation as the rows.
     fn inline_pieces_root(&self, inline_paintable: NodeSlotId) -> Option<NodeSlotId> {
@@ -745,6 +754,9 @@ where
 /// arena.
 pub(crate) struct CommittedPaintableRows<'a> {
     arena: &'a LayoutNodeArena,
+    /// Whether a recording of the arena is in flight, which writes the absolute rect memo: the view
+    /// reads around it.
+    beside_recording: bool,
 }
 
 impl Deref for CommittedPaintableRows<'_> {
@@ -837,6 +849,19 @@ impl PaintableRowsRead for CommittedPaintableRows<'_> {
     fn visual_context_tree(&self) -> Option<std::sync::Arc<VisualContextTree>> {
         self.published().visual_context_tree.clone()
     }
+
+    fn memoized_absolute_rect(&self, id: NodeSlotId) -> Option<crate::css::css_pixels::CssPixelRect> {
+        if self.beside_recording {
+            return None;
+        }
+        self.arena.memoized_absolute_rect(id)
+    }
+
+    fn memoize_absolute_rect(&self, id: NodeSlotId, rect: crate::css::css_pixels::CssPixelRect) {
+        if !self.beside_recording {
+            self.arena.memoize_absolute_rect(id, rect);
+        }
+    }
 }
 
 /// The paintable rows as a main-side read sees them, from [`crate::painting::ffi`]'s one door
@@ -924,6 +949,20 @@ impl PaintableRowsRead for MainSidePaintableRows<'_> {
         match self {
             Self::Committed(rows) => rows.visual_context_tree(),
             Self::DuringStage(rows) => rows.visual_context_tree(),
+        }
+    }
+
+    fn memoized_absolute_rect(&self, id: NodeSlotId) -> Option<crate::css::css_pixels::CssPixelRect> {
+        match self {
+            Self::Committed(rows) => PaintableRowsRead::memoized_absolute_rect(rows, id),
+            Self::DuringStage(rows) => PaintableRowsRead::memoized_absolute_rect(rows, id),
+        }
+    }
+
+    fn memoize_absolute_rect(&self, id: NodeSlotId, rect: crate::css::css_pixels::CssPixelRect) {
+        match self {
+            Self::Committed(rows) => PaintableRowsRead::memoize_absolute_rect(rows, id, rect),
+            Self::DuringStage(rows) => PaintableRowsRead::memoize_absolute_rect(rows, id, rect),
         }
     }
 }
@@ -1660,7 +1699,23 @@ impl LayoutNodeArena {
     pub(crate) fn committed_paintable_rows(&mut self) -> CommittedPaintableRows<'_> {
         self.measure_scrollable_overflow_on_stage_before_publication();
         self.publish_paintable_rows();
-        CommittedPaintableRows { arena: self }
+        CommittedPaintableRows {
+            arena: self,
+            beside_recording: false,
+        }
+    }
+
+    /// The paintable rows as last published, read beside a recording of the arena in flight. The
+    /// recording published them before it was submitted, and changes none of them.
+    pub(crate) fn rows_beside_recording(&self) -> CommittedPaintableRows<'_> {
+        assert!(
+            self.paintable_rows.published.is_some(),
+            "a recording publishes the rows before it is submitted"
+        );
+        CommittedPaintableRows {
+            arena: self,
+            beside_recording: true,
+        }
     }
 
     fn paintable_data_by_index(&self, index: u32) -> &PaintableData {

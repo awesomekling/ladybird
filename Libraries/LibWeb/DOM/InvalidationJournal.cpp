@@ -520,6 +520,9 @@ void InvalidationJournal::drain()
     //     drain asks of the style engine joins it at the engine's own entrances.
     VERIFY(!m_holds_next_generation);
     if (auto* arena = m_document.layout_node_arena_if_created()) {
+        // An empty journal writes nothing, and a read beside the recording in flight finds it so.
+        if (is_empty() && Layout::RustFFI::rust_stage_thread_reads_beside_recording_of(arena->handle()))
+            return;
         auto location = SourceLocation::current();
         Layout::RustFFI::layout_arena_join_frame_owning_arena(arena->handle(), reinterpret_cast<u8 const*>(location.filename().characters_without_null_termination()), location.filename().length(), location.line_number());
     }
