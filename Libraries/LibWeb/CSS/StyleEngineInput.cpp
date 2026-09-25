@@ -46,6 +46,7 @@
 #include <LibWeb/HTML/HTMLVideoElement.h>
 #include <LibWeb/HTML/LocalNavigable.h>
 #include <LibWeb/Layout/ImageProvider.h>
+#include <LibWeb/Layout/LayoutRustFFI.h>
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/SVG/AttributeNames.h>
 #include <LibWeb/SVG/SVGClipPathElement.h>
@@ -1899,8 +1900,10 @@ static void record_element_inline_style_properties(DOM::Element& element)
     if (!style_engine || element.style_node_id() == no_style_node || has_pending_initial_features(element))
         return;
     // The declarations cross with the next transaction. Like a DOM mutation, recording them waits
-    // for the frame in flight, so no transaction carrying them is applied beside one.
-    element.document().join_frame_in_flight();
+    // for the frame in flight, so no transaction carrying them is applied beside one. Beside a style
+    // pass they are recorded as they are, and wait for its drain.
+    if (!Layout::RustFFI::rust_stage_thread_only_style_pass_in_flight_for(style_engine->rust_handle()))
+        element.document().join_frame_in_flight();
     auto const inline_style = element.inline_style();
     // What the block holds now: an edit made before the transaction crosses records a write of its own.
     auto const* declarations = inline_style ? Parser::ValueParserFFI::rust_declaration_block_snapshot(inline_style->declaration_block().handle()) : nullptr;
@@ -2065,10 +2068,12 @@ void record_shadow_root_connected(DOM::ShadowRoot& shadow_root)
 static void publish_document_kind(DOM::Document& document)
 {
     auto& style_engine = document.style_computer().style_engine();
-    style_engine.set_html_element_namespace(
-        document.document_type() == DOM::Document::Type::HTML
-            ? style_engine.intern_case_sensitive_text_atom(Namespace::HTML.view())
-            : 0);
+    auto namespace_atom = document.document_type() == DOM::Document::Type::HTML
+        ? style_engine.intern_case_sensitive_text_atom(Namespace::HTML.view())
+        : StyleAtomID { 0 };
+    style_engine.publish_input([namespace_atom](StyleInputScope const& input) {
+        input.engine().set_html_element_namespace(namespace_atom);
+    });
 }
 
 void record_document_kind(DOM::Document& document)
@@ -2682,7 +2687,9 @@ void record_stylesheet_conditions(StyleSheetState& sheet, DOM::Node& document_or
     auto sheet_id = style_computer.style_engine_sheet_id_for(*engine_sheet);
     if (sheet_id == 0)
         return;
-    style_computer.style_engine().set_sheet_occurrence_conditions(tree_scope_of(document_or_shadow_root), sheet.style_engine_occurrence_id(), conditions_hold);
+    style_computer.style_engine().publish_input([tree_scope = tree_scope_of(document_or_shadow_root), occurrence = sheet.style_engine_occurrence_id(), conditions_hold](StyleInputScope const& input) {
+        input.engine().set_sheet_occurrence_conditions(tree_scope, occurrence, conditions_hold);
+    });
 }
 
 void record_stylesheet_detached(StyleSheetState& sheet, DOM::Node& document_or_shadow_root)

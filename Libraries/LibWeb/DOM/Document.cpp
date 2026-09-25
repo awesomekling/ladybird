@@ -2247,8 +2247,11 @@ void Document::flush_deferred_style_change_event()
 {
     // This is the first style engine entrance of most DOM and CSSOM mutations, so it is their door:
     // a mutation made beside this document's frame in flight waits for it before it changes anything.
-    join_frame_in_flight();
+    // A style pass in flight is the exception: there is no deferred transaction to flush beside it, and
+    // the inputs the mutation records wait for its drain.
     auto& style_engine = style_computer().style_engine();
+    if (!Layout::RustFFI::rust_stage_thread_only_style_pass_in_flight_for(style_engine.rust_handle()))
+        join_frame_in_flight();
     if (!style_engine.has_deferred_geometry_transaction())
         return;
 

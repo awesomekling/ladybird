@@ -254,6 +254,9 @@ interface Internals {
     // "layout") and goes on with the rest, which submits its recordings, once the main thread has taken the pass back
     // between tasks.
     boolean renderingUpdateAwaitsPass();
+    // How many times main-thread code took a style pass in flight back before its time (a forced join), since the
+    // process started. A write that queues its style input beside the pass leaves it unchanged.
+    unsigned long long stylePassForcedJoins();
     undefined updateCompositorAnimations();
     boolean runEmptyAnimationStyleUpdateForTesting();
     undefined armCompositorAnimationTimersForTesting();

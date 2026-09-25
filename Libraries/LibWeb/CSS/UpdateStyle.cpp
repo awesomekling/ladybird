@@ -1180,6 +1180,11 @@ static bool submit_style_update(DOM::Document& document)
 static void finish_submitted_style_update(DOM::Document& document)
 {
     VERIFY(s_submitted_style_update);
+    // What was recorded beside the pass is the next transaction's, however the pass was taken back: held until the
+    // update below has ended.
+    auto& style_engine = document.style_computer().style_engine();
+    style_engine.begin_holding_input_recorded_beside_pass();
+    ScopeGuard release_input = [&] { style_engine.end_holding_input_recorded_beside_pass(); };
     auto update = adopt_own(*exchange(s_submitted_style_update, nullptr));
     // What was marked beside the pass is what the next drain writes.
     document.release_held_invalidation_marks();

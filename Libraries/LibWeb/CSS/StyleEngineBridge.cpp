@@ -23,6 +23,7 @@
 #include <LibWeb/CSS/StyleSheetState.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/ShadowRoot.h>
+#include <LibWeb/Layout/LayoutRustFFI.h>
 #include <LibWeb/Layout/NodeArena.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/StyleValueRustFFI.h>
@@ -46,9 +47,22 @@ void StyleEngine::publish_input(Function<void(StyleInputScope const&)>&& input)
     input(scope);
 }
 
+void StyleEngine::begin_holding_input_recorded_beside_pass()
+{
+    VERIFY(!m_holds_input_recorded_beside_pass);
+    // With nothing recorded beside the pass, what the drain records goes on with its waves as it does in place.
+    m_holds_input_recorded_beside_pass = has_recorded_input() || !m_host_fact_writes.is_empty() || m_style_node_grant_request || m_text_style_node_grant_request || !m_inputs_queued_during_pass.is_empty();
+}
+
+void StyleEngine::end_holding_input_recorded_beside_pass()
+{
+    m_holds_input_recorded_beside_pass = false;
+    publish_inputs_queued_during_pass();
+}
+
 void StyleEngine::publish_inputs_queued_during_pass()
 {
-    while (!pass_is_in_flight() && !m_inputs_queued_during_pass.is_empty()) {
+    while (!pass_is_in_flight() && !m_holds_input_recorded_beside_pass && !m_inputs_queued_during_pass.is_empty()) {
         auto input = m_inputs_queued_during_pass.take_first();
         StyleInputScope const scope { *this };
         input(scope);
@@ -833,7 +847,7 @@ bool StyleEngine::has_recorded_input() const
 void StyleEngine::submit_recorded_input()
 {
     // The recorded input is the next transaction's journal. While a pass is in flight it stays there.
-    if (pass_is_in_flight())
+    if (pass_is_in_flight() || m_holds_input_recorded_beside_pass)
         return;
     StyleInputScope const input { *this };
     if (m_style_computer)
@@ -1195,6 +1209,10 @@ bool StyleEngine::pending_transaction_may_affect_layout_geometry()
 
 bool StyleEngine::has_deferred_geometry_transaction() const
 {
+    // The submitted pass took the transaction a geometry read deferred with the rest of its inputs, and only a
+    // geometry read, which takes the pass back first, defers another one.
+    if (Layout::RustFFI::rust_stage_thread_only_style_pass_in_flight_for(m_impl))
+        return false;
     return StyleEngineFFI::style_engine_has_deferred_geometry_transaction(m_impl);
 }
 

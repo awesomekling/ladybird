@@ -48,12 +48,15 @@
         const removed = await whileStyleInFlight("before-run", () => {
             box.style.height = "50px";
         }, frame => {
-            sheet.disabled = true;
+            const joined = writeJoinedStylePass(() => {
+                sheet.disabled = true;
+            });
             document.getElementById("inserted").remove();
             base.media = "print";
-            return frame;
+            return { ...frame, joined };
         });
         println(`removal: held as armed: ${styleHeldAsArmed(removed, "before-run")}`);
+        println(`removal: disabling joined the pass: ${removed.joined}`);
         await twoFrames();
         println(`removal: after: ${describe()}, ${box.offsetHeight}`);
 

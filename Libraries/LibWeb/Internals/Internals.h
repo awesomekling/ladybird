@@ -231,6 +231,7 @@ public:
     bool wait_for_frame_to_finish();
     Utf16String frame_scheduler_state() const;
     bool rendering_update_awaits_pass() const;
+    u64 style_pass_forced_joins() const;
     void update_compositor_animations();
     bool run_empty_animation_style_update_for_testing();
     void arm_compositor_animation_timers_for_testing();
