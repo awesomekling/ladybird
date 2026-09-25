@@ -746,6 +746,9 @@ void NodeWithStyle::set_style_record_identity(CSS::StyleRecordID style_record_id
         return;
     }
 
+    // An animation sample installed the record over the row ahead of the host, with the caches and marks a
+    // style change over the row leaves: the host only takes it into its own mirror of the row.
+    bool installed_ahead = RustFFI::layout_arena_take_animation_adoption(arena_handle(), slot_id(this), style_record_identity.value());
     bool should_repin_style_record = RustFFI::layout_arena_node_style_record_pinned_by_host(arena_handle(), slot_id(this)) != 0;
     // Both answers come from the records themselves, so neither side needs a ComputedValues built
     // for it. An overlay record borrows different payloads than its base, so carrying one is already
@@ -768,11 +771,17 @@ void NodeWithStyle::set_style_record_identity(CSS::StyleRecordID style_record_id
     m_list_style_type.clear();
     m_list_style_image.clear();
     m_style_record_identity = style_record_identity;
-    publish_style_record_to_node_data();
+    if (installed_ahead) {
+        m_style_payloads = document().style_computer().style_engine().held_style_record_payloads(m_style_record_identity);
+        VERIFY(m_style_payloads);
+        did_update_style_record();
+    } else {
+        publish_style_record_to_node_data();
+    }
     if (should_repin_style_record)
         pin_style_record_for_cxx_consumers();
 
-    if (changes_layout_affecting_style) {
+    if (changes_layout_affecting_style && !installed_ahead) {
         bump_fragment_cache_epoch_of_self_and_ancestors();
         RustFFI::layout_arena_reset_cached_intrinsic_sizes_of_self_and_ancestors(arena_handle(), slot_id(this));
     }

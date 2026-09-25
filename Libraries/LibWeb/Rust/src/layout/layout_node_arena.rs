@@ -894,6 +894,13 @@ const _: () = {
     assert_send::<StyleEngine>();
 };
 
+/// A record an animation sample installed over a row ahead of the host.
+#[derive(Clone, Copy)]
+struct AnimationAdoption {
+    slot: NodeSlotId,
+    style_record: u64,
+}
+
 pub(crate) struct LayoutNodeArena {
     chunks: Vec<Box<Chunk>>,
     chunks_by_address: Vec<ChunkAddress>,
@@ -905,6 +912,9 @@ pub(crate) struct LayoutNodeArena {
     /// A pin is counted, so this is a pin of its own beside the arena's rather than a share of it,
     /// and it names the record it took rather than whichever record the row holds when it goes.
     style_records_pinned_by_host: Vec<Cell<u64>>,
+    /// The records an animation sample installed over rows ahead of the host, each pinned until the
+    /// host adopts it into its own mirror of the row: one per row, the last one installed.
+    animation_adoption_log: RefCell<Vec<AnimationAdoption>>,
     /// The StyleNodeID of the element or text node each row is bound to, or of the element it is
     /// generated for. Rows carrying one
     /// identity are chained through `next_rows_with_same_style_node` from
@@ -1121,6 +1131,7 @@ impl LayoutNodeArena {
             style_records: Vec::new(),
             style_records_pinned_by_arena: Vec::new(),
             style_records_pinned_by_host: Vec::new(),
+            animation_adoption_log: RefCell::new(Vec::new()),
             style_nodes: Vec::new(),
             next_rows_with_same_style_node: Vec::new(),
             first_rows_by_style_node: RefCell::new(RowsByStyleNode::default()),
@@ -2015,6 +2026,77 @@ impl LayoutNodeArena {
             }
             self.set_node_style_node(row, None);
         }
+    }
+
+    /// Install the record an animation sample published for `style_node` over the row its box is
+    /// bound to, ahead of the host: the row's style, the caches a style change over the row resets,
+    /// and the layout mark the sample asks for. The record is logged, pinned, for the host to adopt
+    /// into its own mirror of the row. Returns false, having done nothing, where the style node has
+    /// no bound row or the row's style is one layout derives; the host installs the sample then.
+    pub(crate) fn install_animation_sample(
+        &self,
+        style_node: StyleNodeID,
+        style_record: u64,
+        needs_relayout: bool,
+    ) -> bool {
+        self.assert_owner_thread();
+        let slot = self.bound_row(style_node);
+        if slot.is_invalid() || self.node_style_record_is_pinned_by_arena(slot) {
+            return false;
+        }
+        let Some(payloads) = self.with_style_engine(|engine| {
+            engine
+                .style_record_payloads(style_record)
+                .map(|payloads| payloads.as_ptr().cast::<c_void>())
+        }) else {
+            return false;
+        };
+        if self.set_node_style(slot, style_record, payloads) {
+            self.refresh_style_flags(slot);
+        }
+        self.enroll_node_for_svg_paint_resources_sync(slot);
+        // A sample's record carries an animation overlay or replaces one, which the host takes as a
+        // layout-affecting style change whatever the payloads.
+        self.bump_fragment_cache_epoch_of_self_and_ancestors(slot);
+        self.reset_cached_intrinsic_sizes_of_self_and_ancestors(slot);
+        if needs_relayout {
+            self.set_needs_layout_update(slot, true);
+        }
+        self.with_style_engine(|engine| engine.pin_layout_style_record(style_record));
+        let superseded = {
+            let mut log = self.animation_adoption_log.borrow_mut();
+            match log.iter_mut().find(|adoption| adoption.slot == slot) {
+                Some(adoption) => Some(std::mem::replace(&mut adoption.style_record, style_record)),
+                None => {
+                    log.push(AnimationAdoption { slot, style_record });
+                    None
+                }
+            }
+        };
+        if let Some(superseded) = superseded {
+            self.with_style_engine(|engine| engine.unpin_layout_style_record(superseded));
+        }
+        true
+    }
+
+    /// Whether an animation sample installed `style_record` over `slot` ahead of the host, which is
+    /// adopting it now: the record leaves the log, and its pin is released to the host's.
+    pub(crate) fn take_animation_adoption(&self, slot: NodeSlotId, style_record: u64) -> bool {
+        let adopted = {
+            let mut log = self.animation_adoption_log.borrow_mut();
+            log.iter()
+                .position(|adoption| adoption.slot == slot && adoption.style_record == style_record)
+                .map(|index| log.swap_remove(index))
+        };
+        let Some(adopted) = adopted else {
+            return false;
+        };
+        self.with_style_engine(|engine| engine.unpin_layout_style_record(adopted.style_record));
+        true
+    }
+
+    pub(crate) fn animation_adoption_log_is_empty(&self) -> bool {
+        self.animation_adoption_log.borrow().is_empty()
     }
 
     pub(crate) fn set_node_style(&self, id: NodeSlotId, style_record: u64, payloads: *const c_void) -> bool {
@@ -6612,6 +6694,55 @@ pub unsafe extern "C" fn layout_arena_publish_document_style_record(
     viewport_scroll_offset: FfiCssPixelPoint,
 ) {
     unsafe { LayoutNodeArena::from_handle(arena) }.publish_document_style(record, viewport_scroll_offset);
+}
+
+/// Install the record an animation sample published for a style node over its bound row ahead of
+/// the host, which adopts it as it installs the sample. False where the host installs it itself.
+///
+/// # Safety
+///
+/// The arena must be live on the document thread, and `style_record` a record the style engine
+/// holds.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_install_animation_sample(
+    arena: *mut c_void,
+    style_node: u32,
+    style_record: u64,
+    needs_relayout: bool,
+) -> bool {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    let Some(style_node) = StyleNodeID::from_raw(style_node) else {
+        return false;
+    };
+    // SAFETY: As above.
+    unsafe { LayoutNodeArena::from_handle(arena) }.install_animation_sample(style_node, style_record, needs_relayout)
+}
+
+/// Whether an animation sample installed `style_record` over `node` ahead of the host, which adopts
+/// it now.
+///
+/// # Safety
+///
+/// The arena must be live on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_take_animation_adoption(
+    arena: *mut c_void,
+    node: NodeSlotId,
+    style_record: u64,
+) -> bool {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    // SAFETY: As above.
+    unsafe { LayoutNodeArena::from_handle(arena) }.take_animation_adoption(node, style_record)
+}
+
+/// # Safety
+///
+/// The arena must be live on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_animation_adoption_log_is_empty(arena: *mut c_void) -> bool {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    // SAFETY: As above.
+    unsafe { LayoutNodeArena::from_handle(arena) }.animation_adoption_log_is_empty()
 }
 
 #[unsafe(no_mangle)]
