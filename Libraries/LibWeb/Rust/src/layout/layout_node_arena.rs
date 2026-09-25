@@ -2133,7 +2133,8 @@ impl LayoutNodeArena {
     /// Runs `stage` as a render stage: on the stage thread under `LIBWEB_STAGE_THREAD=lockstep`, here
     /// otherwise. The stage has the arena to itself while this thread waits for it.
     pub(crate) fn run_stage<R: Send>(&mut self, stage: impl FnOnce(&mut Self) -> R + Send) -> R {
-        crate::stage_thread::run_stage(move || stage(self))
+        let arena = std::ptr::from_mut(self).cast_const().cast::<c_void>();
+        crate::stage_thread::run_document_stage(arena, move || stage(self))
     }
 
     /// True while a render stage is on the stack: a layout pass, a layout tree build, or a paint
