@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<style>
+    #box {
+        width: 100px;
+        height: 20px;
+        animation: grow 800ms linear forwards;
+    }
+    @keyframes grow {
+        from {
+            width: 100px;
+            text-transform: none;
+        }
+        to {
+            width: 900px;
+            text-transform: uppercase;
+        }
+    }
+</style>
+<div id="box">text</div>
+<script src="../../include.js"></script>
+<script>
+    // Under LIBWEB_RENDER_CLOCK_FRAMES, a render clock tick whose sample the arena cannot take (text-transform flips
+    // halfway and needs a layout tree build) ends the lease: no later tick samples over the record only the host's
+    // adoption keeps alive. The main thread adopts the tick and takes the animation over.
+    asyncTest(async done => {
+        const box = document.getElementById("box");
+        const animation = box.getAnimations()[0];
+        const enabled = internals.clockFramesEnabled();
+        const nextTask = () => new Promise(resolve => setTimeout(resolve, 10));
+        while (!(animation.currentTime > 500))
+            await nextTask();
+        while (enabled && internals.getRenderClockCounters().ticksNeedingMain === 0 && animation.playState === "running")
+            await nextTask();
+
+        println(`text-transform after the flip: ${getComputedStyle(box).textTransform}`);
+        println(`text after the flip: ${box.innerText}`);
+        await animation.finished;
+        println(`width at the end: ${box.getBoundingClientRect().width}`);
+        done();
+    });
+</script>
