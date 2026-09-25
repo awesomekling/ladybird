@@ -259,26 +259,6 @@ static StyleEngineTransaction take_style_engine_transaction(DOM::Document& docum
     return transaction;
 }
 
-static StyleEngine::PublishedStyleDelta make_materialize_gap_delta(StyleNodeID style_node, u8 reaction, u8 inherited_style_groups = 0)
-{
-    return {
-        .style_node = style_node.value(),
-        .match_answer = 0,
-        .old_style_record = 0,
-        .new_style_record = 0,
-        .damage = StyleEngineFFI::FfiStyleDeltaDamage::None,
-        .reaction = reaction,
-        .inherited_style_groups = inherited_style_groups,
-        .pseudo_kind = NumericLimits<u8>::max(),
-        .gap = StyleEngineFFI::FfiStyleDeltaGap::Materialize,
-        .uses_substitution = false,
-        .record_damage = 0,
-        .row_facts = 0,
-        .explicit_inheritance_debt = 0,
-        .row_effect_debt = 0,
-    };
-}
-
 enum class SampleInvalidation {
     Applied,
     AppliedByCaller,
@@ -979,81 +959,17 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
 static RequiredInvalidationAfterStyleChange install_style_batch(StyleDrainScope const& scope, DOM::Document& document, Vector<StyleEngine::PublishedStyleDelta>& style_engine_reactions, size_t published_reaction_count, HashTable<StyleNodeID>& declined_rows, bool& declined_a_row_again)
 {
     RequiredInvalidationAfterStyleChange invalidation;
-    HashTable<StyleNodeID> reaction_set;
-    reaction_set.ensure_capacity(style_engine_reactions.size());
-    for (auto const& reaction : style_engine_reactions)
-        reaction_set.set(StyleNodeID { reaction.style_node });
-    Vector<StyleNodeID> inheritance_closure;
-
-    // A reaction can name an element created by editing after its new inheritance parent was
-    // inserted. Close the batch over unstyled inheritance prerequisites, which are bounded by
-    // the reaction paths rather than discovered by a document traversal.
-    for (size_t index = 0; index < style_engine_reactions.size(); ++index) {
-        auto element = document.style_computer().element_for_style_node(style_engine_reactions[index].style_node);
-        if (!element || !element->is_connected() || &element->document() != &document)
-            continue;
-        for (auto ancestor = DOM::AbstractElement { *element }.element_to_inherit_style_from(); ancestor.has_value() && !ancestor->has_style(); ancestor = ancestor->element_to_inherit_style_from()) {
-            auto prerequisite = ancestor->element().style_node_id();
-            VERIFY(prerequisite != 0);
-            if (reaction_set.set(prerequisite) == AK::HashSetResult::InsertedNewEntry) {
-                style_engine_reactions.append(make_materialize_gap_delta(prerequisite, StyleEngine::RecomputeStyle));
-                inheritance_closure.append(prerequisite);
-            }
-        }
+    // The engine closed the batch over the elements its rows inherit from and ordered it for
+    // direct application as it published it.
+    if (style_engine_reactions.is_empty())
+        return invalidation;
+    auto& counters = document.style_invalidation_counters();
+    if (published_reaction_count > 0) {
+        ++counters.style_engine_reaction_batch_runs;
+        counters.style_engine_reaction_elements += published_reaction_count;
     }
-
-    // A published descendant may have an inheritance ancestor in the batch while the nodes
-    // between them have no selector reaction of their own. Keep zero-bit scheduling slots for
-    // that gap so derived inheritance bits can reach the descendant before its published
-    // reaction is consumed.
-    auto reaction_count_before_inheritance_closure = style_engine_reactions.size();
-    Vector<StyleNodeID, 16> inheritance_gap;
-    for (size_t index = 0; index < reaction_count_before_inheritance_closure; ++index) {
-        auto element = document.style_computer().element_for_style_node(style_engine_reactions[index].style_node);
-        if (!element)
-            continue;
-        inheritance_gap.clear_with_capacity();
-        for (auto ancestor = DOM::AbstractElement { *element }.element_to_inherit_style_from(); ancestor.has_value(); ancestor = ancestor->element_to_inherit_style_from()) {
-            auto ancestor_style_node = ancestor->element().style_node_id();
-            VERIFY(ancestor_style_node != 0);
-            if (reaction_set.contains(ancestor_style_node)) {
-                for (auto style_node : inheritance_gap) {
-                    if (reaction_set.set(style_node) == AK::HashSetResult::InsertedNewEntry) {
-                        style_engine_reactions.append(make_materialize_gap_delta(style_node, 0));
-                        inheritance_closure.append(style_node);
-                    }
-                }
-                break;
-            }
-            inheritance_gap.append(ancestor_style_node);
-        }
-    }
-    if (!inheritance_closure.is_empty())
-        VERIFY(scope.engine().complete_published_match_answers_for_closure(inheritance_closure));
-
-    Vector<StyleEngine::PublishedStyleDelta> applicable_style_engine_reactions;
-    for (auto const& reaction : style_engine_reactions) {
-        auto element = document.style_computer().element_for_style_node(reaction.style_node);
-        if (!element)
-            continue;
-        if (!element->is_connected() || &element->document() != &document)
-            continue;
-        applicable_style_engine_reactions.append(reaction);
-    }
+    invalidation = apply_style_engine_reactions(scope, document, style_engine_reactions, declined_rows, declined_a_row_again);
     style_engine_reactions.clear();
-    if (!applicable_style_engine_reactions.is_empty()) {
-        // Apply each inheritance branch contiguously in preorder. Besides making every parent
-        // ready before its descendants, this lets a parent's derived reaction merge into an
-        // unconsumed child reaction in the same batch.
-        scope.engine().sort_style_deltas_for_direct_application(applicable_style_engine_reactions);
-        auto& counters = document.style_invalidation_counters();
-        if (published_reaction_count > 0) {
-            ++counters.style_engine_reaction_batch_runs;
-            counters.style_engine_reaction_elements += published_reaction_count;
-        }
-        invalidation = apply_style_engine_reactions(scope, document, applicable_style_engine_reactions, declined_rows, declined_a_row_again);
-    }
-
     return invalidation;
 }
 
