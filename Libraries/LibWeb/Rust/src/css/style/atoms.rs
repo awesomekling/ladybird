@@ -172,6 +172,24 @@ pub(super) fn release_raw_without_adoption(raw: usize, atom: StyleAtomID) {
         .release_raw(raw, atom);
 }
 
+/// Acquire the process-global atom for the name `name` qualified by `namespace`, for a document
+/// to adopt with its next transaction. Touches no document.
+pub(super) fn acquire_qualified_for_adoption(namespace: StyleAtomID, name: StyleAtomID) -> StyleAtomID {
+    global_atoms()
+        .lock()
+        .expect("process-global style atom lock is poisoned")
+        .acquire_qualified(namespace, name)
+}
+
+/// Give up the reference [`acquire_qualified_for_adoption`] took for an adoption that never
+/// happened, or that found the document already holding the atom.
+pub(super) fn release_qualified_without_adoption(namespace: StyleAtomID, name: StyleAtomID, atom: StyleAtomID) {
+    global_atoms()
+        .lock()
+        .expect("process-global style atom lock is poisoned")
+        .release_qualified((namespace.0, name.0), atom);
+}
+
 #[derive(Clone, Copy)]
 enum AtomScope {
     #[cfg(test)]
@@ -326,6 +344,28 @@ impl DocumentAtoms {
                     #[cfg(test)]
                     AtomScope::Document => {}
                     AtomScope::Process(_) => release_raw_without_adoption(raw, atom),
+                }
+            }
+            Entry::Vacant(vacant) => {
+                vacant.insert(atom);
+            }
+        }
+    }
+
+    /// Takes the qualified atom the host acquired with [`acquire_qualified_for_adoption`], with the
+    /// reference the acquisition took, unless the document already holds it.
+    pub(super) fn adopt_qualified(&mut self, namespace: StyleAtomID, name: StyleAtomID, atom: StyleAtomID) {
+        match self.qualified.entry((namespace.0, name.0)) {
+            Entry::Occupied(held) => {
+                assert_eq!(
+                    *held.get(),
+                    atom,
+                    "a qualified name has one process-global atom while it is held"
+                );
+                match self.scope {
+                    #[cfg(test)]
+                    AtomScope::Document => {}
+                    AtomScope::Process(_) => release_qualified_without_adoption(namespace, name, atom),
                 }
             }
             Entry::Vacant(vacant) => {

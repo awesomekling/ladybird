@@ -185,6 +185,8 @@ StyleEngine::~StyleEngine()
             Parser::ValueParserFFI::rust_declaration_data_release(bit_cast<Parser::ValueParserFFI::DeclarationBlockData const*>(write.data));
         else if (write.kind == StyleEngineFFI::FfiHostFactKind::AdoptAtom)
             StyleEngineFFI::style_engine_release_host_atom(write.data, write.facts);
+        else if (write.kind == StyleEngineFFI::FfiHostFactKind::AdoptQualifiedAtom)
+            StyleEngineFFI::style_engine_release_host_qualified_atom(write.node, write.parent, write.facts);
     }
     if (m_impl)
         StyleEngineFFI::style_engine_destroy(m_impl);
@@ -458,6 +460,16 @@ StyleAtomID StyleEngine::intern_atom(Utf16FlyString const& name)
     return atom;
 }
 
+// A qualified name is acquired as intern_atom() acquires a plain one: from the shared table, for the document
+// to take with its next transaction, so a name first seen beside a style pass waits for no pass.
+StyleAtomID StyleEngine::acquire_qualified_atom(StyleAtomID namespace_atom, StyleAtomID name_atom)
+{
+    auto atom = StyleAtomID { StyleEngineFFI::style_engine_acquire_host_qualified_atom(m_recording_stream, namespace_atom.value(), name_atom.value()) };
+    m_host_fact_writes.append({ .kind = StyleEngineFFI::FfiHostFactKind::AdoptQualifiedAtom, .value = 0, .node = namespace_atom.value(), .parent = name_atom.value(), .previous_sibling = 0, .facts = atom.value(), .data = 0 });
+    ++m_pending_atom_adoption_count;
+    return atom;
+}
+
 void StyleEngine::note_custom_property_name(StyleAtomID atom, Utf16FlyString const& name)
 {
     if (m_published_custom_property_names.contains(atom))
@@ -530,9 +542,9 @@ StyleAtomID StyleEngine::intern_attribute_name(Utf16FlyString const& local_name,
     auto in_namespace = [&](StyleAtomID name) {
         if (namespace_atom == 0)
             return name;
-        return intern_qualified_atom(namespace_atom, name);
+        return acquire_qualified_atom(namespace_atom, name);
     };
-    auto any_namespace = intern_qualified_atom(StyleEngine::any_namespace, local);
+    auto any_namespace = acquire_qualified_atom(StyleEngine::any_namespace, local);
     auto name = in_namespace(local);
 
     StyleAtomID folded_name;
@@ -540,7 +552,7 @@ StyleAtomID StyleEngine::intern_attribute_name(Utf16FlyString const& local_name,
     if (auto folded = local_name.to_ascii_lowercase(); folded != local_name) {
         auto folded_atom = intern_atom(folded);
         folded_name = in_namespace(folded_atom);
-        folded_local = intern_qualified_atom(StyleEngine::any_namespace, folded_atom);
+        folded_local = acquire_qualified_atom(StyleEngine::any_namespace, folded_atom);
     }
 
     auto local_name_view = local_name.view();
@@ -548,7 +560,11 @@ StyleAtomID StyleEngine::intern_attribute_name(Utf16FlyString const& local_name,
     local_name_code_units.ensure_capacity(local_name_view.length_in_code_units());
     for (size_t i = 0; i < local_name_view.length_in_code_units(); ++i)
         local_name_code_units.unchecked_append(local_name_view.code_unit_at(i));
-    note_attribute_name_forms(name, any_namespace, folded_name, folded_local, local_name_code_units, namespace_atom == 0);
+    // Beside a style pass the engine is the pass's: the forms wait for its drain with the attribute change that
+    // names them.
+    publish_input([name, any_namespace, folded_name, folded_local, local_name_code_units = move(local_name_code_units), has_no_namespace = namespace_atom == 0](StyleInputScope const& input) {
+        input.engine().note_attribute_name_forms(name, any_namespace, folded_name, folded_local, local_name_code_units, has_no_namespace);
+    });
     names_by_namespace.set(namespace_atom, name);
     return name;
 }

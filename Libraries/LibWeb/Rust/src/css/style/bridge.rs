@@ -964,6 +964,10 @@ pub enum FfiHostFactKind {
     /// `data` points at an `FfiReplacedContentInput`: what the element gives the natural size of
     /// its replaced content.
     ElementReplacedContentInput = 14,
+    /// The document takes the atom `facts` the host acquired for the name atom `parent` qualified by
+    /// the namespace atom `node`, with the reference the acquisition took. See
+    /// `style_engine_acquire_host_qualified_atom`.
+    AdoptQualifiedAtom = 15,
 }
 
 /// Which element an `FfiReplacedContentInput` holds the values of.
@@ -2226,6 +2230,11 @@ unsafe fn apply_host_fact_writes(engine: &mut StyleEngine, writes: &[FfiHostFact
                 );
             }
             FfiHostFactKind::AdoptAtom => engine.adopt_atom(write.data, StyleAtomID(write.facts)),
+            FfiHostFactKind::AdoptQualifiedAtom => engine.adopt_qualified_atom(
+                StyleAtomID(write.node),
+                StyleAtomID(write.parent),
+                StyleAtomID(write.facts),
+            ),
             FfiHostFactKind::ElementInlineStyleProperties => {
                 // SAFETY: The caller vouches that the write transfers one reference to the snapshot.
                 let data = (write.data != 0).then(|| unsafe {
@@ -4890,6 +4899,34 @@ pub unsafe extern "C" fn style_engine_acquire_host_atom(recording_stream: u64, r
     #[cfg(not(feature = "style-recording"))]
     let _ = recording_stream;
     atom.0
+}
+
+/// Acquires the process-global atom for the name atom `name` qualified by the namespace atom
+/// `namespace`, for the document to adopt with its next transaction
+/// (`FfiHostFactKind::AdoptQualifiedAtom`). Touches no engine, as `style_engine_acquire_host_atom`.
+#[unsafe(no_mangle)]
+pub extern "C" fn style_engine_acquire_host_qualified_atom(recording_stream: u64, namespace: u32, name: u32) -> u32 {
+    let atom = super::atoms::acquire_qualified_for_adoption(StyleAtomID(namespace), StyleAtomID(name));
+    // A replay interns the qualified name where the host acquired it, which is where the atom was
+    // numbered.
+    #[cfg(feature = "style-recording")]
+    if recording_stream != 0 {
+        super::record_replay::record_engine_event(recording_stream, EventKind::InternQualifiedAtom, |payload| {
+            payload.write_u32(namespace);
+            payload.write_u32(name);
+            payload.write_u32(atom.0);
+        });
+    }
+    #[cfg(not(feature = "style-recording"))]
+    let _ = recording_stream;
+    atom.0
+}
+
+/// Gives up an atom `style_engine_acquire_host_qualified_atom` acquired whose adoption never
+/// crossed.
+#[unsafe(no_mangle)]
+pub extern "C" fn style_engine_release_host_qualified_atom(namespace: u32, name: u32, atom: u32) {
+    super::atoms::release_qualified_without_adoption(StyleAtomID(namespace), StyleAtomID(name), StyleAtomID(atom));
 }
 
 /// Gives up an atom `style_engine_acquire_host_atom` acquired whose adoption never crossed.
