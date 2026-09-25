@@ -134,9 +134,12 @@ fn reads_beside_recording_enabled() -> bool {
     *ENABLED.get_or_init(|| std::env::var_os("LIBWEB_READS_BESIDE_RECORDING").is_none_or(|value| value != "0"))
 }
 
-/// Whether the frame in flight holds the document whose arena is `arena` only for its recordings, and a read of that
-/// document's committed geometry reads the rows its layout published instead of taking the frame in. The recording
-/// reads those rows and writes none of them, and the view it lends the main side is published before it is submitted.
+/// Whether the frame in flight holds the document whose arena is `arena` only for its recordings and their
+/// presentation, and a read of that document's committed geometry reads the rows its layout published instead of
+/// taking the frame in. The recording reads those rows and writes none of them, and the view it lends the main side is
+/// published before it is submitted. The presentation publishes the recording to the arena's paint state and live
+/// hit-test list, which that view does not read: it reads the hit-test list and visual context tree published with the
+/// rows, and memoizes nothing.
 pub(crate) fn reads_beside_recording_of(arena: *const c_void) -> bool {
     if !reads_beside_recording_enabled() || RUNNING_JOIN_WORK.with(Cell::get) != 0 {
         return false;
@@ -146,7 +149,7 @@ pub(crate) fn reads_beside_recording_of(arena: *const c_void) -> bool {
             .iter()
             .filter(|stage| stage.arena == arena as usize)
             .peekable();
-        stages.peek().is_some() && stages.all(|stage| stage.role == "recording")
+        stages.peek().is_some() && stages.all(|stage| stage.role == "recording" || stage.role == PRESENTATION_STAGE)
     })
 }
 
@@ -1902,6 +1905,39 @@ mod tests {
             submitted.len() == 2 && submitted[0].outcome.is_none() && submitted[1].outcome.is_some()
         }));
         SUBMITTED.with(|submitted| submitted.borrow_mut().clear());
+    }
+
+    #[test]
+    fn a_read_goes_on_beside_a_recording_and_its_presentation_only() {
+        let submit = |label: &'static str, arena: usize| {
+            let (to_caller, from_stage) = channel::<StageOutcome>();
+            // The stage has finished.
+            let _ = to_caller.send(Ok(()));
+            SUBMITTED.with_borrow_mut(|submitted| {
+                submitted.push(SubmittedStage {
+                    label,
+                    role: label,
+                    arena,
+                    owns_arena: true,
+                    style_engine: 0,
+                    from_stage,
+                    outcome: None,
+                    on_taken_back: None,
+                    recall: None,
+                })
+            });
+        };
+        let arena = 0x10 as *const c_void;
+        assert!(!reads_beside_recording_of(arena));
+        submit("recording", 0x10);
+        assert!(reads_beside_recording_of(arena));
+        // The presentation publishes the recording to what the read does not read.
+        submit(PRESENTATION_STAGE, 0x10);
+        assert!(reads_beside_recording_of(arena));
+        assert!(!reads_beside_recording_of(0x20 as *const c_void));
+        submit("layout", 0x10);
+        assert!(!reads_beside_recording_of(arena));
+        SUBMITTED.with_borrow_mut(Vec::clear);
     }
 
     #[test]
