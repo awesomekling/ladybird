@@ -514,8 +514,8 @@ void InvalidationJournal::drain()
 {
     // Publishing a pseudo-element's offset reads it back, and that read drains. The drain already
     // running takes whatever such a read would have.
-    // The drain writes what the frame reads, so a frame in flight is waited for first. Its last join
-    // hands this journal what was marked beside it.
+    // The drain writes what the frame reads, so a frame in flight is waited for first. Its end hands
+    // this journal what was marked beside it.
     VERIFY(!m_holds_next_generation);
     m_document.join_frame_in_flight();
     if (is_empty() || m_draining)

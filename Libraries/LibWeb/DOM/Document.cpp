@@ -2309,7 +2309,7 @@ InvalidationJournal& Document::invalidation_journal()
     return *m_invalidation_journal;
 }
 
-// The frame calls this in its last join, once the document holds its render state again. What was
+// The frame's end calls this as it is taken in, once the document holds its render state again. What was
 // marked beside it is what the next drain writes, and nothing the frame publishes clears it. The
 // frame that drains it has to be asked for, since a frame asked for while this one ran may be the
 // one that is ending.

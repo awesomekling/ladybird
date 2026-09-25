@@ -185,8 +185,8 @@ bool Document::update_style_and_layout_once(UpdateLayoutReason reason, Throttled
     // during layout tree construction and layout do not need individual record pins.
     style_computer().begin_style_record_view_epoch();
 
-    // NB: The frame ends the update, and the epochs begun above, in its last join (finish_update_layout
-    //     in the host callbacks), so that whoever joins the frame first finds the document idle.
+    // NB: The update, and the epochs begun above, end as the frame's end is taken in (finish_update_layout in the host
+    //     callbacks): before layout_arena_update_layout returns, or once a submitted pass's frame is taken back.
 
     Layout::RustFFI::FfiLayoutUpdateInputs inputs {
         .reason_is_inspect_devtools_layout_data = reason == UpdateLayoutReason::InspectDevToolsLayoutData,
