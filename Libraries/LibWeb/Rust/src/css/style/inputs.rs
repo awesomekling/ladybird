@@ -2115,6 +2115,7 @@ impl StyleEngineState {
             },
             host: HostState {
                 suspended_style_pass: None,
+                update_cold_matching_batch: None,
                 font_resolver: None,
                 random_state: std::collections::hash_map::RandomState::new(),
                 random_serial: 0,

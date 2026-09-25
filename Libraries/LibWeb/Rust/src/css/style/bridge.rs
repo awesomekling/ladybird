@@ -251,8 +251,6 @@ pub struct FfiStyleTransactionView {
     /// The transaction planned nothing but the child reactions the engine derived from the
     /// reactions C++ applied last: one more generation of the same style change, not a new one.
     pub only_derived_child_reactions: bool,
-    /// The elements connected to the document as the transaction was taken.
-    pub connected_element_count: u32,
 }
 
 /// A host-owned object the engine names but never follows.
@@ -452,7 +450,6 @@ impl Default for FfiStyleTransactionView {
             scoped: false,
             only_derived_child_reactions: false,
             style_atoms_swept: false,
-            connected_element_count: 0,
         }
     }
 }
@@ -4559,6 +4556,20 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
         });
         engine.forget_recording_atom_mappings(output.reclaimed_style_atoms.iter().map(|reclaimed| reclaimed.atom));
     }
+    // The rows of a style update are matched in one cold matching batch, begun with the first of
+    // its transactions that publishes rows and ended as the update discards its outputs. A batch
+    // covering more than one sixteenth of the connected elements is dense enough that packing the
+    // scope once is cheaper than repeatedly reconstructing cold facts while matching its rows.
+    if !output.answers.is_empty() && engine.host.update_cold_matching_batch.is_none() {
+        let broad = !output.scoped || output.answers.len() * 16 > engine.connected_element_count() as usize;
+        let has_traversal = if broad {
+            engine.begin_cold_matching_batch(root)
+        } else {
+            engine.begin_adaptive_cold_matching_batch(root);
+            true
+        };
+        engine.host.update_cold_matching_batch = Some(has_traversal);
+    }
     engine.install_ffi_style_transaction_output(output);
     let output = &engine.host.ffi_style_transaction_output;
     FfiStyleTransactionView {
@@ -4571,7 +4582,6 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
         scoped: output.scoped,
         only_derived_child_reactions: output.only_derived_child_reactions,
         style_atoms_swept: output.style_atoms_swept,
-        connected_element_count: engine.connected_element_count(),
     }
 }
 
