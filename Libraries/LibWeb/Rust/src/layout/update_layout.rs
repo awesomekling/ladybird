@@ -420,8 +420,8 @@ enum FrameJoin {
     Style,
     /// What a layout tree build the frame has walked needs the document for before the pass that
     /// follows it: the pass's sources, the replaced content facts the document still reads from
-    /// the shells of the boxes whose content it owns (an image box showing an image of its own,
-    /// an object's SVG document). A build no pass follows has no such join. The build's host half
+    /// the shell of an object's box showing an SVG document. A build no pass follows has no such
+    /// join. The build's host half
     /// (the shells of the rows the walk freed and of the new rows whose making tells the document
     /// something, the box presence it changed, the DOM nodes its commit messages resolve to, a new
     /// viewport's paint state) waits for the next join, and the style resources and generated

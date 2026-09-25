@@ -895,6 +895,9 @@ pub(crate) struct LayoutNodeArena {
     /// arena hands it back when the row is freed, rather than leaving it on a shell that the arena
     /// materialises and destroys on its own schedule. The providers are in the host tables.
     rows_with_owned_image_provider: RefCell<HashSet<NodeSlotId>>,
+    /// The natural size of the image each row that owns its image's provider shows, as the provider
+    /// publishes it: zero while the image is not available.
+    owned_image_natural_sizes: RefCell<HashMap<NodeSlotId, NaturalSize>>,
     /// The rows that hold the set of image observers their style asks for. Like the provider a row
     /// owns, the set is made for the row and is of no use without it, so the arena hands it back
     /// when the row is freed. The sets are in the host tables.
@@ -1072,6 +1075,7 @@ impl LayoutNodeArena {
             identities_in_focused_text_control: HashSet::default(),
             layout_tree_update_marks: RefCell::new(LayoutTreeUpdateMarks::default()),
             rows_with_owned_image_provider: RefCell::new(HashSet::default()),
+            owned_image_natural_sizes: RefCell::new(HashMap::default()),
             rows_with_image_observers: RefCell::new(HashSet::default()),
             shadow_including_parent_elements: RefCell::new(Vec::new()),
             anchor_name_elements: RefCell::new(HashMap::default()),
@@ -1357,6 +1361,7 @@ impl LayoutNodeArena {
             if self.rows_with_owned_image_provider.get_mut().remove(&slot) {
                 rows_with_owned_image_provider.push(slot);
             }
+            self.owned_image_natural_sizes.get_mut().remove(&slot);
             if self.rows_with_image_observers.get_mut().remove(&slot) {
                 rows_with_image_observers.push(slot);
             }
@@ -2537,6 +2542,31 @@ impl LayoutNodeArena {
             }
             _ => ReplacedContentInput::None,
         }
+    }
+
+    /// The natural size of the image an image box owns the provider of (`content: url(...)`), as
+    /// its provider published it: zero while the image is not available.
+    pub(crate) fn owned_image_natural_size_input(&self, id: NodeSlotId) -> ReplacedContentInput {
+        let natural_size = self
+            .owned_image_natural_sizes
+            .borrow()
+            .get(&id)
+            .copied()
+            .unwrap_or(NaturalSize {
+                width: Some(0),
+                height: Some(0),
+                aspect_ratio: None,
+            });
+        ReplacedContentInput::NaturalSize(natural_size)
+    }
+
+    pub(crate) fn set_owned_image_natural_size(&self, id: NodeSlotId, natural_size: NaturalSize) {
+        self.assert_owner_thread();
+        assert!(
+            self.rows_with_owned_image_provider.borrow().contains(&id),
+            "only a row that owns its image's provider publishes the image's natural size"
+        );
+        self.owned_image_natural_sizes.borrow_mut().insert(id, natural_size);
     }
 
     /// Which principal box the element asks for, before its computed style has a say. A text
@@ -6305,6 +6335,37 @@ pub unsafe extern "C" fn layout_arena_set_owned_image_provider(
     );
 }
 
+/// Publishes the natural size of the image `slot`'s owned provider shows, as the auto content size
+/// in `facts`, which its box's replaced content facts are derived from.
+///
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread, and `slot` a live row that owns its
+/// image's provider.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_set_owned_image_natural_size(
+    arena: *mut c_void,
+    slot: NodeSlotId,
+    facts: FfiReplacedContentFacts,
+) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    let has_aspect_ratio = facts.auto_content_aspect_ratio_denominator != CssPixels::default();
+    let natural_size = NaturalSize {
+        width: facts
+            .has_auto_content_width
+            .then_some(facts.auto_content_width.raw_value()),
+        height: facts
+            .has_auto_content_height
+            .then_some(facts.auto_content_height.raw_value()),
+        aspect_ratio: has_aspect_ratio.then_some((
+            facts.auto_content_aspect_ratio_numerator.raw_value(),
+            facts.auto_content_aspect_ratio_denominator.raw_value(),
+        )),
+    };
+    // SAFETY: The handle came from layout_arena_create and outlives this call.
+    unsafe { LayoutNodeArena::from_handle(arena) }.set_owned_image_natural_size(slot, natural_size);
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_owned_image_provider(arena: *mut c_void, slot: NodeSlotId) -> *mut c_void {
     assert!(!arena.is_null(), "layout node arena handle is null");
@@ -6705,9 +6766,13 @@ pub(crate) unsafe fn read_enrolled_content_sources(
                 derived_nodes.push((node, ReplacedContentInput::NaturalSize(no_image)));
                 continue;
             }
-            let has_owned_image_provider = arena.rows_with_owned_image_provider.borrow().contains(&node);
-            if !super::node_facts::node_replaced_content_facts_need_host(arena.data(node), has_owned_image_provider) {
-                derived_nodes.push((node, arena.replaced_content_input(node)));
+            if !super::node_facts::node_replaced_content_facts_need_host(arena.data(node)) {
+                let input = if arena.rows_with_owned_image_provider.borrow().contains(&node) {
+                    arena.owned_image_natural_size_input(node)
+                } else {
+                    arena.replaced_content_input(node)
+                };
+                derived_nodes.push((node, input));
                 continue;
             }
         }
