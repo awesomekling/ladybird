@@ -878,7 +878,9 @@ void publish_table_spans(DOM::Element const& element)
     if (identity.value() == 0)
         return;
     auto spans = table_spans_of(&element);
-    const_cast<DOM::Document&>(element.document()).style_computer().style_engine().set_element_table_spans(identity, spans.column_span, spans.row_span, spans.raw_column_span);
+    const_cast<DOM::Document&>(element.document()).style_computer().style_engine().publish_input([identity, spans](CSS::StyleInputScope const& input) {
+        input.engine().set_element_table_spans(identity, spans.column_span, spans.row_span, spans.raw_column_span);
+    });
 }
 
 void NodeWithStyle::set_display(CSS::Display display)
