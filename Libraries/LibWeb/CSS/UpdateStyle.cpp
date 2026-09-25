@@ -27,6 +27,8 @@
 #include <LibWeb/DOM/PseudoElement.h>
 #include <LibWeb/DOM/Range.h>
 #include <LibWeb/DOM/ShadowRoot.h>
+#include <LibWeb/HTML/EventLoop/EventLoop.h>
+#include <LibWeb/HTML/EventLoop/FrameScheduler.h>
 #include <LibWeb/HTML/FormAssociatedElement.h>
 #include <LibWeb/HTML/HTMLSlotElement.h>
 #include <LibWeb/HTML/LocalNavigable.h>
@@ -1755,7 +1757,8 @@ void Document::finish_submitted_style_update()
 }
 
 // A style update for one element reads and writes nothing a recording in flight reads, and what it changes in the arena
-// joins at the arena's doors, so beside a recording of the document it does not take the recording in.
+// joins at the arena's doors, so beside a recording of the document it does not take the recording in. It can release
+// the record a row names before the row takes its new one, though, so the engine reclaims no record until then.
 static bool updates_element_style_beside_recording(Document const& document)
 {
     auto const* arena = document.layout_node_arena_if_created();
@@ -1766,6 +1769,8 @@ bool Document::update_style_for_element(AbstractElement const& abstract_element)
 {
     if (!updates_element_style_beside_recording(*this))
         join_frame_in_flight();
+    else
+        HTML::main_thread_event_loop().frame_scheduler().hold_style_records_for_frame(*this);
     update_selection_style_observability();
     flush_throttled_animation_style_update_for_node(abstract_element.element());
     return CSS::update_style_for_element(*this, abstract_element, StyleUpdateMode::Normal);
@@ -1775,6 +1780,8 @@ bool Document::update_style_for_element(AbstractElement const& abstract_element,
 {
     if (!updates_element_style_beside_recording(*this))
         join_frame_in_flight();
+    else
+        HTML::main_thread_event_loop().frame_scheduler().hold_style_records_for_frame(*this);
     update_selection_style_observability();
     flush_throttled_animation_style_update_for_node(abstract_element.element());
     return CSS::update_style_for_element(*this, abstract_element, mode);

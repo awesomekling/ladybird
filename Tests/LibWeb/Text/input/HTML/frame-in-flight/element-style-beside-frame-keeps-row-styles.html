@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<style>
+    @keyframes fade {
+        from { color: rgb(0, 0, 0); }
+        to { color: rgb(0, 0, 250); }
+    }
+    .animated { width: 50px; height: 20px; animation: fade 1000s linear -10s infinite paused; }
+</style>
+<div id="container"></div>
+<script>
+    // Script seeks animations beside a frame that owns the arena and reads their style back. Each read samples the
+    // element's animations again, and replaces the record its box is styled with before the box takes the new one.
+    asyncTest(async done => {
+        for (let i = 0; i < 20; ++i) {
+            const element = document.createElement("div");
+            element.className = "animated";
+            container.appendChild(element);
+        }
+        await twoFrames();
+        let animations;
+        const result = await whileFrameInFlight("before-run", () => {
+            animations = [...container.children].map(child => child.getAnimations()[0]);
+            container.style.width = "300px";
+        }, frame => {
+            const colors = [];
+            for (const [index, child] of [...container.children].entries()) {
+                animations[index].currentTime = (index + 1) * 10000;
+                colors.push(getComputedStyle(child).color);
+            }
+            println(`colors: ${colors[0]} ... ${colors[19]}`);
+            return frame;
+        });
+        println(`held as armed: ${heldAsArmed(result, "before-run")}`);
+        await twoFrames();
+        println(`last child color: ${getComputedStyle(container.lastElementChild).color}`);
+        done();
+    });
+</script>

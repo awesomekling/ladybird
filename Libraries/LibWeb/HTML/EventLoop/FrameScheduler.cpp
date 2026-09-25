@@ -337,12 +337,22 @@ void FrameScheduler::change_arena(DOM::Document& document, Function<void(Layout:
     }));
 }
 
+void FrameScheduler::hold_style_records_for_frame(DOM::Document& document)
+{
+    if (m_documents_holding_style_records.contains_slow(GC::Ref { document }))
+        return;
+    m_documents_holding_style_records.append(document);
+    document.style_computer().style_engine().begin_pin_waiting_for_frame();
+}
+
 void FrameScheduler::apply_deferred_arena_changes()
 {
     // A change applied here can defer no other: nothing is in flight anymore.
     auto changes = move(m_deferred_arena_changes);
     for (auto const& change : changes)
         change->function()();
+    for (auto const& document : exchange(m_documents_holding_style_records, {}))
+        document->style_computer().style_engine().end_pin_waiting_for_frame();
 }
 
 // What a clock lease of a document ticks, and until when.
@@ -608,6 +618,7 @@ void FrameScheduler::visit_edges(JS::Cell::Visitor& visitor)
         visitor.visit(hold.document);
         visitor.visit(hold.effects);
     }
+    visitor.visit(m_documents_holding_style_records);
     if (!m_ticket)
         return;
     for (auto& submitted : m_ticket->navigables) {

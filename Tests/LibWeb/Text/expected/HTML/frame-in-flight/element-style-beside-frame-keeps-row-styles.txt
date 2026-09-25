@@ -1,0 +1,3 @@
+colors: rgb(0, 0, 5) ... rgb(0, 0, 52)
+held as armed: true
+last child color: rgb(0, 0, 52)
