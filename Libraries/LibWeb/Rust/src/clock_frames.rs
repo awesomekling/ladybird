@@ -847,9 +847,23 @@ pub unsafe extern "C" fn rust_clock_lend_to_busy_main(arena: *mut c_void, relend
         // SAFETY: Guaranteed by the caller.
         unsafe { lease.pin_host_records() };
     }
-    let recall = || {
+    // The task pins and unpins its records at any moment beside the ticks, which read its pin table
+    // no more until it has taken the engine back.
+    // SAFETY: Guaranteed by the caller.
+    let engine = unsafe { LayoutNodeArena::from_handle(arena) }
+        .style_engine_handle()
+        .cast::<StyleEngine>();
+    if !engine.is_null() {
+        // SAFETY: The main thread owns the engine until the lend below.
+        unsafe { &mut *engine }.begin_clock_lend_beside_host_pins();
+    }
+    let recall = move || {
         take_arenas_back();
         LENT_TO_BUSY_MAIN.store(false, Ordering::Release);
+        if !engine.is_null() {
+            // SAFETY: The main thread owns the engine again, which outlives the lend of its arena.
+            unsafe { &mut *engine }.finish_clock_lend_beside_host_pins();
+        }
     };
     let taken_back = move || {
         if let Some(taken_back) = LEND_TAKEN_BACK.get() {
@@ -1346,6 +1360,18 @@ fn run_render_clock_tick_at(context: u64, frame_time_nanoseconds: i64) {
     let mut tick = None;
     crate::stage_thread::run_detached_for(idle_tick.caller, lease.arena, || {
         tick = Some(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            // A task pins and unpins its host's records beside the tick, which may read none of them.
+            if beside_task {
+                // SAFETY: As below.
+                let engine = unsafe { &*(lease.arena as *const LayoutNodeArena) }
+                    .style_engine_handle()
+                    .cast::<StyleEngine>();
+                // SAFETY: As below.
+                assert!(
+                    engine.is_null() || !unsafe { &*engine }.reads_host_style_record_pins(),
+                    "a clock tick beside a task reads the host's style-record pins"
+                );
+            }
             // SAFETY: The main thread is idle with nothing in flight, and waits for this tick when
             // it wakes: the stage thread owns the arena and its engine until `idle_tick` is dropped.
             let outcome = unsafe { lease.run_tick(time, lease.deadline_for_tick(beside_task)) };
