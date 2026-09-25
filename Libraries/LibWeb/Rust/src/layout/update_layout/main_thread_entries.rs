@@ -86,3 +86,51 @@ pub(super) fn finish_layout_frame_taken_back(arena: *mut c_void, frame: LayoutFr
         unsafe { finish_layout_frame(&main_thread, frame) }
     });
 }
+
+/// Hands the clock lease of the document a fresh layout frame for its ticks to lay out in on the
+/// render side while the document thread idles (see `ClockLayoutFrame`).
+///
+/// # Safety
+///
+/// `arena` must be a live handle with a registered layout update host, used on the document thread
+/// with no layout update running and no frame in flight.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_renew_clock_layout_frame(arena: *mut c_void) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+    // SAFETY: As above.
+    let frame = unsafe { make_clock_layout_frame(&main_thread, arena) };
+    crate::clock_frames::set_clock_layout_frame(arena, frame);
+}
+
+/// Takes in the layout frame the clock lease's ticks laid out in, if they did, and ends the layout
+/// update the document began for it: pays what the rounds owe the document and applies their
+/// messages, as a submitted pass's frame is taken in. Returns whether there was one; the lease then
+/// holds a fresh frame.
+///
+/// # Safety
+///
+/// `arena` must be a live handle with a registered layout update host, used on the document thread
+/// after `layout_arena_begin_update_layout`, with the ticks over.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_take_in_clock_layout_frame(arena: *mut c_void) -> bool {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    let Some(frame) = crate::clock_frames::take_laid_out_clock_layout_frame(arena) else {
+        return false;
+    };
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+    abort_on_panic(|| {
+        // SAFETY: As above.
+        unsafe { take_in_clock_layout_frame(&main_thread, frame) }
+    });
+    // SAFETY: As above; the update has ended.
+    let frame = unsafe { make_clock_layout_frame(&main_thread, arena) };
+    crate::clock_frames::set_clock_layout_frame(arena, frame);
+    true
+}
+
+/// Whether the clock lease's ticks laid out in its layout frame since the document last took it in.
+#[unsafe(no_mangle)]
+extern "C" fn layout_arena_clock_layout_frame_laid_out(arena: *mut c_void) -> bool {
+    crate::clock_frames::clock_layout_frame_laid_out(arena)
+}
