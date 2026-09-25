@@ -1464,6 +1464,11 @@ unsafe fn update_layout(
     let Some(pass) = (unsafe { LayoutPassJob::prepare(main_thread, inputs, submits_pass) }) else {
         return FfiLayoutUpdateOutcome::Finished;
     };
+    if crate::stage_thread::submits_flight() {
+        // SAFETY: As below.
+        unsafe { crate::flight::submit(arena_handle, crate::flight::Flight::from_layout_pass(pass)) };
+        return FfiLayoutUpdateOutcome::PassSubmitted;
+    }
     let take_back = pass.take_back();
     // SAFETY: The frame reaches only the arena, which the frame in flight owns until the document
     // thread takes it back, and every document-thread path to the arena, the style mirror its tree
