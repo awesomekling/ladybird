@@ -45,6 +45,11 @@ pub(crate) struct HostTables {
     /// The generation of the document's render state, which retiring it moves on. See
     /// [`super::frame_retirement`].
     pub(super) frame_generation: Cell<u64>,
+    /// The document's layout tree update marks, while the tree build has not borrowed them. See
+    /// [`super::tree_update_marks`].
+    pub(super) layout_tree_update_marks: RefCell<super::tree_update_marks::LayoutTreeUpdateMarks>,
+    /// Whether the tree build holds the marks, in the arena, for its walk.
+    pub(super) layout_tree_update_marks_are_lent: Cell<bool>,
 }
 
 impl HostTables {
