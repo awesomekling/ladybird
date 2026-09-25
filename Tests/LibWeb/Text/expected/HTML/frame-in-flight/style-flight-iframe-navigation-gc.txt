@@ -1,6 +1,9 @@
 resize: held as armed: true
 resize: child color: rgb(0, 128, 0)
 resize: child width: 300
+child resize: held as armed: true
+child resize: resizing joined the child's pass: false
+child resize: child color: rgb(0, 0, 0)
 navigation: held as armed: true
 navigation: new document: second, rgb(128, 0, 128)
 navigation: old document replaced: true

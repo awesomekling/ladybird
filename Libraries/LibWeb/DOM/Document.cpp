@@ -2439,28 +2439,32 @@ void Document::invalidate_style_for_viewport_change()
         return;
     }
 
-    auto& style_engine = style_computer().style_engine();
-    // The viewport is a published document input, and the engine unseats any record that reads it
-    // when it moves, so these rows are ones the engine settles by driving them again against the
-    // inputs it already holds. The walk still names them: what moved is not in any winner.
-    for (auto style_node : style_engine.viewport_dependent_style_nodes()) {
-        auto element = style_computer().element_for_style_node(style_node.value());
-        if (!element || !element->is_connected() || &element->document() != this)
-            continue;
-        style_engine.record_derived_element_style_input_change(style_node, CSS::StyleEngine::PublishedStyle | CSS::StyleEngine::RecomputeStyle);
-    }
+    // Beside a style pass the engine is the pass's, so what follows waits for its drain, and then names the rows the
+    // pass left.
+    style_computer().style_engine().publish_input([document = GC::Root<Document> { *this }](CSS::StyleInputScope const& input) {
+        auto& style_engine = input.engine();
+        // The viewport is a published document input, and the engine unseats any record that reads it
+        // when it moves, so these rows are ones the engine settles by driving them again against the
+        // inputs it already holds. The walk still names them: what moved is not in any winner.
+        for (auto style_node : style_engine.viewport_dependent_style_nodes()) {
+            auto element = document->style_computer().element_for_style_node(style_node.value());
+            if (!element || !element->is_connected() || &element->document() != document.ptr())
+                continue;
+            style_engine.record_derived_element_style_input_change(style_node, CSS::StyleEngine::PublishedStyle | CSS::StyleEngine::RecomputeStyle);
+        }
 
-    // Descendants that inherit changed values are reached by the normal inherited-style reaction path.
-    // Container query conditions that resolved a container unit against the viewport have no
-    // computed-value dependency for the retained style engine to discover.
-    auto elements = move(m_elements_with_viewport_dependent_style);
-    for (auto& element : elements) {
-        if (&element.document() != this || (!element.style_uses_if_css_function() && !element.style_uses_custom_function() && !element.style_depends_on_viewport_metrics()))
-            continue;
-        m_elements_with_viewport_dependent_style.set(element);
-        if (element.is_connected())
-            style_engine.record_derived_element_style_input_change(element.style_node_id(), CSS::StyleEngine::PublishedStyle | CSS::StyleEngine::RecomputeStyle);
-    }
+        // Descendants that inherit changed values are reached by the normal inherited-style reaction path.
+        // Container query conditions that resolved a container unit against the viewport have no
+        // computed-value dependency for the retained style engine to discover.
+        auto elements = move(document->m_elements_with_viewport_dependent_style);
+        for (auto& element : elements) {
+            if (&element.document() != document.ptr() || (!element.style_uses_if_css_function() && !element.style_uses_custom_function() && !element.style_depends_on_viewport_metrics()))
+                continue;
+            document->m_elements_with_viewport_dependent_style.set(element);
+            if (element.is_connected())
+                style_engine.record_derived_element_style_input_change(element.style_node_id(), CSS::StyleEngine::PublishedStyle | CSS::StyleEngine::RecomputeStyle);
+        }
+    });
 }
 
 void Document::sample_animation_effects_needing_style_update()

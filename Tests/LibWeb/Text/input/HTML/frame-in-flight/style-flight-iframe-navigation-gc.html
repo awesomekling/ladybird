@@ -47,6 +47,21 @@
         println(`resize: child color: ${resized.color}`);
         println(`resize: child width: ${resized.width}`);
 
+        // The child's pass is in flight, and the parent's layout shrinks the child's viewport below its media query.
+        const shrunk = await whileStyleInFlight("before-run", () => {
+            inner().style.height = "25px";
+        }, frameInFlight => {
+            const joined = writeJoinedStylePass(() => {
+                frame.style.width = "220px";
+                frame.offsetWidth;
+            });
+            return { ...frameInFlight, joined };
+        }, frame.contentDocument);
+        await twoFrames();
+        println(`child resize: held as armed: ${styleHeldAsArmed(shrunk, "before-run")}`);
+        println(`child resize: resizing joined the child's pass: ${shrunk.joined}`);
+        println(`child resize: child color: ${getComputedStyle(inner()).color}`);
+
         // The child's pass is in flight, and the parent navigates it.
         const child = frame.contentDocument;
         const navigated = await whileStyleInFlight("before-completion", () => {
