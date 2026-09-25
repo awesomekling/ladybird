@@ -52,8 +52,9 @@ public:
     struct AnimationNames {
         StyleNodeID style_node;
     };
-    // What a row's container conditions read of its containers, which the host records for the
-    // commit as it records them for a row it computes.
+    // What a row's container conditions read of its containers. The engine records what it reads of
+    // it as the drain takes it; the host mirrors the rest on the elements for the commit, as it
+    // does for a row it computes.
     struct ContainerQueryEffects {
         StyleNodeID style_node;
     };
