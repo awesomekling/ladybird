@@ -77,9 +77,9 @@ FontComputer::~FontComputer()
 void FontComputer::bump_environment_generation()
 {
     // A font change republishes the `@font-face` table and then invalidates the elements that use
-    // it, in several calls into the style engine the layout frame reads, so it waits for the frame
-    // in flight first.
-    m_document->join_frame_in_flight();
+    // it, in several calls into the style engine the layout frame reads, so it waits for a frame in
+    // flight that reaches the engine first. A recording reads none of it.
+    m_document->join_frame_reaching_style_engine();
     ++m_environment_generation;
     publish_font_faces();
     // A style update holds the table it was given for its whole length, so a change made while one
@@ -522,11 +522,12 @@ static void record_font_input_change(DOM::Element& element)
 
 // Beside a style pass alone, the pass resolves fonts on its own thread against the `@font-face` table and the cascade
 // memo it was given. A font change waits for the pass's drain as published input, and reacts to the faces as they are
-// then.
-static bool leave_font_change_beside_style_pass(DOM::Document& document, Function<void()> change)
+// then. Beside a layout pass, which reads the style the engine resolved with the table, it waits for the pass to be
+// taken back the same way.
+static bool leave_font_change_beside_pass(DOM::Document& document, Function<void()> change)
 {
     auto& style_engine = document.style_computer().style_engine();
-    if (!Layout::RustFFI::rust_stage_thread_only_style_pass_in_flight_for(style_engine.rust_handle()))
+    if (!Layout::RustFFI::rust_stage_thread_only_style_pass_in_flight_for(style_engine.rust_handle()) && !style_engine.layout_pass_is_in_flight())
         return false;
     style_engine.publish_input([change = move(change)](StyleInputScope const&) { change(); });
     return true;
@@ -535,7 +536,7 @@ static bool leave_font_change_beside_style_pass(DOM::Document& document, Functio
 void FontComputer::clear_computed_font_cache_for_families(Vector<Utf16FlyString> const& family_names)
 {
     VERIFY(!family_names.is_empty());
-    if (leave_font_change_beside_style_pass(document(), [font_computer = GC::Root { *this }, family_names] { font_computer->clear_computed_font_cache_for_families(family_names); }))
+    if (leave_font_change_beside_pass(document(), [font_computer = GC::Root { *this }, family_names] { font_computer->clear_computed_font_cache_for_families(family_names); }))
         return;
     bump_environment_generation();
 
@@ -629,7 +630,7 @@ void FontComputer::did_load_font(FontFaceKey const& changed_face)
         did_load_font(changed_face.family_name);
         return;
     }
-    if (leave_font_change_beside_style_pass(document(), [font_computer = GC::Root { *this }, changed_face] { font_computer->did_load_font(changed_face); }))
+    if (leave_font_change_beside_pass(document(), [font_computer = GC::Root { *this }, changed_face] { font_computer->did_load_font(changed_face); }))
         return;
 
     bump_environment_generation();
