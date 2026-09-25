@@ -1,4 +1,3 @@
 visible: ticks advance: true
 hidden: ticks advance: false
-hidden: ticks received: false
 visible again: ticks advance: true

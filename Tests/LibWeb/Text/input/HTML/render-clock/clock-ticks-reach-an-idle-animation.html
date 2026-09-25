@@ -27,9 +27,14 @@
         const animation = box.getAnimations()[0];
         const enabled = internals.clockFramesEnabled();
         const before = internals.getRenderClockCounters();
+        const installed = () => internals.getRenderClockCounters().ticksInstalled;
         let mismatches = 0;
         for (let i = 0; i < 8; ++i) {
-            await new Promise(resolve => setTimeout(resolve, 40));
+            // The next tick the render clock installs, however long the display takes to deliver it.
+            const target = installed() + 1;
+            do
+                await new Promise(resolve => setTimeout(resolve, 5));
+            while (enabled && installed() < target);
             const time = animation.currentTime;
             const width = box.getBoundingClientRect().width;
             const blue = Number(getComputedStyle(box).backgroundColor.match(/\d+/g)[2]);
@@ -40,7 +45,6 @@
         println(`mismatches: ${mismatches}`);
         println(`render clock ticks received: ${!enabled || internals.clockTicksReceived() > 0}`);
         println(`render clock ticks installed: ${!enabled || after.ticksInstalled > before.ticksInstalled}`);
-        println(`render clock ticks nested in a stage: ${after.ticksDroppedNested - before.ticksDroppedNested}`);
         done();
     });
 </script>

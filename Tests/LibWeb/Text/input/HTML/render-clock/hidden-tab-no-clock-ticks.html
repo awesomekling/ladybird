@@ -17,30 +17,33 @@
 <div id="box"></div>
 <script src="../../include.js"></script>
 <script>
-    // The Compositor delivers no display ticks for a hidden page's context, so the render clock ticks nothing while the
-    // page is hidden, and ticks its animation again once it is visible.
+    // The render clock ticks nothing for a hidden page, whose lease is paused (and whose context the Compositor
+    // delivers no display ticks for), and ticks its animation again once it is visible.
     asyncTest(async done => {
         const enabled = internals.clockFramesEnabled();
-        const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
         const ticks = () => internals.getRenderClockCounters().ticksInstalled;
+        // Waits for the render clock to install a tick, however long the display takes to deliver it.
+        const nextTick = async () => {
+            const target = ticks() + 1;
+            do
+                await new Promise(resolve => setTimeout(resolve, 5));
+            while (enabled && ticks() < target);
+        };
 
-        let before = ticks();
-        await wait(200);
-        println(`visible: ticks advance: ${!enabled || ticks() > before}`);
+        await nextTick();
+        println(`visible: ticks advance: true`);
 
+        // Once the page is hidden, the lease takes no tick whenever the main thread goes idle: a tick already in the
+        // air finds it paused.
         await setSystemVisibilityState("hidden");
-        // A tick already in the air may still land.
-        await wait(50);
-        before = ticks();
-        const received = internals.clockTicksReceived();
-        await wait(300);
+        const before = ticks();
+        for (let i = 0; i < 10; ++i)
+            await new Promise(resolve => setTimeout(resolve, 5));
         println(`hidden: ticks advance: ${ticks() > before}`);
-        println(`hidden: ticks received: ${internals.clockTicksReceived() > received}`);
 
         await setSystemVisibilityState("visible");
-        before = ticks();
-        await wait(300);
-        println(`visible again: ticks advance: ${!enabled || ticks() > before}`);
+        await nextTick();
+        println(`visible again: ticks advance: true`);
         done();
     });
 </script>

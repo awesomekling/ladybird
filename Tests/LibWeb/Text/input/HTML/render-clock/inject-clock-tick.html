@@ -25,6 +25,13 @@
         return promise;
     }
 
+    // A frame time past `time`, and not past now: the time a display tick at the next frame carries.
+    async function frameTimeAfter(time) {
+        while (performance.now() <= time + 1)
+            await nextTask();
+        return performance.now();
+    }
+
     // Under LIBWEB_RENDER_CLOCK_FRAMES with manual rendering opportunities and clock ticks, the display ticks the leases
     // see come from the test alone: each injected tick presents one frame from the render side, with no rendering
     // update, and a read after it sees the width composed at the time of the tick.
@@ -34,9 +41,10 @@
         const enabled = internals.clockFramesEnabled();
         internals.setManualRenderingOpportunities(true, true);
         await nextTask();
-        const start = performance.now();
+        let frameTime = performance.now();
         for (let i = 0; i < 3; ++i) {
-            internals.injectRenderingOpportunity(start + i * 16);
+            frameTime = await frameTimeAfter(frameTime);
+            internals.injectRenderingOpportunity(frameTime);
             await nextTask();
         }
 
@@ -45,7 +53,8 @@
         let taken = 0;
         let mismatches = 0;
         for (let i = 1; i <= 5; ++i) {
-            if (await internals.injectClockTick(start + 32 + i * 16))
+            frameTime = await frameTimeAfter(frameTime);
+            if (await internals.injectClockTick(frameTime))
                 ++taken;
             const time = animation.currentTime;
             if (Math.abs(box.getBoundingClientRect().width - (100 + (2000 * time) / 20000)) > 0.5)
