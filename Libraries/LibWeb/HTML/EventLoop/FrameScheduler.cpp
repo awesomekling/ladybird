@@ -415,6 +415,21 @@ void FrameScheduler::apply_deferred_arena_changes()
         document->style_computer().style_engine().end_pin_waiting_for_frame();
 }
 
+// Takes in what a clock lease's ticks laid out on the render side while the main thread idled, as a layout update of
+// its own. Returns whether they had laid anything out.
+static bool take_in_clock_layout_frame(DOM::Document& document)
+{
+    auto* arena = document.layout_node_arena_if_created();
+    if (!arena || !Layout::RustFFI::layout_arena_clock_layout_frame_laid_out(arena->handle()))
+        return false;
+    // The ticks' rounds ran as the rest of a layout update, which begins and ends here, around their frame: its end is
+    // taken in as a submitted pass's frame is taken back (finish_update_layout in the host callbacks).
+    Layout::RustFFI::layout_arena_begin_update_layout(arena->handle());
+    document.begin_style_stabilization_epoch();
+    document.style_computer().begin_style_record_view_epoch();
+    return Layout::RustFFI::layout_arena_take_in_clock_layout_frame(arena->handle());
+}
+
 // What a clock lease of a document ticks, and until when.
 struct ClockLeasePlan {
     Vector<GC::Ref<Animations::KeyframeEffect>> effects;
@@ -515,6 +530,8 @@ static Optional<ClockLeasePlan> clock_lease_plan(DOM::Document& document)
 void FrameScheduler::revoke_clock_lease(size_t index)
 {
     auto hold = m_clock_leases.take(index);
+    // What the render clock's ticks laid out goes in before the lease that holds it ends.
+    take_in_clock_layout_frame(*hold.document);
     if (auto* arena = hold.document->layout_node_arena_if_created())
         Layout::RustFFI::rust_clock_lease_revoke(arena->handle());
     if (hold.render_clock_context.has_value())
@@ -566,6 +583,9 @@ void FrameScheduler::grant_clock_leases()
         auto& hold = *m_clock_leases.find_if([&](auto const& hold) { return hold.document.ptr() == document.ptr(); });
         publish_clock_lease_targets(hold);
         update_render_clock(hold, context_id ? Optional<Compositing::CompositorContextId> { context_id } : OptionalNone {});
+        // The render clock's ticks lay out what their samples leave in a frame of their own.
+        if (hold.render_clock_context.has_value())
+            Layout::RustFFI::layout_arena_renew_clock_layout_frame(document->layout_node_arena_if_created()->handle());
     }
 }
 
@@ -650,6 +670,8 @@ void FrameScheduler::main_thread_did_wake()
             continue;
         auto time = Layout::RustFFI::rust_clock_lease_time(arena->handle());
         adopt_clock_tick(*document);
+        // The style the ticks installed is the document's now, and so is what they laid out with it.
+        take_in_clock_layout_frame(*document);
         if (!isnan(time)) {
             if (auto current = document->timeline()->current_time(); current.has_value() && current->type == Animations::TimeValue::Type::Milliseconds && current->value < time)
                 document->timeline()->update_current_time(time);

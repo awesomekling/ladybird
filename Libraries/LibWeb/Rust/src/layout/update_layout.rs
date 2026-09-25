@@ -369,6 +369,10 @@ impl UpdateLayoutTrace {
         Self { reason: Some(reason) }
     }
 
+    fn disabled() -> Self {
+        Self { reason: None }
+    }
+
     fn now(&self) -> Option<Instant> {
         self.reason.as_ref().map(|_| Instant::now())
     }
@@ -1270,6 +1274,114 @@ impl LayoutFrame {
             return PartialRelayout::NeedsAnotherLayoutPass;
         }
         PartialRelayout::Done
+    }
+}
+
+/// A layout frame a clock lease's ticks lay out in on the render side while the main thread idles
+/// (`LIBWEB_RENDER_CLOCK_FRAMES`). The main thread makes it with what its rounds read from the
+/// document (the facts, the selection), which nothing changes while it idles, and takes it in when
+/// it wakes: it pays what the rounds owe and applies their messages, as it takes in a submitted
+/// pass's frame.
+pub(crate) struct ClockLayoutFrame {
+    frame: LayoutFrame,
+    facts: FfiLayoutUpdateDocumentFacts,
+    /// Whether a round laid out in the frame, so that it has something to take in.
+    laid_out: bool,
+}
+
+// SAFETY: The frame reaches only the arena, which a clock tick owns while it runs a round in it, and
+// its document, which only the main thread reaches, once it has taken the frame back.
+unsafe impl Send for ClockLayoutFrame {}
+
+impl ClockLayoutFrame {
+    /// Runs the round of layout the samples a clock tick installed left. Returns false where the
+    /// round needs the main thread: a layout tree build, or another style round.
+    ///
+    /// # Safety
+    ///
+    /// On the thread that owns the arena, with the main thread idle.
+    pub(crate) unsafe fn run_round(&mut self) -> bool {
+        if !self.frame.round_lays_out(&self.facts) {
+            return true;
+        }
+        if self.frame.needs_layout_tree_rebuild(&self.facts) || self.frame.inputs.is_template_contents_document {
+            return false;
+        }
+        // SAFETY: Guaranteed by the caller.
+        self.frame.pass_sources = Some(unsafe { LayoutPassSources::read(self.frame.inputs.arena_handle) });
+        self.laid_out = true;
+        // SAFETY: Guaranteed by the caller.
+        match unsafe { self.frame.run_round_through_pass(self.facts) } {
+            FrameStep::Ended(_) => !self.frame.commit_left_layout_work(&self.facts),
+            FrameStep::NeedsStyle | FrameStep::PassReady(_) => false,
+        }
+    }
+
+    pub(crate) fn laid_out(&self) -> bool {
+        self.laid_out
+    }
+}
+
+/// Takes in the layout frame of a clock lease's ticks, and ends the update the document began for
+/// it: pays what the rounds owe the document, and applies their messages at once, since the
+/// document thread takes the frame in at the top of its event loop, where they can run.
+///
+/// # Safety
+///
+/// On the document thread, with the ticks over and the update begun.
+unsafe fn take_in_clock_layout_frame(main_thread: &crate::stage::MainThread, mut frame: ClockLayoutFrame) {
+    let host = frame.frame.inputs.host;
+    // SAFETY: Guaranteed by the caller.
+    unsafe {
+        pay_owed_host_halves(
+            main_thread,
+            &host,
+            frame.frame.inputs.arena_handle,
+            frame.frame.owed_host_halves.take(),
+        );
+    }
+    let list_owners_to_rebuild = std::mem::take(&mut frame.frame.list_owners_to_rebuild);
+    host.rebuild_list_owners_with_stale_item_counters(main_thread, &list_owners_to_rebuild);
+    // SAFETY: As above.
+    let over = unsafe {
+        frame
+            .frame
+            .take_in_end(main_thread, FrameEnd::Over(FfiLayoutUpdateEnd::InUpdate))
+    };
+    debug_assert!(over, "a clock layout frame taken in is over");
+}
+
+/// Makes the frame a clock lease's ticks lay out in, with the document as it stands now.
+///
+/// # Safety
+///
+/// On the document thread, with no layout update running.
+unsafe fn make_clock_layout_frame(
+    main_thread: &crate::stage::MainThread,
+    arena_handle: *mut c_void,
+) -> ClockLayoutFrame {
+    let host = layout_update_host(main_thread);
+    let facts = host.document_facts(main_thread);
+    ClockLayoutFrame {
+        frame: LayoutFrame {
+            inputs: FrameInputs {
+                host,
+                arena_handle,
+                reason_is_inspect_devtools_layout_data: false,
+                is_template_contents_document: false,
+                trace: UpdateLayoutTrace::disabled(),
+            },
+            messages: FrameMessages::default(),
+            layout_pass: 0,
+            connected_element_count: 0,
+            pass_sources: None,
+            tree_build_document_style_node: None,
+            list_owners_to_rebuild: Vec::new(),
+            selection: host.read_selection(main_thread),
+            owed_host_halves: Cell::default(),
+        },
+        facts,
+        laid_out: false,
     }
 }
 

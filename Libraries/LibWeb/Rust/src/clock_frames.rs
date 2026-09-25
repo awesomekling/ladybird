@@ -33,6 +33,7 @@ use crate::css::style::StyleEngine;
 use crate::css::style::bridge::{FfiRowSampledInPass, sample_installed_record_for_clock_tick};
 use crate::css::style::tree::StyleNodeID;
 use crate::layout::LayoutNodeArena;
+use crate::layout::update_layout::ClockLayoutFrame;
 
 /// Whether clock frames are on: `LIBWEB_RENDER_CLOCK_FRAMES` set to anything but empty or `0`.
 pub(crate) fn enabled() -> bool {
@@ -96,6 +97,9 @@ pub struct ClockLease {
     paused: AtomicBool,
     targets: Mutex<Vec<ClockTarget>>,
     entries: Mutex<Vec<ClockTickEntry>>,
+    /// The layout frame the render clock's ticks lay out in, which the main thread takes in when
+    /// it wakes.
+    layout_frame: Mutex<Option<ClockLayoutFrame>>,
     outcome: Mutex<Option<FfiClockTickOutcome>>,
 }
 
@@ -218,6 +222,26 @@ impl ClockLease {
             });
         }
         outcome
+    }
+
+    /// Lays out what the tick's samples left, in the layout frame the main thread handed the lease.
+    /// Returns whether a round laid out, or `None` where the main thread has to.
+    ///
+    /// # Safety
+    ///
+    /// As for [`Self::run_tick`], with the main thread idle.
+    unsafe fn lay_out(&self) -> Option<bool> {
+        let mut frame = self.layout_frame.lock().expect("clock lease layout frame");
+        let Some(frame) = frame.as_mut() else {
+            // SAFETY: The caller owns the arena.
+            let arena = unsafe { &*(self.arena as *const LayoutNodeArena) };
+            return arena.layout_is_up_to_date(false).then_some(false);
+        };
+        // SAFETY: Guaranteed by the caller.
+        if !unsafe { frame.run_round() } {
+            return None;
+        }
+        Some(frame.laid_out())
     }
 
     fn take_entry(&self) -> Option<ClockTickEntry> {
@@ -343,6 +367,7 @@ pub extern "C" fn rust_clock_lease_grant(
         paused: AtomicBool::new(false),
         targets: Mutex::default(),
         entries: Mutex::default(),
+        layout_frame: Mutex::default(),
         outcome: Mutex::default(),
     });
     if let Some(previous) = registry()
@@ -403,6 +428,34 @@ pub extern "C" fn rust_clock_lease_set_paused(arena: *mut c_void, paused: bool) 
     if let Some(lease) = clock_lease_for(arena as usize) {
         lease.paused.store(paused, Ordering::Release);
     }
+}
+
+/// Hands the lease of `arena` the layout frame its render clock ticks lay out in.
+pub(crate) fn set_clock_layout_frame(arena: *mut c_void, frame: ClockLayoutFrame) {
+    if let Some(lease) = clock_lease_for(arena as usize) {
+        *lease.layout_frame.lock().expect("clock lease layout frame") = Some(frame);
+    }
+}
+
+/// Takes the layout frame of the lease of `arena` if its ticks laid out in it.
+pub(crate) fn take_laid_out_clock_layout_frame(arena: *mut c_void) -> Option<ClockLayoutFrame> {
+    let lease = clock_lease_for(arena as usize)?;
+    let mut frame = lease.layout_frame.lock().expect("clock lease layout frame");
+    if !frame.as_ref().is_some_and(ClockLayoutFrame::laid_out) {
+        return None;
+    }
+    frame.take()
+}
+
+pub(crate) fn clock_layout_frame_laid_out(arena: *mut c_void) -> bool {
+    clock_lease_for(arena as usize).is_some_and(|lease| {
+        lease
+            .layout_frame
+            .lock()
+            .expect("clock lease layout frame")
+            .as_ref()
+            .is_some_and(ClockLayoutFrame::laid_out)
+    })
 }
 
 /// Whether the document whose layout arena is `arena` holds a live lease.
@@ -623,6 +676,8 @@ pub struct FfiRenderClockCounters {
     pub ticks_dropped_stale: u64,
     /// Ticks that installed their samples for the main thread to adopt.
     pub ticks_installed: u64,
+    /// Ticks after which a layout frame on the render side held what the main thread takes in.
+    pub ticks_laid_out: u64,
     /// Ticks that ended their lease: past its deadline, or with a sample only the main thread takes.
     pub ticks_needing_main: u64,
 }
@@ -638,6 +693,7 @@ struct RenderClockCounters {
     ticks_dropped_paused: AtomicU64,
     ticks_dropped_stale: AtomicU64,
     ticks_installed: AtomicU64,
+    ticks_laid_out: AtomicU64,
     ticks_needing_main: AtomicU64,
 }
 
@@ -651,6 +707,7 @@ static COUNTERS: RenderClockCounters = RenderClockCounters {
     ticks_dropped_paused: AtomicU64::new(0),
     ticks_dropped_stale: AtomicU64::new(0),
     ticks_installed: AtomicU64::new(0),
+    ticks_laid_out: AtomicU64::new(0),
     ticks_needing_main: AtomicU64::new(0),
 };
 
@@ -764,10 +821,18 @@ fn run_render_clock_tick(context: u64, slot: &ClockSlot) {
         tick = Some(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             // SAFETY: The main thread is idle with nothing in flight, and waits for this tick when
             // it wakes: the stage thread owns the arena and its engine until `idle_tick` is dropped.
-            unsafe { lease.run_tick(time) }
+            let outcome = unsafe { lease.run_tick(time) };
+            if outcome != FfiClockTickOutcome::Presented {
+                return (outcome, false);
+            }
+            // SAFETY: As above.
+            match unsafe { lease.lay_out() } {
+                Some(laid_out) => (outcome, laid_out),
+                None => (FfiClockTickOutcome::NeedsMain, false),
+            }
         })));
     });
-    let Some(Ok(outcome)) = tick else {
+    let Some(Ok((outcome, laid_out))) = tick else {
         // A tick has nobody to hand a panic to.
         std::process::abort();
     };
@@ -777,6 +842,9 @@ fn run_render_clock_tick(context: u64, slot: &ClockSlot) {
     drop(idle_tick);
     if outcome == FfiClockTickOutcome::Presented {
         count(&COUNTERS.ticks_installed);
+        if laid_out {
+            count(&COUNTERS.ticks_laid_out);
+        }
         return;
     }
     count(&COUNTERS.ticks_needing_main);
@@ -799,6 +867,7 @@ pub extern "C" fn rust_render_clock_counters() -> FfiRenderClockCounters {
         ticks_dropped_paused: load(&COUNTERS.ticks_dropped_paused),
         ticks_dropped_stale: load(&COUNTERS.ticks_dropped_stale),
         ticks_installed: load(&COUNTERS.ticks_installed),
+        ticks_laid_out: load(&COUNTERS.ticks_laid_out),
         ticks_needing_main: load(&COUNTERS.ticks_needing_main),
     }
 }
