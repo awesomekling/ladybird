@@ -1807,15 +1807,18 @@ RefPtr<CustomPropertyData const> StyleComputer::engine_custom_property_environme
     auto const* store = m_style_engine.borrow_engine_custom_property_environment(identity, parent_identity);
     if (!store)
         return {};
-    // What a pseudo-element's animations composed its custom properties into is its animation
-    // overlay, over the environment its record was resolved over.
+    // What an element's or a pseudo-element's animations composed its custom properties into is its
+    // animation overlay, over the environment its record was resolved over.
     u32 owner_style_node = 0;
     u8 owner_pseudo_kind = 0;
-    if (StyleEngineFFI::style_engine_sampled_pseudo_element_environment_owner(m_style_engine.rust_handle(), identity, &owner_style_node, &owner_pseudo_kind)) {
+    if (StyleEngineFFI::style_engine_sampled_custom_property_environment_owner(m_style_engine.rust_handle(), identity, &owner_style_node, &owner_pseudo_kind)) {
         auto index = style_node_index(StyleNodeID { owner_style_node });
         if (auto* owner = index < m_element_style_nodes.size() ? as_if<DOM::Element>(m_element_style_nodes[index].ptr()) : nullptr) {
+            Optional<PseudoElement> owner_pseudo_element;
+            if (owner_pseudo_kind != NumericLimits<u8>::max())
+                owner_pseudo_element = static_cast<PseudoElement>(owner_pseudo_kind);
             auto data = CustomPropertyData::view_animation_overlay(store, identity, engine_custom_property_environment(parent_identity),
-                DOM::AbstractElement { *owner, static_cast<PseudoElement>(owner_pseudo_kind) });
+                DOM::AbstractElement { *owner, owner_pseudo_element });
             ComputedValuesFFI::rust_custom_property_store_destroy(store);
             m_engine_custom_property_environments.set(identity, *data);
             return data;

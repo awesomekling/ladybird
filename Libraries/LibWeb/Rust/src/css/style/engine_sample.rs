@@ -1520,6 +1520,63 @@ impl super::StyleEngineState {
         true
     }
 
+    /// A sample of an element moved its custom-property environment: to `sampled`, the one the
+    /// engine composed its animated custom properties into, or, with zero, back to the one beneath.
+    /// The element takes it here, where the host would have installed its view of it, and the host
+    /// views it by identity.
+    ///
+    /// Returns false where the host installs it: over an environment the host resolved, whose
+    /// object the engine does not hold.
+    pub(crate) fn install_sampled_element_environment(&mut self, node: StyleNodeID, sampled: u64) -> bool {
+        let (base, declares) = match self.retained.element_custom_property_data.get(&node) {
+            None | Some(None) => (0, false),
+            Some(Some(held)) if held.is_animation_overlay => match held.animation_base.as_ref() {
+                Some(base) => (base.environment(), held.declares),
+                None => return false,
+            },
+            Some(Some(held)) => (held.identity, held.declares),
+        };
+        if base != 0 && base & custom_property_environments::ENGINE_ENVIRONMENT_IDENTITY_BIT == 0 {
+            engine_sample_check::note_declined("element sampled environment: over a host environment");
+            return false;
+        }
+        let held = match (sampled, base) {
+            (0, 0) => None,
+            (0, base) => Some(inputs::HeldCustomPropertyEnvironment {
+                identity: base,
+                is_animation_overlay: false,
+                declares,
+                data: None,
+                animation_base: None,
+            }),
+            (sampled, base) => {
+                let base_store = self
+                    .retained
+                    .custom_property_environments
+                    .store(base)
+                    .unwrap_or(std::ptr::null());
+                Some(inputs::HeldCustomPropertyEnvironment {
+                    identity: sampled,
+                    is_animation_overlay: true,
+                    declares,
+                    data: None,
+                    animation_base: Some(inputs::AnimationBaseEnvironment::resolved_by_engine(base, base_store)),
+                })
+            }
+        };
+        if let Some(held) = held.as_ref() {
+            self.retained
+                .computed_group_sets
+                .set_node_custom_property_environment(node, held.identity);
+        }
+        let retired = self.retained.element_custom_property_data.insert(node, held);
+        self.host
+            .retired_custom_property_data
+            .extend(retired.flatten().and_then(|held| held.data));
+        engine_sample_check::note_taken("element sampled environment installed by the engine");
+        true
+    }
+
     /// Take what the engine published for a pseudo-element whose animations it sampled as it
     /// settled it, so that exactly one installation applies it.
     pub(crate) fn take_pseudo_element_sampled_in_pass(

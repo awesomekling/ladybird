@@ -3750,25 +3750,61 @@ pub unsafe extern "C" fn style_engine_take_pseudo_element_sampled_in_pass(
     sampled
 }
 
-/// The pseudo-element whose animations composed their custom properties into an environment the
-/// engine resolved, for the host to view it as that pseudo-element's animation overlay. Returns
+/// The host installs a sample that moved the custom-property environment of an element, or of one
+/// of its synthetic pseudo-elements, to `environment`, or, with zero, back to the one beneath: the
+/// engine takes it itself, and the host views it by identity. Returns false where the host installs
+/// its own view of it.
+///
+/// # Safety
+/// `engine` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_install_sampled_custom_property_environment(
+    engine: *mut c_void,
+    node: u32,
+    pseudo_kind: u8,
+    environment: u64,
+) -> bool {
+    engine_entrance(engine, "style_engine_install_sampled_custom_property_environment");
+    let Some(node) = StyleNodeID::from_raw(node) else {
+        return false;
+    };
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    match pseudo_kind {
+        u8::MAX => engine.install_sampled_element_environment(node, environment),
+        pseudo_kind => {
+            engine
+                .computed_group_sets
+                .owns_animation_overlay_slot(super::computed::ComputedStyleTarget::new(node, pseudo_kind))
+                && engine.install_sampled_pseudo_element_environment(node, pseudo_kind, environment)
+        }
+    }
+}
+
+/// The element or pseudo-element whose animations composed their custom properties into an
+/// environment the engine resolved, for the host to view it as that pseudo-element's animation overlay. Returns
 /// false for any other environment.
 ///
 /// # Safety
 /// `engine` must be live, and `node` and `pseudo_kind` writable.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_sampled_pseudo_element_environment_owner(
+pub unsafe extern "C" fn style_engine_sampled_custom_property_environment_owner(
     engine: *const c_void,
     environment: u64,
     node: *mut u32,
     pseudo_kind: *mut u8,
 ) -> bool {
-    engine_entrance(engine, "style_engine_sampled_pseudo_element_environment_owner");
+    engine_entrance(engine, "style_engine_sampled_custom_property_environment_owner");
     let engine = unsafe { &*engine.cast::<StyleEngine>() };
-    let Some(&(owner, kind)) = engine
+    let Some((owner, kind)) = engine
         .sampled_pseudo_element_custom_property_environments
         .iter()
-        .find_map(|(key, &sampled)| (sampled == environment).then_some(key))
+        .find_map(|(&key, &sampled)| (sampled == environment).then_some(key))
+        .or_else(|| {
+            engine
+                .sampled_custom_property_environments
+                .iter()
+                .find_map(|(&node, &sampled)| (sampled == environment).then_some((node, u8::MAX)))
+        })
     else {
         return false;
     };
@@ -3812,13 +3848,7 @@ pub unsafe extern "C" fn style_engine_sample_installed_record(
         match sampled {
             Ok(published) => {
                 super::engine_sample_check::note_taken("installed record sample");
-                let mut sampled = row_sampled_in_pass(engine, Some(published));
-                // A synthetic pseudo-element takes the environment its sample moved it to here.
-                if let (true, Some(pseudo_kind), Some(moved)) = (owns_slot, pseudo, published.custom_properties) {
-                    sampled.custom_property_environment_named =
-                        engine.install_sampled_pseudo_element_environment(style_node, pseudo_kind, moved.environment);
-                }
-                sampled
+                row_sampled_in_pass(engine, Some(published))
             }
             Err(reason) => {
                 super::engine_sample_check::note_declined(&format!("installed record: {reason}"));
