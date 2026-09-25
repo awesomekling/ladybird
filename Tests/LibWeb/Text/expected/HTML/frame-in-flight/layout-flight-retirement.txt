@@ -1,0 +1,10 @@
+navigation: held as armed: true
+navigation: new document: second
+document.open: held as armed: true
+document.open: document: third
+document.open: inner laid out: true
+removal: held as armed: true
+removal: iframes left: 0
+window close: held as armed: true
+window close: closed: true
+window close: opener laid out: 300

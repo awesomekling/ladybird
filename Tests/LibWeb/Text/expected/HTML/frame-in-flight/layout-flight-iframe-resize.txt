@@ -1,0 +1,10 @@
+parent in flight, parent reads: held as armed: true
+parent in flight, parent reads: iframe width: 300
+parent in flight, parent reads: child viewport width: 300
+parent in flight, parent reads: child box width: 300
+parent in flight, child reads: held as armed: true
+parent in flight, child reads: child box width: 250
+parent in flight, child reads: child viewport width: 250
+child in flight: held as armed: true
+child in flight: child viewport width: 220
+child in flight: child box: 220x30

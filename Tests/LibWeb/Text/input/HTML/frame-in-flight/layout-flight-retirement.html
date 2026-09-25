@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<iframe id="frame" style="width: 200px; height: 100px" srcdoc="<body style='background: blue'><div id=inner>first</div>"></iframe>
+<script>
+    // The document whose layout pass is in flight goes away beside it: its iframe navigates, has its document replaced
+    // by document.open(), or is removed, and a window the page opened is closed. The pass in flight is taken back, its
+    // document retired, and the documents that follow lay out in later rendering updates.
+    function loaded() {
+        return new Promise(resolve => frame.addEventListener("load", resolve, { once: true }));
+    }
+
+    function mutateChild() {
+        frame.contentDocument.getElementById("inner").style.width = "120px";
+    }
+
+    asyncTest(async done => {
+        if (!frame.contentDocument?.getElementById("inner"))
+            await loaded();
+
+        const navigated = await whileLayoutInFlight("before-run", mutateChild, frameInFlight => {
+            frame.srcdoc = "<body><div id=inner>second</div>";
+            return frameInFlight;
+        }, frame.contentDocument);
+        await loaded();
+        println(`navigation: held as armed: ${layoutHeldAsArmed(navigated, "before-run")}`);
+        println(`navigation: new document: ${frame.contentDocument.body.textContent}`);
+
+        const opened = await whileLayoutInFlight("before-completion", mutateChild, frameInFlight => {
+            const doc = frame.contentDocument;
+            doc.open();
+            doc.write("<body><div id=inner>third</div>");
+            doc.close();
+            return frameInFlight;
+        }, frame.contentDocument);
+        println(`document.open: held as armed: ${layoutHeldAsArmed(opened, "before-completion")}`);
+        await twoFrames();
+        println(`document.open: document: ${frame.contentDocument.body.textContent}`);
+        println(`document.open: inner laid out: ${frame.contentDocument.getElementById("inner").offsetWidth > 0}`);
+
+        const removed = await whileLayoutInFlight("before-run", mutateChild, frameInFlight => {
+            frame.remove();
+            internals.gc();
+            return frameInFlight;
+        }, frame.contentDocument);
+        println(`removal: held as armed: ${layoutHeldAsArmed(removed, "before-run")}`);
+        await twoFrames();
+        internals.gc();
+        println(`removal: iframes left: ${document.querySelectorAll("iframe").length}`);
+
+        const popup = window.open();
+        popup.document.body.innerHTML = "<div id=popupBox style='width: 40px'>popup</div>";
+        const closed = await whileLayoutInFlight("before-run", () => {
+            popup.document.getElementById("popupBox").style.width = "80px";
+            document.body.style.width = "300px";
+        }, frameInFlight => {
+            popup.close();
+            internals.gc();
+            return frameInFlight;
+        });
+        println(`window close: held as armed: ${layoutHeldAsArmed(closed, "before-run")}`);
+        await twoFrames();
+        internals.gc();
+        println(`window close: closed: ${popup.closed}`);
+        println(`window close: opener laid out: ${document.body.offsetWidth}`);
+        done();
+    });
+</script>
