@@ -1310,6 +1310,8 @@ void Heap::sweep_dead_cells(bool print_report, Core::ElapsedTimer const& measure
 
 void Heap::sweep_block(HeapBlock& block)
 {
+    TemporaryChange sweeping_block_change(m_sweeping_block, true);
+
     // Remove from the allocator's pending sweep list.
     block.m_sweep_list_node.remove();
 
