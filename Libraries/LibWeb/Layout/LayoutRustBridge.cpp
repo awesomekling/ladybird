@@ -27,7 +27,6 @@
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/Node.h>
 #include <LibWeb/HTML/AttributeNames.h>
-#include <LibWeb/HTML/HTMLBodyElement.h>
 #include <LibWeb/HTML/HTMLElement.h>
 #include <LibWeb/Layout/Box.h>
 #include <LibWeb/Layout/ImageProvider.h>
@@ -358,58 +357,6 @@ void clear_svg_attribute_facts(DOM::Document& document, CSS::StyleNodeID style_n
         RustFFI::layout_arena_clear_style_node_svg_attribute_facts(arena->handle(), style_node.value());
 }
 
-static bool style_has_any_containment(CSS::ComputedValues::BoxValues const& values)
-{
-    return values.size_containment || values.inline_size_containment || values.layout_containment || values.style_containment || values.paint_containment;
-}
-
-// The inputs of the principal writing mode and viewport overflow propagation. They are read from
-// the elements' own style records: the previous pass already rewrote their boxes' values, and a
-// display:none body has style but no box.
-static RustFFI::FfiViewportPropagationFacts viewport_propagation_facts(DOM::Document& document)
-{
-    static_assert(to_underlying(CSS::Overflow::Auto) == 0);
-    static_assert(to_underlying(CSS::Overflow::Clip) == 1);
-    static_assert(to_underlying(CSS::Overflow::Hidden) == 2);
-    static_assert(to_underlying(CSS::Overflow::Visible) == 4);
-    RustFFI::FfiViewportPropagationFacts facts {};
-    facts.root_layout_node = Compositing::RustFFI::NodeSlotId_INVALID;
-    facts.body_layout_node = Compositing::RustFFI::NodeSlotId_INVALID;
-    auto* root_element = document.document_element();
-    auto* arena = document.layout_node_arena_if_created();
-    if (!root_element || !arena)
-        return facts;
-    // The rows are found by identity, so no shell is made just to name them.
-    auto root_row = RustFFI::layout_arena_bound_row(arena->handle(), root_element->style_node_id().value());
-    if (root_row.index == Compositing::RustFFI::NodeSlotId_INVALID.index)
-        return facts;
-    auto const* root_box_values = root_element->style_group<CSS::ComputedValues::BoxValues>();
-    auto const* root_inherited_box_values = root_element->style_group<CSS::ComputedValues::InheritedBoxValues>();
-    VERIFY(root_box_values && root_inherited_box_values);
-    facts.root_layout_node = root_row;
-    facts.root_is_html_html_element = root_element->is_html_html_element();
-    facts.root_overflow_x = root_box_values->overflow_x;
-    facts.root_overflow_y = root_box_values->overflow_y;
-    facts.root_writing_mode = root_inherited_box_values->writing_mode;
-    facts.root_direction = root_inherited_box_values->direction;
-    facts.root_has_containment = style_has_any_containment(*root_box_values);
-
-    auto* body_element = root_element->first_child_of_type<HTML::HTMLBodyElement>();
-    auto const* body_box_values = body_element ? body_element->style_group<CSS::ComputedValues::BoxValues>() : nullptr;
-    auto const* body_inherited_box_values = body_element ? body_element->style_group<CSS::ComputedValues::InheritedBoxValues>() : nullptr;
-    if (!body_box_values || !body_inherited_box_values)
-        return facts;
-    facts.has_styled_body = true;
-    facts.body_layout_node = RustFFI::layout_arena_bound_row(arena->handle(), body_element->style_node_id().value());
-    facts.body_display_is_none = CSS::display_from_ffi_display(body_box_values->display).is_none();
-    facts.body_overflow_x = body_box_values->overflow_x;
-    facts.body_overflow_y = body_box_values->overflow_y;
-    facts.body_writing_mode = body_inherited_box_values->writing_mode;
-    facts.body_direction = body_inherited_box_values->direction;
-    facts.body_has_containment = style_has_any_containment(*body_box_values);
-    return facts;
-}
-
 void register_layout_host(NodeArena& arena, DOM::Document& document)
 {
     static_assert(to_underlying(SVG::PreserveAspectRatio::Align::None) == 0);
@@ -438,7 +385,6 @@ void register_layout_host(NodeArena& arena, DOM::Document& document)
             auto const& node = *static_cast<Node const*>(node_shell);
             if (auto const* box = as_if<Box>(node))
                 *facts = box->build_replaced_content_facts_for_arena(); },
-        .viewport_propagation_facts = [](void* context) { return viewport_propagation_facts(*static_cast<DOM::Document*>(context)); },
     };
     RustFFI::layout_arena_set_layout_host_callbacks(arena.handle(), callbacks);
     RustFFI::layout_arena_set_document_is_decoded_svg(arena.handle(), document.is_decoded_svg());
