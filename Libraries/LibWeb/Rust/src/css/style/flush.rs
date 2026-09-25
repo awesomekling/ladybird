@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-use super::animations::CommittedTransformReferenceBoxes;
+use super::animations::{AnimationTimelineSamples, CommittedTransformReferenceBoxes};
 use super::engine_sample_check;
 use super::*;
 
@@ -48,6 +48,8 @@ pub(crate) struct StylePass {
     /// The nodes that joined the pass, or wait for a later wave or transaction, for a reaction a row
     /// it settled derived for them.
     joined_by_derivation: HashSet<StyleNodeID>,
+    /// The times the pass's first wave sampled at. Every wave of one pass samples at the same times.
+    timeline_samples: AnimationTimelineSamples,
 }
 
 impl StylePass {
@@ -230,6 +232,7 @@ impl StyleEngineState {
         clock: &mut TransactionClock,
         counters: &mut Counters,
         committed_boxes: CommittedTransformReferenceBoxes,
+        timeline_samples: &AnimationTimelineSamples,
     ) -> bool {
         // The previous transaction's uninstalled records can no longer be consumed. Revert
         // them before this transaction publishes anything: a later C++ computation can install
@@ -2059,6 +2062,7 @@ impl StyleEngineState {
                 batch_custom_property_matches: HashMap::default(),
                 published_nodes_are_charged: true,
                 joined_by_derivation: HashSet::default(),
+                timeline_samples: timeline_samples.clone(),
             };
             self.run_style_pass(
                 &mut pass,
@@ -2067,6 +2071,7 @@ impl StyleEngineState {
                 &mut computation_scratch_memory,
                 counters,
                 committed_boxes,
+                timeline_samples,
             );
             computation_loop_timer.stop(Counter::ComputationLoopMicroseconds, counters);
             computation_scratch_memory.resize_required_to(&mut self.retained.memory, pass.scratch.capacity_bytes());
@@ -2142,6 +2147,7 @@ impl StyleEngineState {
     /// Settle the pass's rows from the first one the host has not been given, in the order the
     /// host applies them, until the first row that reads an ancestor only the host settles. That
     /// row, and every row after it, waits for the next wave.
+    #[allow(clippy::too_many_arguments)]
     fn run_style_pass(
         &mut self,
         pass: &mut StylePass,
@@ -2150,6 +2156,7 @@ impl StyleEngineState {
         computation_scratch_memory: &mut MemoryLease,
         counters: &mut Counters,
         committed_boxes: CommittedTransformReferenceBoxes,
+        timeline_samples: &AnimationTimelineSamples,
     ) {
         loop {
             let derived_children = self.run_style_pass_round(
@@ -2159,6 +2166,7 @@ impl StyleEngineState {
                 computation_scratch_memory,
                 counters,
                 committed_boxes,
+                timeline_samples,
             );
             if derived_children.is_empty() {
                 return;
@@ -2409,6 +2417,7 @@ impl StyleEngineState {
     }
 
     #[allow(clippy::too_many_lines)]
+    #[allow(clippy::too_many_arguments)]
     fn run_style_pass_round(
         &mut self,
         pass: &mut StylePass,
@@ -2417,6 +2426,7 @@ impl StyleEngineState {
         computation_scratch_memory: &mut MemoryLease,
         counters: &mut Counters,
         committed_boxes: CommittedTransformReferenceBoxes,
+        timeline_samples: &AnimationTimelineSamples,
     ) -> Vec<(StyleNodeID, u8, u8, bool)> {
         // Where each row of the pass stands, for a reaction a row derives for a child that is a row
         // still to come.
@@ -3075,6 +3085,7 @@ impl StyleEngineState {
                         None,
                         root,
                         committed_boxes,
+                        timeline_samples,
                     )
                     .and_then(|sample| {
                         self.publish_settled_row_sample(node, None, sample, counters)
@@ -3111,6 +3122,7 @@ impl StyleEngineState {
                             new_style_record.raw(),
                             installed,
                             committed_boxes,
+                            timeline_samples,
                             counters,
                         );
                     }
@@ -3626,12 +3638,17 @@ impl StyleEngineState {
         mut emit: impl FnMut(StyleTransactionVersion, ProgramVersion, &[PublishedStyleDeltaRecord]),
         counters: &mut Counters,
         committed_boxes: CommittedTransformReferenceBoxes,
+        timeline_samples: &AnimationTimelineSamples,
     ) -> bool {
         let mut pass = self
             .host
             .suspended_style_pass
             .take()
             .expect("only a suspended style pass continues");
+        debug_assert!(
+            pass.timeline_samples.agree_with(timeline_samples),
+            "a wave samples at other times than its style pass began at"
+        );
         // A record the host did not install from the last wave is gone, as at a transaction
         // boundary: the host computed that row itself, or skipped it.
         self.discard_engine_computed_records(counters);
@@ -3699,6 +3716,7 @@ impl StyleEngineState {
             &mut computation_scratch_memory,
             counters,
             committed_boxes,
+            timeline_samples,
         );
         computation_scratch_memory.release();
         // Every row before the one this wave resumes at is installed, so nothing that stopped the
@@ -3893,9 +3911,10 @@ impl StyleEngineState {
         mut emit: impl FnMut(StyleTransactionVersion, ProgramVersion, &[PublishedStyleDeltaRecord]),
         counters: &mut Counters,
         committed_boxes: CommittedTransformReferenceBoxes,
+        timeline_samples: &AnimationTimelineSamples,
     ) -> bool {
         if self.retained.pseudo_settles_owed.is_empty() {
-            return self.take_style_transaction_rows(root, emit, counters, committed_boxes);
+            return self.take_style_transaction_rows(root, emit, counters, committed_boxes, timeline_samples);
         }
         // The pseudo-elements the host's installations left owed are settled once the rows are:
         // an element with a row of its own has them settled beside it.
@@ -3907,6 +3926,7 @@ impl StyleEngineState {
             },
             counters,
             committed_boxes,
+            timeline_samples,
         );
         let (transaction_version, program_version, mut rows) = batch.unwrap_or_else(|| {
             let transaction_version = self.retained.next_style_transaction_version;
@@ -3918,7 +3938,7 @@ impl StyleEngineState {
             );
             (transaction_version, self.retained.program.version(), Vec::new())
         });
-        let settled_rows = self.settle_owed_pseudo_elements(&rows, committed_boxes, counters);
+        let settled_rows = self.settle_owed_pseudo_elements(&rows, committed_boxes, timeline_samples, counters);
         rows.extend(settled_rows);
         if !rows.is_empty() {
             emit(transaction_version, program_version, &rows);
@@ -3932,6 +3952,7 @@ impl StyleEngineState {
         emit: impl FnMut(StyleTransactionVersion, ProgramVersion, &[PublishedStyleDeltaRecord]),
         counters: &mut Counters,
         committed_boxes: CommittedTransformReferenceBoxes,
+        timeline_samples: &AnimationTimelineSamples,
     ) -> bool {
         self.retained.engine_row_child_facts.clear();
         self.derive_applied_style_reactions();
@@ -3944,14 +3965,15 @@ impl StyleEngineState {
                 && !self.host.program_staging.is_dirty()
                 && self.host.sheet_rule_replacement.is_none()
             {
-                return self.continue_style_pass(emit, counters, committed_boxes);
+                return self.continue_style_pass(emit, counters, committed_boxes, timeline_samples);
             }
             self.abandon_suspended_style_pass();
         }
         let mut clock = TransactionClock::new();
         self.install_witness_effects();
         self.install_pending_matching_context();
-        let scoped = self.take_style_transaction_with_clock(root, emit, &mut clock, counters, committed_boxes);
+        let scoped =
+            self.take_style_transaction_with_clock(root, emit, &mut clock, counters, committed_boxes, timeline_samples);
         self.finish_memory_evaluation_loop();
         // Include transaction-local destruction on both ordinary and early-return paths.
         clock.finish(counters);

@@ -1097,6 +1097,7 @@ impl super::StyleEngineState {
         settled: &mut super::publication::RetriedEngineRecord,
         held_style_records: &[u64; bridge::RETRY_PSEUDO_RECORD_SLOTS],
         committed_boxes: super::animations::CommittedTransformReferenceBoxes,
+        timeline_samples: &super::animations::AnimationTimelineSamples,
         counters: &mut super::Counters,
     ) -> (u8, u8) {
         let mut sampled = 0u8;
@@ -1132,6 +1133,7 @@ impl super::StyleEngineState {
                         None,
                         None,
                         committed_boxes,
+                        timeline_samples,
                     )
                     .and_then(|sample| {
                         self.publish_settled_row_sample(node, Some(pseudo_kind), sample, counters)
@@ -1158,6 +1160,7 @@ impl super::StyleEngineState {
                 record,
                 installed,
                 committed_boxes,
+                timeline_samples,
                 counters,
             ) {
                 stepped |= 1 << kind;
@@ -1178,6 +1181,7 @@ impl super::StyleEngineState {
         pseudo: Option<u8>,
         style_record: u64,
         committed_boxes: super::animations::CommittedTransformReferenceBoxes,
+        timeline_samples: &super::animations::AnimationTimelineSamples,
         counters: &mut super::Counters,
     ) -> Result<SettledRowPublication, String> {
         // The effects the element holds now are sampled, as the host's own sample collects them,
@@ -1190,6 +1194,7 @@ impl super::StyleEngineState {
             Some(style_record),
             None,
             committed_boxes,
+            timeline_samples,
         )?;
         // A sample that moves nothing the record composed may still move the custom properties
         // the element's environment animates, which the publication composes.

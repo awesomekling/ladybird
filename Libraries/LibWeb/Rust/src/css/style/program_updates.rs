@@ -1452,11 +1452,13 @@ impl StyleEngineState {
             nodes: Vec::new(),
             scoped: true,
         });
+        let timeline_samples = self.animation_timeline_samples().clone();
         let _ = self.take_style_transaction(
             root,
             |_, _, _| {},
             counters,
             super::animations::CommittedTransformReferenceBoxes::NONE,
+            &timeline_samples,
         );
         // A pass the host would install in waves reports every wave, as the host's diagnostic
         // take does.
@@ -1466,6 +1468,7 @@ impl StyleEngineState {
                 |_, _, _| {},
                 counters,
                 super::animations::CommittedTransformReferenceBoxes::NONE,
+                &timeline_samples,
             );
         }
         let capture = self

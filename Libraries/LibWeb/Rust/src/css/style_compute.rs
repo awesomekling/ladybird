@@ -3078,6 +3078,7 @@ fn prepare_engine_sample(
     descriptions: &[crate::css::style::animations::PublishedEffect],
     environments: crate::css::style::engine_sample::SampleCustomPropertyEnvironments,
     root: Option<crate::css::style::animations::RootElementFontMetrics>,
+    timeline_samples: &crate::css::style::animations::AnimationTimelineSamples,
 ) -> Result<(Box<EngineSampleRun>, FfiHostAnimationSample), String> {
     let root = root.unwrap_or_else(|| engine.root_element_font_metrics());
     use crate::css::style::animations;
@@ -3104,7 +3105,7 @@ fn prepare_engine_sample(
     let selected = animations::select_sampled_effects(
         engine.element_animation_timing_rows(node, slot),
         engine.element_animation_timing_row_linear_points(node, slot),
-        engine.animation_timeline_samples(),
+        timeline_samples,
     )
     .ok_or("effect selection")?;
     let view = engine
@@ -3224,6 +3225,7 @@ fn plan_effect_stack(
     engine: &crate::css::style::StyleEngineState,
     node: crate::css::style::tree::StyleNodeID,
     plan: &crate::css::style::animations::SettledAnimationPlan,
+    timeline_samples: &crate::css::style::animations::AnimationTimelineSamples,
 ) -> Result<Vec<PlannedEffect>, &'static str> {
     use crate::css::style::animations::{
         self, AnimationTimingRow, AppliedAnimationDefinition, NO_MATCHED_ANIMATION, PublishedEasing,
@@ -3295,8 +3297,8 @@ fn plan_effect_stack(
                 .ok_or("a timing the engine cannot restamp")?;
         }
         if let Some(&(_, running)) = played.iter().find(|(played, _)| *played == index) {
-            let timeline_time = animations::row_timeline_time(row, engine.animation_timeline_samples())
-                .ok_or("a timeline with no sample")?;
+            let timeline_time =
+                animations::row_timeline_time(row, timeline_samples).ok_or("a timeline with no sample")?;
             *row = row
                 .with_css_play_state(running, timeline_time)
                 .ok_or("a play or pause the engine cannot settle")?;
@@ -3312,12 +3314,11 @@ fn plan_effect_stack(
         }
     }
     let rows = animations::rows_with_synthesized(planned, &synthesized);
-    let samples = engine.animation_timeline_samples();
     let mut effects = Vec::with_capacity(rows.len());
     for row in &rows {
         let timeline_time = match row.has_hold_time() {
             true => None,
-            false => animations::row_timeline_time(row, samples).ok_or("a timeline with no sample")?,
+            false => animations::row_timeline_time(row, timeline_samples).ok_or("a timeline with no sample")?,
         };
         let points = match row.synthesized_index() {
             Some(_) => &[][..],
@@ -3363,6 +3364,7 @@ unsafe extern "C" fn settled_row_overlay(context: *mut c_void) -> *mut c_void {
 /// settled and before the host installs it: the effects the timing rows select, the environments
 /// the new record and its parent's were published with, and the length contexts and fonts the
 /// engine builds; or why the engine cannot.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn sample_settled_row(
     engine: &mut crate::css::style::StyleEngineState,
     node: crate::css::style::tree::StyleNodeID,
@@ -3371,6 +3373,7 @@ pub(crate) fn sample_settled_row(
     record: Option<u64>,
     root: Option<crate::css::style::animations::RootElementFontMetrics>,
     committed_boxes: crate::css::style::animations::CommittedTransformReferenceBoxes,
+    timeline_samples: &crate::css::style::animations::AnimationTimelineSamples,
 ) -> Result<SettledRowSample, String> {
     use crate::css::animated_overlay::{
         rust_animated_overlay_clone_inherited, rust_animated_overlay_create, rust_animated_overlay_free,
@@ -3393,9 +3396,10 @@ pub(crate) fn sample_settled_row(
         .then(|| engine.element_settled_animation_plan(node))
         .flatten()
     {
-        Some(plan) => {
-            Some(plan_effect_stack(engine, node, plan).map_err(|reason| format!("animation plan: {reason}"))?)
-        }
+        Some(plan) => Some(
+            plan_effect_stack(engine, node, plan, timeline_samples)
+                .map_err(|reason| format!("animation plan: {reason}"))?,
+        ),
         None => None,
     };
     let environments = match pseudo {
@@ -3449,28 +3453,29 @@ pub(crate) fn sample_settled_row(
             FfiHostAnimationSampleResult::with_outcome(FfiHostAnimationSampleOutcome::Cleared),
         )),
         (None, Some(descriptions)) => {
-            let sampled = prepare_engine_sample(&input, engine, node, &descriptions, environments, root).map(
-                |(run, run_input)| {
-                    let result = unsafe {
-                        sample_described_animation_effects(
-                            &run_input,
-                            engine,
-                            node,
-                            &descriptions,
-                            transform_reference_box,
-                        )
-                    };
-                    (Some(run), result)
-                },
-            );
+            let sampled = prepare_engine_sample(
+                &input,
+                engine,
+                node,
+                &descriptions,
+                environments,
+                root,
+                timeline_samples,
+            )
+            .map(|(run, run_input)| {
+                let result = unsafe {
+                    sample_described_animation_effects(&run_input, engine, node, &descriptions, transform_reference_box)
+                };
+                (Some(run), result)
+            });
             engine.restore_element_animation_effect_descriptions(node, slot, descriptions);
             sampled
         }
         (Some(planned), descriptions) => {
             let keyframes = engine.take_animation_keyframes();
             let described = descriptions.as_deref().unwrap_or(&[]);
-            let sampled = prepare_engine_sample(&input, engine, node, described, environments, root).and_then(
-                |(run, run_input)| {
+            let sampled = prepare_engine_sample(&input, engine, node, described, environments, root, timeline_samples)
+                .and_then(|(run, run_input)| {
                     let mut selected = Vec::with_capacity(planned.len());
                     let mut preparation_effects = Vec::with_capacity(planned.len());
                     let mut selected_keys = Vec::with_capacity(planned.len());
@@ -3529,8 +3534,7 @@ pub(crate) fn sample_settled_row(
                         )
                     };
                     Ok((Some(run), result))
-                },
-            );
+                });
             engine.restore_animation_keyframes(keyframes);
             if let Some(descriptions) = descriptions {
                 engine.restore_element_animation_effect_descriptions(node, slot, descriptions);
@@ -3599,6 +3603,7 @@ pub(crate) struct StartedTransition {
 /// A step that removes transitions collects the element's effects again without them instead, over
 /// what the installed composition inherited, and layers what it starts over that: `removed` names
 /// the effects of the transitions it removes.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn sample_transition_step(
     engine: &mut crate::css::style::StyleEngineState,
     node: crate::css::style::tree::StyleNodeID,
@@ -3607,6 +3612,7 @@ pub(crate) fn sample_transition_step(
     removed: Option<&[u64]>,
     started: &[StartedTransition],
     committed_boxes: crate::css::style::animations::CommittedTransformReferenceBoxes,
+    timeline_samples: &crate::css::style::animations::AnimationTimelineSamples,
 ) -> Result<Box<AnimatedOverlay>, String> {
     use crate::css::animated_overlay::{
         rust_animated_overlay_clone, rust_animated_overlay_clone_inherited, rust_animated_overlay_create,
@@ -3667,9 +3673,10 @@ pub(crate) fn sample_transition_step(
     // the plan before it collects the element's effects again.
     let planned = match (removed, pseudo) {
         (Some(_), None) => match engine.element_settled_animation_plan(node) {
-            Some(plan) => {
-                Some(plan_effect_stack(engine, node, plan).map_err(|reason| format!("animation plan: {reason}"))?)
-            }
+            Some(plan) => Some(
+                plan_effect_stack(engine, node, plan, timeline_samples)
+                    .map_err(|reason| format!("animation plan: {reason}"))?,
+            ),
             None => None,
         },
         _ => None,
@@ -3734,7 +3741,6 @@ pub(crate) fn sample_transition_step(
         } else if let Some(removed) = removed {
             let rows = engine.element_animation_timing_rows(node, slot);
             let linear_points = engine.element_animation_timing_row_linear_points(node, slot);
-            let samples = engine.animation_timeline_samples();
             let described = descriptions.as_deref().unwrap_or(&[]);
             for row in rows {
                 if !row.is_associated() || removed.contains(&row.effect_identity()) {
@@ -3742,7 +3748,7 @@ pub(crate) fn sample_transition_step(
                 }
                 let timeline_time = match row.has_hold_time() {
                     true => None,
-                    false => animations::row_timeline_time(row, samples).ok_or("a timeline with no sample")?,
+                    false => animations::row_timeline_time(row, timeline_samples).ok_or("a timeline with no sample")?,
                 };
                 let Some(current_key) = animations::row_current_key(row, linear_points, timeline_time)
                     .ok_or("a row the engine cannot decide")?
@@ -3789,7 +3795,8 @@ pub(crate) fn sample_transition_step(
             selected_keys.push(current_key);
         }
         let descriptions: &[animations::PublishedEffect] = &[];
-        let (_run, run_input) = prepare_engine_sample(&input, engine, node, descriptions, environments, None)?;
+        let (_run, run_input) =
+            prepare_engine_sample(&input, engine, node, descriptions, environments, None, timeline_samples)?;
         let result = unsafe {
             compose_selected_animation_effects(
                 &run_input,
