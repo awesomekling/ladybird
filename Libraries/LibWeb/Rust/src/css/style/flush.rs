@@ -3550,11 +3550,22 @@ impl StyleEngineState {
             // A row past the cut that a font drive settled early is settled again in the wave
             // that reaches it; the record it holds now is not one the host installs. An
             // engine-computed record goes back with the transaction's uninstalled records, but a
-            // direct inherited-groups delta moved the node's record as it was driven: it goes back
-            // here, so the wave that reaches the row moves the node from the record the host holds.
+            // direct inherited-groups delta moved the node's record as it was driven, and an
+            // environment move republished the records below it: they go back here, latest
+            // first, so the wave that reaches the row moves each node from the record the host
+            // holds.
             if let Some(cut) = cut_at {
-                for delta in record_deltas.iter().skip(cut).flatten().flatten() {
-                    if delta.pseudo_kind != u8::MAX || delta.gap != FfiStyleDeltaGap::None {
+                for delta in record_deltas.iter().skip(cut).flatten().flatten().rev() {
+                    if delta.pseudo_kind != u8::MAX {
+                        continue;
+                    }
+                    if delta.gap == FfiStyleDeltaGap::EnvironmentMoved {
+                        if let Some(node) = StyleNodeID::from_raw(delta.style_node) {
+                            self.unwind_environment_move(node, delta.new_style_record, delta.old_style_record);
+                        }
+                        continue;
+                    }
+                    if delta.gap != FfiStyleDeltaGap::None {
                         continue;
                     }
                     let (Some(node), Some(derived), Some(previous)) = (
