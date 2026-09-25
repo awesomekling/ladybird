@@ -651,11 +651,6 @@ impl RetainedState {
         pseudo_kind: u8,
         style_record: u64,
     ) -> Result<SampleCustomPropertyEnvironments, &'static str> {
-        // Where custom properties are registered, the environment an element passes on is a
-        // projection of its own the host builds.
-        if self.custom_property_registry_has_registrations()? {
-            return Err("a pseudo-element under registered custom properties");
-        }
         // Custom properties an earlier sample of the pseudo-element composed are in an environment
         // the host built over its own.
         if self
@@ -681,12 +676,17 @@ impl RetainedState {
             .computed_group_sets
             .custom_property_environment_identity(node)
             .unwrap_or(0);
+        // Where a registration keeps custom properties from inheriting, what the element passes on
+        // is a projection of its environment, which a pseudo-element declaring none holds.
+        let inherited = self
+            .built_inheritable_custom_property_environment(element_environment, &self.document_style_computation_inputs)
+            .ok_or("an element environment whose inherited projection nobody built")?;
         let store = store_of(environment)?;
         Ok(SampleCustomPropertyEnvironments {
             store,
             base_store: store,
             inheritance_store: store_of(element_environment)?,
-            element_declares_own: environment != 0 && environment != element_environment,
+            element_declares_own: environment != 0 && environment != element_environment && environment != inherited,
             base_is_engine: environment & ENGINE_CUSTOM_PROPERTY_ENVIRONMENT_TAG != 0,
         })
     }
