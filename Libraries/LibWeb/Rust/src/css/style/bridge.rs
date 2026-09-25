@@ -942,6 +942,11 @@ pub enum FfiHostFactKind {
     /// The document takes the atom `facts` the host acquired for the raw name `data`, with the
     /// reference the acquisition took. See `style_engine_acquire_host_atom`.
     AdoptAtom = 11,
+    /// The host minted the element identity `node` from its grant. `value` says whether it stands in
+    /// the tree only to be named by relations.
+    MintElement = 12,
+    /// The host minted the text identity `node` from its grant.
+    MintText = 13,
 }
 
 /// One write the host made to a fact of the mirror, which the engine applies with the next
@@ -981,6 +986,13 @@ pub struct FfiStyleInputTransaction {
     pub element_style_input_count: usize,
     pub host_fact_writes: *const FfiHostFactWrite,
     pub host_fact_write_count: usize,
+    /// Where the engine writes the element identities it grants the host to mint from, and how many
+    /// the host asks for. See `StyleEngineState::grant_style_nodes`.
+    pub element_identity_grant: *mut u32,
+    pub element_identity_grant_count: usize,
+    /// Where the engine writes the text identities it grants the host, and how many it asks for.
+    pub text_identity_grant: *mut u32,
+    pub text_identity_grant_count: usize,
 }
 
 /// Device class selecting the document's memory budget coefficients.
@@ -1737,38 +1749,6 @@ pub unsafe extern "C" fn style_engine_destroy(engine: *mut c_void) {
     engine.end_recording();
 }
 
-/// # Safety
-/// `engine` must be live, and `out` must point at `count` writable `u32` values.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_allocate_style_nodes(engine: *mut c_void, out: *mut u32, count: usize) {
-    engine_entrance(engine, "style_engine_allocate_style_nodes");
-    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
-    let out = if count == 0 {
-        &mut []
-    } else {
-        unsafe { std::slice::from_raw_parts_mut(out, count) }
-    };
-    engine.allocate_style_nodes(out);
-    engine.record_boundary_call(EventKind::AllocateStyleNodes, |payload| payload.write_u32_slice(out));
-}
-
-/// # Safety
-/// `engine` must be live, and `out` must point at `count` writable `u32` values.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_allocate_text_style_nodes(engine: *mut c_void, out: *mut u32, count: usize) {
-    engine_entrance(engine, "style_engine_allocate_text_style_nodes");
-    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
-    let out = if count == 0 {
-        &mut []
-    } else {
-        unsafe { std::slice::from_raw_parts_mut(out, count) }
-    };
-    engine.allocate_text_style_nodes(out);
-    engine.record_boundary_call(EventKind::AllocateTextStyleNodes, |payload| {
-        payload.write_u32_slice(out);
-    });
-}
-
 /// Returns the live element descendants whose inheritance path begins at `root` in the flat tree.
 ///
 /// # Safety
@@ -1861,6 +1841,16 @@ pub unsafe extern "C" fn style_engine_apply_transaction(engine: *mut c_void, tra
     // and the batch reads the facts they write.
     let host_fact_writes = unsafe { borrow(transaction.host_fact_writes, transaction.host_fact_write_count) };
     unsafe { apply_host_fact_writes(engine, host_fact_writes) };
+    // SAFETY: the caller vouches that each grant pointer covers its stated count for this call.
+    let element_identity_grant = unsafe {
+        borrow_mut(
+            transaction.element_identity_grant,
+            transaction.element_identity_grant_count,
+        )
+    };
+    let text_identity_grant =
+        unsafe { borrow_mut(transaction.text_identity_grant, transaction.text_identity_grant_count) };
+    grant_style_nodes(engine, element_identity_grant, text_identity_grant);
     if tree.is_empty()
         && arrivals.is_empty()
         && features.is_empty()
@@ -1911,6 +1901,23 @@ unsafe fn apply_host_fact_writes(engine: &mut StyleEngine, writes: &[FfiHostFact
                     .flat_map(|link| [link.node, link.parent, link.previous_sibling])
                     .collect();
                 operations::link_style_nodes_in_dom_order(engine, &links);
+                index += run_length;
+                continue;
+            }
+            FfiHostFactKind::MintElement => {
+                let nodes: Vec<u32> = writes[index..index + run_length].iter().map(|mint| mint.node).collect();
+                mint_style_nodes(engine, &nodes);
+                for mint in &writes[index..index + run_length] {
+                    if mint.value != 0 {
+                        operations::mark_relation_only_style_node(engine, mint.node);
+                    }
+                }
+                index += run_length;
+                continue;
+            }
+            FfiHostFactKind::MintText => {
+                let nodes: Vec<u32> = writes[index..index + run_length].iter().map(|mint| mint.node).collect();
+                mint_text_style_nodes(engine, &nodes);
                 index += run_length;
                 continue;
             }
@@ -1967,6 +1974,54 @@ unsafe fn apply_host_fact_writes(engine: &mut StyleEngine, writes: &[FfiHostFact
             }
         }
         index += 1;
+    }
+}
+
+fn grant_style_nodes(engine: &mut StyleEngine, elements: &mut [u32], texts: &mut [u32]) {
+    if elements.is_empty() && texts.is_empty() {
+        return;
+    }
+    engine.grant_style_nodes(elements);
+    engine.grant_text_style_nodes(texts);
+    engine.record_boundary_call(EventKind::GrantStyleNodes, |payload| {
+        payload.write_u32_slice(elements);
+        payload.write_u32_slice(texts);
+    });
+}
+
+fn mint_style_nodes(engine: &mut StyleEngine, nodes: &[u32]) {
+    let identities: Vec<StyleNodeID> = nodes.iter().copied().filter_map(StyleNodeID::from_raw).collect();
+    engine.mint_style_nodes(&identities);
+    engine.record_boundary_call(EventKind::MintStyleNodes, |payload| payload.write_u32_slice(nodes));
+}
+
+fn mint_text_style_nodes(engine: &mut StyleEngine, nodes: &[u32]) {
+    let identities: Vec<StyleNodeID> = nodes.iter().copied().filter_map(StyleNodeID::from_raw).collect();
+    engine.mint_text_style_nodes(&identities);
+    engine.record_boundary_call(EventKind::MintTextStyleNodes, |payload| payload.write_u32_slice(nodes));
+}
+
+/// Grants what a recorded grant granted, answering whether the engine granted the same identities.
+///
+/// # Safety
+/// `engine` must be live.
+#[cfg(feature = "style-recording")]
+pub unsafe fn replay_grant_style_nodes(engine: *mut c_void, elements: &mut [u32], texts: &mut [u32]) {
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    grant_style_nodes(engine, elements, texts);
+}
+
+/// Mints identities a recorded mint named.
+///
+/// # Safety
+/// `engine` must be live, and every identity must have been granted and not yet minted.
+#[cfg(feature = "style-recording")]
+pub unsafe fn replay_mint_style_nodes(engine: *mut c_void, nodes: &[u32], text: bool) {
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    if text {
+        mint_text_style_nodes(engine, nodes);
+    } else {
+        mint_style_nodes(engine, nodes);
     }
 }
 
@@ -5204,6 +5259,14 @@ unsafe fn borrow<'a, T>(pointer: *const T, count: usize) -> &'a [T] {
     }
     assert!(!pointer.is_null(), "a non-empty delta array must not be null");
     unsafe { std::slice::from_raw_parts(pointer, count) }
+}
+
+unsafe fn borrow_mut<'a, T>(pointer: *mut T, count: usize) -> &'a mut [T] {
+    if count == 0 {
+        return &mut [];
+    }
+    assert!(!pointer.is_null(), "a non-empty output array must not be null");
+    unsafe { std::slice::from_raw_parts_mut(pointer, count) }
 }
 
 include!(concat!(env!("OUT_DIR"), "/style_engine_boundary_generated.rs"));

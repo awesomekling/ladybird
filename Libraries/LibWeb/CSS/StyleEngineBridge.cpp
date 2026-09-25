@@ -160,25 +160,78 @@ void StyleEngine::visit_edges(GC::Cell::Visitor& visitor)
     visitor.visit(m_style_computer);
 }
 
-StyleNodeID StyleEngine::allocate_style_node()
+// A grant covers what a burst of insertions mints between two transactions, and is topped up with the
+// next one once it runs low. Only a burst larger than that asks for identities on the spot.
+static constexpr size_t STYLE_NODE_GRANT_SIZE = 256;
+static constexpr size_t STYLE_NODE_GRANT_LOW_WATER = 64;
+
+// Minted last to first, so the identities the engine granted first are minted first.
+static void adopt_identity_grant(Vector<StyleNodeID>& granted, Vector<StyleNodeID> const& grant)
+{
+    for (auto node : grant.in_reverse())
+        granted.append(node);
+}
+
+StyleNodeID StyleEngine::mint_style_node()
 {
     StyleNodeID node;
-    allocate_style_nodes({ &node, 1 });
+    mint_style_nodes({ &node, 1 });
     return node;
 }
 
-void StyleEngine::allocate_style_nodes(Span<StyleNodeID> nodes)
+void StyleEngine::mint_style_nodes(Span<StyleNodeID> nodes)
 {
-    if (nodes.is_empty())
-        return;
-    StyleEngineFFI::style_engine_allocate_style_nodes(m_impl, reinterpret_cast<u32*>(nodes.data()), nodes.size());
+    mint_style_nodes(nodes, m_granted_style_nodes, m_style_node_grant_request, StyleEngineFFI::FfiHostFactKind::MintElement, 0);
 }
 
-void StyleEngine::allocate_text_style_nodes(Span<StyleNodeID> nodes)
+void StyleEngine::mint_text_style_nodes(Span<StyleNodeID> nodes)
+{
+    mint_style_nodes(nodes, m_granted_text_style_nodes, m_text_style_node_grant_request, StyleEngineFFI::FfiHostFactKind::MintText, 0);
+}
+
+StyleNodeID StyleEngine::mint_relation_only_style_node()
+{
+    StyleNodeID node;
+    mint_style_nodes({ &node, 1 }, m_granted_style_nodes, m_style_node_grant_request, StyleEngineFFI::FfiHostFactKind::MintElement, 1);
+    return node;
+}
+
+void StyleEngine::mint_style_nodes(Span<StyleNodeID> nodes, Vector<StyleNodeID>& granted, size_t& grant_request, StyleEngineFFI::FfiHostFactKind kind, u8 value)
 {
     if (nodes.is_empty())
         return;
-    StyleEngineFFI::style_engine_allocate_text_style_nodes(m_impl, reinterpret_cast<u32*>(nodes.data()), nodes.size());
+    if (granted.size() < nodes.size()) {
+        auto is_text = kind == StyleEngineFFI::FfiHostFactKind::MintText;
+        ensure_granted_style_nodes(is_text ? 0 : nodes.size(), is_text ? nodes.size() : 0);
+    }
+    for (auto& node : nodes) {
+        node = granted.take_last();
+        record_host_fact_write({ .kind = kind, .value = value, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = 0, .data = 0 });
+    }
+    if (granted.size() < STYLE_NODE_GRANT_LOW_WATER)
+        grant_request = STYLE_NODE_GRANT_SIZE - granted.size();
+}
+
+void StyleEngine::ensure_granted_style_nodes(size_t element_count, size_t text_count)
+{
+    if (m_granted_style_nodes.size() >= element_count && m_granted_text_style_nodes.size() >= text_count)
+        return;
+    // A grant asked for on the spot crosses alone. A mutation in progress is no place to end a transaction,
+    // so what the host recorded so far waits for its own.
+    Vector<StyleNodeID> style_node_grant;
+    Vector<StyleNodeID> text_style_node_grant;
+    if (m_granted_style_nodes.size() < element_count)
+        style_node_grant.resize(element_count - m_granted_style_nodes.size() + STYLE_NODE_GRANT_SIZE);
+    if (m_granted_text_style_nodes.size() < text_count)
+        text_style_node_grant.resize(text_count - m_granted_text_style_nodes.size() + STYLE_NODE_GRANT_SIZE);
+    InputTransaction transaction {};
+    transaction.element_identity_grant = reinterpret_cast<u32*>(style_node_grant.data());
+    transaction.element_identity_grant_count = style_node_grant.size();
+    transaction.text_identity_grant = reinterpret_cast<u32*>(text_style_node_grant.data());
+    transaction.text_identity_grant_count = text_style_node_grant.size();
+    apply_transaction(transaction);
+    adopt_identity_grant(m_granted_style_nodes, style_node_grant);
+    adopt_identity_grant(m_granted_text_style_nodes, text_style_node_grant);
 }
 
 HashTable<StyleNodeID> StyleEngine::take_deferred_element_initial_features()
@@ -760,7 +813,7 @@ void StyleEngine::submit_recorded_input()
 {
     if (m_style_computer)
         publish_pending_element_features(*this, *m_style_computer);
-    if (!has_recorded_input() && m_host_fact_writes.is_empty()) {
+    if (!has_recorded_input() && m_host_fact_writes.is_empty() && !m_style_node_grant_request && !m_text_style_node_grant_request) {
         if (refresh_attribute_value_text_requirements() && m_style_computer)
             publish_required_attribute_value_texts(*this, *m_style_computer);
         return;
@@ -775,6 +828,12 @@ void StyleEngine::submit_recorded_input()
         if (write.kind == StyleEngineFFI::FfiHostFactKind::TextData)
             write.data = host_fact_text_data[write.data].to_raw_leaked();
     }
+    // The grant answers the transaction. It is taken aside until the call returns, because the host may
+    // mint from what it was granted before while the engine calls back into it.
+    Vector<StyleNodeID> style_node_grant;
+    Vector<StyleNodeID> text_style_node_grant;
+    style_node_grant.resize(exchange(m_style_node_grant_request, 0));
+    text_style_node_grant.resize(exchange(m_text_style_node_grant_request, 0));
 
     InputTransaction transaction {
         .tree_deltas = m_tree_deltas.data(),
@@ -793,8 +852,14 @@ void StyleEngine::submit_recorded_input()
         .element_style_input_count = 0,
         .host_fact_writes = host_fact_writes.data(),
         .host_fact_write_count = host_fact_writes.size(),
+        .element_identity_grant = reinterpret_cast<u32*>(style_node_grant.data()),
+        .element_identity_grant_count = style_node_grant.size(),
+        .text_identity_grant = reinterpret_cast<u32*>(text_style_node_grant.data()),
+        .text_identity_grant_count = text_style_node_grant.size(),
     };
     apply_transaction(transaction);
+    adopt_identity_grant(m_granted_style_nodes, style_node_grant);
+    adopt_identity_grant(m_granted_text_style_nodes, text_style_node_grant);
 
     m_tree_deltas.clear_with_capacity();
     m_element_arrivals.clear_with_capacity();

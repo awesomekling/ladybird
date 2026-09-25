@@ -218,30 +218,29 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     });
                     unsafe { bridge::style_engine_destroy(engine) };
                 }
-                EventKind::AllocateStyleNodes => {
+                EventKind::GrantStyleNodes => {
                     let engine = read_engine(&mut event.payload, &live_engines)?;
-                    let expected = event.payload.read_u32_vec()?;
-                    let mut actual = vec![0; expected.len()];
-                    unsafe { bridge::style_engine_allocate_style_nodes(engine, actual.as_mut_ptr(), actual.len()) };
-                    if actual != expected {
-                        return Err(
-                            format!("style-node allocation diverged: expected {expected:?}, got {actual:?}").into(),
-                        );
-                    }
-                }
-                EventKind::AllocateTextStyleNodes => {
-                    let engine = read_engine(&mut event.payload, &live_engines)?;
-                    let expected = event.payload.read_u32_vec()?;
-                    let mut actual = vec![0; expected.len()];
-                    unsafe {
-                        bridge::style_engine_allocate_text_style_nodes(engine, actual.as_mut_ptr(), actual.len())
-                    };
-                    if actual != expected {
+                    let expected_elements = event.payload.read_u32_vec()?;
+                    let expected_texts = event.payload.read_u32_vec()?;
+                    let mut elements = vec![0; expected_elements.len()];
+                    let mut texts = vec![0; expected_texts.len()];
+                    unsafe { bridge::replay_grant_style_nodes(engine, &mut elements, &mut texts) };
+                    if elements != expected_elements || texts != expected_texts {
                         return Err(format!(
-                            "text style-node allocation diverged: expected {expected:?}, got {actual:?}"
+                            "style-node grant diverged: expected {expected_elements:?} and {expected_texts:?}, got {elements:?} and {texts:?}"
                         )
                         .into());
                     }
+                }
+                EventKind::MintStyleNodes => {
+                    let engine = read_engine(&mut event.payload, &live_engines)?;
+                    let nodes = event.payload.read_u32_vec()?;
+                    unsafe { bridge::replay_mint_style_nodes(engine, &nodes, false) };
+                }
+                EventKind::MintTextStyleNodes => {
+                    let engine = read_engine(&mut event.payload, &live_engines)?;
+                    let nodes = event.payload.read_u32_vec()?;
+                    unsafe { bridge::replay_mint_style_nodes(engine, &nodes, true) };
                 }
                 EventKind::ApplyTransaction => {
                     let engine = read_engine(&mut event.payload, &live_engines)?;
@@ -279,6 +278,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         // The host's fact writes are recorded as the boundary calls they stand for.
                         host_fact_writes: std::ptr::null(),
                         host_fact_write_count: 0,
+                        // So is the grant the transaction answered with.
+                        element_identity_grant: std::ptr::null_mut(),
+                        element_identity_grant_count: 0,
+                        text_identity_grant: std::ptr::null_mut(),
+                        text_identity_grant_count: 0,
                     };
                     unsafe { bridge::style_engine_apply_transaction(engine, &transaction) };
                 }

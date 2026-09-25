@@ -215,17 +215,43 @@ impl StyleEngine {
             .record_rule_declarations_changed(rule, block_version, &mut self.counters);
     }
 
-    /// Mint `out.len()` element identities in one call. Identity allocation is batched because a
-    /// call per element is exactly the boundary shape this design rules out.
+    /// Grant and mint `out.len()` element identities in one call, for an engine with no host.
+    #[cfg(test)]
     #[inline]
     pub fn allocate_style_nodes(&mut self, out: &mut [u32]) {
         self.state.allocate_style_nodes(out, &mut self.counters);
     }
 
-    /// Mint `out.len()` text identities in one call.
+    /// Grant and mint `out.len()` text identities in one call, for an engine with no host.
+    #[cfg(test)]
     #[inline]
     pub fn allocate_text_style_nodes(&mut self, out: &mut [u32]) {
         self.state.allocate_text_style_nodes(out, &mut self.counters);
+    }
+
+    /// Hand the host `out.len()` element identities to mint on its own. Identities are granted in
+    /// batches because a call per element is exactly the boundary shape this design rules out.
+    #[inline]
+    pub fn grant_style_nodes(&mut self, out: &mut [u32]) {
+        self.state.grant_style_nodes(out);
+    }
+
+    /// Hand the host `out.len()` text identities to mint on its own.
+    #[inline]
+    pub fn grant_text_style_nodes(&mut self, out: &mut [u32]) {
+        self.state.grant_text_style_nodes(out);
+    }
+
+    /// Bring element identities the host minted into the tree.
+    #[inline]
+    pub fn mint_style_nodes(&mut self, nodes: &[StyleNodeID]) {
+        self.state.mint_style_nodes(nodes, &mut self.counters);
+    }
+
+    /// Bring text identities the host minted into the tree.
+    #[inline]
+    pub fn mint_text_style_nodes(&mut self, nodes: &[StyleNodeID]) {
+        self.state.mint_text_style_nodes(nodes, &mut self.counters);
     }
 
     /// Stage a structural change. The normalized transaction installs the final relation rows at

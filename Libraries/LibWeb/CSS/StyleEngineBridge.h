@@ -68,10 +68,17 @@ public:
     [[nodiscard]] double ensure_random_base_value(StyleNodeID, Utf16View name, bool element_shared);
     void set_element_custom_property_data(StyleNodeID, CustomPropertyData const*, bool is_animation_overlay = false, bool declares = false);
 
-    // Identity 0 is never returned; it means "no node".
-    StyleNodeID allocate_style_node();
-    void allocate_style_nodes(Span<StyleNodeID> nodes);
-    void allocate_text_style_nodes(Span<StyleNodeID> nodes);
+    // The host names a node the moment it connects, from identities the engine granted it ahead of
+    // time, and the mint crosses with the next transaction ahead of everything written to the identity
+    // since. Identity 0 is never minted; it means "no node".
+    StyleNodeID mint_style_node();
+    void mint_style_nodes(Span<StyleNodeID> nodes);
+    void mint_text_style_nodes(Span<StyleNodeID> nodes);
+    // An identity that stands in the tree only to be named by relations, and is never styled.
+    StyleNodeID mint_relation_only_style_node();
+    // Makes the grant cover this many mints of each kind, so that minting a subtree asks for identities
+    // at most once.
+    void ensure_granted_style_nodes(size_t element_count, size_t text_count);
     void defer_element_initial_features(StyleNodeID style_node)
     {
         m_nodes_with_pending_initial_features.set(style_node);
@@ -342,6 +349,7 @@ private:
     void apply_transaction(InputTransaction const&);
     void submit_recorded_input();
     void record_host_fact_write(StyleEngineFFI::FfiHostFactWrite);
+    void mint_style_nodes(Span<StyleNodeID>, Vector<StyleNodeID>& granted, size_t& grant_request, StyleEngineFFI::FfiHostFactKind, u8 value);
     bool refresh_attribute_value_text_requirements();
     [[nodiscard]] bool attribute_name_requires_value_text(StyleAtomID);
     void publish_attribute_value_text(StyleAtomID, Utf16View, bool affects_selector_catalog);
@@ -385,6 +393,12 @@ private:
     size_t m_pending_atom_adoption_count { 0 };
     // What each `TextData` write holds, by the index its `data` names until the writes cross.
     Vector<Utf16String> m_host_fact_text_data;
+    // The identities the engine granted and the host has yet to mint, and how many more the host asks
+    // for with the next transaction.
+    Vector<StyleNodeID> m_granted_style_nodes;
+    Vector<StyleNodeID> m_granted_text_style_nodes;
+    size_t m_style_node_grant_request { 0 };
+    size_t m_text_style_node_grant_request { 0 };
     bool m_css_transitions_may_observe_style_changes { false };
 };
 

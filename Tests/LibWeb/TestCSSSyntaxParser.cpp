@@ -372,7 +372,7 @@ static void record_inline_style_properties(Web::CSS::StyleEngine& engine, Web::C
 TEST_CASE(style_engine_consumes_native_inline_declaration_blocks)
 {
     StyleEngine engine(StyleEngine::DeviceClass::ForegroundDesktop);
-    auto node = engine.allocate_style_node();
+    auto node = engine.mint_style_node();
     auto declarations = parse_native_declaration_block(u"color: rgb(20, 24, 28); margin: var(--gap); --gap: 13px"sv);
     auto shared = declarations.share();
     auto transitions = parse_native_declaration_block(u"transition-duration: 1s"sv);
@@ -396,7 +396,7 @@ TEST_CASE(style_engine_consumes_native_inline_declaration_blocks)
 TEST_CASE(style_engine_expands_presentation_hint_shorthands_in_rust)
 {
     StyleEngine engine(StyleEngine::DeviceClass::ForegroundDesktop);
-    auto node = engine.allocate_style_node();
+    auto node = engine.mint_style_node();
     auto inherited = parse_native_declaration_block(u"color: inherit"sv);
     Vector<StyleProperty> hints { StyleProperty { Important::No, PropertyID::Border, inherited.properties()[0].value } };
     engine.set_element_presentational_hint_properties(node, StyleEngineFFI::FfiElementDeclarationKind::PresentationalHint, hints);
