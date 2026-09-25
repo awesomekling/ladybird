@@ -1653,7 +1653,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
         // What the settled pseudo-elements' container units read of the element's containers.
         auto container_effects = CSS::StyleEngineFFI::style_engine_take_container_effects(scope.engine().rust_handle(), style_node_id().value());
         ScopeGuard release_container_effects = [&] { CSS::StyleEngineFFI::style_engine_native_container_effects_release(container_effects.effects); };
-        CSS::StyleComputer::record_container_query_effects(AbstractElement { *this }, container_effects);
+        CSS::StyleComputer::record_container_query_effects(scope, AbstractElement { *this }, container_effects);
         for (size_t kind = 0; kind < array_size(settled.pseudo_records); ++kind) {
             if (!((settled.pseudo_records_present >> kind) & 1))
                 continue;
@@ -1775,7 +1775,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
             }
             set_custom_property_data(scope, pseudo_element, move(data));
             if (!!old_style_record || !new_pseudo_element_style->transition_delay_and_duration_are_single_zero()) {
-                auto transition_invalidation = style_computer.run_transition_step_for_installed_record({ *this, pseudo_element }, old_style_record);
+                auto transition_invalidation = style_computer.run_transition_step_for_installed_record(scope, { *this, pseudo_element }, old_style_record);
                 invalidation |= transition_invalidation;
             }
         } else if (auto existing_pseudo_element = get_synthetic_pseudo_element(pseudo_element); existing_pseudo_element.has_value())
@@ -1804,7 +1804,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
             auto kind = to_underlying(pseudo_element);
             if (!records_settled_after_host_record[kind].has_value() || !*records_settled_after_host_record[kind])
                 continue;
-            if (auto plan = style_computer.take_settled_animation_plan(style_node_id(), kind); plan.has_value())
+            if (auto plan = style_computer.take_settled_animation_plan(scope, style_node_id(), kind); plan.has_value())
                 style_computer.apply_settled_animation_plan({ *this, pseudo_element }, *plan);
         }
         scope.engine().acknowledge_engine_computed_record(style_node_id());

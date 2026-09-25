@@ -43,7 +43,7 @@ class WEB_API StyleComputer final : public GC::Cell {
     GC_DECLARE_ALLOCATOR(StyleComputer);
 
 public:
-    static void record_container_query_effects(DOM::AbstractElement, StyleEngineFFI::FfiNativeContainerMatchResult const&);
+    static void record_container_query_effects(StyleDrainScope const&, DOM::AbstractElement, StyleEngineFFI::FfiNativeContainerMatchResult const&);
 
     static void for_each_property_expanding_shorthands(PropertyID, StyleValue const&, Function<void(PropertyID, StyleValue const&)> const& set_longhand_property);
 
@@ -151,7 +151,7 @@ public:
         No,
         Yes,
     };
-    void collect_animations_into(DOM::AbstractElement, ReadonlySpan<GC::Ref<Animations::KeyframeEffect>>, ComputedStyleWorkingSet&, AnimationRefresh, ComputedValuesFFI::FfiAnimationLengthContexts const* = nullptr) const;
+    void collect_animations_into(StyleDrainScope const&, DOM::AbstractElement, ReadonlySpan<GC::Ref<Animations::KeyframeEffect>>, ComputedStyleWorkingSet&, AnimationRefresh, ComputedValuesFFI::FfiAnimationLengthContexts const* = nullptr) const;
 
     void apply_animation_definitions(DOM::AbstractElement& abstract_element, ReadonlySpan<AnimationProperties> animation_definitions, ReadonlySpan<i32> definition_matches, ReadonlySpan<RefPtr<Animations::KeyframeEffect::KeyFrameSet const>> definition_keyframe_sets, bool in_display_none_subtree) const;
     // The animation plan a record the engine settled left for the host: what the C++ computation of
@@ -162,7 +162,7 @@ public:
         Vector<RefPtr<Animations::KeyframeEffect::KeyFrameSet const>> definition_keyframe_sets;
         bool in_display_none_subtree { false };
     };
-    [[nodiscard]] Optional<SettledAnimationPlan> take_settled_animation_plan(StyleNodeID, u8 pseudo_kind) const;
+    [[nodiscard]] Optional<SettledAnimationPlan> take_settled_animation_plan(StyleDrainScope const&, StyleNodeID, u8 pseudo_kind) const;
     void apply_settled_animation_plan(DOM::AbstractElement, SettledAnimationPlan const&) const;
 
     ComputationContext fallback_computation_context_for_custom_property(AbstractOrHypotheticalElement const&) const;
@@ -178,11 +178,11 @@ public:
 
     void begin_transition_stabilization_epoch();
     // Says whether a baseline was recorded, which is a main-side write.
-    bool record_transition_stabilization_baseline(DOM::AbstractElement, Optional<StyleRecordID> before_change_style_record = {}) const;
-    bool pin_transition_stabilization_baseline_if_a_later_pass_may_need_it(DOM::AbstractElement) const;
+    bool record_transition_stabilization_baseline(StyleDrainScope const&, DOM::AbstractElement, Optional<StyleRecordID> before_change_style_record = {}) const;
+    bool pin_transition_stabilization_baseline_if_a_later_pass_may_need_it(StyleDrainScope const&, DOM::AbstractElement) const;
     // Runs the whole transition step for an installed record, against the record the element moved
     // away from. Returns what publishing a started transition's values invalidates.
-    [[nodiscard]] RequiredInvalidationAfterStyleChange run_transition_step_for_installed_record(DOM::AbstractElement, StyleRecordID before_change_style_record) const;
+    [[nodiscard]] RequiredInvalidationAfterStyleChange run_transition_step_for_installed_record(StyleDrainScope const&, DOM::AbstractElement, StyleRecordID before_change_style_record) const;
     void commit_transition_stabilization_epoch();
     void for_each_provisional_transition_effect(DOM::AbstractElement const&, Function<void(Animations::KeyframeEffect&)> const&) const;
     void for_each_provisional_transition_effect_on_element(DOM::Element const&, Function<void(Animations::KeyframeEffect&)> const&) const;
@@ -194,12 +194,12 @@ private:
 
     [[nodiscard]] StyleEngine::StyleRecordDelta record_computed_style_inputs(Optional<DOM::AbstractElement>, ComputedValues const&, StyleNodeID style_node_id) const;
 
-    void collect_animation_effects_into(DOM::AbstractElement, ReadonlySpan<GC::Ref<Animations::KeyframeEffect>>, ComputedStyleWorkingSet&, ComputedValuesFFI::FfiAnimationLengthContexts const*) const;
+    void collect_animation_effects_into(StyleDrainScope const&, DOM::AbstractElement, ReadonlySpan<GC::Ref<Animations::KeyframeEffect>>, ComputedStyleWorkingSet&, ComputedValuesFFI::FfiAnimationLengthContexts const*) const;
     // Says whether publishing moved the element's custom-property environment. An element whose
     // animations settle on the values it already holds is left alone.
-    bool publish_animated_custom_properties(ComputedStyleWorkingSet&, DOM::AbstractElement) const;
-    void invalidate_animated_custom_property_readers(DOM::AbstractElement) const;
-    void start_needed_transitions(ComputedStyleWorkingSet&, DOM::AbstractElement, StyleRecordID before_change_style_record) const;
+    bool publish_animated_custom_properties(StyleDrainScope const&, ComputedStyleWorkingSet&, DOM::AbstractElement) const;
+    void invalidate_animated_custom_property_readers(StyleDrainScope const&, DOM::AbstractElement) const;
+    void start_needed_transitions(StyleDrainScope const&, ComputedStyleWorkingSet&, DOM::AbstractElement, StyleRecordID before_change_style_record) const;
     [[nodiscard]] bool has_provisional_transition_states(DOM::AbstractElement) const;
     void finalize_style(ComputedStyleWorkingSet&, DOM::AbstractElement, ComputedValuesFFI::FfiStyleFinalizationMode) const;
 

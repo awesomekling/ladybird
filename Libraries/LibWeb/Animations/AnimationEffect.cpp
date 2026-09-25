@@ -17,6 +17,7 @@
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/CSS/StyleComputer.h>
+#include <LibWeb/CSS/StyleDrainScope.h>
 #include <LibWeb/CSS/StyleInvalidation.h>
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/CSS/StyleValues/StyleValueList.h>
@@ -1006,8 +1007,11 @@ AnimationUpdateContext::~AnimationUpdateContext()
             if (!effects_to_collect.contains_slow(dirty_effect))
                 effects_to_collect.append(dirty_effect);
         }
+        // FIXME: The pass samples an element's effect stack itself; this host sample is still
+        //        asked for from outside it, by animation updates and by rows the pass declined.
+        auto const scope = CSS::StyleDrainScope::not_yet_drained(target->document().style_computer().style_engine());
         // With no effect left, collecting still clears the composition the style was reconstructed with.
-        target->document().style_computer().collect_animations_into(element, effects_to_collect.span(), *style, CSS::StyleComputer::AnimationRefresh::Yes);
+        target->document().style_computer().collect_animations_into(scope, element, effects_to_collect.span(), *style, CSS::StyleComputer::AnimationRefresh::Yes);
         auto& style_computer = target->document().style_computer();
         // A sample published between a row's derivation and its installation composed an overlay
         // over the base the row installs. The installed record names none, but the engine still
@@ -1026,7 +1030,7 @@ AnimationUpdateContext::~AnimationUpdateContext()
             if (style->animated_overlay() && !animated_overlay_entries(style->animated_overlay()).is_empty()
                 && target->document().is_in_style_stabilization_epoch()
                 && (target->document().style_stabilization_has_style_reactions() || overlay_invalidation.requires_base_style_recomputation)) {
-                target->document().style_computer().record_transition_stabilization_baseline(element);
+                target->document().style_computer().record_transition_stabilization_baseline(scope, element);
             }
         });
         apply_published_animation_overlay(element, animated_property_invalidation, publication.new_style_record, it.value.caller_applies_invalidation);
