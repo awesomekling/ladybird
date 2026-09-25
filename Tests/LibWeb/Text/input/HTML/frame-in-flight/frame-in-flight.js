@@ -8,6 +8,9 @@
 // submitted (default and lockstep modes), nothing is armed and `during` runs after the rendering update: a test prints
 // the same output in every mode, and checks the in-flight facts only when `armed` is set.
 // It starts once the document has loaded: the load task lays the document out, which waits for the frame in flight.
+// Where the rendering update submits its layout pass too (LIBWEB_STAGE_OVERLAP naming "layout"), the frame is in
+// flight twice: the recording is submitted only once the main thread has taken the layout pass back between tasks and
+// gone on with the rendering update, so `during` waits for that first.
 async function whileFrameInFlight(point, mutate, during, doc = null) {
     if (document.readyState !== "complete")
         await new Promise(resolve => window.addEventListener("load", resolve, { once: true }));
@@ -17,6 +20,10 @@ async function whileFrameInFlight(point, mutate, during, doc = null) {
             mutate();
             setTimeout(async () => {
                 try {
+                    while (armed && internals.renderingUpdateAwaitsLayoutPass()) {
+                        internals.waitForFrameToFinish();
+                        await nextTask();
+                    }
                     const heldAt = armed ? internals.waitForHeldFrame() : "";
                     const frame = { armed, heldAt, state: internals.frameSchedulerState() };
                     const result = await during(frame);
