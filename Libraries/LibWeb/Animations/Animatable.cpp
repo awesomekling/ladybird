@@ -265,12 +265,14 @@ void Animatable::cancel_css_animations_and_transitions()
         animations->clear();
         publish_css_defined_animations(index);
     }
-    for (auto& transition : m_impl->transitions) {
-        if (!transition)
+    for (size_t index = 0; index < m_impl->transitions.size(); ++index) {
+        auto& transition = m_impl->transitions[index];
+        if (!transition || transition->associated_transitions.is_empty())
             continue;
         for (auto& animation : transition->associated_transitions)
             animations_to_cancel.append(animation.value);
         transition->associated_transitions.clear();
+        CSS::CSSTransition::publish_transitions(as<DOM::Element>(*this), index == 0 ? Optional<CSS::PseudoElement> {} : static_cast<CSS::PseudoElement>(index - 1));
     }
     m_impl->has_css_defined_animations = false;
 
@@ -334,6 +336,7 @@ void Animatable::set_transition(Optional<CSS::PseudoElement> pseudo_element, CSS
     auto& transition = *maybe_transition;
     VERIFY(!transition.associated_transitions.contains(property));
     transition.associated_transitions.set(property, animation);
+    CSS::CSSTransition::publish_transitions(as<DOM::Element>(*this), pseudo_element);
 }
 
 void Animatable::remove_transition(Optional<CSS::PseudoElement> pseudo_element, CSS::PropertyID property_id)
@@ -346,6 +349,7 @@ void Animatable::remove_transition(Optional<CSS::PseudoElement> pseudo_element, 
     VERIFY(removed_transition.has_value());
     transition.associated_transitions.remove(property_id);
     removed_transition.value()->schedule_disassociation_from_target();
+    CSS::CSSTransition::publish_transitions(as<DOM::Element>(*this), pseudo_element);
 }
 
 void Animatable::visit_edges(JS::Cell::Visitor& visitor)

@@ -1709,6 +1709,73 @@ pub struct FfiCommittedTransformReferenceBox {
     pub height: f64,
 }
 
+/// One transition an element holds for a property, whether it still runs or completed: what the
+/// transition step reads of it. Published whenever the element's set of transitions moves; whether
+/// it still runs is read from its timing row when the step is decided.
+#[repr(C)]
+pub struct FfiPublishedTransition {
+    pub property_id: u16,
+    pub effect_identity: u64,
+    /// Script replaced the effect the transition started with.
+    pub effect_replaced: bool,
+    pub end_value: *const std::ffi::c_void,
+    pub reversing_adjusted_start_value: *const std::ffi::c_void,
+    pub reversing_shortening_factor: f64,
+    pub start_time: f64,
+    pub end_time: f64,
+}
+
+/// The transitions one of an element's lists holds, replacing what it held: published whenever the
+/// set moves, for the pass to decide the element's transition step over.
+///
+/// # Safety
+/// `engine` must be a live style engine, and `transitions` must point to `count` rows whose values
+/// are live style values for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_set_element_transitions(
+    engine: *mut c_void,
+    node: u32,
+    slot: u8,
+    transitions: *const FfiPublishedTransition,
+    count: usize,
+) {
+    super::seal::note_engine_call("style_engine_set_element_transitions");
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    let Some(node) = StyleNodeID::from_raw(node) else {
+        return;
+    };
+    let transitions = match count {
+        0 => &[][..],
+        _ => unsafe { std::slice::from_raw_parts(transitions, count) },
+    };
+    unsafe { engine.set_element_transitions(node, slot, transitions) };
+}
+
+/// Compare the transition step the host decided for an element with the one the pass decided, for
+/// the engine sample report.
+///
+/// # Safety
+/// `engine` must be a live style engine, and `actions` must point to `count` transition actions.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_check_transition_step(
+    engine: *mut c_void,
+    node: u32,
+    actions: *const c_void,
+    count: usize,
+) {
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    let Some(node) = StyleNodeID::from_raw(node) else {
+        return;
+    };
+    let actions = match count {
+        0 => &[][..],
+        _ => unsafe {
+            std::slice::from_raw_parts(actions.cast::<crate::css::transition::FfiTransitionAction>(), count)
+        },
+    };
+    engine.check_transition_step(node, actions);
+}
+
 /// The transform reference box the last committed layout left for `node`, which the animation
 /// stage resolves percentage translations against. An element with no committed box, and every
 /// element while the document has no layout arena, has none.

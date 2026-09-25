@@ -55,6 +55,11 @@ public:
 
     double timing_function_output_at_time(double t) const;
 
+    // The transitions an element holds for one of its lists, which the style pass decides the
+    // element's transition step over. Published whenever the set moves or script replaces one's
+    // effect.
+    static void publish_transitions(DOM::Element&, Optional<PseudoElement>);
+
     // This is designed to be created from AnimationEffect::Phase.
     enum class Phase : u8 {
         Before,

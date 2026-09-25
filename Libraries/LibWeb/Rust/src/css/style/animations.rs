@@ -1026,6 +1026,24 @@ pub(crate) fn row_current_key(
     // https://www.w3.org/TR/web-animations-1/#transformed-progress
     let before_flag =
         (timing.phase == Phase::Before && going_forwards) || (timing.phase == Phase::After && !going_forwards);
+    let output_progress = row_easing_output(row, linear_points, directed_progress, before_flag)?;
+
+    // `AnimationKeyFrameKeyScaleFactor`, and the host's clamp to what an `i64` key can hold.
+    let key = output_progress * 100.0 * 1000.0;
+    Some(Some(key.clamp(i64::MIN as f64, i64::MAX as f64)))
+}
+
+/// The row's own easing at `progress`: `EasingFunction::evaluate_at()`. `None` for an easing the
+/// row has no room to spell out.
+#[must_use]
+pub(crate) fn row_easing_output(
+    row: &AnimationTimingRow,
+    linear_points: &[crate::css::easing::FfiLinearEasingPoint],
+    progress: f64,
+    before_flag: bool,
+) -> Option<f64> {
+    use timing_row_flag as flag;
+
     let easing_kind = (row.flags >> flag::EASING_KIND_SHIFT) & flag::EASING_KIND_MASK;
     let output_progress = match easing_kind {
         // `linear()`, whose stops the row names by range in the list's shared buffer. An empty
@@ -1046,7 +1064,7 @@ pub(crate) fn row_current_key(
                     .get(row.first_linear_point as usize..)?
                     .get(..count as usize)?,
             },
-            directed_progress,
+            progress,
             before_flag,
         ),
         1 => crate::css::easing::evaluate_cubic_bezier_easing(
@@ -1054,20 +1072,73 @@ pub(crate) fn row_current_key(
             row.times[TIME_EASING_Y1],
             row.times[TIME_EASING_X2],
             row.times[TIME_EASING_Y2],
-            directed_progress,
+            progress,
         ),
         2 => crate::css::easing::evaluate_steps_easing(
             row.easing_interval_count,
             ((row.flags >> flag::EASING_STEP_POSITION_SHIFT) & flag::EASING_STEP_POSITION_MASK) as u8,
-            directed_progress,
+            progress,
             before_flag,
         ),
         _ => return None,
     };
+    Some(output_progress)
+}
 
-    // `AnimationKeyFrameKeyScaleFactor`, and the host's clamp to what an `i64` key can hold.
-    let key = output_progress * 100.0 * 1000.0;
-    Some(Some(key.clamp(i64::MIN as f64, i64::MAX as f64)))
+/// Whether the animation a row describes is neither finished nor idle, which is what makes a CSS
+/// transition a running one: a mirror of `Animation::play_state_at()` at the timeline's time.
+/// `None` where the host's arithmetic would refuse to mix two times' kinds.
+#[must_use]
+pub(crate) fn row_plays_unfinished(row: &AnimationTimingRow, timeline_time: Option<TimeValue>) -> Option<bool> {
+    use timing_row_flag as flag;
+
+    let progress_based = row.has(flag::TIMELINE_IS_PROGRESS_BASED);
+    let zero = TimeValue::zero(progress_based);
+    let current_time = if row.has(flag::HAS_HOLD_TIME) {
+        Some(row.time(TIME_HOLD, flag::HOLD_TIME_IS_PERCENTAGE))
+    } else if !row.has(flag::HAS_TIMELINE) || timeline_time.is_none() || !row.has(flag::HAS_START_TIME) {
+        None
+    } else {
+        let start_time = row.time(TIME_START, flag::START_TIME_IS_PERCENTAGE);
+        Some(
+            timeline_time?
+                .subtract(start_time)?
+                .scale(row.times[TIME_PLAYBACK_RATE]),
+        )
+    };
+    let pending = row.has(flag::HAS_PENDING_PLAY_TASK) || row.has(flag::HAS_PENDING_PAUSE_TASK);
+    // https://www.w3.org/TR/web-animations-1/#play-states
+    if current_time.is_none() && !row.has(flag::HAS_START_TIME) && !pending {
+        return Some(false);
+    }
+    if row.has(flag::HAS_PENDING_PAUSE_TASK)
+        || (!row.has(flag::HAS_START_TIME) && !row.has(flag::HAS_PENDING_PLAY_TASK))
+    {
+        return Some(true);
+    }
+    let Some(current_time) = current_time else {
+        return Some(true);
+    };
+    let effective_playback_rate = match row.has(flag::HAS_PENDING_PLAYBACK_RATE) {
+        true => row.times[TIME_PENDING_PLAYBACK_RATE],
+        false => row.times[TIME_PLAYBACK_RATE],
+    };
+    // https://www.w3.org/TR/web-animations-1/#associated-effect-end
+    let iteration_duration = row.time(TIME_ITERATION_DURATION, flag::ITERATION_DURATION_IS_PERCENTAGE);
+    let iteration_count = row.times[TIME_ITERATION_COUNT];
+    let active_duration = if iteration_duration.value == 0.0 || iteration_count == 0.0 {
+        zero
+    } else {
+        iteration_duration.scale(iteration_count)
+    };
+    let effect_end = row
+        .time(TIME_START_DELAY, flag::START_DELAY_IS_PERCENTAGE)
+        .add(active_duration)?
+        .add(row.time(TIME_END_DELAY, flag::END_DELAY_IS_PERCENTAGE))?
+        .largest(zero)?;
+    let finished = (effective_playback_rate > 0.0 && current_time.compare(effect_end)?.is_ge())
+        || (effective_playback_rate < 0.0 && current_time.value <= 0.0);
+    Some(!finished)
 }
 
 /// One effect a sample composes, as the engine chooses it from an element's published timing rows:

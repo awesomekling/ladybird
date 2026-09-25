@@ -10,6 +10,7 @@
 #include <LibWeb/CSS/CSSStyleDeclaration.h>
 #include <LibWeb/CSS/CSSTransition.h>
 #include <LibWeb/CSS/PropertyID.h>
+#include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/HTML/Scripting/TemporaryExecutionContext.h>
@@ -185,6 +186,30 @@ void CSSTransition::visit_edges(Cell::Visitor& visitor)
     Base::visit_edges(visitor);
     visitor.visit(m_cached_declaration);
     visitor.visit(m_keyframe_effect);
+}
+
+void CSSTransition::publish_transitions(DOM::Element& element, Optional<PseudoElement> pseudo_element)
+{
+    if (element.style_node_id() == 0)
+        return;
+    Vector<StyleEngineFFI::FfiPublishedTransition> transitions;
+    for (auto property_id : element.property_ids_with_existing_transitions(pseudo_element)) {
+        auto transition = element.property_transition(pseudo_element, property_id);
+        VERIFY(transition);
+        transitions.append({
+            .property_id = to_underlying(property_id),
+            .effect_identity = transition->m_keyframe_effect->animation_preparation_identity(),
+            .effect_replaced = transition->effect().ptr() != transition->m_keyframe_effect.ptr(),
+            .end_value = transition->m_end_value->rust_style_value_data(),
+            .reversing_adjusted_start_value = transition->m_reversing_adjusted_start_value->rust_style_value_data(),
+            .reversing_shortening_factor = transition->m_reversing_shortening_factor,
+            .start_time = transition->m_start_time,
+            .end_time = transition->m_end_time,
+        });
+    }
+    auto slot = pseudo_element.has_value() ? static_cast<u8>(to_underlying(*pseudo_element) + 1) : static_cast<u8>(0);
+    StyleEngineFFI::style_engine_set_element_transitions(element.document().style_computer().style_engine().rust_handle(),
+        element.style_node_id().value(), slot, transitions.data(), transitions.size());
 }
 
 double CSSTransition::timing_function_output_at_time(double t) const

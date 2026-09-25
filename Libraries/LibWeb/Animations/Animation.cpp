@@ -18,6 +18,7 @@
 #include <LibWeb/Bindings/WrapperWorld.h>
 #include <LibWeb/CSS/CSSAnimation.h>
 #include <LibWeb/CSS/CSSNumericValue.h>
+#include <LibWeb/CSS/CSSTransition.h>
 #include <LibWeb/CSS/Length.h>
 #include <LibWeb/CSS/StyleValues/ComputationContext.h>
 #include <LibWeb/DOM/Document.h>
@@ -95,6 +96,11 @@ void Animation::set_effect(GC::Ptr<AnimationEffect> new_effect, ShouldInvalidate
     if (m_effect)
         m_effect->set_associated_animation({});
     m_effect = new_effect;
+    // The style pass decides a CSS transition's step over the effect the transition started with.
+    if (is_css_transition()) {
+        if (auto owner = owning_element(); owner.has_value())
+            CSS::CSSTransition::publish_transitions(owner->element(), owner->pseudo_element());
+    }
 
     // Once animated properties of the old effect no longer apply, we need to ensure appropriate invalidations are scheduled
     if (old_effect) {
