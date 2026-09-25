@@ -1569,6 +1569,7 @@ GC::Ref<JS::Object> Internals::get_render_clock_counters() const
     define("ticksDroppedMainBusy"sv, counters.ticks_dropped_main_busy);
     define("ticksDroppedWithoutLease"sv, counters.ticks_dropped_without_lease);
     define("ticksDroppedPaused"sv, counters.ticks_dropped_paused);
+    define("ticksDroppedNeedingMain"sv, counters.ticks_dropped_needing_main);
     define("ticksDroppedStale"sv, counters.ticks_dropped_stale);
     define("ticksInstalled"sv, counters.ticks_installed);
     define("ticksLaidOut"sv, counters.ticks_laid_out);

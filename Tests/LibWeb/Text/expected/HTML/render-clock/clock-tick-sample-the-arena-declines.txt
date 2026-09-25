@@ -1,0 +1,3 @@
+text-transform after the flip: uppercase
+text after the flip: TEXT
+width at the end: 900

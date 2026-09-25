@@ -113,6 +113,10 @@ pub struct ClockLease {
     /// Whether the render side presented every tick the host has not adopted yet, so that adopting
     /// them repaints nothing.
     presented_since_adoption: AtomicBool,
+    /// Whether a render clock tick ended the lease: the render clock ticks it no more, and the main
+    /// thread adopts what its ticks left before its rendering update ends it. A later tick would
+    /// sample over records only the entries the host has not adopted yet keep alive.
+    needs_main: AtomicBool,
     outcome: Mutex<Option<FfiClockTickOutcome>>,
 }
 
@@ -465,6 +469,7 @@ pub extern "C" fn rust_clock_lease_grant(
         presentable: AtomicBool::new(false),
         tick_started_fresh: AtomicBool::new(false),
         presented_since_adoption: AtomicBool::new(false),
+        needs_main: AtomicBool::new(false),
         outcome: Mutex::default(),
     });
     if let Some(previous) = registry()
@@ -778,6 +783,8 @@ pub struct FfiRenderClockCounters {
     pub ticks_dropped_without_lease: u64,
     /// Ticks for a lease the main thread moved what it ticks of.
     pub ticks_dropped_paused: u64,
+    /// Ticks for a lease an earlier tick ended, which waits for the main thread.
+    pub ticks_dropped_needing_main: u64,
     /// Ticks at a time no later than the lease's last.
     pub ticks_dropped_stale: u64,
     /// Ticks that installed their samples for the main thread to adopt.
@@ -799,6 +806,7 @@ struct RenderClockCounters {
     ticks_dropped_main_busy: AtomicU64,
     ticks_dropped_without_lease: AtomicU64,
     ticks_dropped_paused: AtomicU64,
+    ticks_dropped_needing_main: AtomicU64,
     ticks_dropped_stale: AtomicU64,
     ticks_installed: AtomicU64,
     ticks_laid_out: AtomicU64,
@@ -814,6 +822,7 @@ static COUNTERS: RenderClockCounters = RenderClockCounters {
     ticks_dropped_main_busy: AtomicU64::new(0),
     ticks_dropped_without_lease: AtomicU64::new(0),
     ticks_dropped_paused: AtomicU64::new(0),
+    ticks_dropped_needing_main: AtomicU64::new(0),
     ticks_dropped_stale: AtomicU64::new(0),
     ticks_installed: AtomicU64::new(0),
     ticks_laid_out: AtomicU64::new(0),
@@ -932,6 +941,10 @@ fn run_render_clock_tick(context: u64, slot: &ClockSlot) {
         count(&COUNTERS.ticks_dropped_paused);
         return;
     }
+    if lease.needs_main.load(Ordering::Acquire) {
+        count(&COUNTERS.ticks_dropped_needing_main);
+        return;
+    }
     let time = lease.timeline_time_at(frame_time_nanoseconds as f64 / 1.0e6);
     if time.partial_cmp(&lease.time()) != Some(std::cmp::Ordering::Greater) {
         count(&COUNTERS.ticks_dropped_stale);
@@ -945,6 +958,17 @@ fn run_render_clock_tick(context: u64, slot: &ClockSlot) {
             let outcome = unsafe { lease.run_tick(time) };
             if outcome != FfiClockTickOutcome::Presented {
                 return (outcome, false);
+            }
+            // A sample the arena did not take, the host installs over the record the target held
+            // before: only its entry keeps that record alive, and no later tick may sample over it.
+            if lease
+                .entries
+                .lock()
+                .expect("clock lease entries")
+                .iter()
+                .any(|entry| !entry.installed_in_arena)
+            {
+                return (FfiClockTickOutcome::NeedsMain, false);
             }
             // SAFETY: As above.
             let Some(laid_out) = (unsafe { lease.lay_out() }) else {
@@ -964,6 +988,11 @@ fn run_render_clock_tick(context: u64, slot: &ClockSlot) {
         std::process::abort();
     };
     let presented = outcome == FfiClockTickOutcome::Presented;
+    if !presented {
+        // The lease ends at the host, which adopts what the ticks left first.
+        *lease.outcome.lock().expect("clock lease outcome") = Some(outcome);
+        lease.needs_main.store(true, Ordering::Release);
+    }
     if lease.tick_started_fresh.load(Ordering::Acquire) {
         lease.presented_since_adoption.store(presented, Ordering::Release);
     } else if !presented {
@@ -999,6 +1028,7 @@ pub extern "C" fn rust_render_clock_counters() -> FfiRenderClockCounters {
         ticks_dropped_main_busy: load(&COUNTERS.ticks_dropped_main_busy),
         ticks_dropped_without_lease: load(&COUNTERS.ticks_dropped_without_lease),
         ticks_dropped_paused: load(&COUNTERS.ticks_dropped_paused),
+        ticks_dropped_needing_main: load(&COUNTERS.ticks_dropped_needing_main),
         ticks_dropped_stale: load(&COUNTERS.ticks_dropped_stale),
         ticks_installed: load(&COUNTERS.ticks_installed),
         ticks_laid_out: load(&COUNTERS.ticks_laid_out),
