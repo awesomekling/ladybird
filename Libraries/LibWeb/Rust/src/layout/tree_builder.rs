@@ -4317,21 +4317,23 @@ impl TreeBuilderHost {
     }
 
     /// A styled row's shell is owed only where materialising one tells the host something about
-    /// the row's style: an element's `::selection` style, whose paint facts the shell pushes, a
-    /// scroll snap type, or a box that may be the scroll container snapping happens in, which the
-    /// root element's box stands in for the viewport as.
+    /// the row's style: a scroll snap type, or a box that may be the scroll container snapping
+    /// happens in, which the root element's box stands in for the viewport as. An element's
+    /// `::selection` style goes to the rows it paints through without one.
     fn owe_styled_shell(&self, slot: NodeSlotId, element: Option<StyleNodeID>) {
         // The commits collect the boxes with `content-visibility: auto` once a row has one.
         self.arena().note_style_of_row(slot);
+        if let Some(element) = element
+            && self.arena().with_style_store(|engine| {
+                engine.published_pseudo_record_mask(element) & (1 << SELECTION_PSEUDO_KIND) != 0
+            })
+        {
+            crate::painting::selection::note_built_row_selection_pseudo_style(self.arena(), slot, element);
+        }
         let owes_shell = self.arena().node_flags(slot) & NodeFlag::IsDocumentElement as u32 != 0
             || self.style(slot).is_none_or(|style| {
                 style.misc_reset().scroll_snap_strictness != crate::css::css_enums::scroll_snap_strictness::NONE
                     || node_facts::kind_and_style_make_scroll_container(self.data(slot).kind.get(), Some(style))
-            })
-            || element.is_some_and(|element| {
-                self.arena().with_style_store(|engine| {
-                    engine.published_pseudo_record_mask(element) & (1 << SELECTION_PSEUDO_KIND) != 0
-                })
             });
         if owes_shell {
             self.arena().defer_shell(slot);
@@ -4342,44 +4344,46 @@ impl TreeBuilderHost {
     /// itself. The row is stamped with whether an empty text produces a line box fragment, which
     /// text controls and editing hosts rely on: the fragment keeps the line box alive with real
     /// font metrics, giving the caret an anchor to paint at and the control its baseline. The
-    /// document restamps it when editability changes. Its shell is owed only under an element
-    /// with a `::selection` style, whose paint facts the shell pushes onto a text whose parent
-    /// has no box of its own.
+    /// document restamps it when editability changes. Under an element with a `::selection`
+    /// style and no box of its own, the row takes that style's paint facts itself.
     fn owe_text_shell(&self, slot: NodeSlotId, style_node: Option<StyleNodeID>) {
         // SAFETY: No arena borrow survives this call.
         unsafe { &mut *self.arena }.invalidate_text_content(slot);
         let Some(text) = style_node else {
             return;
         };
-        let (produces_line_box_fragment_when_empty, owes_shell) = self.arena().with_style_store(|engine| {
-            let tree = engine.tree();
-            let parent = tree.text_parent(text);
-            let parent_element = parent.filter(|parent| parent.element_index().is_some());
-            let parent_is_editing_host = parent_element.is_some_and(|parent| {
-                engine.element_construction_facts(parent)
-                    & crate::css::style::bridge::element_construction_fact::IS_EDITING_HOST
-                    != 0
+        let (produces_line_box_fragment_when_empty, selection_styled_parent) =
+            self.arena().with_style_store(|engine| {
+                let tree = engine.tree();
+                let parent = tree.text_parent(text);
+                let parent_element = parent.filter(|parent| parent.element_index().is_some());
+                let parent_is_editing_host = parent_element.is_some_and(|parent| {
+                    engine.element_construction_facts(parent)
+                        & crate::css::style::bridge::element_construction_fact::IS_EDITING_HOST
+                        != 0
+                });
+                let is_in_text_control = self.arena().node_flags(slot) & NodeFlag::IsInUserAgentShadowTree as u32 != 0
+                    && parent_element
+                        .and_then(|parent| tree.shadow_host_of(parent))
+                        .is_some_and(|host| {
+                            engine.element_construction_facts(host)
+                                & crate::css::style::bridge::element_construction_fact::IS_HTML_INPUT_ELEMENT
+                                != 0
+                                || engine.element_box_kind(host) == ElementBoxKind::TextArea as u8
+                        });
+                let selection_styled_parent = parent_element
+                    .filter(|parent| engine.published_pseudo_record_mask(*parent) & (1 << SELECTION_PSEUDO_KIND) != 0);
+                (parent_is_editing_host || is_in_text_control, selection_styled_parent)
             });
-            let is_in_text_control = self.arena().node_flags(slot) & NodeFlag::IsInUserAgentShadowTree as u32 != 0
-                && parent_element
-                    .and_then(|parent| tree.shadow_host_of(parent))
-                    .is_some_and(|host| {
-                        engine.element_construction_facts(host)
-                            & crate::css::style::bridge::element_construction_fact::IS_HTML_INPUT_ELEMENT
-                            != 0
-                            || engine.element_box_kind(host) == ElementBoxKind::TextArea as u8
-                    });
-            let parent_has_selection_style = parent_element
-                .is_some_and(|parent| engine.published_pseudo_record_mask(parent) & (1 << SELECTION_PSEUDO_KIND) != 0);
-            (parent_is_editing_host || is_in_text_control, parent_has_selection_style)
-        });
         self.arena().set_node_flag(
             slot,
             NodeFlag::ProducesLineBoxFragmentWhenEmpty,
             produces_line_box_fragment_when_empty,
         );
-        if owes_shell {
-            self.arena().defer_shell(slot);
+        if let Some(parent) = selection_styled_parent
+            && self.arena().bound_row(parent).is_invalid()
+        {
+            crate::painting::selection::note_built_row_selection_pseudo_style(self.arena(), slot, parent);
         }
     }
 
