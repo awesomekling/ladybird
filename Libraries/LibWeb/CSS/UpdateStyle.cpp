@@ -640,10 +640,14 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                 // A row that moved nothing names the record the element held when the transaction
                 // published it. An ancestor applied before it can have republished that record over
                 // a moved custom-property environment since, and the element holds the republished
-                // record the engine now assigns it: the published one is nobody's any more.
+                // record the engine now assigns it: the published one is nobody's any more. A row a
+                // wave drove again over the record it had settled for the element names that record
+                // instead, which the engine still assigns while the element holds the republished
+                // one: the row installs its own.
                 auto new_style_record = StyleRecordID { reaction.new_style_record };
                 bool const holds_republished_record = reaction.new_style_record == reaction.old_style_record && element->style_record_identity().value() != reaction.old_style_record
-                    && republished_nodes.contains(StyleNodeID { reaction.style_node });
+                    && republished_nodes.contains(StyleNodeID { reaction.style_node })
+                    && StyleEngineFFI::style_engine_assigned_style_record(style_engine.rust_handle(), reaction.style_node, NumericLimits<u8>::max()) == element->style_record_identity().value();
                 if (holds_republished_record)
                     new_style_record = element->style_record_identity();
                 // The engine answered the record with what the move from the record it names damages.
