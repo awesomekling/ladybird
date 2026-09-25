@@ -34,18 +34,10 @@ pub(crate) fn node_may_have_replaced_content_facts_including_size_containment(da
 
 /// Whether the node's replaced-content facts need something only the DOM knows. The rest follow
 /// from the node's kind, its computed style and what its element published as the input of its
-/// replaced content, see [`derived_replaced_content_facts`]. `has_owned_image_provider` says
-/// whether an image box shows an image the box owns rather than its element's.
-pub(crate) fn node_replaced_content_facts_need_host(data: &NodeData, has_owned_image_provider: bool) -> bool {
-    let kind = data.kind.get();
-    if node_style_view(data).is_some_and(|style| style_has_size_containment(style)) {
-        return false;
-    }
-    match kind {
-        NodeKind::ImageBox => has_owned_image_provider,
-        NodeKind::NavigableContainerViewport => true,
-        _ => false,
-    }
+/// replaced content, see [`derived_replaced_content_facts`].
+pub(crate) fn node_replaced_content_facts_need_host(data: &NodeData) -> bool {
+    data.kind.get() == NodeKind::NavigableContainerViewport
+        && !node_style_view(data).is_some_and(|style| style_has_size_containment(style))
 }
 
 // https://drafts.csswg.org/css-contain-2/#containment-size
