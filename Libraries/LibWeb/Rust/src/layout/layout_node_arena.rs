@@ -6,7 +6,6 @@
 
 use super::abspos_inputs::AbsposLayoutInputs;
 use super::formatting_context::DerivedBaselines;
-use super::formatting_context::LayoutHost;
 use super::formatting_context::LayoutMode;
 use super::geometry::AvailableSize;
 use super::geometry::AvailableSpace;
@@ -6709,92 +6708,60 @@ pub unsafe extern "C" fn layout_arena_layout_is_up_to_date(
     unsafe { LayoutNodeArena::from_handle(arena) }.layout_is_up_to_date(document_needs_layout_tree_build)
 }
 
-/// What the host answers for the content enrolled for sync: the replaced-content facts of each
-/// enrolled node that still has a shell. Text content is published to the arena and needs no host.
+/// What a sync of the enrolled content takes from the arena ahead of a pass: what each enrolled
+/// replaced node's facts are derived from. Text content is published to the arena as it is.
 #[derive(Default)]
 pub(crate) struct EnrolledContentSources {
     /// Nothing is synced when this is read inside a running pass.
     pass_was_running: bool,
-    /// The enrolled replaced nodes the facts were read for, whether or not they are still live.
+    /// The enrolled replaced nodes the sources were read for, whether or not they are still live.
     enrolled_replaced_node_count: usize,
-    replaced_content_facts: Vec<(NodeSlotId, FfiReplacedContentFacts)>,
-    /// The enrolled nodes whose facts follow from their kind, style and replaced content input,
-    /// which the arena half derives.
-    derived_nodes: Vec<(NodeSlotId, ReplacedContentInput)>,
+    /// The live enrolled replaced nodes, and what their element or owned provider published as
+    /// the input of their replaced content.
+    replaced_content_inputs: Vec<(NodeSlotId, ReplacedContentInput)>,
 }
 
-/// The host half of the enrolled content sync. It reads the replaced-content facts of the nodes
-/// enrolled now, so [`apply_enrolled_content_sources`] needs no host and can run on a stage.
+/// Reads what the replaced-content facts of the nodes enrolled now are derived from, which
+/// [`apply_enrolled_content_sources`] derives them from.
 ///
 /// # Safety
 ///
-/// `arena` must be a live handle with a registered layout host, used on the document thread.
-pub(crate) unsafe fn read_enrolled_content_sources(
-    main_thread: &crate::stage::MainThread,
-    arena: *mut c_void,
-) -> EnrolledContentSources {
+/// `arena` must be a live handle whose owner waits for this call or makes it itself.
+pub(crate) unsafe fn read_enrolled_content_sources(arena: *mut c_void) -> EnrolledContentSources {
     assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY (for every derive below): the caller keeps the arena alive for this call and
-    // serializes all access on the document thread; no shared borrow outlives a callback.
-    if unsafe { &*arena.cast::<LayoutNodeArena>() }.layout_pass_is_running() {
+    // SAFETY: The caller keeps the arena alive for this call and serializes all access to it.
+    let arena = unsafe { &*arena.cast::<LayoutNodeArena>() };
+    if arena.layout_pass_is_running() {
         return EnrolledContentSources {
             pass_was_running: true,
             ..EnrolledContentSources::default()
         };
     }
-    let host = LayoutHost::of(main_thread);
-    let enrolled_replaced_nodes = unsafe { &*arena.cast::<LayoutNodeArena>() }
-        .nodes_enrolled_for_replaced_content_facts_sync
-        .borrow()
-        .clone();
-    let mut replaced_content_facts = Vec::with_capacity(enrolled_replaced_nodes.len());
-    let mut derived_nodes = Vec::new();
+    let enrolled_replaced_nodes = arena.nodes_enrolled_for_replaced_content_facts_sync.borrow().clone();
+    let mut replaced_content_inputs = Vec::with_capacity(enrolled_replaced_nodes.len());
     for &node in &enrolled_replaced_nodes {
-        {
-            let arena = unsafe { &*arena.cast::<LayoutNodeArena>() };
-            if !arena.slot_is_live(node) {
-                continue;
-            }
-            // An image box waiting for the provider it owns shows no image until the frame that
-            // built it is over.
-            if arena.image_box_awaits_owned_provider(node) {
-                let no_image = NaturalSize {
-                    width: Some(0),
-                    height: Some(0),
-                    aspect_ratio: None,
-                };
-                derived_nodes.push((node, ReplacedContentInput::NaturalSize(no_image)));
-                continue;
-            }
-            if !super::node_facts::node_replaced_content_facts_need_host(arena.data(node)) {
-                let input = if arena.rows_with_owned_image_provider.borrow().contains(&node) {
-                    arena.owned_image_natural_size_input(node)
-                } else {
-                    arena.replaced_content_input(node)
-                };
-                derived_nodes.push((node, input));
-                continue;
-            }
-        }
-        let shell = unsafe { &*arena.cast::<LayoutNodeArena>() }.shell_if_live(main_thread, node);
-        if shell.is_null() {
+        if !arena.slot_is_live(node) {
             continue;
         }
-        let mut facts = FfiReplacedContentFacts::default();
-        super::seal::note_host_call(
-            unsafe { &*arena.cast::<LayoutNodeArena>() }.layout_pass_is_running(),
-            "build_replaced_content_facts",
-        );
-        super::tree_build_seal::note_host_call("build_replaced_content_facts");
-        // SAFETY: The callback receives a live shell and a valid out-pointer.
-        unsafe { host.build_replaced_content_facts(main_thread, shell, &raw mut facts) };
-        replaced_content_facts.push((node, facts));
+        // An image box waiting for the provider it owns shows no image until the frame that built
+        // it is over, and one that owns it shows the image the provider published.
+        let input = if arena.image_box_awaits_owned_provider(node) {
+            ReplacedContentInput::NaturalSize(NaturalSize {
+                width: Some(0),
+                height: Some(0),
+                aspect_ratio: None,
+            })
+        } else if arena.rows_with_owned_image_provider.borrow().contains(&node) {
+            arena.owned_image_natural_size_input(node)
+        } else {
+            arena.replaced_content_input(node)
+        };
+        replaced_content_inputs.push((node, input));
     }
     EnrolledContentSources {
         pass_was_running: false,
         enrolled_replaced_node_count: enrolled_replaced_nodes.len(),
-        replaced_content_facts,
-        derived_nodes,
+        replaced_content_inputs,
     }
 }
 
@@ -6827,22 +6794,13 @@ pub(crate) unsafe fn apply_enrolled_content_sources(arena: *mut c_void, sources:
         unsafe { super::rendered_text::ensure_text_content(arena.cast(), node) };
     }
 
-    let mut live_replaced_nodes =
-        Vec::with_capacity(sources.replaced_content_facts.len() + sources.derived_nodes.len());
-    let derived_facts = sources.derived_nodes.into_iter().map(|(node, input)| {
+    let mut live_replaced_nodes = Vec::with_capacity(sources.replaced_content_inputs.len());
+    for (node, input) in sources.replaced_content_inputs {
         // SAFETY: As above.
         let facts = super::node_facts::derived_replaced_content_facts(
             unsafe { (*arena.cast::<LayoutNodeArena>()).data(node) },
             input,
         );
-        (node, facts)
-    });
-    let replaced_content_facts: Vec<_> = sources
-        .replaced_content_facts
-        .into_iter()
-        .chain(derived_facts)
-        .collect();
-    for (node, facts) in replaced_content_facts {
         live_replaced_nodes.push(node);
         // Changed facts invalidate cached formatting-context runs regardless of which
         // channel produced the change, including sources with no invalidation of their own.

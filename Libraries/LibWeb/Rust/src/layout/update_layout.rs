@@ -455,11 +455,11 @@ impl LayoutPassSources {
     /// # Safety
     ///
     /// As for [`arena`], on the document thread.
-    unsafe fn read(main_thread: &crate::stage::MainThread, arena_handle: *mut c_void) -> Self {
+    unsafe fn read(arena_handle: *mut c_void) -> Self {
         // SAFETY: Guaranteed by the caller.
         unsafe {
             Self {
-                content: read_enrolled_content_sources(main_thread, arena_handle),
+                content: read_enrolled_content_sources(arena_handle),
             }
         }
     }
@@ -813,7 +813,7 @@ impl LayoutFrame {
         }
         RoundAfterStyle {
             // SAFETY: The frame runs for the update the arena is in.
-            pass_sources: Some(unsafe { LayoutPassSources::read(main_thread, self.inputs.arena_handle) }),
+            pass_sources: Some(unsafe { LayoutPassSources::read(self.inputs.arena_handle) }),
             selection,
             ..RoundAfterStyle::default()
         }
@@ -1045,9 +1045,9 @@ impl LayoutFrame {
                 // Only the sources of a pass that follows are read on the document thread; the
                 // host half waits for the join after them.
                 let pass_sources = pass_follows.then(|| {
-                    self.join(joins, FrameJoin::BuildLayoutTree, |main_thread, _| {
+                    self.join(joins, FrameJoin::BuildLayoutTree, |_, _| {
                         // SAFETY: The frame runs for the update the arena is in.
-                        unsafe { LayoutPassSources::read(main_thread, arena_handle) }
+                        unsafe { LayoutPassSources::read(arena_handle) }
                     })
                 });
                 self.owe_tree_build_host_half(host_half);
@@ -1165,9 +1165,9 @@ impl LayoutFrame {
             // it changes (it can resize this document's viewport through its embedding document)
             // is left for that join to find.
             let pass_sources = pass_follows.then(|| {
-                self.join(joins, FrameJoin::BuildLayoutTree, |main_thread, _| {
+                self.join(joins, FrameJoin::BuildLayoutTree, |_, _| {
                     // SAFETY: The frame runs for the update the arena is in.
-                    unsafe { LayoutPassSources::read(main_thread, arena_handle) }
+                    unsafe { LayoutPassSources::read(arena_handle) }
                 })
             });
             self.owe_tree_build_host_half(host_half);

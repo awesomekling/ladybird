@@ -22,18 +22,6 @@ public:
     // when layout is invalidated somewhere inside its subtree.
     bool is_partial_relayout_boundary() const;
 
-    // https://www.w3.org/TR/css-images-3/#natural-dimensions
-    CSS::SizeWithAspectRatio natural_size() const;
-
-    // When computed width/height is auto, auto_content_box_size gives the fallback content-box size for
-    // elements whose used size is determined by natural dimensions, attributes, or defaults other than
-    // the generic UA fallback (300x150). Any returned aspect ratio comes from natural dimensions (when
-    // available) or may be computed from fallback sizing. Don't confuse this with the CSS preferred
-    // aspect ratio.
-    CSS::SizeWithAspectRatio auto_content_box_size() const;
-
-    RustFFI::FfiReplacedContentFacts build_replaced_content_facts_for_arena() const;
-
     ImageProvider const& image_provider() const;
     ImageProvider& image_provider()
     {
@@ -54,8 +42,6 @@ public:
     Box(DOM::Document&, BindToPreparedArenaSlot, Compositing::RustFFI::NodeSlotId, RustFFI::NodeKind, CSS::LayoutStyle);
 
 private:
-    CSS::SizeWithAspectRatio compute_auto_content_box_size() const;
-
     virtual bool is_box() const final { return true; }
 
     ImageProvider* owned_image_provider() const;

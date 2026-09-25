@@ -923,8 +923,6 @@ pub struct FfiLayoutHostCallbacks {
     /// The commit messages a finished commit leaves for the document, in the order it produced
     /// them.
     pub deliver_commit_messages: unsafe extern "C" fn(*mut c_void, *const commit::FfiCommitMessage, usize),
-    /// Fills the replaced-content facts of a live box shell ahead of a pass.
-    pub build_replaced_content_facts: unsafe extern "C" fn(*mut c_void, *mut c_void, *mut FfiReplacedContentFacts),
 }
 
 #[derive(Clone, Copy)]
@@ -932,13 +930,12 @@ pub struct FfiLayoutHostCallbacks {
 ///
 /// ```compile_fail
 /// fn layout_stage(host: &libweb_rust::layout::formatting_context::LayoutHost) {
-///     unsafe { host.build_replaced_content_facts(std::ptr::null_mut(), std::ptr::null_mut()) };
+///     unsafe { host.deliver_commit_messages(&[]) };
 /// }
 /// ```
 pub(crate) struct LayoutHost {
     context: *mut c_void,
     deliver_commit_messages: unsafe extern "C" fn(*mut c_void, *const commit::FfiCommitMessage, usize),
-    build_replaced_content_facts: unsafe extern "C" fn(*mut c_void, *mut c_void, *mut FfiReplacedContentFacts),
 }
 
 impl From<FfiLayoutHostCallbacks> for LayoutHost {
@@ -946,7 +943,6 @@ impl From<FfiLayoutHostCallbacks> for LayoutHost {
         Self {
             context: host.context,
             deliver_commit_messages: host.deliver_commit_messages,
-            build_replaced_content_facts: host.build_replaced_content_facts,
         }
     }
 }
@@ -959,15 +955,6 @@ impl LayoutHost {
             .and_then(|host_tables| host_tables.layout_host.get())
             .expect("layout node arena has no layout host")
             .into()
-    }
-
-    pub(crate) unsafe fn build_replaced_content_facts(
-        &self,
-        _: &crate::stage::MainThread,
-        shell: *mut c_void,
-        facts: *mut FfiReplacedContentFacts,
-    ) {
-        unsafe { (self.build_replaced_content_facts)(self.context, shell, facts) };
     }
 
     pub(crate) unsafe fn deliver_commit_messages(

@@ -32,14 +32,6 @@ pub(crate) fn node_may_have_replaced_content_facts_including_size_containment(da
     style.has_size_containment() || style.is_size_container()
 }
 
-/// Whether the node's replaced-content facts need something only the DOM knows. The rest follow
-/// from the node's kind, its computed style and what its element published as the input of its
-/// replaced content, see [`derived_replaced_content_facts`].
-pub(crate) fn node_replaced_content_facts_need_host(data: &NodeData) -> bool {
-    data.kind.get() == NodeKind::NavigableContainerViewport
-        && !node_style_view(data).is_some_and(|style| style_has_size_containment(style))
-}
-
 // https://drafts.csswg.org/css-contain-2/#containment-size
 fn style_has_size_containment(style: ComputedValuesView<'_>) -> bool {
     // Giving an element size containment has no effect if its inner display type is 'table', or if its principal box
@@ -51,9 +43,8 @@ fn style_has_size_containment(style: ComputedValuesView<'_>) -> bool {
     style.has_size_containment() || style.is_size_container()
 }
 
-/// The replaced-content facts of a node whose facts need no host: a size-contained box, a
-/// checkbox, radio button, slider, textarea, text input, canvas, video, SVG image or an image box
-/// showing its element's image, or a kind with no natural size.
+/// The replaced-content facts of an enrolled node, from its kind, its computed style and what its
+/// element published as the input of its replaced content.
 pub(crate) fn derived_replaced_content_facts(data: &NodeData, input: ReplacedContentInput) -> FfiReplacedContentFacts {
     let mut facts = FfiReplacedContentFacts::default();
     // An SVG <image> runs the default sizing algorithm over its own geometry, so it publishes the natural size exactly as
@@ -211,6 +202,12 @@ fn derived_auto_content_size(
             };
             natural_size_facts(natural_size)
         }
+        // An <object> showing an SVG document is sized from its root; any other navigable
+        // container has no natural size.
+        NodeKind::NavigableContainerViewport => match input {
+            ReplacedContentInput::NaturalSize(natural_size) => natural_size_facts(natural_size),
+            _ => AutoContentSize::default(),
+        },
         _ => AutoContentSize::default(),
     }
 }

@@ -44,14 +44,17 @@
 #include <LibWeb/HTML/HTMLTableElement.h>
 #include <LibWeb/HTML/HTMLTextAreaElement.h>
 #include <LibWeb/HTML/HTMLVideoElement.h>
+#include <LibWeb/HTML/LocalNavigable.h>
 #include <LibWeb/Layout/ImageProvider.h>
 #include <LibWeb/Layout/Node.h>
+#include <LibWeb/SVG/AttributeNames.h>
 #include <LibWeb/SVG/SVGClipPathElement.h>
 #include <LibWeb/SVG/SVGElement.h>
 #include <LibWeb/SVG/SVGGraphicsElement.h>
 #include <LibWeb/SVG/SVGImageElement.h>
 #include <LibWeb/SVG/SVGMaskElement.h>
 #include <LibWeb/SVG/SVGPatternElement.h>
+#include <LibWeb/SVG/SVGSVGElement.h>
 #include <LibWeb/SVG/SVGSwitchElement.h>
 #include <LibWeb/StyleEngineRustFFI.h>
 
@@ -839,6 +842,19 @@ static StyleEngineFFI::FfiReplacedContentInput image_natural_size_input(Layout::
     return natural_size_input({ image_provider.intrinsic_width(), image_provider.intrinsic_height(), image_provider.intrinsic_aspect_ratio() });
 }
 
+// An <object> showing the element's document as its content navigable's is sized from the <svg>
+// document element, so it publishes again what it gives its box as the root arrives or changes.
+static void record_replaced_content_input_of_object_showing(DOM::Element const& element)
+{
+    if (!element.is_document_element() || !is<SVG::SVGSVGElement>(element))
+        return;
+    auto navigable = element.document().navigable();
+    if (!navigable)
+        return;
+    if (auto* object = as_if<HTML::HTMLObjectElement>(navigable->container().ptr()))
+        record_element_replaced_content_input(*object);
+}
+
 // What the element gives the natural size of its replaced content, which layout resolves against
 // the style of the element's box: what its attributes say, or the size of what it has loaded.
 void record_element_replaced_content_input(DOM::Element& element)
@@ -855,7 +871,11 @@ void record_element_replaced_content_input(DOM::Element& element)
         return;
     }
     if (auto const* object = as_if<HTML::HTMLObjectElement>(element)) {
-        style_engine->record_replaced_content_input(element.style_node_id(), image_natural_size_input(*object));
+        // An object representing its content navigable is sized from the SVG document it shows.
+        if (object->representation() == HTML::HTMLObjectElement::Representation::ContentNavigable)
+            style_engine->record_replaced_content_input(element.style_node_id(), natural_size_input(object->natural_size_of_content_svg_document()));
+        else
+            style_engine->record_replaced_content_input(element.style_node_id(), image_natural_size_input(*object));
         return;
     }
     if (auto const* input = as_if<HTML::HTMLInputElement>(element)) {
@@ -1092,6 +1112,7 @@ static void record_element_initial_features(DOM::Element& element)
     if (element_has_presentational_hints_to_publish(element))
         StyleComputer::collect_presentational_hint_properties({ element });
     record_element_replaced_content_input(element);
+    record_replaced_content_input_of_object_showing(element);
 }
 
 void record_element_moved(DOM::Element& element, DOM::Node* old_parent, DOM::Element* old_previous_sibling, DOM::Element* old_next_sibling)
@@ -2836,6 +2857,10 @@ void record_element_attribute_changed(DOM::Element& element, Utf16FlyString cons
     // editing host and whether it renders its alternative text instead of its image.
     else if (name == HTML::AttributeNames::contenteditable || name == HTML::AttributeNames::alt)
         record_element_construction_facts(element);
+
+    // What an <object> showing this <svg> document is sized from.
+    if (name == SVG::AttributeNames::width || name == SVG::AttributeNames::height || name == SVG::AttributeNames::viewBox)
+        record_replaced_content_input_of_object_showing(element);
 
     // What the replaced content of a textarea, an input or a canvas is sized from.
     if ((is<HTML::HTMLTextAreaElement>(element) && (name == HTML::AttributeNames::cols || name == HTML::AttributeNames::rows))
