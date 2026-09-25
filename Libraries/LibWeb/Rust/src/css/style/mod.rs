@@ -50,6 +50,7 @@ macro_rules! define_id {
     };
 }
 
+mod anchor_names;
 pub(crate) mod animations;
 mod atoms;
 pub mod batch_matcher;
@@ -834,6 +835,8 @@ pub struct RetainedState {
     /// What the host learned about size container queries, which finds the elements a size
     /// query container's new box moves.
     size_container_queries: size_container_invalidation::SizeContainerQueryFacts,
+    /// The anchor names the installed records of elements register in their tree scopes.
+    anchor_names: anchor_names::AnchorNameRegistry,
     declaration_block_version: u32,
     /// Whether the last transaction taken planned nothing but derived child reactions.
     last_transaction_only_derived_child_reactions: bool,

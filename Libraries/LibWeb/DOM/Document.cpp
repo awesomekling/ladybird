@@ -1112,7 +1112,6 @@ void Document::visit_edges(Cell::Visitor& visitor)
     visitor.visit(m_radio_button_group_registry);
 
     visitor.visit(m_potentially_named_elements);
-    m_anchor_name_map.visit_edges(visitor);
     if (m_query_selector_result_cache)
         m_query_selector_result_cache->visit_edges(visitor);
     if (m_isolated_selector_query_engine_cache)

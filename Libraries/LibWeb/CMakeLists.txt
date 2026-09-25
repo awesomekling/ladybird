@@ -295,7 +295,6 @@ set(SOURCES
     DOM/AbstractRange.cpp
     DOM/AccessibilityTreeNode.cpp
     DOM/AdoptedStyleSheets.cpp
-    DOM/AnchorNameMap.cpp
     DOM/Attr.cpp
     DOM/CDATASection.cpp
     DOM/CaretPosition.cpp

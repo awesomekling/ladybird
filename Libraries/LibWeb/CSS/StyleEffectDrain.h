@@ -7,7 +7,6 @@
 #pragma once
 
 #include <AK/Function.h>
-#include <AK/Utf16FlyString.h>
 #include <AK/Variant.h>
 #include <AK/Vector.h>
 #include <LibWeb/CSS/StyleComputer.h>
@@ -40,11 +39,10 @@ public:
         StyleNodeID style_node;
         u32 style_groups { 0 };
     };
-    // The anchor names a row's record registers in its tree scope, in place of the ones the record
-    // it replaced registered.
+    // The anchor names a row's record registers in its tree scope, in place of the ones the engine
+    // holds for the element.
     struct AnchorNames {
         StyleNodeID style_node;
-        Vector<Utf16FlyString> old_names;
     };
     // Which animations a row's record references, as the index a `@keyframes` rule finds its
     // elements by holds them. A row with an animation plan exists because the declarations naming

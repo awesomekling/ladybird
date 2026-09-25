@@ -37,7 +37,6 @@
 #include <LibWeb/CSS/CustomPropertyRegistration.h>
 #include <LibWeb/CSS/ScrollStateContainerQuery.h>
 #include <LibWeb/CSS/StyleScope.h>
-#include <LibWeb/DOM/AnchorNameMap.h>
 #include <LibWeb/DOM/HoverEventData.h>
 #include <LibWeb/DOM/LayoutOverlapBlocker.h>
 #include <LibWeb/DOM/ParentNode.h>
@@ -1133,9 +1132,6 @@ public:
     void element_with_name_was_added(Badge<DOM::Element>, GC::Ref<DOM::Element> element);
     void element_with_name_was_removed(Badge<DOM::Element>, GC::Ref<DOM::Element> element);
 
-    // https://drafts.csswg.org/css-anchor-position-1/#determining
-    AnchorNameMap& anchor_name_map() { return m_anchor_name_map; }
-
     void add_form_associated_element_with_form_attribute(HTML::FormAssociatedElement&);
     void remove_form_associated_element_with_form_attribute(HTML::FormAssociatedElement&);
 
@@ -2088,8 +2084,6 @@ private:
     // Every <pattern> in the document's node tree, which is what lets a pattern that inherits
     // attributes from the pattern its `href` names be republished when the chain changes.
     SVG::SVGPatternElement::DocumentPatternElementList m_svg_pattern_elements;
-
-    AnchorNameMap m_anchor_name_map;
 
     bool m_design_mode_enabled { false };
 

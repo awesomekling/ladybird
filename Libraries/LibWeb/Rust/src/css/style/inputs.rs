@@ -2025,6 +2025,7 @@ impl StyleEngineState {
                 container_gates_unheld: HashSet::default(),
                 container_input_nodes: HashSet::default(),
                 size_container_queries: Default::default(),
+                anchor_names: Default::default(),
                 declaration_block_version: 1,
                 last_transaction_only_derived_child_reactions: false,
                 sheets_excluded_from_routing: BitColumn::default(),
@@ -2962,6 +2963,7 @@ impl StyleEngineState {
                     .retain(|(owner, _), _| *owner != node);
                 self.retained.environment_move_recompute_nodes.remove(&node);
                 self.retained.size_container_queries.retire(node);
+                self.retained.anchor_names.retire(node);
             }
             if !self.retained.pseudo_element_custom_property_data.is_empty() {
                 let retired: HashSet<StyleNodeID> = retired_nodes.iter().copied().collect();

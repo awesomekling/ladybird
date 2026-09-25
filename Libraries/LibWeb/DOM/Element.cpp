@@ -2193,32 +2193,25 @@ void Element::publish_custom_property_names(RefPtr<CSS::CustomPropertyData const
     }
 }
 
-// The anchor names of one tree scope, and the identity the render side names that scope by: the
-// shadow host of the scope's root, or nothing for the document tree.
-struct AnchorNameScope {
-    AnchorNameMap& names;
-    Optional<CSS::StyleNodeID> host;
-};
-
-static AnchorNameScope anchor_name_scope_of(Element& element, Node& tree_root)
-{
-    if (auto* shadow_root = as_if<ShadowRoot>(tree_root)) {
-        auto* host = shadow_root->host();
-        return { shadow_root->anchor_name_map(), Optional<CSS::StyleNodeID> { host ? host->style_node_id() : CSS::StyleNodeID {} } };
-    }
-    return { element.document().anchor_name_map(), OptionalNone {} };
-}
-
-static bool unregister_current_anchor_names(Element& element, Node& tree_root)
+static bool has_anchor_names(Element const& element)
 {
     auto const* anchor_values = element.style_group<CSS::ComputedValues::AnchorValues>();
-    if (!anchor_values || anchor_values->anchor_names_span().is_empty())
-        return false;
+    return anchor_values && !anchor_values->anchor_names_span().is_empty();
+}
 
-    auto scope = anchor_name_scope_of(element, tree_root);
-    for (auto const& name : anchor_values->anchor_names_span())
-        scope.names.unregister_name(name, element, scope.host);
-    return true;
+// The style engine keeps the anchor names installed records register, by tree scope, and publishes
+// them to the arena layout finds anchors in. A zero record withdraws the element's names. Returns
+// whether the element had names registered.
+template<typename Scope>
+static bool register_anchor_names_in_engine(Scope const& scope, DOM::Document& document, CSS::StyleNodeID style_node, CSS::StyleRecordID style_record, bool has_names)
+{
+    auto* arena = document.layout_node_arena_if_created();
+    // A document that registers a name is one that lays out, so the arena the fact belongs to is
+    // worth creating here rather than replaying the registry later.
+    if (!arena && has_names)
+        arena = &document.layout_node_arena();
+    auto registered = CSS::StyleEngineFFI::style_engine_register_anchor_names(scope, scope.engine().rust_handle(), arena ? arena->handle() : nullptr, style_node.value(), style_record.value());
+    return registered & 1;
 }
 
 RefPtr<CSS::CustomPropertyData const> Element::custom_property_environment_of_engine_record(CSS::StyleRecordID style_record, bool& installable) const
@@ -2248,23 +2241,14 @@ RefPtr<CSS::CustomPropertyData const> Element::custom_property_environment_of_en
 }
 
 // https://drafts.csswg.org/css-anchor-position-1/#determining
-// Update the anchor name registry when anchor-name changes.
+// Register the anchor names of the installed record in place of the ones registered before.
 // FIXME: The tree root should be determined by the stylesheet origin, not the element's position in the tree.
-void Element::update_anchor_name_registry(ReadonlySpan<Utf16FlyString> old_anchor_names, CSS::ComputedValues const& new_style)
+void Element::register_anchor_names(CSS::StyleDrainScope const& scope)
 {
     if (!is_connected())
         return;
-    auto scope = anchor_name_scope_of(*this, root());
-    bool element_had_registered_anchor_names = false;
-    for (auto const& name : old_anchor_names) {
-        element_had_registered_anchor_names = true;
-        scope.names.unregister_name(name, *this, scope.host);
-    }
-    bool element_has_anchor_names = false;
-    for (auto const& name : new_style.anchor_names()) {
-        element_has_anchor_names = true;
-        scope.names.register_name(name, *this, scope.host);
-    }
+    bool const element_has_anchor_names = has_anchor_names(*this);
+    bool const element_had_registered_anchor_names = register_anchor_names_in_engine(scope, document(), style_node_id(), style_record_identity(), element_has_anchor_names);
 
     // Anchor names that vanish here become invisible to the partial relayout planner's
     // subtree check, while positioned boxes anywhere may hold geometry resolved against them.
@@ -2347,9 +2331,9 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
         auto custom_property_environment = install_custom_property_environment(custom_property_data({}));
         set_computed_style(scope, {}, new_style_record);
         if (!effect_drain)
-            update_anchor_name_registry({}, *computed_style());
+            register_anchor_names(scope);
         else if (!computed_style()->anchor_names().is_empty())
-            effect_drain->append(CSS::StyleEffectDrain::AnchorNames { style_node_id(), {} });
+            effect_drain->append(CSS::StyleEffectDrain::AnchorNames { style_node_id() });
         if (is_document_element())
             style_computer.update_root_element_font_metrics(*computed_style());
         counters.element_computed_style_changes++;
@@ -2408,13 +2392,10 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
                 counters.element_computed_style_changes++;
         }
         set_computed_style(scope, {}, new_style_record);
-        if (!effect_drain) {
-            update_anchor_name_registry(old_computed_values->anchor_names(), *new_computed_values);
-        } else if (!old_computed_values->anchor_names().is_empty() || !new_computed_values->anchor_names().is_empty()) {
-            Vector<Utf16FlyString> old_anchor_names;
-            old_anchor_names.append(old_computed_values->anchor_names().data(), old_computed_values->anchor_names().size());
-            effect_drain->append(CSS::StyleEffectDrain::AnchorNames { style_node_id(), move(old_anchor_names) });
-        }
+        if (!effect_drain)
+            register_anchor_names(scope);
+        else if (!old_computed_values->anchor_names().is_empty() || !new_computed_values->anchor_names().is_empty())
+            effect_drain->append(CSS::StyleEffectDrain::AnchorNames { style_node_id() });
         if (is_document_element()) {
             // Root-relative units read document-global font metrics rather than inherited style.
             // Every descendant must recompute when they move.
@@ -2515,9 +2496,10 @@ void Element::clear_computed_styles_from_display_none_descendants(CSS::StyleDrai
         if (!element->has_style())
             return TraversalDecision::SkipChildrenAndContinue;
 
-        // Anchor names are registered outside the style record, so unregister them before discarding the only record
-        // that identifies them. Rematerializing the element's style will register its current names again.
-        if (element->is_connected() && unregister_current_anchor_names(*element, element->root()))
+        // Anchor names are registered outside the style record, so withdraw them with the record. Rematerializing
+        // the element's style will register its current names again.
+        if (element->is_connected() && has_anchor_names(*element)
+            && register_anchor_names_in_engine(scope, element->document(), element->style_node_id(), {}, false))
             element->document().record_partial_relayout_escape(PartialRelayoutEscapeReason::AnchorNamesUnregisteredByStyleChange);
 
         // The layout tree is torn down after the style transaction. Keep its style alive until then without
@@ -3228,7 +3210,11 @@ void Element::removed_from(IsSubtreeRoot is_subtree_root, Node* old_ancestor, No
             document().element_with_id_was_removed({}, *this);
         if (m_has_name)
             document().element_with_name_was_removed({}, *this);
-        if (unregister_current_anchor_names(*this, old_root)) {
+        if (has_anchor_names(*this) && style_node_id() != 0) {
+            // The engine withdraws the names as it takes the removal in, after a pass in flight.
+            document().style_computer().style_engine().publish_input([document = GC::Root<Document> { document() }, style_node = style_node_id()](CSS::StyleInputScope const& input) {
+                (void)register_anchor_names_in_engine(input, *document, style_node, {}, false);
+            });
             // Positioned boxes anywhere may hold geometry resolved against these names, which
             // the partial relayout planner's subtree check can no longer see.
             document().record_partial_relayout_escape(PartialRelayoutEscapeReason::AnchorNamesUnregisteredByElementRemoval);

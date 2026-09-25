@@ -172,9 +172,8 @@ void StyleEffectDrain::apply(StyleDrainScope const& scope, DOM::Document& docume
                 if (auto* parent = element->parent())
                     parent->add_children_explicitly_inherited_non_inherited_style_groups(row.style_groups == NumericLimits<u32>::max() ? ComputedValues::all_style_groups : row.style_groups);
             },
-            [&](AnchorNames const& row) {
-                if (auto style = element->computed_style())
-                    element->update_anchor_name_registry(row.old_names, *style);
+            [&](AnchorNames const&) {
+                element->register_anchor_names(scope);
             },
             [&](AnimationNames const&) {
                 element->republish_animation_name_registry();
