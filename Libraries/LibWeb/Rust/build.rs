@@ -723,6 +723,11 @@ fn generate_style_engine_boundary(manifest_dir: &Path, out_dir: &Path) -> Result
         } else {
             "&mut StyleEngine"
         };
+        // The boundary definition sets the parameter count, so a long generated signature is not a
+        // design smell here.
+        if parsed_arguments.len() + 1 > 7 {
+            writeln!(native, "#[allow(clippy::too_many_arguments)]")?;
+        }
         write!(native, "pub fn {operation_name}(engine: {native_receiver}")?;
         for (name, kind, (rust_type, _, _, _)) in &parsed_arguments {
             if kind.ends_with("_slice") {
