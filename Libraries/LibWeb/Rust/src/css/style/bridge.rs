@@ -937,6 +937,8 @@ pub enum FfiHostFactKind {
     ElementAssociatedPseudoKind = 8,
     /// `facts` is the element's construction facts, and `value` the box kind it asks for.
     ElementConstructionFacts = 9,
+    /// `data` is a snapshot of the element's inline style declarations, or null for none.
+    ElementInlineStyleProperties = 10,
 }
 
 /// One write the host made to a fact of the mirror, which the engine applies with the next
@@ -951,7 +953,8 @@ pub struct FfiHostFactWrite {
     pub parent: u32,
     pub previous_sibling: u32,
     pub facts: u32,
-    /// For `TextData`, a raw `AK::Utf16String` whose reference the write transfers to the engine.
+    /// For `TextData`, a raw `AK::Utf16String`, and for `ElementInlineStyleProperties`, an Arc-owned
+    /// `DeclarationBlockData`. The write transfers its one reference to the engine.
     pub data: usize,
 }
 
@@ -1887,7 +1890,8 @@ pub unsafe extern "C" fn style_engine_apply_transaction(engine: *mut c_void, tra
 /// it stands for, so a replay applies it on its own.
 ///
 /// # Safety
-/// Every `TextData` write must carry a raw `AK::Utf16String` whose reference it transfers.
+/// Every `TextData` write must carry a raw `AK::Utf16String`, and every `ElementInlineStyleProperties`
+/// write null or an Arc-owned `DeclarationBlockData`, whose reference it transfers.
 unsafe fn apply_host_fact_writes(engine: &mut StyleEngine, writes: &[FfiHostFactWrite]) {
     let mut index = 0;
     while index < writes.len() {
@@ -1941,6 +1945,21 @@ unsafe fn apply_host_fact_writes(engine: &mut StyleEngine, writes: &[FfiHostFact
             }
             FfiHostFactKind::ElementConstructionFacts => {
                 operations::set_element_construction_facts(engine, write.node, write.facts, write.value);
+            }
+            FfiHostFactKind::ElementInlineStyleProperties => {
+                // SAFETY: The caller vouches that the write transfers one reference to the snapshot.
+                let data = (write.data != 0).then(|| unsafe {
+                    std::sync::Arc::from_raw(write.data as *const crate::css::declaration_block::DeclarationBlockData)
+                });
+                if let Some(node) = StyleNodeID::from_raw(write.node) {
+                    register_element_declared_properties(
+                        engine,
+                        node,
+                        FfiElementDeclarationKind::InlineStyle,
+                        data.as_ref().map_or(&[], |data| data.properties.as_slice()),
+                        data.as_ref().map_or(&[], |data| data.custom_properties.as_slice()),
+                    );
+                }
             }
         }
         index += 1;
@@ -2708,33 +2727,6 @@ fn register_element_declared_properties(
         write_custom_declarations(&custom_declarations, payload);
     });
     has_transitions
-}
-
-/// Registers an element's native inline declaration block, or clears it when null.
-/// Returns whether the declarations can define transitions.
-///
-/// # Safety
-/// `engine` must be live. A non-null `block` must borrow a live `DeclarationBlock`.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_set_element_inline_style_properties(
-    engine: *mut c_void,
-    node: u32,
-    block: *const c_void,
-) -> bool {
-    super::seal::note_engine_call("style_engine_set_element_inline_style_properties");
-    let Some(node) = StyleNodeID::from_raw(node) else {
-        return false;
-    };
-    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
-    let block = unsafe { block.cast::<crate::css::declaration_block::DeclarationBlock>().as_ref() };
-    let data = block.map(|block| block.data());
-    register_element_declared_properties(
-        engine,
-        node,
-        FfiElementDeclarationKind::InlineStyle,
-        data.as_ref().map_or(&[], |data| data.properties.as_slice()),
-        data.as_ref().map_or(&[], |data| data.custom_properties.as_slice()),
-    )
 }
 
 /// Registers borrowed presentation hints and returns whether they can define transitions.

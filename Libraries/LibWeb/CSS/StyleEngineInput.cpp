@@ -1749,10 +1749,15 @@ static void record_element_inline_style_properties(DOM::Element& element)
     auto* style_engine = style_engine_for(element);
     if (!style_engine || element.style_node_id() == no_style_node || has_pending_initial_features(element))
         return;
-    // As for custom states, the declarations go into the style mirror the layout frame reads.
+    // The declarations cross with the next transaction. Like a DOM mutation, recording them waits
+    // for the frame in flight, so no transaction carrying them is applied beside one.
     element.document().join_frame_in_flight();
     auto const inline_style = element.inline_style();
-    style_engine->set_element_inline_style_properties(element.style_node_id(), inline_style ? &inline_style->declaration_block() : nullptr);
+    // What the block holds now: an edit made before the transaction crosses records a write of its own.
+    auto const* declarations = inline_style ? Parser::ValueParserFFI::rust_declaration_block_snapshot(inline_style->declaration_block().handle()) : nullptr;
+    if (declarations && Parser::ValueParserFFI::rust_declaration_data_defines_a_css_transition(declarations))
+        style_engine->note_css_transitions_may_observe_style_changes();
+    style_engine->record_inline_style_properties(element.style_node_id(), declarations);
 }
 
 // The hints an element's attributes map to are published from where the cascade collects them

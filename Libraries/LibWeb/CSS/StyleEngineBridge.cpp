@@ -141,6 +141,11 @@ void StyleEngine::publish_font_faces()
 
 StyleEngine::~StyleEngine()
 {
+    // A snapshot a write took that never crossed is still the write's to give up.
+    for (auto const& write : m_host_fact_writes) {
+        if (write.kind == StyleEngineFFI::FfiHostFactKind::ElementInlineStyleProperties)
+            Parser::ValueParserFFI::rust_declaration_data_release(bit_cast<Parser::ValueParserFFI::DeclarationBlockData const*>(write.data));
+    }
     if (m_impl)
         StyleEngineFFI::style_engine_destroy(m_impl);
     for (auto const& atom : m_atoms)
@@ -192,12 +197,6 @@ void StyleEngine::set_element_parts(StyleNodeID node, ReadonlySpan<StyleAtomID> 
 void StyleEngine::finish_sheet_rules_replacement(SheetID sheet)
 {
     StyleEngineFFI::style_engine_finish_sheet_rules_replacement(m_impl, sheet.value(), next_declaration_block_version());
-}
-
-void StyleEngine::set_element_inline_style_properties(StyleNodeID node, RustDeclarationBlock const* declarations)
-{
-    if (StyleEngineFFI::style_engine_set_element_inline_style_properties(m_impl, node.value(), declarations ? declarations->handle() : nullptr))
-        note_css_transitions_may_observe_style_changes();
 }
 
 void StyleEngine::set_element_presentational_hint_properties(StyleNodeID node, StyleEngineFFI::FfiElementDeclarationKind kind, ReadonlySpan<StyleProperty> properties)
@@ -649,6 +648,11 @@ void StyleEngine::record_associated_pseudo_kind(StyleNodeID node, u8 pseudo_kind
 void StyleEngine::record_construction_facts(StyleNodeID node, u32 facts, u8 box_kind)
 {
     record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::ElementConstructionFacts, .value = box_kind, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = facts, .data = 0 });
+}
+
+void StyleEngine::record_inline_style_properties(StyleNodeID node, Parser::ValueParserFFI::DeclarationBlockData const* declarations)
+{
+    record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::ElementInlineStyleProperties, .value = 0, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = 0, .data = bit_cast<FlatPtr>(declarations) });
 }
 
 void StyleEngine::record_container_query_input_change(StyleNodeID style_node)
