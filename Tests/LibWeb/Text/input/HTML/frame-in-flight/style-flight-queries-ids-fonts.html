@@ -5,14 +5,19 @@
     #box { width: 100px; height: 20px; }
     #renamed { width: 150px; }
     .item { height: 10px; }
+    #text { font: 20px StyleFlightFace, monospace; }
 </style>
 <div id="box" class="item"></div>
 <div id="list"><div class="item">a</div><div class="item">b</div></div>
+<span id="text">flight</span>
 <script>
-    // Selector queries the DOM answers alone, a first-seen id and sheet conditions, made while the style pass is in
-    // flight: none of them waits for the pass, and the next style update sees each of them.
+    // Selector queries the DOM answers alone, a first-seen id, sheet conditions and a font face added while the style
+    // pass is in flight: none of them waits for the pass, and the next style update sees each of them.
     asyncTest(async done => {
+        const face = new FontFace("StyleFlightFace", "url(../../../../Assets/HashSans.woff)");
+        await face.load();
         const element = box;
+        const widthBefore = text.offsetWidth;
         let height = 20;
 
         // `write` runs beside a pass of its own, since a write that joins takes the pass back for the ones after it.
@@ -43,6 +48,9 @@
         await besidePass("a constructed sheet with a media list", () => {
             constructed = new CSSStyleSheet({ media: "print" });
         }, () => constructed.media.mediaText);
+        await besidePass("adding a font face", () => {
+            document.fonts.add(face);
+        }, () => `the text width changed: ${text.offsetWidth !== widthBefore}`);
         await besidePass("a style element's media", () => {
             base.media = "print";
         }, () => `width ${element.offsetWidth}`);

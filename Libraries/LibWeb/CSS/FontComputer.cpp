@@ -34,6 +34,7 @@
 #include <LibWeb/DOM/ShadowRoot.h>
 #include <LibWeb/Fetch/Infrastructure/HTTP/MIME.h>
 #include <LibWeb/Fetch/Response.h>
+#include <LibWeb/Layout/LayoutRustFFI.h>
 #include <LibWeb/MimeSniff/Resource.h>
 #include <LibWeb/Platform/FontPlugin.h>
 #include <LibWeb/StyleValueRustFFI.h>
@@ -519,9 +520,23 @@ static void record_font_input_change(DOM::Element& element)
         element.style_node_id(), StyleEngine::PublishedStyle | StyleEngine::RecomputeStyle | StyleEngine::FontInputsChanged, font_group);
 }
 
+// Beside a style pass alone, the pass resolves fonts on its own thread against the `@font-face` table and the cascade
+// memo it was given. A font change waits for the pass's drain as published input, and reacts to the faces as they are
+// then.
+static bool leave_font_change_beside_style_pass(DOM::Document& document, Function<void()> change)
+{
+    auto& style_engine = document.style_computer().style_engine();
+    if (!Layout::RustFFI::rust_stage_thread_only_style_pass_in_flight_for(style_engine.rust_handle()))
+        return false;
+    style_engine.publish_input([change = move(change)](StyleInputScope const&) { change(); });
+    return true;
+}
+
 void FontComputer::clear_computed_font_cache_for_families(Vector<Utf16FlyString> const& family_names)
 {
     VERIFY(!family_names.is_empty());
+    if (leave_font_change_beside_style_pass(document(), [font_computer = GC::Root { *this }, family_names] { font_computer->clear_computed_font_cache_for_families(family_names); }))
+        return;
     bump_environment_generation();
 
     // Only forget remembered resolutions that reference the loaded font family.
@@ -614,6 +629,8 @@ void FontComputer::did_load_font(FontFaceKey const& changed_face)
         did_load_font(changed_face.family_name);
         return;
     }
+    if (leave_font_change_beside_style_pass(document(), [font_computer = GC::Root { *this }, changed_face] { font_computer->did_load_font(changed_face); }))
+        return;
 
     bump_environment_generation();
     // A family can contain many faces, but one face becoming available changes only the remembered
