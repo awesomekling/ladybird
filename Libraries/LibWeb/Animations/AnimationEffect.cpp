@@ -843,6 +843,8 @@ static bool render_side_installs_animation_samples()
 enum class InstalledInArena {
     No,
     Yes,
+    // Installed, and presented on the render side (a render clock tick): nothing to repaint.
+    YesAndPresented,
 };
 
 // Install the record a sample of an element's animations published, and apply what publishing it
@@ -916,7 +918,7 @@ static void apply_animation_overlay(CSS::StyleDrainScope const& scope, DOM::Abst
         return;
 
     if (invalidation.needs_relayout()) {
-        if (installed_in_arena == InstalledInArena::Yes)
+        if (installed_in_arena != InstalledInArena::No)
             target->document().note_render_state_mutation();
         else
             target->set_needs_layout_update(DOM::SetNeedsLayoutReason::KeyframeEffect);
@@ -941,6 +943,8 @@ static void apply_animation_overlay(CSS::StyleDrainScope const& scope, DOM::Abst
         }
     }
 
+    if (installed_in_arena == InstalledInArena::YesAndPresented)
+        return;
     auto* repaint_layout_node = element.pseudo_element().has_value()
         ? target->pseudo_element_unsafe_layout_node(*element.pseudo_element())
         : target->unsafe_layout_node();
@@ -1078,15 +1082,18 @@ static void install_taken_engine_sample(CSS::StyleDrainScope const& scope, DOM::
     if (!sample.overlay_is_empty && document.is_in_style_stabilization_epoch()
         && (document.style_stabilization_has_style_reactions() || sample.invalidation.requires_base_style_recomputation))
         document.style_computer().record_transition_stabilization_baseline(scope, element);
-    if (installed_in_arena == InstalledInArena::Yes)
-        apply_animation_overlay(scope, element, sample.invalidation, CSS::StyleRecordID { sample.style_record }, caller_applies_invalidation, InstalledInArena::Yes);
+    if (installed_in_arena != InstalledInArena::No)
+        apply_animation_overlay(scope, element, sample.invalidation, CSS::StyleRecordID { sample.style_record }, caller_applies_invalidation, installed_in_arena);
     else if (!install_animation_sample_in_arena(scope, element, sample.invalidation, CSS::StyleRecordID { sample.style_record }, caller_applies_invalidation))
         apply_published_animation_overlay(scope, element, sample.invalidation, CSS::StyleRecordID { sample.style_record }, caller_applies_invalidation);
 }
 
-void adopt_clock_tick_sample(CSS::StyleDrainScope const& scope, DOM::AbstractElement element, CSS::StyleRecordID style_record_before_tick, CSS::StyleEngineFFI::FfiRowSampledInPass const& sample, bool installed_in_arena)
+void adopt_clock_tick_sample(CSS::StyleDrainScope const& scope, DOM::AbstractElement element, CSS::StyleRecordID style_record_before_tick, CSS::StyleEngineFFI::FfiRowSampledInPass const& sample, bool installed_in_arena, bool presented_on_render_side)
 {
-    install_taken_engine_sample(scope, element, style_record_before_tick, false, sample, installed_in_arena ? InstalledInArena::Yes : InstalledInArena::No);
+    auto installed = InstalledInArena::No;
+    if (installed_in_arena)
+        installed = presented_on_render_side ? InstalledInArena::YesAndPresented : InstalledInArena::Yes;
+    install_taken_engine_sample(scope, element, style_record_before_tick, false, sample, installed);
 }
 
 void AnimationUpdateContext::publish_animation_inputs_before_sample(DOM::Element& element)

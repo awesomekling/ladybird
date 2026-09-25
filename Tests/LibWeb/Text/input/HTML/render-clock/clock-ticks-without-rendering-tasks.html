@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<style>
+    #box {
+        width: 100px;
+        height: 20px;
+        animation: grow 20s linear;
+    }
+    @keyframes grow {
+        from {
+            width: 100px;
+            background-color: rgb(0, 0, 0);
+        }
+        to {
+            width: 2100px;
+            background-color: rgb(0, 0, 200);
+        }
+    }
+</style>
+<div id="box"></div>
+<script src="../../include.js"></script>
+<script>
+    // Under LIBWEB_RENDER_CLOCK_FRAMES, the render clock ticks an idle page's width and background color animation at
+    // the display's ticks and presents each frame from the render side: the main thread runs no rendering update for
+    // it while it idles. Once it wakes, it reads the animation at the time of the last frame presented.
+    asyncTest(async done => {
+        const box = document.getElementById("box");
+        const animation = box.getAnimations()[0];
+        const enabled = internals.clockFramesEnabled();
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        const presentedBefore = internals.getRenderClockCounters().ticksPresented;
+        const updatesBefore = internals.getRenderingSchedulerCounters().updatesRun;
+        await new Promise(resolve => setTimeout(resolve, 400));
+        const presented = internals.getRenderClockCounters().ticksPresented - presentedBefore;
+        const updates = internals.getRenderingSchedulerCounters().updatesRun - updatesBefore;
+
+        const time = animation.currentTime;
+        const width = box.getBoundingClientRect().width;
+        const blue = Number(getComputedStyle(box).backgroundColor.match(/\d+/g)[2]);
+        println(`frames presented from the render side: ${!enabled || presented >= 10}`);
+        println(`rendering updates meanwhile: ${!enabled || updates <= 1 ? "at most one" : updates}`);
+        println(`width is the one composed at currentTime: ${Math.abs(width - (100 + (2000 * time) / 20000)) <= 0.5}`);
+        println(`color is the one composed at currentTime: ${Math.abs(blue - (200 * time) / 20000) <= 1}`);
+        done();
+    });
+</script>

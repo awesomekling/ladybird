@@ -204,7 +204,10 @@ private:
         bool ticked { false };
         // The compositor context at whose display ticks a render clock ticks the lease, if one does.
         Optional<Compositing::CompositorContextId> render_clock_context {};
+        // What the render clock's ticks present the document's frames with.
+        OwnPtr<LocalNavigable::RenderClockFrameKit> render_clock_kit {};
     };
+    void replace_render_clock_kit(ClockLeaseHold&, OwnPtr<LocalNavigable::RenderClockFrameKit>);
     void update_render_clock(ClockLeaseHold&, Optional<Compositing::CompositorContextId>);
     bool publish_clock_lease_targets(ClockLeaseHold const&);
     bool submit_clock_tick(Vector<GC::Ref<DOM::Document>> const& docs, size_t first_document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp);

@@ -1502,6 +1502,13 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
     };
     let publishes_recording = recording_inputs.publishes_recording;
     let should_paint_overlay = recording_inputs.should_paint_overlay;
+    // A clock lease's ticks record again with what this recording records with.
+    if crate::clock_frames::enabled() && publishes_recording {
+        arena.paint_state().borrow_mut().clock_recording = Some(crate::painting::paint_state::ClockRecording {
+            viewport,
+            inputs: recording_inputs.clone().into_owned(),
+        });
+    }
     // The recording is made for the render state as it stands now. It is not published if the
     // document retires that render state before the host takes the recording in.
     // SAFETY: Guaranteed by the caller.
@@ -1547,6 +1554,51 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
         frame_generation,
         output,
     );
+    true
+}
+
+/// Records the document's display list again for a clock lease's tick, with the inputs of the last
+/// recording the main thread published, and leaves it pending in the arena for the tick to present.
+/// Returns false, having recorded nothing, where there is no such recording to go by, or a
+/// recording is pending already.
+///
+/// # Safety
+///
+/// `arena_handle` must be a live arena that the calling tick owns, with the main thread idle.
+pub(crate) unsafe fn record_for_clock_tick(arena_handle: *mut c_void) -> bool {
+    // SAFETY: Guaranteed by the caller.
+    let arena = unsafe { arena_from_handle(arena_handle) };
+    let (viewport, inputs) = {
+        let paint_state = arena.paint_state().borrow();
+        let Some(clock) = paint_state.clock_recording.clone() else {
+            return false;
+        };
+        if paint_state.pending_recording.is_some() {
+            return false;
+        }
+        let mut inputs = clock.inputs;
+        // What the tick's layout prepared, the recording reads as the main thread's would have.
+        if let Some(root_background_source) = paint_state.root_background_source {
+            inputs.uncaptured.root_background_source = root_background_source;
+        }
+        inputs.vector_image_display_lists = paint_state.vector_image_display_lists.clone();
+        (clock.viewport, inputs)
+    };
+    if !arena.paintable_row_is_populated(viewport) || arena.stacking_context_entries(viewport).is_none() {
+        return false;
+    }
+    let should_paint_overlay = inputs.should_paint_overlay;
+    // SAFETY: Guaranteed by the caller.
+    let frame_generation = unsafe { crate::layout::frame_retirement::frame_generation(arena_handle) };
+    let output = record_display_list_stage(RecordingStageInput {
+        // SAFETY: Guaranteed by the caller; no borrow of the arena is live here.
+        arena: unsafe { arena_from_handle_mut(arena_handle) },
+        viewport,
+        inputs,
+    });
+    // SAFETY: The recording has returned its borrow.
+    let arena = unsafe { arena_from_handle(arena_handle) };
+    leave_pending_recording(arena, viewport, should_paint_overlay, true, frame_generation, output);
     true
 }
 
