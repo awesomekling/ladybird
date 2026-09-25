@@ -470,11 +470,6 @@ void StyleEngine::note_custom_property_name(StyleAtomID atom, Utf16FlyString con
     Utf16FlyString::unref_raw(raw);
 }
 
-StyleEngineFFI::FfiRecordDemandAnswer StyleEngine::answer_record_demand(StyleNodeID node, Optional<u8> pseudo_kind, bool exclude_inline_style, bool targeted, bool read_only, TakeRowDebts take_row_debts)
-{
-    return StyleEngineFFI::style_engine_answer_record_demand(m_impl, node.value(), pseudo_kind.value_or(NumericLimits<u8>::max()), exclude_inline_style, targeted, read_only, 0, take_row_debts == TakeRowDebts::Yes);
-}
-
 StyleEngineFFI::FfiEngineComputedRecord StyleEngine::settle_pseudo_records_after_host_record(StyleNodeID node, bool old_is_list_item, TakeRowDebts take_row_debts)
 {
     return StyleEngineFFI::style_engine_settle_pseudo_records_after_host_record(m_impl, node.value(), old_is_list_item, take_row_debts == TakeRowDebts::Yes);
