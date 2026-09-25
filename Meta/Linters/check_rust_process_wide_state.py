@@ -67,8 +67,12 @@ RENDER_STAGE_ALLOWED = {
     **render_stage_entries(MAIN_SIDE_COUNTER, ["layout/layout_node_arena.rs:DOOR_COUNTERS"]),
     **render_stage_entries(MAIN_THREAD_ONLY, ["flight.rs:TAKEN_BACK_OUTCOME", "flight.rs:FLIGHT_ENDS"]),
     **render_stage_entries(PRESENTED_COUNTER, ["clock_frames.rs:CLOCK_TICKS_PRESENTED"]),
-    **render_stage_entries(CLOCK_HANDOFF, ["clock_frames.rs:GATE", "clock_frames.rs:TICKS_TO_ADOPT"]),
-    **render_stage_entries(BUILT_ONCE, ["clock_frames.rs:NEEDS_MAIN", "clock_frames.rs:PRESENT"]),
+    **render_stage_entries(
+        CLOCK_HANDOFF, ["clock_frames.rs:GATE", "clock_frames.rs:TICKS_TO_ADOPT", "clock_frames.rs:LENT_TO_BUSY_MAIN"]
+    ),
+    **render_stage_entries(
+        BUILT_ONCE, ["clock_frames.rs:NEEDS_MAIN", "clock_frames.rs:PRESENT", "clock_frames.rs:LEND_TAKEN_BACK"]
+    ),
     **render_stage_entries(
         GROW_ONLY,
         [

@@ -97,6 +97,7 @@
 #include <LibWeb/HTML/CustomElements/CustomElementRegistry.h>
 #include <LibWeb/HTML/CustomElements/CustomStateSet.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
+#include <LibWeb/HTML/EventLoop/FrameScheduler.h>
 #include <LibWeb/HTML/EventNames.h>
 #include <LibWeb/HTML/FormAssociatedElement.h>
 #include <LibWeb/HTML/HTMLAnchorElement.h>
@@ -3009,6 +3010,7 @@ static QueryResult query_client_rects_after_layout_update(Element const& element
     auto& document = element.document();
     if (!document.navigable())
         return QueryResult {};
+    HTML::ClockLendReadScope clock_lend_read_scope;
 
     // NOTE: Ensure that layout is up-to-date before looking at metrics.
     const_cast<Document&>(document).update_layout_if_needed_for_node(element, UpdateLayoutReason::ElementGetClientRects);

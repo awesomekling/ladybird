@@ -899,6 +899,8 @@ const _: () = {
 struct AnimationAdoption {
     slot: NodeSlotId,
     style_record: u64,
+    /// The record the row held before the first sample the host has not adopted yet: the host's.
+    host_style_record: u64,
 }
 
 pub(crate) struct LayoutNodeArena {
@@ -2051,6 +2053,38 @@ impl LayoutNodeArena {
         }) else {
             return false;
         };
+        let host_style_record = self.style_records[slot.slot_index() as usize].get();
+        self.install_row_style_over_host(slot, style_record, payloads, needs_relayout);
+        self.with_style_engine(|engine| engine.pin_layout_style_record(style_record));
+        let superseded = {
+            let mut log = self.animation_adoption_log.borrow_mut();
+            match log.iter_mut().find(|adoption| adoption.slot == slot) {
+                Some(adoption) => Some(std::mem::replace(&mut adoption.style_record, style_record)),
+                None => {
+                    log.push(AnimationAdoption {
+                        slot,
+                        style_record,
+                        host_style_record,
+                    });
+                    None
+                }
+            }
+        };
+        if let Some(superseded) = superseded {
+            self.with_style_engine(|engine| engine.unpin_layout_style_record(superseded));
+        }
+        true
+    }
+
+    /// Sets a row's style to `style_record` ahead of the host or back to the host's, with the caches a
+    /// style change over the row resets and, where `needs_relayout` says so, its layout mark.
+    fn install_row_style_over_host(
+        &self,
+        slot: NodeSlotId,
+        style_record: u64,
+        payloads: *const c_void,
+        needs_relayout: bool,
+    ) {
         if self.set_node_style(slot, style_record, payloads) {
             self.refresh_style_flags(slot);
         }
@@ -2062,21 +2096,28 @@ impl LayoutNodeArena {
         if needs_relayout {
             self.set_needs_layout_update(slot, true);
         }
-        self.with_style_engine(|engine| engine.pin_layout_style_record(style_record));
-        let superseded = {
-            let mut log = self.animation_adoption_log.borrow_mut();
-            match log.iter_mut().find(|adoption| adoption.slot == slot) {
-                Some(adoption) => Some(std::mem::replace(&mut adoption.style_record, style_record)),
-                None => {
-                    log.push(AnimationAdoption { slot, style_record });
-                    None
-                }
-            }
-        };
-        if let Some(superseded) = superseded {
-            self.with_style_engine(|engine| engine.unpin_layout_style_record(superseded));
+    }
+
+    /// Puts back the host's record over every row an animation sample installed a record over ahead
+    /// of the host, which has not adopted them yet: the host goes on reading its rows at its own
+    /// time. Marks each row for layout, and returns the rows with the samples' records, whose pins
+    /// go to the caller.
+    pub(crate) fn restore_animation_adoptions(&self) -> Vec<(NodeSlotId, u64)> {
+        self.assert_owner_thread();
+        let restored = std::mem::take(&mut *self.animation_adoption_log.borrow_mut());
+        let mut rows = Vec::with_capacity(restored.len());
+        for adoption in restored {
+            let payloads = self.with_style_engine(|engine| {
+                engine
+                    .style_record_payloads(adoption.host_style_record)
+                    .map(|payloads| payloads.as_ptr().cast::<c_void>())
+            });
+            // The host holds its record, so the engine has its payloads.
+            let payloads = payloads.expect("the host's style record is live");
+            self.install_row_style_over_host(adoption.slot, adoption.host_style_record, payloads, true);
+            rows.push((adoption.slot, adoption.style_record));
         }
-        true
+        rows
     }
 
     /// Whether an animation sample installed `style_record` over `slot` ahead of the host, which is

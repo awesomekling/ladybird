@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<style>
+    #box {
+        width: 100px;
+        height: 20px;
+        animation: grow 20s linear;
+    }
+    @keyframes grow {
+        from {
+            width: 100px;
+            background-color: rgb(0, 0, 0);
+        }
+        to {
+            width: 2100px;
+            background-color: rgb(0, 0, 200);
+        }
+    }
+</style>
+<div id="box"></div>
+<script src="../../include.js"></script>
+<script>
+    // Under LIBWEB_RENDER_CLOCK_FRAMES, the render clock goes on presenting a width and background color animation
+    // while script runs a long task. The task reads the animation at its own time however many frames the render side
+    // presents meanwhile: the width it reads is the one composed at the currentTime it sees, which does not move.
+    asyncTest(async done => {
+        const box = document.getElementById("box");
+        const animation = box.getAnimations()[0];
+        const enabled = internals.clockFramesEnabled();
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        const countersBefore = internals.getRenderClockCounters();
+        const updatesBefore = internals.getRenderingSchedulerCounters().updatesRun;
+        const timeAtStart = animation.currentTime;
+        const widthAtStart = box.getBoundingClientRect().width;
+
+        // Not a timing test: the task runs until the render side has presented enough frames, however slow the machine.
+        const wanted = 5;
+        const start = performance.now();
+        let presented = 0;
+        let widthsInTask = [];
+        while (enabled && performance.now() - start < 10000) {
+            presented = internals.getRenderClockCounters().ticksPresented - countersBefore.ticksPresented;
+            if (presented >= wanted)
+                break;
+            if (widthsInTask.length < 3 && presented >= widthsInTask.length + 1)
+                widthsInTask.push(box.getBoundingClientRect().width);
+        }
+        const widthAtEnd = box.getBoundingClientRect().width;
+        const widthAtEndAgain = box.getBoundingClientRect().width;
+        const timeAtEnd = animation.currentTime;
+        const countersAfter = internals.getRenderClockCounters();
+        const updates = internals.getRenderingSchedulerCounters().updatesRun - updatesBefore;
+
+        const expectedWidth = 100 + (2000 * timeAtStart) / 20000;
+        const widthsAreTheTasks = [widthAtStart, ...widthsInTask, widthAtEnd, widthAtEndAgain].every(width => Math.abs(width - expectedWidth) <= 0.5);
+        println(`frames presented during the task: ${!enabled || presented >= wanted}`);
+        println(`rendering updates during the task: ${updates}`);
+        println(`currentTime does not move in the task: ${timeAtEnd === timeAtStart}`);
+        println(`every read in the task sees the task's width: ${widthsAreTheTasks}`);
+        println(`reads took the ticks' samples back: ${!enabled || countersAfter.restores - countersBefore.restores >= 1}`);
+        done();
+    });
+</script>

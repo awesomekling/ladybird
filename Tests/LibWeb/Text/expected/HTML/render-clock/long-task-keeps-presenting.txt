@@ -1,0 +1,5 @@
+frames presented during the task: true
+rendering updates during the task: 0
+currentTime does not move in the task: true
+every read in the task sees the task's width: true
+reads took the ticks' samples back: true

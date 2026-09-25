@@ -1575,6 +1575,15 @@ GC::Ref<JS::Object> Internals::get_render_clock_counters() const
     define("ticksPresented"sv, counters.ticks_presented);
     define("ticksNeedingMain"sv, counters.ticks_needing_main);
     define("ticksMovingVisualContexts"sv, counters.ticks_moving_visual_contexts);
+    define("ticksMidTask"sv, counters.ticks_mid_task);
+    define("lends"sv, counters.lends);
+    define("relends"sv, counters.relends);
+    define("recalls"sv, counters.recalls);
+    define("restores"sv, counters.restores);
+    define("restoreNanoseconds"sv, counters.restore_nanoseconds);
+    define("restoresNeedingMain"sv, counters.restores_needing_main);
+    define("lendsSuspendedWrite"sv, counters.lends_suspended_write);
+    define("lendsSuspendedBudget"sv, counters.lends_suspended_budget);
     return object;
 }
 
