@@ -1663,6 +1663,8 @@ pub(crate) struct FlightPaintSeal {
 pub(crate) struct FlightPaintProducts {
     pub(crate) visual_context_update: crate::painting::host::FfiVisualContextUpdateOutcome,
     pub(crate) scroll_state_snapshot: Option<Vec<libgfx_rust::FloatPoint>>,
+    /// Why the flight did not record after preparing the paint state, if it did not.
+    pub(crate) stopped: Option<FlightPaintStop>,
 }
 
 /// Why a flight did not record.
@@ -1750,7 +1752,7 @@ pub(crate) unsafe fn paint_in_flight(
     if arena.svg_paint_resources().needs_sync() {
         return Err(FlightPaintStop::SvgPaintResources);
     }
-    if !arena.paintable_row_is_populated(viewport) || arena.stacking_context_entries(viewport).is_none() {
+    if !arena.paintable_row_is_populated(viewport) {
         return Err(FlightPaintStop::NoViewport);
     }
     let FlightPaintSeal {
@@ -1791,6 +1793,14 @@ pub(crate) unsafe fn paint_in_flight(
             snapshot
         })
     };
+    // The visual context update settles the viewport's stacking contexts, which the recording starts from.
+    if arena.stacking_context_entries(viewport).is_none() {
+        return Ok(FlightPaintProducts {
+            visual_context_update,
+            scroll_state_snapshot,
+            stopped: Some(FlightPaintStop::NoViewport),
+        });
+    }
     {
         let paint_state = arena.paint_state().borrow();
         let tree_inputs = paint_state
@@ -1834,6 +1844,7 @@ pub(crate) unsafe fn paint_in_flight(
     Ok(FlightPaintProducts {
         visual_context_update,
         scroll_state_snapshot,
+        stopped: None,
     })
 }
 
