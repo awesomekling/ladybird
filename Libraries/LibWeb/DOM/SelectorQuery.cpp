@@ -215,9 +215,9 @@ static void collect_matches(ParentNode& root, Matcher&& matcher, Vector<GC::RawP
 
 static void settle_connected_selector_query(Document& document)
 {
-    // Settling applies the staged tree and fact changes to the style mirror the layout frame reads,
-    // so a query made beside the frame in flight waits for it first.
-    document.join_frame_in_flight();
+    // Settling applies the staged tree and fact changes to the style mirror a layout pass reads, so
+    // a query made beside a frame in flight that reads the mirror waits for it first.
+    document.join_frame_reaching_style_engine();
     document.synchronize_dirty_style_attributes();
     document.style_computer().style_engine().prepare_selector_query();
 }

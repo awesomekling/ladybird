@@ -546,13 +546,17 @@ public:
     // Hands the journal what was marked beside the frame in flight, once the frame is over and the
     // document holds its render state again. Whoever ends a frame calls it.
     void release_held_invalidation_marks();
-    // A DOM tree mutation writes the style mirror and the arena as it goes, so it joins the frame
-    // in flight before it starts.
+    // A DOM tree mutation writes the style mirror as it goes, so it joins a frame in flight that
+    // reads the mirror before it starts. Its writes to the arena wait at the arena's own doors.
     void join_frame_for_dom_tree_mutation() const;
     // Waits for this document's layout frame if it runs beside the document thread. A read of what
     // the frame writes, or a write to what it reads, joins it first. The call site names itself in
     // the forced-join log.
     void join_frame_in_flight(SourceLocation = SourceLocation::current()) const;
+    // Like join_frame_in_flight(), for a write to this document's style engine: waits only for a
+    // frame in flight that reaches the engine (a style or layout pass). A recording reads nothing
+    // of it, so the write goes on beside one.
+    void join_frame_reaching_style_engine(SourceLocation = SourceLocation::current()) const;
     // What the render side has told this document and the document has not acted on yet.
     [[nodiscard]] CommitMessages& commit_messages() { return *m_commit_messages; }
     void apply_commit_messages();

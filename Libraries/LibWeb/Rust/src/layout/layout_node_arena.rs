@@ -6130,10 +6130,12 @@ pub extern "C" fn layout_arena_reset_door_counters() {
     DOOR_COUNTERS.with_borrow_mut(Vec::clear);
 }
 
-/// Joins the frame in flight ahead of a DOM tree mutation. The mutation splices the style mirror
-/// and builds, frees and marks the arena's rows as it goes, in an order the retirement of the
-/// mutated nodes' style identities depends on, so none of it is journalled apart from the rest, and
-/// the whole mutation waits for the frame instead.
+/// The door of a DOM tree mutation. The mutation splices the style mirror as it goes, so it joins
+/// a frame in flight with a stage that reads the mirror (a style or layout pass) before it starts.
+/// A recording reads nothing of the mirror and goes on beside the mutation. What the mutation
+/// writes to the arena, the rows it frees or marks as it goes, waits for the recording at the
+/// arena's own doors ([`LayoutNodeArena::from_handle`], [`super::HostTables::from_handle`]), and
+/// its layout tree marks go to the invalidation journal.
 ///
 /// # Safety
 ///
@@ -6141,6 +6143,17 @@ pub extern "C" fn layout_arena_reset_door_counters() {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_join_frame_for_dom_tree_mutation(arena: *mut c_void) {
     assert!(!arena.is_null(), "layout node arena handle is null");
+    let location = std::panic::Location::caller();
+    crate::stage_thread::join_frame_reaching_style_engine_at(
+        arena,
+        location.file(),
+        location.line(),
+        location.column(),
+    );
+    if crate::stage_thread::frame_in_flight_owns(arena) {
+        record_door_pass(LayoutNodeArena::DOM_TREE_MUTATION_WRITER, None);
+        return;
+    }
     // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on the document thread.
     let arena = unsafe { LayoutNodeArena::from_handle(arena) };
     drop(arena.join_frame_for_main_side_write(LayoutNodeArena::DOM_TREE_MUTATION_WRITER));
