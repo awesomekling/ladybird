@@ -3949,7 +3949,14 @@ pub unsafe extern "C" fn style_engine_sample_installed_record(
         };
         let pseudo = (pseudo_kind != u8::MAX).then_some(pseudo_kind);
         let layout_arena = unsafe { super::animations::CommittedTransformReferenceBoxes::lend(layout_arena) };
-        match engine.sample_installed_record(style_node, pseudo, style_record, layout_arena) {
+        let owns_slot = engine
+            .computed_group_sets
+            .owns_animation_overlay_slot(super::computed::ComputedStyleTarget::new(style_node, pseudo_kind));
+        let sampled = match owns_slot {
+            true => engine.sample_installed_record(style_node, pseudo, style_record, layout_arena),
+            false => sample_record_without_overlay_slot(engine, style_node, pseudo_kind, style_record, layout_arena),
+        };
+        match sampled {
             Ok(published) => {
                 super::engine_sample_check::note_taken("installed record sample");
                 row_sampled_in_pass(engine, Some(published))
@@ -3959,6 +3966,114 @@ pub unsafe extern "C" fn style_engine_sample_installed_record(
                 row_sampled_in_pass(engine, None)
             }
         }
+    })
+}
+
+/// Sample the animations of a pseudo-element the engine holds no assignment for, which owns no
+/// overlay slot, over the record the host holds for it, and publish the composition as the whole
+/// record again over the same base, as the host's own publication does.
+fn sample_record_without_overlay_slot(
+    engine: &mut StyleEngine,
+    node: StyleNodeID,
+    pseudo_kind: u8,
+    style_record: u64,
+    layout_arena: super::animations::CommittedTransformReferenceBoxes,
+) -> Result<super::engine_sample::SettledRowPublication, String> {
+    let pseudo = (pseudo_kind != u8::MAX).then_some(pseudo_kind);
+    let sample = crate::css::style_compute::sample_settled_row(
+        &mut engine.state,
+        node,
+        pseudo,
+        false,
+        Some(style_record),
+        None,
+        layout_arena,
+    )?;
+    if !sample.animated_custom_properties.is_empty() {
+        return Err("a sample without an overlay slot that animates custom properties".into());
+    }
+    let overlay_is_empty = unsafe { sample.style.overlay.as_ref() }.is_none_or(|overlay| overlay.is_empty());
+    let unchanged = super::engine_sample::SettledRowPublication {
+        style_record,
+        custom_properties: None,
+        invalidation: FfiAnimationInvalidation::default(),
+        overlay_is_empty,
+        substitution_marks: sample.substitution_marks,
+        keyframes_inherited_non_inherited_style_groups: sample.keyframes_inherited_non_inherited_style_groups,
+        uses_tree_counting_function: sample.uses_tree_counting_function,
+        rebuilt_every_group: false,
+    };
+    if !engine.animation_overlay_changed(style_record, sample.style.overlay) {
+        return Ok(unchanged);
+    }
+    let payloads = {
+        let StyleEngine { state, counters } = engine;
+        state.build_settled_row_payloads(node, pseudo_kind, &sample, counters)?
+    };
+    let shared = SharedPayload::from_pointer_slice(&payloads.payloads);
+    let invalidation = engine.compare_animation_overlay(style_record, sample.style.overlay, shared, false);
+    let (base_payloads, counter_style_environment_identity, longhand_table) = {
+        let view = engine
+            .computed_group_sets
+            .style_record_view(style_record)
+            .ok_or("a record with no view")?;
+        let base_payloads = match view.base_payloads.is_empty() {
+            true => view.payloads.to_vec(),
+            false => view.base_payloads.to_vec(),
+        };
+        (
+            base_payloads,
+            view.counter_style_environment_identity,
+            view.longhand_table,
+        )
+    };
+    let custom_property_environment = engine
+        .computed_group_sets
+        .style_record_custom_property_environment(engine.computed_group_sets.base_style_record_of(style_record))
+        .unwrap_or(0);
+    let custom_property_store = match custom_property_environment {
+        0 => std::ptr::null(),
+        environment => engine
+            .custom_property_environments
+            .store(environment)
+            .ok_or("an environment without a store")?,
+    };
+    let identity = match overlay_is_empty {
+        true => 0,
+        false => {
+            engine.retained.next_engine_animation_overlay_identity += 1;
+            (1 << 63) | engine.retained.next_engine_animation_overlay_identity
+        }
+    };
+    let delta = publish_computed_groups_from_inputs(
+        engine,
+        node.raw(),
+        pseudo_kind,
+        &base_payloads,
+        super::computed::ENGINE_INHERITED_GROUP_COUNT,
+        custom_property_environment,
+        false,
+        counter_style_environment_identity,
+        identity,
+        match overlay_is_empty {
+            true => std::ptr::null(),
+            false => sample.style.overlay.cast_const().cast(),
+        },
+        match overlay_is_empty {
+            true => &[],
+            false => shared,
+        },
+        unsafe { longhand_table.as_ref() },
+        custom_property_store,
+    );
+    if delta.new_style_record == 0 {
+        return Err("no whole publication".into());
+    }
+    Ok(super::engine_sample::SettledRowPublication {
+        style_record: delta.new_style_record,
+        invalidation,
+        rebuilt_every_group: payloads.rebuilt_every_group,
+        ..unchanged
     })
 }
 
