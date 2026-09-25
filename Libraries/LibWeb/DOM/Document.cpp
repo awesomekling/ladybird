@@ -9292,9 +9292,10 @@ Optional<LayoutOverlapBlocker> Document::layout_overlap_blocker()
         return LayoutOverlapBlocker::ScrollStateContainer;
 
     // NB: An element that has content-visibility: auto only after this rendering update's layout is not in the paint
-    //     state yet. Its first determination runs after the pass all the same, and loops in place from there.
-    if (document_element()) {
-        for (auto box_slot : paint_state().boxes_with_auto_content_visibility()) {
+    //     state yet. Its first determination runs after the pass all the same, and loops in place from there. A document
+    //     that has never been laid out has no paint state, and so no such element.
+    if (document_element() && m_paint_state) {
+        for (auto box_slot : m_paint_state->boxes_with_auto_content_visibility()) {
             auto* layout_node = Painting::layout_node_for_committed_slot(layout_node_arena(), box_slot);
             if (!layout_node)
                 continue;
