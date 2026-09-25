@@ -251,9 +251,13 @@ void FrameScheduler::commit()
     //     style pass's frame ends the document's style update here: its drain installs what the pass computed.
     if (m_ticket->submitted_pass.has_value() && m_ticket->submitted_pass->kind == FrameTicket::SubmittedPass::Kind::Style)
         m_ticket->submitted_pass->documents[m_ticket->submitted_pass->document_index]->finish_submitted_style_update();
-    // A clock tick's document adopts what the tick installed before anything reads it.
-    if (m_ticket->submitted_pass.has_value() && m_ticket->submitted_pass->kind == FrameTicket::SubmittedPass::Kind::Clock)
-        adopt_clock_tick(m_ticket->submitted_pass->documents[m_ticket->submitted_pass->document_index]);
+    // A clock tick's document adopts what the tick installed before anything reads it, and then takes in what was
+    // marked beside the tick, as the end of a layout pass's frame does: the next drain writes it.
+    if (m_ticket->submitted_pass.has_value() && m_ticket->submitted_pass->kind == FrameTicket::SubmittedPass::Kind::Clock) {
+        auto& document = m_ticket->submitted_pass->documents[m_ticket->submitted_pass->document_index];
+        adopt_clock_tick(document);
+        document->release_held_invalidation_marks();
+    }
     // NB: Each navigable's recording is published and its resources are added to its resource storage before its
     //     compositor frame is built and handed off, so a compositor frame never reaches its sink ahead of the
     //     resources it references. The canvases it shows were flushed before the recording was prepared, and the next
@@ -661,6 +665,7 @@ void FrameScheduler::main_thread_did_wake()
 {
     if (!Layout::RustFFI::rust_render_clock_main_did_wake())
         return;
+
     // What the render clock's ticks installed ahead of the main thread, each document adopts before anything else
     // reaches it, and its timeline shows the time of the last tick.
     for (size_t index = m_clock_leases.size(); index-- > 0;) {
