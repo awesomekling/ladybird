@@ -205,6 +205,9 @@ thread_local! {
     // On the calling thread, the stages it has submitted and not taken back yet, in submission
     // order. Together they are the frame in flight.
     static SUBMITTED: RefCell<Vec<SubmittedStage>> = const { RefCell::new(Vec::new()) };
+    // While above zero, the style engine entrances of this thread only wait for a stage that reaches
+    // their engine (see rust_stage_thread_begin_style_engine_entrances_that_only_wait).
+    static STYLE_ENGINE_ENTRANCES_ONLY_WAIT: Cell<u32> = const { Cell::new(0) };
     // On the calling thread, how deep it is in work a stage joined it for.
     static RUNNING_JOIN_WORK: Cell<u32> = const { Cell::new(0) };
     // On the calling thread, the call sites that forced a join already logged.
@@ -236,6 +239,15 @@ impl SubmittedStage {
             }
         }
         self.outcome.is_some()
+    }
+
+    /// Waits for the stage to finish without taking its outcome, which stays for the frame's
+    /// consume.
+    fn wait_until_finished(&mut self) {
+        release_hold_on(self.label);
+        if self.outcome.is_none() {
+            self.outcome = Some(self.from_stage.recv().unwrap_or_else(|_| std::process::abort()));
+        }
     }
 
     fn wait(&mut self) -> StageOutcome {
@@ -607,9 +619,46 @@ pub(crate) fn join_frame_for_style_engine_entrance(engine: *const c_void, entry:
     if engine.is_null() || RUNNING_JOIN_WORK.with(Cell::get) != 0 {
         return;
     }
+    if STYLE_ENGINE_ENTRANCES_ONLY_WAIT.with(Cell::get) != 0 {
+        wait_for_submitted_stages_reaching(engine);
+        return;
+    }
     if let Some(arena) = arena_of_submitted_stage_reaching(engine) {
         join_frame_in_flight_at(arena as *mut c_void, entry, 0, 0);
     }
+}
+
+/// Waits for every stage of the calling thread's frame in flight that reaches the style engine
+/// `engine` to finish, and leaves the frame in flight for its consume.
+fn wait_for_submitted_stages_reaching(engine: *const c_void) {
+    let waited = SUBMITTED.with(|submitted| {
+        let mut waited = false;
+        for stage in submitted.borrow_mut().iter_mut() {
+            if stage.style_engine == engine as usize {
+                stage.wait_until_finished();
+                waited = true;
+            }
+        }
+        waited
+    });
+    if let Some(thread) = stage_thread().filter(|_| waited) {
+        tsan::acquire(thread);
+    }
+}
+
+/// Makes the calling thread's style engine entrances only wait for a stage of the frame in flight
+/// that reaches their engine, until the matching [`rust_stage_thread_end_style_engine_entrances_that_only_wait`].
+/// For code that must not take in a frame: its consume runs script and allocates, which a garbage
+/// collector's finalizer must not do. The stage has finished once such an entrance returns, so the
+/// entrance does not race it, and the frame waits for its consume at the top of the event loop.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_stage_thread_begin_style_engine_entrances_that_only_wait() {
+    STYLE_ENGINE_ENTRANCES_ONLY_WAIT.with(|depth| depth.set(depth.get() + 1));
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_stage_thread_end_style_engine_entrances_that_only_wait() {
+    STYLE_ENGINE_ENTRANCES_ONLY_WAIT.with(|depth| depth.set(depth.get() - 1));
 }
 
 /// The arena of the calling thread's submitted stage that reaches the style engine `engine`.
@@ -921,7 +970,9 @@ mod tests {
     fn a_style_engine_entrance_finds_only_the_stage_that_reaches_its_engine() {
         let engine = 0x1000usize;
         let submit = |label: &'static str, arena: usize, style_engine: usize| {
-            let (_, from_stage) = channel::<StageOutcome>();
+            let (to_caller, from_stage) = channel::<StageOutcome>();
+            // The stage has finished.
+            let _ = to_caller.send(Ok(()));
             SUBMITTED.with(|submitted| {
                 submitted.borrow_mut().push(SubmittedStage {
                     label,
@@ -938,6 +989,16 @@ mod tests {
         submit("layout", 0x20, engine);
         assert_eq!(arena_of_submitted_stage_reaching(engine as *const c_void), Some(0x20));
         assert_eq!(arena_of_submitted_stage_reaching(0x2000 as *const c_void), None);
+
+        // An entrance that only waits leaves the finished stage in flight, with its outcome, for
+        // the frame's consume.
+        rust_stage_thread_begin_style_engine_entrances_that_only_wait();
+        join_frame_for_style_engine_entrance(engine as *const c_void, "test entrance");
+        rust_stage_thread_end_style_engine_entrances_that_only_wait();
+        assert!(SUBMITTED.with(|submitted| {
+            let submitted = submitted.borrow();
+            submitted.len() == 2 && submitted[0].outcome.is_none() && submitted[1].outcome.is_some()
+        }));
         SUBMITTED.with(|submitted| submitted.borrow_mut().clear());
     }
 
