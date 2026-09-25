@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<div id="box" style="width: 100px; height: 50px; background: blue"></div>
+<div id="scroller" style="width: 100px; height: 50px; overflow: auto"><div id="content" style="width: 100px; height: 80px"></div></div>
+<script>
+    // Layout reads while the layout pass is in flight: each read takes the pass back first and sees its result, and a
+    // read after a mutation beside the pass sees that mutation too.
+    asyncTest(async done => {
+        const reads = await whileLayoutInFlight("before-run", () => {
+            box.style.width = "150px";
+        }, frame => {
+            const offsetWidth = box.offsetWidth;
+            box.style.width = "170px";
+            const rectWidth = box.getBoundingClientRect().width;
+            box.style.width = "180px";
+            const computedWidth = getComputedStyle(box).width;
+            return { ...frame, offsetWidth, rectWidth, computedWidth };
+        });
+        println(`reads: held as armed: ${layoutHeldAsArmed(reads, "before-run")}`);
+        println(`reads: offsetWidth: ${reads.offsetWidth}`);
+        println(`reads: getBoundingClientRect after a mutation: ${reads.rectWidth}`);
+        println(`reads: computed width after a mutation: ${reads.computedWidth}`);
+
+        // The pass has laid out, and the main thread has not heard of it yet.
+        const finished = await whileLayoutInFlight("before-completion", () => {
+            box.style.height = "60px";
+            content.style.height = "120px";
+        }, frame => {
+            const rectHeight = box.getBoundingClientRect().height;
+            const scrollHeight = scroller.scrollHeight;
+            const hit = document.elementFromPoint(10, 10) === box;
+            return { ...frame, rectHeight, scrollHeight, hit };
+        });
+        println(`finished pass: held as armed: ${layoutHeldAsArmed(finished, "before-completion")}`);
+        println(`finished pass: getBoundingClientRect height: ${finished.rectHeight}`);
+        println(`finished pass: scrollHeight: ${finished.scrollHeight}`);
+        println(`finished pass: hit test: ${finished.hit}`);
+
+        await twoFrames();
+        println(`after: box: ${box.offsetWidth}x${box.offsetHeight}`);
+        done();
+    });
+</script>
