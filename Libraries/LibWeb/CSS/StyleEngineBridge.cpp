@@ -14,6 +14,7 @@
 #include <LibWeb/CSS/RustDeclarationBlock.h>
 #include <LibWeb/CSS/SharedCompiledStyleSheet.h>
 #include <LibWeb/CSS/StyleComputer.h>
+#include <LibWeb/CSS/StyleEffectDrain.h>
 #include <LibWeb/CSS/StyleEngineBridge.h>
 #include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/CSS/StyleScope.h>
@@ -910,14 +911,17 @@ bool StyleEngine::take_diagnostic_style_transaction(StyleNodeID root, Function<v
             break;
         take_reaction_nodes(wave.reactions);
     }
-    discard_style_transaction_outputs();
+    // The host installs nothing a diagnostic transaction published: draining it discards its outputs.
+    StyleEffectDrain::install(m_style_computer->document(), [](StyleDrainScope const& scope) {
+        scope.engine().discard_style_transaction_outputs(scope);
+    });
     if (!transaction.is_scoped)
         return false;
     consume(reaction_nodes.span());
     return true;
 }
 
-void StyleEngine::discard_style_transaction_outputs()
+void StyleEngine::discard_style_transaction_outputs(StyleDrainScope const&)
 {
     StyleEngineFFI::style_engine_discard_style_transaction_outputs(m_impl);
 }
