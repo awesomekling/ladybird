@@ -1389,6 +1389,61 @@ fn leave_pending_recording(
     });
 }
 
+/// A recording the main thread has prepared to run in the frame in flight, which owns the arena
+/// while it runs. Running it leaves the recording pending in the arena.
+pub(crate) struct RecordingJob {
+    input: RecordingStageInput<'static>,
+    arena_address: usize,
+    viewport: NodeSlotId,
+    should_paint_overlay: bool,
+    publishes_recording: bool,
+    frame_generation: u64,
+}
+
+impl RecordingJob {
+    /// # Safety
+    ///
+    /// `arena_handle` must be a live arena that the frame in flight the job runs in owns until
+    /// the host takes it back, with no borrow of it live here.
+    pub(crate) unsafe fn in_flight(
+        arena_handle: *mut c_void,
+        viewport: NodeSlotId,
+        inputs: crate::painting::record::RecordingInputs<'static>,
+        should_paint_overlay: bool,
+        publishes_recording: bool,
+        frame_generation: u64,
+    ) -> Self {
+        Self {
+            input: RecordingStageInput {
+                // SAFETY: Guaranteed by the caller.
+                arena: unsafe { &mut *arena_handle.cast::<LayoutNodeArena>() },
+                viewport,
+                inputs,
+            },
+            arena_address: arena_handle as usize,
+            viewport,
+            should_paint_overlay,
+            publishes_recording,
+            frame_generation,
+        }
+    }
+
+    /// Records, on the stage that owns the arena.
+    pub(crate) fn run(self) {
+        let output = record_display_list_stage(self.input);
+        // SAFETY: The stage has returned its borrow, and the frame still owns the arena.
+        let arena = unsafe { &*(self.arena_address as *const LayoutNodeArena) };
+        leave_pending_recording(
+            arena,
+            self.viewport,
+            self.should_paint_overlay,
+            self.publishes_recording,
+            self.frame_generation,
+            output,
+        );
+    }
+}
+
 /// Records the document's display list and leaves the recording pending in the arena. With
 /// `run` [`FfiRecordingRun::InSubmittedFrame`], and a frame scheduler that submits recordings, the
 /// recording runs in the submitted frame and this returns before it has; otherwise it runs now.
@@ -1457,31 +1512,20 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
             // SAFETY: No borrow of the arena is live here.
             let _ = unsafe { arena_from_handle_mut(arena_handle) }.committed_paintable_rows();
         }
-        // The recording outlives this call, so it takes copies of what the host lends.
-        let input = RecordingStageInput {
-            // SAFETY: No borrow of the arena outlives this point. The submitted frame owns the arena
-            // until the host takes it back: every main-side access to it joins the frame first.
-            arena: unsafe { &mut *arena_handle.cast::<LayoutNodeArena>() },
-            viewport,
-            inputs: recording_inputs.into_owned(),
+        // SAFETY: No borrow of the arena outlives this point. The submitted frame owns the arena
+        // until the host takes it back: every main-side access to it joins the frame first.
+        let job = unsafe {
+            RecordingJob::in_flight(
+                arena_handle,
+                viewport,
+                recording_inputs.into_owned(),
+                should_paint_overlay,
+                publishes_recording,
+                frame_generation,
+            )
         };
-        let arena_address = arena_handle as usize;
         // SAFETY: As above.
-        unsafe {
-            crate::stage_thread::submit_stage("recording", arena_handle, move || {
-                let output = record_display_list_stage(input);
-                // SAFETY: The stage has returned its borrow, and the frame still owns the arena.
-                let arena = &*(arena_address as *const LayoutNodeArena);
-                leave_pending_recording(
-                    arena,
-                    viewport,
-                    should_paint_overlay,
-                    publishes_recording,
-                    frame_generation,
-                    output,
-                );
-            });
-        }
+        unsafe { crate::stage_thread::submit_stage("recording", arena_handle, move || job.run()) };
         return true;
     }
     let output = {
