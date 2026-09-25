@@ -197,6 +197,11 @@ if (BUILD_TESTING AND NOT WIN32)
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test-webdriver-render-clock-reconnect.py $<TARGET_FILE:WebDriver>
         )
         set_tests_properties(TestWebDriverRenderClockReconnect PROPERTIES TIMEOUT 120)
+        add_test(
+            NAME TestWebDriverCompositorLossDuringWebGLSyncCall
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test-webdriver-compositor-loss-during-webgl-sync-call.py $<TARGET_FILE:WebDriver>
+        )
+        set_tests_properties(TestWebDriverCompositorLossDuringWebGLSyncCall PROPERTIES TIMEOUT 120)
     endif()
 
     add_test(
