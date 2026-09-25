@@ -1,0 +1,3 @@
+a render clock ticks both documents: true
+frames presented after a read in one took it back: true
+a geometry read lent its document again: true
