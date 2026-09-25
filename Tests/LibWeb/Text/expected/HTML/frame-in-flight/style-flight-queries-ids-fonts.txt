@@ -7,6 +7,9 @@ a first-seen id: after: width 150, by id: true
 a constructed sheet with a media list: held as armed: true
 a constructed sheet with a media list: joined the pass: false
 a constructed sheet with a media list: after: print
+adding a font face: held as armed: true
+adding a font face: joined the pass: false
+adding a font face: after: the text width changed: true
 a style element's media: held as armed: true
 a style element's media: joined the pass: false
 a style element's media: after: width 784
