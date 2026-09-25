@@ -224,6 +224,7 @@ public:
     bool hold_next_style_frame(Utf16String const& point, GC::Ptr<DOM::Document> document);
     Utf16String wait_for_held_frame();
     void release_held_frame();
+    u64 forced_join_count(Utf16String const& stage) const;
     bool frame_in_flight_holds_document() const;
     bool frame_in_flight_references_are_alive() const;
     void set_manual_rendering_opportunities(bool enabled);
