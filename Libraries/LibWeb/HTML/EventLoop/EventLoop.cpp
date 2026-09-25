@@ -74,9 +74,10 @@ bool EventLoop::holds_rendering_opportunities()
 {
     if (s_holds_rendering_opportunities_for_testing.has_value())
         return *s_holds_rendering_opportunities_for_testing;
+    // On unless LIBWEB_RENDERING_OPPORTUNITY_HOLD=0.
     static bool const holds = [] {
         auto const* value = getenv("LIBWEB_RENDERING_OPPORTUNITY_HOLD");
-        return value && *value && StringView { value, strlen(value) } != "0"sv;
+        return !value || StringView { value, strlen(value) } != "0"sv;
     }();
     return holds;
 }
