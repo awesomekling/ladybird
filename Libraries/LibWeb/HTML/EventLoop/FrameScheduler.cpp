@@ -219,19 +219,45 @@ void FrameScheduler::consume_finished_frame()
     m_event_loop.run_consume_tail([this] { run_tail(); });
 }
 
-void FrameScheduler::finish_frame_now()
+u64 FrameScheduler::finish_frame_now()
 {
+    u64 waited_nanoseconds = 0;
     // NB: The tail of a style or layout pass's frame goes on with its rendering update, which can submit the recording.
+    while (m_state != State::Idle)
+        waited_nanoseconds += finish_one_frame();
+    return waited_nanoseconds;
+}
+
+bool FrameScheduler::finish_finished_frames()
+{
+    // NB: A finished style or layout pass's tail can submit the next stage, which the loop then finds unfinished.
     while (m_state != State::Idle) {
-        if (m_state == State::InFlight) {
-            Layout::RustFFI::rust_stage_thread_take_frame_in_flight();
-            consume_commit(EventLoop::FrameConsumeSite::ForcedJoin);
-        }
-        // NB: The tail is the rest of the previous rendering update, which the rendering update starting now has to
-        //     follow. It runs here, where a lockstep frame would have run it too.
-        VERIFY(m_state == State::CommittedTailPending);
-        run_tail();
+        if (has_unfinished_frame())
+            return false;
+        finish_one_frame();
     }
+    return true;
+}
+
+u64 FrameScheduler::finish_one_frame()
+{
+    u64 waited_nanoseconds = 0;
+    if (m_state == State::InFlight) {
+        auto wait_start_nanoseconds = MonotonicTime::now().nanoseconds();
+        Layout::RustFFI::rust_stage_thread_take_frame_in_flight();
+        waited_nanoseconds = MonotonicTime::now().nanoseconds() - wait_start_nanoseconds;
+        consume_commit(EventLoop::FrameConsumeSite::ForcedJoin);
+    }
+    // NB: The tail is the rest of the previous rendering update, which the rendering update starting now has to
+    //     follow. It runs here, where a lockstep frame would have run it too.
+    VERIFY(m_state == State::CommittedTailPending);
+    run_tail();
+    return waited_nanoseconds;
+}
+
+bool FrameScheduler::has_unfinished_frame() const
+{
+    return m_state == State::InFlight && !Layout::RustFFI::rust_stage_thread_frame_in_flight_has_finished();
 }
 
 void FrameScheduler::run_tail()

@@ -119,6 +119,13 @@ public:
         // What the DOM side journaled while a frame was in flight, which it could do without waiting for the frame.
         Array<u64, to_underlying(JournalEntryKind::Count)> journal_entries_during_flight {};
         u64 finished_frame_consumer_calls { 0 };
+        // How long rendering tasks waited for the render side to finish the previous rendering update's frame before
+        // they could start (finish_frame_now()), and how many held their rendering opportunity instead of waiting
+        // (LIBWEB_RENDERING_OPPORTUNITY_HOLD).
+        u64 rendering_task_blocked_on_frame_nanoseconds { 0 };
+        u64 rendering_tasks_held { 0 };
+        // Rendering tasks that ran ahead of tasks queued before them.
+        u64 rendering_tasks_ahead_of_queue { 0 };
         // Rendering updates whose layout the render side could lay out beside main, and the ones it could not, by the
         // first thing that kept them in place. Counted only where the render side submits layout.
         u64 layout_overlap_eligible_updates { 0 };
@@ -158,6 +165,16 @@ public:
     };
     bool rendering_opportunity(HighResolutionTime::DOMHighResTimeStamp frame_time, RenderingOpportunitySource);
     bool rendering_task_queued_or_running() const { return m_rendering_task_queued || m_running_rendering_task; }
+
+    // Whether a rendering task that finds the previous rendering update's frame still in flight holds its rendering
+    // opportunity instead of waiting for the frame (LIBWEB_RENDERING_OPPORTUNITY_HOLD). The held rendering update runs
+    // at the step 1 that takes that frame in and runs its tail, ahead of the tasks queued meanwhile.
+    static bool holds_rendering_opportunities();
+    static void set_holds_rendering_opportunities_for_testing(Optional<bool>);
+    bool rendering_task_held() const { return m_rendering_task_held; }
+    // Whether the queued rendering task runs before the other tasks queued ahead of it. Asked by the task queue.
+    bool rendering_task_runs_ahead_of_queue() const { return m_rendering_task_queued && m_rendering_task_runs_ahead; }
+    void did_run_rendering_task_ahead_of_queue() { ++m_rendering_scheduler_counters.rendering_tasks_ahead_of_queue; }
     bool running_synchronous_rendering_update() const { return m_running_synchronous_rendering_update; }
 
     // Whether the layout of the running rendering update may run beside the main thread, decided once all of its
@@ -279,6 +296,8 @@ private:
     bool run_rendering_update_from_step_16(Vector<GC::Ref<DOM::Document>> const& docs, size_t first_document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp, LayoutSubmission);
     void finish_rendering_update_steps(ReadonlySpan<GC::Ref<DOM::Document>> docs);
     void end_rendering_update();
+    void run_rendering_task();
+    void queue_held_rendering_task_if_frame_finished();
 
     Type m_type { Type::Window };
 
@@ -324,6 +343,10 @@ private:
     bool m_rendering_update_may_overlap_layout { false };
     bool m_rendering_update_may_overlap_style { false };
     bool m_rendering_task_queued { false };
+    // The queued rendering task ran while the previous rendering update's frame was in flight and held its rendering
+    // opportunity: it counts as queued, and is queued again once that frame has been taken in.
+    bool m_rendering_task_held { false };
+    bool m_rendering_task_runs_ahead { false };
     bool m_rendering_update_requested { false };
 
     RenderingSchedulerCounters m_rendering_scheduler_counters;

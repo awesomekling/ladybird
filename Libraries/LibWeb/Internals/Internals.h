@@ -228,6 +228,9 @@ public:
     bool frame_in_flight_holds_document() const;
     bool frame_in_flight_references_are_alive() const;
     void set_manual_rendering_opportunities(bool enabled);
+    void set_rendering_opportunity_hold(bool enabled);
+    void reset_rendering_opportunity_hold();
+    bool rendering_task_held() const;
     void inject_rendering_opportunity(double frame_time_ms);
     bool wait_for_frame_to_finish();
     Utf16String frame_scheduler_state() const;

@@ -121,7 +121,13 @@ public:
     // takes in a finished frame, and runs the tail of a frame that is taken in, where the event loop lets it.
     void consume_finished_frame();
     // Waits for the frame in flight, takes it in and runs its tail. For a rendering update that has to start now.
-    void finish_frame_now();
+    // Returns how long it waited for the render side.
+    u64 finish_frame_now();
+    // Takes in the frames in flight that the render side has finished and runs their tails, without waiting for one.
+    // Returns whether none is left, i.e. whether a rendering update can start now without waiting.
+    bool finish_finished_frames();
+    // Whether a frame is in flight that the render side has not finished yet.
+    bool has_unfinished_frame() const;
 
     // Takes in the frame the render side has handed back: publishes its recordings and hands off their compositor
     // frames. Runs no script: what the render side told the documents (their commit messages, which can dispatch
@@ -152,6 +158,9 @@ private:
     void submit_pass(FrameTicket::SubmittedPass::Kind, Vector<GC::Ref<DOM::Document>> documents, size_t document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp);
     void commit();
     void run_tail();
+    // Takes in the frame in flight, waiting for it if it has not finished, and runs its tail. Returns how long it
+    // waited for the render side.
+    u64 finish_one_frame();
     void apply_deferred_arena_changes();
 
     EventLoop& m_event_loop;

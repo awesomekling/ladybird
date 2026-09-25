@@ -1,0 +1,5 @@
+held as armed: true
+rendering task held its opportunity: true
+frame still held, no rendering update: true
+held update ran ahead of the queued task: true
+width: 20
