@@ -1207,6 +1207,9 @@ struct ClockSlot {
     queued: AtomicBool,
 }
 
+/// How many slots a render clock keeps before it lets go of those no tick waits in.
+const MAX_IDLE_CLOCK_SLOTS: usize = 16;
+
 /// The render clock's way onto the stage thread. Owned by the render clock thread.
 pub struct ClockSender {
     jobs: crate::stage_thread::DetachedJobSender,
@@ -1387,6 +1390,11 @@ pub unsafe extern "C" fn rust_render_clock_post_tick(
 ) -> bool {
     // SAFETY: Guaranteed by the caller.
     let sender = unsafe { &mut *sender };
+    // A context whose tick no job holds any more gets a slot again if it ticks again: the slots of
+    // contexts that went away go.
+    if sender.slots.len() >= MAX_IDLE_CLOCK_SLOTS && !sender.slots.contains_key(&context) {
+        sender.slots.retain(|_, slot| Arc::strong_count(slot) > 1);
+    }
     let slot = sender.slots.entry(context).or_insert_with(|| {
         Arc::new(ClockSlot {
             frame_time_nanoseconds: AtomicI64::new(0),
