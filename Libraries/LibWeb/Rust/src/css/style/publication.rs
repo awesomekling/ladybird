@@ -2796,41 +2796,54 @@ impl RetainedState {
 
         // The document element's groups build against no parent payloads. A parent record is one
         // the caller holds, which stays live through the assembly.
-        let (parent_payloads, parent_in_display_none_subtree) = match parent_record {
-            Some(parent_record) => {
-                let parent_view = self
-                    .computed_group_sets
-                    .style_record_view(parent_record.raw())
-                    .expect("a held parent record has a view");
-                (parent_view.payloads, parent_view.dependency_flags & (1 << 2) != 0)
+        let mut parent_payloads = [SharedPayload::null(); group_index::COUNT];
+        let parent_in_display_none_subtree = parent_record.is_some_and(|parent_record| {
+            let parent_view = self
+                .computed_group_sets
+                .style_record_view(parent_record.raw())
+                .expect("a held parent record has a view");
+            for (payload, &parent_payload) in parent_payloads.iter_mut().zip(parent_view.payloads) {
+                *payload = parent_payload;
             }
-            None => (&[SharedPayload::null(); group_index::COUNT][..], false),
-        };
+            parent_view.dependency_flags & (1 << 2) != 0
+        });
         let display_is_none = crate::css::style_compute::effective_display(&table, None).is_none();
         table.set_in_display_none_subtree(parent_in_display_none_subtree || display_is_none);
         table.freeze();
         let swap_eligible = table.property_inheritance_is_standard()
             && !table.display_is_list_item()
             && !crate::css::style_compute::has_active_transition_properties(&table);
-        let color_inputs = crate::css::table_group_builder::assembly_color_inputs(&table, length);
         let table = table.into_raw_shared();
-        let payloads = parent_payloads
-            .iter()
-            .enumerate()
-            .take(group_index::COUNT)
-            .map(|(group, &parent_payload)| {
-                SharedPayload::new(unsafe {
-                    crate::css::table_group_builder::assemble_group_from_table(
-                        &*table,
-                        group,
-                        Some(font),
-                        parent_payload.as_ptr(),
-                        color_inputs,
-                        length,
-                    )
+        // A table the catalog already holds assembled to the same payloads the last time it was
+        // built against these inputs; only a new one is built.
+        let assembly_inputs = computed::GroupAssemblyInputs::new(length, font);
+        let assembled = self.computed_group_sets.assembled_payloads(
+            Some(target),
+            cascade_state,
+            unsafe { &*table },
+            assembly_inputs,
+        );
+        let reuses_assembly = assembled.is_some();
+        let payloads = assembled.unwrap_or_else(|| {
+            let color_inputs = crate::css::table_group_builder::assembly_color_inputs(unsafe { &*table }, length);
+            parent_payloads
+                .iter()
+                .enumerate()
+                .take(group_index::COUNT)
+                .map(|(group, &parent_payload)| {
+                    SharedPayload::new(unsafe {
+                        crate::css::table_group_builder::assemble_group_from_table(
+                            &*table,
+                            group,
+                            Some(font),
+                            parent_payload.as_ptr(),
+                            color_inputs,
+                            length,
+                        )
+                    })
                 })
-            })
-            .collect::<Vec<_>>();
+                .collect::<Vec<_>>()
+        });
         let holds_image_values = crate::css::computed_values::style_group_payloads_hold_image_values(
             HostShared::as_pointer_slice(&payloads),
         );
@@ -2859,8 +2872,13 @@ impl RetainedState {
         }
         // The drive built every payload and the table, and holds the only reference to each:
         // hand them to the catalog rather than have it retain a second one per published payload.
+        // Reused payloads are the catalog's own.
         let owned = computed::PendingRecordOwnership {
-            groups: u32::try_from((1_u64 << payloads.len()) - 1).expect("a style group index fits the ownership mask"),
+            groups: if reuses_assembly {
+                0
+            } else {
+                u32::try_from((1_u64 << payloads.len()) - 1).expect("a style group index fits the ownership mask")
+            },
             table: true,
         };
         let publication = self.publish_computed_groups_impl(
@@ -2872,8 +2890,14 @@ impl RetainedState {
             owned,
             counters,
         );
+        self.computed_group_sets.remember_table_assembly(
+            publication.style_record_identity,
+            cascade_state,
+            assembly_inputs,
+            !reuses_assembly,
+        );
         let transferred = publication.transferred;
-        for (group, payload) in payloads.into_iter().enumerate() {
+        for (group, payload) in payloads.into_iter().enumerate().filter(|_| !reuses_assembly) {
             if transferred.groups & (1 << group) == 0 {
                 crate::css::computed_values::release_group_payload(group, payload.as_ptr());
             }
