@@ -5,11 +5,12 @@
  */
 
 //! One flight: the stages of a rendering update (style, the layout rounds, the recording and the
-//! presentation) run one after another as one submitted stage run, under `LIBWEB_STAGE_OVERLAP`
-//! naming `flight`. The main thread seals what the stages read when it submits the flight. The
-//! flight runs its stages until it has run them all or reaches one that needs the main thread,
-//! and ends there: the frame scheduler goes on with the rendering update where the flight ended,
-//! on the path a rendering update that submitted that stage on its own would have taken.
+//! presentation) run one after another as one submitted stage run, by default or under
+//! `LIBWEB_STAGE_OVERLAP` naming `flight`. The main thread seals what the stages read when it
+//! submits the flight. The flight runs its stages until it has run them all or reaches one that
+//! needs the main thread, and ends there: the frame scheduler goes on with the rendering update
+//! where the flight ended, on the path a rendering update that submitted that stage on its own
+//! would have taken.
 
 use crate::css::style::bridge::StylePassJob;
 use crate::layout::update_layout::{LayoutPassJob, LayoutPassTakeBack};
