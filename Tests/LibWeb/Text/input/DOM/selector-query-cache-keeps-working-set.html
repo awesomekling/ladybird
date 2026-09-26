@@ -15,15 +15,15 @@
             return (after.atomSweepPinReleasesSkipped - before.atomSweepPinReleasesSkipped) + (after.atomSweeps - before.atomSweeps);
         }
 
-        // The DOM matches a lone class selector without the style engine, so each of these has a combinator, which
-        // compiles the query into the engine.
+        // The DOM matches class selectors and combinators without the style engine, so each of these reads a state,
+        // which compiles the query into the engine.
         // Fill the cache with selectors the page never uses again.
         for (let index = 0; index < 600; ++index)
-            target.matches(`body > .old-${index}`);
+            target.matches(`body > .old-${index}:not(:hover)`);
 
         const workingSet = [];
         for (let index = 0; index < 300; ++index)
-            workingSet.push(`body > .working-${index}`);
+            workingSet.push(`body > .working-${index}:not(:hover)`);
         const cycle = () => {
             for (let round = 0; round < 4; ++round) {
                 for (const selector of workingSet)
@@ -36,7 +36,7 @@
 
         const tooLarge = [];
         for (let index = 0; index < 700; ++index)
-            tooLarge.push(`body > .large-${index}`);
+            tooLarge.push(`body > .large-${index}:not(:hover)`);
         const releases = releasesDuring(() => {
             for (let round = 0; round < 2; ++round) {
                 for (const selector of tooLarge)

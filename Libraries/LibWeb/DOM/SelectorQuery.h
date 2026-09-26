@@ -51,6 +51,9 @@ private:
 
     void* engine_query(Document&) const;
     bool matches_simple_selector_in_dom(Element const&) const;
+    bool matches_compounds_in_dom(CSS::Selector const&, size_t index, Element const&) const;
+    bool matches_tree_in_dom(Element const&) const;
+    bool should_match_tree_in_dom(Document&, ParentNode* subtree_root) const;
     bool matches_in_style_engine(Element const&, ParentNode const& scope) const;
 
     CSS::SelectorList m_selectors;
@@ -62,6 +65,10 @@ private:
     bool m_can_match_locally_in_dom { false };
     bool m_dom_matching_needs_id { false };
     bool m_dom_matching_needs_classes { false };
+    // Whether every selector's compounds can be matched in the DOM one at a time, walking its combinators there.
+    bool m_can_match_tree_in_dom { false };
+    bool m_tree_dom_matching_needs_id { false };
+    bool m_tree_dom_matching_needs_classes { false };
 
     // Whether the selector is a lone `*`, which every element matches: a query then collects the
     // subtree's elements without matching any of them.

@@ -263,6 +263,8 @@ public:
     [[nodiscard]] bool has_recorded_element_style_input_change(StyleNodeID style_node) const;
     void record_benchmark_marker(Utf16View);
     [[nodiscard]] bool has_recorded_input() const;
+    // How many inputs are recorded for the next submission, which is what settling for a selector query costs.
+    [[nodiscard]] size_t recorded_input_count() const;
     [[nodiscard]] bool has_pending_transaction() const;
     [[nodiscard]] bool has_deferred_geometry_transaction() const;
     [[nodiscard]] bool has_deferred_element_style_inputs() const;

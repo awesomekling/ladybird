@@ -308,6 +308,14 @@ SelectorQuery::SelectorQuery(CSS::SelectorList&& selectors)
         m_dom_matching_needs_classes |= needs_classes;
         return supported;
     });
+    m_can_match_tree_in_dom = all_of(m_selectors, [&](auto const& selector) {
+        bool needs_id = false;
+        bool needs_classes = false;
+        auto supported = CSS::SelectorFFI::rust_selector_supports_tree_dom_matching(&selector->rust_selector(), &needs_id, &needs_classes);
+        m_tree_dom_matching_needs_id |= needs_id;
+        m_tree_dom_matching_needs_classes |= needs_classes;
+        return supported;
+    });
     m_matches_every_element = m_selectors.size() == 1
         && CSS::SelectorFFI::rust_selector_matches_every_element(&m_selectors.first()->rust_selector());
 
@@ -359,68 +367,203 @@ void* SelectorQuery::engine_query(Document& document) const
     return m_engine_query;
 }
 
-static uintptr_t interned_name_identity(Utf16FlyString const& name)
-{
-    return name.raw_identity();
-}
+namespace {
 
-bool SelectorQuery::matches_simple_selector_in_dom(Element const& element) const
-{
-    auto const classes = m_dom_matching_needs_classes ? element.class_names().span() : ReadonlySpan<Utf16FlyString> {};
-    Vector<uintptr_t, 8> class_identities;
-    Vector<Utf16FlyString, 8> lowercase_classes;
-    Vector<uintptr_t, 8> lowercase_class_identities;
-    class_identities.ensure_capacity(classes.size());
-    for (auto const& class_name : classes)
-        class_identities.unchecked_append(interned_name_identity(class_name));
-    if (element.document().in_quirks_mode()) {
-        lowercase_classes.ensure_capacity(classes.size());
-        lowercase_class_identities.ensure_capacity(classes.size());
+// The names of one element a compound is matched against in the DOM, interned the way a compiled selector names
+// them, and folded where the document matches them ASCII case-insensitively.
+struct ElementNamesForDomMatching {
+    ElementNamesForDomMatching(Element const& element, bool needs_id, bool needs_classes)
+        : element(element)
+        , fold_tag_name(element.is_html_element() && element.document().is_html_document())
+        , fold_id_and_classes(element.document().in_quirks_mode())
+    {
+        auto const classes = needs_classes ? element.class_names().span() : ReadonlySpan<Utf16FlyString> {};
+        class_identities.ensure_capacity(classes.size());
         for (auto const& class_name : classes)
-            lowercase_classes.unchecked_append(class_name.to_ascii_lowercase());
-        for (auto const& class_name : lowercase_classes)
-            lowercase_class_identities.unchecked_append(interned_name_identity(class_name));
+            class_identities.unchecked_append(interned_name_identity(class_name));
+        if (fold_id_and_classes) {
+            lowercase_classes.ensure_capacity(classes.size());
+            lowercase_class_identities.ensure_capacity(classes.size());
+            for (auto const& class_name : classes)
+                lowercase_classes.unchecked_append(class_name.to_ascii_lowercase());
+            for (auto const& class_name : lowercase_classes)
+                lowercase_class_identities.unchecked_append(interned_name_identity(class_name));
+        }
+        id = needs_id ? element.id().value_or({}) : Utf16FlyString {};
+        if (fold_id_and_classes)
+            lowercase_id = id.to_ascii_lowercase();
     }
 
-    auto id = m_dom_matching_needs_id ? element.id().value_or({}) : Utf16FlyString {};
-    Utf16FlyString lowercase_id;
-    if (element.document().in_quirks_mode())
-        lowercase_id = id.to_ascii_lowercase();
-    struct AttributeContext {
-        GC::Ref<Element const> element;
-        Optional<Utf16String> value;
-    } attribute_context { element, {} };
-    for (auto const& selector : m_selectors) {
-        auto result = CSS::SelectorFFI::rust_selector_matches_simple_dom(
-            &selector->rust_selector(),
-            interned_name_identity(element.local_name()),
+    static uintptr_t interned_name_identity(Utf16FlyString const& name)
+    {
+        return name.raw_identity();
+    }
+
+    static bool lookup_attribute(void* context, uintptr_t name_identity, CSS::SelectorFFI::FfiUtf16View* result)
+    {
+        auto& names = *static_cast<ElementNamesForDomMatching*>(context);
+        auto name = Utf16FlyString::from_raw(name_identity);
+        names.attribute_value = names.element->get_attribute_ns({}, name);
+        if (!names.attribute_value.has_value())
+            return false;
+        Utf16View view = *names.attribute_value;
+        *result = {
+            .ascii = view.has_ascii_storage() ? reinterpret_cast<u8 const*>(view.ascii_span().data()) : nullptr,
+            .utf16 = view.has_ascii_storage() ? nullptr : reinterpret_cast<u16 const*>(view.utf16_span().data()),
+            .length = view.length_in_code_units(),
+        };
+        return true;
+    }
+
+    // The 1-based position of the element among its element siblings, or among those of its own type, counted from
+    // the start or from the end.
+    static i32 lookup_position(void* context, u8 kind)
+    {
+        auto const& element = *static_cast<ElementNamesForDomMatching*>(context)->element;
+        bool const from_end = kind == 1 || kind == 3;
+        bool const of_type = kind == 2 || kind == 3;
+        i32 position = 1;
+        auto next = [&](Element const* sibling) { return from_end ? sibling->next_element_sibling() : sibling->previous_element_sibling(); };
+        for (Element const* sibling = next(&element); sibling; sibling = next(sibling)) {
+            if (!of_type || (sibling->local_name() == element.local_name() && sibling->namespace_uri() == element.namespace_uri()))
+                ++position;
+        }
+        return position;
+    }
+
+    u8 match_simple(CSS::Selector const& selector)
+    {
+        return CSS::SelectorFFI::rust_selector_matches_simple_dom(
+            &selector.rust_selector(),
+            interned_name_identity(element->local_name()),
             interned_name_identity(id),
             interned_name_identity(lowercase_id),
             class_identities.data(),
             lowercase_class_identities.data(),
             class_identities.size(),
-            element.is_html_element() && element.document().is_html_document(),
-            element.document().in_quirks_mode(),
-            &attribute_context,
-            [](void* context, uintptr_t name_identity, CSS::SelectorFFI::FfiUtf16View* result) {
-                auto& attributes = *static_cast<AttributeContext*>(context);
-                auto name = Utf16FlyString::from_raw(name_identity);
-                attributes.value = attributes.element->get_attribute_ns({}, name);
-                if (!attributes.value.has_value())
-                    return false;
-                Utf16View view = *attributes.value;
-                *result = {
-                    .ascii = view.has_ascii_storage() ? reinterpret_cast<u8 const*>(view.ascii_span().data()) : nullptr,
-                    .utf16 = view.has_ascii_storage() ? nullptr : reinterpret_cast<u16 const*>(view.utf16_span().data()),
-                    .length = view.length_in_code_units(),
-                };
-                return true;
-            });
+            fold_tag_name,
+            fold_id_and_classes,
+            this,
+            lookup_attribute);
+    }
+
+    u8 match_compound(CSS::Selector const& selector, size_t index)
+    {
+        return CSS::SelectorFFI::rust_selector_matches_dom_compound(
+            &selector.rust_selector(),
+            index,
+            interned_name_identity(element->local_name()),
+            interned_name_identity(id),
+            interned_name_identity(lowercase_id),
+            class_identities.data(),
+            lowercase_class_identities.data(),
+            class_identities.size(),
+            fold_tag_name,
+            fold_id_and_classes,
+            this,
+            lookup_attribute,
+            this,
+            lookup_position);
+    }
+
+    GC::Ref<Element const> element;
+    bool fold_tag_name { false };
+    bool fold_id_and_classes { false };
+    Vector<uintptr_t, 8> class_identities;
+    Vector<Utf16FlyString, 8> lowercase_classes;
+    Vector<uintptr_t, 8> lowercase_class_identities;
+    Utf16FlyString id;
+    Utf16FlyString lowercase_id;
+    Optional<Utf16String> attribute_value;
+};
+
+}
+
+bool SelectorQuery::matches_simple_selector_in_dom(Element const& element) const
+{
+    ElementNamesForDomMatching names { element, m_dom_matching_needs_id, m_dom_matching_needs_classes };
+    for (auto const& selector : m_selectors) {
+        auto result = names.match_simple(*selector);
         VERIFY(result != NumericLimits<u8>::max());
         if (result != 0)
             return true;
     }
     return false;
+}
+
+// Whether the compounds of a selector up to and including the one at `index` match, the one at `index` as `element`,
+// reaching the elements the ones before it are matched as through their combinators.
+bool SelectorQuery::matches_compounds_in_dom(CSS::Selector const& selector, size_t index, Element const& element) const
+{
+    ElementNamesForDomMatching names { element, m_tree_dom_matching_needs_id, m_tree_dom_matching_needs_classes };
+    auto result = names.match_compound(selector, index);
+    VERIFY(result != NumericLimits<u8>::max());
+    if (result == 0)
+        return false;
+    if (index == 0)
+        return true;
+    switch (CSS::SelectorFFI::rust_selector_compound_combinator(&selector.rust_selector(), index)) {
+    case CSS::SelectorFFI::Combinator::Descendant:
+        for (GC::Ptr<Element const> ancestor = element.parent_element(); ancestor; ancestor = ancestor->parent_element()) {
+            if (matches_compounds_in_dom(selector, index - 1, *ancestor))
+                return true;
+        }
+        return false;
+    case CSS::SelectorFFI::Combinator::ImmediateChild: {
+        GC::Ptr<Element const> parent = element.parent_element();
+        return parent && matches_compounds_in_dom(selector, index - 1, *parent);
+    }
+    case CSS::SelectorFFI::Combinator::NextSibling: {
+        auto const* sibling = element.previous_element_sibling();
+        return sibling && matches_compounds_in_dom(selector, index - 1, *sibling);
+    }
+    case CSS::SelectorFFI::Combinator::SubsequentSibling:
+        for (auto const* sibling = element.previous_element_sibling(); sibling; sibling = sibling->previous_element_sibling()) {
+            if (matches_compounds_in_dom(selector, index - 1, *sibling))
+                return true;
+        }
+        return false;
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
+
+bool SelectorQuery::matches_tree_in_dom(Element const& element) const
+{
+    for (auto const& selector : m_selectors) {
+        auto last_index = CSS::SelectorFFI::rust_selector_compound_count(&selector->rust_selector()) - 1;
+        if (matches_compounds_in_dom(*selector, last_index, element))
+            return true;
+    }
+    return false;
+}
+
+// Whether a subtree holds at most `limit` elements, found by a walk that stops as soon as it holds more.
+static bool subtree_has_at_most_elements(ParentNode& root, size_t limit)
+{
+    size_t visited = 0;
+    root.for_each_in_subtree_of_type<Element>([&](auto&) {
+        return ++visited > limit ? TraversalDecision::Break : TraversalDecision::Continue;
+    });
+    return visited <= limit;
+}
+
+// Settling the style engine for a query applies everything recorded since the last settle, which a DOM that just
+// took a batch of elements makes as costly as publishing each of them, and which may never be needed: the next
+// mutation can take them away again before any style pass reads them. A query the DOM answers alone is answered from
+// the DOM while that costs less than settling: always for one element and its ancestors, and for a subtree whose walk
+// is short beside the recorded input. Once there is nothing to settle, the engine's indexes answer it.
+bool SelectorQuery::should_match_tree_in_dom(Document& document, ParentNode* subtree_root) const
+{
+    if (!m_can_match_tree_in_dom)
+        return false;
+    auto recorded_input_count = document.style_computer().style_engine().recorded_input_count();
+    if (recorded_input_count == 0)
+        return false;
+    if (!subtree_root)
+        return true;
+    // NB: Settling one recorded input costs about as much as matching a few elements.
+    return subtree_has_at_most_elements(*subtree_root, 32 + 4 * recorded_input_count);
 }
 
 bool SelectorQuery::matches(Element const& element, ParentNode const& scope) const
@@ -432,6 +575,8 @@ bool SelectorQuery::matches(Element const& element, ParentNode const& scope) con
 
     auto& document = const_cast<Document&>(element.document());
     if (element.is_tracked_by_style_engine()) {
+        if (should_match_tree_in_dom(document, nullptr))
+            return matches_tree_in_dom(element);
         settle_connected_selector_query(document);
         return matches_in_style_engine(element, scope);
     }
@@ -477,6 +622,13 @@ GC::Ptr<Element const> SelectorQuery::closest(Element const& element) const
     }
 
     if (element.is_tracked_by_style_engine()) {
+        if (should_match_tree_in_dom(const_cast<Document&>(element.document()), nullptr)) {
+            for (GC::Ptr<Element const> ancestor = GC::Ptr { element }; ancestor; ancestor = ancestor->parent_element()) {
+                if (matches_tree_in_dom(*ancestor))
+                    return ancestor;
+            }
+            return nullptr;
+        }
         settle_connected_selector_query(const_cast<Document&>(element.document()));
         for (GC::Ptr<Element const> ancestor = GC::Ptr { element }; ancestor; ancestor = ancestor->parent_element()) {
             if (matches_in_style_engine(*ancestor, element))
@@ -507,11 +659,7 @@ GC::Ptr<Element const> SelectorQuery::closest(Element const& element) const
 // matching so large roots only pay for a bounded tree walk before using their indexes.
 static bool is_small_query_subtree(ParentNode& root)
 {
-    size_t visited = 0;
-    root.for_each_in_subtree_of_type<Element>([&](auto&) {
-        return ++visited > 32 ? TraversalDecision::Break : TraversalDecision::Continue;
-    });
-    return visited <= 32;
+    return subtree_has_at_most_elements(root, 32);
 }
 
 // https://dom.spec.whatwg.org/#scope-match-a-selectors-string
@@ -557,6 +705,8 @@ GC::Ptr<Element> SelectorQuery::query_first(ParentNode& root) const
     }
 
     auto& document = root.document();
+    if (should_match_tree_in_dom(document, &root))
+        return cache_result(first_match(root, [&](auto& element) { return matches_tree_in_dom(element); }));
     settle_connected_selector_query(document);
     auto subtree_query = engine_subtree_query_for(document, root);
     if (!subtree_query.has_query_root)
@@ -611,6 +761,8 @@ GC::Ref<NodeList> SelectorQuery::query_all(ParentNode& root) const
             IsolatedSelectorQueryEngine engine(tree_root);
             engine.query_all(*this, root, elements);
         }
+    } else if (should_match_tree_in_dom(document, &root)) {
+        collect_matches(root, [&](auto& element) { return matches_tree_in_dom(element); }, elements);
     } else {
         settle_connected_selector_query(document);
         auto subtree_query = engine_subtree_query_for(document, root);
