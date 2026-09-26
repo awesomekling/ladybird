@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<div id="target">target</div>
+<script>
+    asyncTest(async done => {
+        for (let i = 0; i < 4; ++i)
+            await new Promise(requestAnimationFrame);
+
+        const animation = target.animate([{ opacity: 0 }, { opacity: 0, offset: 0.5 }, { opacity: 1 }], 100000);
+        for (let i = 0; i < 4; ++i)
+            await new Promise(requestAnimationFrame);
+
+        // Nothing repaints once the animation is no longer pending, since its output does not change for its first half.
+        println(`animation is no longer pending: ${!animation.pending}`);
+        println(`compositor animations: ${internals.getStyleInvalidationCounters().compositorVisualAnimations}`);
+        done();
+    });
+</script>
