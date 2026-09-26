@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<style>
+    #box {
+        width: 100px;
+        height: 20px;
+        animation: grow 2s linear infinite alternate;
+    }
+    @keyframes grow {
+        from {
+            width: 100px;
+        }
+        to {
+            width: 300px;
+        }
+    }
+    #dot {
+        position: relative;
+        width: 10px;
+        height: 10px;
+    }
+</style>
+<div id="box"></div>
+<div id="dot"></div>
+<script src="../../include.js"></script>
+<script>
+    // Under LIBWEB_RENDER_CLOCK_FRAMES, a main thread that runs one short task after another beside a page with an
+    // animation frame callback goes on beside the frames of its rendering updates: it does not wait for each of them to
+    // lend the page's clock lease to its next task.
+    asyncTest(async done => {
+        const dot = document.getElementById("dot");
+        let frames = 0;
+        let looping = true;
+        function frame(now) {
+            ++frames;
+            dot.style.left = `${now % 100}px`;
+            if (looping)
+                requestAnimationFrame(frame);
+        }
+        requestAnimationFrame(frame);
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        // Not a timing test: the tasks go on until the page has rendered enough frames beside them.
+        const countersBefore = internals.getRenderClockCounters();
+        const framesBefore = frames;
+        const wanted = 10;
+        const channel = new MessageChannel();
+        await new Promise(resolve => {
+            channel.port1.onmessage = () => {
+                const start = performance.now();
+                while (performance.now() - start < 0.2) { }
+                if (frames - framesBefore < wanted)
+                    channel.port2.postMessage(0);
+                else
+                    resolve();
+            };
+            channel.port2.postMessage(0);
+        });
+        const countersAfter = internals.getRenderClockCounters();
+        looping = false;
+        println(`animation frames beside the tasks: ${frames - framesBefore >= wanted}`);
+        println(`the tasks waited for no frame: ${countersAfter.lendFrameWaits === countersBefore.lendFrameWaits}`);
+        done();
+    });
+</script>

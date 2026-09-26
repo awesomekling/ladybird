@@ -1609,6 +1609,10 @@ GC::Ref<JS::Object> Internals::get_render_clock_counters() const
     define("restoresNeedingMain"sv, counters.restores_needing_main);
     define("lendsSuspendedWrite"sv, counters.lends_suspended_write);
     define("lendsSuspendedBudget"sv, counters.lends_suspended_budget);
+    auto frame_waits = HTML::FrameScheduler::clock_lend_frame_waits();
+    define("lendFramesTakenIn"sv, frame_waits.frames_taken_in);
+    define("lendFrameWaits"sv, frame_waits.waits);
+    define("lendFrameNanoseconds"sv, frame_waits.nanoseconds);
     return object;
 }
 
