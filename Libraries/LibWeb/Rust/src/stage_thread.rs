@@ -312,7 +312,7 @@ struct SubmittedStage {
     style_engine: usize,
     // For a flight, set once it is done with the style engine: the stages after its layout reach
     // none, as a recording does (see [`FlightReleasesStyleEngine`]).
-    style_engine_released: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    style_engine_released: Option<std::sync::Arc<std::sync::atomic::AtomicU8>>,
     from_stage: Receiver<StageOutcome>,
     outcome: Option<StageOutcome>,
     // What the main thread runs once it has taken the stage back, before anything else reaches
@@ -340,14 +340,23 @@ impl SubmittedStage {
     /// Whether the stage reaches the style engine `engine` now: a flight stops reaching it once it
     /// is done with it. What the stage wrote of the engine is then the calling thread's to see.
     fn reaches_style_engine(&self, engine: usize) -> bool {
-        self.style_engine == engine && self.style_engine != 0 && !self.has_released_style_engine()
+        self.style_engine == engine && self.style_engine != 0 && !self.has_released_style_engine(STYLE_ENGINE_RELEASED)
     }
 
-    fn has_released_style_engine(&self) -> bool {
+    /// Whether the stage reaches the style engine `engine` now for an entrance that only reads a
+    /// record: a flight that still owes the document thread the install of the style batch it
+    /// published stops reaching it for those once it is done with it.
+    fn reaches_style_engine_for_record_read(&self, engine: usize) -> bool {
+        self.style_engine == engine
+            && self.style_engine != 0
+            && !self.has_released_style_engine(STYLE_ENGINE_RELEASED_FOR_RECORD_READS)
+    }
+
+    fn has_released_style_engine(&self, at_least: u8) -> bool {
         let released = self
             .style_engine_released
             .as_ref()
-            .is_some_and(|released| released.load(Ordering::Acquire));
+            .is_some_and(|released| released.load(Ordering::Acquire) >= at_least);
         if let Some(thread) = stage_thread().filter(|_| released) {
             tsan::acquire(thread);
         }
@@ -490,15 +499,31 @@ pub(crate) unsafe fn submit_stage_with_take_back(
 /// entrances and writes go on beside it. What it hands the style engine meanwhile still waits for
 /// the flight to be taken back, as beside a layout pass.
 #[derive(Clone, Default)]
-pub(crate) struct FlightReleasesStyleEngine(std::sync::Arc<std::sync::atomic::AtomicBool>);
+pub(crate) struct FlightReleasesStyleEngine(std::sync::Arc<std::sync::atomic::AtomicU8>);
+
+/// How far a flight has released its style engine: for entrances that only read a record, or
+/// for all of them.
+const STYLE_ENGINE_RELEASED_FOR_RECORD_READS: u8 = 1;
+const STYLE_ENGINE_RELEASED: u8 = 2;
 
 impl FlightReleasesStyleEngine {
     /// On the stage thread, once the flight is done with the style engine.
     pub(crate) fn release(&self) {
+        self.release_to(STYLE_ENGINE_RELEASED);
+    }
+
+    /// On the stage thread, once the flight is done with the style engine but still owes the
+    /// document thread the install of the style batch it published: the calling thread may read
+    /// records beside it, which the install does not change, but writes and asks nothing else.
+    pub(crate) fn release_for_record_reads(&self) {
+        self.release_to(STYLE_ENGINE_RELEASED_FOR_RECORD_READS);
+    }
+
+    fn release_to(&self, released: u8) {
         if let Some(thread) = stage_thread() {
             tsan::release(thread);
         }
-        self.0.store(true, Ordering::Release);
+        self.0.store(released, Ordering::Release);
     }
 }
 
@@ -562,7 +587,7 @@ unsafe fn submit(
     label: &'static str,
     role: &'static str,
     hold_labels: Vec<&'static str>,
-    style_engine_released: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    style_engine_released: Option<std::sync::Arc<std::sync::atomic::AtomicU8>>,
     arena: *mut c_void,
     stage: impl FnOnce() + Send + 'static,
     on_taken_back: Option<Box<dyn FnOnce()>>,
@@ -1508,8 +1533,27 @@ pub(crate) fn join_frame_for_style_engine_entrance(engine: *const c_void, entry:
         wait_for_submitted_stages_reaching(engine);
         return;
     }
+    if STYLE_ENGINE_RECORD_READS.contains(&entry) {
+        join_frame_in_flight_for_stage(
+            |stage| stage.reaches_style_engine_for_record_read(engine as usize),
+            entry,
+            0,
+            0,
+        );
+        return;
+    }
     join_frame_in_flight_for_stage(|stage| stage.reaches_style_engine(engine as usize), entry, 0, 0);
 }
+
+/// The style engine entrances that only read what a record holds, which a published record keeps
+/// as it is whatever else the engine does.
+const STYLE_ENGINE_RECORD_READS: &[&str] = &[
+    "style_engine_style_record_payloads",
+    "style_engine_style_record_view",
+    "style_engine_style_record_dependency_flags",
+    "style_engine_style_record_custom_property_environment",
+    "style_engine_base_style_record_of",
+];
 
 /// Waits for every stage of the calling thread's frame in flight that reaches the style engine
 /// `engine` to finish, and leaves the frame in flight for its consume.
