@@ -582,8 +582,10 @@ CSS::SizeWithAspectRatio HTMLObjectElement::natural_size_of_content_svg_document
     auto const* root = as_if<SVG::SVGSVGElement>(content_document->document_element());
     if (!root)
         return {};
-    auto resolution_context = root->layout_node()
-        ? CSS::Length::ResolutionContext::for_layout_node(*root->layout_node())
+    // The size is published as the document loads, when its layout may not be up to date yet.
+    auto const* root_layout_node = content_document->layout_is_up_to_date() ? root->layout_node() : nullptr;
+    auto resolution_context = root_layout_node
+        ? CSS::Length::ResolutionContext::for_layout_node(*root_layout_node)
         : CSS::Length::ResolutionContext::for_document(*content_document);
     return SVG::SVGSVGElement::negotiate_natural_metrics(*root, resolution_context);
 }

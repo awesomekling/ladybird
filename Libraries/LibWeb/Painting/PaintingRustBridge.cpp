@@ -411,7 +411,9 @@ static void dump_layout_tree(Layout::Node const& root, size_t initial_indent, bo
                 return { .has_document = false, .layout_root_shell = nullptr };
             auto serialized_url = content_document->url().serialize();
             push_bytes_to_dump_sink(url_sink, serialized_url.bytes());
-            return { .has_document = true, .layout_root_shell = const_cast<Layout::Viewport*>(content_document->layout_node()) }; },
+            // The dump brings every hosted document's layout up to date first.
+            ASSERT(content_document->layout_is_up_to_date());
+            return { .has_document = true, .layout_root_shell = const_cast<Layout::Viewport*>(content_document->unsafe_layout_node()) }; },
         .svg_as_image_layout_root = [](void*, void* layout_node_pointer) -> void* {
             auto const* image_element = as_if<HTML::HTMLImageElement>(static_cast<Layout::Node const*>(layout_node_pointer)->dom_node());
             if (!image_element)
