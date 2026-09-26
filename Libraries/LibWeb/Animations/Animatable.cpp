@@ -460,6 +460,17 @@ void Animatable::publish_css_defined_animations(size_t index)
     CSS::record_element_css_defined_animations(*element, static_cast<u8>(index), names, definition_words);
 }
 
+// An animation that has been cancelled, replaced, or has finished without filling leaves its target's list at the next
+// animation frame (see Animation::disassociate_from_target_if_inert()). Until then it has no row to publish, as an
+// animation that is not relevant only becomes relevant again when the host moves its timing, and that republishes the
+// list. A style change can cancel and restart a transition any number of times before that frame, and every style
+// update would otherwise republish and redescribe each of the dead ones. A CSS animation stays, as the next plan of the
+// element that lists it can play it again.
+static bool is_leaving_its_target(Animation const& animation)
+{
+    return animation.disassociation_from_target_pending() && !is<CSS::CSSAnimation>(animation) && !animation.is_relevant();
+}
+
 // Which of the animations an element holds are relevant is a question about the WAAPI timing
 // model, not about the GC heap: it is answered from the animation's own timing and the current time
 // of its timeline. Publish the timing, once per list, so the style stage can answer it itself.
@@ -506,7 +517,7 @@ void Animatable::publish_animation_timing_rows()
         note_slot_of(*effect);
     for (auto const& animation : impl.associated_animations) {
         auto effect = animation->effect();
-        if (!effect || !is<KeyframeEffect>(*effect))
+        if (!effect || !is<KeyframeEffect>(*effect) || is_leaving_its_target(*animation))
             continue;
         note_slot_of(static_cast<KeyframeEffect const&>(*effect));
     }
@@ -604,7 +615,7 @@ void Animatable::publish_animation_timing_rows()
         }
         for (auto const& animation : impl.associated_animations) {
             auto effect = animation->effect();
-            if (!effect || !is<KeyframeEffect>(*effect))
+            if (!effect || !is<KeyframeEffect>(*effect) || is_leaving_its_target(*animation))
                 continue;
             auto& keyframe_effect = static_cast<KeyframeEffect&>(*effect);
             if (slot_of(keyframe_effect) != slot)
