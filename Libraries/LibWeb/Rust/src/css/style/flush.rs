@@ -2628,10 +2628,21 @@ impl StyleEngineState {
                             hidden = true;
                             break;
                         }
-                        if let Some(record) = self.computed_group_sets.assigned_style_record(current) {
+                        // The host decides by the first ancestor that holds a style when it applies
+                        // the row: a row of the pass holds the record the pass settled for it, and
+                        // any other element the one the host installed, which is none below an
+                        // element that entered display:none, even where the engine kept a record.
+                        let record = if row_of(&pass.scratch.derived_child_inputs, current).is_some() {
+                            self.computed_group_sets
+                                .assigned_style_record(current)
+                                .map_or(0, |record| record.raw())
+                        } else {
+                            self.held_style_record_in_pass(current)
+                        };
+                        if record != 0 {
                             hidden = self
                                 .computed_group_sets
-                                .style_record_dependency_flags(record.raw())
+                                .style_record_dependency_flags(record)
                                 .is_some_and(|flags| flags & (1 << 2) != 0);
                             break;
                         }
