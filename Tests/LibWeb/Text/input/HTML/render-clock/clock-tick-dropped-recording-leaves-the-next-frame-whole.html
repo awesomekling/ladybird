@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<style>
+    #box {
+        width: 100px;
+        height: 40px;
+        animation: grow 20s linear;
+        background-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10' preserveAspectRatio='none'><rect width='10' height='10' fill='green'/></svg>");
+        background-size: 100% 100%;
+    }
+    @keyframes grow {
+        from {
+            width: 100px;
+        }
+        to {
+            width: 20100px;
+        }
+    }
+    .after {
+        width: 50px;
+        height: 20px;
+        background: blue;
+        border: 2px solid red;
+    }
+</style>
+<div id="box"></div>
+<div class="after">one</div>
+<div class="after">two</div>
+<div class="after">three</div>
+<script src="../../include.js"></script>
+<script>
+    function nextTask() {
+        const { promise, resolve } = Promise.withResolvers();
+        const channel = new MessageChannel();
+        channel.port1.onmessage = resolve;
+        channel.port2.postMessage(null);
+        return promise;
+    }
+
+    async function frameTimeAfter(time) {
+        while (performance.now() <= time + 1)
+            await nextTask();
+        return performance.now();
+    }
+
+    // Under LIBWEB_RENDER_CLOCK_FRAMES, a render clock tick whose recording is dropped (here: it sizes an SVG image at a size
+    // nothing rendered it at) assembled that recording in the retained paint-order tree. The main thread's next frame must
+    // not copy the published frame's output by that tree's ranges: it records the content after the box from scratch.
+    // Under --verify-paint-cache, the frame that copied by the dropped recording's ranges diverges and aborts.
+    asyncTest(async done => {
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        const enabled = internals.clockFramesEnabled();
+        internals.setManualRenderingOpportunities(true, true);
+        await nextTask();
+        let frameTime = performance.now();
+        for (let i = 0; i < 3; ++i) {
+            frameTime = await frameTimeAfter(frameTime);
+            internals.injectRenderingOpportunity(frameTime);
+            await nextTask();
+        }
+
+        const countersBefore = internals.getRenderClockCounters();
+        frameTime = await frameTimeAfter(frameTime + 20);
+        await internals.injectClockTick(frameTime);
+        const countersAfter = internals.getRenderClockCounters();
+        for (let i = 0; i < 2; ++i) {
+            frameTime = await frameTimeAfter(frameTime);
+            internals.injectRenderingOpportunity(frameTime);
+            await nextTask();
+        }
+        internals.setManualRenderingOpportunities(false);
+
+        println(`the tick handed over to the main thread: ${!enabled || countersAfter.ticksNeedingMain - countersBefore.ticksNeedingMain === 1}`);
+        println(`the main thread rendered after it: ${document.querySelectorAll(".after").length === 3}`);
+        done();
+    });
+</script>

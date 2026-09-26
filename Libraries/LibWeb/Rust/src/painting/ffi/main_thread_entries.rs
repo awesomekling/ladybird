@@ -292,8 +292,7 @@ unsafe extern "C" fn layout_arena_discard_retired_recording(arena: *mut c_void) 
     if !unsafe { crate::layout::frame_retirement::frame_was_retired(arena_handle, generation) } {
         return false;
     }
-    paint_state.pending_recording = None;
-    paint_state.pending_recording_trace = None;
+    paint_state.discard_pending_recording();
     true
 }
 
