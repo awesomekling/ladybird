@@ -206,6 +206,14 @@ public:
     // At step 1, before the event loop runs a task: finishes the frame in flight where a clock lease would tick beside
     // the task once it is in, and lends the leases a frame kept from being lent.
     void finish_frame_for_clock_lend();
+    // Test only: how many times finish_frame_for_clock_lend() took in a frame, how many of those times the render side
+    // had not finished it yet, and how long taking them in took in total.
+    struct ClockLendFrameWaits {
+        u64 frames_taken_in { 0 };
+        u64 waits { 0 };
+        u64 nanoseconds { 0 };
+    };
+    static ClockLendFrameWaits clock_lend_frame_waits();
 
     // Takes in the frame the render side has handed back: publishes its recordings and hands off their compositor
     // frames. Runs no script: what the render side told the documents (their commit messages, which can dispatch

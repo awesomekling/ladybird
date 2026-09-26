@@ -220,7 +220,8 @@ interface Internals {
     // ticks beside the task running now.
     boolean clockLendActive();
     // What the render clock did with them: ticksPosted, ticksFolded, ticksRun, ticksInstalled, ticksNeedingMain and
-    // why it dropped the others.
+    // why it dropped the others; and the frames in flight the main thread took in before a task to lend them
+    // (lendFramesTakenIn), how many of those it waited for (lendFrameWaits), and for how long (lendFrameNanoseconds).
     object getRenderClockCounters();
     // Leaves clock leases to the main thread's rendering updates, with no render clock armed, while suspended.
     undefined setRenderClockSuspended(boolean suspended);
