@@ -23,7 +23,7 @@
         println(`querySelector observes mutation: ${document.querySelector("#root > .query-first") === target}`);
         println(`querySelector settles resident input: ${settles(() => {
             target.className = "query-first-next";
-            return document.querySelector("#root > .query-first-next") === target;
+            return document.querySelector("#root > .query-first-next:not(:hover)") === target;
         })}`);
 
         println(`querySelectorAll settles resident input: ${settles(() => {
@@ -33,12 +33,12 @@
 
         println(`matches settles resident input: ${settles(() => {
             target.className = "matches";
-            return target.matches("#root > .matches");
+            return target.matches("#root > .matches:not(:hover)");
         })}`);
 
         println(`closest settles resident input: ${settles(() => {
             root.className = "closest";
-            return target.closest("body > .closest") === root;
+            return target.closest("body > .closest:not(:hover)") === root;
         })}`);
 
         root.classList.add("style-flush");

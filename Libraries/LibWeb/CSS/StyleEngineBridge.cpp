@@ -915,6 +915,16 @@ bool StyleEngine::has_recorded_input() const
         || m_host_fact_writes.size() > m_pending_atom_adoption_count;
 }
 
+size_t StyleEngine::recorded_input_count() const
+{
+    return m_tree_deltas.size()
+        + m_element_arrivals.size()
+        + m_local_feature_deltas.size()
+        + m_state_deltas.size()
+        + m_element_declaration_deltas.size()
+        + (m_host_fact_writes.size() - m_pending_atom_adoption_count);
+}
+
 void StyleEngine::submit_recorded_input()
 {
     // A layout flight that ran a style pass installs the pass's batch as it is taken back: whoever submits the recorded

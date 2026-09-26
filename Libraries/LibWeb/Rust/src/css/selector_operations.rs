@@ -187,10 +187,7 @@ pub(crate) fn relative_to(selector: &CompiledSelector, parent: SimpleSelector) -
     CompiledSelector::new(compounds.into_boxed_slice())
 }
 
-fn supports_dom_matching(selector: &CompiledSelector, attributes: bool) -> bool {
-    let [compound] = selector.compound_selectors.as_ref() else {
-        return false;
-    };
+fn compound_supports_dom_matching(compound: &CompoundSelector, attributes: bool, positions: bool) -> bool {
     !compound.simple_selectors.is_empty()
         && compound.simple_selectors.iter().all(|simple| match simple {
             SimpleSelector::Universal(name) | SimpleSelector::TagName(name) => matches!(
@@ -205,8 +202,42 @@ fn supports_dom_matching(selector: &CompiledSelector, attributes: bool) -> bool 
                         super::selector::NamespaceType::Default | super::selector::NamespaceType::None
                     )
             }
+            SimpleSelector::PseudoClass(pseudo_class) => {
+                positions && dom_position_of(pseudo_class).is_some() && pseudo_class.argument_selector_list.is_empty()
+            }
             _ => false,
         })
+}
+
+fn supports_dom_matching(selector: &CompiledSelector, attributes: bool) -> bool {
+    let [compound] = selector.compound_selectors.as_ref() else {
+        return false;
+    };
+    compound_supports_dom_matching(compound, attributes, false)
+}
+
+/// Which sibling position a child-indexed pseudo-class reads, and whether it counts from the end.
+/// The numeric values are what `rust_selector_matches_dom_compound`'s position callback is asked for.
+#[derive(Clone, Copy)]
+#[repr(u8)]
+enum DomPosition {
+    Child = 0,
+    ChildFromEnd = 1,
+    OfType = 2,
+    OfTypeFromEnd = 3,
+}
+
+fn dom_position_of(pseudo_class: &PseudoClassSelector) -> Option<(DomPosition, Option<DomPosition>)> {
+    use DomPosition::*;
+    Some(match pseudo_class.pseudo_class {
+        PseudoClassType::FirstChild | PseudoClassType::NthChild => (Child, None),
+        PseudoClassType::LastChild | PseudoClassType::NthLastChild => (ChildFromEnd, None),
+        PseudoClassType::OnlyChild => (Child, Some(ChildFromEnd)),
+        PseudoClassType::FirstOfType | PseudoClassType::NthOfType => (OfType, None),
+        PseudoClassType::LastOfType | PseudoClassType::NthLastOfType => (OfTypeFromEnd, None),
+        PseudoClassType::OnlyOfType => (OfType, Some(OfTypeFromEnd)),
+        _ => return None,
+    })
 }
 
 /// Returns whether a selector can be matched by `rust_selector_matches_simple_dom`.
@@ -250,6 +281,72 @@ pub unsafe extern "C" fn rust_selector_supports_local_dom_matching(
             .iter()
             .any(|simple| matches!(simple, SimpleSelector::Class(_)));
         true
+    }
+}
+
+/// Returns whether a selector can be matched compound by compound with
+/// `rust_selector_matches_dom_compound`, walking the DOM for its combinators: every compound is
+/// local or reads a child-indexed position, and every combinator relates an element to an
+/// ancestor or a preceding sibling.
+///
+/// # Safety
+/// `selector` must point to a live `RustSelector`. Both output pointers must be writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_selector_supports_tree_dom_matching(
+    selector: *const RustSelector,
+    needs_id: *mut bool,
+    needs_classes: *mut bool,
+) -> bool {
+    unsafe {
+        assert!(!selector.is_null());
+        let compounds = &(*selector).compiled().compound_selectors;
+        let supported = !compounds.is_empty()
+            && compounds.iter().enumerate().all(|(index, compound)| {
+                let combinator_is_supported = match index {
+                    0 => compound.combinator == Combinator::None,
+                    _ => matches!(
+                        compound.combinator,
+                        Combinator::ImmediateChild
+                            | Combinator::Descendant
+                            | Combinator::NextSibling
+                            | Combinator::SubsequentSibling
+                    ),
+                };
+                combinator_is_supported && compound_supports_dom_matching(compound, true, true)
+            });
+        if !supported {
+            return false;
+        }
+        let has_simple = |predicate: fn(&SimpleSelector) -> bool| {
+            compounds
+                .iter()
+                .any(|compound| compound.simple_selectors.iter().any(predicate))
+        };
+        *needs_id = has_simple(|simple| matches!(simple, SimpleSelector::Id(_)));
+        *needs_classes = has_simple(|simple| matches!(simple, SimpleSelector::Class(_)));
+        true
+    }
+}
+
+/// # Safety
+/// `selector` must point to a live `RustSelector`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_selector_compound_count(selector: *const RustSelector) -> usize {
+    unsafe {
+        assert!(!selector.is_null());
+        (*selector).compiled().compound_selectors.len()
+    }
+}
+
+/// The combinator relating the compound at `index` to the one before it.
+///
+/// # Safety
+/// `selector` must point to a live `RustSelector` with more than `index` compounds.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_selector_compound_combinator(selector: *const RustSelector, index: usize) -> Combinator {
+    unsafe {
+        assert!(!selector.is_null());
+        (*selector).compiled().compound_selectors[index].combinator
     }
 }
 
@@ -311,18 +408,14 @@ pub unsafe extern "C" fn rust_selector_contains_named_namespace(selector: *const
     }
 }
 
-/// Matches a local compound against interned DOM names and borrowed attribute values.
-///
-/// Returns zero or one for a supported selector and `u8::MAX` for any selector which needs the
-/// full style-engine matcher.
+/// Answers one compound of a selector for an element, from its interned DOM names, borrowed attribute
+/// values and, for a child-indexed pseudo-class, the sibling positions `lookup_position` counts.
 ///
 /// # Safety
-/// `selector` must point to a live `RustSelector`. The class pointers must each address
-/// `class_count` identities, or be null when the count is zero. The attribute callback must
-/// return a view valid until its next invocation, looking up the name in no namespace.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_selector_matches_simple_dom(
-    selector: *const RustSelector,
+/// As for `rust_selector_matches_dom_compound`.
+#[allow(clippy::too_many_arguments)]
+unsafe fn matches_dom_compound(
+    compound: &CompoundSelector,
     tag_name: usize,
     lowercase_tag_name: usize,
     id: usize,
@@ -333,17 +426,11 @@ pub unsafe extern "C" fn rust_selector_matches_simple_dom(
     fold_tag_name: bool,
     fold_id_and_classes: bool,
     attribute_context: *mut std::ffi::c_void,
-    lookup_attribute: Option<
-        unsafe extern "C" fn(*mut std::ffi::c_void, usize, *mut super::ffi_support::FfiUtf16View) -> bool,
-    >,
+    lookup_attribute: unsafe extern "C" fn(*mut std::ffi::c_void, usize, *mut super::ffi_support::FfiUtf16View) -> bool,
+    position_context: *mut std::ffi::c_void,
+    lookup_position: Option<unsafe extern "C" fn(*mut std::ffi::c_void, u8) -> i32>,
 ) -> u8 {
     unsafe {
-        assert!(!selector.is_null());
-        let compounds = &(*selector).compiled().compound_selectors;
-        if !supports_dom_matching((*selector).compiled(), lookup_attribute.is_some()) {
-            return u8::MAX;
-        }
-        let compound = &compounds[0];
         let classes = if class_count == 0 {
             &[][..]
         } else {
@@ -416,7 +503,7 @@ pub unsafe extern "C" fn rust_selector_matches_simple_dom(
                         }
                     };
                     let operator = AttributeOperator::from(attribute.match_type);
-                    let lookup = lookup_attribute.unwrap();
+                    let lookup = lookup_attribute;
                     let Some(name) = (if fold_tag_name {
                         attribute.qualified_name.interned_lowercase_name_identity()
                     } else {
@@ -438,6 +525,27 @@ pub unsafe extern "C" fn rust_selector_matches_simple_dom(
                         }
                     }
                 }
+                SimpleSelector::PseudoClass(pseudo_class) => {
+                    let Some(lookup_position) = lookup_position else {
+                        return u8::MAX;
+                    };
+                    let Some((position, other_position)) = dom_position_of(pseudo_class) else {
+                        return u8::MAX;
+                    };
+                    let pattern = match pseudo_class.pseudo_class {
+                        PseudoClassType::NthChild
+                        | PseudoClassType::NthLastChild
+                        | PseudoClassType::NthOfType
+                        | PseudoClassType::NthLastOfType => pseudo_class.an_plus_b_pattern,
+                        _ => super::selector::AnPlusBPattern {
+                            step_size: 0,
+                            offset: 1,
+                        },
+                    };
+                    pattern.matches(lookup_position(position_context, position as u8))
+                        && other_position
+                            .is_none_or(|other| pattern.matches(lookup_position(position_context, other as u8)))
+                }
                 _ => unreachable!(),
             };
             if !matches {
@@ -445,6 +553,140 @@ pub unsafe extern "C" fn rust_selector_matches_simple_dom(
             }
         }
         1
+    }
+}
+
+/// Matches a local compound against interned DOM names and borrowed attribute values.
+///
+/// Returns zero or one for a supported selector and `u8::MAX` for any selector which needs the
+/// full style-engine matcher.
+///
+/// # Safety
+/// `selector` must point to a live `RustSelector`. The class pointers must each address
+/// `class_count` identities, or be null when the count is zero. The attribute callback must
+/// return a view valid until its next invocation, looking up the name in no namespace.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_selector_matches_simple_dom(
+    selector: *const RustSelector,
+    tag_name: usize,
+    lowercase_tag_name: usize,
+    id: usize,
+    lowercase_id: usize,
+    classes: *const usize,
+    lowercase_classes: *const usize,
+    class_count: usize,
+    fold_tag_name: bool,
+    fold_id_and_classes: bool,
+    attribute_context: *mut std::ffi::c_void,
+    lookup_attribute: Option<
+        unsafe extern "C" fn(*mut std::ffi::c_void, usize, *mut super::ffi_support::FfiUtf16View) -> bool,
+    >,
+) -> u8 {
+    unsafe {
+        assert!(!selector.is_null());
+        let Some(lookup_attribute) = lookup_attribute else {
+            if !supports_dom_matching((*selector).compiled(), false) {
+                return u8::MAX;
+            }
+            unsafe extern "C" fn no_attribute(
+                _: *mut std::ffi::c_void,
+                _: usize,
+                _: *mut super::ffi_support::FfiUtf16View,
+            ) -> bool {
+                false
+            }
+            return matches_dom_compound(
+                &(*selector).compiled().compound_selectors[0],
+                tag_name,
+                lowercase_tag_name,
+                id,
+                lowercase_id,
+                classes,
+                lowercase_classes,
+                class_count,
+                fold_tag_name,
+                fold_id_and_classes,
+                attribute_context,
+                no_attribute,
+                std::ptr::null_mut(),
+                None,
+            );
+        };
+        if !supports_dom_matching((*selector).compiled(), true) {
+            return u8::MAX;
+        }
+        matches_dom_compound(
+            &(*selector).compiled().compound_selectors[0],
+            tag_name,
+            lowercase_tag_name,
+            id,
+            lowercase_id,
+            classes,
+            lowercase_classes,
+            class_count,
+            fold_tag_name,
+            fold_id_and_classes,
+            attribute_context,
+            lookup_attribute,
+            std::ptr::null_mut(),
+            None,
+        )
+    }
+}
+
+/// Matches the compound at `index` of a selector `rust_selector_supports_tree_dom_matching`
+/// accepts, as `rust_selector_matches_simple_dom` matches its one compound. A child-indexed
+/// pseudo-class asks `lookup_position` for the element's 1-based position among its element
+/// siblings (0), counted from the end (1), among those of its own type (2), or of its type from the
+/// end (3).
+///
+/// # Safety
+/// As for `rust_selector_matches_simple_dom`, and `selector` must have more than `index` compounds.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_selector_matches_dom_compound(
+    selector: *const RustSelector,
+    index: usize,
+    tag_name: usize,
+    lowercase_tag_name: usize,
+    id: usize,
+    lowercase_id: usize,
+    classes: *const usize,
+    lowercase_classes: *const usize,
+    class_count: usize,
+    fold_tag_name: bool,
+    fold_id_and_classes: bool,
+    attribute_context: *mut std::ffi::c_void,
+    lookup_attribute: Option<
+        unsafe extern "C" fn(*mut std::ffi::c_void, usize, *mut super::ffi_support::FfiUtf16View) -> bool,
+    >,
+    position_context: *mut std::ffi::c_void,
+    lookup_position: Option<unsafe extern "C" fn(*mut std::ffi::c_void, u8) -> i32>,
+) -> u8 {
+    unsafe {
+        assert!(!selector.is_null());
+        let compound = &(*selector).compiled().compound_selectors[index];
+        let Some(lookup_attribute) = lookup_attribute else {
+            return u8::MAX;
+        };
+        if !compound_supports_dom_matching(compound, true, true) {
+            return u8::MAX;
+        }
+        matches_dom_compound(
+            compound,
+            tag_name,
+            lowercase_tag_name,
+            id,
+            lowercase_id,
+            classes,
+            lowercase_classes,
+            class_count,
+            fold_tag_name,
+            fold_id_and_classes,
+            attribute_context,
+            lookup_attribute,
+            position_context,
+            lookup_position,
+        )
     }
 }
 
