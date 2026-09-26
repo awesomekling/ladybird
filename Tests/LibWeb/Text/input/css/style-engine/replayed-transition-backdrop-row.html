@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style>
+    .fancy::backdrop { background-color: red; }
+</style>
+<dialog id="a"></dialog><dialog id="b"></dialog>
+<script>
+    test(() => {
+        b.showModal();
+        internals.updateStyle();
+        b.close();
+        internals.updateStyle();
+        a.classList.add("fancy");
+        b.classList.add("fancy");
+        internals.updateStyle();
+        b.showModal();
+        println(`backdrop color: ${getComputedStyle(b, "::backdrop").backgroundColor}`);
+    });
+</script>
