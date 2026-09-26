@@ -859,6 +859,12 @@ void FrameScheduler::revoke_all_clock_leases()
     }
 }
 
+void FrameScheduler::revoke_clock_lease_of(DOM::Document const& document)
+{
+    if (auto held = m_clock_leases.find_first_index_if([&](auto const& hold) { return hold.document.ptr() == &document; }); held.has_value())
+        revoke_clock_lease(*held);
+}
+
 void FrameScheduler::main_thread_will_idle()
 {
     // The task is over: what the ticks installed beside it is the documents' now, and nothing lends the arenas again

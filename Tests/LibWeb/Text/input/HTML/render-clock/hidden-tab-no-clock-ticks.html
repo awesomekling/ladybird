@@ -17,8 +17,8 @@
 <div id="box"></div>
 <script src="../../include.js"></script>
 <script>
-    // The render clock ticks nothing for a hidden page, whose lease is paused (and whose context the Compositor
-    // delivers no display ticks for), and ticks its animation again once it is visible.
+    // The render clock ticks nothing for a hidden page, whose lease ends as it is hidden (and whose context the
+    // Compositor delivers no display ticks for), and ticks its animation again once it is visible.
     asyncTest(async done => {
         const enabled = internals.clockFramesEnabled();
         const ticks = () => internals.getRenderClockCounters().ticksInstalled;
@@ -40,6 +40,7 @@
         for (let i = 0; i < 10; ++i)
             await new Promise(resolve => setTimeout(resolve, 5));
         println(`hidden: ticks advance: ${ticks() > before}`);
+        println(`hidden: the render clock ticks the page: ${internals.renderClockTicks(document)}`);
 
         await setSystemVisibilityState("visible");
         await nextTick();
