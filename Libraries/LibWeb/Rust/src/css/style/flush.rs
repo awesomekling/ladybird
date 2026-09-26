@@ -2524,10 +2524,15 @@ impl StyleEngineState {
         // each one makes a cohort of markers waiting for a font take cubic work.
         let mut ready_record = None::<publication::pending::ParkedEngineComputedRecord>;
         let mut waiting_records = Vec::<publication::pending::ParkedEngineComputedRecord>::new();
+        // The subtree roots of the records this round parked, which each later row looks its
+        // ancestors up in: comparing every ancestor with every parked record made a round over
+        // a cohort of parked rows quadratic.
+        let mut parked_subtree_roots = HashSet::<StyleNodeID>::default();
         while next_published_index < cut_at.unwrap_or(pass.published_nodes.len()) {
             let settled_rows_before_round = settled_row_count(style_deltas, record_deltas.as_deref());
             let mut resumed_records = std::mem::take(&mut waiting_records).into_iter();
             let mut next_parked_records = Vec::<publication::pending::ParkedEngineComputedRecord>::new();
+            parked_subtree_roots.clear();
             let mut carried_records = Vec::<publication::pending::ParkedEngineComputedRecord>::new();
             for (published_index, node) in pass
                 .published_nodes
@@ -2544,14 +2549,13 @@ impl StyleEngineState {
                 // flat tree is walked too.
                 if let Some(record_deltas) = &record_deltas
                     && (record_deltas[published_index].is_some()
-                        || next_parked_records
-                            .iter()
-                            .any(|parked| self.tree.is_in_subtree_of(node, parked.subtree_root))
-                        || (!next_parked_records.is_empty()
-                            && std::iter::successors(self.tree.flat_tree_parent(node), |&ancestor| {
-                                self.tree.flat_tree_parent(ancestor)
-                            })
-                            .any(|ancestor| next_parked_records.iter().any(|parked| parked.subtree_root == ancestor))))
+                        || (!parked_subtree_roots.is_empty()
+                            && (std::iter::successors(Some(node), |&ancestor| self.tree.parent(ancestor))
+                                .any(|ancestor| parked_subtree_roots.contains(&ancestor))
+                                || std::iter::successors(self.tree.flat_tree_parent(node), |&ancestor| {
+                                    self.tree.flat_tree_parent(ancestor)
+                                })
+                                .any(|ancestor| parked_subtree_roots.contains(&ancestor)))))
                 {
                     // A record this round would resume waits for the next one with its ancestor,
                     // unless its row has settled, and the next record to resume is the one after it.
@@ -2954,9 +2958,9 @@ impl StyleEngineState {
                         record_deltas = Some((0..pass.published_nodes.len()).map(|_| None).collect());
                         batching_start = Some(published_index);
                     }
+                    parked_subtree_roots.insert(node);
                     next_parked_records.push(publication::pending::ParkedEngineComputedRecord {
                         published_index,
-                        subtree_root: node,
                         parent_inputs: parent_inputs_moved,
                         continuation: std::mem::take(&mut pass.scratch.continuation),
                     });
