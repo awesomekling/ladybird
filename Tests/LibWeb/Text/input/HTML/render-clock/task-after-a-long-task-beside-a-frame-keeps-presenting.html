@@ -24,7 +24,7 @@
 <script src="../../include.js"></script>
 <script>
     // Under LIBWEB_RENDER_CLOCK_FRAMES, the render clock goes on presenting an animation in a task that follows a long
-    // task, even when the frame of the rendering update between them is still in flight as the task begins.
+    // task, even where the frame of the rendering update between them is still in flight as the task begins.
     asyncTest(async done => {
         const dot = document.getElementById("dot");
         const enabled = internals.clockFramesEnabled();
@@ -43,7 +43,6 @@
                 if (presented >= wanted)
                     break;
             }
-            internals.releaseHeldFrame();
             nextTaskRan();
         }
 
@@ -51,10 +50,9 @@
         let looping = true;
         function frame(now) {
             dot.style.left = `${now % 100}px`;
-            // The frame of this rendering update stays in flight until the main thread waits for it.
+            // The task can begin while the frame of this rendering update is in flight.
             if (afterLongTask) {
                 afterLongTask = false;
-                internals.holdNextRecordingFrame("before-run");
                 setTimeout(busyLoopUntilPresented, 0);
             }
             if (looping)

@@ -992,6 +992,14 @@ pub unsafe extern "C" fn rust_stage_thread_hold_next_submitted_stage(
     true
 }
 
+/// Whether a test's hold is armed, or holds a run: the test runs its tasks beside the frame in flight
+/// it holds, and nothing but a wait for the stage it names should take that frame back.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_stage_thread_hold_armed_or_holding() -> bool {
+    let (hold, _) = lock_stage_hold();
+    hold.armed.is_some() || hold.holding.is_some()
+}
+
 /// Releases a held stage, or disarms a hold no stage has reached yet.
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_stage_thread_release_held_stage() {

@@ -331,8 +331,8 @@ void EventLoop::process()
         m_finished_frame_consumer->function()();
     }
 
-    // LIBWEB_RENDER_CLOCK_FRAMES: A task that follows a long task may need the frame in flight finished first, for the
-    //                             render clock to tick beside it.
+    // LIBWEB_RENDER_CLOCK_FRAMES: A task may need the frame in flight finished first, and the leases its tail granted
+    //                             lent, for the render clock to tick beside it.
     if (m_finished_frame_consumer && m_task_queue->has_runnable_tasks()) {
         TemporaryChange at_step_one { m_calling_finished_frame_consumer, true };
         m_frame_scheduler->finish_frame_for_clock_lend();
