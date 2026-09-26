@@ -303,6 +303,9 @@ interface Internals {
     // Whether the keyboard scroll state this window's navigable last handed its compositor is still current (true where
     // it hands none).
     boolean lastFrameKeyboardScrollStateIsCurrent();
+    // How many animations the compositor runs on the last visual context tree this window's navigable handed it, read
+    // without taking in the frame in flight.
+    unsigned long long presentedCompositorAnimationCount();
     // Whether the rendering update has submitted its style or layout pass (under LIBWEB_STAGE_OVERLAP naming "style" or
     // "layout") and goes on with the rest, which submits its recordings, once the main thread has taken the pass back
     // between tasks.

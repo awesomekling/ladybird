@@ -96,6 +96,7 @@ CompositorFrame NavigablePresenter::build_frame(PresentationInputs& inputs, Pres
             .resource_transaction = move(resource_transaction),
             .scroll_state_snapshot = move(scroll_state_snapshot),
         };
+        m_compositor_visual_animation_count = frame.display_list_update->visual_context_tree.visual_animation_summary().count;
         source.did_update_visual_context_tree_in_compositor();
         did_hand_display_list_to_compositor(published->display_list, inputs.paint_config, move(published->command_resources), move(display_list_resources));
     } else {
@@ -115,6 +116,7 @@ CompositorFrame NavigablePresenter::build_frame(PresentationInputs& inputs, Pres
                 .visual_context_tree = move(updated_visual_context_tree),
                 .resource_transaction = move(updated_resource_transaction),
             };
+            m_compositor_visual_animation_count = frame.visual_context_tree_update->visual_context_tree.visual_animation_summary().count;
             source.did_update_visual_context_tree_in_compositor();
             did_hand_visual_context_tree_to_compositor(move(updated_display_list_resources));
         }

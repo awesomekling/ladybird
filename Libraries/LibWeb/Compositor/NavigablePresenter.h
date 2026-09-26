@@ -204,6 +204,9 @@ public:
     // A frame taken in late never takes the epoch back: the main thread may have presented a later scene meanwhile.
     void did_adopt_scene(u64 epoch) { m_adopted_scene_epoch = max(m_adopted_scene_epoch, epoch); }
     bool has_scene_to_adopt() const { return presented_scene_epoch() > m_adopted_scene_epoch; }
+    // How many animations the compositor runs on the last visual context tree this presenter handed it. Read from any
+    // thread, as the scene epoch.
+    u64 compositor_visual_animation_count() const { return m_compositor_visual_animation_count.load(); }
 
     // Builds the frame that brings the compositor context up to date with `published` (or, if the frame recorded
     // nothing, with its source's tree and scroll state). Reaches no document but through `source`.
@@ -220,6 +223,7 @@ private:
     Compositing::DisplayListResourceSet m_compositor_display_list_command_resources;
     bool m_lent_to_frame_in_flight { false };
     Atomic<u64> m_presented_scene_epoch { 0 };
+    Atomic<u64> m_compositor_visual_animation_count { 0 };
     u64 m_adopted_scene_epoch { 0 };
 };
 
