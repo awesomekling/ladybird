@@ -146,6 +146,8 @@ static GC::Ptr<HTML::LocalNavigable> local_root_of(HTML::Window const& window)
 Internals::Internals(HTML::Window& window)
     : InternalsBase(window)
 {
+    // The join counters report how long before each join the page last dirtied render state.
+    DOM::Document::time_render_state_mutations_for_join_counters();
 }
 
 Internals::~Internals() = default;
