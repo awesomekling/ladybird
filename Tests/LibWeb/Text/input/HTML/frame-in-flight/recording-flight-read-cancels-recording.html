@@ -9,8 +9,13 @@
 <script>
     // A read of layout that script waits for outside the rendering update does not wait out the recording in flight:
     // it cancels it and lays out at once. The cancelled frame shows nothing, and the next rendering update records
-    // and presents the document as the read left it.
+    // and presents the document as the read left it, recording it again on the Rendering thread.
     asyncTest(async done => {
+        const redone = () => ({
+            rendering: internals.cancelledRecordingsRedone("submitted") + internals.cancelledRecordingsRedone("flight"),
+            mainWaits: internals.cancelledRecordingsRedone("main-waits"),
+        });
+        const redoneBefore = redone();
         let presentedBefore = 0;
         const result = await whileFrameInFlight("mid-recording", () => {
             box.style.backgroundColor = "blue";
@@ -32,6 +37,9 @@
         println(`presented nothing of it: ${!result.armed || result.presentedAtRead === presentedBefore}`);
         await twoFrames();
         println(`presented again: ${!result.armed || internals.presentedSceneEpoch() > presentedBefore}`);
+        const redoneAfter = redone();
+        println(`recorded again on the Rendering thread: ${!result.armed || redoneAfter.rendering - redoneBefore.rendering === 1}`);
+        println(`recorded again while the main thread waited: ${redoneAfter.mainWaits - redoneBefore.mainWaits}`);
         println(`hit test finds the grown box: ${document.elementFromPoint(50, 15) === box}`);
         println(`color: ${getComputedStyle(box).backgroundColor}`);
         done();

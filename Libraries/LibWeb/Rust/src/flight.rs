@@ -456,6 +456,7 @@ pub(crate) unsafe fn submit(arena: *mut c_void, flight: Flight) {
     let releases_style_engine = flight.releases_style_engine.clone();
     let take_back = flight.take_back();
     FLIGHT_STYLE_DECISION.store(STYLE_UNDECIDED, std::sync::atomic::Ordering::Release);
+    let arena_address = arena as usize;
     // SAFETY: Guaranteed by the caller.
     unsafe {
         crate::stage_thread::submit_flight(
@@ -489,6 +490,12 @@ pub(crate) unsafe fn submit(arena: *mut c_void, flight: Flight) {
                     ends.set(counts);
                 });
                 TAKEN_BACK_OUTCOME.with(|taken_back| taken_back.set(Some(outcome)));
+                if ran.paint.is_some() {
+                    crate::stage_thread::note_recording_made(
+                        arena_address,
+                        crate::stage_thread::RecordingRedo::InFlight,
+                    );
+                }
                 TAKEN_BACK_PAINT.with_borrow_mut(|paint| *paint = ran.paint);
             },
         );

@@ -1598,10 +1598,15 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
             )
         };
         let cancel = job.cancel();
+        crate::stage_thread::note_recording_made(arena_handle as usize, crate::stage_thread::RecordingRedo::Submitted);
         // SAFETY: As above.
         unsafe { crate::stage_thread::submit_cancellable_recording(arena_handle, cancel, move || job.run()) };
         return true;
     }
+    crate::stage_thread::note_recording_made(
+        arena_handle as usize,
+        crate::stage_thread::RecordingRedo::WhileMainWaits,
+    );
     let output = {
         let input = RecordingStageInput {
             // SAFETY: No borrow of the arena outlives this point, so the stage holds it alone.
