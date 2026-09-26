@@ -78,6 +78,19 @@ impl CounterOwner {
             generated_for: 0,
         }
     }
+
+    /// Every owner an element and its box-generating pseudo-elements can be.
+    pub(crate) fn every_owner_of(element: StyleNodeID) -> impl Iterator<Item = Self> {
+        [
+            0,
+            GENERATED_FOR_AFTER,
+            GENERATED_FOR_BACKDROP,
+            GENERATED_FOR_BEFORE,
+            GENERATED_FOR_MARKER,
+        ]
+        .into_iter()
+        .map(move |generated_for| Self { element, generated_for })
+    }
 }
 
 // https://drafts.csswg.org/css-lists-3/#counter
@@ -103,14 +116,8 @@ pub(crate) struct CountersSets {
 impl CountersSets {
     /// Drops the sets of an element and its pseudo-elements, once its identity is retired.
     pub(crate) fn forget(&mut self, element: StyleNodeID) {
-        for generated_for in [
-            0,
-            GENERATED_FOR_AFTER,
-            GENERATED_FOR_BACKDROP,
-            GENERATED_FOR_BEFORE,
-            GENERATED_FOR_MARKER,
-        ] {
-            self.sets.remove(&CounterOwner { element, generated_for });
+        for owner in CounterOwner::every_owner_of(element) {
+            self.sets.remove(&owner);
         }
     }
 
