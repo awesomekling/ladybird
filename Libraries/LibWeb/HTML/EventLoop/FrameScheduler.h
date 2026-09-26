@@ -295,6 +295,8 @@ private:
     bool m_render_clock_suspended { false };
     // Whether the main thread lent the leased arenas to the render clock since it last took in what the ticks sampled.
     bool m_clock_lent_this_wake { false };
+    // The arenas lent to the ticks since the main thread last took the lends in.
+    Vector<void*> m_clock_lent_arenas;
     // Whether something the main thread reached took the leased arenas back from the render clock mid-task.
     bool m_clock_lend_taken_back { false };
     // Whether the main thread lends the arenas no more until it next idles.

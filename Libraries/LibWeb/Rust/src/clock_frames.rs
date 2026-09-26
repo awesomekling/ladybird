@@ -31,7 +31,7 @@
 
 use std::collections::HashMap;
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread::ThreadId;
 
@@ -133,6 +133,13 @@ pub struct ClockLease {
     /// thread adopts what its ticks left before its rendering update ends it. A later tick would
     /// sample over records only the entries the host has not adopted yet keep alive.
     needs_main: AtomicBool,
+    /// How many display ticks in a row the render clock could not run because the main thread held
+    /// the arena or had paused the lease, while nothing else ticked it: from
+    /// [`MISSED_TICKS_BEFORE_MAIN`] on, the main thread's rendering updates tick the lease in its
+    /// place.
+    ticks_missed: AtomicU32,
+    /// The time of the lease, as `f64` bits, when the render clock last missed a tick.
+    time_at_missed_tick: AtomicU64,
     outcome: Mutex<Option<FfiClockTickOutcome>>,
     /// The records the host holds for the targets, pinned while the main thread lends the arena to
     /// the ticks mid-task: a sample would otherwise replace one in place, and a take-back puts them
@@ -564,6 +571,8 @@ pub extern "C" fn rust_clock_lease_grant(
         tick_started_fresh: AtomicBool::new(false),
         presented_since_adoption: AtomicBool::new(false),
         needs_main: AtomicBool::new(false),
+        ticks_missed: AtomicU32::new(0),
+        time_at_missed_tick: AtomicU64::new(f64::NAN.to_bits()),
         outcome: Mutex::default(),
         host_pins: Mutex::default(),
         restored_pins: Mutex::default(),
@@ -836,18 +845,19 @@ struct IdleTick {
 }
 
 impl IdleTick {
-    /// Takes the arenas for a tick that reaches `arena`, or returns `None` where the main thread
-    /// holds that one.
-    fn begin(arena: usize) -> Option<Self> {
+    /// Takes the arenas for a tick that reaches `arena`. Fails where the main thread holds that one,
+    /// with `true`, or where another tick holds the arenas, with `false`.
+    fn begin(arena: usize) -> Result<Self, bool> {
         let mut state = idle_gate().state.lock().expect("render clock idle gate");
         let before = state.holder;
         match before {
             ArenaHolder::Idle(_) => {}
             ArenaHolder::Lent(_) if state.lent.contains(&arena) => {}
-            _ => return None,
+            ArenaHolder::Tick => return Err(false),
+            _ => return Err(true),
         }
         state.holder = ArenaHolder::Tick;
-        Some(Self { before })
+        Ok(Self { before })
     }
 
     /// The thread the tick acts for.
@@ -1266,6 +1276,7 @@ pub struct FfiRenderClockCounters {
     pub ticks_mid_task: u64,
     /// Ticks that woke an idle main thread to take in the rounds they laid out.
     pub ticks_waking_main_to_adopt: u64,
+    pub ticks_missed_asking_main: u64,
     /// Times the main thread lent the arenas to the ticks while it ran a task.
     pub lends: u64,
     /// Times the main thread lent them again after a read had taken them back.
@@ -1302,6 +1313,7 @@ struct RenderClockCounters {
     ticks_moving_visual_contexts: AtomicU64,
     ticks_mid_task: AtomicU64,
     ticks_waking_main_to_adopt: AtomicU64,
+    ticks_missed_asking_main: AtomicU64,
     lends: AtomicU64,
     relends: AtomicU64,
     recalls: AtomicU64,
@@ -1329,6 +1341,7 @@ static COUNTERS: RenderClockCounters = RenderClockCounters {
     ticks_moving_visual_contexts: AtomicU64::new(0),
     ticks_mid_task: AtomicU64::new(0),
     ticks_waking_main_to_adopt: AtomicU64::new(0),
+    ticks_missed_asking_main: AtomicU64::new(0),
     lends: AtomicU64::new(0),
     relends: AtomicU64::new(0),
     recalls: AtomicU64::new(0),
@@ -1452,9 +1465,15 @@ fn run_render_clock_tick_at(context: u64, frame_time_nanoseconds: i64) {
         count(&COUNTERS.ticks_dropped_without_lease);
         return;
     };
-    let Some(idle_tick) = IdleTick::begin(lease.arena) else {
-        count(&COUNTERS.ticks_dropped_main_busy);
-        return;
+    let idle_tick = match IdleTick::begin(lease.arena) {
+        Ok(idle_tick) => idle_tick,
+        Err(main_holds_arena) => {
+            count(&COUNTERS.ticks_dropped_main_busy);
+            if main_holds_arena {
+                miss_tick(context, &lease);
+            }
+            return;
+        }
     };
     // Only the main thread grants and revokes, and it holds none of the lease's arena now: the lease
     // stays as it is found, and so does its arena, which revoking it takes back first.
@@ -1468,12 +1487,15 @@ fn run_render_clock_tick_at(context: u64, frame_time_nanoseconds: i64) {
     }
     if lease.paused.load(Ordering::Acquire) {
         count(&COUNTERS.ticks_dropped_paused);
+        drop(idle_tick);
+        miss_tick(context, &lease);
         return;
     }
     if lease.needs_main.load(Ordering::Acquire) {
         count(&COUNTERS.ticks_dropped_needing_main);
         return;
     }
+    lease.ticks_missed.store(0, Ordering::Release);
     let time = lease.timeline_time_at(frame_time_nanoseconds as f64 / 1.0e6);
     if time.partial_cmp(&lease.time()) != Some(std::cmp::Ordering::Greater) {
         count(&COUNTERS.ticks_dropped_stale);
@@ -1576,6 +1598,42 @@ fn run_render_clock_tick_at(context: u64, frame_time_nanoseconds: i64) {
     }
 }
 
+/// How many display ticks in a row a lease may miss before the main thread's rendering updates tick
+/// it: a task that holds the arena for a frame or two is over before anyone sees the difference.
+const MISSED_TICKS_BEFORE_MAIN: u32 = 2;
+
+/// Notes a display tick the render clock could not run for `lease`: the main thread held its arena
+/// or had paused it. Nothing else has the main thread render, so one that keeps missing them asks
+/// it for a rendering update at every display tick until the render clock runs one again.
+fn miss_tick(context: u64, lease: &ClockLease) {
+    // A rendering update that ticked the lease since the last miss ends the run: one the render
+    // clock's tick ran into is no reason to ask for another.
+    let time = lease.time.load(Ordering::Acquire);
+    let missed = if lease.time_at_missed_tick.swap(time, Ordering::AcqRel) == time {
+        lease.ticks_missed.load(Ordering::Acquire).saturating_add(1)
+    } else {
+        1
+    };
+    lease.ticks_missed.store(missed, Ordering::Release);
+    if missed < MISSED_TICKS_BEFORE_MAIN {
+        return;
+    }
+    count(&COUNTERS.ticks_missed_asking_main);
+    if let Some(needs_main) = NEEDS_MAIN.get() {
+        needs_main(context);
+    }
+}
+
+/// Whether the render clock missed so many display ticks of the lease of `arena` in a row that the
+/// main thread's rendering updates tick it in its place.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_clock_lease_misses_ticks(arena: *mut c_void) -> bool {
+    clock_lease_for(arena as usize).is_some_and(|lease| {
+        lease.ticks_missed.load(Ordering::Acquire) >= MISSED_TICKS_BEFORE_MAIN
+            && lease.time_at_missed_tick.load(Ordering::Acquire) == lease.time.load(Ordering::Acquire)
+    })
+}
+
 /// What the render clock did with the display ticks it was handed.
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_render_clock_counters() -> FfiRenderClockCounters {
@@ -1597,6 +1655,7 @@ pub extern "C" fn rust_render_clock_counters() -> FfiRenderClockCounters {
         ticks_moving_visual_contexts: load(&COUNTERS.ticks_moving_visual_contexts),
         ticks_mid_task: load(&COUNTERS.ticks_mid_task),
         ticks_waking_main_to_adopt: load(&COUNTERS.ticks_waking_main_to_adopt),
+        ticks_missed_asking_main: load(&COUNTERS.ticks_missed_asking_main),
         lends: load(&COUNTERS.lends),
         relends: load(&COUNTERS.relends),
         recalls: load(&COUNTERS.recalls),
@@ -1633,11 +1692,11 @@ mod tests {
     #[test]
     fn idle_gate_lets_a_tick_in_only_while_the_main_thread_is_idle_and_waits_for_it() {
         take_arenas_back();
-        assert!(IdleTick::begin(1).is_none());
+        assert_eq!(IdleTick::begin(1).err(), Some(true), "the main thread holds the arena");
         idle_gate().state.lock().unwrap().holder = ArenaHolder::Idle(std::thread::current().id());
         let tick = IdleTick::begin(1).expect("the main thread is idle");
         assert!(!tick.is_beside_task());
-        assert!(IdleTick::begin(2).is_none());
+        assert_eq!(IdleTick::begin(2).err(), Some(false), "another tick holds the arenas");
         let woke = Arc::new(AtomicBool::new(false));
         let waker = {
             let woke = Arc::clone(&woke);
@@ -1651,7 +1710,7 @@ mod tests {
         drop(tick);
         waker.join().unwrap();
         assert!(woke.load(Ordering::SeqCst));
-        assert!(IdleTick::begin(1).is_none());
+        assert!(IdleTick::begin(1).is_err());
 
         // The gate is the process's, so the lend test runs here, after the idle one.
         idle_gate_lets_a_tick_in_only_on_an_arena_lent_to_it_while_a_task_runs();
@@ -1669,17 +1728,17 @@ mod tests {
         take_arenas_back();
         lend(1);
         // An arena the main thread has yet to lend is still its own.
-        assert!(IdleTick::begin(2).is_none());
+        assert!(IdleTick::begin(2).is_err());
         let tick = IdleTick::begin(1).expect("arena 1 is lent");
         assert!(tick.is_beside_task());
         drop(tick);
         lend(2);
         // Taking one arena back leaves the other lent.
         take_arena_back(1);
-        assert!(IdleTick::begin(1).is_none());
+        assert!(IdleTick::begin(1).is_err());
         drop(IdleTick::begin(2).expect("arena 2 is still lent"));
         take_arena_back(2);
-        assert!(IdleTick::begin(2).is_none());
+        assert!(IdleTick::begin(2).is_err());
         assert!(idle_gate().state.lock().unwrap().holder == ArenaHolder::Main);
     }
 }

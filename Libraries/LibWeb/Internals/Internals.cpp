@@ -1599,6 +1599,7 @@ GC::Ref<JS::Object> Internals::get_render_clock_counters() const
     define("ticksMovingVisualContexts"sv, counters.ticks_moving_visual_contexts);
     define("ticksMidTask"sv, counters.ticks_mid_task);
     define("ticksWakingMainToAdopt"sv, counters.ticks_waking_main_to_adopt);
+    define("ticksMissedAskingMain"sv, counters.ticks_missed_asking_main);
     define("lends"sv, counters.lends);
     define("relends"sv, counters.relends);
     define("recalls"sv, counters.recalls);

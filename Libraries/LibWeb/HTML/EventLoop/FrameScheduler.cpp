@@ -1017,8 +1017,10 @@ void FrameScheduler::main_thread_did_not_block()
     if (m_clock_leases.is_empty())
         return;
     // A lend no tick has used since stays as it is: a loop that goes round thousands of times a second would otherwise
-    // plan and pin the leases again at every turn.
-    if (Layout::RustFFI::rust_clock_lend_is_active() && !m_clock_lend_suspended && !Layout::RustFFI::rust_clock_lend_has_ticks_to_adopt())
+    // plan and pin the leases again at every turn. Only while every arena it lent is still lent, though: one a task
+    // took back, or a garbage collection, the ticks would otherwise miss until the main thread idles.
+    bool const every_lent_arena_is_lent = !m_clock_lent_arenas.is_empty() && all_of(m_clock_lent_arenas, [](void* arena) { return Layout::RustFFI::rust_clock_lend_holds(arena); });
+    if (every_lent_arena_is_lent && !m_clock_lend_suspended && !Layout::RustFFI::rust_clock_lend_has_ticks_to_adopt())
         return;
     take_back_clock_lend_for_adoption();
     m_clock_lend_taken_back = false;
@@ -1032,6 +1034,7 @@ void FrameScheduler::main_thread_did_not_block()
 // what the ticks installed, as they do when the main thread wakes.
 void FrameScheduler::take_back_clock_lend_for_adoption()
 {
+    m_clock_lent_arenas.clear();
     if (!exchange(m_clock_lent_this_wake, false))
         return;
     // What a read put back under the task, the documents adopt too.
@@ -1103,8 +1106,13 @@ void FrameScheduler::lend_clock_leases_to_busy_main(bool relend)
         hold.lend_style_transaction = hold.document->style_computer().style_engine().published_transaction_version().transaction;
         arenas.append(arena->handle());
     }
-    for (auto* arena : arenas)
-        m_clock_lent_this_wake |= Layout::RustFFI::rust_clock_lend_to_busy_main(arena, relend);
+    for (auto* arena : arenas) {
+        if (!Layout::RustFFI::rust_clock_lend_to_busy_main(arena, relend))
+            continue;
+        m_clock_lent_this_wake = true;
+        if (!m_clock_lent_arenas.contains_slow(arena))
+            m_clock_lent_arenas.append(arena);
+    }
     m_clock_lend_taken_back = false;
 }
 
@@ -1238,7 +1246,8 @@ void FrameScheduler::prepare_clock_ticks(ReadonlySpan<GC::Root<DOM::Document>> d
         // main thread rendering at every display frame. A render clock that falls behind, the rendering update ticks.
         auto& hold = m_clock_leases[index];
         hold.timeline_time_for_update.clear();
-        if (hold.render_clock_context.has_value()) {
+        // So does a render clock that keeps missing the lease's ticks: the main thread held the arena for them.
+        if (hold.render_clock_context.has_value() && !Layout::RustFFI::rust_clock_lease_misses_ticks(arena->handle())) {
             auto lease_time = Layout::RustFFI::rust_clock_lease_time(arena->handle());
             auto current = document->timeline()->current_time();
             if (!isnan(lease_time) && current.has_value() && current->type == Animations::TimeValue::Type::Milliseconds
