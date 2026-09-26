@@ -21,8 +21,11 @@
         println(`visibility: ${frame.visibility}`);
         println(`still in flight once hidden: ${!frame.heldAt || frame.stateWhenHidden === "in-flight"}`);
         println(`finished while hidden: ${frame.finished}`);
+        // The rendering update goes on with the stages that follow the pass, and the main thread takes each back once
+        // the render side has finished it.
         let tasks = 0;
         while (internals.frameSchedulerState() !== "idle" && tasks < 100) {
+            internals.waitForFrameToFinish();
             await nextTask();
             ++tasks;
         }
