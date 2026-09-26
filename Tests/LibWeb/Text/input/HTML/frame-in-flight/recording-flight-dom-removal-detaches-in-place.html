@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<style>
+    #container * { display: inline-block; height: 10px; min-width: 10px; }
+    #container .decorated::before { content: ""; display: inline-block; min-width: 5px; }
+</style>
+<div id="other" style="height: 10px"></div><div id="container" style="width: 300px"><span class="decorated"><b></b><i id="leaf"></i><b></b></span><span class="decorated"><b></b></span></div>
+<script>
+    // A leaf removed beside a recording in flight leaves its box in place until the frame has been taken in, and is
+    // detached from its parent's then, as it would have been without the recording: no part of the tree is built again.
+    asyncTest(async done => {
+        let buildsBefore;
+        const result = await whileFrameInFlight("before-run", () => {
+            buildsBefore = internals.layoutTreeBuildStats().builds;
+            other.style.height = "20px";
+        }, frame => {
+            leaf.remove();
+            return frame;
+        });
+        await twoFrames();
+        // Printing builds the output's boxes, so the count is taken first.
+        const builds = internals.layoutTreeBuildStats().builds - buildsBefore;
+        println(`held as armed: ${heldAsArmed(result, "before-run")}`);
+        println(`layout tree builds for the removal: ${builds}`);
+        println(`parent width: ${container.firstChild.offsetWidth}`);
+        println(`layout tree matches a full rebuild: ${internals.compareLayoutTreeWithFullRebuild().matches}`);
+        done();
+    });
+</script>
