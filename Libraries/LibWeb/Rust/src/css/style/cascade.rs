@@ -1412,6 +1412,9 @@ pub struct WinnerGroups {
     state_reference_counts: Vec<u32>,
     state_pending_reference_counts: Vec<u32>,
     state_winning_rules: Vec<Box<[RuleID]>>,
+    /// Whether any winner of the state, or of a continuation below one, is one of the element's own
+    /// declarations rather than a rule's.
+    state_has_element_winners: Vec<bool>,
     groups: InternTable<WinnerGroupID, Box<[SemanticPropertyWinner]>>,
     provenance_groups: InternTable<WinnerProvenanceGroupID, Box<[WinnerProvenance]>>,
     priorities: InternTable<CascadePriorityID, CascadePriority>,
@@ -1474,6 +1477,7 @@ impl Default for WinnerGroups {
             state_reference_counts: Vec::new(),
             state_pending_reference_counts: Vec::new(),
             state_winning_rules: Vec::new(),
+            state_has_element_winners: Vec::new(),
             groups: InternTable::default(),
             provenance_groups: InternTable::default(),
             priorities: InternTable::default(),
@@ -1520,6 +1524,7 @@ impl WinnerGroups {
             state_reference_counts: self.state_reference_counts.clone(),
             state_pending_reference_counts: self.state_pending_reference_counts.clone(),
             state_winning_rules: self.state_winning_rules.clone(),
+            state_has_element_winners: self.state_has_element_winners.clone(),
             groups: self.groups.clone(),
             provenance_groups: self.provenance_groups.clone(),
             priorities: self.priorities.clone(),
@@ -1702,11 +1707,14 @@ impl WinnerGroups {
         }
         let id = CascadeStateID(u32::try_from(self.states.len()).expect("cascade state space exhausted"));
         let mut winning_rules = Vec::new();
+        let mut has_element_winners = false;
         for &group in &groups {
             for mut winner in self.group_winners(group) {
                 loop {
-                    if let WinnerSource::Rule(rule) = winner.source {
-                        winning_rules.push(rule);
+                    match winner.source {
+                        WinnerSource::Rule(rule) => winning_rules.push(rule),
+                        WinnerSource::Element(_) => has_element_winners = true,
+                        WinnerSource::ExactCascade => {}
                     }
                     let Some(continuation) = self.continuation(winner.key.continuation) else {
                         break;
@@ -1729,6 +1737,7 @@ impl WinnerGroups {
         self.state_reference_counts.push(0);
         self.state_pending_reference_counts.push(0);
         self.state_winning_rules.push(winning_rules);
+        self.state_has_element_winners.push(has_element_winners);
         id
     }
 
@@ -2005,6 +2014,16 @@ impl WinnerGroups {
 
     pub fn winners_in_state(&self, state: CascadeStateID) -> impl Iterator<Item = PropertyWinner> + '_ {
         self.states[state].iter().flat_map(|&group| self.group_winners(group))
+    }
+
+    /// The rules the state's winners come from, continuations included, sorted and each once.
+    pub(super) fn state_winning_rules(&self, state: CascadeStateID) -> &[RuleID] {
+        &self.state_winning_rules[state.0 as usize]
+    }
+
+    /// Whether any of the state's winners, continuations included, is an element's own declaration.
+    pub(super) fn state_has_element_winners(&self, state: CascadeStateID) -> bool {
+        self.state_has_element_winners[state.0 as usize]
     }
 
     pub(super) fn rules_for_compaction(&self, state: CascadeStateID) -> Option<&[RuleID]> {
@@ -2532,6 +2551,7 @@ impl WinnerGroups {
         self.state_reference_counts = Vec::new();
         self.state_pending_reference_counts = Vec::new();
         self.state_winning_rules = Vec::new();
+        self.state_has_element_winners = Vec::new();
         self.groups = InternTable::default();
         self.provenance_groups = InternTable::default();
         self.priorities = InternTable::default();
@@ -2565,6 +2585,7 @@ impl WinnerGroups {
                 self.state_reference_counts,
                 self.state_pending_reference_counts,
                 self.state_winning_rules,
+                self.state_has_element_winners,
                 self.winner_rule_references,
             ];
             cached [self.nested_residency.bytes()];

@@ -2180,6 +2180,17 @@ impl RetainedState {
     /// What the per-state queries below answer, in one walk of the state's winners.
     pub(super) fn state_written_facts(&self, node: StyleNodeID, state: CascadeStateID) -> StateWrittenFacts {
         let mut facts = StateWrittenFacts::default();
+        // Most states hold only winners of rules written without anything these facts are about,
+        // which the state's rules answer without walking its winners.
+        if !self.winner_groups.state_has_element_winners(state)
+            && self
+                .winner_groups
+                .state_winning_rules(state)
+                .iter()
+                .all(|&rule| self.program.written_values_add_no_state_facts(rule))
+        {
+            return facts;
+        }
         for winner in self.winner_groups.winners_in_state(state) {
             let Some(winner) = self.winner_groups.resolved_winner(winner) else {
                 continue;
