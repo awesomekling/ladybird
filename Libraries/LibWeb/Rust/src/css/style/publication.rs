@@ -5291,6 +5291,13 @@ impl StyleEngineState {
             self.retained
                 .custom_property_environments
                 .retain_only(|identity| live.contains(&identity));
+            // The records the engine keeps for reuse are keyed by the parent's inherited group set
+            // and custom property environment, whose reclaimed identities the next computations
+            // reuse for other contents.
+            self.retained.engine_cold_record_cache.clear();
+            self.retained.engine_cold_record_donors.clear();
+            self.retained.engine_warm_record_cohorts.clear();
+            self.retained.engine_pseudo_record_cache.clear();
         }
         self.settle_computed_memory();
     }
