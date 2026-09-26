@@ -2801,9 +2801,11 @@ void Node::inserted()
 
     // A node can also arrive in the shadow tree of a text control that is already focused, which
     // is the one other inherited state a row is built with. No node holds it unless a text control
-    // is focused at all.
-    if (is<HTML::FormAssociatedTextControlElement>(document().focused_area().ptr()))
-        document().invalidation_journal().note_is_in_focused_text_control(NodeIdentity::of(*this));
+    // is focused at all, and only the nodes of that control's own shadow tree hold it.
+    if (auto focused_area = document().focused_area(); is<HTML::FormAssociatedTextControlElement>(focused_area.ptr())) {
+        if (auto* shadow_root = as_if<ShadowRoot>(root()); shadow_root && shadow_root->host() == focused_area.ptr())
+            document().invalidation_journal().note_is_in_focused_text_control(NodeIdentity::of(*this));
+    }
 }
 
 void Node::removed_from(IsSubtreeRoot, Node* old_parent, Node&)
