@@ -55,6 +55,7 @@ mod trace;
 mod tree_build_seal;
 mod tree_builder;
 mod tree_mutation;
+pub(crate) mod tree_shape;
 mod tree_update_marks;
 pub(crate) mod update_layout;
 pub mod used_values;
