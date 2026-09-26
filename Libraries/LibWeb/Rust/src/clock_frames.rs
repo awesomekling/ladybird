@@ -1520,7 +1520,7 @@ fn run_render_clock_tick_at(context: u64, frame_time_nanoseconds: i64) {
             // it wakes: the stage thread owns the arena and its engine until `idle_tick` is dropped.
             let outcome = unsafe { lease.run_tick(time, lease.deadline_for_tick(beside_task)) };
             if outcome != FfiClockTickOutcome::Presented {
-                return (outcome, false);
+                return (outcome, false, false);
             }
             // A sample the arena did not take, the host installs over the record the target held
             // before: only its entry keeps that record alive, and no later tick may sample over it.
@@ -1532,11 +1532,11 @@ fn run_render_clock_tick_at(context: u64, frame_time_nanoseconds: i64) {
                 .iter()
                 .any(|entry| !entry.installed_in_arena && !entry.restored)
             {
-                return (FfiClockTickOutcome::NeedsMain, false);
+                return (FfiClockTickOutcome::NeedsMain, false, false);
             }
             // SAFETY: As above.
             let Some(laid_out) = (unsafe { lease.lay_out() }) else {
-                return (FfiClockTickOutcome::NeedsMain, false);
+                return (FfiClockTickOutcome::NeedsMain, false, false);
             };
             // A round that moved a box that owns a clip, a transform or a scroll frame moved the
             // visual contexts, which the compositor has from the main thread's frames.
@@ -1545,18 +1545,18 @@ fn run_render_clock_tick_at(context: u64, frame_time_nanoseconds: i64) {
                 && !unsafe { crate::painting::ffi::settle_visual_contexts_for_clock_tick(lease.arena as *mut c_void) }
             {
                 count(&COUNTERS.ticks_moving_visual_contexts);
-                return (FfiClockTickOutcome::NeedsMain, laid_out);
+                return (FfiClockTickOutcome::NeedsMain, laid_out, false);
             }
             // A tick that moved nothing shows nothing new.
             let moved_nothing = !laid_out && lease.repaints.lock().is_ok_and(|repaints| repaints.is_empty());
             // SAFETY: As above.
             if !moved_nothing && !unsafe { lease.present() } {
-                return (FfiClockTickOutcome::NeedsMain, laid_out);
+                return (FfiClockTickOutcome::NeedsMain, laid_out, false);
             }
-            (outcome, laid_out)
+            (outcome, laid_out, !moved_nothing)
         })));
     });
-    let Some(Ok((outcome, laid_out))) = tick else {
+    let Some(Ok((outcome, laid_out, presented_frame))) = tick else {
         // A tick has nobody to hand a panic to.
         std::process::abort();
     };
@@ -1581,7 +1581,10 @@ fn run_render_clock_tick_at(context: u64, frame_time_nanoseconds: i64) {
         if laid_out {
             count(&COUNTERS.ticks_laid_out);
         }
-        count(&COUNTERS.ticks_presented);
+        // A tick that moved nothing presented no frame.
+        if presented_frame {
+            count(&COUNTERS.ticks_presented);
+        }
         // What the rounds owe the document piles up in the frame until the main thread takes it in:
         // one that idles for long takes it in every so often, and pays for a few rounds at a time.
         if laid_out && rounds_owed >= MAX_CLOCK_ROUNDS_OWED && !beside_task {
