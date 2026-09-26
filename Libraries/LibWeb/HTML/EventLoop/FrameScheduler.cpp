@@ -14,6 +14,7 @@
 #include <LibWeb/Animations/AnimationEffect.h>
 #include <LibWeb/Animations/DocumentTimeline.h>
 #include <LibWeb/Animations/KeyframeEffect.h>
+#include <LibWeb/Animations/ScrollTimeline.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleEffectDrain.h>
 #include <LibWeb/Compositor/CompositorHost.h>
@@ -642,9 +643,19 @@ static bool has_animation_frame_callbacks(DOM::Document const& document)
     return window && window->has_animation_frame_callbacks();
 }
 
+// A scroll progress timeline whose effects a clock lease ticks: a tick samples it at the scroll offset the compositor
+// scrolled its scroller to.
+struct ClockLeaseScrollTimeline {
+    GC::Ref<Animations::ScrollTimeline> timeline;
+    // Its progress (percent) at the scroll offset the main thread holds now.
+    double progress { 0 };
+    Layout::RustFFI::FfiClockLeaseScrollTimeline lease {};
+};
+
 // What a clock lease of a document ticks, and until when.
 struct ClockLeasePlan {
     Vector<GC::Ref<Animations::KeyframeEffect>> effects;
+    Vector<ClockLeaseScrollTimeline> scroll_timelines;
     // The timeline time at which the document has something observable to do: an event, a phase change, the end of an
     // effect. No tick samples at or past it.
     double deadline { AK::Infinity<double> };
@@ -659,6 +670,56 @@ struct EffectBoundaries {
     // The next time at which its phase changes.
     double next_phase_change;
 };
+
+// The local times from which, and up to which, the phase and the current iteration of `effect` stay what they are at
+// `local_time`, on a progress-based timeline.
+struct EffectInterval {
+    double start;
+    double end;
+};
+
+static Optional<EffectInterval> phase_and_iteration_interval_in_local_time(Animations::KeyframeEffect const& effect, Animations::TimeValue local_time)
+{
+    if (effect.start_delay().type != local_time.type || effect.iteration_duration().type != local_time.type || effect.active_duration().type != local_time.type)
+        return {};
+    auto start_delay = effect.start_delay().value;
+    auto iteration_duration = effect.iteration_duration().value;
+    auto active_end = start_delay + effect.active_duration().value;
+    if (local_time.value < start_delay)
+        return EffectInterval { -AK::Infinity<double>, start_delay };
+    if (!(iteration_duration > 0) || local_time.value >= active_end)
+        return {};
+    auto iteration_start = start_delay + floor((local_time.value - start_delay) / iteration_duration) * iteration_duration;
+    return EffectInterval { iteration_start, min(iteration_start + iteration_duration, active_end) };
+}
+
+// The scroll progress timeline `timeline` as a lease ticks it, where the compositor scrolls its scroller: the document
+// viewport or an element's box.
+static Optional<ClockLeaseScrollTimeline> clock_lease_scroll_timeline(DOM::Document& document, Animations::ScrollTimeline& timeline)
+{
+    auto inputs = timeline.scroll_progress_inputs();
+    if (!inputs.has_value())
+        return {};
+    ClockLeaseScrollTimeline scroll_timeline { timeline };
+    scroll_timeline.progress = inputs->scroll_offset / inputs->max_scroll_offset * 100;
+    scroll_timeline.lease.identity = timeline.style_engine_identity();
+    if (inputs->scroller) {
+        if (&inputs->scroller->document() != &document || !inputs->scroller->unsafe_layout_node())
+            return {};
+        scroll_timeline.lease.node_id = inputs->scroller->unique_id().value();
+        scroll_timeline.lease.kind = to_underlying(Compositing::AsyncScrollNodeKind::Element);
+    } else {
+        scroll_timeline.lease.node_id = document.unique_id().value();
+        scroll_timeline.lease.kind = to_underlying(Compositing::AsyncScrollNodeKind::Viewport);
+    }
+    scroll_timeline.lease.pseudo_element_type = 0;
+    scroll_timeline.lease.vertical = inputs->is_vertical;
+    scroll_timeline.lease.max_scroll_offset = inputs->max_scroll_offset;
+    scroll_timeline.lease.progress_start = -AK::Infinity<double>;
+    scroll_timeline.lease.progress_end = AK::Infinity<double>;
+    scroll_timeline.lease.progress = scroll_timeline.progress;
+    return scroll_timeline;
+}
 
 static Optional<EffectBoundaries> next_boundaries_in_local_time(Animations::KeyframeEffect const& effect, double local_time)
 {
@@ -705,7 +766,13 @@ static Optional<ClockLeasePlan> clock_lease_plan(DOM::Document& document)
     auto navigable = document.navigable();
     if (!navigable || navigable->active_document().ptr() != &document || !document.layout_node_arena_if_created())
         return {};
-    if (document.needs_animated_style_update() || !document.layout_is_up_to_date() || document.layout_overlap_blocker().has_value())
+    // NB: A tick lays out on the render side, as a layout pass beside the main thread does. What keeps the layout of a
+    //     scroll-driven animation's document in place is that a layout that changes a scroller's scroll range makes
+    //     its timelines stale, which the main thread's rendering update takes care of after its layout. A tick keeps
+    //     the range the main thread last laid out.
+    if (document.needs_animated_style_update() || !document.layout_is_up_to_date())
+        return {};
+    if (auto blocker = document.layout_overlap_blocker(); blocker.has_value() && *blocker != DOM::LayoutOverlapBlocker::ScrollTimeline)
         return {};
     if (!document.window())
         return {};
@@ -718,11 +785,24 @@ static Optional<ClockLeasePlan> clock_lease_plan(DOM::Document& document)
     bool const intersections_are_observed = document.has_intersection_observations();
     ClockLeasePlan plan;
     for (auto const& associated_timeline : document.associated_animation_timelines()) {
+        auto* scroll_timeline = as_if<Animations::ScrollTimeline>(*associated_timeline);
+        Optional<size_t> scroll_timeline_index;
         for (auto& animation : associated_timeline->associated_animations()) {
             if (animation.play_state() != Bindings::AnimationPlayState::Running)
                 continue;
-            if (animation.pending() || associated_timeline.ptr() != timeline.ptr() || !(animation.playback_rate() > 0))
+            if (animation.pending() || !(animation.playback_rate() > 0))
                 return {};
+            if (associated_timeline.ptr() != timeline.ptr()) {
+                if (!scroll_timeline)
+                    return {};
+                if (!scroll_timeline_index.has_value()) {
+                    auto leased = clock_lease_scroll_timeline(document, *scroll_timeline);
+                    if (!leased.has_value())
+                        return {};
+                    scroll_timeline_index = plan.scroll_timelines.size();
+                    plan.scroll_timelines.append(leased.release_value());
+                }
+            }
             auto effect = animation.effect();
             if (!effect || !is<Animations::KeyframeEffect>(*effect))
                 return {};
@@ -751,6 +831,25 @@ static Optional<ClockLeasePlan> clock_lease_plan(DOM::Document& document)
                 }
             }
             auto local_time = keyframe_effect.local_time();
+            if (scroll_timeline_index.has_value()) {
+                // A tick past the progress at which the effect changes its phase or its iteration needs the main thread,
+                // which has events to send.
+                auto timeline_progress = scroll_timeline->current_time();
+                if (!local_time.has_value() || local_time->type != Animations::TimeValue::Type::Percentage || !timeline_progress.has_value() || timeline_progress->type != Animations::TimeValue::Type::Percentage)
+                    return {};
+                auto interval = phase_and_iteration_interval_in_local_time(keyframe_effect, *local_time);
+                if (!interval.has_value())
+                    return {};
+                auto& lease = plan.scroll_timelines[*scroll_timeline_index].lease;
+                lease.progress_start = max(lease.progress_start, timeline_progress->value - (local_time->value - interval->start) / animation.playback_rate());
+                lease.progress_end = min(lease.progress_end, timeline_progress->value + (interval->end - local_time->value) / animation.playback_rate());
+                if (!ticks_effect)
+                    continue;
+                if (intersections_are_observed && moves_boxes(keyframe_effect))
+                    return {};
+                plan.effects.append(keyframe_effect);
+                continue;
+            }
             if (!local_time.has_value() || local_time->type != Animations::TimeValue::Type::Milliseconds)
                 return {};
             auto boundaries = next_boundaries_in_local_time(keyframe_effect, local_time->value);
@@ -854,6 +953,10 @@ void FrameScheduler::grant_clock_leases()
         if (auto navigable = document->navigable(); navigable && navigable->has_compositor_context())
             context_id = navigable->compositor_context().id().value();
         Layout::RustFFI::rust_clock_lease_grant(document->layout_node_arena_if_created()->handle(), context_id, timeline->style_engine_identity(), timeline_zero, timeline_time, plan->deadline, plan->deadline_beside_task);
+        Vector<Layout::RustFFI::FfiClockLeaseScrollTimeline> scroll_timelines;
+        for (auto const& scroll_timeline : plan->scroll_timelines)
+            scroll_timelines.append(scroll_timeline.lease);
+        Layout::RustFFI::rust_clock_lease_set_scroll_timelines(document->layout_node_arena_if_created()->handle(), scroll_timelines.data(), scroll_timelines.size());
         auto& hold = *m_clock_leases.find_if([&](auto const& hold) { return hold.document.ptr() == document.ptr(); });
         publish_clock_lease_targets(hold);
         update_render_clock(hold, context_id ? Optional<Compositing::CompositorContextId> { context_id } : OptionalNone {});
@@ -1297,8 +1400,15 @@ void FrameScheduler::prepare_clock_ticks(ReadonlySpan<GC::Root<DOM::Document>> d
         // main thread rendering at every display frame. A render clock that falls behind, the rendering update ticks.
         auto& hold = m_clock_leases[index];
         hold.timeline_time_for_update.clear();
-        // So does a render clock that keeps missing the lease's ticks: the main thread held the arena for them.
-        if (hold.render_clock_context.has_value() && !Layout::RustFFI::rust_clock_lease_misses_ticks(arena->handle())) {
+        // So does a render clock that keeps missing the lease's ticks: the main thread held the arena for them. And one
+        // whose last tick sampled a scroll progress timeline elsewhere than where the main thread has scrolled to since:
+        // the render clock follows the compositor's scrolling only beside a task.
+        bool const ticks_followed_scrolling = all_of(plan->scroll_timelines, [&](auto const& scroll_timeline) {
+            auto progress = Layout::RustFFI::rust_clock_lease_scroll_progress(arena->handle(), scroll_timeline.lease.identity);
+            // NB: Scroll offsets are in 1/64 CSS pixels.
+            return fabs(progress - scroll_timeline.progress) * scroll_timeline.lease.max_scroll_offset / 100 < 1.0 / 64;
+        });
+        if (hold.render_clock_context.has_value() && ticks_followed_scrolling && !Layout::RustFFI::rust_clock_lease_misses_ticks(arena->handle())) {
             auto lease_time = Layout::RustFFI::rust_clock_lease_time(arena->handle());
             auto current = document->timeline()->current_time();
             if (!isnan(lease_time) && current.has_value() && current->type == Animations::TimeValue::Type::Milliseconds
