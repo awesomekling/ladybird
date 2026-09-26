@@ -56,10 +56,12 @@ impl GeneratedContent {
 
     /// Drops everything kept for an element's pseudo-elements, once its identity is retired.
     pub(crate) fn forget(&mut self, element: StyleNodeID) {
-        let belongs_to_element = |owner: &CounterOwner| owner.element != element;
-        self.accessible_texts.retain(|owner, _| belongs_to_element(owner));
-        self.content_counter_styles_in_use
-            .retain(|owner, _| belongs_to_element(owner));
+        // NB: One lookup per owner, not a walk over every pseudo-element of the document: a removed
+        //     subtree retires its identities one at a time.
+        for owner in CounterOwner::every_owner_of(element) {
+            self.accessible_texts.remove(&owner);
+            self.content_counter_styles_in_use.remove(&owner);
+        }
     }
 }
 
@@ -362,6 +364,7 @@ fn note_content_counter_styles_in_use(
     owner: CounterOwner,
     styles: Vec<Option<Arc<CounterStyle>>>,
 ) {
+    debug_assert!(CounterOwner::every_owner_of(owner.element).any(|forgotten| forgotten == owner));
     arena
         .generated_content()
         .borrow_mut()
