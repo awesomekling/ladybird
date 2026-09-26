@@ -1465,7 +1465,8 @@ pub extern "C" fn rust_stage_thread_arena_changes_wait_for_frame(arena: *mut c_v
 
 /// What a DOM tree mutation of the document the arena `arena` belongs to does about the frame in flight.
 pub(crate) enum FrameForDomTreeMutation {
-    /// A stage of the frame reaches the style engine, and nothing lets the mutation go on beside it.
+    /// A stage of the frame reaches the style engine, and nothing lets the mutation go on beside it,
+    /// or the arena is lent.
     Joins,
     /// The mutation goes on beside the frame, which may own the arena.
     GoesOnBeside { owns_arena: bool },
@@ -1474,9 +1475,10 @@ pub(crate) enum FrameForDomTreeMutation {
 /// Answers, in one look at the frame in flight, whether a DOM tree mutation's door joins it (as
 /// [`join_frame_reaching_style_engine_at`] does) and otherwise whether it owns the arena (as
 /// [`frame_in_flight_owns`] answers). A style pass alone in flight, or a layout pass (see
-/// [`rust_stage_thread_layout_pass_in_flight_for`]), lets the mutation go on beside it. Every
-/// DOM tree mutation passes the door, a parser for each node it inserts, so no frame in flight is
-/// answered first.
+/// [`rust_stage_thread_layout_pass_in_flight_for`]), lets the mutation go on beside it. A lent
+/// arena is taken back whether or not the lend reaches a style engine, as the arena's own door
+/// ([`join_frame_in_flight`]) would. Every DOM tree mutation passes the door, a parser for each
+/// node it inserts, so no frame in flight is answered first.
 pub(crate) fn frame_in_flight_for_dom_tree_mutation(arena: *mut c_void) -> FrameForDomTreeMutation {
     SUBMITTED.with_borrow(|submitted| {
         if submitted.is_empty() {
@@ -1492,7 +1494,8 @@ pub(crate) fn frame_in_flight_for_dom_tree_mutation(arena: *mut c_void) -> Frame
         let reaches_style_engine = submitted
             .iter()
             .any(|stage| stage.arena == arena && stage.reaches_style_engine(stage.style_engine));
-        if !only_style_pass && !layout_pass && reaches_style_engine {
+        let lent = submitted.iter().any(|stage| stage.is_lend() && stage.arena == arena);
+        if lent || (!only_style_pass && !layout_pass && reaches_style_engine) {
             return FrameForDomTreeMutation::Joins;
         }
         FrameForDomTreeMutation::GoesOnBeside {

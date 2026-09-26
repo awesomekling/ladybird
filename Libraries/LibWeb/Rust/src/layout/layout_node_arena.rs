@@ -6651,7 +6651,7 @@ pub unsafe extern "C" fn layout_arena_join_frame_for_dom_tree_mutation(arena: *m
     // arena's own doors.
     let frame_owns_arena = match crate::stage_thread::frame_in_flight_for_dom_tree_mutation(arena) {
         crate::stage_thread::FrameForDomTreeMutation::Joins => {
-            crate::stage_thread::join_frame_reaching_style_engine_at(
+            crate::stage_thread::join_document_frame_in_flight_at(
                 arena,
                 location.file(),
                 location.line(),
@@ -8684,6 +8684,34 @@ mod tests {
         let second_data = &*arena.data(second.slot);
         assert_eq!(caches.table_cell_measurement_cache_get(&arena, second_data, key), None);
         arena.free_subtree(second.slot).destroy_shells_and_invoke_callbacks();
+    }
+
+    #[test]
+    fn a_dom_tree_mutation_takes_back_an_arena_lent_with_no_style_engine() {
+        use std::rc::Rc;
+        let arena = super::layout_arena_create();
+        let recalled = Rc::new(Cell::new(false));
+        let taken_back = Rc::new(Cell::new(false));
+        // SAFETY: Nothing is in flight, and nothing but this thread reaches the arena.
+        unsafe {
+            crate::stage_thread::lend_arena(
+                arena,
+                {
+                    let recalled = recalled.clone();
+                    move || recalled.set(true)
+                },
+                {
+                    let taken_back = taken_back.clone();
+                    move || taken_back.set(true)
+                },
+            );
+        }
+        // SAFETY: The arena is live, and this is its document thread.
+        unsafe { super::layout_arena_join_frame_for_dom_tree_mutation(arena) };
+        assert!(recalled.get() && taken_back.get());
+        assert!(!crate::stage_thread::has_lent_arena());
+        // SAFETY: The arena came from layout_arena_create and nothing holds it any more.
+        unsafe { super::layout_arena_destroy(arena) };
     }
 }
 
