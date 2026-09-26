@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<style>
+    #box {
+        width: 100px;
+        height: 40px;
+        animation: grow 20s linear;
+        background-image: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10' preserveAspectRatio='none'><rect width='10' height='10' fill='green'/></svg>");
+        background-size: 100% 100%;
+    }
+    @keyframes grow {
+        from {
+            width: 100px;
+        }
+        to {
+            width: 20100px;
+        }
+    }
+</style>
+<div id="box"></div>
+<script src="../../include.js"></script>
+<script>
+    function nextTask() {
+        const { promise, resolve } = Promise.withResolvers();
+        const channel = new MessageChannel();
+        channel.port1.onmessage = resolve;
+        channel.port2.postMessage(null);
+        return promise;
+    }
+
+    async function frameTimeAfter(time) {
+        while (performance.now() <= time + 1)
+            await nextTask();
+        return performance.now();
+    }
+
+    // Under LIBWEB_RENDER_CLOCK_FRAMES, a render clock tick that sizes an SVG background image to the animated box paints it at a
+    // size the main thread has not rendered the image at: it presents no frame with the image missing from it, and the
+    // main thread's rendering update, which renders the image at that size, takes over.
+    asyncTest(async done => {
+        const box = document.getElementById("box");
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        const enabled = internals.clockFramesEnabled();
+        internals.setManualRenderingOpportunities(true, true);
+        await nextTask();
+        let frameTime = performance.now();
+        for (let i = 0; i < 3; ++i) {
+            frameTime = await frameTimeAfter(frameTime);
+            internals.injectRenderingOpportunity(frameTime);
+            await nextTask();
+        }
+
+        const leased = !enabled || internals.renderClockTicks(document);
+        const countersBefore = internals.getRenderClockCounters();
+        // Far enough past the last frame that the box has grown by pixels, at a size nothing rendered the image at yet.
+        frameTime = await frameTimeAfter(frameTime + 20);
+        const taken = await internals.injectClockTick(frameTime);
+        const countersAfter = internals.getRenderClockCounters();
+        internals.setManualRenderingOpportunities(false);
+
+        println(`the lease was granted: ${leased}`);
+        println(`a lease took the tick: ${!enabled || taken}`);
+        println(`frames presented with the image missing: ${countersAfter.ticksPresented - countersBefore.ticksPresented}`);
+        println(`the tick handed over to the main thread: ${!enabled || countersAfter.ticksNeedingMain - countersBefore.ticksNeedingMain === 1}`);
+        done();
+    });
+</script>

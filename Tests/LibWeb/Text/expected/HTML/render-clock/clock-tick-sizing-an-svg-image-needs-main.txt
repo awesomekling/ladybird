@@ -1,0 +1,4 @@
+the lease was granted: true
+a lease took the tick: true
+frames presented with the image missing: 0
+the tick handed over to the main thread: true
