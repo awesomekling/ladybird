@@ -81,8 +81,10 @@ void StyleEngine::publish_inputs_queued_during_pass()
         input(scope);
     }
     // Every removal published beside the pass has reached the engine, which answers for none of those nodes again.
-    if (!m_submitted_pass_in_flight && !pass_is_in_flight() && !m_holds_input_recorded_beside_pass && m_inputs_queued_during_pass.is_empty())
+    if (!m_submitted_pass_in_flight && !pass_is_in_flight() && !m_holds_input_recorded_beside_pass && m_inputs_queued_during_pass.is_empty()) {
         m_style_nodes_retired_beside_pass.clear();
+        m_parents_whose_children_changed_beside_pass.clear();
+    }
 }
 
 // The style stage's between-pass font batch. It is a function of the document's published

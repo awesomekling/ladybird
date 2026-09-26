@@ -2267,8 +2267,19 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
                 host->set_style_uses_attr_css_function();
         }
     }
-    if (record_reads & CSS::StyleEngine::NodeRecordReadsTreeCounting)
+    if (record_reads & CSS::StyleEngine::NodeRecordReadsTreeCounting) {
+        // NB: A record from a submitted pass counted the siblings as they were when the pass was submitted. If this is
+        //     the first record to read a tree-counting function, children_changed() could not know to recompute it
+        //     for siblings that changed beside the pass, so it is recomputed once the drain is over.
+        auto parent = parent_element();
+        if (!style_uses_tree_counting_function() && parent && style_computer.style_engine().children_changed_beside_pass(parent->style_node_id())) {
+            style_computer.style_engine().publish_input([element = GC::Root<Element> { *this }, style_node = style_node_id()](CSS::StyleInputScope const& input) {
+                if (element->style_node_id() == style_node)
+                    input.engine().record_tree_counting_style_input_change(style_node);
+            });
+        }
         set_style_uses_tree_counting_function();
+    }
     if (record_reads & CSS::StyleEngine::NodeRecordReadsIfFunction)
         set_style_uses_if_css_function();
     if (record_reads & CSS::StyleEngine::NodeRecordReadsInheritFunction)
@@ -3189,6 +3200,7 @@ void Element::children_changed(ChildrenChangedMetadata const& metadata)
 {
     Node::children_changed(metadata);
 
+    document().style_computer().style_engine().note_children_changed(style_node_id());
     if (child_style_uses_tree_counting_function()) {
         for_each_child_of_type<Element>([&](Element& element) {
             if (!element.style_uses_tree_counting_function())

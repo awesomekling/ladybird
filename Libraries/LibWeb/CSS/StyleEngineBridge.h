@@ -374,6 +374,15 @@ public:
     // the drain skips its answers.
     void note_style_node_retired(StyleNodeID);
     [[nodiscard]] bool style_node_was_retired_beside_pass(StyleNodeID style_node) const { return m_style_nodes_retired_beside_pass.contains(style_node); }
+    // A submitted pass counts an element's siblings as they were when it was submitted. An element whose first record
+    // reading a tree-counting function comes from that pass is not known to read one while its siblings change beside
+    // the pass, so the parents whose children changed are kept until the drain has installed the pass's records.
+    void note_children_changed(StyleNodeID parent)
+    {
+        if (m_submitted_pass_in_flight && parent != 0)
+            m_parents_whose_children_changed_beside_pass.set(parent);
+    }
+    [[nodiscard]] bool children_changed_beside_pass(StyleNodeID parent) const { return m_parents_whose_children_changed_beside_pass.contains(parent); }
     void discard_style_transaction_outputs(StyleDrainScope const&);
 
     using RuleMatch = StyleEngineFFI::FfiRuleMatch;
@@ -451,6 +460,7 @@ private:
     i64 m_submitted_style_transaction_microseconds { 0 };
     bool m_submitted_pass_in_flight { false };
     HashTable<StyleNodeID> m_style_nodes_retired_beside_pass;
+    HashTable<StyleNodeID> m_parents_whose_children_changed_beside_pass;
     Vector<StyleDrainScope const*> m_effect_drain_scopes;
     Vector<Function<void(StyleInputScope const&)>> m_inputs_queued_during_pass;
     bool m_publishing_queued_inputs { false };
