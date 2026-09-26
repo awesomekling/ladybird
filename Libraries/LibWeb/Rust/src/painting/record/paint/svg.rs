@@ -18,7 +18,7 @@ use crate::painting::force_dark::ForceDarkRole;
 use crate::painting::host::{FfiSvgGradientKind, FfiSvgGradientSpreadMethod};
 use crate::painting::node_painting;
 use crate::painting::paintable_geometry::absolute_rect;
-use crate::painting::paintable_rows::PaintableRowsRead;
+use crate::painting::published_frame::PaintRead;
 use crate::painting::record::{PaintPhase, PaintRecorder};
 use crate::painting::svg_paint_resources::{
     PublishedSvgGradient, PublishedSvgPaintServer, PublishedSvgPattern, SvgPaintResourceKind,
@@ -541,7 +541,7 @@ pub(crate) fn paint_path<O: Observer>(recorder: &mut PaintRecorder<'_, O>, paint
 }
 
 pub(crate) fn svg_image_unquantized_device_rect(
-    layout_arena: &impl PaintableRowsRead,
+    layout_arena: &impl PaintRead,
     paintable: NodeSlotId,
     pixel_ratio: f64,
 ) -> FloatRect {

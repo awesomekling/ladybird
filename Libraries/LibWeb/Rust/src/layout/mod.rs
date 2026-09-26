@@ -96,7 +96,7 @@ pub(crate) use geometry::{
 pub(crate) use host_tables::{ArenaHandle, HostTables};
 pub(crate) use layout_pass::LayoutPass;
 pub(crate) use node_facts::NodeFacts;
-pub(crate) use rendered_text::RenderedTextBoundary;
+pub(crate) use rendered_text::{RenderedTextBoundary, TextContent};
 pub(crate) use run_records::{LayoutScratch, RunRecords};
 use std::cell::Cell;
 use std::cell::OnceCell;
