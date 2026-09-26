@@ -1289,7 +1289,8 @@ public:
         u64 max_nanoseconds { 0 };
         // Summed over the joins, how long before each one the page last dirtied render state. A
         // join that follows its own mutation could never have overlapped with anything; one that
-        // follows a quiet stretch could have been answered from work done during it.
+        // follows a quiet stretch could have been answered from work done during it. Only a process
+        // that exposes internals times the mutations.
         u64 nanoseconds_since_mutation { 0 };
         // Joins that published nothing: the read found render state dirty, ran the pipeline, and
         // came out with the same style program and the same committed layout it went in with. The
@@ -1314,8 +1315,15 @@ public:
     void reset_join_counters();
     void dump_join_counters() const;
 
-    // Notes that the page dirtied render state, for the joins that will have to wait for it.
-    void note_render_state_mutation() { m_last_render_state_mutation_nanoseconds = MonotonicTime::now().nanoseconds(); }
+    // Notes that the page dirtied render state, for the joins that will have to wait for it. Every style input the page
+    // writes passes here, hundreds of thousands of times a second in a busy page, so the clock is read only in a
+    // process that measures its joins.
+    void note_render_state_mutation()
+    {
+        if (s_join_counters_time_render_state_mutations)
+            m_last_render_state_mutation_nanoseconds = MonotonicTime::now().nanoseconds();
+    }
+    static void time_render_state_mutations_for_join_counters() { s_join_counters_time_render_state_mutations = true; }
     // A style change marked a layout node for a layout update, as a node's own mark does.
     void note_style_change_needs_layout_update(Badge<CSS::StyleEffectDrain>)
     {
@@ -2159,6 +2167,7 @@ private:
     mutable StyleInvalidationCounters m_style_invalidation_counters;
     JoinCountersByReason m_join_counters;
     u64 m_last_render_state_mutation_nanoseconds { 0 };
+    static inline bool s_join_counters_time_render_state_mutations { false };
     size_t m_join_depth { 0 };
 
     mutable GC::Ptr<WebIDL::ObservableArray> m_adopted_style_sheets;
