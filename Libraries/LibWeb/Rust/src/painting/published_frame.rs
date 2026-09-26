@@ -17,8 +17,11 @@ use crate::cow_column::ColumnSnapshot;
 use crate::css::computed_value_views::ComputedValuesView;
 use crate::css::css_pixels::CssPixelRect;
 use crate::layout::LayoutNodeArena;
+use crate::layout::SLOTS_PER_CHUNK;
 use crate::layout::fragment_tree::FragmentLink;
-use crate::layout::node_data::{CompositorAnimationFrameKind, DomPaintFact, NodeKind, NodeSlotId};
+use crate::layout::node_data::{
+    CompositorAnimationFrameKind, DomPaintFact, FfiStylePayloads, NodeFlag, NodeKind, NodeSlotId, PaintNode,
+};
 use crate::layout::node_facts;
 use crate::layout::used_values::FfiCssPixelRect;
 use crate::layout::{RenderedTextBoundary, TextContent, TextFragments};
@@ -41,7 +44,7 @@ use std::sync::Arc;
 
 /// One published generation of a document's paintable rows and of the columns read beside them.
 #[derive(Clone)]
-pub(crate) struct PublishedFrame {
+pub(crate) struct PublishedRows {
     pub(super) rows: ColumnSnapshot<PaintableData, PAINTABLE_SLOTS_PER_CHUNK>,
     pub(super) fragment_links: ColumnSnapshot<CommittedFragmentLinkSlot, PAINTABLE_SLOTS_PER_CHUNK>,
     pub(super) side_data: ColumnSnapshot<CommittedSideData, PAINTABLE_SLOTS_PER_CHUNK>,
@@ -52,6 +55,13 @@ pub(crate) struct PublishedFrame {
     pub(super) visual_context_tree: Option<Arc<VisualContextTree>>,
 }
 
+/// What a document published for one recording to read: its rows, and what the paint side reads of
+/// its layout nodes.
+pub(crate) struct PublishedFrame {
+    pub(super) rows: PublishedRows,
+    nodes: ColumnSnapshot<PaintNode, SLOTS_PER_CHUNK>,
+}
+
 // A frame is read on whichever thread paints it while the document writes its live columns: it
 // holds no cell, no raw pointer and no borrow of the document.
 const _: () = {
@@ -60,6 +70,50 @@ const _: () = {
 };
 
 impl PublishedFrame {
+    pub(crate) fn new(rows: PublishedRows, nodes: ColumnSnapshot<PaintNode, SLOTS_PER_CHUNK>) -> Self {
+        Self { rows, nodes }
+    }
+
+    /// The node in a live slot, as the frame published it.
+    #[inline]
+    fn node(&self, id: NodeSlotId) -> Option<&PaintNode> {
+        if id.is_invalid() {
+            return None;
+        }
+        self.nodes
+            .get(id.slot_index() as usize)
+            .filter(|node| node.generation != 0 && node.generation == id.generation())
+    }
+
+    fn node_and_style(&self, id: NodeSlotId) -> Option<(&PaintNode, Option<ComputedValuesView<'_>>)> {
+        let node = self.node(id)?;
+        Some((node, Self::style_of(node)))
+    }
+
+    fn style_of(node: &PaintNode) -> Option<ComputedValuesView<'_>> {
+        if node.style.is_null() {
+            return None;
+        }
+        // SAFETY: A non-null style pointer addresses a style container's group pointer array,
+        // which FfiStylePayloads mirrors exactly. The document reclaims no style record a frame
+        // it published may name until it has taken that frame back (hold_style_records_for_frame).
+        let payloads = unsafe { &*node.style.as_ptr().cast::<FfiStylePayloads>() };
+        Some(ComputedValuesView::new(&payloads.groups))
+    }
+
+    /// The node in a slot a read requires to be live.
+    #[track_caller]
+    fn live_node(&self, id: NodeSlotId) -> &PaintNode {
+        assert!(!id.is_invalid(), "invalid layout node arena slot ID");
+        self.node(id).expect("layout node arena read a stale or unused slot")
+    }
+
+    fn link(node: NodeSlotId) -> Option<NodeSlotId> {
+        (!node.is_invalid()).then_some(node)
+    }
+}
+
+impl PublishedRows {
     pub(crate) fn paintable_data(&self, id: NodeSlotId) -> &PaintableData {
         assert!(!id.is_invalid(), "invalid paintable arena slot ID");
         let data = self
@@ -239,18 +293,10 @@ pub(crate) trait PaintRead: Sized {
     }
 }
 
-/// Answers [`PaintRead`]'s reads of the layout tree, style, paint facts and damage from the live
-/// arena that `$arena` maps the implementing type to.
-macro_rules! read_live_arena {
+/// Answers [`PaintRead`]'s reads of the layout tree and its style from the live arena that `$arena`
+/// maps the implementing type to.
+macro_rules! read_live_layout_tree {
     ($arena:path) => {
-        fn with_paintable_visual_context_node_handles<R>(
-            &self,
-            id: crate::layout::node_data::NodeSlotId,
-            read: impl FnOnce(&crate::painting::visual_context::BoxVisualContextNodeHandles) -> R,
-        ) -> R {
-            crate::layout::LayoutNodeArena::with_paintable_visual_context_node_handles($arena(self), id, read)
-        }
-
         fn slot_is_live(&self, id: crate::layout::node_data::NodeSlotId) -> bool {
             crate::layout::LayoutNodeArena::slot_is_live($arena(self), id)
         }
@@ -285,13 +331,6 @@ macro_rules! read_live_arena {
             id: crate::layout::node_data::NodeSlotId,
         ) -> Option<crate::layout::node_data::NodeSlotId> {
             crate::layout::LayoutNodeArena::node_next_sibling_if_live($arena(self), id)
-        }
-
-        fn node_containing_block_if_live(
-            &self,
-            id: crate::layout::node_data::NodeSlotId,
-        ) -> Option<crate::layout::node_data::NodeSlotId> {
-            crate::layout::LayoutNodeArena::node_containing_block_if_live($arena(self), id)
         }
 
         fn node_generated_for(&self, id: crate::layout::node_data::NodeSlotId) -> u8 {
@@ -351,6 +390,29 @@ macro_rules! read_live_arena {
             id: crate::layout::node_data::NodeSlotId,
         ) -> Option<crate::css::computed_value_views::ComputedValuesView<'_>> {
             crate::layout::LayoutNodeArena::node_style_if_live($arena(self), id)
+        }
+    };
+}
+
+pub(crate) use read_live_layout_tree;
+
+/// Answers [`PaintRead`]'s reads of paint facts, side tables and damage from the live arena that
+/// `$arena` maps the implementing type to.
+macro_rules! read_live_paint_facts {
+    ($arena:path) => {
+        fn with_paintable_visual_context_node_handles<R>(
+            &self,
+            id: crate::layout::node_data::NodeSlotId,
+            read: impl FnOnce(&crate::painting::visual_context::BoxVisualContextNodeHandles) -> R,
+        ) -> R {
+            crate::layout::LayoutNodeArena::with_paintable_visual_context_node_handles($arena(self), id, read)
+        }
+
+        fn node_containing_block_if_live(
+            &self,
+            id: crate::layout::node_data::NodeSlotId,
+        ) -> Option<crate::layout::node_data::NodeSlotId> {
+            crate::layout::LayoutNodeArena::node_containing_block_if_live($arena(self), id)
         }
 
         fn text_content(&self, id: crate::layout::node_data::NodeSlotId) -> Option<&crate::layout::TextContent> {
@@ -424,6 +486,17 @@ macro_rules! read_live_arena {
     };
 }
 
+pub(crate) use read_live_paint_facts;
+
+/// Answers every [`PaintRead`] read but the rows' from the live arena that `$arena` maps the
+/// implementing type to.
+macro_rules! read_live_arena {
+    ($arena:path) => {
+        $crate::painting::published_frame::read_live_layout_tree!($arena);
+        $crate::painting::published_frame::read_live_paint_facts!($arena);
+    };
+}
+
 pub(crate) use read_live_arena;
 
 impl PaintRead for LayoutNodeArena {
@@ -473,19 +546,19 @@ impl<'a> PaintSource<'a> {
 
 impl PaintRead for PaintSource<'_> {
     fn paintable_data(&self, id: NodeSlotId) -> &PaintableData {
-        self.frame.paintable_data(id)
+        self.frame.rows.paintable_data(id)
     }
 
     fn paintable_row_is_populated(&self, id: NodeSlotId) -> bool {
-        self.frame.paintable_row_is_populated(id)
+        self.frame.rows.paintable_row_is_populated(id)
     }
 
     fn with_committed_fragment_link<R>(&self, id: NodeSlotId, read: impl FnOnce(Option<&FragmentLink>) -> R) -> R {
-        self.frame.with_committed_fragment_link(id, read)
+        self.frame.rows.with_committed_fragment_link(id, read)
     }
 
     fn committed_side_data(&self, id: NodeSlotId) -> CommittedSideDataRef<'_> {
-        CommittedSideDataRef::Published(self.frame.committed_side_data(id))
+        CommittedSideDataRef::Published(self.frame.rows.committed_side_data(id))
     }
 
     fn memoized_absolute_rect(&self, id: NodeSlotId) -> Option<CssPixelRect> {
@@ -496,5 +569,95 @@ impl PaintRead for PaintSource<'_> {
         self.arena.memoize_absolute_rect(id, rect);
     }
 
-    read_live_arena!(PaintSource::arena);
+    fn slot_is_live(&self, id: NodeSlotId) -> bool {
+        self.frame.node(id).is_some()
+    }
+
+    fn node_kind_if_live(&self, id: NodeSlotId) -> Option<NodeKind> {
+        self.frame.node(id).map(|node| node.kind)
+    }
+
+    fn node_flags_if_live(&self, id: NodeSlotId) -> u32 {
+        self.frame.node(id).map_or(0, |node| node.flags)
+    }
+
+    fn node_parent_if_live(&self, id: NodeSlotId) -> Option<NodeSlotId> {
+        PublishedFrame::link(self.frame.node(id)?.parent)
+    }
+
+    fn node_first_child_if_live(&self, id: NodeSlotId) -> Option<NodeSlotId> {
+        PublishedFrame::link(self.frame.node(id)?.first_child)
+    }
+
+    fn node_next_sibling_if_live(&self, id: NodeSlotId) -> Option<NodeSlotId> {
+        PublishedFrame::link(self.frame.node(id)?.next_sibling)
+    }
+
+    fn node_generated_for(&self, id: NodeSlotId) -> u8 {
+        self.frame.live_node(id).generated_for
+    }
+
+    fn node_is_generated_for_pseudo_element(&self, id: NodeSlotId) -> bool {
+        self.frame.node(id).is_some_and(|node| node.generated_for != 0)
+    }
+
+    fn node_is_dom_backed(&self, id: NodeSlotId) -> bool {
+        // A slot that has not been given a shell yet stands for nothing at all, and its flags do
+        // not say so.
+        self.frame
+            .node(id)
+            .is_some_and(|node| node.kind != NodeKind::Unset && !node_facts::has_flag(node, NodeFlag::Anonymous))
+    }
+
+    fn node_is_element_backed(&self, id: NodeSlotId) -> bool {
+        self.node_is_dom_backed(id)
+            && self
+                .frame
+                .node(id)
+                .is_some_and(|node| node.kind != NodeKind::Viewport && !node_facts::kind_is_text(node.kind))
+    }
+
+    fn node_is_out_of_flow_if_live(&self, id: NodeSlotId) -> bool {
+        self.frame
+            .node_and_style(id)
+            .is_some_and(|(node, style)| node_facts::node_is_out_of_flow(node, style))
+    }
+
+    fn node_is_fragmented_inline(&self, id: NodeSlotId) -> bool {
+        self.frame
+            .node_and_style(id)
+            .is_some_and(|(node, style)| node_facts::node_is_fragmented_inline(node, style))
+    }
+
+    fn node_is_atomic_inline(&self, id: NodeSlotId) -> bool {
+        self.frame
+            .node_and_style(id)
+            .is_some_and(|(node, style)| node_facts::node_is_atomic_inline(node, style))
+    }
+
+    fn node_is_positioned(&self, id: NodeSlotId) -> bool {
+        self.frame
+            .node_and_style(id)
+            .is_some_and(|(node, style)| node_facts::node_is_positioned(node, style))
+    }
+
+    fn node_is_floating(&self, id: NodeSlotId) -> bool {
+        self.frame
+            .node_and_style(id)
+            .is_some_and(|(node, style)| node_facts::node_is_floating(node, style))
+    }
+
+    fn node_has_dom_paint_fact(&self, id: NodeSlotId, fact: DomPaintFact) -> bool {
+        self.frame.live_node(id).dom_paint_facts & fact as u8 != 0
+    }
+
+    fn node_has_compositor_animation_frame(&self, id: NodeSlotId, kind: CompositorAnimationFrameKind) -> bool {
+        self.frame.live_node(id).compositor_animation_frame_kinds & kind as u8 != 0
+    }
+
+    fn node_style_if_live(&self, id: NodeSlotId) -> Option<ComputedValuesView<'_>> {
+        PublishedFrame::style_of(self.frame.node(id)?)
+    }
+
+    read_live_paint_facts!(PaintSource::arena);
 }
