@@ -4242,7 +4242,7 @@ static bool prepare_to_finalize_a_cross_document_navigation(GC::Ref<LocalNavigab
 
     // AD-HOC: This check is not in the spec but we should not continue navigation if ongoing navigation id has changed.
     if (expected_ongoing_navigation_id.has_value() && navigable->ongoing_navigation() != *expected_ongoing_navigation_id) {
-        navigable->set_delaying_load_events(false);
+        navigable->stop_delaying_load_events_for_superseded_navigation();
         return false;
     }
 
