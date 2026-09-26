@@ -44,7 +44,7 @@ bool StyleEngine::layout_pass_is_in_flight() const
 void StyleEngine::publish_input(Function<void(StyleInputScope const&)>&& input)
 {
     if (pass_is_in_flight() || layout_pass_is_in_flight()) {
-        m_inputs_queued_during_pass.append(move(input));
+        m_inputs_queued_during_pass.enqueue(move(input));
         return;
     }
     // A layout pass taken back publishes what waited for it as its frame ends, and code the take-back runs before
@@ -76,7 +76,7 @@ void StyleEngine::publish_inputs_queued_during_pass()
         return;
     TemporaryChange publishing_queued_inputs { m_publishing_queued_inputs, true };
     while (!pass_is_in_flight() && !m_holds_input_recorded_beside_pass && !m_inputs_queued_during_pass.is_empty() && !layout_pass_is_in_flight()) {
-        auto input = m_inputs_queued_during_pass.take_first();
+        auto input = m_inputs_queued_during_pass.dequeue();
         StyleInputScope const scope { *this };
         input(scope);
     }

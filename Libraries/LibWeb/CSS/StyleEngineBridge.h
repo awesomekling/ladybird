@@ -11,6 +11,7 @@
 #include <AK/HashTable.h>
 #include <AK/Noncopyable.h>
 #include <AK/Optional.h>
+#include <AK/Queue.h>
 #include <AK/Span.h>
 #include <AK/StringView.h>
 #include <AK/Types.h>
@@ -462,7 +463,8 @@ private:
     HashTable<StyleNodeID> m_style_nodes_retired_beside_pass;
     HashTable<StyleNodeID> m_parents_whose_children_changed_beside_pass;
     Vector<StyleDrainScope const*> m_effect_drain_scopes;
-    Vector<Function<void(StyleInputScope const&)>> m_inputs_queued_during_pass;
+    // Drained from the front one input at a time, and a busy page queues thousands beside a pass.
+    Queue<Function<void(StyleInputScope const&)>, 64> m_inputs_queued_during_pass;
     bool m_publishing_queued_inputs { false };
     u64 m_attribute_value_text_requirements_version { 0 };
     HashTable<StyleNodeID> m_nodes_with_pending_initial_features;
