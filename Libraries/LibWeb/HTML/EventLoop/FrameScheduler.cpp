@@ -215,6 +215,7 @@ void FrameScheduler::begin_main_half(bool synchronous)
     // The rendering update moves the timelines on from where the render clock's ticks left them.
     take_back_clock_lend_for_adoption();
     m_rendering_update_began_with_clock_lease = !m_clock_leases.is_empty();
+    m_rendering_update_ended_clock_lease_for_frame_callbacks = false;
     // A rendering update that has to start now (a synchronous one, or one a rendering opportunity started while the
     // tail was still pending) finishes the previous frame first.
     if (m_state != State::Idle)
@@ -438,13 +439,19 @@ void FrameScheduler::consume_finished_frame()
 
 // The render clock ticks nothing beside a frame in flight, and a rendering update ends the lease of a document with
 // animation frame callbacks, which its tail grants again. A task that begins beside the frame of one that began with a
-// clock lease would get no ticks: after a long task, the main thread finishes that frame first, and lends the lease its
-// tail granted to the task.
+// clock lease would get no ticks for as long as it runs: the main thread finishes that frame first, and lends the lease
+// its tail granted to the task. Such a document has a rendering update at every display frame, so its task would begin
+// beside a frame often, and it waits for the frame at every task. For another, it waits only after a long task. Where
+// the frame's tail ran at step 1 already, the main thread only lends the leases.
 void FrameScheduler::finish_frame_for_clock_lend()
 {
-    if (!m_rendering_update_began_with_clock_lease || m_last_task_milliseconds < clock_lend_long_task_milliseconds || !Layout::RustFFI::rust_clock_frames_enabled())
+    if (!Layout::RustFFI::rust_clock_frames_enabled())
         return;
-    while (m_state == State::InFlight || m_state == State::CommittedTailPending) {
+    // NB: A frame a test holds stays in flight for the tasks the test runs beside it.
+    bool const finishes_frame = m_rendering_update_began_with_clock_lease
+        && (m_rendering_update_ended_clock_lease_for_frame_callbacks || m_last_task_milliseconds >= clock_lend_long_task_milliseconds)
+        && !Layout::RustFFI::rust_stage_thread_hold_armed_or_holding();
+    while (finishes_frame && (m_state == State::InFlight || m_state == State::CommittedTailPending)) {
         if (m_state == State::InFlight) {
             if (!m_event_loop.may_consume_commit(EventLoop::FrameConsumeSite::StepOne))
                 return;
@@ -461,7 +468,10 @@ void FrameScheduler::finish_frame_for_clock_lend()
         }
         m_event_loop.run_consume_tail([this] { run_tail(); });
     }
-    lend_clock_leases_to_busy_main(false);
+    // NB: A lend that no frame kept back stays as the main thread left it at its wake, where it planned the leases
+    //     already.
+    if (m_state == State::Idle && exchange(m_clock_lend_waits_for_frame, false))
+        lend_clock_leases_to_busy_main(false);
 }
 
 u64 FrameScheduler::finish_frame_now()
@@ -857,6 +867,8 @@ void FrameScheduler::grant_clock_leases()
         }
         replace_render_clock_kit(hold, move(kit));
     }
+    // A task that runs before the main thread next wakes gets these leases lent (see finish_frame_for_clock_lend()).
+    m_clock_lend_waits_for_frame = !m_clock_leases.is_empty();
 }
 
 // Takes in what the ticks presented from the lease's kit, and has them present from `kit` from now on.
@@ -1105,10 +1117,15 @@ void FrameScheduler::adopt_render_clock_ticks()
 // its own records again, laid out at its own time (see clock_lend_taken_back()).
 void FrameScheduler::lend_clock_leases_to_busy_main(bool relend)
 {
-    if (m_clock_leases.is_empty() || m_clock_lend_suspended || m_render_clock_suspended || m_state != State::Idle)
+    if (m_clock_leases.is_empty() || m_clock_lend_suspended || m_render_clock_suspended || !Layout::RustFFI::rust_clock_frames_enabled())
         return;
-    if (!Layout::RustFFI::rust_clock_frames_enabled() || Layout::RustFFI::rust_stage_thread_has_frame_in_flight())
+    // The tail of the frame grants the leases again: the main thread lends them before its next task (see
+    // finish_frame_for_clock_lend()).
+    if (m_state != State::Idle || Layout::RustFFI::rust_stage_thread_has_frame_in_flight()) {
+        m_clock_lend_waits_for_frame = true;
         return;
+    }
+    m_clock_lend_waits_for_frame = false;
     // A lend again lends what a read took back; the others are still lent.
     if (!relend && Layout::RustFFI::rust_clock_lend_is_active())
         return;
@@ -1261,8 +1278,10 @@ void FrameScheduler::prepare_clock_ticks(ReadonlySpan<GC::Root<DOM::Document>> d
         // plan finds it, or finds other effects to tick.
         // So does a document with animation frame callbacks, whose rendering updates sample its effects themselves: the
         // render clock ticks its lease only beside the tasks between them.
-        auto plan = renders && arena && Layout::RustFFI::rust_clock_lease_is_live(arena->handle()) && !has_animation_frame_callbacks(*document) ? clock_lease_plan(*document) : Optional<ClockLeasePlan> {};
+        bool const frame_callbacks = has_animation_frame_callbacks(*document);
+        auto plan = renders && arena && Layout::RustFFI::rust_clock_lease_is_live(arena->handle()) && !frame_callbacks ? clock_lease_plan(*document) : Optional<ClockLeasePlan> {};
         if (!plan.has_value() || plan->effects != m_clock_leases[index].effects) {
+            m_rendering_update_ended_clock_lease_for_frame_callbacks |= frame_callbacks;
             revoke_clock_lease(index);
             continue;
         }

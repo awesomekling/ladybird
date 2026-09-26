@@ -39,6 +39,9 @@
         requestAnimationFrame(frame);
         await new Promise(resolve => setTimeout(resolve, 100));
 
+        // The main thread lends the leases to the task even where it begins beside the frame of a rendering update.
+        const lentAtStart = internals.clockLendActive();
+
         // Not a timing test: the task runs until the render side has presented enough frames, however slow the
         // machine, and gives up after a while if it presents none.
         const framesBefore = frames;
@@ -55,6 +58,7 @@
 
         await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
         looping = false;
+        println(`leases lent as the task begins: ${!enabled || lentAtStart}`);
         println(`frames presented during the task: ${!enabled || presented >= wanted}`);
         println(`animation frame callbacks during the task: ${framesInTask}`);
         println(`animation frame callbacks after the task: ${frames - framesBefore > 0}`);
