@@ -1,0 +1,3 @@
+both documents flew: true
+width: 50
+inner width: 50
