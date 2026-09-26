@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<style>
+    #dialog {
+        color: rgb(255, 0, 0);
+        animation: fade 20s linear;
+    }
+    #dialog::backdrop {
+        background-color: currentcolor;
+    }
+    @keyframes fade {
+        from {
+            color: rgb(255, 0, 0);
+        }
+        to {
+            color: rgb(0, 0, 255);
+        }
+    }
+</style>
+<dialog id="dialog">The backdrop takes its color from the dialog.</dialog>
+<script src="../../include.js"></script>
+<script>
+    // Under LIBWEB_RENDER_CLOCK_FRAMES, the render clock presents no tick of an inherited property's animation beside
+    // a long task where the animated element has a ::backdrop: the backdrop's style inherits from the element, and only
+    // the main thread derives it.
+    asyncTest(async done => {
+        const dialog = document.getElementById("dialog");
+        dialog.showModal();
+        const enabled = internals.clockFramesEnabled();
+        // Not a timing test: the task begins once the main thread lends the arena to the ticks beside it.
+        const waitStart = performance.now();
+        do
+            await new Promise(resolve => setTimeout(resolve, 10));
+        while (enabled && !internals.clockLendActive() && performance.now() - waitStart < 5000);
+
+        const countersBefore = internals.getRenderClockCounters();
+        // Not a timing test: the task runs until the render side has ticked enough times, however slow the machine.
+        const wanted = 5;
+        const start = performance.now();
+        let presented = 0;
+        let needingMain = 0;
+        while (enabled && performance.now() - start < 5000) {
+            const counters = internals.getRenderClockCounters();
+            presented = counters.ticksPresented - countersBefore.ticksPresented;
+            needingMain = counters.ticksNeedingMain - countersBefore.ticksNeedingMain;
+            if (presented >= wanted || needingMain > 0)
+                break;
+        }
+        println(`the ticks leave the dialog's color to the main thread: ${!enabled || (needingMain > 0 && presented === 0)}`);
+        done();
+    });
+</script>
