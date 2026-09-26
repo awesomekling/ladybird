@@ -1332,6 +1332,9 @@ pub(crate) struct ClockLayoutFrame {
     facts: FfiLayoutUpdateDocumentFacts,
     /// Whether a round laid out in the frame, so that it has something to take in.
     laid_out: bool,
+    /// How many rounds laid out in the frame, each of which owes the document its host half until
+    /// the frame is taken in.
+    rounds: u32,
 }
 
 // SAFETY: The frame reaches only the arena, which a clock tick owns while it runs a round in it, and
@@ -1355,6 +1358,7 @@ impl ClockLayoutFrame {
         // SAFETY: Guaranteed by the caller.
         self.frame.pass_sources = Some(unsafe { LayoutPassSources::read(self.frame.inputs.arena_handle) });
         self.laid_out = true;
+        self.rounds += 1;
         // SAFETY: Guaranteed by the caller.
         match unsafe { self.frame.run_round_through_pass(self.facts) } {
             FrameStep::Ended(_) => !self.frame.commit_left_layout_work(&self.facts),
@@ -1364,6 +1368,10 @@ impl ClockLayoutFrame {
 
     pub(crate) fn laid_out(&self) -> bool {
         self.laid_out
+    }
+
+    pub(crate) fn rounds(&self) -> u32 {
+        self.rounds
     }
 }
 
@@ -1433,6 +1441,7 @@ unsafe fn make_clock_layout_frame(
         },
         facts,
         laid_out: false,
+        rounds: 0,
     }
 }
 

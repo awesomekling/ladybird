@@ -288,6 +288,15 @@ impl ClockLease {
         outcome
     }
 
+    /// How many rounds the ticks laid out in the layout frame the main thread has yet to take in.
+    fn rounds_owed(&self) -> u32 {
+        self.layout_frame
+            .lock()
+            .expect("clock lease layout frame")
+            .as_ref()
+            .map_or(0, ClockLayoutFrame::rounds)
+    }
+
     /// Lays out what the tick's samples left, in the layout frame the main thread handed the lease.
     /// Returns whether a round laid out, or `None` where the main thread has to.
     ///
@@ -1155,7 +1164,8 @@ static INJECTED_TICKS_PENDING: AtomicUsize = AtomicUsize::new(0);
 static WAKE_MAIN: OnceLock<extern "C" fn()> = OnceLock::new();
 
 /// Has the render clock call `wake_main()` on the stage thread where a tick a test injected ended, for the main
-/// thread to go on with what waits for it. The first one set stays.
+/// thread to go on with what waits for it, and where the ticks laid out many rounds for an idle main thread to take
+/// in. The first one set stays.
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_render_clock_set_wake_main(wake_main: extern "C" fn()) {
     let _ = WAKE_MAIN.set(wake_main);
@@ -1207,6 +1217,10 @@ struct ClockSlot {
     queued: AtomicBool,
 }
 
+/// How many rounds the ticks lay out in one layout frame before they wake an idle main thread to
+/// take it in: about two seconds of display ticks.
+const MAX_CLOCK_ROUNDS_OWED: u32 = 120;
+
 /// How many slots a render clock keeps before it lets go of those no tick waits in.
 const MAX_IDLE_CLOCK_SLOTS: usize = 16;
 
@@ -1250,6 +1264,8 @@ pub struct FfiRenderClockCounters {
     pub ticks_moving_visual_contexts: u64,
     /// Ticks that ran while the main thread ran a task beside them.
     pub ticks_mid_task: u64,
+    /// Ticks that woke an idle main thread to take in the rounds they laid out.
+    pub ticks_waking_main_to_adopt: u64,
     /// Times the main thread lent the arenas to the ticks while it ran a task.
     pub lends: u64,
     /// Times the main thread lent them again after a read had taken them back.
@@ -1285,6 +1301,7 @@ struct RenderClockCounters {
     ticks_needing_main: AtomicU64,
     ticks_moving_visual_contexts: AtomicU64,
     ticks_mid_task: AtomicU64,
+    ticks_waking_main_to_adopt: AtomicU64,
     lends: AtomicU64,
     relends: AtomicU64,
     recalls: AtomicU64,
@@ -1311,6 +1328,7 @@ static COUNTERS: RenderClockCounters = RenderClockCounters {
     ticks_needing_main: AtomicU64::new(0),
     ticks_moving_visual_contexts: AtomicU64::new(0),
     ticks_mid_task: AtomicU64::new(0),
+    ticks_waking_main_to_adopt: AtomicU64::new(0),
     lends: AtomicU64::new(0),
     relends: AtomicU64::new(0),
     recalls: AtomicU64::new(0),
@@ -1534,6 +1552,7 @@ fn run_render_clock_tick_at(context: u64, frame_time_nanoseconds: i64) {
     if lease.entries.lock().is_ok_and(|entries| !entries.is_empty()) {
         TICKS_TO_ADOPT.store(true, Ordering::Release);
     }
+    let rounds_owed = lease.rounds_owed();
     drop(idle_tick);
     if outcome == FfiClockTickOutcome::Presented {
         count(&COUNTERS.ticks_installed);
@@ -1541,6 +1560,14 @@ fn run_render_clock_tick_at(context: u64, frame_time_nanoseconds: i64) {
             count(&COUNTERS.ticks_laid_out);
         }
         count(&COUNTERS.ticks_presented);
+        // What the rounds owe the document piles up in the frame until the main thread takes it in:
+        // one that idles for long takes it in every so often, and pays for a few rounds at a time.
+        if laid_out && rounds_owed >= MAX_CLOCK_ROUNDS_OWED && !beside_task {
+            count(&COUNTERS.ticks_waking_main_to_adopt);
+            if let Some(wake_main) = WAKE_MAIN.get() {
+                wake_main();
+            }
+        }
         return;
     }
     count(&COUNTERS.ticks_needing_main);
@@ -1569,6 +1596,7 @@ pub extern "C" fn rust_render_clock_counters() -> FfiRenderClockCounters {
         ticks_needing_main: load(&COUNTERS.ticks_needing_main),
         ticks_moving_visual_contexts: load(&COUNTERS.ticks_moving_visual_contexts),
         ticks_mid_task: load(&COUNTERS.ticks_mid_task),
+        ticks_waking_main_to_adopt: load(&COUNTERS.ticks_waking_main_to_adopt),
         lends: load(&COUNTERS.lends),
         relends: load(&COUNTERS.relends),
         recalls: load(&COUNTERS.recalls),
