@@ -406,6 +406,28 @@ pub struct FfiCommittedRow {
     pub own_scroll_node_index: SpatialNodeIndex,
 }
 
+/// Whether `slot` has a committed box, which is all most main-side callers ask before they touch
+/// its row. Publishing the rows, and measuring the overflow they are published with, changes no
+/// row's population, so the live rows answer this without the publication
+/// [`layout_arena_committed_row`] makes.
+///
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_has_committed_box(arena: *mut c_void, slot: NodeSlotId) -> bool {
+    if crate::stage_thread::reads_beside_recording_of(arena) {
+        crate::painting::seal::note_main_side_read(std::panic::Location::caller());
+        // SAFETY: As in `main_side_paintable_rows`, the recording in flight writes none of the rows it published.
+        return unsafe { &*arena.cast::<LayoutNodeArena>() }
+            .rows_beside_recording()
+            .paintable_row_is_populated(slot);
+    }
+    unsafe { arena_from_handle(arena) }
+        .paintable_rows()
+        .paintable_row_is_populated(slot)
+}
+
 /// # Safety
 ///
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread.

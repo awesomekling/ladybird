@@ -79,7 +79,7 @@ Layout::RustFFI::FfiCommittedRow committed_row(Layout::Node const& node)
 
 bool has_committed_box(Layout::Node const& node)
 {
-    return committed_row(node).is_populated;
+    return Layout::RustFFI::layout_arena_has_committed_box(node.arena_handle(), committed_row_slot(node));
 }
 
 Layout::Node* layout_node_for_committed_slot(Layout::NodeArena& arena, Compositing::RustFFI::NodeSlotId slot)
