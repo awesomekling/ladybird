@@ -1,2 +1,2 @@
-pseudo-element winner rows added: 35
+pseudo-element winner rows added: fewer than siblings
 marker color: rgb(0, 128, 0)

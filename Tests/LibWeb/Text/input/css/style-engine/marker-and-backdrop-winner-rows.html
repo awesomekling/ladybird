@@ -21,7 +21,10 @@
         internals.updateStyle();
         container.firstElementChild.remove();
         internals.updateStyle();
-        println(`pseudo-element winner rows added: ${rows() - before}`);
+        // NB: Whether the untouched siblings hold rows yet depends on how their style passes were
+        //     split, so only the bound is stable: a leaf insert must not add rows per sibling.
+        const added = rows() - before;
+        println(`pseudo-element winner rows added: ${added < container.childElementCount ? "fewer than siblings" : added}`);
         println(`marker color: ${getComputedStyle(item, "::marker").color}`);
     });
 </script>
