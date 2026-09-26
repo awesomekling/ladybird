@@ -828,12 +828,15 @@ impl RetainedState {
         {
             cohort_parent = RecordDeltaParent::Inputs(inputs);
         }
+        // The environment the record is published under, which the key names whether it moved or
+        // not: a node moving to the empty environment and one keeping its record's must not meet.
         let cohort = (
+            generation,
             old_style_record.raw(),
             state,
             facts,
             cohort_parent,
-            environment.unwrap_or(0),
+            current_environment,
             RootFontInputs::from_document(&inputs),
             self.monospace_cohort_key(node, state),
             self.substitution_attributes_key(node, None, state),
@@ -847,7 +850,14 @@ impl RetainedState {
             && !self.computed_group_sets.node_has_animation_overlay(node)
             && !derived_beneath_a_composition
             && (!has_registered_declarations || !full_drive))
-            .then(|| scratch.cohorts.get(&cohort).copied())
+            .then(|| {
+                scratch.cohorts.get(&cohort).copied().or_else(|| {
+                    self.may_take_a_kept_warm_record_cohort(node)
+                        .then(|| self.engine_warm_record_cohorts.get(&cohort).copied())
+                        .flatten()
+                        .filter(|&(record, _)| self.warm_record_cohort_is_current(node, record))
+                })
+            })
             .flatten()
             .and_then(|(record, groups)| match owes_an_animation_plan {
                 true => self
@@ -1192,6 +1202,7 @@ impl RetainedState {
         // when the drive was partial.
         if container_unit_mask == 0 && !driver_input_moved && (!has_registered_declarations || !full_drive) {
             scratch.cohorts.insert(cohort, (delta.1, explicitly_inherited_groups));
+            self.remember_warm_record_cohort(cohort, (delta.1, explicitly_inherited_groups));
         }
         if explicitly_inherited_groups != 0 {
             self.nodes_owing_explicit_inheritance
@@ -3022,6 +3033,35 @@ impl RetainedState {
             facts: self.computed_group_sets.adjustment_facts(node),
             highlight_parent: None,
         }
+    }
+
+    /// Keeps a warm record's cohort past its transaction. An element whose style moves back and
+    /// forth between the same states, a class toggled on and off, moves between the same records
+    /// every time, and the cohort a transaction kept answers the next one's alike rows.
+    fn remember_warm_record_cohort(&mut self, key: RecordCohortKey, value: RecordCohortValue) {
+        if self.engine_warm_record_cohorts.len() >= COLD_RECORD_CACHE_LIMIT {
+            self.engine_warm_record_cohorts.clear();
+        }
+        self.engine_warm_record_cohorts.insert(key, value);
+    }
+
+    /// Whether a node can take a record a cohort kept past its transaction at all. The custom
+    /// properties a node declares, and the container queries its rules wait on, are decided for it
+    /// after its cohort is looked up, as they are for a first record the cold record cache answers;
+    /// a kept record was decided under what they were then.
+    fn may_take_a_kept_warm_record_cohort(&self, node: StyleNodeID) -> bool {
+        !self.node_declares_custom_properties(node)
+            && !self.published_container_verdicts.contains_key(&node)
+            && !self.container_gates_unheld.contains(&node)
+    }
+
+    /// Whether a record a cohort kept past its transaction can still answer for the node: it is
+    /// live, and what it computed from the counter-style registry is what the node would read now.
+    /// The rest of what it was computed from is in the key, and the document inputs that are not
+    /// clear the kept cohorts when they move.
+    fn warm_record_cohort_is_current(&self, node: StyleNodeID, record: computed::FinalStyleRecordID) -> bool {
+        self.computed_group_sets.final_style_record_is_live(record.raw())
+            && self.record_counter_environment_is_current(node, record)
     }
 
     /// A later element alike in what a first record is computed from takes this record, the way a
@@ -5319,7 +5359,7 @@ pub(super) struct ColdRecordKey {
 /// parent's. A state that explicitly inherits a non-inherited property reads the parent's whole
 /// table, so it keys on the parent's record instead.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-struct ColdRecordParent {
+pub(super) struct ColdRecordParent {
     record: u64,
     inherited_groups: u32,
     environment: u64,
@@ -5328,8 +5368,10 @@ struct ColdRecordParent {
 }
 
 /// What a warm record's cohort is keyed by, and what it answers with: the record, and the style
-/// groups it read straight from the parent through an explicit `inherit`.
-type RecordCohortKey = (
+/// groups it read straight from the parent through an explicit `inherit`. The winner generation
+/// comes first, so a key kept past its transaction names the winners the state stood for then.
+pub(super) type RecordCohortKey = (
+    u64,
     u64,
     CascadeStateID,
     u32,
@@ -5340,7 +5382,7 @@ type RecordCohortKey = (
     u64,
     (u32, u64),
 );
-type RecordCohortValue = (computed::FinalStyleRecordID, u32);
+pub(super) type RecordCohortValue = (computed::FinalStyleRecordID, u32);
 
 /// A first record the engine keeps for reuse, with the swap eligibility its assignment carries.
 #[derive(Clone, Copy)]
@@ -5687,7 +5729,7 @@ impl AncestorChain {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-enum RecordDeltaParent {
+pub(super) enum RecordDeltaParent {
     Exact(u64),
     Inputs(ColdRecordParent),
 }

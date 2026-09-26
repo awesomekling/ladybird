@@ -30,10 +30,14 @@
         }
 
         function measure(action, undo) {
-            action();
-            internals.updateStyle();
-            undo();
-            internals.updateStyle();
+            // Warm up twice: the style engine keeps the records a change moves between across
+            // updates, and the measurement at every scale should find them settled.
+            for (let round = 0; round < 2; ++round) {
+                action();
+                internals.updateStyle();
+                undo();
+                internals.updateStyle();
+            }
 
             const graphBefore = internals.styleEngineCounters();
             const styleBefore = internals.getStyleInvalidationCounters();

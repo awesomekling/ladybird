@@ -136,6 +136,7 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
         batch_backing_pseudo_matches,
         engine_cold_record_cache,
         engine_cold_record_donors,
+        engine_warm_record_cohorts,
         computed_group_set_memory,
         custom_property_environment_memory,
         computed_fixed_metadata_memory,
@@ -281,6 +282,7 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
     assert_member_is_sync(batch_backing_pseudo_matches);
     assert_member_is_sync(engine_cold_record_cache);
     assert_member_is_sync(engine_cold_record_donors);
+    assert_member_is_sync(engine_warm_record_cohorts);
     assert_member_is_sync(computed_group_set_memory);
     assert_member_is_sync(custom_property_environment_memory);
     assert_member_is_sync(computed_fixed_metadata_memory);
