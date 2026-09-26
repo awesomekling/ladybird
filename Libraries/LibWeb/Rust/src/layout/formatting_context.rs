@@ -2206,7 +2206,6 @@ pub(crate) fn run_table_cell_ahead_of_its_intrinsic_block_padding(
         Ok(attempt) => attempt,
         Err(entry) => {
             let _trace = run.callbacks.arena().layout_trace.run(
-                run.callbacks.arena(),
                 cell,
                 FormattingContextType::Block,
                 LayoutPurpose::Commit,
@@ -2217,7 +2216,6 @@ pub(crate) fn run_table_cell_ahead_of_its_intrinsic_block_padding(
         }
     };
     let _trace = run.callbacks.arena().layout_trace.run(
-        run.callbacks.arena(),
         cell,
         FormattingContextType::Block,
         LayoutPurpose::Commit,
