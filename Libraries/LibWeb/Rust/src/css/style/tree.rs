@@ -1963,17 +1963,21 @@ impl StyleNodeTree {
 
     /// Rank a batch in the same dependency order as `compare_style_reaction_order`.
     /// Each ancestor is visited once, even for a deep chain of reacting descendants.
-    pub fn style_reaction_order_ranks(
-        &self,
-        nodes: impl IntoIterator<Item = StyleNodeID>,
-    ) -> HashMap<StyleNodeID, usize> {
-        let mut seen = HashSet::default();
-        let mut children: HashMap<StyleNodeID, Vec<(u8, StyleNodeID)>> = HashMap::default();
+    pub fn style_reaction_order_ranks(&self, nodes: impl IntoIterator<Item = StyleNodeID>) -> StyleReactionRanks {
+        // A batch this small reaches too few nodes to repay filling a slot for every element.
+        const MINIMUM_SLOTTED_BATCH: usize = 16;
+        let nodes: Vec<StyleNodeID> = nodes.into_iter().collect();
+        let mut ranks = StyleReactionRanks::new(if nodes.len() >= MINIMUM_SLOTTED_BATCH {
+            self.parent.len()
+        } else {
+            0
+        });
+        let mut edges: Vec<(StyleNodeID, u8, StyleNodeID)> = Vec::new();
         let mut roots = Vec::new();
         for mut node in nodes {
-            while seen.insert(node) {
+            while ranks.insert_seen(node) {
                 if let Some((parent, branch)) = self.style_reaction_parent(node) {
-                    children.entry(parent).or_default().push((branch, node));
+                    edges.push((parent, branch, node));
                     node = parent;
                 } else {
                     roots.push(node);
@@ -1981,19 +1985,34 @@ impl StyleNodeTree {
                 }
             }
         }
-        // The existing order uses identity within each branch, not DOM sibling order.
+        // The existing order uses identity within each branch, not DOM sibling order. Each parent's
+        // children form one run of the edges, largest first, so the stack pops them smallest first.
         roots.sort_unstable_by(|first, second| second.cmp(first));
-        for children in children.values_mut() {
-            children.sort_unstable_by(|first, second| second.cmp(first));
+        edges.sort_unstable_by(|first, second| {
+            first
+                .0
+                .cmp(&second.0)
+                .then_with(|| (second.1, second.2).cmp(&(first.1, first.2)))
+        });
+        for (index, &(parent, _, _)) in edges.iter().enumerate().rev() {
+            ranks.set(parent, index);
         }
-        let mut ranks = HashMap::default();
         let mut pending = roots;
+        let mut next_rank = 0;
         while let Some(node) = pending.pop() {
-            ranks.insert(node, ranks.len());
-            if let Some(children) = children.get(&node) {
-                pending.extend(children.iter().map(|&(_, child)| child));
+            let first_edge = ranks.get(node);
+            ranks.set(node, next_rank);
+            next_rank += 1;
+            if first_edge != StyleReactionRanks::SEEN {
+                pending.extend(
+                    edges[first_edge..]
+                        .iter()
+                        .take_while(|&&(parent, _, _)| parent == node)
+                        .map(|&(_, _, child)| child),
+                );
             }
         }
+        ranks.len = next_rank;
         ranks
     }
 
@@ -2372,6 +2391,83 @@ pub struct Preorder<'a> {
     tree: &'a StyleNodeTree,
     root: StyleNodeID,
     next: Option<StyleNodeID>,
+}
+
+/// The ranks `StyleNodeTree::style_reaction_order_ranks` gives a batch and its ancestors, by
+/// element slot. While ranking, a slot holds a mark that the node was seen, then the first edge to
+/// its children, then its rank. An identity past the slots, which is every identity for a small
+/// batch, keeps its value in `overflow`.
+pub struct StyleReactionRanks {
+    by_slot: Vec<usize>,
+    overflow: HashMap<StyleNodeID, usize>,
+    len: usize,
+}
+
+impl StyleReactionRanks {
+    const UNSEEN: usize = usize::MAX;
+    const SEEN: usize = usize::MAX - 1;
+
+    fn new(slot_count: usize) -> Self {
+        Self {
+            by_slot: vec![Self::UNSEEN; slot_count],
+            overflow: HashMap::default(),
+            len: 0,
+        }
+    }
+
+    fn get(&self, node: StyleNodeID) -> usize {
+        match self.by_slot.get(node.element_slot()) {
+            Some(&value) => value,
+            None => self.overflow.get(&node).copied().unwrap_or(Self::UNSEEN),
+        }
+    }
+
+    fn set(&mut self, node: StyleNodeID, value: usize) {
+        match self.by_slot.get_mut(node.element_slot()) {
+            Some(slot) => *slot = value,
+            None => {
+                self.overflow.insert(node, value);
+            }
+        }
+    }
+
+    fn insert_seen(&mut self, node: StyleNodeID) -> bool {
+        if self.get(node) != Self::UNSEEN {
+            return false;
+        }
+        self.set(node, Self::SEEN);
+        true
+    }
+
+    /// How many nodes have a rank: the batch and every ancestor it reaches.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    #[must_use]
+    pub fn capacity_bytes(&self) -> u64 {
+        (self.by_slot.capacity() * size_of::<usize>()
+            + self.overflow.capacity() * (size_of::<StyleNodeID>() + size_of::<usize>() + 1)) as u64
+    }
+}
+
+impl std::ops::Index<&StyleNodeID> for StyleReactionRanks {
+    type Output = usize;
+
+    fn index(&self, node: &StyleNodeID) -> &usize {
+        let value = match self.by_slot.get(node.element_slot()) {
+            Some(value) => value,
+            None => &self.overflow[node],
+        };
+        assert!(*value < self.len, "a node outside the ranked batch has no rank");
+        value
+    }
 }
 
 impl Iterator for Preorder<'_> {
@@ -2930,6 +3026,54 @@ mod tests {
         reactions.sort_unstable_by(|first, second| fixture.tree.compare_style_reaction_order(*first, *second));
 
         assert_eq!(reactions, vec![host, slot, fallback, assigned, light_child]);
+        let ranks = fixture.tree.style_reaction_order_ranks(reactions.iter().copied());
+        for &first in &reactions {
+            for &second in &reactions {
+                assert_eq!(
+                    ranks[&first].cmp(&ranks[&second]),
+                    fixture.tree.compare_style_reaction_order(first, second)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn reaction_ranks_of_a_wide_batch_follow_the_reaction_order() {
+        let mut fixture = TreeFixture::new();
+        let document = fixture.element();
+        let host = fixture.element();
+        let shadow_root = fixture.element();
+        let slot = fixture.element();
+        let assigned = fixture.element();
+        fixture.attach_children(document, &[host]);
+        fixture.attach_children(shadow_root, &[slot]);
+        let mut branches = Vec::new();
+        for _ in 0..6 {
+            let branch = fixture.element();
+            let leaves = [fixture.element(), fixture.element(), fixture.element()];
+            fixture.attach_children(branch, &leaves);
+            branches.push((branch, leaves));
+        }
+        let (first_branches, last_branches) = branches.split_at(3);
+        let mut host_children: Vec<_> = first_branches.iter().map(|&(branch, _)| branch).collect();
+        host_children.push(assigned);
+        fixture.attach_children(host, &host_children);
+        fixture.attach_children(
+            slot,
+            &last_branches.iter().map(|&(branch, _)| branch).collect::<Vec<_>>(),
+        );
+        fixture.tree.set_shadow_root(host, shadow_root, &mut fixture.memory);
+        fixture
+            .tree
+            .set_assigned_slot(assigned, Some(slot), &mut fixture.memory);
+        fixture.tree.set_assigned_nodes(slot, &[assigned], &mut fixture.memory);
+
+        let mut reactions = vec![assigned, slot];
+        for (branch, leaves) in &branches {
+            reactions.extend(leaves.iter().rev());
+            reactions.push(*branch);
+        }
+        assert!(reactions.len() >= 16, "the batch must be wide enough to rank by slot");
         let ranks = fixture.tree.style_reaction_order_ranks(reactions.iter().copied());
         for &first in &reactions {
             for &second in &reactions {

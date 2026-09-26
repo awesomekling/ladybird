@@ -1849,18 +1849,24 @@ impl StyleEngineState {
         // that is in the same batch. Visit it in the order C++ applies the deltas in instead.
         if published_nodes.len() > 1 {
             let ranks = self.tree.style_reaction_order_ranks(published_nodes.iter().copied());
-            let mut order: Vec<u32> = (0..published_nodes.len() as u32).collect();
-            order.sort_unstable_by_key(|&index| ranks[&published_nodes[index as usize]]);
+            let mut ranked: Vec<(usize, u32)> = published_nodes
+                .iter()
+                .enumerate()
+                .map(|(index, node)| (ranks[node], index as u32))
+                .collect();
+            ranked.sort_unstable();
+            let order: Vec<u32> = ranked.iter().map(|&(_, index)| index).collect();
             let reordered: Vec<_> = order.iter().map(|&index| published_nodes[index as usize]).collect();
             let reordered_inputs: Vec<_> = order
                 .iter()
                 .map(|&index| previous_cascade_inputs[index as usize])
                 .collect();
-            let reorder_bytes = (order.capacity() * size_of::<u32>()
+            let reorder_bytes = (ranked.capacity() * size_of::<(usize, u32)>()
+                + order.capacity() * size_of::<u32>()
                 + reordered.capacity() * size_of::<StyleNodeID>()
-                + reordered_inputs.capacity() * size_of::<Option<MatchAnswerID>>()
-                + ranks.capacity() * (size_of::<StyleNodeID>() + size_of::<usize>() + 1))
-                as u64;
+                + reordered_inputs.capacity() * size_of::<Option<MatchAnswerID>>())
+                as u64
+                + ranks.capacity_bytes();
             self.retained
                 .memory
                 .reserve_required(MemoryCategory::BatchScratch, reorder_bytes);
@@ -1868,7 +1874,7 @@ impl StyleEngineState {
             published_nodes.extend(reordered.iter().copied());
             previous_cascade_inputs.clear();
             previous_cascade_inputs.extend(reordered_inputs.iter().copied());
-            drop((order, reordered, reordered_inputs, ranks));
+            drop((ranked, order, reordered, reordered_inputs, ranks));
             self.retained
                 .memory
                 .release(MemoryCategory::BatchScratch, reorder_bytes);
