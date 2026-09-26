@@ -213,7 +213,7 @@ mod tests {
 
         let mut arena = LayoutNodeArena::new();
         let node = arena.allocate_for_test().slot;
-        arena.data(node).kind.set(NodeKind::InlineNode);
+        arena.write_shape(node).set_kind(NodeKind::InlineNode);
         arena.populate_paintable_row(node);
         arena.scrollable_overflow.viewport.set(Some(node));
         let rect = CssPixelRect::new(
@@ -241,7 +241,7 @@ mod tests {
 
         let mut arena = LayoutNodeArena::new();
         let node = arena.allocate_for_test().slot;
-        arena.data(node).kind.set(NodeKind::InlineNode);
+        arena.write_shape(node).set_kind(NodeKind::InlineNode);
         arena.populate_paintable_row(node);
         arena.scrollable_overflow.viewport.set(Some(node));
         let rect = CssPixelRect::new(
@@ -276,7 +276,7 @@ mod tests {
 
         let mut arena = LayoutNodeArena::new();
         let node = arena.allocate_for_test().slot;
-        arena.data(node).kind.set(NodeKind::InlineNode);
+        arena.write_shape(node).set_kind(NodeKind::InlineNode);
         arena.set_node_flag(node, NodeFlag::HasScrollOffset, true);
         arena.populate_paintable_row(node);
         arena.scrollable_overflow.viewport.set(Some(node));

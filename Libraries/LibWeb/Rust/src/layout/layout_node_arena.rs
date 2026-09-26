@@ -12,6 +12,7 @@ use super::geometry::AvailableSpace;
 use super::host_tables::HostTables;
 use super::rendered_text::{FfiTextSourceRange, RenderedTextBoundary, TextContent, TextFragments};
 use super::svg_formatting_context::FfiSvgAttributeFacts;
+use super::tree_shape::{Chunk, ShapeWriter, TreeShape};
 
 /// How many interned names one SVG element's publication can name.
 const PUBLISHED_REFERENCE_ATOM_COUNT: usize = 5;
@@ -548,26 +549,6 @@ struct ReplacedContentFactsSlot {
     facts: Option<FfiReplacedContentFacts>,
 }
 
-// NodeData is sized to one cache line; the aligned chunk keeps every densely-strided slot
-// line-aligned, and per-slot bookkeeping lives in a parallel array so it stays that way.
-#[repr(align(64))]
-pub(crate) struct Chunk {
-    slots: [NodeData; SLOTS_PER_CHUNK],
-}
-
-fn new_chunk() -> Box<Chunk> {
-    // SAFETY: Every slot is written with NodeData::default() before the chunk is exposed. The
-    // chunk is built in place on the heap because it is far too large for the stack.
-    unsafe {
-        let mut chunk = Box::<Chunk>::new_uninit();
-        let slots = &raw mut (*chunk.as_mut_ptr()).slots;
-        for offset in 0..SLOTS_PER_CHUNK {
-            (&raw mut (*slots)[offset]).write(NodeData::default());
-        }
-        chunk.assume_init()
-    }
-}
-
 #[derive(Clone, Copy, Default)]
 struct SlotMetadata {
     generation: u8,
@@ -928,9 +909,9 @@ struct SettledScrollContainers {
 pub(crate) struct LayoutNodeArena {
     chunks: Vec<Box<Chunk>>,
     chunks_by_address: Vec<ChunkAddress>,
+    /// What the paint side reads of every node in `chunks`, as the arena publishes it for a frame.
+    tree_shape: TreeShape,
     slot_metadata: Vec<SlotMetadata>,
-    /// What the paint side reads of every node, as the arena last published it for a recording.
-    paint_tree: crate::cow_column::CowColumn<PaintNode, SLOTS_PER_CHUNK>,
     style_records: Vec<Cell<u64>>,
     style_records_pinned_by_arena: Vec<Cell<bool>>,
     /// The style record a row's host has pinned for readers that outlive the row's place in the
@@ -1166,8 +1147,8 @@ impl LayoutNodeArena {
         Self {
             chunks: Vec::new(),
             chunks_by_address: Vec::new(),
+            tree_shape: TreeShape::default(),
             slot_metadata: Vec::new(),
-            paint_tree: Default::default(),
             style_records: Vec::new(),
             style_records_pinned_by_arena: Vec::new(),
             style_records_pinned_by_host: Vec::new(),
@@ -1341,19 +1322,19 @@ impl LayoutNodeArena {
             self.slot_is_live(slot),
             "layout node arena bound a shell to a dead slot"
         );
-        let data = self.data(slot);
+        let data = self.write_shape(slot);
         assert!(
             data.shell.get().is_none(),
             "layout node arena bound a second shell to a slot"
         );
-        data.kind.set(construction_facts.kind);
+        data.set_kind(construction_facts.kind);
         data.shell.set(ShellId::of_host_object(construction_facts.shell));
         let element_facts = self.element_construction_facts(StyleNodeID::from_raw(construction_facts.style_node));
-        data.flags.set(super::node_facts::construction_flags(
+        data.set_flags(super::node_facts::construction_flags(
             &construction_facts,
             element_facts,
         ));
-        data.dom_paint_facts.set(construction_facts.dom_paint_facts);
+        data.set_dom_paint_facts(construction_facts.dom_paint_facts);
         self.set_node_style_node(slot, StyleNodeID::from_raw(construction_facts.style_node));
         self.enroll_node_for_replaced_content_facts_sync_if_eligible(slot);
     }
@@ -1397,8 +1378,8 @@ impl LayoutNodeArena {
                 "layout node arena exhausted its 24-bit slot index space"
             );
             if (index as usize).is_multiple_of(SLOTS_PER_CHUNK) {
-                let chunk = new_chunk();
-                let start = (&raw const chunk.slots) as usize;
+                let chunk = Chunk::new();
+                let start = chunk.slots_address();
                 let chunk_index = self.chunks.len();
                 let insertion_index = self.chunks_by_address.partition_point(|address| address.start < start);
                 self.chunks_by_address
@@ -1433,7 +1414,7 @@ impl LayoutNodeArena {
             .expect("retired layout node arena slot was reused");
         metadata.occupied = true;
         let generation = metadata.generation;
-        self.data_mut(index).slot_generation.set(generation);
+        *self.data_mut(index).slot_generation.get_mut() = generation;
 
         NodeSlotId::new(index, generation)
     }
@@ -1600,24 +1581,12 @@ impl LayoutNodeArena {
     /// the last publication is shared with it, and a changed one is copied only while an earlier
     /// publication still holds it.
     pub(crate) fn publish_paint_tree(&mut self) -> crate::cow_column::ColumnSnapshot<PaintNode, SLOTS_PER_CHUNK> {
-        self.paint_tree.grow_to(self.slot_metadata.len());
-        for (index, metadata) in self.slot_metadata.iter().enumerate() {
-            let node = if metadata.occupied {
-                PaintNode::of(
-                    &self.chunks[index / SLOTS_PER_CHUNK].slots[index % SLOTS_PER_CHUNK],
-                    metadata.generation,
-                )
-            } else {
-                PaintNode::default()
-            };
-            if self.paint_tree.get(index) != Some(&node) {
-                *self
-                    .paint_tree
-                    .get_mut(index)
-                    .expect("the column grew to hold every slot") = node;
-            }
-        }
-        self.paint_tree.publish()
+        self.tree_shape.publish(&self.chunks)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn paint_tree_changed_since_publish(&mut self) -> bool {
+        self.tree_shape.changed_since_publish(&self.chunks)
     }
 
     pub(crate) fn data(&self, id: NodeSlotId) -> &NodeData {
@@ -1627,7 +1596,7 @@ impl LayoutNodeArena {
             .chunks
             .get(index / SLOTS_PER_CHUNK)
             .expect("invalid layout node arena slot ID");
-        let data = &chunk.slots[index % SLOTS_PER_CHUNK];
+        let data = chunk.slot(index % SLOTS_PER_CHUNK);
         assert_eq!(
             data.slot_generation.get(),
             id.generation(),
@@ -1636,10 +1605,27 @@ impl LayoutNodeArena {
         data
     }
 
+    /// The node's data, for writing its shape: see [`super::tree_shape`].
+    pub(crate) fn write_shape(&self, id: NodeSlotId) -> ShapeWriter<'_> {
+        assert!(!id.is_invalid(), "invalid layout node arena slot ID");
+        let index = id.slot_index() as usize;
+        let chunk = self
+            .chunks
+            .get(index / SLOTS_PER_CHUNK)
+            .expect("invalid layout node arena slot ID");
+        let writer = chunk.write_shape(index % SLOTS_PER_CHUNK);
+        assert_eq!(
+            writer.slot_generation.get(),
+            id.generation(),
+            "layout node arena wrote a stale or unused slot"
+        );
+        writer
+    }
+
     pub(crate) fn set_node_generated_for(&self, id: NodeSlotId, generated_for: u8, generator: Option<StyleNodeID>) {
         self.assert_owner_thread();
-        let data = self.data(id);
-        data.generated_for.set(generated_for);
+        let data = self.write_shape(id);
+        data.set_generated_for(generated_for);
         self.set_node_style_node(id, generator);
     }
 
@@ -2418,8 +2404,7 @@ impl LayoutNodeArena {
 
     pub(crate) fn set_node_style(&self, id: NodeSlotId, style_record: u64, payloads: *const c_void) -> bool {
         self.assert_owner_thread();
-        let data = self.data(id);
-        data.style.set(StylePayloadsRef::new(payloads));
+        self.write_shape(id).set_style(StylePayloadsRef::new(payloads));
         self.set_node_flag(id, NodeFlag::FollowsPrincipalStyle, false);
         self.invalidate_overflow_after_style_change(id);
         let previous = self.style_records[id.slot_index() as usize].replace(style_record);
@@ -3383,7 +3368,7 @@ impl LayoutNodeArena {
         if fixed {
             flags |= NodeFlag::EstablishesFixedPositionContainingBlock as u32;
         }
-        data.flags.set(flags);
+        self.write_shape(node).set_flags(flags);
 
         let previous = previous_flags & establishment_flags;
         let current = flags & establishment_flags;
@@ -3449,9 +3434,8 @@ impl LayoutNodeArena {
     }
 
     pub(crate) fn forget_committed_out_of_flow_facts(&self, node: NodeSlotId) {
-        let data = self.data(node);
-        data.flags
-            .set(data.flags.get() & !(NodeFlag::AbsposDescendantEscapes as u32));
+        let data = self.write_shape(node);
+        data.set_flags(data.flags.get() & !(NodeFlag::AbsposDescendantEscapes as u32));
         let mut contained = self.out_of_flow_positioning_contained.borrow_mut();
         if !contained.is_empty() {
             contained.remove(&node);
@@ -3516,15 +3500,15 @@ impl LayoutNodeArena {
 
     pub(crate) fn stamp_anonymous_box(&self, slot: NodeSlotId, kind: NodeKind, derived: DerivedStyleRecord) {
         self.assert_owner_thread();
-        let data = self.data(slot);
+        let data = self.write_shape(slot);
         assert_eq!(
             data.kind.get(),
             NodeKind::Unset,
             "stamped an anonymous box onto a bound slot"
         );
         assert!(derived.record != 0 && !derived.payloads.is_null());
-        data.kind.set(kind);
-        data.flags.set(super::node_facts::construction_flags(
+        data.set_kind(kind);
+        data.set_flags(super::node_facts::construction_flags(
             &FfiNodeConstructionFacts {
                 kind,
                 shell: std::ptr::null_mut(),
@@ -3536,7 +3520,7 @@ impl LayoutNodeArena {
         ));
         self.style_records[slot.slot_index() as usize].set(derived.record);
         self.style_records_pinned_by_arena[slot.slot_index() as usize].set(true);
-        data.style.set(derived.payloads);
+        data.set_style(derived.payloads);
         self.enroll_node_for_replaced_content_facts_sync_if_eligible(slot);
     }
 
@@ -3549,14 +3533,14 @@ impl LayoutNodeArena {
     /// carries no style, as the shell the retired host path allocated for one did.
     pub(crate) fn stamp_anonymous_text_row(&self, slot: NodeSlotId) {
         self.assert_owner_thread();
-        let data = self.data(slot);
+        let data = self.write_shape(slot);
         assert_eq!(
             data.kind.get(),
             NodeKind::Unset,
             "stamped a prepared row onto a bound slot"
         );
-        data.kind.set(NodeKind::GeneratedTextNode);
-        data.flags.set(super::node_facts::construction_flags(
+        data.set_kind(NodeKind::GeneratedTextNode);
+        data.set_flags(super::node_facts::construction_flags(
             &FfiNodeConstructionFacts {
                 kind: NodeKind::GeneratedTextNode,
                 shell: std::ptr::null_mut(),
@@ -3570,14 +3554,14 @@ impl LayoutNodeArena {
 
     pub(crate) fn stamp_dom_row(&self, slot: NodeSlotId, kind: NodeKind, style_node: Option<StyleNodeID>) {
         self.assert_owner_thread();
-        let data = self.data(slot);
+        let data = self.write_shape(slot);
         assert_eq!(
             data.kind.get(),
             NodeKind::Unset,
             "stamped a prepared row onto a bound slot"
         );
-        data.kind.set(kind);
-        data.flags.set(super::node_facts::construction_flags(
+        data.set_kind(kind);
+        data.set_flags(super::node_facts::construction_flags(
             &FfiNodeConstructionFacts {
                 kind,
                 shell: std::ptr::null_mut(),
@@ -3599,7 +3583,7 @@ impl LayoutNodeArena {
         // name it answers by.
         let scroll_offset = style_node.map_or_else(FfiCssPixelPoint::default, |style_node| {
             let facts = self.with_style_store(|engine| engine.node_dom_paint_facts(style_node));
-            self.data(slot).dom_paint_facts.set(facts);
+            self.write_shape(slot).set_dom_paint_facts(facts);
             // What the element has scrolled to, which its own box carries. The viewport's row
             // takes the navigable's offset instead, and a text node's row never scrolls.
             self.element_scroll_offset(style_node)
@@ -3731,7 +3715,7 @@ impl LayoutNodeArena {
         // an anonymous row apart from one stamped for a pseudo-element, and the row carries it
         // before its shell exists; binding it to the pseudo-element comes later.
         self.set_node_flag(slot, NodeFlag::Anonymous, true);
-        self.data(slot).generated_for.set(pseudo_kind + 1);
+        self.write_shape(slot).set_generated_for(pseudo_kind + 1);
         let (record, payloads) = self
             .with_style_engine(|engine| engine.pseudo_published_style_record(generator, pseudo_kind))
             .expect("a pseudo-element whose box is built has published its style");
@@ -3749,7 +3733,7 @@ impl LayoutNodeArena {
     /// performs rather than the change funnel a live row's facts move through.
     pub(crate) fn set_constructed_row_dom_paint_facts(&self, slot: NodeSlotId, facts: u8) {
         self.assert_owner_thread();
-        self.data(slot).dom_paint_facts.set(facts);
+        self.write_shape(slot).set_dom_paint_facts(facts);
     }
 
     pub(crate) fn refresh_insets_use_anchor_functions_flag(&self, slot: NodeSlotId) {
@@ -4173,7 +4157,7 @@ impl LayoutNodeArena {
         let previously_pinned = self.style_records_pinned_by_arena[slot.slot_index() as usize].replace(true);
         assert!(derived.record != 0 && !derived.payloads.is_null());
         let previous_style_record = self.style_records[slot.slot_index() as usize].replace(derived.record);
-        self.data(slot).style.set(derived.payloads);
+        self.write_shape(slot).set_style(derived.payloads);
         self.refresh_style_flags(slot);
         self.invalidate_overflow_after_style_change(slot);
         self.enroll_text_children_for_content_sync(slot);
@@ -4553,11 +4537,11 @@ impl LayoutNodeArena {
         crate::painting::published_immutable::note_row_mutation(self, id, "M5 layout_arena_set_node_dom_paint_facts");
         let mut any_changed = false;
         for row in self.rows_sharing_dom_node_with(id) {
-            let data = self.data(row);
+            let data = self.write_shape(row);
             if data.dom_paint_facts.get() == facts {
                 continue;
             }
-            data.dom_paint_facts.set(facts);
+            data.set_dom_paint_facts(facts);
             any_changed = true;
             use crate::painting::record::damage::PaintDamage;
             self.push_paint_damage_for_repaint(row, PaintDamage::ALL_HIT | PaintDamage::SCROLL_METADATA);
@@ -4646,7 +4630,7 @@ impl LayoutNodeArena {
 
     pub(crate) fn set_node_flag(&self, id: NodeSlotId, flag: NodeFlag, value: bool) {
         self.assert_owner_thread();
-        let data = self.data(id);
+        let data = self.write_shape(id);
         let previous = data.flags.get();
         let mut updated = previous;
         if value {
@@ -4671,7 +4655,7 @@ impl LayoutNodeArena {
         {
             self.remove_layout_update_flag_node(id);
         }
-        data.flags.set(updated);
+        data.set_flags(updated);
         // Retaining compositor-animated content decides whether a non-invertible transform
         // still records its stacking context.
         if flag == NodeFlag::HasAnimatedOpacityOrTransform && updated != previous {
@@ -4705,14 +4689,14 @@ impl LayoutNodeArena {
         value: bool,
     ) {
         self.assert_owner_thread();
-        let frame_kinds = &self.data(id).compositor_animation_frame_kinds;
-        let mut updated = frame_kinds.get();
+        let data = self.write_shape(id);
+        let mut updated = data.compositor_animation_frame_kinds.get();
         if value {
             updated |= kind as u8;
         } else {
             updated &= !(kind as u8);
         }
-        frame_kinds.set(updated);
+        data.set_compositor_animation_frame_kinds(updated);
     }
 
     pub(crate) fn for_each_node_in_layout_subtree_in_pre_order(
@@ -4785,8 +4769,8 @@ impl LayoutNodeArena {
             // NB: A partial-relayout batch commits each independent boundary separately.
             // Scanning the document's dirty list per boundary would make cleanup quadratic.
             self.for_each_node_in_layout_subtree_in_pre_order(root, |node| {
-                let data = self.data(node);
-                data.flags.set(data.flags.get() & !flags_to_clear);
+                let data = self.write_shape(node);
+                data.set_flags(data.flags.get() & !flags_to_clear);
                 self.remove_layout_update_flag_node(node);
             });
             return;
@@ -4819,8 +4803,8 @@ impl LayoutNodeArena {
                 index += 1;
                 continue;
             }
-            let data = self.data(node);
-            data.flags.set(data.flags.get() & !flags_to_clear);
+            let data = self.write_shape(node);
+            data.set_flags(data.flags.get() & !flags_to_clear);
             self.remove_layout_update_flag_node(node);
         }
     }
@@ -5270,8 +5254,8 @@ impl LayoutNodeArena {
         self.paintable_rows
             .set_committed_fragment_link(index, metadata.generation, geometry_epoch, link);
 
-        data.flags
-            .set(data.flags.get() | NodeFlag::HasCommittedFragmentLink as u32);
+        self.write_shape(NodeSlotId::new(index, metadata.generation))
+            .set_flags(data.flags.get() | NodeFlag::HasCommittedFragmentLink as u32);
     }
 
     pub(crate) fn epoch_of_geometry_laid_out_in_this_pass(&self, data: &NodeData) -> Option<u32> {
@@ -5302,8 +5286,8 @@ impl LayoutNodeArena {
             link.is_some(),
             "committed fragment link presence flag disagrees with the arena side table"
         );
-        data.flags
-            .set(data.flags.get() & !(NodeFlag::HasCommittedFragmentLink as u32));
+        self.write_shape(NodeSlotId::new(index, metadata.generation))
+            .set_flags(data.flags.get() & !(NodeFlag::HasCommittedFragmentLink as u32));
         link
     }
 
@@ -5605,8 +5589,8 @@ impl LayoutNodeArena {
     pub(crate) fn insert_child(&self, parent: NodeSlotId, child: NodeSlotId, before: NodeSlotId) {
         self.assert_owner_thread();
         assert_ne!(parent, child, "a layout node cannot become its own child");
-        let parent_data = self.data(parent);
-        let child_data = self.data(child);
+        let parent_data = self.write_shape(parent);
+        let child_data = self.write_shape(child);
 
         let child_parent = child_data.parent.get();
         let child_previous_sibling = child_data.previous_sibling.get();
@@ -5651,13 +5635,13 @@ impl LayoutNodeArena {
             before_data.previous_sibling.get()
         };
 
-        child_data.parent.set(parent);
+        child_data.set_parent(parent);
         child_data.previous_sibling.set(previous);
-        child_data.next_sibling.set(before);
+        child_data.set_next_sibling(before);
         if previous.is_invalid() {
-            parent_data.first_child.set(child);
+            parent_data.set_first_child(child);
         } else {
-            self.data(previous).next_sibling.set(child);
+            self.write_shape(previous).set_next_sibling(child);
         }
         if before.is_invalid() {
             parent_data.last_child.set(child);
@@ -5681,8 +5665,8 @@ impl LayoutNodeArena {
 
     fn unlink_child(&self, parent: NodeSlotId, child: NodeSlotId) {
         self.assert_owner_thread();
-        let parent_data = self.data(parent);
-        let child_data = self.data(child);
+        let parent_data = self.write_shape(parent);
+        let child_data = self.write_shape(child);
 
         let child_parent = child_data.parent.get();
         assert_eq!(child_parent, parent, "removed layout node is not a child of the parent");
@@ -5692,15 +5676,15 @@ impl LayoutNodeArena {
         if previous.is_invalid() {
             let first_child = parent_data.first_child.get();
             assert_eq!(first_child, child, "layout node child list lost its first child");
-            parent_data.first_child.set(next);
+            parent_data.set_first_child(next);
         } else {
-            let previous_data = self.data(previous);
+            let previous_data = self.write_shape(previous);
             let previous_next_sibling = previous_data.next_sibling.get();
             assert_eq!(
                 previous_next_sibling, child,
                 "layout node sibling chain is inconsistent"
             );
-            previous_data.next_sibling.set(next);
+            previous_data.set_next_sibling(next);
         }
 
         if next.is_invalid() {
@@ -5717,9 +5701,9 @@ impl LayoutNodeArena {
             next_data.previous_sibling.set(previous);
         }
 
-        child_data.parent.set(NodeSlotId::INVALID);
+        child_data.set_parent(NodeSlotId::INVALID);
         child_data.previous_sibling.set(NodeSlotId::INVALID);
-        child_data.next_sibling.set(NodeSlotId::INVALID);
+        child_data.set_next_sibling(NodeSlotId::INVALID);
     }
 
     pub(crate) fn paint_state(&self) -> &RefCell<crate::painting::paint_state::PaintState> {
@@ -6200,7 +6184,7 @@ impl LayoutNodeArena {
             .chunks
             .get_mut(index / SLOTS_PER_CHUNK)
             .expect("invalid layout node arena slot ID");
-        &mut chunk.slots[index % SLOTS_PER_CHUNK]
+        chunk.slot_mut(index % SLOTS_PER_CHUNK)
     }
 
     fn metadata(&self, index: u32) -> &SlotMetadata {
@@ -7914,7 +7898,7 @@ mod tests {
         assert!(arena.previous_dom_backed_or_generated_node(element, true).is_invalid());
         assert!(arena.previous_dom_backed_or_generated_node(root, false).is_invalid());
 
-        arena.data(nested_anonymous).generated_for.set(1);
+        arena.write_shape(nested_anonymous).set_generated_for(1);
         assert_eq!(
             arena.previous_dom_backed_or_generated_node(element, false),
             nested_anonymous
@@ -8201,7 +8185,7 @@ mod tests {
         let root = arena.allocate_for_test();
         let child = arena.allocate_for_test();
         let detached = arena.allocate_for_test();
-        arena.data(root.slot).kind.set(NodeKind::Viewport);
+        arena.write_shape(root.slot).set_kind(NodeKind::Viewport);
         arena.insert_child(root.slot, child.slot, NodeSlotId::INVALID);
         let update_flags = NodeFlag::NeedsLayoutUpdate as u32 | NodeFlag::NeedsOwnGeometryUpdate as u32;
         for node in [root.slot, child.slot, detached.slot] {
@@ -8231,7 +8215,7 @@ mod tests {
     fn independent_partial_commits_remove_only_their_own_dirty_nodes() {
         let mut arena = LayoutNodeArena::new();
         let viewport = arena.allocate_for_test();
-        arena.data(viewport.slot).kind.set(NodeKind::Viewport);
+        arena.write_shape(viewport.slot).set_kind(NodeKind::Viewport);
         let mut boundaries = Vec::new();
         for _ in 0..32 {
             let boundary = arena.allocate_for_test();
@@ -8263,7 +8247,7 @@ mod tests {
     fn full_commit_checks_shared_dirty_ancestor_chains_once() {
         let mut arena = LayoutNodeArena::new();
         let viewport = arena.allocate_for_test();
-        arena.data(viewport.slot).kind.set(NodeKind::Viewport);
+        arena.write_shape(viewport.slot).set_kind(NodeKind::Viewport);
         let detached = arena.allocate_for_test();
         let mut dirty_nodes = Vec::new();
         for root in [viewport.slot, detached.slot] {
