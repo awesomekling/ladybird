@@ -248,9 +248,14 @@ impl Flight {
                     // main thread's writes may go on beside it only if what the round owes the
                     // document thread reaches no node they could change: no tree build or image
                     // to pay for, no rebuild to ask for. A flight that ran the round's style keeps
-                    // the engine until the document thread has installed the batch it published.
-                    if round.may_be_presented && self.began != FfiFlightStage::Style {
-                        self.releases_style_engine.release();
+                    // the engine until the document thread has installed the batch it published,
+                    // but for reads of the records, which the install does not change.
+                    if round.may_be_presented {
+                        if self.began == FfiFlightStage::Style {
+                            self.releases_style_engine.release_for_record_reads();
+                        } else {
+                            self.releases_style_engine.release();
+                        }
                     }
                     reached = FfiFlightStage::Rounds;
                     next = FfiFlightStage::PaintPrep;
