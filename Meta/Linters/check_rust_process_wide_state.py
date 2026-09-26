@@ -232,6 +232,8 @@ RENDER_STAGE_ALLOWED = {
             "stage_thread.rs:READS",
             "stage_thread.rs:FRAMES_OWED_SINCE",
             "stage_thread.rs:RECORDINGS_CANCELLED_BY_READS",
+            "stage_thread.rs:RECORDINGS_TO_REDO",
+            "stage_thread.rs:RECORDINGS_REDONE",
         ],
     ),
     **render_stage_entries(

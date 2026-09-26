@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<style>
+    body { margin: 0; }
+    #box { width: 100px; height: 10px; background-color: green; }
+</style>
+<div id="box"></div>
+<script>
+    // A read of a document the page left alone since its recording was submitted changes nothing the recording
+    // shows: it waits for the recording instead of cancelling it, and the frame is presented.
+    asyncTest(async done => {
+        let presentedBefore = 0;
+        const result = await whileFrameInFlight("mid-recording", () => {
+            box.style.backgroundColor = "blue";
+        }, frame => {
+            presentedBefore = internals.presentedSceneEpoch();
+            const cancelledBefore = internals.recordingsCancelledByReads();
+            const color = getComputedStyle(box).backgroundColor;
+            const height = box.offsetHeight;
+            return {
+                ...frame,
+                color,
+                height,
+                cancelled: internals.recordingsCancelledByReads() - cancelledBefore,
+            };
+        });
+        println(`held as armed: ${heldAsArmed(result, "mid-recording")}`);
+        println(`read: ${result.color} ${result.height}`);
+        println(`cancelled recordings: ${result.armed ? result.cancelled : 0}`);
+        await twoFrames();
+        println(`presented: ${!result.armed || internals.presentedSceneEpoch() > presentedBefore}`);
+        done();
+    });
+</script>

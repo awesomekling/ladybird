@@ -564,15 +564,54 @@ fn recording_cancellation_enabled() -> bool {
 }
 
 thread_local! {
-    // On the main thread, the reads of render state it is in, innermost last, and whether each is
-    // one that script waits for outside the rendering update. A forced join inside such a read
-    // cancels the recordings in flight instead of waiting for them.
-    static READS: RefCell<Vec<bool>> = const { RefCell::new(Vec::new()) };
+    // On the main thread, the reads of render state it is in, innermost last, and for each the arena
+    // whose recording in flight it may cancel, or 0. A forced join inside these reads cancels those
+    // recordings instead of waiting for them.
+    static READS: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
     // On the main thread, for each arena whose last recording was cancelled, when the first
     // recording since its last presented one was.
     static FRAMES_OWED_SINCE: RefCell<Vec<(usize, std::time::Instant)>> = const { RefCell::new(Vec::new()) };
     // On the main thread, how many recordings reads cancelled.
     static RECORDINGS_CANCELLED_BY_READS: Cell<u64> = const { Cell::new(0) };
+    // On the main thread, the arenas whose last recording was cancelled and not yet made again.
+    static RECORDINGS_TO_REDO: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
+    // On the main thread, how the recordings made again after a cancellation were made, by
+    // [`RecordingRedo`].
+    static RECORDINGS_REDONE: Cell<[u64; 3]> = const { Cell::new([0; 3]) };
+}
+
+/// How a document whose recording a read cancelled is recorded again.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(u8)]
+pub enum RecordingRedo {
+    /// In a frame submitted to the Rendering thread, which the main thread does not wait for.
+    Submitted = 0,
+    /// In a flight on the Rendering thread.
+    InFlight = 1,
+    /// With the main thread waiting for it.
+    WhileMainWaits = 2,
+}
+
+/// Notes, on the main thread, that the arena `arena` is being recorded `how`.
+pub(crate) fn note_recording_made(arena: usize, how: RecordingRedo) {
+    let redone = RECORDINGS_TO_REDO.with_borrow_mut(|to_redo| {
+        let position = to_redo.iter().position(|owing| *owing == arena)?;
+        to_redo.swap_remove(position);
+        Some(())
+    });
+    if redone.is_some() {
+        RECORDINGS_REDONE.with(|counts| {
+            let mut value = counts.get();
+            value[how as usize] += 1;
+            counts.set(value);
+        });
+    }
+}
+
+/// How many recordings a read cancelled were made again `how` on the calling thread so far.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_stage_thread_cancelled_recordings_redone(how: RecordingRedo) -> u64 {
+    RECORDINGS_REDONE.with(Cell::get)[how as usize]
 }
 
 /// How many recordings in flight reads cancelled on the calling thread so far.
@@ -581,12 +620,14 @@ pub extern "C" fn rust_stage_thread_recordings_cancelled_by_reads() -> u64 {
     RECORDINGS_CANCELLED_BY_READS.with(Cell::get)
 }
 
-/// Begins a read of render state. If `script_waits` (the read is made outside the rendering
-/// update), a forced join until the matching [`rust_stage_thread_end_read`] cancels the recordings
-/// in flight rather than waiting for them.
+/// Begins a read of render state. With a non-null `cancels_recording_of` (a read script waits for
+/// outside the rendering update, of a document dirtied beside its recording in flight, so the
+/// recording shows a document the read is about to change), a forced join until the matching
+/// [`rust_stage_thread_end_read`] cancels the recording in flight of that arena rather than
+/// waiting for it.
 #[unsafe(no_mangle)]
-pub extern "C" fn rust_stage_thread_begin_read(script_waits: bool) {
-    READS.with_borrow_mut(|reads| reads.push(script_waits));
+pub extern "C" fn rust_stage_thread_begin_read(cancels_recording_of: *const c_void) {
+    READS.with_borrow_mut(|reads| reads.push(cancels_recording_of as usize));
 }
 
 /// Ends the innermost read [`rust_stage_thread_begin_read`] began.
@@ -595,10 +636,10 @@ pub extern "C" fn rust_stage_thread_end_read() {
     READS.with_borrow_mut(|reads| reads.pop());
 }
 
-/// Asks every recording of the frame in flight to stop, unless the document it records has gone
-/// without a frame for too long already.
+/// Asks the recordings of the frame in flight that the reads in progress may cancel to stop,
+/// unless the document one records has gone without a frame for too long already.
 fn cancel_recordings_a_read_waits_for() {
-    if !READS.with_borrow(|reads| reads.iter().any(|script_waits| *script_waits)) || !recording_cancellation_enabled() {
+    if READS.with_borrow(|reads| reads.iter().all(|arena| *arena == 0)) || !recording_cancellation_enabled() {
         return;
     }
     SUBMITTED.with_borrow(|submitted| {
@@ -606,6 +647,9 @@ fn cancel_recordings_a_read_waits_for() {
             let Some(cancel) = &stage.recording_cancel else {
                 continue;
             };
+            if !READS.with_borrow(|reads| reads.contains(&stage.arena)) {
+                continue;
+            }
             let owed_too_long = FRAMES_OWED_SINCE.with_borrow(|owed| {
                 owed.iter().any(|(arena, since)| {
                     *arena == stage.arena && since.elapsed() >= LONGEST_WAIT_FOR_A_FRAME_OF_CANCELLED_RECORDINGS
@@ -622,6 +666,11 @@ fn cancel_recordings_a_read_waits_for() {
 fn note_recording_taken_back(arena: usize, cancelled: bool) {
     if cancelled {
         RECORDINGS_CANCELLED_BY_READS.with(|count| count.set(count.get() + 1));
+        RECORDINGS_TO_REDO.with_borrow_mut(|to_redo| {
+            if !to_redo.contains(&arena) {
+                to_redo.push(arena);
+            }
+        });
     }
     FRAMES_OWED_SINCE.with_borrow_mut(|owed| {
         let position = owed.iter().position(|(owing, _)| *owing == arena);
@@ -2280,19 +2329,22 @@ mod tests {
         let first = submit(0x10);
         let second = submit(0x20);
 
-        // A read inside the rendering update waits.
-        rust_stage_thread_begin_read(false);
+        let read = |arena: usize| rust_stage_thread_begin_read(arena as *const c_void);
+
+        // A read inside the rendering update, or of a document still clean, waits.
+        read(0);
         cancel_recordings_a_read_waits_for();
+        rust_stage_thread_end_read();
         assert!(!first.is_requested() && !second.is_requested());
 
-        // A read script waits for, even one nested in it, cancels.
-        rust_stage_thread_end_read();
-        rust_stage_thread_begin_read(true);
-        rust_stage_thread_begin_read(false);
+        // A read script waits for cancels the recording of the dirty document it reads, even from a
+        // read nested in it, and waits for the others.
+        read(0x10);
+        read(0);
         cancel_recordings_a_read_waits_for();
         rust_stage_thread_end_read();
         rust_stage_thread_end_read();
-        assert!(first.is_requested() && second.is_requested());
+        assert!(first.is_requested() && !second.is_requested());
         SUBMITTED.with_borrow_mut(Vec::clear);
 
         // A document whose recordings were cancelled for too long gets its next one presented.
@@ -2302,8 +2354,10 @@ mod tests {
         });
         let owing = submit(0x10);
         let other = submit(0x20);
-        rust_stage_thread_begin_read(true);
+        read(0x10);
+        read(0x20);
         cancel_recordings_a_read_waits_for();
+        rust_stage_thread_end_read();
         rust_stage_thread_end_read();
         assert!(!owing.is_requested() && other.is_requested());
         SUBMITTED.with_borrow_mut(Vec::clear);
@@ -2311,12 +2365,22 @@ mod tests {
         // Once one of its recordings is presented, its recordings may be cancelled again.
         note_recording_taken_back(0x10, false);
         let presented = submit(0x10);
-        rust_stage_thread_begin_read(true);
+        read(0x10);
         cancel_recordings_a_read_waits_for();
         rust_stage_thread_end_read();
         assert!(presented.is_requested());
         SUBMITTED.with_borrow_mut(Vec::clear);
         FRAMES_OWED_SINCE.with_borrow_mut(Vec::clear);
+
+        // A cancelled recording counts as redone by the next recording of its arena, and only once.
+        let redone = |how| rust_stage_thread_cancelled_recordings_redone(how);
+        let before = redone(RecordingRedo::Submitted);
+        note_recording_made(0x10, RecordingRedo::Submitted);
+        note_recording_made(0x10, RecordingRedo::Submitted);
+        note_recording_made(0x30, RecordingRedo::WhileMainWaits);
+        assert_eq!(redone(RecordingRedo::Submitted), before + 1);
+        assert_eq!(redone(RecordingRedo::WhileMainWaits), 0);
+        RECORDINGS_TO_REDO.with_borrow_mut(Vec::clear);
     }
 
     #[test]
