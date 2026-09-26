@@ -25,6 +25,7 @@
 #include <LibWeb/ComputedValuesRustFFI.h>
 #include <LibWeb/DOM/AdoptedStyleSheets.h>
 #include <LibWeb/DOM/Document.h>
+#include <LibWeb/HTML/EventLoop/MainThreadPhases.h>
 #include <LibWeb/Layout/NodeArena.h>
 #include <LibWeb/Loader/ContentBlocker.h>
 #include <LibWeb/Namespace.h>
@@ -332,6 +333,7 @@ StyleCache& StyleScope::ensure_style_cache() const
 
 void StyleScope::build_rule_cache()
 {
+    HTML::MainThreadPhases::Scope phase { HTML::MainThreadPhases::Phase::StyleScopeCaches };
     auto& style_cache = ensure_style_cache();
 
     if (!style_cache.rule_cache) {
@@ -751,6 +753,7 @@ void StyleScope::invalidate_counter_style_cache()
 
 void StyleScope::build_counter_style_cache()
 {
+    HTML::MainThreadPhases::Scope phase { HTML::MainThreadPhases::Phase::StyleScopeCaches };
     m_is_doing_counter_style_cache_update = true;
 
     // Counter styles can be resolved before any keyframe or function lookup builds the rule cache.

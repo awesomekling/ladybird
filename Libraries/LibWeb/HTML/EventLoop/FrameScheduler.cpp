@@ -26,6 +26,7 @@
 #include <LibWeb/HTML/EventLoop/FrameCompletion.h>
 #include <LibWeb/HTML/EventLoop/FrameInFlightReferences.h>
 #include <LibWeb/HTML/EventLoop/FrameScheduler.h>
+#include <LibWeb/HTML/EventLoop/MainThreadPhases.h>
 #include <LibWeb/HTML/LocalNavigable.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/Scripting/TemporaryExecutionContext.h>
@@ -538,6 +539,7 @@ u64 FrameScheduler::finish_one_frame()
 {
     u64 waited_nanoseconds = 0;
     if (m_state == State::InFlight) {
+        MainThreadPhases::Scope phase { MainThreadPhases::Phase::FlightJoin };
         auto wait_start_nanoseconds = MonotonicTime::now().nanoseconds();
         Layout::RustFFI::rust_stage_thread_take_frame_in_flight();
         waited_nanoseconds = MonotonicTime::now().nanoseconds() - wait_start_nanoseconds;

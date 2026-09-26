@@ -33,6 +33,7 @@
 #include <LibWeb/DOM/ShadowRoot.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
 #include <LibWeb/HTML/EventLoop/FrameScheduler.h>
+#include <LibWeb/HTML/EventLoop/MainThreadPhases.h>
 #include <LibWeb/HTML/FormAssociatedElement.h>
 #include <LibWeb/HTML/HTMLBodyElement.h>
 #include <LibWeb/HTML/HTMLSlotElement.h>
@@ -1265,6 +1266,7 @@ bool StyleUpdate::begin(DocumentWithoutBrowsingContext document_without_browsing
     if (document.created_for_appropriate_template_contents())
         return false;
 
+    HTML::MainThreadPhases::Scope begin_phase { document.container_document() ? HTML::MainThreadPhases::Phase::StyleBeginChild : HTML::MainThreadPhases::Phase::StyleBeginTop };
     auto submission_started_at = MonotonicTime::now();
     // What publishes by identity below (animations, the elements prepared for style) finds the nodes that connected
     // since the last update under the identities they take here.
@@ -1999,6 +2001,7 @@ void Document::update_style()
 {
     join_frame_in_flight();
     update_selection_style_observability();
+    HTML::MainThreadPhases::Scope phase { HTML::MainThreadPhases::style_phase(*this) };
     CSS::update_style(*this);
 }
 
@@ -2010,6 +2013,7 @@ void Document::update_style_beside_recording()
 {
     HTML::main_thread_event_loop().frame_scheduler().hold_style_records_for_frame(*this);
     update_selection_style_observability();
+    HTML::MainThreadPhases::Scope phase { HTML::MainThreadPhases::style_phase(*this) };
     CSS::update_style(*this);
 }
 
@@ -2017,6 +2021,7 @@ bool Document::submit_style_for_rendering_update()
 {
     join_frame_in_flight();
     update_selection_style_observability();
+    HTML::MainThreadPhases::Scope phase { HTML::MainThreadPhases::style_phase(*this) };
     return CSS::submit_style_update(*this);
 }
 

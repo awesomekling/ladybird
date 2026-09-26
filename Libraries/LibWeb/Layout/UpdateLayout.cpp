@@ -11,6 +11,7 @@
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/NodeIdentity.h>
 #include <LibWeb/DOM/Range.h>
+#include <LibWeb/HTML/EventLoop/MainThreadPhases.h>
 #include <LibWeb/HTML/LocalNavigable.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
 #include <LibWeb/Layout/Node.h>
@@ -131,6 +132,7 @@ void Document::update_layout(UpdateLayoutReason reason)
 
 void Document::update_layout(UpdateLayoutReason reason, ThrottledAnimationSamplingScope animation_sampling_scope)
 {
+    HTML::MainThreadPhases::Scope phase { HTML::MainThreadPhases::layout_phase(*this) };
     JoinScope join_scope { *this, reason };
     join_scope.update_style_beside_recording(animation_sampling_scope);
 

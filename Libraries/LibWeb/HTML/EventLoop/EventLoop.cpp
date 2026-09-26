@@ -27,6 +27,7 @@
 #include <LibWeb/HTML/EventLoop/FrameCompletion.h>
 #include <LibWeb/HTML/EventLoop/FrameInFlightReferences.h>
 #include <LibWeb/HTML/EventLoop/FrameScheduler.h>
+#include <LibWeb/HTML/EventLoop/MainThreadPhases.h>
 #include <LibWeb/HTML/HTMLMediaElement.h>
 #include <LibWeb/HTML/LocalTraversableNavigable.h>
 #include <LibWeb/HTML/NavigableContainer.h>
@@ -328,6 +329,7 @@ void EventLoop::process()
         m_finished_frame_consumer_call_requested = false;
         ++m_rendering_scheduler_counters.finished_frame_consumer_calls;
         TemporaryChange at_step_one { m_calling_finished_frame_consumer, true };
+        MainThreadPhases::Scope phase { MainThreadPhases::Phase::FrameConsumer };
         m_finished_frame_consumer->function()();
     }
 
@@ -335,6 +337,7 @@ void EventLoop::process()
     //                             lent, for the render clock to tick beside it.
     if (m_finished_frame_consumer && m_task_queue->has_runnable_tasks()) {
         TemporaryChange at_step_one { m_calling_finished_frame_consumer, true };
+        MainThreadPhases::Scope phase { MainThreadPhases::Phase::FrameConsumer };
         m_frame_scheduler->finish_frame_for_clock_lend();
     }
 
@@ -345,8 +348,10 @@ void EventLoop::process()
     // Some algorithms request that steps or states only occur once the event loop has reached step 1.
     // Invoke a set of tasks that these algorithms request us to in order to achieve this.
     auto reached_step_1_tasks = move(m_reached_step_1_tasks);
-    for (auto& reached_step_1_task : reached_step_1_tasks)
+    for (auto& reached_step_1_task : reached_step_1_tasks) {
+        MainThreadPhases::Scope phase { MainThreadPhases::Phase::StepOne };
         reached_step_1_task->function()();
+    }
 
     // 2. If the event loop has a task queue with at least one runnable task, then:
     if (m_task_queue->has_runnable_tasks()) {
@@ -369,6 +374,7 @@ void EventLoop::process()
         m_currently_running_task = oldest_task.ptr();
 
         // 6. Perform oldestTask's steps.
+        MainThreadPhases::Scope phase { MainThreadPhases::task_phase(*oldest_task) };
         oldest_task->execute();
 
         // 7. Set the event loop's currently running task back to null.
@@ -763,7 +769,10 @@ void EventLoop::update_the_rendering()
             end_rendering_update();
     };
 
-    process_input_events();
+    {
+        MainThreadPhases::Scope phase { MainThreadPhases::Phase::RenderingInput };
+        process_input_events();
+    }
 
     // 1. Let frameTimestamp be eventLoop's last render opportunity time.
     auto frame_timestamp = m_last_render_opportunity_time;
@@ -806,8 +815,11 @@ void EventLoop::update_the_rendering()
     // Everything the render side told each document goes through before the rendering opportunity
     // that reports it can observe it. Animation events, observations and input are ordered by the
     // list, so they keep their place relative to the steps below.
-    for (auto& document : docs)
-        document->apply_commit_messages();
+    {
+        MainThreadPhases::Scope phase { MainThreadPhases::Phase::RenderingCommitMessages };
+        for (auto& document : docs)
+            document->apply_commit_messages();
+    }
 
     // FIXME: 4. Unnecessary rendering: Remove from docs any Document object doc for which all of the following are true:
 
@@ -816,6 +828,8 @@ void EventLoop::update_the_rendering()
     // FIXME: 6. For each doc of docs, reveal doc.
 
     auto observable_steps_start_nanoseconds = MonotonicTime::now().nanoseconds();
+    Optional<MainThreadPhases::Scope> observable_phase;
+    observable_phase.emplace(MainThreadPhases::Phase::RenderingResizeScrollMedia);
 
     // 7. For each doc of docs, flush autofocus candidates for doc if its node navigable is a top-level traversable.
     for (auto& document : docs) {
@@ -847,6 +861,9 @@ void EventLoop::update_the_rendering()
     // samples the lease's effects itself.
     m_frame_scheduler->prepare_clock_ticks(docs, frame_timestamp);
 
+    observable_phase.clear();
+    observable_phase.emplace(MainThreadPhases::Phase::RenderingAnimations);
+
     // 11. For each doc of docs, update animations and send events for doc, passing in relative high resolution time given frameTimestamp and doc's relevant global object as the timestamp [WEBANIMATIONS]
     Vector<HighResolutionTime::DOMHighResTimeStamp> animation_timestamps;
     animation_timestamps.ensure_capacity(docs.size());
@@ -873,8 +890,11 @@ void EventLoop::update_the_rendering()
     // FIXME: 13. For each doc of docs, if the user agent detects that the backing storage associated with a CanvasRenderingContext2D or an OffscreenCanvasRenderingContext2D, context, has been lost, then it must run the context lost steps for each such context:
 
     // 14. For each doc of docs, run the animation frame callbacks for doc, passing in the relative high resolution time given frameTimestamp and doc's relevant global object as the timestamp.
+    observable_phase.clear();
+    observable_phase.emplace(MainThreadPhases::Phase::RenderingAnimationFrameCallbacks);
     for (size_t index = 0; index < docs.size(); ++index)
         run_animation_frame_callbacks(*docs[index], animation_timestamps[index]);
+    observable_phase.clear();
     m_rendering_scheduler_counters.observable_steps_nanoseconds += MonotonicTime::now().nanoseconds() - observable_steps_start_nanoseconds;
 
     // Every animation frame callback of the rendering update has run, and its microtasks with it, so nothing script
@@ -941,6 +961,7 @@ bool EventLoop::run_rendering_update_from_step_16(Vector<GC::Ref<DOM::Document>>
     // 16. For each doc of docs:
     for (size_t document_index = first_document_index; document_index < docs.size(); ++document_index) {
         auto document = docs[document_index];
+        MainThreadPhases::Scope step_16_phase { MainThreadPhases::Phase::RenderingStep16 };
 
         // A rendering update that may overlap its layout lets the first document whose layout update runs a full
         // layout pass run the pass beside the main thread, and goes on at this step once the frame scheduler has taken
@@ -1049,6 +1070,7 @@ bool EventLoop::run_rendering_update_from_step_16(Vector<GC::Ref<DOM::Document>>
             // 6. If doc has active resize observations:
             if (document->has_active_resize_observations()) {
                 // 1. Set resizeObserverDepth to the result of broadcasting active resize observations given doc.
+                MainThreadPhases::Scope phase { MainThreadPhases::Phase::RenderingResizeObservers };
                 resize_observer_depth = document->broadcast_active_resize_observations();
 
                 // 2. Continue.
@@ -1098,6 +1120,9 @@ bool EventLoop::run_rendering_update_from_step_16(Vector<GC::Ref<DOM::Document>>
 
     // FIXME: 17. For each doc of docs, if the focused area of doc is not a focusable area, then run the focusing steps for doc's viewport, and set doc's relevant global object's navigation API's focus changed during ongoing navigation to false.
 
+    Optional<MainThreadPhases::Scope> after_step_16_phase;
+    after_step_16_phase.emplace(MainThreadPhases::Phase::RenderingIntersectionObservers);
+
     // 18. For each doc of docs, perform pending transition operations for doc. [CSSVIEWTRANSITIONS]
     for (auto& document : docs) {
         document->perform_pending_transition_operations();
@@ -1140,6 +1165,9 @@ bool EventLoop::run_rendering_update_from_step_16(Vector<GC::Ref<DOM::Document>>
     // have had a chance to update them, and before painting snapshots the frame.
     for (auto& document : docs)
         document->page().prepare_canvas_contexts_for_compositing();
+
+    after_step_16_phase.clear();
+    after_step_16_phase.emplace(MainThreadPhases::Phase::RenderingPaint);
 
     // 22. For each doc of docs, update the rendering or user interface of doc and its node navigable to reflect the current state.
     for (auto& doc : docs.in_reverse()) {
@@ -1189,8 +1217,12 @@ bool EventLoop::run_rendering_update_from_step_16(Vector<GC::Ref<DOM::Document>>
 
     // NB: The steps after painting run here, before the frame is submitted, even when the render side records it:
     //     once the main half ends, tasks run beside the frame, and the steps must not see what they change.
+    after_step_16_phase.clear();
+    after_step_16_phase.emplace(MainThreadPhases::Phase::RenderingFinish);
     finish_rendering_update_steps(docs);
 
+    after_step_16_phase.clear();
+    after_step_16_phase.emplace(MainThreadPhases::Phase::RenderingSubmit);
     return m_frame_scheduler->submit();
 }
 
@@ -1395,6 +1427,7 @@ void EventLoop::perform_a_microtask_checkpoint()
     // > At some future point in time, when there is no running context in the agent for which the job is scheduled and that agent's execution context stack is empty...
     VERIFY(vm().execution_context_stack().is_empty());
     VERIFY(!vm().has_running_execution_context());
+    MainThreadPhases::Scope phase { MainThreadPhases::Phase::Microtasks };
 
     // 2. Set the event loop's performing a microtask checkpoint to true.
     m_performing_a_microtask_checkpoint = true;
