@@ -117,6 +117,8 @@ public:
     void begin_main_half(bool synchronous);
     // The recording mode of the main half's recordings.
     Painting::RecordingRun recording_run() const;
+    // What the main half's recordings count as, if the render side runs them while the main thread waits.
+    Painting::RecordingOrigin recording_origin() const;
     // Whether the ticket is taking the main half's frames: a frame begun after one the render side records is finished
     // after it too, so frames reach their compositor contexts in paint order.
     bool ticket_takes_frames() const { return m_ticket && !m_ticket->navigables.is_empty(); }

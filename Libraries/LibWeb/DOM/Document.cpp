@@ -2845,42 +2845,45 @@ static bool hosts_navigable_that_may_paint_after_it(Document const& document)
         auto const& style_engine = content_document->style_computer().style_engine();
         if (style_engine.has_recorded_input() || style_engine.has_pending_transaction())
             return true;
-        if (content_document->flight_paint_is_blocked())
+        if (content_document->flight_paint_blocker().has_value())
             return true;
     }
     return false;
 }
 
-bool Document::flight_paint_is_blocked() const
+Optional<Painting::FlightPaintDecline> Document::flight_paint_blocker() const
 {
+    using Painting::FlightPaintDecline;
     // What only the main thread paints.
     if (highlighted_layout_node() || !m_flexbox_highlights.is_empty() || !m_grid_highlights.is_empty())
-        return true;
+        return FlightPaintDecline::InspectorOverlay;
     // A caret reads the layout it paints over, which the flight has yet to run.
     if (cursor_position())
-        return true;
+        return FlightPaintDecline::Caret;
     if (auto focused = focused_area(); focused && (is<HTML::FormAssociatedTextControlElement>(*focused) || is<HTML::HTMLAreaElement>(*focused)))
-        return true;
+        return FlightPaintDecline::FocusedTextControl;
     if (auto navigable = this->navigable(); navigable && navigable->event_handler().middle_button_scroll_handler().has_value())
-        return true;
+        return FlightPaintDecline::MiddleButtonScroll;
 
     // What the steps of the rendering update after its layout can change before its paint.
     for (auto const& observer : m_resize_observers) {
         if (observer)
-            return true;
+            return FlightPaintDecline::ResizeObserver;
     }
     for (auto const& timeline : m_associated_animation_timelines) {
         if (!timeline->associated_animations().is_empty())
-            return true;
+            return FlightPaintDecline::Animations;
     }
     if (!m_layout_nodes_with_forced_compositor_effects_layer.is_empty() || !m_layout_nodes_with_forced_compositor_background_color_frame.is_empty())
-        return true;
+        return FlightPaintDecline::ForcedCompositorLayer;
     if (m_active_view_transition || m_scroll_state_query_containers.has_containers())
-        return true;
+        return FlightPaintDecline::ViewTransitionOrScrollState;
 
     // A parent never presents ahead of a frame of a navigable it hosts. The flight's layout stops short of the paint
     // should it resize one.
-    return hosts_navigable_that_may_paint_after_it(*this);
+    if (hosts_navigable_that_may_paint_after_it(*this))
+        return FlightPaintDecline::HostedNavigable;
+    return {};
 }
 
 void Document::take_in_flight_paint(bool handed_accumulated_visual_contexts_update)
@@ -10545,6 +10548,7 @@ void Document::set_needs_to_record_display_list_keeping_hit_test_display_list()
 
 RefPtr<Compositing::DisplayList> Document::record_display_list(HTML::PaintConfig config, Compositing::DisplayListResourceStorage& resource_storage, Painting::PaintCommandCacheMode cache_mode)
 {
+    TemporaryChange origin { Painting::current_recording_origin(), Painting::RecordingOrigin::DocumentRecord };
     auto recording = begin_display_list_recording(config, resource_storage, cache_mode, Painting::RecordingRun::Now);
     if (!recording.has_value())
         return nullptr;
@@ -10662,6 +10666,7 @@ Painting::HitTestDisplayList const* Document::ensure_hit_test_display_list()
         if (!navigable)
             return nullptr;
         set_needs_to_record_display_list();
+        TemporaryChange origin { Painting::current_recording_origin(), Painting::RecordingOrigin::HitTest };
         if (!navigable->record_display_list_and_scroll_state({ .paint_overlay = true }))
             return nullptr;
         // LIBWEB_RENDER_CLOCK_FRAMES: That frame shows the document at the task's time.

@@ -15,6 +15,7 @@
 #include <LibWeb/Forward.h>
 #include <LibWeb/Painting/DocumentPaintState.h>
 #include <LibWeb/Painting/PaintableTypes.h>
+#include <LibWeb/Painting/RecordingOrigin.h>
 #include <LibWeb/PixelUnits.h>
 
 namespace Web::Painting {

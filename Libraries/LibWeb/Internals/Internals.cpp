@@ -1790,6 +1790,22 @@ GC::Ref<JS::Object> Internals::get_rendering_scheduler_counters() const
     object->define_direct_property("layoutOverlapBlockedUpdates"_utf16_fly_string, layout_overlap_blocked_updates, JS::default_attributes);
     auto rendering_updates_by_frames_submitted = JS::Array::create_from<u64>(realm, counters.rendering_updates_by_frames_submitted.span(), [](u64 updates) { return JS::Value(updates); });
     object->define_direct_property("renderingUpdatesByFramesSubmitted"_utf16_fly_string, rendering_updates_by_frames_submitted, JS::default_attributes);
+    auto recordings_waited_for = JS::Object::create(realm, nullptr);
+    for (size_t origin = 0; origin < counters.recordings_waited_for.size(); ++origin) {
+        auto by_origin = JS::Object::create(realm, nullptr);
+        by_origin->define_direct_property("count"_utf16_fly_string, JS::Value(counters.recordings_waited_for[origin]), JS::default_attributes);
+        by_origin->define_direct_property("nanoseconds"_utf16_fly_string, JS::Value(counters.recording_wait_nanoseconds[origin]), JS::default_attributes);
+        auto name = Utf16FlyString::from_utf8(Painting::recording_origin_name(static_cast<Painting::RecordingOrigin>(origin)));
+        recordings_waited_for->define_direct_property(name, by_origin, JS::default_attributes);
+    }
+    object->define_direct_property("recordingsWaitedFor"_utf16_fly_string, recordings_waited_for, JS::default_attributes);
+    auto flight_paint = JS::Object::create(realm, nullptr);
+    flight_paint->define_direct_property("sealed"_utf16_fly_string, JS::Value(counters.flight_paint_seals), JS::default_attributes);
+    for (size_t decline = 0; decline < counters.flight_paint_declines.size(); ++decline) {
+        auto name = Utf16FlyString::from_utf8(Painting::flight_paint_decline_name(static_cast<Painting::FlightPaintDecline>(decline)));
+        flight_paint->define_direct_property(name, JS::Value(counters.flight_paint_declines[decline]), JS::default_attributes);
+    }
+    object->define_direct_property("flightPaintSeals"_utf16_fly_string, flight_paint, JS::default_attributes);
     // Flights by why they ended, and by the last stage they ran.
     static constexpr Array flight_end_reasons { "done"sv, "stageRunsOnMain"sv, "paintNotSealed"sv, "roundLeftWork"sv, "svgPaintResources"sv, "vectorImages"sv, "noViewport"sv, "hostLeftWork"sv, "preempted"sv, "styleNeedsHost"sv };
     static constexpr Array flight_stages { "style"sv, "styleRenderHalf"sv, "rounds"sv, "paintPrep"sv, "record"sv, "present"sv };

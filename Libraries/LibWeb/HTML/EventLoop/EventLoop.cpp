@@ -1173,6 +1173,7 @@ bool EventLoop::run_rendering_update_from_step_16(Vector<GC::Ref<DOM::Document>>
         }
         // A frame the render side records beside this thread is finished by the frame scheduler once it has
         // been, and so is every frame after it, so that frames reach their compositor contexts in paint order.
+        TemporaryChange origin { Painting::current_recording_origin(), m_frame_scheduler->recording_origin() };
         auto pending_frame = navigable->begin_painting_next_frame(m_frame_scheduler->recording_run());
         if (!pending_frame.has_value())
             continue;

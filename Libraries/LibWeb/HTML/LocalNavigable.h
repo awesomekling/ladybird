@@ -339,6 +339,7 @@ public:
     // reads, if the navigable may be painted that way, and with `may_present`, how the flight presents it where the
     // render side presents. Returns whether it sealed it.
     bool seal_flight_paint(DOM::Document&, bool may_present);
+    Optional<Painting::FlightPaintDecline> flight_paint_decline(DOM::Document&) const;
     // Takes in the paint of the document's flight once the flight has been taken back: publishes the recording the
     // flight made, and hands off its compositor frame if the recording stands. Returns whether it painted a frame.
     enum class FlightPaintEnd : u8 {
@@ -466,6 +467,7 @@ protected:
     Variant<Empty, Traversal, Utf16String> m_ongoing_navigation;
 
 private:
+    bool seal_flight_paint_now(DOM::Document&, bool may_present);
     enum class PendingNavigationBehavior {
         Append,
         Replace
