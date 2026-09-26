@@ -1613,7 +1613,8 @@ pub(crate) unsafe fn record_for_clock_tick(arena_handle: *mut c_void) -> bool {
 /// without the main thread: the update changed the tree incrementally, and the tick's frame takes
 /// it to the compositor, whose copy is in step with the frames it was shown (see
 /// `layout_arena_clock_tick_scroll_state_snapshot`). Where it returns false, the update built the
-/// tree anew, and the main thread's next frame takes it to the compositor.
+/// tree anew or left a compositor animation without its node, and the main thread's next frame
+/// takes the tree to the compositor.
 ///
 /// # Safety
 ///
@@ -1645,9 +1646,42 @@ pub(crate) unsafe fn settle_visual_contexts_for_clock_tick(arena_handle: *mut c_
     if !arena.paintable_row_is_populated(viewport) {
         return false;
     }
+    let compositor_animations = arena
+        .paint_state()
+        .borrow()
+        .visual_context
+        .tree
+        .as_ref()
+        .map(|tree| tree.shared_visual_animations());
     // SAFETY: Guaranteed by the caller; no borrow of the arena is live here.
     let outcome = update_accumulated_visual_contexts_stage(unsafe { arena_from_handle_mut(arena_handle) }, viewport);
-    !outcome.performed_full_build
+    if outcome.performed_full_build {
+        return false;
+    }
+    // A new structure of the tree drops the compositor's animations, which the main thread publishes
+    // again in its rendering update. The tick's frame takes the tree to the compositor with them,
+    // or else the compositor would show what the main thread last laid down for the nodes they
+    // drive. An animation whose node went away needs the main thread to publish it anew.
+    if outcome.structural_epoch_changed
+        && let Some(animations) = compositor_animations.filter(|animations| !animations.is_empty())
+    {
+        // SAFETY: Guaranteed by the caller; no borrow of the arena is live here.
+        let arena = unsafe { arena_from_handle_mut(arena_handle) };
+        let carried_every_animation = {
+            let mut paint_state = arena.paint_state().borrow_mut();
+            let Some(tree) = paint_state.visual_context.tree.as_mut() else {
+                return true;
+            };
+            if tree.has_visual_animations() {
+                return true;
+            }
+            std::sync::Arc::make_mut(tree).carry_visual_animations_over(animations)
+        };
+        // The rows the update published hold the tree it left.
+        arena.publish_paintable_rows();
+        return carried_every_animation;
+    }
+    true
 }
 
 /// Hands `publish` the scroll offsets of the nodes of the visual context tree a clock tick's layout
