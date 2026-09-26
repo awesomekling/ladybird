@@ -1976,8 +1976,11 @@ void record_element_custom_property_names(DOM::Element& element, CustomPropertyD
         quick_sort(reference_atoms);
         merge_names(reference_atoms);
     }
-    publish_element_input(*style_engine, element, [published = Vector<StyleAtomID> { published }, uses_unnamed, uses_custom_functions](StyleInputScope const& input, StyleNodeID node) {
-        input.engine().set_element_custom_property_names(input, node, published, uses_unnamed, uses_custom_functions);
+    // Names that are exactly one environment's declared names are named by its identity as well, so the engine
+    // finds the set it interned them as without comparing them again.
+    auto environment = merged_environments.size() == 1 && reference_atoms.is_empty() && data == merged_environments.first() ? data->identity() : 0;
+    publish_element_input(*style_engine, element, [published = Vector<StyleAtomID> { published }, environment, uses_unnamed, uses_custom_functions](StyleInputScope const& input, StyleNodeID node) {
+        input.engine().set_element_custom_property_names(input, node, environment, published, uses_unnamed, uses_custom_functions);
     });
 }
 
@@ -1992,7 +1995,7 @@ void record_element_custom_property_names(DOM::Element& element, ReadonlySpan<Ut
     for (auto const& name : names)
         atoms.unchecked_append(style_engine->intern_atom(name));
     publish_element_input(*style_engine, element, [atoms = move(atoms), uses_unnamed, uses_custom_functions](StyleInputScope const& input, StyleNodeID node) {
-        input.engine().set_element_custom_property_names(input, node, atoms, uses_unnamed, uses_custom_functions);
+        input.engine().set_element_custom_property_names(input, node, 0, atoms, uses_unnamed, uses_custom_functions);
     });
 }
 

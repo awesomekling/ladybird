@@ -32,6 +32,8 @@ use super::column::RemovablePagedColumnPage;
 use super::column::advance_epoch;
 use super::fast_hash::FastMap as HashMap;
 use super::fast_hash::FastSet as HashSet;
+use super::instrumentation::Counter;
+use super::instrumentation::Counters;
 use super::shared_vector::{SharedVector, SharedVectorPool};
 use crate::css::style_value::RetainedStyleValueData;
 use std::cmp::Reverse;
@@ -3621,6 +3623,11 @@ pub struct ElementFactStore {
     /// proportional to the stylesheet rather than to the document times the stylesheet.
     custom_property_name_sets: super::intern_table::InternTable<CustomPropertyNameSetID, Box<[StyleAtomID]>>,
     custom_property_name_set_vacancies: Vec<u32>,
+    /// The set each custom-property environment's declared names were interned as, and how many
+    /// names that is, by the environment's identity, which is never reused. Every element under a
+    /// theme hands the engine the theme's names, and this spares hashing and comparing them each
+    /// time. Forgotten as the sets are swept, which is also the only time atoms are reclaimed.
+    custom_property_name_sets_by_environment: HashMap<u64, (u32, usize)>,
     custom_property_set_ids_by_name: PagedOwnedColumn<Vec<u32>>,
     /// Authoritative semantic references from committed fact rows and per-element metadata. This
     /// is indexed by atom so a lifetime sweep visits distinct identities rather than every live
@@ -3998,6 +4005,7 @@ impl Default for ElementFactStore {
             settled_non_apply_capacity_bytes: 0,
             custom_property_name_sets: super::intern_table::InternTable::default(),
             custom_property_name_set_vacancies: Vec::new(),
+            custom_property_name_sets_by_environment: HashMap::default(),
             custom_property_set_ids_by_name: PagedOwnedColumn::default(),
             atom_live_counts: PagedCopyColumn::default(),
             language_live_counts: PagedCopyColumn::default(),
@@ -4863,6 +4871,52 @@ impl ElementFactStore {
         // element resolved to.
         debug_assert!(names.windows(2).all(|pair| pair[0].0 < pair[1].0));
         let set = self.intern_custom_property_name_set(names);
+        self.set_custom_property_name_set(node, set, memory);
+    }
+
+    /// Like [`Self::set_custom_property_names`], for names that are exactly the declared names of
+    /// the custom-property environment `environment` (or of none, where it is zero).
+    pub fn set_environment_custom_property_names(
+        &mut self,
+        node: StyleNodeID,
+        environment: u64,
+        names: &[u32],
+        memory: &mut MemoryController,
+        counters: &mut Counters,
+    ) {
+        self.memory_dirty = true;
+        let remembered = self
+            .custom_property_name_sets_by_environment
+            .get(&environment)
+            .copied()
+            .filter(|&(_, count)| environment != 0 && count == names.len());
+        let set = match remembered {
+            Some((set, _)) => {
+                debug_assert!(
+                    set == 0
+                        || self.custom_property_name_sets[CustomPropertyNameSetID(set)]
+                            .iter()
+                            .map(|atom| atom.0)
+                            .eq(names.iter().copied())
+                );
+                set
+            }
+            None => {
+                counters.bump(Counter::CustomPropertyNameSetsLookedUp);
+                let names = names.iter().copied().map(StyleAtomID).collect::<Vec<_>>();
+                debug_assert!(names.windows(2).all(|pair| pair[0].0 < pair[1].0));
+                let set = self.intern_custom_property_name_set(&names);
+                if environment != 0 {
+                    self.custom_property_name_sets_by_environment
+                        .insert(environment, (set, names.len()));
+                }
+                set
+            }
+        };
+        self.set_custom_property_name_set(node, set, memory);
+    }
+
+    fn set_custom_property_name_set(&mut self, node: StyleNodeID, set: u32, memory: &mut MemoryController) {
         let previous = self
             .metadata_of(node)
             .map_or(0, |metadata| metadata.custom_property_set);
@@ -5458,6 +5512,7 @@ impl ElementFactStore {
             *sets = Vec::new();
         }
         self.custom_property_name_set_vacancies.clear();
+        self.custom_property_name_sets_by_environment.clear();
         for id in 1..=self.custom_property_name_sets.len() {
             if self.custom_property_set_live_counts.get(id).copied().unwrap_or(0) == 0 {
                 let identity = CustomPropertyNameSetID(id as u32);
@@ -5616,6 +5671,7 @@ impl ElementFactStore {
             shallow [
                 self.custom_property_name_sets,
                 self.custom_property_name_set_vacancies,
+                self.custom_property_name_sets_by_environment,
                 self.custom_property_set_ids_by_name,
                 self.atom_live_counts,
                 self.language_live_counts,
@@ -5669,6 +5725,7 @@ impl ElementFactStore {
                 self.staging,
                 self.custom_property_name_sets,
                 self.custom_property_name_set_vacancies,
+                self.custom_property_name_sets_by_environment,
                 self.custom_property_set_ids_by_name,
                 self.atom_live_counts,
                 self.language_live_counts,
