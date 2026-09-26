@@ -8,6 +8,7 @@
 #include <AK/HashMap.h>
 #include <AK/Mutex.h>
 #include <AK/NeverDestroyed.h>
+#include <AK/TemporaryChange.h>
 #include <AK/Time.h>
 #include <LibCore/EventLoop.h>
 #include <LibWeb/Animations/Animation.h>
@@ -757,6 +758,10 @@ static bool moves_boxes(Animations::KeyframeEffect const& effect)
     return false;
 }
 
+// Whether a lease plan leaves a document's layout that is not up to date to the render clock's ticks, which lay out the
+// layout tree as the main thread last built it (see FrameScheduler::relend_clock_leases_after_mutation()).
+static bool s_clock_lease_plan_leaves_layout_to_ticks = false;
+
 static Optional<ClockLeasePlan> clock_lease_plan(DOM::Document& document)
 {
     if (!Layout::RustFFI::rust_stage_thread_submits_clock())
@@ -770,7 +775,7 @@ static Optional<ClockLeasePlan> clock_lease_plan(DOM::Document& document)
     //     scroll-driven animation's document in place is that a layout that changes a scroller's scroll range makes
     //     its timelines stale, which the main thread's rendering update takes care of after its layout. A tick keeps
     //     the range the main thread last laid out.
-    if (document.needs_animated_style_update() || !document.layout_is_up_to_date())
+    if (document.needs_animated_style_update() || (!s_clock_lease_plan_leaves_layout_to_ticks && !document.layout_is_up_to_date()))
         return {};
     if (auto blocker = document.layout_overlap_blocker(); blocker.has_value() && *blocker != DOM::LayoutOverlapBlocker::ScrollTimeline)
         return {};
@@ -1322,6 +1327,28 @@ void FrameScheduler::relend_clock_leases_after_read()
         return;
     if (!m_clock_lend_taken_back || m_clock_lend_suspended || m_event_loop.running_rendering_task())
         return;
+    lend_clock_leases_to_busy_main(true);
+}
+
+// A DOM mutation takes the leased arenas back where it reaches the style engine, and nothing lends them again before the
+// task is over unless a read of render state follows. Once the outermost mutation is over, the ticks may have them again
+// beside what it left for the next layout update: they lay out the layout tree as the main thread last built it, so
+// what the task inserted or removed shows only once the task is over, as it would without them. A tree the next update
+// has to build in full, the ticks leave to the main thread. They sample over the records the host holds, and the style
+// inputs the mutation recorded apply once the documents have adopted the ticks, as those of a task that ran beside
+// them do. A style change the task published would show before the task is over, and suspends the lend.
+void FrameScheduler::relend_clock_leases_after_mutation()
+{
+    if (ClockLendReadScope::is_active())
+        return;
+    if (!m_clock_lend_taken_back || m_clock_lend_suspended || m_event_loop.running_rendering_task())
+        return;
+    // NB: The transaction a geometry read deferred goes on with the next style change, which a tick must not merge into.
+    for (auto const& hold : m_clock_leases) {
+        if (hold.document->style_computer().style_engine().has_deferred_geometry_transaction())
+            return;
+    }
+    TemporaryChange leaves_layout_to_ticks { s_clock_lease_plan_leaves_layout_to_ticks, true };
     lend_clock_leases_to_busy_main(true);
 }
 
