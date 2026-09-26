@@ -1234,6 +1234,14 @@ bool FrameScheduler::submit_clock_tick(Vector<GC::Ref<DOM::Document>> const& doc
             revoke_clock_lease(*held);
             continue;
         }
+        // Beside a tick in flight, the main thread takes its style inputs for applied, as it does beside a layout pass,
+        // which is only submitted once the frame's style rounds applied every transaction. A tick submitted with one
+        // pending would have a later task's change merge into it as one style change.
+        auto& style_engine = document->style_computer().style_engine();
+        if (style_engine.has_pending_transaction() || style_engine.has_deferred_geometry_transaction()) {
+            revoke_clock_lease(*held);
+            continue;
+        }
         publish_clock_lease_targets(m_clock_leases[*held]);
         if (!Layout::RustFFI::rust_clock_lease_submit_tick(arena->handle(), time->value)) {
             revoke_clock_lease(*held);

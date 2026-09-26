@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<style>
+    #box {
+        width: 100px;
+        height: 20px;
+        animation: grow 20s linear;
+    }
+    @keyframes grow {
+        from { width: 100px; }
+        to { width: 2100px; }
+    }
+    #other {
+        color: rgb(0, 0, 0);
+    }
+</style>
+<div id="box"></div>
+<div id="other">text</div>
+<script src="../../include.js"></script>
+<script>
+    const nextTask = () => new Promise(resolve => setTimeout(resolve, 0));
+
+    // Under LIBWEB_RENDER_CLOCK_FRAMES, a style change a task made before a rendering update (here one a geometry read
+    // deferred) is its own style change event, whatever clock lease tick the rendering update submits: a transition a
+    // later task starts beside the tick runs from it.
+    asyncTest(async done => {
+        const other = document.getElementById("other");
+        // The rendering updates tick the lease, not a render clock.
+        internals.setRenderClockSuspended(true);
+        await nextTask();
+        await nextTask();
+
+        other.style.color = "rgb(255, 0, 0)";
+        other.offsetWidth;
+        const armed = internals.holdNextClockTick("before-completion");
+        if (armed) {
+            for (let i = 0; i < 200 && !(internals.frameSchedulerState() === "in-flight" && internals.renderingUpdateAwaitsPass()); ++i)
+                await new Promise(resolve => setTimeout(resolve, 5));
+            internals.waitForHeldFrame();
+            internals.setManualRenderingOpportunities(true);
+        }
+        other.style.transition = "color 1000s linear";
+        other.style.color = "rgb(0, 0, 255)";
+        internals.releaseHeldFrame();
+        if (armed)
+            internals.setManualRenderingOpportunities(false);
+        internals.setRenderClockSuspended(false);
+        // The next rendering update starts the transition. One over 1000 s shows its start for the rest of the test.
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        const [red, green, blue] = getComputedStyle(other).color.match(/[0-9.]+/g).map(Number);
+        const color = `rgb(${Math.round(red)}, ${Math.round(green)}, ${Math.round(blue)})`;
+
+        println(`the transition runs from: ${color}`);
+        done();
+    });
+</script>
