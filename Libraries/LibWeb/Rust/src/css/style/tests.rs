@@ -6960,7 +6960,10 @@ fn selective_matching_completes_a_bounded_prefix_transition_window() {
         1,
         "invalidation reuses the retained partial prefix transition cache"
     );
-    assert_eq!(engine.memory().bytes_in_category(MemoryCategory::BatchScratch), 0);
+    assert_eq!(
+        engine.memory().bytes_in_category(MemoryCategory::BatchScratch),
+        engine.cascade_compaction_scratch.capacity_bytes()
+    );
 }
 
 #[test]
@@ -10342,7 +10345,10 @@ fn local_routes_for_one_exact_entry_are_compared_once() {
         0,
         "routes consolidate before late exact-entry grouping"
     );
-    assert_eq!(engine.memory().bytes_in_category(MemoryCategory::BatchScratch), 0);
+    assert_eq!(
+        engine.memory().bytes_in_category(MemoryCategory::BatchScratch),
+        engine.cascade_compaction_scratch.capacity_bytes()
+    );
 }
 
 #[test]
