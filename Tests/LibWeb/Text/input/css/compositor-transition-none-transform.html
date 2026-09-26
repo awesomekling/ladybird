@@ -74,12 +74,14 @@
         return promise;
     }
 
-    // A rendering update that submits its style or layout pass finishes in a later task, once the main thread takes
-    // the pass back.
+    // Where rendering opportunities are held, an opportunity injected while the previous rendering update's frame is
+    // still in flight runs its rendering update only once that frame has finished. A rendering update that submits its
+    // style or layout pass finishes in a later task, once the main thread takes the pass back.
     async function renderAt(frameTime) {
+        const updatesRun = internals.getRenderingSchedulerCounters().updatesRun;
         internals.injectRenderingOpportunity(frameTime);
         await nextTask();
-        while (internals.renderingUpdateAwaitsPass()) {
+        while (internals.getRenderingSchedulerCounters().updatesRun === updatesRun || internals.renderingUpdateAwaitsPass()) {
             internals.waitForFrameToFinish();
             await nextTask();
         }
