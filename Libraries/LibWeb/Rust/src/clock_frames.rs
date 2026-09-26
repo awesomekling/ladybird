@@ -427,7 +427,7 @@ impl ClockLease {
 
 /// Whether what `sample` changes is all the render side shows without the main thread: its own
 /// row's style, layout and paint. What moves descendants' styles, visual contexts, stacking
-/// contexts or scroll snapping, the main thread derives.
+/// contexts or scroll snapping, the main thread derives, and it loads the images a sample swaps in.
 fn render_side_shows(sample: &FfiRowSampledInPass) -> bool {
     use FfiStyleInvalidationField as Field;
     let invalidation = sample.invalidation.invalidation;
@@ -443,6 +443,7 @@ fn render_side_shows(sample: &FfiRowSampledInPass) -> bool {
         && inherited_groups == 0
         && invalidation & main_only == 0
         && !sample.invalidation.requires_base_style_recomputation
+        && !sample.invalidation.requires_style_resource_update
         && !sample.custom_property_environment_moved
         && sample.custom_property_reactions == 0
         && sample.keyframes_inherited_non_inherited_style_groups == 0
