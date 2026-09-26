@@ -31,7 +31,7 @@ NonnullRefPtr<Gfx::FontCascadeList const> resolve_font_for_style_values(FontComp
     memo.publish_font_feature_values(font_computer.published_font_feature_values());
     FontFaceSnapshotView snapshot;
     rust_font_face_snapshot_view(font_computer.published_font_faces(), &snapshot);
-    auto font_list = memo.resolve(snapshot, key);
+    auto font_list = memo.resolve(snapshot, move(key));
     (void)request_wanted_web_faces();
     return font_list;
 }
@@ -355,8 +355,15 @@ static RefPtr<Gfx::FontCascadeList const> font_matching_algorithm(FontFaceSnapsh
     return {};
 }
 
-NonnullRefPtr<Gfx::FontCascadeList const> FontCascadeMemo::resolve(FontFaceSnapshotView const& snapshot, ComputedFontCacheKey const& key, FontFeatureValuesProvider const* font_feature_values_provider)
+NonnullRefPtr<Gfx::FontCascadeList const> FontCascadeMemo::resolve(FontFaceSnapshotView const& snapshot, ComputedFontCacheKey key, FontFeatureValuesProvider const* font_feature_values_provider)
 {
+    // A tree scope reaches the resolution only through the @font-feature-values it publishes, and only a request whose
+    // font-variant-alternates names feature values reads those. Any other request resolves the same in every tree scope,
+    // so it is remembered once for all of them. That keeps one cascade for equal fonts in different shadow trees, which
+    // is what lets their elements' styles, and the styles of everything inheriting from them, compare equal and share.
+    if (!key.font_feature_data.font_variant_alternates.has_value() || key.font_feature_data.font_variant_alternates->font_feature_value_entries.is_empty())
+        key.tree_scope = 0;
+
     MutexLocker locker { m_mutex };
     auto it = m_cascades.find(key);
     if (it != m_cascades.end() && it->value.generation == snapshot.generation)
@@ -380,7 +387,7 @@ NonnullRefPtr<Gfx::FontCascadeList const> FontCascadeMemo::resolve(FontFaceSnaps
         it->value = Entry { snapshot.generation, font_list };
         return font_list;
     }
-    m_cascades.set(key, Entry { snapshot.generation, font_list });
+    m_cascades.set(move(key), Entry { snapshot.generation, font_list });
     return font_list;
 }
 

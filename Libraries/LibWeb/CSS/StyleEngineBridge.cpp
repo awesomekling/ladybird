@@ -128,7 +128,7 @@ static StyleEngineFFI::FfiResolvedFont resolve_font(FontCascadeMemo& memo, FontF
         .font_variation_settings = font_variation_settings_from_style_values(feature_values),
         .font_feature_data = move(font_feature_data),
     };
-    auto font_list = memo.resolve(font_faces, key);
+    auto font_list = memo.resolve(font_faces, move(key));
     // The metric probe must not load a face: the first available font answers without one.
     auto const& first_available_font = font_list->first_available_font();
     auto const metrics = first_available_font.pixel_metrics();
