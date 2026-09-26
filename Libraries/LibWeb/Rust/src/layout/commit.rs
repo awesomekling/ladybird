@@ -250,7 +250,8 @@ pub(crate) fn commit_replacing(
     }
     let resized_a_hosted_navigable = paintables.resized_a_navigable_container_viewport();
     crate::painting::published_immutable::published(paintables.arena());
-    paintables.publish_rows();
+    // The rows are published when the main side next reads them, or when a recording is submitted:
+    // what derives from the commit before either writes them in place.
     paintables.arena().finish_layout_style_snapshot_commit();
     CommitNotifications {
         row_resets: paintables.take_row_reset_notifications(),

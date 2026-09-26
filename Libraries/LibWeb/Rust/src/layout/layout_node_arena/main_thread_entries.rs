@@ -44,6 +44,7 @@ unsafe extern "C" fn layout_arena_free_subtree(arena: *mut c_void, root: NodeSlo
     // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on
     // the document thread.
     unsafe {
+        (*arena.cast::<LayoutNodeArena>()).release_published_paintable_rows_for_main_side_write();
         paying_host_handbacks(&main_thread, arena, || {
             crate::layout::tree_mutation::free_subtree_and_hand_back(arena.cast::<LayoutNodeArena>(), root);
         });
@@ -61,7 +62,10 @@ unsafe extern "C" fn layout_arena_detach_and_free_subtree(arena: *mut c_void, no
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on
     // the document thread.
-    unsafe { paying_host_handbacks(&main_thread, arena, || detach_and_free_subtree(arena.cast(), node)) }
+    unsafe {
+        (*arena.cast::<LayoutNodeArena>()).release_published_paintable_rows_for_main_side_write();
+        paying_host_handbacks(&main_thread, arena, || detach_and_free_subtree(arena.cast(), node))
+    }
 }
 
 /// # Safety

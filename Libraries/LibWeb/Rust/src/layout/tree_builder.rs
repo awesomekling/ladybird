@@ -2994,6 +2994,9 @@ pub(crate) unsafe fn walk_layout_tree_build(
     // SAFETY: Guaranteed by the caller.
     let arena = unsafe { LayoutNodeArena::from_handle_mut(arena_handle) };
     arena.run_stage(|arena| {
+        // The build writes the rows of the boxes it changes, and nothing reads the rows as last
+        // published while it runs.
+        arena.release_published_paintable_rows();
         // The host is made on the stage's side from the arena the stage holds alone.
         let host = dom_tree_builder_host(std::ptr::from_mut(arena).cast());
         let TreeBuildStageOutput {
