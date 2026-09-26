@@ -2185,6 +2185,10 @@ impl RetainedState {
             };
             facts.container_relative_length_unit_mask |= checks.container_relative_length_unit_mask;
             facts.has_written_tree_counting |= checks.uses_tree_counting_function;
+            facts.may_read_element_random |= match checks.substitution {
+                WrittenSubstitution::None => checks.reads_element_random,
+                WrittenSubstitution::Unresolved | WrittenSubstitution::PendingShorthand => true,
+            };
             if winner.property >= crate::css::property_metadata::FIRST_LONGHAND_PROPERTY_ID
                 && checks.substitution != WrittenSubstitution::None
             {
@@ -2215,26 +2219,31 @@ impl RetainedState {
             .computed_group_sets
             .custom_property_environment_identity(node)
             .unwrap_or(0);
-        let reads_random = self.winner_groups.winners_in_state(state).any(|winner| {
-            let Some(winner) = self.winner_groups.resolved_winner(winner) else {
-                return false;
-            };
-            let Some((_, value, checks)) = self.written_winner_value(node, &winner) else {
-                return false;
-            };
-            match checks.substitution {
-                WrittenSubstitution::Unresolved => self
-                    .custom_property_environments
-                    .substitution(value, winner.property, environment)
-                    .is_none_or(|value| {
-                        crate::css::style_compute::collect_external_value_dependencies(value.data())
-                            .has_unfixed_random_sharing
-                    }),
-                WrittenSubstitution::PendingShorthand => true,
-                WrittenSubstitution::None => checks.reads_element_random,
-            }
-        });
-        if !reads_random && !self.state_reads_attributes(node, state) {
+        let written = self.state_written_facts(node, state);
+        if !written.may_read_element_random && !written.reads_attributes {
+            return 0;
+        }
+        let reads_random = written.may_read_element_random
+            && self.winner_groups.winners_in_state(state).any(|winner| {
+                let Some(winner) = self.winner_groups.resolved_winner(winner) else {
+                    return false;
+                };
+                let Some((_, value, checks)) = self.written_winner_value(node, &winner) else {
+                    return false;
+                };
+                match checks.substitution {
+                    WrittenSubstitution::Unresolved => self
+                        .custom_property_environments
+                        .substitution(value, winner.property, environment)
+                        .is_none_or(|value| {
+                            crate::css::style_compute::collect_external_value_dependencies(value.data())
+                                .has_unfixed_random_sharing
+                        }),
+                    WrittenSubstitution::PendingShorthand => true,
+                    WrittenSubstitution::None => checks.reads_element_random,
+                }
+            });
+        if !reads_random && !written.reads_attributes {
             return 0;
         }
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -3506,10 +3515,6 @@ impl RetainedState {
     pub(super) fn state_container_unit_mask(&self, node: StyleNodeID, state: CascadeStateID) -> u8 {
         self.state_written_facts(node, state)
             .container_relative_length_unit_mask
-    }
-
-    pub(crate) fn state_has_written_tree_counting(&self, node: StyleNodeID, state: CascadeStateID) -> bool {
-        self.state_written_facts(node, state).has_written_tree_counting
     }
 
     /// A tree-counting value reads its tree scope and sibling position. A substitution may
@@ -5450,12 +5455,15 @@ fn custom_condition_usage_of(mut value: &crate::css::style_value::StyleValueData
 #[derive(Clone, Copy, Default)]
 pub(super) struct StateWrittenFacts {
     /// Of the longhand winners, whether any substitutes, and whether any reads attributes.
-    has_substitutions: bool,
-    reads_attributes: bool,
-    custom_condition_usage: u8,
+    pub(super) has_substitutions: bool,
+    pub(super) reads_attributes: bool,
+    pub(super) custom_condition_usage: u8,
     /// Of every winner.
-    container_relative_length_unit_mask: u8,
-    has_written_tree_counting: bool,
+    pub(super) container_relative_length_unit_mask: u8,
+    pub(super) has_written_tree_counting: bool,
+    /// Whether any winner may read an element-scoped `random()` base: one written with one, or
+    /// with a substitution whose value is only known once it is resolved.
+    pub(super) may_read_element_random: bool,
 }
 
 #[derive(Default)]
