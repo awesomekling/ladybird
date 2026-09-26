@@ -1564,21 +1564,6 @@ static bool style_record_is_unchanged(CSS::StyleEngine::StyleRecordDelta const& 
     return !!delta.old_style_record && delta.old_style_record == delta.new_style_record;
 }
 
-// https://drafts.csswg.org/css-overflow-3/#overflow-propagation
-// https://drafts.csswg.org/css-writing-modes-4/#principal-flow
-// The root element and, for an html root, its first body child are the elements whose overflow, writing mode, and
-// direction every full layout pass reads for viewport propagation.
-bool Element::is_viewport_propagation_source() const
-{
-    auto const* document_element = document().document_element();
-    if (!document_element)
-        return false;
-    if (this == document_element)
-        return true;
-    return document_element->is_html_html_element()
-        && document_element->first_child_of_type<HTML::HTMLBodyElement>() == this;
-}
-
 static CSS::StyleComputer::ComputedStyleInvalidation compute_required_invalidation_with_cache(CSS::StyleDrainScope const& scope, CSS::ComputedValues const& new_computed_values, ElementDependentInvalidationState const& old_state, DOM::AbstractElement& abstract_element, CSS::StyleEngine::StyleRecordDelta const& style_record_delta, Optional<u32> answered_damage = {})
 {
     CSS::StyleComputer::ComputedStyleInvalidation result;

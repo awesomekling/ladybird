@@ -23,13 +23,16 @@
 #include <LibWeb/DOM/CommitMessages.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
+#include <LibWeb/DOM/InvalidationJournal.h>
 #include <LibWeb/DOM/Node.h>
+#include <LibWeb/DOM/NodeIdentity.h>
 #include <LibWeb/DOM/PseudoElement.h>
 #include <LibWeb/DOM/Range.h>
 #include <LibWeb/DOM/ShadowRoot.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
 #include <LibWeb/HTML/EventLoop/FrameScheduler.h>
 #include <LibWeb/HTML/FormAssociatedElement.h>
+#include <LibWeb/HTML/HTMLBodyElement.h>
 #include <LibWeb/HTML/HTMLSlotElement.h>
 #include <LibWeb/HTML/LocalNavigable.h>
 #include <LibWeb/HTML/NavigableContainer.h>
@@ -82,42 +85,86 @@ enum class DocumentWithoutBrowsingContext {
 static void update_style(DOM::Document&, DocumentWithoutBrowsingContext = DocumentWithoutBrowsingContext::Skip);
 static bool update_style_for_element(DOM::Document&, DOM::AbstractElement const&, StyleUpdateMode);
 
-static void apply_element_style_invalidation_after_style_change(DOM::Element& element, RequiredInvalidationAfterStyleChange const& invalidation)
+// https://drafts.csswg.org/css-overflow-3/#overflow-propagation
+// https://drafts.csswg.org/css-writing-modes-4/#principal-flow
+// The root element and, for an html root, its first body child are the elements whose overflow, writing mode, and
+// direction every full layout pass reads for viewport propagation: by style node, as the document holds them when a
+// drain applies its rows.
+StyleEffectDrain::ViewportPropagationSources StyleEffectDrain::viewport_propagation_sources_of(DOM::Document const& document)
 {
-    if (invalidation.accumulated_visual_contexts() == AccumulatedVisualContextInvalidation::UpdateValues)
-        element.document().schedule_accumulated_visual_context_update(element, DOM::Document::AccumulatedVisualContextUpdateScope::Values);
-    else if (invalidation.accumulated_visual_contexts() == AccumulatedVisualContextInvalidation::Rebuild)
-        element.document().schedule_accumulated_visual_context_update(element, DOM::Document::AccumulatedVisualContextUpdateScope::Structure);
+    ViewportPropagationSources sources;
+    auto const* document_element = document.document_element();
+    if (!document_element)
+        return sources;
+    sources.append(document_element->style_node_id());
+    if (!document_element->is_html_html_element())
+        return sources;
+    if (auto const* body = document_element->first_child_of_type<HTML::HTMLBodyElement>())
+        sources.append(body->style_node_id());
+    return sources;
+}
 
-    if (invalidation.needs_scroll_container_resnap)
-        element.document().schedule_scroll_container_resnap();
+void StyleEffectDrain::apply_layout_invalidation(DOM::Document& document, ViewportPropagationSources const& viewport_propagation_sources, StyleNodeID style_node, RequiredInvalidationAfterStyleChange const& invalidation)
+{
+    auto* arena = document.layout_node_arena_if_created();
+    if (!arena)
+        return;
+    // The layout nodes the arena binds to the node's element and its synthetic pseudo-elements.
+    auto* layout_node = static_cast<Layout::Node*>(Layout::RustFFI::layout_arena_bound_shell(arena->handle(), style_node.value()));
+    auto pseudo_element_layout_node = [&](PseudoElement pseudo_element) {
+        return static_cast<Layout::Node*>(Layout::RustFFI::layout_arena_bound_pseudo_element_shell(arena->handle(), style_node.value(), Layout::Node::encode_generated_for(pseudo_element)));
+    };
 
-    // Only a full layout pass applies viewport propagation again, so a relayout of an element the viewport takes its
-    // overflow, writing mode, or direction from must not finish as a partial relayout of that element.
-    bool const element_is_viewport_propagation_source = element.is_viewport_propagation_source();
-    if (invalidation.needs_relayout() && element_is_viewport_propagation_source)
-        element.document().record_partial_relayout_escape(DOM::PartialRelayoutEscapeReason::ViewportPropagationSourceChangedByStyleChange);
-
-    if (invalidation.needs_relayout()) {
-        // A relayout-only style change on an absolutely positioned partial relayout boundary
-        // stays confined to it: the box contributes nothing to ancestor layout, and partial
-        // relayout re-resolves the boundary's own size and position. A rendered ::backdrop
-        // disqualifies the element, because pseudo-element style diffs are merged into the
-        // element's invalidation while the ::backdrop box is a sibling of the element's box,
-        // outside the subtree a boundary-self relayout covers.
-        auto* box = as_if<Layout::Box>(element.unsafe_layout_node());
-        if (!invalidation.needs_layout_tree_rebuild()
-            && !element_is_viewport_propagation_source
-            && box
-            && box->is_absolutely_positioned()
-            && box->is_partial_relayout_boundary()
-            && !element.pseudo_element_unsafe_layout_node(CSS::PseudoElement::Backdrop)) {
-            box->set_needs_own_geometry_update();
-            element.set_needs_layout_update(DOM::SetNeedsLayoutReason::StyleChange, Layout::LayoutUpdatePropagation::BoundarySelfOnly);
-        } else {
-            element.set_needs_layout_update(DOM::SetNeedsLayoutReason::StyleChange);
+    if (invalidation.accumulated_visual_contexts() != AccumulatedVisualContextInvalidation::None) {
+        auto scope = invalidation.accumulated_visual_contexts() == AccumulatedVisualContextInvalidation::UpdateValues
+            ? DOM::Document::AccumulatedVisualContextUpdateScope::Values
+            : DOM::Document::AccumulatedVisualContextUpdateScope::Structure;
+        if (layout_node)
+            document.schedule_accumulated_visual_context_update(*layout_node, scope);
+        for (auto index = to_underlying(first_synthetic_pseudo_element); index <= to_underlying(last_synthetic_pseudo_element); ++index) {
+            if (auto* pseudo_layout_node = pseudo_element_layout_node(static_cast<PseudoElement>(index)))
+                document.schedule_accumulated_visual_context_update(*pseudo_layout_node, scope);
         }
     }
+
+    if (invalidation.needs_scroll_container_resnap)
+        document.schedule_scroll_container_resnap();
+
+    if (!invalidation.needs_relayout())
+        return;
+    // Only a full layout pass applies viewport propagation again, so a relayout of an element the viewport takes its
+    // overflow, writing mode, or direction from must not finish as a partial relayout of that element.
+    bool const is_viewport_propagation_source = viewport_propagation_sources.contains_slow(style_node);
+    if (is_viewport_propagation_source)
+        document.record_partial_relayout_escape(DOM::PartialRelayoutEscapeReason::ViewportPropagationSourceChangedByStyleChange);
+    // A node without a box has nothing to mark.
+    if (!layout_node)
+        return;
+    // A relayout-only style change on an absolutely positioned partial relayout boundary
+    // stays confined to it: the box contributes nothing to ancestor layout, and partial
+    // relayout re-resolves the boundary's own size and position. A rendered ::backdrop
+    // disqualifies the element, because pseudo-element style diffs are merged into the
+    // element's invalidation while the ::backdrop box is a sibling of the element's box,
+    // outside the subtree a boundary-self relayout covers.
+    auto propagation = Layout::LayoutUpdatePropagation::ThroughAncestors;
+    auto* box = as_if<Layout::Box>(layout_node);
+    if (!invalidation.needs_layout_tree_rebuild()
+        && !is_viewport_propagation_source
+        && box
+        && box->is_absolutely_positioned()
+        && box->is_partial_relayout_boundary()
+        && !pseudo_element_layout_node(PseudoElement::Backdrop)) {
+        box->set_needs_own_geometry_update();
+        propagation = Layout::LayoutUpdatePropagation::BoundarySelfOnly;
+    }
+    document.invalidation_journal().note_needs_layout_update(DOM::NodeIdentity::of_style_node(style_node), DOM::SetNeedsLayoutReason::StyleChange, propagation);
+    document.note_style_change_needs_layout_update({});
+}
+
+// What a style change invalidates of the layout tree is decided by the element: whether its box can be replaced in
+// place, sits in the top layer, or is still to be built for a child list insertion.
+static void apply_layout_tree_rebuild_after_style_change(DOM::Element& element, RequiredInvalidationAfterStyleChange const& invalidation)
+{
     if (invalidation.needs_layout_tree_rebuild())
         element.set_needs_layout_tree_rebuild(DOM::SetNeedsLayoutTreeUpdateReason::StyleChange, invalidation.layout_tree_rebuild_root());
 }
@@ -230,6 +277,7 @@ void StyleEffectDrain::apply_layout_node_style(DOM::Document& document, StyleNod
 void StyleEffectDrain::apply_render_half(StyleDrainScope const& scope, DOM::Document& document)
 {
     static PseudoElementStyleRecords const no_pseudo_element_style_records {};
+    auto const viewport_propagation_sources = viewport_propagation_sources_of(document);
     for (auto const& effect : m_render_effects) {
         if (auto const* row = effect.get_pointer<LayoutNodeStyle>()) {
             if (!row->style_record.has_value())
@@ -252,6 +300,10 @@ void StyleEffectDrain::apply_render_half(StyleDrainScope const& scope, DOM::Docu
             StyleEngineFFI::style_engine_discard_container_effects(scope, scope.engine().rust_handle(), row->style_node.value());
             continue;
         }
+        if (auto const* row = effect.get_pointer<LayoutInvalidation>()) {
+            apply_layout_invalidation(document, viewport_propagation_sources, row->style_node, row->invalidation);
+            continue;
+        }
         auto element = document.style_computer().element_for_style_node(effect.visit([](auto const& row) { return row.style_node; }));
         if (!element)
             continue;
@@ -259,8 +311,11 @@ void StyleEffectDrain::apply_render_half(StyleDrainScope const& scope, DOM::Docu
             [&](LayoutNodeStyle const&) {
                 VERIFY_NOT_REACHED();
             },
-            [&](ElementInvalidation const& row) {
-                apply_element_style_invalidation_after_style_change(*element, row.invalidation);
+            [&](LayoutInvalidation const&) {
+                VERIFY_NOT_REACHED();
+            },
+            [&](LayoutTreeRebuild const& row) {
+                apply_layout_tree_rebuild_after_style_change(*element, row.invalidation);
             },
             [&](ExplicitInheritance const& row) {
                 if (!element->is_connected() || &element->document() != &document)
@@ -684,7 +739,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                 row_effects.append(StyleEffectDrain::AcknowledgeRecord { StyleNodeID { published_reaction.style_node } });
                 auto effects = invalidation;
                 effects |= DOM::end_style_row_counter_style_invalidation(*element);
-                row_effects.append(StyleEffectDrain::ElementInvalidation { StyleNodeID { published_reaction.style_node }, effects });
+                row_effects.append_invalidation(StyleNodeID { published_reaction.style_node }, effects);
                 transaction_invalidation |= effects;
                 continue;
             }
@@ -964,7 +1019,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                             auto step_invalidation = document.style_computer().run_transition_step_for_installed_record(scope,
                                 settled, StyleRecordID { reaction.old_style_record }, decided.present ? &decided : nullptr);
                             if (!step_invalidation.is_none()) {
-                                row_effects.append(StyleEffectDrain::ElementInvalidation { StyleNodeID { reaction.style_node }, step_invalidation });
+                                row_effects.append_invalidation(StyleNodeID { reaction.style_node }, step_invalidation);
                                 transaction_invalidation |= step_invalidation;
                             }
                         }
@@ -1005,7 +1060,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
             // A counter-style rebuild is the row's effect, not a move of style its children react to.
             auto effects = invalidation;
             effects |= DOM::end_style_row_counter_style_invalidation(*element);
-            row_effects.append(StyleEffectDrain::ElementInvalidation { StyleNodeID { reaction.style_node }, effects });
+            row_effects.append_invalidation(StyleNodeID { reaction.style_node }, effects);
             transaction_invalidation |= effects;
 
             // The environment moved. Where the engine moved the descendants' environments as it
@@ -1418,7 +1473,9 @@ static void apply_targeted_style_invalidation(StyleDrainScope const& scope, DOM:
     // A counter-style rebuild is the element's effect, not a move of style its children react to.
     auto effects = invalidation;
     effects |= counter_style_invalidation;
-    apply_element_style_invalidation_after_style_change(element, effects);
+    auto& document = element.document();
+    StyleEffectDrain::apply_layout_invalidation(document, StyleEffectDrain::viewport_propagation_sources_of(document), element.style_node_id(), effects);
+    apply_layout_tree_rebuild_after_style_change(element, effects);
     note_targeted_style_reaction_applied(scope, element, row_start, invalidation, did_change_custom_properties, descendant_style_recompute_needed);
     apply_document_style_invalidation_after_style_change(element.document(), effects);
 }

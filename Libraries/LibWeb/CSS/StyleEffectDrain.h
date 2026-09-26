@@ -48,8 +48,14 @@ public:
         u32 pseudo_element_style_records { NumericLimits<u32>::max() };
     };
 
-    // What a row's change invalidates of layout, the layout tree, visual contexts and scroll snapping.
-    struct ElementInvalidation {
+    // What a row's change invalidates of layout and visual contexts, and whether scroll snapping
+    // runs again, marked on the layout nodes the arena binds to its style node.
+    struct LayoutInvalidation {
+        StyleNodeID style_node;
+        RequiredInvalidationAfterStyleChange invalidation;
+    };
+    // A row whose change rebuilds the layout tree marks it where its element decides.
+    struct LayoutTreeRebuild {
         StyleNodeID style_node;
         RequiredInvalidationAfterStyleChange invalidation;
     };
@@ -89,7 +95,7 @@ public:
     struct DiscardContainerQueryEffects {
         StyleNodeID style_node;
     };
-    using RenderEffect = Variant<LayoutNodeStyle, ElementInvalidation, ExplicitInheritance, AnchorNames, ContainerQueryEffects, RestoreRowDebts, AcknowledgeRecord, DiscardContainerQueryEffects>;
+    using RenderEffect = Variant<LayoutNodeStyle, LayoutInvalidation, LayoutTreeRebuild, ExplicitInheritance, AnchorNames, ContainerQueryEffects, RestoreRowDebts, AcknowledgeRecord, DiscardContainerQueryEffects>;
 
     // -- The main half ------------------------------------------------------------------------
 
@@ -116,6 +122,12 @@ public:
 
     void append(RenderEffect effect) { m_render_effects.append(move(effect)); }
     void append(MainEffect effect) { m_main_effects.append(move(effect)); }
+    void append_invalidation(StyleNodeID style_node, RequiredInvalidationAfterStyleChange const& invalidation)
+    {
+        append(LayoutInvalidation { style_node, invalidation });
+        if (invalidation.needs_layout_tree_rebuild())
+            append(LayoutTreeRebuild { style_node, invalidation });
+    }
     void apply(DOM::Document&);
     void apply(StyleDrainScope const&, DOM::Document&);
 
@@ -123,6 +135,11 @@ public:
     static void install(DOM::Document&, Function<void(StyleDrainScope const&)> const& install);
 
     static PseudoElementStyleRecords pseudo_element_style_records_of(DOM::Element const&);
+    // The style nodes of the elements the viewport takes its overflow, writing mode and direction from.
+    using ViewportPropagationSources = Vector<StyleNodeID, 2>;
+    static ViewportPropagationSources viewport_propagation_sources_of(DOM::Document const&);
+    // Marks what a row's change invalidates on the layout nodes the arena binds to its style node.
+    static void apply_layout_invalidation(DOM::Document&, ViewportPropagationSources const&, StyleNodeID, RequiredInvalidationAfterStyleChange const&);
     // Applies the records a row installs to the layout nodes the arena binds to its style node.
     static void apply_layout_node_style(DOM::Document&, StyleNodeID, RequiredInvalidationAfterStyleChange const&, StyleRecordID, PseudoElementStyleRecords const&);
 
