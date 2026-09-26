@@ -99,10 +99,9 @@ static void set_own_inline_style(DOM::Element& element, CSS::CSSStyleProperties 
     auto current = element.inline_style();
     bool const holds_own_copy = current && current->owner_node().has_value();
     // Every value change asks again, and nearly always the element holds the defaults already: comparing the
-    // declarations answers that without serializing both sides.
+    // declarations answers that without serializing both sides. The element's copy shares the declarations it was
+    // given, so declarations that compare unequal are different ones, which a placeholder showing or hiding makes.
     if (holds_own_copy && current->properties() == defaults.properties() && current->custom_properties().is_empty() && defaults.custom_properties().is_empty())
-        return;
-    if (holds_own_copy && current->serialized() == defaults.serialized())
         return;
     // The copy shares the defaults' declarations until either changes, which the comparison above answers first.
     auto style = CSS::CSSStyleProperties::create_element_inline_style({ element });
