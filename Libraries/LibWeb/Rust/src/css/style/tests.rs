@@ -839,6 +839,7 @@ fn retained_answer_delta_memo_accounts_its_tuple_capacity() {
             winners_updated: false,
             cascade_winners_are_complete: false,
             pseudo_winner_states: Box::default(),
+            flipped_pseudo_kinds: 0,
         },
     };
 

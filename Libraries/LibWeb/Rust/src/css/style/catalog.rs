@@ -1468,6 +1468,9 @@ pub(super) struct RetainedAnswerDeltaTransition {
     /// The pseudo-element winner states the first member settled beside its winner state, of
     /// the same program version.
     pub(super) pseudo_winner_states: Box<[(super::tree::PseudoElementTarget, CascadeStateID)]>,
+    /// The pseudo-element kinds the deltas' rules target: a replaying member's rows for those
+    /// kinds that `pseudo_winner_states` does not carry predate the transition.
+    pub(super) flipped_pseudo_kinds: u64,
     /// Whether the first member's winner application reported an update, which decides whether
     /// replays hand the traversal an incremental cascade answer.
     pub(super) winners_updated: bool,
