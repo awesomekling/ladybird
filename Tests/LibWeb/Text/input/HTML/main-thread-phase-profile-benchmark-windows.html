@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<div id="target"></div>
+<script>
+    asyncTest(done => {
+        internals.resetRenderingSchedulerCounters();
+        // Marks open no window until the profile is enabled.
+        performance.mark("Off.Step-start");
+        performance.mark("Off.Step-sync-end");
+        internals.setMainThreadPhaseProfileEnabled(true);
+        performance.mark("Suite.Step-start");
+        document.getElementById("target").style.width = "10px";
+        document.body.offsetWidth;
+        performance.mark("Suite.Step-sync-end");
+        setTimeout(() => {
+            document.getElementById("target").style.width = "20px";
+            document.body.getBoundingClientRect();
+            performance.mark("Suite.Step-async-end");
+            const profile = JSON.parse(internals.getMainThreadPhaseProfile());
+            for (const key of Object.keys(profile).sort()) {
+                const row = profile[key];
+                println(`${key}: windows=${row.windows} wall=${row.wallNs > 0} timer=${"task.timer" in row.phases} forcedLayout=${"layout.forced.top" in row.phases}`);
+            }
+            internals.setMainThreadPhaseProfileEnabled(false);
+            println(`after disabling: ${internals.getMainThreadPhaseProfile()}`);
+            done();
+        }, 0);
+    });
+</script>

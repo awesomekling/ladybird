@@ -242,6 +242,8 @@ interface Internals {
     DOMString layoutOverlapBlocker();
     object getRenderingSchedulerCounters();
     undefined resetRenderingSchedulerCounters();
+    undefined setMainThreadPhaseProfileEnabled(boolean enabled);
+    DOMString getMainThreadPhaseProfile();
     // Under LIBWEB_STAGE_THREAD=overlap, holds the next recording submitted to the render side
     // until releaseHeldFrame(), so that tasks run beside that frame in flight. Returns whether it
     // will hold one; it never does in the other modes. It holds the recording at `point`:

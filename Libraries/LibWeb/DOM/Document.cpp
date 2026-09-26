@@ -154,6 +154,7 @@
 #include <LibWeb/HTML/DragEvent.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
 #include <LibWeb/HTML/EventLoop/FrameScheduler.h>
+#include <LibWeb/HTML/EventLoop/MainThreadPhases.h>
 #include <LibWeb/HTML/EventNames.h>
 #include <LibWeb/HTML/Focus.h>
 #include <LibWeb/HTML/HTMLAllCollection.h>
@@ -2428,15 +2429,19 @@ void Document::drain_invalidation_journal() const
 void Document::join_frame_in_flight(SourceLocation location) const
 {
     // A document with no arena has no frame to be in flight.
-    if (m_layout_node_arena)
+    if (m_layout_node_arena) {
+        HTML::MainThreadPhases::Scope phase { HTML::MainThreadPhases::Phase::FlightJoin };
         Layout::RustFFI::layout_arena_join_frame_in_flight(m_layout_node_arena->handle(), reinterpret_cast<u8 const*>(location.filename().characters_without_null_termination()), location.filename().length(), location.line_number());
+    }
 }
 
 void Document::join_frame_reaching_style_engine(SourceLocation location) const
 {
     // A document with no arena has no frame to be in flight.
-    if (m_layout_node_arena)
+    if (m_layout_node_arena) {
+        HTML::MainThreadPhases::Scope phase { HTML::MainThreadPhases::Phase::FlightJoin };
         Layout::RustFFI::layout_arena_join_frame_reaching_style_engine(m_layout_node_arena->handle(), reinterpret_cast<u8 const*>(location.filename().characters_without_null_termination()), location.filename().length(), location.line_number());
+    }
 }
 
 void Document::join_frame_for_dom_tree_mutation() const

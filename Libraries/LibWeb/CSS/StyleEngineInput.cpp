@@ -32,6 +32,7 @@
 #include <LibWeb/DOM/Slottable.h>
 #include <LibWeb/DOM/Text.h>
 #include <LibWeb/HTML/CustomElements/CustomStateSet.h>
+#include <LibWeb/HTML/EventLoop/MainThreadPhases.h>
 #include <LibWeb/HTML/FormAssociatedElement.h>
 #include <LibWeb/HTML/HTMLBRElement.h>
 #include <LibWeb/HTML/HTMLBodyElement.h>
@@ -2873,6 +2874,7 @@ void record_non_author_stylesheets(DOM::Document& document)
     if (recorded_sheets_match())
         return;
 
+    HTML::MainThreadPhases::Scope phase { HTML::MainThreadPhases::Phase::StyleUserAgentSheets };
     auto& style_engine = style_computer.style_engine();
     for (auto const& entry : recorded)
         style_engine.detach_sheet(entry.sheet_id, document_tree_scope);

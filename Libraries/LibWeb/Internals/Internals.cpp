@@ -68,6 +68,7 @@
 #include <LibWeb/HTML/EventLoop/FrameCompletion.h>
 #include <LibWeb/HTML/EventLoop/FrameInFlightReferences.h>
 #include <LibWeb/HTML/EventLoop/FrameScheduler.h>
+#include <LibWeb/HTML/EventLoop/MainThreadPhases.h>
 #include <LibWeb/HTML/EventLoop/TaskQueue.h>
 #include <LibWeb/HTML/FormAssociatedElement.h>
 #include <LibWeb/HTML/HTMLElement.h>
@@ -1847,6 +1848,17 @@ void Internals::reset_rendering_scheduler_counters()
     HTML::main_thread_event_loop().reset_rendering_scheduler_counters();
     Layout::RustFFI::rust_reset_frame_retirement_counters();
     Layout::RustFFI::rust_reset_flight_ends();
+    HTML::MainThreadPhases::reset();
+}
+
+void Internals::set_main_thread_phase_profile_enabled(bool enabled)
+{
+    HTML::MainThreadPhases::set_enabled(enabled);
+}
+
+String Internals::get_main_thread_phase_profile() const
+{
+    return HTML::MainThreadPhases::report_as_json();
 }
 
 static bool hold_next_submitted_stage(StringView label, Utf16String const& point, GC::Ptr<DOM::Document> document)

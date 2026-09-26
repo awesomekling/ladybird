@@ -229,6 +229,8 @@ public:
     Utf16String layout_overlap_blocker() const;
     GC::Ref<JS::Object> get_rendering_scheduler_counters() const;
     void reset_rendering_scheduler_counters();
+    void set_main_thread_phase_profile_enabled(bool);
+    String get_main_thread_phase_profile() const;
     bool hold_next_recording_frame(Utf16String const& point, GC::Ptr<DOM::Document> document);
     bool hold_next_layout_frame(Utf16String const& point, GC::Ptr<DOM::Document> document);
 

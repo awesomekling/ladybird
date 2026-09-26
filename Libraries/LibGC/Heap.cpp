@@ -58,6 +58,33 @@ static constexpr int GC_INCREMENTAL_SWEEP_SLICE_MS = 5;
 static constexpr int GC_IDLE_GC_INTERVAL_MS = 4000;
 
 static Heap* s_the;
+static Heap::CollectionObserver s_collection_observer;
+
+void Heap::set_collection_observer(CollectionObserver observer)
+{
+    s_collection_observer = observer;
+}
+
+namespace {
+
+struct CollectionObservation {
+    explicit CollectionObservation(Heap::CollectionWork work)
+        : m_work(work)
+    {
+        if (s_collection_observer)
+            s_collection_observer(m_work, true);
+    }
+    ~CollectionObservation()
+    {
+        if (s_collection_observer)
+            s_collection_observer(m_work, false);
+    }
+
+private:
+    Heap::CollectionWork m_work;
+};
+
+}
 
 namespace {
 
@@ -654,6 +681,7 @@ NO_SANITIZE_ADDRESS void Heap::collect_garbage(CollectionType collection_type, b
 
 void Heap::run_collection(ReadonlySpan<FlatPtr> callee_saved_registers, CollectionType collection_type, bool print_report)
 {
+    CollectionObservation observation { CollectionWork::Collection };
     ConservativeScanOrigin origin {
         .stack_floor = bit_cast<FlatPtr>(__builtin_frame_address(0)),
         .callee_saved_registers = callee_saved_registers,
@@ -1481,6 +1509,7 @@ void Heap::sweep_on_timer()
     if (is_gc_deferred())
         return;
 
+    CollectionObservation observation { CollectionWork::SweepSlice };
     size_t blocks_swept = 0;
     bool finished_sweep = false;
     auto start_time = MonotonicTime::now();

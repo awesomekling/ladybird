@@ -128,6 +128,15 @@ public:
 
     void register_sweep_callback(AK::Function<void()>);
 
+    // Told when a collection, or a slice of incremental sweeping on its timer, begins and ends on the heap's thread.
+    // For an embedder's profile of where its thread's time goes.
+    enum class CollectionWork : u8 {
+        Collection,
+        SweepSlice,
+    };
+    using CollectionObserver = void (*)(CollectionWork, bool begins);
+    static void set_collection_observer(CollectionObserver);
+
     void register_cell_allocator(Badge<CellAllocator>, CellAllocator&);
     CellAllocator& cell_allocator_for(Badge<CellAllocatorDescriptorBase>, CellAllocatorDescriptorBase&);
 
