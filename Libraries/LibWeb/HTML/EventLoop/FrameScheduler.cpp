@@ -622,6 +622,11 @@ void FrameScheduler::change_arena(DOM::Document& document, Function<void(Layout:
     auto* arena = document.layout_node_arena_if_created();
     if (!arena)
         return;
+    // A task's change to the arena, such as a removal taking its boxes out of it ahead of the next layout update, would
+    // show half done in the ticks' frames: the render clock leaves the rest of the task to the main thread.
+    auto& scheduler = main_thread_event_loop().frame_scheduler();
+    if (!scheduler.m_event_loop.running_rendering_task() && (scheduler.m_clock_lend_taken_back || Layout::RustFFI::rust_clock_lend_is_active()))
+        scheduler.suspend_clock_lend(ClockLendSuspension::Write);
     if (!arena_changes_wait_for_frame(document)) {
         change(*arena);
         return;
