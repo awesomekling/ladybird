@@ -1304,21 +1304,27 @@ enum class DetachedBoxLevel {
     AtomicInline,
 };
 
-static bool can_detach_layout_subtree_for_removal(Node const& node, Node const& parent, DetachedBoxLevel box_level = DetachedBoxLevel::FromStyle)
+// Whether what the removed node's subtree means for generated content and the top layer lets its boxes be detached in
+// place. It reads nothing of the layout tree.
+static bool subtree_allows_layout_detach_for_removal(Node const& node)
 {
-    auto const* layout_node = as_if<Layout::NodeWithStyle>(node.unsafe_layout_node());
+    if (CSS::subtree_affects_generated_content_state(node))
+        return false;
+    auto const* element = as_if<Element>(node);
+    return !element || !element->rendered_in_top_layer();
+}
+
+// Whether the layout tree lets the removed node's box `layout_node` be detached from the parent's in place, given
+// `previous_sibling` and `next_sibling`, the node's siblings in the parent as the layout tree has them.
+static bool layout_tree_allows_detach_for_removal(Layout::NodeWithStyle const* layout_node, Node const& parent, Node const* previous_sibling, Node const* next_sibling, DetachedBoxLevel box_level)
+{
     auto const* parent_layout_node = parent.unsafe_layout_node();
     if (!layout_node || !parent_layout_node)
-        return false;
-    if (CSS::subtree_affects_generated_content_state(node))
         return false;
 
     // OPTIMIZATION: Absolutely positioned boxes do not participate in their DOM parent's inline or block formatting
     //               structure, even when they are attached to an ancestor containing block. Removing them cannot
     //               disturb anonymous wrappers or sibling box levels.
-    auto const* element = as_if<Element>(node);
-    if (element && element->rendered_in_top_layer())
-        return false;
     if (layout_node->position() == CSS::Positioning::Absolute) {
         if (parent.is_html_body_element())
             return true;
@@ -1346,8 +1352,8 @@ static bool can_detach_layout_subtree_for_removal(Node const& node, Node const& 
         return !sibling_element || !sibling_element->has_style()
             || !CSS::display_from_ffi_display(sibling_element->style_group<CSS::ComputedValues::BoxValues>()->display).is_contents();
     };
-    if (!sibling_is_direct_layout_child(node.previous_sibling())
-        && !sibling_is_direct_layout_child(node.next_sibling())) {
+    if (!sibling_is_direct_layout_child(previous_sibling)
+        && !sibling_is_direct_layout_child(next_sibling)) {
         return false;
     }
 
@@ -1389,6 +1395,12 @@ static bool can_detach_layout_subtree_for_removal(Node const& node, Node const& 
     if (box_level == DetachedBoxLevel::FromStyle)
         return layout_node->is_inline_block();
     return box_level == DetachedBoxLevel::AtomicInline;
+}
+
+static bool can_detach_layout_subtree_for_removal(Node const& node, Node const& parent, DetachedBoxLevel box_level = DetachedBoxLevel::FromStyle)
+{
+    return subtree_allows_layout_detach_for_removal(node)
+        && layout_tree_allows_detach_for_removal(as_if<Layout::NodeWithStyle>(node.unsafe_layout_node()), parent, node.previous_sibling(), node.next_sibling(), box_level);
 }
 
 bool Node::can_detach_layout_subtree_in_place(Node const& node, Node const& parent, bool box_is_block_level)
@@ -1588,8 +1600,8 @@ void Node::update_layout_tree_for_removal(Node& parent, LayoutSubtreeRemoval rem
         }
     }
 
-    if (removal == LayoutSubtreeRemoval::DetachInPlace && can_detach_layout_subtree_for_removal(*this, parent)) {
-        auto* layout_node = unsafe_layout_node();
+    // Takes the removed node's box `layout_node` out of the parent's in place, which the checks above allowed.
+    auto detach_layout_subtree_for_removal = [](Layout::Node* layout_node, Node& parent) {
         auto const* removed_box = as_if<Layout::NodeWithStyle>(layout_node);
         auto* parent_box = parent.unsafe_layout_node();
         bool const parent_contains_removed_abspos_box = removed_box && removed_box->position() == CSS::Positioning::Absolute
@@ -1606,13 +1618,39 @@ void Node::update_layout_tree_for_removal(Node& parent, LayoutSubtreeRemoval rem
             parent_layout_node->set_children_are_inline(false);
         if (parent_contains_removed_abspos_box) {
             // No layout commit follows, so do what one would have done for the box that left.
-            document().set_needs_accumulated_visual_contexts_update(true);
-            document().schedule_scroll_container_resnap();
-            document().set_needs_repaint(Badge<Node> {}, InvalidateDisplayList::PaintCommandsAndHitTestList);
+            parent.document().set_needs_accumulated_visual_contexts_update(true);
+            parent.document().schedule_scroll_container_resnap();
+            parent.document().set_needs_repaint(Badge<Node> {}, InvalidateDisplayList::PaintCommandsAndHitTestList);
             return;
         }
         parent.set_needs_layout_update(SetNeedsLayoutReason::LayoutTreeUpdate);
-        return;
+    };
+
+    if (removal == LayoutSubtreeRemoval::DetachInPlace && subtree_allows_layout_detach_for_removal(*this)) {
+        if (HTML::FrameScheduler::arena_changes_wait_for_frame(document())) {
+            // A recording that owns the arena reads the boxes, so they stay in place until the frame has been taken in,
+            // and are detached then, over the siblings they still have. The node's box is found by the identity the
+            // node leaves with, and the change is kept outside the heap, so it roots the nodes it reads. The parent
+            // needs a layout update either way, which the layout update that takes the frame in makes.
+            CSS::StyleNodeID style_node;
+            if (auto const* element = as_if<Element>(*this))
+                style_node = element->style_node_id();
+            else if (auto const* text = as_if<Text>(*this))
+                style_node = text->style_node_id();
+            parent.set_needs_layout_update(SetNeedsLayoutReason::LayoutTreeUpdate);
+            HTML::FrameScheduler::change_arena(document(), [detach_layout_subtree_for_removal, style_node, parent = GC::make_root(parent), previous_sibling = GC::make_root(previous_sibling()), next_sibling = GC::make_root(next_sibling())](Layout::NodeArena& arena) {
+                auto* layout_node = style_node.value() != 0 ? static_cast<Layout::Node*>(Layout::RustFFI::layout_arena_bound_shell(arena.handle(), style_node.value())) : nullptr;
+                if (layout_tree_allows_detach_for_removal(as_if<Layout::NodeWithStyle>(layout_node), *parent, previous_sibling.ptr(), next_sibling.ptr(), DetachedBoxLevel::FromStyle))
+                    detach_layout_subtree_for_removal(layout_node, *parent);
+                else
+                    parent->set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::NodeRemove);
+            });
+            return;
+        }
+        if (auto* layout_node = unsafe_layout_node(); layout_tree_allows_detach_for_removal(as_if<Layout::NodeWithStyle>(layout_node), parent, previous_sibling(), next_sibling(), DetachedBoxLevel::FromStyle)) {
+            detach_layout_subtree_for_removal(layout_node, parent);
+            return;
+        }
     }
 
     parent.set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::NodeRemove);
@@ -1775,9 +1813,7 @@ void Node::remove(bool suppress_observers)
     if (was_tracked_by_style_engine) {
         // A suppressed-observer removal may be the first half of a compound mutation that immediately reinserts
         // this node. Keep the old parent on the conservative rebuild path so the later insertion can relocate it.
-        // A removal beside a recording that owns the arena takes that path too: the recording reads the boxes, so
-        // they stay in place until the parent's rebuild.
-        auto layout_subtree_removal = suppress_observers || HTML::FrameScheduler::arena_changes_wait_for_frame(document()) ? LayoutSubtreeRemoval::RebuildParent : LayoutSubtreeRemoval::DetachInPlace;
+        auto layout_subtree_removal = suppress_observers ? LayoutSubtreeRemoval::RebuildParent : LayoutSubtreeRemoval::DetachInPlace;
         // Layout goes first: the removed rows resolve their DOM nodes through StyleNodeIDs the style engine retires.
         update_layout_tree_for_removal(*parent, layout_subtree_removal, AncestorsMayHaveFirstLetter::Yes);
         detach_remaining_layout_nodes_for_removal();
