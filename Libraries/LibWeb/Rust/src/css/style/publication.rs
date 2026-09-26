@@ -2182,6 +2182,11 @@ impl RetainedState {
             let Some(winner) = self.winner_groups.resolved_winner(winner) else {
                 continue;
             };
+            if let WinnerSource::Rule(rule) = winner.source
+                && self.program.written_values_add_no_state_facts(rule)
+            {
+                continue;
+            }
             let Some((_, _, checks)) = self.written_winner_value(node, &winner) else {
                 continue;
             };
@@ -5443,6 +5448,14 @@ impl WrittenValueChecks {
             uses_tree_counting_function: dependencies.uses_tree_counting_function,
             reads_element_random: substitution == WrittenSubstitution::None && value_reads_element_random(value.data()),
         }
+    }
+
+    /// Whether a winner written with this value leaves `StateWrittenFacts` as it is.
+    pub(super) fn adds_no_state_facts(&self) -> bool {
+        self.substitution == WrittenSubstitution::None
+            && !self.reads_element_random
+            && self.container_relative_length_unit_mask == 0
+            && !self.uses_tree_counting_function
     }
 }
 
