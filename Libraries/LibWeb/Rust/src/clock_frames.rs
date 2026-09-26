@@ -55,6 +55,9 @@ pub(crate) fn enabled() -> bool {
 struct ClockTarget {
     style_node: StyleNodeID,
     style_record: u64,
+    /// Whether the element has a pseudo-element style that inherits from it outside its box: a
+    /// ::backdrop or a ::selection style, which only the main thread derives.
+    has_pseudo_element_style_outside_box: bool,
 }
 
 /// A scroll offset a display tick carries: where the compositor had scrolled a scroll node to.
@@ -358,7 +361,8 @@ impl ClockLease {
                 && arena.install_animation_sample(target.style_node, sample.style_record, needs_relayout);
             presentable &= installed_in_arena
                 && render_side_shows(&sample, || {
-                    box_holds_only_text(arena, arena.bound_row(target.style_node))
+                    !target.has_pseudo_element_style_outside_box
+                        && box_holds_only_text(arena, arena.bound_row(target.style_node))
                 });
             if level >= 1 && installed_in_arena {
                 let affects_hit_testing =
@@ -523,7 +527,8 @@ impl ClockLease {
 /// row's style, layout and paint. What moves descendants' styles, visual contexts, stacking
 /// contexts or scroll snapping, the main thread derives, and it loads the images a sample swaps in.
 /// Inherited properties move the styles of descendants only where `box_holds_only_text` says no:
-/// text lays out with its parent's style.
+/// text lays out with its parent's style, and the element has no pseudo-element style outside its
+/// box to inherit them.
 fn render_side_shows(sample: &FfiRowSampledInPass, box_holds_only_text: impl FnOnce() -> bool) -> bool {
     use FfiStyleInvalidationField as Field;
     let invalidation = sample.invalidation.invalidation;
@@ -702,16 +707,19 @@ pub extern "C" fn rust_clock_lease_grant(
     }
 }
 
-/// Sets the elements the lease of `arena` ticks, with the records they hold now.
+/// Sets the elements the lease of `arena` ticks, with the records they hold now, and whether each
+/// has a pseudo-element style that inherits from it outside its box.
 ///
 /// # Safety
 ///
-/// `style_nodes` and `style_records` point at `count` values each.
+/// `style_nodes`, `style_records` and `pseudo_element_styles_outside_box` point at `count` values
+/// each.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_clock_lease_set_targets(
     arena: *mut c_void,
     style_nodes: *const u32,
     style_records: *const u64,
+    pseudo_element_styles_outside_box: *const bool,
     count: usize,
 ) {
     let Some(lease) = clock_lease_for(arena as usize) else {
@@ -721,11 +729,18 @@ pub unsafe extern "C" fn rust_clock_lease_set_targets(
     targets.clear();
     for index in 0..count {
         // SAFETY: Guaranteed by the caller.
-        let (node, record) = unsafe { (*style_nodes.add(index), *style_records.add(index)) };
+        let (node, record, outside_box) = unsafe {
+            (
+                *style_nodes.add(index),
+                *style_records.add(index),
+                *pseudo_element_styles_outside_box.add(index),
+            )
+        };
         if let Some(style_node) = StyleNodeID::from_raw(node) {
             targets.push(ClockTarget {
                 style_node,
                 style_record: record,
+                has_pseudo_element_style_outside_box: outside_box,
             });
         }
     }
