@@ -44,6 +44,11 @@ u64 NodeArena::table_cell_measurement_cache_miss_count() const
     return RustFFI::layout_arena_table_cell_measurement_cache_miss_count(m_handle);
 }
 
+u64 NodeArena::retained_inline_item_count() const
+{
+    return RustFFI::layout_arena_retained_inline_item_count(m_handle);
+}
+
 u64 NodeArena::intrinsic_measurement_count() const
 {
     return RustFFI::layout_arena_intrinsic_measurement_count(m_handle);

@@ -1,0 +1,5 @@
+retained inline items beyond the baseline:
+after laying out 100 text containers: 100
+after 50 replacements: 5101
+after adding an image to each: 5102
+after removing them: 5103
