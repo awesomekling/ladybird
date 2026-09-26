@@ -208,6 +208,73 @@ impl StyleRecordView<'_> {
     }
 }
 
+/// What a record's group payloads are built from besides its longhand table: the context its
+/// lengths resolve in and its resolved font. Two tables equal for publication, built against
+/// equal inputs, assemble to equal payloads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct GroupAssemblyInputs([u64; 23]);
+
+impl GroupAssemblyInputs {
+    pub(crate) fn new(
+        length: &crate::css::style_compute::FfiLengthResolutionContext,
+        font: &crate::css::table_group_builder::FfiFontGroupBuildInputs,
+    ) -> Self {
+        let metrics = |metrics: &crate::css::style_compute::FfiFontMetrics| {
+            [
+                metrics.font_size,
+                metrics.x_height,
+                metrics.cap_height,
+                metrics.zero_advance,
+                metrics.line_height,
+            ]
+            .map(f64::to_bits)
+        };
+        let flags = [
+            length.font_metrics_depend_on_viewport_metrics,
+            length.root_font_metrics_depend_on_viewport_metrics,
+            length.has_container_width_basis,
+            length.has_container_height_basis,
+            length.container_width_basis_depends_on_viewport_metrics,
+            length.container_height_basis_depends_on_viewport_metrics,
+            length.subject_inline_axis_is_horizontal,
+        ]
+        .iter()
+        .enumerate()
+        .fold(0_u64, |flags, (bit, &flag)| flags | (u64::from(flag) << bit));
+        let pair = |first: u32, second: u32| (u64::from(first) << 32) | u64::from(second);
+        let [a, b, c, d, e] = metrics(&length.font_metrics);
+        let [f, g, h, i, j] = metrics(&length.root_font_metrics);
+        Self([
+            length.viewport_width.to_bits(),
+            length.viewport_height.to_bits(),
+            a,
+            b,
+            c,
+            d,
+            e,
+            f,
+            g,
+            h,
+            i,
+            j,
+            length.container_width_basis.to_bits(),
+            length.container_height_basis.to_bits(),
+            flags,
+            pair(font.font_size_raw as u32, font.line_height_used_raw as u32),
+            pair(
+                u32::from(font.font_variant_emoji) | u32::from(font.math_shift) << 8 | u32::from(font.math_style) << 16,
+                font.math_depth as u32,
+            ),
+            pair(font.font_ascent.to_bits(), font.font_descent.to_bits()),
+            pair(font.font_x_height.to_bits(), font.font_zero_advance.to_bits()),
+            font.first_available_font as u64,
+            font.font_cascade_list as u64,
+            font.font_weight.to_bits(),
+            font.font_width.to_bits(),
+        ])
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct StyleRecord {
     groups: ComputedGroupSetID,
@@ -744,6 +811,16 @@ pub struct ComputedGroupSets {
     style_records_interned_since_reclamation: usize,
     next_reclamation_after: usize,
     style_record_view_epoch_depth: u32,
+    /// The group set each published longhand table assembled to, by the inputs it assembled
+    /// against: a record whose table is already published takes its payloads from here rather
+    /// than building and interning a second copy of each.
+    table_assemblies: HashMap<(ComputedLonghandTableID, GroupAssemblyInputs), ComputedGroupSetID>,
+    /// The table the last record of each cascade state published: the table an element of the
+    /// same state most likely computes to, asked before any table is hashed.
+    table_candidates: HashMap<(u64, CascadeStateID), ComputedLonghandTableID>,
+    /// The catalog's answer for the table the next publication carries, when the publisher
+    /// already asked for it, by the table's address.
+    known_longhand_table: Option<(usize, Result<ComputedLonghandTableID, u64>)>,
 }
 
 impl Default for ComputedGroupSets {
@@ -780,6 +857,9 @@ impl Default for ComputedGroupSets {
             style_records_interned_since_reclamation: 0,
             next_reclamation_after: 1024,
             style_record_view_epoch_depth: 0,
+            table_assemblies: HashMap::default(),
+            table_candidates: HashMap::default(),
+            known_longhand_table: None,
         }
     }
 }
@@ -1108,7 +1188,12 @@ impl ComputedGroupSets {
         canonical: Option<ComputedLonghandTableID>,
         owned: bool,
     ) -> (ComputedLonghandTableID, bool) {
-        let hash = match self.find_longhand_table(table, previous, canonical) {
+        let known = self
+            .known_longhand_table
+            .take()
+            .filter(|&(known, _)| known == std::ptr::from_ref(table).addr())
+            .map(|(_, lookup)| lookup);
+        let hash = match known.unwrap_or_else(|| self.find_longhand_table(table, previous, canonical)) {
             Ok(identity) => return (identity, false),
             Err(hash) => hash,
         };
@@ -1132,6 +1217,81 @@ impl ComputedGroupSets {
         };
         // NB: Only a new unique result materializes; ownership transfers to the catalog.
         self.insert_longhand_table(table.into_raw_shared(), hash)
+    }
+
+    /// The payloads a frozen table assembles to against `inputs`, when the table equals one the
+    /// catalog holds that already assembled against equal inputs. The table is looked for among
+    /// the one its cascade state last published and the target's own, without hashing it; one
+    /// found is kept for the publication that carries this very table next.
+    pub(crate) fn assembled_payloads(
+        &mut self,
+        target: Option<ComputedStyleTarget>,
+        cascade_state: Option<(u64, CascadeStateID)>,
+        table: &ComputedLonghandTable,
+        inputs: GroupAssemblyInputs,
+    ) -> Option<Vec<SharedPayload>> {
+        // A verification pass decides no identities, and a replay takes the recorded ones.
+        if self.content_identities_suspended || replaying_style_groups() {
+            return None;
+        }
+        let candidates = [
+            cascade_state.and_then(|state| self.table_candidates.get(&state).copied()),
+            target.and_then(|target| self.target_longhand_table(target)),
+        ];
+        let found = candidates.into_iter().flatten().find(|&candidate| {
+            self.computed_longhand_tables[candidate]
+                .table()
+                .publication_equals(table)
+        })?;
+        self.known_longhand_table = Some((std::ptr::from_ref(table).addr(), Ok(found)));
+        let set = *self.table_assemblies.get(&(found, inputs))?;
+        Some(self.sets[set].payloads.to_vec())
+    }
+
+    /// Remembers the table `record` just published for its cascade state and, when its payloads
+    /// were `assembled` against `inputs` rather than reused, what the table assembled to.
+    pub(crate) fn remember_table_assembly(
+        &mut self,
+        record: FinalStyleRecordID,
+        cascade_state: Option<(u64, CascadeStateID)>,
+        inputs: GroupAssemblyInputs,
+        assembled: bool,
+    ) {
+        if self.content_identities_suspended || replaying_style_groups() {
+            return;
+        }
+        let Some(&StyleRecord {
+            groups,
+            longhand_table: Some(table),
+            ..
+        }) = record
+            .base_record()
+            .and_then(|identity| self.style_records.get_index(identity.index()))
+        else {
+            return;
+        };
+        if let Some(cascade_state) = cascade_state {
+            self.table_candidates.insert(cascade_state, table);
+        }
+        if assembled {
+            self.table_assemblies.insert((table, inputs), groups);
+        }
+    }
+
+    /// The longhand table of the record `target` holds now.
+    fn target_longhand_table(&self, target: ComputedStyleTarget) -> Option<ComputedLonghandTableID> {
+        let ComputedStyleTarget { node, pseudo_kind } = target;
+        let style_record = if target.is_pseudo() {
+            self.pseudo_row(node, pseudo_kind)
+                .and_then(|row| row.assignment)
+                .map(|inputs| inputs.style_record)
+        } else {
+            node.element_index()
+                .and_then(|index| self.style_record_column.get(index as usize))
+                .copied()
+                .flatten()
+        }?;
+        self.style_records.get_index(style_record.index())?.longhand_table
     }
 
     fn insert_longhand_table(&mut self, retained: *const ComputedLonghandTable, hash: u64) -> ComputedLonghandTableID {
@@ -2171,20 +2331,7 @@ impl ComputedGroupSets {
         //     style record - on every recompute. The target's previous table is offered as a
         //     canonical candidate and reused when every slot holds an equal value, mirroring how
         //     output group payloads canonicalize against the previous group set above.
-        let previous_longhand_table = target.and_then(|target| {
-            let ComputedStyleTarget { node, pseudo_kind } = target;
-            let style_record = if target.is_pseudo() {
-                self.pseudo_row(node, pseudo_kind)
-                    .and_then(|row| row.assignment)
-                    .map(|inputs| inputs.style_record)
-            } else {
-                node.element_index()
-                    .and_then(|index| self.style_record_column.get(index as usize))
-                    .copied()
-                    .flatten()
-            }?;
-            self.style_records.get_index(style_record.index())?.longhand_table
-        });
+        let previous_longhand_table = target.and_then(|target| self.target_longhand_table(target));
         let canonical_longhand_table = self.sets[identity].canonical_longhand_table;
         let longhand_table_identity = longhand_table.map(|table| {
             let (identity, moved) =
@@ -3413,6 +3560,9 @@ impl ComputedGroupSets {
         if replaying_style_groups() {
             return retention;
         }
+        self.table_candidates.clear();
+        self.table_assemblies
+            .retain(|(table, _), set| reachable.longhand_tables[table.index()] && reachable.sets[set.index()]);
 
         let mut unreachable_style_records = self
             .style_records
