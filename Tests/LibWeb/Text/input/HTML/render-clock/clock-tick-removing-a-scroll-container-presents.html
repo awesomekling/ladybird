@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<style>
+    body {
+        margin: 0;
+    }
+    #clipper {
+        width: 100px;
+        height: 20px;
+        overflow: hidden;
+    }
+    #shrinker {
+        width: 2000px;
+        height: 20px;
+        background-color: blue;
+        animation: shrink 200s linear;
+    }
+    @keyframes shrink {
+        from {
+            width: 2000px;
+        }
+        to {
+            width: 0;
+        }
+    }
+</style>
+<div id="clipper"><div id="shrinker"></div></div>
+<script src="../../include.js"></script>
+<script>
+    function nextTask() {
+        const { promise, resolve } = Promise.withResolvers();
+        const channel = new MessageChannel();
+        channel.port1.onmessage = resolve;
+        channel.port2.postMessage(null);
+        return promise;
+    }
+
+    // A frame time past `time`, and not past now: the time a display tick at the next frame carries.
+    async function frameTimeAfter(time) {
+        while (performance.now() <= time + 1)
+            await nextTask();
+        return performance.now();
+    }
+
+    // Under LIBWEB_RENDER_CLOCK_FRAMES, a render clock tick whose layout ends the overflow of a box with overflow: hidden
+    // changes the structure of the visual context tree: the box is no longer a scroll container. The tick presents its
+    // frame, and takes the tree to the compositor with the display list it recorded for it.
+    asyncTest(async done => {
+        const clipper = document.getElementById("clipper");
+        const shrinker = document.getElementById("shrinker");
+        const animation = shrinker.getAnimations()[0];
+        const enabled = internals.clockFramesEnabled();
+        internals.setManualRenderingOpportunities(true, true);
+        await nextTask();
+        // 10 px per second: the shrinker overflows the clipper at 105px, and fits it a second later.
+        animation.currentTime = 189500;
+        let frameTime = performance.now();
+        for (let i = 0; i < 3; ++i) {
+            frameTime = await frameTimeAfter(frameTime);
+            internals.injectRenderingOpportunity(frameTime);
+            await nextTask();
+        }
+        const overflowedBefore = clipper.scrollWidth > clipper.clientWidth;
+
+        const before = internals.getRenderClockCounters();
+        const epochBefore = internals.visualContextTreeStructuralEpoch();
+        frameTime = await frameTimeAfter(frameTime + 1000);
+        const taken = await internals.injectClockTick(frameTime);
+        const after = internals.getRenderClockCounters();
+        const epochChanged = internals.visualContextTreeStructuralEpoch() !== epochBefore;
+        println(`the clipper overflowed before the tick: ${overflowedBefore}`);
+        println(`the tick ended the clipper's overflow and presented it: ${!enabled || (taken && epochChanged && after.ticksPresented === before.ticksPresented + 1 && after.ticksMovingVisualContexts === before.ticksMovingVisualContexts)}`);
+        frameTime = await frameTimeAfter(frameTime);
+        internals.injectRenderingOpportunity(frameTime);
+        await nextTask();
+        println(`the clipper fits after the tick: ${clipper.scrollWidth <= clipper.clientWidth}`);
+        internals.setManualRenderingOpportunities(false);
+        done();
+    });
+</script>

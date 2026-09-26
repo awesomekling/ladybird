@@ -1,0 +1,3 @@
+the clipper overflowed before the tick: true
+the tick ended the clipper's overflow and presented it: true
+the clipper fits after the tick: true

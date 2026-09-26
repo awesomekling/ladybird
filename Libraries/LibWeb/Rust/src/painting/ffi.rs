@@ -1610,11 +1610,10 @@ pub(crate) unsafe fn record_for_clock_tick(arena_handle: *mut c_void) -> bool {
 
 /// Updates the visual contexts a clock tick's layout left behind, on the render side, as the main
 /// thread's rendering update does before it records. Returns whether the tick can show its frame
-/// without the main thread: the update kept the structure of the tree, whose copy the compositor
-/// keeps in step with the main thread's frames, and moved at most what its contexts hold (a clip
-/// rect, a transform), which the tick's frame takes to the compositor with the tree. Where it
-/// returns false, the tree may have moved on already, and the main thread's next frame takes it to
-/// the compositor.
+/// without the main thread: the update changed the tree incrementally, and the tick's frame takes
+/// it to the compositor, whose copy is in step with the frames it was shown (see
+/// `layout_arena_clock_tick_scroll_state_snapshot`). Where it returns false, the update built the
+/// tree anew, and the main thread's next frame takes it to the compositor.
 ///
 /// # Safety
 ///
@@ -1648,7 +1647,45 @@ pub(crate) unsafe fn settle_visual_contexts_for_clock_tick(arena_handle: *mut c_
     }
     // SAFETY: Guaranteed by the caller; no borrow of the arena is live here.
     let outcome = update_accumulated_visual_contexts_stage(unsafe { arena_from_handle_mut(arena_handle) }, viewport);
-    !outcome.performed_full_build && !outcome.structural_epoch_changed
+    !outcome.performed_full_build
+}
+
+/// Hands `publish` the scroll offsets of the nodes of the visual context tree a clock tick's layout
+/// left, for the frame that takes a tree of another structure to the compositor. The main thread
+/// refreshes its own copy of the scroll state still.
+///
+/// # Safety
+///
+/// `arena_handle` must be a live arena that the calling tick owns, with the main thread idle;
+/// `publish` is called synchronously with `sink` and a view of the snapshot that is valid only for
+/// the duration of that call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_clock_tick_scroll_state_snapshot(
+    arena_handle: *mut c_void,
+    sink: *mut c_void,
+    publish: unsafe extern "C" fn(*mut c_void, *const libgfx_rust::FloatPoint, usize),
+) {
+    // SAFETY: Guaranteed by the caller.
+    let arena = unsafe { arena_from_handle(arena_handle) };
+    let snapshot = {
+        let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::ScrollStateRefresh);
+        let paintable_rows = arena.paintable_rows();
+        let mut paint_state = arena.paint_state().borrow_mut();
+        let state = &mut paint_state.visual_context;
+        if state.needs_to_refresh_scroll_state {
+            crate::painting::visual_context::refresh::refresh_scroll_state(&paintable_rows, &mut state.scroll_state);
+        }
+        let mut snapshot = state
+            .scroll_state
+            .snapshot(arena.visual_context_tree_inputs().device_pixels_per_css_pixel);
+        // https://drafts.csswg.org/css-position/#sticky-pos
+        if let Some(tree) = state.tree.as_deref() {
+            tree.resolve_sticky_offsets_in_place(&mut snapshot);
+        }
+        snapshot
+    };
+    // SAFETY: The C++ sink copies the offsets synchronously.
+    unsafe { publish(sink, snapshot.as_ptr(), snapshot.len()) };
 }
 
 /// What a flight's recording reads of the host, which the main thread sealed where it submitted the
