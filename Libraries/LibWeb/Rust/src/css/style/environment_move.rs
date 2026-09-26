@@ -115,7 +115,6 @@ impl StyleEngineState {
             .retained
             .element_custom_property_data
             .get(&parent)
-            .and_then(Option::as_ref)
             .filter(|held| held.identity == environment && !held.is_animation_overlay)?;
         Some(Some(HeldCustomPropertyEnvironment {
             animation_base: None,
@@ -253,7 +252,6 @@ impl StyleEngineState {
         self.retained
             .element_custom_property_data
             .get(&element)
-            .and_then(Option::as_ref)
             .map_or((0, false, false), |held| {
                 (held.identity, held.declares, held.is_animation_overlay)
             })
@@ -438,7 +436,6 @@ impl StyleEngineState {
             .retained
             .element_custom_property_data
             .get(&node)
-            .and_then(Option::as_ref)
             .map_or(0, |held| held.identity);
         let Some(moved) = self.held_environment_for(environment_move.environment, environment_move.parent) else {
             self.record_derived_element_style_input(node, STYLE_REACTION_RECOMPUTE_STYLE, 0);
@@ -447,10 +444,13 @@ impl StyleEngineState {
         if self.move_pseudo_element_environments(node, existing, moved.as_ref()) {
             self.record_derived_element_style_input(node, STYLE_REACTION_RECOMPUTE_STYLE, 0);
         }
-        let retired = self.retained.element_custom_property_data.insert(node, moved);
+        let retired = match moved {
+            Some(moved) => self.retained.element_custom_property_data.insert(node, moved),
+            None => self.retained.element_custom_property_data.remove(&node),
+        };
         self.host
             .retired_custom_property_data
-            .extend(retired.flatten().and_then(|held| held.data));
+            .extend(retired.and_then(|held| held.data));
         style_record
     }
 

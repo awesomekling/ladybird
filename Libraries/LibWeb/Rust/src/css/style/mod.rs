@@ -896,9 +896,9 @@ pub struct RetainedState {
     custom_property_registry: std::sync::Arc<crate::css::custom_properties::CustomPropertyRegistry>,
     /// The custom-property environment each element holds, kept so a row that inherits custom
     /// properties is not the reason a walk to the element it inherits from happens. This is the only
-    /// copy: the host reads an element's environment from here. `None` records an element holding
-    /// none; a missing entry records an element the engine was never told about.
-    element_custom_property_data: HashMap<StyleNodeID, Option<inputs::HeldCustomPropertyEnvironment>>,
+    /// copy: the host reads an element's environment from here. An element holding none has no
+    /// entry, which most elements are.
+    element_custom_property_data: HashMap<StyleNodeID, inputs::HeldCustomPropertyEnvironment>,
     /// The custom-property environment each of an element's synthetic pseudo-elements holds, by the
     /// pseudo-element's kind. The host reads it from here; a missing entry is one holding none.
     pseudo_element_custom_property_data: HashMap<(StyleNodeID, u8), inputs::HeldCustomPropertyEnvironment>,

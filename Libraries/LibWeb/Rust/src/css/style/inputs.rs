@@ -151,8 +151,7 @@ impl RetainedState {
     }
 
     /// Keep the custom-property environment an element now holds. A null `data` records that the
-    /// element holds none, which is an answer like any other - unlike having never been told,
-    /// which is what a missing entry means.
+    /// element holds none.
     ///
     /// # Safety
     /// `data` must be null or a live `Web::CSS::CustomPropertyData` carrying `store`, and, where it
@@ -168,10 +167,10 @@ impl RetainedState {
         animation_base: Option<(u64, *const std::ffi::c_void, *const std::ffi::c_void)>,
     ) {
         if data.is_null() {
-            self.element_custom_property_data.insert(node, None);
+            self.element_custom_property_data.remove(&node);
             return;
         }
-        if let Some(Some(existing)) = self.element_custom_property_data.get(&node)
+        if let Some(existing) = self.element_custom_property_data.get(&node)
             && existing.data.as_ref().is_some_and(|existing| existing.data() == data)
         {
             return;
@@ -187,7 +186,7 @@ impl RetainedState {
         }
         self.element_custom_property_data.insert(
             node,
-            Some(HeldCustomPropertyEnvironment {
+            HeldCustomPropertyEnvironment {
                 identity: environment,
                 is_animation_overlay: animation_base.is_some(),
                 declares,
@@ -197,7 +196,7 @@ impl RetainedState {
                     data: crate::css::host_shared::HostShared::new(data),
                 }),
                 data: Some(unsafe { RetainedCustomPropertyData::retain(data, store) }),
-            }),
+            },
         );
     }
 
@@ -210,7 +209,6 @@ impl RetainedState {
     ) -> Option<(u64, *const std::ffi::c_void, *const std::ffi::c_void)> {
         self.element_custom_property_data
             .get(&node)?
-            .as_ref()?
             .animation_base
             .as_ref()
             .map(|base| (base.environment, base.store.as_ptr(), base.data.as_ptr()))
@@ -219,7 +217,7 @@ impl RetainedState {
     /// The environment an element holds, as it was last kept: the host's object for it, or null with
     /// the identity of one the engine resolved. The host keeps no copy of its own.
     pub(crate) fn element_custom_property_data(&self, node: StyleNodeID) -> (*const std::ffi::c_void, u64) {
-        Self::held_environment_answer(self.element_custom_property_data.get(&node).and_then(Option::as_ref))
+        Self::held_environment_answer(self.element_custom_property_data.get(&node))
     }
 
     fn held_environment_answer(held: Option<&HeldCustomPropertyEnvironment>) -> (*const std::ffi::c_void, u64) {
@@ -2965,7 +2963,7 @@ impl StyleEngineState {
                 self.host.held_style_records.remove(&node);
                 // An identity can be minted again for another element, so a retained environment
                 // must not outlive the element that installed it.
-                if let Some(Some(held)) = self.retained.element_custom_property_data.remove(&node) {
+                if let Some(held) = self.retained.element_custom_property_data.remove(&node) {
                     self.host.retired_custom_property_data.extend(held.data);
                 }
                 self.retained.sampled_custom_property_environments.remove(&node);
@@ -3232,11 +3230,11 @@ impl StyleEngineState {
     /// Bring element identities the host minted into the tree.
     ///
     /// A freshly minted element holds no custom-property environment yet: installing its style
-    /// gives it one.
+    /// gives it one. An identity minted again holds nothing of the element it named before.
     pub fn mint_style_nodes(&mut self, nodes: &[StyleNodeID], counters: &mut Counters) {
         for &node in nodes {
             self.retained.tree.mint_element(node, &mut self.retained.memory);
-            self.retained.element_custom_property_data.insert(node, None);
+            self.retained.element_custom_property_data.remove(&node);
             counters.bump(Counter::StyleNodesAllocated);
         }
         self.publish_budget_inputs();
