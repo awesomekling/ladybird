@@ -2540,6 +2540,13 @@ impl LayoutNodeArena {
         &self,
         writer: &'static str,
     ) -> crate::painting::published_immutable::WriterScope {
+        self.pass_main_side_door(writer);
+        crate::painting::published_immutable::enter_writer(writer)
+    }
+
+    /// Like [`Self::join_frame_for_main_side_write`], for a writer that goes on to write through
+    /// doors of its own, so that no write is made in a scope of this one.
+    fn pass_main_side_door(&self, writer: &'static str) {
         assert!(
             !self.a_stage_is_running(),
             "{writer} were written by the main side while a render stage was running"
@@ -2547,7 +2554,6 @@ impl LayoutNodeArena {
         // FIXME: The wait for an overlapping stage happens as the writer borrows the arena, before the door is
         //        counted. Once the door itself waits for the frame in flight, pass the wait here.
         record_door_pass(writer, None);
-        crate::painting::published_immutable::enter_writer(writer)
     }
 
     pub(crate) fn begin_active_layout_pass(&self) {
@@ -6561,10 +6567,22 @@ pub struct FfiDoorCounters {
 thread_local! {
     // By writer, in the order each was first passed. There are only a few writers, so a scan is enough.
     static DOOR_COUNTERS: RefCell<Vec<(&'static str, FfiDoorCounters)>> = const { RefCell::new(Vec::new()) };
+    // Whether the door passes are counted at all. See `layout_arena_count_door_passes`.
+    static COUNTS_DOOR_PASSES: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Counts the door passes on this thread from now on. Only internals reports them, and every DOM
+/// tree mutation passes a door: a page that rebuilds a list by innerHTML passes one for each node.
+#[unsafe(no_mangle)]
+pub extern "C" fn layout_arena_count_door_passes() {
+    COUNTS_DOOR_PASSES.set(true);
 }
 
 /// Counts a pass through `writer`'s door, and the wait for the frame in flight it took, if any.
 fn record_door_pass(writer: &'static str, wait: Option<std::time::Duration>) {
+    if !COUNTS_DOOR_PASSES.get() {
+        return;
+    }
     DOOR_COUNTERS.with_borrow_mut(|counters| {
         let index = match counters.iter().position(|(name, _)| *name == writer) {
             Some(index) => index,
@@ -6631,23 +6649,27 @@ pub unsafe extern "C" fn layout_arena_join_frame_for_dom_tree_mutation(arena: *m
     // join the pass, and the rows it frees or marks are no longer the pass's to read. So is a
     // layout pass: the inputs wait for it to be taken back, and the rows it owns wait at the
     // arena's own doors.
-    if !crate::stage_thread::only_style_pass_in_flight_for_arena(arena)
-        && !crate::stage_thread::layout_pass_in_flight_for_arena(arena)
-    {
-        crate::stage_thread::join_frame_reaching_style_engine_at(
-            arena,
-            location.file(),
-            location.line(),
-            location.column(),
-        );
-    }
-    if crate::stage_thread::frame_in_flight_owns(arena) {
+    let frame_owns_arena = match crate::stage_thread::frame_in_flight_for_dom_tree_mutation(arena) {
+        crate::stage_thread::FrameForDomTreeMutation::Joins => {
+            crate::stage_thread::join_frame_reaching_style_engine_at(
+                arena,
+                location.file(),
+                location.line(),
+                location.column(),
+            );
+            crate::stage_thread::frame_in_flight_owns(arena)
+        }
+        crate::stage_thread::FrameForDomTreeMutation::GoesOnBeside { owns_arena } => owns_arena,
+    };
+    if frame_owns_arena {
         record_door_pass(LayoutNodeArena::DOM_TREE_MUTATION_WRITER, None);
         return;
     }
+    // NB: No stage of the frame in flight owns the arena, so there is nothing for LayoutNodeArena::from_handle() to join.
+    super::main_side_census::note_arena_access(location, arena);
     // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on the document thread.
-    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
-    drop(arena.join_frame_for_main_side_write(LayoutNodeArena::DOM_TREE_MUTATION_WRITER));
+    let arena = unsafe { &*arena.cast::<LayoutNodeArena>() };
+    arena.pass_main_side_door(LayoutNodeArena::DOM_TREE_MUTATION_WRITER);
 }
 
 /// Whether the box keeps content the compositor animates. Like the frames below, it is chosen by

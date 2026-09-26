@@ -1432,15 +1432,6 @@ pub extern "C" fn rust_stage_thread_layout_pass_in_flight_for(engine: *const c_v
     })
 }
 
-/// As [`rust_stage_thread_layout_pass_in_flight_for`], for the document the arena `arena` belongs to.
-pub(crate) fn layout_pass_in_flight_for_arena(arena: *mut c_void) -> bool {
-    SUBMITTED.with_borrow(|submitted| {
-        submitted
-            .iter()
-            .any(|stage| inputs_wait_for_take_back(stage.role) && stage.arena == arena as usize)
-    })
-}
-
 /// Like [`join_frame_in_flight_at`], for a main-side write to the style engine of the document the
 /// arena `arena` belongs to: joins the frame in flight only if one of its stages for that arena
 /// reaches the style engine (a style or layout pass). A recording reads nothing of the style
@@ -1472,14 +1463,43 @@ pub extern "C" fn rust_stage_thread_arena_changes_wait_for_frame(arena: *mut c_v
     })
 }
 
-/// Whether the frame in flight is a style pass for the document the arena `arena` belongs to, and
-/// nothing else. See [`rust_stage_thread_only_style_pass_in_flight_for`].
-pub(crate) fn only_style_pass_in_flight_for_arena(arena: *mut c_void) -> bool {
+/// What a DOM tree mutation of the document the arena `arena` belongs to does about the frame in flight.
+pub(crate) enum FrameForDomTreeMutation {
+    /// A stage of the frame reaches the style engine, and nothing lets the mutation go on beside it.
+    Joins,
+    /// The mutation goes on beside the frame, which may own the arena.
+    GoesOnBeside { owns_arena: bool },
+}
+
+/// Answers, in one look at the frame in flight, whether a DOM tree mutation's door joins it (as
+/// [`join_frame_reaching_style_engine_at`] does) and otherwise whether it owns the arena (as
+/// [`frame_in_flight_owns`] answers). A style pass alone in flight, or a layout pass (see
+/// [`rust_stage_thread_layout_pass_in_flight_for`]), lets the mutation go on beside it. Every
+/// DOM tree mutation passes the door, a parser for each node it inserts, so no frame in flight is
+/// answered first.
+pub(crate) fn frame_in_flight_for_dom_tree_mutation(arena: *mut c_void) -> FrameForDomTreeMutation {
     SUBMITTED.with_borrow(|submitted| {
-        !submitted.is_empty()
-            && submitted
+        if submitted.is_empty() {
+            return FrameForDomTreeMutation::GoesOnBeside { owns_arena: false };
+        }
+        let arena = arena as usize;
+        let only_style_pass = submitted
+            .iter()
+            .all(|stage| stage.role == "style" && stage.arena == arena);
+        let layout_pass = submitted
+            .iter()
+            .any(|stage| inputs_wait_for_take_back(stage.role) && stage.arena == arena);
+        let reaches_style_engine = submitted
+            .iter()
+            .any(|stage| stage.arena == arena && stage.reaches_style_engine(stage.style_engine));
+        if !only_style_pass && !layout_pass && reaches_style_engine {
+            return FrameForDomTreeMutation::Joins;
+        }
+        FrameForDomTreeMutation::GoesOnBeside {
+            owns_arena: submitted
                 .iter()
-                .all(|stage| stage.role == "style" && stage.arena == arena as usize)
+                .any(|stage| stage.owns_arena && stage.arena == arena && !stage.is_lend()),
+        }
     })
 }
 
