@@ -574,9 +574,11 @@ void NodeWithStyle::apply_style(CSS::StyleRecordID style_record_identity)
     m_list_style_type.clear();
     m_list_style_image.clear();
     m_style_record_identity = style_record_identity;
-    if (installed_ahead) {
+    if (installed_ahead)
         m_style_payloads = document().style_computer().style_engine().held_style_record_payloads(m_style_record_identity);
-        VERIFY(m_style_payloads);
+    // NB: A record installed ahead is held by the engine; if it is not, publish it as if it were not installed ahead.
+    ASSERT(!installed_ahead || m_style_payloads);
+    if (installed_ahead && m_style_payloads) {
         did_update_style_record();
     } else {
         publish_style_record_to_node_data();
@@ -781,13 +783,14 @@ void NodeWithStyle::set_style_record_identity(CSS::StyleRecordID style_record_id
     m_list_style_type.clear();
     m_list_style_image.clear();
     m_style_record_identity = style_record_identity;
-    if (installed_ahead) {
+    if (installed_ahead)
         m_style_payloads = document().style_computer().style_engine().held_style_record_payloads(m_style_record_identity);
-        VERIFY(m_style_payloads);
+    // NB: As above: a record installed ahead that the engine does not hold is published as if it were not.
+    ASSERT(!installed_ahead || m_style_payloads);
+    if (installed_ahead && m_style_payloads)
         did_update_style_record();
-    } else {
+    else
         publish_style_record_to_node_data();
-    }
     if (should_repin_style_record)
         pin_style_record_for_cxx_consumers();
 
