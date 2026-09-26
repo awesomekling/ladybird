@@ -263,7 +263,10 @@ impl ClockLease {
             let needs_relayout = level >= 2;
             let installed_in_arena = !needs_layout_tree_rebuild
                 && arena.install_animation_sample(target.style_node, sample.style_record, needs_relayout);
-            presentable &= installed_in_arena && render_side_shows(&sample);
+            presentable &= installed_in_arena
+                && render_side_shows(&sample, || {
+                    box_holds_only_text(arena, arena.bound_row(target.style_node))
+                });
             if level >= 1 && installed_in_arena {
                 let affects_hit_testing =
                     sample.invalidation.invalidation & FfiStyleInvalidationField::AffectsHitTesting as u32 != 0;
@@ -428,7 +431,9 @@ impl ClockLease {
 /// Whether what `sample` changes is all the render side shows without the main thread: its own
 /// row's style, layout and paint. What moves descendants' styles, visual contexts, stacking
 /// contexts or scroll snapping, the main thread derives, and it loads the images a sample swaps in.
-fn render_side_shows(sample: &FfiRowSampledInPass) -> bool {
+/// Inherited properties move the styles of descendants only where `box_holds_only_text` says no:
+/// text lays out with its parent's style.
+fn render_side_shows(sample: &FfiRowSampledInPass, box_holds_only_text: impl FnOnce() -> bool) -> bool {
     use FfiStyleInvalidationField as Field;
     let invalidation = sample.invalidation.invalidation;
     let visual_context = (invalidation >> Field::VisualContextShift as u32) & Field::LevelMask as u32;
@@ -440,13 +445,29 @@ fn render_side_shows(sample: &FfiRowSampledInPass) -> bool {
         | Field::NonInheritedInheritanceSource as u32
         | Field::RepaintSelection as u32;
     visual_context == 0
-        && inherited_groups == 0
         && invalidation & main_only == 0
         && !sample.invalidation.requires_base_style_recomputation
         && !sample.invalidation.requires_style_resource_update
         && !sample.custom_property_environment_moved
         && sample.custom_property_reactions == 0
         && sample.keyframes_inherited_non_inherited_style_groups == 0
+        && (inherited_groups == 0 || box_holds_only_text())
+}
+
+/// Whether every child of the box in `row` is text, which has no style of its own.
+fn box_holds_only_text(arena: &LayoutNodeArena, row: NodeSlotId) -> bool {
+    if !arena.slot_is_live(row) {
+        return false;
+    }
+    let mut child = arena.data(row).first_child.get();
+    while !child.is_invalid() {
+        let data = arena.data(child);
+        if !crate::layout::node_facts::kind_is_text(data.kind.get()) {
+            return false;
+        }
+        child = data.next_sibling.get();
+    }
+    true
 }
 
 /// One sample for what `earlier` and `later`, taken over the record `earlier` installed, did: the
