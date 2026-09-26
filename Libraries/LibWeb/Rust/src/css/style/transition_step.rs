@@ -203,19 +203,6 @@ impl RetainedState {
         if before.dependency_flags & IN_DISPLAY_NONE_SUBTREE != 0 {
             return Ok(TransitionStep::default());
         }
-        // A pseudo-element inherits from its originating element.
-        let parent = match pseudo {
-            None => self.tree.inheritance_parent(node),
-            Some(_) => Some(node),
-        };
-        if let Some(parent) = parent
-            && let Some(parent_record) = self.computed_group_sets.assigned_style_record(parent)
-            && let Some(parent_view) = self.style_record_view(parent_record.raw())
-            && parent_view.dependency_flags & IN_DISPLAY_NONE_SUBTREE != 0
-        {
-            return Ok(TransitionStep::default());
-        }
-
         let installed = self
             .style_record_view(installed_style_record)
             .ok_or("no installed record")?;
@@ -230,6 +217,20 @@ impl RetainedState {
         };
         if entries.is_empty() && transitions.is_empty() {
             return Ok(TransitionStep::default());
+        }
+        // A pseudo-element inherits from its originating element. A parent hidden as the pass reads
+        // it may still be revealed before the host installs this row, and the host decides against
+        // the parent it holds then.
+        let parent = match pseudo {
+            None => self.tree.inheritance_parent(node),
+            Some(_) => Some(node),
+        };
+        if let Some(parent) = parent
+            && let Some(parent_record) = self.computed_group_sets.assigned_style_record(parent)
+            && let Some(parent_view) = self.style_record_view(parent_record.raw())
+            && parent_view.dependency_flags & IN_DISPLAY_NONE_SUBTREE != 0
+        {
+            return Err("a parent hidden as the pass reads it");
         }
         // Script removed the effect of one of the element's transitions: whether its animation
         // still runs is the host's to say.
