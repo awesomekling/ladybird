@@ -198,32 +198,28 @@ pub struct PaintableSideData {
     // mutable cache state out of the plain-data row shared with C++.
     pub(crate) overflow_style: Option<crate::painting::scrollable_overflow::OverflowStyle>,
     pub(crate) overflow_measured_this_commit: Cell<bool>,
-    pub(crate) svg_filter_bounds: Cell<Option<used_values::FfiCssPixelRect>>,
-    // Only meaningful while is_self_painting(); assigned by the containing block's
-    // assign_fragment_ownership().
-    pub(crate) fragment_ownership: Option<crate::painting::fragment_ownership::FragmentOwnershipFilter>,
     // The filter a recommit cleared, kept so the next assignment can tell whether the box
     // paints a different selection of fragments than before.
-    pub(crate) fragment_ownership_before_recommit: Option<crate::painting::fragment_ownership::FragmentOwnershipFilter>,
-}
-
-impl PaintableSideData {
-    pub(crate) fn clear_committed_records(&mut self) {
-        if let Some(filter) = self.fragment_ownership.take() {
-            self.fragment_ownership_before_recommit = Some(filter);
-        }
-    }
+    pub(crate) fragment_ownership_before_recommit:
+        Option<std::sync::Arc<crate::painting::fragment_ownership::FragmentOwnershipFilter>>,
 }
 
 /// What a row committed beside its geometry that the main side reads with it: its inline
 /// content, the pieces an inline box has in its line root's content, and its measured
-/// scrollable overflow. It is published with the rows, so a slot copies two reference counts.
+/// scrollable overflow. It is published with the rows, so a slot copies three reference counts.
+/// Paint preparation adds what the recording reads beside them.
 #[derive(Clone, Default)]
 pub(crate) struct CommittedSideData {
     pub(crate) inline_content: Option<std::sync::Arc<crate::layout::inline_content::InlineContent>>,
     pub(crate) piece_indices: Option<std::sync::Arc<[u32]>>,
     pub(crate) overflow_valid_across_recommits: bool,
     pub(crate) overflow_relative_to_padding_box: FfiOverflowData,
+    /// The bounds of the SVG filter the box references, as the visual context update resolved
+    /// them.
+    pub(crate) svg_filter_bounds: Option<used_values::FfiCssPixelRect>,
+    // Only meaningful while is_self_painting(); assigned by the containing block's
+    // assign_fragment_ownership().
+    pub(crate) fragment_ownership: Option<std::sync::Arc<crate::painting::fragment_ownership::FragmentOwnershipFilter>>,
 }
 
 impl CommittedSideData {

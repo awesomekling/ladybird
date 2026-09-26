@@ -341,10 +341,25 @@ pub(crate) trait PaintRead: Sized {
     }
 }
 
-/// Answers [`PaintRead`]'s reads of the layout tree and its style from the live arena that `$arena`
-/// maps the implementing type to.
+/// Answers [`PaintRead`]'s reads of the layout tree, its style and what paint preparation keeps
+/// beside the rows from the live arena that `$arena` maps the implementing type to: the reads a
+/// [`PublishedFrame`] answers from what it published.
 macro_rules! read_live_layout_tree {
     ($arena:path) => {
+        fn fragment_ownership_filter(
+            &self,
+            id: crate::layout::node_data::NodeSlotId,
+        ) -> Option<crate::painting::fragment_ownership::FragmentOwnershipFilter> {
+            crate::layout::LayoutNodeArena::fragment_ownership_filter($arena(self), id)
+        }
+
+        fn svg_filter_bounds(
+            &self,
+            id: crate::layout::node_data::NodeSlotId,
+        ) -> Option<crate::layout::used_values::FfiCssPixelRect> {
+            crate::layout::LayoutNodeArena::svg_filter_bounds($arena(self), id)
+        }
+
         fn node_containing_block_if_live(
             &self,
             id: crate::layout::node_data::NodeSlotId,
@@ -489,20 +504,6 @@ macro_rules! read_live_paint_facts {
             computed_index: u32,
         ) -> Option<crate::painting::layer_image_paint_facts::LayerImagePaintFacts> {
             crate::layout::LayoutNodeArena::layer_image_paint_facts($arena(self), id, list, computed_index)
-        }
-
-        fn svg_filter_bounds(
-            &self,
-            id: crate::layout::node_data::NodeSlotId,
-        ) -> Option<crate::layout::used_values::FfiCssPixelRect> {
-            crate::layout::LayoutNodeArena::svg_filter_bounds($arena(self), id)
-        }
-
-        fn fragment_ownership_filter(
-            &self,
-            id: crate::layout::node_data::NodeSlotId,
-        ) -> Option<crate::painting::fragment_ownership::FragmentOwnershipFilter> {
-            crate::layout::LayoutNodeArena::fragment_ownership_filter($arena(self), id)
         }
 
         fn paint_damage_of_row(
@@ -709,6 +710,19 @@ impl PaintRead for PaintSource<'_> {
 
     fn node_containing_block_if_live(&self, id: NodeSlotId) -> Option<NodeSlotId> {
         containing_block_by_walking_ancestors(self, id)
+    }
+
+    fn svg_filter_bounds(&self, id: NodeSlotId) -> Option<FfiCssPixelRect> {
+        self.frame.rows.committed_side_data(id).svg_filter_bounds
+    }
+
+    fn fragment_ownership_filter(&self, id: NodeSlotId) -> Option<FragmentOwnershipFilter> {
+        self.frame
+            .rows
+            .committed_side_data(id)
+            .fragment_ownership
+            .as_deref()
+            .cloned()
     }
 
     read_live_paint_facts!(PaintSource::arena);
