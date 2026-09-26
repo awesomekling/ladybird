@@ -32,6 +32,9 @@ pub struct PaintState {
     pub(crate) trace_recordings: bool,
     pub(crate) pending_recording_trace: Option<PendingRecordingTrace>,
     pub(crate) pending_recording: Option<PendingRecording>,
+    // Set by a recording in flight that a read cancelled, which left nothing pending: its frame's
+    // presentation shows nothing, and the frame's consume has the document record again.
+    pub(crate) recording_was_cancelled: bool,
     // The SVG-as-image renders the next recording looks up, resolved by the main thread.
     pub(crate) vector_image_display_lists:
         std::sync::Arc<crate::painting::record::vector_images::VectorImageDisplayLists>,

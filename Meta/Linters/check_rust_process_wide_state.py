@@ -229,6 +229,9 @@ RENDER_STAGE_ALLOWED = {
             "stage_thread.rs:RUNNING_SUBMITTED_RUN",
             "stage_thread.rs:PRESENTATIONS_SUBMITTED",
             "stage_thread.rs:TAKE_BACKS_THAT_WAITED_FOR_PRESENTATION",
+            "stage_thread.rs:READS",
+            "stage_thread.rs:FRAMES_OWED_SINCE",
+            "stage_thread.rs:RECORDINGS_CANCELLED_BY_READS",
         ],
     ),
     **render_stage_entries(

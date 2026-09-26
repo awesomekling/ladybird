@@ -117,6 +117,9 @@ pub struct PaintRecorder<'a, O: Observer> {
     list: HitTestList,
     pub(crate) scratch: &'a mut scratch::RecordingScratch,
     pub(crate) resources: resources::RecordingResourceManifest,
+    // For a recording in flight a read may cancel. Once it is, the recorder plans and records
+    // nothing more, and what it made is dropped.
+    cancel: Option<&'a crate::stage_thread::RecordingCancel>,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -132,6 +135,19 @@ pub(crate) struct BasePaintFacts {
 }
 
 impl<'a, O: Observer> PaintRecorder<'a, O> {
+    /// Whether a read cancelled the recording: the rest of the assembly only closes the scopes it
+    /// is in.
+    pub(crate) fn is_cancelled(&self) -> bool {
+        let Some(cancel) = self.cancel else {
+            return false;
+        };
+        if !cancel.is_requested() {
+            return false;
+        }
+        cancel.note_cancelled();
+        true
+    }
+
     pub(crate) fn layer_resolution_context(&self) -> paint::background_resolution::LayerResolutionContext<'a> {
         paint::background_resolution::LayerResolutionContext {
             layout_arena: self.layout_arena,

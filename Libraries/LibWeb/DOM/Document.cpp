@@ -842,6 +842,9 @@ Document::JoinScope::JoinScope(Document& document, UpdateLayoutReason reason)
     : m_document(document)
     , m_reason(reason)
 {
+    // A read that script waits for outside the rendering update does not wait out the recordings in flight: it
+    // cancels them, and the next rendering update records what the read leaves behind.
+    Layout::RustFFI::rust_stage_thread_begin_read(!HTML::main_thread_event_loop().running_rendering_task());
     // A read of render state waits for the frame in flight before it asks anything, and the
     // cleanliness check below already asks the style engine. A read of committed geometry that a
     // clean document answers goes on beside its recording in flight, which changes no geometry.
@@ -882,6 +885,7 @@ Document::JoinScope::JoinScope(Document& document, UpdateLayoutReason reason)
 
 Document::JoinScope::~JoinScope()
 {
+    Layout::RustFFI::rust_stage_thread_end_read();
     --m_document.m_join_depth;
     if (m_is_nested)
         return;

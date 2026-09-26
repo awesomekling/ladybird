@@ -1275,6 +1275,8 @@ struct RecordingStageInput<'a> {
     arena: &'a mut LayoutNodeArena,
     viewport: NodeSlotId,
     inputs: crate::painting::record::RecordingInputs<'a>,
+    // For a recording in flight that a read may cancel: what it records once cancelled is dropped.
+    cancel: Option<&'a crate::stage_thread::RecordingCancel>,
 }
 
 struct RecordingStageOutput {
@@ -1295,6 +1297,7 @@ fn record_display_list_stage(stage: RecordingStageInput<'_>) -> RecordingStageOu
         arena,
         viewport,
         mut inputs,
+        cancel,
     } = stage;
     let arena: &LayoutNodeArena = arena;
     let mut scratch = arena.recording_scratch().take_for_run();
@@ -1349,11 +1352,15 @@ fn record_display_list_stage(stage: RecordingStageInput<'_>) -> RecordingStageOu
         source_items,
         true,
         paint_state.trace_recordings || crate::painting::record::verify::enabled_by_environment(),
+        cancel,
     );
+    let cancelled = cancel.is_some_and(crate::stage_thread::RecordingCancel::was_cancelled);
     // The oracle records the same frame from scratch into a throwaway tree whenever the
     // published frame could have been copied from.
-    let recording_from_scratch =
-        (crate::painting::record::verify::enabled_by_environment() && copies_from_published_frame).then(|| {
+    let recording_from_scratch = (crate::painting::record::verify::enabled_by_environment()
+        && copies_from_published_frame
+        && !cancelled)
+        .then(|| {
             inputs.publishes_recording = false;
             let mut tree_for_recording_from_scratch = crate::painting::record::order_tree::PaintOrderTree::default();
             crate::painting::record::traversal::record_display_list(
@@ -1368,6 +1375,7 @@ fn record_display_list_stage(stage: RecordingStageInput<'_>) -> RecordingStageOu
                 None,
                 false,
                 false,
+                None,
             )
         });
     drop(pass);
@@ -1426,6 +1434,7 @@ pub(crate) struct RecordingJob {
     should_paint_overlay: bool,
     publishes_recording: bool,
     frame_generation: u64,
+    cancel: std::sync::Arc<crate::stage_thread::RecordingCancel>,
 }
 
 impl RecordingJob {
@@ -1447,20 +1456,47 @@ impl RecordingJob {
                 arena: unsafe { &mut *arena_handle.cast::<LayoutNodeArena>() },
                 viewport,
                 inputs,
+                cancel: None,
             },
             arena_address: arena_handle as usize,
             viewport,
             should_paint_overlay,
             publishes_recording,
             frame_generation,
+            cancel: Default::default(),
         }
     }
 
-    /// Records, on the stage that owns the arena.
+    /// How a read that would wait for the job asks it to stop.
+    pub(crate) fn cancel(&self) -> std::sync::Arc<crate::stage_thread::RecordingCancel> {
+        self.cancel.clone()
+    }
+
+    /// Records, on the stage that owns the arena. A recording cancelled before it starts records
+    /// nothing; one cancelled on the way drops what it recorded, and the retained paint-order tree
+    /// it assembled that into with it. Either way nothing is left pending, and the arena notes
+    /// the cancellation for the frame's presentation and consume.
     pub(crate) fn run(self) {
-        let output = record_display_list_stage(self.input);
+        let cancel = self.cancel;
+        let output = if cancel.is_requested() {
+            cancel.note_cancelled();
+            None
+        } else {
+            let mut input = self.input;
+            input.cancel = Some(&cancel);
+            let output = record_display_list_stage(input);
+            (!cancel.was_cancelled()).then_some(output)
+        };
         // SAFETY: The stage has returned its borrow, and the frame still owns the arena.
         let arena = unsafe { &*(self.arena_address as *const LayoutNodeArena) };
+        let Some(output) = output else {
+            let mut paint_state = arena.paint_state().borrow_mut();
+            if self.publishes_recording {
+                paint_state.forget_published_frame();
+            }
+            paint_state.recording_was_cancelled = true;
+            return;
+        };
         leave_pending_recording(
             arena,
             self.viewport,
@@ -1508,6 +1544,7 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
         );
         paint_state.pending_recording_trace = None;
         paint_state.pending_recording = None;
+        paint_state.recording_was_cancelled = false;
     }
     let recording_inputs = {
         let paint_state = arena.paint_state().borrow();
@@ -1560,8 +1597,9 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
                 frame_generation,
             )
         };
+        let cancel = job.cancel();
         // SAFETY: As above.
-        unsafe { crate::stage_thread::submit_stage("recording", arena_handle, move || job.run()) };
+        unsafe { crate::stage_thread::submit_cancellable_recording(arena_handle, cancel, move || job.run()) };
         return true;
     }
     let output = {
@@ -1570,6 +1608,7 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
             arena: unsafe { arena_from_handle_mut(arena_handle) },
             viewport,
             inputs: recording_inputs,
+            cancel: None,
         };
         crate::stage_thread::run_stage_on_stage_thread(|| record_display_list_stage(input))
     };
@@ -1625,6 +1664,7 @@ pub(crate) unsafe fn record_for_clock_tick(arena_handle: *mut c_void) -> bool {
         arena: unsafe { arena_from_handle_mut(arena_handle) },
         viewport,
         inputs,
+        cancel: None,
     });
     // SAFETY: The recording has returned its borrow.
     let arena = unsafe { arena_from_handle(arena_handle) };
@@ -1958,6 +1998,7 @@ pub(crate) unsafe fn paint_in_flight(
         arena: unsafe { &mut *arena_handle.cast::<LayoutNodeArena>() },
         viewport,
         inputs,
+        cancel: None,
     });
     // SAFETY: The stage has returned its borrow.
     let arena = unsafe { &*arena_handle.cast::<LayoutNodeArena>() };
@@ -2035,6 +2076,32 @@ pub unsafe extern "C" fn layout_arena_publish_recording_in_frame(
     // NB: The published-rows verifier keeps its baseline per thread, on the main thread; it sees this
     //     publication as the rows the next main-side publication finds.
     crate::painting::record::publish::publish_recording(arena, pending, &presentation, &publish)
+}
+
+/// Whether a read cancelled the recording the frame in flight made of the arena's document, which
+/// left nothing to publish: the frame's presentation shows nothing.
+///
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, owned by the frame in flight whose
+/// presentation stage calls this.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_recording_in_frame_was_cancelled(arena: *mut c_void) -> bool {
+    let arena = unsafe { arena_from_handle(arena) };
+    arena.paint_state().borrow().recording_was_cancelled
+}
+
+/// Whether a read cancelled the recording of the frame the main thread took back, which it then
+/// forgets: the document records again in the next rendering update.
+///
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, on the document thread, with the frame
+/// that recorded it taken back.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_take_recording_cancellation(arena: *mut c_void) -> bool {
+    let arena = unsafe { arena_from_handle(arena) };
+    std::mem::take(&mut arena.paint_state().borrow_mut().recording_was_cancelled)
 }
 
 /// Runs `handoff(context)`, which hands a navigable's finished frame to its compositor frame sink,

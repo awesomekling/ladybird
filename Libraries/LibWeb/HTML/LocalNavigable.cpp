@@ -6920,6 +6920,9 @@ Optional<LocalNavigable::PendingCompositorFrame> LocalNavigable::begin_painting_
 static void present_from_frame_in_flight(void* context)
 {
     auto& presentation = *static_cast<Compositor::Presentation*>(context);
+    // A read cancelled the recording: the frame shows nothing, and the rendering update records again.
+    if (presentation.recording && Layout::RustFFI::layout_arena_recording_in_frame_was_cancelled(presentation.recording->arena))
+        return;
     Optional<Compositor::PublishedDisplayList> published;
     if (presentation.recording) {
         published = Painting::publish_rust_display_list_recording_in_frame(*presentation.recording, presentation.paint_command_cache_source.ptr(), presentation.inputs.paint_command_cache_source_resources, presentation.source);
@@ -7370,8 +7373,25 @@ bool LocalNavigable::finish_flight_paint(DOM::Document& document, FlightPaintEnd
     return true;
 }
 
-void LocalNavigable::finish_painting_next_frame(PendingCompositorFrame& pending_frame)
+bool LocalNavigable::finish_painting_next_frame(PendingCompositorFrame& pending_frame)
 {
+    // A read beside the frame in flight cancelled its recording, which left nothing to publish or present. The frame
+    // takes nothing to the compositor, and the document records again in the next rendering update.
+    if (pending_frame.recording && pending_frame.recording->run == Painting::RecordingRun::InSubmittedFrame
+        && Layout::RustFFI::layout_arena_take_recording_cancellation(pending_frame.recording->arena)) {
+        auto document = pending_frame.document;
+        if (auto* presentation = pending_frame.presentation.ptr()) {
+            if (presentation->is_presented_by_frame_in_flight)
+                m_presenter->take_back_from_frame_in_flight();
+            if (presentation->source.visual_context_tree_needs_compositor_update() && document->has_paint_state())
+                document->paint_state().did_update_visual_context_values();
+        }
+        document->release_held_invalidation_marks();
+        m_needs_repaint = true;
+        m_needs_to_record_display_list = true;
+        page().client().request_frame();
+        return false;
+    }
     // A render clock kit is sealed as this frame was.
     m_keyboard_scroll_state_of_last_frame = pending_frame.keyboard_scroll_state;
     if (pending_frame.recording && Layout::RustFFI::rust_clock_frames_enabled()) {
@@ -7383,14 +7403,15 @@ void LocalNavigable::finish_painting_next_frame(PendingCompositorFrame& pending_
     }
     if (pending_frame.presentation && pending_frame.presentation->is_presented_by_frame_in_flight) {
         adopt_presented_frame(pending_frame);
-        return;
+        return true;
     }
     auto frame = finish_compositor_frame(pending_frame);
     if (!frame.has_value())
-        return;
+        return true;
     if (!pending_frame.presentation)
         frame->present_viewport_rect = page().css_to_device_rect(this->viewport_rect()).to_type<int>();
     submit_compositor_frame(frame.release_value());
+    return true;
 }
 
 bool LocalNavigable::paint_next_frame_if_needed(DOM::UpdateLayoutReason layout_reason)

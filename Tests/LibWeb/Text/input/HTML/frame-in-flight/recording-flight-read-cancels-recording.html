@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<style>
+    body { margin: 0; }
+    #box { width: 100px; height: 10px; background-color: green; }
+</style>
+<div id="box"></div>
+<script>
+    // A read of layout that script waits for outside the rendering update does not wait out the recording in flight:
+    // it cancels it and lays out at once. The cancelled frame shows nothing, and the next rendering update records
+    // and presents the document as the read left it.
+    asyncTest(async done => {
+        let presentedBefore = 0;
+        const result = await whileFrameInFlight("mid-recording", () => {
+            box.style.backgroundColor = "blue";
+        }, frame => {
+            presentedBefore = internals.presentedSceneEpoch();
+            const cancelledBefore = internals.recordingsCancelledByReads();
+            box.style.height = "20px";
+            const height = box.offsetHeight;
+            return {
+                ...frame,
+                height,
+                cancelled: internals.recordingsCancelledByReads() - cancelledBefore,
+                presentedAtRead: internals.presentedSceneEpoch(),
+            };
+        });
+        println(`held as armed: ${heldAsArmed(result, "mid-recording")}`);
+        println(`read: ${result.height}`);
+        println(`cancelled the recording: ${!result.armed || result.cancelled === 1}`);
+        println(`presented nothing of it: ${!result.armed || result.presentedAtRead === presentedBefore}`);
+        await twoFrames();
+        println(`presented again: ${!result.armed || internals.presentedSceneEpoch() > presentedBefore}`);
+        println(`hit test finds the grown box: ${document.elementFromPoint(50, 15) === box}`);
+        println(`color: ${getComputedStyle(box).backgroundColor}`);
+        done();
+    });
+</script>
