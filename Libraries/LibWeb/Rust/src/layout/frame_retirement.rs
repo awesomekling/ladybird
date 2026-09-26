@@ -122,7 +122,7 @@ pub unsafe extern "C" fn layout_arena_retire_render_state(arena: *mut c_void, re
     // A render clock tick the arena is lent to reads the generation, and presents what it recorded for it: the arena
     // comes back first. A leased document is not finalized, since its lease holds it.
     if crate::stage_thread::has_lent(arena) {
-        assert!(
+        debug_assert!(
             reason != FfiRenderStateRetirement::DocumentFinalized,
             "a document was finalized while its arena was lent to clock ticks"
         );
