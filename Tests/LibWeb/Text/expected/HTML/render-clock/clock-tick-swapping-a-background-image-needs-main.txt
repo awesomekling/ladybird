@@ -1,0 +1,4 @@
+a lease took the tick: true
+the tick swapped the image: true
+frames presented without the image: 0
+the tick handed over to the main thread: true
