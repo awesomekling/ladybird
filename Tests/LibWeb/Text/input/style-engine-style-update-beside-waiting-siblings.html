@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<script src="include.js"></script>
+<style>
+    li { transition: color 100s; }
+    li.x:nth-child(2) { color: rgb(255, 0, 0); }
+    #faded { opacity: 0; transition: opacity 100s; }
+</style>
+<ul id="list"><li>first</li><li id="f">f</li></ul>
+<div id="unrelated">unrelated</div>
+<script>
+    test(() => {
+        internals.updateStyle();
+
+        // The element is the third child once the new item arrives, so it never matches, and no transition starts
+        // for it. A read of an element that nothing inserted can decide still brings the element whose class
+        // changed up to date.
+        const item = document.createElement("li");
+        list.insertBefore(item, f);
+        f.classList.add("x");
+        const before = internals.styleEngineCounters();
+        getComputedStyle(unrelated).color;
+        const after = internals.styleEngineCounters();
+        println(`transitions started by the read: ${after.animationOverlaySlotsAllocated - before.animationOverlaySlotsAllocated}`);
+        println(`f: ${getComputedStyle(f).color}, ${f.getAnimations().length} animations`);
+
+        // A new element beside others takes its style at a read of its parent, so a later change transitions.
+        const faded = document.createElement("div");
+        faded.id = "faded";
+        document.body.appendChild(faded);
+        getComputedStyle(document.body).color;
+        faded.style.opacity = "1";
+        println(`faded: ${faded.getAnimations().length} animations`);
+    });
+</script>

@@ -24,6 +24,7 @@
 #include <LibWeb/CSS/StyleScope.h>
 #include <LibWeb/CSS/StyleSheetImport.h>
 #include <LibWeb/CSS/StyleSheetState.h>
+#include <LibWeb/DOM/AbstractElement.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/InvalidationJournal.h>
@@ -634,31 +635,72 @@ PendingStyleArrivalsWaitScope::~PendingStyleArrivalsWaitScope()
     s_document_whose_arrivals_wait = m_previous_document;
 }
 
-bool pending_style_arrivals_may_decide_style_of(DOM::Element const& element)
+// Whether a node waiting to arrive can decide the style of a node that has arrived: it is an element beside an element
+// that has arrived, which sibling combinators and child positions count, or it is in the shadow tree of a host whose
+// children have arrived, which can be assigned to a slot that waits and inherit through it. A style update run without
+// the waiting nodes would compute such a style as if they were not there.
+static bool pending_style_arrivals_may_decide_style_of_arrived_nodes(DOM::Node const& node)
 {
-    auto const& document = element.document();
-    if (!document.descendant_style_arrival_pending())
-        return false;
-    if (element.style_node_id() == no_style_node)
-        return true;
-    if (document.style_computer().style_engine().may_have_child_dependent_selectors())
-        return true;
-    // Otherwise a selector reaches from the element only up its ancestors and across their siblings, never into the
-    // children of any of them, and the element inherits along the flat tree, through the slot it is assigned to.
-    for (DOM::Node const* node = &element; node; node = node->parent_or_shadow_host()) {
-        if (auto const* slottable = as_if<DOM::Element>(*node)) {
-            if (auto slot = slottable->assigned_slot_internal(); slot && slot->style_node_id() == no_style_node)
-                return true;
-        }
-        auto const* parent = node->parent_or_shadow_host();
-        if (!parent || is<DOM::ShadowRoot>(*node) || !parent->descendant_style_arrival_pending())
-            continue;
-        for (auto const* sibling = parent->first_child(); sibling; sibling = sibling->next_sibling()) {
-            if (sibling->style_arrival_pending())
+    if (auto const* host = as_if<DOM::Element>(node); host && host->shadow_root()) {
+        auto const& shadow_root = *host->shadow_root();
+        if (shadow_root.style_arrival_pending() || shadow_root.descendant_style_arrival_pending()) {
+            for (auto const* child = host->first_child(); child; child = child->next_sibling()) {
+                if (auto const* element = as_if<DOM::Element>(*child); element && element->style_node_id() != no_style_node)
+                    return true;
+                if (auto const* text = as_if<DOM::Text>(*child); text && text->style_node_id() != no_style_node)
+                    return true;
+            }
+            if (!shadow_root.style_arrival_pending() && pending_style_arrivals_may_decide_style_of_arrived_nodes(shadow_root))
                 return true;
         }
     }
+    bool has_waiting_element_child = false;
+    bool has_arrived_element_child = false;
+    for (auto const* child = node.first_child(); child; child = child->next_sibling()) {
+        if (!is<DOM::Element>(*child))
+            continue;
+        if (child->style_arrival_pending()) {
+            has_waiting_element_child = true;
+        } else {
+            has_arrived_element_child = true;
+            if (child->descendant_style_arrival_pending() && pending_style_arrivals_may_decide_style_of_arrived_nodes(*child))
+                return true;
+        }
+        if (has_waiting_element_child && has_arrived_element_child)
+            return true;
+    }
     return false;
+}
+
+bool pending_style_arrivals_may_decide_style_of(DOM::AbstractElement const& abstract_element)
+{
+    auto const& element = abstract_element.element();
+    auto const& document = element.document();
+    if (!document.descendant_style_arrival_pending())
+        return false;
+    // The element, or one it inherits from along the flat tree (through the slots it and they are assigned to), waits.
+    for (Optional<DOM::AbstractElement> cursor = DOM::AbstractElement { const_cast<DOM::Element&>(element) }; cursor.has_value(); cursor = cursor->element_to_inherit_style_from()) {
+        if (cursor->element().style_node_id() == no_style_node)
+            return true;
+    }
+    // A pseudo-element can be backed by an element in the element's user-agent shadow tree (::placeholder,
+    // ::file-selector-button, ::details-content), which is rebuilt as the element changes.
+    if (abstract_element.pseudo_element().has_value()) {
+        if (auto shadow_root = element.shadow_root(); shadow_root && (shadow_root->style_arrival_pending() || shadow_root->descendant_style_arrival_pending()))
+            return true;
+    }
+    if (document.style_computer().style_engine().may_have_child_dependent_selectors())
+        return true;
+    // Otherwise a selector reaches a waiting node only across siblings, and a style update may compute the style of any
+    // node that has arrived, not just the one read.
+    return pending_style_arrivals_may_decide_style_of_arrived_nodes(document);
+}
+
+void take_in_pending_style_arrivals_for_read(DOM::Document& document)
+{
+    if (s_document_whose_arrivals_wait == &document)
+        s_document_whose_arrivals_wait = nullptr;
+    take_in_pending_style_arrivals(document);
 }
 
 void take_in_pending_style_arrivals(DOM::Document& document)

@@ -1,0 +1,2 @@
+::placeholder: rgb(1, 2, 3)
+::file-selector-button: rgb(4, 5, 6)

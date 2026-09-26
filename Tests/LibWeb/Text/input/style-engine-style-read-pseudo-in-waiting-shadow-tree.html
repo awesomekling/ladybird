@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<script src="include.js"></script>
+<style>
+    input::placeholder { color: rgb(1, 2, 3); }
+    input::file-selector-button { color: rgb(4, 5, 6); }
+</style>
+<input id="placeholder" type="checkbox" placeholder="hello">
+<input id="file" type="text">
+<script>
+    test(() => {
+        internals.updateStyle();
+
+        // A type change rebuilds the input's user-agent shadow tree, and the element that backs the
+        // pseudo-element that is read is new in it.
+        placeholder.type = "text";
+        println(`::placeholder: ${getComputedStyle(placeholder, "::placeholder").color}`);
+
+        file.type = "file";
+        println(`::file-selector-button: ${getComputedStyle(file, "::file-selector-button").color}`);
+    });
+</script>
