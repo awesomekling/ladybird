@@ -1,5 +1,5 @@
 held as armed: true
-sibling offset right after the removal: 30
-container height right after the removal: 40
+sibling offset right after the removal: 20
+container height right after the removal: 30
 container height: 30
 layout tree matches a full rebuild: true
