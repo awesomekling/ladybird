@@ -13,6 +13,7 @@
 #include <LibCore/EventLoop.h>
 #include <LibGC/Heap.h>
 #include <LibJS/Runtime/VM.h>
+#include <LibWeb/Animations/DocumentTimeline.h>
 #include <LibWeb/Animations/ScrollTimeline.h>
 #include <LibWeb/Bindings/MainThreadVM.h>
 #include <LibWeb/CSS/FontComputer.h>
@@ -847,11 +848,20 @@ void EventLoop::update_the_rendering()
     m_frame_scheduler->prepare_clock_ticks(docs, frame_timestamp);
 
     // 11. For each doc of docs, update animations and send events for doc, passing in relative high resolution time given frameTimestamp and doc's relevant global object as the timestamp [WEBANIMATIONS]
+    Vector<HighResolutionTime::DOMHighResTimeStamp> animation_timestamps;
+    animation_timestamps.ensure_capacity(docs.size());
     for (auto& document : docs) {
         auto timestamp = relative_frame_timestamp_for(frame_timestamp, *document);
         // LIBWEB_RENDER_CLOCK_FRAMES: A document whose animations a render clock ticks shows its last tick.
         if (auto clock_time = m_frame_scheduler->clock_lease_timeline_time(*document); clock_time.has_value())
             timestamp = *clock_time;
+        // LIBWEB_RENDER_CLOCK_FRAMES: The ticks a render clock presented beside a long task moved the document
+        //                             timeline past a display frame that went by meanwhile. The timeline does not go
+        //                             back, so the document takes its time, and its animation frame callbacks at step
+        //                             14 get that time too.
+        else if (auto current = document->timeline()->current_time(); current.has_value() && current->type == Animations::TimeValue::Type::Milliseconds && current->value > timestamp)
+            timestamp = current->value;
+        animation_timestamps.unchecked_append(timestamp);
         document->update_animations_and_send_events(timestamp);
     };
 
@@ -863,10 +873,8 @@ void EventLoop::update_the_rendering()
     // FIXME: 13. For each doc of docs, if the user agent detects that the backing storage associated with a CanvasRenderingContext2D or an OffscreenCanvasRenderingContext2D, context, has been lost, then it must run the context lost steps for each such context:
 
     // 14. For each doc of docs, run the animation frame callbacks for doc, passing in the relative high resolution time given frameTimestamp and doc's relevant global object as the timestamp.
-    for (auto& document : docs) {
-        auto now = relative_frame_timestamp_for(frame_timestamp, *document);
-        run_animation_frame_callbacks(*document, now);
-    }
+    for (size_t index = 0; index < docs.size(); ++index)
+        run_animation_frame_callbacks(*docs[index], animation_timestamps[index]);
     m_rendering_scheduler_counters.observable_steps_nanoseconds += MonotonicTime::now().nanoseconds() - observable_steps_start_nanoseconds;
 
     // Every animation frame callback of the rendering update has run, and its microtasks with it, so nothing script
