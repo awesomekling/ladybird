@@ -2000,7 +2000,18 @@ impl<'context> InlineFormattingContext<'context> {
             self.callbacks.arena().note_intrinsic_inline_measurement();
             iterator.stash_for_reuse(self);
         } else {
+            // OPTIMIZATION: A measurement is laid out ahead of the committing layout of the same content (a table cell
+            //               whose row is sized first), which takes its items instead of generating them again.
+            let items_for_committing_layout = (self.run.purpose == formatting_context::LayoutPurpose::Measurement
+                && self.layout_mode == LayoutMode::Normal)
+                .then(|| iterator.copy_for_reuse(self))
+                .flatten();
             self.generate_line_boxes(iterator);
+            if let Some(items) = items_for_committing_layout {
+                self.callbacks
+                    .layout_scratch()
+                    .store_inline_item_stash(self.containing_block, items);
+            }
             if self.layout_mode == LayoutMode::Normal && !self.run.purpose.is_measurement() {
                 self.compute_inline_box_pieces();
                 self.fold_inline_ancestor_relative_insets_into_line_data();

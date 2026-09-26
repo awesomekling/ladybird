@@ -888,24 +888,27 @@ impl InlineLevelIterator {
     }
 
     /// Element items and percentage inline-box margins and paddings depend on the run's available space.
-    pub(crate) fn stash_for_reuse(self, context: &inline_formatting_context::InlineFormattingContext<'_>) {
+    fn items_are_reusable(&self, context: &inline_formatting_context::InlineFormattingContext<'_>) -> bool {
         if self
             .items
             .as_slice()
             .iter()
             .any(|item| !matches!(item.type_, ItemType::Text | ItemType::ForcedBreak))
         {
-            return;
+            return false;
         }
-        for node in &self.entered_box_model_nodes {
+        self.entered_box_model_nodes.iter().all(|node| {
             let style = context.style(*node);
-            if style.margin_left().contains_percentage()
-                || style.margin_right().contains_percentage()
-                || style.padding_left().contains_percentage()
-                || style.padding_right().contains_percentage()
-            {
-                return;
-            }
+            !style.margin_left().contains_percentage()
+                && !style.margin_right().contains_percentage()
+                && !style.padding_left().contains_percentage()
+                && !style.padding_right().contains_percentage()
+        })
+    }
+
+    pub(crate) fn stash_for_reuse(self, context: &inline_formatting_context::InlineFormattingContext<'_>) {
+        if !self.items_are_reusable(context) {
+            return;
         }
         context.callbacks.layout_scratch().store_inline_item_stash(
             context.containing_block,
@@ -914,6 +917,20 @@ impl InlineLevelIterator {
                 entered_box_model_nodes: self.entered_box_model_nodes,
             },
         );
+    }
+
+    /// A copy of the items for a later run of the same content to take (see stash_copy), if they are reusable.
+    pub(crate) fn copy_for_reuse(
+        &self,
+        context: &inline_formatting_context::InlineFormattingContext<'_>,
+    ) -> Option<StashedInlineItems> {
+        if !self.items_are_reusable(context) {
+            return None;
+        }
+        Some(StashedInlineItems {
+            items: self.items.as_slice().to_vec(),
+            entered_box_model_nodes: self.entered_box_model_nodes.clone(),
+        })
     }
 
     pub(crate) fn next(&mut self) -> Option<Item> {
