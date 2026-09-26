@@ -207,6 +207,15 @@ bool Document::update_style_and_layout_once(UpdateLayoutReason reason, Throttled
     // made from inside the pass write through on their own.
     drain_invalidation_journal();
 
+    // The style a flight runs ahead of its layout is the style of a layout update that builds no layout tree first and
+    // has no host step between its style and its layout that reads style: otherwise the style runs in a flight of its
+    // own, and the layout on the main thread after it.
+    if (pass_submission == LayoutPassSubmission::MaySubmitWithStyle
+        && (needs_layout_tree_update() || child_needs_layout_tree_update() || m_top_layer_needs_layout_zone_rebuild
+            || !m_elements_with_pending_top_layer_membership_change.is_empty() || !m_list_owners_pending_item_renumber.is_empty()
+            || Layout::RustFFI::layout_arena_needs_full_layout_tree_update(layout_node_arena().handle())))
+        return false;
+
     auto& arena = layout_node_arena();
     Layout::RustFFI::layout_arena_begin_update_layout(arena.handle());
 
