@@ -1640,6 +1640,13 @@ void Node::update_layout_tree_for_removal(Node& parent, LayoutSubtreeRemoval rem
 
     if (removal == LayoutSubtreeRemoval::DetachInPlace && subtree_allows_layout_detach_for_removal(*this)) {
         if (HTML::FrameScheduler::arena_changes_wait_for_frame(document())) {
+            // A parent without a box, such as one with display: contents, has none to take the node's box out of, and
+            // none for the removal to mark, so it is rebuilt as it would be without the recording: that marks the box
+            // its children are laid out in, which a read of layout beside the recording would otherwise find clean.
+            if (!parent.has_layout_box()) {
+                parent.set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::NodeRemove);
+                return;
+            }
             // A recording that owns the arena reads the boxes, so they stay in place until the frame has been taken in,
             // and are detached then, over the siblings they still have. The node's box is found by the identity the
             // node leaves with, and the change is kept outside the heap, so it roots the nodes it reads. The parent
