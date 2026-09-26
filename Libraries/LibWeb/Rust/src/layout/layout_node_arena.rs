@@ -934,8 +934,10 @@ pub(crate) struct LayoutNodeArena {
     /// style node, packed as an `FfiStyleInvalidationField` word, with the record it installed,
     /// until the host installs the row.
     flight_style_damages: RefCell<HashMap<StyleNodeID, (u32, u64)>>,
-    /// Whether a flight applied a style batch whose handbacks the host half of its style pays.
-    flight_style_handbacks_open: Cell<bool>,
+    /// What applying a flight's style batch handed back, taken out of the queue the round's commits
+    /// take theirs from: the host pays it ahead of installing the batch, which reads what it hands
+    /// back. `None` unless a flight applied a batch whose host half is not paid yet.
+    flight_style_handbacks: RefCell<Option<HostHandbacks>>,
     /// Whether a flight applied a style batch whose repaint the end of its frame settles.
     flight_style_applied: Cell<bool>,
     /// The StyleNodeID of the element or text node each row is bound to, or of the element it is
@@ -1157,7 +1159,7 @@ impl LayoutNodeArena {
             animation_adoption_log: RefCell::new(Vec::new()),
             flight_style_adoptions: RefCell::new(Vec::new()),
             flight_style_damages: RefCell::new(HashMap::default()),
-            flight_style_handbacks_open: Cell::new(false),
+            flight_style_handbacks: RefCell::new(None),
             flight_style_applied: Cell::new(false),
             style_nodes: Vec::new(),
             next_rows_with_same_style_node: Vec::new(),
@@ -2094,7 +2096,6 @@ impl LayoutNodeArena {
             }
         }
         self.open_host_handback_span();
-        self.flight_style_handbacks_open.set(true);
         self.flight_style_applied.set(true);
         for row in rows {
             let slot = self.bound_row(row.style_node);
@@ -2130,7 +2131,18 @@ impl LayoutNodeArena {
                 .borrow_mut()
                 .insert(row.style_node, (row.damage, row.new_style_record));
         }
+        let handbacks = self.take_host_handbacks_ahead_of_payment();
+        *self.flight_style_handbacks.borrow_mut() = Some(handbacks);
         Ok(())
+    }
+
+    /// Pays what applying a flight's style batch handed back, ahead of the host installing the
+    /// batch, and closes the span the batch opened.
+    pub(crate) fn pay_flight_style_handbacks(&self, main_thread: &crate::stage::MainThread) {
+        let handbacks = self.flight_style_handbacks.borrow_mut().take();
+        if let Some(handbacks) = handbacks {
+            self.finish_paying_taken_host_handbacks(main_thread, handbacks);
+        }
     }
 
     /// Repaints and marks the visual contexts of a row a style change in flight moved, as the host's
@@ -2229,9 +2241,10 @@ impl LayoutNodeArena {
             }
             self.with_style_engine(|engine| engine.unpin_layout_style_record(adoption.style_record));
         }
-        if self.flight_style_handbacks_open.replace(false) {
-            self.finish_paying_host_handbacks(main_thread);
-        }
+        debug_assert!(
+            self.flight_style_handbacks.borrow().is_none(),
+            "the style half's handbacks are paid ahead of the install"
+        );
         restored
     }
 
