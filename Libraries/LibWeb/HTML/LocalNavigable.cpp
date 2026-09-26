@@ -766,6 +766,8 @@ void LocalNavigable::visit_edges(Cell::Visitor& visitor)
         visitor.visit(smooth_scroll.promises);
     for (auto& entry : m_pending_user_scrollend_targets)
         visitor.visit(entry.target);
+    if (m_last_painted_frame_for_render_clock.has_value())
+        visitor.visit(m_last_painted_frame_for_render_clock->recording->document);
 }
 
 // https://html.spec.whatwg.org/multipage/nav-history-apis.html#script-closable
