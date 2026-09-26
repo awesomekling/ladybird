@@ -102,6 +102,7 @@ public:
     void stop_loading();
 
     void set_delaying_load_events(bool value);
+    void stop_delaying_load_events_for_superseded_navigation();
     bool is_delaying_load_events() const { return m_is_delaying_load_events; }
 
     void set_navigation_load_event_guard(DOM::Document& parent_doc);
