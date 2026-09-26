@@ -21,8 +21,16 @@ pub(crate) struct LayoutScratch {
     /// The intrinsic sizes passes measured, kept for the passes after them.
     pub(crate) intrinsic_size_caches: super::layout_node_arena::IntrinsicSizeCaches,
     /// The inline items a block container generated, kept for its next run in the same pass. The
-    /// items borrow fonts for the current pass, so the stashes are cleared when the pass ends.
+    /// stashes are cleared when the pass ends.
     inline_item_stashes: RefCell<HashMap<NodeSlotId, super::inline_level_iterator::StashedInlineItems>>,
+    /// The reusable inline items a block container generated last, kept across passes for as long as the container's
+    /// slot and fragment cache epoch stay what they were (see retained_inline_items).
+    retained_inline_items: RefCell<HashMap<NodeSlotId, RetainedInlineItems>>,
+}
+
+struct RetainedInlineItems {
+    validity: super::fc_run_cache::FcRunCacheValidity,
+    items: super::inline_level_iterator::StashedInlineItems,
 }
 
 /// Which run holds a slot's record, and where on the record stack it is. The records stay on the
@@ -43,6 +51,7 @@ impl Default for LayoutScratch {
             run_record_stack: RunRecordStack::default(),
             intrinsic_size_caches: Default::default(),
             inline_item_stashes: RefCell::new(HashMap::default()),
+            retained_inline_items: RefCell::new(HashMap::default()),
         }
     }
 }
@@ -61,6 +70,30 @@ impl LayoutScratch {
         block_container: NodeSlotId,
     ) -> Option<super::inline_level_iterator::StashedInlineItems> {
         self.inline_item_stashes.borrow_mut().remove(&block_container)
+    }
+
+    /// A copy of the inline items `block_container` generated last, if nothing has invalidated its layout since: any
+    /// change to its subtree that the items could depend on bumps its fragment cache epoch, as it does for the run
+    /// cache.
+    pub(crate) fn retained_inline_items(
+        &self,
+        block_container: NodeSlotId,
+        validity: super::fc_run_cache::FcRunCacheValidity,
+    ) -> Option<super::inline_level_iterator::StashedInlineItems> {
+        let retained = self.retained_inline_items.borrow();
+        let entry = retained.get(&block_container)?;
+        (entry.validity == validity).then(|| entry.items.clone())
+    }
+
+    pub(crate) fn retain_inline_items(
+        &self,
+        block_container: NodeSlotId,
+        validity: super::fc_run_cache::FcRunCacheValidity,
+        items: super::inline_level_iterator::StashedInlineItems,
+    ) {
+        self.retained_inline_items
+            .borrow_mut()
+            .insert(block_container, RetainedInlineItems { validity, items });
     }
 
     pub(crate) fn clear_inline_item_stashes(&self) {

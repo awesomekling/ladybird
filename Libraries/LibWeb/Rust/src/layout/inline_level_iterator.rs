@@ -841,6 +841,7 @@ fn record_entered_inline_box<'context>(
     used
 }
 
+#[derive(Clone)]
 pub(crate) struct StashedInlineItems {
     items: Vec<Item>,
     entered_box_model_nodes: Vec<Node>,
@@ -868,13 +869,27 @@ impl InlineLevelIterator {
         atomic_sizing: AtomicInlineSizing,
     ) -> Option<Self> {
         let callbacks = context.callbacks;
-        match callbacks
-            .layout_scratch()
-            .take_inline_item_stash(context.containing_block)
-        {
-            Some(stash) => Some(Self::from_stash(context, stash)),
-            None => InlineLevelIteratorGenerator::generate(context, atomic_sizing),
+        let scratch = callbacks.layout_scratch();
+        if let Some(stash) = scratch.take_inline_item_stash(context.containing_block) {
+            return Some(Self::from_stash(context, stash));
         }
+        // OPTIMIZATION: Reusable items depend on the container's subtree alone, not on the run's available space, so
+        //               they are kept across passes until something invalidates the container's layout. A container
+        //               laid out again at another inline size, like a table cell whose column grows, reuses them.
+        let validity = (fc_run_cache::fc_run_cache_mode_from_environment() != fc_run_cache::FcRunCacheMode::Disabled)
+            .then(|| fc_run_cache::run_root_validity(&callbacks, context.containing_block));
+        if let Some(validity) = validity
+            && let Some(items) = scratch.retained_inline_items(context.containing_block, validity)
+        {
+            return Some(Self::from_stash(context, items));
+        }
+        let iterator = InlineLevelIteratorGenerator::generate(context, atomic_sizing)?;
+        if let Some(validity) = validity
+            && let Some(items) = iterator.copy_for_reuse(context)
+        {
+            scratch.retain_inline_items(context.containing_block, validity, items);
+        }
+        Some(iterator)
     }
 
     fn from_stash(context: &inline_formatting_context::InlineFormattingContext<'_>, stash: StashedInlineItems) -> Self {
