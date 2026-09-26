@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+use crate::painting::published_frame::PaintRead;
 use crate::painting::record::trace::Observer;
 
 use super::{PaintPhase, PaintRecorder};
@@ -90,7 +91,7 @@ fn record_display_list_impl<O: Observer>(
         "a recording that publishes nothing has no published frame to copy from"
     );
     let structural_epoch = paint_state.visual_context.structural_epoch();
-    let paintable_rows = layout_arena.paintable_rows();
+    let paintable_rows = crate::painting::published_frame::PaintSource::new(layout_arena);
     let frame_inputs = FrameInputs::from_recording_inputs(inputs, paint_state);
     let root_background_canvas_rect = root_background_canvas_rect(
         &paintable_rows,
@@ -231,7 +232,7 @@ impl<O: Observer> PaintRecorder<'_, O> {
 
         // For elements with SVG filters, emit a transparent FillRect to trigger filter application.
         // This ensures content-generating filters (feFlood, feImage) work even with empty source.
-        if let Some(svg_filter_bounds) = self.layout_arena.paintable_side_data(svg_box).svg_filter_bounds.get() {
+        if let Some(svg_filter_bounds) = self.layout_arena.svg_filter_bounds(svg_box) {
             let device_rect = self
                 .converter
                 .enclosing_device_rect(crate::css::css_pixels::CssPixelRect::from(svg_filter_bounds));

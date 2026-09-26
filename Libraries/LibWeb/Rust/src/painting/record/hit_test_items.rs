@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+use crate::painting::published_frame::PaintRead;
 use crate::painting::record::trace::Observer;
 
 use super::{PaintPhase, PaintRecorder};
@@ -31,7 +32,7 @@ pub(crate) struct HitTestFacts {
 }
 
 pub(crate) fn hit_test_facts(
-    arena: &impl crate::painting::paintable_rows::PaintableRowsRead,
+    arena: &impl PaintRead,
     paintable: NodeSlotId,
     inputs: &crate::painting::record::RecordingInputs<'_>,
 ) -> HitTestFacts {
@@ -343,10 +344,11 @@ impl<'a, O: Observer> PaintRecorder<'a, O> {
         self.append_empty_editable(paintable, rect, context);
     }
 
-    fn fragment(&self, owner: NodeSlotId, index: usize) -> std::cell::Ref<'a, FragmentRecord> {
-        std::cell::Ref::map(self.layout_arena.live_committed_side_data(owner), |side_data| {
-            &side_data.fragments()[index]
-        })
+    fn fragment(&self, owner: NodeSlotId, index: usize) -> CommittedFragment<'a> {
+        CommittedFragment {
+            side_data: self.layout_arena.committed_side_data(owner),
+            index,
+        }
     }
 
     fn fragment_is_block_level_box(&self, owner: NodeSlotId, index: usize) -> bool {
@@ -608,5 +610,19 @@ impl<'a, O: Observer> PaintRecorder<'a, O> {
             ..self.base_hit_test_item(HitTestItemKind::ChromeWidget, paintable, context)
         };
         self.list.append(item);
+    }
+}
+
+/// A fragment of a row's committed side data.
+struct CommittedFragment<'a> {
+    side_data: crate::painting::paintable_rows::CommittedSideDataRef<'a>,
+    index: usize,
+}
+
+impl std::ops::Deref for CommittedFragment<'_> {
+    type Target = FragmentRecord;
+
+    fn deref(&self) -> &FragmentRecord {
+        &self.side_data.fragments()[self.index]
     }
 }

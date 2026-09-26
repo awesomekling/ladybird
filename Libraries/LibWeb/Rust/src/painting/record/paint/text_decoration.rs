@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+use crate::painting::published_frame::PaintRead;
 use crate::painting::record::trace::Observer;
 
 use crate::css::css_enums::{
@@ -46,14 +47,14 @@ fn text_decoration_lines(style: crate::css::computed_value_views::ComputedValues
 }
 
 fn first_available_font(
-    arena: &crate::layout::LayoutNodeArena,
+    arena: &impl PaintRead,
     node: crate::layout::node_data::NodeSlotId,
 ) -> Option<libgfx_rust::font::FontHandle> {
     Some(arena.node_style_if_live(node)?.first_available_font())
 }
 
 fn resolve_text_decoration_thickness(
-    arena: &crate::layout::LayoutNodeArena,
+    arena: &impl PaintRead,
     value_node: crate::layout::node_data::NodeSlotId,
     basis_node: crate::layout::node_data::NodeSlotId,
     glyph_height: CssPixels,
