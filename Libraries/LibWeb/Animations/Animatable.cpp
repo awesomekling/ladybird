@@ -465,9 +465,9 @@ void Animatable::publish_css_defined_animations(size_t index)
 // of its timeline. Publish the timing, once per list, so the style stage can answer it itself.
 void Animatable::publish_animation_timing_rows()
 {
-    auto* element = as_if<DOM::Element>(*this);
-    if (!element)
-        return;
+    // NB: Every Animatable is an Element, and every style update asks this of every animated one, so this does not
+    //     pay for a cross-cast to learn it.
+    auto* element = static_cast<DOM::Element*>(this);
 
     auto slot_of = [](KeyframeEffect const& effect) {
         auto pseudo_element = effect.pseudo_element_type();
@@ -478,10 +478,16 @@ void Animatable::publish_animation_timing_rows()
     // started it, and by every animated style update until the stabilization epoch commits, but it
     // is not associated with the element yet. Publish its timing too, or the one computation that
     // samples it has nothing to sample it from.
-    GC::ConservativeVector<GC::Ref<KeyframeEffect>> provisional_effects;
+    // OPTIMIZATION: There are none outside a style update that starts transitions, so no vector is rooted for them.
+    Optional<GC::ConservativeVector<GC::Ref<KeyframeEffect>>> provisional_effect_storage;
     element->document().style_computer().for_each_provisional_transition_effect_on_element(*element, [&](KeyframeEffect& effect) {
-        provisional_effects.append(effect);
+        if (!provisional_effect_storage.has_value())
+            provisional_effect_storage.emplace();
+        provisional_effect_storage->append(effect);
     });
+    ReadonlySpan<GC::Ref<KeyframeEffect>> provisional_effects;
+    if (provisional_effect_storage.has_value())
+        provisional_effects = provisional_effect_storage->span();
     // An element whose only animation is a provisionally started transition has no animation state
     // of its own yet, and one with neither has nothing to publish and nothing published.
     if (!m_impl && provisional_effects.is_empty())
