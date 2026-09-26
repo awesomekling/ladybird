@@ -39,11 +39,13 @@
     asyncTest(async done => {
         const box = document.getElementById("box");
         const enabled = internals.clockFramesEnabled();
-        // Not a timing test: the task begins once the main thread lends the arena to the ticks beside it.
+        // Not a timing test: the task begins once a frame has handed the pseudo-element's animation to the compositor,
+        // and the main thread lends the arena to the ticks beside it.
+        const handedToCompositor = () => internals.presentedCompositorAnimationCount() === 1;
         const waitStart = performance.now();
         do
             await new Promise(resolve => setTimeout(resolve, 10));
-        while (enabled && !internals.clockLendActive() && performance.now() - waitStart < 5000);
+        while ((!handedToCompositor() || (enabled && !internals.clockLendActive())) && performance.now() - waitStart < 5000);
 
         const countersBefore = internals.getRenderClockCounters();
         // Not a timing test: the task runs until the render side has presented enough frames, however slow the machine.
@@ -55,7 +57,7 @@
             if (presented >= wanted)
                 break;
         }
-        println(`the pseudo-element's animation runs on the compositor: ${internals.presentedCompositorAnimationCount() === 1}`);
+        println(`the pseudo-element's animation runs on the compositor: ${handedToCompositor()}`);
         println(`frames presented during the task: ${!enabled || presented >= wanted}`);
         done();
     });
