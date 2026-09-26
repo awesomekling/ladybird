@@ -11,7 +11,6 @@
 //! committed table. The published generation changes in place; it is copied only where a reader
 //! still holds it.
 
-use crate::css::style::fast_hash::FastMap as HashMap;
 use crate::css::style::tree::StyleNodeID;
 use crate::layout::used_values::FfiCssPixelSize;
 use crate::layout::{LayoutNodeArena, node_data::NodeSlotId};
@@ -42,10 +41,26 @@ pub struct FfiLayoutStyleScrollState {
     pub scrolled: u8,
 }
 
+/// The rows of a generation, by element index: only elements are containers, which are all that
+/// style asks layout about, and nearly every element has a box.
 #[derive(Clone, Default)]
 struct SnapshotGeneration {
     layout_commit_generation: u64,
-    rows: HashMap<StyleNodeID, LayoutStyleSnapshotRow>,
+    rows: Vec<Option<LayoutStyleSnapshotRow>>,
+}
+
+impl SnapshotGeneration {
+    fn row(&self, node: StyleNodeID) -> Option<&LayoutStyleSnapshotRow> {
+        self.rows.get(node.element_index()? as usize)?.as_ref()
+    }
+
+    fn row_mut(&mut self, node: StyleNodeID) -> Option<&mut LayoutStyleSnapshotRow> {
+        let index = node.element_index()? as usize;
+        if self.rows.len() <= index {
+            self.rows.resize(index + 1, None);
+        }
+        Some(self.rows[index].get_or_insert_default())
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -94,6 +109,10 @@ impl LayoutStyleSnapshotStore {
             building.layout_commit_generation.is_some(),
             "layout snapshot geometry published outside a commit"
         );
+        debug_assert!(
+            node.element_index().is_some(),
+            "layout snapshot geometry published for a text node"
+        );
         building.rows.push(CommittedGeometry {
             node,
             content_width_raw: size.width.raw_value(),
@@ -115,7 +134,9 @@ impl LayoutStyleSnapshotStore {
         let next = Arc::make_mut(&mut published);
         next.layout_commit_generation = generation;
         for geometry in building.rows.drain(..) {
-            let row = next.rows.entry(geometry.node).or_default();
+            let Some(row) = next.row_mut(geometry.node) else {
+                continue;
+            };
             row.content_width_raw = geometry.content_width_raw;
             row.content_height_raw = geometry.content_height_raw;
             row.layout_commit_generation = generation;
@@ -136,7 +157,9 @@ impl LayoutStyleSnapshotStore {
                 continue;
             };
             let generation = next.layout_commit_generation;
-            let row = next.rows.entry(node).or_default();
+            let Some(row) = next.row_mut(node) else {
+                continue;
+            };
             row.stuck = state.stuck;
             row.snapped = state.snapped;
             row.scrollable = state.scrollable;
@@ -152,17 +175,21 @@ impl LayoutStyleSnapshotStore {
         // A script that replaces the text of thousands of elements retires their text nodes one at a time, so the
         // generation is changed in place, and copied only where a reader still holds it.
         let mut published = self.published.write().unwrap();
-        if !nodes.iter().any(|node| published.rows.contains_key(node)) {
+        if !nodes.iter().any(|node| published.row(*node).is_some()) {
             return;
         }
         let next = Arc::make_mut(&mut published);
         for node in nodes {
-            next.rows.remove(node);
+            if let Some(index) = node.element_index()
+                && let Some(row) = next.rows.get_mut(index as usize)
+            {
+                *row = None;
+            }
         }
     }
 
     pub(crate) fn row(&self, node: StyleNodeID) -> Option<LayoutStyleSnapshotRow> {
-        self.published.read().unwrap().rows.get(&node).copied()
+        self.published.read().unwrap().row(node).copied()
     }
 }
 
@@ -173,7 +200,11 @@ impl LayoutNodeArena {
     }
 
     pub(crate) fn publish_layout_style_snapshot_geometry(&self, node: NodeSlotId, writing_mode: u8) {
-        let Some(style_node) = self.node_style_node(node) else {
+        // Style asks layout only about elements.
+        let Some(style_node) = self
+            .node_style_node(node)
+            .filter(|style_node| style_node.element_index().is_some())
+        else {
             return;
         };
         if self.bound_row(style_node) != node {
