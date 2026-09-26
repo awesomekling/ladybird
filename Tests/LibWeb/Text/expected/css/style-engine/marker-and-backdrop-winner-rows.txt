@@ -1,2 +1,2 @@
-pseudo-element winner rows added: 237
+pseudo-element winner rows added: 35
 marker color: rgb(0, 128, 0)

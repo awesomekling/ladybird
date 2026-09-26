@@ -160,7 +160,10 @@ impl RetainedState {
 
     /// The pseudo-element winner states a node settled this flush for the kinds the engine
     /// settles pseudo-elements from, to travel with the node's winner state: ::before, ::after,
-    /// ::first-letter, ::marker, ::selection and ::backdrop.
+    /// ::first-letter, ::marker, ::selection and ::backdrop. The user agent's rules for ::marker
+    /// and ::backdrop match every element, and a row for each of them on every element would cost
+    /// the memory the winner groups have, so those travel only from a node holding a record for
+    /// that pseudo-element: a list item's marker, or a backdrop in the top layer.
     fn settled_pseudo_winner_states(
         &self,
         effects: &AnswerEffects,
@@ -171,7 +174,12 @@ impl RetainedState {
             .view(&self.winner_groups)
             .pseudo_states(node)
             .filter(|&(pseudo, version, _, priority_current)| {
-                matches!(pseudo.kind.0, 0 | 1 | 2 | 3 | 5 | 6) && version == self.program.version() && priority_current
+                let travels = match pseudo.kind.0 {
+                    0 | 2 | 3 | 6 => true,
+                    kind @ (1 | 5) => self.computed_group_sets.pseudo_style_record(node, kind as u8).is_some(),
+                    _ => false,
+                };
+                travels && version == self.program.version() && priority_current
             })
             .map(|(pseudo, _, state, _)| (pseudo, state))
             .collect()
