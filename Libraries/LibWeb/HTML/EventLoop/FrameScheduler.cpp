@@ -35,6 +35,11 @@
 #include <LibWeb/StyleEngineRustFFI.h>
 #include <time.h>
 
+#if defined(AK_OS_MACOS)
+#    include <mach/mach.h>
+#    include <pthread.h>
+#endif
+
 namespace Web::HTML {
 
 static FrameScheduler* s_frame_scheduler_with_host = nullptr;
@@ -51,6 +56,16 @@ static u64 thread_cpu_time_nanoseconds()
 {
 #if defined(AK_OS_WINDOWS)
     return MonotonicTime::now().nanoseconds();
+#elif defined(AK_OS_MACOS)
+    // NB: clock_gettime(CLOCK_THREAD_CPUTIME_ID) is the thread_selfusage system call here, which the sandbox of the
+    //     helper processes kills them for. The thread's basic info is a message to its own thread port.
+    thread_basic_info_data_t info {};
+    mach_msg_type_number_t count = THREAD_BASIC_INFO_COUNT;
+    if (thread_info(pthread_mach_thread_np(pthread_self()), THREAD_BASIC_INFO, reinterpret_cast<thread_info_t>(&info), &count) != KERN_SUCCESS)
+        return MonotonicTime::now().nanoseconds();
+    auto microseconds = (static_cast<u64>(info.user_time.seconds) + static_cast<u64>(info.system_time.seconds)) * 1'000'000
+        + static_cast<u64>(info.user_time.microseconds) + static_cast<u64>(info.system_time.microseconds);
+    return microseconds * 1'000;
 #else
     timespec time {};
     VERIFY(clock_gettime(CLOCK_THREAD_CPUTIME_ID, &time) == 0);
