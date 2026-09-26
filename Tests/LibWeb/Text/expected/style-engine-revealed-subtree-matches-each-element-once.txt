@@ -1,4 +1,4 @@
 hidden add: engineComputedRecordDeltas=61
-show: matchAnswerUpqueries=40
+show: matchAnswerUpqueries=10
 input color: rgb(0, 128, 0)
 label ::before content: "#"
