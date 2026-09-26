@@ -876,17 +876,18 @@ impl InlineLevelIterator {
         // OPTIMIZATION: Reusable items depend on the container's subtree alone, not on the run's available space, so
         //               they are kept across passes until something invalidates the container's layout. A container
         //               laid out again at another inline size, like a table cell whose column grows, reuses them.
-        let validity = (fc_run_cache::fc_run_cache_mode_from_environment() != fc_run_cache::FcRunCacheMode::Disabled)
+        //               The run cache's shadow mode verifies replays against real layout, so the real layout generates
+        //               its items afresh there.
+        let validity = (fc_run_cache::fc_run_cache_mode_from_environment() == fc_run_cache::FcRunCacheMode::Enabled)
             .then(|| fc_run_cache::run_root_validity(&callbacks, context.containing_block));
         if let Some(validity) = validity
             && let Some(items) = scratch.retained_inline_items(context.containing_block, validity)
         {
             return Some(Self::from_stash(context, items));
         }
-        let iterator = InlineLevelIteratorGenerator::generate(context, atomic_sizing)?;
-        if let Some(validity) = validity
-            && let Some(items) = iterator.copy_for_reuse(context)
-        {
+        let mut iterator = InlineLevelIteratorGenerator::generate(context, atomic_sizing)?;
+        if let Some(validity) = validity {
+            let items = iterator.share_for_reuse(context);
             scratch.retain_inline_items(context.containing_block, validity, items);
         }
         Some(iterator)
@@ -934,13 +935,21 @@ impl InlineLevelIterator {
         );
     }
 
-    /// A copy of the items for a later run of the same content to take (see stash_copy), if they are reusable.
-    pub(crate) fn copy_for_reuse(
-        &self,
+    /// A copy of the items for a later run of the same content to take, if they are reusable. The copy and the
+    /// iterator share their glyph buffers.
+    pub(crate) fn share_for_reuse(
+        &mut self,
         context: &inline_formatting_context::InlineFormattingContext<'_>,
     ) -> Option<StashedInlineItems> {
         if !self.items_are_reusable(context) {
             return None;
+        }
+        for item in self.items.as_mut_slice() {
+            if let Some(glyph_data) = &mut item.glyphs
+                && let libgfx_rust::text_layout::GlyphBuffer::Owned(glyphs) = &mut glyph_data.glyphs
+            {
+                glyph_data.glyphs = libgfx_rust::text_layout::GlyphBuffer::Shared(std::mem::take(glyphs).into());
+            }
         }
         Some(StashedInlineItems {
             items: self.items.as_slice().to_vec(),

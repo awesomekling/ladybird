@@ -1974,7 +1974,7 @@ impl<'context> InlineFormattingContext<'context> {
 
     pub(crate) fn run(&mut self) {
         assert!(self.facts(self.containing_block).children_are_inline());
-        let iterator = inline_level_iterator::InlineLevelIterator::new(self);
+        let mut iterator = inline_level_iterator::InlineLevelIterator::new(self);
         // OPTIMIZATION: Under a min-content or max-content constraint every soft wrap opportunity breaks the line or
         //               none does, so eligible content is measured from its items without building line boxes.
         //               Earlier floats would shorten lines by an amount that depends on block positions the
@@ -2004,7 +2004,7 @@ impl<'context> InlineFormattingContext<'context> {
             //               whose row is sized first), which takes its items instead of generating them again.
             let items_for_committing_layout = (self.run.purpose == formatting_context::LayoutPurpose::Measurement
                 && self.layout_mode == LayoutMode::Normal)
-                .then(|| iterator.copy_for_reuse(self))
+                .then(|| iterator.share_for_reuse(self))
                 .flatten();
             self.generate_line_boxes(iterator);
             if let Some(items) = items_for_committing_layout {

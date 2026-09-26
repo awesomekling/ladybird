@@ -2345,14 +2345,12 @@ const _: () = {
     assert_send::<LayoutScratch>();
 };
 
-/// The arena's layout scratch, with the intrinsic size caches the arena recorded as stale since the
-/// last pass dropped, so the stage never reads them.
+/// The arena's layout scratch, with what it keeps for the slots the arena freed or recorded as stale since the last
+/// pass dropped, so the stage never reads them.
 fn layout_scratch_for_stage<'a>(arena_handle: *mut c_void, arena: &LayoutNodeArena) -> &'a mut LayoutScratch {
     // SAFETY: The scratch lives beside the arena for as long as the handle does.
     let scratch = unsafe { LayoutScratch::from_handle(arena_handle) };
-    scratch
-        .intrinsic_size_caches
-        .drop_slots(arena.take_intrinsic_size_caches_to_drop());
+    scratch.drop_slots(arena.take_intrinsic_size_caches_to_drop());
     scratch
 }
 
