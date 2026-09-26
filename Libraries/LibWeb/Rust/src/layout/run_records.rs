@@ -25,10 +25,13 @@ pub(crate) struct LayoutScratch {
     inline_item_stashes: RefCell<HashMap<NodeSlotId, super::inline_level_iterator::StashedInlineItems>>,
 }
 
-#[derive(Default)]
+/// Which run holds a slot's record, and where on the record stack it is. The records stay on the
+/// stack, so the table holds no reference and the scratch can move to the thread the layout stage
+/// runs on.
+#[derive(Clone, Copy, Default)]
 struct RunRecordSlot {
     nonce: u64, // 0 = vacant
-    record: Option<NonNull<UsedValues>>,
+    record: u32,
 }
 
 impl Default for LayoutScratch {
@@ -68,8 +71,9 @@ impl LayoutScratch {
     ///
     /// # Safety
     ///
-    /// `handle` must come from `layout_arena_create` and stay live for `'a`.
-    pub(crate) unsafe fn from_handle<'a>(handle: *mut std::ffi::c_void) -> &'a Self {
+    /// `handle` must come from `layout_arena_create` and stay live for `'a`, and nothing else may
+    /// borrow the scratch meanwhile.
+    pub(crate) unsafe fn from_handle<'a>(handle: *mut std::ffi::c_void) -> &'a mut Self {
         // SAFETY: Guaranteed by the caller.
         unsafe { super::ArenaHandle::layout_scratch_of(handle) }
     }
@@ -95,16 +99,13 @@ impl LayoutScratch {
         self.live_run_nonces.borrow().last().copied()
     }
 
-    fn run_record(&self, slot_index: u32, run_nonce: u64) -> Option<NonNull<UsedValues>> {
+    fn run_record(&self, slot_index: u32, run_nonce: u64) -> Option<u32> {
         let records = self.run_used_records.borrow();
         let slot = records.get(slot_index as usize)?;
-        if slot.nonce != run_nonce {
-            return None;
-        }
-        slot.record
+        (slot.nonce == run_nonce).then_some(slot.record)
     }
 
-    fn claim_run_record(&self, slot_index: u32, run_nonce: u64, record: NonNull<UsedValues>) -> RunRecordClaim {
+    fn claim_run_record(&self, slot_index: u32, run_nonce: u64, record: u32) -> RunRecordClaim {
         let mut records = self.run_used_records.borrow_mut();
         // The table grows with the slot space: nearly every slot gets a run record each layout
         // pass, and the table outlives the pass, so this resizes rarely.
@@ -121,13 +122,13 @@ impl LayoutScratch {
         }
         *slot = RunRecordSlot {
             nonce: run_nonce,
-            record: Some(record),
+            record,
         };
         RunRecordClaim::Claimed
     }
 }
 
-/// The per-run registry of UsedValues records, backed by the slot-indexed side
+/// The per-run registry of UsedValues records, found through the slot-indexed side
 /// table in the layout stage's scratch. A run holds its root's record itself and
 /// allocates every other record on the scratch's record stack, which releases them
 /// when the run returns. The scoped constructors lend records to the run, so
@@ -236,8 +237,10 @@ impl<'arena> RunRecords<'arena> {
             Some(self.nonce),
             "only the innermost layout run may register records"
         );
+        let stack_index = u32::try_from(self.scratch.run_record_stack.length())
+            .expect("a layout pass holds fewer than 2^32 run records");
         let record = self.scratch.run_record_stack.push(used);
-        match self.scratch.claim_run_record(slot_index, self.nonce, record) {
+        match self.scratch.claim_run_record(slot_index, self.nonce, stack_index) {
             RunRecordClaim::Claimed => {}
             RunRecordClaim::AlreadyClaimed => registered_twice(),
             RunRecordClaim::HeldByEnclosingRun => {
@@ -277,13 +280,17 @@ impl<'arena> RunRecords<'arena> {
         {
             return Some(root_used);
         }
-        let record = self.scratch.run_record(node.slot_index(), self.nonce).or_else(|| {
-            let records = self.records_outside_table.borrow();
-            if records.is_empty() {
-                return None;
-            }
-            records.get(&node).copied()
-        })?;
+        let record = self
+            .scratch
+            .run_record(node.slot_index(), self.nonce)
+            .map(|stack_index| self.scratch.run_record_stack.record(stack_index as usize))
+            .or_else(|| {
+                let records = self.records_outside_table.borrow();
+                if records.is_empty() {
+                    return None;
+                }
+                records.get(&node).copied()
+            })?;
         // SAFETY: This run registered the record, and it stays on the stack until this run returns.
         Some(unsafe { record.as_ref() })
     }
@@ -318,9 +325,22 @@ pub(crate) struct RunRecordStack {
     length: Cell<usize>,
 }
 
+// SAFETY: The stack owns its chunks as a Vec owns its buffer. A record lives only while the run that
+//         registered it borrows the scratch, and nothing can move the scratch to another thread while it
+//         is borrowed, so a stack that moves holds no record.
+unsafe impl Send for RunRecordStack {}
+
 impl RunRecordStack {
     fn length(&self) -> usize {
         self.length.get()
+    }
+
+    /// The record at `index`, which must lie below the stack's length.
+    fn record(&self, index: usize) -> NonNull<UsedValues> {
+        assert!(index < self.length.get(), "layout run record index is past the stack");
+        let chunks = self.chunks.borrow();
+        // SAFETY: The slot lies inside a chunk the stack allocated, since it is below the stack's length.
+        unsafe { chunks[index / RECORDS_PER_STACK_CHUNK].add(index % RECORDS_PER_STACK_CHUNK) }
     }
 
     fn push(&self, record: UsedValues) -> NonNull<UsedValues> {
