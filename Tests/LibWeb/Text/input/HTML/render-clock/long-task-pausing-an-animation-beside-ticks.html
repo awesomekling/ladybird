@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<style>
+    #box {
+        width: 100px;
+        height: 20px;
+        animation: grow 20s linear;
+    }
+    @keyframes grow {
+        from {
+            width: 100px;
+        }
+        to {
+            width: 2100px;
+        }
+    }
+</style>
+<div id="box"></div>
+<script src="../../include.js"></script>
+<script>
+    // Under LIBWEB_RENDER_CLOCK_FRAMES, a long task pauses an animation after the render clock's ticks presented frames
+    // beside it. The document adopts the ticks once the task is over, and moving its timeline runs the animation's
+    // pending pause task, which resolves the animation's ready promise.
+    asyncTest(async done => {
+        const box = document.getElementById("box");
+        const animation = box.getAnimations()[0];
+        const enabled = internals.clockFramesEnabled();
+        // Not a timing test: the task begins once the main thread lends the arena to the ticks beside it.
+        const waitStart = performance.now();
+        do
+            await new Promise(resolve => setTimeout(resolve, 10));
+        while (enabled && !internals.clockLendActive() && performance.now() - waitStart < 5000);
+
+        const countersBefore = internals.getRenderClockCounters();
+        // Not a timing test: the task runs until the render side has presented enough frames, however slow the machine.
+        const wanted = 3;
+        const start = performance.now();
+        let presented = 0;
+        while (enabled && performance.now() - start < 5000) {
+            presented = internals.getRenderClockCounters().ticksPresented - countersBefore.ticksPresented;
+            if (presented >= wanted)
+                break;
+        }
+        let resolved = false;
+        animation.pause();
+        animation.ready.then(() => {
+            resolved = true;
+        });
+        await new Promise(resolve => setTimeout(resolve, 0));
+        await animation.ready;
+        println(`frames presented during the task: ${!enabled || presented >= wanted}`);
+        println(`ready resolved: ${resolved}`);
+        println(`play state: ${animation.playState}`);
+        done();
+    });
+</script>
