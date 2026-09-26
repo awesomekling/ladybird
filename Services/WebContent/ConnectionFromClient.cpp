@@ -2477,6 +2477,16 @@ static void append_page_text(Web::Page& page, StringBuilder& builder)
     builder.append(body->inner_text());
 }
 
+// A dump descends into the documents of the page's navigable containers, and each of those updates its own layout,
+// which laying out the containers can leave out of date.
+static void update_layout_of_hosted_documents(Web::Page& page)
+{
+    for (auto const& navigable : page.local_traversable()->hosted_inclusive_descendant_navigables()) {
+        if (auto document = navigable->active_document())
+            document->update_layout(Web::DOM::UpdateLayoutReason::Debugging);
+    }
+}
+
 static void append_layout_tree(Web::Page& page, StringBuilder& builder)
 {
     auto document = page.local_traversable()->active_document();
@@ -2485,7 +2495,7 @@ static void append_layout_tree(Web::Page& page, StringBuilder& builder)
         return;
     }
 
-    document->update_layout(Web::DOM::UpdateLayoutReason::Debugging);
+    update_layout_of_hosted_documents(page);
 
     auto* layout_root = document->layout_node();
     if (!layout_root) {
