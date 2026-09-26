@@ -947,6 +947,13 @@ bool EventLoop::run_rendering_update_from_step_16(Vector<GC::Ref<DOM::Document>>
         // it back.
         // The first style update of such a rendering update runs its first pass beside the main thread the same way,
         // and the rendering update goes on at this step, style finished, once the frame scheduler has taken it back.
+        // A style update that leaves the layout tree as it is runs its first pass in the flight that then lays the
+        // document out, and the rendering update goes on at this step once the frame scheduler has taken it back.
+        if (layout_submission == LayoutSubmission::MaySubmit && m_rendering_update_may_overlap_style && m_rendering_update_may_overlap_layout
+            && Layout::RustFFI::rust_stage_thread_submits_flight() && document->submit_style_and_layout_for_rendering_update()) {
+            m_frame_scheduler->submit_layout(docs, document_index, frame_timestamp);
+            return true;
+        }
         if (layout_submission == LayoutSubmission::MaySubmit && m_rendering_update_may_overlap_style && document->submit_style_for_rendering_update()) {
             m_frame_scheduler->submit_style(docs, document_index, frame_timestamp);
             return true;

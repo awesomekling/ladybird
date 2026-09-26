@@ -32,6 +32,41 @@ pub(super) fn unpack_invalidation(packed: u32) -> StyleInvalidation {
     StyleInvalidation::unpack(packed)
 }
 
+/// What a style change marks on the layout nodes of its element, as the host's drain marks it.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub(crate) struct LayoutNodeMarks {
+    pub(crate) repaint: bool,
+    /// The repaint invalidates the hit test items with the paint commands.
+    pub(crate) repaint_hit_test: bool,
+    pub(crate) relayout: bool,
+    pub(crate) propagated_text_decorations: bool,
+    pub(crate) stacking_context: bool,
+    /// 0 for none, 1 to update the visual contexts' values, 2 to rebuild them.
+    pub(crate) visual_context: u8,
+}
+
+/// The marks a packed invalidation word leaves on the layout nodes of its element.
+pub(crate) fn layout_node_marks(packed: u32) -> LayoutNodeMarks {
+    let invalidation = StyleInvalidation::unpack(packed);
+    // The stacking context rebuild repaints at least, as the host's reading of the word does.
+    let level = if invalidation.rebuild_stacking_context {
+        invalidation.level.max(INVALIDATION_REPAINT)
+    } else {
+        invalidation.level
+    };
+    LayoutNodeMarks {
+        repaint: level >= INVALIDATION_REPAINT,
+        repaint_hit_test: invalidation.affects_hit_testing
+            || level >= INVALIDATION_RELAYOUT
+            || invalidation.rebuild_stacking_context
+            || invalidation.visual_context == VISUAL_CONTEXT_REBUILD,
+        relayout: level >= INVALIDATION_RELAYOUT,
+        propagated_text_decorations: invalidation.repaint_text_decorations,
+        stacking_context: invalidation.rebuild_stacking_context,
+        visual_context: invalidation.visual_context.min(VISUAL_CONTEXT_REBUILD),
+    }
+}
+
 #[derive(Clone, Copy, Default)]
 pub(super) struct StyleInvalidation {
     pub(super) level: u8,
@@ -65,6 +100,27 @@ impl StyleInvalidation {
             && !self.affects_hit_testing
             && !self.repaint_text_decorations
             && !self.non_inherited_inheritance_source
+    }
+
+    /// Whether the move rebuilds the layout tree.
+    pub(super) fn rebuilds_layout_tree(self) -> bool {
+        self.level >= INVALIDATION_REBUILD_LAYOUT_TREE
+    }
+
+    /// Whether snap containers re-snap after the move.
+    pub(super) fn resnaps_scroll_containers(self) -> bool {
+        self.resnap_scroll_container
+    }
+
+    /// Whether the text the move's element and its descendants paint repaints its selection.
+    pub(super) fn repaints_selection(self) -> bool {
+        self.repaint_selection
+    }
+
+    /// Whether the move is one the element's children read: an inherited group moved, or a
+    /// non-inherited value a child may inherit explicitly.
+    pub(super) fn reaches_children(self) -> bool {
+        self.inherited_groups != 0 || self.non_inherited_inheritance_source
     }
 
     pub(super) fn merge_packed(&mut self, packed: u32) {

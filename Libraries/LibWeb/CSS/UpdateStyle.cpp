@@ -4,9 +4,11 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/AnyOf.h>
 #include <AK/HashTable.h>
 #include <AK/QuickSort.h>
 #include <AK/ScopeGuard.h>
+#include <AK/TemporaryChange.h>
 #include <LibGC/RootVector.h>
 #include <LibWeb/Animations/Animation.h>
 #include <LibWeb/Animations/AnimationEffect.h>
@@ -105,11 +107,46 @@ StyleEffectDrain::ViewportPropagationSources StyleEffectDrain::viewport_propagat
     return sources;
 }
 
+// Whether what a flight marked of a row's layout nodes as it applied the row covers what the host's install of the row
+// marks: the host then has nothing to mark, and nothing to paint again.
+static bool flight_marks_cover(RequiredInvalidationAfterStyleChange const& applied, RequiredInvalidationAfterStyleChange const& host)
+{
+    auto combined = applied;
+    combined |= host;
+    return combined.needs_repaint() == applied.needs_repaint()
+        && combined.needs_relayout() == applied.needs_relayout()
+        && combined.needs_layout_tree_rebuild() == applied.needs_layout_tree_rebuild()
+        && combined.accumulated_visual_contexts() == applied.accumulated_visual_contexts()
+        && combined.needs_stacking_context_tree_rebuild() == applied.needs_stacking_context_tree_rebuild()
+        && combined.needs_scroll_container_resnap == applied.needs_scroll_container_resnap
+        && combined.repaint_propagated_text_decorations == applied.repaint_propagated_text_decorations
+        && combined.repaint_selection == applied.repaint_selection
+        && combined.invalidates_hit_test_display_list() == applied.invalidates_hit_test_display_list();
+}
+
+// What the flight that applied a row marked of its layout nodes, if it applied it (with the record `style_record`, unless
+// taken), taken with the row's invalidation or as the host installs the row itself.
+static Optional<RequiredInvalidationAfterStyleChange> marks_of_flight(Layout::NodeArena& arena, StyleNodeID style_node, bool take, StyleRecordID style_record = {})
+{
+    auto damage = Layout::RustFFI::layout_arena_flight_style_damage(arena.handle(), style_node.value(), style_record.value(), take);
+    if (!damage)
+        return {};
+    return decode_style_invalidation(static_cast<u32>(damage));
+}
+
+// Whether the style update being installed is one whose pass ran in a layout flight, and the rows of it that flight
+// applied ahead of the install without covering what the install marks.
+static thread_local bool s_installing_style_applied_by_flight = false;
+static thread_local size_t s_rows_the_flight_left_to_mark = 0;
+
 void StyleEffectDrain::apply_layout_invalidation(DOM::Document& document, ViewportPropagationSources const& viewport_propagation_sources, StyleNodeID style_node, RequiredInvalidationAfterStyleChange const& invalidation)
 {
     auto* arena = document.layout_node_arena_if_created();
     if (!arena)
         return;
+    if (auto applied = marks_of_flight(*arena, style_node, true); applied.has_value() && flight_marks_cover(*applied, invalidation))
+        return;
+    ++s_rows_the_flight_left_to_mark;
     // The layout nodes the arena binds to the node's element and its synthetic pseudo-elements.
     auto* layout_node = static_cast<Layout::Node*>(Layout::RustFFI::layout_arena_bound_shell(arena->handle(), style_node.value()));
     auto pseudo_element_layout_node = [&](PseudoElement pseudo_element) {
@@ -240,6 +277,18 @@ void StyleEffectDrain::apply_layout_node_style(DOM::Document& document, StyleNod
     // If we're keeping the layout tree, we can just apply the new style to the existing layout tree.
     auto* layout_node = static_cast<Layout::NodeWithStyle*>(Layout::RustFFI::layout_arena_bound_shell(arena->handle(), style_node.value()));
     ASSERT(!layout_node || style_record.value() != 0);
+    // A flight applied the row's record to the layout nodes and painted after it: the element's box only takes the record
+    // into its mirror, and its pseudo-elements' records are the ones they hold. A row whose record or pseudo-element
+    // records are others than the flight's is installed here over what the flight did, marks and all.
+    bool const moves_pseudo_element_records = any_of(pseudo_element_style_records, [](auto record) { return record.value() != 0; });
+    auto applied_by_flight = marks_of_flight(*arena, style_node, false, style_record);
+    if (applied_by_flight.has_value() && !moves_pseudo_element_records && flight_marks_cover(*applied_by_flight, invalidation)) {
+        if (layout_node && style_record.value() != 0)
+            layout_node->apply_style(style_record);
+        return;
+    }
+    (void)marks_of_flight(*arena, style_node, true);
+    ++s_rows_the_flight_left_to_mark;
     if (layout_node && style_record.value() != 0) {
         layout_node->apply_style(style_record);
         if (Painting::has_committed_box(*layout_node))
@@ -1408,7 +1457,14 @@ void StyleUpdate::finish(StyleEngineTransaction style_engine_transaction)
     }
 
     document.set_has_completed_style_update();
-    apply_document_style_invalidation_after_style_change(document, invalidation);
+    // What a flight applied of the batch it ran the pass for, it records after: the repaint is that recording, unless the
+    // recording does not stand. What it left to the install repaints now.
+    if (s_installing_style_applied_by_flight && s_rows_the_flight_left_to_mark == 0) {
+        if (invalidation.needs_repaint())
+            document.owe_style_repaint_to_flight(invalidation.invalidates_hit_test_display_list());
+    } else {
+        apply_document_style_invalidation_after_style_change(document, invalidation);
+    }
     document.sample_animation_effects_needing_style_update();
 }
 
@@ -1421,6 +1477,8 @@ static void update_style(DOM::Document& document, DocumentWithoutBrowsingContext
 
 // The style update whose first pass is in flight, which it owns. At most one frame is in flight per event loop.
 static StyleUpdate* s_submitted_style_update = nullptr;
+// Whether that pass runs in the flight of a layout update, whose take-back installs it.
+static bool s_submitted_style_update_runs_in_layout_flight = false;
 
 static bool submit_style_update(DOM::Document& document)
 {
@@ -1434,7 +1492,18 @@ static bool submit_style_update(DOM::Document& document)
     return true;
 }
 
-static void finish_submitted_style_update(DOM::Document& document)
+bool style_update_submitted_in_layout_flight()
+{
+    return s_submitted_style_update_runs_in_layout_flight;
+}
+
+enum class HeldInvalidationMarks {
+    Release,
+    // The layout update whose flight ran the pass releases them as it ends.
+    KeepForLayoutUpdate,
+};
+
+static void finish_submitted_style_update(DOM::Document& document, HeldInvalidationMarks held_invalidation_marks = HeldInvalidationMarks::Release)
 {
     VERIFY(s_submitted_style_update);
     // What was recorded beside the pass is the next transaction's, however the pass was taken back: held until the
@@ -1443,8 +1512,13 @@ static void finish_submitted_style_update(DOM::Document& document)
     style_engine.begin_holding_input_recorded_beside_pass();
     ScopeGuard release_input = [&] { style_engine.end_holding_input_recorded_beside_pass(); };
     auto update = adopt_own(*exchange(s_submitted_style_update, nullptr));
+    s_submitted_style_update_runs_in_layout_flight = false;
     // What was marked beside the pass is what the next drain writes.
-    document.release_held_invalidation_marks();
+    if (held_invalidation_marks == HeldInvalidationMarks::Release)
+        document.release_held_invalidation_marks();
+    // A pass whose layout ran in the same flight may have been applied by the flight ahead of the install.
+    TemporaryChange installing_style_applied_by_flight { s_installing_style_applied_by_flight, held_invalidation_marks == HeldInvalidationMarks::KeepForLayoutUpdate };
+    s_rows_the_flight_left_to_mark = 0;
     update->finish_submitted();
 }
 
@@ -1939,6 +2013,48 @@ bool Document::submit_style_for_rendering_update()
 void Document::finish_submitted_style_update()
 {
     CSS::finish_submitted_style_update(*this);
+}
+
+void Document::submit_style_for_flight()
+{
+    update_selection_style_observability();
+    CSS::s_submitted_style_update_runs_in_layout_flight = CSS::submit_style_update(*this);
+}
+
+// The marks made beside the flight wait for the end of its layout update, as beside a flight that begins with layout: its
+// recording stands unless the flight's own style and layout leave work.
+void Document::finish_style_update_submitted_in_flight()
+{
+    CSS::finish_submitted_style_update(*this, CSS::HeldInvalidationMarks::KeepForLayoutUpdate);
+}
+
+bool Document::has_submitted_style_update() const
+{
+    return CSS::s_submitted_style_update;
+}
+
+void Document::owe_style_repaint_to_flight(bool invalidates_hit_test)
+{
+    m_style_repaint_owed_to_flight = true;
+    m_style_repaint_owed_to_flight_invalidates_hit_test |= invalidates_hit_test;
+}
+
+// A flight that applied a style batch and did not record the document after it, or whose recording did not stand, leaves
+// the repaint the batch asks for to the document: the visual contexts it marked, and the display list.
+void Document::settle_style_repaint_owed_to_flight(bool recorded_in_flight)
+{
+    auto owed = exchange(m_style_repaint_owed_to_flight, false);
+    auto invalidates_hit_test = exchange(m_style_repaint_owed_to_flight_invalidates_hit_test, false);
+    if (recorded_in_flight)
+        return;
+    set_needs_accumulated_visual_contexts_update(true);
+    if (!owed)
+        return;
+    if (invalidates_hit_test)
+        set_needs_to_record_display_list();
+    else
+        set_needs_to_record_display_list_keeping_hit_test_display_list();
+    set_needs_repaint(InvalidateDisplayList::No);
 }
 
 // A style update for one element reads and writes nothing a recording in flight reads, and what it changes in the arena

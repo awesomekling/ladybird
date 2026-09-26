@@ -318,8 +318,13 @@ bool FrameScheduler::pass_in_flight_records() const
     if (!awaits_pass() || m_ticket->submitted_pass->kind != FrameTicket::SubmittedPass::Kind::Flight)
         return false;
     auto const& pass = *m_ticket->submitted_pass;
-    auto navigable = pass.documents[pass.document_index]->navigable();
-    return navigable && navigable->has_sealed_flight_paint();
+    auto const& document = pass.documents[pass.document_index];
+    auto navigable = document->navigable();
+    if (!navigable || !navigable->has_sealed_flight_paint())
+        return false;
+    // A flight that runs the style of its layout records only if it applies that style itself; otherwise the rendering
+    // update lays out after it, and records then.
+    return !CSS::style_update_submitted_in_layout_flight() || Layout::RustFFI::rust_flight_applies_its_style();
 }
 
 bool FrameScheduler::pass_in_flight_holds(DOM::Document const& document) const
@@ -364,7 +369,8 @@ void FrameScheduler::commit()
         auto outcome = Layout::RustFFI::rust_flight_take_outcome();
         m_ticket->submitted_pass->flight_outcome = outcome;
         auto document = m_ticket->submitted_pass->documents[m_ticket->submitted_pass->document_index];
-        if (outcome.began == Layout::RustFFI::FfiFlightStage::Style)
+        // A flight that ran its layout's style had the style installed as its layout frame was taken back.
+        if (outcome.began == Layout::RustFFI::FfiFlightStage::Style && document->has_submitted_style_update())
             document->finish_submitted_style_update();
         // A flight that went on from the layout pass to record the document hands its frame off here, as the frame of a
         // recording in flight is.

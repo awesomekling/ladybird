@@ -153,4 +153,7 @@ private:
     Vector<MainEffect> m_main_effects;
 };
 
+// Whether the style update submitted is one whose pass runs in a layout flight, which installs it as it is taken back.
+[[nodiscard]] bool style_update_submitted_in_layout_flight();
+
 }

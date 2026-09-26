@@ -2383,11 +2383,11 @@ void Document::process_pending_list_item_renumbers()
     }
 }
 
-bool Document::needs_style_update_after_layout()
+bool Document::needs_style_update_after_layout(bool style_runs_in_flight)
 {
     return has_size_containers_needing_evaluation_after_layout()
         || m_needs_animated_style_update
-        || style_computer().style_engine().has_pending_transaction();
+        || (!style_runs_in_flight && style_computer().style_engine().has_pending_transaction());
 }
 
 void Document::clear_devtools_layout_inspection_data()

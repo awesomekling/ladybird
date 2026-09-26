@@ -47,6 +47,9 @@ mod main_thread_entries;
 pub(crate) use main_thread_entries::MainThreadFfiEntry;
 
 pub(crate) const SLOTS_PER_CHUNK: usize = 256;
+/// How many kinds of synthetic pseudo-element a row can be generated for, from `::after` to
+/// `::view-transition`: the `generated_for` of their rows runs from one to this.
+const SYNTHETIC_PSEUDO_ELEMENT_GENERATED_FOR_COUNT: u8 = 8;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct IntrinsicSizeCacheKey {
@@ -924,6 +927,17 @@ pub(crate) struct LayoutNodeArena {
     /// The records an animation sample installed over rows ahead of the host, each pinned until the
     /// host adopts it into its own mirror of the row: one per row, the last one installed.
     animation_adoption_log: RefCell<Vec<AnimationAdoption>>,
+    /// The records a flight installed over rows ahead of the host, for the host to adopt as it
+    /// installs the style batch the flight applied, pinned until it does.
+    flight_style_adoptions: RefCell<Vec<AnimationAdoption>>,
+    /// What each row of the style batch a flight applied marked of its element's layout nodes, by
+    /// style node, packed as an `FfiStyleInvalidationField` word, with the record it installed,
+    /// until the host installs the row.
+    flight_style_damages: RefCell<HashMap<StyleNodeID, (u32, u64)>>,
+    /// Whether a flight applied a style batch whose handbacks the host half of its style pays.
+    flight_style_handbacks_open: Cell<bool>,
+    /// Whether a flight applied a style batch whose repaint the end of its frame settles.
+    flight_style_applied: Cell<bool>,
     /// The StyleNodeID of the element or text node each row is bound to, or of the element it is
     /// generated for. Rows carrying one
     /// identity are chained through `next_rows_with_same_style_node` from
@@ -1141,6 +1155,10 @@ impl LayoutNodeArena {
             style_records_pinned_by_arena: Vec::new(),
             style_records_pinned_by_host: Vec::new(),
             animation_adoption_log: RefCell::new(Vec::new()),
+            flight_style_adoptions: RefCell::new(Vec::new()),
+            flight_style_damages: RefCell::new(HashMap::default()),
+            flight_style_handbacks_open: Cell::new(false),
+            flight_style_applied: Cell::new(false),
             style_nodes: Vec::new(),
             next_rows_with_same_style_node: Vec::new(),
             first_rows_by_style_node: RefCell::new(RowsByStyleNode::default()),
@@ -2037,6 +2055,186 @@ impl LayoutNodeArena {
         }
     }
 
+    /// Applies the rows of a style batch to the layout nodes of their elements ahead of the host, as
+    /// a flight does between its style pass and its layout rounds: each row's record over the row
+    /// its element's box is bound to, and what its move marks of that box and the boxes of the
+    /// element's pseudo-elements, as the host's drain would. Answers why, having done nothing, if a
+    /// row's box is one the host styles itself.
+    ///
+    /// The records are logged, pinned, for the host to adopt as it installs the batch, which pays
+    /// the handbacks the rows leave: the host half of the flight's style.
+    pub(crate) fn apply_flight_style_rows(
+        &self,
+        rows: &[crate::css::style::flight_style_rows::FlightStyleRow],
+    ) -> Result<(), crate::css::style::flight_style_rows::FfiFlightStyleDecline> {
+        use crate::css::style::flight_style_rows::FfiFlightStyleDecline;
+        use crate::css::style::style_invalidation::layout_node_marks;
+        self.assert_owner_thread();
+        for row in rows {
+            let slot = self.bound_row(row.style_node);
+            if slot.is_invalid() {
+                continue;
+            }
+            // Replaced content, form controls, list items, tables and SVG take facts from their
+            // element the host publishes as it styles them.
+            if !matches!(
+                self.data(slot).kind.get(),
+                NodeKind::Box | NodeKind::BlockContainer | NodeKind::InlineNode
+            ) || self.node_style_record_is_pinned_by_arena(slot)
+            {
+                return Err(FfiFlightStyleDecline::LayoutNode);
+            }
+            if self.style_records[slot.slot_index() as usize].get() != row.old_style_record {
+                return Err(FfiFlightStyleDecline::StaleLayoutNode);
+            }
+            // A relayout of a partial relayout boundary may stay confined to it, which the host
+            // decides from the element's pseudo-elements.
+            if layout_node_marks(row.damage).relayout && self.node_is_partial_relayout_boundary(slot) {
+                return Err(FfiFlightStyleDecline::RelayoutBoundary);
+            }
+        }
+        self.open_host_handback_span();
+        self.flight_style_handbacks_open.set(true);
+        self.flight_style_applied.set(true);
+        for row in rows {
+            let slot = self.bound_row(row.style_node);
+            if slot.is_invalid() {
+                continue;
+            }
+            let marks = layout_node_marks(row.damage);
+            if row.new_style_record != row.old_style_record {
+                if self.set_node_style(slot, row.new_style_record, row.payloads) {
+                    self.refresh_style_flags(slot);
+                }
+                self.enroll_node_for_svg_paint_resources_sync(slot);
+                self.set_node_flag(slot, NodeFlag::HasAnimatedOpacityOrTransform, false);
+                self.reinherit_anonymous_descendants(slot, ShellStyleChangeNotice::Handback);
+                self.note_style_image_resources_attached(slot, false);
+                self.with_style_engine(|engine| engine.pin_layout_style_record(row.new_style_record));
+                self.flight_style_adoptions.borrow_mut().push(AnimationAdoption {
+                    slot,
+                    style_record: row.new_style_record,
+                    host_style_record: row.old_style_record,
+                });
+            }
+            let pseudo_element_slots = (1..=SYNTHETIC_PSEUDO_ELEMENT_GENERATED_FOR_COUNT)
+                .map(|generated_for| self.bound_pseudo_element_row(row.style_node, generated_for))
+                .filter(|pseudo_slot| !pseudo_slot.is_invalid());
+            for marked in std::iter::once(slot).chain(pseudo_element_slots) {
+                self.mark_row_after_style_change_in_flight(marked, marks);
+            }
+            if marks.relayout {
+                self.set_needs_layout_update(slot, true);
+            }
+            self.flight_style_damages
+                .borrow_mut()
+                .insert(row.style_node, (row.damage, row.new_style_record));
+        }
+        Ok(())
+    }
+
+    /// Repaints and marks the visual contexts of a row a style change in flight moved, as the host's
+    /// drain does for a box it has committed.
+    fn mark_row_after_style_change_in_flight(
+        &self,
+        slot: NodeSlotId,
+        marks: crate::css::style::style_invalidation::LayoutNodeMarks,
+    ) {
+        use crate::painting::record::damage::PaintDamage;
+        use crate::painting::visual_context::dirty::VisualContextBoxDirtyKind;
+        if !self.paintable_row_is_populated(slot) {
+            return;
+        }
+        let _writer = crate::painting::published_immutable::enter_writer("flight style render half");
+        if marks.repaint {
+            self.push_paint_damage_for_repaint(
+                slot,
+                if marks.repaint_hit_test {
+                    PaintDamage::ALL_PRODUCERS
+                } else {
+                    PaintDamage::ALL_DRAW
+                },
+            );
+        }
+        if marks.propagated_text_decorations {
+            self.push_propagated_text_decoration_damage(slot);
+        }
+        let mut visual_context = match marks.visual_context {
+            0 => None,
+            1 => Some(VisualContextBoxDirtyKind::StyleValueChange),
+            _ => Some(VisualContextBoxDirtyKind::StyleStructuralChange),
+        };
+        if marks.stacking_context {
+            visual_context = Some(VisualContextBoxDirtyKind::StyleStructuralChange);
+            // A table's wrapper carries the table properties the stacking context moved with.
+            let parent = self.data(slot).parent.get();
+            if !parent.is_invalid()
+                && self.data(parent).kind.get() == NodeKind::TableWrapper
+                && self.paintable_row_is_populated(parent)
+            {
+                self.note_visual_context_box_dirty(parent, VisualContextBoxDirtyKind::StyleStructuralChange);
+            }
+        }
+        if let Some(kind) = visual_context {
+            self.note_visual_context_box_dirty(slot, kind);
+        }
+    }
+
+    /// Whether a flight applied a style batch since this was asked last.
+    pub(crate) fn take_flight_style_applied(&self) -> bool {
+        self.flight_style_applied.replace(false)
+    }
+
+    /// Takes what the flight marked of the layout nodes of `style_node`'s element as it applied the
+    /// style row the host installs now, or `None` if it applied none for it.
+    pub(crate) fn take_flight_style_damage(&self, style_node: StyleNodeID) -> Option<u32> {
+        self.flight_style_damages
+            .borrow_mut()
+            .remove(&style_node)
+            .map(|(damage, _)| damage)
+    }
+
+    /// What the flight marked of the layout nodes of `style_node`'s element, which the host reads
+    /// before it takes it, if the flight installed `style_record` there.
+    pub(crate) fn flight_style_damage(&self, style_node: StyleNodeID, style_record: u64) -> Option<u32> {
+        self.flight_style_damages
+            .borrow()
+            .get(&style_node)
+            .filter(|(_, installed)| *installed == style_record)
+            .map(|(damage, _)| *damage)
+    }
+
+    /// Ends the host half of a flight's style: what the rows of the batch left to the host's
+    /// install that it did not take is dropped, and a record it did not adopt, and did not install
+    /// another one over, is put back over its row with the host's, which lays the row out again.
+    /// Answers whether one was.
+    pub(crate) fn finish_flight_style_host_half(&self, main_thread: &crate::stage::MainThread) -> bool {
+        self.flight_style_damages.borrow_mut().clear();
+        let unadopted = std::mem::take(&mut *self.flight_style_adoptions.borrow_mut());
+        let restored = !unadopted.is_empty();
+        for adoption in unadopted {
+            let payloads = self.with_style_engine(|engine| {
+                engine
+                    .style_record_payloads(adoption.host_style_record)
+                    .map(|payloads| payloads.as_ptr().cast::<c_void>())
+            });
+            // The host holds its record, so the engine has its payloads; a row whose element left
+            // keeps the flight's record until its box goes.
+            if let Some(payloads) = payloads
+                && self.slot_is_live(adoption.slot)
+                && self.style_records[adoption.slot.slot_index() as usize].get() == adoption.style_record
+            {
+                self.install_row_style_over_host(adoption.slot, adoption.host_style_record, payloads, true);
+                self.reinherit_anonymous_descendants(adoption.slot, ShellStyleChangeNotice::Now(main_thread));
+            }
+            self.with_style_engine(|engine| engine.unpin_layout_style_record(adoption.style_record));
+        }
+        if self.flight_style_handbacks_open.replace(false) {
+            self.finish_paying_host_handbacks(main_thread);
+        }
+        restored
+    }
+
     /// Install the record an animation sample published for `style_node` over the row its box is
     /// bound to, ahead of the host: the row's style, the caches a style change over the row resets,
     /// and the layout mark the sample asks for. The record is logged, pinned, for the host to adopt
@@ -2130,12 +2328,13 @@ impl LayoutNodeArena {
     /// Whether an animation sample installed `style_record` over `slot` ahead of the host, which is
     /// adopting it now: the record leaves the log, and its pin is released to the host's.
     pub(crate) fn take_animation_adoption(&self, slot: NodeSlotId, style_record: u64) -> bool {
-        let adopted = {
-            let mut log = self.animation_adoption_log.borrow_mut();
+        let take = |log: &RefCell<Vec<AnimationAdoption>>| {
+            let mut log = log.borrow_mut();
             log.iter()
                 .position(|adoption| adoption.slot == slot && adoption.style_record == style_record)
                 .map(|index| log.swap_remove(index))
         };
+        let adopted = take(&self.animation_adoption_log).or_else(|| take(&self.flight_style_adoptions));
         let Some(adopted) = adopted else {
             return false;
         };
@@ -6680,6 +6879,35 @@ pub unsafe extern "C" fn layout_arena_move_pseudo_element_scroll_offsets(
     let arena = unsafe { LayoutNodeArena::from_handle_mut(arena) };
     let _write = arena.join_frame_for_main_side_write(LayoutNodeArena::SCROLL_OFFSETS_WRITER);
     arena.move_pseudo_element_scroll_offsets(old_generator, new_generator);
+}
+
+/// What the flight that applied the style row of `style_node`'s element marked of its layout nodes,
+/// as a packed `FfiStyleInvalidationField` word with bit 32 set, or zero if it applied none, or
+/// (unless `take`) installed another record than `style_record` there. `take` has the host take it,
+/// as it installs the row's invalidation or as it installs the row itself over what the flight did.
+///
+/// # Safety
+///
+/// The arena must be live on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_flight_style_damage(
+    arena: *mut c_void,
+    style_node: u32,
+    style_record: u64,
+    take: bool,
+) -> u64 {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    let Some(style_node) = StyleNodeID::from_raw(style_node) else {
+        return 0;
+    };
+    // SAFETY: As above.
+    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
+    let damage = if take {
+        arena.take_flight_style_damage(style_node)
+    } else {
+        arena.flight_style_damage(style_node, style_record)
+    };
+    damage.map_or(0, |damage| (1 << 32) | u64::from(damage))
 }
 
 #[unsafe(no_mangle)]

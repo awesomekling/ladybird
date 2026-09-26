@@ -77,13 +77,20 @@ async function whileLayoutInFlight(point, mutate, during, doc = null) {
             setTimeout(async () => {
                 try {
                     // A rendering update that submits its style pass first submits the layout pass once the main
-                    // thread has taken the style pass back between tasks.
-                    while (armed && internals.heldFrameAwaitsSubmission()) {
-                        internals.waitForFrameToFinish();
-                        await nextTask();
+                    // thread has taken the style pass back between tasks. So it does where a flight that could have
+                    // laid out ended after its style: the rendering update lays out once it has taken that flight back.
+                    let heldAt = "";
+                    while (armed) {
+                        while (internals.heldFrameAwaitsSubmission()) {
+                            internals.waitForFrameToFinish();
+                            await nextTask();
+                        }
+                        // Returns "" at once if no layout pass was submitted.
+                        heldAt = internals.waitForHeldFrame();
+                        // A flight that could have laid out can end before it does while this waits.
+                        if (heldAt || !internals.heldFrameAwaitsSubmission())
+                            break;
                     }
-                    // Returns "" at once if no layout pass was submitted.
-                    const heldAt = armed ? internals.waitForHeldFrame() : "";
                     if (heldAt) layoutHoldsHeld++;
                     const frame = { heldAt, state: internals.frameSchedulerState() };
                     const result = await during(frame);

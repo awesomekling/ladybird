@@ -8,8 +8,9 @@
 <div id="container"><div id="first" style="height: 10px">first</div><div id="second">second</div></div>
 <script>
     // Writes to the style engine beside a recording in flight: the recording reads nothing of the style engine, so an
-    // attribute change and a selector query go on beside it instead of taking it in, and the next rendering update sees
-    // the change.
+    // attribute change goes on beside it instead of taking it in, and the next rendering update sees the change. A
+    // selector query reads what the change wrote: beside a flight that ran the rendering update's style, whose batch is
+    // installed as the flight is taken back, it takes the flight back first.
     asyncTest(async done => {
         const result = await whileFrameInFlight("before-run", () => {
             first.style.height = "20px";
@@ -17,11 +18,13 @@
             const joinsBefore = internals.forcedJoinCount("recording");
             container.className = "narrow";
             second.className = "changed";
+            const joins = internals.forcedJoinCount("recording") - joinsBefore;
+            const stillInFlight = !frame.armed || internals.frameInFlightHoldsDocument();
             const queried = document.querySelector("#container > .changed");
             return {
                 ...frame,
-                joins: internals.forcedJoinCount("recording") - joinsBefore,
-                stillInFlight: !frame.armed || internals.frameInFlightHoldsDocument(),
+                joins,
+                stillInFlight,
                 queried: queried.id,
             };
         });

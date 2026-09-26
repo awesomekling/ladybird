@@ -5,6 +5,7 @@
  */
 
 #include <LibWeb/CSS/StyleComputer.h>
+#include <LibWeb/CSS/StyleEffectDrain.h>
 #include <LibWeb/CSS/StyleEngineBridge.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
@@ -57,11 +58,12 @@ Layout::RustFFI::FfiLayoutUpdateHostCallbacks Document::layout_update_host_callb
             }; },
         .needs_style_update_after_layout = [](void* context) -> bool { return static_cast<Document*>(context)->needs_style_update_after_layout(); },
         .prepare_for_rendering = [](void* context) { static_cast<Document*>(context)->prepare_for_rendering(); },
-        .seal_flight_paint = [](void* context) {
+        .seal_flight_paint = [](void* context, bool style_runs_in_flight) {
             auto& document = *static_cast<Document*>(context);
-            // A document that is to update its style after the layout lays out again before it shows anything.
+            // A document that is to update its style after the layout lays out again before it shows anything. The style
+            // a flight runs ahead of its layout is not such an update: the flight's take-back installs it.
             if (auto navigable = document.navigable())
-                navigable->seal_flight_paint(document, !document.needs_style_update_after_layout()); },
+                navigable->seal_flight_paint(document, !document.needs_style_update_after_layout(style_runs_in_flight)); },
         .prepare_layout_tree_build = [](void* context) -> u32 { return static_cast<Document*>(context)->prepare_layout_tree_build(); },
         .renew_paint_state = [](void* context) {
             auto& document = *static_cast<Document*>(context);
@@ -116,6 +118,9 @@ Layout::RustFFI::FfiLayoutUpdateHostCallbacks Document::layout_update_host_callb
             }
 
             document.page().client().flush_pending_dom_mutations(); },
+        .submit_style_for_flight = [](void* context) { static_cast<Document*>(context)->submit_style_for_flight(); },
+        .finish_submitted_style_update = [](void* context) { static_cast<Document*>(context)->finish_style_update_submitted_in_flight(); },
+        .settle_flight_style_repaint = [](void* context, bool recorded_in_flight) { static_cast<Document*>(context)->settle_style_repaint_owed_to_flight(recorded_in_flight); },
     };
 }
 
@@ -154,6 +159,26 @@ void Document::update_layout(UpdateLayoutReason reason, ThrottledAnimationSampli
 bool Document::submit_layout_for_rendering_update()
 {
     return update_style_and_layout_once(UpdateLayoutReason::HTMLEventLoopRenderingUpdate, ThrottledAnimationSamplingScope::Document, LayoutPassSubmission::MaySubmit);
+}
+
+// A style update whose first pass leaves the layout tree as it is runs in the flight that lays the document out after it:
+// the layout update begins as the rendering update's would, and its first round submits the style pass for the flight to
+// run instead of running style itself, unless the document's layout tree is to be built again first.
+// Opt-in for now (LIBWEB_FLIGHT_STYLE=1): otherwise the style pass runs in a flight of its own ahead of the layout.
+bool Document::style_runs_in_layout_flights()
+{
+    static bool const enabled = [] {
+        auto const* value = getenv("LIBWEB_FLIGHT_STYLE");
+        return value && StringView { value, strlen(value) } == "1"sv;
+    }();
+    return enabled;
+}
+
+bool Document::submit_style_and_layout_for_rendering_update()
+{
+    if (!style_runs_in_layout_flights() || m_created_for_appropriate_template_contents || !has_layout_root())
+        return false;
+    return update_style_and_layout_once(UpdateLayoutReason::HTMLEventLoopRenderingUpdate, ThrottledAnimationSamplingScope::Document, LayoutPassSubmission::MaySubmitWithStyle);
 }
 
 bool Document::update_style_and_layout_once(UpdateLayoutReason reason, ThrottledAnimationSamplingScope animation_sampling_scope, LayoutPassSubmission pass_submission)
@@ -198,8 +223,15 @@ bool Document::update_style_and_layout_once(UpdateLayoutReason reason, Throttled
         .reason_is_inspect_devtools_layout_data = reason == UpdateLayoutReason::InspectDevToolsLayoutData,
         .is_template_contents_document = m_created_for_appropriate_template_contents,
         .reason_name = ffi_utf16_view(to_string(reason)),
-        .may_submit_pass = pass_submission == LayoutPassSubmission::MaySubmit,
+        .may_submit_pass = pass_submission != LayoutPassSubmission::Wait,
+        .style_in_flight = pass_submission == LayoutPassSubmission::MaySubmitWithStyle,
+        .viewport_propagation_sources = {},
     };
+    if (pass_submission == LayoutPassSubmission::MaySubmitWithStyle) {
+        auto sources = CSS::StyleEffectDrain::viewport_propagation_sources_of(*this);
+        for (size_t index = 0; index < sources.size() && index < 2; ++index)
+            inputs.viewport_propagation_sources[index] = sources[index].value();
+    }
     return Layout::RustFFI::layout_arena_update_layout(arena.handle(), &inputs) == Layout::RustFFI::FfiLayoutUpdateOutcome::PassSubmitted;
 }
 
