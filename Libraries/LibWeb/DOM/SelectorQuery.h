@@ -51,7 +51,6 @@ private:
 
     void* engine_query(Document&) const;
     bool matches_simple_selector_in_dom(Element const&) const;
-    bool matches_compounds_in_dom(CSS::Selector const&, size_t index, Element const&) const;
     bool matches_tree_in_dom(Element const&) const;
     bool should_match_tree_in_dom(Document&, ParentNode* subtree_root) const;
     bool matches_in_style_engine(Element const&, ParentNode const& scope) const;

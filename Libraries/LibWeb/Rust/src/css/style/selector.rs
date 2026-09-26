@@ -4896,6 +4896,12 @@ pub struct MatchEvaluator<'a> {
     /// Where a completed simple relational evaluation records its outcome, when the caller is
     /// evaluating the live tree and current facts. See `MatchEvaluator::observing_witnesses`.
     witnesses: Option<&'a mut Vec<WitnessEffect>>,
+    /// The descendant and subsequent-sibling relations found not to hold at a node, when the caller
+    /// asks for them to be remembered. See `MatchEvaluator::remembering_relation_failures`.
+    relation_failures: Option<HashSet<(usize, SelectorNodeID, StyleNodeID)>>,
+    /// How many descendant or subsequent-sibling relation walks the relation being evaluated is
+    /// inside of.
+    relation_walk_depth: u32,
 }
 
 /// Transaction-local answers for repeated match-program relations.
@@ -5535,6 +5541,8 @@ impl<'a> MatchEvaluator<'a> {
             positional_index_policy: PositionalIndexPolicy::All,
             transitive_relation_program: Cell::new(None),
             witnesses: None,
+            relation_failures: None,
+            relation_walk_depth: 0,
         }
     }
 
@@ -5543,6 +5551,55 @@ impl<'a> MatchEvaluator<'a> {
     pub fn in_shadow_tree(mut self, shadow_root: StyleNodeID) -> Self {
         self.scope_shadow_root = Some(shadow_root);
         self
+    }
+
+    /// Remember every descendant and subsequent-sibling relation found not to hold at a node, for
+    /// an evaluator that answers one query over a tree that does not change meanwhile.
+    ///
+    /// Such a relation tries the compounds before it at every ancestor or earlier sibling, and
+    /// whether they match there does not depend on the node the walk came from. Without this,
+    /// `p div div div span` beside no `p` tries every combination of ancestors for its `div`s.
+    #[must_use]
+    pub(super) fn remembering_relation_failures(mut self) -> Self {
+        self.relation_failures = Some(HashSet::default());
+        self
+    }
+
+    /// Where a relation's failure at a node is remembered, when it is: inside another relation's walk,
+    /// which is what can reach the node again, and not inside a relative query or a `:host()`
+    /// argument, where the answer also depends on the anchor bound meanwhile.
+    fn relation_failure_key(
+        &self,
+        program: &SelectorProgram,
+        relation: SelectorNodeID,
+        node: StyleNodeID,
+    ) -> Option<(usize, SelectorNodeID, StyleNodeID)> {
+        if self.relation_failures.is_none()
+            || self.relation_walk_depth == 0
+            || self.relative_anchor.get().is_some()
+            || self.matching_host_argument.get()
+        {
+            return None;
+        }
+        Some((std::ptr::from_ref(program) as usize, relation, node))
+    }
+
+    fn relation_failed_before(&self, key: Option<(usize, SelectorNodeID, StyleNodeID)>) -> bool {
+        key.is_some_and(|key| {
+            self.relation_failures
+                .as_ref()
+                .is_some_and(|failures| failures.contains(&key))
+        })
+    }
+
+    fn remember_relation_result(
+        &mut self,
+        key: Option<(usize, SelectorNodeID, StyleNodeID)>,
+        result: &Result<bool, Incomplete>,
+    ) {
+        if let (Some(key), Ok(false), Some(failures)) = (key, result, self.relation_failures.as_mut()) {
+            failures.insert(key);
+        }
     }
 
     /// Evaluate a part through the tree scope it is exposed to.
@@ -6271,17 +6328,27 @@ impl<'a> MatchEvaluator<'a> {
                 {
                     return self.matches_descendant_relation(program, id, inner, node, counters);
                 }
-                let mut ancestor = self.parent_of(node);
-                while let Some(current) = ancestor {
-                    counters.bump(Counter::CombinatorSteps);
-                    if self.relation_target_may_match(program, inner, current)
-                        && self.matches_relation_target(program, inner, current, counters)?
-                    {
-                        return Ok(true);
-                    }
-                    ancestor = self.parent_of(current);
+                let failure_key = self.relation_failure_key(program, id, node);
+                if self.relation_failed_before(failure_key) {
+                    return Ok(false);
                 }
-                Ok(false)
+                self.relation_walk_depth += 1;
+                let result = (|| {
+                    let mut ancestor = self.parent_of(node);
+                    while let Some(current) = ancestor {
+                        counters.bump(Counter::CombinatorSteps);
+                        if self.relation_target_may_match(program, inner, current)
+                            && self.matches_relation_target(program, inner, current, counters)?
+                        {
+                            return Ok(true);
+                        }
+                        ancestor = self.parent_of(current);
+                    }
+                    Ok(false)
+                })();
+                self.relation_walk_depth -= 1;
+                self.remember_relation_result(failure_key, &result);
+                result
             }
             SelectorOp::PreviousSibling(inner) => {
                 counters.bump(Counter::CombinatorSteps);
@@ -6302,24 +6369,34 @@ impl<'a> MatchEvaluator<'a> {
                 let Some(parent) = self.parent_of(node) else {
                     return Ok(false);
                 };
-                for sibling in self.children_of(parent) {
-                    if sibling == node {
-                        return Ok(false);
-                    }
-                    counters.bump(Counter::CombinatorSteps);
-                    match self.matches_relation_target(program, inner, sibling, counters) {
-                        Ok(true) => return Ok(true),
-                        Ok(false) => {}
-                        Err(Incomplete::MissingFacts(missing)) if missing == sibling => {
-                            return Err(Incomplete::MissingSiblingFacts {
-                                first: sibling,
-                                last_exclusive: Some(node),
-                            });
-                        }
-                        Err(incomplete) => return Err(incomplete),
-                    }
+                let failure_key = self.relation_failure_key(program, id, node);
+                if self.relation_failed_before(failure_key) {
+                    return Ok(false);
                 }
-                Ok(false)
+                self.relation_walk_depth += 1;
+                let result = (|| {
+                    for sibling in self.children_of(parent) {
+                        if sibling == node {
+                            return Ok(false);
+                        }
+                        counters.bump(Counter::CombinatorSteps);
+                        match self.matches_relation_target(program, inner, sibling, counters) {
+                            Ok(true) => return Ok(true),
+                            Ok(false) => {}
+                            Err(Incomplete::MissingFacts(missing)) if missing == sibling => {
+                                return Err(Incomplete::MissingSiblingFacts {
+                                    first: sibling,
+                                    last_exclusive: Some(node),
+                                });
+                            }
+                            Err(incomplete) => return Err(incomplete),
+                        }
+                    }
+                    Ok(false)
+                })();
+                self.relation_walk_depth -= 1;
+                self.remember_relation_result(failure_key, &result);
+                result
             }
             SelectorOp::NthPosition(position) => {
                 let memoizes_answers = self.positional_index_policy == PositionalIndexPolicy::All;
