@@ -58,9 +58,10 @@ pub(crate) fn publish_recording(
 fn publish_recording_output(arena: &LayoutNodeArena, mut output: RecordingOutput, publishes_recording: bool) -> u64 {
     let mut paint_state = arena.paint_state().borrow_mut();
     output.is_identical_to_published_frame = paint_state
-        .published_frame
+        .recorder
+        .published_recording
         .as_ref()
-        .zip(paint_state.published_hit_test_items.as_ref())
+        .zip(paint_state.recorder.published_hit_test_items.as_ref())
         .is_some_and(|(source, item_source)| {
             std::sync::Arc::ptr_eq(&output.display_list, &source.display_list)
                 && std::sync::Arc::ptr_eq(&output.hit_test_list.items, &item_source.items)
@@ -72,7 +73,7 @@ fn publish_recording_output(arena: &LayoutNodeArena, mut output: RecordingOutput
     let mut hit_test_list = arena.hit_test_list.borrow_mut();
     let previous_list_is_the_source = hit_test_list
         .as_ref()
-        .zip(paint_state.published_hit_test_items.as_ref())
+        .zip(paint_state.recorder.published_hit_test_items.as_ref())
         .is_some_and(|(list, source)| std::sync::Arc::ptr_eq(&list.items, &source.items));
     if output.is_identical_to_published_frame && previous_list_is_the_source {
         drop(list);
@@ -80,7 +81,7 @@ fn publish_recording_output(arena: &LayoutNodeArena, mut output: RecordingOutput
         paint_state.hit_test_list_generation += 1;
         debug_assert_eq!(list.generation, paint_state.hit_test_list_generation);
         if publishes_recording {
-            paint_state.published_hit_test_items =
+            paint_state.recorder.published_hit_test_items =
                 Some(std::sync::Arc::new(crate::painting::record::PublishedHitTestItems {
                     items: list.items.clone(),
                 }));
@@ -89,7 +90,7 @@ fn publish_recording_output(arena: &LayoutNodeArena, mut output: RecordingOutput
     }
     let output = std::sync::Arc::new(output);
     if publishes_recording {
-        paint_state.published_frame = Some(output.clone());
+        paint_state.recorder.published_recording = Some(output.clone());
         // Read-only recordings publish no frame and must not consume the damage.
         arena.clear_paint_damage_consumed_by_published_recording();
         paint_state.visual_context.quarantined_slots_are_releasable = true;
@@ -127,7 +128,13 @@ mod tests {
                 publish_recording_output(&arena, output, read_write),
                 hit_test_generation
             );
-            let source = arena.paint_state().borrow().published_frame.clone().unwrap();
+            let source = arena
+                .paint_state()
+                .borrow()
+                .recorder
+                .published_recording
+                .clone()
+                .unwrap();
             match hit_test_generation {
                 1 => {
                     original_source = Some(source);

@@ -8356,7 +8356,7 @@ mod tests {
 
     #[test]
     fn committed_fragment_links_are_read_at_the_generation_published_with_the_rows() {
-        use crate::painting::paintable_rows::PaintableRowsRead;
+        use crate::painting::published_frame::PaintRead;
 
         let mut arena = LayoutNodeArena::new();
         let node = arena.allocate_for_test().slot;

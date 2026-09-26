@@ -30,6 +30,7 @@ pub mod paintable_build;
 pub mod paintable_data;
 pub mod paintable_geometry;
 pub(crate) mod paintable_rows;
+pub(crate) mod published_frame;
 pub(crate) mod published_immutable;
 pub mod record;
 pub(crate) mod rect_to_viewport_transform;
