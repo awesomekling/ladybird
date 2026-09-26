@@ -628,6 +628,230 @@ fn detach_remaining_layout_rows_for_removal(arena: *mut LayoutNodeArena, style_n
     }
 }
 
+/// A DOM sibling of a node leaving the document, as whether the node's box can be detached in place reads it.
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct FfiRemovedBoxSibling {
+    pub present: bool,
+    /// The sibling's identity, or 0 for none.
+    pub style_node: u32,
+    /// Whether the sibling is an element with style whose display is contents.
+    pub is_contents: bool,
+}
+
+/// Which kind of box a detached child is. DOM removal reads it from the child's style; a style
+/// change that stopped generating the box has already swapped the style, so it names the level.
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+// NB: `FromStyle` is constructed by C++ through the FFI.
+#[allow(dead_code)]
+pub enum FfiDetachedBoxLevel {
+    FromStyle,
+    Block,
+    AtomicInline,
+}
+
+/// Where the box of a node leaving the document sits, as the DOM has it: the node, its parent and its siblings.
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct FfiRemovedBoxPlace {
+    /// The node's identity, or 0 for none.
+    pub style_node: u32,
+    /// The parent's identity, or 0 for none.
+    pub parent_style_node: u32,
+    pub parent_is_document: bool,
+    pub parent_is_body: bool,
+    pub previous_sibling: FfiRemovedBoxSibling,
+    pub next_sibling: FfiRemovedBoxSibling,
+    pub box_level: FfiDetachedBoxLevel,
+}
+
+/// What detaching a removed node's box in place came to.
+#[derive(Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum FfiRemovedBoxDetach {
+    /// The layout tree does not let the box go in place; the parent's boxes have to be rebuilt.
+    NotAllowed,
+    Detached,
+    /// The box was an absolutely positioned box its parent's box contains.
+    DetachedAbsposOfParent,
+}
+
+/// The box of the node `place` names and its parent's box, if the layout tree lets the box be detached from the
+/// parent's in place. It reads the rows by identity, so no shell is made for any box it looks at.
+pub(crate) fn removed_box_detachable_in_place(
+    arena: &LayoutNodeArena,
+    place: &FfiRemovedBoxPlace,
+) -> Option<(NodeSlotId, NodeSlotId)> {
+    let layout_node = arena.bound_row(StyleNodeID::from_raw(place.style_node)?);
+    let parent = if place.parent_is_document {
+        arena.bound_viewport_row()
+    } else {
+        StyleNodeID::from_raw(place.parent_style_node).map_or(NodeSlotId::INVALID, |parent| arena.bound_row(parent))
+    };
+    if layout_node.is_invalid() || parent.is_invalid() {
+        return None;
+    }
+    let data = arena.node_data_if_live(layout_node)?;
+    if !node_kind_is_node_with_style(data.kind.get()) {
+        return None;
+    }
+    let style = arena.node_style_if_live(layout_node);
+
+    // OPTIMIZATION: Absolutely positioned boxes do not participate in their DOM parent's inline or block formatting
+    //               structure, even when they are attached to an ancestor containing block. Removing them cannot
+    //               disturb anonymous wrappers or sibling box levels.
+    if style.is_some_and(|style| style.position() == positioning::ABSOLUTE) {
+        if place.parent_is_body {
+            return Some((layout_node, parent));
+        }
+        let containing_block_is_of_parent = arena.node_containing_block_if_live(layout_node).is_some_and(|block| {
+            if place.parent_is_document {
+                return block == arena.bound_viewport_row();
+            }
+            !node_has_flag(arena.data(block), NodeFlag::Anonymous)
+                && arena
+                    .node_style_node(block)
+                    .is_some_and(|node| node.raw() == place.parent_style_node)
+        });
+        if containing_block_is_of_parent {
+            return Some((layout_node, parent));
+        }
+    }
+
+    if data.parent.get() != parent {
+        return None;
+    }
+    if node_facts::node_is_out_of_flow(data, style) {
+        return None;
+    }
+    let parent_data = arena.node_data_if_live(parent)?;
+    if !node_kind_is_node_with_style(parent_data.kind.get()) {
+        return None;
+    }
+
+    let sibling_is_direct_layout_child = |sibling: &FfiRemovedBoxSibling| {
+        if !sibling.present {
+            return true;
+        }
+        let sibling_box =
+            StyleNodeID::from_raw(sibling.style_node).map_or(NodeSlotId::INVALID, |node| arena.bound_row(node));
+        if !sibling_box.is_invalid() {
+            return arena.data(sibling_box).parent.get() == parent;
+        }
+        !sibling.is_contents
+    };
+    if !sibling_is_direct_layout_child(&place.previous_sibling) && !sibling_is_direct_layout_child(&place.next_sibling)
+    {
+        return None;
+    }
+
+    let parent_display = node_facts::node_display(arena.node_style_if_live(parent));
+    if parent_display.is_flex_inside() || parent_display.is_grid_inside() {
+        return Some((layout_node, parent));
+    }
+
+    let is_anonymous = |node: NodeSlotId| node_has_flag(arena.data(node), NodeFlag::Anonymous);
+    let parent_children_are_inline = node_has_flag(parent_data, NodeFlag::ChildrenAreInline);
+    let allowed =
+        if (parent_display.is_flow_inside() || parent_display.is_flow_root_inside()) && !parent_children_are_inline {
+            // Direct block children and in-flow atomic inline children can be detached without changing
+            // anonymous wrapper structure. Other box kinds still rebuild the parent so tree fixup can
+            // reconstruct any affected wrappers.
+            let previous = data.previous_sibling.get();
+            let next = data.next_sibling.get();
+            if !previous.is_invalid() && is_anonymous(previous) && !next.is_invalid() && is_anonymous(next) {
+                return None;
+            }
+            // Once only anonymous wrappers would remain, a full rebuild would place their inline
+            // content directly in the parent instead.
+            let mut an_anonymous_inline_wrapper_remains = false;
+            let mut an_in_flow_block_level_sibling_remains = false;
+            let mut sibling = parent_data.first_child.get();
+            while !sibling.is_invalid() {
+                let sibling_data = arena.data(sibling);
+                let next_sibling = sibling_data.next_sibling.get();
+                if sibling != layout_node
+                    && !(node_kind_is_node_with_style(sibling_data.kind.get())
+                        && node_facts::node_is_out_of_flow(sibling_data, arena.node_style_if_live(sibling)))
+                {
+                    if node_has_flag(sibling_data, NodeFlag::Anonymous)
+                        && node_has_flag(sibling_data, NodeFlag::ChildrenAreInline)
+                    {
+                        an_anonymous_inline_wrapper_remains = true;
+                    } else {
+                        an_in_flow_block_level_sibling_remains = true;
+                    }
+                }
+                sibling = next_sibling;
+            }
+            if an_anonymous_inline_wrapper_remains && !an_in_flow_block_level_sibling_remains {
+                return None;
+            }
+            match place.box_level {
+                FfiDetachedBoxLevel::FromStyle => node_facts::node_display(style).is_block_outside(),
+                level => level == FfiDetachedBoxLevel::Block,
+            }
+        } else if parent_children_are_inline {
+            match place.box_level {
+                FfiDetachedBoxLevel::FromStyle => node_facts::node_display(style).is_inline_block(),
+                level => level == FfiDetachedBoxLevel::AtomicInline,
+            }
+        } else {
+            false
+        };
+    allowed.then_some((layout_node, parent))
+}
+
+/// Takes the box `layout_node` of a node leaving the document out of its parent's box `parent` in place, which
+/// removed_box_detachable_in_place allowed, with the paint state of every box in its subtree.
+///
+/// # Safety
+///
+/// The arena must remain valid for the duration of the call, which must be made on the document thread inside a span
+/// that pays the host handbacks, with the published paintable rows released for a main-side write.
+pub(crate) unsafe fn detach_removed_box_in_place(
+    arena: *mut LayoutNodeArena,
+    layout_node: NodeSlotId,
+    parent: NodeSlotId,
+) -> FfiRemovedBoxDetach {
+    // SAFETY: Guaranteed by the caller.
+    let parent_contains_removed_abspos_box = unsafe {
+        let arena = &*arena;
+        let contains = arena
+            .node_style_if_live(layout_node)
+            .is_some_and(|style| style.position() == positioning::ABSOLUTE)
+            && arena.node_containing_block_if_live(layout_node) == Some(parent);
+        if contains {
+            arena.note_contained_abspos_child_removal(parent, layout_node);
+        }
+        contains
+    };
+    let mut subtree = Vec::new();
+    // SAFETY: Guaranteed by the caller.
+    unsafe { &*arena }.for_each_node_in_layout_subtree_in_pre_order(layout_node, |node| subtree.push(node));
+    for node in subtree {
+        // SAFETY: Guaranteed by the caller; the clear borrows the arena for itself.
+        unsafe { crate::painting::ffi::clear_paintable_row_of_node(arena.cast(), node) };
+    }
+    prepare_subtree_for_detach(arena.cast(), layout_node);
+    let was_attached = super::layout_node_arena::detach_and_free_subtree(arena, layout_node);
+    debug_assert!(
+        was_attached,
+        "a removed box detached in place hangs from its parent's box"
+    );
+    // SAFETY: Guaranteed by the caller.
+    let arena = unsafe { &*arena };
+    if arena.data(parent).first_child.get().is_invalid() {
+        arena.set_node_flag(parent, NodeFlag::ChildrenAreInline, false);
+    }
+    if parent_contains_removed_abspos_box {
+        FfiRemovedBoxDetach::DetachedAbsposOfParent
+    } else {
+        FfiRemovedBoxDetach::Detached
+    }
+}
+
 /// Clears every stale layout node in the shadow-including subtree `root` names.
 ///
 /// The DOM walk this replaced visited a node, then its shadow root's subtree, then its DOM
