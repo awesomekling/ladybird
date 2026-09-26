@@ -11,12 +11,12 @@
 #include <AK/HashTable.h>
 #include <AK/JsonObjectSerializer.h>
 #include <AK/NeverDestroyed.h>
+#include <AK/Queue.h>
 #include <AK/Utf16StringBuilder.h>
 #include <AK/Vector.h>
 #include <LibGC/ConservativeVector.h>
 #include <LibGC/DeferGC.h>
 #include <LibGC/Heap.h>
-#include <LibGC/WeakHashMap.h>
 #include <LibJS/Runtime/ExternalMemory.h>
 #include <LibWeb/Animations/Animation.h>
 #include <LibWeb/Bindings/Node.h>
@@ -128,30 +128,73 @@ static Utf16String generated_content_accessible_text(Element const& element, CSS
         arena->handle(), element.style_node_id().value(), Layout::Node::encode_generated_for(pseudo_element)));
 }
 
-static UniqueNodeID s_next_unique_id;
-static GC::WeakHashMap<UniqueNodeID, Node>& node_directory()
+// Every node the style engine hears of gets an identity as it connects, so handing one out and
+// giving it up again are paid per element. The directory is a slab: an identity names a slot and
+// the generation the slot was at when it was handed out, so an identity outliving its node never
+// names the node that takes the slot next. Freed slots are taken again oldest first, which spreads
+// the generations over every slot, and an identity stays within what a JavaScript number holds
+// exactly, as the ones handed to devtools and WebDriver clients are read.
+static constexpr u32 max_node_directory_generation = (1u << 21) - 1;
+
+struct NodeDirectorySlot {
+    Node* node { nullptr };
+    u32 generation { 0 };
+};
+
+static Vector<NodeDirectorySlot>& node_directory()
 {
-    static NeverDestroyed<GC::WeakHashMap<UniqueNodeID, Node>> directory;
+    static NeverDestroyed<Vector<NodeDirectorySlot>> directory;
     return *directory;
+}
+
+static Queue<u32>& free_node_directory_slots()
+{
+    static NeverDestroyed<Queue<u32>> free_slots;
+    return *free_slots;
 }
 
 static UniqueNodeID allocate_unique_id(Node& node)
 {
-    auto id = s_next_unique_id;
-    ++s_next_unique_id;
-    node_directory().set(id, node);
-    return id;
+    auto& directory = node_directory();
+    auto& free_slots = free_node_directory_slots();
+    u32 index;
+    if (!free_slots.is_empty()) {
+        index = free_slots.dequeue();
+    } else {
+        index = directory.size();
+        directory.append({});
+    }
+    auto& slot = directory[index];
+    // A generation is never zero, so neither is an identity.
+    slot.generation = (slot.generation % max_node_directory_generation) + 1;
+    slot.node = &node;
+    return (static_cast<i64>(slot.generation) << 32) | index;
+}
+
+static Optional<u32> node_directory_index(UniqueNodeID node_id)
+{
+    auto index = static_cast<u32>(node_id.value() & 0xffffffff);
+    auto generation = static_cast<u32>(node_id.value() >> 32);
+    auto& directory = node_directory();
+    if (index >= directory.size() || directory[index].generation != generation || !directory[index].node)
+        return {};
+    return index;
 }
 
 static void deallocate_unique_id(UniqueNodeID node_id)
 {
-    if (!node_directory().remove(node_id))
-        VERIFY_NOT_REACHED();
+    auto index = node_directory_index(node_id);
+    VERIFY(index.has_value());
+    node_directory()[*index].node = nullptr;
+    free_node_directory_slots().enqueue(*index);
 }
 
 Node* Node::from_unique_id(UniqueNodeID unique_id)
 {
-    return node_directory().get(unique_id);
+    auto index = node_directory_index(unique_id);
+    if (!index.has_value())
+        return nullptr;
+    return node_directory()[*index].node;
 }
 
 Node::Node(Document& document, NodeType type)
