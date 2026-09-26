@@ -64,7 +64,10 @@ def render_stage_entries(reason, entries):
 
 
 RENDER_STAGE_ALLOWED = {
-    **render_stage_entries(MAIN_SIDE_COUNTER, ["layout/layout_node_arena.rs:DOOR_COUNTERS"]),
+    **render_stage_entries(
+        MAIN_SIDE_COUNTER,
+        ["layout/layout_node_arena.rs:DOOR_COUNTERS", "layout/layout_node_arena.rs:COUNTS_DOOR_PASSES"],
+    ),
     **render_stage_entries(
         MAIN_THREAD_ONLY,
         [

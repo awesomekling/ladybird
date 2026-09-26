@@ -149,6 +149,8 @@ Internals::Internals(HTML::Window& window)
 {
     // The join counters report how long before each join the page last dirtied render state.
     DOM::Document::time_render_state_mutations_for_join_counters();
+    // The rendering scheduler counters report the door passes.
+    Layout::RustFFI::layout_arena_count_door_passes();
 }
 
 Internals::~Internals() = default;
