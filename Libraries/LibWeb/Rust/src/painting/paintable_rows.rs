@@ -6,7 +6,7 @@
 
 use crate::cow_column::{ColumnSnapshot, CowColumn};
 use crate::css::computed_value_views::ComputedValuesView;
-use crate::css::css_pixels::CssPixelPoint;
+use crate::css::css_pixels::{CssPixelPoint, CssPixelRect};
 use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::{NodeFlag, NodeKind, NodeSlotId};
 use crate::layout::{fragment_tree, used_values};
@@ -506,25 +506,6 @@ pub(crate) trait PaintableRowsRead: PaintRead + Deref<Target = LayoutNodeArena> 
     fn with_hit_test_list<R>(&self, read: impl FnOnce(Option<&HitTestList>) -> R) -> R;
     /// The visual context tree, as it was when the rows were published.
     fn visual_context_tree(&self) -> Option<std::sync::Arc<VisualContextTree>>;
-
-    /// The absolute rect memoized for a box, if any.
-    fn memoized_absolute_rect(&self, id: NodeSlotId) -> Option<crate::css::css_pixels::CssPixelRect> {
-        LayoutNodeArena::memoized_absolute_rect(self, id)
-    }
-
-    fn memoize_absolute_rect(&self, id: NodeSlotId, rect: crate::css::css_pixels::CssPixelRect) {
-        LayoutNodeArena::memoize_absolute_rect(self, id, rect);
-    }
-
-    /// The line root whose committed side data holds an inline box's pieces, read from the same
-    /// generation as the rows.
-    fn inline_pieces_root(&self, inline_paintable: NodeSlotId) -> Option<NodeSlotId> {
-        if !self.paintable_row_is_populated(inline_paintable) {
-            return None;
-        }
-        let root = self.paintable_data(inline_paintable).containing_block;
-        (self.paintable_row_is_populated(root) && node_painting::has_lines(self, root)).then_some(root)
-    }
 }
 
 /// A row's committed side data, as a published generation or the live column holds it.
@@ -794,6 +775,19 @@ impl PaintRead for CommittedPaintableRows<'_> {
     }
 
     read_layout_tree_from_live_arena!();
+
+    fn memoized_absolute_rect(&self, id: NodeSlotId) -> Option<crate::css::css_pixels::CssPixelRect> {
+        if self.beside_recording {
+            return None;
+        }
+        self.arena.memoized_absolute_rect(id)
+    }
+
+    fn memoize_absolute_rect(&self, id: NodeSlotId, rect: crate::css::css_pixels::CssPixelRect) {
+        if !self.beside_recording {
+            self.arena.memoize_absolute_rect(id, rect);
+        }
+    }
 }
 
 impl PaintableRowsRead for CommittedPaintableRows<'_> {
@@ -815,19 +809,6 @@ impl PaintableRowsRead for CommittedPaintableRows<'_> {
 
     fn visual_context_tree(&self) -> Option<std::sync::Arc<VisualContextTree>> {
         self.published().visual_context_tree.clone()
-    }
-
-    fn memoized_absolute_rect(&self, id: NodeSlotId) -> Option<crate::css::css_pixels::CssPixelRect> {
-        if self.beside_recording {
-            return None;
-        }
-        self.arena.memoized_absolute_rect(id)
-    }
-
-    fn memoize_absolute_rect(&self, id: NodeSlotId, rect: crate::css::css_pixels::CssPixelRect) {
-        if !self.beside_recording {
-            self.arena.memoize_absolute_rect(id, rect);
-        }
     }
 }
 
@@ -885,6 +866,20 @@ impl PaintRead for MainSidePaintableRows<'_> {
     }
 
     read_layout_tree_from_live_arena!();
+
+    fn memoized_absolute_rect(&self, id: NodeSlotId) -> Option<crate::css::css_pixels::CssPixelRect> {
+        match self {
+            Self::Committed(rows) => PaintRead::memoized_absolute_rect(rows, id),
+            Self::DuringStage(rows) => PaintRead::memoized_absolute_rect(rows, id),
+        }
+    }
+
+    fn memoize_absolute_rect(&self, id: NodeSlotId, rect: crate::css::css_pixels::CssPixelRect) {
+        match self {
+            Self::Committed(rows) => PaintRead::memoize_absolute_rect(rows, id, rect),
+            Self::DuringStage(rows) => PaintRead::memoize_absolute_rect(rows, id, rect),
+        }
+    }
 }
 
 impl PaintableRowsRead for MainSidePaintableRows<'_> {
@@ -922,20 +917,6 @@ impl PaintableRowsRead for MainSidePaintableRows<'_> {
             Self::DuringStage(rows) => rows.visual_context_tree(),
         }
     }
-
-    fn memoized_absolute_rect(&self, id: NodeSlotId) -> Option<crate::css::css_pixels::CssPixelRect> {
-        match self {
-            Self::Committed(rows) => PaintableRowsRead::memoized_absolute_rect(rows, id),
-            Self::DuringStage(rows) => PaintableRowsRead::memoized_absolute_rect(rows, id),
-        }
-    }
-
-    fn memoize_absolute_rect(&self, id: NodeSlotId, rect: crate::css::css_pixels::CssPixelRect) {
-        match self {
-            Self::Committed(rows) => PaintableRowsRead::memoize_absolute_rect(rows, id, rect),
-            Self::DuringStage(rows) => PaintableRowsRead::memoize_absolute_rect(rows, id, rect),
-        }
-    }
 }
 
 impl<Arena> PaintRead for PaintableRows<Arena>
@@ -963,6 +944,14 @@ where
     }
 
     read_layout_tree_from_live_arena!();
+
+    fn memoized_absolute_rect(&self, id: NodeSlotId) -> Option<CssPixelRect> {
+        LayoutNodeArena::memoized_absolute_rect(self, id)
+    }
+
+    fn memoize_absolute_rect(&self, id: NodeSlotId, rect: CssPixelRect) {
+        LayoutNodeArena::memoize_absolute_rect(self, id, rect);
+    }
 }
 
 impl<Arena> PaintableRowsRead for PaintableRows<Arena>

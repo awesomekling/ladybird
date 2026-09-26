@@ -15,6 +15,7 @@
 
 use crate::cow_column::ColumnSnapshot;
 use crate::css::computed_value_views::ComputedValuesView;
+use crate::css::css_pixels::CssPixelRect;
 use crate::layout::LayoutNodeArena;
 use crate::layout::fragment_tree::FragmentLink;
 use crate::layout::node_data::{NodeKind, NodeSlotId};
@@ -47,7 +48,7 @@ const _: () = {
 
 /// The reads the display list recording makes of a document. The live arena answers them from the
 /// columns layout writes; a [`PublishedFrame`] answers them from what the document published.
-pub(crate) trait PaintRead {
+pub(crate) trait PaintRead: Sized {
     fn paintable_data(&self, id: NodeSlotId) -> &PaintableData;
     fn paintable_row_is_populated(&self, id: NodeSlotId) -> bool;
     /// Reads the fragment link a populated row committed, from the same generation as its row.
@@ -67,7 +68,22 @@ pub(crate) trait PaintRead {
     fn node_is_dom_backed(&self, id: NodeSlotId) -> bool;
     fn node_is_element_backed(&self, id: NodeSlotId) -> bool;
     fn node_is_out_of_flow_if_live(&self, id: NodeSlotId) -> bool;
+    fn node_is_fragmented_inline(&self, id: NodeSlotId) -> bool;
     fn node_style_if_live(&self, id: NodeSlotId) -> Option<ComputedValuesView<'_>>;
+
+    /// The absolute rect memoized for a box, if any.
+    fn memoized_absolute_rect(&self, id: NodeSlotId) -> Option<CssPixelRect>;
+    fn memoize_absolute_rect(&self, id: NodeSlotId, rect: CssPixelRect);
+
+    /// The line root whose committed side data holds an inline box's pieces, read from the same
+    /// generation as the rows.
+    fn inline_pieces_root(&self, inline_paintable: NodeSlotId) -> Option<NodeSlotId> {
+        if !self.paintable_row_is_populated(inline_paintable) {
+            return None;
+        }
+        let root = self.paintable_data(inline_paintable).containing_block;
+        (self.paintable_row_is_populated(root) && crate::painting::node_painting::has_lines(self, root)).then_some(root)
+    }
 }
 
 /// Answers [`PaintRead`]'s layout tree and style reads from the live arena the implementing type
@@ -122,6 +138,10 @@ macro_rules! read_layout_tree_from_live_arena {
             LayoutNodeArena::node_is_out_of_flow_if_live(self, id)
         }
 
+        fn node_is_fragmented_inline(&self, id: NodeSlotId) -> bool {
+            LayoutNodeArena::node_is_fragmented_inline(self, id)
+        }
+
         fn node_style_if_live(&self, id: NodeSlotId) -> Option<ComputedValuesView<'_>> {
             LayoutNodeArena::node_style_if_live(self, id)
         }
@@ -148,4 +168,12 @@ impl PaintRead for LayoutNodeArena {
     }
 
     read_layout_tree_from_live_arena!();
+
+    fn memoized_absolute_rect(&self, id: NodeSlotId) -> Option<CssPixelRect> {
+        LayoutNodeArena::memoized_absolute_rect(self, id)
+    }
+
+    fn memoize_absolute_rect(&self, id: NodeSlotId, rect: CssPixelRect) {
+        LayoutNodeArena::memoize_absolute_rect(self, id, rect);
+    }
 }
