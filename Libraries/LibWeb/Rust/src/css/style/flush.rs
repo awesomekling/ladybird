@@ -1992,49 +1992,7 @@ impl StyleEngineState {
             self.retained.batch_answers_complete_but_for_custom_properties.clear();
             // The host took the effects of the rows it installed from the last transaction.
             self.retained.container_effects_for_host.clear();
-            for &node in &published_nodes {
-                let Some(answer) = published_match_answers.lookup(node) else {
-                    continue;
-                };
-                let mask = match answer.cascade_input {
-                    Some(identity) => self.retained.match_answers.synthetic_pseudo_mask(identity),
-                    None => published_match_answers.matches_for(answer).map(|matches| {
-                        matches.iter().fold(0, |mask, rule_match| {
-                            mask | rule_match
-                                .pseudo_element
-                                .map(|pseudo| pseudo.kind.0)
-                                .filter(|&kind| kind <= bridge::LAST_SYNTHETIC_PSEUDO_ELEMENT_KIND)
-                                .map_or(0, |kind| 1u64 << kind)
-                        })
-                    }),
-                };
-                if let Some(mask) = mask {
-                    self.retained.computed_group_sets.set_node_pseudo_style_mask(node, mask);
-                }
-                if self.retained.any_custom_property_is_declared()
-                    && let Some(matches) = self
-                        .retained
-                        .batch_custom_property_matches_of(&published_match_answers, answer)
-                {
-                    self.retained.batch_custom_property_matches.insert(node, matches);
-                }
-                if let Some(matches) =
-                    self.retained
-                        .batch_backing_pseudo_matches_of(node, &published_match_answers, answer)
-                {
-                    self.retained.batch_backing_pseudo_matches.insert(node, matches);
-                } else {
-                    self.retained.batch_backing_pseudo_matches.remove(&node);
-                }
-                if let Some(complete) =
-                    self.retained
-                        .answer_is_complete_but_for_custom_properties(node, &published_match_answers, answer)
-                {
-                    self.retained
-                        .batch_answers_complete_but_for_custom_properties
-                        .insert(node, complete);
-                }
-            }
+            self.keep_published_answer_facts(&published_nodes, &published_match_answers);
             let scoped = !publish_document_root_arrival && !plan_is_broad;
             let mut pass = StylePass {
                 transaction_version,
@@ -2187,6 +2145,55 @@ impl StyleEngineState {
         }
     }
 
+    /// What the rows' records read of the answers this transaction publishes for them: each row's
+    /// pseudo-element inventory, its custom property matches and whether its answer is complete. A
+    /// row that joins the pass reads them as the rows it began with do, instead of matching again.
+    fn keep_published_answer_facts(&mut self, nodes: &[StyleNodeID], published_match_answers: &PublishedMatchAnswers) {
+        for &node in nodes {
+            let Some(answer) = published_match_answers.lookup(node) else {
+                continue;
+            };
+            let mask = match answer.cascade_input {
+                Some(identity) => self.retained.match_answers.synthetic_pseudo_mask(identity),
+                None => published_match_answers.matches_for(answer).map(|matches| {
+                    matches.iter().fold(0, |mask, rule_match| {
+                        mask | rule_match
+                            .pseudo_element
+                            .map(|pseudo| pseudo.kind.0)
+                            .filter(|&kind| kind <= bridge::LAST_SYNTHETIC_PSEUDO_ELEMENT_KIND)
+                            .map_or(0, |kind| 1u64 << kind)
+                    })
+                }),
+            };
+            if let Some(mask) = mask {
+                self.retained.computed_group_sets.set_node_pseudo_style_mask(node, mask);
+            }
+            if self.retained.any_custom_property_is_declared()
+                && let Some(matches) = self
+                    .retained
+                    .batch_custom_property_matches_of(published_match_answers, answer)
+            {
+                self.retained.batch_custom_property_matches.insert(node, matches);
+            }
+            if let Some(matches) = self
+                .retained
+                .batch_backing_pseudo_matches_of(node, published_match_answers, answer)
+            {
+                self.retained.batch_backing_pseudo_matches.insert(node, matches);
+            } else {
+                self.retained.batch_backing_pseudo_matches.remove(&node);
+            }
+            if let Some(complete) =
+                self.retained
+                    .answer_is_complete_but_for_custom_properties(node, published_match_answers, answer)
+            {
+                self.retained
+                    .batch_answers_complete_but_for_custom_properties
+                    .insert(node, complete);
+            }
+        }
+    }
+
     /// A round stopped before a row whose flat-tree ancestor is no row of the pass, where a row the
     /// round settled derived a reaction for that ancestor. The ancestor joins the pass right
     /// before the first row still to come below it, so the next round settles it before the rows
@@ -2270,6 +2277,7 @@ impl StyleEngineState {
             self.defer_derived_children(pass, deferred);
             return false;
         }
+        self.keep_published_answer_facts(&nodes, &pass.published_match_answers);
         self.defer_derived_children(pass, deferred);
         // An ancestor above another joins before it, as it comes first in the flat tree.
         joining.sort_by_key(|&(index, (child, _, _, _))| (index, self.tree.depth(child)));
@@ -2388,6 +2396,7 @@ impl StyleEngineState {
             self.defer_derived_children(pass, joining);
             return false;
         }
+        self.keep_published_answer_facts(&nodes, &pass.published_match_answers);
         let published_node_capacity = pass.published_nodes.capacity();
         for (child, reaction, groups, display_moved) in joining {
             pass.joined_by_derivation.insert(child);
@@ -3657,12 +3666,13 @@ impl StyleEngineState {
         // A record the host did not install from the last wave is gone, as at a transaction
         // boundary: the host computed that row itself, or skipped it.
         self.discard_engine_computed_records(counters);
-        self.join_rows_between_installed_ancestors(&mut pass, counters);
+        let joined = self.join_rows_between_installed_ancestors(&mut pass, counters);
         let resumed_at = pass.next_index;
         pass.published_match_answers = std::mem::take(&mut self.retained.published_match_answers);
         self.retained.batch_answers_complete_but_for_custom_properties =
             std::mem::take(&mut pass.batch_answers_complete_but_for_custom_properties);
         self.retained.batch_custom_property_matches = std::mem::take(&mut pass.batch_custom_property_matches);
+        self.keep_published_answer_facts(&joined, &pass.published_match_answers);
         // The host took the effects of the rows it installed from the last wave.
         self.retained.container_effects_for_host.clear();
         // Every row of the waves before is installed: its record is the one its descendants
@@ -3757,9 +3767,14 @@ impl StyleEngineState {
     /// A node between an installed row and a row still to come, which the host's installation of
     /// the last wave gave a reaction, joins the pass before the first row below it. The host would
     /// have settled it in the batch that applied its ancestor, and the rows below it read it.
-    fn join_rows_between_installed_ancestors(&mut self, pass: &mut StylePass, counters: &mut Counters) {
+    /// The nodes that joined.
+    fn join_rows_between_installed_ancestors(
+        &mut self,
+        pass: &mut StylePass,
+        counters: &mut Counters,
+    ) -> Vec<StyleNodeID> {
         if !self.has_deferred_element_style_inputs() {
-            return;
+            return Vec::new();
         }
         let pass_rows: HashSet<StyleNodeID> = pass.published_nodes.iter().copied().collect();
         let mut seen = HashSet::<StyleNodeID>::default();
@@ -3783,7 +3798,7 @@ impl StyleEngineState {
             }
         }
         if joining.is_empty() {
-            return;
+            return Vec::new();
         }
         let nodes: Vec<StyleNodeID> = joining.iter().map(|&(_, node)| node).collect();
         // NB: A node whose answer cannot be completed here is driven from a new match instead.
@@ -3812,6 +3827,7 @@ impl StyleEngineState {
         }
         pass.published_nodes = published_nodes;
         pass.previous_cascade_inputs = previous_cascade_inputs;
+        nodes
     }
 
     /// Give up the pass the host is installing: each row it did not reach is owed again, to the
