@@ -131,6 +131,7 @@ interface Internals {
     undefined updateLayoutForTesting();
     DOMString takeLayoutTrace();
     unsigned long long tableCellMeasurementCacheMissCount();
+    unsigned long long retainedInlineItemCount();
     unsigned long long intrinsicMeasurementCount();
     unsigned long long intrinsicInlineMeasurementCount();
     unsigned long long accumulatedVisualContextTreeBuildCount();

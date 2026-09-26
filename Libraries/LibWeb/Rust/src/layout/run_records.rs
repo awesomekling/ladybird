@@ -96,6 +96,10 @@ impl LayoutScratch {
             .insert(block_container, RetainedInlineItems { validity, items });
     }
 
+    pub(crate) fn retained_inline_item_count(&self) -> u64 {
+        self.retained_inline_items.borrow().len() as u64
+    }
+
     pub(crate) fn clear_inline_item_stashes(&self) {
         self.inline_item_stashes.borrow_mut().clear();
     }

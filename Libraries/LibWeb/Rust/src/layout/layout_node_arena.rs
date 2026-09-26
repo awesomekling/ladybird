@@ -6341,6 +6341,15 @@ pub unsafe extern "C" fn layout_arena_table_cell_measurement_cache_miss_count(ar
 
 /// # Safety
 ///
+/// The arena must remain valid for the duration of the call, with no layout stage running on it.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_retained_inline_item_count(arena: *mut c_void) -> u64 {
+    // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on the document thread.
+    unsafe { super::LayoutScratch::from_handle(arena) }.retained_inline_item_count()
+}
+
+/// # Safety
+///
 /// The arena must remain valid for the duration of the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_intrinsic_measurement_count(arena: *mut c_void) -> u64 {

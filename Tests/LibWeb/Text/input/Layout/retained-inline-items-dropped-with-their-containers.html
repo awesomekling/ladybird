@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<div id="host"></div>
+<script>
+    test(() => {
+        const host = document.getElementById("host");
+        // NB: The output container keeps its own items.
+        println("retained inline items beyond the baseline:");
+        document.body.offsetHeight;
+        const baseline = internals.retainedInlineItemCount();
+
+        const fill = round => {
+            host.innerHTML = "";
+            for (let i = 0; i < 100; ++i) {
+                const div = document.createElement("div");
+                div.textContent = `round ${round} line ${i}`;
+                host.append(div);
+            }
+            document.body.offsetHeight;
+        };
+
+        fill(0);
+        println(`after laying out 100 text containers: ${internals.retainedInlineItemCount() - baseline}`);
+
+        // Replaced content frees the containers' slots, and what was kept for them goes with them.
+        for (let round = 1; round <= 50; ++round)
+            fill(round);
+        println(`after 50 replacements: ${internals.retainedInlineItemCount() - baseline}`);
+
+        // A container whose items stop being reusable keeps nothing.
+        for (const div of host.children)
+            div.append(document.createElement("img"));
+        document.body.offsetHeight;
+        println(`after adding an image to each: ${internals.retainedInlineItemCount() - baseline}`);
+
+        host.remove();
+        document.body.offsetHeight;
+        println(`after removing them: ${internals.retainedInlineItemCount() - baseline}`);
+    });
+</script>
