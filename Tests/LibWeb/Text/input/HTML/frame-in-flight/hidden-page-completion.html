@@ -21,8 +21,10 @@
         println(`visibility: ${frame.visibility}`);
         println(`still in flight once hidden: ${!frame.armed || frame.stateWhenHidden === "in-flight"}`);
         println(`finished while hidden: ${frame.finished}`);
+        // The main thread takes the frame in once the render side has finished it.
         let tasks = 0;
         while (internals.frameSchedulerState() !== "idle" && tasks < 100) {
+            internals.waitForFrameToFinish();
             await nextTask();
             ++tasks;
         }
