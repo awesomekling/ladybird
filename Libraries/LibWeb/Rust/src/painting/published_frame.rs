@@ -326,13 +326,21 @@ pub(crate) trait PaintRead: Sized {
                 current = next_sibling;
                 continue;
             }
-            current = self.node_parent_if_live(current).unwrap_or(NodeSlotId::INVALID);
+            let Some(parent) = self.node_parent_if_live(current) else {
+                debug_assert!(false, "a node under the walked root has no parent");
+                return;
+            };
+            current = parent;
             while current != root {
                 if let Some(next_sibling) = self.node_next_sibling_if_live(current) {
                     current = next_sibling;
                     break;
                 }
-                current = self.node_parent_if_live(current).unwrap_or(NodeSlotId::INVALID);
+                let Some(parent) = self.node_parent_if_live(current) else {
+                    debug_assert!(false, "a node under the walked root has no parent");
+                    return;
+                };
+                current = parent;
             }
             if current == root {
                 break;
