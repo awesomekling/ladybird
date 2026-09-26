@@ -1,5 +1,5 @@
-lists published by 20 focus() calls: 1743
+lists published by 20 focus() calls: 0
 opacity after moving the current time: 0.5
-lists published by moving one animation: 84
-lists published by pausing one CSS animation: 150
+lists published by moving one animation: 1
+lists published by pausing one CSS animation: 2
 opacity after the element came back: 0.5
