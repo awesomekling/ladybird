@@ -711,40 +711,33 @@ impl RetainedState {
         self.cascade_custom_declarations(node, pseudo, None)
     }
 
-    pub(super) fn custom_declarations_read_attributes(&self, node: StyleNodeID, pseudo: Option<u8>) -> bool {
+    /// What the custom declarations cascaded for the node, or for one of its pseudo-elements, read
+    /// beyond their cascade: the conditions and functions they use, as `node_record_reads` bits, and
+    /// whether any substitutes an attribute. One cascade answers both.
+    pub(super) fn custom_declarations_reads(&self, node: StyleNodeID, pseudo: Option<u8>) -> (u8, bool) {
+        if !self.any_custom_property_is_declared() {
+            return (0, false);
+        }
         self.cascaded_custom_declarations_of(node, pseudo)
-            .is_some_and(|declarations| {
-                declarations.iter().any(|(_, value)| {
-                    matches!(
-                        value.data(),
+            .map_or((0, false), |declarations| {
+                declarations
+                    .iter()
+                    .fold((0, false), |(usage, reads_attributes), (_, value)| match value.data() {
                         StyleValueData::Unresolved {
-                            presence_attr: true,
+                            presence_if,
+                            presence_inherit,
+                            presence_dashed_function,
+                            presence_attr,
                             ..
-                        }
-                    )
-                })
-            })
-    }
-
-    pub(super) fn custom_declarations_condition_usage(&self, node: StyleNodeID, pseudo: Option<u8>) -> u8 {
-        self.cascaded_custom_declarations_of(node, pseudo)
-            .map_or(0, |declarations| {
-                declarations.iter().fold(0, |usage, (_, value)| {
-                    usage
-                        | match value.data() {
-                            StyleValueData::Unresolved {
-                                presence_if,
-                                presence_inherit,
-                                presence_dashed_function,
-                                ..
-                            } => {
-                                u8::from(*presence_if)
-                                    | (u8::from(*presence_inherit) << 1)
-                                    | (u8::from(*presence_dashed_function) << 2)
-                            }
-                            _ => 0,
-                        }
-                })
+                        } => (
+                            usage
+                                | u8::from(*presence_if)
+                                | (u8::from(*presence_inherit) << 1)
+                                | (u8::from(*presence_dashed_function) << 2),
+                            reads_attributes || *presence_attr,
+                        ),
+                        _ => (usage, reads_attributes),
+                    })
             })
     }
 
