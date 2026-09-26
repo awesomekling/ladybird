@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<script src="include.js"></script>
+<style>
+    .anchor:has(.flag) .probe { color: blue; }
+    .box:empty + .after { color: red; }
+</style>
+<div class="anchor"><div id="deep"></div><div id="probe" class="probe">probe</div></div>
+<div id="box" class="box"></div><div id="after" class="after">after</div>
+<script>
+    test(() => {
+        internals.updateStyle();
+
+        // A :has() argument inside an ancestor of the element that is read.
+        println(`probe before: ${getComputedStyle(probe).color}`);
+        const flag = document.createElement("span");
+        flag.className = "flag";
+        deep.appendChild(flag);
+        println(`probe after flag: ${getComputedStyle(probe).color}`);
+        flag.remove();
+        println(`probe after removal: ${getComputedStyle(probe).color}`);
+
+        // The child that makes a sibling of the element that is read no longer :empty.
+        println(`after before: ${getComputedStyle(after).color}`);
+        box.appendChild(document.createElement("b"));
+        println(`after with a child in the box: ${getComputedStyle(after).color}`);
+    });
+</script>

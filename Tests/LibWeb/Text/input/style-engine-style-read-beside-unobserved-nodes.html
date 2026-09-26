@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<script src="include.js"></script>
+<style>
+    li.completed label { color: green; }
+</style>
+<section id="main"><ul id="list"></ul></section>
+<footer id="footer"></footer>
+<script>
+    test(() => {
+        const count = 20;
+        function render(round) {
+            let html = "";
+            for (let i = 0; i < count; i++)
+                html += `<li${i === round ? ' class="completed"' : ""}><div class="view"><input class="toggle" type="checkbox"><label>Item ${i}</label></div></li>`;
+            list.innerHTML = html;
+            // What jQuery's .toggle() reads to decide whether the section is shown: the style of an
+            // ancestor of the new items, which nothing in them can change.
+            const display = getComputedStyle(main).display;
+            footer.innerHTML = `<span><strong>${count}</strong> items left (${display})</span>`;
+        }
+
+        render(-1);
+        internals.updateStyle();
+        const before = internals.styleEngineCounters();
+
+        for (let round = 0; round < 10; round++)
+            render(round);
+
+        println(`completed label color: ${getComputedStyle(list.children[9].querySelector("label")).color}`);
+        println(`footer: ${footer.textContent}`);
+        const after = internals.styleEngineCounters();
+        for (const key of ["treeDeltas", "treeDepartureDeltas", "styleNodesRetired"])
+            println(`${key}: ${after[key] - before[key]}`);
+    });
+</script>
