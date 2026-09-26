@@ -4025,6 +4025,11 @@ impl RetainedState {
         );
     }
 
+    pub(crate) fn style_record_is_unassigned_animation_overlay(&self, style_record: u64) -> bool {
+        self.computed_group_sets
+            .style_record_is_unassigned_animation_overlay(style_record)
+    }
+
     pub(crate) fn unpin_style_record(&mut self, style_record: u64) {
         self.computed_group_sets.unpin_style_record(style_record);
     }

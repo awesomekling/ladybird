@@ -2339,7 +2339,9 @@ impl LayoutNodeArena {
     }
 
     /// Whether an animation sample installed `style_record` over `slot` ahead of the host, which is
-    /// adopting it now: the record leaves the log, and its pin is released to the host's.
+    /// adopting it now: the record leaves the log, and its pin is released to the host's. An
+    /// animation-overlay record the engine no longer assigns lives by that pin alone, so the host
+    /// takes a pin of its own over the row before it goes.
     pub(crate) fn take_animation_adoption(&self, slot: NodeSlotId, style_record: u64) -> bool {
         let take = |log: &RefCell<Vec<AnimationAdoption>>| {
             let mut log = log.borrow_mut();
@@ -2351,6 +2353,12 @@ impl LayoutNodeArena {
         let Some(adopted) = adopted else {
             return false;
         };
+        if self.with_style_engine(|engine| engine.style_record_is_unassigned_animation_overlay(adopted.style_record))
+            && self.node_style_record_pinned_by_host(slot) != adopted.style_record
+        {
+            self.release_node_style_record_pin_for_host(slot);
+            self.pin_node_style_record_for_host(slot, adopted.style_record);
+        }
         self.with_style_engine(|engine| engine.unpin_layout_style_record(adopted.style_record));
         true
     }

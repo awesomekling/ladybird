@@ -563,22 +563,22 @@ void NodeWithStyle::apply_style(CSS::StyleRecordID style_record_identity)
     // A flight installed the record over the row ahead of the host, with what a style change over the row leaves in the
     // arena: the host only takes it into its own mirror of the row. A shell first asked for since then was made with
     // the record already.
-    bool const installed_ahead = RustFFI::layout_arena_take_animation_adoption(arena_handle(), slot_id(this), style_record_identity.value());
     // The pin holds the record the node names. An animation-overlay record the engine no longer
     // assigns lives by that pin alone, so a node that keeps its record keeps the pin.
     if (style_record_identity != m_style_record_identity)
         release_pinned_style_record();
+    // Taking the adoption hands the host a pin of its own over a record that lives by the adoption's
+    // pin alone, so this comes after the node let go of its old record's pin.
+    bool const installed_ahead = RustFFI::layout_arena_take_animation_adoption(arena_handle(), slot_id(this), style_record_identity.value());
     m_background_layers.clear();
     m_mask_layers.clear();
     m_border_image.clear();
     m_list_style_type.clear();
     m_list_style_image.clear();
     m_style_record_identity = style_record_identity;
-    if (installed_ahead)
+    if (installed_ahead) {
         m_style_payloads = document().style_computer().style_engine().held_style_record_payloads(m_style_record_identity);
-    // NB: A record installed ahead is held by the engine; if it is not, publish it as if it were not installed ahead.
-    ASSERT(!installed_ahead || m_style_payloads);
-    if (installed_ahead && m_style_payloads) {
+        VERIFY(m_style_payloads);
         did_update_style_record();
     } else {
         publish_style_record_to_node_data();
@@ -758,9 +758,6 @@ void NodeWithStyle::set_style_record_identity(CSS::StyleRecordID style_record_id
         return;
     }
 
-    // An animation sample installed the record over the row ahead of the host, with the caches and marks a
-    // style change over the row leaves: the host only takes it into its own mirror of the row.
-    bool installed_ahead = RustFFI::layout_arena_take_animation_adoption(arena_handle(), slot_id(this), style_record_identity.value());
     bool should_repin_style_record = RustFFI::layout_arena_node_style_record_pinned_by_host(arena_handle(), slot_id(this)) != 0;
     // Both answers come from the records themselves, so neither side needs a ComputedValues built
     // for it. An overlay record borrows different payloads than its base, so carrying one is already
@@ -777,20 +774,23 @@ void NodeWithStyle::set_style_record_identity(CSS::StyleRecordID style_record_id
         || CSS::ComputedValues::layout_affecting_group_payloads_differ(old_record_view.payloads, new_record_view.payloads);
 
     release_pinned_style_record();
+    // An animation sample installed the record over the row ahead of the host, with the caches and marks a
+    // style change over the row leaves: the host only takes it into its own mirror of the row. The adoption's
+    // pin held the record through the reads above; one the engine no longer assigns now has the host's pin.
+    bool installed_ahead = RustFFI::layout_arena_take_animation_adoption(arena_handle(), slot_id(this), style_record_identity.value());
     m_background_layers.clear();
     m_mask_layers.clear();
     m_border_image.clear();
     m_list_style_type.clear();
     m_list_style_image.clear();
     m_style_record_identity = style_record_identity;
-    if (installed_ahead)
+    if (installed_ahead) {
         m_style_payloads = document().style_computer().style_engine().held_style_record_payloads(m_style_record_identity);
-    // NB: As above: a record installed ahead that the engine does not hold is published as if it were not.
-    ASSERT(!installed_ahead || m_style_payloads);
-    if (installed_ahead && m_style_payloads)
+        VERIFY(m_style_payloads);
         did_update_style_record();
-    else
+    } else {
         publish_style_record_to_node_data();
+    }
     if (should_repin_style_record)
         pin_style_record_for_cxx_consumers();
 
