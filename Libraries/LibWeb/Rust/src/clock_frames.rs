@@ -86,6 +86,11 @@ pub enum FfiClockTickOutcome {
     Revoked,
 }
 
+/// The layout arena of the lease's document, whose registration keeps it alive.
+fn arena_of(lease: &ClockLease) -> *const LayoutNodeArena {
+    lease.arena as *const LayoutNodeArena
+}
+
 /// A document's clock lease.
 pub struct ClockLease {
     arena: usize,
@@ -682,12 +687,38 @@ pub unsafe extern "C" fn rust_clock_lease_submit_tick(arena: *mut c_void, time: 
     // The host shows what this tick installs itself.
     lease.presented_since_adoption.store(false, Ordering::Release);
     let tick = move || {
+        // The main thread pins and unpins its host's records beside the tick, which may read none of them.
+        // SAFETY: The stage owns the arena and its engine, as below.
+        let engine = unsafe { &*arena_of(&lease) }
+            .style_engine_handle()
+            .cast::<StyleEngine>();
+        // SAFETY: As above.
+        assert!(
+            engine.is_null() || !unsafe { &*engine }.reads_host_style_record_pins(),
+            "a clock tick beside the main thread reads the host's style-record pins"
+        );
         // SAFETY: The stage owns the arena, as below.
         unsafe { lease.run_tick(time, lease.deadline()) };
     };
+    // The main thread's pin table is its own until it has taken the tick back, as it is beside a style
+    // pass in flight.
+    // SAFETY: Guaranteed by the caller: the main thread owns the engine until the submit below.
+    let engine = unsafe { LayoutNodeArena::from_handle(arena) }
+        .style_engine_handle()
+        .cast::<StyleEngine>();
+    if !engine.is_null() {
+        // SAFETY: As above.
+        unsafe { &mut *engine }.begin_clock_lend_beside_host_pins();
+    }
+    let taken_back = move || {
+        if !engine.is_null() {
+            // SAFETY: The main thread owns the engine again, which outlives the tick of its arena.
+            unsafe { &mut *engine }.finish_clock_lend_beside_host_pins();
+        }
+    };
     // SAFETY: The stage reaches the arena and its engine only, which the `clock` stage owns until
     // the main thread takes it back, and every main-thread path to either joins it first.
-    unsafe { crate::stage_thread::submit_stage("clock", arena, tick) };
+    unsafe { crate::stage_thread::submit_stage_with_take_back("clock", arena, tick, taken_back) };
     true
 }
 
