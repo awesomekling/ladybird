@@ -1565,8 +1565,9 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
 
 /// Records the document's display list again for a clock lease's tick, with the inputs of the last
 /// recording the main thread published, and leaves it pending in the arena for the tick to present.
-/// Returns false, having recorded nothing, where there is no such recording to go by, or a
-/// recording is pending already.
+/// Returns false, having left nothing pending, where there is no such recording to go by, a
+/// recording is pending already, or the recording painted an SVG-as-image render the main thread
+/// has not resolved.
 ///
 /// # Safety
 ///
@@ -1602,6 +1603,11 @@ pub(crate) unsafe fn record_for_clock_tick(arena_handle: *mut c_void) -> bool {
         viewport,
         inputs,
     });
+    // An SVG-as-image the tick paints at a size the main thread has not rendered it at would show as
+    // an empty image: the main thread renders the image, and the frame, itself.
+    if !output.recording.resources.missed_vector_images.is_empty() {
+        return false;
+    }
     // SAFETY: The recording has returned its borrow.
     let arena = unsafe { arena_from_handle(arena_handle) };
     leave_pending_recording(arena, viewport, should_paint_overlay, true, frame_generation, output);
