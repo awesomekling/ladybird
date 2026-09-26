@@ -829,6 +829,14 @@ impl SelectorProgram {
         &self.entries
     }
 
+    /// Whether the program tests an element's children: `:has()` or `:empty`.
+    #[must_use]
+    pub fn tests_children(&self) -> bool {
+        self.nodes
+            .iter()
+            .any(|node| matches!(node, SelectorOp::RelativeExists(_) | SelectorOp::Empty))
+    }
+
     #[must_use]
     pub fn contains_relational_selector(&self) -> bool {
         self.nodes
@@ -2759,6 +2767,9 @@ pub struct SelectorPrograms {
     program_memory: MemoryLease,
     memory: MemoryLease,
     scope: SelectorProgramScope,
+    /// Whether a program that tests an element's children was ever added. Never cleared: it only
+    /// lets a read of one element's style skip nodes that cannot decide it.
+    may_have_child_dependent_programs: bool,
 }
 
 impl Default for SelectorPrograms {
@@ -2774,6 +2785,7 @@ impl Default for SelectorPrograms {
             program_memory: MemoryLease::new(MemoryCategory::RuleProgram),
             memory: MemoryLease::new(MemoryCategory::RuleProgram),
             scope: SelectorProgramScope::Document,
+            may_have_child_dependent_programs: false,
         }
     }
 }
@@ -2827,6 +2839,7 @@ impl SelectorPrograms {
             }
         }
 
+        self.may_have_child_dependent_programs |= program.tests_children();
         let entry_count = program.entries().len();
         let id = self.vacant_programs.last().copied().unwrap_or_else(|| {
             SelectorProgramID(u32::try_from(self.programs.len()).expect("selector program space exhausted"))
@@ -2932,6 +2945,11 @@ impl SelectorPrograms {
         let mut hasher = fast_hasher();
         program.hash(&mut hasher);
         hasher.finish()
+    }
+
+    #[must_use]
+    pub fn may_have_child_dependent_programs(&self) -> bool {
+        self.may_have_child_dependent_programs
     }
 
     #[must_use]

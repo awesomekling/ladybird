@@ -2427,6 +2427,17 @@ impl StyleEngineState {
             || !self.retained.pseudo_settles_owed.is_empty()
     }
 
+    /// Whether a selector whose answer for an element depends on the element's children (`:has()`,
+    /// `:empty`) may take part in the next transaction. Such a selector lets a node anywhere in the
+    /// tree decide an element's style, so a program still waiting to be installed counts as one.
+    #[must_use]
+    pub fn may_have_child_dependent_selectors(&self) -> bool {
+        self.retained.programs.may_have_child_dependent_programs()
+            || !self.retained.routing.relational_routes().is_empty()
+            || self.host.program_staging.is_dirty()
+            || self.host.sheet_rule_replacement.is_some()
+    }
+
     #[must_use]
     pub fn has_deferred_geometry_transaction(&self) -> bool {
         !self.host.flushing_deferred_geometry_journal && !self.host.deferred_geometry_journal.is_empty()
