@@ -3401,7 +3401,7 @@ impl RetainedState {
             effects.winners.mark_pseudo_rows_not_carried(
                 &mut self.winner_groups,
                 node,
-                transition.flipped_pseudo_kinds & SETTLED_PSEUDO_WINNER_KINDS,
+                transition.flipped_pseudo_kinds,
                 &transition.pseudo_winner_states,
                 &mut self.memory,
             );
@@ -5435,7 +5435,7 @@ impl RetainedState {
                                     effects.winners.mark_pseudo_rows_not_carried(
                                         &mut self.winner_groups,
                                         node,
-                                        SETTLED_PSEUDO_WINNER_KINDS,
+                                        u64::MAX,
                                         carried_pseudo_winner_groups.as_deref().unwrap_or_default(),
                                         &mut self.memory,
                                     );
@@ -5481,7 +5481,7 @@ impl RetainedState {
                                 };
                                 // The rows the engine settles pseudo-elements from travel with
                                 // the group, ::marker and ::backdrop only from a node holding a
-                                // record for them. A cohort hit marks its own rows for the kinds
+                                // record for them. A cohort hit marks its own rows for every kind
                                 // the group does not carry stale.
                                 let pseudo_winner_groups = self.settled_pseudo_winner_states(effects, node);
                                 let pseudo_winner_groups = (!pseudo_winner_groups.is_empty())

@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style>
+    div::first-line { color: green; }
+    .fancy::first-line { color: red; }
+</style>
+<div id="a">a</div><div id="b">b</div>
+<script>
+    test(() => {
+        getComputedStyle(a, "::first-line").color;
+        getComputedStyle(b, "::first-line").color;
+        internals.updateStyle();
+        a.classList.add("fancy");
+        b.classList.add("fancy");
+        internals.updateStyle();
+        println(`first-line color: ${getComputedStyle(b, "::first-line").color}`);
+    });
+</script>
