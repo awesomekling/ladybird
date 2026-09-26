@@ -6,9 +6,10 @@
 
 //! Layout outputs retained for the next style stage.
 //!
-//! Layout builds a private generation and publishes it atomically when the commit completes. The
-//! style engine holds the same store and clones the published `Arc` before reading a row, so no
-//! style evaluation observes a partly committed table.
+//! Layout gathers a commit's rows privately and applies them to the published generation at once,
+//! under its write lock, when the commit completes, so no style evaluation observes a partly
+//! committed table. The published generation changes in place; it is copied only where a reader
+//! still holds it.
 
 use crate::css::style::fast_hash::FastMap as HashMap;
 use crate::css::style::tree::StyleNodeID;
@@ -47,18 +48,37 @@ struct SnapshotGeneration {
     rows: HashMap<StyleNodeID, LayoutStyleSnapshotRow>,
 }
 
+#[derive(Clone, Copy)]
+struct CommittedGeometry {
+    node: StyleNodeID,
+    content_width_raw: i32,
+    content_height_raw: i32,
+    style_record: u64,
+    has_committed_box: bool,
+    writing_mode: u8,
+}
+
+#[derive(Default)]
+struct BuildingCommit {
+    layout_commit_generation: Option<u64>,
+    rows: Vec<CommittedGeometry>,
+}
+
 #[derive(Default)]
 pub(crate) struct LayoutStyleSnapshotStore {
     published: RwLock<Arc<SnapshotGeneration>>,
-    building: Mutex<Option<SnapshotGeneration>>,
+    building: Mutex<BuildingCommit>,
 }
 
 impl LayoutStyleSnapshotStore {
     pub(crate) fn begin_layout_commit(&self, generation: u64) {
-        let published = self.published.read().unwrap().clone();
-        let mut next = (*published).clone();
-        next.layout_commit_generation = generation;
-        *self.building.lock().unwrap() = Some(next);
+        let mut building = self.building.lock().unwrap();
+        debug_assert!(
+            building.layout_commit_generation.is_none(),
+            "layout snapshot commit began inside another"
+        );
+        building.layout_commit_generation = Some(generation);
+        building.rows.clear();
     }
 
     pub(crate) fn publish_geometry(
@@ -70,34 +90,47 @@ impl LayoutStyleSnapshotStore {
         style_record: u64,
     ) {
         let mut building = self.building.lock().unwrap();
-        let building = building
-            .as_mut()
-            .expect("layout snapshot geometry published outside a commit");
-        let row = building.rows.entry(node).or_default();
-        row.content_width_raw = size.width.raw_value();
-        row.content_height_raw = size.height.raw_value();
-        row.layout_commit_generation = building.layout_commit_generation;
-        row.style_record = style_record;
-        row.has_committed_box = has_committed_box;
-        row.writing_mode = writing_mode;
+        debug_assert!(
+            building.layout_commit_generation.is_some(),
+            "layout snapshot geometry published outside a commit"
+        );
+        building.rows.push(CommittedGeometry {
+            node,
+            content_width_raw: size.width.raw_value(),
+            content_height_raw: size.height.raw_value(),
+            style_record,
+            has_committed_box,
+            writing_mode,
+        });
     }
 
     pub(crate) fn finish_layout_commit(&self) {
-        let generation = self
-            .building
-            .lock()
-            .unwrap()
-            .take()
-            .expect("layout snapshot commit finished without beginning");
-        *self.published.write().unwrap() = Arc::new(generation);
+        let mut building = self.building.lock().unwrap();
+        let Some(generation) = building.layout_commit_generation.take() else {
+            debug_assert!(false, "layout snapshot commit finished without beginning");
+            building.rows.clear();
+            return;
+        };
+        let mut published = self.published.write().unwrap();
+        let next = Arc::make_mut(&mut published);
+        next.layout_commit_generation = generation;
+        for geometry in building.rows.drain(..) {
+            let row = next.rows.entry(geometry.node).or_default();
+            row.content_width_raw = geometry.content_width_raw;
+            row.content_height_raw = geometry.content_height_raw;
+            row.layout_commit_generation = generation;
+            row.style_record = geometry.style_record;
+            row.has_committed_box = geometry.has_committed_box;
+            row.writing_mode = geometry.writing_mode;
+        }
     }
 
     pub(crate) fn publish_scroll_states(&self, states: &[FfiLayoutStyleScrollState]) {
         if states.is_empty() {
             return;
         }
-        let published = self.published.read().unwrap().clone();
-        let mut next = (*published).clone();
+        let mut published = self.published.write().unwrap();
+        let next = Arc::make_mut(&mut published);
         for state in states {
             let Some(node) = StyleNodeID::from_raw(state.style_node) else {
                 continue;
@@ -110,7 +143,6 @@ impl LayoutStyleSnapshotStore {
             row.scrolled = state.scrolled;
             row.layout_commit_generation = generation;
         }
-        *self.published.write().unwrap() = Arc::new(next);
     }
 
     pub(crate) fn retire(&self, nodes: &[StyleNodeID]) {
