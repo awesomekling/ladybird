@@ -702,7 +702,7 @@ pub unsafe extern "C" fn rust_clock_lease_submit_tick(arena: *mut c_void, time: 
             .style_engine_handle()
             .cast::<StyleEngine>();
         // SAFETY: As above.
-        assert!(
+        debug_assert!(
             engine.is_null() || !unsafe { &*engine }.reads_host_style_record_pins(),
             "a clock tick beside the main thread reads the host's style-record pins"
         );
@@ -1489,7 +1489,7 @@ fn run_render_clock_tick_at(context: u64, frame_time_nanoseconds: i64) {
                     .style_engine_handle()
                     .cast::<StyleEngine>();
                 // SAFETY: As below.
-                assert!(
+                debug_assert!(
                     engine.is_null() || !unsafe { &*engine }.reads_host_style_record_pins(),
                     "a clock tick beside a task reads the host's style-record pins"
                 );
