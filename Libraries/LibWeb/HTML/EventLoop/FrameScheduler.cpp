@@ -25,6 +25,7 @@
 #include <LibWeb/HTML/EventLoop/FrameScheduler.h>
 #include <LibWeb/HTML/LocalNavigable.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
+#include <LibWeb/HTML/Scripting/TemporaryExecutionContext.h>
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/HighResolutionTime/TimeOrigin.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
@@ -1068,6 +1069,8 @@ void FrameScheduler::adopt_render_clock_ticks()
 {
     // What the render clock's ticks installed ahead of the main thread, each document adopts before anything else
     // reaches it, and its timeline shows the time of the last tick.
+    Vector<GC::Root<DOM::Document>> documents_to_move;
+    Vector<double> times_to_move_to;
     for (size_t index = m_clock_leases.size(); index-- > 0;) {
         auto document = m_clock_leases[index].document;
         auto* arena = document->layout_node_arena_if_created();
@@ -1083,9 +1086,17 @@ void FrameScheduler::adopt_render_clock_ticks()
                 navigable->adopt_render_clock_frame_kit(*m_clock_leases[index].render_clock_kit);
         }
         if (!isnan(time)) {
-            if (auto current = document->timeline()->current_time(); current.has_value() && current->type == Animations::TimeValue::Type::Milliseconds && current->value < time)
-                document->timeline()->update_current_time(time);
+            if (auto current = document->timeline()->current_time(); current.has_value() && current->type == Animations::TimeValue::Type::Milliseconds && current->value < time) {
+                documents_to_move.append(*document);
+                times_to_move_to.append(time);
+            }
         }
+    }
+    // Moving a timeline runs the pending tasks of its animations, which resolve their promises, as a rendering update
+    // does in an execution context of the document's. The microtasks that follow run once every document adopted.
+    for (size_t index = 0; index < documents_to_move.size(); ++index) {
+        HTML::TemporaryExecutionContext execution_context { documents_to_move[index]->relevant_settings_object() };
+        documents_to_move[index]->timeline()->update_current_time(times_to_move_to[index]);
     }
 }
 
