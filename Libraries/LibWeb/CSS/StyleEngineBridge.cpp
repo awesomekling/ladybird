@@ -751,6 +751,10 @@ void StyleEngine::record_host_fact_write(StyleEngineFFI::FfiHostFactWrite write)
     // needs a frame, and the mutation behind each of them notes the render state change itself.
     if (m_host_fact_writes.size() == m_pending_atom_adoption_count)
         note_recorded_input(*this, m_style_computer);
+    // Inserting markup records thousands of writes in one transaction, and growing by a quarter at a time copies
+    // them over and over.
+    if (m_host_fact_writes.size() == m_host_fact_writes.capacity())
+        m_host_fact_writes.ensure_capacity(max<size_t>(64, m_host_fact_writes.capacity() * 2));
     m_host_fact_writes.append(write);
 }
 
@@ -980,6 +984,17 @@ void StyleEngine::submit_recorded_input()
     apply_transaction(input, transaction);
     adopt_identity_grant(m_granted_style_nodes, style_node_grant);
     adopt_identity_grant(m_granted_text_style_nodes, text_style_node_grant);
+    // A page that inserts markup records thousands of writes per transaction: the buffers keep their capacity for
+    // the next one. What the engine's callbacks began the next one with moves into them, where a write's index
+    // into its side buffer still finds what it names.
+    auto reuse_buffer = [](auto& member, auto& buffer) {
+        buffer.clear_with_capacity();
+        buffer.extend(move(member));
+        member = move(buffer);
+    };
+    reuse_buffer(m_host_fact_writes, host_fact_writes);
+    reuse_buffer(m_host_fact_text_data, host_fact_text_data);
+    reuse_buffer(m_host_fact_replaced_content_inputs, host_fact_replaced_content_inputs);
 
     m_tree_deltas.clear_with_capacity();
     m_element_arrivals.clear_with_capacity();
