@@ -21,7 +21,11 @@ WEB_API void push_layer_image_paint_facts(Layout::NodeWithStyle const&);
 WEB_API void push_form_control_paint_facts(HTML::HTMLInputElement&);
 WEB_API void push_canvas_paint_facts(HTML::HTMLCanvasElement const&);
 WEB_API void push_navigable_container_paint_facts(HTML::NavigableContainer const&);
-WEB_API void reconcile_navigable_container_paint_facts(DOM::Document const&);
+enum class ReconcileAheadOfLayout : u8 {
+    No,
+    Yes,
+};
+WEB_API void reconcile_navigable_container_paint_facts(DOM::Document const&, ReconcileAheadOfLayout = ReconcileAheadOfLayout::No);
 WEB_API void push_replaced_image_paint_facts(Layout::ImageProvider const&, Layout::Node const&);
 WEB_API void push_video_paint_facts(HTML::HTMLVideoElement const&);
 WEB_API void push_image_map_area_facts(HTML::HTMLImageElement&);

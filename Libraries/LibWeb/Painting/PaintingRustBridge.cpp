@@ -723,7 +723,7 @@ FlightRecordingSeal seal_rust_display_list_recording_for_flight(DOM::Document& d
     publish_visual_context_tree_inputs(document);
     HostRecordingInputs host;
     read_host_recording_inputs(host, document, PaintCommandCacheMode::ReadWrite, config, overlay_inputs, ReadAheadOfLayout::Yes);
-    reconcile_navigable_container_paint_facts(document);
+    reconcile_navigable_container_paint_facts(document, ReconcileAheadOfLayout::Yes);
     Layout::RustFFI::layout_arena_resolve_painted_vector_images(arena, &host.inputs, vector_image_callbacks(publish_context));
     Layout::RustFFI::layout_arena_seal_flight_paint(arena, host.inputs, present, present_context);
     return {

@@ -54,12 +54,15 @@ pub(crate) struct CommitNotifications {
 
 impl CommitNotifications {
     /// Whether telling the host these leaves it no style or layout work to do: the messages ask for
-    /// no rebuild and no top layer pass.
+    /// no rebuild and no top layer pass. A navigable container's committed viewport sizes the
+    /// navigable it hosts, whose document lays itself out; the container's document has nothing
+    /// more to do for it.
     pub(crate) fn leave_the_host_no_work(&self) -> bool {
         self.messages.iter().all(|message| {
             matches!(
                 message.kind,
-                FfiCommitMessageKind::PendingFontFaceWanted
+                FfiCommitMessageKind::NavigableContainerViewportCommitted
+                    | FfiCommitMessageKind::PendingFontFaceWanted
                     | FfiCommitMessageKind::UnexpectedFragmentedInline
                     | FfiCommitMessageKind::SvgResourceReferenced
             )
