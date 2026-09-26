@@ -913,6 +913,18 @@ struct AnimationAdoption {
     host_style_record: u64,
 }
 
+/// The scroll containers finished tree builds settled, in the order they settled them, each with
+/// whether it was a scroll snap container then.
+#[derive(Default)]
+struct SettledScrollContainers {
+    rows: Vec<(NodeSlotId, bool)>,
+    /// Where each row is in `rows`: a build settles each of its rows without a walk over the rows
+    /// earlier builds settled.
+    positions: HashMap<NodeSlotId, usize>,
+    /// How many rows were left when the rows builds freed were last dropped.
+    rows_after_last_prune: usize,
+}
+
 pub(crate) struct LayoutNodeArena {
     chunks: Vec<Box<Chunk>>,
     chunks_by_address: Vec<ChunkAddress>,
@@ -1128,7 +1140,7 @@ pub(crate) struct LayoutNodeArena {
     built_scroll_containers: RefCell<Vec<NodeSlotId>>,
     /// The scroll containers finished tree builds gave a style, each with whether it was a scroll
     /// snap container then, until the document's scroll snap bookkeeping takes them.
-    built_scroll_snap_containers_for_host: RefCell<Vec<(NodeSlotId, bool)>>,
+    built_scroll_snap_containers_for_host: RefCell<SettledScrollContainers>,
     /// The image resources the tree builds owe the host for the rows they stamped, in the order the
     /// builds came to owe them, until the frame the builds ran in takes them.
     image_resources_owed_to_host: RefCell<Vec<(NodeSlotId, OwedImageResources)>>,
@@ -1247,7 +1259,7 @@ impl LayoutNodeArena {
             needs_full_scrollable_overflow_recalculation: Cell::new(false),
             text_nodes_enrolled_for_content_sync: RefCell::new(HashSet::default()),
             built_scroll_containers: RefCell::new(Vec::new()),
-            built_scroll_snap_containers_for_host: RefCell::new(Vec::new()),
+            built_scroll_snap_containers_for_host: RefCell::new(SettledScrollContainers::default()),
             image_resources_owed_to_host: RefCell::new(Vec::new()),
             image_boxes_awaiting_owned_provider: RefCell::new(HashSet::default()),
             published_document_style: Cell::new(None),
@@ -6020,18 +6032,33 @@ impl LayoutNodeArena {
         let built = std::mem::take(&mut *self.built_scroll_containers.borrow_mut());
         let mut settled = self.built_scroll_snap_containers_for_host.borrow_mut();
         for row in built {
-            if !self.slot_is_live(row) || settled.iter().any(|&(settled_row, _)| settled_row == row) {
+            if !self.slot_is_live(row) || settled.positions.contains_key(&row) {
                 continue;
             }
             let axes = crate::painting::scroll_snap::snap_axes_of_scroll_container(self, row);
-            settled.push((row, axes.x || axes.y));
+            let position = settled.rows.len();
+            settled.positions.insert(row, position);
+            settled.rows.push((row, axes.x || axes.y));
+        }
+        // A document without scroll snap areas never takes them, so the rows later builds freed are
+        // dropped once they could make up half of them.
+        if settled.rows.len() > 2 * settled.rows_after_last_prune + 64 {
+            settled.rows.retain(|&(row, _)| self.slot_is_live(row));
+            let positions = settled
+                .rows
+                .iter()
+                .enumerate()
+                .map(|(position, &(row, _))| (row, position))
+                .collect();
+            settled.positions = positions;
+            settled.rows_after_last_prune = settled.rows.len();
         }
     }
 
     /// The scroll containers finished builds gave a style, each with whether it was a scroll snap
     /// container then. A later build can still free a row, so only the live ones are handed out.
     pub(crate) fn take_built_scroll_snap_containers(&self) -> Vec<(NodeSlotId, bool)> {
-        let mut built = std::mem::take(&mut *self.built_scroll_snap_containers_for_host.borrow_mut());
+        let mut built = std::mem::take(&mut *self.built_scroll_snap_containers_for_host.borrow_mut()).rows;
         built.retain(|&(row, _)| self.slot_is_live(row));
         built
     }
