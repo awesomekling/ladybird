@@ -5,13 +5,18 @@
 <script>
     // Keyframe effects created and changed beside a recording in flight: their timing goes to the style mirror, which
     // the recording does not read, so the change goes on beside it instead of taking it in, and the next rendering
-    // update samples the effects.
+    // update samples the effects. A flight that ran the rendering update's style as well still owes the install of the
+    // style batch it published, which reads the animations the change writes: the change takes it in first.
+    const styleAppliedInFlights = () => internals.getRenderingSchedulerCounters().flightStyleEnds.applied;
+
     asyncTest(async done => {
         let animation;
+        const appliedBefore = styleAppliedInFlights();
         const result = await whileFrameInFlight("before-run", () => {
             first.style.height = "20px";
         }, frame => {
             const joinsBefore = internals.forcedJoinCount("recording");
+            const appliedBeforeChanges = styleAppliedInFlights();
             animation = second.animate([{ width: "40px" }, { width: "40px" }], { duration: 100000 });
             animation.effect.setKeyframes([{ width: "60px" }, { width: "60px" }]);
             animation.effect.composite = "replace";
@@ -19,11 +24,13 @@
                 ...frame,
                 joins: internals.forcedJoinCount("recording") - joinsBefore,
                 stillInFlight: !frame.armed || internals.frameInFlightHoldsDocument(),
+                // Whether the flight the changes took in was one that applied its style batch.
+                tookInStyleInstall: appliedBeforeChanges === appliedBefore && styleAppliedInFlights() > appliedBefore,
             };
         });
         println(`held as armed: ${heldAsArmed(result, "before-run")}`);
         println(`forced joins of the recording: ${result.joins}`);
-        println(`recording still in flight after the changes: ${result.stillInFlight}`);
+        println(`recording still in flight after the changes, unless it owed a style install: ${result.stillInFlight || result.tookInStyleInstall}`);
         await twoFrames();
         println(`second width: ${second.offsetWidth}`);
         println(`animations: ${second.getAnimations().length}`);
