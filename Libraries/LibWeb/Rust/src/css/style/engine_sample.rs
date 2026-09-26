@@ -686,7 +686,17 @@ impl RetainedState {
             .custom_property_environment_identity(node)
             .unwrap_or(0);
         if self.sampled_custom_property_environments.get(&node) != Some(&environment) {
-            return Ok(environment);
+            // Where the element took a new record's environment, the host composed what an earlier sample animated
+            // over it, under an identity of its own. That overlay names its base when the element installs it, and a
+            // sample composing over the overlay instead would compose over what it animated last time.
+            let host_overlay_base = self
+                .element_custom_property_data
+                .get(&node)
+                .and_then(Option::as_ref)
+                .filter(|held| held.is_animation_overlay && held.identity == environment)
+                .and_then(|held| held.animation_base.as_ref())
+                .map(|base| base.environment());
+            return Ok(host_overlay_base.unwrap_or(environment));
         }
         // One the host composed names its base when the element installs it.
         self.custom_property_environments
