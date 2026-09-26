@@ -159,12 +159,14 @@ void push_navigable_container_paint_facts(HTML::NavigableContainer const& naviga
     });
 }
 
-void reconcile_navigable_container_paint_facts(DOM::Document const& document)
+void reconcile_navigable_container_paint_facts(DOM::Document const& document, ReconcileAheadOfLayout ahead_of_layout)
 {
     for (auto const* navigable_container : HTML::NavigableContainer::all_instances()) {
         if (&navigable_container->document() != &document)
             continue;
-        auto const* layout_node = navigable_container->layout_node();
+        // Ahead of the layout a flight runs, the boxes are those the last layout left. A box the flight's tree build
+        // makes is given its facts as that build's host half commits it.
+        auto const* layout_node = ahead_of_layout == ReconcileAheadOfLayout::Yes ? navigable_container->unsafe_layout_node() : navigable_container->layout_node();
         if (!layout_node || !is_navigable_container_viewport_paintable(*layout_node))
             continue;
         push_navigable_container_paint_facts_onto(*navigable_container, *layout_node, ReconcilingBeforeRecording::Yes);

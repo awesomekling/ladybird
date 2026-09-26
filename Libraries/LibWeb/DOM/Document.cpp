@@ -2839,10 +2839,6 @@ bool Document::flight_paint_is_blocked() const
         return true;
     if (auto navigable = this->navigable(); navigable && navigable->event_handler().middle_button_scroll_handler().has_value())
         return true;
-    for (auto const* navigable_container : HTML::NavigableContainer::all_instances()) {
-        if (&navigable_container->document() == this)
-            return true;
-    }
 
     // What the steps of the rendering update after its layout can change before its paint.
     for (auto const& observer : m_resize_observers) {
