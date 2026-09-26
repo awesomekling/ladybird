@@ -1617,6 +1617,20 @@ impl LayoutNodeArena {
         self.paintable_rows.published = None;
     }
 
+    /// Lets a main-side writer write the rows' chunks in place. It runs after the frame holding
+    /// the arena is taken in, so nothing reads the rows as last published until the main side
+    /// reads them again, which publishes them anew.
+    pub(crate) fn release_published_paintable_rows_for_main_side_write(&mut self) {
+        let reads_beside_recording = crate::stage_thread::reads_beside_recording_of(std::ptr::from_ref(self).cast());
+        debug_assert!(
+            !reads_beside_recording,
+            "a main-side write of the rows runs beside a recording that reads them"
+        );
+        if !reads_beside_recording {
+            self.release_published_paintable_rows();
+        }
+    }
+
     /// Hands the main side the rows as they are now, if a writer changed them since they were last
     /// handed over.
     pub(crate) fn publish_paintable_rows(&mut self) {

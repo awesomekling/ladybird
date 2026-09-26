@@ -117,6 +117,7 @@ unsafe extern "C" fn layout_arena_paintable_cleared_from_node(arena: *mut c_void
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     // SAFETY: Guaranteed by the entry point's contract.
     unsafe {
+        arena_from_handle_mut(arena).release_published_paintable_rows_for_main_side_write();
         crate::layout::paying_host_handbacks(&main_thread, arena, || {
             clear_paintable_row_of_node(arena, layout_node);
         });

@@ -101,10 +101,6 @@ impl<'a> PaintableCommit<'a> {
     }
 
     /// Hands the main side the rows this commit wrote.
-    pub(crate) fn publish_rows(&mut self) {
-        self.arena.publish_paintable_rows();
-    }
-
     pub(crate) fn discard_absolute_rects_memoized_during_commit(&self) {
         self.arena().clear_absolute_rect_memo();
     }
