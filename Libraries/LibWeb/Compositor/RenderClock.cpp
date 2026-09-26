@@ -44,10 +44,10 @@ private:
             m_clock.did_lose_channel();
     }
 
-    virtual void clock_tick(Compositing::CompositorContextId context_id, i64 frame_time_nanoseconds, double frame_interval_milliseconds) override
+    virtual void clock_tick(Compositing::CompositorContextId context_id, i64 frame_time_nanoseconds, double frame_interval_milliseconds, Vector<Compositing::AsyncScrollNodeStableID> scroll_nodes, Vector<Compositing::CSSPixelPoint> scroll_offsets) override
     {
         if (!m_detached)
-            m_clock.did_receive_clock_tick(context_id, frame_time_nanoseconds, frame_interval_milliseconds);
+            m_clock.did_receive_clock_tick(context_id, frame_time_nanoseconds, frame_interval_milliseconds, scroll_nodes, scroll_offsets);
     }
 
     RenderClock& m_clock;
@@ -226,7 +226,7 @@ void RenderClock::restart_watchdog(Compositing::CompositorContextId context_id, 
     armed.watchdog->restart(timeout_milliseconds);
 }
 
-void RenderClock::did_receive_clock_tick(Compositing::CompositorContextId context_id, i64 frame_time_nanoseconds, double frame_interval_milliseconds)
+void RenderClock::did_receive_clock_tick(Compositing::CompositorContextId context_id, i64 frame_time_nanoseconds, double frame_interval_milliseconds, ReadonlySpan<Compositing::AsyncScrollNodeStableID> scroll_nodes, ReadonlySpan<Compositing::CSSPixelPoint> scroll_offsets)
 {
     VERIFY(s_on_render_clock_thread);
     // A tick for a context disarmed after its request went out, or armed on an earlier channel.
@@ -244,7 +244,7 @@ void RenderClock::did_receive_clock_tick(Compositing::CompositorContextId contex
     request_clock_tick(context_id, armed);
     restart_watchdog(context_id, armed);
 
-    m_post_tick(context_id, frame_time_nanoseconds, frame_interval_milliseconds);
+    m_post_tick(context_id, frame_time_nanoseconds, frame_interval_milliseconds, scroll_nodes, scroll_offsets);
     m_ticks_posted.fetch_add(1, AK::MemoryOrder::memory_order_relaxed);
 }
 

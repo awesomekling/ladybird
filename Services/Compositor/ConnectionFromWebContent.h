@@ -88,7 +88,7 @@ private:
     virtual void dispatch_key_event_to_web_content(u64 page_id, Compositing::KeyEvent const&) override;
     virtual void request_rendering_update() override;
     virtual void rendering_opportunity(Compositing::CompositorContextId, i64 frame_time_nanoseconds, double frame_interval_milliseconds) override;
-    virtual void clock_tick(Compositing::CompositorContextId, i64 frame_time_nanoseconds, double frame_interval_milliseconds) override;
+    virtual void clock_tick(Compositing::CompositorContextId, i64 frame_time_nanoseconds, double frame_interval_milliseconds, Vector<Compositing::AsyncScrollNodeStableID> const& scroll_nodes, Vector<Compositing::CSSPixelPoint> const& scroll_offsets) override;
     virtual void async_scroll_updates(Compositing::CompositorContextId, Compositing::PendingAsyncScrollUpdates const&) override;
     virtual void create_video_edge(Media::VideoSinkHandle) override;
     virtual void release_video_edge(Media::VideoSinkHandle) override;

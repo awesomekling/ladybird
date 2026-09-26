@@ -98,10 +98,10 @@ void ConnectionFromWebContent::request_clock_tick(Compositing::CompositorContext
     m_compositor_state->request_clock_tick(context_id, maximum_frames_per_second);
 }
 
-void ConnectionFromWebContent::clock_tick(Compositing::CompositorContextId context_id, i64 frame_time_nanoseconds, double frame_interval_milliseconds)
+void ConnectionFromWebContent::clock_tick(Compositing::CompositorContextId context_id, i64 frame_time_nanoseconds, double frame_interval_milliseconds, Vector<Compositing::AsyncScrollNodeStableID> const& scroll_nodes, Vector<Compositing::CSSPixelPoint> const& scroll_offsets)
 {
     if (m_render_clock_connection)
-        m_render_clock_connection->async_clock_tick(context_id, frame_time_nanoseconds, frame_interval_milliseconds);
+        m_render_clock_connection->async_clock_tick(context_id, frame_time_nanoseconds, frame_interval_milliseconds, scroll_nodes, scroll_offsets);
 }
 
 void ConnectionFromWebContent::add_video_sink(Media::VideoSinkHandle video_sink_handle)
