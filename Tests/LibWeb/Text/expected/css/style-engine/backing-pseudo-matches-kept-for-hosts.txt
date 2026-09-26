@@ -1,2 +1,2 @@
-elements keeping backing pseudo-element matches: 112
+elements keeping backing pseudo-element matches: 1
 placeholder color: rgb(0, 128, 0)

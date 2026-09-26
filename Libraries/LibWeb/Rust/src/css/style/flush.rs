@@ -2179,9 +2179,14 @@ impl StyleEngineState {
             {
                 self.retained.batch_custom_property_matches.insert(node, matches);
             }
-            if let Some(matches) = self
-                .retained
-                .batch_backing_pseudo_matches_of(node, published_match_answers, answer)
+            // Only a shadow host's matches are read back, by the elements in its shadow tree that
+            // back its pseudo-elements. The user agent's rules for element-backed pseudo-elements
+            // match every element, so keeping them for elements that host nothing would hold a
+            // list for most of the document.
+            if self.retained.tree.shadow_root_of(node).is_some()
+                && let Some(matches) =
+                    self.retained
+                        .batch_backing_pseudo_matches_of(node, published_match_answers, answer)
             {
                 self.retained.batch_backing_pseudo_matches.insert(node, matches);
             } else {
