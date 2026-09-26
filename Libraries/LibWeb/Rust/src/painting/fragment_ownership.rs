@@ -208,10 +208,24 @@ fn assign_for_block(layout_arena: &impl PaintableRowsRead, block: NodeSlotId) {
     // different selection of the block's fragments.
     let pieces = layout_arena.committed_side_data(block).inline_box_pieces().to_vec();
     let previous_filter_of = |paintable: NodeSlotId| {
-        let mut side = layout_arena.paintable_side_data_mut(paintable);
-        side.fragment_ownership
-            .take()
-            .or_else(|| side.fragment_ownership_before_recommit.take())
+        let is_assigned = layout_arena
+            .live_committed_side_data(paintable)
+            .fragment_ownership
+            .is_some();
+        let assigned = is_assigned
+            .then(|| {
+                layout_arena
+                    .committed_side_data_mut(paintable)
+                    .fragment_ownership
+                    .take()
+            })
+            .flatten();
+        assigned.or_else(|| {
+            layout_arena
+                .paintable_side_data_mut(paintable)
+                .fragment_ownership_before_recommit
+                .take()
+        })
     };
     let mut boxes_with_previous_filters = Vec::new();
     for piece in &pieces {
@@ -227,18 +241,18 @@ fn assign_for_block(layout_arena: &impl PaintableRowsRead, block: NodeSlotId) {
     for (owner, filter) in owners_with_filters {
         let unchanged = boxes_with_previous_filters
             .iter()
-            .any(|(previous_owner, previous)| *previous_owner == owner && *previous == filter);
+            .any(|(previous_owner, previous)| *previous_owner == owner && **previous == filter);
         if !unchanged {
             layout_arena.push_paint_damage(
                 owner,
                 PaintDamage::DRAW_FOREGROUND | PaintDamage::HIT_FOREGROUND | PaintDamage::ORDER,
             );
         }
-        layout_arena.paintable_side_data_mut(owner).fragment_ownership = Some(filter);
+        layout_arena.committed_side_data_mut(owner).fragment_ownership = Some(std::sync::Arc::new(filter));
     }
     for (previous_owner, _) in boxes_with_previous_filters {
         if layout_arena
-            .paintable_side_data(previous_owner)
+            .live_committed_side_data(previous_owner)
             .fragment_ownership
             .is_none()
         {

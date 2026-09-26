@@ -690,9 +690,18 @@ where
             .overflow_measured_this_commit
             .set(false);
         // The row's damage is deliberately kept; the commit diff pushes what actually changed.
-        self.arena.paintable_side_data_mut(id).clear_committed_records();
-        if self.arena.live_committed_side_data(id).has_committed_records() {
-            self.arena.committed_side_data_mut(id).clear_committed_records();
+        let committed = self.arena.live_committed_side_data(id);
+        let clears = committed.has_committed_records() || committed.fragment_ownership.is_some();
+        drop(committed);
+        if clears {
+            let mut committed = self.arena.committed_side_data_mut(id);
+            committed.clear_committed_records();
+            if let Some(filter) = committed.fragment_ownership.take() {
+                drop(committed);
+                self.arena
+                    .paintable_side_data_mut(id)
+                    .fragment_ownership_before_recommit = Some(filter);
+            }
         }
     }
 }
@@ -1750,14 +1759,14 @@ impl LayoutNodeArena {
     }
 
     pub(crate) fn svg_filter_bounds(&self, id: NodeSlotId) -> Option<used_values::FfiCssPixelRect> {
-        self.paintable_side_data(id).svg_filter_bounds.get()
+        self.live_committed_side_data(id).svg_filter_bounds
     }
 
     pub(crate) fn fragment_ownership_filter(
         &self,
         id: NodeSlotId,
     ) -> Option<crate::painting::fragment_ownership::FragmentOwnershipFilter> {
-        self.paintable_side_data(id).fragment_ownership.clone()
+        self.live_committed_side_data(id).fragment_ownership.as_deref().cloned()
     }
 
     pub(crate) fn paintable_side_data_mut(&self, id: NodeSlotId) -> RefMut<'_, PaintableSideData> {
