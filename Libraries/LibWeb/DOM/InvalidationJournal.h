@@ -8,6 +8,7 @@
 
 #include <AK/Function.h>
 #include <AK/HashMap.h>
+#include <AK/OwnPtr.h>
 #include <AK/Vector.h>
 #include <LibWeb/CSS/PseudoElement.h>
 #include <LibWeb/DOM/Node.h>
@@ -112,6 +113,29 @@ private:
         CSSPixelPoint offset;
     };
 
+    // What few entries carry: kept out of line, so the entries every insertion and style change makes stay small
+    // and move cheaply as the journal grows.
+    struct RareFacts {
+        AK_ALLOC_WITH_KMALLOC;
+
+        bool has_canvas_paint_facts { false };
+        bool canvas_has_content { false };
+        i32 canvas_content_width { 0 };
+        i32 canvas_content_height { 0 };
+        u64 canvas_id { 0 };
+        u64 canvas_content_generation { 0 };
+        bool has_form_control_paint_facts { false };
+        bool form_control_enabled { false };
+        bool form_control_checked { false };
+        bool form_control_indeterminate { false };
+        bool form_control_being_activated { false };
+        Function<void(Layout::Node const&)> layer_image_paint_facts_update;
+        Function<void(Layout::Node const&)> replaced_image_paint_facts_update;
+        Function<void(Layout::Node const&)> video_paint_facts_update;
+        Function<void(Layout::Node const&)> navigable_container_paint_facts_update;
+        Vector<PseudoElementScrollOffset, 1> pseudo_element_scroll_offsets;
+    };
+
     struct Entry {
         NodeIdentity identity;
         // The reason of the first layout mark. Only the layout update trace reads it.
@@ -127,23 +151,8 @@ private:
         bool needs_layout_tree_update { false };
         bool has_dom_paint_facts { false };
         u8 dom_paint_facts { 0 };
-        bool has_canvas_paint_facts { false };
-        bool canvas_has_content { false };
-        i32 canvas_content_width { 0 };
-        i32 canvas_content_height { 0 };
-        u64 canvas_id { 0 };
-        u64 canvas_content_generation { 0 };
-        bool has_form_control_paint_facts { false };
-        bool form_control_enabled { false };
-        bool form_control_checked { false };
-        bool form_control_indeterminate { false };
-        bool form_control_being_activated { false };
         bool invalidate_paint_and_hit_test_cache { false };
         bool invalidate_propagated_text_decoration_caches { false };
-        Function<void(Layout::Node const&)> layer_image_paint_facts_update;
-        Function<void(Layout::Node const&)> replaced_image_paint_facts_update;
-        Function<void(Layout::Node const&)> video_paint_facts_update;
-        Function<void(Layout::Node const&)> navigable_container_paint_facts_update;
         bool needs_editability_stamps_refresh { false };
         bool needs_focused_text_control_publish { false };
         bool needs_scroll_offset_publish { false };
@@ -151,7 +160,14 @@ private:
         bool text_whitespace_state_changed { false };
         bool needs_svg_attribute_facts_publish { false };
         bool needs_table_spans_publish { false };
-        Vector<PseudoElementScrollOffset, 1> pseudo_element_scroll_offsets;
+        OwnPtr<RareFacts> rare;
+
+        RareFacts& ensure_rare()
+        {
+            if (!rare)
+                rare = make<RareFacts>();
+            return *rare;
+        }
     };
 
     Entry& entry_for(NodeIdentity);

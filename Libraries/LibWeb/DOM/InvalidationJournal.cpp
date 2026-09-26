@@ -78,14 +78,7 @@ InvalidationJournal::Entry& InvalidationJournal::entry_for(NodeIdentity identity
     if (is_empty() && !m_holds_next_generation)
         report_journal_pending_to_census(m_document, true);
     auto index = m_entry_index_by_identity.ensure(identity, [&] {
-        m_entries.append(Entry {
-            .identity = identity,
-            .layer_image_paint_facts_update = {},
-            .replaced_image_paint_facts_update = {},
-            .video_paint_facts_update = {},
-            .navigable_container_paint_facts_update = {},
-            .pseudo_element_scroll_offsets = {},
-        });
+        m_entries.append(Entry { .identity = identity, .rare = {} });
         return m_entries.size() - 1;
     });
     return m_entries[index];
@@ -154,48 +147,48 @@ void InvalidationJournal::note_dom_paint_facts(NodeIdentity identity, u8 facts)
 void InvalidationJournal::note_canvas_paint_facts(NodeIdentity identity, bool has_content, i32 content_width, i32 content_height, u64 canvas_id, u64 content_generation)
 {
     count_entry_during_flight(HTML::EventLoop::JournalEntryKind::PaintFacts);
-    auto& entry = entry_for(identity);
-    entry.has_canvas_paint_facts = true;
-    entry.canvas_has_content = has_content;
-    entry.canvas_content_width = content_width;
-    entry.canvas_content_height = content_height;
-    entry.canvas_id = canvas_id;
-    entry.canvas_content_generation = content_generation;
+    auto& rare = entry_for(identity).ensure_rare();
+    rare.has_canvas_paint_facts = true;
+    rare.canvas_has_content = has_content;
+    rare.canvas_content_width = content_width;
+    rare.canvas_content_height = content_height;
+    rare.canvas_id = canvas_id;
+    rare.canvas_content_generation = content_generation;
     drain_if_the_render_side_is_reading();
 }
 
 void InvalidationJournal::note_form_control_paint_facts(NodeIdentity identity, bool enabled, bool checked, bool indeterminate, bool being_activated)
 {
     count_entry_during_flight(HTML::EventLoop::JournalEntryKind::PaintFacts);
-    auto& entry = entry_for(identity);
-    entry.has_form_control_paint_facts = true;
-    entry.form_control_enabled = enabled;
-    entry.form_control_checked = checked;
-    entry.form_control_indeterminate = indeterminate;
-    entry.form_control_being_activated = being_activated;
+    auto& rare = entry_for(identity).ensure_rare();
+    rare.has_form_control_paint_facts = true;
+    rare.form_control_enabled = enabled;
+    rare.form_control_checked = checked;
+    rare.form_control_indeterminate = indeterminate;
+    rare.form_control_being_activated = being_activated;
     drain_if_the_render_side_is_reading();
 }
 
 void InvalidationJournal::note_paint_facts(NodeIdentity identity, PaintFactsFamily family, Function<void(Layout::Node const&)>&& update)
 {
     count_entry_during_flight(HTML::EventLoop::JournalEntryKind::PaintFacts);
-    auto& entry = entry_for(identity);
+    auto& rare = entry_for(identity).ensure_rare();
     switch (family) {
     case PaintFactsFamily::LayerImage:
-        entry.layer_image_paint_facts_update = move(update);
+        rare.layer_image_paint_facts_update = move(update);
         break;
     case PaintFactsFamily::ReplacedImage:
-        entry.replaced_image_paint_facts_update = move(update);
+        rare.replaced_image_paint_facts_update = move(update);
         // Applying changed replaced-image facts requests a repaint; see note_dom_paint_facts().
         m_document.request_frame_for_journalled_repaint({});
         break;
     case PaintFactsFamily::Video:
-        entry.video_paint_facts_update = move(update);
+        rare.video_paint_facts_update = move(update);
         // Applying changed video facts requests a repaint; see note_dom_paint_facts().
         m_document.request_frame_for_journalled_repaint({});
         break;
     case PaintFactsFamily::NavigableContainer:
-        entry.navigable_container_paint_facts_update = move(update);
+        rare.navigable_container_paint_facts_update = move(update);
         // Applying changed navigable container facts invalidates the paint cache, which only a
         // rendering update repaints; see note_dom_paint_facts().
         m_document.request_frame_for_journalled_repaint({});
@@ -311,7 +304,7 @@ void InvalidationJournal::note_scroll_offset(NodeIdentity identity, bool offset_
 void InvalidationJournal::note_pseudo_element_scroll_offset(NodeIdentity generator, CSS::PseudoElement type, CSSPixelPoint offset, bool offset_changed)
 {
     count_entry_during_flight(HTML::EventLoop::JournalEntryKind::ScrollOffset);
-    auto& offsets = entry_for(generator).pseudo_element_scroll_offsets;
+    auto& offsets = entry_for(generator).ensure_rare().pseudo_element_scroll_offsets;
     if (auto existing = offsets.find_if([&](auto const& pending) { return pending.type == type; }); existing != offsets.end())
         existing->offset = offset;
     else
@@ -486,7 +479,7 @@ void InvalidationJournal::publish_scroll_offsets(Node& node, Entry const& entry)
     auto* element = as_if<Element>(node);
     if (!element)
         return;
-    for (auto const& [type, offset] : entry.pseudo_element_scroll_offsets) {
+    for (auto const& [type, offset] : entry.rare ? entry.rare->pseudo_element_scroll_offsets.span() : ReadonlySpan<PseudoElementScrollOffset> {}) {
         auto pseudo_element = element->get_synthetic_pseudo_element(type);
         if (!pseudo_element.has_value())
             continue;
@@ -584,10 +577,11 @@ void InvalidationJournal::drain()
                 refresh_editability_stamps(*node);
             if (entry.needs_focused_text_control_publish && node)
                 Layout::publish_is_in_focused_text_control(*node);
-            if (node && (entry.needs_scroll_offset_publish || !entry.pseudo_element_scroll_offsets.is_empty()))
+            auto const* rare = entry.rare.ptr();
+            if (node && (entry.needs_scroll_offset_publish || (rare && !rare->pseudo_element_scroll_offsets.is_empty())))
                 publish_scroll_offsets(*node, entry);
 
-            if (!entry.needs_layout_update && !entry.needs_repaint && !entry.needs_subtree_repaint && !entry.has_dom_paint_facts && !entry.has_canvas_paint_facts && !entry.has_form_control_paint_facts && !entry.invalidate_paint_and_hit_test_cache && !entry.invalidate_propagated_text_decoration_caches && !entry.layer_image_paint_facts_update && !entry.replaced_image_paint_facts_update && !entry.video_paint_facts_update && !entry.navigable_container_paint_facts_update)
+            if (!entry.needs_layout_update && !entry.needs_repaint && !entry.needs_subtree_repaint && !entry.has_dom_paint_facts && !rare && !entry.invalidate_paint_and_hit_test_cache && !entry.invalidate_propagated_text_decoration_caches)
                 continue;
             // A node whose box went away between the mark and here has nothing left to mark.
             auto* layout_node = arena ? entry.identity.bound_layout_node(*arena) : nullptr;
@@ -600,37 +594,37 @@ void InvalidationJournal::drain()
                 if (changed && node)
                     node->set_needs_repaint();
             }
-            if (entry.has_canvas_paint_facts) {
+            if (rare && rare->has_canvas_paint_facts) {
                 Layout::RustFFI::FfiCanvasPaintFacts facts {
-                    .has_content = entry.canvas_has_content,
-                    .content_width = entry.canvas_content_width,
-                    .content_height = entry.canvas_content_height,
-                    .canvas_id = entry.canvas_id,
-                    .content_generation = entry.canvas_content_generation,
+                    .has_content = rare->canvas_has_content,
+                    .content_width = rare->canvas_content_width,
+                    .content_height = rare->canvas_content_height,
+                    .canvas_id = rare->canvas_id,
+                    .content_generation = rare->canvas_content_generation,
                 };
                 auto changed = Layout::RustFFI::layout_arena_set_canvas_paint_facts(layout_node->arena_handle(), Layout::Node::slot_id(layout_node), facts);
                 if (changed && Painting::has_committed_box(*layout_node))
                     Painting::apply_paint_cache_invalidation(*layout_node, Painting::PaintCacheInvalidation::PaintAndHitTest, Painting::PaintCacheInvalidationStage::JournalDrain);
             }
-            if (entry.has_form_control_paint_facts && (layout_node->kind() == Layout::RustFFI::NodeKind::CheckBox || layout_node->kind() == Layout::RustFFI::NodeKind::RadioButton)) {
+            if (rare && rare->has_form_control_paint_facts && (layout_node->kind() == Layout::RustFFI::NodeKind::CheckBox || layout_node->kind() == Layout::RustFFI::NodeKind::RadioButton)) {
                 Layout::RustFFI::FfiFormControlPaintFacts facts {
-                    .enabled = entry.form_control_enabled,
-                    .checked = entry.form_control_checked,
-                    .indeterminate = entry.form_control_indeterminate,
-                    .being_activated = entry.form_control_being_activated,
+                    .enabled = rare->form_control_enabled,
+                    .checked = rare->form_control_checked,
+                    .indeterminate = rare->form_control_indeterminate,
+                    .being_activated = rare->form_control_being_activated,
                 };
                 auto changed = Layout::RustFFI::layout_arena_set_form_control_paint_facts(layout_node->arena_handle(), Layout::Node::slot_id(layout_node), facts);
                 if (changed && Painting::has_committed_box(*layout_node))
                     Painting::set_needs_repaint(*layout_node, InvalidateDisplayList::PaintCommands);
             }
-            if (entry.layer_image_paint_facts_update)
-                entry.layer_image_paint_facts_update(*layout_node);
-            if (entry.replaced_image_paint_facts_update)
-                entry.replaced_image_paint_facts_update(*layout_node);
-            if (entry.video_paint_facts_update)
-                entry.video_paint_facts_update(*layout_node);
-            if (entry.navigable_container_paint_facts_update)
-                entry.navigable_container_paint_facts_update(*layout_node);
+            if (rare && rare->layer_image_paint_facts_update)
+                rare->layer_image_paint_facts_update(*layout_node);
+            if (rare && rare->replaced_image_paint_facts_update)
+                rare->replaced_image_paint_facts_update(*layout_node);
+            if (rare && rare->video_paint_facts_update)
+                rare->video_paint_facts_update(*layout_node);
+            if (rare && rare->navigable_container_paint_facts_update)
+                rare->navigable_container_paint_facts_update(*layout_node);
             if (entry.invalidate_paint_and_hit_test_cache)
                 Painting::apply_paint_cache_invalidation(*layout_node, Painting::PaintCacheInvalidation::PaintAndHitTest, Painting::PaintCacheInvalidationStage::JournalDrain);
             if (entry.invalidate_propagated_text_decoration_caches)
@@ -643,6 +637,11 @@ void InvalidationJournal::drain()
                 else if (Painting::has_committed_box(*layout_node))
                     Painting::apply_repaint_damage(*layout_node, entry.invalidate_display_list, Painting::RepaintDamageStage::JournalDrain);
             }
+        }
+        // The next generation reuses the storage, unless what the drain wrote through noted more.
+        if (m_entries.is_empty()) {
+            entries.clear_with_capacity();
+            m_entries = move(entries);
         }
     }
 
