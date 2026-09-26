@@ -16,12 +16,21 @@
 //! [`ShapeWriter`] writes one, and only a [`Chunk`] hands out a writer, through which a write that
 //! changes a field marks its node in the chunk. A write the next publication would miss does not
 //! compile.
+//!
+//! A slot freed while a publication that may name it is alive is retired rather than reused: it
+//! joins the [`RetireEpoch`] of the latest publication, and the epoch hands it back to the arena
+//! when it is dropped. An earlier publication keeps every later epoch alive, since a slot freed
+//! after a later publication was live when the earlier one was made, so a slot comes back once no
+//! publication that could name it is left. A slot freed while no publication is alive is reused at
+//! once, as before.
 
 use super::layout_node_arena::SLOTS_PER_CHUNK;
 use super::node_data::{NodeData, NodeKind, NodeSlotId, PaintNode, StylePayloadsRef};
 use crate::cow_column::{ColumnSnapshot, CowColumn};
 use std::cell::Cell;
 use std::ops::Deref;
+use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
 
 /// A field of a node that a [`PaintNode`] copies. It reads like a `Cell`, and is written through a
 /// [`ShapeWriter`] or through `&mut`, both of which mark the node in its chunk.
@@ -166,18 +175,66 @@ impl Chunk {
     }
 }
 
-/// The arena's column of what the paint side reads of every node, which it publishes from.
-#[derive(Default)]
+/// The arena's column of what the paint side reads of every node, which it publishes from, and the
+/// slots its publications retire.
 pub(crate) struct TreeShape {
     nodes: CowColumn<PaintNode, SLOTS_PER_CHUNK>,
+    /// The epoch of the latest publication, while one that holds it is alive.
+    latest_epoch: Weak<RetireEpoch>,
+    /// Where dropped epochs send the slots they retired.
+    returned_slots: Receiver<Vec<u32>>,
+    returns: Sender<Vec<u32>>,
+}
+
+impl Default for TreeShape {
+    fn default() -> Self {
+        let (returns, returned_slots) = channel();
+        Self {
+            nodes: CowColumn::default(),
+            latest_epoch: Weak::new(),
+            returned_slots,
+            returns,
+        }
+    }
 }
 
 impl TreeShape {
     /// Brings the rows of every node written since the last publication up to date and publishes
-    /// the column.
-    pub(crate) fn publish(&mut self, chunks: &[Box<Chunk>]) -> ColumnSnapshot<PaintNode, SLOTS_PER_CHUNK> {
+    /// the column. Slots freed from now on are retired until the returned [`RetiredSlots`] is
+    /// dropped.
+    pub(crate) fn publish(
+        &mut self,
+        chunks: &[Box<Chunk>],
+    ) -> (ColumnSnapshot<PaintNode, SLOTS_PER_CHUNK>, RetiredSlots) {
         self.update(chunks);
-        self.nodes.publish()
+        let epoch = Arc::new(RetireEpoch {
+            slots: Mutex::default(),
+            later: OnceLock::new(),
+            returns: self.returns.clone(),
+        });
+        if let Some(previous) = self.latest_epoch.upgrade() {
+            let chained = previous.later.set(epoch.clone());
+            debug_assert!(chained.is_ok(), "only the latest epoch is chained to");
+        }
+        self.latest_epoch = Arc::downgrade(&epoch);
+        (self.nodes.publish(), RetiredSlots { _epoch: epoch })
+    }
+
+    /// Retires a freed slot while a publication that may name it is alive. A slot that is not
+    /// retired is free to reuse at once.
+    pub(crate) fn retire(&self, index: u32) -> bool {
+        let Some(epoch) = self.latest_epoch.upgrade() else {
+            return false;
+        };
+        epoch.slots.lock().unwrap_or_else(PoisonError::into_inner).push(index);
+        true
+    }
+
+    /// Moves the slots whose publications are all gone to `free_list`.
+    pub(crate) fn reclaim_retired_slots(&self, free_list: &mut Vec<u32>) {
+        while let Ok(slots) = self.returned_slots.try_recv() {
+            free_list.extend(slots);
+        }
     }
 
     /// Brings the rows of every node written since the last call up to date. A row whose node did
@@ -198,6 +255,45 @@ impl TreeShape {
                     }
                 }
             }
+        }
+    }
+}
+
+/// Keeps the slots freed after a publication from being reused while it is alive.
+pub(crate) struct RetiredSlots {
+    _epoch: Arc<RetireEpoch>,
+}
+
+/// The slots freed after one publication and before the next. The publication holds it, and so does
+/// the epoch of the publication before, so it is dropped once no publication that could name one of
+/// its slots is alive. Dropping it hands its slots back to the arena.
+struct RetireEpoch {
+    slots: Mutex<Vec<u32>>,
+    later: OnceLock<Arc<RetireEpoch>>,
+    returns: Sender<Vec<u32>>,
+}
+
+impl RetireEpoch {
+    fn hand_back(&mut self) {
+        let slots = std::mem::take(self.slots.get_mut().unwrap_or_else(PoisonError::into_inner));
+        if !slots.is_empty() {
+            // An arena that is gone has no use for its slots.
+            let _ = self.returns.send(slots);
+        }
+    }
+}
+
+impl Drop for RetireEpoch {
+    fn drop(&mut self) {
+        self.hand_back();
+        // Drop the chain of later epochs this one alone held in a loop rather than recursively.
+        let mut later = self.later.take();
+        while let Some(epoch) = later {
+            let Some(mut epoch) = Arc::into_inner(epoch) else {
+                break;
+            };
+            epoch.hand_back();
+            later = epoch.later.take();
         }
     }
 }
@@ -241,7 +337,7 @@ mod tests {
         let mut arena = LayoutNodeArena::new();
         let (root, first, second) = tree(&mut arena);
         arena.set_node_flag(first, NodeFlag::Anonymous, true);
-        let nodes = arena.publish_paint_tree();
+        let (nodes, _retired) = arena.publish_paint_tree();
         for id in [root, first, second] {
             assert!(node(&nodes, id) == Some(&PaintNode::of(arena.data(id))));
         }
@@ -252,7 +348,7 @@ mod tests {
     fn a_published_column_does_not_see_later_writes() {
         let mut arena = LayoutNodeArena::new();
         let (root, first, second) = tree(&mut arena);
-        let nodes = arena.publish_paint_tree();
+        let (nodes, _retired) = arena.publish_paint_tree();
 
         arena.remove_child(root, first);
         arena.set_node_flag(second, NodeFlag::IsFlexItem, true);
@@ -268,7 +364,7 @@ mod tests {
         assert_eq!(node(&nodes, second).unwrap().flags & NodeFlag::IsFlexItem as u32, 0);
         assert!(node(&nodes, second).unwrap().next_sibling.is_invalid());
 
-        let later = arena.publish_paint_tree();
+        let (later, _retired_later) = arena.publish_paint_tree();
         assert!(node(&later, first).is_none());
         assert_eq!(node(&later, root).unwrap().first_child, second);
         assert_eq!(node(&later, second).unwrap().next_sibling, added);
@@ -281,13 +377,115 @@ mod tests {
     fn a_write_that_leaves_the_nodes_as_published_writes_no_row() {
         let mut arena = LayoutNodeArena::new();
         let (root, first, _) = tree(&mut arena);
-        let _nodes = arena.publish_paint_tree();
+        let _published = arena.publish_paint_tree();
         assert!(!arena.paint_tree_changed_since_publish());
         arena.set_node_flag(first, NodeFlag::NeedsLayoutUpdate, true);
         arena.set_node_flag(first, NodeFlag::NeedsLayoutUpdate, false);
         assert!(!arena.paint_tree_changed_since_publish());
         arena.set_node_flag(first, NodeFlag::IsGridItem, true);
         assert!(arena.paint_tree_changed_since_publish());
+        arena.free_subtree(root).destroy_shells_and_invoke_callbacks();
+    }
+
+    #[test]
+    fn a_slot_a_live_publication_names_is_not_reused_until_it_is_dropped() {
+        let mut arena = LayoutNodeArena::new();
+        let (root, first, _) = tree(&mut arena);
+        let (nodes, retired) = arena.publish_paint_tree();
+        arena.remove_child(root, first);
+        arena.free_subtree(first).destroy_shells_and_invoke_callbacks();
+
+        let while_published = arena.allocate_for_test().slot;
+        assert_ne!(while_published.slot_index(), first.slot_index());
+        assert_eq!(node(&nodes, first).unwrap().kind, NodeKind::InlineNode);
+
+        drop((nodes, retired));
+        let once_dropped = arena.allocate_for_test().slot;
+        assert_eq!(once_dropped.slot_index(), first.slot_index());
+        assert_ne!(once_dropped.generation(), first.generation());
+        arena
+            .free_subtree(while_published)
+            .destroy_shells_and_invoke_callbacks();
+        arena.free_subtree(once_dropped).destroy_shells_and_invoke_callbacks();
+        arena.free_subtree(root).destroy_shells_and_invoke_callbacks();
+    }
+
+    #[test]
+    fn an_earlier_publication_keeps_the_slots_freed_after_a_later_one() {
+        let mut arena = LayoutNodeArena::new();
+        let (root, first, _) = tree(&mut arena);
+        let (earlier, earlier_retired) = arena.publish_paint_tree();
+        let later = arena.publish_paint_tree();
+        arena.remove_child(root, first);
+        arena.free_subtree(first).destroy_shells_and_invoke_callbacks();
+
+        drop(later);
+        let while_earlier_is_alive = arena.allocate_for_test().slot;
+        assert_ne!(while_earlier_is_alive.slot_index(), first.slot_index());
+        assert_eq!(node(&earlier, first).unwrap().parent, root);
+
+        drop((earlier, earlier_retired));
+        let once_both_are_dropped = arena.allocate_for_test().slot;
+        assert_eq!(once_both_are_dropped.slot_index(), first.slot_index());
+        arena
+            .free_subtree(while_earlier_is_alive)
+            .destroy_shells_and_invoke_callbacks();
+        arena
+            .free_subtree(once_both_are_dropped)
+            .destroy_shells_and_invoke_callbacks();
+        arena.free_subtree(root).destroy_shells_and_invoke_callbacks();
+    }
+
+    #[test]
+    fn a_slot_freed_with_no_publication_alive_is_reused_at_once() {
+        let mut arena = LayoutNodeArena::new();
+        let (root, first, _) = tree(&mut arena);
+        drop(arena.publish_paint_tree());
+        arena.remove_child(root, first);
+        arena.free_subtree(first).destroy_shells_and_invoke_callbacks();
+        let reused = arena.allocate_for_test().slot;
+        assert_eq!(reused.slot_index(), first.slot_index());
+        arena.free_subtree(reused).destroy_shells_and_invoke_callbacks();
+        arena.free_subtree(root).destroy_shells_and_invoke_callbacks();
+    }
+
+    #[test]
+    fn a_publication_dropped_on_another_thread_hands_its_slots_back() {
+        let mut arena = LayoutNodeArena::new();
+        let (root, first, _) = tree(&mut arena);
+        let published = arena.publish_paint_tree();
+        arena.remove_child(root, first);
+        arena.free_subtree(first).destroy_shells_and_invoke_callbacks();
+        std::thread::spawn(move || {
+            let (nodes, _retired) = published;
+            assert_eq!(node(&nodes, first).unwrap().parent, root);
+        })
+        .join()
+        .unwrap();
+        let reused = arena.allocate_for_test().slot;
+        assert_eq!(reused.slot_index(), first.slot_index());
+        arena.free_subtree(reused).destroy_shells_and_invoke_callbacks();
+        arena.free_subtree(root).destroy_shells_and_invoke_callbacks();
+    }
+
+    #[test]
+    fn a_slot_a_live_published_frame_names_is_not_reused_until_it_is_dropped() {
+        let mut arena = LayoutNodeArena::new();
+        let (root, first, _) = tree(&mut arena);
+        let frame = arena.freeze_paint_frame();
+        arena.remove_child(root, first);
+        arena.free_subtree(first).destroy_shells_and_invoke_callbacks();
+
+        let while_published = arena.allocate_for_test().slot;
+        assert_ne!(while_published.slot_index(), first.slot_index());
+
+        std::thread::spawn(move || drop(frame)).join().unwrap();
+        let once_dropped = arena.allocate_for_test().slot;
+        assert_eq!(once_dropped.slot_index(), first.slot_index());
+        arena
+            .free_subtree(while_published)
+            .destroy_shells_and_invoke_callbacks();
+        arena.free_subtree(once_dropped).destroy_shells_and_invoke_callbacks();
         arena.free_subtree(root).destroy_shells_and_invoke_callbacks();
     }
 }

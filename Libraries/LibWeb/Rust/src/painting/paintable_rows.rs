@@ -1618,7 +1618,8 @@ impl LayoutNodeArena {
             .published
             .clone()
             .expect("the rows were just published");
-        PublishedFrame::new(rows, self.publish_paint_tree())
+        let (nodes, retired_slots) = self.publish_paint_tree();
+        PublishedFrame::new(rows, nodes, retired_slots)
     }
 
     /// Builds the structures a hit-test query derives from the list before the rows are
