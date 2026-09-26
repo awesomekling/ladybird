@@ -3865,6 +3865,19 @@ impl ComputedGroupSets {
             .expect("animation-overlay pin count overflow");
     }
 
+    /// Whether `raw_style_record` is an animation-overlay record the engine no longer assigns: it
+    /// lives by its pins alone.
+    #[must_use]
+    pub fn style_record_is_unassigned_animation_overlay(&self, raw_style_record: u64) -> bool {
+        if raw_style_record & FinalStyleRecordID::ANIMATION_OVERLAY_TAG == 0 {
+            return false;
+        }
+        self.animation_overlay_slots_by_record
+            .get(&FinalStyleRecordID(raw_style_record))
+            .and_then(|slot| self.animation_overlay_slots[*slot as usize].as_ref())
+            .is_some_and(|record| !record.is_assigned)
+    }
+
     pub fn unpin_style_record(&mut self, raw_style_record: u64) {
         let final_style_record = FinalStyleRecordID(raw_style_record);
         if let Some(style_record) = final_style_record.base_record() {
