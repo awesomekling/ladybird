@@ -7169,26 +7169,40 @@ struct LocalNavigable::FlightPaintSeal {
 
 bool LocalNavigable::seal_flight_paint(DOM::Document& document, bool may_present)
 {
-    VERIFY(!m_flight_paint_seal);
+    auto decline = flight_paint_decline(document);
+    HTML::main_thread_event_loop().did_seal_flight_paint(decline);
+    if (decline.has_value())
+        return false;
+    return seal_flight_paint_now(document, may_present);
+}
+
+// Why the flight cannot paint the navigable, if it cannot.
+Optional<Painting::FlightPaintDecline> LocalNavigable::flight_paint_decline(DOM::Document& document) const
+{
+    using Painting::FlightPaintDecline;
     // The flight paints the navigable as step 22 of the rendering update would, and only where nothing painted beside
     // the main thread's own steps would differ.
     if (has_been_destroyed() || !has_compositor_context() || active_document().ptr() != &document)
-        return false;
+        return FlightPaintDecline::Inactive;
     if (!is_local_root()) {
         // Nested navigables paint transparent bitmaps for their parent compositor context.
         auto parent = this->parent();
         if (!parent || !as<LocalNavigable>(*parent).has_compositor_context())
-            return false;
+            return FlightPaintDecline::Inactive;
     }
     // NB: Whether the document opts out of force-dark depends on its root's box, which the flight has yet to lay out.
     if (has_inclusive_ancestor_with_visibility_hidden() || is_svg_page() || m_should_show_line_box_borders || m_should_show_caret_hit_test_debug_overlay || m_force_dark_enabled)
-        return false;
+        return FlightPaintDecline::NotPaintedThatWay;
     if (m_presenter->is_lent_to_frame_in_flight())
-        return false;
+        return FlightPaintDecline::PresenterLent;
     if (document.font_computer().should_defer_initial_paint() || !document.has_paint_state() || !document.has_committed_viewport_box())
-        return false;
-    if (document.flight_paint_is_blocked())
-        return false;
+        return FlightPaintDecline::NothingToPaintYet;
+    return document.flight_paint_blocker();
+}
+
+bool LocalNavigable::seal_flight_paint_now(DOM::Document& document, bool may_present)
+{
+    VERIFY(!m_flight_paint_seal);
 
     PaintConfig paint_config { .paint_overlay = true, .should_show_caret_hit_test_debug_overlay = m_should_show_caret_hit_test_debug_overlay };
     paint_config.force_dark_enabled = false;
@@ -7430,6 +7444,7 @@ bool LocalNavigable::paint_next_frame_if_needed(DOM::UpdateLayoutReason layout_r
         if (active_document() != document || !document->has_committed_viewport_box() || !document->layout_is_up_to_date())
             return false;
     }
+    TemporaryChange origin { Painting::current_recording_origin(), Painting::RecordingOrigin::PaintIfNeeded };
     paint_next_frame();
     return true;
 }
@@ -7450,6 +7465,7 @@ void LocalNavigable::render_screenshot(Gfx::PaintingSurface& painting_surface, P
             navigable->paint_next_frame_if_needed(DOM::UpdateLayoutReason::ProcessScreenshot);
     }
 
+    TemporaryChange origin { Painting::current_recording_origin(), Painting::RecordingOrigin::Screenshot };
     if (!record_display_list_and_scroll_state(paint_config)) {
         callback();
         return;

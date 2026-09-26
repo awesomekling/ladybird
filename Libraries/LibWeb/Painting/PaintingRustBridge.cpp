@@ -26,6 +26,7 @@
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/Node.h>
 #include <LibWeb/DOM/ShadowRoot.h>
+#include <LibWeb/HTML/EventLoop/EventLoop.h>
 #include <LibWeb/HTML/FormAssociatedElement.h>
 #include <LibWeb/HTML/HTMLBRElement.h>
 #include <LibWeb/HTML/HTMLCanvasElement.h>
@@ -679,6 +680,72 @@ static void read_host_recording_inputs(HostRecordingInputs& host, DOM::Document&
     }
 }
 
+StringView recording_origin_name(RecordingOrigin origin)
+{
+    switch (origin) {
+    case RecordingOrigin::RenderingUpdate:
+        return "renderingUpdate"sv;
+    case RecordingOrigin::SynchronousRenderingUpdate:
+        return "synchronousRenderingUpdate"sv;
+    case RecordingOrigin::WaitsForRecordings:
+        return "waitsForRecordings"sv;
+    case RecordingOrigin::NoFrameScheduler:
+        return "noFrameScheduler"sv;
+    case RecordingOrigin::HitTest:
+        return "hitTest"sv;
+    case RecordingOrigin::Screenshot:
+        return "screenshot"sv;
+    case RecordingOrigin::PaintIfNeeded:
+        return "paintIfNeeded"sv;
+    case RecordingOrigin::DocumentRecord:
+        return "documentRecord"sv;
+    case RecordingOrigin::Count:
+        break;
+    }
+    VERIFY_NOT_REACHED();
+}
+
+StringView flight_paint_decline_name(FlightPaintDecline decline)
+{
+    switch (decline) {
+    case FlightPaintDecline::Inactive:
+        return "inactive"sv;
+    case FlightPaintDecline::NotPaintedThatWay:
+        return "notPaintedThatWay"sv;
+    case FlightPaintDecline::PresenterLent:
+        return "presenterLent"sv;
+    case FlightPaintDecline::NothingToPaintYet:
+        return "nothingToPaintYet"sv;
+    case FlightPaintDecline::InspectorOverlay:
+        return "inspectorOverlay"sv;
+    case FlightPaintDecline::Caret:
+        return "caret"sv;
+    case FlightPaintDecline::FocusedTextControl:
+        return "focusedTextControl"sv;
+    case FlightPaintDecline::MiddleButtonScroll:
+        return "middleButtonScroll"sv;
+    case FlightPaintDecline::ResizeObserver:
+        return "resizeObserver"sv;
+    case FlightPaintDecline::Animations:
+        return "animations"sv;
+    case FlightPaintDecline::ForcedCompositorLayer:
+        return "forcedCompositorLayer"sv;
+    case FlightPaintDecline::ViewTransitionOrScrollState:
+        return "viewTransitionOrScrollState"sv;
+    case FlightPaintDecline::HostedNavigable:
+        return "hostedNavigable"sv;
+    case FlightPaintDecline::Count:
+        break;
+    }
+    VERIFY_NOT_REACHED();
+}
+
+RecordingOrigin& current_recording_origin()
+{
+    static thread_local RecordingOrigin origin { RecordingOrigin::PaintIfNeeded };
+    return origin;
+}
+
 Optional<PendingDisplayListRecording> begin_rust_display_list_recording(DOM::Document& document, Compositing::DisplayList const& placeholder_display_list, Compositing::DisplayListResourceStorage& resource_storage, PaintCommandCacheMode cache_mode, HTML::PaintConfig const& config, InspectorOverlayInputs const& overlay_inputs, RecordingRun run)
 {
     auto* arena = layout_arena_handle(document);
@@ -701,6 +768,8 @@ Optional<PendingDisplayListRecording> begin_rust_display_list_recording(DOM::Doc
         return {};
     // NB: The render side may still record while the main thread waits, if the frame scheduler does not submit recordings.
     auto const submitted = Layout::RustFFI::layout_arena_frame_state(arena) == Layout::RustFFI::FfiLayoutFrameState::InFlight;
+    if (!submitted)
+        HTML::main_thread_event_loop().did_wait_for_recording(current_recording_origin(), rust_timer.elapsed_time().to_nanoseconds());
     return PendingDisplayListRecording {
         .document = document,
         .arena = arena,

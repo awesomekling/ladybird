@@ -250,6 +250,17 @@ Painting::RecordingRun FrameScheduler::recording_run() const
     return Painting::RecordingRun::Now;
 }
 
+Painting::RecordingOrigin FrameScheduler::recording_origin() const
+{
+    if (recording_run() == Painting::RecordingRun::InSubmittedFrame)
+        return Painting::RecordingOrigin::RenderingUpdate;
+    if (m_synchronous_update)
+        return Painting::RecordingOrigin::SynchronousRenderingUpdate;
+    if (m_ticket && m_ticket->waits_for_recordings)
+        return Painting::RecordingOrigin::WaitsForRecordings;
+    return Painting::RecordingOrigin::NoFrameScheduler;
+}
+
 void FrameScheduler::add_to_ticket(LocalNavigable& navigable, LocalNavigable::PendingCompositorFrame&& frame)
 {
     VERIFY(m_state == State::MainHalf);

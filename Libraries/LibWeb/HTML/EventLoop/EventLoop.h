@@ -19,6 +19,7 @@
 #include <LibWeb/DOM/LayoutOverlapBlocker.h>
 #include <LibWeb/Export.h>
 #include <LibWeb/HTML/EventLoop/TaskQueue.h>
+#include <LibWeb/Painting/RecordingOrigin.h>
 #include <LibWebCommon/HighResolutionTime/DOMHighResTimeStamp.h>
 
 namespace Web::HTML {
@@ -136,6 +137,12 @@ public:
         // Rendering updates by how many frames they submitted (their hops to the render side): none, 1, 2, 3, and 4 or
         // more.
         Array<u64, 5> rendering_updates_by_frames_submitted {};
+        // Display list recordings the main thread waited for rather than submitting them, by what asked for them.
+        Array<u64, to_underlying(Painting::RecordingOrigin::Count)> recordings_waited_for {};
+        Array<u64, to_underlying(Painting::RecordingOrigin::Count)> recording_wait_nanoseconds {};
+        // Flights the main thread sealed paint for, and the ones it did not, by why.
+        u64 flight_paint_seals { 0 };
+        Array<u64, to_underlying(Painting::FlightPaintDecline::Count)> flight_paint_declines {};
     };
 
     enum class Type {
@@ -271,6 +278,18 @@ public:
     void did_consume_frame_tail(u64 nanoseconds);
     void did_drop_frame() { ++m_rendering_scheduler_counters.frames_dropped; }
     void did_run_frame_in_lockstep(FrameLockstepReason reason) { ++m_rendering_scheduler_counters.frames_lockstep[to_underlying(reason)]; }
+    void did_seal_flight_paint(Optional<Painting::FlightPaintDecline> decline)
+    {
+        if (decline.has_value())
+            ++m_rendering_scheduler_counters.flight_paint_declines[to_underlying(*decline)];
+        else
+            ++m_rendering_scheduler_counters.flight_paint_seals;
+    }
+    void did_wait_for_recording(Painting::RecordingOrigin origin, i64 nanoseconds)
+    {
+        ++m_rendering_scheduler_counters.recordings_waited_for[to_underlying(origin)];
+        m_rendering_scheduler_counters.recording_wait_nanoseconds[to_underlying(origin)] += nanoseconds;
+    }
     // Main-thread only, and cheap enough to ask on every journal write.
     static bool a_frame_is_in_flight() { return s_a_frame_is_in_flight; }
     void note_journal_entry_during_flight(JournalEntryKind kind) { ++m_rendering_scheduler_counters.journal_entries_during_flight[to_underlying(kind)]; }

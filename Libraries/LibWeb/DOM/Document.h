@@ -472,7 +472,7 @@ public:
     // thread paints (inspector overlays, a caret, a focused text control or area) or what the rendering update's steps
     // after its layout can change before its paint (resize observers, animations, view transitions, scroll-state
     // queries, nested navigables).
-    bool flight_paint_is_blocked() const;
+    Optional<Painting::FlightPaintDecline> flight_paint_blocker() const;
     // Hands the pending accumulated visual contexts update to the flight about to be submitted, which runs it.
     bool hand_accumulated_visual_contexts_update_to_flight() { return exchange(m_needs_accumulated_visual_contexts_update, false); }
     // Takes in what the document's flight prepared of its paint state. A flight that prepared nothing hands back the
