@@ -1001,6 +1001,21 @@ impl super::StyleEngineState {
         sample: crate::css::style_compute::SettledRowSample,
         counters: &mut super::Counters,
     ) -> Result<SettledRowPublication, &'static str> {
+        let installed_style_record = sample.style_record;
+        self.publish_sample_over_installed_record(node, pseudo, sample, installed_style_record, counters)
+    }
+
+    /// Publish a sample composed over the settled record `sample.style_record` in place of
+    /// `installed_style_record`, which the invalidation is measured against: what the host holds
+    /// until it installs the publication.
+    pub(crate) fn publish_sample_over_installed_record(
+        &mut self,
+        node: StyleNodeID,
+        pseudo: Option<u8>,
+        sample: crate::css::style_compute::SettledRowSample,
+        installed_style_record: u64,
+        counters: &mut super::Counters,
+    ) -> Result<SettledRowPublication, &'static str> {
         use crate::css::host_shared::{HostShared, SharedPayload};
 
         let pseudo_kind = pseudo.unwrap_or(u8::MAX);
@@ -1022,9 +1037,12 @@ impl super::StyleEngineState {
         let shared = SharedPayload::from_pointer_slice(&payloads.payloads);
         let is_document_element = pseudo.is_none()
             && self.computed_group_sets.adjustment_facts(node) & element_adjustment_fact::IS_DOCUMENT_ELEMENT != 0;
-        let invalidation =
-            self.retained
-                .compare_animation_overlay(style_record, sample.style.overlay, shared, is_document_element);
+        let invalidation = self.retained.compare_animation_overlay(
+            installed_style_record,
+            sample.style.overlay,
+            shared,
+            is_document_element,
+        );
         let overlay_is_empty = overlay.is_empty();
         let identity = match overlay_is_empty {
             true => 0,

@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style>
+    @keyframes overflow-container {
+        0% { overflow: hidden; }
+        100% { overflow: initial; }
+    }
+    #target { opacity: 0; transition: opacity 1s 50ms; }
+    #target.on { opacity: 1; animation: overflow-container 2s; }
+</style>
+<div id="target">reveal</div>
+<script>
+    test(() => {
+        // A class change that starts a transition and an animation of overflow, whose value feeds
+        // the box adjustments: the transition step over the installed composition moves nothing
+        // the composition already animated, so the style update settles.
+        internals.updateStyle();
+        internals.resetStyleInvalidationCounters();
+        target.className = "on";
+        internals.updateStyle();
+
+        const counters = internals.getStyleInvalidationCounters();
+        println(`style pass guard reached: ${counters.styleUpdatePassGuardHits}`);
+        println(`reaction batches settled in few waves: ${counters.styleEngineReactionBatchRuns < 8}`);
+        println(`transition running: ${target.getAnimations().some(animation => animation instanceof CSSTransition)}`);
+        println(`overflow: ${getComputedStyle(target).overflow}`);
+    });
+</script>
