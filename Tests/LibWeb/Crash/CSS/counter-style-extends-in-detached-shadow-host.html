@@ -1,0 +1,11 @@
+<!DOCTYPE html>
+<script>
+    // A shadow root under a detached host reaches no document scope, which is where the predefined counter styles
+    // are registered. Building its counter styles must still find decimal to extend.
+    const host = document.createElement("div");
+    const shadowRoot = host.attachShadow({ mode: "open" });
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync("@counter-style x { system: extends decimal; } @counter-style y { system: extends lower-roman; }");
+    shadowRoot.adoptedStyleSheets = [sheet];
+    document.body.offsetWidth;
+</script>

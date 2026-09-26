@@ -1191,13 +1191,24 @@ void StyleScope::for_each_active_css_style_sheet(Function<void(CSS::StyleSheetSt
 
 RefPtr<CSS::CounterStyle const> StyleScope::get_registered_counter_style(Utf16FlyString const& name) const
 {
-    return dereference_global_tree_scoped_reference<CSS::CounterStyle const*>([&](StyleScope const& scope) {
+    Function<Optional<CSS::CounterStyle const*>(StyleScope const&)> look_up_in_scope = [&](StyleScope const& scope) -> Optional<CSS::CounterStyle const*> {
         if (scope.m_needs_counter_style_cache_update && !scope.m_is_doing_counter_style_cache_update)
             const_cast<StyleScope&>(scope).build_counter_style_cache();
 
         return scope.m_registered_counter_styles.get(name);
-    })
-        .value_or(nullptr);
+    };
+
+    if (auto counter_style = dereference_global_tree_scoped_reference<CSS::CounterStyle const*>(look_up_in_scope); counter_style.has_value())
+        return *counter_style;
+
+    // NB: The predefined counter styles are registered only in the document's scope, which a shadow tree under a
+    //     detached host never reaches through its hosts. Look there last so those names still resolve for it.
+    auto const* outermost_scope = this;
+    while (auto const* parent = outermost_scope->parent_counter_style_scope())
+        outermost_scope = parent;
+    if (outermost_scope->m_node->is_document())
+        return nullptr;
+    return look_up_in_scope(document().style_scope()).value_or(nullptr);
 }
 
 Optional<StyleScope::FunctionDefinitionAndScope> StyleScope::get_function_definition(Utf16FlyString const& name) const
