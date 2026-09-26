@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <AK/Array.h>
 #include <AK/Function.h>
 #include <AK/Variant.h>
 #include <AK/Vector.h>
@@ -30,12 +31,23 @@ class StyleEffectDrain {
 public:
     // -- The render half ----------------------------------------------------------------------
 
-    // The element and its layout node already hold the record; what applying it to the layout node
-    // adds (style resources, anonymous reinheritance, repaint) is render state.
+    static constexpr size_t synthetic_pseudo_element_count = to_underlying(last_synthetic_pseudo_element) - to_underlying(first_synthetic_pseudo_element) + 1;
+    // The records of an element's synthetic pseudo-elements, by kind from the first.
+    using PseudoElementStyleRecords = Array<StyleRecordID, synthetic_pseudo_element_count>;
+
+    // What applying the records a row installs to its layout nodes adds (style resources, anonymous
+    // reinheritance, repaint) is render state. Once the batch is installed, the row names the records
+    // its element holds, and the layout nodes are the rows the arena binds to its style node:
+    // applying it reads nothing of the element.
     struct LayoutNodeStyle {
         StyleNodeID style_node;
         RequiredInvalidationAfterStyleChange invalidation;
+        // None where the element is gone by the time the batch is installed.
+        Optional<StyleRecordID> style_record {};
+        // Where the drain keeps the records of the element's synthetic pseudo-elements, if it has any.
+        u32 pseudo_element_style_records { NumericLimits<u32>::max() };
     };
+
     // What a row's change invalidates of layout, the layout tree, visual contexts and scroll snapping.
     struct ElementInvalidation {
         StyleNodeID style_node;
@@ -110,11 +122,17 @@ public:
     // Install a published style batch inside the drain: `install` receives the scope that proves it.
     static void install(DOM::Document&, Function<void(StyleDrainScope const&)> const& install);
 
+    static PseudoElementStyleRecords pseudo_element_style_records_of(DOM::Element const&);
+    // Applies the records a row installs to the layout nodes the arena binds to its style node.
+    static void apply_layout_node_style(DOM::Document&, StyleNodeID, RequiredInvalidationAfterStyleChange const&, StyleRecordID, PseudoElementStyleRecords const&);
+
 private:
+    void take_layout_node_style_records(DOM::Document&);
     void apply_render_half(StyleDrainScope const&, DOM::Document&);
     void apply_main_half(StyleDrainScope const&, DOM::Document&);
 
     Vector<RenderEffect> m_render_effects;
+    Vector<PseudoElementStyleRecords> m_pseudo_element_style_records;
     Vector<MainEffect> m_main_effects;
 };
 

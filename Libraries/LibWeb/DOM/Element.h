@@ -936,7 +936,6 @@ private:
 
     void exit_fullscreen_on_element_removal();
     CSS::RequiredInvalidationAfterStyleChange recompute_pseudo_element_styles(CSS::StyleDrainScope const&, bool& did_change_custom_properties, bool had_list_marker, EnginePseudoElementRecords const* = nullptr, EnginePseudoElementDamages const* = nullptr);
-    void apply_computed_pseudo_element_styles_to_layout_nodes_if_needed(CSS::RequiredInvalidationAfterStyleChange const&);
     void publish_custom_property_names();
     void publish_custom_property_names(RefPtr<CSS::CustomPropertyData const> data);
     RefPtr<CSS::CustomPropertyData const> set_own_custom_property_data(CSS::StyleDrainScope const&, RefPtr<CSS::CustomPropertyData const> current, RefPtr<CSS::CustomPropertyData const> data);

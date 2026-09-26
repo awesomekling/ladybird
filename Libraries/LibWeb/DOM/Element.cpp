@@ -1781,13 +1781,30 @@ void Element::settle_pseudo_elements_over_moved_composition(CSS::StyleDrainScope
     settle_pseudo_elements_in_next_pass(scope, computed_values->display().is_list_item());
 }
 
+// A style change can change what an SVG paint resource describes, which the document syncs its paint
+// resources from on the main thread.
+static void note_svg_paint_resource_style_change(Element& element)
+{
+    if (auto* svg_element = as_if<SVG::SVGElement>(element))
+        svg_element->note_svg_paint_resource_description_may_have_changed();
+}
+
+// The records the element installed reach its layout nodes in the drain's render half, or at once
+// where no drain takes them.
+static void apply_layout_node_style_after_installation(Element& element, CSS::StyleEffectDrain* effect_drain, CSS::RequiredInvalidationAfterStyleChange const& invalidation)
+{
+    if (!effect_drain) {
+        element.apply_computed_style_to_layout_node_if_needed(invalidation);
+        return;
+    }
+    note_svg_paint_resource_style_change(element);
+    effect_drain->append(CSS::StyleEffectDrain::LayoutNodeStyle { element.style_node_id(), invalidation });
+}
+
 CSS::RequiredInvalidationAfterStyleChange Element::install_engine_pseudo_element_records_after_sample(CSS::StyleDrainScope const& scope, bool& did_change_custom_properties, bool old_is_list_item, EnginePseudoElementRecords const* records, CSS::StyleEffectDrain* effect_drain)
 {
     auto invalidation = recompute_pseudo_element_styles(scope, did_change_custom_properties, old_is_list_item, records);
-    if (effect_drain)
-        effect_drain->append(CSS::StyleEffectDrain::LayoutNodeStyle { style_node_id(), with_style_row_counter_style_invalidation(*this, invalidation) });
-    else
-        apply_computed_style_to_layout_node_if_needed(with_style_row_counter_style_invalidation(*this, invalidation));
+    apply_layout_node_style_after_installation(*this, effect_drain, with_style_row_counter_style_invalidation(*this, invalidation));
     return invalidation;
 }
 
@@ -2018,53 +2035,8 @@ bool Element::apply_box_presence_change_in_place(SetNeedsLayoutTreeUpdateReason 
 
 void Element::apply_computed_style_to_layout_node_if_needed(CSS::RequiredInvalidationAfterStyleChange const& invalidation)
 {
-    auto* layout_node = unsafe_layout_node();
-    if (auto* svg_element = as_if<SVG::SVGElement>(*this))
-        svg_element->note_svg_paint_resource_description_may_have_changed();
-    if (invalidation.needs_layout_tree_rebuild())
-        return;
-
-    if (!layout_node) {
-        apply_computed_pseudo_element_styles_to_layout_nodes_if_needed(invalidation);
-        return;
-    }
-
-    // If we're keeping the layout tree, we can just apply the new style to the existing layout tree.
-    VERIFY(has_style());
-    layout_node->apply_style(style_record_identity());
-    if (Painting::has_committed_box(*layout_node))
-        Painting::repaint_after_style_change(*layout_node, invalidation);
-
-    apply_computed_pseudo_element_styles_to_layout_nodes_if_needed(invalidation);
-}
-
-void Element::apply_computed_pseudo_element_styles_to_layout_nodes_if_needed(CSS::RequiredInvalidationAfterStyleChange const& invalidation)
-{
-    if (invalidation.needs_layout_tree_rebuild())
-        return;
-
-    if (invalidation.repaint_selection) {
-        Painting::push_selection_pseudo_style(*this);
-        // NB: A display:contents element has no box of its own. Invalidate the nearest
-        //     painted ancestor's subtree so cached text commands take the new highlight.
-        for (Node const* node = this; node; node = node->parent_or_shadow_host()) {
-            if (auto* layout_node = node->unsafe_layout_node(); layout_node && Painting::has_committed_box(*layout_node)) {
-                Painting::set_needs_repaint_in_subtree(*layout_node);
-                break;
-            }
-        }
-    }
-
-    for_each_synthetic_pseudo_element([&](CSS::PseudoElement pseudo_element_type, SyntheticPseudoElement const& pseudo_element) {
-        if (!has_style(pseudo_element_type))
-            return;
-
-        if (auto node_with_style = pseudo_element.unsafe_layout_node()) {
-            node_with_style->apply_style(style_record_identity(pseudo_element_type));
-            if (Painting::has_committed_box(*node_with_style))
-                Painting::repaint_after_style_change(*node_with_style, invalidation);
-        }
-    });
+    note_svg_paint_resource_style_change(*this);
+    CSS::StyleEffectDrain::apply_layout_node_style(document(), style_node_id(), invalidation, style_record_identity(), CSS::StyleEffectDrain::pseudo_element_style_records_of(*this));
 }
 
 void Element::record_style_query_custom_property_reference(Optional<CSS::PseudoElement> pseudo_element, Utf16FlyString const& name)
@@ -2344,10 +2316,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
         if (!CSS::deferring_engine_pseudo_installation())
             invalidation |= recompute_pseudo_element_styles(scope, did_change_custom_properties, false, &pseudo_element_records, pseudo_element_damages);
         publish_custom_property_names(move(custom_property_environment));
-        if (effect_drain)
-            effect_drain->append(CSS::StyleEffectDrain::LayoutNodeStyle { style_node_id(), invalidation });
-        else
-            apply_computed_style_to_layout_node_if_needed(invalidation);
+        apply_layout_node_style_after_installation(*this, effect_drain, invalidation);
         return invalidation;
     }
     // The engine derives records this way only when the element's animation names are exactly what
@@ -2433,10 +2402,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
     if (new_style_record != old_style_record || did_change_custom_properties)
         invalidate_descendant_styles_depending_on_style_container_query();
     if (comparison == EngineRecordComparison::AtInstallation) {
-        if (effect_drain)
-            effect_drain->append(CSS::StyleEffectDrain::LayoutNodeStyle { style_node_id(), with_style_row_counter_style_invalidation(*this, result.invalidation) });
-        else
-            apply_computed_style_to_layout_node_if_needed(with_style_row_counter_style_invalidation(*this, result.invalidation));
+        apply_layout_node_style_after_installation(*this, effect_drain, with_style_row_counter_style_invalidation(*this, result.invalidation));
     }
     return result.invalidation;
 }
@@ -2463,10 +2429,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::compare_engine_computed_style
             document().style_invalidation_counters().element_computed_style_changes++;
         invalidation |= result.invalidation;
     }
-    if (effect_drain)
-        effect_drain->append(CSS::StyleEffectDrain::LayoutNodeStyle { style_node_id(), with_style_row_counter_style_invalidation(*this, invalidation) });
-    else
-        apply_computed_style_to_layout_node_if_needed(with_style_row_counter_style_invalidation(*this, invalidation));
+    apply_layout_node_style_after_installation(*this, effect_drain, with_style_row_counter_style_invalidation(*this, invalidation));
     return invalidation;
 }
 
