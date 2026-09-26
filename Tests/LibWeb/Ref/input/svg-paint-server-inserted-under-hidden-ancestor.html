@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<link rel="match" href="../expected/svg-paint-server-inserted-under-hidden-ancestor-ref.html">
+<style>
+    #styled { color: green; }
+</style>
+<svg width="100" height="100"><rect width="100" height="100" fill="url(#gradient)"/></svg>
+<div id="hidden"><div id="styled"></div></div>
+<script>
+    internals.updateStyle();
+    hidden.style.display = "none";
+    internals.updateStyle();
+    // The gradient's stops take their color from an ancestor that entered display:none. The
+    // gradient paints the visible rect, so the stops and every ancestor they inherit from still
+    // need their style.
+    styled.innerHTML = `<span><svg><linearGradient id="gradient"><stop offset="0" stop-color="currentColor"/><stop offset="1" stop-color="currentColor"/></linearGradient></svg></span>`;
+</script>
