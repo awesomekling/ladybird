@@ -174,13 +174,19 @@ CounterStyle::CounterStyle(Utf16FlyString name, CounterStyleAlgorithm algorithm,
     , m_range(move(range))
     , m_fallback(move(fallback))
     , m_pad(move(pad))
-    , m_rust_counter_style(create_rust_counter_style(m_name, m_algorithm, m_negative_sign, m_prefix, m_suffix, m_range, m_fallback, m_pad))
 {
 }
 
 CounterStyle::~CounterStyle()
 {
     Parser::ValueParserFFI::rust_counter_style_release(m_rust_counter_style);
+}
+
+Parser::ValueParserFFI::FfiRegisteredCounterStyle const* CounterStyle::rust_counter_style() const
+{
+    if (!m_rust_counter_style)
+        m_rust_counter_style = create_rust_counter_style(m_name, m_algorithm, m_negative_sign, m_prefix, m_suffix, m_range, m_fallback, m_pad);
+    return m_rust_counter_style;
 }
 
 bool counter_style_representation_depends_on_value(CounterStyle const& counter_style)

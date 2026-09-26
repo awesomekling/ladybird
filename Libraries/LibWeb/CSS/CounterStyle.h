@@ -43,8 +43,10 @@ public:
     CounterStylePad const& pad() const { return m_pad; }
 
     // The representation algorithm and the descriptors it reads live in Rust; this is the handle
-    // the style scope publishes and a representation request names.
-    Parser::ValueParserFFI::FfiRegisteredCounterStyle const* rust_counter_style() const { return m_rust_counter_style; }
+    // the style scope publishes and a representation request names. It is made the first time it
+    // is asked for: a style scope rebuilding its counter styles resolves every one of them again
+    // and keeps the one it had whenever the new one equals it.
+    Parser::ValueParserFFI::FfiRegisteredCounterStyle const* rust_counter_style() const;
 
     bool representation_is_constant() const;
     bool equals(CounterStyle const&) const;
@@ -82,7 +84,7 @@ private:
     // AD-HOC: We store the `pad` descriptor here as well to have everything in one place
     CounterStylePad m_pad;
 
-    Parser::ValueParserFFI::FfiRegisteredCounterStyle* m_rust_counter_style { nullptr };
+    mutable Parser::ValueParserFFI::FfiRegisteredCounterStyle* m_rust_counter_style { nullptr };
 };
 
 bool counter_style_representation_depends_on_value(CounterStyle const&);
