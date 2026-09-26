@@ -1959,6 +1959,11 @@ u64 Internals::forced_join_count(Utf16String const& stage) const
     return Layout::RustFFI::rust_stage_thread_forced_joins(label.bytes().data(), label.bytes().size());
 }
 
+u64 Internals::recordings_cancelled_by_reads() const
+{
+    return Layout::RustFFI::rust_stage_thread_recordings_cancelled_by_reads();
+}
+
 bool Internals::frame_in_flight_holds_document() const
 {
     auto const& document = window().associated_document();

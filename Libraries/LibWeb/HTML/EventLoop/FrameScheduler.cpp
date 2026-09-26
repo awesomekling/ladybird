@@ -424,9 +424,11 @@ void FrameScheduler::commit()
     auto navigables = move(m_ticket->navigables);
     for (auto& [navigable, frame, held_compositor_context] : navigables) {
         // FIXME: A navigable destroyed while its frame was in flight retires the frame instead of finishing it.
-        navigable->finish_painting_next_frame(frame);
+        bool const painted = navigable->finish_painting_next_frame(frame);
         if (held_compositor_context.has_value())
             Layout::RustFFI::rust_frame_release_compositor_context(*held_compositor_context);
+        if (!painted)
+            continue;
         m_event_loop.note_frame_painted({});
         if (navigable->is_local_root())
             m_ticket->painted_local_roots.append(navigable);
