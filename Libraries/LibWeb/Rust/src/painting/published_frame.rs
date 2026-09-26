@@ -159,6 +159,43 @@ impl PublishedRows {
     }
 }
 
+/// The box whose content box a node is laid out against, found by walking its ancestors as the
+/// arena's own walk does (`containing_block_by_walking_ancestors`), from what a [`PaintRead`] reads.
+fn containing_block_by_walking_ancestors(read: &impl PaintRead, node: NodeSlotId) -> Option<NodeSlotId> {
+    use crate::css::css_enums::positioning;
+    let kind = read.node_kind_if_live(node)?;
+    let position = if node_facts::kind_is_text(kind) {
+        positioning::STATIC
+    } else {
+        crate::painting::style_queries::position(read, node)
+    };
+    if position != positioning::ABSOLUTE && position != positioning::FIXED {
+        let mut ancestor = read.node_parent_if_live(node);
+        while let Some(candidate) = ancestor {
+            let shape = (read.node_kind_if_live(candidate)?, read.node_flags_if_live(candidate));
+            if node_facts::node_forms_containing_block_for_children(&shape, read.node_style_if_live(candidate)) {
+                return Some(candidate);
+            }
+            ancestor = read.node_parent_if_live(candidate);
+        }
+        return None;
+    }
+    let is_fixed_position = position == positioning::FIXED;
+    let establishes_containing_block = node_facts::containing_block_establishment_flag(is_fixed_position) as u32;
+    let mut current = node;
+    while let Some(ancestor) = read.node_parent_if_live(current) {
+        current = ancestor;
+        if read.node_kind_if_live(current).is_some_and(node_facts::kind_is_box)
+            && read.node_flags_if_live(current) & establishes_containing_block != 0
+        {
+            return Some(current);
+        }
+    }
+    // A fixed-position box with no ancestor establishing its containing block is laid out against
+    // the root.
+    is_fixed_position.then_some(current)
+}
+
 /// The reads the display list recording makes of a document. The live arena answers them from the
 /// columns layout writes; a [`PublishedFrame`] answers them from what the document published.
 pub(crate) trait PaintRead: Sized {
@@ -297,6 +334,13 @@ pub(crate) trait PaintRead: Sized {
 /// maps the implementing type to.
 macro_rules! read_live_layout_tree {
     ($arena:path) => {
+        fn node_containing_block_if_live(
+            &self,
+            id: crate::layout::node_data::NodeSlotId,
+        ) -> Option<crate::layout::node_data::NodeSlotId> {
+            crate::layout::LayoutNodeArena::node_containing_block_if_live($arena(self), id)
+        }
+
         fn slot_is_live(&self, id: crate::layout::node_data::NodeSlotId) -> bool {
             crate::layout::LayoutNodeArena::slot_is_live($arena(self), id)
         }
@@ -406,13 +450,6 @@ macro_rules! read_live_paint_facts {
             read: impl FnOnce(&crate::painting::visual_context::BoxVisualContextNodeHandles) -> R,
         ) -> R {
             crate::layout::LayoutNodeArena::with_paintable_visual_context_node_handles($arena(self), id, read)
-        }
-
-        fn node_containing_block_if_live(
-            &self,
-            id: crate::layout::node_data::NodeSlotId,
-        ) -> Option<crate::layout::node_data::NodeSlotId> {
-            crate::layout::LayoutNodeArena::node_containing_block_if_live($arena(self), id)
         }
 
         fn text_content(&self, id: crate::layout::node_data::NodeSlotId) -> Option<&crate::layout::TextContent> {
@@ -657,6 +694,10 @@ impl PaintRead for PaintSource<'_> {
 
     fn node_style_if_live(&self, id: NodeSlotId) -> Option<ComputedValuesView<'_>> {
         PublishedFrame::style_of(self.frame.node(id)?)
+    }
+
+    fn node_containing_block_if_live(&self, id: NodeSlotId) -> Option<NodeSlotId> {
+        containing_block_by_walking_ancestors(self, id)
     }
 
     read_live_paint_facts!(PaintSource::arena);

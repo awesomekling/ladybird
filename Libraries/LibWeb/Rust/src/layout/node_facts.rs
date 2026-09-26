@@ -509,6 +509,18 @@ impl NodeShape for NodeData {
     }
 }
 
+impl NodeShape for (NodeKind, u32) {
+    #[inline]
+    fn kind(&self) -> NodeKind {
+        self.0
+    }
+
+    #[inline]
+    fn flags(&self) -> u32 {
+        self.1
+    }
+}
+
 impl NodeShape for super::node_data::PaintNode {
     #[inline]
     fn kind(&self) -> NodeKind {
