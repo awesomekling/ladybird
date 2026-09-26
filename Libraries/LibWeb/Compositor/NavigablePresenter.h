@@ -86,6 +86,12 @@ public:
 
     // Whether the frame took the tree to the compositor, which the seal marked as done already.
     bool did_update_visual_context_tree_in_compositor() const { return m_did_update_visual_context_tree_in_compositor; }
+    // A render clock tick presents with the tree its layout left, which kept the structure of the sealed one.
+    void replace_visual_context_tree(Compositing::AccumulatedVisualContextTree visual_context_tree, bool needs_compositor_update)
+    {
+        m_visual_context_tree = move(visual_context_tree);
+        m_visual_context_tree_needs_compositor_update = needs_compositor_update;
+    }
 
 private:
     Optional<Compositing::AccumulatedVisualContextTree> m_visual_context_tree;

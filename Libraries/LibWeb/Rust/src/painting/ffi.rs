@@ -1610,9 +1610,11 @@ pub(crate) unsafe fn record_for_clock_tick(arena_handle: *mut c_void) -> bool {
 
 /// Updates the visual contexts a clock tick's layout left behind, on the render side, as the main
 /// thread's rendering update does before it records. Returns whether the tick can show its frame
-/// without the main thread: the update changed nothing of the tree, whose copy the compositor keeps
-/// in step with the main thread's frames, and nothing a box records of it. Where it returns false,
-/// the tree may have moved on already, and the main thread's next frame takes it to the compositor.
+/// without the main thread: the update kept the structure of the tree, whose copy the compositor
+/// keeps in step with the main thread's frames, and moved at most what its contexts hold (a clip
+/// rect, a transform), which the tick's frame takes to the compositor with the tree. Where it
+/// returns false, the tree may have moved on already, and the main thread's next frame takes it to
+/// the compositor.
 ///
 /// # Safety
 ///
@@ -1646,7 +1648,7 @@ pub(crate) unsafe fn settle_visual_contexts_for_clock_tick(arena_handle: *mut c_
     }
     // SAFETY: Guaranteed by the caller; no borrow of the arena is live here.
     let outcome = update_accumulated_visual_contexts_stage(unsafe { arena_from_handle_mut(arena_handle) }, viewport);
-    !outcome.performed_full_build && !outcome.tree_changed
+    !outcome.performed_full_build && !outcome.structural_epoch_changed
 }
 
 /// What a flight's recording reads of the host, which the main thread sealed where it submitted the

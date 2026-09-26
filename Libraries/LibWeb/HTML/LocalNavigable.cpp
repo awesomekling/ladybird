@@ -7048,6 +7048,15 @@ Optional<LocalNavigable::RenderClockFrameKit> LocalNavigable::seal_render_clock_
 void LocalNavigable::present_render_clock_frame(RenderClockFrameKit& kit)
 {
     auto& presentation = *kit.presentation;
+    // What the tick's layout moved of the visual contexts, a clip or a transform, goes to the compositor with the tree:
+    // with the display list the tick recorded, or on its own where the recording is the same.
+    if (auto const* tree = Layout::RustFFI::layout_arena_main_visual_context_tree_retain(kit.recording->arena)) {
+        auto visual_context_tree = Compositing::AccumulatedVisualContextTree::adopt_rust_handle(tree);
+        bool const changed = visual_context_tree.rust_handle() != kit.recording->visual_context_tree.rust_handle();
+        if (changed)
+            kit.recording->visual_context_tree = visual_context_tree;
+        presentation.source.replace_visual_context_tree(move(visual_context_tree), changed);
+    }
     presentation.recording = kit.recording.ptr();
     presentation.published.clear();
     presentation.presented_scene_epoch.clear();
