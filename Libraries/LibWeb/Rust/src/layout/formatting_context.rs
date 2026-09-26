@@ -2363,11 +2363,12 @@ const _: () = {
     const fn assert_send<T: Send>() {}
     assert_send::<LayoutStageInput<'static>>();
     assert_send::<LayoutStageOutput>();
+    assert_send::<LayoutScratch>();
 };
 
 /// The arena's layout scratch, with the intrinsic size caches the arena recorded as stale since the
 /// last pass dropped, so the stage never reads them.
-fn layout_scratch_for_stage<'a>(arena_handle: *mut c_void, arena: &LayoutNodeArena) -> &'a LayoutScratch {
+fn layout_scratch_for_stage<'a>(arena_handle: *mut c_void, arena: &LayoutNodeArena) -> &'a mut LayoutScratch {
     // SAFETY: The scratch lives beside the arena for as long as the handle does.
     let scratch = unsafe { LayoutScratch::from_handle(arena_handle) };
     scratch
@@ -2559,7 +2560,7 @@ pub(crate) unsafe fn compute_root_layout(
         should_collect_devtools_layout_data,
     };
     // SAFETY: The arena and its scratch belong to the waiting owner.
-    unsafe { crate::stage_thread::run_stage(|| run_root_layout_stage(input, scratch)) }
+    unsafe { crate::stage_thread::run_stage(move || run_root_layout_stage(input, scratch)) }
 }
 
 /// Commits a computed root layout to the arena without the host. The host half, which pays what
@@ -2859,7 +2860,7 @@ pub(crate) unsafe fn compute_subtree_layout_fragments(
         should_collect_devtools_layout_data: false,
     };
     // SAFETY: The arena and its scratch belong to the waiting owner.
-    unsafe { crate::stage_thread::run_stage(|| compute_subtree_layout_stage(input, scratch)) }
+    unsafe { crate::stage_thread::run_stage(move || compute_subtree_layout_stage(input, scratch)) }
 }
 
 /// Commits a computed partial relayout boundary to the arena without the host, leaving the host
