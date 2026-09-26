@@ -1,0 +1,3 @@
+a lease took the tick: true
+animation frame time matches the timeline: false
+animation frame time is not before the tick: false
