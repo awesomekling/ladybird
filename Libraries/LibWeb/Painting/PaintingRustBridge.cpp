@@ -699,7 +699,7 @@ Optional<PendingDisplayListRecording> begin_rust_display_list_recording(DOM::Doc
     auto ffi_run = run == RecordingRun::InSubmittedFrame ? Layout::RustFFI::FfiRecordingRun::InSubmittedFrame : Layout::RustFFI::FfiRecordingRun::Now;
     if (!Layout::RustFFI::layout_arena_record_display_list(arena, viewport_row_slot(document), inputs, ffi_run))
         return {};
-    // NB: The render side may still record in place, if the frame scheduler does not submit recordings.
+    // NB: The render side may still record while the main thread waits, if the frame scheduler does not submit recordings.
     auto const submitted = Layout::RustFFI::layout_arena_frame_state(arena) == Layout::RustFFI::FfiLayoutFrameState::InFlight;
     return PendingDisplayListRecording {
         .document = document,

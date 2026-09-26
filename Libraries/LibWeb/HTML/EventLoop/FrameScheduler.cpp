@@ -245,7 +245,7 @@ void FrameScheduler::begin_main_half(bool synchronous)
 
 Painting::RecordingRun FrameScheduler::recording_run() const
 {
-    if (m_state == State::MainHalf && m_ticket && !m_ticket->records_in_place)
+    if (m_state == State::MainHalf && m_ticket && !m_ticket->waits_for_recordings)
         return Painting::RecordingRun::InSubmittedFrame;
     return Painting::RecordingRun::Now;
 }
@@ -280,7 +280,7 @@ bool FrameScheduler::submit()
     VERIFY(m_state == State::MainHalf);
     if (!m_ticket || m_ticket->navigables.is_empty()) {
         // Nothing went to the render side, or a forced join during the main half took all of it in already. Then the
-        // rendering update goes on as one that painted in place.
+        // rendering update goes on as one that waited for its paint.
         auto painted_local_roots = m_ticket ? move(m_ticket->painted_local_roots) : Vector<GC::Ref<LocalNavigable>> {};
         m_ticket = nullptr;
         m_state = State::Idle;
@@ -590,10 +590,10 @@ void FrameScheduler::resume_rendering_update_after_flight(FrameTicket::Submitted
     case FfiFlightStage::Rounds:
     case FfiFlightStage::PaintPrep:
         // A flight that recorded after its layout, and whose recording did not stand, recorded this rendering update's
-        // frame already: the frame the document records again for what changed since goes as a frame it would have
-        // painted in place.
+        // frame already: the frame the document records again for what changed since goes as a frame whose recording
+        // the rendering update waits for.
         if (flight.flight_outcome->end == Layout::RustFFI::FfiFlightEndReason::HostLeftWork)
-            m_ticket->records_in_place = true;
+            m_ticket->waits_for_recordings = true;
         m_event_loop.resume_rendering_update_after_layout({}, flight.documents, flight.document_index, flight.frame_timestamp);
         return;
     // NB: Consume-commit handed off the frame the flight recorded. The rest of the rendering update runs as after the

@@ -6971,7 +6971,7 @@ bool LocalNavigable::submit_presentation(PendingCompositorFrame& pending_frame)
     auto presentation = pending_frame.presentation;
     if (!presentation || !Layout::RustFFI::rust_stage_thread_submits_presentation() || !has_compositor_context())
         return false;
-    // The frame in flight presents what it records; a recording made in place is finished here.
+    // The frame in flight presents what it records; a recording the main thread waited for is finished here.
     auto* recording = pending_frame.recording.ptr();
     if (recording && recording->run != Painting::RecordingRun::InSubmittedFrame)
         return false;
