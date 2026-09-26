@@ -7566,6 +7566,11 @@ void Document::publish_animation_environment_for_style_update()
         auto target = effect->target();
         if (!target || &target->document() != this)
             continue;
+        // The style stage styles no element outside the tree, and one that comes back is a target again at the
+        // next style update. An animation of a removed element stays associated with the document until it is
+        // collected, which on a page that removes animated elements is most of them.
+        if (!target->is_connected())
+            continue;
         targets.set(target);
     }
     for (auto target : targets)
