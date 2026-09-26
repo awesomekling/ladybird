@@ -30,10 +30,12 @@
             println(`${name}: tail ran before the pause's rendering update: ${frame.stateAfterNestedLoop === "idle"}`);
     }
 
+    // Rendering opportunities come again once the held frame is released, so the next rendering update may already be under
+    // way by the next task. It only begins once the tail has run.
     asyncTest(async done => {
         report("alert", await finishInNestedLoop(() => alert("nested")));
         await nextTask();
-        println(`alert: tail ran by the next task: ${internals.frameSchedulerState() === "idle"}`);
+        println(`alert: tail ran by the next task: ${internals.frameSchedulerState() !== "committed-tail-pending"}`);
 
         report("sync xhr", await finishInNestedLoop(() => {
             const xhr = new XMLHttpRequest();
@@ -41,7 +43,7 @@
             xhr.send();
         }));
         await nextTask();
-        println(`sync xhr: tail ran by the next task: ${internals.frameSchedulerState() === "idle"}`);
+        println(`sync xhr: tail ran by the next task: ${internals.frameSchedulerState() !== "committed-tail-pending"}`);
         await twoFrames();
         println(`box width: ${box.offsetWidth}`);
         done();

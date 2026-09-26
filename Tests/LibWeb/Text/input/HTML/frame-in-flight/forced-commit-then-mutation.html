@@ -28,8 +28,10 @@
         println(`join took the frame in: ${!frame.armed || frame.stateAfterJoin === "committed-tail-pending"}`);
         println(`width after mutation: ${frame.widthAfterMutation}`);
         println(`computed width: ${frame.style}`);
+        // Rendering opportunities come again once the held frame is released, so the next rendering update may already
+        // be under way by then. It only begins once the tail has run.
         await nextTask();
-        println(`tail ran by the next task: ${internals.frameSchedulerState() === "idle"}`);
+        println(`tail ran by the next task: ${internals.frameSchedulerState() !== "committed-tail-pending"}`);
         internals.resetRenderingSchedulerCounters();
         await twoFrames();
         println(`next frames painted: ${internals.getRenderingSchedulerCounters().paints > 0}`);
