@@ -18,11 +18,14 @@ use crate::css::computed_value_views::ComputedValuesView;
 use crate::css::css_pixels::CssPixelRect;
 use crate::layout::LayoutNodeArena;
 use crate::layout::fragment_tree::FragmentLink;
-use crate::layout::node_data::{NodeKind, NodeSlotId};
+use crate::layout::node_data::{CompositorAnimationFrameKind, NodeKind, NodeSlotId};
+use crate::layout::node_facts;
+use crate::layout::{RenderedTextBoundary, TextContent};
 use crate::painting::hit_test::HitTestList;
 use crate::painting::image_map_areas::ImageMapAreas;
 use crate::painting::paintable_data::{CommittedSideData, PaintableData};
 use crate::painting::paintable_rows::{CommittedFragmentLinkSlot, CommittedSideDataRef, PAINTABLE_SLOTS_PER_CHUNK};
+use crate::painting::svg_paint_resources::SvgPaintResources;
 use crate::painting::visual_context::VisualContextTree;
 use crate::painting::visual_context::scroll_state::ScrollOffsets;
 use std::sync::Arc;
@@ -69,11 +72,46 @@ pub(crate) trait PaintRead: Sized {
     fn node_is_element_backed(&self, id: NodeSlotId) -> bool;
     fn node_is_out_of_flow_if_live(&self, id: NodeSlotId) -> bool;
     fn node_is_fragmented_inline(&self, id: NodeSlotId) -> bool;
+    fn node_is_atomic_inline(&self, id: NodeSlotId) -> bool;
+    fn node_is_positioned(&self, id: NodeSlotId) -> bool;
+    fn node_is_floating(&self, id: NodeSlotId) -> bool;
     fn node_style_if_live(&self, id: NodeSlotId) -> Option<ComputedValuesView<'_>>;
+    fn node_has_compositor_animation_frame(&self, id: NodeSlotId, kind: CompositorAnimationFrameKind) -> bool;
+    /// The rendered text of a text row, as published with its row.
+    fn text_content(&self, id: NodeSlotId) -> Option<&TextContent>;
+    fn svg_paint_resources(&self) -> &SvgPaintResources;
 
     /// The absolute rect memoized for a box, if any.
     fn memoized_absolute_rect(&self, id: NodeSlotId) -> Option<CssPixelRect>;
     fn memoize_absolute_rect(&self, id: NodeSlotId, rect: CssPixelRect);
+
+    fn dom_offset_for_rendered_text_offset(
+        &self,
+        id: NodeSlotId,
+        offset: usize,
+        boundary: RenderedTextBoundary,
+    ) -> usize {
+        if !self.node_kind_if_live(id).is_some_and(node_facts::kind_is_text) {
+            return offset;
+        }
+        self.text_content(id)
+            .expect("text must be published before mapping rendered offsets")
+            .dom_offset_for_rendered_text_offset(offset, boundary)
+    }
+
+    fn rendered_text_offset_for_dom_offset(
+        &self,
+        id: NodeSlotId,
+        offset: usize,
+        boundary: RenderedTextBoundary,
+    ) -> usize {
+        if !self.node_kind_if_live(id).is_some_and(node_facts::kind_is_text) {
+            return offset;
+        }
+        self.text_content(id)
+            .expect("text must be published before mapping DOM offsets")
+            .rendered_text_offset_for_dom_offset(offset, boundary)
+    }
 
     /// The line root whose committed side data holds an inline box's pieces, read from the same
     /// generation as the rows.
@@ -142,8 +180,36 @@ macro_rules! read_layout_tree_from_live_arena {
             LayoutNodeArena::node_is_fragmented_inline(self, id)
         }
 
+        fn node_is_atomic_inline(&self, id: NodeSlotId) -> bool {
+            LayoutNodeArena::node_is_atomic_inline(self, id)
+        }
+
+        fn node_is_positioned(&self, id: NodeSlotId) -> bool {
+            LayoutNodeArena::node_is_positioned(self, id)
+        }
+
+        fn node_is_floating(&self, id: NodeSlotId) -> bool {
+            LayoutNodeArena::node_is_floating(self, id)
+        }
+
         fn node_style_if_live(&self, id: NodeSlotId) -> Option<ComputedValuesView<'_>> {
             LayoutNodeArena::node_style_if_live(self, id)
+        }
+
+        fn node_has_compositor_animation_frame(
+            &self,
+            id: NodeSlotId,
+            kind: crate::layout::node_data::CompositorAnimationFrameKind,
+        ) -> bool {
+            LayoutNodeArena::node_has_compositor_animation_frame(self, id, kind)
+        }
+
+        fn text_content(&self, id: NodeSlotId) -> Option<&crate::layout::TextContent> {
+            LayoutNodeArena::text_content(self, id)
+        }
+
+        fn svg_paint_resources(&self) -> &crate::painting::svg_paint_resources::SvgPaintResources {
+            LayoutNodeArena::svg_paint_resources(self)
         }
     };
 }
