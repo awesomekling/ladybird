@@ -1982,6 +1982,13 @@ bool Internals::last_frame_keyboard_scroll_state_is_current()
     return generation.has_value() && navigable->page().keyboard_scroll_state_is_current(*generation);
 }
 
+WebIDL::UnsignedLongLong Internals::presented_compositor_animation_count()
+{
+    // NB: Read beside the frame in flight, which would be taken in by presenter().
+    auto navigable = window().associated_document().navigable();
+    return navigable ? navigable->presenter_beside_frame_in_flight().compositor_visual_animation_count() : 0;
+}
+
 WebIDL::UnsignedLongLong Internals::hit_test_scene_epoch()
 {
     auto navigable = window().associated_document().navigable();

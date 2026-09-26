@@ -1,0 +1,5 @@
+the compositor ran the spinner's animation before the tick: true
+the tick ended the clipper's overflow and presented it: true
+the tree the tick presented carries the spinner's animation: false
+the clipper fits after the tick: true
+the next frame presents the spinner's animation: false

@@ -250,6 +250,7 @@ public:
     void reset_render_presents();
     WebIDL::UnsignedLongLong presented_scene_epoch();
     bool last_frame_keyboard_scroll_state_is_current();
+    WebIDL::UnsignedLongLong presented_compositor_animation_count();
     WebIDL::UnsignedLongLong hit_test_scene_epoch();
     bool rendering_update_awaits_pass() const;
     u64 style_pass_forced_joins() const;
