@@ -42,11 +42,7 @@ pub struct PaintState {
     pub(crate) root_background_source: Option<crate::painting::host::FfiRootBackgroundSource>,
     pub(crate) hit_test_list_generation: u64,
     pub(crate) last_recording: Option<Arc<crate::painting::record::RecordingOutput>>,
-    pub(crate) published_frame: Option<Arc<crate::painting::record::RecordingOutput>>,
-    pub(crate) published_hit_test_items: Option<Arc<crate::painting::record::PublishedHitTestItems>>,
-    // The paint-order tree describing the published frame; a recording appends to it and
-    // publication or discarding decides what stays.
-    pub(crate) paint_order_tree: std::cell::RefCell<crate::painting::record::order_tree::PaintOrderTree>,
+    pub(crate) recorder: crate::painting::record::recorder_state::RecorderState,
     pub(crate) selection: Option<crate::painting::selection::SelectionRange>,
     // LIBWEB_RENDER_CLOCK_FRAMES: the inputs of the last recording the main thread published, which
     // a clock lease's ticks record again with while the main thread idles.
@@ -70,13 +66,8 @@ impl PaintState {
         }
     }
 
-    /// A recording that publishes assembles its frame in the retained paint-order tree, which no
-    /// longer describes the published frame once that recording is dropped: the next recording
-    /// copies nothing from it and records from scratch into a tree of its own.
     pub(crate) fn forget_published_frame(&mut self) {
-        self.published_frame = None;
-        self.published_hit_test_items = None;
-        *self.paint_order_tree.get_mut() = Default::default();
+        self.recorder.forget_published_recording();
     }
 
     pub(crate) fn update_root_background_source(

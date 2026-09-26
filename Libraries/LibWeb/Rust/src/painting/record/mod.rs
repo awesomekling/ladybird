@@ -16,6 +16,7 @@ pub(crate) mod order_tree;
 pub mod paint;
 pub(crate) mod producers;
 pub(crate) mod publish;
+pub(crate) mod recorder_state;
 pub(crate) mod resources;
 pub(crate) mod scratch;
 pub mod svg_resources;

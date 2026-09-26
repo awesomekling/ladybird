@@ -5,19 +5,21 @@
  */
 
 use crate::cow_column::{ColumnSnapshot, CowColumn};
+use crate::css::computed_value_views::ComputedValuesView;
 use crate::css::css_pixels::CssPixelPoint;
 use crate::layout::LayoutNodeArena;
-use crate::layout::node_data::{NodeFlag, NodeSlotId};
+use crate::layout::node_data::{NodeFlag, NodeKind, NodeSlotId};
 use crate::layout::{fragment_tree, used_values};
 use crate::painting::hit_test::HitTestList;
 use crate::painting::image_map_areas::{ImageMapAreaColumn, ImageMapAreas};
 use crate::painting::node_painting;
 use crate::painting::paintable_data::*;
+use crate::painting::published_frame::{PaintRead, PublishedFrame, read_layout_tree_from_live_arena};
 use crate::painting::record::damage::{DamageSet, PaintDamage, RowPaintState};
 use crate::painting::visual_context::dirty::{
     RemovedBoxBlocks, VisualContextBoxDirtyKind, VisualContextGlobalRebuildReason,
 };
-use crate::painting::visual_context::scroll_state::{ScrollOffsetColumn, ScrollOffsets};
+use crate::painting::visual_context::scroll_state::ScrollOffsetColumn;
 use crate::painting::visual_context::{
     BoxVisualContextNodeHandles, EMPTY_BOX_VISUAL_CONTEXT_NODE_HANDLES, PaintableVisualContextRecord, VisualContextTree,
 };
@@ -455,7 +457,7 @@ pub(crate) struct PaintableRowStore {
     /// nothing reads it while they run and releasing it lets them write chunks in place, and
     /// publish again when they are done. A row a main-side writer changes is published when the
     /// main side next reads the rows.
-    published: Option<PublishedPaintableRows>,
+    published: Option<PublishedFrame>,
     side_data: RefCell<Vec<PaintableSideData>>,
     committed_side_data: RefCell<CowColumn<CommittedSideData, PAINTABLE_SLOTS_PER_CHUNK>>,
     row_reset_versions: Vec<u64>,
@@ -480,23 +482,6 @@ pub(crate) struct PaintableRowStore {
     visual_context_tree_inputs: Cell<crate::painting::host::FfiVisualContextTreeInputs>,
 }
 
-/// One published generation of the paintable rows and of the columns read beside them.
-struct PublishedPaintableRows {
-    rows: ColumnSnapshot<PaintableData, PAINTABLE_SLOTS_PER_CHUNK>,
-    fragment_links: ColumnSnapshot<CommittedFragmentLinkSlot, PAINTABLE_SLOTS_PER_CHUNK>,
-    side_data: ColumnSnapshot<CommittedSideData, PAINTABLE_SLOTS_PER_CHUNK>,
-    unique_node_ids: ColumnSnapshot<(NodeSlotId, i64), PAINTABLE_SLOTS_PER_CHUNK>,
-    scroll_offsets: std::sync::Arc<ScrollOffsets>,
-    image_map_areas: std::sync::Arc<ImageMapAreas>,
-    hit_test_list: Option<std::sync::Arc<HitTestList>>,
-    visual_context_tree: Option<std::sync::Arc<VisualContextTree>>,
-}
-
-const _: () = {
-    const fn assert_send_and_sync<T: Send + Sync>() {}
-    assert_send_and_sync::<PublishedPaintableRows>();
-};
-
 pub(crate) struct PaintableRows<Arena> {
     arena: Arena,
 }
@@ -510,17 +495,7 @@ impl Clone for PaintableRowsRef<'_> {
     }
 }
 
-pub(crate) trait PaintableRowsRead: Deref<Target = LayoutNodeArena> {
-    fn paintable_data(&self, id: NodeSlotId) -> &PaintableData;
-    fn paintable_row_is_populated(&self, id: NodeSlotId) -> bool;
-    /// Reads the fragment link a populated row committed, from the same generation as its row.
-    fn with_committed_fragment_link<R>(
-        &self,
-        id: NodeSlotId,
-        read: impl FnOnce(Option<&fragment_tree::FragmentLink>) -> R,
-    ) -> R;
-    /// The side data a populated row committed, from the same generation as its row.
-    fn committed_side_data(&self, id: NodeSlotId) -> CommittedSideDataRef<'_>;
+pub(crate) trait PaintableRowsRead: PaintRead + Deref<Target = LayoutNodeArena> {
     /// The scroll offset the document published for a box, or zero.
     fn scroll_offset(&self, id: NodeSlotId) -> CssPixelPoint;
     /// The unique node id the document published for what a box is the box of, or zero.
@@ -598,19 +573,7 @@ where
     Arena: Deref<Target = LayoutNodeArena>,
 {
     pub(crate) fn paintable_data(&self, id: NodeSlotId) -> &PaintableData {
-        assert!(!id.is_invalid(), "invalid paintable arena slot ID");
-        let data = self
-            .arena
-            .paintable_rows
-            .rows
-            .get(id.slot_index() as usize)
-            .expect("invalid paintable arena slot ID");
-        assert_eq!(
-            data.slot_generation,
-            id.generation(),
-            "paintable arena read a stale or unused slot"
-        );
-        data
+        self.arena.live_paintable_data(id)
     }
 
     pub(crate) fn paintable_row_is_populated(&self, id: NodeSlotId) -> bool {
@@ -768,7 +731,7 @@ impl Deref for CommittedPaintableRows<'_> {
 }
 
 impl CommittedPaintableRows<'_> {
-    fn published(&self) -> &PublishedPaintableRows {
+    fn published(&self) -> &PublishedFrame {
         self.arena
             .paintable_rows
             .published
@@ -781,7 +744,7 @@ impl CommittedPaintableRows<'_> {
     }
 }
 
-impl PaintableRowsRead for CommittedPaintableRows<'_> {
+impl PaintRead for CommittedPaintableRows<'_> {
     fn paintable_data(&self, id: NodeSlotId) -> &PaintableData {
         assert!(!id.is_invalid(), "invalid paintable arena slot ID");
         let data = self
@@ -830,6 +793,10 @@ impl PaintableRowsRead for CommittedPaintableRows<'_> {
         )
     }
 
+    read_layout_tree_from_live_arena!();
+}
+
+impl PaintableRowsRead for CommittedPaintableRows<'_> {
     fn scroll_offset(&self, id: NodeSlotId) -> CssPixelPoint {
         self.published().scroll_offsets.offset(id)
     }
@@ -884,7 +851,7 @@ impl Deref for MainSidePaintableRows<'_> {
     }
 }
 
-impl PaintableRowsRead for MainSidePaintableRows<'_> {
+impl PaintRead for MainSidePaintableRows<'_> {
     fn paintable_data(&self, id: NodeSlotId) -> &PaintableData {
         match self {
             Self::Committed(rows) => rows.paintable_data(id),
@@ -917,6 +884,10 @@ impl PaintableRowsRead for MainSidePaintableRows<'_> {
         }
     }
 
+    read_layout_tree_from_live_arena!();
+}
+
+impl PaintableRowsRead for MainSidePaintableRows<'_> {
     fn scroll_offset(&self, id: NodeSlotId) -> CssPixelPoint {
         match self {
             Self::Committed(rows) => rows.scroll_offset(id),
@@ -967,7 +938,7 @@ impl PaintableRowsRead for MainSidePaintableRows<'_> {
     }
 }
 
-impl<Arena> PaintableRowsRead for PaintableRows<Arena>
+impl<Arena> PaintRead for PaintableRows<Arena>
 where
     Arena: Deref<Target = LayoutNodeArena>,
 {
@@ -991,6 +962,13 @@ where
         PaintableRows::committed_side_data(self, id)
     }
 
+    read_layout_tree_from_live_arena!();
+}
+
+impl<Arena> PaintableRowsRead for PaintableRows<Arena>
+where
+    Arena: Deref<Target = LayoutNodeArena>,
+{
     fn scroll_offset(&self, id: NodeSlotId) -> CssPixelPoint {
         self.arena.paintable_rows.scroll_offsets.offset(id)
     }
@@ -1641,7 +1619,7 @@ impl LayoutNodeArena {
         let side_data = store.committed_side_data.get_mut();
         let unique_node_ids = store.unique_node_ids.ids.get_mut();
         let Some(published) = &mut store.published else {
-            store.published = Some(PublishedPaintableRows {
+            store.published = Some(PublishedFrame {
                 rows: store.rows.publish(),
                 fragment_links: fragment_links.publish(),
                 side_data: side_data.publish(),
@@ -1730,6 +1708,21 @@ impl LayoutNodeArena {
             arena: self,
             beside_recording: true,
         }
+    }
+
+    pub(crate) fn live_paintable_data(&self, id: NodeSlotId) -> &PaintableData {
+        assert!(!id.is_invalid(), "invalid paintable arena slot ID");
+        let data = self
+            .paintable_rows
+            .rows
+            .get(id.slot_index() as usize)
+            .expect("invalid paintable arena slot ID");
+        assert_eq!(
+            data.slot_generation,
+            id.generation(),
+            "paintable arena read a stale or unused slot"
+        );
+        data
     }
 
     fn paintable_data_by_index(&self, index: u32) -> &PaintableData {

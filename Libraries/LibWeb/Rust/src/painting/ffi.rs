@@ -18,6 +18,7 @@ use crate::painting::force_dark::ForceDarkRole;
 use crate::painting::host::visual_context::FfiSvgFilterPrimitive;
 use crate::painting::paintable_data::*;
 use crate::painting::paintable_rows::{MainSidePaintableRows, PaintableRowsRead, with_inline_pieces};
+use crate::painting::published_frame::PaintRead;
 use crate::painting::rect_to_viewport_transform::RectToViewportTransform;
 use crate::painting::scroll_chain::ViewportWheelOverflow;
 use crate::painting::svg_filter::SvgFilterPrimitive;
@@ -1306,7 +1307,7 @@ fn record_display_list_stage(stage: RecordingStageInput<'_>) -> RecordingStageOu
     // The root background paints the union of the viewport and the root's overflow, so it
     // is the one output a viewport move can change. Drop its caches before recording
     // starts instead of treating the viewport position as a frame-wide input.
-    if let Some(source) = &paint_state.published_frame {
+    if let Some(source) = &paint_state.recorder.published_recording {
         let root = inputs.uncaptured.root_background_source.root_layout_node;
         let rows = arena.paintable_rows();
         let canvas_rect = crate::painting::record::paint::background_resolution::root_background_canvas_rect(
@@ -1325,13 +1326,13 @@ fn record_display_list_stage(stage: RecordingStageInput<'_>) -> RecordingStageOu
     // The retained tree describes the published tape and is written in place while a frame
     // is assembled, so only a recording that publishes may copy from that frame or touch
     // the tree; any other recording records from scratch into a tree of its own.
-    let mut retained_tree = paint_state.paint_order_tree.borrow_mut();
+    let mut retained_tree = paint_state.recorder.paint_order_tree.borrow_mut();
     let mut throwaway_tree = crate::painting::record::order_tree::PaintOrderTree::default();
     let (tree, source_frame, source_items) = if inputs.publishes_recording {
         (
             &mut *retained_tree,
-            paint_state.published_frame.clone(),
-            paint_state.published_hit_test_items.clone(),
+            paint_state.recorder.published_recording.clone(),
+            paint_state.recorder.published_hit_test_items.clone(),
         )
     } else {
         (&mut throwaway_tree, None, None)
