@@ -1426,6 +1426,7 @@ pub struct WinnerGroups {
     element_row_stamps: Column<u64>,
     pseudo_rows_by_node: Column<Vec<PseudoWinnerRow>>,
     pseudo_row_capacity_bytes: u64,
+    pseudo_row_count: usize,
     priority_current: BitColumn,
     row_count: usize,
     priority_current_row_count: usize,
@@ -1489,6 +1490,7 @@ impl Default for WinnerGroups {
             element_row_stamps: Column::default(),
             pseudo_rows_by_node: Column::default(),
             pseudo_row_capacity_bytes: 0,
+            pseudo_row_count: 0,
             priority_current: BitColumn::default(),
             row_count: 0,
             priority_current_row_count: 0,
@@ -1536,6 +1538,7 @@ impl WinnerGroups {
             element_row_stamps: self.element_row_stamps.clone(),
             pseudo_rows_by_node,
             pseudo_row_capacity_bytes,
+            pseudo_row_count: self.pseudo_row_count,
             priority_current: self.priority_current.clone(),
             row_count: self.row_count,
             priority_current_row_count: self.priority_current_row_count,
@@ -2265,6 +2268,7 @@ impl WinnerGroups {
             });
             self.pseudo_row_capacity_bytes +=
                 ((self.pseudo_rows_by_node[index].capacity() - capacity_before) * size_of::<PseudoWinnerRow>()) as u64;
+            self.pseudo_row_count += 1;
         }
         match reference {
             #[cfg(test)]
@@ -2291,6 +2295,7 @@ impl WinnerGroups {
         if let Some(rows) = self.pseudo_rows_by_node.get_mut(index) {
             let rows = std::mem::take(rows);
             self.pseudo_row_capacity_bytes -= (rows.capacity() * size_of::<PseudoWinnerRow>()) as u64;
+            self.pseudo_row_count -= rows.len();
             for row in rows {
                 self.update_winner_rule_node_references(row.state.0, node, false);
                 self.release_state(row.state.0);
@@ -2499,6 +2504,12 @@ impl WinnerGroups {
         }
     }
 
+    /// How many pseudo-element winner rows the groups hold across all nodes.
+    #[must_use]
+    pub(super) fn pseudo_row_count(&self) -> usize {
+        self.pseudo_row_count
+    }
+
     pub fn active_states(&self) -> impl Iterator<Item = CascadeStateID> + '_ {
         self.states
             .iter()
@@ -2562,6 +2573,7 @@ impl WinnerGroups {
         self.element_row_stamps = Column::default();
         self.pseudo_rows_by_node = Column::default();
         self.pseudo_row_capacity_bytes = 0;
+        self.pseudo_row_count = 0;
         self.priority_current = BitColumn::default();
         self.row_count = 0;
         self.priority_current_row_count = 0;
@@ -2599,6 +2611,7 @@ impl WinnerGroups {
                 self.newest_program_version,
                 self.newest_version_row_count,
                 self.pseudo_row_capacity_bytes,
+                self.pseudo_row_count,
             ];
         }
     }

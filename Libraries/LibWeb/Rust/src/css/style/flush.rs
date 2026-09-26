@@ -1170,6 +1170,10 @@ impl StyleEngineState {
             Counter::BatchBackingPseudoMatchHosts,
             self.retained.batch_backing_pseudo_matches.len() as u64,
         );
+        counters.set(
+            Counter::CascadePseudoWinnerRows,
+            self.retained.winner_groups.pseudo_row_count() as u64,
+        );
         compile_union_timer.stop(Counter::BatchCompilationMicroseconds, counters);
         let winner_version_timer = PassTimer::start();
         if let Some(base_version) = program_base_version {

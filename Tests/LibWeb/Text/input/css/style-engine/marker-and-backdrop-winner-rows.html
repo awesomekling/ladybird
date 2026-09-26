@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style>
+    div > div { color: blue; }
+    li::marker { color: green; }
+</style>
+<ul><li id="item">item</li></ul>
+<div id="container"></div>
+<script>
+    container.innerHTML = "<div></div>".repeat(100);
+</script>
+<script>
+    test(() => {
+        const rows = () => {
+            document.body.classList.toggle("flip");
+            internals.updateStyle();
+            return internals.styleEngineCounters().cascadePseudoWinnerRows;
+        };
+        const before = rows();
+        container.appendChild(document.createElement("div"));
+        internals.updateStyle();
+        container.firstElementChild.remove();
+        internals.updateStyle();
+        println(`pseudo-element winner rows added: ${rows() - before}`);
+        println(`marker color: ${getComputedStyle(item, "::marker").color}`);
+    });
+</script>
