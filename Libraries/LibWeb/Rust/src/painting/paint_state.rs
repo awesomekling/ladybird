@@ -55,6 +55,27 @@ pub struct PaintState {
 }
 
 impl PaintState {
+    /// Drops the pending recording unpublished.
+    pub(crate) fn discard_pending_recording(&mut self) {
+        self.pending_recording_trace = None;
+        if self
+            .pending_recording
+            .take()
+            .is_some_and(|pending| pending.publishes_recording)
+        {
+            self.forget_published_frame();
+        }
+    }
+
+    /// A recording that publishes assembles its frame in the retained paint-order tree, which no
+    /// longer describes the published frame once that recording is dropped: the next recording
+    /// copies nothing from it and records from scratch into a tree of its own.
+    pub(crate) fn forget_published_frame(&mut self) {
+        self.published_frame = None;
+        self.published_hit_test_items = None;
+        *self.paint_order_tree.get_mut() = Default::default();
+    }
+
     pub(crate) fn update_root_background_source(
         &mut self,
         arena: &crate::layout::LayoutNodeArena,

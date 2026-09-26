@@ -459,9 +459,7 @@ impl ClockLease {
             return true;
         }
         // Nothing presents the recording; the main thread records the frame again.
-        let mut paint_state = arena.paint_state().borrow_mut();
-        paint_state.pending_recording = None;
-        paint_state.pending_recording_trace = None;
+        arena.paint_state().borrow_mut().discard_pending_recording();
         false
     }
 

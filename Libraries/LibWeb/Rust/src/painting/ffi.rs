@@ -1603,13 +1603,14 @@ pub(crate) unsafe fn record_for_clock_tick(arena_handle: *mut c_void) -> bool {
         viewport,
         inputs,
     });
+    // SAFETY: The recording has returned its borrow.
+    let arena = unsafe { arena_from_handle(arena_handle) };
     // An SVG-as-image the tick paints at a size the main thread has not rendered it at would show as
     // an empty image: the main thread renders the image, and the frame, itself.
     if !output.recording.resources.missed_vector_images.is_empty() {
+        arena.paint_state().borrow_mut().forget_published_frame();
         return false;
     }
-    // SAFETY: The recording has returned its borrow.
-    let arena = unsafe { arena_from_handle(arena_handle) };
     leave_pending_recording(arena, viewport, should_paint_overlay, true, frame_generation, output);
     true
 }

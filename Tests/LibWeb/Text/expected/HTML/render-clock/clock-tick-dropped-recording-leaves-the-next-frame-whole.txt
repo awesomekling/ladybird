@@ -1,0 +1,2 @@
+the tick handed over to the main thread: true
+the main thread rendered after it: true
