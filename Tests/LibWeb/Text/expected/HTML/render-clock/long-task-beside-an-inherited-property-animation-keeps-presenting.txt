@@ -1,0 +1,2 @@
+frames presented during the task: false
+the text lays out with the sampled style: true

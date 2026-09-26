@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<style>
+    #headline {
+        width: 400px;
+        font-size: 20px;
+        animation: headline 20s linear;
+    }
+    #reference {
+        width: 400px;
+    }
+    @keyframes headline {
+        from {
+            font-size: 20px;
+            letter-spacing: 0;
+        }
+        to {
+            font-size: 60px;
+            letter-spacing: 10px;
+        }
+    }
+</style>
+<div id="headline">The main thread was busy. The text did not care.</div>
+<div id="reference">The main thread was busy. The text did not care.</div>
+<script src="../../include.js"></script>
+<script>
+    // Under LIBWEB_RENDER_CLOCK_FRAMES, the render clock goes on presenting an animation of inherited properties while
+    // script runs a long task, where the animated element's box holds nothing but text: the text lays out with the
+    // element's style, and no descendant has a style of its own to derive.
+    asyncTest(async done => {
+        const headline = document.getElementById("headline");
+        const reference = document.getElementById("reference");
+        const enabled = internals.clockFramesEnabled();
+        // Not a timing test: the task begins once the main thread lends the arena to the ticks beside it.
+        const waitStart = performance.now();
+        do
+            await new Promise(resolve => setTimeout(resolve, 10));
+        while (enabled && !internals.clockLendActive() && performance.now() - waitStart < 5000);
+
+        const countersBefore = internals.getRenderClockCounters();
+        // Not a timing test: the task runs until the render side has presented enough frames, however slow the machine.
+        const wanted = 5;
+        const start = performance.now();
+        let presented = 0;
+        while (enabled && performance.now() - start < 5000) {
+            presented = internals.getRenderClockCounters().ticksPresented - countersBefore.ticksPresented;
+            if (presented >= wanted)
+                break;
+        }
+        println(`frames presented during the task: ${!enabled || presented >= wanted}`);
+
+        // The text lays out as it would with the sampled style set on the element.
+        headline.getAnimations()[0].pause();
+        const style = getComputedStyle(headline);
+        reference.style.fontSize = style.fontSize;
+        reference.style.letterSpacing = style.letterSpacing;
+        const headlineRect = headline.getBoundingClientRect();
+        const referenceRect = reference.getBoundingClientRect();
+        println(`the text lays out with the sampled style: ${headlineRect.height === referenceRect.height}`);
+        done();
+    });
+</script>
