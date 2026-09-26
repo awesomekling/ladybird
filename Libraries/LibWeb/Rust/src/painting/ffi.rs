@@ -1452,7 +1452,8 @@ impl RecordingJob {
 
 /// Records the document's display list and leaves the recording pending in the arena. With
 /// `run` [`FfiRecordingRun::InSubmittedFrame`], and a frame scheduler that submits recordings, the
-/// recording runs in the submitted frame and this returns before it has; otherwise it runs now.
+/// recording runs in the submitted frame and this returns before it has; otherwise it runs now, on
+/// the stage thread, while the caller waits for it. The document thread never records itself.
 ///
 /// # Safety
 ///
@@ -1548,7 +1549,7 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
             viewport,
             inputs: recording_inputs,
         };
-        crate::stage_thread::run_stage(|| record_display_list_stage(input))
+        crate::stage_thread::run_stage_on_stage_thread(|| record_display_list_stage(input))
     };
     // SAFETY: The stage has returned the arena.
     let arena = unsafe { arena_from_handle(arena_handle) };

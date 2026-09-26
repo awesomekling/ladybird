@@ -1703,6 +1703,17 @@ pub(crate) fn run_stage<R: Send>(stage: impl FnOnce() -> R + Send) -> R {
     }
 }
 
+/// Runs `stage` on the stage thread if there is one, as [`run_stage`] does, but never right here for want of a frame in
+/// flight: a stage the stage thread is for runs there however little it would overlap. Without a stage thread
+/// (`LIBWEB_STAGE_OVERLAP=none`), or when called from the stage thread itself, `stage` runs right here.
+pub(crate) fn run_stage_on_stage_thread<R: Send>(stage: impl FnOnce() -> R + Send) -> R {
+    match stage_thread() {
+        // SAFETY: The stage has no joins, and it is `Send`.
+        Some(thread) => unsafe { run_stage_on(thread, None, |_| stage()) },
+        None => stage(),
+    }
+}
+
 /// Whether a stage the caller waits for runs right here rather than on the stage thread: with the stages overlapping
 /// and no frame in flight, nothing runs on the stage thread for the caller, which would only wait for it. The stage
 /// runs as it does when nothing overlaps, without handing its state to another core and back.
