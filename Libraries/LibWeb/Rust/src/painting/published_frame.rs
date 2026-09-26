@@ -23,6 +23,7 @@ use crate::layout::node_data::{
     CompositorAnimationFrameKind, DomPaintFact, FfiStylePayloads, NodeFlag, NodeKind, NodeSlotId, PaintNode,
 };
 use crate::layout::node_facts;
+use crate::layout::tree_shape::RetiredSlots;
 use crate::layout::used_values::FfiCssPixelRect;
 use crate::layout::{RenderedTextBoundary, TextContent, TextFragments};
 use crate::painting::fragment_ownership::FragmentOwnershipFilter;
@@ -60,6 +61,8 @@ pub(crate) struct PublishedRows {
 pub(crate) struct PublishedFrame {
     pub(super) rows: PublishedRows,
     nodes: ColumnSnapshot<PaintNode, SLOTS_PER_CHUNK>,
+    /// Keeps the arena from reusing a slot this frame may name until the frame is dropped.
+    _retired_slots: RetiredSlots,
 }
 
 // A frame is read on whichever thread paints it while the document writes its live columns: it
@@ -70,8 +73,16 @@ const _: () = {
 };
 
 impl PublishedFrame {
-    pub(crate) fn new(rows: PublishedRows, nodes: ColumnSnapshot<PaintNode, SLOTS_PER_CHUNK>) -> Self {
-        Self { rows, nodes }
+    pub(crate) fn new(
+        rows: PublishedRows,
+        nodes: ColumnSnapshot<PaintNode, SLOTS_PER_CHUNK>,
+        retired_slots: RetiredSlots,
+    ) -> Self {
+        Self {
+            rows,
+            nodes,
+            _retired_slots: retired_slots,
+        }
     }
 
     /// The node in a live slot, as the frame published it.

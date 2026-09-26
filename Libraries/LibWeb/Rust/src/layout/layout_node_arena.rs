@@ -12,7 +12,7 @@ use super::geometry::AvailableSpace;
 use super::host_tables::HostTables;
 use super::rendered_text::{FfiTextSourceRange, RenderedTextBoundary, TextContent, TextFragments};
 use super::svg_formatting_context::FfiSvgAttributeFacts;
-use super::tree_shape::{Chunk, ShapeWriter, TreeShape};
+use super::tree_shape::{Chunk, RetiredSlots, ShapeWriter, TreeShape};
 
 /// How many interned names one SVG element's publication can name.
 const PUBLISHED_REFERENCE_ATOM_COUNT: usize = 5;
@@ -1369,6 +1369,9 @@ impl LayoutNodeArena {
     fn allocate_slot(&mut self) -> NodeSlotId {
         self.assert_owner_thread();
 
+        if self.free_list.is_empty() {
+            self.tree_shape.reclaim_retired_slots(&mut self.free_list);
+        }
         let index = if let Some(index) = self.free_list.pop() {
             index
         } else {
@@ -1571,7 +1574,7 @@ impl LayoutNodeArena {
             .live_count
             .checked_sub(1)
             .expect("layout node arena live count underflowed");
-        if should_reuse {
+        if should_reuse && !self.tree_shape.retire(index) {
             self.free_list.push(index);
         }
         paintable_row_reset
@@ -1580,7 +1583,12 @@ impl LayoutNodeArena {
     /// Publishes what the paint side reads of every node. A chunk whose nodes are unchanged since
     /// the last publication is shared with it, and a changed one is copied only while an earlier
     /// publication still holds it.
-    pub(crate) fn publish_paint_tree(&mut self) -> crate::cow_column::ColumnSnapshot<PaintNode, SLOTS_PER_CHUNK> {
+    pub(crate) fn publish_paint_tree(
+        &mut self,
+    ) -> (
+        crate::cow_column::ColumnSnapshot<PaintNode, SLOTS_PER_CHUNK>,
+        RetiredSlots,
+    ) {
         self.tree_shape.publish(&self.chunks)
     }
 
