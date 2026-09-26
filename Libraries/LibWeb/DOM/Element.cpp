@@ -3221,6 +3221,7 @@ void Element::set_style_node_id(CSS::StyleNodeID style_node_id)
     if (m_style_node_id == style_node_id)
         return;
     m_published_presentational_hint_properties.clear();
+    note_animation_timing_rows_identity_changed();
     auto old_style_node_id = m_style_node_id;
     m_style_node_id = style_node_id;
     Layout::Node::dom_node_style_node_changed(*this, old_style_node_id);

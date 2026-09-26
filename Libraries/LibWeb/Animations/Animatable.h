@@ -61,8 +61,10 @@ public:
 
     // The timing of every animation this element holds a keyframe effect for, which is what the
     // style stage decides relevance from. Published whole per animation list, since any of it can
-    // have moved by the time the stage looks.
+    // have moved by the time the stage looks, and only when it has.
     void publish_animation_timing_rows();
+    // The style engine holds nothing this element published under an identity it no longer has.
+    void note_animation_timing_rows_identity_changed();
 
     struct AnimationTimingRowCounters {
         u64 lists_published { 0 };
@@ -93,9 +95,22 @@ private:
         AK_ALLOC_WITH_KMALLOC;
 
         Vector<GC::Ref<Animation>> associated_animations;
+        // What one animation list last published, as it was built before its rows were put in
+        // composite order. The effects' descriptions are named by identity and generation, which
+        // moves on everything a description is built from.
+        struct PublishedTimingRows {
+            u8 slot { 0 };
+            Vector<u32> words;
+            Vector<u64> times;
+            Vector<u64> linear_points;
+            Vector<u64> effect_generations;
+        };
         // The animation lists the element last published timing rows for, so a list that empties
-        // can be cleared without walking every pseudo-element's slot.
-        Vector<u8> published_timing_row_slots;
+        // can be cleared without walking every pseudo-element's slot, and one built the same as
+        // it was last published is not published again.
+        Vector<PublishedTimingRows> published_timing_rows;
+        // The element's style node changed since the lists above were published.
+        bool published_timing_rows_are_stale { false };
         bool is_sorted_by_composite_order { true };
         bool has_css_defined_animations { false };
 

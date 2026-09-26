@@ -488,7 +488,9 @@ void Animatable::publish_animation_timing_rows()
         return;
     auto& impl = ensure_impl();
 
-    Vector<u8> slots_with_rows;
+    // OPTIMIZATION: An element holds a few animations, and every style update rebuilds its rows to
+    //               learn that they have not moved, so the buffers they are built in start inline.
+    Vector<u8, 4> slots_with_rows;
     auto note_slot_of = [&](KeyframeEffect const& effect) {
         auto slot = slot_of(effect);
         if (!slots_with_rows.contains_slow(slot))
@@ -503,13 +505,13 @@ void Animatable::publish_animation_timing_rows()
         note_slot_of(static_cast<KeyframeEffect const&>(*effect));
     }
 
-    Vector<u32> words;
-    Vector<u64> times;
+    Vector<u32, 4 * Animation::StyleTimingRow::word_count> words;
+    Vector<u64, 4 * Animation::StyleTimingRow::TimeCount> times;
     // The `linear()` stops the rows name by range, input and output interleaved as raw `f64` bits.
     // The rows are reordered below and this buffer is not, so a range stays the one it was appended
     // at.
     Vector<u64> linear_points;
-    Vector<GC::Ref<KeyframeEffect>> effects_in_order;
+    Vector<GC::Ref<KeyframeEffect>, 4> effects_in_order;
     // A CSS animation keeps the place in its owning element's `animation-name` list it was given
     // when a plan last applied a definition to it, and script can revive one the element has since
     // stopped listing. Its place is then one another animation holds, so the key alone says nothing
@@ -572,6 +574,17 @@ void Animatable::publish_animation_timing_rows()
             ordered_effects.append(effects_in_order[index]);
         }
     };
+    // The rows and descriptions a list publishes are a function of what it is built from here, so
+    // a list built the same as it was last published has nothing new to tell the engine. Every
+    // style update republishes every animated element, and most of them have not moved.
+    auto published_list = [&](u8 slot) -> Impl::PublishedTimingRows* {
+        for (auto& published : impl.published_timing_rows) {
+            if (published.slot == slot)
+                return &published;
+        }
+        return nullptr;
+    };
+    Vector<u64, 4> effect_generations;
     for (auto slot : slots_with_rows) {
         words.clear_with_capacity();
         times.clear_with_capacity();
@@ -592,19 +605,51 @@ void Animatable::publish_animation_timing_rows()
                 continue;
             append_row(keyframe_effect, *animation, 0);
         }
+        effect_generations.clear_with_capacity();
+        for (auto const& effect : effects_in_order)
+            effect_generations.append(effect->animation_preparation_generation());
+
+        auto* published = published_list(slot);
+        if (published && !impl.published_timing_rows_are_stale
+            && published->words == words && published->times == times
+            && published->linear_points == linear_points && published->effect_generations == effect_generations) {
+            ++s_animation_timing_row_counters.lists_unchanged;
+            continue;
+        }
+
         put_rows_in_composite_order();
         CSS::record_element_animation_timing_rows(*element, slot, ordered_words, ordered_times, linear_points);
         CSS::record_element_animation_effect_descriptions(*element, slot, ordered_effects);
         ++s_animation_timing_row_counters.lists_published;
+        if (!published) {
+            impl.published_timing_rows.append({});
+            published = &impl.published_timing_rows.last();
+            published->slot = slot;
+        }
+        published->words.clear_with_capacity();
+        published->words.append(words.data(), words.size());
+        published->times.clear_with_capacity();
+        published->times.append(times.data(), times.size());
+        published->linear_points.clear_with_capacity();
+        published->linear_points.append(linear_points.data(), linear_points.size());
+        published->effect_generations.clear_with_capacity();
+        published->effect_generations.append(effect_generations.data(), effect_generations.size());
     }
 
-    for (auto slot : impl.published_timing_row_slots) {
-        if (!slots_with_rows.contains_slow(slot)) {
-            CSS::record_element_animation_timing_rows(*element, slot, {}, {}, {});
-            CSS::record_element_animation_effect_descriptions(*element, slot, {});
-        }
-    }
-    impl.published_timing_row_slots = move(slots_with_rows);
+    impl.published_timing_rows.remove_all_matching([&](auto const& published) {
+        if (slots_with_rows.contains_slow(published.slot))
+            return false;
+        CSS::record_element_animation_timing_rows(*element, published.slot, {}, {}, {});
+        CSS::record_element_animation_effect_descriptions(*element, published.slot, {});
+        return true;
+    });
+    impl.published_timing_rows_are_stale = false;
+}
+
+void Animatable::note_animation_timing_rows_identity_changed()
+{
+    if (m_impl)
+        m_impl->published_timing_rows_are_stale = true;
 }
 
 Animatable::AnimationTimingRowCounters Animatable::animation_timing_row_counters()
