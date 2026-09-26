@@ -284,8 +284,25 @@ void EventLoopManagerUnix::wait_for_events(EventLoopImplementation::PumpMode mod
 
     // The outermost loop of the thread tells its idle observer that it blocks.
     auto const* idle_observer = s_pump_depth == 1 && (should_wait_forever || timeout > 0) ? idle_observer_for_current_thread() : nullptr;
-    if (idle_observer)
+    if (idle_observer) {
         idle_observer->will_block();
+        // What the observer posted or scheduled, the wait below has to see: posting an event does not wake this thread.
+        if (ThreadEventQueue::current().has_pending_events()) {
+            should_wait_forever = false;
+            timeout = 0;
+        } else {
+            auto now = MonotonicTime::now();
+            thread_data.timeouts.absolutize_relative_timeouts(now);
+            if (auto next_timer_expiration = thread_data.timeouts.next_timer_expiration(); next_timer_expiration.has_value()) {
+                auto until_expiration = max(next_timer_expiration.value() - now, AK::Duration::zero());
+                auto timer_timeout = static_cast<i32>(min<i64>(AK::NumericLimits<i32>::max(), until_expiration.to_milliseconds()));
+                if (should_wait_forever || timer_timeout < timeout) {
+                    should_wait_forever = false;
+                    timeout = timer_timeout;
+                }
+            }
+        }
+    }
 
 try_select_again:
     // select() and wait for file system events, calls to wake(), POSIX signals, or timer expirations.
