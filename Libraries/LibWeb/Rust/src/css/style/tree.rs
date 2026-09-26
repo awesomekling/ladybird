@@ -120,6 +120,14 @@ impl StyleNodeID {
         (self.0.get() & TEXT_STYLE_NODE_BIT == 0).then_some(self.0.get())
     }
 
+    /// The slot the node has in columns keyed by element index. A text node's identity has the
+    /// top bit set, which puts its slot past the end of every element column: indexing one with it
+    /// fails the bounds check, and looking it up finds nothing, without testing the kind first.
+    #[must_use]
+    pub fn element_slot(self) -> usize {
+        self.0.get() as usize
+    }
+
     /// The dense text index, or `None` for an element.
     #[must_use]
     pub fn text_index(self) -> Option<u32> {
@@ -2256,8 +2264,11 @@ impl StyleNodeTree {
     }
 
     fn element_index(&self, node: StyleNodeID) -> usize {
-        node.element_index()
-            .expect("tree relations are keyed by element identity") as usize
+        debug_assert!(
+            node.element_index().is_some(),
+            "tree relations are keyed by element identity"
+        );
+        node.element_slot()
     }
 
     fn live_element_index(&self, node: StyleNodeID) -> usize {
