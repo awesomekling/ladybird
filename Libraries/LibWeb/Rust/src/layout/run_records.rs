@@ -23,9 +23,10 @@ pub(crate) struct LayoutScratch {
     /// The inline items a block container generated, kept for its next run in the same pass. The
     /// stashes are cleared when the pass ends.
     inline_item_stashes: RefCell<HashMap<NodeSlotId, super::inline_level_iterator::StashedInlineItems>>,
-    /// The reusable inline items a block container generated last, kept across passes for as long as the container's
-    /// slot and fragment cache epoch stay what they were (see retained_inline_items).
-    retained_inline_items: RefCell<HashMap<NodeSlotId, RetainedInlineItems>>,
+    /// The reusable inline items a block container generated last, by slot index, kept across passes for as long as the
+    /// container's slot and fragment cache epoch stay what they were (see retained_inline_items). A slot holds at most
+    /// one entry, dropped when the slot is freed or its container's items stop being reusable.
+    retained_inline_items: RefCell<HashMap<u32, RetainedInlineItems>>,
 }
 
 struct RetainedInlineItems {
@@ -81,23 +82,40 @@ impl LayoutScratch {
         validity: super::fc_run_cache::FcRunCacheValidity,
     ) -> Option<super::inline_level_iterator::StashedInlineItems> {
         let retained = self.retained_inline_items.borrow();
-        let entry = retained.get(&block_container)?;
+        let entry = retained.get(&block_container.slot_index())?;
         (entry.validity == validity).then(|| entry.items.clone())
     }
 
+    /// Keeps `items` as the inline items `block_container` generated last, or, given none, drops what it kept before.
     pub(crate) fn retain_inline_items(
         &self,
         block_container: NodeSlotId,
         validity: super::fc_run_cache::FcRunCacheValidity,
-        items: super::inline_level_iterator::StashedInlineItems,
+        items: Option<super::inline_level_iterator::StashedInlineItems>,
     ) {
-        self.retained_inline_items
-            .borrow_mut()
-            .insert(block_container, RetainedInlineItems { validity, items });
+        let mut retained = self.retained_inline_items.borrow_mut();
+        match items {
+            Some(items) => {
+                retained.insert(block_container.slot_index(), RetainedInlineItems { validity, items });
+            }
+            None => {
+                retained.remove(&block_container.slot_index());
+            }
+        }
     }
 
     pub(crate) fn retained_inline_item_count(&self) -> u64 {
         self.retained_inline_items.borrow().len() as u64
+    }
+
+    /// Drops what the scratch keeps across passes for `slots`, which the arena freed or whose intrinsic size caches
+    /// went stale since the last pass.
+    pub(crate) fn drop_slots(&self, slots: Vec<u32>) {
+        let mut retained = self.retained_inline_items.borrow_mut();
+        for index in &slots {
+            retained.remove(index);
+        }
+        self.intrinsic_size_caches.drop_slots(slots);
     }
 
     pub(crate) fn clear_inline_item_stashes(&self) {
