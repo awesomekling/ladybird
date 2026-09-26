@@ -8,6 +8,7 @@
 #include <Compositor/RenderClockClientEndpoint.h>
 #include <Compositor/RenderClockServerEndpoint.h>
 #include <LibCore/EventLoop.h>
+#include <LibCore/ThreadEventQueue.h>
 #include <LibCore/Timer.h>
 #include <LibIPC/ConnectionToServer.h>
 #include <LibIPC/Transport.h>
@@ -109,11 +110,16 @@ intptr_t RenderClock::thread_main()
 
     auto result = event_loop.exec();
 
-    clear_armed_contexts();
-    if (auto channel = move(m_channel)) {
-        channel->detach();
-        channel->shutdown();
-    }
+    // What is still queued on this thread runs before it returns: a connection's deferred invocations hold references
+    // to it, and the last one to go would destroy the channel as the thread exits, after its thread-locals are gone.
+    // Nothing it runs arms a context, or sets up a channel, for the thread to leave behind.
+    do {
+        clear_armed_contexts();
+        if (auto channel = move(m_channel)) {
+            channel->detach();
+            channel->shutdown();
+        }
+    } while (Core::ThreadEventQueue::current().process() > 0);
 
     {
         MutexLocker locker(m_mutex);
