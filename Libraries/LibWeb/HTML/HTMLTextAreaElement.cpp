@@ -44,11 +44,11 @@ static void set_own_inline_style(DOM::Element& element, CSS::CSSStyleProperties 
     // declarations answers that without serializing both sides.
     if (holds_own_copy && current->properties() == defaults.properties() && current->custom_properties().is_empty() && defaults.custom_properties().is_empty())
         return;
-    auto defaults_text = defaults.serialized();
-    if (holds_own_copy && current->serialized() == defaults_text)
+    if (holds_own_copy && current->serialized() == defaults.serialized())
         return;
+    // The copy shares the defaults' declarations until either changes, which the comparison above answers first.
     auto style = CSS::CSSStyleProperties::create_element_inline_style({ element });
-    style->set_declarations_from_text(defaults_text);
+    style->set_declarations_from(defaults);
     element.set_inline_style(style);
 }
 
