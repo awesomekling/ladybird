@@ -1,1 +1,1 @@
-the ticks leave the dialog's color to the main thread: false
+the ticks leave the dialog's color to the main thread: true

@@ -1048,6 +1048,7 @@ bool FrameScheduler::publish_clock_lease_targets(ClockLeaseHold const& hold)
         return false;
     Vector<u32> style_nodes;
     Vector<u64> style_records;
+    Vector<bool> pseudo_element_styles_outside_box;
     for (auto effect : hold.effects) {
         auto target = effect->target();
         if (!target || style_nodes.contains_slow(target->style_node_id().value()))
@@ -1056,8 +1057,10 @@ bool FrameScheduler::publish_clock_lease_targets(ClockLeaseHold const& hold)
         (void)target->unsafe_layout_node();
         style_nodes.append(target->style_node_id().value());
         style_records.append(DOM::AbstractElement { *target }.style_record_identity().value());
+        // A tick derives no style of these from the element's, as it does for the text in its box.
+        pseudo_element_styles_outside_box.append(target->has_style(CSS::PseudoElement::Backdrop) || target->has_style(CSS::PseudoElement::Selection));
     }
-    Layout::RustFFI::rust_clock_lease_set_targets(arena->handle(), style_nodes.data(), style_records.data(), style_nodes.size());
+    Layout::RustFFI::rust_clock_lease_set_targets(arena->handle(), style_nodes.data(), style_records.data(), pseudo_element_styles_outside_box.data(), style_nodes.size());
     return true;
 }
 
