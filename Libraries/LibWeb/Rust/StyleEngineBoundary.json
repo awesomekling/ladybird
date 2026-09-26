@@ -154,7 +154,8 @@
     [177, "GrantStyleNodes"],
     [178, "AcknowledgeEnvironmentMove"],
     [179, "SetElementReplacedContentInput"],
-    [180, "SettlePseudoElementsInNextPass"]
+    [180, "SettlePseudoElementsInNextPass"],
+    [181, "MayHaveChildDependentSelectors"]
   ],
   "operations": [
     { "event": "SettlePseudoElementsInNextPass", "ffi": "style_engine_settle_pseudo_elements_in_next_pass", "cpp": "settle_pseudo_elements_in_next_pass", "return": "void", "args": [["node", "style_node"], ["old_is_list_item", "bool"], ["held_pseudo_records", "u64_slice"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.settle_pseudo_elements_in_next_pass(node, old_is_list_item, held_pseudo_records);" },
@@ -204,6 +205,7 @@
     { "event": "SetElementCustomStates", "ffi": "style_engine_set_element_custom_states", "cpp": "set_element_custom_states", "return": "void", "args": [["node", "style_node"], ["states", "style_atom_slice"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; let states = states.iter().copied().map(StyleAtomID).collect::<Vec<_>>(); engine.set_element_custom_states(node, &states);" },
     { "event": "ConnectedElementCount", "ffi": "style_engine_connected_element_count", "cpp": "connected_element_count", "return": "u32", "receiver": "const", "args": [], "body": "let result = engine.connected_element_count();" },
     { "event": "HasPendingTransaction", "ffi": "style_engine_has_pending_transaction", "return": "bool", "receiver": "const", "args": [], "body": "let result = engine.has_pending_transaction();" },
+    { "event": "MayHaveChildDependentSelectors", "ffi": "style_engine_may_have_child_dependent_selectors", "return": "bool", "receiver": "const", "args": [], "body": "let result = engine.may_have_child_dependent_selectors();" },
     { "event": "PendingTransactionMayAffectLayoutGeometry", "ffi": "style_engine_pending_transaction_may_affect_layout_geometry", "return": "bool", "receiver": "const", "args": [], "body": "let result = engine.pending_transaction_may_affect_layout_geometry();" },
     { "event": "DeferPendingTransactionForGeometryRead", "ffi": "style_engine_defer_pending_transaction_for_geometry_read", "return": "bool", "args": [], "body": "let result = engine.defer_pending_transaction_for_geometry_read();" },
     { "event": "BeginDeferredGeometryTransactionFlush", "ffi": "style_engine_begin_deferred_geometry_transaction_flush", "return": "bool", "args": [], "body": "let result = engine.begin_deferred_geometry_transaction_flush();" },

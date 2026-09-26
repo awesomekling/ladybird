@@ -621,10 +621,48 @@ static void collect_pending_style_arrival_roots(DOM::Node& node, Vector<GC::Ref<
 }
 
 static bool s_taking_in_pending_style_arrivals = false;
+static DOM::Document const* s_document_whose_arrivals_wait = nullptr;
+
+PendingStyleArrivalsWaitScope::PendingStyleArrivalsWaitScope(DOM::Document const& document)
+    : m_previous_document(exchange(s_document_whose_arrivals_wait, &document))
+{
+}
+
+PendingStyleArrivalsWaitScope::~PendingStyleArrivalsWaitScope()
+{
+    s_document_whose_arrivals_wait = m_previous_document;
+}
+
+bool pending_style_arrivals_may_decide_style_of(DOM::Element const& element)
+{
+    auto const& document = element.document();
+    if (!document.descendant_style_arrival_pending())
+        return false;
+    if (element.style_node_id() == no_style_node)
+        return true;
+    if (document.style_computer().style_engine().may_have_child_dependent_selectors())
+        return true;
+    // Otherwise a selector reaches from the element only up its ancestors and across their siblings, never into the
+    // children of any of them, and the element inherits along the flat tree, through the slot it is assigned to.
+    for (DOM::Node const* node = &element; node; node = node->parent_or_shadow_host()) {
+        if (auto const* slottable = as_if<DOM::Element>(*node)) {
+            if (auto slot = slottable->assigned_slot_internal(); slot && slot->style_node_id() == no_style_node)
+                return true;
+        }
+        auto const* parent = node->parent_or_shadow_host();
+        if (!parent || is<DOM::ShadowRoot>(*node) || !parent->descendant_style_arrival_pending())
+            continue;
+        for (auto const* sibling = parent->first_child(); sibling; sibling = sibling->next_sibling()) {
+            if (sibling->style_arrival_pending())
+                return true;
+        }
+    }
+    return false;
+}
 
 void take_in_pending_style_arrivals(DOM::Document& document)
 {
-    if (s_taking_in_pending_style_arrivals)
+    if (s_taking_in_pending_style_arrivals || &document == s_document_whose_arrivals_wait)
         return;
     // Nodes that waited and left the tree again are counted too, and nothing is left of them to take in.
     document.style_computer().style_engine().forget_pending_arrivals();

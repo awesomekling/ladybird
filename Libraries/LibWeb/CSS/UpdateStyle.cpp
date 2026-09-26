@@ -1735,6 +1735,15 @@ static bool update_style_for_element(DOM::Document& document, DOM::AbstractEleme
         return false;
     document.ensure_style_engine_tracks_tree();
 
+    // Script often reads the style of an element beside markup it has just inserted and replaces again before anything
+    // else reads it, like the section jQuery's toggle() reads around a list it renders. Those nodes arrive here only
+    // if they can decide the style read.
+    Optional<PendingStyleArrivalsWaitScope> pending_style_arrivals_wait;
+    if (pending_style_arrivals_may_decide_style_of(abstract_element.element()))
+        take_in_pending_style_arrivals(document);
+    else
+        pending_style_arrivals_wait.emplace(document);
+
     // OPTIMIZATION: When nothing style-related is pending anywhere that could affect this document, the only question
     // left is, if the element's inheritance chain already has style. If it does, the walk below would conclude there's
     // nothing to recompute. So answer that directly — without constructing a style record view for every ancestor.
@@ -1749,7 +1758,6 @@ static bool update_style_for_element(DOM::Document& document, DOM::AbstractEleme
             return true;
     }
 
-    take_in_pending_style_arrivals(document);
     document.style_computer().begin_style_update();
     ScopeGuard end_style_update = [&] {
         document.style_computer().end_style_update();

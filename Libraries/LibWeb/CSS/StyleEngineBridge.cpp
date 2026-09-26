@@ -915,8 +915,12 @@ void StyleEngine::record_benchmark_marker(Utf16View name)
 
 bool StyleEngine::has_recorded_input() const
 {
-    return m_pending_arrival_count > 0
-        || !m_tree_deltas.is_empty()
+    return m_pending_arrival_count > 0 || has_journaled_input();
+}
+
+bool StyleEngine::has_journaled_input() const
+{
+    return !m_tree_deltas.is_empty()
         || !m_element_arrivals.is_empty()
         || !m_local_feature_deltas.is_empty()
         || !m_state_deltas.is_empty()
@@ -956,7 +960,8 @@ void StyleEngine::submit_recorded_input()
     StyleInputScope const input { *this };
     if (m_style_computer)
         publish_pending_element_features(*this, *m_style_computer);
-    if (!has_recorded_input() && m_host_fact_writes.is_empty() && !m_style_node_grant_request && !m_text_style_node_grant_request) {
+    // Nodes still waiting to arrive when a read decided it does not need them go in with a later submission.
+    if (!has_journaled_input() && m_host_fact_writes.is_empty() && !m_style_node_grant_request && !m_text_style_node_grant_request) {
         if (refresh_attribute_value_text_requirements() && m_style_computer)
             publish_required_attribute_value_texts(*this, *m_style_computer);
         return;
@@ -1319,6 +1324,11 @@ StyleEngine::PublishedStyleTransaction StyleEngine::publish_style_transaction_vi
         .submission_microseconds = static_cast<u64>(submission_microseconds),
         .bridge_microseconds = static_cast<u64>(bridge_microseconds),
     };
+}
+
+bool StyleEngine::may_have_child_dependent_selectors() const
+{
+    return StyleEngineFFI::style_engine_may_have_child_dependent_selectors(m_impl);
 }
 
 bool StyleEngine::has_pending_transaction() const

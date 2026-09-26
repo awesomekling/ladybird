@@ -51,6 +51,22 @@ WEB_API void record_text_connected(DOM::Text&);
 // order. Whatever reads the style engine, or a connected node's identity, calls this first.
 WEB_API void take_in_pending_style_arrivals(DOM::Document&);
 
+// Whether nodes still waiting to arrive can decide the style of `element`: it waits itself, a
+// sibling of it or of one of its ancestors waits, its slot waits, or a `:has()` or `:empty`
+// selector may reach a waiting node through the children of an element.
+WEB_API bool pending_style_arrivals_may_decide_style_of(DOM::Element const&);
+
+// While one is alive, the nodes of the document that wait to arrive keep waiting: a read of one
+// element's style that does not need them leaves them to the next observer that does.
+class WEB_API PendingStyleArrivalsWaitScope {
+public:
+    explicit PendingStyleArrivalsWaitScope(DOM::Document const&);
+    ~PendingStyleArrivalsWaitScope();
+
+private:
+    DOM::Document const* m_previous_document { nullptr };
+};
+
 // Called once a text node's data has stopped being, or started being, nothing but ASCII whitespace.
 // That is the only thing about its data the mirror carries.
 WEB_API void record_text_whitespace_state_changed(DOM::Text&);

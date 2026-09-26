@@ -1,5 +1,5 @@
 completed label color: rgb(0, 128, 0)
 footer: 20 items left (block)
-treeDeltas: 2030
-treeDepartureDeltas: 820
-styleNodesRetired: 820
+treeDeltas: 203
+treeDepartureDeltas: 82
+styleNodesRetired: 82

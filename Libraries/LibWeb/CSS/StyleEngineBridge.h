@@ -270,6 +270,9 @@ public:
     // How many inputs are recorded for the next submission, which is what settling for a selector query costs.
     [[nodiscard]] size_t recorded_input_count() const;
     [[nodiscard]] bool has_pending_transaction() const;
+    // Whether a `:has()` or `:empty` selector may take part in the next transaction, letting a node anywhere decide an
+    // element's style.
+    [[nodiscard]] bool may_have_child_dependent_selectors() const;
     [[nodiscard]] bool has_deferred_geometry_transaction() const;
     [[nodiscard]] bool has_deferred_element_style_inputs() const;
     [[nodiscard]] bool has_deferred_element_style_input(StyleNodeID style_node) const;
@@ -426,6 +429,7 @@ private:
     bool read_matches(StyleNodeID, Vector<RuleMatch>&, Optional<MatchPurpose>);
     void apply_transaction(StyleInputScope const&, InputTransaction const&);
     void submit_recorded_input();
+    [[nodiscard]] bool has_journaled_input() const;
     void publish_inputs_queued_during_pass();
     void lend_style_transaction_inputs(Function<void(StyleEngineFFI::FfiDocumentStyleComputationInputs const&, void* layout_arena)> const&);
     PublishedStyleTransaction publish_style_transaction_view(StyleEngineFFI::FfiStyleTransactionView const&, i64 submission_microseconds, i64 bridge_microseconds);
