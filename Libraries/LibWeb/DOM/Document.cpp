@@ -10587,7 +10587,10 @@ void Document::adopt_published_recording(Painting::PendingDisplayListRecording c
         && (!published.is_paint_command_cache_source || !m_hit_test_display_list || !m_hit_test_display_list->is_current()))
         m_hit_test_display_list = Painting::HitTestDisplayList::create_from_rust_recording(recording.visual_context_tree.structural_epoch(), layout_node_arena(), *m_chrome_widget_registry);
 
-    if (published.becomes_paint_command_cache_source)
+    // A recording identical to the frame the arena published last publishes the paint command cache source it was
+    // handed. For a render clock tick, that is the display list of the tick before it, which the document takes in too:
+    // the next recording here is compared with that frame.
+    if (published.becomes_paint_command_cache_source || published.is_paint_command_cache_source)
         document_paint_state.set_display_list_used_as_paint_command_cache_source(published.display_list, published.command_resources);
 }
 
