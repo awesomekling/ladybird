@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<style>
+    #box {
+        width: 100px;
+        height: 20px;
+        animation: grow 20s linear;
+    }
+    @keyframes grow {
+        from {
+            width: 100px;
+        }
+        to {
+            width: 2100px;
+        }
+    }
+    #removed::before {
+        content: "before";
+    }
+</style>
+<div id="box"></div>
+<div id="removed">removed</div>
+<div id="after">after</div>
+<script src="../../include.js"></script>
+<script>
+    // Under LIBWEB_RENDER_CLOCK_FRAMES, removing an element in a long task takes its boxes out of the arena the ticks
+    // lay out and record, while its parent's boxes wait for the main thread's next layout update. The ticks would show
+    // the removal half done, so they leave the rest of the task to the main thread.
+    asyncTest(async done => {
+        const removed = document.getElementById("removed");
+        const after = document.getElementById("after");
+        const enabled = internals.clockFramesEnabled();
+        const topBefore = after.getBoundingClientRect().top;
+        // Not a timing test: the task begins once the main thread lends the arena to the ticks beside it.
+        const waitStart = performance.now();
+        do
+            await new Promise(resolve => setTimeout(resolve, 10));
+        while (enabled && !internals.clockLendActive() && performance.now() - waitStart < 5000);
+        const lentBeforeRemoval = internals.clockLendActive();
+
+        removed.remove();
+
+        // The task goes on for a while; no tick presents a frame in it.
+        const countersBefore = internals.getRenderClockCounters();
+        const start = performance.now();
+        while (enabled && performance.now() - start < 500) {
+            if (internals.getRenderClockCounters().ticksPresented - countersBefore.ticksPresented >= 3)
+                break;
+        }
+        const presented = internals.getRenderClockCounters().ticksPresented - countersBefore.ticksPresented;
+
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        println(`leases lent before the removal: ${!enabled || lentBeforeRemoval}`);
+        println(`no frame presented after the removal: ${presented === 0}`);
+        println(`the removal shows once the task is over: ${after.getBoundingClientRect().top < topBefore}`);
+        done();
+    });
+</script>

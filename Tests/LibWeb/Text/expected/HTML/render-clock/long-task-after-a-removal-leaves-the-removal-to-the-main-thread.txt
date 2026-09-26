@@ -1,0 +1,3 @@
+leases lent before the removal: true
+no frame presented after the removal: false
+the removal shows once the task is over: true
