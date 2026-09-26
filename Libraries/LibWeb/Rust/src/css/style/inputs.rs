@@ -2124,6 +2124,7 @@ impl StyleEngineState {
                 batch_backing_pseudo_matches: HashMap::default(),
                 engine_cold_record_cache: HashMap::default(),
                 engine_cold_record_donors: HashMap::default(),
+                engine_warm_record_cohorts: HashMap::default(),
                 computed_group_set_memory: MemoryLease::new(MemoryCategory::ComputedGroupSet),
                 custom_property_environment_memory: MemoryLease::new(MemoryCategory::CustomPropertyEnvironment),
                 computed_fixed_metadata_memory: MemoryLease::new(MemoryCategory::ComputedFixedMetadata),

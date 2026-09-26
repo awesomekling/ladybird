@@ -1077,6 +1077,7 @@ pub struct RetainedState {
     batch_backing_pseudo_matches: HashMap<StyleNodeID, Vec<RuleMatch>>,
     engine_cold_record_cache: HashMap<publication::ColdRecordKey, publication::ColdRecord>,
     engine_cold_record_donors: HashMap<publication::ColdRecordDonorKey, Vec<publication::ColdRecordDonor>>,
+    engine_warm_record_cohorts: HashMap<publication::RecordCohortKey, publication::RecordCohortValue>,
     computed_group_set_memory: MemoryLease,
     custom_property_environment_memory: MemoryLease,
     computed_fixed_metadata_memory: MemoryLease,

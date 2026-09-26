@@ -5554,6 +5554,7 @@ unsafe fn begin_style_transaction(engine: &mut StyleEngine, mut computation_inpu
         // font generation carried in their keys.
         engine.engine_cold_record_cache.clear();
         engine.engine_cold_record_donors.clear();
+        engine.engine_warm_record_cohorts.clear();
         engine.engine_pseudo_record_cache.clear();
     }
     engine.document_style_computation_inputs = computation_inputs;
