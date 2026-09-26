@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<style>
+    .box {
+        width: 100px;
+        height: 4px;
+    }
+</style>
+<div id="boxes"></div>
+<div id="log"></div>
+<script src="../../include.js"></script>
+<script>
+    // Under LIBWEB_RENDER_CLOCK_FRAMES, a DOM write in a long task takes back what the ticks installed, and the ticks
+    // go on after it. An element whose value stopped moving before the write keeps the sample the ticks took of it,
+    // which the main thread installs itself once the task is over, beside the samples the later ticks installed of
+    // elements that went on moving. The main thread adopts all of them.
+    function spinUntilTicksPresented(wanted, notBefore = 0) {
+        // Not a timing test: the task runs until the render side has presented enough frames, however slow the
+        // machine, and gives up after a while if it presents none.
+        const before = internals.getRenderClockCounters().ticksPresented;
+        const start = performance.now();
+        while (performance.now() - start < 3000) {
+            if (performance.now() >= notBefore && internals.getRenderClockCounters().ticksPresented - before >= wanted)
+                return;
+        }
+    }
+
+    asyncTest(async done => {
+        const boxes = document.getElementById("boxes");
+        const log = document.getElementById("log");
+        const enabled = internals.clockFramesEnabled();
+
+        // The held boxes' width moves for 500 ms and holds from then on. The moving boxes' width goes on moving. The
+        // ticks take their samples in no particular order, so there are a few of each.
+        const held = [];
+        const moving = [];
+        const animations = [];
+        for (let i = 0; i < 5; ++i) {
+            for (const list of [held, moving]) {
+                const box = document.createElement("div");
+                box.className = "box";
+                boxes.append(box);
+                list.push(box);
+            }
+        }
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        for (const box of held)
+            animations.push(box.animate([{ width: "100px" }, { width: "300px", offset: 0.025 }, { width: "300px" }], { duration: 20000 }));
+        for (const box of moving)
+            animations.push(box.animate([{ width: "100px" }, { width: "2100px" }], { duration: 20000 }));
+        await Promise.all(animations.map(animation => animation.ready));
+        const started = performance.now();
+
+        // Not a timing test: the task begins once the main thread lends the arena to the ticks beside it.
+        const waitStart = performance.now();
+        do
+            await new Promise(resolve => setTimeout(resolve, 10));
+        while (enabled && !internals.clockLendActive() && performance.now() - waitStart < 5000);
+
+        if (enabled) {
+            // The ticks sample every box moving, until the held boxes hold.
+            spinUntilTicksPresented(3, started + 600);
+            log.append("A chunk of text. ");
+            // The ticks after the write sample only the moving boxes.
+            spinUntilTicksPresented(3);
+        } else {
+            while (performance.now() < started + 600)
+                await new Promise(resolve => setTimeout(resolve, 10));
+            log.append("A chunk of text. ");
+        }
+
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        println(`held boxes hold: ${held.every(box => getComputedStyle(box).width === "300px")}`);
+        println(`moving boxes moved: ${moving.every(box => parseFloat(getComputedStyle(box).width) > 100)}`);
+        println(`the text shows once the task is over: ${log.getBoundingClientRect().height > 0}`);
+        done();
+    });
+</script>

@@ -972,7 +972,12 @@ static bool install_animation_sample_in_arena(CSS::StyleDrainScope const& scope,
     if (!layout_node_arena || !Layout::RustFFI::layout_arena_install_animation_sample(layout_node_arena->handle(), target->style_node_id().value(), new_style_record.value(), invalidation.needs_relayout()))
         return false;
     apply_animation_overlay(scope, element, animated_property_invalidation, new_style_record, caller_applies_invalidation, InstalledInArena::Yes);
-    VERIFY(Layout::RustFFI::layout_arena_animation_adoption_log_is_empty(layout_node_arena->handle()));
+    // The element's box adopted the record as the element published it. The log may still hold what clock ticks installed
+    // over other boxes, whose entries their elements adopt in turn. One left over this box would put the host's old
+    // record back over it at the next recall; the box and the element hold the record, so it is only dropped.
+    auto* layout_node = target->unsafe_layout_node();
+    [[maybe_unused]] bool const left_in_log = layout_node && Layout::RustFFI::layout_arena_take_animation_adoption(layout_node_arena->handle(), Layout::Node::slot_id(layout_node), new_style_record.value());
+    ASSERT(!left_in_log);
     return true;
 }
 
