@@ -1,3 +1,4 @@
 visible: ticks advance: true
 hidden: ticks advance: false
+hidden: the render clock ticks the page: false
 visible again: ticks advance: true

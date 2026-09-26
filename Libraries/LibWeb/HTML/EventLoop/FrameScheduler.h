@@ -156,6 +156,8 @@ public:
     bool render_clock_ticks(DOM::Document const&) const;
     // Ends every clock lease: the compositor went away, or the process is going.
     void revoke_all_clock_leases();
+    // Ends the clock lease of `document`, if it holds one: it was hidden.
+    void revoke_clock_lease_of(DOM::Document const&);
     // The main thread's outermost event loop is about to block: the render clock may tick the leases until it wakes.
     void main_thread_will_idle();
     // The main thread woke: the documents adopt what the render clock's ticks installed while it idled, and the render
