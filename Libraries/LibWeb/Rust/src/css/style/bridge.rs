@@ -3709,8 +3709,7 @@ impl StyleEngine {
         // pseudo-elements resolve with the originating element's environment.
         let groups = self.current_winner_groups();
         let version = self.program.version();
-        let mut usage = self.retained.custom_declarations_condition_usage(node, None);
-        let mut reads_attributes = self.retained.custom_declarations_read_attributes(node, None);
+        let (mut usage, mut reads_attributes) = self.retained.custom_declarations_reads(node, None);
         let mut uses_tree_counting = self.retained.nodes_with_tree_counting_records.contains(&node);
         if let super::partial_view::Lookup::Known((_, state)) =
             groups.token_for(super::cascade::WinnerGroupKey::current(node, version))
@@ -3727,8 +3726,9 @@ impl StyleEngine {
             // Only a pseudo-element's current winners read its sibling position.
             uses_tree_counting |= pseudo_version == version && priority_current && written.has_written_tree_counting;
             if let Ok(kind) = u8::try_from(pseudo.kind.0) {
-                usage |= self.retained.custom_declarations_condition_usage(node, Some(kind));
-                reads_attributes |= self.retained.custom_declarations_read_attributes(node, Some(kind));
+                let (pseudo_usage, pseudo_reads_attributes) = self.retained.custom_declarations_reads(node, Some(kind));
+                usage |= pseudo_usage;
+                reads_attributes |= pseudo_reads_attributes;
             }
         }
         let mut reads = usage
