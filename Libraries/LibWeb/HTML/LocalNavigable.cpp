@@ -7190,8 +7190,14 @@ bool LocalNavigable::seal_flight_paint(DOM::Document& document, bool may_present
 
     // Where the render side presents, the flight presents what it records too, unless what its layout leaves the document
     // to do could ask for another layout first. What is known to ask for one already keeps the flight from presenting.
+    // The flight presents the keyboard scroll state of the last frame, which it cannot take again before its layout:
+    // once that state is invalidated, the frame is presented from the main thread, which takes the state anew.
+    auto keyboard_scroll_state_of_last_frame_is_current = [&] {
+        return m_keyboard_scroll_state_of_last_frame.has_value()
+            && (!is_top_level_traversable() || page().keyboard_scroll_state_is_current(m_keyboard_scroll_state_of_last_frame->generation));
+    };
     OwnPtr<FlightPresentation> flight_presentation;
-    if (may_present && Compositor::render_presents() && Layout::RustFFI::rust_stage_thread_submits_presentation() && m_keyboard_scroll_state_of_last_frame.has_value()) {
+    if (may_present && Compositor::render_presents() && Layout::RustFFI::rust_stage_thread_submits_presentation() && keyboard_scroll_state_of_last_frame_is_current()) {
         if (auto frame_sink = compositor_context().prepare_to_submit_frame_from_render_side()) {
             auto& document_paint_state = document.paint_state();
             Compositing::ScrollStateSnapshot scroll_state_snapshot { document_paint_state.scroll_state_snapshot() };

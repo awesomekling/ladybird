@@ -1972,6 +1972,15 @@ WebIDL::UnsignedLongLong Internals::presented_scene_epoch()
     return navigable ? navigable->presenter_beside_frame_in_flight().presented_scene_epoch() : 0;
 }
 
+bool Internals::last_frame_keyboard_scroll_state_is_current()
+{
+    auto navigable = window().associated_document().navigable();
+    if (!navigable || !navigable->is_top_level_traversable())
+        return true;
+    auto generation = navigable->keyboard_scroll_generation_of_last_frame();
+    return generation.has_value() && navigable->page().keyboard_scroll_state_is_current(*generation);
+}
+
 WebIDL::UnsignedLongLong Internals::hit_test_scene_epoch()
 {
     auto navigable = window().associated_document().navigable();

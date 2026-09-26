@@ -377,6 +377,12 @@ public:
     bool has_compositor_context() const { return m_compositor_context; }
     // The context, for the page to retire when the navigable stops hosting the tab's document.
     OwnPtr<Compositor::CompositorContextHandle> take_compositor_context();
+    Optional<u64> keyboard_scroll_generation_of_last_frame() const
+    {
+        if (!m_keyboard_scroll_state_of_last_frame.has_value())
+            return {};
+        return m_keyboard_scroll_state_of_last_frame->generation;
+    }
 
     void set_pending_set_browser_zoom_request(bool value) { m_pending_set_browser_zoom_request = value; }
     bool pending_set_browser_zoom_request() const { return m_pending_set_browser_zoom_request; }

@@ -236,6 +236,8 @@ public:
     void keyboard_scroll_dom_tree_changed(DOM::Node const&);
     void keyboard_scroll_editability_changed(DOM::Document&);
     Compositing::KeyboardScrollState take_keyboard_scroll_state_for_compositor(u64 visual_context_tree_structural_epoch);
+    // Whether a keyboard scroll state taken at `generation` is still the one the compositor should have.
+    bool keyboard_scroll_state_is_current(u64 generation) const;
     bool needs_beforeunload_check() const { return m_needs_beforeunload_check; }
     void update_needs_beforeunload_check();
 
