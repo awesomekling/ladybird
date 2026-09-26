@@ -243,6 +243,8 @@ pub(super) struct FfiStyleTransactionOutput {
     program_version: u64,
     answers: Vec<FfiStyleDelta>,
     reclaimed_style_atoms: Vec<FfiReclaimedStyleAtom>,
+    /// Whether each element row already holds its node's facts, as a submitted pass leaves them.
+    row_facts_settled: bool,
 }
 
 impl FfiStyleTransactionOutput {
@@ -5406,7 +5408,14 @@ impl StylePassJob {
         }
         // SAFETY: The pass owns the snapshot for as long as it runs.
         let committed_boxes = unsafe { super::animations::CommittedTransformReferenceBoxes::taken_along(&snapshot) };
-        let output = run_style_pass(engine, root, committed_boxes, &timeline_samples);
+        let mut output = run_style_pass(engine, root, committed_boxes, &timeline_samples);
+        // What the finish reads of the engine alone, it reads here, off the main thread: nothing
+        // reaches the engine between the pass and the finish but the pass's own atom sweep, which
+        // an active cold matching batch would put off, so that batch waits for the finish.
+        settle_style_row_facts(engine, &mut output);
+        if !engine.host.atom_sweep_skipped_by_submitted_pass {
+            begin_update_cold_matching_batch(engine, root, &output);
+        }
         engine.host.submitted_style_pass_output = Some((root, Box::new(output)));
     }
 }
@@ -5578,52 +5587,36 @@ fn run_style_pass(
     output
 }
 
-/// What the main thread does with a style pass's output once the pass has run: hands each row the
-/// facts and debts of its node, and publishes the batch.
-fn finish_style_transaction(
-    engine: &mut StyleEngine,
-    root: StyleNodeID,
-    mut output: FfiStyleTransactionOutput,
-) -> FfiStyleTransactionView {
-    // What each element row's node holds now travels with the row, and a computed row takes the
-    // debts its computation left: the host settles them as it installs the row, or hands them back.
-    for answer in &mut output.answers {
-        if answer.pseudo_kind != u8::MAX
-            || matches!(
-                answer.gap,
-                FfiStyleDeltaGap::SkippedHidden
-                    | FfiStyleDeltaGap::EnvironmentMoved
-                    | FfiStyleDeltaGap::PseudoElementsSettled
-            )
-        {
-            continue;
-        }
-        let Some(node) = StyleNodeID::from_raw(answer.style_node) else {
-            continue;
-        };
-        answer.row_facts = engine.style_row_facts(node);
-        if matches!(
+/// The node of an element row that carries its node's facts.
+fn element_row_node(answer: &FfiStyleDelta) -> Option<StyleNodeID> {
+    if answer.pseudo_kind != u8::MAX
+        || matches!(
             answer.gap,
-            FfiStyleDeltaGap::Computed
-                | FfiStyleDeltaGap::RetriedAfterAncestors
-                | FfiStyleDeltaGap::RetriedMaterialization
-        ) {
-            answer.explicit_inheritance_debt = engine.take_explicit_inheritance_debt(node);
-            answer.row_effect_debt = u32::from(engine.take_settled_row_effect_debt(node));
+            FfiStyleDeltaGap::SkippedHidden
+                | FfiStyleDeltaGap::EnvironmentMoved
+                | FfiStyleDeltaGap::PseudoElementsSettled
+        )
+    {
+        return None;
+    }
+    StyleNodeID::from_raw(answer.style_node)
+}
+
+/// Hands each element row of a pass's output the facts its node holds now, once.
+fn settle_style_row_facts(engine: &StyleEngine, output: &mut FfiStyleTransactionOutput) {
+    if std::mem::replace(&mut output.row_facts_settled, true) {
+        return;
+    }
+    for answer in &mut output.answers {
+        if let Some(node) = element_row_node(answer) {
+            answer.row_facts = engine.style_row_facts(node);
         }
     }
-    // Font cascade lists the transaction's font resolutions gave up on the stage thread.
-    crate::css::ffi_stats::release_deferred_font_cascade_lists();
-    engine.host.retired_custom_property_data.clear();
-    output.reclaimed_style_atoms = std::mem::take(&mut engine.host.reclaimed_style_atoms)
-        .into_iter()
-        .map(|reclaimed| FfiReclaimedStyleAtom {
-            raw: reclaimed.raw,
-            atom: reclaimed.atom.0,
-        })
-        .collect();
-    output.style_atoms_swept = std::mem::take(&mut engine.host.style_atoms_swept);
-    output.only_derived_child_reactions = engine.take_only_derived_child_reactions();
+}
+
+/// Begins the style update's cold matching batch with the first of its transactions whose output
+/// publishes rows.
+fn begin_update_cold_matching_batch(engine: &mut StyleEngine, root: StyleNodeID, output: &FfiStyleTransactionOutput) {
     // The rows of a style update are matched in one cold matching batch, begun with the first of
     // its transactions that publishes rows and ended as the update discards its outputs. A batch
     // covering more than one sixteenth of the connected elements is dense enough that packing the
@@ -5650,6 +5643,45 @@ fn finish_style_transaction(
         };
         engine.host.update_cold_matching_batch = Some(has_traversal);
     }
+}
+
+/// What the main thread does with a style pass's output once the pass has run: hands each row the
+/// facts and debts of its node, and publishes the batch.
+fn finish_style_transaction(
+    engine: &mut StyleEngine,
+    root: StyleNodeID,
+    mut output: FfiStyleTransactionOutput,
+) -> FfiStyleTransactionView {
+    // What each element row's node holds now travels with the row, and a computed row takes the
+    // debts its computation left: the host settles them as it installs the row, or hands them back.
+    settle_style_row_facts(engine, &mut output);
+    for answer in &mut output.answers {
+        let Some(node) = element_row_node(answer) else {
+            continue;
+        };
+        if matches!(
+            answer.gap,
+            FfiStyleDeltaGap::Computed
+                | FfiStyleDeltaGap::RetriedAfterAncestors
+                | FfiStyleDeltaGap::RetriedMaterialization
+        ) {
+            answer.explicit_inheritance_debt = engine.take_explicit_inheritance_debt(node);
+            answer.row_effect_debt = u32::from(engine.take_settled_row_effect_debt(node));
+        }
+    }
+    // Font cascade lists the transaction's font resolutions gave up on the stage thread.
+    crate::css::ffi_stats::release_deferred_font_cascade_lists();
+    engine.host.retired_custom_property_data.clear();
+    output.reclaimed_style_atoms = std::mem::take(&mut engine.host.reclaimed_style_atoms)
+        .into_iter()
+        .map(|reclaimed| FfiReclaimedStyleAtom {
+            raw: reclaimed.raw,
+            atom: reclaimed.atom.0,
+        })
+        .collect();
+    output.style_atoms_swept = std::mem::take(&mut engine.host.style_atoms_swept);
+    output.only_derived_child_reactions = engine.take_only_derived_child_reactions();
+    begin_update_cold_matching_batch(engine, root, &output);
     close_style_deltas_over_inheritance(engine, &mut output.answers);
     sort_style_deltas_for_direct_application(engine, &mut output.answers);
     if engine.recording_id().is_some() {
