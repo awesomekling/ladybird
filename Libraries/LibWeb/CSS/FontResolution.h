@@ -87,7 +87,7 @@ class WEB_API FontCascadeMemo : public AtomicRefCounted<FontCascadeMemo> {
 public:
     static NonnullRefPtr<FontCascadeMemo> create() { return adopt_ref(*new FontCascadeMemo); }
 
-    [[nodiscard]] NonnullRefPtr<Gfx::FontCascadeList const> resolve(FontFaceSnapshotView const&, ComputedFontCacheKey const&, FontFeatureValuesProvider const* = nullptr);
+    [[nodiscard]] NonnullRefPtr<Gfx::FontCascadeList const> resolve(FontFaceSnapshotView const&, ComputedFontCacheKey, FontFeatureValuesProvider const* = nullptr);
     void publish_font_feature_values(ScopedFontFeatureValuesTables const&);
 
     // Answers every remembered resolution, so the caller can decide which a change to the table
