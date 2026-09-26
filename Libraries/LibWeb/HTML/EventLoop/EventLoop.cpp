@@ -963,23 +963,25 @@ bool EventLoop::run_rendering_update_from_step_16(Vector<GC::Ref<DOM::Document>>
         auto document = docs[document_index];
         MainThreadPhases::Scope step_16_phase { MainThreadPhases::Phase::RenderingStep16 };
 
-        // A rendering update that may overlap its layout lets the first document whose layout update runs a full
-        // layout pass run the pass beside the main thread, and goes on at this step once the frame scheduler has taken
-        // it back.
-        // The first style update of such a rendering update runs its first pass beside the main thread the same way,
-        // and the rendering update goes on at this step, style finished, once the frame scheduler has taken it back.
+        // A rendering update that may overlap its layout lets a document whose layout update runs a full layout pass
+        // run the pass beside the main thread, and goes on at this step once the frame scheduler has taken it back.
+        // The first style update of such a document runs its first pass beside the main thread the same way, and the
+        // rendering update goes on at this step, style finished, once the frame scheduler has taken it back.
         // A style update that leaves the layout tree as it is runs its first pass in the flight that then lays the
         // document out, and the rendering update goes on at this step once the frame scheduler has taken it back.
-        if (layout_submission == LayoutSubmission::MaySubmit && m_rendering_update_may_overlap_style && m_rendering_update_may_overlap_layout
+        // What was taken back belongs to the document the rendering update went on at: every document after it
+        // submits its own passes, as the first did (a child document, such as an app's iframe, included).
+        auto document_submission = document_index == first_document_index ? layout_submission : LayoutSubmission::MaySubmit;
+        if (document_submission == LayoutSubmission::MaySubmit && m_rendering_update_may_overlap_style && m_rendering_update_may_overlap_layout
             && Layout::RustFFI::rust_stage_thread_submits_flight() && document->submit_style_and_layout_for_rendering_update()) {
             m_frame_scheduler->submit_layout(docs, document_index, frame_timestamp);
             return true;
         }
-        if (layout_submission == LayoutSubmission::MaySubmit && m_rendering_update_may_overlap_style && document->submit_style_for_rendering_update()) {
+        if (document_submission == LayoutSubmission::MaySubmit && m_rendering_update_may_overlap_style && document->submit_style_for_rendering_update()) {
             m_frame_scheduler->submit_style(docs, document_index, frame_timestamp);
             return true;
         }
-        if (layout_submission != LayoutSubmission::Wait && m_rendering_update_may_overlap_layout && document->submit_layout_for_rendering_update()) {
+        if (document_submission != LayoutSubmission::Wait && m_rendering_update_may_overlap_layout && document->submit_layout_for_rendering_update()) {
             m_frame_scheduler->submit_layout(docs, document_index, frame_timestamp);
             return true;
         }

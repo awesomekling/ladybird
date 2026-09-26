@@ -7,8 +7,9 @@
     // A parent never presents ahead of a frame of a navigable it hosts that paints in the same rendering update: that
     // frame reaches the compositor after the parent's, so the parent would show the iframe as it was. A flight of the
     // parent presents only while the iframe has nothing to paint, and a flight whose layout resizes the iframe stops
-    // before its paint. Nothing is printed until the end, as printing inserts nodes, whose tree build keeps a flight
-    // from presenting.
+    // before its paint. The iframe's document lays itself out in a flight of its own after the parent's, which presents
+    // its frame. Nothing is printed until the end, as printing inserts nodes,
+    // whose tree build keeps a flight from presenting.
     function flightEnds() {
         return internals.getRenderingSchedulerCounters().flightEnds;
     }
@@ -42,8 +43,8 @@
         const flew = ends => Object.values(ends).some(byStage => Object.values(byStage).some(count => count > 0));
         const noFlights = !flew(parentOnly) && !flew(parentAndChild) && !flew(resize);
         println(`parent alone presents in its flight: ${noFlights || parentOnly.done.present >= 1}`);
-        println(`parent beside a painting iframe: presented ${parentAndChild.done.present}, refused its paint ${noFlights || parentAndChild.paintNotSealed.rounds >= 1}`);
-        println(`parent resizing its iframe: presented ${resize.done.present}, stopped after layout ${noFlights || resize.roundLeftWork.rounds >= 1}`);
+        println(`parent beside a painting iframe: only the iframe presented ${noFlights || parentAndChild.done.present === 1}, refused its paint ${noFlights || parentAndChild.paintNotSealed.rounds >= 1}`);
+        println(`parent resizing its iframe: only the iframe presented ${noFlights || resize.done.present === 1}, stopped after layout ${noFlights || resize.roundLeftWork.rounds >= 1}`);
         println(`width: ${box.getBoundingClientRect().width}`);
         println(`inner width: ${inner.getBoundingClientRect().width}`);
         println(`iframe viewport width: ${frame.contentWindow.innerWidth}`);
