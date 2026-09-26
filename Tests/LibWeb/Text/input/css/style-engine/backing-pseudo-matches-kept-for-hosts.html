@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style>
+    div::placeholder { color: red; }
+    input::placeholder { color: green; }
+</style>
+<div id="container"></div>
+<input id="input" placeholder="text">
+<script>
+    test(() => {
+        for (let i = 0; i < 100; ++i)
+            container.appendChild(document.createElement("div"));
+        internals.updateStyle();
+        input.className = "changed";
+        internals.updateStyle();
+        println(`elements keeping backing pseudo-element matches: ${internals.styleEngineCounters().batchBackingPseudoMatchHosts}`);
+        println(`placeholder color: ${getComputedStyle(input, "::placeholder").color}`);
+    });
+</script>
