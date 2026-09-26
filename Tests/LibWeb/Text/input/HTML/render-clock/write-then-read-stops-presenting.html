@@ -25,7 +25,11 @@
         const box = document.getElementById("box");
         const other = document.getElementById("other");
         const enabled = internals.clockFramesEnabled();
-        await new Promise(resolve => setTimeout(resolve, 100));
+        // Not a timing test: the task begins once the main thread lends the arena to the ticks beside it.
+        const waitStart = performance.now();
+        do
+            await new Promise(resolve => setTimeout(resolve, 10));
+        while (enabled && !internals.clockLendActive() && performance.now() - waitStart < 10000);
 
         const countersBefore = internals.getRenderClockCounters();
         const start = performance.now();

@@ -42,6 +42,10 @@
                 println("currentTime moved within a task");
         }
         println(`mismatches: ${mismatches}`);
+        // Not a timing test: the lease ticks the animation however long the display takes to tick.
+        const waitStart = performance.now();
+        while (internals.clockFramesEnabled() && internals.clockTicksPresented() === ticksBefore && performance.now() - waitStart < 10000)
+            await new Promise(resolve => setTimeout(resolve, 10));
         const ticks = internals.clockTicksPresented() - ticksBefore;
         println(`ticked by the clock lease: ${internals.clockFramesEnabled() ? ticks > 0 : true}`);
         done();
