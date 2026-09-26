@@ -3232,6 +3232,11 @@ impl StyleEngineState {
                     self.retained
                         .element_record_damage(node, false, old_style_record, new_style_record)
                         | bridge::FfiStyleInvalidationField::EngineComputed as u32
+                        | if self.retained.record_builds_no_counter_styles(old_style_record) {
+                            bridge::FfiStyleInvalidationField::DamageIsTotal as u32
+                        } else {
+                            0
+                        }
                 } else {
                     0
                 };

@@ -1583,6 +1583,9 @@ static CSS::StyleComputer::ComputedStyleInvalidation compute_required_invalidati
     if (packed & to_underlying(CSS::StyleEngineFFI::FfiStyleInvalidationField::CacheHit))
         ++abstract_element.document().style_invalidation_counters().style_record_property_damage_cache_hits;
     result = decode_style_record_invalidation(packed);
+    // The engine answered all the move damages: the box was built with no counter styles to compare.
+    if (packed & to_underlying(CSS::StyleEngineFFI::FfiStyleInvalidationField::DamageIsTotal))
+        return result;
 
     CSS::RequiredInvalidationAfterStyleChange counter_style_invalidation;
     add_element_dependent_invalidation(counter_style_invalidation, new_computed_values, old_state, abstract_element);

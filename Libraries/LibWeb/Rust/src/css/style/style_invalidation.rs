@@ -988,6 +988,18 @@ impl RetainedState {
         packed
     }
 
+    /// Whether a box built from `style_record` resolved no counter styles of its own: it is no list
+    /// item, and its content is a keyword. Only such counter styles are compared by the host after
+    /// the engine answers what a move away from the record damages.
+    pub(crate) fn record_builds_no_counter_styles(&self, style_record: u64) -> bool {
+        let Some(record) = self.computed_group_sets.style_record_view(style_record) else {
+            return false;
+        };
+        let values = ComputedValuesView::new(SharedPayload::as_pointer_slice(record.payloads));
+        !values.display().is_list_item()
+            && matches!(values.content_value(), None | Some(StyleValueData::Keyword { .. }))
+    }
+
     /// What moving `node` (or its `pseudo` element) from one record to another damages, read from
     /// the two records and the facts the engine holds of the element and its place in the tree.
     /// Only what the element's box was built with is left to the host: the counter styles its

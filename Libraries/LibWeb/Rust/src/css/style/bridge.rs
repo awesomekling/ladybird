@@ -113,6 +113,10 @@ pub enum FfiStyleInvalidationField {
     /// The row's custom-property environment moved, and the pass moved the environments below it
     /// as it settled the row: the host walks nothing below it.
     EnvironmentMovedInPass = 1 << 29,
+    /// The damage the engine computed is all the move damages: the element's box was built from
+    /// the old record with no counter styles the host would compare, as it was no list item and
+    /// its content named no counters.
+    DamageIsTotal = 1 << 30,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
