@@ -1115,6 +1115,11 @@ fn stage_thread_holds_run_for_queued_stage() -> bool {
     }
 }
 
+/// Whether the stage thread holds a run for a test's hold.
+pub(crate) fn stage_thread_holds_a_run() -> bool {
+    lock_stage_hold().0.holding.is_some()
+}
+
 /// Whether a hold armed for `armed` holds a run of a submitted stage a hold may name by one of
 /// `hold_labels`. A hold names the stages it holds the first run of, as "recording|flight:record".
 fn hold_names_stage(armed: &str, hold_labels: &[&'static str]) -> bool {
@@ -1827,6 +1832,16 @@ impl<F> FrameOwns<F> {
     // Taken through a method, so a closure captures the wrapper rather than its field.
     pub(crate) fn into_inner(self) -> F {
         self.0
+    }
+
+    /// The value, for the thread that owns the frame it goes into as it is.
+    pub(crate) fn get(&self) -> &F {
+        &self.0
+    }
+
+    /// The value, for the thread that owns the frame it goes into as it is.
+    pub(crate) fn get_mut(&mut self) -> &mut F {
+        &mut self.0
     }
 }
 

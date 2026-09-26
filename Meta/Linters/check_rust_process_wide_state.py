@@ -65,8 +65,17 @@ def render_stage_entries(reason, entries):
 
 RENDER_STAGE_ALLOWED = {
     **render_stage_entries(MAIN_SIDE_COUNTER, ["layout/layout_node_arena.rs:DOOR_COUNTERS"]),
-    **render_stage_entries(MAIN_THREAD_ONLY, ["flight.rs:TAKEN_BACK_OUTCOME", "flight.rs:FLIGHT_ENDS"]),
+    **render_stage_entries(
+        MAIN_THREAD_ONLY,
+        [
+            "flight.rs:TAKEN_BACK_OUTCOME",
+            "flight.rs:FLIGHT_ENDS",
+            "flight.rs:FLIGHT_STYLE_ENDS",
+            "css/style/bridge.rs:STYLE_PASS_FOR_FLIGHT",
+        ],
+    ),
     **render_stage_entries(PRESENTED_COUNTER, ["clock_frames.rs:CLOCK_TICKS_PRESENTED"]),
+    **render_stage_entries(STAGE_THREAD, ["flight.rs:FLIGHT_STYLE_DECISION"]),
     **render_stage_entries(
         CLOCK_HANDOFF,
         [
@@ -77,7 +86,12 @@ RENDER_STAGE_ALLOWED = {
     ),
     **render_stage_entries(
         BUILT_ONCE,
-        ["clock_frames.rs:NEEDS_MAIN", "clock_frames.rs:PRESENT", "clock_frames.rs:LEND_TAKEN_BACK", "clock_frames.rs:WAKE_MAIN"],
+        [
+            "clock_frames.rs:NEEDS_MAIN",
+            "clock_frames.rs:PRESENT",
+            "clock_frames.rs:LEND_TAKEN_BACK",
+            "clock_frames.rs:WAKE_MAIN",
+        ],
     ),
     **render_stage_entries(
         GROW_ONLY,

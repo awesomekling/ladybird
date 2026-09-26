@@ -241,6 +241,13 @@ pub(super) struct FfiStyleTransactionOutput {
     reclaimed_style_atoms: Vec<FfiReclaimedStyleAtom>,
 }
 
+impl FfiStyleTransactionOutput {
+    /// The rows the transaction published, in the order the host applies them.
+    pub(super) fn answers(&self) -> &[FfiStyleDelta] {
+        &self.answers
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(C)]
 pub struct FfiReclaimedStyleAtom {
@@ -5184,6 +5191,16 @@ pub unsafe extern "C" fn style_engine_submit_style_transaction(
 ) {
     // SAFETY: Guaranteed by the caller.
     let pass = unsafe { prepare_style_pass(engine, root, computation_inputs, layout_arena) };
+    // A layout frame that runs its first round's style in its flight takes the pass along instead.
+    let Some(pass) = STYLE_PASS_FOR_FLIGHT.with(|collected| match collected.borrow_mut().as_mut() {
+        Some(slot) => {
+            *slot = Some(pass);
+            None
+        }
+        None => Some(pass),
+    }) else {
+        return;
+    };
     if crate::stage_thread::submits_flight() {
         // SAFETY: As above.
         unsafe { crate::flight::submit(layout_arena, crate::flight::Flight::from_style_pass(layout_arena, pass)) };
@@ -5193,17 +5210,42 @@ pub unsafe extern "C" fn style_engine_submit_style_transaction(
     unsafe { crate::stage_thread::submit_stage("style", layout_arena, move || pass.run()) };
 }
 
+thread_local! {
+    // On the main thread, while a layout frame's style round submits the style pass its flight is to
+    // run: the pass, once submitted.
+    static STYLE_PASS_FOR_FLIGHT: std::cell::RefCell<Option<Option<StylePassJob>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Runs `submit`, which submits a style pass unless the document has no style to update, and takes
+/// the pass it submitted, for a flight to run.
+pub(crate) fn collect_style_pass_for_flight(submit: impl FnOnce()) -> Option<StylePassJob> {
+    STYLE_PASS_FOR_FLIGHT.with(|collected| {
+        let previous = collected.borrow_mut().replace(None);
+        debug_assert!(previous.is_none(), "one style pass is collected at a time");
+    });
+    submit();
+    STYLE_PASS_FOR_FLIGHT.with(|collected| collected.borrow_mut().take().flatten())
+}
+
 /// A style pass the main thread has prepared to run beside it: the engine it owns while it runs,
 /// and what it takes along from the main thread. Running it leaves its output in the engine, for
 /// [`style_engine_finish_submitted_style_transaction`].
 pub(crate) struct StylePassJob {
     engine: crate::stage_thread::FrameOwns<*mut StyleEngine>,
+    /// The engine, which the flight that runs the pass reads the pass's output from after it.
+    engine_address: usize,
     root: StyleNodeID,
     snapshot: super::animations::CommittedTransformReferenceBoxSnapshot,
     timeline_samples: super::animations::AnimationTimelineSamples,
 }
 
 impl StylePassJob {
+    /// The engine the pass runs in.
+    pub(crate) fn engine_address(&self) -> usize {
+        self.engine_address
+    }
+
     /// Runs the pass, on the stage that owns the engine.
     pub(crate) fn run(self) {
         let Self {
@@ -5211,6 +5253,7 @@ impl StylePassJob {
             root,
             snapshot,
             timeline_samples,
+            ..
         } = self;
         // SAFETY: The frame in flight owns the engine until the main thread takes it back.
         let engine = unsafe { &mut *engine.into_inner() };
@@ -5260,6 +5303,7 @@ pub(crate) unsafe fn prepare_style_pass(
     StylePassJob {
         // SAFETY: Guaranteed by the caller: the frame in flight owns the engine.
         engine: unsafe { crate::stage_thread::FrameOwns::new(engine_handle.cast::<StyleEngine>()) },
+        engine_address: engine_handle as usize,
         root,
         snapshot,
         timeline_samples,

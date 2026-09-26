@@ -560,6 +560,10 @@ namespace Web::Layout {
 
 void NodeWithStyle::apply_style(CSS::StyleRecordID style_record_identity)
 {
+    // A flight installed the record over the row ahead of the host, with what a style change over the row leaves in the
+    // arena: the host only takes it into its own mirror of the row. A shell first asked for since then was made with
+    // the record already.
+    bool const installed_ahead = RustFFI::layout_arena_take_animation_adoption(arena_handle(), slot_id(this), style_record_identity.value());
     // The pin holds the record the node names. An animation-overlay record the engine no longer
     // assigns lives by that pin alone, so a node that keeps its record keeps the pin.
     if (style_record_identity != m_style_record_identity)
@@ -570,11 +574,17 @@ void NodeWithStyle::apply_style(CSS::StyleRecordID style_record_identity)
     m_list_style_type.clear();
     m_list_style_image.clear();
     m_style_record_identity = style_record_identity;
-    publish_style_record_to_node_data();
-    set_flag(RustFFI::NodeFlag::HasAnimatedOpacityOrTransform, false);
-    // A style change can introduce the properties that make a node carry replaced-content facts,
-    // such as size containment arriving on a kept layout node.
-    RustFFI::layout_arena_reinherit_anonymous_descendants(arena_handle(), slot_id(this));
+    if (installed_ahead) {
+        m_style_payloads = document().style_computer().style_engine().held_style_record_payloads(m_style_record_identity);
+        VERIFY(m_style_payloads);
+        did_update_style_record();
+    } else {
+        publish_style_record_to_node_data();
+        set_flag(RustFFI::NodeFlag::HasAnimatedOpacityOrTransform, false);
+        // A style change can introduce the properties that make a node carry replaced-content facts,
+        // such as size containment arriving on a kept layout node.
+        RustFFI::layout_arena_reinherit_anonymous_descendants(arena_handle(), slot_id(this));
+    }
     attach_style_resources();
     // A pseudo layout node can outlive replacement of the DOM pseudo's record until the layout
     // tree is rebuilt. Root its record across that gap, including metadata-only style changes that

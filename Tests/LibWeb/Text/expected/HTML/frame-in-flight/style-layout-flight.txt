@@ -1,0 +1,5 @@
+held as armed: true
+style applied in its flight: true
+query found: other
+box width: 30
+box color: rgb(0, 128, 0)

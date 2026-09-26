@@ -537,6 +537,8 @@ public:
     enum class LayoutPassSubmission : u8 {
         Wait,
         MaySubmit,
+        // May submit the full layout pass together with the style pass of the update's first round, in one flight.
+        MaySubmitWithStyle,
     };
     // Returns true if the update's full layout pass was submitted to run beside the main thread. The update then ends
     // once the frame in flight is taken back.
@@ -549,6 +551,19 @@ public:
     [[nodiscard]] bool submit_style_for_rendering_update();
     // Runs the rest of the style update submit_style_for_rendering_update() submitted, once its frame is taken back.
     void finish_submitted_style_update();
+    // The rendering update's style and layout updates, whose first style pass and full layout pass run beside the main
+    // thread in one flight. Returns true if they do; the rendering update goes on once the frame is taken back.
+    [[nodiscard]] bool submit_style_and_layout_for_rendering_update();
+    // Whether a rendering update may run its first style pass in the flight that lays the document out.
+    [[nodiscard]] static bool style_runs_in_layout_flights();
+    // The layout update's first round begins the style update and submits its pass, for the flight to run.
+    void submit_style_for_flight();
+    // Installs what the style pass of a layout flight's first round published, as the layout frame is taken back.
+    void finish_style_update_submitted_in_flight();
+    [[nodiscard]] bool has_submitted_style_update() const;
+    // The install of a style batch a flight applied owes the repaint the flight's recording is, unless it does not stand.
+    void owe_style_repaint_to_flight(bool invalidates_hit_test);
+    void settle_style_repaint_owed_to_flight(bool recorded_in_flight);
     void update_layout_if_needed_for_node(Node const&, UpdateLayoutReason);
     [[nodiscard]] u64 partial_layout_count() const;
     [[nodiscard]] u64 full_layout_count() const;
@@ -1710,7 +1725,7 @@ private:
     void process_pending_top_layer_layout_changes();
 
     void update_active_element();
-    bool needs_style_update_after_layout();
+    bool needs_style_update_after_layout(bool style_runs_in_flight = false);
     Layout::RustFFI::FfiLayoutUpdateHostCallbacks layout_update_host_callbacks();
 
     void process_pending_list_item_renumbers();
@@ -2123,6 +2138,9 @@ private:
     HashMap<Compositing::AsyncScrollNodeStableID, Compositing::SnappedAreas> m_scroll_container_snapped_areas;
     Vector<Compositing::RustFFI::NodeSlotId> m_scroll_snap_containers;
     bool m_needs_scroll_container_resnap { false };
+    // Whether the install of a style batch a flight applied owes a repaint, and whether it invalidates the hit test list.
+    bool m_style_repaint_owed_to_flight { false };
+    bool m_style_repaint_owed_to_flight_invalidates_hit_test { false };
     // Whether an image box handed the provider it owns after a layout frame found its image already there, so it
     // lays out again with it.
     bool m_owed_image_provider_arrived_with_image { false };
