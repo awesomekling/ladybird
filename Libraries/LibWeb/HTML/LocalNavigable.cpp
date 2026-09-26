@@ -7021,6 +7021,17 @@ void LocalNavigable::present_render_clock_frame(RenderClockFrameKit& kit)
     if (auto const* tree = Layout::RustFFI::layout_arena_main_visual_context_tree_retain(kit.recording->arena)) {
         auto visual_context_tree = Compositing::AccumulatedVisualContextTree::adopt_rust_handle(tree);
         bool const changed = visual_context_tree.rust_handle() != kit.recording->visual_context_tree.rust_handle();
+        // A tree of another structure (a scroll container that went away, say) goes only with a display list recorded
+        // for it, and with the scroll offsets of its nodes.
+        if (changed && visual_context_tree.structural_epoch() != kit.recording->visual_context_tree.structural_epoch()) {
+            auto scroll_state_snapshot = presentation.source.scroll_state_snapshot();
+            Layout::RustFFI::layout_arena_clock_tick_scroll_state_snapshot(kit.recording->arena, &scroll_state_snapshot, [](void* sink, Gfx::FloatPoint const* offsets, size_t count) {
+                static_cast<Compositing::ScrollStateSnapshot*>(sink)->assign_device_offsets({ offsets, count });
+            });
+            presentation.source.replace_scroll_state_snapshot(move(scroll_state_snapshot));
+            presentation.paint_command_cache_source = nullptr;
+            presentation.inputs.keyboard_scroll_state.visual_context_tree_structural_epoch = Compositor::keyboard_scroll_epoch_placeholder;
+        }
         if (changed)
             kit.recording->visual_context_tree = visual_context_tree;
         presentation.source.replace_visual_context_tree(move(visual_context_tree), changed);
