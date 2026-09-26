@@ -1,0 +1,4 @@
+leases lent before the removal: true
+request finished: done
+no frame presented after the removal: true
+the removal shows once the task is over: true
