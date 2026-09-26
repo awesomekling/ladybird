@@ -324,6 +324,25 @@ impl StyleEngine {
         self.state.set_element_heading_level(node, level, &mut self.counters);
     }
 
+    #[inline]
+    pub fn set_element_custom_property_names(
+        &mut self,
+        node: StyleNodeID,
+        environment: u64,
+        name_atoms: &[u32],
+        uses_unnamed: bool,
+        uses_custom_functions: bool,
+    ) {
+        self.state.set_element_custom_property_names(
+            node,
+            environment,
+            name_atoms,
+            uses_unnamed,
+            uses_custom_functions,
+            &mut self.counters,
+        );
+    }
+
     /// Record what a language atom spells, so `:lang()` can compare its ranges against the tag.
     #[inline]
     pub fn set_element_language_text(&mut self, language: StyleAtomID, text: &[u16]) {

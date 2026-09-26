@@ -1654,11 +1654,14 @@ impl RetainedState {
     pub fn set_element_custom_property_names(
         &mut self,
         node: StyleNodeID,
-        names: &[StyleAtomID],
+        environment: u64,
+        name_atoms: &[u32],
         uses_unnamed: bool,
         uses_custom_functions: bool,
+        counters: &mut Counters,
     ) {
-        self.facts.set_custom_property_names(node, names, &mut self.memory);
+        self.facts
+            .set_environment_custom_property_names(node, environment, name_atoms, &mut self.memory, counters);
         self.facts
             .set_uses_unnamed_custom_properties(node, uses_unnamed, &mut self.memory);
         self.facts
