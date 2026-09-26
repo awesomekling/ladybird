@@ -611,9 +611,22 @@ pub(crate) fn compute_effects_data(
     slot: NodeSlotId,
     device_pixels_per_css_pixel: f64,
 ) -> Option<EffectsData> {
+    let (effects, svg_filter_bounds) = resolve_effects_data(layout_arena, slot, device_pixels_per_css_pixel)?;
+    set_svg_filter_bounds(layout_arena, slot, svg_filter_bounds);
+    effects
+}
+
+/// A box's effects, and the bounds of the SVG filter it references, or `None` for a box without
+/// style.
+pub(crate) fn resolve_effects_data(
+    layout_arena: &impl PaintRead,
+    slot: NodeSlotId,
+    device_pixels_per_css_pixel: f64,
+) -> Option<(Option<EffectsData>, Option<crate::layout::used_values::FfiCssPixelRect>)> {
     use crate::css::css_enums::mix_blend_mode;
     let style = layout_arena.node_style_if_live(slot)?;
     let effects_values = style.effects();
+    let mut svg_filter_bounds = None;
     let filter = if crate::painting::css_filter::contains_url(&effects_values.filter) {
         let resolved_svg_filter = published_svg_filter(
             layout_arena,
@@ -622,14 +635,10 @@ pub(crate) fn compute_effects_data(
             style,
             device_pixels_per_css_pixel,
         );
-        set_svg_filter_bounds(
-            layout_arena,
-            slot,
-            resolved_svg_filter
-                .svg_filter_bounds
-                .has_value
-                .then_some(resolved_svg_filter.svg_filter_bounds.value),
-        );
+        svg_filter_bounds = resolved_svg_filter
+            .svg_filter_bounds
+            .has_value
+            .then_some(resolved_svg_filter.svg_filter_bounds.value);
         crate::painting::css_filter::serialize_filter_with_resolved_svg(
             &effects_values.filter,
             resolved_svg_filter,
@@ -637,7 +646,6 @@ pub(crate) fn compute_effects_data(
         )
         .map(std::sync::Arc::new)
     } else {
-        set_svg_filter_bounds(layout_arena, slot, None);
         crate::painting::css_filter::serialize_non_url_filter(&effects_values.filter, device_pixels_per_css_pixel)
             .map(std::sync::Arc::new)
     };
@@ -651,7 +659,7 @@ pub(crate) fn compute_effects_data(
         && effects_values.mix_blend_mode == mix_blend_mode::NORMAL
         && !keeps_effects_node_for_later_values
     {
-        return None;
+        return Some((None, svg_filter_bounds));
     }
     let effects = EffectsData {
         opacity: effects_values.opacity,
@@ -660,7 +668,7 @@ pub(crate) fn compute_effects_data(
         backdrop_filter,
     };
     let needs_effects_node = effects.needs_layer() || keeps_effects_node_for_later_values;
-    needs_effects_node.then_some(effects)
+    Some((needs_effects_node.then_some(effects), svg_filter_bounds))
 }
 
 // https://drafts.fxtf.org/filter-effects-2/#BackdropFilterProperty

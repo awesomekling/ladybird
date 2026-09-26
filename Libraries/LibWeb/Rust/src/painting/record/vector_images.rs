@@ -10,6 +10,7 @@ use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::NodeSlotId;
 use crate::painting::display_list::commands::DisplayListResourceId;
 use crate::painting::host::FfiVectorImageRenderRequest;
+use crate::painting::published_frame::PaintRead;
 use libgfx_rust::{FloatRect, FloatSize, IntSize};
 use std::collections::HashMap;
 
@@ -42,7 +43,7 @@ pub(crate) fn declares_light_or_dark_color_scheme(schemes: &RetainedUtf16FlyStri
 /// Its used `color-scheme` counts only when the element or the document declared a scheme the
 /// image can answer with; otherwise, like Firefox, the preferred scheme wins.
 pub(crate) fn image_color_scheme(
-    layout_arena: &LayoutNodeArena,
+    layout_arena: &impl PaintRead,
     owner: NodeSlotId,
     document_declares_light_or_dark_color_scheme: bool,
     image_color_scheme_fallback: u8,

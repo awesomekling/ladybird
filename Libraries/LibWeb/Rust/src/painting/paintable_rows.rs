@@ -5,16 +5,15 @@
  */
 
 use crate::cow_column::{ColumnSnapshot, CowColumn};
-use crate::css::computed_value_views::ComputedValuesView;
 use crate::css::css_pixels::{CssPixelPoint, CssPixelRect};
 use crate::layout::LayoutNodeArena;
-use crate::layout::node_data::{NodeFlag, NodeKind, NodeSlotId};
+use crate::layout::node_data::{NodeFlag, NodeSlotId};
 use crate::layout::{fragment_tree, used_values};
 use crate::painting::hit_test::HitTestList;
 use crate::painting::image_map_areas::{ImageMapAreaColumn, ImageMapAreas};
 use crate::painting::node_painting;
 use crate::painting::paintable_data::*;
-use crate::painting::published_frame::{PaintRead, PublishedFrame, read_layout_tree_from_live_arena};
+use crate::painting::published_frame::{PaintRead, PublishedFrame, read_live_arena};
 use crate::painting::record::damage::{DamageSet, PaintDamage, RowPaintState};
 use crate::painting::visual_context::dirty::{
     RemovedBoxBlocks, VisualContextBoxDirtyKind, VisualContextGlobalRebuildReason,
@@ -774,7 +773,7 @@ impl PaintRead for CommittedPaintableRows<'_> {
         )
     }
 
-    read_layout_tree_from_live_arena!();
+    read_live_arena!(std::ops::Deref::deref);
 
     fn memoized_absolute_rect(&self, id: NodeSlotId) -> Option<crate::css::css_pixels::CssPixelRect> {
         if self.beside_recording {
@@ -865,7 +864,7 @@ impl PaintRead for MainSidePaintableRows<'_> {
         }
     }
 
-    read_layout_tree_from_live_arena!();
+    read_live_arena!(std::ops::Deref::deref);
 
     fn memoized_absolute_rect(&self, id: NodeSlotId) -> Option<crate::css::css_pixels::CssPixelRect> {
         match self {
@@ -943,7 +942,7 @@ where
         PaintableRows::committed_side_data(self, id)
     }
 
-    read_layout_tree_from_live_arena!();
+    read_live_arena!(std::ops::Deref::deref);
 
     fn memoized_absolute_rect(&self, id: NodeSlotId) -> Option<CssPixelRect> {
         LayoutNodeArena::memoized_absolute_rect(self, id)
@@ -1763,6 +1762,17 @@ impl LayoutNodeArena {
         Ref::map(self.paintable_rows.side_data.borrow(), |side_data| {
             &side_data[id.slot_index() as usize]
         })
+    }
+
+    pub(crate) fn svg_filter_bounds(&self, id: NodeSlotId) -> Option<used_values::FfiCssPixelRect> {
+        self.paintable_side_data(id).svg_filter_bounds.get()
+    }
+
+    pub(crate) fn fragment_ownership_filter(
+        &self,
+        id: NodeSlotId,
+    ) -> Option<crate::painting::fragment_ownership::FragmentOwnershipFilter> {
+        self.paintable_side_data(id).fragment_ownership.clone()
     }
 
     pub(crate) fn paintable_side_data_mut(&self, id: NodeSlotId) -> RefMut<'_, PaintableSideData> {

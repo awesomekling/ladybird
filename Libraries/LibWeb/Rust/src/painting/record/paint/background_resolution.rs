@@ -16,7 +16,6 @@ use crate::painting::paintable_geometry::{
     absolute_border_box_rect, absolute_padding_box_rect, committed_border_box_edges, committed_padding,
     committed_uses_collapsing_borders_model,
 };
-use crate::painting::paintable_rows::PaintableRowsRef;
 use crate::painting::published_frame::PaintRead;
 use crate::painting::record::paint::background::{BackgroundBox, background_box_for};
 use crate::painting::record::paint::replaced::{SizeWithAspectRatio, run_default_sizing_algorithm};
@@ -27,12 +26,19 @@ use crate::painting::visual_context::node_values::{
 use libgfx_rust::CompositingAndBlendingOperator;
 
 /// What resolving a box's background and mask layers reads besides the box's own rows.
-#[derive(Clone, Copy)]
-pub(crate) struct LayerResolutionContext<'a> {
-    pub layout_arena: &'a PaintableRowsRef<'a>,
+pub(crate) struct LayerResolutionContext<'a, R: PaintRead> {
+    pub layout_arena: &'a R,
     pub root_background_source: FfiRootBackgroundSource,
     pub css_viewport_rect: CssPixelRect,
 }
+
+impl<R: PaintRead> Clone for LayerResolutionContext<'_, R> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<R: PaintRead> Copy for LayerResolutionContext<'_, R> {}
 
 #[derive(Clone, Copy)]
 pub(crate) struct LayerImageSource<'a> {
@@ -481,7 +487,7 @@ enum LayerType {
 /// https://drafts.fxtf.org/css-masking-1/#the-mask-image
 #[allow(clippy::too_many_arguments)]
 fn resolve_layers<'a>(
-    context: LayerResolutionContext<'_>,
+    context: LayerResolutionContext<'_, impl PaintRead>,
     paintable: NodeSlotId,
     layers: Vec<ComputedLayer<'a>>,
     background_color: libgfx_rust::Color,
@@ -718,7 +724,7 @@ struct LayerImageIntrinsics<'a> {
 }
 
 pub(crate) fn committed_layer_image_paint_facts(
-    layout_arena: &crate::layout::LayoutNodeArena,
+    layout_arena: &impl PaintRead,
     image: &LayerImageSource<'_>,
 ) -> crate::painting::layer_image_paint_facts::LayerImagePaintFacts {
     layout_arena
@@ -727,7 +733,7 @@ pub(crate) fn committed_layer_image_paint_facts(
 }
 
 fn layer_image_intrinsics<'a>(
-    context: LayerResolutionContext<'_>,
+    context: LayerResolutionContext<'_, impl PaintRead>,
     image: &LayerImageSource<'a>,
 ) -> LayerImageIntrinsics<'a> {
     match image.value {
@@ -762,7 +768,7 @@ fn layer_image_intrinsics<'a>(
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn resolve_background_layers<'a>(
-    context: LayerResolutionContext<'_>,
+    context: LayerResolutionContext<'_, impl PaintRead>,
     paintable: NodeSlotId,
     style: ComputedValuesView<'a>,
     layer_image_facts_owner: NodeSlotId,
@@ -785,7 +791,7 @@ pub(crate) fn resolve_background_layers<'a>(
 }
 
 pub(crate) fn resolve_mask_layers<'a>(
-    context: LayerResolutionContext<'_>,
+    context: LayerResolutionContext<'_, impl PaintRead>,
     paintable: NodeSlotId,
     style: ComputedValuesView<'a>,
     border_rect: CssPixelRect,
@@ -839,7 +845,7 @@ pub(crate) fn root_background_canvas_rect(
 }
 
 pub(crate) fn resolve_background_for_paint(
-    context: LayerResolutionContext<'_>,
+    context: LayerResolutionContext<'_, impl PaintRead>,
     paintable: NodeSlotId,
 ) -> Option<BackgroundPaintInputs<'_>> {
     if !has_background_to_paint(context.layout_arena, paintable, context.root_background_source) {

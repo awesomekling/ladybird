@@ -5,9 +5,9 @@
  */
 
 use crate::css::css_pixels::{CssPixelRect, CssPixels};
-use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::{NodeKind, NodeSlotId};
 use crate::painting::paintable_rows::PaintableRowsRead;
+use crate::painting::published_frame::PaintRead;
 use crate::painting::{paintable_geometry, text_fragment};
 
 pub(crate) struct RecordVisualLine {
@@ -19,7 +19,7 @@ pub(crate) struct RecordVisualLine {
     pub line_index: u32,
 }
 
-pub(crate) fn text_preserves_newlines(layout_arena: &LayoutNodeArena, text_node: NodeSlotId) -> bool {
+pub(crate) fn text_preserves_newlines(layout_arena: &impl PaintRead, text_node: NodeSlotId) -> bool {
     let Some(parent) = layout_arena.node_parent_if_live(text_node) else {
         return false;
     };
@@ -34,7 +34,7 @@ pub(crate) fn text_preserves_newlines(layout_arena: &LayoutNodeArena, text_node:
 }
 
 fn for_each_empty_visual_line_position(
-    layout_arena: &LayoutNodeArena,
+    layout_arena: &impl PaintRead,
     node_slots: &[NodeSlotId],
     mut callback: impl FnMut(usize) -> bool,
 ) {
@@ -68,7 +68,7 @@ fn for_each_empty_visual_line_position(
     }
 }
 
-fn has_empty_visual_line_positions(layout_arena: &LayoutNodeArena, node_slots: &[NodeSlotId]) -> bool {
+fn has_empty_visual_line_positions(layout_arena: &impl PaintRead, node_slots: &[NodeSlotId]) -> bool {
     let mut found = false;
     for_each_empty_visual_line_position(layout_arena, node_slots, |_| {
         found = true;
@@ -77,10 +77,7 @@ fn has_empty_visual_line_positions(layout_arena: &LayoutNodeArena, node_slots: &
     found
 }
 
-pub(crate) fn collect_visual_lines(
-    layout_arena: &impl PaintableRowsRead,
-    node_slots: &[NodeSlotId],
-) -> Vec<RecordVisualLine> {
+pub(crate) fn collect_visual_lines(layout_arena: &impl PaintRead, node_slots: &[NodeSlotId]) -> Vec<RecordVisualLine> {
     let mut lines: Vec<RecordVisualLine> = Vec::new();
     text_fragment::for_each_fragment_of_nodes(layout_arena, node_slots, |block, _, fragment| {
         let dom_start = fragment.dom_start_offset_in_node;
@@ -133,10 +130,7 @@ pub(crate) struct EmptyLineCaretTarget {
     pub rect: CssPixelRect,
 }
 
-pub(crate) fn empty_line_caret_targets(
-    layout_arena: &impl PaintableRowsRead,
-    block: NodeSlotId,
-) -> Vec<EmptyLineCaretTarget> {
+pub(crate) fn empty_line_caret_targets(layout_arena: &impl PaintRead, block: NodeSlotId) -> Vec<EmptyLineCaretTarget> {
     let side = layout_arena.committed_side_data(block);
     if side.fragments().is_empty() || side.lines().is_empty() {
         return Vec::new();

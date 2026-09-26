@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+use crate::painting::published_frame::PaintRead;
 use crate::painting::record::trace::Observer;
 
 use crate::css::css_enums::{image_rendering, object_fit};
@@ -15,7 +16,6 @@ use crate::painting::display_list::commands::{CanvasId, CompositorContextId};
 use crate::painting::display_list::device_pixels::DevicePixelConverter;
 use crate::painting::force_dark::ForceDarkRole;
 use crate::painting::paintable_geometry::absolute_rect;
-use crate::painting::paintable_rows::PaintableRowsRef;
 use crate::painting::record::PaintRecorder;
 use crate::painting::record::paint::background::{paint_image_content, to_gfx_scaling_mode};
 use crate::painting::replaced_paint_facts::VideoPaintFacts;
@@ -169,7 +169,7 @@ pub(crate) fn run_default_sizing_algorithm(
 }
 
 pub(crate) fn get_replaced_box_painting_area(
-    layout_arena: &PaintableRowsRef<'_>,
+    layout_arena: &impl PaintRead,
     converter: DevicePixelConverter,
     paintable: NodeSlotId,
     mut object_fit: u8,
@@ -275,7 +275,7 @@ pub(crate) fn paint_replaced_image_content<O: Observer>(
     );
 }
 
-fn replaced_style(layout_arena: &PaintableRowsRef<'_>, paintable: NodeSlotId) -> (u8, u8) {
+fn replaced_style(layout_arena: &impl PaintRead, paintable: NodeSlotId) -> (u8, u8) {
     layout_arena
         .node_style_if_live(paintable)
         .map_or((object_fit::FILL, image_rendering::AUTO), |style| {
@@ -286,7 +286,7 @@ fn replaced_style(layout_arena: &PaintableRowsRef<'_>, paintable: NodeSlotId) ->
 /// The device rect an image element's content paints into: its concrete object size placed in the element's box per
 /// `object-fit` and `object-position`. Empty when nothing paints.
 pub(crate) fn image_content_draw_rect(
-    layout_arena: &PaintableRowsRef<'_>,
+    layout_arena: &impl PaintRead,
     converter: DevicePixelConverter,
     paintable: NodeSlotId,
     natural: &SizeWithAspectRatio,

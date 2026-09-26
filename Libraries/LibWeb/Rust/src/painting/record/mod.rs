@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+use crate::painting::published_frame::PaintRead;
 use crate::painting::record::trace::{Observer, Operation};
 
 pub(crate) mod assemble;
@@ -38,7 +39,6 @@ use crate::painting::display_list::recorder::DisplayListRecorder;
 use crate::painting::hit_test::HitTestItem;
 use crate::painting::hit_test::HitTestList;
 use crate::painting::paintable_data::{InlineBoxPieceRecord, PaintableData};
-use crate::painting::paintable_rows::PaintableRowsRef;
 use crate::painting::record::frame_inputs::FrameInputs;
 use crate::painting::record::svg_resources::SvgResourceWalk;
 use std::sync::Arc;
@@ -96,7 +96,7 @@ impl PaintPhase {
     }
 }
 pub struct PaintRecorder<'a, O: Observer> {
-    pub(crate) layout_arena: &'a PaintableRowsRef<'a>,
+    pub(crate) layout_arena: &'a crate::painting::published_frame::PaintSource<'a>,
     pub(crate) paint_state: &'a crate::painting::paint_state::PaintState,
     pub(crate) inputs: &'a RecordingInputs<'a>,
     pub(crate) recorder: DisplayListRecorder,
@@ -149,7 +149,10 @@ impl<'a, O: Observer> PaintRecorder<'a, O> {
         true
     }
 
-    pub(crate) fn layer_resolution_context(&self) -> paint::background_resolution::LayerResolutionContext<'a> {
+    pub(crate) fn layer_resolution_context(
+        &self,
+    ) -> paint::background_resolution::LayerResolutionContext<'a, crate::painting::published_frame::PaintSource<'a>>
+    {
         paint::background_resolution::LayerResolutionContext {
             layout_arena: self.layout_arena,
             root_background_source: self.inputs.uncaptured.root_background_source,
@@ -303,7 +306,10 @@ impl<'a, O: Observer> PaintRecorder<'a, O> {
         if let Some(answer) = self.scratch.selection_style_cache.get(&key) {
             return answer.clone();
         }
-        let style_source = self.layout_arena.data(node).parent.get();
+        let style_source = self
+            .layout_arena
+            .node_parent_if_live(node)
+            .unwrap_or(NodeSlotId::INVALID);
         let committed = self
             .first_non_anonymous_ancestor_row(node)
             .and_then(|element_row| self.committed_selection_pseudo_style(node, element_row));
@@ -365,11 +371,17 @@ impl<'a, O: Observer> PaintRecorder<'a, O> {
         if self.layout_arena.node_flags_if_live(element_row) & NodeFlag::IsInUserAgentShadowTree as u32 == 0 {
             return None;
         }
-        let mut host_row = self.layout_arena.data(element_row).parent.get();
+        let mut host_row = self
+            .layout_arena
+            .node_parent_if_live(element_row)
+            .unwrap_or(NodeSlotId::INVALID);
         while !host_row.is_invalid()
             && self.layout_arena.node_flags_if_live(host_row) & NodeFlag::IsInUserAgentShadowTree as u32 != 0
         {
-            host_row = self.layout_arena.data(host_row).parent.get();
+            host_row = self
+                .layout_arena
+                .node_parent_if_live(host_row)
+                .unwrap_or(NodeSlotId::INVALID);
         }
         if host_row.is_invalid() {
             return None;
@@ -381,12 +393,18 @@ impl<'a, O: Observer> PaintRecorder<'a, O> {
         &self,
         node: crate::layout::node_data::NodeSlotId,
     ) -> Option<crate::layout::node_data::NodeSlotId> {
-        let mut row = self.layout_arena.data(node).parent.get();
+        let mut row = self
+            .layout_arena
+            .node_parent_if_live(node)
+            .unwrap_or(NodeSlotId::INVALID);
         while !row.is_invalid() {
             if self.layout_arena.node_flags_if_live(row) & NodeFlag::Anonymous as u32 == 0 {
                 return Some(row);
             }
-            row = self.layout_arena.data(row).parent.get();
+            row = self
+                .layout_arena
+                .node_parent_if_live(row)
+                .unwrap_or(NodeSlotId::INVALID);
         }
         None
     }
