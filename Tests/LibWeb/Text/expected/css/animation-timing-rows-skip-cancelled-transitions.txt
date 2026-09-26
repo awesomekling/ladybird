@@ -1,0 +1,6 @@
+rows published by 21 toggles: 1169
+relevant animations: 1
+transform after cancelling: none
+revived play state: paused
+transform after reviving: matrix(1, 0, 0, 1, 50, 0)
+relevant animations after reviving: 2
