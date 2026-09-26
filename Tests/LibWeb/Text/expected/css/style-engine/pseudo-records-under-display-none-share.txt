@@ -1,0 +1,6 @@
+alike items in one update share: true
+an alike item in a later update shares: true
+it was not driven in full: true
+computed ::before: "x" rgb(1, 2, 3)
+a shown item keeps its ::before: "x" inline
+its box shows it: true
