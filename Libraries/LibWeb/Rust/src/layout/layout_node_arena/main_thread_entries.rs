@@ -143,6 +143,22 @@ unsafe extern "C" fn layout_arena_bound_shell(arena: *mut c_void, style_node: u3
     arena.node_shell(&main_thread, row)
 }
 
+/// The element the tree build last saw as the shadow-including parent of the element with
+/// `style_node`, which is the host when the element's parent is a shadow root, or 0 for none.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_shadow_including_parent_element(arena: *mut c_void, style_node: u32) -> u32 {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    let _main_thread = unsafe { crate::stage::from_ffi_entry_beside_recording(&MAIN_THREAD_FFI_ENTRY, arena) };
+    let Some(style_node) = StyleNodeID::from_raw(style_node) else {
+        return 0;
+    };
+    // SAFETY: The C++ caller keeps the arena alive for this synchronous call. The ancestry is
+    // nothing a recording writes.
+    unsafe { LayoutNodeArena::from_handle_beside_recording(arena) }
+        .shadow_including_parent(style_node)
+        .element
+}
+
 /// The shell of the row the pseudo-element of kind `generated_for` on the element with
 /// `style_node` is bound to, materialised if nothing has asked for it yet, or null.
 #[unsafe(no_mangle)]

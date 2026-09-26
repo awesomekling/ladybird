@@ -34,6 +34,8 @@
 #include <LibWeb/HTML/LocalNavigable.h>
 #include <LibWeb/HTML/NavigableContainer.h>
 #include <LibWeb/Layout/Box.h>
+#include <LibWeb/Layout/Viewport.h>
+#include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/Selection/Selection.h>
 
 namespace Web::CSS {
@@ -145,13 +147,100 @@ void StyleEffectDrain::apply(DOM::Document& document)
 
 void StyleEffectDrain::apply(StyleDrainScope const& scope, DOM::Document& document)
 {
+    take_layout_node_style_records(document);
     apply_render_half(scope, document);
     apply_main_half(scope, document);
 }
 
+StyleEffectDrain::PseudoElementStyleRecords StyleEffectDrain::pseudo_element_style_records_of(DOM::Element const& element)
+{
+    PseudoElementStyleRecords records {};
+    element.for_each_synthetic_pseudo_element([&](PseudoElement pseudo_element, auto const&) {
+        records[to_underlying(pseudo_element) - to_underlying(first_synthetic_pseudo_element)] = element.style_record_identity(pseudo_element);
+    });
+    return records;
+}
+
+// The records of every row's element, as the installed batch leaves them. Few elements have
+// pseudo-element records, so they are kept beside the effects rather than in each.
+void StyleEffectDrain::take_layout_node_style_records(DOM::Document& document)
+{
+    for (auto& effect : m_render_effects) {
+        auto* row = effect.get_pointer<LayoutNodeStyle>();
+        if (!row)
+            continue;
+        auto element = document.style_computer().element_for_style_node(row->style_node);
+        if (!element)
+            continue;
+        row->style_record = element->style_record_identity();
+        auto pseudo_element_style_records = pseudo_element_style_records_of(*element);
+        if (any_of(pseudo_element_style_records, [](auto style_record) { return style_record.value() != 0; })) {
+            VERIFY(m_pseudo_element_style_records.size() < NumericLimits<u32>::max());
+            row->pseudo_element_style_records = static_cast<u32>(m_pseudo_element_style_records.size());
+            m_pseudo_element_style_records.append(pseudo_element_style_records);
+        }
+    }
+}
+
+void StyleEffectDrain::apply_layout_node_style(DOM::Document& document, StyleNodeID style_node, RequiredInvalidationAfterStyleChange const& invalidation, StyleRecordID style_record, PseudoElementStyleRecords const& pseudo_element_style_records)
+{
+    if (invalidation.needs_layout_tree_rebuild())
+        return;
+    auto* arena = document.layout_node_arena_if_created();
+    if (!arena)
+        return;
+
+    // If we're keeping the layout tree, we can just apply the new style to the existing layout tree.
+    auto* layout_node = static_cast<Layout::NodeWithStyle*>(Layout::RustFFI::layout_arena_bound_shell(arena->handle(), style_node.value()));
+    ASSERT(!layout_node || style_record.value() != 0);
+    if (layout_node && style_record.value() != 0) {
+        layout_node->apply_style(style_record);
+        if (Painting::has_committed_box(*layout_node))
+            Painting::repaint_after_style_change(*layout_node, invalidation);
+    }
+
+    if (invalidation.repaint_selection) {
+        Layout::RustFFI::layout_arena_sync_selection_pseudo_style(arena->handle(), style_node.value());
+        // NB: A display:contents element has no box of its own. Invalidate the nearest painted ancestor's subtree so
+        //     cached text commands take the new highlight. The ancestry is the one the layout tree was built from.
+        Layout::Node* painted_ancestor = nullptr;
+        for (auto ancestor = style_node.value(); ancestor != 0 && !painted_ancestor; ancestor = Layout::RustFFI::layout_arena_shadow_including_parent_element(arena->handle(), ancestor)) {
+            auto* layout_node = static_cast<Layout::Node*>(Layout::RustFFI::layout_arena_bound_shell(arena->handle(), ancestor));
+            if (layout_node && Painting::has_committed_box(*layout_node))
+                painted_ancestor = layout_node;
+        }
+        if (auto* viewport = document.unsafe_layout_node(); !painted_ancestor && viewport && Painting::has_committed_box(*viewport))
+            painted_ancestor = viewport;
+        if (painted_ancestor)
+            Painting::set_needs_repaint_in_subtree(*painted_ancestor);
+    }
+
+    for (size_t index = 0; index < pseudo_element_style_records.size(); ++index) {
+        auto pseudo_element_style_record = pseudo_element_style_records[index];
+        if (!pseudo_element_style_record)
+            continue;
+        auto pseudo_element = static_cast<PseudoElement>(to_underlying(first_synthetic_pseudo_element) + index);
+        if (auto* layout_node = static_cast<Layout::NodeWithStyle*>(Layout::RustFFI::layout_arena_bound_pseudo_element_shell(arena->handle(), style_node.value(), Layout::Node::encode_generated_for(pseudo_element)))) {
+            layout_node->apply_style(pseudo_element_style_record);
+            if (Painting::has_committed_box(*layout_node))
+                Painting::repaint_after_style_change(*layout_node, invalidation);
+        }
+    }
+}
+
 void StyleEffectDrain::apply_render_half(StyleDrainScope const& scope, DOM::Document& document)
 {
+    static PseudoElementStyleRecords const no_pseudo_element_style_records {};
     for (auto const& effect : m_render_effects) {
+        if (auto const* row = effect.get_pointer<LayoutNodeStyle>()) {
+            if (!row->style_record.has_value())
+                continue;
+            auto const& pseudo_element_style_records = row->pseudo_element_style_records == NumericLimits<u32>::max()
+                ? no_pseudo_element_style_records
+                : m_pseudo_element_style_records[row->pseudo_element_style_records];
+            apply_layout_node_style(document, row->style_node, row->invalidation, *row->style_record, pseudo_element_style_records);
+            continue;
+        }
         if (auto const* row = effect.get_pointer<RestoreRowDebts>()) {
             scope.engine().restore_row_debts(scope, row->style_node, row->explicit_inheritance_debt, row->row_effect_debt);
             continue;
@@ -168,8 +257,8 @@ void StyleEffectDrain::apply_render_half(StyleDrainScope const& scope, DOM::Docu
         if (!element)
             continue;
         effect.visit(
-            [&](LayoutNodeStyle const& row) {
-                element->apply_computed_style_to_layout_node_if_needed(row.invalidation);
+            [&](LayoutNodeStyle const&) {
+                VERIFY_NOT_REACHED();
             },
             [&](ElementInvalidation const& row) {
                 apply_element_style_invalidation_after_style_change(*element, row.invalidation);
@@ -199,6 +288,7 @@ void StyleEffectDrain::apply_render_half(StyleDrainScope const& scope, DOM::Docu
             });
     }
     m_render_effects.clear();
+    m_pseudo_element_style_records.clear();
 }
 
 void StyleEffectDrain::apply_main_half(StyleDrainScope const& scope, DOM::Document& document)
