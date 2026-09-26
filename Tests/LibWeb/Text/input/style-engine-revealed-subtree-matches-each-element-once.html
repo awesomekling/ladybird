@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<script src="include.js"></script>
+<style>
+    li input { color: rgb(0, 128, 0); }
+    li label::before { content: "#"; }
+</style>
+<div id="main"><ul id="list"></ul></div>
+<script>
+    test(() => {
+        internals.updateStyle();
+        main.style.display = "none";
+        internals.updateStyle();
+
+        // Items added under a display:none ancestor have no box to style until it is shown again.
+        let before = internals.styleEngineCounters();
+        let html = "";
+        for (let i = 0; i < 10; i++)
+            html += `<li><input type="checkbox"><label>${i}</label><input class="edit" value="${i}"></li>`;
+        list.innerHTML = html;
+        internals.updateStyle();
+        let after = internals.styleEngineCounters();
+        println(`hidden add: engineComputedRecordDeltas=${after.engineComputedRecordDeltas - before.engineComputedRecordDeltas}`);
+
+        // Showing the ancestor styles the revealed subtree, matching each element once.
+        before = internals.styleEngineCounters();
+        main.style.display = "";
+        internals.updateStyle();
+        after = internals.styleEngineCounters();
+        println(`show: matchAnswerUpqueries=${after.matchAnswerUpqueries - before.matchAnswerUpqueries}`);
+
+        const item = list.lastElementChild;
+        println(`input color: ${getComputedStyle(item.querySelector(".edit")).color}`);
+        println(`label ::before content: ${getComputedStyle(item.querySelector("label"), "::before").content}`);
+    });
+</script>
