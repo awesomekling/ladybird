@@ -22,6 +22,20 @@ namespace Web::DOM {
 
 void CommitMessages::note_box_presence(NodeIdentity identity, bool has_layout_box, bool has_committed_box)
 {
+    // OPTIMIZATION: With nothing queued ahead of it, the message would be applied the moment it is
+    //               queued, so the bits are set without queuing it. What setting them queues is
+    //               applied after them, as the drain below would.
+    if (m_messages.is_empty() && !m_applying) {
+        {
+            m_applying = true;
+            ScopeGuard done = [&] { m_applying = false; };
+            if (auto node = identity.resolve(m_document))
+                node->set_box_presence(has_layout_box, has_committed_box);
+        }
+        if (!m_messages.is_empty())
+            apply_script_free();
+        return;
+    }
     m_messages.append(Message {
         .identity = identity,
         .kind = Kind::BoxPresence,
