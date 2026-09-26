@@ -1271,9 +1271,13 @@ pub unsafe extern "C" fn layout_arena_refresh_scroll_state(
 }
 
 /// What a recording stage runs on. The stage holds the arena exclusively while the owning thread
-/// waits for it, so the input is sendable because the arena is, not because it is shared.
+/// waits for it, so the input is sendable because the arena is, not because it is shared. The
+/// frame it records is frozen before the stage is handed the input, and moved into it: the stage
+/// publishes nothing, so a main-side read beside a submitted recording reads a publication the
+/// recording never writes.
 struct RecordingStageInput<'a> {
     arena: &'a mut LayoutNodeArena,
+    frame: std::sync::Arc<crate::painting::published_frame::PublishedFrame>,
     viewport: NodeSlotId,
     inputs: crate::painting::record::RecordingInputs<'a>,
     // For a recording in flight that a read may cancel: what it records once cancelled is dropped.
@@ -1291,39 +1295,52 @@ const _: () = {
     assert_send::<RecordingStageOutput>();
 };
 
+/// Freezes the frame a recording with `inputs` reads, on the thread that owns the arena, before the
+/// recording is handed to the stage that runs it.
+fn freeze_recording_frame(
+    arena: &mut LayoutNodeArena,
+    inputs: &crate::painting::record::RecordingInputs<'_>,
+) -> std::sync::Arc<crate::painting::published_frame::PublishedFrame> {
+    {
+        let paint_state = arena.paint_state().borrow();
+        // The root background paints the union of the viewport and the root's overflow, so it
+        // is the one output a viewport move can change. Drop its caches before recording
+        // starts instead of treating the viewport position as a frame-wide input.
+        if let Some(source) = &paint_state.recorder.published_recording {
+            let root = inputs.uncaptured.root_background_source.root_layout_node;
+            let rows = arena.paintable_rows();
+            let canvas_rect = crate::painting::record::paint::background_resolution::root_background_canvas_rect(
+                &rows,
+                root,
+                inputs.css_viewport_rect,
+            );
+            if canvas_rect != source.root_background_canvas_rect {
+                let _writer = crate::painting::published_immutable::enter_writer_if_unattributed("recording preflight");
+                arena.push_paint_damage(root, crate::painting::record::damage::PaintDamage::DRAW_BACKGROUND);
+            }
+        }
+    }
+    // Damage pushed from here on is for the next recording to consume.
+    if inputs.publishes_recording {
+        arena.note_publishing_paint_recording_started();
+    }
+    std::sync::Arc::new(arena.freeze_paint_frame())
+}
+
 /// The host-free display-list recording stage. Host callbacks require a `MainThread` capability,
 /// which this function neither receives nor stores in its input.
 fn record_display_list_stage(stage: RecordingStageInput<'_>) -> RecordingStageOutput {
     let RecordingStageInput {
         arena,
+        frame,
         viewport,
         mut inputs,
         cancel,
     } = stage;
-    let frame = arena.freeze_paint_frame();
     let arena: &LayoutNodeArena = arena;
     let mut scratch = arena.recording_scratch().take_for_run();
     let scratch = &mut *scratch;
     let paint_state = arena.paint_state().borrow();
-    // The root background paints the union of the viewport and the root's overflow, so it
-    // is the one output a viewport move can change. Drop its caches before recording
-    // starts instead of treating the viewport position as a frame-wide input.
-    if let Some(source) = &paint_state.recorder.published_recording {
-        let root = inputs.uncaptured.root_background_source.root_layout_node;
-        let rows = arena.paintable_rows();
-        let canvas_rect = crate::painting::record::paint::background_resolution::root_background_canvas_rect(
-            &rows,
-            root,
-            inputs.css_viewport_rect,
-        );
-        if canvas_rect != source.root_background_canvas_rect {
-            let _writer = crate::painting::published_immutable::enter_writer_if_unattributed("recording preflight");
-            arena.push_paint_damage(root, crate::painting::record::damage::PaintDamage::DRAW_BACKGROUND);
-        }
-    }
-    if inputs.publishes_recording {
-        arena.note_publishing_paint_recording_started();
-    }
     // The retained tree describes the published tape and is written in place while a frame
     // is assembled, so only a recording that publishes may copy from that frame or touch
     // the tree; any other recording records from scratch into a tree of its own.
@@ -1449,6 +1466,7 @@ impl RecordingJob {
     pub(crate) unsafe fn in_flight(
         arena_handle: *mut c_void,
         viewport: NodeSlotId,
+        frame: std::sync::Arc<crate::painting::published_frame::PublishedFrame>,
         inputs: crate::painting::record::RecordingInputs<'static>,
         should_paint_overlay: bool,
         publishes_recording: bool,
@@ -1458,6 +1476,7 @@ impl RecordingJob {
             input: RecordingStageInput {
                 // SAFETY: Guaranteed by the caller.
                 arena: unsafe { &mut *arena_handle.cast::<LayoutNodeArena>() },
+                frame,
                 viewport,
                 inputs,
                 cancel: None,
@@ -1589,12 +1608,15 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
             // SAFETY: No borrow of the arena is live here.
             let _ = unsafe { arena_from_handle_mut(arena_handle) }.committed_paintable_rows();
         }
+        // SAFETY: No borrow of the arena is live here.
+        let frame = freeze_recording_frame(unsafe { arena_from_handle_mut(arena_handle) }, &recording_inputs);
         // SAFETY: No borrow of the arena outlives this point. The submitted frame owns the arena
         // until the host takes it back: every main-side access to it joins the frame first.
         let job = unsafe {
             RecordingJob::in_flight(
                 arena_handle,
                 viewport,
+                frame,
                 recording_inputs.into_owned(),
                 should_paint_overlay,
                 publishes_recording,
@@ -1612,9 +1634,12 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
         crate::stage_thread::RecordingRedo::WhileMainWaits,
     );
     let output = {
+        // SAFETY: No borrow of the arena outlives this point, so the stage holds it alone.
+        let arena = unsafe { arena_from_handle_mut(arena_handle) };
+        let frame = freeze_recording_frame(arena, &recording_inputs);
         let input = RecordingStageInput {
-            // SAFETY: No borrow of the arena outlives this point, so the stage holds it alone.
-            arena: unsafe { arena_from_handle_mut(arena_handle) },
+            arena,
+            frame,
             viewport,
             inputs: recording_inputs,
             cancel: None,
@@ -1668,9 +1693,12 @@ pub(crate) unsafe fn record_for_clock_tick(arena_handle: *mut c_void) -> bool {
     let should_paint_overlay = inputs.should_paint_overlay;
     // SAFETY: Guaranteed by the caller.
     let frame_generation = unsafe { crate::layout::frame_retirement::frame_generation(arena_handle) };
+    // SAFETY: Guaranteed by the caller; no borrow of the arena is live here.
+    let arena = unsafe { arena_from_handle_mut(arena_handle) };
+    let frame = freeze_recording_frame(arena, &inputs);
     let output = record_display_list_stage(RecordingStageInput {
-        // SAFETY: Guaranteed by the caller; no borrow of the arena is live here.
-        arena: unsafe { arena_from_handle_mut(arena_handle) },
+        arena,
+        frame,
         viewport,
         inputs,
         cancel: None,
@@ -2002,9 +2030,12 @@ pub(crate) unsafe fn paint_in_flight(
     }
     let should_paint_overlay = inputs.should_paint_overlay;
     let publishes_recording = inputs.publishes_recording;
+    // SAFETY: The frame in flight owns the arena, and no borrow of it is held here.
+    let arena = unsafe { &mut *arena_handle.cast::<LayoutNodeArena>() };
+    let frame = freeze_recording_frame(arena, &inputs);
     let output = record_display_list_stage(RecordingStageInput {
-        // SAFETY: The frame in flight owns the arena, and no borrow of it is held here.
-        arena: unsafe { &mut *arena_handle.cast::<LayoutNodeArena>() },
+        arena,
+        frame,
         viewport,
         inputs,
         cancel: None,
