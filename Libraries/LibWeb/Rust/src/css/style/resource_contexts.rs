@@ -8,7 +8,7 @@
 //! sheet a rule came from, keyed by the native sheet's identity (an imported sheet's own, not its
 //! importer's). The host lends them at each style transaction boundary; the engine keeps a copy.
 
-use std::collections::HashMap;
+use super::fast_hash::FastMap as HashMap;
 
 use super::bridge::{FfiDocumentStyleComputationInputs, FfiHostHandle, FfiStyleSheetResourceContextEntry};
 use crate::css::style_compute::FfiStyleSheetResourceContext;
