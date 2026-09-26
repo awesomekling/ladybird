@@ -10,7 +10,8 @@
 // It starts once the document has loaded: the load task lays the document out, which waits for the frame in flight.
 // Where the rendering update submits its layout pass too (LIBWEB_STAGE_OVERLAP naming "layout"), the frame is in
 // flight twice: the recording is submitted only once the main thread has taken the layout pass back between tasks and
-// gone on with the rendering update, so `during` waits for that first.
+// gone on with the rendering update, so `during` waits for that first. So it does where a flight that could have
+// recorded ended before it did: the rendering update records once it has taken that flight back.
 async function whileFrameInFlight(point, mutate, during, doc = null) {
     if (document.readyState !== "complete")
         await new Promise(resolve => window.addEventListener("load", resolve, { once: true }));
@@ -23,11 +24,17 @@ async function whileFrameInFlight(point, mutate, during, doc = null) {
             mutate();
             setTimeout(async () => {
                 try {
-                    while (armed && internals.renderingUpdateAwaitsPass()) {
-                        internals.waitForFrameToFinish();
-                        await nextTask();
+                    let heldAt = "";
+                    while (armed) {
+                        while (internals.renderingUpdateAwaitsPass() || internals.heldFrameAwaitsSubmission()) {
+                            internals.waitForFrameToFinish();
+                            await nextTask();
+                        }
+                        heldAt = internals.waitForHeldFrame();
+                        // A flight that could have recorded can end before it does while this waits.
+                        if (heldAt || !internals.heldFrameAwaitsSubmission())
+                            break;
                     }
-                    const heldAt = armed ? internals.waitForHeldFrame() : "";
                     const frame = { armed, heldAt, state: internals.frameSchedulerState() };
                     const result = await during(frame);
                     internals.releaseHeldFrame();

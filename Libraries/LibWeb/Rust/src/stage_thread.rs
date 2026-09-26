@@ -367,10 +367,19 @@ impl SubmittedStage {
         self.outcome.is_some()
     }
 
+    /// A held stage would never finish while the main thread waits for it, so waiting releases a
+    /// hold on it. A run that finished without reaching the hold, as a flight that ended before the
+    /// stage the hold names, leaves the hold armed for the run that reaches it.
+    fn release_hold_unless_finished(&mut self) {
+        if self.recall.is_some() || !self.poll() {
+            release_hold_on(&self.hold_labels);
+        }
+    }
+
     /// Waits for the stage to finish without taking its outcome, which stays for the frame's
     /// consume.
     fn wait_until_finished(&mut self) {
-        release_hold_on(&self.hold_labels);
+        self.release_hold_unless_finished();
         self.recall();
         if self.outcome.is_none() {
             self.outcome = Some(self.from_stage.recv().unwrap_or_else(|_| std::process::abort()));
@@ -378,8 +387,7 @@ impl SubmittedStage {
     }
 
     fn wait(&mut self) -> StageOutcome {
-        // A held stage would never finish while the main thread waits for it.
-        release_hold_on(&self.hold_labels);
+        self.release_hold_unless_finished();
         self.recall();
         match self.outcome.take() {
             Some(outcome) => outcome,
@@ -1007,16 +1015,21 @@ pub extern "C" fn rust_stage_thread_wait_for_held_stage(timeout_ms: u32, held_at
         let Some(armed) = &hold.armed else {
             return false;
         };
-        let submitted_armed_run = SUBMITTED.with(|submitted| {
-            submitted.borrow().iter().any(|stage| {
-                hold_names_stage(&armed.label, &stage.hold_labels) && (armed.arena == 0 || armed.arena == stage.arena)
+        // A run that finished without reaching the hold, as a flight that ended before the stage it
+        // names, holds nothing.
+        let submitted_armed_run = SUBMITTED.with_borrow_mut(|submitted| {
+            submitted.iter_mut().any(|stage| {
+                hold_names_stage(&armed.label, &stage.hold_labels)
+                    && (armed.arena == 0 || armed.arena == stage.arena)
+                    && !stage.poll()
             })
         });
         if !submitted_armed_run || now >= deadline {
             return false;
         }
+        // A run that finishes without reaching the hold tells nobody: look again shortly.
         hold = changed
-            .wait_timeout(hold, deadline - now)
+            .wait_timeout(hold, (deadline - now).min(std::time::Duration::from_millis(1)))
             .expect("the stage hold is never poisoned")
             .0;
     }
@@ -1024,7 +1037,8 @@ pub extern "C" fn rust_stage_thread_wait_for_held_stage(timeout_ms: u32, held_at
 
 /// Whether a hold is armed for a stage the frame in flight has not submitted yet, while other stages
 /// of it are in flight: the style pass a rendering update submits before its layout pass, which it
-/// submits once the main thread has taken the style pass back between tasks.
+/// submits once the main thread has taken the style pass back between tasks, or a flight that ended
+/// before the stage the hold names, which the rendering update runs once it has taken the flight back.
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_stage_thread_armed_hold_awaits_submission() -> bool {
     let (hold, _) = lock_stage_hold();
@@ -1034,10 +1048,12 @@ pub extern "C" fn rust_stage_thread_armed_hold_awaits_submission() -> bool {
     let Some(armed) = &hold.armed else {
         return false;
     };
-    SUBMITTED.with_borrow(|submitted| {
+    SUBMITTED.with_borrow_mut(|submitted| {
         !submitted.is_empty()
-            && !submitted.iter().any(|stage| {
-                hold_names_stage(&armed.label, &stage.hold_labels) && (armed.arena == 0 || armed.arena == stage.arena)
+            && !submitted.iter_mut().any(|stage| {
+                hold_names_stage(&armed.label, &stage.hold_labels)
+                    && (armed.arena == 0 || armed.arena == stage.arena)
+                    && !stage.poll()
             })
     })
 }
