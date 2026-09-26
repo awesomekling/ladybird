@@ -828,12 +828,27 @@ impl LayoutFrame {
     /// Whether nothing the frame leaves for the document thread changes what a recording made from
     /// the arena now would show: no scroll offsets to store, no image resources to attach, no list
     /// owners to rebuild, and no boxes whose relevance to the user the rendering update determines.
+    ///
+    /// Nor may a round that resized a navigable the document hosts: that navigable lays itself out
+    /// at its new size later in the rendering update and paints then, and a frame of the document
+    /// handed off before would compose the navigable's frame at its old size.
     fn may_be_painted_before_take_back(&self) -> bool {
         self.messages.clamped_scroll_offsets.is_empty()
             && self.messages.owed_image_resources.is_empty()
             && !self.messages.prepare_for_rendering
             && self.list_owners_to_rebuild.is_empty()
             && !self.arena().may_have_auto_content_visibility()
+            && !self.resized_a_hosted_navigable()
+    }
+
+    fn resized_a_hosted_navigable(&self) -> bool {
+        let owed = self.owed_host_halves.take();
+        let resized = owed.iter().any(|owed| match owed {
+            OwedHostHalf::TreeBuild(_) => false,
+            OwedHostHalf::Commit(commit) => commit.resized_a_hosted_navigable(),
+        });
+        self.owed_host_halves.set(owed);
+        resized
     }
 
     /// Whether what the frame owes the document thread leaves it no style or layout work: no tree

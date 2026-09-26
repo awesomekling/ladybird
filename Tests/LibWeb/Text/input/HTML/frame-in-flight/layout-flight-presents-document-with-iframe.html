@@ -5,16 +5,19 @@
 <iframe id="frame" style="width: 100px; height: 50px; border: 0" srcdoc="<body style='margin: 0'><div id=inner style='width: 20px; height: 20px'></div></body>"></iframe>
 <script>
     // The parent's recording draws a same-process iframe as the compositor context its own frames present into, so a
-    // document that contains one records and presents in the flight that laid it out, as any other. Nothing is
+    // document that contains one records and presents in the flight that laid it out, as any other, while the iframe
+    // has nothing to paint after it (layout-flight-presents-after-hosted-navigables covers when it does). Nothing is
     // printed until the end, as printing inserts nodes, whose tree build keeps a flight from presenting.
     asyncTest(async done => {
         await new Promise(resolve => frame.complete || frame.contentDocument?.readyState === "complete" ? resolve() : frame.addEventListener("load", resolve, { once: true }));
         internals.setRenderPresents(true);
-        await twoFrames();
+        // The iframe paints its first frames after its load: until it has nothing left to paint, the parent's flights
+        // leave their paint to the rendering update.
+        for (let i = 0; i < 3; ++i)
+            await twoFrames();
         internals.resetRenderingSchedulerCounters();
         for (const width of [20, 30, 40]) {
             box.style.width = `${width}px`;
-            frame.contentDocument.getElementById("inner").style.width = `${width}px`;
             await twoFrames();
         }
         const ends = internals.getRenderingSchedulerCounters().flightEnds;

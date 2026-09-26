@@ -73,7 +73,9 @@ fn has_descendant_dependent_paint(arena: &LayoutNodeArena, node: NodeSlotId) -> 
 pub(crate) struct PaintableCommit<'a> {
     arena: &'a mut LayoutNodeArena,
     is_full_layout: bool,
-    committed_navigable_container_viewports: Vec<NodeSlotId>,
+    /// The navigable container viewports the commit reached, with the content size each was
+    /// committed with before, if it had a row.
+    committed_navigable_container_viewports: Vec<(NodeSlotId, Option<used_values::FfiCssPixelSize>)>,
     row_reset_notifications: Vec<crate::painting::paintable_rows::PaintableRowReset>,
     overflow_invalidated_boxes: std::collections::HashSet<NodeSlotId>,
 }
@@ -150,7 +152,10 @@ impl<'a> PaintableCommit<'a> {
             };
         }
         if node_kind == NodeKind::NavigableContainerViewport {
-            self.committed_navigable_container_viewports.push(node);
+            let previous_content_size =
+                row_existed_before_this_commit.then(|| self.arena().paintable_rows().paintable_data(node).content_size);
+            self.committed_navigable_container_viewports
+                .push((node, previous_content_size));
         }
         if reuses_committed_subtree {
             assert!(
@@ -210,8 +215,22 @@ impl<'a> PaintableCommit<'a> {
         std::mem::take(&mut self.row_reset_notifications)
     }
 
-    pub(crate) fn committed_navigable_container_viewports(&self) -> &[NodeSlotId] {
+    pub(crate) fn committed_navigable_container_viewports(
+        &self,
+    ) -> &[(NodeSlotId, Option<used_values::FfiCssPixelSize>)] {
         &self.committed_navigable_container_viewports
+    }
+
+    /// Whether the commit gave a navigable container viewport another content size than it had,
+    /// which the navigable it hosts is laid out at.
+    pub(crate) fn resized_a_navigable_container_viewport(&self) -> bool {
+        self.committed_navigable_container_viewports
+            .iter()
+            .any(|(node, previous_content_size)| {
+                let rows = self.arena().paintable_rows();
+                !rows.paintable_row_is_populated(*node)
+                    || *previous_content_size != Some(rows.paintable_data(*node).content_size)
+            })
     }
 
     pub(crate) fn replace_committed_fragment_link(
