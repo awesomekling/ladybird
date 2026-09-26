@@ -457,16 +457,17 @@ void FrameScheduler::consume_finished_frame()
 // The render clock ticks nothing beside a frame in flight, and a rendering update ends the lease of a document with
 // animation frame callbacks, which its tail grants again. A task that begins beside the frame of one that began with a
 // clock lease would get no ticks for as long as it runs: the main thread finishes that frame first, and lends the lease
-// its tail granted to the task. Such a document has a rendering update at every display frame, so its task would begin
-// beside a frame often, and it waits for the frame at every task. For another, it waits only after a long task. Where
-// the frame's tail ran at step 1 already, the main thread only lends the leases.
+// its tail granted to the task. It waits for the frame only for a task that is likely long: one that follows a long
+// task, or, for a document with animation frame callbacks, whose rendering updates end its lease at every display frame,
+// one the main thread woke up for. A main thread busy with short tasks goes on beside the frame, and lends the leases
+// once it has taken the frame in. Where the frame's tail ran at step 1 already, the main thread only lends the leases.
 void FrameScheduler::finish_frame_for_clock_lend()
 {
     if (!Layout::RustFFI::rust_clock_frames_enabled())
         return;
     // NB: A frame a test holds stays in flight for the tasks the test runs beside it.
     bool const finishes_frame = m_rendering_update_began_with_clock_lease
-        && (m_rendering_update_ended_clock_lease_for_frame_callbacks || m_last_task_milliseconds >= clock_lend_long_task_milliseconds)
+        && ((m_rendering_update_ended_clock_lease_for_frame_callbacks && m_main_thread_idled_since_task) || m_last_task_milliseconds >= clock_lend_long_task_milliseconds)
         && !Layout::RustFFI::rust_stage_thread_hold_armed_or_holding();
     bool const takes_frame_in = finishes_frame && (m_state == State::InFlight || m_state == State::CommittedTailPending);
     auto const start_nanoseconds = takes_frame_in ? MonotonicTime::now().nanoseconds() : 0;
@@ -1086,6 +1087,7 @@ void FrameScheduler::main_thread_will_idle()
     // The task is over: what the ticks installed beside it is the documents' now, and nothing lends the arenas again
     // until the main thread wakes.
     m_clock_lend_suspended = true;
+    m_main_thread_idled_since_task = true;
     take_back_clock_lend_for_adoption();
     // A tick a test injected finds no lease to take it.
     if (m_clock_leases.is_empty() && !m_injected_clock_ticks.is_empty()) {

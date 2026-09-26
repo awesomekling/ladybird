@@ -202,7 +202,11 @@ public:
     bool has_unfinished_frame() const;
 
     // LIBWEB_RENDER_CLOCK_FRAMES: The event loop ran a task other than a rendering task, for `milliseconds`.
-    void note_task_ran(double milliseconds) { m_last_task_milliseconds = milliseconds; }
+    void note_task_ran(double milliseconds)
+    {
+        m_last_task_milliseconds = milliseconds;
+        m_main_thread_idled_since_task = false;
+    }
     // At step 1, before the event loop runs a task: finishes the frame in flight where a clock lease would tick beside
     // the task once it is in, and lends the leases a frame kept from being lent.
     void finish_frame_for_clock_lend();
@@ -317,6 +321,8 @@ private:
     u64 m_clock_lend_restore_nanoseconds { 0 };
     // How long the last task other than a rendering task ran.
     double m_last_task_milliseconds { 0 };
+    // Whether the main thread idled since it last ran a task other than a rendering task.
+    bool m_main_thread_idled_since_task { false };
     // Whether the leases wait for a lend that a frame in flight, or one whose tail has not run, kept back: the tail
     // that grants them runs after the main thread woke.
     bool m_clock_lend_waits_for_frame { false };
