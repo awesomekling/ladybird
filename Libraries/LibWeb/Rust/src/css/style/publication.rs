@@ -2070,9 +2070,11 @@ impl RetainedState {
                     derived_under_parent(self, record).then_some((record, true))
                 })
         })?;
-        // A record with an animation overlay or transitions is not shared; the row drives its
-        // own. Missing the cache declines nothing.
-        if self.record_requires_cpp_animation(record) {
+        // A record with an animation overlay is not shared; the row drives its own. Nor is one
+        // declaring transitions for a row that had a record: the row owes the host a transition
+        // step from it. A first record starts none, so every first record alike shares. Missing
+        // the cache declines nothing.
+        if !self.record_is_shareable(record, old_style_record == computed::FinalStyleRecordID::NONE) {
             return None;
         }
         self.computed_group_sets
@@ -2493,13 +2495,14 @@ impl RetainedState {
         }
     }
 
-    fn record_requires_cpp_animation(&self, record: computed::FinalStyleRecordID) -> bool {
+    fn record_is_shareable(&self, record: computed::FinalStyleRecordID, as_first_record: bool) -> bool {
         self.computed_group_sets
             .style_record_view(record.raw())
-            .is_none_or(|view| {
-                !view.animated_overlay.is_null()
-                    || (unsafe { view.longhand_table.as_ref() })
-                        .is_none_or(crate::css::style_compute::has_active_transition_properties)
+            .is_some_and(|view| {
+                view.animated_overlay.is_null()
+                    && (unsafe { view.longhand_table.as_ref() }).is_some_and(|table| {
+                        as_first_record || !crate::css::style_compute::has_active_transition_properties(table)
+                    })
             })
     }
 

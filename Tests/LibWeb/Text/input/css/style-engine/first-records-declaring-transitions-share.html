@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style>
+    .item { color: rgb(1, 2, 3); transition: color 1s linear; }
+    .item.changed { color: rgb(4, 5, 6); }
+</style>
+<ul id="list"></ul>
+<script>
+    // A first record starts no transition, so elements alike in everything share their first record even when it declares
+    // transitions: within one style update and across updates. A record that changes still starts its own transition.
+    asyncTest(async done => {
+        function addItem() {
+            const item = document.createElement("li");
+            item.className = "item";
+            list.append(item);
+            return item;
+        }
+        const first = addItem();
+        const second = addItem();
+        internals.updateStyle();
+        const before = internals.styleEngineCounters();
+        const third = addItem();
+        internals.updateStyle();
+        const after = internals.styleEngineCounters();
+        println(`alike items in one update share: ${internals.styleRecordIdentity(first) === internals.styleRecordIdentity(second)}`);
+        println(`an alike item in a later update shares: ${internals.styleRecordIdentity(first) === internals.styleRecordIdentity(third)}`);
+        println(`it was not driven in full: ${after.engineFullDrivesStarted === before.engineFullDrivesStarted}`);
+
+        second.classList.add("changed");
+        getComputedStyle(second).color;
+        println(`a changed item transitions: ${second.getAnimations().length === 1}`);
+        println(`its alike siblings do not: ${first.getAnimations().length === 0 && third.getAnimations().length === 0}`);
+        done();
+    });
+</script>
