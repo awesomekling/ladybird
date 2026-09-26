@@ -198,6 +198,12 @@ public:
     // Whether a frame is in flight that the render side has not finished yet.
     bool has_unfinished_frame() const;
 
+    // LIBWEB_RENDER_CLOCK_FRAMES: The event loop ran a task other than a rendering task, for `milliseconds`.
+    void note_task_ran(double milliseconds) { m_last_task_milliseconds = milliseconds; }
+    // At step 1, before the event loop runs a task: finishes the frame in flight where a clock lease would tick beside
+    // the task once it is in.
+    void finish_frame_for_clock_lend();
+
     // Takes in the frame the render side has handed back: publishes its recordings and hands off their compositor
     // frames. Runs no script: what the render side told the documents (their commit messages, which can dispatch
     // events) waits for the next rendering update or layout update to apply it.
@@ -296,6 +302,10 @@ private:
     // When the main thread last woke, and how much of its time restores took since.
     u64 m_clock_lend_woke_at_nanoseconds { 0 };
     u64 m_clock_lend_restore_nanoseconds { 0 };
+    // How long the last task other than a rendering task ran.
+    double m_last_task_milliseconds { 0 };
+    // Whether the rendering update running now, or whose frame is in flight, began with a clock lease.
+    bool m_rendering_update_began_with_clock_lease { false };
 
     // The display ticks tests injected, waiting for the main thread to go idle, and those the render side runs now.
     struct InjectedClockTick {
