@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-use crate::cow_column::{ColumnSnapshot, CowColumn};
+use crate::cow_column::CowColumn;
 use crate::css::css_pixels::{CssPixelPoint, CssPixelRect};
 use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::{NodeFlag, NodeSlotId};
@@ -51,7 +51,7 @@ mod tests {
         arena.paintable_rows_mut().paintable_data_mut(node).offset.x = CssPixels::from_integer(20);
 
         let published = arena.paintable_rows.published.as_ref().unwrap().rows.clone();
-        let published_offset = |rows: &ColumnSnapshot<PaintableData, PAINTABLE_SLOTS_PER_CHUNK>| {
+        let published_offset = |rows: &crate::cow_column::ColumnSnapshot<PaintableData, PAINTABLE_SLOTS_PER_CHUNK>| {
             rows.get(node.slot_index() as usize).unwrap().offset.x
         };
         assert_eq!(published_offset(&published), CssPixels::from_integer(10).into());
@@ -441,6 +441,10 @@ pub(crate) struct CommittedFragmentLinkSlot {
 }
 
 impl CommittedFragmentLinkSlot {
+    pub(crate) fn link(&self) -> Option<&fragment_tree::FragmentLink> {
+        self.link.as_deref()
+    }
+
     fn link_for(&self, layout_slot_generation: u8) -> Option<&fragment_tree::FragmentLink> {
         (self.layout_slot_generation == layout_slot_generation)
             .then_some(self.link.as_deref())
@@ -456,7 +460,7 @@ pub(crate) struct PaintableRowStore {
     /// nothing reads it while they run and releasing it lets them write chunks in place, and
     /// publish again when they are done. A row a main-side writer changes is published when the
     /// main side next reads the rows.
-    published: Option<PublishedFrame>,
+    published: Option<std::sync::Arc<PublishedFrame>>,
     side_data: RefCell<Vec<PaintableSideData>>,
     committed_side_data: RefCell<CowColumn<CommittedSideData, PAINTABLE_SLOTS_PER_CHUNK>>,
     row_reset_versions: Vec<u64>,
@@ -718,35 +722,15 @@ impl CommittedPaintableRows<'_> {
             .as_ref()
             .expect("committed rows are published before they are read")
     }
-
-    fn published_rows(&self) -> &ColumnSnapshot<PaintableData, PAINTABLE_SLOTS_PER_CHUNK> {
-        &self.published().rows
-    }
 }
 
 impl PaintRead for CommittedPaintableRows<'_> {
     fn paintable_data(&self, id: NodeSlotId) -> &PaintableData {
-        assert!(!id.is_invalid(), "invalid paintable arena slot ID");
-        let data = self
-            .published_rows()
-            .get(id.slot_index() as usize)
-            .expect("invalid paintable arena slot ID");
-        assert_eq!(
-            data.slot_generation,
-            id.generation(),
-            "paintable arena read a stale or unused slot"
-        );
-        data
+        self.published().paintable_data(id)
     }
 
     fn paintable_row_is_populated(&self, id: NodeSlotId) -> bool {
-        if id.is_invalid() {
-            return false;
-        }
-        let Some(data) = self.published_rows().get(id.slot_index() as usize) else {
-            return false;
-        };
-        data.slot_generation != 0 && data.slot_generation == id.generation()
+        self.published().paintable_row_is_populated(id)
     }
 
     fn with_committed_fragment_link<R>(
@@ -754,23 +738,11 @@ impl PaintRead for CommittedPaintableRows<'_> {
         id: NodeSlotId,
         read: impl FnOnce(Option<&fragment_tree::FragmentLink>) -> R,
     ) -> R {
-        debug_assert!(self.paintable_row_is_populated(id));
-        read(
-            self.published()
-                .fragment_links
-                .get(id.slot_index() as usize)
-                .and_then(|slot| slot.link.as_deref()),
-        )
+        self.published().with_committed_fragment_link(id, read)
     }
 
     fn committed_side_data(&self, id: NodeSlotId) -> CommittedSideDataRef<'_> {
-        debug_assert!(self.paintable_row_is_populated(id));
-        CommittedSideDataRef::Published(
-            self.published()
-                .side_data
-                .get(id.slot_index() as usize)
-                .expect("a populated row has published side data"),
-        )
+        CommittedSideDataRef::Published(self.published().committed_side_data(id))
     }
 
     read_live_arena!(std::ops::Deref::deref);
@@ -1607,7 +1579,7 @@ impl LayoutNodeArena {
         let side_data = store.committed_side_data.get_mut();
         let unique_node_ids = store.unique_node_ids.ids.get_mut();
         let Some(published) = &mut store.published else {
-            store.published = Some(PublishedFrame {
+            store.published = Some(std::sync::Arc::new(PublishedFrame {
                 rows: store.rows.publish(),
                 fragment_links: fragment_links.publish(),
                 side_data: side_data.publish(),
@@ -1616,9 +1588,10 @@ impl LayoutNodeArena {
                 image_map_areas: store.image_map_areas.snapshot(),
                 hit_test_list,
                 visual_context_tree,
-            });
+            }));
             return;
         };
+        let published = std::sync::Arc::make_mut(published);
         if store.rows.written_since_publish() {
             published.rows = store.rows.publish();
         }
@@ -1637,12 +1610,22 @@ impl LayoutNodeArena {
         published.visual_context_tree = visual_context_tree;
     }
 
+    /// Publishes the rows as they are now, for a recording to read while the arena goes on
+    /// changing.
+    pub(crate) fn freeze_paint_frame(&mut self) -> std::sync::Arc<PublishedFrame> {
+        self.publish_paintable_rows();
+        self.paintable_rows
+            .published
+            .clone()
+            .expect("the rows were just published")
+    }
+
     /// Builds the structures a hit-test query derives from the list before the rows are
     /// published, so that the query only reads. A published generation that still pins the list
     /// lets go of it first, so building does not copy it.
     pub(crate) fn prepare_hit_test_list_for_query(&mut self, needs_spatial_indexes: bool, needs_caret_lines: bool) {
         if let Some(published) = &mut self.paintable_rows.published {
-            published.hit_test_list = None;
+            std::sync::Arc::make_mut(published).hit_test_list = None;
         }
         let mut list = std::mem::take(self.hit_test_list.get_mut());
         if let Some(list) = list.as_mut()

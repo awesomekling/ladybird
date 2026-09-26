@@ -33,6 +33,7 @@ use std::sync::Arc;
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn record_display_list(
     layout_arena: &LayoutNodeArena,
+    frame: &crate::painting::published_frame::PublishedFrame,
     paint_state: &crate::painting::paint_state::PaintState,
     scratch: &mut RecordingScratch,
     tree: &mut PaintOrderTree,
@@ -50,6 +51,7 @@ pub(crate) fn record_display_list(
         ($observer:ty) => {
             record_display_list_impl::<$observer>(
                 layout_arena,
+                frame,
                 paint_state,
                 scratch,
                 tree,
@@ -75,6 +77,7 @@ pub(crate) fn record_display_list(
 #[allow(clippy::too_many_arguments)]
 fn record_display_list_impl<O: Observer>(
     layout_arena: &LayoutNodeArena,
+    frame: &crate::painting::published_frame::PublishedFrame,
     paint_state: &crate::painting::paint_state::PaintState,
     scratch: &mut RecordingScratch,
     tree: &mut PaintOrderTree,
@@ -91,7 +94,7 @@ fn record_display_list_impl<O: Observer>(
         "a recording that publishes nothing has no published frame to copy from"
     );
     let structural_epoch = paint_state.visual_context.structural_epoch();
-    let paintable_rows = crate::painting::published_frame::PaintSource::new(layout_arena);
+    let paintable_rows = crate::painting::published_frame::PaintSource::new(layout_arena, frame);
     let frame_inputs = FrameInputs::from_recording_inputs(inputs, paint_state);
     let root_background_canvas_rect = root_background_canvas_rect(
         &paintable_rows,
