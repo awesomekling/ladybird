@@ -717,9 +717,12 @@ static Optional<ClockLeasePlan> clock_lease_plan(DOM::Document& document)
                 return {};
             auto& keyframe_effect = static_cast<Animations::KeyframeEffect&>(*effect);
             auto target = keyframe_effect.target();
-            if (!target || &target->document() != &document || !target->is_connected() || keyframe_effect.pseudo_element_type().has_value())
+            if (!target || &target->document() != &document || !target->is_connected())
                 return {};
-            if (target->namespace_uri() != Namespace::HTML || !target->unsafe_layout_node())
+            // What the compositor or the offscreen throttle runs, the main thread does not sample per frame either:
+            // the lease only has to stop at its events.
+            bool const ticks_effect = !keyframe_effect.is_compositor_driven() && !keyframe_effect.is_compositor_replaced() && !keyframe_effect.can_skip_per_frame_style_update();
+            if (ticks_effect && (keyframe_effect.pseudo_element_type().has_value() || target->namespace_uri() != Namespace::HTML || !target->unsafe_layout_node()))
                 return {};
             if (auto const* key_frame_set = keyframe_effect.key_frame_set()) {
                 for (auto const& keyframe : key_frame_set->keyframes_by_key) {
@@ -744,8 +747,7 @@ static Optional<ClockLeasePlan> clock_lease_plan(DOM::Document& document)
                 return {};
             plan.deadline = min(plan.deadline, timeline_time->value + (boundaries->next_boundary - local_time->value) / animation.playback_rate());
             plan.deadline_beside_task = min(plan.deadline_beside_task, timeline_time->value + (boundaries->next_phase_change - local_time->value) / animation.playback_rate());
-            // What the compositor or the offscreen throttle runs, the main thread does not sample per frame either.
-            if (keyframe_effect.is_compositor_driven() || keyframe_effect.is_compositor_replaced() || keyframe_effect.can_skip_per_frame_style_update())
+            if (!ticks_effect)
                 continue;
             if (intersections_are_observed && moves_boxes(keyframe_effect))
                 return {};
