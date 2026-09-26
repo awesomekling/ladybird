@@ -287,6 +287,9 @@ struct RuleDeclarationData {
     /// canonical identity may have rewritten. Empty when the rule arrived without them.
     written_values: Vec<RetainedStyleValueData>,
     written_value_checks: Vec<super::publication::WrittenValueChecks>,
+    /// Whether no written value adds to what a cascade state's written facts answer, which lets
+    /// the facts skip finding each winner's declaration in this rule.
+    written_values_add_no_state_facts: bool,
     /// The custom properties the rule declares, in declaration order, and the values they were
     /// written with, parallel to them: a custom property resolves from its written spelling.
     custom_declarations: Vec<CustomDeclaration>,
@@ -1273,16 +1276,20 @@ impl StyleSheetProgram {
         }
         let entry = &mut self.rules[rule.0 as usize];
         let declared_custom_properties_before = entry.live && !entry.custom_declarations.is_empty();
-        let written_value_checks = declared
+        let written_value_checks: Vec<_> = declared
             .iter()
             .zip(&written_values)
             .map(|(declared, value)| super::publication::WrittenValueChecks::prepare(declared.property, value))
             .collect();
+        let written_values_add_no_state_facts = written_value_checks
+            .iter()
+            .all(super::publication::WrittenValueChecks::adds_no_state_facts);
         entry.declarations = share_rule_declarations(
             RuleDeclarationData {
                 declared_properties: declared,
                 written_values,
                 written_value_checks,
+                written_values_add_no_state_facts,
                 custom_declarations,
                 custom_written_values,
             },
@@ -1411,6 +1418,15 @@ impl StyleSheetProgram {
     ) -> Option<&RetainedStyleValueData> {
         self.written_winner_declaration(rule, property, important, value)
             .map(|(_, value)| value)
+    }
+
+    /// Whether none of the rule's written values adds to a cascade state's written facts. A rule
+    /// that arrived without its written values adds none either: no winner finds its value.
+    pub(super) fn written_values_add_no_state_facts(&self, rule: RuleID) -> bool {
+        self.rules[rule.0 as usize]
+            .declarations
+            .data
+            .written_values_add_no_state_facts
     }
 
     pub(super) fn written_value_checks(&self, rule: RuleID, index: usize) -> super::publication::WrittenValueChecks {
