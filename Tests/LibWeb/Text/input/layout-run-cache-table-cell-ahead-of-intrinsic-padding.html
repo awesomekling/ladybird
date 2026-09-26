@@ -23,9 +23,9 @@
                         BlockContainer<HTML>/block RUN (cache=miss)
                           TableWrapper(anonymous)/block RUN (cache=miss)
                             Box<TABLE>#table/table RUN (cache=miss)
-                              BlockContainer<TD>#text-cell/block (measurement) RUN (cache=bypass)
+                              BlockContainer<TD>#text-cell/block RUN AHEAD OF INTRINSIC BLOCK PADDING
                               BlockContainer<TD>#markup-cell/block (measurement) RUN (cache=bypass)
-                              BlockContainer<TD>#text-cell/block RUN (cache=miss)
+                              BlockContainer<TD>#text-cell/block REPLAY FRAGMENTS
                               BlockContainer<TD>#markup-cell/block RUN (cache=miss)
                 `,
                 check: equal => {
