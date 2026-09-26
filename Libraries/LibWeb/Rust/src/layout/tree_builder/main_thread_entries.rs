@@ -72,3 +72,53 @@ unsafe extern "C" fn rust_detach_remaining_layout_rows_for_removal(
         });
     }
 }
+
+/// Whether the layout tree lets the box of the node `place` names be detached from its parent's box in place. The
+/// rows are found by identity, so no shell is made for any box it looks at.
+///
+/// # Safety
+///
+/// The arena must remain valid for the duration of the call, which must be made on the document thread, and `place`
+/// must point to a valid place.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn rust_removed_box_detachable_in_place(
+    arena: *mut c_void,
+    place: *const FfiRemovedBoxPlace,
+) -> bool {
+    assert!(!arena.is_null() && !place.is_null());
+    // SAFETY: The entry point's contract puts this call on the document thread.
+    let _main_thread = unsafe { crate::stage::from_ffi_entry_beside_recording(&MAIN_THREAD_FFI_ENTRY, arena) };
+    // SAFETY: Guaranteed by the entry point's contract. The rows and links it reads are nothing a recording writes.
+    let arena = unsafe { LayoutNodeArena::from_handle_beside_recording(arena) };
+    removed_box_detachable_in_place(arena, unsafe { &*place }).is_some()
+}
+
+/// Detaches the box of the node `place` names from its parent's box in place, with the paint state of every box in
+/// its subtree, if the layout tree lets it go; see rust_removed_box_detachable_in_place.
+///
+/// # Safety
+///
+/// The arena must remain valid for the duration of the call, which must be made on the document thread, and `place`
+/// must point to a valid place.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn rust_detach_removed_box_in_place(
+    arena: *mut c_void,
+    place: *const FfiRemovedBoxPlace,
+) -> FfiRemovedBoxDetach {
+    assert!(!arena.is_null() && !place.is_null());
+    // SAFETY: The entry point's contract puts this call on the document thread.
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+    // SAFETY: Guaranteed by the entry point's contract.
+    let Some((layout_node, parent)) =
+        removed_box_detachable_in_place(unsafe { LayoutNodeArena::from_handle(arena) }, unsafe { &*place })
+    else {
+        return FfiRemovedBoxDetach::NotAllowed;
+    };
+    // SAFETY: Guaranteed by the entry point's contract.
+    unsafe {
+        LayoutNodeArena::from_handle_mut(arena).release_published_paintable_rows_for_main_side_write();
+        super::layout_node_arena::paying_host_handbacks(&main_thread, arena, || {
+            detach_removed_box_in_place(arena.cast(), layout_node, parent)
+        })
+    }
+}
