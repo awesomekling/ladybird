@@ -689,8 +689,10 @@ impl StyleEngineState {
                 overlay: Box::into_raw(overlay),
             },
         };
+        // The host holds the installed composition until it installs this one, so what the step
+        // moved is measured against it: an animation it composed already moved nothing.
         Ok(self
-            .publish_settled_row_sample(node, pseudo, sample, counters)?
+            .publish_sample_over_installed_record(node, pseudo, sample, installed_style_record, counters)?
             .style_record)
     }
 
