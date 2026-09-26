@@ -1166,6 +1166,10 @@ impl StyleEngineState {
         self.retained
             .batch_backing_pseudo_matches
             .retain(|node, _| !regions.batch_contains_node(&compiled_regions, *node));
+        counters.set(
+            Counter::BatchBackingPseudoMatchHosts,
+            self.retained.batch_backing_pseudo_matches.len() as u64,
+        );
         compile_union_timer.stop(Counter::BatchCompilationMicroseconds, counters);
         let winner_version_timer = PassTimer::start();
         if let Some(base_version) = program_base_version {
