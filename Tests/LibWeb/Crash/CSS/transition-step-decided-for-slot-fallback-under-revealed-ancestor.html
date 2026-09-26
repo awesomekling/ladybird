@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<style>
+    .gone { display: none; }
+</style>
+<div id="list"><div id="item"></div></div>
+<script>
+    const root = item.attachShadow({ mode: "open" });
+    root.innerHTML = `<style>svg { transition: transform 1s; }</style><a><slot name="icon"><svg id="icon" width="16" height="16"></svg></slot></a>`;
+    const icon = root.getElementById("icon");
+    document.body.offsetWidth;
+
+    // Assigning a node to the slot takes its fallback content out of the flat tree, with the style
+    // it had. Hiding an ancestor then hides the slot, but not the fallback.
+    item.innerHTML = `<span slot="icon">icon</span>`;
+    document.body.offsetWidth;
+    list.classList.add("gone");
+    document.body.offsetWidth;
+
+    // The pass settles the fallback before it reveals the slot, and decides the fallback's
+    // transition step over the slot it has not revealed yet. The host installs it under the
+    // revealed slot.
+    list.classList.remove("gone");
+    icon.style.transform = "translateX(2px)";
+    document.body.offsetWidth;
+</script>

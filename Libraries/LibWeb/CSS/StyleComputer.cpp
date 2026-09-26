@@ -777,6 +777,23 @@ static StyleEngineFFI::FfiRowSampledInPass resample_installed_record_after_host_
     return resampled;
 }
 
+// Whether a transition step the engine decided names each property the host decides the step over:
+// those with a matching transition-property entry, followed by those of the element's transitions
+// without one.
+static bool transition_step_names_each_property(StyleEngineFFI::FfiTransitionStepDecidedInPass const& step, ReadonlySpan<PropertyID> matching_property_ids, ReadonlySpan<PropertyID> existing_property_ids)
+{
+    ReadonlySpan<StyleEngineFFI::FfiTransitionStepAction> actions { step.actions, step.action_count };
+    auto names = [&](PropertyID property_id) {
+        return any_of(actions, [&](auto const& action) { return action.property_id == to_underlying(property_id); });
+    };
+    size_t property_count = matching_property_ids.size();
+    for (auto property_id : existing_property_ids) {
+        if (!matching_property_ids.contains_slow(property_id))
+            ++property_count;
+    }
+    return actions.size() == property_count && all_of(matching_property_ids, names) && all_of(existing_property_ids, names);
+}
+
 // The whole transition step for an element's record, run once the record is installed, whether
 // the engine settled it or the host computed it.
 //
@@ -819,10 +836,16 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_inst
     // OPTIMIZATION: The two lists `start_needed_transitions` decides over, plus this element's own
     //               provisional states. With none of them there is nothing to decide, and the
     //               after-change style need not be reconstructed at all.
-    if (abstract_element.element().property_ids_with_matching_transition_property_entry(abstract_element.pseudo_element()).is_empty()
-        && abstract_element.element().property_ids_with_existing_transitions(abstract_element.pseudo_element()).is_empty()
-        && !has_provisional_transition_states(abstract_element))
+    auto matching_property_ids = abstract_element.element().property_ids_with_matching_transition_property_entry(abstract_element.pseudo_element());
+    auto existing_property_ids = abstract_element.element().property_ids_with_existing_transitions(abstract_element.pseudo_element());
+    if (matching_property_ids.is_empty() && existing_property_ids.is_empty() && !has_provisional_transition_states(abstract_element))
         return {};
+    // A step the pass decided names each property of the two lists. One that does not was decided
+    // over state that moved before the row was installed, and the step is decided again here.
+    auto const decided_names_each_property = !decided || transition_step_names_each_property(*decided, matching_property_ids, existing_property_ids);
+    ASSERT(decided_names_each_property);
+    if (!decided_names_each_property)
+        decided = nullptr;
 
     begin_style_update();
     ScopeGuard end_style_update = [&] { this->end_style_update(); };
@@ -852,6 +875,10 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_inst
                 ? StyleEngineFFI::style_engine_take_pseudo_element_transition_step_decided_in_pass(scope.engine().rust_handle(), element.style_node_id().value(), pseudo_element_to_ffi(abstract_element.pseudo_element()))
                 : StyleEngineFFI::style_engine_take_transition_step_decided_in_pass(scope.engine().rust_handle(), element.style_node_id().value());
             VERIFY(engine_decided.present);
+            auto const engine_decided_names_each_property = transition_step_names_each_property(engine_decided, matching_property_ids, existing_property_ids);
+            ASSERT(engine_decided_names_each_property);
+            if (!engine_decided_names_each_property)
+                engine_composition = {};
         }
     }
     start_needed_transitions(scope, *new_style, abstract_element, before_change_style_record, decided ? decided : engine_composition.present ? &engine_decided
@@ -1125,7 +1152,7 @@ void StyleComputer::start_needed_transitions(StyleDrainScope const& scope, Compu
         // The pass decided the step over the same styles and transitions, and handed over what each
         // transition it starts runs from and to.
         ReadonlySpan<StyleEngineFFI::FfiTransitionStepAction> decided_actions { decided->actions, decided->action_count };
-        VERIFY(decided_actions.size() == ffi_properties.size());
+        ASSERT(decided_actions.size() == ffi_properties.size());
         for (size_t index = 0; index < ffi_properties.size(); ++index) {
             auto& property = ffi_properties[index];
             StyleEngineFFI::FfiTransitionStepAction const* decided_action = nullptr;
@@ -1133,7 +1160,7 @@ void StyleComputer::start_needed_transitions(StyleDrainScope const& scope, Compu
                 if (action.property_id == property.property_id)
                     decided_action = &action;
             }
-            VERIFY(decided_action);
+            ASSERT(decided_action);
             auto kind = static_cast<StyleValueFFI::FfiTransitionActionKind>(decided_action->kind);
             actions[index] = {
                 .property_id = decided_action->property_id,
