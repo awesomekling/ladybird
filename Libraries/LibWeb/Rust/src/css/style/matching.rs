@@ -218,7 +218,7 @@ impl RetainedState {
             self.query_match_workspace = MatchScratch::for_selector_query();
             self.query_workspace_generation = self.selector_query_generation;
         }
-        let mut evaluator = MatchEvaluator::new(&self.tree, self.facts.primary());
+        let mut evaluator = MatchEvaluator::new(&self.tree, self.facts.primary()).remembering_relation_failures();
         if share_sibling_geometry {
             evaluator = evaluator.with_match_workspace(&mut self.query_match_workspace, MatchEvaluationSide::Current);
         }
@@ -285,7 +285,7 @@ impl RetainedState {
         }
         let candidates_are_known = self.ensure_sorted_query_candidates(program, context.root);
 
-        let mut evaluator = MatchEvaluator::new(&self.tree, self.facts.primary());
+        let mut evaluator = MatchEvaluator::new(&self.tree, self.facts.primary()).remembering_relation_failures();
         if share_sibling_geometry {
             evaluator = evaluator.with_match_workspace(&mut self.query_match_workspace, MatchEvaluationSide::Current);
         }
@@ -471,7 +471,7 @@ impl RetainedState {
             self.query_workspace_generation = self.selector_query_generation;
         }
         let mut matches = HashSet::default();
-        let mut evaluator = MatchEvaluator::new(&self.tree, self.facts.primary());
+        let mut evaluator = MatchEvaluator::new(&self.tree, self.facts.primary()).remembering_relation_failures();
         if share_sibling_geometry {
             evaluator = evaluator.with_match_workspace(&mut self.query_match_workspace, MatchEvaluationSide::Current);
         }

@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/HashMap.h>
 #include <LibGC/WeakInlines.h>
 #include <LibWeb/CSS/SelectorMatching.h>
 #include <LibWeb/CSS/StyleComputer.h>
@@ -295,6 +296,10 @@ static bool pseudo_class_matching_is_covered_by_version_counters(CSS::PseudoClas
     }
 }
 
+// A DOM match remembers which compounds of a selector did not match an element in one bit each. A selector with more
+// compounds is matched by the style engine.
+static constexpr size_t max_dom_matched_compound_count = 64;
+
 SelectorQuery::SelectorQuery(CSS::SelectorList&& selectors)
     : m_selectors(move(selectors))
 {
@@ -311,7 +316,8 @@ SelectorQuery::SelectorQuery(CSS::SelectorList&& selectors)
     m_can_match_tree_in_dom = all_of(m_selectors, [&](auto const& selector) {
         bool needs_id = false;
         bool needs_classes = false;
-        auto supported = CSS::SelectorFFI::rust_selector_supports_tree_dom_matching(&selector->rust_selector(), &needs_id, &needs_classes);
+        auto supported = CSS::SelectorFFI::rust_selector_supports_tree_dom_matching(&selector->rust_selector(), &needs_id, &needs_classes)
+            && CSS::SelectorFFI::rust_selector_compound_count(&selector->rust_selector()) <= max_dom_matched_compound_count;
         m_tree_dom_matching_needs_id |= needs_id;
         m_tree_dom_matching_needs_classes |= needs_classes;
         return supported;
@@ -491,48 +497,102 @@ bool SelectorQuery::matches_simple_selector_in_dom(Element const& element) const
     return false;
 }
 
-// Whether the compounds of a selector up to and including the one at `index` match, the one at `index` as `element`,
-// reaching the elements the ones before it are matched as through their combinators.
-bool SelectorQuery::matches_compounds_in_dom(CSS::Selector const& selector, size_t index, Element const& element) const
-{
-    ElementNamesForDomMatching names { element, m_tree_dom_matching_needs_id, m_tree_dom_matching_needs_classes };
-    auto result = names.match_compound(selector, index);
-    VERIFY(result != NumericLimits<u8>::max());
-    if (result == 0)
+namespace {
+
+// Matches the compounds of one selector in the DOM, walking its combinators there.
+class DomCompoundMatcher {
+public:
+    DomCompoundMatcher(CSS::Selector const& selector, bool needs_id, bool needs_classes)
+        : m_selector(selector)
+        , m_needs_id(needs_id)
+        , m_needs_classes(needs_classes)
+    {
+    }
+
+    // Whether the compounds up to and including the one at `index` match, the one at `index` as `element`, reaching the
+    // elements the ones before it are matched as through their combinators.
+    bool matches(size_t index, Element const& element)
+    {
+        if (!matches_compound(index, element))
+            return false;
+        return index == 0 || matches_through_combinator(index, element);
+    }
+
+private:
+    bool matches_compound(size_t index, Element const& element) const
+    {
+        ElementNamesForDomMatching names { element, m_needs_id, m_needs_classes };
+        auto result = names.match_compound(m_selector, index);
+        VERIFY(result != NumericLimits<u8>::max());
+        return result != 0;
+    }
+
+    // Like matches(), for an element a combinator walk reaches.
+    //
+    // A descendant or subsequent-sibling combinator tries the compounds before it at every ancestor or earlier sibling,
+    // and whether they match there does not depend on the element the walk came from. Each element is walked from at
+    // each compound once: remembering none of it, `p div div div span` beside no `p` tries every combination of
+    // ancestors for its `div`s.
+    bool matches_reached(size_t index, Element const& element)
+    {
+        if (!matches_compound(index, element))
+            return false;
+        if (index == 0)
+            return true;
+        auto const failed_bit = 1ull << index;
+        if (auto failed = m_failed_compounds.get(&element); failed.has_value() && (*failed & failed_bit))
+            return false;
+        if (matches_through_combinator(index, element))
+            return true;
+        m_failed_compounds.ensure(&element, [] { return 0; }) |= failed_bit;
         return false;
-    if (index == 0)
-        return true;
-    switch (CSS::SelectorFFI::rust_selector_compound_combinator(&selector.rust_selector(), index)) {
-    case CSS::SelectorFFI::Combinator::Descendant:
-        for (GC::Ptr<Element const> ancestor = element.parent_element(); ancestor; ancestor = ancestor->parent_element()) {
-            if (matches_compounds_in_dom(selector, index - 1, *ancestor))
-                return true;
+    }
+
+    // Whether the compounds before the one at `index` match at the elements its combinator reaches from `element`.
+    bool matches_through_combinator(size_t index, Element const& element)
+    {
+        switch (CSS::SelectorFFI::rust_selector_compound_combinator(&m_selector.rust_selector(), index)) {
+        case CSS::SelectorFFI::Combinator::Descendant:
+            for (GC::Ptr<Element const> ancestor = element.parent_element(); ancestor; ancestor = ancestor->parent_element()) {
+                if (matches_reached(index - 1, *ancestor))
+                    return true;
+            }
+            return false;
+        case CSS::SelectorFFI::Combinator::ImmediateChild: {
+            GC::Ptr<Element const> parent = element.parent_element();
+            return parent && matches_reached(index - 1, *parent);
         }
-        return false;
-    case CSS::SelectorFFI::Combinator::ImmediateChild: {
-        GC::Ptr<Element const> parent = element.parent_element();
-        return parent && matches_compounds_in_dom(selector, index - 1, *parent);
-    }
-    case CSS::SelectorFFI::Combinator::NextSibling: {
-        auto const* sibling = element.previous_element_sibling();
-        return sibling && matches_compounds_in_dom(selector, index - 1, *sibling);
-    }
-    case CSS::SelectorFFI::Combinator::SubsequentSibling:
-        for (auto const* sibling = element.previous_element_sibling(); sibling; sibling = sibling->previous_element_sibling()) {
-            if (matches_compounds_in_dom(selector, index - 1, *sibling))
-                return true;
+        case CSS::SelectorFFI::Combinator::NextSibling: {
+            auto const* sibling = element.previous_element_sibling();
+            return sibling && matches_reached(index - 1, *sibling);
         }
-        return false;
-    default:
-        VERIFY_NOT_REACHED();
+        case CSS::SelectorFFI::Combinator::SubsequentSibling:
+            for (auto const* sibling = element.previous_element_sibling(); sibling; sibling = sibling->previous_element_sibling()) {
+                if (matches_reached(index - 1, *sibling))
+                    return true;
+            }
+            return false;
+        default:
+            VERIFY_NOT_REACHED();
+        }
     }
+
+    CSS::Selector const& m_selector;
+    bool m_needs_id { false };
+    bool m_needs_classes { false };
+    // The compounds, one bit each (see max_dom_matched_compound_count), that matched an element but not the elements
+    // their combinator reaches from it.
+    HashMap<Element const*, u64> m_failed_compounds;
+};
+
 }
 
 bool SelectorQuery::matches_tree_in_dom(Element const& element) const
 {
     for (auto const& selector : m_selectors) {
         auto last_index = CSS::SelectorFFI::rust_selector_compound_count(&selector->rust_selector()) - 1;
-        if (matches_compounds_in_dom(*selector, last_index, element))
+        DomCompoundMatcher matcher { *selector, m_tree_dom_matching_needs_id, m_tree_dom_matching_needs_classes };
+        if (matcher.matches(last_index, element))
             return true;
     }
     return false;
