@@ -868,7 +868,7 @@ impl LayoutNodeArena {
         // ancestors in the set so changes invalidate their paint caches even when a cached
         // recording would otherwise skip the subtree.
         let mut roots = Vec::new();
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = crate::fast_hash::FastSet::default();
         let mut add = |slot: NodeSlotId| {
             if arena.paintable_row_is_populated(slot) && seen.insert(slot) {
                 if !full_layout_commit || slot == viewport || box_holds_scroll_state(arena, slot) {
@@ -966,7 +966,7 @@ pub(crate) fn measure_and_find_scroll_offsets_to_clamp(arena: &LayoutNodeArena) 
     // store is the document's, and the document is told what to put in it rather than asked
     // where it is.
     let mut clamped = Vec::new();
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = crate::fast_hash::FastSet::default();
     for slot in settled {
         if !seen.insert(slot) || !arena.slot_is_live(slot) || !arena.paintable_row_is_populated(slot) {
             continue;

@@ -77,7 +77,7 @@ pub(crate) struct PaintableCommit<'a> {
     /// committed with before, if it had a row.
     committed_navigable_container_viewports: Vec<(NodeSlotId, Option<used_values::FfiCssPixelSize>)>,
     row_reset_notifications: Vec<crate::painting::paintable_rows::PaintableRowReset>,
-    overflow_invalidated_boxes: std::collections::HashSet<NodeSlotId>,
+    overflow_invalidated_boxes: crate::fast_hash::FastSet<NodeSlotId>,
 }
 
 impl<'a> PaintableCommit<'a> {
