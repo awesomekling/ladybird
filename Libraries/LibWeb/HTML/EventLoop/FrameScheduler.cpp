@@ -58,6 +58,10 @@ static u64 thread_cpu_time_nanoseconds()
 #endif
 }
 
+// How long a task has to run for the next one to find the leases lent: a task that follows a long task is likely long
+// too. This is the threshold of a long task in the Long Tasks API.
+static constexpr double clock_lend_long_task_milliseconds = 50;
+
 // LIBWEB_RENDER_CLOCK_FRAMES: A render clock ticks the leases while the main thread idles, and tells it where a tick
 // ended one. The stage thread reaches the main thread through this.
 struct RenderClockNeedsMain {
@@ -194,6 +198,7 @@ void FrameScheduler::begin_main_half(bool synchronous)
 {
     // The rendering update moves the timelines on from where the render clock's ticks left them.
     take_back_clock_lend_for_adoption();
+    m_rendering_update_began_with_clock_lease = !m_clock_leases.is_empty();
     // A rendering update that has to start now (a synchronous one, or one a rendering opportunity started while the
     // tail was still pending) finishes the previous frame first.
     if (m_state != State::Idle)
@@ -413,6 +418,34 @@ void FrameScheduler::consume_finished_frame()
         return;
     }
     m_event_loop.run_consume_tail([this] { run_tail(); });
+}
+
+// The render clock ticks nothing beside a frame in flight, and a rendering update ends the lease of a document with
+// animation frame callbacks, which its tail grants again. A task that begins beside the frame of one that began with a
+// clock lease would get no ticks: after a long task, the main thread finishes that frame first, and lends the lease its
+// tail granted to the task.
+void FrameScheduler::finish_frame_for_clock_lend()
+{
+    if (!m_rendering_update_began_with_clock_lease || m_last_task_milliseconds < clock_lend_long_task_milliseconds || !Layout::RustFFI::rust_clock_frames_enabled())
+        return;
+    while (m_state == State::InFlight || m_state == State::CommittedTailPending) {
+        if (m_state == State::InFlight) {
+            if (!m_event_loop.may_consume_commit(EventLoop::FrameConsumeSite::StepOne))
+                return;
+            Layout::RustFFI::rust_stage_thread_take_frame_in_flight();
+            consume_commit(EventLoop::FrameConsumeSite::StepOne);
+        }
+        if (m_state != State::CommittedTailPending || !m_event_loop.may_run_consume_tail())
+            return;
+        // As in consume_finished_frame().
+        if (m_ticket->submitted_pass.has_value()) {
+            run_tail();
+            m_event_loop.perform_a_microtask_checkpoint();
+            continue;
+        }
+        m_event_loop.run_consume_tail([this] { run_tail(); });
+    }
+    lend_clock_leases_to_busy_main(false);
 }
 
 u64 FrameScheduler::finish_frame_now()
