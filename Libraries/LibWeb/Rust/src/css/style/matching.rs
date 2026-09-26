@@ -129,6 +129,10 @@ fn verify_cascade_answer_against_cold(
     });
 }
 
+/// The pseudo-element kinds whose winner states can travel with a node's winner state: ::after,
+/// ::backdrop, ::before, ::first-letter, ::marker and ::selection.
+const SETTLED_PSEUDO_WINNER_KINDS: u64 = (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3) | (1 << 5) | (1 << 6);
+
 impl RetainedState {
     fn retained_answer_delta_memo_key(
         old_answer: MatchAnswerID,
@@ -174,15 +178,23 @@ impl RetainedState {
             .view(&self.winner_groups)
             .pseudo_states(node)
             .filter(|&(pseudo, version, _, priority_current)| {
-                let travels = match pseudo.kind.0 {
-                    0 | 2 | 3 | 6 => true,
-                    kind @ (1 | 5) => self.computed_group_sets.pseudo_style_record(node, kind as u8).is_some(),
-                    _ => false,
+                let kind = pseudo.kind.0;
+                let travels = match kind {
+                    1 | 5 => self.computed_group_sets.pseudo_style_record(node, kind as u8).is_some(),
+                    _ => kind < 64 && SETTLED_PSEUDO_WINNER_KINDS & (1 << kind) != 0,
                 };
                 travels && version == self.program.version() && priority_current
             })
             .map(|(pseudo, _, state, _)| (pseudo, state))
             .collect()
+    }
+
+    fn flipped_pseudo_kinds(&self, deltas: &[SelectorTruthDelta]) -> u64 {
+        deltas
+            .iter()
+            .filter_map(|delta| self.programs.entry(delta.entry).1.pseudo_element)
+            .filter_map(|pseudo| 1_u64.checked_shl(u32::from(pseudo.kind.0)))
+            .fold(0, |kinds, bit| kinds | bit)
     }
 
     fn remember_retained_answer_delta_transition(
@@ -3388,6 +3400,13 @@ impl RetainedState {
                     &mut self.memory,
                 );
             }
+            effects.winners.mark_pseudo_rows_not_carried(
+                &mut self.winner_groups,
+                node,
+                transition.flipped_pseudo_kinds & SETTLED_PSEUDO_WINNER_KINDS,
+                &transition.pseudo_winner_states,
+                &mut self.memory,
+            );
             self.publish_cascade_input_with_effects(effects, node, transition.new_cascade_input);
             counters.bump(Counter::RetainedMatchAnswerDeltaPatches);
             if stopped {
@@ -3444,6 +3463,7 @@ impl RetainedState {
                         new_cascade_input: old_cascade_input,
                         winner_state,
                         pseudo_winner_states: pseudo_winner_states.into_boxed_slice(),
+                        flipped_pseudo_kinds: self.flipped_pseudo_kinds(deltas),
                         winners_updated: false,
                         cascade_winners_are_complete: false,
                     },
@@ -3527,6 +3547,7 @@ impl RetainedState {
                     new_cascade_input,
                     winner_state,
                     pseudo_winner_states: pseudo_winner_states.into_boxed_slice(),
+                    flipped_pseudo_kinds: self.flipped_pseudo_kinds(deltas),
                     winners_updated: cascade_winners_updated,
                     cascade_winners_are_complete,
                 },
@@ -5411,9 +5432,11 @@ impl RetainedState {
                                 {
                                     published_winner_rows = true;
                                 }
+                                let carried_pseudo_winner_groups = pseudo_winner_groups
+                                    .filter(|&(generation, _)| generation == self.winner_groups.generation())
+                                    .map(|(_, pseudo_winner_groups)| pseudo_winner_groups);
                                 if scope == TreeScopeID::DOCUMENT
-                                    && let Some((generation, pseudo_winner_groups)) = pseudo_winner_groups
-                                    && generation == self.winner_groups.generation()
+                                    && let Some(pseudo_winner_groups) = &carried_pseudo_winner_groups
                                 {
                                     for &(pseudo, state) in pseudo_winner_groups.iter() {
                                         let _ = effects.winners.set_pseudo(
@@ -5426,6 +5449,15 @@ impl RetainedState {
                                         );
                                     }
                                     published_winner_rows = true;
+                                }
+                                if scope == TreeScopeID::DOCUMENT {
+                                    effects.winners.mark_pseudo_rows_not_carried(
+                                        &mut self.winner_groups,
+                                        node,
+                                        SETTLED_PSEUDO_WINNER_KINDS,
+                                        carried_pseudo_winner_groups.as_deref().unwrap_or_default(),
+                                        &mut self.memory,
+                                    );
                                 }
                                 if published_winner_rows {
                                     self.winner_groups.settle_memory(&mut self.memory);
@@ -5467,9 +5499,9 @@ impl RetainedState {
                                     Lookup::Missing(_) => None,
                                 };
                                 // The rows the engine settles pseudo-elements from travel with
-                                // the group, including ::marker: its UA rule matches every
-                                // element, and a cohort hit must carry that cascade when the
-                                // originating record makes the element a list item.
+                                // the group, ::marker and ::backdrop only from a node holding a
+                                // record for them. A cohort hit marks its own rows for the kinds
+                                // the group does not carry stale.
                                 let pseudo_winner_groups = self.settled_pseudo_winner_states(effects, node);
                                 let pseudo_winner_groups = (!pseudo_winner_groups.is_empty())
                                     .then(|| (self.winner_groups.generation(), Arc::from(pseudo_winner_groups)));

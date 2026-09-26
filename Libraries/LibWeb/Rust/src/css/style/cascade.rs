@@ -1119,6 +1119,57 @@ impl WinnerEffects {
         }
     }
 
+    /// A node taking another node's winner rows keeps its own rows for the pseudo-elements those
+    /// did not carry, settled against its old answer. Mark the ones of the `stale_kinds`, which
+    /// that answer may have settled differently, stale, so settling republishes whichever it reads.
+    pub(super) fn mark_pseudo_rows_not_carried(
+        &mut self,
+        groups: &mut WinnerGroups,
+        node: StyleNodeID,
+        stale_kinds: u64,
+        carried: &[(PseudoElementTarget, CascadeStateID)],
+        memory: &mut MemoryController,
+    ) {
+        if stale_kinds == 0 {
+            return;
+        }
+        let stale: SmallVec<[_; 2]> = self
+            .view(groups)
+            .pseudo_states(node)
+            .filter(|&(pseudo, _, _, current)| {
+                current
+                    && pseudo.kind.0 < 64
+                    && stale_kinds & (1 << pseudo.kind.0) != 0
+                    && !carried.iter().any(|&(carried, _)| carried == pseudo)
+            })
+            .map(|(pseudo, version, state, _)| (pseudo, version, state))
+            .collect();
+        for (pseudo, version, state) in stale {
+            if let Some(&entry) = node
+                .element_index()
+                .and_then(|index| self.by_node.get(index as usize))
+                .filter(|&&entry| entry != 0)
+                && let Some(row) = self.entries[entry as usize - 1]
+                    .pseudos
+                    .iter_mut()
+                    .find(|row| row.pseudo == pseudo)
+            {
+                row.priority_current = false;
+                let write = self.writes.iter_mut().rev().find(|write| {
+                    matches!(write, WinnerNodeWrite::Set { node: owner, target, .. }
+                        if *owner == node && *target == Some(pseudo))
+                });
+                if let Some(WinnerNodeWrite::Set { priority_current, .. }) = write {
+                    *priority_current = false;
+                }
+            } else if self.set_pseudo(groups, node, pseudo, state, version, memory) {
+                self.mark_pseudo_inventory_incomplete(node, pseudo);
+            } else {
+                debug_assert!(false, "a retained pseudo winner row admits its own rewrite");
+            }
+        }
+    }
+
     pub(super) fn set_from_token(
         &mut self,
         groups: &mut WinnerGroups,
