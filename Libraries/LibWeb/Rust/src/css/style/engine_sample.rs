@@ -692,7 +692,6 @@ impl RetainedState {
             let host_overlay_base = self
                 .element_custom_property_data
                 .get(&node)
-                .and_then(Option::as_ref)
                 .filter(|held| held.is_animation_overlay && held.identity == environment)
                 .and_then(|held| held.animation_base.as_ref())
                 .map(|base| base.environment());
@@ -1326,11 +1325,7 @@ impl super::StyleEngineState {
             .retained
             .computed_group_sets
             .style_record_custom_property_environment(style_record)?;
-        let element_held = self
-            .retained
-            .element_custom_property_data
-            .get(&node)
-            .and_then(Option::as_ref);
+        let element_held = self.retained.element_custom_property_data.get(&node);
         let element_environment = element_held.map_or(0, |held| held.identity);
         let named = match environment {
             0 => NamedPseudoElementEnvironment {
@@ -1426,7 +1421,6 @@ impl super::StyleEngineState {
                     .retained
                     .element_custom_property_data
                     .get(&node)
-                    .and_then(Option::as_ref)
                     .filter(|held| held.identity == named.identity)
                     .and_then(|held| held.data.as_ref())
                     .map(inputs::RetainedCustomPropertyData::share)
@@ -1544,12 +1538,12 @@ impl super::StyleEngineState {
     /// object the engine does not hold.
     pub(crate) fn install_sampled_element_environment(&mut self, node: StyleNodeID, sampled: u64) -> bool {
         let (base, declares) = match self.retained.element_custom_property_data.get(&node) {
-            None | Some(None) => (0, false),
-            Some(Some(held)) if held.is_animation_overlay => match held.animation_base.as_ref() {
+            None => (0, false),
+            Some(held) if held.is_animation_overlay => match held.animation_base.as_ref() {
                 Some(base) => (base.environment(), held.declares),
                 None => return false,
             },
-            Some(Some(held)) => (held.identity, held.declares),
+            Some(held) => (held.identity, held.declares),
         };
         if base != 0 && base & custom_property_environments::ENGINE_ENVIRONMENT_IDENTITY_BIT == 0 {
             engine_sample_check::note_declined("element sampled environment: over a host environment");
@@ -1584,10 +1578,13 @@ impl super::StyleEngineState {
                 .computed_group_sets
                 .set_node_custom_property_environment(node, held.identity);
         }
-        let retired = self.retained.element_custom_property_data.insert(node, held);
+        let retired = match held {
+            Some(held) => self.retained.element_custom_property_data.insert(node, held),
+            None => self.retained.element_custom_property_data.remove(&node),
+        };
         self.host
             .retired_custom_property_data
-            .extend(retired.flatten().and_then(|held| held.data));
+            .extend(retired.and_then(|held| held.data));
         engine_sample_check::note_taken("element sampled environment installed by the engine");
         true
     }
