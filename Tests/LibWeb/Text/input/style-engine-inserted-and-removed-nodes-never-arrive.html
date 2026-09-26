@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<script src="include.js"></script>
+<style>
+    li.completed label { color: green; }
+</style>
+<ul id="list"></ul>
+<script>
+    test(() => {
+        const count = 20;
+        function render(round) {
+            let html = "";
+            for (let i = 0; i < count; i++)
+                html += `<li${i === round ? ' class="completed"' : ""}><div class="view"><input class="toggle" type="checkbox"><label>Item ${i}</label></div></li>`;
+            list.innerHTML = html;
+        }
+
+        render(-1);
+        internals.updateStyle();
+        const before = internals.styleEngineCounters();
+
+        // Each round replaces the whole list before anything reads style, so only the last
+        // round's items are ever observed.
+        for (let round = 0; round < 10; round++)
+            render(round);
+
+        println(`last label color: ${getComputedStyle(list.lastElementChild.querySelector("label")).color}`);
+        println(`completed label color: ${getComputedStyle(list.children[9].querySelector("label")).color}`);
+        const after = internals.styleEngineCounters();
+        for (const key of ["treeDeltas", "treeDepartureDeltas", "styleNodesRetired"])
+            println(`${key}: ${after[key] - before[key]}`);
+    });
+</script>
