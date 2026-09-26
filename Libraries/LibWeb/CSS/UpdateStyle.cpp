@@ -1745,10 +1745,12 @@ static bool update_style_for_element(DOM::Document& document, DOM::AbstractEleme
 
     // Script often reads the style of an element beside markup it has just inserted and replaces again before anything
     // else reads it, like the section jQuery's toggle() reads around a list it renders. Those nodes arrive here only
-    // if they can decide the style read.
+    // if they can decide the style read, or a style the read's update computes.
+    // INTEROP: Blink also leaves the style of new nodes uncomputed for a read of an element they cannot decide
+    //          (Document::UpdateStyleAndLayoutTreeForElement()), so they take no before-change style from it.
     Optional<PendingStyleArrivalsWaitScope> pending_style_arrivals_wait;
-    if (pending_style_arrivals_may_decide_style_of(abstract_element.element()))
-        take_in_pending_style_arrivals(document);
+    if (pending_style_arrivals_may_decide_style_of(abstract_element))
+        take_in_pending_style_arrivals_for_read(document);
     else
         pending_style_arrivals_wait.emplace(document);
 
@@ -1906,6 +1908,19 @@ static bool update_style_for_element(DOM::Document& document, DOM::AbstractEleme
     for (auto cursor = abstract_element.element_to_inherit_style_from(); cursor.has_value(); cursor = cursor->element_to_inherit_style_from()) {
         auto& ancestor = const_cast<DOM::Element&>(cursor->element());
         inheritance_chain.append(ancestor);
+    }
+
+    // Every element the read installs a record for has arrived, unless a node the read left waiting could decide it.
+    // Should one not have, the waiting nodes are taken in and the update runs again.
+    auto has_not_arrived = [](GC::Ref<DOM::Element> element) { return element->style_node_id() == StyleNodeID {}; };
+    if (any_of(inheritance_chain, has_not_arrived)) {
+        ASSERT(!pending_style_arrivals_wait.has_value());
+        pending_style_arrivals_wait.clear();
+        take_in_pending_style_arrivals_for_read(document);
+        if (!document.is_running_update_layout())
+            update_style(document, DocumentWithoutBrowsingContext::Update);
+        if (any_of(inheritance_chain, has_not_arrived))
+            return false;
     }
 
     for (size_t i = inheritance_chain.size(); i > 0; --i) {
