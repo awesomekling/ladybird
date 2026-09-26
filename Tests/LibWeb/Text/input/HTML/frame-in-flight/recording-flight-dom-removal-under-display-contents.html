@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<style>
+    .item { height: 10px; }
+</style>
+<div id="other" style="height: 10px"></div><div id="container" style="width: 300px"><div id="contents" style="display: contents"><div class="item"></div><div class="item"></div><div class="item"></div></div><div id="after" class="item"></div></div>
+<script>
+    // A leaf removed from a display: contents parent beside a recording in flight. The parent has no box, so the
+    // removal marks the box its children are laid out in. A style update after the removal leaves that mark as the
+    // only sign of layout to do, and a read of layout then sees the tree without the leaf.
+    asyncTest(async done => {
+        const result = await whileFrameInFlight("before-run", () => {
+            other.style.backgroundColor = "green";
+        }, frame => {
+            contents.children[1].remove();
+            getComputedStyle(after).color;
+            return { ...frame, top: after.offsetTop - container.offsetTop, height: container.offsetHeight };
+        });
+        println(`held as armed: ${heldAsArmed(result, "before-run")}`);
+        println(`sibling offset right after the removal: ${result.top}`);
+        println(`container height right after the removal: ${result.height}`);
+        await twoFrames();
+        println(`container height: ${container.offsetHeight}`);
+        println(`layout tree matches a full rebuild: ${internals.compareLayoutTreeWithFullRebuild().matches}`);
+        done();
+    });
+</script>
