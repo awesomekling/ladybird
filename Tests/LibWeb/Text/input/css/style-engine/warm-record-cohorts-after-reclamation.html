@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style>
+    .c { font-style: italic; }
+    .c:not(.x) { color: rgb(0, 128, 0); }
+    #churn { padding-left: attr(data-padding type(<length>)); }
+</style>
+<div id="parent" style="color: rgb(255, 0, 0)"><div id="child" class="c">child</div></div>
+<div style="color: rgb(255, 0, 0); font-style: oblique"><div id="holder" class="c">holder</div></div>
+<div id="churn" data-padding="0px"></div>
+<script>
+    test(() => {
+        const parent = document.getElementById("parent");
+        const child = document.getElementById("child");
+        const holder = document.getElementById("holder");
+        const churn = document.getElementById("churn");
+        internals.updateStyle();
+
+        // Each toggle keeps a cohort keyed by the parent's inherited style. The holder moves
+        // through the same records under a parent with other inherited style, and keeps the
+        // red one alive.
+        for (let i = 0; i < 4; ++i) {
+            child.classList.toggle("x");
+            holder.classList.toggle("x");
+            internals.updateStyle();
+        }
+        holder.classList.add("x");
+        println(`holder: ${getComputedStyle(holder).color}`);
+
+        // Drop the parent's inherited style, and intern enough records for its identity to be
+        // reclaimed.
+        parent.style.color = "rgb(0, 0, 255)";
+        internals.updateStyle();
+        for (let index = 1; index <= 1100; ++index) {
+            churn.dataset.padding = `${index}px`;
+            internals.updateStyle();
+        }
+        internals.updateStyle();
+
+        // New inherited styles take the reclaimed identities.
+        let mismatches = 0;
+        for (let index = 1; index <= 20; ++index) {
+            const color = `rgb(${index}, 0, 0)`;
+            parent.style.color = color;
+            internals.updateStyle();
+            child.classList.add("x");
+            if (getComputedStyle(child).color !== color)
+                ++mismatches;
+            child.classList.remove("x");
+            if (getComputedStyle(child).color !== "rgb(0, 128, 0)")
+                ++mismatches;
+        }
+        println(`children inheriting the wrong color: ${mismatches}`);
+    });
+</script>

@@ -1,0 +1,2 @@
+holder: rgb(255, 0, 0)
+children inheriting the wrong color: 1
