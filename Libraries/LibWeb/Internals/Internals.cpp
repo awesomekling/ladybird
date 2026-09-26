@@ -1634,6 +1634,7 @@ GC::Ref<JS::Object> Internals::get_animation_timing_row_counters() const
     auto object = JS::Object::create(realm, nullptr);
     object->define_direct_property("listsPublished"_utf16_fly_string, JS::Value(static_cast<double>(counters.lists_published)), JS::default_attributes);
     object->define_direct_property("listsUnchanged"_utf16_fly_string, JS::Value(static_cast<double>(counters.lists_unchanged)), JS::default_attributes);
+    object->define_direct_property("rowsPublished"_utf16_fly_string, JS::Value(static_cast<double>(counters.rows_published)), JS::default_attributes);
     return object;
 }
 

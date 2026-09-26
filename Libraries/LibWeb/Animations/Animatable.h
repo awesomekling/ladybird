@@ -69,6 +69,7 @@ public:
     struct AnimationTimingRowCounters {
         u64 lists_published { 0 };
         u64 lists_unchanged { 0 };
+        u64 rows_published { 0 };
     };
     static AnimationTimingRowCounters animation_timing_row_counters();
 

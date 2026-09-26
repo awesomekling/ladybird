@@ -627,6 +627,7 @@ void Animatable::publish_animation_timing_rows()
         CSS::record_element_animation_timing_rows(*element, slot, ordered_words, ordered_times, linear_points);
         CSS::record_element_animation_effect_descriptions(*element, slot, ordered_effects);
         ++s_animation_timing_row_counters.lists_published;
+        s_animation_timing_row_counters.rows_published += ordered_effects.size();
         if (!published) {
             impl.published_timing_rows.append({});
             published = &impl.published_timing_rows.last();
