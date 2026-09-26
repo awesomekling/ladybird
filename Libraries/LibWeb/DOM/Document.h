@@ -1301,6 +1301,12 @@ public:
 
     // Notes that the page dirtied render state, for the joins that will have to wait for it.
     void note_render_state_mutation() { m_last_render_state_mutation_nanoseconds = MonotonicTime::now().nanoseconds(); }
+    // A style change marked a layout node for a layout update, as a node's own mark does.
+    void note_style_change_needs_layout_update(Badge<CSS::StyleEffectDrain>)
+    {
+        note_render_state_mutation();
+        set_needs_repaint(InvalidateDisplayList::No);
+    }
 
     // What the published render state is, rather than what is owed on it. The layout commit
     // generation counts the commits the arena published; the style transaction version pair names
