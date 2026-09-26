@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style>
+    .hidden { display: none; color: rgb(1, 2, 3); }
+    .hidden::before { content: "x"; color: inherit; }
+    .hidden.shown { display: block; }
+</style>
+<div id="container"></div>
+<script>
+    // A display:none element's pseudo-element records are computed from that display, and are shared with every alike
+    // element's, as any first pseudo-element record is: within one style update and across updates.
+    test(() => {
+        function addItem() {
+            const item = document.createElement("div");
+            item.className = "hidden";
+            container.append(item);
+            return item;
+        }
+        const first = addItem();
+        const second = addItem();
+        internals.updateStyle();
+        const before = internals.styleEngineCounters();
+        const third = addItem();
+        internals.updateStyle();
+        const after = internals.styleEngineCounters();
+        println(`alike items in one update share: ${internals.beforeStyleRecordIdentity(first) === internals.beforeStyleRecordIdentity(second)}`);
+        println(`an alike item in a later update shares: ${internals.beforeStyleRecordIdentity(first) === internals.beforeStyleRecordIdentity(third)}`);
+        println(`it was not driven in full: ${after.engineFullDrivesStarted === before.engineFullDrivesStarted}`);
+        println(`computed ::before: ${getComputedStyle(third, "::before").content} ${getComputedStyle(third, "::before").color}`);
+
+        second.classList.add("shown");
+        println(`a shown item keeps its ::before: ${getComputedStyle(second, "::before").content} ${getComputedStyle(second, "::before").display}`);
+        println(`its box shows it: ${second.getBoundingClientRect().height > 0}`);
+    });
+</script>

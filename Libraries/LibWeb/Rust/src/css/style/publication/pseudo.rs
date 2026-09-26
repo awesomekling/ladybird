@@ -450,7 +450,7 @@ impl RetainedState {
             .and(
                 self.computed_group_sets
                     .node_inherited_groups_identity(node)
-                    .zip(self.box_type_parent_display(node))
+                    .zip(self.box_type_originating_display(node))
                     .map(|(inherited_groups, parent_display)| PseudoCohortKey {
                         parent_record: if kind == SELECTION
                             || kind == BACKDROP

@@ -3065,6 +3065,16 @@ impl RetainedState {
     /// The display the box-type transformation reads as the parent's for a child of the parent:
     /// the parent's own, past any display:contents ancestor, packed into one word.
     fn box_type_parent_display(&self, parent: StyleNodeID) -> Option<u32> {
+        self.box_type_display_key(parent, false)
+    }
+
+    /// The same for a pseudo-element of `node`. Its records are computed under a display:none
+    /// element too, from that display, so the key carries it.
+    pub(super) fn box_type_originating_display(&self, node: StyleNodeID) -> Option<u32> {
+        self.box_type_display_key(node, true)
+    }
+
+    fn box_type_display_key(&self, parent: StyleNodeID, admits_none: bool) -> Option<u32> {
         let mut ancestor = Some(parent);
         while let Some(current) = ancestor {
             let record = self.computed_group_sets.assigned_style_record(current)?;
@@ -3073,7 +3083,7 @@ impl RetainedState {
             let display = crate::css::style_compute::effective_display(table, None);
             // C++ styles the children of a display:none element on demand, past the engine's
             // view of the parent, so no first record is computed under one.
-            if display.is_none() {
+            if display.is_none() && !admits_none {
                 return None;
             }
             if !display.is_contents() {
