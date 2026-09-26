@@ -2860,10 +2860,14 @@ void Node::inserted()
             CSS::Invalidation::invalidate_style_after_text_change_under(*parent);
     }
 
+    // An element or text node takes its identity only as it arrives in the style engine, which publishes what follows
+    // under that identity. Until then there is nothing to publish it under, and a node that never takes one has no row.
+    auto identity = NodeIdentity::of(*this);
+    if (!identity)
+        return;
+
     // Inertness, editability and the wheel-handler state are all inherited, so a node that arrives
     // somewhere new holds whatever its new place gives it.
-    // NB: An element or text node takes its identity only as it arrives in the style engine, which
-    //     publishes this and the focused text control state below again under that identity.
     Layout::publish_dom_paint_facts(*this);
 
     // A node can also arrive in the shadow tree of a text control that is already focused, which
@@ -2871,7 +2875,7 @@ void Node::inserted()
     // is focused at all, and only the nodes of that control's own shadow tree hold it.
     if (auto focused_area = document().focused_area(); is<HTML::FormAssociatedTextControlElement>(focused_area.ptr())) {
         if (auto* shadow_root = as_if<ShadowRoot>(root()); shadow_root && shadow_root->host() == focused_area.ptr())
-            document().invalidation_journal().note_is_in_focused_text_control(NodeIdentity::of(*this));
+            document().invalidation_journal().note_is_in_focused_text_control(identity);
     }
 }
 
