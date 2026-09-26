@@ -1,5 +1,5 @@
 last label color: rgb(0, 0, 0)
 completed label color: rgb(0, 128, 0)
-treeDeltas: 2180
-treeDepartureDeltas: 800
-styleNodesRetired: 800
+treeDeltas: 199
+treeDepartureDeltas: 80
+styleNodesRetired: 80

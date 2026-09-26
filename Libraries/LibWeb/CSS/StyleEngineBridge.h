@@ -263,6 +263,10 @@ public:
     [[nodiscard]] bool has_recorded_element_style_input_change(StyleNodeID style_node) const;
     void record_benchmark_marker(Utf16View);
     [[nodiscard]] bool has_recorded_input() const;
+    // Nodes that connected without taking an identity yet count as recorded input: they arrive when the input is
+    // next submitted.
+    void note_pending_arrivals(size_t count);
+    void forget_pending_arrivals() { m_pending_arrival_count = 0; }
     // How many inputs are recorded for the next submission, which is what settling for a selector query costs.
     [[nodiscard]] size_t recorded_input_count() const;
     [[nodiscard]] bool has_pending_transaction() const;
@@ -490,6 +494,7 @@ private:
     Vector<StyleNodeID> m_granted_style_nodes;
     Vector<StyleNodeID> m_granted_text_style_nodes;
     size_t m_style_node_grant_request { 0 };
+    size_t m_pending_arrival_count { 0 };
     size_t m_text_style_node_grant_request { 0 };
     bool m_css_transitions_may_observe_style_changes { false };
 };
