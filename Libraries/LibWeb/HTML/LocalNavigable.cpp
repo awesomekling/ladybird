@@ -6787,7 +6787,7 @@ Compositor::NavigablePresenter& LocalNavigable::presenter(SourceLocation locatio
         auto* arena = document->layout_node_arena_if_created()->handle();
         if (Layout::RustFFI::rust_clock_lend_holds(arena))
             Layout::RustFFI::layout_arena_join_frame_owning_arena(arena, reinterpret_cast<u8 const*>(location.filename().characters_without_null_termination()), location.filename().length(), location.line_number());
-        VERIFY(!Layout::RustFFI::rust_clock_lend_holds(arena));
+        ASSERT(!Layout::RustFFI::rust_clock_lend_holds(arena));
     }
     return *m_presenter;
 }
