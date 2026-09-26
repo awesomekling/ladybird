@@ -96,8 +96,14 @@ namespace Web::HTML {
 // when the defaults it should hold differ from the ones it holds.
 static void set_own_inline_style(DOM::Element& element, CSS::CSSStyleProperties const& defaults)
 {
+    auto current = element.inline_style();
+    bool const holds_own_copy = current && current->owner_node().has_value();
+    // Every value change asks again, and nearly always the element holds the defaults already: comparing the
+    // declarations answers that without serializing both sides.
+    if (holds_own_copy && current->properties() == defaults.properties() && current->custom_properties().is_empty() && defaults.custom_properties().is_empty())
+        return;
     auto defaults_text = defaults.serialized();
-    if (auto current = element.inline_style(); current && current->owner_node().has_value() && current->serialized() == defaults_text)
+    if (holds_own_copy && current->serialized() == defaults_text)
         return;
     auto style = CSS::CSSStyleProperties::create_element_inline_style({ element });
     style->set_declarations_from_text(defaults_text);
