@@ -614,7 +614,10 @@ unsafe fn pay_owed_host_halves(
             // The install is the rest of the style update, as the commit of a style flight runs it
             // at the join that takes the flight back, forced or not: a forced join in the middle of
             // a DOM mutation runs it there as it does for the style flight.
+            // What applying the batch in flight handed back, the install reads: it is paid first.
             OwedHostHalf::StyleInstall => {
+                // SAFETY: Guaranteed by the caller.
+                unsafe { arena(arena_handle) }.pay_flight_style_handbacks(main_thread);
                 host.finish_submitted_style_update(main_thread);
                 // SAFETY: Guaranteed by the caller.
                 restored_style |= unsafe { arena(arena_handle) }.finish_flight_style_host_half(main_thread);
@@ -1845,7 +1848,8 @@ impl LayoutPassTakeBack {
 /// back the tree update marks, pays what the round owes, and applies the frame's messages.
 /// Whatever the round leaves pending (another build, another round), the next layout update does:
 /// the frame is taken back wherever the document thread reaches what it owns, which can be in the
-/// middle of a DOM mutation, so it runs no style update.
+/// middle of a DOM mutation. It starts no style update there; the rest of a style update the flight
+/// ran (its install) is paid all the same, as the commit of a style flight pays it at a forced join.
 ///
 /// # Safety
 ///
@@ -1865,8 +1869,11 @@ unsafe fn finish_layout_frame(main_thread: &crate::stage::MainThread, mut frame:
     // the next layout update, as the next style round would have marked them.
     let list_owners_to_rebuild = std::mem::take(&mut frame.list_owners_to_rebuild);
     host.rebuild_list_owners_with_stale_item_counters(main_thread, &list_owners_to_rebuild);
-    // SAFETY: As above.
-    if frame.style_ran_in_flight && unsafe { arena(frame.inputs.arena_handle) }.take_flight_style_applied() {
+    // The install owed the flight the repaint of a batch the flight applied, or parked and did not:
+    // either way nothing recorded after it here.
+    if frame.style_ran_in_flight {
+        // SAFETY: As above.
+        unsafe { arena(frame.inputs.arena_handle) }.take_flight_style_applied();
         host.settle_flight_style_repaint(main_thread, false);
     }
     // SAFETY: As above.
@@ -1904,8 +1911,11 @@ unsafe fn finish_layout_frame_recorded_in_flight(
         && !host.needs_style_update_after_layout(main_thread)
         && !facts.top_layer_work_pending
         && layout_is_up_to_date(arena, &facts);
-    if frame.style_ran_in_flight && arena.take_flight_style_applied() {
-        host.settle_flight_style_repaint(main_thread, recording_stands);
+    // The install owed the flight the repaint of its batch whether the flight applied it or parked:
+    // the recording is that repaint only if the flight applied the batch before it recorded.
+    if frame.style_ran_in_flight {
+        let applied = arena.take_flight_style_applied();
+        host.settle_flight_style_repaint(main_thread, applied && recording_stands);
     }
     let mut messages = std::mem::take(&mut frame.messages);
     messages.recorded_in_flight = recording_stands;
