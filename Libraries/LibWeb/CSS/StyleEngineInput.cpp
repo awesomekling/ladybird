@@ -35,6 +35,7 @@
 #include <LibWeb/HTML/CustomElements/CustomStateSet.h>
 #include <LibWeb/HTML/EventLoop/MainThreadPhases.h>
 #include <LibWeb/HTML/FormAssociatedElement.h>
+#include <LibWeb/HTML/HTMLAreaElement.h>
 #include <LibWeb/HTML/HTMLBRElement.h>
 #include <LibWeb/HTML/HTMLBodyElement.h>
 #include <LibWeb/HTML/HTMLButtonElement.h>
@@ -43,6 +44,7 @@
 #include <LibWeb/HTML/HTMLHeadingElement.h>
 #include <LibWeb/HTML/HTMLImageElement.h>
 #include <LibWeb/HTML/HTMLInputElement.h>
+#include <LibWeb/HTML/HTMLMapElement.h>
 #include <LibWeb/HTML/HTMLObjectElement.h>
 #include <LibWeb/HTML/HTMLSelectElement.h>
 #include <LibWeb/HTML/HTMLSlotElement.h>
@@ -54,6 +56,7 @@
 #include <LibWeb/Layout/ImageProvider.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
 #include <LibWeb/Layout/Node.h>
+#include <LibWeb/Painting/PaintFacts.h>
 #include <LibWeb/SVG/AttributeNames.h>
 #include <LibWeb/SVG/SVGClipPathElement.h>
 #include <LibWeb/SVG/SVGElement.h>
@@ -594,6 +597,11 @@ static void record_subtree_arrivals(DOM::Document& document, ReadonlySpan<GC::Re
     // The top layer is published whole, naming only the members that have arrived.
     if (any_of(arrivals, [](auto const& arrival) { auto* element = as_if<DOM::Element>(*arrival.node); return element && element->in_top_layer(); }))
         record_top_layer_elements_changed(document);
+
+    // An image names the areas of its map by identity (see Painting::refresh_image_map_area_facts()), and the insertion
+    // of an area or a map published them without one.
+    if (any_of(arrivals, [](auto const& arrival) { return is<HTML::HTMLAreaElement>(*arrival.node) || is<HTML::HTMLMapElement>(*arrival.node); }))
+        Painting::refresh_image_map_area_facts(document);
 
     // The insertion that connected a subtree marked it for the layout tree build under the identity it did not have
     // yet, so the mark is made here, as the insertion would have made it.
