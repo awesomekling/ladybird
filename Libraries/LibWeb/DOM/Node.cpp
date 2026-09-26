@@ -1606,24 +1606,27 @@ void Node::detach_remaining_layout_nodes_for_removal()
 {
     if (!document().layout_node_arena_if_created())
         return;
+    // A pseudo-element's box is found through its generator's identity, and a box that escaped the generator's subtree
+    // is no one else's to destroy. A top layer element's box is a viewport child rather than part of the parent's box
+    // subtree, so the parent rebuild triggered by this removal can never detach it. A node that never arrived in the
+    // style engine has no rows.
+    Vector<u32> style_nodes;
     for_each_shadow_including_inclusive_descendant([&](Node& node) {
-        // A pseudo-element's box is found through its generator's identity, and a box that escaped
-        // the generator's subtree is no one else's to destroy. A top layer element's box is a
-        // viewport child rather than part of the parent's box subtree, so the parent rebuild
-        // triggered by this removal can never detach it.
         CSS::StyleNodeID style_node;
         if (auto const* element = as_if<Element>(node))
             style_node = element->style_node_id();
         else if (auto const* text = as_if<Text>(node))
             style_node = text->style_node_id();
-        else
-            return TraversalDecision::Continue;
-        // Beside a recording that owns the arena, the rows stay bound under the node's identity until the frame has
-        // been taken in, and are detached then, ahead of the identity change.
-        HTML::FrameScheduler::change_arena(document(), [style_node](Layout::NodeArena& arena) {
-            Layout::RustFFI::rust_detach_remaining_layout_rows_for_removal(arena.handle(), style_node.value());
-        });
+        if (style_node.value() != 0)
+            style_nodes.append(style_node.value());
         return TraversalDecision::Continue;
+    });
+    if (style_nodes.is_empty())
+        return;
+    // Beside a recording that owns the arena, the rows stay bound under the nodes' identities until the frame has been
+    // taken in, and are detached then, ahead of the identity changes.
+    HTML::FrameScheduler::change_arena(document(), [style_nodes = move(style_nodes)](Layout::NodeArena& arena) {
+        Layout::RustFFI::rust_detach_remaining_layout_rows_for_removal(arena.handle(), style_nodes.data(), style_nodes.size());
     });
 }
 

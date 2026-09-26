@@ -38,25 +38,37 @@ unsafe extern "C" fn rust_detach_top_layer_element_layout_subtree(arena: *mut c_
     }
 }
 
-/// Detaches what is left of a node's boxes as the node leaves the document, while its identity
-/// still names them: its synthetic pseudo-elements' boxes, subtree and all, the paint state of its
-/// own box, and its box's top layer placement, which is a viewport child rather than part of the
-/// parent's box subtree, so the parent's rebuild would never detach it. The rows are found by
-/// identity, so no shell is made for any of this.
+/// Detaches what is left of the boxes of the nodes of a subtree as it leaves the document, while
+/// their identities still name them: their synthetic pseudo-elements' boxes, subtree and all, the
+/// paint state of their own boxes, and their boxes' top layer placements, which are viewport
+/// children rather than part of the parent's box subtree, so the parent's rebuild would never
+/// detach them. The rows are found by identity, so no shell is made for any of this.
 ///
 /// # Safety
 ///
 /// The arena must remain valid for the duration of the call, which must be made on the document
-/// thread.
+/// thread, and `style_nodes` must point to `style_node_count` identities.
 #[unsafe(no_mangle)]
-unsafe extern "C" fn rust_detach_remaining_layout_rows_for_removal(arena: *mut c_void, style_node: u32) {
+unsafe extern "C" fn rust_detach_remaining_layout_rows_for_removal(
+    arena: *mut c_void,
+    style_nodes: *const u32,
+    style_node_count: usize,
+) {
     assert!(!arena.is_null());
+    if style_node_count == 0 {
+        return;
+    }
+    assert!(!style_nodes.is_null());
+    // SAFETY: Guaranteed by the entry point's contract.
+    let style_nodes = unsafe { std::slice::from_raw_parts(style_nodes, style_node_count) };
     // SAFETY: The entry point's contract puts this call on the document thread.
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     // SAFETY: Guaranteed by the entry point's contract.
     unsafe {
         super::layout_node_arena::paying_host_handbacks(&main_thread, arena, || {
-            detach_remaining_layout_rows_for_removal(arena.cast(), style_node);
+            for &style_node in style_nodes {
+                detach_remaining_layout_rows_for_removal(arena.cast(), style_node);
+            }
         });
     }
 }
