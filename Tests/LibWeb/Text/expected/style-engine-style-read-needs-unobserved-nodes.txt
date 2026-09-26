@@ -1,0 +1,5 @@
+target after x: rgb(0, 128, 0)
+target is third: rgb(255, 255, 0)
+probe after late: rgb(0, 0, 255)
+fresh after y: rgb(0, 128, 0)
+light: rgb(255, 165, 0) / rgb(128, 0, 128)

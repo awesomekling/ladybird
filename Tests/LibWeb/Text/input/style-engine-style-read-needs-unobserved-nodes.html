@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<script src="include.js"></script>
+<style>
+    .x + .target { color: green; }
+    #siblings > :nth-child(3) { background-color: yellow; }
+    #outer > .late ~ section > .probe { color: blue; }
+</style>
+<div id="siblings"><div id="first">first</div><div id="target" class="target">target</div></div>
+<div id="outer"><section><div id="probe" class="probe">probe</div></section></div>
+<div id="host"><span id="light">light</span></div>
+<script>
+    test(() => {
+        const shadow = host.attachShadow({ mode: "open" });
+        internals.updateStyle();
+
+        // A sibling inserted before the element that is read.
+        const x = document.createElement("div");
+        x.className = "x";
+        siblings.insertBefore(x, target);
+        println(`target after x: ${getComputedStyle(target).color}`);
+        println(`target is third: ${getComputedStyle(target).backgroundColor}`);
+
+        // A sibling of an ancestor of the element that is read.
+        const late = document.createElement("div");
+        late.className = "late";
+        outer.insertBefore(late, outer.firstChild);
+        println(`probe after late: ${getComputedStyle(probe).color}`);
+
+        // The element that is read has just been inserted itself.
+        const fresh = document.createElement("div");
+        fresh.className = "target";
+        const y = document.createElement("div");
+        y.className = "x";
+        siblings.append(y, fresh);
+        println(`fresh after y: ${getComputedStyle(fresh).color}`);
+
+        // The slot the element is assigned to has just been inserted, and it inherits through it.
+        shadow.innerHTML = `<style>::slotted(span) { background-color: purple; }</style><div style="color: orange"><slot></slot></div>`;
+        println(`light: ${getComputedStyle(light).color} / ${getComputedStyle(light).backgroundColor}`);
+    });
+</script>
