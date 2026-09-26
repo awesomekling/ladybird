@@ -531,7 +531,7 @@ void ConnectionFromClient::attach_render_clock()
             bool created { false };
             ~Sender() { Web::Layout::RustFFI::rust_render_clock_sender_destroy(sender); }
         };
-        auto render_clock = Web::Compositor::RenderClock::create([sender = make<Sender>()](Compositing::CompositorContextId context_id, i64 frame_time_nanoseconds, double) {
+        auto render_clock = Web::Compositor::RenderClock::create([sender = make<Sender>()](Compositing::CompositorContextId context_id, i64 frame_time_nanoseconds, double, ReadonlySpan<Compositing::AsyncScrollNodeStableID>, ReadonlySpan<Compositing::CSSPixelPoint>) {
             if (!exchange(sender->created, true))
                 sender->sender = Web::Layout::RustFFI::rust_render_clock_sender_create();
             if (sender->sender)

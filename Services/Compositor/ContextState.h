@@ -187,6 +187,8 @@ public:
     double clock_tick_frame_interval(double display_refresh_rate) const { return m_clock_tick_pacer.frame_interval(display_refresh_rate); }
     bool clock_tick_is_due(MonotonicTime frame_time, double display_refresh_rate) const { return m_clock_tick_pacer.is_due(frame_time, display_refresh_rate); }
     void did_deliver_clock_tick(MonotonicTime frame_time);
+    // The scroll offsets of the scroll nodes, in CSS pixels, as a clock tick carries them.
+    void clock_tick_scroll_offsets(Vector<Compositing::AsyncScrollNodeStableID>&, Vector<Compositing::CSSPixelPoint>&) const;
 
     void queue_present_frame(PendingFrame);
     Optional<Gfx::IntRect> pending_present_frame_viewport_rect() const;

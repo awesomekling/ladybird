@@ -2,5 +2,6 @@
 
 endpoint RenderClockClient
 {
-    clock_tick(Compositing::CompositorContextId context_id, i64 frame_time_nanoseconds, double frame_interval_milliseconds) =|
+    // With the scroll offsets (CSS pixels) of the context's scroll nodes as the compositor holds them at the tick.
+    clock_tick(Compositing::CompositorContextId context_id, i64 frame_time_nanoseconds, double frame_interval_milliseconds, Vector<Compositing::AsyncScrollNodeStableID> scroll_nodes, Vector<Compositing::CSSPixelPoint> scroll_offsets) =|
 }
