@@ -1,0 +1,6 @@
+parent alone presents in its flight: true
+parent beside a painting iframe: presented 0, refused its paint true
+parent resizing its iframe: presented 0, stopped after layout true
+width: 30
+inner width: 30
+iframe viewport width: 120

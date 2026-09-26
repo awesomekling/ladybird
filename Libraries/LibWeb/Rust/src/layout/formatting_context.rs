@@ -2616,6 +2616,11 @@ impl DeferredLayoutCommitHostHalf {
         self.handbacks.only_reset_paintable_rows() && self.notifications.leave_the_host_no_work()
     }
 
+    /// Whether the commit resized a navigable the document hosts.
+    pub(crate) fn resized_a_hosted_navigable(&self) -> bool {
+        self.notifications.resized_a_hosted_navigable()
+    }
+
     /// Pays the host what the commit owed it and delivers the commit's notifications, then names
     /// the owners of the trace lines the pass left.
     ///

@@ -2846,6 +2846,30 @@ void Document::prepare_for_rendering()
     }
 }
 
+// Whether a navigable the document hosts in this event loop may paint later in the rendering update than the document
+// itself would in a flight: its step 22 comes after the flight's frame, which would compose its frame as it was.
+static bool hosts_navigable_that_may_paint_after_it(Document const& document)
+{
+    for (auto const* navigable_container : HTML::NavigableContainer::all_instances()) {
+        if (&navigable_container->document() != &document)
+            continue;
+        auto* content_navigable = as_if<HTML::LocalNavigable>(navigable_container->content_navigable().ptr());
+        if (!content_navigable)
+            continue;
+        auto content_document = content_navigable->active_document();
+        if (!content_document)
+            continue;
+        if (content_navigable->needs_repaint() || !content_document->layout_is_up_to_date())
+            return true;
+        auto const& style_engine = content_document->style_computer().style_engine();
+        if (style_engine.has_recorded_input() || style_engine.has_pending_transaction())
+            return true;
+        if (content_document->flight_paint_is_blocked())
+            return true;
+    }
+    return false;
+}
+
 bool Document::flight_paint_is_blocked() const
 {
     // What only the main thread paints.
@@ -2872,7 +2896,10 @@ bool Document::flight_paint_is_blocked() const
         return true;
     if (m_active_view_transition || m_scroll_state_query_containers.has_containers())
         return true;
-    return false;
+
+    // A parent never presents ahead of a frame of a navigable it hosts. The flight's layout stops short of the paint
+    // should it resize one.
+    return hosts_navigable_that_may_paint_after_it(*this);
 }
 
 void Document::take_in_flight_paint(bool handed_accumulated_visual_contexts_update)

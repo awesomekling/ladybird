@@ -1,5 +1,5 @@
 flights presented: true
 none refused their paint: true
 width: 40
-inner width: 40
+inner width: 20
 hit test reaches the iframe: true

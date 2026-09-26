@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<div id="box" style="width: 10px; height: 10px; background: green"></div>
+<iframe id="frame" style="width: 100px; height: 50px; border: 0" srcdoc="<body style='margin: 0'><div id=inner style='width: 20px; height: 20px; background: blue'></div></body>"></iframe>
+<script>
+    // A parent never presents ahead of a frame of a navigable it hosts that paints in the same rendering update: that
+    // frame reaches the compositor after the parent's, so the parent would show the iframe as it was. A flight of the
+    // parent presents only while the iframe has nothing to paint, and a flight whose layout resizes the iframe stops
+    // before its paint. Nothing is printed until the end, as printing inserts nodes, whose tree build keeps a flight
+    // from presenting.
+    function flightEnds() {
+        return internals.getRenderingSchedulerCounters().flightEnds;
+    }
+
+    async function step(mutate) {
+        internals.resetRenderingSchedulerCounters();
+        mutate();
+        await twoFrames();
+        return flightEnds();
+    }
+
+    asyncTest(async done => {
+        while (!frame.contentDocument?.getElementById("inner") || frame.contentDocument.readyState !== "complete")
+            await new Promise(resolve => frame.addEventListener("load", resolve, { once: true }));
+        const inner = frame.contentDocument.getElementById("inner");
+        internals.setRenderPresents(true);
+        // The iframe paints its first frames after its load: until it has nothing left to paint, the parent's flights
+        // leave their paint to the rendering update.
+        for (let i = 0; i < 3; ++i)
+            await twoFrames();
+
+        const parentOnly = await step(() => { box.style.width = "20px"; });
+        const parentAndChild = await step(() => {
+            box.style.width = "30px";
+            inner.style.width = "30px";
+        });
+        const resize = await step(() => { frame.style.width = "120px"; });
+        internals.resetRenderPresents();
+
+        // Without flights (LIBWEB_FLIGHT=0) nothing presents ahead of the rendering update.
+        const flew = ends => Object.values(ends).some(byStage => Object.values(byStage).some(count => count > 0));
+        const noFlights = !flew(parentOnly) && !flew(parentAndChild) && !flew(resize);
+        println(`parent alone presents in its flight: ${noFlights || parentOnly.done.present >= 1}`);
+        println(`parent beside a painting iframe: presented ${parentAndChild.done.present}, refused its paint ${noFlights || parentAndChild.paintNotSealed.rounds >= 1}`);
+        println(`parent resizing its iframe: presented ${resize.done.present}, stopped after layout ${noFlights || resize.roundLeftWork.rounds >= 1}`);
+        println(`width: ${box.getBoundingClientRect().width}`);
+        println(`inner width: ${inner.getBoundingClientRect().width}`);
+        println(`iframe viewport width: ${frame.contentWindow.innerWidth}`);
+        done();
+    });
+</script>

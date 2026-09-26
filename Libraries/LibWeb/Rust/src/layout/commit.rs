@@ -50,9 +50,18 @@ pub struct FfiCommitMessage {
 pub(crate) struct CommitNotifications {
     row_resets: Vec<crate::painting::paintable_rows::PaintableRowReset>,
     messages: Vec<FfiCommitMessage>,
+    /// The commit gave a navigable container viewport another size: the navigable it hosts lays
+    /// itself out again at that size, and paints after the container's document.
+    resized_a_hosted_navigable: bool,
 }
 
 impl CommitNotifications {
+    /// Whether the commit resized a navigable its document hosts, whose frame at the new size is
+    /// painted after the container's document is.
+    pub(crate) fn resized_a_hosted_navigable(&self) -> bool {
+        self.resized_a_hosted_navigable
+    }
+
     /// Whether telling the host these leaves it no style or layout work to do: the messages ask for
     /// no rebuild and no top layer pass. A navigable container's committed viewport sizes the
     /// navigable it hosts, whose document lays itself out; the container's document has nothing
@@ -228,7 +237,7 @@ pub(crate) fn commit_replacing(
         Default::default(),
     );
     paintables.discard_absolute_rects_memoized_during_commit();
-    for viewport in paintables.committed_navigable_container_viewports() {
+    for (viewport, _) in paintables.committed_navigable_container_viewports() {
         if let Some(style_node) = paintables.arena().commit_message_style_node(*viewport) {
             messages.push(FfiCommitMessage {
                 style_node,
@@ -239,11 +248,13 @@ pub(crate) fn commit_replacing(
             });
         }
     }
+    let resized_a_hosted_navigable = paintables.resized_a_navigable_container_viewport();
     crate::painting::published_immutable::published(paintables.arena());
     paintables.publish_rows();
     paintables.arena().finish_layout_style_snapshot_commit();
     CommitNotifications {
         row_resets: paintables.take_row_reset_notifications(),
         messages,
+        resized_a_hosted_navigable,
     }
 }
