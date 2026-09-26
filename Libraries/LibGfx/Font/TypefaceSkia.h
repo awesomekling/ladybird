@@ -56,6 +56,9 @@ public:
 
     SkTypeface const* sk_typeface() const;
 
+    // How many glyph pages the calling thread has filled in, for tests of its glyph page caches.
+    static u64 glyph_pages_populated_on_this_thread();
+
 protected:
     virtual void encode_font_data_for_ipc(IPC::Encoder&) const override;
     virtual hb_face_t* create_harfbuzz_face() const override;

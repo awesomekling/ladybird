@@ -694,3 +694,29 @@ TEST_CASE(frozen_cascade_leaves_out_a_failed_pending_face)
 
     EXPECT_EQ(ladybird_gfx_frozen_font_list_font_for_code_point(cascade->frozen_list(), 'a', false, false), local_font.ptr());
 }
+
+TEST_CASE(glyph_page_caches_keep_the_typefaces_in_use_once_full)
+{
+    auto file = MUST(Core::MappedFile::map(TEST_INPUT("fonts/text.ttf"sv)));
+    IGNORE_USE_IN_ESCAPING_LAMBDA Vector<NonnullRefPtr<Gfx::Typeface>> typefaces;
+    for (size_t i = 0; i < 200; ++i)
+        typefaces.append(MUST(Gfx::Typeface::try_load_from_temporary_memory(file->bytes())));
+
+    // A fresh thread starts with no caches. More typefaces than it keeps caches for fill them up, and a few typefaces
+    // used in turn afterwards fill their glyph pages in once each.
+    IGNORE_USE_IN_ESCAPING_LAMBDA u64 pages_populated_in_turns = 0;
+    auto thread = Threading::Thread::construct("GlyphPageCache"sv, [&typefaces, &pages_populated_in_turns]() {
+        for (auto const& typeface : typefaces)
+            (void)typeface->glyph_id_for_code_point('A');
+        auto populated_before_turns = Gfx::TypefaceSkia::glyph_pages_populated_on_this_thread();
+        for (size_t turn = 0; turn < 50; ++turn) {
+            for (size_t i = 0; i < 8; ++i)
+                (void)typefaces[i * 20]->glyph_id_for_code_point('A');
+        }
+        pages_populated_in_turns = Gfx::TypefaceSkia::glyph_pages_populated_on_this_thread() - populated_before_turns;
+        return 0;
+    });
+    thread->start();
+    (void)thread->join();
+    EXPECT(pages_populated_in_turns <= 8);
+}
