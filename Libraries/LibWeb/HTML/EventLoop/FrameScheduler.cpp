@@ -670,6 +670,21 @@ static Optional<EffectBoundaries> next_boundaries_in_local_time(Animations::Keyf
 // ticks only what the main thread would do nothing else for until the deadline: the running, non-pending animations
 // of the document timeline that animate no property that can change the layout tree's shape or what the main thread
 // observes of it, on elements that have a box.
+// Whether the effect moves or resizes boxes, which an intersection observer may see.
+static bool moves_boxes(Animations::KeyframeEffect const& effect)
+{
+    auto const* key_frame_set = effect.key_frame_set();
+    if (!key_frame_set)
+        return true;
+    for (auto const& keyframe : key_frame_set->keyframes_by_key) {
+        for (auto const& [property, value] : keyframe.properties) {
+            if (CSS::property_affects_layout(property.id()) || first_is_one_of(property.id(), CSS::PropertyID::Translate, CSS::PropertyID::Rotate, CSS::PropertyID::Scale, CSS::PropertyID::Transform))
+                return true;
+        }
+    }
+    return false;
+}
+
 static Optional<ClockLeasePlan> clock_lease_plan(DOM::Document& document)
 {
     if (!Layout::RustFFI::rust_stage_thread_submits_clock())
@@ -688,6 +703,8 @@ static Optional<ClockLeasePlan> clock_lease_plan(DOM::Document& document)
     if (!timeline_time.has_value() || timeline_time->type != Animations::TimeValue::Type::Milliseconds)
         return {};
 
+    // The render clock's ticks run no rendering update, which is where intersection observers see what moved.
+    bool const intersections_are_observed = document.has_intersection_observations();
     ClockLeasePlan plan;
     for (auto const& associated_timeline : document.associated_animation_timelines()) {
         for (auto& animation : associated_timeline->associated_animations()) {
@@ -730,6 +747,8 @@ static Optional<ClockLeasePlan> clock_lease_plan(DOM::Document& document)
             // What the compositor or the offscreen throttle runs, the main thread does not sample per frame either.
             if (keyframe_effect.is_compositor_driven() || keyframe_effect.is_compositor_replaced() || keyframe_effect.can_skip_per_frame_style_update())
                 continue;
+            if (intersections_are_observed && moves_boxes(keyframe_effect))
+                return {};
             plan.effects.append(keyframe_effect);
         }
     }

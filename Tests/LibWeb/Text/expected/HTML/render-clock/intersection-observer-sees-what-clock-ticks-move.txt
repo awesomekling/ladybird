@@ -1,0 +1,1 @@
+the intersection observer saw the element pushed out as the box grew: true
