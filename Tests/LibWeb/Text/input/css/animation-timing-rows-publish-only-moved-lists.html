@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<style>
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+.animated { width: 10px; height: 10px; animation: fade 1000s linear infinite; }
+</style>
+<div id="host"></div>
+<input id="first"><input id="second">
+<script src="../include.js"></script>
+<script>
+asyncTest(async done => {
+    const host = document.getElementById("host");
+    const elements = [];
+    for (let i = 0; i < 20; ++i) {
+        const element = document.createElement("div");
+        element.className = "animated";
+        host.appendChild(element);
+        elements.push(element);
+    }
+    const scripted = document.createElement("div");
+    host.appendChild(scripted);
+    const scriptedAnimation = scripted.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 1000 });
+    scriptedAnimation.pause();
+    scriptedAnimation.currentTime = 250;
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    getComputedStyle(scripted).opacity;
+
+    const first = document.getElementById("first");
+    const second = document.getElementById("second");
+    let before = internals.getAnimationTimingRowCounters();
+    for (let i = 0; i < 10; ++i) {
+        first.focus();
+        second.focus();
+    }
+    let after = internals.getAnimationTimingRowCounters();
+    println(`lists published by 20 focus() calls: ${after.listsPublished - before.listsPublished}`);
+
+    before = after;
+    scriptedAnimation.currentTime = 500;
+    println(`opacity after moving the current time: ${getComputedStyle(scripted).opacity}`);
+    after = internals.getAnimationTimingRowCounters();
+    println(`lists published by moving one animation: ${after.listsPublished - before.listsPublished}`);
+
+    before = after;
+    elements[3].style.animationPlayState = "paused";
+    getComputedStyle(elements[3]).opacity;
+    after = internals.getAnimationTimingRowCounters();
+    println(`lists published by pausing one CSS animation: ${after.listsPublished - before.listsPublished}`);
+
+    scripted.remove();
+    host.appendChild(scripted);
+    println(`opacity after the element came back: ${getComputedStyle(scripted).opacity}`);
+    done();
+});
+</script>

@@ -223,6 +223,9 @@ interface Internals {
     // why it dropped the others; and the frames in flight the main thread took in before a task to lend them
     // (lendFramesTakenIn), how many of those it waited for (lendFrameWaits), and for how long (lendFrameNanoseconds).
     object getRenderClockCounters();
+    // How many animation lists of an element published their timing rows to the style engine (listsPublished), and how
+    // many were built the same as they were last published and published nothing (listsUnchanged).
+    object getAnimationTimingRowCounters();
     // Leaves clock leases to the main thread's rendering updates, with no render clock armed, while suspended.
     undefined setRenderClockSuspended(boolean suspended);
     // Hands the leases a render clock ticks a display tick at frameTimeMs (like injectRenderingOpportunity()) once the

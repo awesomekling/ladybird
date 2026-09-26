@@ -28,6 +28,8 @@ struct Animatable::Transition {
 
 Animatable::Impl::~Impl() = default;
 
+static Animatable::AnimationTimingRowCounters s_animation_timing_row_counters;
+
 static WebIDL::ExceptionOr<Animatable::GetAnimationsOptions> get_animations_options_from_bindings(Bindings::GetAnimationsOptions const& options)
 {
     Animatable::GetAnimationsOptions converted_options;
@@ -593,6 +595,7 @@ void Animatable::publish_animation_timing_rows()
         put_rows_in_composite_order();
         CSS::record_element_animation_timing_rows(*element, slot, ordered_words, ordered_times, linear_points);
         CSS::record_element_animation_effect_descriptions(*element, slot, ordered_effects);
+        ++s_animation_timing_row_counters.lists_published;
     }
 
     for (auto slot : impl.published_timing_row_slots) {
@@ -602,6 +605,11 @@ void Animatable::publish_animation_timing_rows()
         }
     }
     impl.published_timing_row_slots = move(slots_with_rows);
+}
+
+Animatable::AnimationTimingRowCounters Animatable::animation_timing_row_counters()
+{
+    return s_animation_timing_row_counters;
 }
 
 Animatable::Impl& Animatable::ensure_impl() const
