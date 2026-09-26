@@ -40,7 +40,7 @@ use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
 use std::panic::AssertUnwindSafe;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Condvar, Mutex, OnceLock};
 use std::thread::ThreadId;
@@ -143,7 +143,7 @@ fn reads_beside_recording_enabled() -> bool {
 /// hit-test list, which that view does not read: it reads the hit-test list and visual context tree published with the
 /// rows, and memoizes nothing.
 pub(crate) fn reads_beside_recording_of(arena: *const c_void) -> bool {
-    if !reads_beside_recording_enabled() || RUNNING_JOIN_WORK.with(Cell::get) != 0 {
+    if no_stage_is_submitted() || !reads_beside_recording_enabled() || RUNNING_JOIN_WORK.with(Cell::get) != 0 {
         return false;
     }
     SUBMITTED.with_borrow(|submitted| {
@@ -321,6 +321,35 @@ struct SubmittedStage {
     // For a lend (see [`lend_arena`]), what takes the arena back: the main thread runs it where it
     // would wait for a stage to finish.
     recall: Option<Box<dyn FnOnce()>>,
+    _count: SubmittedStageCount,
+}
+
+/// How many submitted stages exist on any thread, taken back or not, until they are dropped. The
+/// checks for a frame in flight read it before the calling thread's own list: while it is zero no
+/// thread has one, which is the common case, and they need not reach any thread-local state.
+static SUBMITTED_STAGES: AtomicUsize = AtomicUsize::new(0);
+
+/// A submitted stage's place in [`SUBMITTED_STAGES`]. A thread only asks about the stages it
+/// submitted itself, which it counted before it asks, so the count needs no ordering.
+struct SubmittedStageCount;
+
+impl SubmittedStageCount {
+    fn new() -> Self {
+        SUBMITTED_STAGES.fetch_add(1, Ordering::Relaxed);
+        Self
+    }
+}
+
+impl Drop for SubmittedStageCount {
+    fn drop(&mut self) {
+        SUBMITTED_STAGES.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+/// Whether no thread has a frame in flight: every check for one on the calling thread finds none.
+#[inline]
+fn no_stage_is_submitted() -> bool {
+    SUBMITTED_STAGES.load(Ordering::Relaxed) == 0
 }
 
 impl SubmittedStage {
@@ -645,6 +674,7 @@ unsafe fn submit(
             outcome: None,
             on_taken_back,
             recall: None,
+            _count: SubmittedStageCount::new(),
         });
     });
     tsan::release(thread);
@@ -753,6 +783,7 @@ pub(crate) unsafe fn lend_arena(
                 recall();
                 let _ = to_caller.send(Ok(()));
             })),
+            _count: SubmittedStageCount::new(),
         });
     });
 }
@@ -1312,7 +1343,7 @@ fn join_frame_in_flight_for_stage(
     line: u32,
     column: u32,
 ) {
-    if RUNNING_JOIN_WORK.with(Cell::get) != 0 {
+    if no_stage_is_submitted() || RUNNING_JOIN_WORK.with(Cell::get) != 0 {
         return;
     }
     let reached_stage = SUBMITTED.with(|submitted| {
@@ -1549,7 +1580,7 @@ pub unsafe extern "C" fn rust_stage_thread_forced_joins(label: *const u8, label_
 /// operation that entered the engine with no door of its own, and the forced-join log names it by
 /// its entrance.
 pub(crate) fn join_frame_for_style_engine_entrance(engine: *const c_void, entry: &'static str) {
-    if engine.is_null() || RUNNING_JOIN_WORK.with(Cell::get) != 0 {
+    if engine.is_null() || no_stage_is_submitted() || RUNNING_JOIN_WORK.with(Cell::get) != 0 {
         return;
     }
     if STYLE_ENGINE_ENTRANCES_ONLY_WAIT.with(Cell::get) != 0 {
@@ -2055,6 +2086,7 @@ mod tests {
                     outcome: None,
                     on_taken_back: None,
                     recall: None,
+                    _count: SubmittedStageCount::new(),
                 })
             });
         };
@@ -2099,6 +2131,7 @@ mod tests {
                     outcome: None,
                     on_taken_back: None,
                     recall: None,
+                    _count: SubmittedStageCount::new(),
                 })
             });
         };
