@@ -428,10 +428,16 @@ private:
 
     bool read_matches(StyleNodeID, Vector<RuleMatch>&, Optional<MatchPurpose>);
     void apply_transaction(StyleInputScope const&, InputTransaction const&);
-    void submit_recorded_input();
+    // Where the input submit_recorded_input() takes goes: to the engine at once, or to the style pass
+    // submit_style_transaction() submits, which applies it as its first step.
+    enum class RecordedInputGoesTo : u8 {
+        Engine,
+        SubmittedPass,
+    };
+    void submit_recorded_input(RecordedInputGoesTo = RecordedInputGoesTo::Engine);
     [[nodiscard]] bool has_journaled_input() const;
     void publish_inputs_queued_during_pass();
-    void lend_style_transaction_inputs(Function<void(StyleEngineFFI::FfiDocumentStyleComputationInputs const&, void* layout_arena)> const&);
+    void lend_style_transaction_inputs(RecordedInputGoesTo, Function<void(StyleEngineFFI::FfiDocumentStyleComputationInputs const&, void* layout_arena, InputTransaction const* input)> const&);
     PublishedStyleTransaction publish_style_transaction_view(StyleEngineFFI::FfiStyleTransactionView const&, i64 submission_microseconds, i64 bridge_microseconds);
     void record_host_fact_write(StyleEngineFFI::FfiHostFactWrite);
     void mint_style_nodes(Span<StyleNodeID>, Vector<StyleNodeID>& granted, size_t& grant_request, StyleEngineFFI::FfiHostFactKind, u8 value);
@@ -493,6 +499,22 @@ private:
     // What each `TextData` write holds, by the index its `data` names until the writes cross.
     Vector<Utf16String> m_host_fact_text_data;
     Vector<StyleEngineFFI::FfiReplacedContentInput> m_host_fact_replaced_content_inputs;
+    // The recorded input submit_recorded_input() took for the style pass submit_style_transaction() submits, until
+    // the pass takes it.
+    struct RecordedInputForPass {
+        Vector<StyleEngineFFI::FfiTreeDelta> tree_deltas;
+        Vector<StyleEngineFFI::FfiElementArrival> element_arrivals;
+        Vector<u32> arrival_custom_state_atoms;
+        Vector<StyleEngineFFI::FfiLocalFeatureDelta> local_feature_deltas;
+        Vector<StyleEngineFFI::FfiStateDelta> state_deltas;
+        Vector<StyleEngineFFI::FfiElementDeclarationDelta> element_declaration_deltas;
+        Vector<StyleEngineFFI::FfiHostFactWrite> host_fact_writes;
+        Vector<Utf16String> host_fact_text_data;
+        Vector<StyleEngineFFI::FfiReplacedContentInput> host_fact_replaced_content_inputs;
+        Vector<StyleNodeID> style_node_grant;
+        Vector<StyleNodeID> text_style_node_grant;
+    };
+    Optional<RecordedInputForPass> m_recorded_input_for_pass;
     // The identities the engine granted and the host has yet to mint, and how many more the host asks
     // for with the next transaction.
     Vector<StyleNodeID> m_granted_style_nodes;

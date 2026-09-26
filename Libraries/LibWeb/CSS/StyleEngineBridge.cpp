@@ -940,7 +940,18 @@ size_t StyleEngine::recorded_input_count() const
         + (m_host_fact_writes.size() - m_pending_atom_adoption_count);
 }
 
-void StyleEngine::submit_recorded_input()
+// A page that inserts markup records thousands of writes per transaction: the buffers keep their capacity for the next
+// one. What the host recorded since the transaction took them moves into them, where a write's index into its side
+// buffer still finds what it names.
+template<typename Buffer>
+static void reuse_journal_buffer(Buffer& member, Buffer& buffer)
+{
+    buffer.clear_with_capacity();
+    buffer.extend(move(member));
+    member = move(buffer);
+}
+
+void StyleEngine::submit_recorded_input(RecordedInputGoesTo goes_to)
 {
     // A layout flight that ran a style pass installs the pass's batch as it is taken back: whoever submits the recorded
     // input goes on to ask the engine about it, so the flight is taken back first, and the recorded input goes in after
@@ -967,6 +978,11 @@ void StyleEngine::submit_recorded_input()
         return;
     }
 
+    // A selector that came to read attribute value texts has the texts published after the input goes in, before
+    // matching reads them, which a pass that applies the input itself would not wait for.
+    if (goes_to == RecordedInputGoesTo::SubmittedPass && StyleEngineFFI::style_engine_attribute_value_text_requirements_version(m_impl) != m_attribute_value_text_requirements_version)
+        goes_to = RecordedInputGoesTo::Engine;
+
     // What the engine calls back into while it applies these records the next transaction's.
     auto host_fact_writes = move(m_host_fact_writes);
     auto host_fact_text_data = move(m_host_fact_text_data);
@@ -986,6 +1002,24 @@ void StyleEngine::submit_recorded_input()
     Vector<StyleNodeID> text_style_node_grant;
     style_node_grant.resize(exchange(m_style_node_grant_request, 0));
     text_style_node_grant.resize(exchange(m_text_style_node_grant_request, 0));
+
+    if (goes_to == RecordedInputGoesTo::SubmittedPass) {
+        // The pass copies the input as it is submitted, and applies it beside the document thread.
+        m_recorded_input_for_pass = RecordedInputForPass {
+            .tree_deltas = move(m_tree_deltas),
+            .element_arrivals = move(m_element_arrivals),
+            .arrival_custom_state_atoms = move(m_arrival_custom_state_atoms),
+            .local_feature_deltas = move(m_local_feature_deltas),
+            .state_deltas = move(m_state_deltas),
+            .element_declaration_deltas = move(m_element_declaration_deltas),
+            .host_fact_writes = move(host_fact_writes),
+            .host_fact_text_data = move(host_fact_text_data),
+            .host_fact_replaced_content_inputs = move(host_fact_replaced_content_inputs),
+            .style_node_grant = move(style_node_grant),
+            .text_style_node_grant = move(text_style_node_grant),
+        };
+        return;
+    }
 
     InputTransaction transaction {
         .tree_deltas = m_tree_deltas.data(),
@@ -1012,17 +1046,9 @@ void StyleEngine::submit_recorded_input()
     apply_transaction(input, transaction);
     adopt_identity_grant(m_granted_style_nodes, style_node_grant);
     adopt_identity_grant(m_granted_text_style_nodes, text_style_node_grant);
-    // A page that inserts markup records thousands of writes per transaction: the buffers keep their capacity for
-    // the next one. What the engine's callbacks began the next one with moves into them, where a write's index
-    // into its side buffer still finds what it names.
-    auto reuse_buffer = [](auto& member, auto& buffer) {
-        buffer.clear_with_capacity();
-        buffer.extend(move(member));
-        member = move(buffer);
-    };
-    reuse_buffer(m_host_fact_writes, host_fact_writes);
-    reuse_buffer(m_host_fact_text_data, host_fact_text_data);
-    reuse_buffer(m_host_fact_replaced_content_inputs, host_fact_replaced_content_inputs);
+    reuse_journal_buffer(m_host_fact_writes, host_fact_writes);
+    reuse_journal_buffer(m_host_fact_text_data, host_fact_text_data);
+    reuse_journal_buffer(m_host_fact_replaced_content_inputs, host_fact_replaced_content_inputs);
 
     m_tree_deltas.clear_with_capacity();
     m_element_arrivals.clear_with_capacity();
@@ -1137,9 +1163,9 @@ Vector<CollectedStyleSheetResourceContext> collect_style_sheet_resource_contexts
 
 // Readies the document's inputs to a style transaction and lends them to `take`, which hands them to the engine
 // with the document's layout arena.
-void StyleEngine::lend_style_transaction_inputs(Function<void(StyleEngineFFI::FfiDocumentStyleComputationInputs const&, void* layout_arena)> const& take)
+void StyleEngine::lend_style_transaction_inputs(RecordedInputGoesTo recorded_input_goes_to, Function<void(StyleEngineFFI::FfiDocumentStyleComputationInputs const&, void* layout_arena, InputTransaction const* input)> const& take)
 {
-    submit_recorded_input();
+    submit_recorded_input(recorded_input_goes_to);
     publish_font_faces();
     style_engine_reset_custom_functions(m_impl);
     StyleEngineFFI::FfiDocumentStyleComputationInputs computation_inputs {};
@@ -1244,7 +1270,47 @@ void StyleEngine::lend_style_transaction_inputs(Function<void(StyleEngineFFI::Ff
     // committed.
     auto* layout_node_arena = m_style_computer ? m_style_computer->document().layout_node_arena_if_created() : nullptr;
     auto* layout_arena = layout_node_arena ? layout_node_arena->handle() : nullptr;
-    take(computation_inputs, layout_arena);
+    if (!m_recorded_input_for_pass.has_value()) {
+        take(computation_inputs, layout_arena, nullptr);
+        return;
+    }
+
+    auto& input = *m_recorded_input_for_pass;
+    InputTransaction transaction {
+        .tree_deltas = input.tree_deltas.data(),
+        .tree_delta_count = input.tree_deltas.size(),
+        .element_arrivals = input.element_arrivals.data(),
+        .element_arrival_count = input.element_arrivals.size(),
+        .arrival_custom_state_atoms = input.arrival_custom_state_atoms.data(),
+        .arrival_custom_state_atom_count = input.arrival_custom_state_atoms.size(),
+        .local_feature_deltas = input.local_feature_deltas.data(),
+        .local_feature_delta_count = input.local_feature_deltas.size(),
+        .state_deltas = input.state_deltas.data(),
+        .state_delta_count = input.state_deltas.size(),
+        .element_declaration_deltas = input.element_declaration_deltas.data(),
+        .element_declaration_delta_count = input.element_declaration_deltas.size(),
+        .element_style_inputs = nullptr,
+        .element_style_input_count = 0,
+        .host_fact_writes = input.host_fact_writes.data(),
+        .host_fact_write_count = input.host_fact_writes.size(),
+        .element_identity_grant = reinterpret_cast<u32*>(input.style_node_grant.data()),
+        .element_identity_grant_count = input.style_node_grant.size(),
+        .text_identity_grant = reinterpret_cast<u32*>(input.text_style_node_grant.data()),
+        .text_identity_grant_count = input.text_style_node_grant.size(),
+    };
+    take(computation_inputs, layout_arena, &transaction);
+    adopt_identity_grant(m_granted_style_nodes, input.style_node_grant);
+    adopt_identity_grant(m_granted_text_style_nodes, input.text_style_node_grant);
+    reuse_journal_buffer(m_tree_deltas, input.tree_deltas);
+    reuse_journal_buffer(m_element_arrivals, input.element_arrivals);
+    reuse_journal_buffer(m_arrival_custom_state_atoms, input.arrival_custom_state_atoms);
+    reuse_journal_buffer(m_local_feature_deltas, input.local_feature_deltas);
+    reuse_journal_buffer(m_state_deltas, input.state_deltas);
+    reuse_journal_buffer(m_element_declaration_deltas, input.element_declaration_deltas);
+    reuse_journal_buffer(m_host_fact_writes, input.host_fact_writes);
+    reuse_journal_buffer(m_host_fact_text_data, input.host_fact_text_data);
+    reuse_journal_buffer(m_host_fact_replaced_content_inputs, input.host_fact_replaced_content_inputs);
+    m_recorded_input_for_pass.clear();
 }
 
 StyleEngine::PublishedStyleTransaction StyleEngine::take_style_transaction(StyleNodeID root)
@@ -1252,7 +1318,7 @@ StyleEngine::PublishedStyleTransaction StyleEngine::take_style_transaction(Style
     auto submission_started_at = MonotonicTime::now();
     StyleEngineFFI::FfiStyleTransactionView view {};
     MonotonicTime bridge_started_at = submission_started_at;
-    lend_style_transaction_inputs([&](auto const& computation_inputs, void* layout_arena) {
+    lend_style_transaction_inputs(RecordedInputGoesTo::Engine, [&](auto const& computation_inputs, void* layout_arena, auto const*) {
         bridge_started_at = MonotonicTime::now();
         view = StyleEngineFFI::style_engine_take_style_transaction(m_impl, root.value(), computation_inputs, layout_arena);
     });
@@ -1263,8 +1329,8 @@ StyleEngine::PublishedStyleTransaction StyleEngine::take_style_transaction(Style
 void StyleEngine::submit_style_transaction(StyleNodeID root)
 {
     auto submission_started_at = MonotonicTime::now();
-    lend_style_transaction_inputs([&](auto const& computation_inputs, void* layout_arena) {
-        StyleEngineFFI::style_engine_submit_style_transaction(m_impl, root.value(), computation_inputs, layout_arena);
+    lend_style_transaction_inputs(RecordedInputGoesTo::SubmittedPass, [&](auto const& computation_inputs, void* layout_arena, InputTransaction const* input) {
+        StyleEngineFFI::style_engine_submit_style_transaction(m_impl, root.value(), computation_inputs, layout_arena, input);
     });
     m_submitted_style_transaction_microseconds = (MonotonicTime::now() - submission_started_at).to_truncated_microseconds();
     m_submitted_pass_in_flight = true;

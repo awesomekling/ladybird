@@ -1,0 +1,4 @@
+held as armed: true
+input applied on the document thread for the submitted pass: 0
+items: 20, last: 20x10 rgb(0, 0, 0)
+first: rgb(0, 128, 0), text: after true

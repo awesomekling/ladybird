@@ -2104,29 +2104,14 @@ pub unsafe extern "C" fn style_engine_grant_style_nodes(
 pub unsafe extern "C" fn style_engine_apply_transaction(engine: *mut c_void, transaction: &FfiStyleInputTransaction) {
     engine_entrance(engine, "style_engine_apply_transaction");
     let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
+    engine
+        .counters
+        .bump(super::instrumentation::Counter::InputTransactionsAppliedOnDocumentThread);
     // SAFETY: the caller vouches that each pointer covers its stated count for this call.
-    let tree = unsafe { borrow(transaction.tree_deltas, transaction.tree_delta_count) };
-    let arrivals = unsafe { borrow(transaction.element_arrivals, transaction.element_arrival_count) };
-    let arrival_custom_state_atoms = unsafe {
-        borrow(
-            transaction.arrival_custom_state_atoms,
-            transaction.arrival_custom_state_atom_count,
-        )
-    };
-    let features = unsafe { borrow(transaction.local_feature_deltas, transaction.local_feature_delta_count) };
-    let states = unsafe { borrow(transaction.state_deltas, transaction.state_delta_count) };
-    let declarations = unsafe {
-        borrow(
-            transaction.element_declaration_deltas,
-            transaction.element_declaration_delta_count,
-        )
-    };
-    let element_style_inputs =
-        unsafe { borrow(transaction.element_style_inputs, transaction.element_style_input_count) };
+    let rows = unsafe { InputRows::borrow_from(transaction) };
     // The host made these writes before it recorded any of the batch's inputs that came after them,
     // and the batch reads the facts they write.
-    let host_fact_writes = unsafe { borrow(transaction.host_fact_writes, transaction.host_fact_write_count) };
-    unsafe { apply_host_fact_writes(engine, host_fact_writes) };
+    unsafe { apply_host_fact_writes(engine, rows.host_fact_writes) };
     // SAFETY: the caller vouches that each grant pointer covers its stated count for this call.
     let element_identity_grant = unsafe {
         borrow_mut(
@@ -2137,6 +2122,59 @@ pub unsafe extern "C" fn style_engine_apply_transaction(engine: *mut c_void, tra
     let text_identity_grant =
         unsafe { borrow_mut(transaction.text_identity_grant, transaction.text_identity_grant_count) };
     grant_style_nodes(engine, element_identity_grant, text_identity_grant);
+    apply_input_batch(engine, &rows);
+}
+
+/// The rows of a style input transaction.
+struct InputRows<'a> {
+    tree: &'a [FfiTreeDelta],
+    arrivals: &'a [FfiElementArrival],
+    arrival_custom_state_atoms: &'a [u32],
+    features: &'a [FfiLocalFeatureDelta],
+    states: &'a [FfiStateDelta],
+    declarations: &'a [FfiElementDeclarationDelta],
+    element_style_inputs: &'a [FfiElementStyleInput],
+    host_fact_writes: &'a [FfiHostFactWrite],
+}
+
+impl<'a> InputRows<'a> {
+    /// # Safety
+    /// Every array in `transaction` must point at its stated number of valid records for `'a`.
+    unsafe fn borrow_from(transaction: &'a FfiStyleInputTransaction) -> Self {
+        // SAFETY: Guaranteed by the caller.
+        unsafe {
+            Self {
+                tree: borrow(transaction.tree_deltas, transaction.tree_delta_count),
+                arrivals: borrow(transaction.element_arrivals, transaction.element_arrival_count),
+                arrival_custom_state_atoms: borrow(
+                    transaction.arrival_custom_state_atoms,
+                    transaction.arrival_custom_state_atom_count,
+                ),
+                features: borrow(transaction.local_feature_deltas, transaction.local_feature_delta_count),
+                states: borrow(transaction.state_deltas, transaction.state_delta_count),
+                declarations: borrow(
+                    transaction.element_declaration_deltas,
+                    transaction.element_declaration_delta_count,
+                ),
+                element_style_inputs: borrow(transaction.element_style_inputs, transaction.element_style_input_count),
+                host_fact_writes: borrow(transaction.host_fact_writes, transaction.host_fact_write_count),
+            }
+        }
+    }
+}
+
+/// Applies a transaction's batch, once its host fact writes are in.
+fn apply_input_batch(engine: &mut StyleEngine, rows: &InputRows<'_>) {
+    let InputRows {
+        tree,
+        arrivals,
+        arrival_custom_state_atoms,
+        features,
+        states,
+        declarations,
+        element_style_inputs,
+        host_fact_writes: _,
+    } = *rows;
     if tree.is_empty()
         && arrivals.is_empty()
         && features.is_empty()
@@ -2163,6 +2201,115 @@ pub unsafe extern "C" fn style_engine_apply_transaction(engine: *mut c_void, tra
         payload.write_raw_slice(declarations);
         write_recording_element_style_inputs(element_style_inputs, payload);
     });
+}
+
+/// A style input transaction the host hands over with the style pass it submits, which applies it as
+/// its first step, beside the document thread. It owns what its host fact writes hand over (see
+/// [`apply_host_fact_writes`]) until then.
+pub(crate) struct InputForPass {
+    tree: Vec<FfiTreeDelta>,
+    arrivals: Vec<FfiElementArrival>,
+    arrival_custom_state_atoms: Vec<u32>,
+    features: Vec<FfiLocalFeatureDelta>,
+    states: Vec<FfiStateDelta>,
+    declarations: Vec<FfiElementDeclarationDelta>,
+    element_style_inputs: Vec<FfiElementStyleInput>,
+    host_fact_writes: Vec<FfiHostFactWrite>,
+    /// What the `ElementReplacedContentInput` writes point at, which the host lends only for the
+    /// call that hands the transaction over. Each such write names its input here by index.
+    replaced_content_inputs: Vec<FfiReplacedContentInput>,
+}
+
+impl InputForPass {
+    /// # Safety
+    /// As for [`style_engine_apply_transaction`]'s `transaction`. What its host fact writes hand over
+    /// is this transaction's from now on.
+    unsafe fn take_from(transaction: &FfiStyleInputTransaction) -> Self {
+        // SAFETY: Guaranteed by the caller.
+        let rows = unsafe { InputRows::borrow_from(transaction) };
+        let mut replaced_content_inputs = Vec::new();
+        let host_fact_writes = rows
+            .host_fact_writes
+            .iter()
+            .map(|write| {
+                let mut write = *write;
+                if write.kind == FfiHostFactKind::ElementReplacedContentInput {
+                    // SAFETY: The caller vouches that the write points at an input that outlives the call.
+                    replaced_content_inputs.push(unsafe { *(write.data as *const FfiReplacedContentInput) });
+                    write.data = replaced_content_inputs.len() - 1;
+                }
+                write
+            })
+            .collect();
+        Self {
+            tree: rows.tree.to_vec(),
+            arrivals: rows.arrivals.to_vec(),
+            arrival_custom_state_atoms: rows.arrival_custom_state_atoms.to_vec(),
+            features: rows.features.to_vec(),
+            states: rows.states.to_vec(),
+            declarations: rows.declarations.to_vec(),
+            element_style_inputs: rows.element_style_inputs.to_vec(),
+            host_fact_writes,
+            replaced_content_inputs,
+        }
+    }
+
+    /// Applies the transaction as [`style_engine_apply_transaction`] does, but for the grant, which
+    /// answered the host as it handed the transaction over.
+    fn apply(mut self, engine: &mut StyleEngine) {
+        let mut host_fact_writes = std::mem::take(&mut self.host_fact_writes);
+        for write in &mut host_fact_writes {
+            if write.kind == FfiHostFactKind::ElementReplacedContentInput {
+                write.data = std::ptr::from_ref(&self.replaced_content_inputs[write.data]) as usize;
+            }
+        }
+        // SAFETY: The writes hand over what this transaction owns, and each replaced content input
+        // write points at an input it holds.
+        unsafe { apply_host_fact_writes(engine, &host_fact_writes) };
+        apply_input_batch(
+            engine,
+            &InputRows {
+                tree: &self.tree,
+                arrivals: &self.arrivals,
+                arrival_custom_state_atoms: &self.arrival_custom_state_atoms,
+                features: &self.features,
+                states: &self.states,
+                declarations: &self.declarations,
+                element_style_inputs: &self.element_style_inputs,
+                host_fact_writes: &[],
+            },
+        );
+    }
+}
+
+impl Drop for InputForPass {
+    fn drop(&mut self) {
+        // A transaction no pass applied gives up what its writes hand over, as the host does for
+        // writes that never crossed.
+        for write in &self.host_fact_writes {
+            match write.kind {
+                // SAFETY: The write transfers one reference to a live string.
+                FfiHostFactKind::TextData => drop(unsafe { ak::Utf16String::from_raw_owned(write.data) }),
+                FfiHostFactKind::ElementInlineStyleProperties if write.data != 0 => {
+                    // SAFETY: The write transfers one reference to the snapshot.
+                    drop(unsafe {
+                        std::sync::Arc::from_raw(
+                            write.data as *const crate::css::declaration_block::DeclarationBlockData,
+                        )
+                    });
+                }
+                FfiHostFactKind::AdoptAtom => {
+                    super::atoms::release_raw_without_adoption(write.data, StyleAtomID(write.facts));
+                }
+                FfiHostFactKind::AdoptQualifiedAtom => super::atoms::release_qualified_without_adoption(
+                    StyleAtomID(write.node),
+                    StyleAtomID(write.parent),
+                    StyleAtomID(write.facts),
+                ),
+                _ => {}
+            }
+        }
+    }
 }
 
 /// Apply the host's fact writes in the order it made them. Each is recorded as the boundary call
@@ -5149,24 +5296,32 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
 /// its pass to the stage thread instead of waiting for it: the pass runs beside the main thread
 /// and owns the engine until the main thread takes the frame back. It does not own the layout
 /// arena `layout_arena`, which it never reaches.
-/// [`style_engine_finish_submitted_style_transaction`] then returns its answers.
+/// [`style_engine_finish_submitted_style_transaction`] then returns its answers. The host hands
+/// over the input it recorded since the last transaction as `input` (or null for none), which the
+/// pass applies as its first step; the grant `input` asks for answers the host at once.
 ///
 /// # Safety
 /// `engine` must be live and `root` a styled node's raw ID; `layout_arena` must be the document's
-/// live layout arena. Until the frame is taken back, every main-thread path to the engine must
-/// join the frame first, as the engine's entrances and the arena's style engine accesses do.
+/// live layout arena. `input` must be null or a transaction as for
+/// [`style_engine_apply_transaction`], applied to no engine yet. Until the frame is taken back,
+/// every main-thread path to the engine must join the frame first, as the engine's entrances and
+/// the arena's style engine accesses do.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_submit_style_transaction(
     engine: *mut c_void,
     root: u32,
     computation_inputs: FfiDocumentStyleComputationInputs,
     layout_arena: *mut c_void,
+    input: *const FfiStyleInputTransaction,
 ) {
     // SAFETY: Guaranteed by the caller.
-    let pass = unsafe { prepare_style_pass(engine, root, computation_inputs, layout_arena) };
+    let mut pass = unsafe { prepare_style_pass(engine, root, computation_inputs, layout_arena, input) };
     // A layout frame that runs its first round's style in its flight takes the pass along instead.
     let Some(pass) = STYLE_PASS_FOR_FLIGHT.with(|collected| match collected.borrow_mut().as_mut() {
         Some(slot) => {
+            // The frame goes on to read the engine on the document thread before its flight runs the
+            // pass, so the input goes in now.
+            pass.apply_input_on_document_thread();
             *slot = Some(pass);
             None
         }
@@ -5211,12 +5366,27 @@ pub(crate) struct StylePassJob {
     root: StyleNodeID,
     snapshot: super::animations::CommittedTransformReferenceBoxSnapshot,
     timeline_samples: super::animations::AnimationTimelineSamples,
+    /// The input the host recorded since the last transaction, which the pass applies first.
+    input: Option<InputForPass>,
 }
 
 impl StylePassJob {
     /// The engine the pass runs in.
     pub(crate) fn engine_address(&self) -> usize {
         self.engine_address
+    }
+
+    /// Applies the pass's input on the document thread, before the pass is submitted.
+    fn apply_input_on_document_thread(&mut self) {
+        let Some(input) = self.input.take() else {
+            return;
+        };
+        // SAFETY: The pass has not been submitted, so the document thread still owns the engine.
+        let engine = unsafe { &mut *(self.engine_address as *mut StyleEngine) };
+        engine
+            .counters
+            .bump(super::instrumentation::Counter::InputTransactionsAppliedOnDocumentThread);
+        input.apply(engine);
     }
 
     /// Runs the pass, on the stage that owns the engine.
@@ -5226,10 +5396,14 @@ impl StylePassJob {
             root,
             snapshot,
             timeline_samples,
+            input,
             ..
         } = self;
         // SAFETY: The frame in flight owns the engine until the main thread takes it back.
         let engine = unsafe { &mut *engine.into_inner() };
+        if let Some(input) = input {
+            input.apply(engine);
+        }
         // SAFETY: The pass owns the snapshot for as long as it runs.
         let committed_boxes = unsafe { super::animations::CommittedTransformReferenceBoxes::taken_along(&snapshot) };
         let output = run_style_pass(engine, root, committed_boxes, &timeline_samples);
@@ -5248,6 +5422,7 @@ pub(crate) unsafe fn prepare_style_pass(
     root: u32,
     computation_inputs: FfiDocumentStyleComputationInputs,
     layout_arena: *mut c_void,
+    input: *const FfiStyleInputTransaction,
 ) -> StylePassJob {
     engine_entrance(engine, "style_engine_take_style_transaction");
     assert!(
@@ -5261,6 +5436,22 @@ pub(crate) unsafe fn prepare_style_pass(
         engine.host.submitted_style_pass_output.is_none(),
         "one style pass is in flight at a time"
     );
+    // SAFETY: Guaranteed by the caller.
+    let input = unsafe { input.as_ref() }.map(|transaction| {
+        // SAFETY: Guaranteed by the caller.
+        let (elements, texts) = unsafe {
+            (
+                borrow_mut(
+                    transaction.element_identity_grant,
+                    transaction.element_identity_grant_count,
+                ),
+                borrow_mut(transaction.text_identity_grant, transaction.text_identity_grant_count),
+            )
+        };
+        grant_style_nodes(engine, elements, texts);
+        // SAFETY: Guaranteed by the caller.
+        unsafe { InputForPass::take_from(transaction) }
+    });
     engine.computed_group_sets.begin_pass_beside_host_pins();
     // SAFETY: Guaranteed by the caller.
     unsafe { begin_style_transaction(engine, computation_inputs) };
@@ -5280,6 +5471,7 @@ pub(crate) unsafe fn prepare_style_pass(
         root,
         snapshot,
         timeline_samples,
+        input,
     }
 }
 
