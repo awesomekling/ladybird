@@ -2425,6 +2425,29 @@ impl StyleEngineState {
         true
     }
 
+    /// The rows the host styles even below a display:none ancestor, as it applies `rows`: an SVG
+    /// element can serve as a paint server or other resource of rendered content, and an animated
+    /// element's animations read its style, so each keeps its style along with the inheritance
+    /// ancestors it computes that style over.
+    fn required_in_hidden_subtrees(&self, rows: &[StyleNodeID]) -> HashSet<StyleNodeID> {
+        let mut required = HashSet::default();
+        for &row in rows {
+            if self.computed_group_sets.adjustment_facts(row)
+                & (bridge::element_adjustment_fact::IS_SVG_ELEMENT | bridge::element_adjustment_fact::HAS_ANIMATIONS)
+                == 0
+            {
+                continue;
+            }
+            let mut current = Some(row);
+            while let Some(node) = current
+                && required.insert(node)
+            {
+                current = self.tree.inheritance_parent(node);
+            }
+        }
+        required
+    }
+
     #[allow(clippy::too_many_lines)]
     #[allow(clippy::too_many_arguments)]
     fn run_style_pass_round(
@@ -2527,6 +2550,9 @@ impl StyleEngineState {
         // ancestors up in: comparing every ancestor with every parked record made a round over
         // a cohort of parked rows quadratic.
         let mut parked_subtree_roots = HashSet::<StyleNodeID>::default();
+        // The rows the host styles below a display:none ancestor all the same, found when a row
+        // first asks.
+        let mut required_in_hidden_subtrees = None::<HashSet<StyleNodeID>>;
         while next_published_index < cut_at.unwrap_or(pass.published_nodes.len()) {
             let settled_rows_before_round = settled_row_count(style_deltas, record_deltas.as_deref());
             let mut resumed_records = std::mem::take(&mut waiting_records).into_iter();
@@ -2616,10 +2642,13 @@ impl StyleEngineState {
                     .computed_group_sets
                     .assigned_style_record(node)
                     .map_or(0, |style_record| style_record.raw());
-                let hidden_svg_resource_style = self.retained.computed_group_sets.adjustment_facts(node)
-                    & bridge::element_adjustment_fact::IS_SVG_ELEMENT
-                    != 0;
-                let skip_hidden = old_style_record == 0 && !hidden_svg_resource_style && {
+                let required_in_hidden_subtree = old_style_record == 0
+                    && required_in_hidden_subtrees
+                        .get_or_insert_with(|| {
+                            self.required_in_hidden_subtrees(&pass.published_nodes[next_published_index..])
+                        })
+                        .contains(&node);
+                let skip_hidden = old_style_record == 0 && !required_in_hidden_subtree && {
                     let mut ancestor = self.tree.inheritance_parent(node);
                     let mut hidden = false;
                     while let Some(current) = ancestor {
