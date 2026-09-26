@@ -40,6 +40,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 /// One published generation of a document's paintable rows and of the columns read beside them.
+#[derive(Clone)]
 pub(crate) struct PublishedFrame {
     pub(super) rows: ColumnSnapshot<PaintableData, PAINTABLE_SLOTS_PER_CHUNK>,
     pub(super) fragment_links: ColumnSnapshot<CommittedFragmentLinkSlot, PAINTABLE_SLOTS_PER_CHUNK>,
@@ -57,6 +58,52 @@ const _: () = {
     const fn assert_published<T: Send + Sync + 'static>() {}
     assert_published::<PublishedFrame>();
 };
+
+impl PublishedFrame {
+    pub(crate) fn paintable_data(&self, id: NodeSlotId) -> &PaintableData {
+        assert!(!id.is_invalid(), "invalid paintable arena slot ID");
+        let data = self
+            .rows
+            .get(id.slot_index() as usize)
+            .expect("invalid paintable arena slot ID");
+        assert_eq!(
+            data.slot_generation,
+            id.generation(),
+            "paintable arena read a stale or unused slot"
+        );
+        data
+    }
+
+    pub(crate) fn paintable_row_is_populated(&self, id: NodeSlotId) -> bool {
+        if id.is_invalid() {
+            return false;
+        }
+        let Some(data) = self.rows.get(id.slot_index() as usize) else {
+            return false;
+        };
+        data.slot_generation != 0 && data.slot_generation == id.generation()
+    }
+
+    pub(crate) fn with_committed_fragment_link<R>(
+        &self,
+        id: NodeSlotId,
+        read: impl FnOnce(Option<&FragmentLink>) -> R,
+    ) -> R {
+        debug_assert!(self.paintable_row_is_populated(id));
+        read(
+            self.fragment_links
+                .get(id.slot_index() as usize)
+                .and_then(CommittedFragmentLinkSlot::link),
+        )
+    }
+
+    pub(crate) fn committed_side_data(&self, id: NodeSlotId) -> &CommittedSideData {
+        debug_assert!(self.paintable_row_is_populated(id));
+        self.side_data
+            .get(id.slot_index() as usize)
+            .expect("a populated row has published side data")
+    }
+}
 
 /// The reads the display list recording makes of a document. The live arena answers them from the
 /// columns layout writes; a [`PublishedFrame`] answers them from what the document published.
@@ -411,11 +458,12 @@ impl PaintRead for LayoutNodeArena {
 /// does not dereference to the arena, so the recording names no read the trait does not.
 pub(crate) struct PaintSource<'a> {
     arena: &'a LayoutNodeArena,
+    frame: &'a PublishedFrame,
 }
 
 impl<'a> PaintSource<'a> {
-    pub(crate) fn new(arena: &'a LayoutNodeArena) -> Self {
-        Self { arena }
+    pub(crate) fn new(arena: &'a LayoutNodeArena, frame: &'a PublishedFrame) -> Self {
+        Self { arena, frame }
     }
 
     fn arena(&self) -> &'a LayoutNodeArena {
@@ -425,19 +473,19 @@ impl<'a> PaintSource<'a> {
 
 impl PaintRead for PaintSource<'_> {
     fn paintable_data(&self, id: NodeSlotId) -> &PaintableData {
-        self.arena.live_paintable_data(id)
+        self.frame.paintable_data(id)
     }
 
     fn paintable_row_is_populated(&self, id: NodeSlotId) -> bool {
-        self.arena.paintable_row_is_populated(id)
+        self.frame.paintable_row_is_populated(id)
     }
 
     fn with_committed_fragment_link<R>(&self, id: NodeSlotId, read: impl FnOnce(Option<&FragmentLink>) -> R) -> R {
-        self.arena.with_committed_fragment_link(id, read)
+        self.frame.with_committed_fragment_link(id, read)
     }
 
     fn committed_side_data(&self, id: NodeSlotId) -> CommittedSideDataRef<'_> {
-        CommittedSideDataRef::Live(self.arena.live_committed_side_data(id))
+        CommittedSideDataRef::Published(self.frame.committed_side_data(id))
     }
 
     fn memoized_absolute_rect(&self, id: NodeSlotId) -> Option<CssPixelRect> {

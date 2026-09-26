@@ -1300,6 +1300,7 @@ fn record_display_list_stage(stage: RecordingStageInput<'_>) -> RecordingStageOu
         mut inputs,
         cancel,
     } = stage;
+    let frame = arena.freeze_paint_frame();
     let arena: &LayoutNodeArena = arena;
     let mut scratch = arena.recording_scratch().take_for_run();
     let scratch = &mut *scratch;
@@ -1343,6 +1344,7 @@ fn record_display_list_stage(stage: RecordingStageInput<'_>) -> RecordingStageOu
     crate::stage_thread::hold_here(crate::stage_thread::FfiStageHoldPoint::MidRecording);
     let recording = crate::painting::record::traversal::record_display_list(
         arena,
+        &frame,
         &paint_state,
         scratch,
         tree,
@@ -1366,6 +1368,7 @@ fn record_display_list_stage(stage: RecordingStageInput<'_>) -> RecordingStageOu
             let mut tree_for_recording_from_scratch = crate::painting::record::order_tree::PaintOrderTree::default();
             crate::painting::record::traversal::record_display_list(
                 arena,
+                &frame,
                 &paint_state,
                 scratch,
                 &mut tree_for_recording_from_scratch,
