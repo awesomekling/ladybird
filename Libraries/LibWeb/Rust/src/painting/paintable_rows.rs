@@ -13,7 +13,7 @@ use crate::painting::hit_test::HitTestList;
 use crate::painting::image_map_areas::{ImageMapAreaColumn, ImageMapAreas};
 use crate::painting::node_painting;
 use crate::painting::paintable_data::*;
-use crate::painting::published_frame::{PaintRead, PublishedFrame, read_live_arena};
+use crate::painting::published_frame::{PaintRead, PublishedFrame, PublishedRows, read_live_arena};
 use crate::painting::record::damage::{DamageSet, PaintDamage, RowPaintState};
 use crate::painting::visual_context::dirty::{
     RemovedBoxBlocks, VisualContextBoxDirtyKind, VisualContextGlobalRebuildReason,
@@ -460,7 +460,7 @@ pub(crate) struct PaintableRowStore {
     /// nothing reads it while they run and releasing it lets them write chunks in place, and
     /// publish again when they are done. A row a main-side writer changes is published when the
     /// main side next reads the rows.
-    published: Option<std::sync::Arc<PublishedFrame>>,
+    published: Option<PublishedRows>,
     side_data: RefCell<Vec<PaintableSideData>>,
     committed_side_data: RefCell<CowColumn<CommittedSideData, PAINTABLE_SLOTS_PER_CHUNK>>,
     row_reset_versions: Vec<u64>,
@@ -715,7 +715,7 @@ impl Deref for CommittedPaintableRows<'_> {
 }
 
 impl CommittedPaintableRows<'_> {
-    fn published(&self) -> &PublishedFrame {
+    fn published(&self) -> &PublishedRows {
         self.arena
             .paintable_rows
             .published
@@ -1579,7 +1579,7 @@ impl LayoutNodeArena {
         let side_data = store.committed_side_data.get_mut();
         let unique_node_ids = store.unique_node_ids.ids.get_mut();
         let Some(published) = &mut store.published else {
-            store.published = Some(std::sync::Arc::new(PublishedFrame {
+            store.published = Some(PublishedRows {
                 rows: store.rows.publish(),
                 fragment_links: fragment_links.publish(),
                 side_data: side_data.publish(),
@@ -1588,10 +1588,9 @@ impl LayoutNodeArena {
                 image_map_areas: store.image_map_areas.snapshot(),
                 hit_test_list,
                 visual_context_tree,
-            }));
+            });
             return;
         };
-        let published = std::sync::Arc::make_mut(published);
         if store.rows.written_since_publish() {
             published.rows = store.rows.publish();
         }
@@ -1612,12 +1611,14 @@ impl LayoutNodeArena {
 
     /// Publishes the rows as they are now, for a recording to read while the arena goes on
     /// changing.
-    pub(crate) fn freeze_paint_frame(&mut self) -> std::sync::Arc<PublishedFrame> {
+    pub(crate) fn freeze_paint_frame(&mut self) -> PublishedFrame {
         self.publish_paintable_rows();
-        self.paintable_rows
+        let rows = self
+            .paintable_rows
             .published
             .clone()
-            .expect("the rows were just published")
+            .expect("the rows were just published");
+        PublishedFrame::new(rows, self.publish_paint_tree())
     }
 
     /// Builds the structures a hit-test query derives from the list before the rows are
@@ -1625,7 +1626,7 @@ impl LayoutNodeArena {
     /// lets go of it first, so building does not copy it.
     pub(crate) fn prepare_hit_test_list_for_query(&mut self, needs_spatial_indexes: bool, needs_caret_lines: bool) {
         if let Some(published) = &mut self.paintable_rows.published {
-            std::sync::Arc::make_mut(published).hit_test_list = None;
+            published.hit_test_list = None;
         }
         let mut list = std::mem::take(self.hit_test_list.get_mut());
         if let Some(list) = list.as_mut()

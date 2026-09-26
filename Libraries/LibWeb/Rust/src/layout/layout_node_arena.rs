@@ -32,7 +32,7 @@ use crate::layout::CssPixels;
 use crate::layout::FfiReplacedContentFacts;
 use crate::layout::node_data::{
     AncestorFact, DomPaintFact, FfiNodeConstructionFacts, FfiNodeLink, FfiStylePayloads, MAX_NODE_SLOT_COUNT, NodeData,
-    NodeFlag, NodeKind, NodeSlotId, ShellId, StylePayloadsRef,
+    NodeFlag, NodeKind, NodeSlotId, PaintNode, ShellId, StylePayloadsRef,
 };
 use crate::layout::used_values::FfiCssPixelPoint;
 use std::cell::Cell;
@@ -929,6 +929,8 @@ pub(crate) struct LayoutNodeArena {
     chunks: Vec<Box<Chunk>>,
     chunks_by_address: Vec<ChunkAddress>,
     slot_metadata: Vec<SlotMetadata>,
+    /// What the paint side reads of every node, as the arena last published it for a recording.
+    paint_tree: crate::cow_column::CowColumn<PaintNode, SLOTS_PER_CHUNK>,
     style_records: Vec<Cell<u64>>,
     style_records_pinned_by_arena: Vec<Cell<bool>>,
     /// The style record a row's host has pinned for readers that outlive the row's place in the
@@ -1165,6 +1167,7 @@ impl LayoutNodeArena {
             chunks: Vec::new(),
             chunks_by_address: Vec::new(),
             slot_metadata: Vec::new(),
+            paint_tree: Default::default(),
             style_records: Vec::new(),
             style_records_pinned_by_arena: Vec::new(),
             style_records_pinned_by_host: Vec::new(),
@@ -1591,6 +1594,30 @@ impl LayoutNodeArena {
             self.free_list.push(index);
         }
         paintable_row_reset
+    }
+
+    /// Publishes what the paint side reads of every node. A chunk whose nodes are unchanged since
+    /// the last publication is shared with it, and a changed one is copied only while an earlier
+    /// publication still holds it.
+    pub(crate) fn publish_paint_tree(&mut self) -> crate::cow_column::ColumnSnapshot<PaintNode, SLOTS_PER_CHUNK> {
+        self.paint_tree.grow_to(self.slot_metadata.len());
+        for (index, metadata) in self.slot_metadata.iter().enumerate() {
+            let node = if metadata.occupied {
+                PaintNode::of(
+                    &self.chunks[index / SLOTS_PER_CHUNK].slots[index % SLOTS_PER_CHUNK],
+                    metadata.generation,
+                )
+            } else {
+                PaintNode::default()
+            };
+            if self.paint_tree.get(index) != Some(&node) {
+                *self
+                    .paint_tree
+                    .get_mut(index)
+                    .expect("the column grew to hold every slot") = node;
+            }
+        }
+        self.paint_tree.publish()
     }
 
     pub(crate) fn data(&self, id: NodeSlotId) -> &NodeData {

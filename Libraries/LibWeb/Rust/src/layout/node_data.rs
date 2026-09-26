@@ -243,6 +243,56 @@ pub(crate) struct NodeData {
     pub shell: Cell<Option<ShellId>>,
 }
 
+/// What the paint side reads of a layout node, copied out of its [`NodeData`] when the arena
+/// publishes a frame. A slot that holds no node publishes the default, whose generation is 0.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) struct PaintNode {
+    pub(crate) generation: u8,
+    pub(crate) kind: NodeKind,
+    pub(crate) generated_for: u8,
+    pub(crate) dom_paint_facts: u8,
+    pub(crate) compositor_animation_frame_kinds: u8,
+    pub(crate) flags: u32,
+    pub(crate) parent: NodeSlotId,
+    pub(crate) first_child: NodeSlotId,
+    pub(crate) next_sibling: NodeSlotId,
+    pub(crate) style: StylePayloadsRef,
+}
+
+impl Default for PaintNode {
+    fn default() -> Self {
+        Self {
+            generation: 0,
+            kind: NodeKind::Unset,
+            generated_for: 0,
+            dom_paint_facts: 0,
+            compositor_animation_frame_kinds: 0,
+            flags: 0,
+            parent: NodeSlotId::INVALID,
+            first_child: NodeSlotId::INVALID,
+            next_sibling: NodeSlotId::INVALID,
+            style: StylePayloadsRef::null(),
+        }
+    }
+}
+
+impl PaintNode {
+    pub(crate) fn of(data: &NodeData, generation: u8) -> Self {
+        Self {
+            generation,
+            kind: data.kind.get(),
+            generated_for: data.generated_for.get(),
+            dom_paint_facts: data.dom_paint_facts.get(),
+            compositor_animation_frame_kinds: data.compositor_animation_frame_kinds.get(),
+            flags: data.flags.get(),
+            parent: data.parent.get(),
+            first_child: data.first_child.get(),
+            next_sibling: data.next_sibling.get(),
+            style: data.style.get(),
+        }
+    }
+}
+
 impl Default for NodeData {
     fn default() -> Self {
         Self {
