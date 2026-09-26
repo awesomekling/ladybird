@@ -64,6 +64,12 @@ public:
     // have moved by the time the stage looks.
     void publish_animation_timing_rows();
 
+    struct AnimationTimingRowCounters {
+        u64 lists_published { 0 };
+        u64 lists_unchanged { 0 };
+    };
+    static AnimationTimingRowCounters animation_timing_row_counters();
+
     bool has_css_defined_animations() const;
     bool has_css_animations_or_transitions() const;
     Vector<GC::Ref<CSS::CSSAnimation>> const* css_defined_animations(Optional<CSS::PseudoElement>);

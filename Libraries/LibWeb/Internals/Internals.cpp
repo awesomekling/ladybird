@@ -29,6 +29,7 @@
 #include <LibURL/Parser.h>
 #include <LibWeb/ARIA/AriaData.h>
 #include <LibWeb/ARIA/StateAndProperties.h>
+#include <LibWeb/Animations/Animatable.h>
 #include <LibWeb/Animations/DocumentTimeline.h>
 #include <LibWeb/Bindings/Internals.h>
 #include <LibWeb/Bindings/Intrinsics.h>
@@ -1612,6 +1613,16 @@ GC::Ref<JS::Object> Internals::get_render_clock_counters() const
     define("lendFramesTakenIn"sv, frame_waits.frames_taken_in);
     define("lendFrameWaits"sv, frame_waits.waits);
     define("lendFrameNanoseconds"sv, frame_waits.nanoseconds);
+    return object;
+}
+
+GC::Ref<JS::Object> Internals::get_animation_timing_row_counters() const
+{
+    auto& realm = HTML::relevant_realm(window());
+    auto counters = Animations::Animatable::animation_timing_row_counters();
+    auto object = JS::Object::create(realm, nullptr);
+    object->define_direct_property("listsPublished"_utf16_fly_string, JS::Value(static_cast<double>(counters.lists_published)), JS::default_attributes);
+    object->define_direct_property("listsUnchanged"_utf16_fly_string, JS::Value(static_cast<double>(counters.lists_unchanged)), JS::default_attributes);
     return object;
 }
 
