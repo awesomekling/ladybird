@@ -3288,6 +3288,30 @@ pub(crate) unsafe fn rebuild_font_group_from_table(
     (!payload.is_null()).then_some(payload)
 }
 
+/// The resolved font a font group payload was built from.
+///
+/// # Safety
+/// `payload` must be a valid font group payload.
+pub(crate) unsafe fn font_group_build_inputs_of(payload: *const c_void) -> FfiFontGroupBuildInputs {
+    let font = unsafe { &*payload.cast::<crate::css::computed_value_types::FontValues>() };
+    FfiFontGroupBuildInputs {
+        font_size_raw: font.font_size.raw_value(),
+        line_height_used_raw: font.line_height_used.raw_value(),
+        font_variant_emoji: font.font_variant_emoji,
+        font_ascent: font.font_ascent,
+        font_descent: font.font_descent,
+        font_x_height: font.font_x_height,
+        font_zero_advance: font.font_zero_advance,
+        first_available_font: font.first_available_font,
+        font_cascade_list: font.font_cascade_list.as_raw(),
+        font_weight: font.font_weight,
+        font_width: font.font_width,
+        math_shift: font.math_shift,
+        math_style: font.math_style,
+        math_depth: font.math_depth,
+    }
+}
+
 /// The element's own resolved color as the group builders consume it: the table's computed
 /// `color`, resolved against the initial color the way the C++ build seeds its context.
 pub(crate) fn own_color_from_table(

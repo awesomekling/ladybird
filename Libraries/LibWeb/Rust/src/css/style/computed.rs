@@ -64,6 +64,8 @@ pub(super) const ENGINE_INHERITED_GROUP_COUNT: usize = 7;
 
 /// Whether a record with this table may take an inherited-group swap: every property inherits
 /// the way its definition says, no marker is generated for it, and no transition runs on it.
+const ALL_GROUPS: u32 = (1 << crate::css::table_group_builder::group_index::COUNT) - 1;
+
 pub(super) fn table_inherited_group_swap_eligible(table: &ComputedLonghandTable) -> bool {
     table.property_inheritance_is_standard()
         && !table.display_is_list_item()
@@ -273,6 +275,15 @@ impl GroupAssemblyInputs {
             font.font_width.to_bits(),
         ])
     }
+}
+
+/// The groups a published longhand table was assembled to against one set of inputs, as far as
+/// any assembly built them.
+#[derive(Clone, Copy)]
+struct AssembledGroups {
+    groups: [ComputedGroupID; crate::css::table_group_builder::group_index::COUNT],
+    /// The groups built so far, one bit per group index.
+    built: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -814,7 +825,7 @@ pub struct ComputedGroupSets {
     /// The group set each published longhand table assembled to, by the inputs it assembled
     /// against: a record whose table is already published takes its payloads from here rather
     /// than building and interning a second copy of each.
-    table_assemblies: HashMap<(ComputedLonghandTableID, GroupAssemblyInputs), ComputedGroupSetID>,
+    table_assemblies: HashMap<(ComputedLonghandTableID, GroupAssemblyInputs), AssembledGroups>,
     /// The table the last record of each cascade state published: the table an element of the
     /// same state most likely computes to, asked before any table is hashed.
     table_candidates: HashMap<(u64, CascadeStateID), ComputedLonghandTableID>,
@@ -1234,18 +1245,61 @@ impl ComputedGroupSets {
         if self.content_identities_suspended || replaying_style_groups() {
             return None;
         }
-        let candidates = [
-            cascade_state.and_then(|state| self.table_candidates.get(&state).copied()),
+        let found = self.find_assembled_table(
+            table,
+            cascade_state,
             target.and_then(|target| self.target_longhand_table(target)),
-        ];
-        let found = candidates.into_iter().flatten().find(|&candidate| {
+        )?;
+        self.known_longhand_table = Some((std::ptr::from_ref(table).addr(), Ok(found)));
+        let assembled = self.table_assemblies.get(&(found, inputs))?;
+        (assembled.built == ALL_GROUPS).then(|| {
+            assembled
+                .groups
+                .iter()
+                .map(|&identity| self.groups[identity].payload)
+                .collect()
+        })
+    }
+
+    /// Remembers that `table` assembled `groups` in `built` to `identities` against `inputs`.
+    fn remember_assembled_groups(
+        &mut self,
+        table: ComputedLonghandTableID,
+        inputs: GroupAssemblyInputs,
+        identities: &[ComputedGroupID],
+        built: u32,
+    ) {
+        let assembled = self.table_assemblies.entry((table, inputs)).or_insert(AssembledGroups {
+            groups: [ComputedGroupID(0); crate::css::table_group_builder::group_index::COUNT],
+            built: 0,
+        });
+        for (group, &identity) in identities.iter().enumerate() {
+            if built & (1 << group) != 0 {
+                assembled.groups[group] = identity;
+            }
+        }
+        assembled.built |= built;
+    }
+
+    /// The published table equal to `table` among the one its cascade state last published and
+    /// `candidate`, asked without hashing `table`.
+    fn find_assembled_table(
+        &self,
+        table: &ComputedLonghandTable,
+        cascade_state: Option<(u64, CascadeStateID)>,
+        candidate: Option<ComputedLonghandTableID>,
+    ) -> Option<ComputedLonghandTableID> {
+        [
+            cascade_state.and_then(|state| self.table_candidates.get(&state).copied()),
+            candidate,
+        ]
+        .into_iter()
+        .flatten()
+        .find(|&candidate| {
             self.computed_longhand_tables[candidate]
                 .table()
                 .publication_equals(table)
-        })?;
-        self.known_longhand_table = Some((std::ptr::from_ref(table).addr(), Ok(found)));
-        let set = *self.table_assemblies.get(&(found, inputs))?;
-        Some(self.sets[set].payloads.to_vec())
+        })
     }
 
     /// Remembers the table `record` just published for its cascade state and, when its payloads
@@ -1274,7 +1328,8 @@ impl ComputedGroupSets {
             self.table_candidates.insert(cascade_state, table);
         }
         if assembled {
-            self.table_assemblies.insert((table, inputs), groups);
+            let identities = self.sets[groups].groups.clone();
+            self.remember_assembled_groups(table, inputs, &identities, ALL_GROUPS);
         }
     }
 
@@ -1561,6 +1616,7 @@ impl ComputedGroupSets {
         parent_in_display_none_subtree: bool,
         environment: Option<u64>,
         counter_style_environment_identity: u64,
+        cascade_state: Option<(u64, CascadeStateID)>,
     ) -> EngineComputedAssembly {
         let index = node.element_index().expect("an engine-computed record is an element's") as usize;
         let base_style_record = FinalStyleRecordID(self.base_style_record_of(base_style_record.raw()));
@@ -1627,11 +1683,46 @@ impl ComputedGroupSets {
         table.set_in_display_none_subtree(parent_in_display_none_subtree || display_is_none);
         table.finish_delta();
 
+        // A group rebuilt from a table the catalog already holds is the one an earlier assembly of
+        // that table built against the same inputs, so it is taken from there. Only the groups
+        // rebuilt are remembered: the ones this keeps are the old record's, which the table need
+        // not determine. A font group not rebuilt is the old record's too, built from the font it
+        // holds.
+        let font_group = crate::css::computed_value_types::STYLE_GROUP_INDEX_FONT;
+        let assembly_inputs = match font.filter(|_| groups_to_rebuild & (1 << font_group) != 0) {
+            Some(font) => GroupAssemblyInputs::new(length, font),
+            None => GroupAssemblyInputs::new(length, &unsafe {
+                crate::css::table_group_builder::font_group_build_inputs_of(
+                    self.sets[old_record.groups].payloads[font_group].as_ptr(),
+                )
+            }),
+        };
+        let remembers_assemblies = !self.content_identities_suspended && !replaying_style_groups();
+        let found_table = remembers_assemblies
+            .then(|| self.find_assembled_table(&table, cascade_state, old_table))
+            .flatten();
+        let assembled = found_table
+            .and_then(|table| self.table_assemblies.get(&(table, assembly_inputs)))
+            .filter(|assembled| assembled.built & groups_to_rebuild == groups_to_rebuild)
+            .map(|assembled| assembled.groups);
+
         let mut groups: SmallVec<[_; crate::css::table_group_builder::group_index::COUNT]> =
             self.group_identities(old_record.groups).collect();
         let mut canonicalized_groups = 0_u32;
+        if let Some(assembled) = assembled {
+            for (group, group_identity) in groups.iter_mut().enumerate() {
+                if groups_to_rebuild & (1 << group) == 0 {
+                    continue;
+                }
+                let identity = assembled[group];
+                if identity == *group_identity {
+                    canonicalized_groups += 1;
+                }
+                *group_identity = identity;
+            }
+        }
         for (group, group_identity) in groups.iter_mut().enumerate() {
-            if groups_to_rebuild & (1 << group) == 0 {
+            if assembled.is_some() || groups_to_rebuild & (1 << group) == 0 {
                 continue;
             }
             let old_payload = self.groups[*group_identity].payload;
@@ -1684,7 +1775,18 @@ impl ComputedGroupSets {
             })
             .0
         };
-        let longhand_table = self.intern_owned_longhand_table(table, old_table, None);
+        let longhand_table = match found_table {
+            Some(found) => found,
+            None => self.intern_owned_longhand_table(table, old_table, None),
+        };
+        if remembers_assemblies {
+            if let Some(cascade_state) = cascade_state {
+                self.table_candidates.insert(cascade_state, longhand_table);
+            }
+            if assembled.is_none() {
+                self.remember_assembled_groups(longhand_table, assembly_inputs, &groups, groups_to_rebuild);
+            }
+        }
         // The environment moves with the record when the node's custom declarations resolved to
         // another; a record keeps its environment otherwise.
         let custom_properties = match environment {
@@ -3561,8 +3663,14 @@ impl ComputedGroupSets {
             return retention;
         }
         self.table_candidates.clear();
-        self.table_assemblies
-            .retain(|(table, _), set| reachable.longhand_tables[table.index()] && reachable.sets[set.index()]);
+        self.table_assemblies.retain(|(table, _), assembled| {
+            assembled.built = (0..assembled.groups.len())
+                .filter(|&group| {
+                    assembled.built & (1 << group) != 0 && reachable.groups[assembled.groups[group].index()]
+                })
+                .fold(0, |built, group| built | (1 << group));
+            reachable.longhand_tables[table.index()] && assembled.built != 0
+        });
 
         let mut unreachable_style_records = self
             .style_records

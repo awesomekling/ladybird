@@ -1166,6 +1166,7 @@ impl RetainedState {
             parent_in_display_none_subtree,
             environment,
             counter_environment,
+            Some((generation, state)),
         );
         self.settle_computed_memory();
         counters.add(
@@ -1886,6 +1887,7 @@ impl RetainedState {
                     parent_in_display_none_subtree,
                     Some(environment),
                     counter_environment,
+                    Some(cascade_state),
                 );
                 self.computed_group_sets
                     .set_pending_cascade_state(target, cascade_state);
