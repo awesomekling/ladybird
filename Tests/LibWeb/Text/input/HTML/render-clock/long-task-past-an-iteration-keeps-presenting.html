@@ -27,7 +27,12 @@
         const enabled = internals.clockFramesEnabled();
         let iterations = 0;
         box.addEventListener("animationiteration", () => ++iterations);
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await box.getAnimations()[0].ready;
+        // Not a timing test: the task begins once the main thread lends the arena to the ticks beside it.
+        const waitStart = performance.now();
+        do
+            await new Promise(resolve => setTimeout(resolve, 10));
+        while (enabled && !internals.clockLendActive() && performance.now() - waitStart < 10000);
 
         // Not a timing test: past two iterations of the animation, the task runs until the render side has presented
         // enough more frames, however slow the machine.
