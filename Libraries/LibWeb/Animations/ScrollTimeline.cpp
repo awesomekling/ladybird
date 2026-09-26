@@ -113,6 +113,7 @@ static ComputedScrollAxis computed_scroll_axis(ScrollAxis axis, CSS::WritingMode
 struct ScrollOffsetData {
     double scroll_offset;
     double max_scroll_offset;
+    bool is_vertical;
 };
 static Optional<ScrollOffsetData> compute_scroll_offset_data(Variant<GC::Ptr<DOM::Element const>, GC::Ptr<DOM::Document>> propagated_source, ScrollAxis axis)
 {
@@ -142,6 +143,7 @@ static Optional<ScrollOffsetData> compute_scroll_offset_data(Variant<GC::Ptr<DOM
         .max_scroll_offset = computed_axis.is_vertical
             ? scrollable_overflow_rect.height().to_double() - Painting::content_height(*layout_node).to_double()
             : scrollable_overflow_rect.width().to_double() - Painting::content_width(*layout_node).to_double(),
+        .is_vertical = computed_axis.is_vertical,
     };
 }
 
@@ -198,6 +200,22 @@ void ScrollTimeline::update_current_time(double)
     auto progress = scroll_offset_data->scroll_offset / scroll_offset_data->max_scroll_offset;
 
     set_current_time(TimeValue { TimeValue::Type::Percentage, progress * 100 });
+}
+
+Optional<ScrollTimeline::ScrollProgressInputs> ScrollTimeline::scroll_progress_inputs() const
+{
+    auto propagated_source = get_propagated_source();
+    auto scroll_offset_data = compute_scroll_offset_data(propagated_source, m_axis);
+    if (!scroll_offset_data.has_value() || scroll_offset_data->max_scroll_offset == 0)
+        return {};
+    return ScrollProgressInputs {
+        .scroller = propagated_source.visit(
+            [](GC::Ptr<DOM::Element const> const& element) { return element; },
+            [](GC::Ptr<DOM::Document> const&) -> GC::Ptr<DOM::Element const> { return nullptr; }),
+        .is_vertical = scroll_offset_data->is_vertical,
+        .scroll_offset = scroll_offset_data->scroll_offset,
+        .max_scroll_offset = scroll_offset_data->max_scroll_offset,
+    };
 }
 
 ScrollTimeline::ScrollTimeline(DOM::Document& document, Source source, ScrollAxis axis)

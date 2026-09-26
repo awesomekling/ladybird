@@ -57,6 +57,59 @@ struct ClockTarget {
     style_record: u64,
 }
 
+/// A scroll offset a display tick carries: where the compositor had scrolled a scroll node to.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FfiClockTickScrollOffset {
+    /// The scroll node's stable identity: the unique id of its document (for the viewport) or of its
+    /// element, its kind and its pseudo-element.
+    pub node_id: i64,
+    pub kind: u8,
+    pub pseudo_element_type: u8,
+    /// The scroll offset, in CSS pixels.
+    pub x: f64,
+    pub y: f64,
+}
+
+/// A scroll progress timeline whose animations a lease ticks, as the host granted it.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FfiClockLeaseScrollTimeline {
+    /// The style engine identity of the timeline.
+    pub identity: u32,
+    /// The stable identity of its scroller's scroll node, as in [`FfiClockTickScrollOffset`].
+    pub node_id: i64,
+    pub kind: u8,
+    pub pseudo_element_type: u8,
+    /// Whether the timeline follows the vertical scroll offset.
+    pub vertical: bool,
+    /// The scroll offset at 100% progress, in CSS pixels: the scroller's as the host last laid it out.
+    pub max_scroll_offset: f64,
+    /// The progress (in percent) from which, and up to which, no effect of the lease on the timeline
+    /// changes its phase or its iteration, which the host has events for.
+    pub progress_start: f64,
+    pub progress_end: f64,
+    /// The progress (in percent) at the scroll offset the host holds.
+    pub progress: f64,
+}
+
+impl FfiClockLeaseScrollTimeline {
+    /// The progress of the timeline at the scroll offset among `offsets` its scroller has, in percent.
+    fn progress_at(&self, offsets: &[FfiClockTickScrollOffset]) -> Option<f64> {
+        let offset = offsets.iter().find(|offset| {
+            offset.node_id == self.node_id
+                && offset.kind == self.kind
+                && offset.pseudo_element_type == self.pseudo_element_type
+        })?;
+        let position = if self.vertical { offset.y } else { offset.x };
+        Some(position / self.max_scroll_offset * 100.0)
+    }
+
+    fn holds(&self, progress: f64) -> bool {
+        progress >= self.progress_start && progress < self.progress_end
+    }
+}
+
 /// What one tick did for one target, for the host to adopt.
 pub(crate) struct ClockTickEntry {
     pub(crate) style_node: StyleNodeID,
@@ -115,6 +168,9 @@ pub struct ClockLease {
     /// its rendering update decides what becomes of the lease.
     paused: AtomicBool,
     targets: Mutex<Vec<ClockTarget>>,
+    /// The scroll progress timelines whose animations the lease ticks, with the progress (percent) of
+    /// the last tick that sampled each, or NaN.
+    scroll_timelines: Mutex<Vec<(FfiClockLeaseScrollTimeline, f64)>>,
     entries: Mutex<Vec<ClockTickEntry>>,
     /// The layout frame the render clock's ticks lay out in, which the main thread takes in when
     /// it wakes.
@@ -185,20 +241,27 @@ impl ClockLease {
 
     /// Samples the lease's targets at timeline time `time` and installs what they compose into the
     /// arena, ahead of the host, which adopts the entries this leaves (see
-    /// `style_engine_clock_tick_take_entry`). No tick samples at or past `deadline`.
+    /// `style_engine_clock_tick_take_entry`). No tick samples at or past `deadline`. The scroll
+    /// timelines are sampled at `scroll_offsets` where those name their scrollers, and where the
+    /// host sampled them otherwise.
     ///
     /// # Safety
     ///
     /// On the thread that owns the lease's arena and its style engine: the stage thread inside the
     /// `clock` stage the host submitted, or the main thread with nothing in flight.
-    pub unsafe fn run_tick(&self, time: f64, deadline: f64) -> FfiClockTickOutcome {
+    pub unsafe fn run_tick(
+        &self,
+        time: f64,
+        deadline: f64,
+        scroll_offsets: &[FfiClockTickScrollOffset],
+    ) -> FfiClockTickOutcome {
         let outcome = if self.is_revoked() {
             FfiClockTickOutcome::Revoked
         } else if time >= deadline {
             FfiClockTickOutcome::PastDeadline
         } else {
             // SAFETY: Guaranteed by the caller.
-            unsafe { self.sample_and_install(time) }
+            unsafe { self.sample_and_install(time, scroll_offsets) }
         };
         if outcome == FfiClockTickOutcome::Presented {
             let previous = self.time();
@@ -211,7 +274,7 @@ impl ClockLease {
     /// # Safety
     ///
     /// As for [`Self::run_tick`].
-    unsafe fn sample_and_install(&self, time: f64) -> FfiClockTickOutcome {
+    unsafe fn sample_and_install(&self, time: f64, scroll_offsets: &[FfiClockTickScrollOffset]) -> FfiClockTickOutcome {
         let arena_handle = self.arena as *mut c_void;
         // SAFETY: The caller owns the arena, which the lease's registration keeps alive.
         let arena = unsafe { &*arena_handle.cast::<LayoutNodeArena>() };
@@ -220,9 +283,39 @@ impl ClockLease {
             return FfiClockTickOutcome::NeedsMain;
         }
         // SAFETY: The caller owns the engine; no other borrow of it is live here.
-        let samples = unsafe { &*engine }
+        let mut samples = unsafe { &*engine }
             .animation_timeline_samples()
             .with_time(self.timeline_identity, time);
+        // A scroll progress timeline is where its scroller is scrolled to. Past the progress at which an
+        // effect changes its phase or its iteration, the host has events to send.
+        let mut follows_scroll = false;
+        for (timeline, last_progress) in self
+            .scroll_timelines
+            .lock()
+            .expect("clock lease scroll timelines")
+            .iter_mut()
+        {
+            let scrolled_progress = timeline.progress_at(scroll_offsets);
+            let progress = scrolled_progress.or_else(|| {
+                samples
+                    .sample(timeline.identity)
+                    .flatten()
+                    .filter(|sample| sample.is_percentage)
+                    .map(|sample| sample.value)
+            });
+            let Some(progress) = progress else {
+                return FfiClockTickOutcome::NeedsMain;
+            };
+            if !timeline.holds(progress) {
+                return FfiClockTickOutcome::NeedsMain;
+            }
+            follows_scroll |= scrolled_progress.is_some() && progress != *last_progress;
+            samples = samples.with_percentage(timeline.identity, progress);
+            *last_progress = progress;
+        }
+        if follows_scroll {
+            count(&COUNTERS.ticks_following_scroll);
+        }
         let mut outcome = FfiClockTickOutcome::Presented;
         let mut targets = self.targets.lock().expect("clock lease targets");
         let mut entries = self.entries.lock().expect("clock lease entries");
@@ -586,6 +679,7 @@ pub extern "C" fn rust_clock_lease_grant(
         revoked: AtomicBool::new(false),
         paused: AtomicBool::new(false),
         targets: Mutex::default(),
+        scroll_timelines: Mutex::default(),
         entries: Mutex::default(),
         layout_frame: Mutex::default(),
         repaints: Mutex::default(),
@@ -637,6 +731,45 @@ pub unsafe extern "C" fn rust_clock_lease_set_targets(
             });
         }
     }
+}
+
+/// Sets the scroll progress timelines whose animations the lease of `arena` ticks.
+///
+/// # Safety
+///
+/// `timelines` points at `count` values.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_clock_lease_set_scroll_timelines(
+    arena: *mut c_void,
+    timelines: *const FfiClockLeaseScrollTimeline,
+    count: usize,
+) {
+    let Some(lease) = clock_lease_for(arena as usize) else {
+        return;
+    };
+    let timelines = match count {
+        0 => &[][..],
+        // SAFETY: Guaranteed by the caller.
+        _ => unsafe { std::slice::from_raw_parts(timelines, count) },
+    };
+    let mut leased = lease.scroll_timelines.lock().expect("clock lease scroll timelines");
+    leased.clear();
+    leased.extend(timelines.iter().map(|timeline| (*timeline, timeline.progress)));
+}
+
+/// The progress (percent) at which the last tick of the lease of `arena` sampled the scroll progress
+/// timeline `identity`, or the host held it at the grant, or NaN.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_clock_lease_scroll_progress(arena: *mut c_void, identity: u32) -> f64 {
+    clock_lease_for(arena as usize).map_or(f64::NAN, |lease| {
+        lease
+            .scroll_timelines
+            .lock()
+            .expect("clock lease scroll timelines")
+            .iter()
+            .find(|(timeline, _)| timeline.identity == identity)
+            .map_or(f64::NAN, |(_, progress)| *progress)
+    })
 }
 
 /// Ends the lease of the document whose layout arena is `arena`, if it holds one. What its last
@@ -738,7 +871,7 @@ pub unsafe extern "C" fn rust_clock_lease_submit_tick(arena: *mut c_void, time: 
             "a clock tick beside the main thread reads the host's style-record pins"
         );
         // SAFETY: The stage owns the arena, as below.
-        unsafe { lease.run_tick(time, lease.deadline()) };
+        unsafe { lease.run_tick(time, lease.deadline(), &[]) };
     };
     // The main thread's pin table is its own until it has taken the tick back, as it is beside a style
     // pass in flight.
@@ -1221,7 +1354,7 @@ pub unsafe extern "C" fn rust_render_clock_inject_tick(
     let sender = unsafe { &mut *sender };
     INJECTED_TICKS_PENDING.fetch_add(1, Ordering::AcqRel);
     let sent = sender.jobs.send(move || {
-        run_render_clock_tick_at(context, frame_time_nanoseconds);
+        run_render_clock_tick_at(context, frame_time_nanoseconds, &[]);
         end_injected_tick();
     });
     if !sent {
@@ -1246,6 +1379,8 @@ fn end_injected_tick() {
 /// Ticks that arrive while one waits fold into it, with the latest time.
 struct ClockSlot {
     frame_time_nanoseconds: AtomicI64,
+    /// The scroll offsets the latest tick carried.
+    scroll_offsets: Mutex<Vec<FfiClockTickScrollOffset>>,
     queued: AtomicBool,
 }
 
@@ -1296,6 +1431,8 @@ pub struct FfiRenderClockCounters {
     pub ticks_moving_visual_contexts: u64,
     /// Ticks that ran while the main thread ran a task beside them.
     pub ticks_mid_task: u64,
+    /// Ticks that sampled a scroll progress timeline at a scroll offset the compositor had moved it to.
+    pub ticks_following_scroll: u64,
     /// Ticks that woke an idle main thread to take in the rounds they laid out.
     pub ticks_waking_main_to_adopt: u64,
     pub ticks_missed_asking_main: u64,
@@ -1334,6 +1471,7 @@ struct RenderClockCounters {
     ticks_needing_main: AtomicU64,
     ticks_moving_visual_contexts: AtomicU64,
     ticks_mid_task: AtomicU64,
+    ticks_following_scroll: AtomicU64,
     ticks_waking_main_to_adopt: AtomicU64,
     ticks_missed_asking_main: AtomicU64,
     lends: AtomicU64,
@@ -1362,6 +1500,7 @@ static COUNTERS: RenderClockCounters = RenderClockCounters {
     ticks_needing_main: AtomicU64::new(0),
     ticks_moving_visual_contexts: AtomicU64::new(0),
     ticks_mid_task: AtomicU64::new(0),
+    ticks_following_scroll: AtomicU64::new(0),
     ticks_waking_main_to_adopt: AtomicU64::new(0),
     ticks_missed_asking_main: AtomicU64::new(0),
     lends: AtomicU64::new(0),
@@ -1428,21 +1567,30 @@ pub unsafe extern "C" fn rust_render_clock_sender_destroy(sender: *mut ClockSend
 }
 
 /// Hands the display tick at `frame_time_nanoseconds` (monotonic time) for the compositor context
-/// `context` to the stage thread, which ticks the lease of that context with it if the main thread
-/// is idle then. Where a tick for the context is still waiting there, it takes this time instead.
-/// Returns false where the stage thread is gone, which it only is when the process is.
+/// `context`, with the scroll offsets the compositor held then, to the stage thread, which ticks the
+/// lease of that context with it if the main thread is idle then. Where a tick for the context is
+/// still waiting there, it takes this time and these offsets instead. Returns false where the stage
+/// thread is gone, which it only is when the process is.
 ///
 /// # Safety
 ///
-/// `sender` came from [`rust_render_clock_sender_create`], on the thread that owns it.
+/// `sender` came from [`rust_render_clock_sender_create`], on the thread that owns it, and
+/// `scroll_offsets` points at `scroll_offset_count` values.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_render_clock_post_tick(
     sender: *mut ClockSender,
     context: u64,
     frame_time_nanoseconds: i64,
+    scroll_offsets: *const FfiClockTickScrollOffset,
+    scroll_offset_count: usize,
 ) -> bool {
     // SAFETY: Guaranteed by the caller.
     let sender = unsafe { &mut *sender };
+    let scroll_offsets = match scroll_offset_count {
+        0 => &[][..],
+        // SAFETY: Guaranteed by the caller.
+        _ => unsafe { std::slice::from_raw_parts(scroll_offsets, scroll_offset_count) },
+    };
     // A context whose tick no job holds any more gets a slot again if it ticks again: the slots of
     // contexts that went away go.
     if sender.slots.len() >= MAX_IDLE_CLOCK_SLOTS && !sender.slots.contains_key(&context) {
@@ -1451,9 +1599,15 @@ pub unsafe extern "C" fn rust_render_clock_post_tick(
     let slot = sender.slots.entry(context).or_insert_with(|| {
         Arc::new(ClockSlot {
             frame_time_nanoseconds: AtomicI64::new(0),
+            scroll_offsets: Mutex::default(),
             queued: AtomicBool::new(false),
         })
     });
+    {
+        let mut offsets = slot.scroll_offsets.lock().expect("render clock slot scroll offsets");
+        offsets.clear();
+        offsets.extend_from_slice(scroll_offsets);
+    }
     slot.frame_time_nanoseconds
         .store(frame_time_nanoseconds, Ordering::Release);
     if slot.queued.swap(true, Ordering::AcqRel) {
@@ -1471,11 +1625,17 @@ fn run_render_clock_tick(context: u64, slot: &ClockSlot) {
     // free and posts a tick of its own, or the time it stored is the one read here.
     slot.queued.swap(false, Ordering::AcqRel);
     let frame_time_nanoseconds = slot.frame_time_nanoseconds.load(Ordering::Acquire);
-    run_render_clock_tick_at(context, frame_time_nanoseconds);
+    let scroll_offsets = slot
+        .scroll_offsets
+        .lock()
+        .expect("render clock slot scroll offsets")
+        .clone();
+    run_render_clock_tick_at(context, frame_time_nanoseconds, &scroll_offsets);
 }
 
-/// Runs the display tick at `frame_time_nanoseconds` for the lease of `context` on the stage thread.
-fn run_render_clock_tick_at(context: u64, frame_time_nanoseconds: i64) {
+/// Runs the display tick at `frame_time_nanoseconds`, at which the compositor had scrolled to
+/// `scroll_offsets`, for the lease of `context` on the stage thread.
+fn run_render_clock_tick_at(context: u64, frame_time_nanoseconds: i64, scroll_offsets: &[FfiClockTickScrollOffset]) {
     count(&COUNTERS.ticks_run);
     // The stage thread runs any job while a stage it runs waits for a join, which may be this one:
     // the main thread is not idle then, and the stage owns what the tick would reach.
@@ -1538,9 +1698,12 @@ fn run_render_clock_tick_at(context: u64, frame_time_nanoseconds: i64) {
                     "a clock tick beside a task reads the host's style-record pins"
                 );
             }
+            // Scroll-driven animations follow the compositor's scrolling only beside a task: an idle main
+            // thread takes in each scroll at once, and its rendering update samples them.
+            let scroll_offsets = if beside_task { scroll_offsets } else { &[] };
             // SAFETY: The main thread is idle with nothing in flight, and waits for this tick when
             // it wakes: the stage thread owns the arena and its engine until `idle_tick` is dropped.
-            let outcome = unsafe { lease.run_tick(time, lease.deadline_for_tick(beside_task)) };
+            let outcome = unsafe { lease.run_tick(time, lease.deadline_for_tick(beside_task), scroll_offsets) };
             if outcome != FfiClockTickOutcome::Presented {
                 return (outcome, false, false);
             }
@@ -1679,6 +1842,7 @@ pub extern "C" fn rust_render_clock_counters() -> FfiRenderClockCounters {
         ticks_needing_main: load(&COUNTERS.ticks_needing_main),
         ticks_moving_visual_contexts: load(&COUNTERS.ticks_moving_visual_contexts),
         ticks_mid_task: load(&COUNTERS.ticks_mid_task),
+        ticks_following_scroll: load(&COUNTERS.ticks_following_scroll),
         ticks_waking_main_to_adopt: load(&COUNTERS.ticks_waking_main_to_adopt),
         ticks_missed_asking_main: load(&COUNTERS.ticks_missed_asking_main),
         lends: load(&COUNTERS.lends),

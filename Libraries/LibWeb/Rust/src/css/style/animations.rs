@@ -1568,6 +1568,21 @@ impl AnimationTimelineSamples {
         samples
     }
 
+    /// These samples, with the progress-based timeline `identity` at `progress` percent instead: the
+    /// progress of a scroll timeline a clock tick samples at.
+    #[must_use]
+    pub(crate) fn with_percentage(&self, identity: u32, progress: f64) -> Self {
+        let mut samples = self.clone();
+        samples.samples.insert(
+            identity,
+            Some(TimeValue {
+                is_percentage: true,
+                value: progress,
+            }),
+        );
+        samples
+    }
+
     /// The sample for one timeline, or `None` when no sample was published for it - a timeline of
     /// another document, most of all, whose identities are not this engine's to read.
     #[must_use]

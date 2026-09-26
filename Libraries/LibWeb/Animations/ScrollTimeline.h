@@ -49,6 +49,17 @@ public:
     bool is_stale() const;
     virtual void update_current_time(double timestamp) override;
 
+    // Where the scroller the timeline follows stands in the layout the main thread last committed: its element, or
+    // null for the document viewport, and its scroll offset along the timeline's axis and at 100% progress. Empty
+    // where the timeline is inactive.
+    struct ScrollProgressInputs {
+        GC::Ptr<DOM::Element const> scroller;
+        bool is_vertical { true };
+        double scroll_offset { 0 };
+        double max_scroll_offset { 0 };
+    };
+    Optional<ScrollProgressInputs> scroll_progress_inputs() const;
+
     virtual bool is_progress_based() const override { return true; }
     virtual bool can_convert_a_timeline_time_to_an_origin_relative_time() const override { return false; }
 

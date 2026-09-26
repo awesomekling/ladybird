@@ -1,6 +1,6 @@
-leases lent before the task: false
-frames presented during the task: false
-ticks followed the compositor's scrolling: false
+leases lent before the task: true
+frames presented during the task: true
+ticks followed the compositor's scrolling: true
 ticks needing the main thread: 0
 scrolled: true
 width follows the scroll: true
