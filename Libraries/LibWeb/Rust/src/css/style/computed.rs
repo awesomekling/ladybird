@@ -1231,9 +1231,8 @@ impl ComputedGroupSets {
     }
 
     /// The payloads a frozen table assembles to against `inputs`, when the table equals one the
-    /// catalog holds that already assembled against equal inputs. The table is looked for among
-    /// the one its cascade state last published and the target's own, without hashing it; one
-    /// found is kept for the publication that carries this very table next.
+    /// catalog holds that already assembled against equal inputs. The catalog's answer for the
+    /// table is kept for the publication that carries this very table next.
     pub(crate) fn assembled_payloads(
         &mut self,
         target: Option<ComputedStyleTarget>,
@@ -1245,13 +1244,17 @@ impl ComputedGroupSets {
         if self.content_identities_suspended || replaying_style_groups() {
             return None;
         }
-        let found = self.find_assembled_table(
-            table,
-            cascade_state,
-            target.and_then(|target| self.target_longhand_table(target)),
-        )?;
-        self.known_longhand_table = Some((std::ptr::from_ref(table).addr(), Ok(found)));
-        let assembled = self.table_assemblies.get(&(found, inputs))?;
+        // Past the likely candidates the table is looked for by its content hash, which the
+        // publication of a table the catalog does not hold computes anyway.
+        let lookup = self
+            .find_assembled_table(
+                table,
+                cascade_state,
+                target.and_then(|target| self.target_longhand_table(target)),
+            )
+            .map_or_else(|| self.find_longhand_table(table, None, None), Ok);
+        self.known_longhand_table = Some((std::ptr::from_ref(table).addr(), lookup));
+        let assembled = self.table_assemblies.get(&(lookup.ok()?, inputs))?;
         (assembled.built == ALL_GROUPS).then(|| {
             assembled
                 .groups
