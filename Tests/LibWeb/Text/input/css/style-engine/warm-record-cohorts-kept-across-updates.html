@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<style>
+    #menu.open { color: green; }
+    #menu span { transition: opacity 1s; }
+</style>
+<div id="menu"><span>a</span><span>b</span><span>c</span><span>d</span></div>
+<script src="../../include.js"></script>
+<script>
+    test(() => {
+        const menu = document.getElementById("menu");
+        const spans = [...menu.children];
+        getComputedStyle(spans[0]).color;
+
+        // Every toggle moves the menu and its spans between the same two styles.
+        const before = internals.styleEngineCounters();
+        for (let i = 0; i < 10; ++i) {
+            menu.classList.toggle("open");
+            getComputedStyle(spans[0]).color;
+        }
+        const after = internals.styleEngineCounters();
+        println(`full drives for 10 toggles: ${after.engineFullDrivesStarted - before.engineFullDrivesStarted}`);
+
+        menu.classList.toggle("open");
+        println(`open: ${spans.map(span => getComputedStyle(span).color).join(", ")}`);
+        menu.classList.toggle("open");
+        println(`closed: ${spans.map(span => getComputedStyle(span).color).join(", ")}`);
+        println(`running transitions: ${document.getAnimations().length}`);
+    });
+</script>
