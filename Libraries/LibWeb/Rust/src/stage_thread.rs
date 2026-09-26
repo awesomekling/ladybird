@@ -113,15 +113,17 @@ fn stage_thread_mode() -> Option<StageThreadMode> {
 }
 
 /// The stages the rendering update submits when the stages overlap: a comma-separated list in
-/// `LIBWEB_STAGE_OVERLAP` (`none` names none), or the recording, layout and style when it is not set.
+/// `LIBWEB_STAGE_OVERLAP` (`none` names none), or the recording, layout and style, as one flight,
+/// when it is not set. `LIBWEB_FLIGHT=0` leaves the flight out of either.
 fn overlapping_stages() -> &'static [String] {
     static STAGES: OnceLock<Vec<String>> = OnceLock::new();
     STAGES.get_or_init(|| {
+        let flies = std::env::var_os("LIBWEB_FLIGHT").is_none_or(|value| value != "0");
         std::env::var("LIBWEB_STAGE_OVERLAP")
-            .unwrap_or_else(|_| "recording,layout,style".into())
+            .unwrap_or_else(|_| "recording,layout,style,flight".into())
             .split(',')
             .map(|stage| stage.trim().to_owned())
-            .filter(|stage| !stage.is_empty() && stage != "none")
+            .filter(|stage| !stage.is_empty() && stage != "none" && (flies || stage != FLIGHT_STAGE))
             .collect()
     })
 }
