@@ -117,12 +117,16 @@ impl LayoutStyleSnapshotStore {
         if nodes.is_empty() {
             return;
         }
-        let published = self.published.read().unwrap().clone();
-        let mut next = (*published).clone();
+        // A script that replaces the text of thousands of elements retires their text nodes one at a time, so the
+        // generation is changed in place, and copied only where a reader still holds it.
+        let mut published = self.published.write().unwrap();
+        if !nodes.iter().any(|node| published.rows.contains_key(node)) {
+            return;
+        }
+        let next = Arc::make_mut(&mut published);
         for node in nodes {
             next.rows.remove(node);
         }
-        *self.published.write().unwrap() = Arc::new(next);
     }
 
     pub(crate) fn row(&self, node: StyleNodeID) -> Option<LayoutStyleSnapshotRow> {
