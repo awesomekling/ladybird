@@ -1404,49 +1404,77 @@ bool Node::list_item_box_change_renumbers_list(Element const& list_item)
 // Pins the style record of the box `node`, or its pseudo-element of kind `pseudo_element`, is bound
 // to, the way the box would for its C++ readers once the node leaves the document. The row is
 // found by the node's identity, so no shell is made just to pin it.
-static void pin_bound_box_style_record_for_detachment(Node& node, Optional<CSS::PseudoElement> pseudo_element = {})
-{
-    CSS::StyleNodeID style_node;
-    if (auto const* element = as_if<Element>(node))
-        style_node = element->style_node_id();
-    else if (auto const* text = as_if<Text>(node))
-        style_node = text->style_node_id();
-    else
-        return;
-    auto generated_for = pseudo_element.has_value() ? Layout::Node::encode_generated_for(*pseudo_element) : 0;
-    auto& document = node.document();
-    if (!HTML::FrameScheduler::arena_changes_wait_for_frame(document)) {
-        if (auto* arena = document.layout_node_arena_if_created())
-            Layout::RustFFI::layout_arena_pin_bound_box_style_record_for_detachment(arena->handle(), style_node.value(), generated_for);
-        return;
+// The style records of the boxes of a subtree that leaves the document, pinned together once the subtree has been
+// walked: its boxes stay in the layout tree, and are read, until they are detached.
+class BoundBoxStyleRecordPinsForDetachment {
+public:
+    void add(Node& node, Optional<CSS::PseudoElement> pseudo_element = {})
+    {
+        CSS::StyleNodeID style_node;
+        if (auto const* element = as_if<Element>(node))
+            style_node = element->style_node_id();
+        else if (auto const* text = as_if<Text>(node))
+            style_node = text->style_node_id();
+        // A node that never arrived in the style engine has no box.
+        if (style_node.value() == 0)
+            return;
+        m_boxes.append({ style_node, pseudo_element.has_value() ? Layout::Node::encode_generated_for(*pseudo_element) : u8 { 0 } });
     }
-    // Beside a recording that owns the arena, the pin waits for the frame with the rest of the removal's arena changes,
-    // ahead of the identity change that unbinds the row. The removal lets go of the record's other pins before then,
-    // and the box is read until its row is freed, so the style engine reclaims no record until the pin has landed.
-    document.style_computer().style_engine().begin_pin_waiting_for_frame();
-    HTML::main_thread_event_loop().frame_scheduler().defer_arena_change(GC::create_function(document.heap(), [document = GC::Ref { document }, style_node, generated_for] {
-        if (auto* arena = document->layout_node_arena_if_created())
-            Layout::RustFFI::layout_arena_pin_bound_box_style_record_for_detachment(arena->handle(), style_node.value(), generated_for);
-        document->style_computer().style_engine().end_pin_waiting_for_frame();
-    }));
-}
+
+    void pin(Document& document)
+    {
+        if (m_boxes.is_empty())
+            return;
+        if (!HTML::FrameScheduler::arena_changes_wait_for_frame(document)) {
+            if (auto* arena = document.layout_node_arena_if_created())
+                pin_in(*arena, m_boxes);
+            return;
+        }
+        // Beside a recording that owns the arena, the pins wait for the frame with the rest of the removal's arena
+        // changes, ahead of the identity changes that unbind the rows. The removal lets go of the records' other pins
+        // before then, and the boxes are read until their rows are freed, so the style engine reclaims no record until
+        // the pins have landed.
+        document.style_computer().style_engine().begin_pin_waiting_for_frame();
+        HTML::main_thread_event_loop().frame_scheduler().defer_arena_change(GC::create_function(document.heap(), [document = GC::Ref { document }, boxes = move(m_boxes)] {
+            if (auto* arena = document->layout_node_arena_if_created())
+                pin_in(*arena, boxes);
+            document->style_computer().style_engine().end_pin_waiting_for_frame();
+        }));
+    }
+
+private:
+    struct BoundBox {
+        CSS::StyleNodeID style_node;
+        u8 generated_for { 0 };
+    };
+
+    static void pin_in(Layout::NodeArena& arena, ReadonlySpan<BoundBox> boxes)
+    {
+        for (auto const& box : boxes)
+            Layout::RustFFI::layout_arena_pin_bound_box_style_record_for_detachment(arena.handle(), box.style_node.value(), box.generated_for);
+    }
+
+    Vector<BoundBox> m_boxes;
+};
 
 // Pins the style record of every box `node` and its shadow-including descendants are bound to, for a subtree that
 // leaves the document: its boxes stay in the layout tree, and are read, until they are detached.
 void pin_bound_box_style_records_for_detachment(Node&);
 void pin_bound_box_style_records_for_detachment(Node& node)
 {
-    node.for_each_shadow_including_inclusive_descendant([](Node& inclusive_descendant) {
-        pin_bound_box_style_record_for_detachment(inclusive_descendant);
+    BoundBoxStyleRecordPinsForDetachment pins;
+    node.for_each_shadow_including_inclusive_descendant([&](Node& inclusive_descendant) {
+        pins.add(inclusive_descendant);
 
         if (auto* element = as_if<Element>(inclusive_descendant)) {
             element->for_each_synthetic_pseudo_element([&](CSS::PseudoElement type, SyntheticPseudoElement&) {
-                pin_bound_box_style_record_for_detachment(*element, type);
+                pins.add(*element, type);
             });
         }
 
         return TraversalDecision::Continue;
     });
+    pins.pin(node.document());
 }
 
 class RemovalStyleRecordPins {
@@ -1465,19 +1493,21 @@ public:
     {
         if (!was_connected)
             return;
+        BoundBoxStyleRecordPinsForDetachment bound_box_pins;
         node.for_each_shadow_including_inclusive_descendant([&](Node& inclusive_descendant) {
-            pin_bound_box_style_record_for_detachment(inclusive_descendant);
+            bound_box_pins.add(inclusive_descendant);
 
             if (auto* element = as_if<Element>(inclusive_descendant)) {
                 pin_dom_style_record(element->style_record_identity());
                 element->for_each_synthetic_pseudo_element([&](CSS::PseudoElement type, SyntheticPseudoElement& pseudo_element) {
-                    pin_bound_box_style_record_for_detachment(*element, type);
+                    bound_box_pins.add(*element, type);
                     pin_dom_style_record(pseudo_element.style_record_identity());
                 });
             }
 
             return TraversalDecision::Continue;
         });
+        bound_box_pins.pin(node.document());
     }
 
     void pin_style_records_after_removal(Node& node, bool was_connected)
