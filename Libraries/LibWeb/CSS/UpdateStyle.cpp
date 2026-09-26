@@ -1268,6 +1268,9 @@ bool StyleUpdate::begin(DocumentWithoutBrowsingContext document_without_browsing
         return false;
 
     auto submission_started_at = MonotonicTime::now();
+    // What publishes by identity below (animations, the elements prepared for style) finds the nodes that connected
+    // since the last update under the identities they take here.
+    take_in_pending_style_arrivals(document);
     document.style_computer().begin_style_update();
     document.style_computer().begin_style_record_view_epoch();
     document.synchronize_dirty_style_attributes();
@@ -1769,6 +1772,7 @@ static bool update_style_for_element(DOM::Document& document, DOM::AbstractEleme
             return true;
     }
 
+    take_in_pending_style_arrivals(document);
     document.style_computer().begin_style_update();
     ScopeGuard end_style_update = [&] {
         document.style_computer().end_style_update();

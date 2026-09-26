@@ -352,6 +352,13 @@ public:
     void set_is_connected(bool is_connected) { m_is_connected = is_connected; }
     bool is_tracked_by_style_engine() const;
 
+    // Whether this subtree waits to take its place in the style engine's tree, and whether a shadow-including
+    // descendant's subtree does. See CSS::take_in_pending_style_arrivals().
+    bool style_arrival_pending() const { return m_style_arrival_pending; }
+    void set_style_arrival_pending(bool value) { m_style_arrival_pending = value; }
+    bool descendant_style_arrival_pending() const { return m_descendant_style_arrival_pending; }
+    void set_descendant_style_arrival_pending(bool value) { m_descendant_style_arrival_pending = value; }
+
     // Mirrors the slottable's assigned slot; see SlottableMixin::set_assigned_slot().
     bool has_assigned_slot() const { return m_has_assigned_slot; }
     void set_has_assigned_slot(Badge<SlottableMixin>, bool value) { m_has_assigned_slot = value; }
@@ -656,6 +663,8 @@ protected:
     bool m_is_connected { false };
     bool m_has_assigned_slot { false };
     bool m_inside_blocking_wheel_event_handler { false };
+    bool m_style_arrival_pending { false };
+    bool m_descendant_style_arrival_pending { false };
 
     void build_accessibility_tree(AccessibilityTreeNode& parent);
 

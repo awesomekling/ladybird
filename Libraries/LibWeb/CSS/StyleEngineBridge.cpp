@@ -705,6 +705,15 @@ static void flush_deferred_geometry_transaction_before_non_replayable_input(Styl
         style_computer->document().flush_deferred_style_change_event();
 }
 
+void StyleEngine::note_pending_arrivals(size_t count)
+{
+    // An arrival is recorded as the input is next submitted, where the transaction a geometry read deferred must not
+    // be waiting: it is flushed here, where the insertion would have recorded the arrival.
+    flush_deferred_geometry_transaction_before_non_replayable_input(*this, m_style_computer);
+    note_recorded_input(*this, m_style_computer);
+    m_pending_arrival_count += count;
+}
+
 void StyleEngine::record_tree_delta(StyleEngineFFI::FfiTreeDelta const& delta)
 {
     flush_deferred_geometry_transaction_before_non_replayable_input(*this, m_style_computer);
@@ -906,7 +915,8 @@ void StyleEngine::record_benchmark_marker(Utf16View name)
 
 bool StyleEngine::has_recorded_input() const
 {
-    return !m_tree_deltas.is_empty()
+    return m_pending_arrival_count > 0
+        || !m_tree_deltas.is_empty()
         || !m_element_arrivals.is_empty()
         || !m_local_feature_deltas.is_empty()
         || !m_state_deltas.is_empty()
@@ -917,7 +927,8 @@ bool StyleEngine::has_recorded_input() const
 
 size_t StyleEngine::recorded_input_count() const
 {
-    return m_tree_deltas.size()
+    return m_pending_arrival_count
+        + m_tree_deltas.size()
         + m_element_arrivals.size()
         + m_local_feature_deltas.size()
         + m_state_deltas.size()
@@ -940,6 +951,8 @@ void StyleEngine::submit_recorded_input()
     // after what was published beside the pass.
     if (m_style_computer && layout_pass_is_in_flight())
         m_style_computer->document().join_frame_reaching_style_engine();
+    if (m_style_computer)
+        take_in_pending_style_arrivals(m_style_computer->document());
     StyleInputScope const input { *this };
     if (m_style_computer)
         publish_pending_element_features(*this, *m_style_computer);

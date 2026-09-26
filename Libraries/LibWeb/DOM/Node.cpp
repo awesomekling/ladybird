@@ -2047,6 +2047,11 @@ WebIDL::ExceptionOr<void> Node::move_node(Node& new_parent, Node* child)
         node_iterator.run_pre_removing_steps(*this);
     });
 
+    // A move keeps the identities in the style engine's tree, so every node on either side of it is named before the
+    // move is recorded against them.
+    if (is_connected())
+        CSS::take_in_pending_style_arrivals(document());
+
     // 11. Let oldPreviousSibling be node’s previous sibling.
     auto* old_previous_sibling = previous_sibling();
 
@@ -2628,8 +2633,8 @@ void Node::set_needs_layout_tree_update(bool value, SetNeedsLayoutTreeUpdateReas
     // A tree update mark names a node for the render side, so a node the style tree has not named
     // has nowhere to hold one. That is every node a build can produce nothing for -- a comment, a
     // doctype, a processing instruction -- and, of the rest, only a node in a document that never
-    // lays out, or one whose subtree is still arriving: the insertion that names it marks it and
-    // its new parent once it is named, which is what covers a slot assigned during the insertion.
+    // lays out, or one whose subtree is still arriving: the insertion marks its new parent, and the
+    // arrival that names it marks it, which is what covers a slot assigned during the insertion.
     auto style_node = style_node_id_of(*this);
     if (!style_node)
         return;
@@ -2804,19 +2809,16 @@ void Node::inserted()
     derive_inside_blocking_wheel_event_handler_state_after_tree_change(*this);
 
     // Text an element clones into its shadow tree from its own insertion steps is not covered by a
-    // subtree arrival, so it takes its identity here.
+    // subtree arrival, so it waits to arrive from here.
     if (auto* text = as_if<Text>(*this); text && text->style_node_id() == 0)
         CSS::record_text_connected(*text);
 
     if (auto* element = as_if<Element>(*this)) {
         // The content an element clones into its shadow tree from its own insertion steps lands under
         // a root that connects only when this walk reaches it, so no subtree arrival covered it.
+        // NB: The element's arrival publishes what it has scrolled to under the identity it takes then.
         if (element->style_node_id() == 0)
             CSS::record_element_connected(*element);
-        // The element brings what it has scrolled to into its new place, under the identity it
-        // publishes it against, which it may have taken only just now.
-        if (!element->scroll_offset({}).is_zero())
-            Layout::publish_element_scroll_offset(*element);
         if (is<HTML::HTMLSlotElement>(*element)) {
             if (auto parent = element->parent_element())
                 CSS::Invalidation::invalidate_style_after_text_change_under(*parent);
@@ -2838,8 +2840,9 @@ void Node::inserted()
     }
 
     // Inertness, editability and the wheel-handler state are all inherited, so a node that arrives
-    // somewhere new holds whatever its new place gives it. The identity it publishes under was
-    // taken just above.
+    // somewhere new holds whatever its new place gives it.
+    // NB: An element or text node takes its identity only as it arrives in the style engine, which
+    //     publishes this and the focused text control state below again under that identity.
     Layout::publish_dom_paint_facts(*this);
 
     // A node can also arrive in the shadow tree of a text control that is already focused, which
