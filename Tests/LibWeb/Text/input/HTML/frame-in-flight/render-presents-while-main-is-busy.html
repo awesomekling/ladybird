@@ -8,6 +8,9 @@
     // Where the main thread presents, the epoch moves only once the frame is taken in, after that task. The frame is
     // submitted and held before its recording runs, so the epoch can only move for a frame already in flight.
     asyncTest(async done => {
+        // A flight presents the keyboard scroll state of the last frame only while it is current: the main thread
+        // presents the frame after the previous test's document is unloaded, which invalidates it.
+        await twoFrames();
         internals.setRenderPresents(true);
         let before = 0;
         const facts = await whileFrameInFlight("before-run", () => {

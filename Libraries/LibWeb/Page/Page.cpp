@@ -619,6 +619,13 @@ Compositing::KeyboardScrollState Page::take_keyboard_scroll_state_for_compositor
     return state;
 }
 
+bool Page::keyboard_scroll_state_is_current(u64 generation) const
+{
+    if (!m_async_scrolling_enabled)
+        return true;
+    return m_keyboard_scroll_state_is_current && generation == m_keyboard_scroll_state_generation;
+}
+
 void Page::invalidate_compositor_wheel_event_listener_state()
 {
     ++m_wheel_event_listener_state_generation;

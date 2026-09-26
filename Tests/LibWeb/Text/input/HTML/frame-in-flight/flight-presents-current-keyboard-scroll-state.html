@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<div id="box" style="width: 10px; height: 10px; background: green"></div>
+<div style="height: 300vh"></div>
+<script>
+    // A flight that presents hands the compositor the keyboard scroll state of the last frame, as it cannot take the
+    // state again before its layout. Once a keydown listener invalidates that state, the next frame takes it anew
+    // instead: the frames flights present after it carry the current state, not the invalidated one. Nothing is
+    // printed until the end, as printing inserts nodes, whose tree build keeps a flight from presenting.
+    asyncTest(async done => {
+        internals.setRenderPresents(true);
+        await twoFrames();
+        box.style.width = "20px";
+        await twoFrames();
+        const before = internals.lastFrameKeyboardScrollStateIsCurrent();
+
+        document.addEventListener("keydown", () => {});
+        internals.resetRenderingSchedulerCounters();
+        const after = [];
+        for (const width of [30, 40, 50]) {
+            box.style.width = `${width}px`;
+            await twoFrames();
+            after.push(internals.lastFrameKeyboardScrollStateIsCurrent());
+        }
+        const ends = internals.getRenderingSchedulerCounters().flightEnds;
+        internals.resetRenderPresents();
+        let flights = 0;
+        for (const byStage of Object.values(ends))
+            for (const count of Object.values(byStage))
+                flights += count;
+        println(`current before the listener: ${before}`);
+        println(`current after the listener: ${after.join(", ")}`);
+        // Where flights run, they presented the frames after the first.
+        println(`flights presented: ${flights === 0 || ends.done.present >= 2}`);
+        println(`width: ${box.getBoundingClientRect().width}`);
+        done();
+    });
+</script>
