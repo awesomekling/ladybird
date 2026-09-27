@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<style>
+    #box {
+        width: 100px;
+        height: 20px;
+        animation: grow 20s linear;
+    }
+    @keyframes grow {
+        from {
+            width: 100px;
+        }
+        to {
+            width: 2100px;
+        }
+    }
+</style>
+<div id="box"></div>
+<script src="../../include.js"></script>
+<script>
+    // A page with animation frame callbacks has a rendering update at every display frame, which samples its animations
+    // itself: the render clock ticks no clock of it meanwhile, and ticks one again once the callbacks stop.
+    asyncTest(async done => {
+        const enabled = internals.clockFramesEnabled();
+        const ticks = () => internals.getRenderClockCounters().ticksInstalled;
+
+        // Tasks between the rendering updates of the loop look for a clock of the page, from the first frame to the last.
+        let framesLeft = 10;
+        let looping = true;
+        let clockDuringFrames = false;
+        const look = () => {
+            clockDuringFrames ||= internals.renderClockTicks(document);
+            if (looping)
+                setTimeout(look, 0);
+        };
+        await new Promise(resolve => {
+            function frame() {
+                if (--framesLeft > 0) {
+                    requestAnimationFrame(frame);
+                    return;
+                }
+                looping = false;
+                resolve();
+            }
+            requestAnimationFrame(frame);
+            look();
+        });
+        println(`the render clock ticks the page while it has frame callbacks: ${clockDuringFrames}`);
+
+        // Waits for the render clock to install a tick, however long the display takes to deliver it.
+        const target = ticks() + 1;
+        do
+            await new Promise(resolve => setTimeout(resolve, 5));
+        while (enabled && ticks() < target);
+        println(`the render clock ticks the page once they stop: ${!enabled || internals.renderClockTicks(document)}`);
+        done();
+    });
+</script>
