@@ -684,7 +684,10 @@ static bool take_in_clock_layout_frame(DOM::Document& document)
     Layout::RustFFI::layout_arena_begin_update_layout(arena->handle());
     document.begin_style_stabilization_epoch();
     document.style_computer().begin_style_record_view_epoch();
-    return Layout::RustFFI::layout_arena_take_in_clock_layout_frame(arena->handle());
+    if (!Layout::RustFFI::layout_arena_take_in_clock_layout_frame(arena->handle()))
+        return false;
+    document.renew_clock_layout_frame();
+    return true;
 }
 
 static bool has_animation_frame_callbacks(DOM::Document const& document)
@@ -1018,7 +1021,7 @@ void FrameScheduler::grant_clock_leases()
         // the navigable just painted was presented.
         OwnPtr<LocalNavigable::RenderClockFrameKit> kit;
         if (hold.render_clock_context.has_value()) {
-            Layout::RustFFI::layout_arena_renew_clock_layout_frame(document->layout_node_arena_if_created()->handle());
+            document->renew_clock_layout_frame();
             if (auto sealed = document->navigable()->seal_render_clock_frame_kit(); sealed.has_value())
                 kit = make<LocalNavigable::RenderClockFrameKit>(sealed.release_value());
         }
@@ -1145,7 +1148,7 @@ void FrameScheduler::main_thread_will_idle()
         // The ticks lay out with the document as it stands now: a resize or a selection change since the last frame
         // was laid out by a read, but nothing painted it yet.
         if (ticks)
-            Layout::RustFFI::layout_arena_renew_clock_layout_frame(arena->handle());
+            hold.document->renew_clock_layout_frame();
         any_ticks |= ticks;
     }
     if (any_ticks)
