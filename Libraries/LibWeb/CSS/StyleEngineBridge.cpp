@@ -787,6 +787,16 @@ void StyleEngine::record_unique_node_id(StyleNodeID node, u64 unique_node_id)
     record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::ElementUniqueNodeId, .value = 0, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = 0, .data = static_cast<FlatPtr>(unique_node_id) });
 }
 
+void StyleEngine::record_dom_paint_facts(StyleNodeID node, u8 facts)
+{
+    record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::NodeDomPaintFacts, .value = facts, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = 0, .data = 0 });
+}
+
+void StyleEngine::record_table_spans(StyleNodeID node, u16 column_span, u16 row_span, u32 raw_column_span)
+{
+    record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::ElementTableSpans, .value = 0, .node = node.value(), .parent = raw_column_span, .previous_sibling = 0, .facts = static_cast<u32>(column_span) | (static_cast<u32>(row_span) << 16), .data = 0 });
+}
+
 void StyleEngine::record_text_is_ascii_whitespace(StyleNodeID node, bool value)
 {
     record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::TextIsAsciiWhitespace, .value = value, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = 0, .data = 0 });

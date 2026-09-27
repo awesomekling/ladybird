@@ -222,6 +222,10 @@ public:
     void record_text_is_ascii_whitespace(StyleNodeID, bool);
     // The unique id the document knows a node by, which arrives with the node's identity.
     void record_unique_node_id(StyleNodeID, u64 unique_node_id);
+    // What a row built for an arriving node is painted and hit-tested with, and the spans of an arriving table cell or
+    // column, which arrive with the node's identity.
+    void record_dom_paint_facts(StyleNodeID, u8 facts);
+    void record_table_spans(StyleNodeID, u16 column_span, u16 row_span, u32 raw_column_span);
     void record_text_is_in_user_agent_shadow_tree(StyleNodeID, bool);
     void record_text_is_password_input(StyleNodeID, bool);
     void record_text_data(StyleNodeID, Utf16String const&);
