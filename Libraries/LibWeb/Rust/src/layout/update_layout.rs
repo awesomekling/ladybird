@@ -60,9 +60,6 @@ pub struct FfiLayoutUpdateHostCallbacks {
     /// Readies the document for a layout tree build, and answers with the document's style node,
     /// which the build walks from.
     pub prepare_layout_tree_build: unsafe extern "C" fn(*mut c_void) -> u32,
-    /// Marks the list owners the frame found showing stale list-item counters for a layout tree
-    /// rebuild, named by their style nodes.
-    pub rebuild_list_owners_with_stale_item_counters: unsafe extern "C" fn(*mut c_void, *const u32, usize),
     /// Reads the document's selection range, when it has one, into a snapshot the third argument
     /// receives with the second as its context. The snapshot is valid for that call.
     pub read_selection:
@@ -219,7 +216,6 @@ pub(crate) struct LayoutUpdateHost {
     prepare_for_rendering: unsafe extern "C" fn(*mut c_void),
     seal_flight_paint: unsafe extern "C" fn(*mut c_void, bool),
     prepare_layout_tree_build: unsafe extern "C" fn(*mut c_void) -> u32,
-    rebuild_list_owners_with_stale_item_counters: unsafe extern "C" fn(*mut c_void, *const u32, usize),
     read_selection:
         unsafe extern "C" fn(*mut c_void, *mut c_void, unsafe extern "C" fn(*mut c_void, *const FfiSelectionSnapshot)),
     apply_layout_commit_effects: unsafe extern "C" fn(*mut c_void, *const FfiLayoutCommitEffects),
@@ -244,7 +240,6 @@ impl From<FfiLayoutUpdateHostCallbacks> for LayoutUpdateHost {
             prepare_for_rendering: host.prepare_for_rendering,
             seal_flight_paint: host.seal_flight_paint,
             prepare_layout_tree_build: host.prepare_layout_tree_build,
-            rebuild_list_owners_with_stale_item_counters: host.rebuild_list_owners_with_stale_item_counters,
             read_selection: host.read_selection,
             apply_layout_commit_effects: host.apply_layout_commit_effects,
             note_full_layouts_performed: host.note_full_layouts_performed,
@@ -294,16 +289,6 @@ impl LayoutUpdateHost {
 
     fn prepare_layout_tree_build(&self, _: &crate::stage::MainThread) -> u32 {
         unsafe { (self.prepare_layout_tree_build)(self.context) }
-    }
-
-    fn rebuild_list_owners_with_stale_item_counters(&self, _: &crate::stage::MainThread, list_owners: &[StyleNodeID]) {
-        if list_owners.is_empty() {
-            return;
-        }
-        let list_owners: Vec<u32> = list_owners.iter().map(|list_owner| list_owner.raw()).collect();
-        unsafe {
-            (self.rebuild_list_owners_with_stale_item_counters)(self.context, list_owners.as_ptr(), list_owners.len());
-        }
     }
 
     fn read_selection(&self, _: &crate::stage::MainThread) -> Option<SelectionSnapshot> {
@@ -654,9 +639,6 @@ struct LayoutFrame {
     pass_sources: Option<LayoutPassSources>,
     /// The document style node of the tree build the style round readied.
     tree_build_document_style_node: Option<u32>,
-    /// The list owners the last build found showing stale counters, which the next join marks
-    /// for a layout tree rebuild.
-    list_owners_to_rebuild: Vec<StyleNodeID>,
     /// The document's selection as the style round of the round read it, if it has one.
     selection: Option<SelectionSnapshot>,
     /// What the frame's tree builds and commits owe the document thread beyond their own joins, in
@@ -862,13 +844,19 @@ impl LayoutFrame {
         self.owe_host_half(OwedHostHalf::TreeBuild(host_half));
     }
 
-    /// Settles the list owners with stale counters after a tree build, and holds on to the ones
-    /// the build found showing them for the next join to mark.
-    fn reconcile_stale_list_item_counters(&mut self, walked: &WalkedLayoutTreeBuild) {
-        debug_assert!(self.list_owners_to_rebuild.is_empty());
-        self.list_owners_to_rebuild = self
+    /// Settles the list owners with stale counters after a tree build, and has the build's host half
+    /// report the ones the build found showing them, which the document marks for a layout tree
+    /// rebuild as the next join pays the half. Answers whether the build found any.
+    fn reconcile_stale_list_item_counters(
+        &self,
+        walked: &WalkedLayoutTreeBuild,
+        host_half: &mut TreeBuildHostHalf,
+    ) -> bool {
+        let list_owners = self
             .arena()
             .reconcile_stale_list_item_counters_after_tree_build(walked.document_style_node);
+        host_half.report_list_owners_with_stale_item_counters(&list_owners);
+        !list_owners.is_empty()
     }
 
     /// What derives from a layout commit, once its arena half has settled: the rendering preparation,
@@ -877,8 +865,9 @@ impl LayoutFrame {
     /// are collected again for the document's paint state, and the document's viewport clients are
     /// to be told the viewport rect.
     /// Whether nothing the frame leaves for the document thread changes what a recording made from
-    /// the arena now would show: no scroll offsets to store, no image resources to attach, no list
-    /// owners to rebuild, and no boxes whose relevance to the user the rendering update determines.
+    /// the arena now would show: no scroll offsets to store, no image resources to attach, and no
+    /// boxes whose relevance to the user the rendering update determines. A round whose build found
+    /// list owners to rebuild goes on to another round, so it is not painted either.
     ///
     /// Nor may a round that resized a navigable the document hosts: that navigable lays itself out
     /// at its new size later in the rendering update and paints then, and a frame of the document
@@ -887,7 +876,6 @@ impl LayoutFrame {
         self.messages.clamped_scroll_offsets.is_empty()
             && self.messages.owed_image_resources.is_empty()
             && !self.messages.prepare_for_rendering
-            && self.list_owners_to_rebuild.is_empty()
             && !self.arena().may_have_auto_content_visibility()
             && !self.resized_a_hosted_navigable()
     }
@@ -996,10 +984,6 @@ impl LayoutFrame {
     ///
     /// As for [`arena`], on the document thread, with no stage run of the frame outstanding.
     unsafe fn take_in_end(&mut self, main_thread: &crate::stage::MainThread, end: FrameEnd) -> bool {
-        debug_assert!(
-            self.list_owners_to_rebuild.is_empty(),
-            "a join marks the list owners before the frame ends"
-        );
         let host = self.inputs.host;
         let arena_handle = self.inputs.arena_handle;
         // SAFETY: Guaranteed by the caller.
@@ -1132,8 +1116,6 @@ impl LayoutFrame {
                 self.owed_host_halves.take(),
             );
         }
-        let list_owners_to_rebuild = std::mem::take(&mut self.list_owners_to_rebuild);
-        host.rebuild_list_owners_with_stale_item_counters(main_thread, &list_owners_to_rebuild);
         // The first round's style is the document's to run ahead of the update, or to submit for the
         // flight to run. The document only submits it when the round lays out the tree it has, which
         // the flight then styles: the round readies no tree build.
@@ -1233,12 +1215,11 @@ impl LayoutFrame {
 
         if needs_layout_tree_rebuild {
             let arena_handle = self.inputs.arena_handle;
-            let (walked, host_half) = self.walk_layout_tree_build();
+            let (walked, mut host_half) = self.walk_layout_tree_build();
             let needs_another_build_pass = walked.outcome.needs_another_build_pass;
-            if !needs_another_build_pass {
-                self.reconcile_stale_list_item_counters(&walked);
-            }
-            let pass_follows = !needs_another_build_pass && self.list_owners_to_rebuild.is_empty();
+            let counters_were_stale =
+                !needs_another_build_pass && self.reconcile_stale_list_item_counters(&walked, &mut host_half);
+            let pass_follows = !needs_another_build_pass && !counters_were_stale;
             // SAFETY: The frame runs for the update the arena is in.
             let pass_sources = pass_follows.then(|| unsafe { LayoutPassSources::read(arena_handle) });
             self.owe_tree_build_host_half(host_half);
@@ -1250,8 +1231,9 @@ impl LayoutFrame {
             // The full layout below covers every boundary the build's invalidation registered.
             drop(self.arena().take_partial_relayout_boundary_roots());
 
-            // The list owners the reconciliation holds on to are marked for another build by
-            // the next style round, after the reset of the full tree update flag.
+            // The list owners the reconciliation reported are marked for another build as the
+            // next style round pays the build's host half, after the reset of the full tree update
+            // flag.
             self.arena().set_needs_full_layout_tree_update(false);
             self.inputs.trace.tree_build(layout_started);
 
@@ -1275,11 +1257,7 @@ impl LayoutFrame {
     /// Ends a loop that has run out of rounds, noting whether style or layout work is still
     /// pending.
     fn run_out_of_rounds(&mut self, joins: &crate::stage_thread::MainJoins<'_>) -> FrameEnd {
-        let list_owners_to_rebuild = std::mem::take(&mut self.list_owners_to_rebuild);
-        let facts = self.join(joins, FrameJoin::FinalFacts, |main_thread, host| {
-            host.rebuild_list_owners_with_stale_item_counters(main_thread, &list_owners_to_rebuild);
-            host.document_facts(main_thread)
-        });
+        let facts = self.join(joins, FrameJoin::FinalFacts, |main_thread, host| host.document_facts(main_thread));
         if style_update_follows_layout(self.arena(), &facts) || !layout_is_up_to_date(self.arena(), &facts) {
             self.messages.stabilization_bound_failed = true;
         }
@@ -1343,10 +1321,9 @@ impl LayoutFrame {
         if *needs_layout_tree_rebuild {
             let tree_build_started = self.inputs.trace.now();
             let arena_handle = self.inputs.arena_handle;
-            let (walked, host_half) = self.walk_layout_tree_build();
+            let (walked, mut host_half) = self.walk_layout_tree_build();
             let needs_another_build_pass = walked.outcome.needs_another_build_pass;
-            self.reconcile_stale_list_item_counters(&walked);
-            let counters_were_stale = !self.list_owners_to_rebuild.is_empty();
+            let counters_were_stale = self.reconcile_stale_list_item_counters(&walked, &mut host_half);
             let pass_follows = !counters_were_stale && !needs_another_build_pass;
             // As after a full layout's build, the host half waits for the next join, which finds
             // what paying it changes (it can resize this document's viewport through its embedding
@@ -1489,8 +1466,6 @@ unsafe fn take_in_clock_layout_frame(
             frame.frame.owed_host_halves.take(),
         );
     }
-    let list_owners_to_rebuild = std::mem::take(&mut frame.frame.list_owners_to_rebuild);
-    host.rebuild_list_owners_with_stale_item_counters(main_thread, &list_owners_to_rebuild);
     // SAFETY: As above.
     let over = unsafe {
         frame
@@ -1525,7 +1500,6 @@ unsafe fn make_clock_layout_frame(
             connected_element_count: 0,
             pass_sources: None,
             tree_build_document_style_node: None,
-            list_owners_to_rebuild: Vec::new(),
             selection: host.read_selection(main_thread),
             owed_host_halves: Cell::default(),
             round_style: RoundStyle::OnDocumentThread,
@@ -1741,7 +1715,6 @@ impl LayoutPassJob {
             connected_element_count: 0,
             pass_sources: None,
             tree_build_document_style_node: None,
-            list_owners_to_rebuild: Vec::new(),
             selection: None,
             owed_host_halves: Cell::default(),
             round_style: if style_in_flight {
@@ -1889,10 +1862,9 @@ unsafe fn finish_layout_frame(main_thread: &crate::stage::MainThread, mut frame:
             frame.owed_host_halves.take(),
         );
     }
-    // The list owners the round's build found showing stale counters are marked for the build of
-    // the next layout update, as the next style round would have marked them.
-    let list_owners_to_rebuild = std::mem::take(&mut frame.list_owners_to_rebuild);
-    host.rebuild_list_owners_with_stale_item_counters(main_thread, &list_owners_to_rebuild);
+    // The list owners the round's build found showing stale counters were marked for the build of
+    // the next layout update as its host half was paid, as the next style round would have marked
+    // them.
     // The install owed the flight the repaint of a batch the flight applied, or parked and did not:
     // either way nothing recorded after it here.
     if frame.style_ran_in_flight {
@@ -1919,10 +1891,6 @@ unsafe fn finish_layout_frame_recorded_in_flight(
 ) -> bool {
     let host = frame.inputs.host;
     let arena_handle = frame.inputs.arena_handle;
-    debug_assert!(
-        frame.list_owners_to_rebuild.is_empty(),
-        "a round that left list owners to rebuild is not recorded"
-    );
     // A style row the flight applied that the host declined was put back: the recording shows
     // what the host did not install, and does not stand.
     // SAFETY: The frame is the document thread's again, and it runs for the update the arena is in.

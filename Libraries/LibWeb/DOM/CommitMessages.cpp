@@ -184,6 +184,17 @@ void CommitMessages::append(Layout::RustFFI::FfiCommitMessage const& message)
             .pending_face_has_been_retried = message.pending_face_has_been_retried,
         });
         return;
+    case Layout::RustFFI::FfiCommitMessageKind::ListItemCountersStale:
+        // An owner that has left the document since the build named it renders nothing.
+        m_messages.append(Message {
+            .identity = identity,
+            .kind = Kind::NeedsLayoutTreeUpdate,
+            .layout_tree_update_reason = SetNeedsLayoutTreeUpdateReason::ListItemCounters,
+            .hover_event_data = {},
+            .pseudo_element = {},
+            .custom_property_name = {},
+        });
+        return;
     case Layout::RustFFI::FfiCommitMessageKind::LayoutTreeReplaced:
         // The layout host takes this one in itself, after the others the delivery carries.
         VERIFY_NOT_REACHED();

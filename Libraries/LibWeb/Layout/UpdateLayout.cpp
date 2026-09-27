@@ -9,7 +9,6 @@
 #include <LibWeb/CSS/StyleEngineBridge.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
-#include <LibWeb/DOM/NodeIdentity.h>
 #include <LibWeb/DOM/Range.h>
 #include <LibWeb/HTML/EventLoop/MainThreadPhases.h>
 #include <LibWeb/HTML/LocalNavigable.h>
@@ -69,13 +68,6 @@ Layout::RustFFI::FfiLayoutUpdateHostCallbacks Document::layout_update_host_callb
             if (auto navigable = document.navigable())
                 navigable->seal_flight_paint(document, !document.needs_style_update_after_layout(style_runs_in_flight)); },
         .prepare_layout_tree_build = [](void* context) -> u32 { return static_cast<Document*>(context)->prepare_layout_tree_build(); },
-        .rebuild_list_owners_with_stale_item_counters = [](void* context, u32 const* list_owners, size_t count) {
-            auto& document = *static_cast<Document*>(context);
-            for (auto list_owner : ReadonlySpan<u32> { list_owners, count }) {
-                // An owner that has left the document since the frame named it renders nothing.
-                if (auto node = NodeIdentity::of_style_node(CSS::StyleNodeID { list_owner }).resolve(document))
-                    node->set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::ListItemCounters);
-            } },
         .read_selection = [](void* context, void* sink, void (*receive)(void*, Layout::RustFFI::FfiSelectionSnapshot const*)) {
             auto& document = *static_cast<Document*>(context);
             auto selection = document.get_selection();
