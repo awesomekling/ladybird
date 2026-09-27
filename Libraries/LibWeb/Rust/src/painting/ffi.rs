@@ -2018,8 +2018,8 @@ pub(crate) unsafe fn present_in_flight(arena_handle: *mut c_void, products: &Fli
     }
 }
 
-/// Publishes the arena's pending recording from the presentation stage of the frame in flight
-/// (unless LIBWEB_RENDER_PRESENTS=0), as `layout_arena_publish_recording` does on the main thread. Returns
+/// Publishes the arena's pending recording from a flight's present stage (unless
+/// LIBWEB_RENDER_PRESENTS=0), as `layout_arena_publish_recording` does on the main thread. Returns
 /// the generation of the hit-test list the recording made, or 0 if there was nothing to publish.
 ///
 /// # Safety

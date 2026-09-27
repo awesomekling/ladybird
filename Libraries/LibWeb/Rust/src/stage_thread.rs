@@ -213,9 +213,11 @@ thread_local! {
     // On the stage thread, where the caller's messages arrive. A stage waiting for a join reads
     // them too, since the work it joined for can start stages of its own.
     static INCOMING: RefCell<Option<Receiver<StageMessage>>> = const { RefCell::new(None) };
-    // On the calling thread, the stages it has submitted and not taken back yet, in submission
-    // order. Together they are the frame in flight.
+    // On the calling thread, the stages it has submitted for a document's arena or style engine and
+    // not taken back yet, in submission order, and likewise the recordings and presentations it has
+    // submitted to the paint lane, which reach neither. Together they are the frame in flight.
     static SUBMITTED: RefCell<Vec<SubmittedStage>> = const { RefCell::new(Vec::new()) };
+    static PAINTING: RefCell<Vec<PaintStage>> = const { RefCell::new(Vec::new()) };
     // While above zero, the style engine entrances of this thread only wait for a stage that reaches
     // their engine (see rust_stage_thread_begin_style_engine_entrances_that_only_wait).
     static STYLE_ENGINE_ENTRANCES_ONLY_WAIT: Cell<u32> = const { Cell::new(0) };
@@ -240,7 +242,74 @@ thread_local! {
 
 type StageOutcome = Result<(), Box<dyn Any + Send>>;
 
-/// A stage the calling thread has submitted and not taken back yet.
+/// How a submitted run answers the calling thread once it has run.
+struct StageReply {
+    from_stage: Receiver<StageOutcome>,
+    outcome: Option<StageOutcome>,
+}
+
+impl StageReply {
+    fn poll(&mut self) -> bool {
+        if self.outcome.is_none() {
+            match self.from_stage.try_recv() {
+                Ok(outcome) => self.outcome = Some(outcome),
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => std::process::abort(),
+            }
+        }
+        self.outcome.is_some()
+    }
+
+    /// Waits for the run to finish without taking its outcome, which stays for the frame's consume.
+    fn wait_until_finished(&mut self) {
+        if self.outcome.is_none() {
+            self.outcome = Some(self.from_stage.recv().unwrap_or_else(|_| std::process::abort()));
+        }
+    }
+
+    fn wait(&mut self) -> StageOutcome {
+        match self.outcome.take() {
+            Some(outcome) => outcome,
+            None => self.from_stage.recv().unwrap_or_else(|_| std::process::abort()),
+        }
+    }
+}
+
+/// A recording or presentation the calling thread has submitted to the paint lane and not taken back
+/// yet. It owns the frame it records or presents and reaches nothing of its document: no arena, no
+/// style engine. So no per-document question about the frame in flight (a door of the arena, a style
+/// engine entrance, an arena change) can find it; only the frame's own take-back and a join of the
+/// whole frame wait for it, and a record of its document joins its recording
+/// ([`join_recording_in_flight_of`]).
+struct PaintStage {
+    // `"recording"` or [`PRESENTATION_STAGE`], which a test's hold names it by.
+    label: &'static str,
+    // The document the stage records or presents a frame of, as the handle the main thread knows its
+    // arena by, or 0 for a presentation that records nothing. A test's hold names a stage by it.
+    document: usize,
+    reply: StageReply,
+}
+
+impl PaintStage {
+    fn hold_labels(&self) -> &[&'static str] {
+        std::slice::from_ref(&self.label)
+    }
+
+    fn poll(&mut self) -> bool {
+        self.reply.poll()
+    }
+
+    /// Waits for the stage, releasing a test's hold on it, as [`SubmittedStage::wait`] does.
+    fn wait(&mut self) -> &mut StageReply {
+        if !self.reply.poll() {
+            release_hold_on(std::slice::from_ref(&self.label));
+        }
+        &mut self.reply
+    }
+}
+
+/// A stage the calling thread has submitted for a document's arena or style engine and not taken
+/// back yet.
 struct SubmittedStage {
     label: &'static str,
     // The stage whose hold on the document this one has: its own label, or for a flight, the label
@@ -249,23 +318,17 @@ struct SubmittedStage {
     // The labels a test's hold may name to hold this run: its own, and those of the stages of a
     // flight it may run ("flight:style").
     hold_labels: Vec<&'static str>,
-    // The arena the stage reaches, as the handle the main thread knows it by, or 0 for a stage that
-    // reaches none.
+    // The arena of the document the stage runs for, as the handle the main thread knows it by. The
+    // stage owns it while it runs, unless it is a style pass ([`SubmittedStage::owns_arena`]). A
+    // test's hold names a stage by it.
     arena: usize,
-    // The document the stage runs for, as the handle the main thread knows its arena by: `arena`, or
-    // for a recording, which reaches no arena, its document's. A test's hold names a stage by it.
-    document: usize,
-    // Whether the stage owns `arena` while it runs. A style pass does not: it reaches only its
-    // style engine, and the main thread goes on writing the arena beside it.
-    owns_arena: bool,
     // The style engine the stage reads and writes while it runs, as the handle the main thread
-    // knows it by, or 0 for a stage that never reaches one.
+    // knows it by.
     style_engine: usize,
     // For a flight, set once it is done with the style engine: the stages after its layout reach
-    // none, as a recording does (see [`FlightReleasesStyleEngine`]).
+    // none (see [`FlightReleasesStyleEngine`]).
     style_engine_released: Option<std::sync::Arc<std::sync::atomic::AtomicU8>>,
-    from_stage: Receiver<StageOutcome>,
-    outcome: Option<StageOutcome>,
+    reply: StageReply,
     // What the main thread runs once it has taken the stage back, before anything else reaches
     // what the stage owned.
     on_taken_back: Option<Box<dyn FnOnce()>>,
@@ -275,9 +338,11 @@ struct SubmittedStage {
     _count: SubmittedStageCount,
 }
 
-/// How many submitted stages exist on any thread, taken back or not, until they are dropped. The
-/// checks for a frame in flight read it before the calling thread's own list: while it is zero no
-/// thread has one, which is the common case, and they need not reach any thread-local state.
+/// How many submitted stages for a document's arena or style engine exist on any thread, taken back
+/// or not, until they are dropped; paint lane stages are not among them. The per-document checks of
+/// the frame in flight read it before the calling thread's own list: while it is zero no thread has
+/// such a stage, which is the common case even beside a recording, and they need not reach any
+/// thread-local state.
 static SUBMITTED_STAGES: AtomicUsize = AtomicUsize::new(0);
 
 /// A submitted stage's place in [`SUBMITTED_STAGES`]. A thread only asks about the stages it
@@ -297,7 +362,8 @@ impl Drop for SubmittedStageCount {
     }
 }
 
-/// Whether no thread has a frame in flight: every check for one on the calling thread finds none.
+/// Whether no thread has a stage in flight for a document's arena or style engine: every check of
+/// [`SUBMITTED`] on the calling thread finds none.
 #[inline]
 fn no_stage_is_submitted() -> bool {
     SUBMITTED_STAGES.load(Ordering::Relaxed) == 0
@@ -307,6 +373,12 @@ impl SubmittedStage {
     /// Whether this is a lend of the arena rather than a stage the main thread submitted.
     fn is_lend(&self) -> bool {
         self.label == LEND_STAGE
+    }
+
+    /// Whether the stage owns its arena while it runs. A style pass does not: it reaches only its
+    /// style engine, and the main thread goes on writing the arena beside it.
+    fn owns_arena(&self) -> bool {
+        self.role != "style"
     }
 
     /// Takes a lent arena back: the recall ends the lend at once, or once the tick that holds the
@@ -345,17 +417,7 @@ impl SubmittedStage {
 
     fn poll(&mut self) -> bool {
         // A lend is taken back without waiting for anything but a running tick.
-        if self.recall.is_some() {
-            return true;
-        }
-        if self.outcome.is_none() {
-            match self.from_stage.try_recv() {
-                Ok(outcome) => self.outcome = Some(outcome),
-                Err(std::sync::mpsc::TryRecvError::Empty) => {}
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => std::process::abort(),
-            }
-        }
-        self.outcome.is_some()
+        self.recall.is_some() || self.reply.poll()
     }
 
     /// A held stage would never finish while the main thread waits for it, so waiting releases a
@@ -372,18 +434,13 @@ impl SubmittedStage {
     fn wait_until_finished(&mut self) {
         self.release_hold_unless_finished();
         self.recall();
-        if self.outcome.is_none() {
-            self.outcome = Some(self.from_stage.recv().unwrap_or_else(|_| std::process::abort()));
-        }
+        self.reply.wait_until_finished();
     }
 
     fn wait(&mut self) -> StageOutcome {
         self.release_hold_unless_finished();
         self.recall();
-        match self.outcome.take() {
-            Some(outcome) => outcome,
-            None => self.from_stage.recv().unwrap_or_else(|_| std::process::abort()),
-        }
+        self.reply.wait()
     }
 }
 
@@ -444,7 +501,7 @@ fn inputs_wait_for_take_back(label: &str) -> bool {
 /// main-thread path to it has to go through [`join_frame_in_flight`] first.
 pub(crate) unsafe fn submit_stage(label: &'static str, arena: *mut c_void, stage: impl FnOnce() + Send + 'static) {
     // SAFETY: Guaranteed by the caller.
-    unsafe { submit(label, label, vec![label], None, arena, arena as usize, stage, None) }
+    unsafe { submit(label, label, vec![label], None, arena, stage, None) }
 }
 
 /// Like [`submit_stage`], and has the main thread run `on_taken_back` once it has taken the stage
@@ -468,7 +525,6 @@ pub(crate) unsafe fn submit_stage_with_take_back(
             vec![label],
             None,
             arena,
-            arena as usize,
             stage,
             Some(Box::new(on_taken_back)),
         );
@@ -476,24 +532,12 @@ pub(crate) unsafe fn submit_stage_with_take_back(
 }
 
 /// Submits the display list recording `stage` of the document whose arena is `arena` to the frame
-/// in flight. The recording reaches no arena: it owns the frame it records and the recorder state it
-/// records with, and answers on a ticket. So it is submitted with none, and no door, read, style
-/// update or arena change of the document waits for it; only the frame's own take-back takes it in.
-/// `arena` names the document a test's hold names the recording by.
+/// in flight, on the paint lane. The recording reaches no arena: it owns the frame it records and the
+/// recorder state it records with, and answers on a ticket. So no door, read, style update or arena
+/// change of the document waits for it ([`PaintStage`]). `arena` names the document a test's hold
+/// names the recording by.
 pub(crate) fn submit_recording(arena: *mut c_void, stage: impl FnOnce() + Send + 'static) {
-    // SAFETY: The stage is submitted with no arena, and holds nothing else the main thread reaches.
-    unsafe {
-        submit(
-            "recording",
-            "recording",
-            vec!["recording"],
-            None,
-            std::ptr::null_mut(),
-            arena as usize,
-            stage,
-            None,
-        );
-    }
+    submit_paint_stage("recording", arena as usize, stage);
 }
 
 /// How a flight tells the calling thread it is done with the style engine: once its layout has run,
@@ -576,7 +620,6 @@ pub(crate) unsafe fn submit_flight(
             hold_labels,
             Some(releases_style_engine.0.clone()),
             arena,
-            arena as usize,
             stage,
             Some(Box::new(on_taken_back)),
         );
@@ -593,30 +636,71 @@ unsafe fn submit(
     hold_labels: Vec<&'static str>,
     style_engine_released: Option<std::sync::Arc<std::sync::atomic::AtomicU8>>,
     arena: *mut c_void,
-    document: usize,
     stage: impl FnOnce() + Send + 'static,
     on_taken_back: Option<Box<dyn FnOnce()>>,
 ) {
-    // A stage for a document that reaches none of its arena runs on the paint lane, if there is one.
-    let thread = (arena.is_null() && document != 0)
-        .then(paint_lane)
-        .flatten()
-        .or_else(stage_thread)
-        .expect("only a stage thread runs submitted stages");
+    let thread = stage_thread().expect("only a stage thread runs submitted stages");
     debug_assert!(
-        submits(label)
-            || (label == PRESENTATION_STAGE && submits_presentation())
-            || (label == FLIGHT_STAGE && submits_flight()),
+        submits(label) || (label == FLIGHT_STAGE && submits_flight()),
         "the stage {label} is not submitted"
     );
-    let (to_caller, from_stage) = channel::<StageOutcome>();
-    let caller = std::thread::current().id();
     let run = SubmittedRun {
         label,
         arena: arena as usize,
+        document: arena as usize,
+        number: NEXT_SUBMITTED_RUN.fetch_add(1, Ordering::Relaxed),
+    };
+    let reply = send_submitted_run(thread, run, stage);
+    SUBMITTED.with(|submitted| {
+        let mut submitted = submitted.borrow_mut();
+        debug_assert!(
+            !submitted.iter().any(SubmittedStage::is_lend),
+            "a stage is submitted beside a lent arena"
+        );
+        submitted.push(SubmittedStage {
+            label,
+            role,
+            hold_labels,
+            arena: arena as usize,
+            style_engine: style_engine_of_stage(arena),
+            style_engine_released,
+            reply,
+            on_taken_back,
+            recall: None,
+            _count: SubmittedStageCount::new(),
+        });
+    });
+}
+
+/// Submits `stage`, a recording or presentation labelled `label` of the document whose arena is
+/// `document` (0 for none), to the frame in flight, on the paint lane: the one thread that runs every
+/// recording and presentation of the frame in flight, in submission order, so frames reach their
+/// compositor contexts in the order the rendering update painted them. Without a paint lane
+/// (`LIBWEB_PAINT_LANE=0`) that thread is the Rendering thread.
+fn submit_paint_stage(label: &'static str, document: usize, stage: impl FnOnce() + Send + 'static) {
+    let thread = paint_lane()
+        .or_else(stage_thread)
+        .expect("only a stage thread runs submitted stages");
+    debug_assert!(submits_presentation(), "the stage {label} is not submitted");
+    debug_assert!(!has_lent_arena(), "a stage is submitted beside a lent arena");
+    let run = SubmittedRun {
+        label,
+        arena: 0,
         document,
         number: NEXT_SUBMITTED_RUN.fetch_add(1, Ordering::Relaxed),
     };
+    let reply = send_submitted_run(thread, run, stage);
+    PAINTING.with_borrow_mut(|painting| painting.push(PaintStage { label, document, reply }));
+}
+
+/// Hands `thread` the submitted run `run` of `stage`, which answers the calling thread on the reply.
+fn send_submitted_run(
+    thread: &'static StageThread,
+    run: SubmittedRun,
+    stage: impl FnOnce() + Send + 'static,
+) -> StageReply {
+    let (to_caller, from_stage) = channel::<StageOutcome>();
+    let caller = std::thread::current().id();
     let job: Job = Box::new(move || {
         RUNNING_SUBMITTED_RUN.with(|running| running.set(Some(run)));
         hold_here(FfiStageHoldPoint::BeforeRun);
@@ -638,32 +722,14 @@ unsafe fn submit(
         let _ = to_caller.send(outcome);
         frame_completion_notify();
     });
-    SUBMITTED.with(|submitted| {
-        let mut submitted = submitted.borrow_mut();
-        debug_assert!(
-            !submitted.iter().any(SubmittedStage::is_lend),
-            "a stage is submitted beside a lent arena"
-        );
-        submitted.push(SubmittedStage {
-            label,
-            role,
-            hold_labels,
-            arena: arena as usize,
-            document,
-            owns_arena: role != "style",
-            style_engine: style_engine_of_stage(role, arena),
-            style_engine_released,
-            from_stage,
-            outcome: None,
-            on_taken_back,
-            recall: None,
-            _count: SubmittedStageCount::new(),
-        });
-    });
     tsan::release(thread);
     if thread.jobs.send(StageMessage::Run(job)).is_err() {
         // The stage thread only goes away if the process is going away.
         std::process::abort();
+    }
+    StageReply {
+        from_stage,
+        outcome: None,
     }
 }
 
@@ -745,6 +811,10 @@ pub(crate) unsafe fn lend_arena(
     on_taken_back: impl FnOnce() + 'static,
 ) {
     let (to_caller, from_stage) = channel::<StageOutcome>();
+    debug_assert!(
+        PAINTING.with_borrow(Vec::is_empty),
+        "an arena is lent beside a frame in flight"
+    );
     SUBMITTED.with_borrow_mut(|submitted| {
         debug_assert!(
             submitted.iter().all(SubmittedStage::is_lend),
@@ -755,13 +825,12 @@ pub(crate) unsafe fn lend_arena(
             role: LEND_STAGE,
             hold_labels: vec![LEND_STAGE],
             arena: arena as usize,
-            document: arena as usize,
-            owns_arena: true,
-            // SAFETY: Guaranteed by the caller; the main thread still owns the arena.
-            style_engine: unsafe { &*arena.cast::<crate::layout::LayoutNodeArena>() }.style_engine_handle() as usize,
+            style_engine: style_engine_of_stage(arena),
             style_engine_released: None,
-            from_stage,
-            outcome: None,
+            reply: StageReply {
+                from_stage,
+                outcome: None,
+            },
             on_taken_back: Some(Box::new(on_taken_back)),
             recall: Some(Box::new(move || {
                 recall();
@@ -825,7 +894,7 @@ pub(crate) fn has_lent(arena: *mut c_void) -> bool {
     SUBMITTED.with_borrow(|submitted| {
         submitted
             .iter()
-            .any(|stage| stage.is_lend() && stage.arena == arena as usize && stage.outcome.is_none())
+            .any(|stage| stage.is_lend() && stage.arena == arena as usize && stage.reply.outcome.is_none())
     })
 }
 
@@ -840,20 +909,19 @@ pub extern "C" fn rust_stage_thread_submits_presentation() -> bool {
     submits_presentation()
 }
 
-/// Submits `present(context)` to the frame in flight as a presentation stage, which runs once the
-/// stages submitted before it have (a navigable's recording among them). With a non-null `arena`
-/// the stage owns that arena, whose recording it publishes; without one it reaches no arena.
+/// Submits `present(context)` to the frame in flight as a presentation stage on the paint lane,
+/// which runs once the recordings and presentations submitted before it have (a navigable's
+/// recording among them). It publishes that recording from its ticket and reaches no arena.
 /// `document` is the arena of the document whose frame it presents, which it may not reach, by
-/// which a test's hold names it.
+/// which a test's hold names it; null for a frame that records nothing.
 ///
 /// # Safety
 ///
 /// `present` must be safe to call with `context` on the stage thread, and `context` must stay valid
 /// until the main thread has taken the frame back. Until then nothing but the stage may reach what
-/// `context` lends it, nor `arena`.
+/// `context` lends it.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_stage_thread_submit_presentation(
-    arena: *mut c_void,
     document: *const c_void,
     present: unsafe extern "C" fn(*mut c_void),
     context: *mut c_void,
@@ -864,22 +932,11 @@ pub unsafe extern "C" fn rust_stage_thread_submit_presentation(
     if logs_presentation_counts() {
         log_presentation_counts();
     }
-    // SAFETY: Guaranteed by the caller.
-    unsafe {
-        submit(
-            PRESENTATION_STAGE,
-            PRESENTATION_STAGE,
-            vec![PRESENTATION_STAGE],
-            None,
-            arena,
-            document as usize,
-            move || {
-                let context = context.into_inner();
-                present(context);
-            },
-            None,
-        );
-    }
+    submit_paint_stage(PRESENTATION_STAGE, document as usize, move || {
+        let context = context.into_inner();
+        // SAFETY: Guaranteed by the caller.
+        unsafe { present(context) };
+    });
 }
 
 /// Whether every presentation counter change is logged (LIBWEB_RENDER_PRESENTS_COUNTS=1), for measuring how often a
@@ -924,13 +981,10 @@ pub extern "C" fn rust_stage_thread_presentation_counters() -> FfiPresentationCo
     }
 }
 
-/// The style engine a submitted stage reaches: the arena's, for a layout pass (it pins style
-/// records, reads the style mirror and evaluates size containers), a style stage and a clock tick
-/// (it samples the document's animations). The recording reaches none.
-fn style_engine_of_stage(label: &'static str, arena: *mut c_void) -> usize {
-    if label != "layout" && label != "style" && label != "clock" {
-        return 0;
-    }
+/// The style engine a submitted stage reaches: its arena's, for a layout pass (it pins style
+/// records, reads the style mirror and evaluates size containers), a style stage, a clock tick (it
+/// samples the document's animations), a flight, which runs the first two, and a lend.
+fn style_engine_of_stage(arena: *mut c_void) -> usize {
     // SAFETY: The stage has not been sent yet, so the main thread still owns the arena.
     unsafe { &*arena.cast::<crate::layout::LayoutNodeArena>() }.style_engine_handle() as usize
 }
@@ -1072,14 +1126,7 @@ pub extern "C" fn rust_stage_thread_wait_for_held_stage(timeout_ms: u32, held_at
         };
         // A run that finished without reaching the hold, as a flight that ended before the stage it
         // names, holds nothing.
-        let submitted_armed_run = SUBMITTED.with_borrow_mut(|submitted| {
-            submitted.iter_mut().any(|stage| {
-                hold_names_stage(&armed.label, &stage.hold_labels)
-                    && (armed.arena == 0 || armed.arena == stage.document)
-                    && !stage.poll()
-            })
-        });
-        if !submitted_armed_run || now >= deadline {
+        if !has_unfinished_run_armed(armed) || now >= deadline {
             return false;
         }
         // A run that finishes without reaching the hold tells nobody: look again shortly.
@@ -1103,14 +1150,9 @@ pub extern "C" fn rust_stage_thread_armed_hold_awaits_submission() -> bool {
     let Some(armed) = &hold.armed else {
         return false;
     };
-    SUBMITTED.with_borrow_mut(|submitted| {
-        !submitted.is_empty()
-            && !submitted.iter_mut().any(|stage| {
-                hold_names_stage(&armed.label, &stage.hold_labels)
-                    && (armed.arena == 0 || armed.arena == stage.document)
-                    && !stage.poll()
-            })
-    })
+    let submitted_any = SUBMITTED.with_borrow(|submitted| !submitted.is_empty())
+        || PAINTING.with_borrow(|painting| !painting.is_empty());
+    submitted_any && !has_unfinished_run_armed(armed)
 }
 
 /// Releases the run the stage thread is holding, and disarms a hold for `label` that the stage
@@ -1148,14 +1190,7 @@ fn stage_thread_holds_run_for_queued_stage() -> bool {
         let Some(armed) = &hold.armed else {
             return false;
         };
-        let armed_run_pending = SUBMITTED.with_borrow_mut(|submitted| {
-            submitted.iter_mut().any(|stage| {
-                hold_names_stage(&armed.label, &stage.hold_labels)
-                    && (armed.arena == 0 || armed.arena == stage.document)
-                    && !stage.poll()
-            })
-        });
-        if !armed_run_pending {
+        if !has_unfinished_run_armed(armed) {
             return false;
         }
         // The stage thread gets to the run's hold point, or finishes the run, without this thread.
@@ -1169,6 +1204,22 @@ fn stage_thread_holds_run_for_queued_stage() -> bool {
 /// Whether the stage thread holds a run for a test's hold.
 pub(crate) fn stage_thread_holds_a_run() -> bool {
     lock_stage_hold().0.holding.is_some()
+}
+
+/// Whether the calling thread has submitted a run the hold `armed` names that has not finished yet.
+fn has_unfinished_run_armed(armed: &ArmedHold) -> bool {
+    let names = |hold_labels: &[&'static str], document: usize| {
+        hold_names_stage(&armed.label, hold_labels) && (armed.arena == 0 || armed.arena == document)
+    };
+    SUBMITTED.with_borrow_mut(|submitted| {
+        submitted
+            .iter_mut()
+            .any(|stage| names(&stage.hold_labels, stage.arena) && !stage.poll())
+    }) || PAINTING.with_borrow_mut(|painting| {
+        painting
+            .iter_mut()
+            .any(|stage| names(stage.hold_labels(), stage.document) && !stage.poll())
+    })
 }
 
 /// Whether a hold armed for `armed` holds a run of a submitted stage a hold may name by one of
@@ -1235,48 +1286,51 @@ fn frame_completion_notify() {
 
 /// Whether the calling thread has submitted stages it has not taken back yet.
 pub(crate) fn has_frame_in_flight() -> bool {
-    SUBMITTED.with(|submitted| submitted.borrow().iter().any(|stage| !stage.is_lend()))
+    SUBMITTED.with_borrow(|submitted| submitted.iter().any(|stage| !stage.is_lend()))
+        || PAINTING.with_borrow(|painting| !painting.is_empty())
 }
 
 /// Whether the frame in flight owns the arena `arena`.
 pub(crate) fn frame_in_flight_owns(arena: *mut c_void) -> bool {
-    SUBMITTED.with(|submitted| {
-        submitted
-            .borrow()
-            .iter()
-            .any(|stage| stage.owns_arena && stage.arena == arena as usize && !stage.is_lend())
-    })
+    !no_stage_is_submitted()
+        && SUBMITTED.with_borrow(|submitted| {
+            submitted
+                .iter()
+                .any(|stage| stage.owns_arena() && stage.arena == arena as usize && !stage.is_lend())
+        })
 }
 
-/// Whether the frame in flight has a stage for the document whose arena is `arena`, owning the
-/// arena or not.
+/// Whether the frame in flight has a stage for the document whose arena is `arena` that owns the
+/// arena or reaches its style engine.
 pub(crate) fn document_frame_in_flight(arena: *mut c_void) -> bool {
-    SUBMITTED.with_borrow(|submitted| {
-        submitted
-            .iter()
-            .any(|stage| stage.arena == arena as usize && !stage.is_lend())
-    })
+    !no_stage_is_submitted()
+        && SUBMITTED.with_borrow(|submitted| {
+            submitted
+                .iter()
+                .any(|stage| stage.arena == arena as usize && !stage.is_lend())
+        })
 }
 
 /// Whether every stage of the frame in flight has finished. Does not wait.
 pub(crate) fn frame_in_flight_has_finished() -> bool {
-    SUBMITTED.with(|submitted| submitted.borrow_mut().iter_mut().all(SubmittedStage::poll))
+    SUBMITTED.with_borrow_mut(|submitted| submitted.iter_mut().all(SubmittedStage::poll))
+        && PAINTING.with_borrow_mut(|painting| painting.iter_mut().all(PaintStage::poll))
 }
 
 /// Waits for every stage of the frame in flight and takes the frame back. Returns whether there was
 /// one. A panic in one of its stages continues here. The frame's effects are the caller's to apply.
 pub(crate) fn take_frame_in_flight() -> bool {
-    let mut stages = SUBMITTED.with(|submitted| std::mem::take(&mut *submitted.borrow_mut()));
-    if stages.is_empty() {
+    let stages = SUBMITTED.with_borrow_mut(std::mem::take);
+    let mut paint_stages = PAINTING.with_borrow_mut(std::mem::take);
+    if stages.is_empty() && paint_stages.is_empty() {
         return false;
     }
-    if stages
+    if paint_stages
         .iter_mut()
         .any(|stage| stage.label == PRESENTATION_STAGE && !stage.poll())
     {
         note_take_back_waited_for_presentation();
     }
-    stage_thread().expect("only a stage thread runs submitted stages");
     let mut panic = None;
     let mut on_taken_back = Vec::new();
     for mut stage in stages {
@@ -1284,6 +1338,11 @@ pub(crate) fn take_frame_in_flight() -> bool {
             panic.get_or_insert(payload);
         }
         on_taken_back.extend(stage.on_taken_back.take());
+    }
+    for mut stage in paint_stages {
+        if let Err(payload) = stage.wait().wait() {
+            panic.get_or_insert(payload);
+        }
     }
     acquire_stage_threads();
     if let Some(payload) = panic {
@@ -1302,8 +1361,8 @@ pub(crate) fn running_join_work() -> bool {
 }
 
 /// Called where main-thread code reaches render-owned state: if the frame in flight owns the arena
-/// `arena` (or any, for a null `arena`), waits for the frame, takes it back and runs the frame
-/// scheduler's consume-commit, so the access finds the document as the frame left it. Work a
+/// `arena` (or has any stage, for a null `arena`), waits for the frame, takes it back and runs the
+/// frame scheduler's consume-commit, so the access finds the document as the frame left it. Work a
 /// stage joined the main thread for belongs to that stage and does not wait. Logs each call site
 /// that forced a join once.
 #[track_caller]
@@ -1315,12 +1374,24 @@ pub(crate) fn join_frame_in_flight(arena: *mut c_void) {
 /// Like [`join_frame_in_flight`], for a call site outside Rust that names itself (column 0 when it
 /// has none).
 pub(crate) fn join_frame_in_flight_at(arena: *mut c_void, file: &'static str, line: u32, column: u32) {
-    join_frame_in_flight_for_stage(
-        |stage| arena.is_null() || (stage.owns_arena && stage.arena == arena as usize),
-        file,
-        line,
-        column,
-    );
+    if !arena.is_null() {
+        join_frame_in_flight_for_stage(
+            |stage| stage.owns_arena() && stage.arena == arena as usize,
+            file,
+            line,
+            column,
+        );
+        return;
+    }
+    if RUNNING_JOIN_WORK.with(Cell::get) != 0 {
+        return;
+    }
+    let first_stage = SUBMITTED
+        .with_borrow(|submitted| submitted.first().map(|stage| (stage.label, stage.role)))
+        .or_else(|| PAINTING.with_borrow(|painting| painting.first().map(|stage| (stage.label, stage.label))));
+    if let Some((label, role)) = first_stage {
+        join_reached_stage(label, role, |_| true, file, line, column);
+    }
 }
 
 /// Like [`join_frame_in_flight_at`], for a main-thread operation on the document whose arena is
@@ -1330,22 +1401,34 @@ pub(crate) fn join_document_frame_in_flight_at(arena: *mut c_void, file: &'stati
     join_frame_in_flight_for_stage(|stage| stage.arena == arena as usize, file, line, column);
 }
 
-/// Like [`join_frame_in_flight`], for the recording of the document whose arena is `arena` in flight,
-/// which is submitted with no arena: the frame's consume publishes it, as the frame's presentation may
-/// not have.
+/// Like [`join_frame_in_flight`], for the recording of the document whose arena is `arena` in flight
+/// on the paint lane: the frame's consume publishes it, as the frame's presentation may not have.
 #[track_caller]
 pub(crate) fn join_recording_in_flight_of(arena: *mut c_void) {
-    let location = std::panic::Location::caller();
-    join_frame_in_flight_for_stage(
-        |stage| stage.role == "recording" && stage.document == arena as usize,
-        location.file(),
-        location.line(),
-        location.column(),
-    );
+    if RUNNING_JOIN_WORK.with(Cell::get) != 0 {
+        return;
+    }
+    let recording_in_flight = PAINTING.with_borrow(|painting| {
+        painting
+            .iter()
+            .any(|stage| stage.label == "recording" && stage.document == arena as usize)
+    });
+    if recording_in_flight {
+        let location = std::panic::Location::caller();
+        join_reached_stage(
+            "recording",
+            "recording",
+            |_| false,
+            location.file(),
+            location.line(),
+            location.column(),
+        );
+    }
 }
 
-/// If a stage of the frame in flight is `reached`, waits for the frame, takes it back and runs the
-/// frame scheduler's consume-commit, as [`join_frame_in_flight`] describes.
+/// If a stage of the frame in flight for a document's arena or style engine is `reached`, waits for
+/// the frame, takes it back and runs the frame scheduler's consume-commit, as
+/// [`join_frame_in_flight`] describes.
 fn join_frame_in_flight_for_stage(
     reached: impl Fn(&SubmittedStage) -> bool,
     file: &'static str,
@@ -1355,18 +1438,32 @@ fn join_frame_in_flight_for_stage(
     if no_stage_is_submitted() || RUNNING_JOIN_WORK.with(Cell::get) != 0 {
         return;
     }
-    let reached_stage = SUBMITTED.with(|submitted| {
+    let reached_stage = SUBMITTED.with_borrow(|submitted| {
         submitted
-            .borrow()
             .iter()
             .find(|stage| reached(stage))
             .map(|stage| (stage.label, stage.role))
     });
-    let Some((label, role)) = reached_stage else {
-        return;
-    };
+    if let Some((label, role)) = reached_stage {
+        join_reached_stage(label, role, reached, file, line, column);
+    }
+}
+
+/// Joins the frame in flight for a reached stage labelled `label` with the role `role`: waits for
+/// the frame, takes it back and runs the frame scheduler's consume-commit. Where the frame is only
+/// lent arenas, takes back those `lend_reached` names instead.
+fn join_reached_stage(
+    label: &'static str,
+    role: &'static str,
+    lend_reached: impl Fn(&SubmittedStage) -> bool,
+    file: &'static str,
+    line: u32,
+    column: u32,
+) {
     // A lent arena comes back with nothing to consume.
-    if SUBMITTED.with_borrow(|submitted| submitted.iter().all(SubmittedStage::is_lend)) {
+    if PAINTING.with_borrow(Vec::is_empty)
+        && SUBMITTED.with_borrow(|submitted| submitted.iter().all(SubmittedStage::is_lend))
+    {
         // SAFETY: Called on the main thread.
         if FRAME_SCHEDULER_HOST
             .get()
@@ -1377,7 +1474,7 @@ fn join_frame_in_flight_for_stage(
             return;
         }
         // The others stay lent: what reached this one reaches nothing of theirs.
-        take_lent_arenas_reached(reached);
+        take_lent_arenas_reached(lend_reached);
         return;
     }
     if role == "style" {
@@ -1431,11 +1528,15 @@ fn refuse_join_while_tearing_down_cells(file: &'static str, line: u32) {
 /// Waits for every stage of the calling thread's frame in flight to finish, and leaves the frame in
 /// flight for its consume.
 fn wait_for_submitted_stages() {
-    let waited = SUBMITTED.with_borrow_mut(|submitted| {
+    let waited_for_stages = SUBMITTED.with_borrow_mut(|submitted| {
         submitted.iter_mut().for_each(SubmittedStage::wait_until_finished);
         !submitted.is_empty()
     });
-    if waited {
+    let waited_for_paint_stages = PAINTING.with_borrow_mut(|painting| {
+        painting.iter_mut().for_each(|stage| stage.wait().wait_until_finished());
+        !painting.is_empty()
+    });
+    if waited_for_stages || waited_for_paint_stages {
         acquire_stage_threads();
     }
 }
@@ -1465,11 +1566,12 @@ pub extern "C" fn rust_stage_thread_only_style_pass_in_flight_for(engine: *const
 /// back (see `StyleEngine::publish_input`).
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_stage_thread_layout_pass_in_flight_for(engine: *const c_void) -> bool {
-    SUBMITTED.with_borrow(|submitted| {
-        submitted
-            .iter()
-            .any(|stage| inputs_wait_for_take_back(stage.role) && stage.style_engine == engine as usize)
-    })
+    !no_stage_is_submitted()
+        && SUBMITTED.with_borrow(|submitted| {
+            submitted
+                .iter()
+                .any(|stage| inputs_wait_for_take_back(stage.role) && stage.style_engine == engine as usize)
+        })
 }
 
 /// Like [`join_frame_in_flight_at`], for a main-side write to the style engine of the document the
@@ -1478,29 +1580,31 @@ pub extern "C" fn rust_stage_thread_layout_pass_in_flight_for(engine: *const c_v
 /// engine, so the write goes on beside it, and whatever else the writer reaches of the arena waits
 /// at the arena's own doors.
 pub(crate) fn join_frame_reaching_style_engine_at(arena: *mut c_void, file: &'static str, line: u32, column: u32) {
-    let reaches_style_engine = SUBMITTED.with_borrow(|submitted| {
-        submitted
-            .iter()
-            .any(|stage| stage.arena == arena as usize && stage.reaches_style_engine(stage.style_engine))
-    });
+    let reaches_style_engine = !no_stage_is_submitted()
+        && SUBMITTED.with_borrow(|submitted| {
+            submitted
+                .iter()
+                .any(|stage| stage.arena == arena as usize && stage.reaches_style_engine(stage.style_engine))
+        });
     if reaches_style_engine {
         join_document_frame_in_flight_at(arena, file, line, column);
     }
 }
 
-/// Whether the frame in flight owns the arena `arena` with its recordings, which reach no style
-/// engine, and its layout pass or clock tick, beside which what the document publishes to its style
-/// engine waits (see [`rust_stage_thread_layout_pass_in_flight_for`]), only. A main-side change the arena would
-/// take in beside such a frame can wait for the frame's take-back instead of joining it.
+/// Whether the frame in flight owns the arena `arena` with its layout pass or clock tick only,
+/// beside which what the document publishes to its style engine waits (see
+/// [`rust_stage_thread_layout_pass_in_flight_for`]). A main-side change the arena would take in
+/// beside such a frame can wait for the frame's take-back instead of joining it.
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_stage_thread_arena_changes_wait_for_frame(arena: *mut c_void) -> bool {
-    SUBMITTED.with_borrow(|submitted| {
-        let mut owners = submitted
-            .iter()
-            .filter(|stage| stage.arena == arena as usize)
-            .peekable();
-        owners.peek().is_some() && owners.all(|stage| stage.style_engine == 0 || inputs_wait_for_take_back(stage.role))
-    })
+    !no_stage_is_submitted()
+        && SUBMITTED.with_borrow(|submitted| {
+            let mut owners = submitted
+                .iter()
+                .filter(|stage| stage.arena == arena as usize)
+                .peekable();
+            owners.peek().is_some() && owners.all(|stage| inputs_wait_for_take_back(stage.role))
+        })
 }
 
 /// What a DOM tree mutation of the document the arena `arena` belongs to does about the frame in flight.
@@ -1520,6 +1624,9 @@ pub(crate) enum FrameForDomTreeMutation {
 /// ([`join_frame_in_flight`]) would. Every DOM tree mutation passes the door, a parser for each
 /// node it inserts, so no frame in flight is answered first.
 pub(crate) fn frame_in_flight_for_dom_tree_mutation(arena: *mut c_void) -> FrameForDomTreeMutation {
+    if no_stage_is_submitted() {
+        return FrameForDomTreeMutation::GoesOnBeside { owns_arena: false };
+    }
     SUBMITTED.with_borrow(|submitted| {
         if submitted.is_empty() {
             return FrameForDomTreeMutation::GoesOnBeside { owns_arena: false };
@@ -1541,26 +1648,27 @@ pub(crate) fn frame_in_flight_for_dom_tree_mutation(arena: *mut c_void) -> Frame
         FrameForDomTreeMutation::GoesOnBeside {
             owns_arena: submitted
                 .iter()
-                .any(|stage| stage.owns_arena && stage.arena == arena && !stage.is_lend()),
+                .any(|stage| stage.owns_arena() && stage.arena == arena && !stage.is_lend()),
         }
     })
 }
 
 /// Counts a forced join against the label of each stage of the frame in flight it takes in.
 fn count_forced_join() {
-    SUBMITTED.with_borrow(|submitted| {
-        FORCED_JOINS.with_borrow_mut(|counts| {
-            for (index, stage) in submitted.iter().enumerate() {
-                // A flight is counted as the stage whose hold it has.
-                if submitted[..index].iter().any(|earlier| earlier.role == stage.role) {
-                    continue;
-                }
-                match counts.iter_mut().find(|(label, _)| *label == stage.role) {
-                    Some((_, count)) => *count += 1,
-                    None => counts.push((stage.role, 1)),
-                }
+    // A flight is counted as the stage whose hold it has.
+    let mut roles: Vec<&'static str> =
+        SUBMITTED.with_borrow(|submitted| submitted.iter().map(|stage| stage.role).collect());
+    roles.extend(PAINTING.with_borrow(|painting| painting.iter().map(|stage| stage.label).collect::<Vec<_>>()));
+    FORCED_JOINS.with_borrow_mut(|counts| {
+        for (index, role) in roles.iter().enumerate() {
+            if roles[..index].contains(role) {
+                continue;
             }
-        });
+            match counts.iter_mut().find(|(label, _)| label == role) {
+                Some((_, count)) => *count += 1,
+                None => counts.push((role, 1)),
+            }
+        }
     });
 }
 
@@ -2125,19 +2233,18 @@ mod tests {
                     hold_labels: vec![label],
                     style_engine_released: None,
                     arena,
-                    document: arena,
-                    owns_arena: label != "style",
                     style_engine,
-                    from_stage,
-                    outcome: None,
+                    reply: StageReply {
+                        from_stage,
+                        outcome: None,
+                    },
                     on_taken_back: None,
                     recall: None,
                     _count: SubmittedStageCount::new(),
                 })
             });
         };
-        // A recording reaches no style engine.
-        submit("recording", 0x10, 0);
+        submit("clock", 0x10, 0x3000);
         assert_eq!(label_of_submitted_stage_reaching(engine as *const c_void), None);
         submit("layout", 0x20, engine);
         assert_eq!(
@@ -2153,7 +2260,7 @@ mod tests {
         rust_stage_thread_end_style_engine_entrances_that_only_wait();
         assert!(SUBMITTED.with(|submitted| {
             let submitted = submitted.borrow();
-            submitted.len() == 2 && submitted[0].outcome.is_none() && submitted[1].outcome.is_some()
+            submitted.len() == 2 && submitted[0].reply.outcome.is_none() && submitted[1].reply.outcome.is_some()
         }));
         SUBMITTED.with(|submitted| submitted.borrow_mut().clear());
     }

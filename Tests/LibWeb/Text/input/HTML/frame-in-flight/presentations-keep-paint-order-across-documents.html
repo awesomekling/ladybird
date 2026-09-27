@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<div id="mover" style="width: 10px; height: 10px; background: green; will-change: transform"></div>
+<iframe id="frame" srcdoc="<div id=inner style='width: 20px; height: 20px; background: red'></div>"></iframe>
+<script>
+    // Frames reach their compositor contexts in paint order. The rendering update paints the iframe before this
+    // document, so the frame in flight presents the iframe's frame first. This document's frame here records nothing
+    // (only a composited transform moves), yet it has to wait for the iframe's frame, whose recording is held before it
+    // runs: while it is held, this document's presented scene epoch stays where it was.
+    asyncTest(async done => {
+        await new Promise(resolve => window.addEventListener("load", resolve));
+        await twoFrames();
+        internals.setRenderPresents(true);
+        const inner = frame.contentDocument.getElementById("inner");
+        let before = 0;
+        const facts = await whileFrameInFlight("before-run", () => {
+            before = internals.presentedSceneEpoch();
+            inner.style.backgroundColor = "green";
+            mover.style.transform = "translateX(5px)";
+        }, async frame => {
+            if (!frame.armed)
+                return frame;
+            // Nothing below takes the frame back: no layout, style or hit-test reads.
+            const deadline = performance.now() + 300;
+            let whileHeld = before;
+            while (whileHeld === before && performance.now() < deadline)
+                whileHeld = internals.presentedSceneEpoch();
+            return { ...frame, whileHeld };
+        }, frame.contentDocument);
+        internals.resetRenderPresents();
+        println(`held as armed: ${heldAsArmed(facts, "before-run")}`);
+        println(`not presented ahead of the iframe's frame: ${!facts.armed || facts.whileHeld === before}`);
+        await twoFrames();
+        println(`presented once released: ${!facts.armed || internals.presentedSceneEpoch() > before}`);
+        println(`inner: ${getComputedStyle(inner).backgroundColor}`);
+        done();
+    });
+</script>
