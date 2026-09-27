@@ -259,6 +259,8 @@ pub(crate) struct PaintNode {
     pub(crate) parent: NodeSlotId,
     pub(crate) first_child: NodeSlotId,
     pub(crate) next_sibling: NodeSlotId,
+    /// The style node of what the node was built for, which is how the host names that DOM node.
+    pub(crate) style_node: Option<crate::css::style::tree::StyleNodeID>,
 }
 
 impl Default for PaintNode {
@@ -273,12 +275,14 @@ impl Default for PaintNode {
             parent: NodeSlotId::INVALID,
             first_child: NodeSlotId::INVALID,
             next_sibling: NodeSlotId::INVALID,
+            style_node: None,
         }
     }
 }
 
 impl PaintNode {
-    pub(crate) fn of(data: &NodeData) -> Self {
+    /// The node's row as `data` holds it, built for the node `style_node` names.
+    pub(crate) fn of(data: &NodeData, style_node: Option<crate::css::style::tree::StyleNodeID>) -> Self {
         Self {
             generation: data.slot_generation.get(),
             kind: data.kind.get(),
@@ -289,6 +293,7 @@ impl PaintNode {
             parent: data.parent.get(),
             first_child: data.first_child.get(),
             next_sibling: data.next_sibling.get(),
+            style_node,
         }
     }
 }

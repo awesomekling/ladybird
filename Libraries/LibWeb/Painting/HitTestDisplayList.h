@@ -116,7 +116,6 @@ private:
 
     [[nodiscard]] Optional<CSSPixelPoint> local_point_for_visual_context(Compositing::ContextRef, CSSPixelPoint, DOM::Document const&, double device_pixels_per_css_pixel) const;
     [[nodiscard]] CSSPixelRect viewport_rect_for_context(Compositing::SpatialNodeIndex, CSSPixelRect const&, DOM::Document const&, double device_pixels_per_css_pixel) const;
-    [[nodiscard]] Layout::Node const* layout_node_for_item(Item) const;
     [[nodiscard]] RefPtr<ChromeWidget> chrome_widget_for_item(Item) const;
     [[nodiscard]] DOM::Node const* item_dom_node(size_t item_index) const;
     [[nodiscard]] DOM::NodeIdentity item_identity(size_t item_index) const;

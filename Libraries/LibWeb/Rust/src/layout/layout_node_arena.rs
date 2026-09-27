@@ -1837,12 +1837,12 @@ impl LayoutNodeArena {
     /// the last publication is shared with it, and a changed one is copied only while an earlier
     /// publication still holds it.
     pub(crate) fn publish_paint_tree(&mut self) -> super::tree_shape::PublishedShape {
-        self.tree_shape.publish(&self.chunks)
+        self.tree_shape.publish(&self.chunks, &self.style_nodes)
     }
 
     #[cfg(test)]
     pub(crate) fn paint_tree_changed_since_publish(&mut self) -> bool {
-        self.tree_shape.changed_since_publish(&self.chunks)
+        self.tree_shape.changed_since_publish(&self.chunks, &self.style_nodes)
     }
 
     pub(crate) fn data(&self, id: NodeSlotId) -> &NodeData {
@@ -1962,6 +1962,8 @@ impl LayoutNodeArena {
             }
         }
         self.style_nodes[index].set(style_node);
+        // The row publishes the style node beside its shape.
+        self.write_shape(id).mark_written();
         if let Some(style_node) = style_node {
             let head = first_rows.head_mut(style_node);
             self.next_rows_with_same_style_node[index].set(*head);

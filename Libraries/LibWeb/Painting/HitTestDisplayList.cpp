@@ -7,9 +7,6 @@
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Node.h>
 #include <LibWeb/DOM/ShadowRoot.h>
-#include <LibWeb/HTML/HTMLAreaElement.h>
-#include <LibWeb/HTML/HTMLImageElement.h>
-#include <LibWeb/HTML/HTMLMapElement.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/Painting/BoxViews.h>
@@ -237,11 +234,6 @@ HitTestDisplayList::ClosestLine HitTestDisplayList::find_closest_line(CSSPixelPo
     return closest_line;
 }
 
-Layout::Node const* HitTestDisplayList::layout_node_for_item(Item item) const
-{
-    return layout_node_for_committed_slot(*m_arena, item.paintable());
-}
-
 RefPtr<ChromeWidget> HitTestDisplayList::chrome_widget_for_item(Item item) const
 {
     switch (item.chrome_widget_kind()) {
@@ -300,63 +292,30 @@ bool HitTestDisplayList::item_is_direct_caret_target(size_t item_index) const
     return !identity.is_none() && identity == event_dispatch_identity_for_item(item_index);
 }
 
-// https://html.spec.whatwg.org/multipage/image-maps.html#image-map-processing-model
-// The image publishes the areas of the map it is associated with onto its row, so the hit names
-// one of them without asking the DOM for the map or for the areas' attributes.
-static DOM::NodeIdentity image_map_area_for_point(Layout::Node const& layout_node, CSSPixelPoint local_point)
+static DOM::NodeIdentity identity_of(Layout::RustFFI::FfiHitNodeIdentity identity)
 {
-    // For historical reasons, the coordinates must be interpreted relative to the displayed image after any stretching
-    // caused by the CSS 'width' and 'height' properties.
-    auto image_rect = Painting::absolute_rect(layout_node);
-    auto point = (local_point - image_rect.location()).to_type<float>();
-    auto area = Layout::RustFFI::layout_arena_image_map_area_for_point(
-        layout_node.arena_handle(), Layout::Node::slot_id(&layout_node), point.x(), point.y(),
-        static_cast<float>(image_rect.width().to_double()), static_cast<float>(image_rect.height().to_double()));
-    if (area == 0)
+    switch (identity.kind) {
+    case Layout::RustFFI::FfiHitNodeIdentityKind::None:
         return {};
-    return DOM::NodeIdentity::of_style_node(CSS::StyleNodeID { area });
+    case Layout::RustFFI::FfiHitNodeIdentityKind::StyleNode:
+        return DOM::NodeIdentity::of_style_node(CSS::StyleNodeID { identity.style_node });
+    case Layout::RustFFI::FfiHitNodeIdentityKind::Document:
+        return DOM::NodeIdentity::of_document();
+    }
+    VERIFY_NOT_REACHED();
 }
 
+// The snapshot resolves the hit to the DOM node it is on (hit_test/snapshot.rs): the root element for a hit on the
+// viewport, an image map's area, or the node an event there is dispatched to.
 HitTestResult HitTestDisplayList::hit_test_result_for_item(Item item, CSSPixelPoint local_point) const
 {
-    auto const* paintable_layout_node = layout_node_for_item(item);
-    auto hit_node = item.hit_node();
-
-    auto const* named_layout_node = layout_node_for_committed_slot(*m_arena, hit_node);
-    VERIFY(named_layout_node && as<Layout::NodeWithStyle>(*named_layout_node).pointer_events() != CSS::PointerEvents::None);
-
-    // https://drafts.csswg.org/cssom-view/#dom-document-elementfrompoint
-    // 2. If there is a box in the viewport that would be a target for hit testing at coordinates x,y, when applying
-    //    the transforms that apply to the descendants of the viewport, return the associated element and terminate
-    //    these steps.
-    // 3. If the document has a root element, return the root element and terminate these steps.
-    // AD-HOC: Our viewport refers to the document instead of the root element. The steps above imply that we should
-    //         not hit test the viewport as a box, and report the root element as hit when we otherwise miss, so we
-    //         correct those hits here. This is where both pointer event hit testing and elementFromPoint() converge.
-    DOM::NodeIdentity root_element;
-    if (paintable_layout_node && paintable_layout_node->kind() == Layout::RustFFI::NodeKind::Viewport) {
-        auto root_row = Layout::RustFFI::layout_arena_published_root_element_row(m_arena->handle());
-        if (root_row.index != Compositing::RustFFI::INVALID_NODE_SLOT_INDEX) {
-            root_element = identity_for_dispatch_node(layout_node_for_committed_slot(*m_arena, root_row), false);
-            hit_node = root_row;
-        }
-    }
-
-    // The hit names rows; the layout nodes they are rows of say which DOM nodes the hit is on.
     auto resolved = Layout::RustFFI::hit_test_snapshot_resolve_hit(m_snapshot, item.index(), local_point);
-    auto identity = root_element;
-    if (identity.is_none() && paintable_layout_node)
-        identity = image_map_area_for_point(*paintable_layout_node, local_point);
-    if (identity.is_none())
-        identity = identity_for_dispatch_node(m_arena->node_if_live(resolved.dispatch), resolved.allow_pseudo_fallback);
-    if (identity.is_none())
-        identity = identity_for_dispatch_node(m_arena->node_if_live(resolved.fallback_dispatch), false);
 
     // NB: Empty-line items are not reachable through regular hit testing; the descriptor still resolves them for
     // callers that already hold such an item.
     auto result = HitTestResult {
-        .node = identity,
-        .hit_node = hit_node,
+        .node = identity_of(resolved.node),
+        .hit_node = resolved.hit_node,
         .arena = *m_arena,
         .chrome_widget = chrome_widget_for_item(item),
         .is_text_fragment = resolved.is_text_fragment,
