@@ -7,6 +7,7 @@
 #include <LibWeb/CSS/CSSStyleProperties.h>
 #include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/DOM/Element.h>
+#include <LibWeb/DOM/NodeIdentity.h>
 #include <LibWeb/Layout/Box.h>
 #include <LibWeb/Page/ElementResizeAction.h>
 #include <LibWeb/Painting/BoxViews.h>
@@ -30,9 +31,9 @@ ElementResizeAction::ElementResizeAction(GC::Ref<DOM::Element> element, CSSPixel
     : m_element(element)
     , m_pointer_down_origin(pointer_down_origin)
 {
-    auto const* layout_node = element->layout_node();
-    if (layout_node && Painting::has_committed_box(*layout_node))
-        m_initial_border_box_size = Painting::absolute_border_box_rect(*layout_node).size();
+    auto identity = DOM::NodeIdentity::of(*element);
+    if (Painting::has_committed_box(element->document(), identity))
+        m_initial_border_box_size = Painting::absolute_border_box_rect(element->document(), identity).size();
 }
 
 void ElementResizeAction::handle_pointer_move(CSSPixelPoint pointer_position)

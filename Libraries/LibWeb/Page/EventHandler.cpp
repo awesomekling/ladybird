@@ -186,15 +186,16 @@ static Optional<Painting::CaretPosition> caret_position_from_editable_hit_node(D
     if (!arena)
         return {};
 
+    auto const& document = hit_node.document();
     auto boundary_identity = DOM::NodeIdentity::of(*boundary_node);
-    auto* layout_node = boundary_identity.bound_layout_node(*arena);
-    if (!layout_node || !Painting::has_committed_box(*layout_node))
-        layout_node = DOM::NodeIdentity::of(hit_node).bound_layout_node(*arena);
-    if (!layout_node || !Painting::has_committed_box(*layout_node))
+    auto box_identity = boundary_identity;
+    if (!Painting::has_committed_box(document, box_identity))
+        box_identity = DOM::NodeIdentity::of(hit_node);
+    if (!Painting::has_committed_box(document, box_identity))
         return {};
 
     return Painting::CaretPosition {
-        .paintable = Painting::committed_row_slot(*layout_node),
+        .paintable = Painting::committed_row_slot(document, box_identity),
         .arena = *arena,
         .boundary = { boundary_identity, 0 },
     };
