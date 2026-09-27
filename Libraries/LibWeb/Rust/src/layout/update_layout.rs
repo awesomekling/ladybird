@@ -744,8 +744,9 @@ pub(crate) struct OwnerLayoutStep(crate::stage_thread::CallerWaits<FrameStep>);
 
 impl OwnerLayoutUnit {
     /// Runs the unit on the owner, with the arena of the render state it holds for the unit's document, and answers
-    /// the waiting document thread.
-    pub(crate) fn run(self, arena: *mut c_void) {
+    /// the waiting document thread. Where the owner holds none (a bug of the sender's), the unit runs with the arena
+    /// its frame names.
+    pub(crate) fn run(self, arena: Option<*mut c_void>) {
         let Self {
             frame,
             facts,
@@ -755,11 +756,9 @@ impl OwnerLayoutUnit {
         let frame = frame.into_inner();
         reply.answer(|| {
             // SAFETY: The document thread waits for the unit, and reaches neither the frame nor the arena meanwhile.
-            debug_assert_eq!(
-                unsafe { (*frame).inputs.arena_handle },
-                arena,
-                "a unit runs with its document's arena"
-            );
+            let frame_arena = unsafe { (*frame).inputs.arena_handle };
+            debug_assert_eq!(Some(frame_arena), arena, "a unit runs with its document's arena");
+            let arena = arena.unwrap_or(frame_arena);
             // The faces the round wants are its document's, for that document's layout end to request.
             let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(arena as u64);
             // SAFETY: As above.

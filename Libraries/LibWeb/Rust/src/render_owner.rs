@@ -110,8 +110,11 @@ impl ChangeQueue {
             "a unit applies only changes sent before it"
         );
         let mut taken = Vec::new();
-        while self.pending.front().is_some_and(|(seq, _)| *seq <= through) {
-            let (seq, change) = self.pending.pop_front().expect("checked above");
+        while let Some((seq, change)) = self.pending.pop_front() {
+            if seq > through {
+                self.pending.push_front((seq, change));
+                break;
+            }
             self.applied_through = seq;
             taken.push(change);
         }
@@ -330,11 +333,14 @@ fn handle_message(message: ToOwner) {
             document,
             first,
             changes,
-        } => with_state(document, |state| {
-            for (index, change) in changes.into_iter().enumerate() {
-                state.changes.receive(ChangeSeq(first.0 + index as u64), change);
-            }
-        }),
+        } => {
+            // The changes of a document with no state have nothing to change: they are dropped.
+            with_state(document, |state| {
+                for (index, change) in changes.into_iter().enumerate() {
+                    state.changes.receive(ChangeSeq(first.0 + index as u64), change);
+                }
+            });
+        }
         ToOwner::RenderingUpdate {
             document,
             update,
@@ -364,6 +370,7 @@ fn handle_message(message: ToOwner) {
                 );
                 state.answer(query)
             })
+            .unwrap_or_else(|| Answer::unanswered(query))
         }),
         ToOwner::Recall { .. } => {}
         ToOwner::Destroy { document } => {
@@ -376,13 +383,16 @@ fn handle_message(message: ToOwner) {
     }
 }
 
-/// Runs `operation` on the render state of `document`, on the owner thread.
-fn with_state<R>(document: DocumentId, operation: impl FnOnce(&mut RenderState) -> R) -> R {
+/// Runs `operation` on the render state of `document`, on the owner thread. A message about a document with no
+/// state here is a bug of the sender's; it gets no answer from the state, and the caller falls back.
+fn with_state<R>(document: DocumentId, operation: impl FnOnce(&mut RenderState) -> R) -> Option<R> {
     STATES.with_borrow_mut(|states| {
         let state = states.get_mut(&document);
-        // A message about a document with no state here panics, which ends the message, not the owner.
-        let state = state.unwrap_or_else(|| panic!("document {document:?} has no render state on this thread"));
-        operation(state)
+        debug_assert!(
+            state.is_some(),
+            "document {document:?} has no render state on this thread"
+        );
+        state.map(operation)
     })
 }
 
@@ -391,7 +401,7 @@ pub(crate) fn apply_changes_through(document: DocumentId, through: ChangeSeq, ta
     if !document.is_valid() {
         return;
     }
-    let changes = with_state(document, |state| state.changes.take_through(through));
+    let changes = with_state(document, |state| state.changes.take_through(through)).unwrap_or_default();
     for change in changes {
         change.apply(target);
     }
@@ -496,8 +506,10 @@ pub(crate) unsafe fn ask(document: DocumentId, arena: *mut c_void, query: Query)
             reply,
         },
         || {
-            if STATES.with_borrow(|states| states.contains_key(&document)) {
-                return with_state(document, |state| state.answer(query));
+            if let Some(answer) =
+                STATES.with_borrow_mut(|states| states.get_mut(&document).map(|state| state.answer(query)))
+            {
+                return answer;
             }
             // SAFETY: Guaranteed by the caller.
             Answer::of(query, unsafe { &mut *arena.cast::<ArenaHandle>() }.arena_mut())
@@ -707,7 +719,7 @@ mod tests {
                 first: seq,
                 changes: vec![Change::StyleInputs(InputForPass::empty())],
             });
-            let applied = with_state(document, |state| state.changes.take_through(seq).len());
+            let applied = with_state(document, |state| state.changes.take_through(seq).len()).unwrap();
             assert_eq!(applied, 1);
             handle(ToOwner::Destroy { document });
             STATES.with_borrow(|states| states.is_empty())
