@@ -1485,7 +1485,7 @@ pub(crate) struct RecordingJob {
     should_paint_overlay: bool,
     publishes_recording: bool,
     frame_generation: u64,
-    ticket: std::sync::Arc<crate::painting::recording_slot::RecordingTicket>,
+    answerer: crate::painting::recording_slot::RecordingAnswerer,
 }
 
 const _: () = {
@@ -1499,23 +1499,24 @@ impl RecordingJob {
         should_paint_overlay: bool,
         frame_generation: u64,
     ) -> (Self, std::sync::Arc<crate::painting::recording_slot::RecordingTicket>) {
-        let ticket = crate::painting::recording_slot::RecordingTicket::new();
+        let (ticket, answerer) = crate::painting::recording_slot::RecordingTicket::new();
         let job = Self {
             should_paint_overlay,
             publishes_recording: input.inputs.publishes_recording,
             frame_generation,
             input,
-            ticket: ticket.clone(),
+            answerer,
         };
         (job, ticket)
     }
 
-    /// Records, and answers.
+    /// Records, and answers. A recording that panics answers that it was abandoned as it unwinds,
+    /// and its panic continues where the main thread takes its stage back.
     pub(crate) fn run(self) {
         let viewport = self.input.viewport;
         let trace_recordings = self.input.trace_recordings;
         let output = record_display_list_stage(self.input);
-        self.ticket.answer(recorded_answer(
+        self.answerer.answer(recorded_answer(
             output,
             viewport,
             self.should_paint_overlay,
@@ -2124,6 +2125,19 @@ pub unsafe extern "C" fn layout_recording_ticket_release(ticket: *const c_void) 
         // SAFETY: Guaranteed by the caller.
         drop(unsafe { std::sync::Arc::from_raw(ticket.cast::<crate::painting::recording_slot::RecordingTicket>()) });
     }
+}
+
+/// Whether the recording whose ticket the frame's presentation holds unwound, which left nothing to
+/// publish: the frame shows nothing, and the recording's panic continues where the main thread takes
+/// the frame back. Waits for the recording to answer.
+///
+/// # Safety
+///
+/// `ticket` must be a live ticket from `layout_arena_recording_ticket_for_presentation`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_recording_ticket_was_abandoned(ticket: *const c_void) -> bool {
+    // SAFETY: Guaranteed by the caller.
+    unsafe { &*ticket.cast::<crate::painting::recording_slot::RecordingTicket>() }.was_abandoned()
 }
 
 /// What the frame's presentation publishes of a recording, for the host to build its frame from.

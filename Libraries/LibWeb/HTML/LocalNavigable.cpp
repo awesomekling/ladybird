@@ -6966,6 +6966,9 @@ Optional<LocalNavigable::PendingCompositorFrame> LocalNavigable::begin_painting_
 static void present_from_frame_in_flight(void* context)
 {
     auto& presentation = *static_cast<Compositor::Presentation*>(context);
+    // The recording panicked: the frame shows nothing, and the panic continues where the main thread takes it back.
+    if (presentation.recording_ticket && Layout::RustFFI::layout_recording_ticket_was_abandoned(presentation.recording_ticket))
+        return;
     Optional<Compositor::PublishedDisplayList> published;
     if (presentation.recording) {
         published = Painting::publish_rust_display_list_recording_in_frame(*presentation.recording, presentation.recording_ticket, presentation.paint_command_cache_source.ptr(), presentation.inputs.paint_command_cache_source_resources, presentation.source);
