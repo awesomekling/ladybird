@@ -496,6 +496,7 @@ pub(crate) unsafe fn submit(arena: *mut c_void, flight: Flight) {
     let style_engine = unsafe { &*arena.cast::<crate::layout::LayoutNodeArena>() }.style_engine_handle();
     let (loan, settlement) = flight.lend_style_engine(style_engine).unzip();
     let take_back = flight.take_back();
+    let began = flight.began;
     // SAFETY: Guaranteed by the caller.
     let document = unsafe { crate::layout::ArenaHandle::document_of(arena) };
     FLIGHT_STYLE_DECISION.store(STYLE_UNDECIDED, std::sync::atomic::Ordering::Release);
@@ -511,10 +512,21 @@ pub(crate) unsafe fn submit(arena: *mut c_void, flight: Flight) {
                 if let Some(settlement) = settlement {
                     settlement.settle();
                 }
-                let FrameEffects { mut outcome, ran } = effects_of_update
-                    .try_recv()
-                    .expect("a rendering update that was taken back sent its effects")
-                    .into_inner();
+                // An update whose handling panicked sent none: the main thread runs the frame from where it began.
+                let FrameEffects { mut outcome, ran } = effects_of_update.try_recv().map_or_else(
+                    |_| {
+                        debug_assert!(false, "a rendering update that was taken back sent its effects");
+                        FrameEffects {
+                            outcome: FfiFlightOutcome {
+                                began,
+                                reached: began,
+                                end: FfiFlightEndReason::StageRunsOnMain,
+                            },
+                            ran: FlightRan::default(),
+                        }
+                    },
+                    crate::stage_thread::FrameOwns::into_inner,
+                );
                 take_back.finish(&mut outcome);
                 if let Some(style) = ran.style {
                     FLIGHT_STYLE_ENDS.with(|ends| {
