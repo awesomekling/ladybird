@@ -3057,7 +3057,8 @@ impl RetainedState {
             })
             .collect::<Option<_>>()?;
         exact_answer = self.in_cascade_order(exact_answer, false);
-        let cascade_winners_are_complete = self.cascade_winner_inventory_is_complete(&exact_answer, Some(node));
+        let cascade_winners_are_complete =
+            self.cascade_winner_inventory_is_complete_in_transaction(effects, &exact_answer, node);
         if exact_answer.iter().any(|entry| {
             entry.pseudo_element.is_some() && patch.cascade_update_rules.binary_search(&entry.rule).is_ok()
         }) {
@@ -3490,7 +3491,8 @@ impl RetainedState {
             materialized.push(entry.materialize(node, &self.programs, cascade_order)?);
         }
         let materialized = self.in_cascade_order(materialized, false);
-        let cascade_winners_are_complete = self.cascade_winner_inventory_is_complete(&materialized, Some(node));
+        let cascade_winners_are_complete =
+            self.cascade_winner_inventory_is_complete_in_transaction(effects, &materialized, node);
 
         verify_match_answer_against_cold(self, &materialized, node, "a retained match answer delta", counters);
 
@@ -4011,7 +4013,8 @@ impl RetainedState {
                     entry.materialize(node, &self.programs, cascade_order)
                 })
                 .collect::<Option<Vec<_>>>()?;
-            let cascade_winners_are_complete = self.cascade_winner_inventory_is_complete(&exact_answer, Some(node));
+            let cascade_winners_are_complete =
+                self.cascade_winner_inventory_is_complete_in_transaction(effects, &exact_answer, node);
             Some((exact_answer, cascade_winners_are_complete))
         });
         let (matches, cascade_winners_are_complete, compact_answer) =

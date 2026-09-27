@@ -1003,6 +1003,27 @@ impl StyleEngine {
             .answer_transition_cannot_change_cascade(node, previous_input, current_input, &mut self.counters)
     }
 
+    /// Whether `node`'s winner inventory over `matches` is complete in a transaction that moves
+    /// the answers of `moving` and nothing else.
+    #[cfg(test)]
+    pub(super) fn cascade_winner_inventory_is_complete_in_transaction(
+        &mut self,
+        matches: &[RuleMatch],
+        node: StyleNodeID,
+        moving: &[StyleNodeID],
+    ) -> bool {
+        let mut effects = AnswerEffects::default();
+        for &moved in moving {
+            let input = self.state.retained.intern_cascade_input(&[], &mut self.counters);
+            self.state
+                .retained
+                .publish_cascade_input_with_effects(&mut effects, moved, input);
+        }
+        self.state
+            .retained
+            .cascade_winner_inventory_is_complete_in_transaction(&effects, matches, node)
+    }
+
     #[inline]
     #[cfg(test)]
     pub(super) fn retained_closure_cascade_input(&self, node: StyleNodeID) -> Option<MatchAnswerID> {

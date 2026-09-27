@@ -1365,6 +1365,23 @@ impl RetainedState {
         })
     }
 
+    /// As cascade_winner_inventory_is_complete(), for winners published in the transaction `effects`
+    /// belong to. Whether a gated rule is held is noted as the node's winners are published, so
+    /// before that it is what held for the winners published last; an ancestor's answer that
+    /// moves now leaves the rule undecided again.
+    pub(super) fn cascade_winner_inventory_is_complete_in_transaction(
+        &self,
+        effects: &AnswerEffects,
+        matches: &[RuleMatch],
+        node: StyleNodeID,
+    ) -> bool {
+        self.cascade_winner_inventory_is_complete(matches, Some(node))
+            && !(matches
+                .iter()
+                .any(|entry| self.program.rule_is_gated_by_container_query(entry.rule))
+                && self.container_ancestor_answer_moves(node, effects))
+    }
+
     /// Exactly match every style node in the document scope against the attached program.
     ///
     /// This is the optimized batch path running on the real document. It packs the facts the store

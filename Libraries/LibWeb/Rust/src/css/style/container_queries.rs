@@ -129,20 +129,24 @@ impl RetainedState {
     /// conditions read the containers above it, which are final only when no ancestor's answer
     /// moves in the same transaction.
     pub(super) fn note_container_gates_for_publication(&mut self, node: StyleNodeID, effects: &AnswerEffects) {
-        let mut ancestor = self.tree.flat_tree_parent(node);
-        let mut moving = false;
-        while let Some(current) = ancestor {
-            if effects.lookup(current).is_some() {
-                moving = true;
-                break;
-            }
-            ancestor = self.tree.flat_tree_parent(current);
-        }
-        if moving {
+        if self.container_ancestor_answer_moves(node, effects) {
             self.container_gates_unheld.insert(node);
         } else {
             self.container_gates_unheld.remove(&node);
         }
+    }
+
+    /// Whether an ancestor's answer moves in the transaction `effects` belong to: the containers
+    /// above `node` are not final then, and neither are its gated rules' conditions.
+    pub(super) fn container_ancestor_answer_moves(&self, node: StyleNodeID, effects: &AnswerEffects) -> bool {
+        let mut ancestor = self.tree.flat_tree_parent(node);
+        while let Some(current) = ancestor {
+            if effects.lookup(current).is_some() {
+                return true;
+            }
+            ancestor = self.tree.flat_tree_parent(current);
+        }
+        false
     }
 
     /// A node whose gated rules decide differently over the containers as they stand now than
