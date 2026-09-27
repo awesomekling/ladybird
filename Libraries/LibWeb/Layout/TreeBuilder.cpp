@@ -188,16 +188,6 @@ static void attach_content_replacement_image(Box& image_box)
 // keep itself alive; every other identity resolves through the index.
 // The DOM node the style mirror files under `style_node`. The document is the only node the
 // style computer does not answer for, because it is not in the node map.
-static DOM::Node& dom_node_for_style_node(DOM::Document& document, u32 style_node)
-{
-    CSS::StyleNodeID identity { style_node };
-    if (identity == document.style_node_id())
-        return document;
-    auto node = document.style_computer().node_for_style_node(identity);
-    VERIFY(node);
-    return *node;
-}
-
 static CSS::PseudoElement css_pseudo_element(RustFFI::FfiPseudoElement pseudo_element)
 {
     switch (pseudo_element) {
@@ -249,7 +239,12 @@ bool attach_owed_style_resources(DOM::Document& document, Compositing::RustFFI::
 
 bool attach_owed_generated_image(DOM::Document& document, Compositing::RustFFI::NodeSlotId slot, u32 style_node, RustFFI::FfiPseudoElement ffi_pseudo, RustFFI::FfiGeneratedContentItem item, Compositing::RustFFI::NodeSlotId pseudo_element_box_slot)
 {
-    auto& element = as<DOM::Element>(dom_node_for_style_node(document, style_node));
+    // A generator that went away beside the frame that built its pseudo-element's boxes (removed, or adopted into
+    // another document) names no image any more, and the boxes go away with it.
+    auto generator = document.style_computer().node_for_style_node(CSS::StyleNodeID { style_node });
+    if (!generator)
+        return false;
+    auto& element = as<DOM::Element>(*generator);
     auto& image_box = as<Box>(*pseudo_element_build_node(document, slot));
     // The marker a list-item pseudo-element nests takes its content's style from itself.
     auto& style_box = item.nested_marker.index != Compositing::RustFFI::INVALID_NODE_SLOT_INDEX

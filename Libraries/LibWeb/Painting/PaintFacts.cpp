@@ -431,6 +431,10 @@ void push_paint_facts_after_style_attach(Layout::Row const& row, DOM::Node* dom_
         }
     }
     // Only these kinds of boxes paint from facts their DOM node keeps; the style of any other box is all it paints from.
+    // A box kept after its node went away beside the frame that built it (removed, or adopted into another document)
+    // has no node to take them from, and paints from its style until the node's removal takes it away.
+    if (!dom_node && row.kind() != Layout::RustFFI::NodeKind::ImageBox)
+        return;
     switch (row.kind()) {
     case Layout::RustFFI::NodeKind::CheckBox:
     case Layout::RustFFI::NodeKind::RadioButton:
