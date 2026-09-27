@@ -7287,11 +7287,11 @@ fn closure_identity_stop_declines_stale_pseudo_rows() {
     let pseudo = PseudoElementTarget::new(PseudoElementKind(1));
     let rule = add_guard_target_rule(&mut engine, guard, target);
     let pseudo_rule = add_pseudo_target_rule(&mut engine, StyleSheetObjectID(2), target, pseudo);
-    engine.set_rule_declared_properties(rule, &[(1, false)], true);
-    engine.set_rule_declared_properties(pseudo_rule, &[(1, false)], true);
+    engine.set_rule_declared_properties(rule, &[(1, false)]);
+    engine.set_rule_declared_properties(pseudo_rule, &[(1, false)]);
     for &node in &nodes {
         for kind in ElementDeclarationKind::ALL {
-            engine.set_element_declared_properties(node, kind, &[], Vec::new(), Vec::new(), Vec::new(), true);
+            engine.set_element_declared_properties(node, kind, &[], Vec::new(), Vec::new(), Vec::new());
         }
     }
     for (node, class) in [(nodes[1], guard), (nodes[2], target)] {
