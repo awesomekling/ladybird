@@ -8,7 +8,7 @@ use super::*;
 use crate::painting::chrome_geometry::{ChromeGeometry, scrollbar_is_enlarged};
 use crate::painting::ffi::ScrollDirection;
 use crate::painting::host::FfiHitTestQueryCallbacks;
-use crate::painting::paintable_rows::PaintableRowsRead;
+use crate::painting::published_frame::PaintRead;
 use crate::painting::visual_context::{NO_SORTING_CONTEXT, SortingContexts, SpatialNodeIndex, VisualContextTree};
 use std::collections::HashMap;
 
@@ -92,7 +92,7 @@ struct TopmostSearch<'a> {
 impl HitTestList {
     fn item_contains(
         &self,
-        layout_arena: &impl PaintableRowsRead,
+        layout_arena: &impl PaintRead,
         callbacks: &FfiHitTestQueryCallbacks,
         item: &HitTestItem,
         local: (f32, f32),
@@ -151,7 +151,7 @@ impl HitTestList {
 
     fn find_topmost_item_in_list(
         &self,
-        layout_arena: &impl PaintableRowsRead,
+        layout_arena: &impl PaintRead,
         callbacks: &FfiHitTestQueryCallbacks,
         item_indices: &[usize],
         local: (f32, f32),
@@ -185,7 +185,7 @@ impl HitTestList {
 
     fn find_topmost(
         &self,
-        layout_arena: &impl PaintableRowsRead,
+        layout_arena: &impl PaintRead,
         visual_context_tree: &VisualContextTree,
         callbacks: &FfiHitTestQueryCallbacks,
         point: CssPixelPoint,
@@ -252,7 +252,7 @@ impl HitTestList {
 
     fn topmost_item_by_plane_depth(
         &self,
-        layout_arena: &impl PaintableRowsRead,
+        layout_arena: &impl PaintRead,
         visual_context_tree: &VisualContextTree,
         callbacks: &FfiHitTestQueryCallbacks,
         point: CssPixelPoint,
@@ -297,7 +297,7 @@ impl HitTestList {
 
     pub(crate) fn find_topmost_item(
         &self,
-        layout_arena: &impl PaintableRowsRead,
+        layout_arena: &impl PaintRead,
         visual_context_tree: &VisualContextTree,
         callbacks: &FfiHitTestQueryCallbacks,
         point: CssPixelPoint,
@@ -313,7 +313,7 @@ impl HitTestList {
 
     pub(crate) fn find_topmost_items_for_caret(
         &self,
-        layout_arena: &impl PaintableRowsRead,
+        layout_arena: &impl PaintRead,
         visual_context_tree: &VisualContextTree,
         callbacks: &FfiHitTestQueryCallbacks,
         point: CssPixelPoint,
@@ -324,7 +324,7 @@ impl HitTestList {
 
     pub(crate) fn hit_test_all(
         &self,
-        layout_arena: &impl PaintableRowsRead,
+        layout_arena: &impl PaintRead,
         visual_context_tree: &VisualContextTree,
         callbacks: &FfiHitTestQueryCallbacks,
         point: CssPixelPoint,

@@ -6,20 +6,45 @@
 
 use super::*;
 use crate::layout::node_data::NodeFlag;
+use crate::painting::hit_test::read::CaretRead;
 use crate::painting::host::FfiCaretBoundaryKind;
-use crate::painting::host::FfiResolvedCaret;
 use crate::painting::paintable_data::SELECTION_STATE_START_AND_END;
-use crate::painting::paintable_rows::PaintableRowsRead;
-use std::ffi::c_void;
+use crate::painting::published_frame::PaintRead;
 
-pub(crate) fn empty_line_is_anchored_to_its_forced_break(arena: &impl PaintableRowsRead, item: &HitTestItem) -> bool {
+/// What a hit names for an event to be dispatched to, and where in its node it landed: rows, which
+/// the caller finds the layout nodes of.
+#[derive(Default)]
+pub(crate) struct ResolvedHit {
+    pub(crate) dispatch: Option<NodeSlotId>,
+    /// Whether a dispatch row that stands for no DOM node dispatches to the element its pseudo-element
+    /// was generated for.
+    pub(crate) allow_pseudo_fallback: bool,
+    pub(crate) fallback_dispatch: Option<NodeSlotId>,
+    pub(crate) has_index_in_node: bool,
+    pub(crate) index_in_node: usize,
+    pub(crate) is_text_fragment: bool,
+}
+
+/// The caret position a hit resolves to, in the row whose node it is a position in.
+#[derive(Default)]
+pub(crate) struct ResolvedCaret {
+    pub(crate) has_position: bool,
+    pub(crate) node: Option<NodeSlotId>,
+    pub(crate) boundary: FfiCaretBoundaryKind,
+    pub(crate) offset: usize,
+    pub(crate) affinity_is_upstream: bool,
+    pub(crate) has_debug_rect: bool,
+    pub(crate) debug_rect: CssPixelRect,
+}
+
+pub(crate) fn empty_line_is_anchored_to_its_forced_break(arena: &impl PaintRead, item: &HitTestItem) -> bool {
     arena.node_kind_if_live(item.caret_node) == Some(crate::layout::node_data::NodeKind::BreakNode)
 }
 
 /// The DOM node a row stands for, named the way the host names one: by the style node, or by 0
 /// for a row that stands for no node of its own. An anonymous row stands for none, and so does
 /// the viewport row, whose node is the document and which the style mirror holds no identity for.
-pub(crate) fn row_dom_style_node(arena: &impl PaintableRowsRead, slot: NodeSlotId) -> u32 {
+pub(crate) fn row_dom_style_node(arena: &impl CaretRead, slot: NodeSlotId) -> u32 {
     if !arena.node_is_dom_backed(slot) {
         return 0;
     }
@@ -32,7 +57,7 @@ pub(crate) fn row_dom_style_node(arena: &impl PaintableRowsRead, slot: NodeSlotI
 /// Whether the node a row stands for is `scope` or lies below it in the DOM tree. The scope is a
 /// node the host named before the query, and the answer is read out of the style mirror, which
 /// carries the DOM child sequence the test walks.
-pub(crate) fn row_is_in_scope(arena: &impl PaintableRowsRead, scope: u32, document: u32, slot: NodeSlotId) -> bool {
+pub(crate) fn row_is_in_scope(arena: &impl CaretRead, scope: u32, document: u32, slot: NodeSlotId) -> bool {
     use crate::css::style::tree::StyleNodeID;
     let (Some(scope), Some(document), Some(node)) = (
         StyleNodeID::from_raw(scope),
@@ -41,11 +66,11 @@ pub(crate) fn row_is_in_scope(arena: &impl PaintableRowsRead, scope: u32, docume
     ) else {
         return false;
     };
-    arena.with_style_store(|engine| engine.tree().is_in_dom_subtree_of(node, scope, document))
+    arena.node_is_in_dom_subtree_of(node, scope, document)
 }
 
 impl HitTestList {
-    pub(crate) fn item_target_slot(&self, arena: &impl PaintableRowsRead, item_index: usize) -> Option<NodeSlotId> {
+    pub(crate) fn item_target_slot(&self, arena: &impl PaintRead, item_index: usize) -> Option<NodeSlotId> {
         let item = &self.items[item_index];
         match item.kind {
             HitTestItemKind::TextFragment => fragment_layout_node_slot(arena, item),
@@ -54,54 +79,33 @@ impl HitTestList {
         }
     }
 
-    pub(crate) fn item_target_shell(
-        &self,
-        main_thread: &crate::stage::MainThread,
-        arena: &impl PaintableRowsRead,
-        item_index: usize,
-    ) -> *mut c_void {
-        self.item_target_slot(arena, item_index)
-            .map_or(std::ptr::null_mut(), |slot| arena.shell_if_live(main_thread, slot))
-    }
-
-    pub(crate) fn item_dispatch_shell(
-        &self,
-        main_thread: &crate::stage::MainThread,
-        arena: &impl PaintableRowsRead,
-        item_index: usize,
-    ) -> (*mut c_void, bool) {
+    /// The row an event at the item is dispatched to, and whether one that stands for no DOM node
+    /// dispatches to the element its pseudo-element was generated for.
+    pub(crate) fn item_dispatch_slot(&self, arena: &impl PaintRead, item_index: usize) -> (Option<NodeSlotId>, bool) {
         let item = &self.items[item_index];
         match item.kind {
-            HitTestItemKind::TextFragment => (
-                fragment_layout_node_slot(arena, item)
-                    .map_or(std::ptr::null_mut(), |slot| arena.shell_if_live(main_thread, slot)),
-                true,
-            ),
-            HitTestItemKind::EmptyLine => (arena.shell_if_live(main_thread, item.caret_node), false),
-            _ => (
-                event_dispatch_shell_for_paintable(main_thread, arena, item.paintable),
-                false,
-            ),
+            HitTestItemKind::TextFragment => (fragment_layout_node_slot(arena, item), true),
+            HitTestItemKind::EmptyLine => (Some(item.caret_node), false),
+            _ => (event_dispatch_slot_for_paintable(arena, item.paintable), false),
         }
     }
 
     pub(crate) fn resolve_hit(
         &self,
-        main_thread: &crate::stage::MainThread,
-        arena: &impl PaintableRowsRead,
+        arena: &impl PaintRead,
         item_index: usize,
         local_point: CssPixelPoint,
-    ) -> crate::painting::host::FfiResolvedHit {
+    ) -> ResolvedHit {
         let item = &self.items[item_index];
-        let (dispatch_shell, allow_pseudo_fallback) = self.item_dispatch_shell(main_thread, arena, item_index);
-        let mut result = crate::painting::host::FfiResolvedHit {
-            dispatch_shell,
+        let (dispatch, allow_pseudo_fallback) = self.item_dispatch_slot(arena, item_index);
+        let mut result = ResolvedHit {
+            dispatch,
             allow_pseudo_fallback,
             ..Default::default()
         };
         match item.kind {
             HitTestItemKind::TextFragment => {
-                result.fallback_dispatch_shell = event_dispatch_shell_for_paintable(main_thread, arena, item.paintable);
+                result.fallback_dispatch = event_dispatch_slot_for_paintable(arena, item.paintable);
                 result.has_index_in_node = true;
                 result.index_in_node = fragment_index_in_node_for_point(arena, item, local_point);
                 result.is_text_fragment = true;
@@ -116,12 +120,11 @@ impl HitTestList {
 
     pub(crate) fn resolve_caret(
         &self,
-        main_thread: &crate::stage::MainThread,
-        arena: &impl PaintableRowsRead,
+        arena: &impl CaretRead,
         item_index: usize,
         local_point: CssPixelPoint,
         position_type: crate::painting::hit_test::caret::CaretPositionType,
-    ) -> FfiResolvedCaret {
+    ) -> ResolvedCaret {
         let item = &self.items[item_index];
         match item.kind {
             HitTestItemKind::TextFragment => with_item_fragment(arena, item, |fragment| {
@@ -134,8 +137,8 @@ impl HitTestList {
                             + fragment.length_in_code_units
                             + fragment.trailing_whitespace_length_in_code_units;
                         if arena
-                            .text_content(fragment.layout_node)
-                            .is_some_and(|content| end < content.text.len())
+                            .text_content_length(fragment.layout_node)
+                            .is_some_and(|length| end < length)
                         {
                             fragment.dom_end_offset_with_trailing_whitespace
                         } else {
@@ -147,24 +150,23 @@ impl HitTestList {
                         crate::painting::text_fragment::index_in_node_for_point(paintable_rows, fragment, local_point)
                     }
                 };
-                let node_shell = arena.shell_if_live(main_thread, fragment.layout_node);
                 let affinity_is_upstream = offset >= fragment.dom_end_offset_in_node
                     && offset == fragment.dom_end_offset_with_trailing_whitespace;
                 let debug_rect = fragment_caret_range_rect(arena, fragment, offset);
-                FfiResolvedCaret {
+                ResolvedCaret {
                     has_position: true,
-                    node_shell,
+                    node: Some(fragment.layout_node),
                     boundary: FfiCaretBoundaryKind::Offset,
                     offset,
                     affinity_is_upstream,
                     has_debug_rect: true,
-                    debug_rect: debug_rect.into(),
+                    debug_rect,
                 }
             })
             .unwrap_or_default(),
-            HitTestItemKind::EmptyLine => FfiResolvedCaret {
+            HitTestItemKind::EmptyLine => ResolvedCaret {
                 has_position: true,
-                node_shell: arena.shell_if_live(main_thread, item.caret_node),
+                node: Some(item.caret_node),
                 boundary: if empty_line_is_anchored_to_its_forced_break(arena, item) {
                     FfiCaretBoundaryKind::IndexOfNodeInParent
                 } else {
@@ -172,15 +174,15 @@ impl HitTestList {
                 },
                 offset: item.caret_offset,
                 has_debug_rect: true,
-                debug_rect: item.caret_rect.into(),
+                debug_rect: item.caret_rect,
                 ..Default::default()
             },
-            HitTestItemKind::EmptyEditable => FfiResolvedCaret {
+            HitTestItemKind::EmptyEditable => ResolvedCaret {
                 has_position: true,
-                node_shell: arena.shell_if_live(main_thread, item.paintable),
+                node: Some(item.paintable),
                 boundary: FfiCaretBoundaryKind::Offset,
                 has_debug_rect: true,
-                debug_rect: item.caret_rect.into(),
+                debug_rect: item.caret_rect,
                 ..Default::default()
             },
             HitTestItemKind::Box => {
@@ -191,16 +193,16 @@ impl HitTestList {
                         self.box_point_is_before(item_index, local_point)
                     }
                 };
-                FfiResolvedCaret {
+                ResolvedCaret {
                     has_position: true,
-                    node_shell: arena.shell_if_live(main_thread, item.paintable),
+                    node: Some(item.paintable),
                     boundary: if is_before {
                         FfiCaretBoundaryKind::BeforeNode
                     } else {
                         FfiCaretBoundaryKind::AfterNode
                     },
                     has_debug_rect: true,
-                    debug_rect: item.caret_rect.into(),
+                    debug_rect: item.caret_rect,
                     ..Default::default()
                 }
             }
@@ -210,7 +212,7 @@ impl HitTestList {
 }
 
 pub(crate) fn with_item_fragment<R>(
-    arena: &impl PaintableRowsRead,
+    arena: &impl PaintRead,
     item: &HitTestItem,
     f: impl FnOnce(&crate::painting::paintable_data::FragmentRecord) -> R,
 ) -> Option<R> {
@@ -222,28 +224,25 @@ pub(crate) fn with_item_fragment<R>(
         .map(f)
 }
 
-pub(crate) fn fragment_layout_node_slot(arena: &impl PaintableRowsRead, item: &HitTestItem) -> Option<NodeSlotId> {
+pub(crate) fn fragment_layout_node_slot(arena: &impl PaintRead, item: &HitTestItem) -> Option<NodeSlotId> {
     with_item_fragment(arena, item, |fragment| fragment.layout_node)
 }
 
-pub(crate) fn event_dispatch_shell_for_paintable(
-    main_thread: &crate::stage::MainThread,
-    arena: &impl PaintableRowsRead,
-    slot: NodeSlotId,
-) -> *mut c_void {
-    let paintable_rows = arena;
-    let mut current = paintable_rows.paintable_row_is_populated(slot).then_some(slot);
+/// The row an event at a paintable is dispatched to: the paintable's, or its nearest paint ancestor's
+/// that is not anonymous.
+pub(crate) fn event_dispatch_slot_for_paintable(arena: &impl PaintRead, slot: NodeSlotId) -> Option<NodeSlotId> {
+    let mut current = arena.paintable_row_is_populated(slot).then_some(slot);
     while let Some(paintable) = current {
         if arena.node_flags_if_live(paintable) & NodeFlag::Anonymous as u32 == 0 {
-            return arena.shell_if_live(main_thread, paintable);
+            return Some(paintable);
         }
-        current = crate::painting::paint_order::paint_parent(paintable_rows, paintable);
+        current = crate::painting::paint_order::paint_parent(arena, paintable);
     }
-    std::ptr::null_mut()
+    None
 }
 
 pub(crate) fn fragment_index_in_node_for_point(
-    arena: &impl PaintableRowsRead,
+    arena: &impl PaintRead,
     item: &HitTestItem,
     local_point: CssPixelPoint,
 ) -> usize {
@@ -255,7 +254,7 @@ pub(crate) fn fragment_index_in_node_for_point(
 }
 
 fn fragment_caret_range_rect(
-    arena: &impl PaintableRowsRead,
+    arena: &impl PaintRead,
     fragment: &crate::painting::paintable_data::FragmentRecord,
     offset: usize,
 ) -> CssPixelRect {
