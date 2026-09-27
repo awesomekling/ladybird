@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style>
+    .hot { color: red; }
+</style>
+<div id="container"></div>
+<script>
+    container.innerHTML = "<div></div>".repeat(20000);
+</script>
+<script>
+    test(() => {
+        const children = container.children;
+        const writes = () => internals.styleEngineCounters().styleReactionRankSlotWrites;
+        internals.updateStyle();
+        let largest = 0;
+        let total = 0;
+        for (let round = 0; round < 5; ++round) {
+            for (let index = round; index < children.length; index += 1000)
+                children[index].classList.toggle("hot");
+            internals.updateStyle();
+            const before = writes();
+            // The counter is read at the start of a flush, so the next flush reports this one.
+            document.body.classList.toggle("flip");
+            internals.updateStyle();
+            const flushWrites = writes() - before;
+            largest = Math.max(largest, flushWrites);
+            total += flushWrites;
+        }
+        println(`ranked 20-element batches: ${total > 0}`);
+        println(`rank slot writes per flush stay below the element count: ${largest < 2000}`);
+    });
+</script>

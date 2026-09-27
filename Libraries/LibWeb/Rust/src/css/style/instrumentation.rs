@@ -166,6 +166,7 @@ define_counters! {
     EngineComputedRecordHostPseudoBackings => "engineComputedRecordHostPseudoBackings",
     BatchBackingPseudoMatchHosts => "batchBackingPseudoMatchHosts",
     CascadePseudoWinnerRows => "cascadePseudoWinnerRows",
+    StyleReactionRankSlotWrites => "styleReactionRankSlotWrites",
     EngineComputedRecordBailPseudoBackdrop => "engineComputedRecordBailPseudoBackdrop",
     EngineComputedRecordGateAncestors => "engineComputedRecordGateAncestors",
     EngineComputedLonghandEvaluations => "engineComputedLonghandEvaluations",

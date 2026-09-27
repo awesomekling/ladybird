@@ -1174,6 +1174,10 @@ impl StyleEngineState {
             Counter::CascadePseudoWinnerRows,
             self.retained.winner_groups.pseudo_row_count() as u64,
         );
+        counters.set(
+            Counter::StyleReactionRankSlotWrites,
+            self.tree.reaction_rank_slot_writes(),
+        );
         compile_union_timer.stop(Counter::BatchCompilationMicroseconds, counters);
         let winner_version_timer = PassTimer::start();
         if let Some(base_version) = program_base_version {
@@ -1849,11 +1853,13 @@ impl StyleEngineState {
         // that is in the same batch. Visit it in the order C++ applies the deltas in instead.
         if published_nodes.len() > 1 {
             let ranks = self.tree.style_reaction_order_ranks(published_nodes.iter().copied());
-            let mut ranked: Vec<(usize, u32)> = published_nodes
+            let mut ranked: Vec<(u32, u32)> = published_nodes
                 .iter()
                 .enumerate()
                 .map(|(index, node)| (ranks[node], index as u32))
                 .collect();
+            let ranks_bytes = ranks.capacity_bytes();
+            drop(ranks);
             ranked.sort_unstable();
             let order: Vec<u32> = ranked.iter().map(|&(_, index)| index).collect();
             let reordered: Vec<_> = order.iter().map(|&index| published_nodes[index as usize]).collect();
@@ -1861,12 +1867,12 @@ impl StyleEngineState {
                 .iter()
                 .map(|&index| previous_cascade_inputs[index as usize])
                 .collect();
-            let reorder_bytes = (ranked.capacity() * size_of::<(usize, u32)>()
+            let reorder_bytes = (ranked.capacity() * size_of::<(u32, u32)>()
                 + order.capacity() * size_of::<u32>()
                 + reordered.capacity() * size_of::<StyleNodeID>()
                 + reordered_inputs.capacity() * size_of::<Option<MatchAnswerID>>())
                 as u64
-                + ranks.capacity_bytes();
+                + ranks_bytes;
             self.retained
                 .memory
                 .reserve_required(MemoryCategory::BatchScratch, reorder_bytes);
@@ -1874,7 +1880,7 @@ impl StyleEngineState {
             published_nodes.extend(reordered.iter().copied());
             previous_cascade_inputs.clear();
             previous_cascade_inputs.extend(reordered_inputs.iter().copied());
-            drop((ranked, order, reordered, reordered_inputs, ranks));
+            drop((ranked, order, reordered, reordered_inputs));
             self.retained
                 .memory
                 .release(MemoryCategory::BatchScratch, reorder_bytes);
