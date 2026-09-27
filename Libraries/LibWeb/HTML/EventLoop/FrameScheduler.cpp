@@ -316,17 +316,25 @@ bool FrameScheduler::submit()
     return true;
 }
 
-void FrameScheduler::submit_layout(Vector<GC::Ref<DOM::Document>> documents, size_t document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp)
+void FrameScheduler::submit_document_pass(Vector<GC::Ref<DOM::Document>> documents, size_t document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp)
 {
-    // NB: The document submitted its layout pass as a flight under the same condition.
-    auto kind = Layout::RustFFI::rust_stage_thread_submits_flight() ? FrameTicket::SubmittedPass::Kind::Flight : FrameTicket::SubmittedPass::Kind::Layout;
-    submit_pass(kind, move(documents), document_index, frame_timestamp);
-}
-
-void FrameScheduler::submit_style(Vector<GC::Ref<DOM::Document>> documents, size_t document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp)
-{
-    // NB: The document submitted its style pass as a flight under the same condition.
-    auto kind = Layout::RustFFI::rust_stage_thread_submits_flight() ? FrameTicket::SubmittedPass::Kind::Flight : FrameTicket::SubmittedPass::Kind::Style;
+    // The ticket runs the pass the frame in flight holds, whichever the document chose to submit.
+    auto kind = FrameTicket::SubmittedPass::Kind::Layout;
+    switch (Layout::RustFFI::rust_stage_thread_submitted_document_pass()) {
+    case Layout::RustFFI::FfiSubmittedDocumentPass::Style:
+        kind = FrameTicket::SubmittedPass::Kind::Style;
+        break;
+    case Layout::RustFFI::FfiSubmittedDocumentPass::Layout:
+        kind = FrameTicket::SubmittedPass::Kind::Layout;
+        break;
+    case Layout::RustFFI::FfiSubmittedDocumentPass::Flight:
+        kind = FrameTicket::SubmittedPass::Kind::Flight;
+        break;
+    case Layout::RustFFI::FfiSubmittedDocumentPass::None:
+        // The document submitted a pass, which the frame in flight holds.
+        ASSERT(false);
+        break;
+    }
     submit_pass(kind, move(documents), document_index, frame_timestamp);
 }
 

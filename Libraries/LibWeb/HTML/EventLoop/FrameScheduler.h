@@ -130,14 +130,12 @@ public:
     void add_to_ticket(LocalNavigable&, LocalNavigable::PendingCompositorFrame&&);
     // Ends the main half. Returns true if a frame is in flight, in which case the tail runs once it has been taken in.
     bool submit();
-    // Ends the main half with a frame that runs the layout pass of documents[document_index], which the document has
-    // submitted. Once the frame is taken back, its tail goes on with the rendering update at step 16 for that document,
-    // as a main half of its own that may submit the recording.
-    void submit_layout(Vector<GC::Ref<DOM::Document>> documents, size_t document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp);
-    // Ends the main half with a frame that runs the first style pass of documents[document_index], which the document
-    // has submitted. Consume-commit finishes the document's style update; the tail then goes on with the rendering
-    // update at step 16 for that document, as a main half of its own that may submit the layout pass and the recording.
-    void submit_style(Vector<GC::Ref<DOM::Document>> documents, size_t document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp);
+    // Ends the main half with a frame that runs the pass documents[document_index] has submitted: its layout pass, its
+    // first style pass, or a flight that begins with either, as the frame in flight holds it. Once the frame is taken
+    // back, its tail goes on with the rendering update at step 16 for that document, as a main half of its own. After
+    // a style pass, consume-commit finishes the document's style update, and that main half may submit the layout pass
+    // and the recording; after a layout pass, it may submit the recording.
+    void submit_document_pass(Vector<GC::Ref<DOM::Document>> documents, size_t document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp);
     // LIBWEB_RENDER_CLOCK_FRAMES: at the end of a rendering update, grants a clock lease to every document whose next
     // rendering update would change nothing but what the running animations of its document timeline show, and ends
     // the lease of every other one.
