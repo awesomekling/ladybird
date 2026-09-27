@@ -2289,7 +2289,7 @@ impl LayoutNodeArena {
         parents[index] = parent;
     }
 
-    fn shadow_including_parent(&self, element: StyleNodeID) -> ShadowIncludingParent {
+    pub(crate) fn shadow_including_parent(&self, element: StyleNodeID) -> ShadowIncludingParent {
         let Some(index) = element.element_index() else {
             return ShadowIncludingParent::default();
         };

@@ -35,7 +35,7 @@
 
 use crate::css::style::bridge::InputForPass;
 use crate::css::style::tree::StyleNodeID;
-use crate::layout::node_data::NodeKind;
+use crate::layout::node_data::{NodeKind, NodeSlotId};
 use crate::layout::{ArenaHandle, FfiCssPixelRect, LayoutNodeArena};
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
@@ -69,12 +69,40 @@ pub(crate) struct ChangeSeq(u64);
 ///
 /// Adding a kind of write is adding a variant and its arm in [`Change::apply`]: the main thread sends it with
 /// [`send_change`], and the owner applies it with everything before it at the next unit that needs it.
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum Change {
     /// The style inputs the main thread recorded since the last transaction: DOM tree insertions, removals and
     /// moves, element arrivals, class, ID and attribute features, element states, inline style and presentational
     /// hint declarations, and the host facts they read. The engine applies them as one batch, which is how its
     /// invalidation sees them.
     StyleInputs(InputForPass),
+    /// A write to the document's layout arena, which the owner applies before the next unit or query that reaches
+    /// the arena.
+    Arena(ArenaChange),
+}
+
+/// A write the main thread makes to a document's layout arena.
+pub(crate) enum ArenaChange {
+    /// Whether the document is an SVG file decoded as an image, which the layout of its SVG roots reads.
+    DocumentIsDecodedSvg(bool),
+    /// The scroll-state query inputs of the document's scroll containers, which style reads as one generation.
+    StyleSnapshotScrollStates(Vec<crate::layout::style_snapshot::FfiLayoutStyleScrollState>),
+    /// The document handed an image box the provider a finished layout frame owed it.
+    OwnedProviderHandedOver(NodeSlotId),
+}
+
+impl ArenaChange {
+    fn apply(self, arena: &mut LayoutNodeArena) {
+        match self {
+            ArenaChange::DocumentIsDecodedSvg(is_decoded_svg) => arena.set_document_is_decoded_svg(is_decoded_svg),
+            ArenaChange::StyleSnapshotScrollStates(states) => arena.publish_style_snapshot_scroll_states(&states),
+            ArenaChange::OwnedProviderHandedOver(row) => {
+                if arena.slot_is_live(row) {
+                    arena.note_owned_provider_handed_over(row);
+                }
+            }
+        }
+    }
 }
 
 /// What of a document's render state the unit applying changes holds. A unit applies only the changes whose target
@@ -87,7 +115,12 @@ impl Change {
     fn apply(self, target: &mut ChangeTarget<'_>) {
         match self {
             Change::StyleInputs(inputs) => inputs.apply(target.style_engine),
+            Change::Arena(_) => debug_assert!(false, "a style unit applies no arena change"),
         }
+    }
+
+    fn writes_arena(&self) -> bool {
+        matches!(self, Change::Arena(_))
     }
 }
 
@@ -110,20 +143,29 @@ impl ChangeQueue {
         self.pending.push_back((seq, change));
     }
 
-    fn take_through(&mut self, through: ChangeSeq) -> Vec<Change> {
+    /// Takes the changes through `through` that `wanted` picks, in order, and leaves the rest queued. A change to the
+    /// arena and one to the engine write disjoint state, so each kind keeps its own order.
+    fn take_through(&mut self, through: ChangeSeq, wanted: impl Fn(&Change) -> bool) -> Vec<Change> {
         debug_assert!(
             through <= self.received_through,
             "a unit applies only changes sent before it"
         );
         let mut taken = Vec::new();
+        let mut kept = VecDeque::new();
         while let Some((seq, change)) = self.pending.pop_front() {
             if seq > through {
                 self.pending.push_front((seq, change));
                 break;
             }
-            self.applied_through = seq;
-            taken.push(change);
+            if wanted(&change) {
+                self.applied_through = self.applied_through.max(seq);
+                taken.push(change);
+            } else {
+                kept.push_back((seq, change));
+            }
         }
+        kept.append(&mut self.pending);
+        self.pending = kept;
         taken
     }
 }
@@ -139,8 +181,24 @@ pub(crate) struct RenderState {
 }
 
 impl RenderState {
+    /// Applies the arena changes the owner has received, which every unit and query that reaches the arena comes after.
+    fn apply_arena_changes(&mut self) {
+        let received = self.changes.received_through;
+        let changes = self.changes.take_through(received, Change::writes_arena);
+        if changes.is_empty() {
+            return;
+        }
+        let arena = self.arena.arena_mut();
+        for change in changes {
+            if let Change::Arena(change) = change {
+                change.apply(arena);
+            }
+        }
+    }
+
     /// Answers `query` from the state as the units before it left it.
     fn answer(&mut self, query: Query) -> Answer {
+        self.apply_arena_changes();
         match query {
             Query::ComputedStyle(demand) => {
                 let engine = self.style_engine();
@@ -166,11 +224,13 @@ impl RenderState {
 
     /// The handle of the state's arena, which names the document to what files work under it.
     fn arena_handle(&mut self) -> *mut c_void {
+        self.apply_arena_changes();
         std::ptr::from_mut::<ArenaHandle>(&mut self.arena).cast::<c_void>()
     }
 
     /// The state's arena and what lives beside it, which the owner hands the units it runs for the document.
     fn state(&mut self) -> *mut ArenaHandle {
+        self.apply_arena_changes();
         std::ptr::from_mut::<ArenaHandle>(&mut self.arena)
     }
 
@@ -200,6 +260,13 @@ pub(crate) enum Query {
     /// to install: a getComputedStyle() read of an element whose style is not up to date, for one. The owner answers
     /// the demand with the engine of the document's render state.
     ComputedStyle(crate::css::style::bridge::RecordDemand),
+    /// How many rows of the layout subtree `root` heads carry a pre-order label no greater than the row before them,
+    /// for tests.
+    PreOrderLabelViolations { root: NodeSlotId },
+    /// The element the tree build last saw as the shadow-including parent of the element `node`.
+    ShadowIncludingParentElement { node: StyleNodeID },
+    /// Whether `row` still names a live row.
+    RowIsLive { row: NodeSlotId },
 }
 
 /// The answer to a [`Query`], of the variant the query asked for.
@@ -208,6 +275,45 @@ pub(crate) enum Answer {
     Geometry(FfiGeometryReadAnswer),
     LayoutCounts(LayoutCounts),
     ComputedStyle(StyleReadAnswer),
+    Count(u64),
+    /// An element, or 0 for none.
+    Element(u32),
+    Is(bool),
+}
+
+impl Answer {
+    /// The count a [`Query::PreOrderLabelViolations`] answered.
+    pub(crate) fn count(self) -> u64 {
+        match self {
+            Self::Count(count) => count,
+            _ => {
+                debug_assert!(false, "a count is answered with a count");
+                0
+            }
+        }
+    }
+
+    /// The element a [`Query::ShadowIncludingParentElement`] answered.
+    pub(crate) fn element(self) -> u32 {
+        match self {
+            Self::Element(element) => element,
+            _ => {
+                debug_assert!(false, "an element is answered with an element");
+                0
+            }
+        }
+    }
+
+    /// What a yes-or-no query answered.
+    pub(crate) fn is(self) -> bool {
+        match self {
+            Self::Is(is) => is,
+            _ => {
+                debug_assert!(false, "a yes-or-no query is answered with yes or no");
+                false
+            }
+        }
+    }
 }
 
 /// What became of a [`Query::ComputedStyle`].
@@ -237,6 +343,9 @@ impl Answer {
             Query::Geometry { .. } => Self::Geometry(FfiGeometryReadAnswer::default()),
             Query::LayoutCounts => Self::LayoutCounts(LayoutCounts::default()),
             Query::ComputedStyle(_) => Self::ComputedStyle(StyleReadAnswer::LeftToHost),
+            Query::PreOrderLabelViolations { .. } => Self::Count(0),
+            Query::ShadowIncludingParentElement { .. } => Self::Element(0),
+            Query::RowIsLive { .. } => Self::Is(false),
         }
     }
 
@@ -245,7 +354,7 @@ impl Answer {
     fn unanswered(query: Query) -> Self {
         match query {
             Query::ComputedStyle(_) => Self::ComputedStyle(StyleReadAnswer::Unanswered),
-            Query::Geometry { .. } | Query::LayoutCounts => Self::left_to_host(query),
+            _ => Self::left_to_host(query),
         }
     }
 
@@ -264,8 +373,27 @@ impl Answer {
                 tree_builds: arena.layout_tree_build_stats(),
             }),
             Query::ComputedStyle(_) => Self::left_to_host(query),
+            Query::PreOrderLabelViolations { root } => Self::Count(pre_order_label_violations(arena, root)),
+            Query::ShadowIncludingParentElement { node } => Self::Element(arena.shadow_including_parent(node).element),
+            Query::RowIsLive { row } => Self::Is(arena.slot_is_live(row)),
         }
     }
+}
+
+fn pre_order_label_violations(arena: &LayoutNodeArena, root: NodeSlotId) -> u64 {
+    if !arena.slot_is_live(root) {
+        return 0;
+    }
+    let mut violation_count = 0u64;
+    let mut previous_label: Option<u64> = None;
+    arena.for_each_node_in_layout_subtree_in_pre_order(root, |node| {
+        let label = arena.node_pre_order_label(node);
+        if previous_label.is_some_and(|previous| label <= previous) {
+            violation_count += 1;
+        }
+        previous_label = Some(label);
+    });
+    violation_count
 }
 
 /// The typed results of a rendering update the owner ran, which the main thread applies where it takes the frame
@@ -576,7 +704,10 @@ pub(crate) fn apply_changes_through(document: DocumentId, through: ChangeSeq, ta
     if !document.is_valid() {
         return;
     }
-    let changes = with_state(document, |state| state.changes.take_through(through)).unwrap_or_default();
+    let changes = with_state(document, |state| {
+        state.changes.take_through(through, |change| !change.writes_arena())
+    })
+    .unwrap_or_default();
     for change in changes {
         change.apply(target);
     }
@@ -683,6 +814,22 @@ pub(crate) fn send_change(
     seq
 }
 
+/// Sends the arena write `change` for `document`, which the owner applies before the next unit or query that reaches
+/// the arena.
+pub(crate) fn send_arena_change(document: DocumentId, change: ArenaChange) -> ChangeSeq {
+    let seq = SENT_THROUGH.with_borrow_mut(|sent| {
+        let seq = sent.entry(document).or_default();
+        seq.0 += 1;
+        *seq
+    });
+    send(ToOwner::Changes {
+        document,
+        first: seq,
+        changes: vec![Change::Arena(change)],
+    });
+    seq
+}
+
 /// The number of the last change the calling document thread sent for `document`.
 pub(crate) fn sent_through(document: DocumentId) -> ChangeSeq {
     SENT_THROUGH.with_borrow(|sent| sent.get(&document).copied().unwrap_or_default())
@@ -727,6 +874,21 @@ pub(crate) unsafe fn ask(document: DocumentId, arena: *mut c_void, query: Query)
     );
     debug_assert!(answer.is_ok(), "the render owner panicked answering {query:?}");
     Answer::of_outcome(query, answer)
+}
+
+/// Asks the owner `query` about the document whose arena the calling document thread names as `arena`, once the frame
+/// in flight that owns the arena, if any, has been taken back.
+///
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread.
+pub(crate) unsafe fn ask_about(arena: *mut c_void, query: Query) -> Answer {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    crate::stage_thread::join_frame_in_flight(arena);
+    // SAFETY: Guaranteed by the caller.
+    let document = unsafe { ArenaHandle::document_of(arena) };
+    // SAFETY: As above.
+    unsafe { ask(document, arena, query) }
 }
 
 /// What became of a style transaction the owner was sent: its answers, or the transaction where the owner could not
@@ -945,14 +1107,14 @@ mod tests {
     #[test]
     fn a_unit_applies_the_changes_through_its_number_in_order() {
         let mut queue = ChangeQueue::default();
-        assert!(queue.take_through(ChangeSeq(0)).is_empty());
+        assert!(queue.take_through(ChangeSeq(0), |_| true).is_empty());
         queue.receive(ChangeSeq(1), Change::StyleInputs(InputForPass::empty()));
         queue.receive(ChangeSeq(2), Change::StyleInputs(InputForPass::empty()));
         queue.receive(ChangeSeq(3), Change::StyleInputs(InputForPass::empty()));
-        assert_eq!(queue.take_through(ChangeSeq(2)).len(), 2);
+        assert_eq!(queue.take_through(ChangeSeq(2), |_| true).len(), 2);
         assert_eq!(queue.applied_through, ChangeSeq(2));
-        assert_eq!(queue.take_through(ChangeSeq(2)).len(), 0);
-        assert_eq!(queue.take_through(ChangeSeq(3)).len(), 1);
+        assert_eq!(queue.take_through(ChangeSeq(2), |_| true).len(), 0);
+        assert_eq!(queue.take_through(ChangeSeq(3), |_| true).len(), 1);
         assert!(queue.pending.is_empty());
     }
 

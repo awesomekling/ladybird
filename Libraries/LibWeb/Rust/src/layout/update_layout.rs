@@ -997,8 +997,8 @@ impl LayoutFrame {
         }
         // A document that traces its layout names the owners of the lines the passes left.
         if committed && main_thread.host_tables().is_some_and(super::HostTables::traces_layout) {
-            // SAFETY: Guaranteed by the caller. Host callbacks have returned.
-            unsafe { LayoutNodeArena::from_handle(arena_handle) }.name_layout_trace_owners(main_thread);
+            // Host callbacks have returned.
+            self.arena().name_layout_trace_owners(main_thread);
         }
         // What the document thread wrote to the marks beside the frame, it wrote after all of that.
         // SAFETY: Guaranteed by the caller. The marks are handed back.
@@ -2539,13 +2539,14 @@ pub unsafe extern "C" fn layout_arena_join_frame_owning_arena(
 /// `arena` must be a live handle on the document thread, which is taking in the frame's effects.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_hand_over_owed_image_resources(arena: *mut c_void, row: NodeSlotId) -> bool {
-    assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
-    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
-    if !arena.slot_is_live(row) {
+    let document = unsafe { ArenaHandle::document_of(arena) };
+    // The frame is the document thread's again, so this asks without joining it.
+    // SAFETY: As above.
+    if !unsafe { crate::render_owner::ask(document, arena, crate::render_owner::Query::RowIsLive { row }) }.is() {
         return false;
     }
-    arena.note_owned_provider_handed_over(row);
+    crate::render_owner::send_arena_change(document, crate::render_owner::ArenaChange::OwnedProviderHandedOver(row));
     true
 }
 
@@ -2608,7 +2609,7 @@ unsafe fn layout_counts(arena: *mut c_void) -> crate::render_owner::LayoutCounts
     // SAFETY: As above.
     match unsafe { crate::render_owner::ask(document, arena, crate::render_owner::Query::LayoutCounts) } {
         crate::render_owner::Answer::LayoutCounts(counts) => counts,
-        crate::render_owner::Answer::Geometry(_) | crate::render_owner::Answer::ComputedStyle(_) => {
+        _ => {
             debug_assert!(false, "layout counts are answered with counts");
             crate::render_owner::LayoutCounts::default()
         }

@@ -132,13 +132,8 @@ pub(crate) fn run_paint_pass<A, R>(
                 }),
             }),
         },
-        || {
-            // SAFETY: The arena is the caller's, which the owner does not reach: it runs no pass of it.
-            body(
-                unsafe { &mut *handle.cast::<LayoutNodeArena>() },
-                arguments.take().expect("a pass runs once"),
-            )
-        },
+        // The arena is the caller's, which the owner does not reach: it runs no pass of it.
+        || body(arena, arguments.take().expect("a pass runs once")),
     );
     // A pass that panicked on the owner panics here, as a stage the document thread waits for does.
     outcome.unwrap_or_else(|payload| std::panic::resume_unwind(payload))
