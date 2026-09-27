@@ -115,8 +115,9 @@ pub struct FfiLayoutUpdateDocumentFacts {
     /// The document node or one of its descendants needs a layout tree update.
     pub document_needs_layout_tree_build: bool,
     pub container_query_evaluation_is_pending: bool,
-    /// The document holds style input it has not handed to the style engine yet, or animation
-    /// effects whose style it has yet to sample.
+    /// The document holds style input it has not handed to the style engine yet (media rules to
+    /// evaluate again and style attributes to read again among it), or animation effects whose
+    /// style it has yet to sample.
     pub style_input_waits_on_document: bool,
     /// A top layer membership change or zone rebuild is waiting for the next pass.
     pub top_layer_work_pending: bool,
@@ -1137,7 +1138,19 @@ impl LayoutFrame {
         // flight to run. The document only submits it when the round lays out the tree it has, which
         // the flight then styles: the round readies no tree build.
         match std::mem::replace(&mut self.round_style, RoundStyle::OnDocumentThread) {
-            RoundStyle::OnDocumentThread => host.update_style(main_thread),
+            // A round after the first has style to run only if the rounds before it left some: what
+            // their layout noted in the engine, or what the host halves paid above handed the
+            // document. Otherwise the document's style update would find nothing to do.
+            RoundStyle::OnDocumentThread => {
+                let facts = host.document_facts(main_thread);
+                if style_update_follows_layout(self.arena(), &facts)
+                    || self
+                        .arena()
+                        .with_style_store(|engine| engine.has_deferred_element_style_inputs())
+                {
+                    host.update_style(main_thread);
+                }
+            }
             RoundStyle::RanAhead => {}
             RoundStyle::InFlight => {
                 debug_assert!(
