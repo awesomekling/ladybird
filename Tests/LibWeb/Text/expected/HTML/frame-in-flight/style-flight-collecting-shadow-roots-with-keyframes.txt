@@ -1,0 +1,5 @@
+the style pass was held as armed: true
+the shadow roots were collected: true
+the style pass was still held after the collection: false
+the document's keyframes animate the box: 20px
+a new scope's keyframes animate its element: 350px

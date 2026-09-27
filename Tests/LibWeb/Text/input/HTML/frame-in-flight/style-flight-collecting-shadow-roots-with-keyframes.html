@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<style>
+    @keyframes grow {
+        from {
+            width: 10px;
+        }
+        to {
+            width: 30px;
+        }
+    }
+    #box {
+        width: 10px;
+        height: 10px;
+    }
+</style>
+<div id="box"></div>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<script>
+    // A garbage collection finalizes shadow roots whose style scopes published @keyframes while a style pass holds
+    // the document's style engine, before the main thread has taken the pass back. The finalizers do not wait for
+    // the pass: the engine gives the scopes up once it is home again.
+    function attachHost(keyframes) {
+        const host = document.createElement("div");
+        host.attachShadow({ mode: "open" }).innerHTML =
+            `<style>@keyframes grow { ${keyframes} } p { animation: grow 1s linear -0.5s paused; }</style><p>shadow</p>`;
+        document.body.appendChild(host);
+        return host;
+    }
+
+    asyncTest(async done => {
+        await twoFrames();
+        let hosts = [];
+        const roots = [];
+        for (let i = 0; i < 20; ++i) {
+            const host = attachHost("from { width: 100px; } to { width: 200px; }");
+            hosts.push(host);
+            roots.push(new WeakRef(host.shadowRoot));
+        }
+        document.body.offsetWidth;
+        await twoFrames();
+        for (const host of hosts)
+            host.remove();
+        hosts = null;
+        await twoFrames();
+
+        const box = document.getElementById("box");
+        const result = await whileStyleInFlight("before-run", () => {
+            box.style.height = "20px";
+        }, frame => {
+            internals.gc();
+            return {
+                heldAsArmed: styleHeldAsArmed(frame, "before-run"),
+                collected: roots.every(root => root.deref() === undefined),
+                stillHeld: !frame.heldAt || internals.waitForHeldFrame() === "before-run",
+            };
+        });
+        println(`the style pass was held as armed: ${result.heldAsArmed}`);
+        println(`the shadow roots were collected: ${result.collected}`);
+        println(`the style pass was still held after the collection: ${result.stillHeld}`);
+
+        await twoFrames();
+        box.style.animation = "grow 1s linear -0.5s paused";
+        println(`the document's keyframes animate the box: ${getComputedStyle(box).width}`);
+        const host = attachHost("from { width: 300px; } to { width: 400px; }");
+        println(`a new scope's keyframes animate its element: ${getComputedStyle(host.shadowRoot.querySelector("p")).width}`);
+        done();
+    });
+</script>
