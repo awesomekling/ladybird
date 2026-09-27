@@ -34,6 +34,9 @@
         await nextTask();
         const transformNodeBefore = internals.visualContextNodeIndices(box).spatial[0];
         const buildCountBefore = internals.accumulatedVisualContextTreeBuildCount();
+        // The reads above do not wait for the first frame's recording; the next opportunity is only taken once
+        // that frame is finished.
+        internals.waitForFrameToFinish();
 
         document.body.classList.add("changed");
         internals.resetStyleInvalidationCounters();
