@@ -974,15 +974,15 @@ bool EventLoop::run_rendering_update_from_step_16(Vector<GC::Ref<DOM::Document>>
         auto document_submission = document_index == first_document_index ? layout_submission : LayoutSubmission::MaySubmit;
         if (document_submission == LayoutSubmission::MaySubmit && m_rendering_update_may_overlap_style && m_rendering_update_may_overlap_layout
             && Layout::RustFFI::rust_stage_thread_submits_flight() && document->submit_style_and_layout_for_rendering_update()) {
-            m_frame_scheduler->submit_layout(docs, document_index, frame_timestamp);
+            m_frame_scheduler->submit_document_pass(docs, document_index, frame_timestamp);
             return true;
         }
         if (document_submission == LayoutSubmission::MaySubmit && m_rendering_update_may_overlap_style && document->submit_style_for_rendering_update()) {
-            m_frame_scheduler->submit_style(docs, document_index, frame_timestamp);
+            m_frame_scheduler->submit_document_pass(docs, document_index, frame_timestamp);
             return true;
         }
         if (document_submission != LayoutSubmission::Wait && m_rendering_update_may_overlap_layout && document->submit_layout_for_rendering_update()) {
-            m_frame_scheduler->submit_layout(docs, document_index, frame_timestamp);
+            m_frame_scheduler->submit_document_pass(docs, document_index, frame_timestamp);
             return true;
         }
 
