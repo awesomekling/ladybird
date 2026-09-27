@@ -227,6 +227,9 @@ public:
     void record_shadow_root(StyleNodeID host, StyleNodeID shadow_root);
     void record_tree_scope_root(TreeScopeID, StyleNodeID root);
     void record_tree_scope_uses_document_sheets(TreeScopeID);
+    // The nodes assigned to a slot, and the document's top layer, each a whole list at a time.
+    void record_slot_assigned_nodes(StyleNodeID slot, ReadonlySpan<StyleNodeID> assigned);
+    void record_top_layer_elements(ReadonlySpan<StyleNodeID> elements);
     // What a row built for an arriving node is painted and hit-tested with, and the spans of an arriving table cell or
     // column, which arrive with the node's identity.
     void record_dom_paint_facts(StyleNodeID, u8 facts);

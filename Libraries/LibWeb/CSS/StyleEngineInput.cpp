@@ -1474,21 +1474,17 @@ void record_slot_assignment_changed(HTML::HTMLSlotElement& slot)
     // membership test here, rather than `style_engine_for`.
     if (slot.style_node_id() == no_style_node || !slot.document().style_engine_tracks_tree())
         return;
-    // Beside a style pass, the list is the one assigned when the pass has drained, of the members that have an
-    // identity then.
-    slot.document().render_inputs_for_write().style_engine().publish_input([slot = GC::Root<HTML::HTMLSlotElement> { slot }](StyleInputScope const& input) {
-        if (slot->style_node_id() == no_style_node)
-            return;
-        auto const& assigned = slot->assigned_nodes_internal();
-        Vector<StyleNodeID, 8> identities;
-        identities.ensure_capacity(assigned.size());
-        for (auto const& slottable : assigned) {
-            auto identity = slottable.visit([](auto const& node) { return node->style_node_id(); });
-            if (identity != no_style_node)
-                identities.unchecked_append(identity);
-        }
-        input.engine().set_slot_assigned_nodes(slot->style_node_id(), identities.span());
-    });
+    // The list is the one assigned now, of the members that have an identity. A later change to it records it again,
+    // and the last list recorded goes in.
+    auto const& assigned = slot.assigned_nodes_internal();
+    Vector<StyleNodeID, 8> identities;
+    identities.ensure_capacity(assigned.size());
+    for (auto const& slottable : assigned) {
+        auto identity = slottable.visit([](auto const& node) { return node->style_node_id(); });
+        if (identity != no_style_node)
+            identities.unchecked_append(identity);
+    }
+    slot.document().render_inputs_for_write().style_engine().record_slot_assigned_nodes(slot.style_node_id(), identities.span());
 }
 
 // The document's top layer, published whole whenever its membership changes.
@@ -1500,17 +1496,15 @@ void record_top_layer_elements_changed(DOM::Document& document)
 {
     if (!document.style_engine_tracks_tree())
         return;
-    // Beside a style pass, the top layer is published as it is when the pass has drained.
-    document.render_inputs_for_write().style_engine().publish_input([document = GC::Root<DOM::Document> { document }](StyleInputScope const& input) {
-        auto const& elements = document->top_layer_elements();
-        Vector<StyleNodeID, 8> identities;
-        identities.ensure_capacity(elements.size());
-        for (auto const& element : elements) {
-            if (element->style_node_id() != no_style_node)
-                identities.unchecked_append(element->style_node_id());
-        }
-        input.engine().set_top_layer_elements(identities.span());
-    });
+    // The top layer is recorded as it is now. A later change to it records it again, and the last one recorded goes in.
+    auto const& elements = document.top_layer_elements();
+    Vector<StyleNodeID, 8> identities;
+    identities.ensure_capacity(elements.size());
+    for (auto const& element : elements) {
+        if (element->style_node_id() != no_style_node)
+            identities.unchecked_append(element->style_node_id());
+    }
+    document.render_inputs_for_write().style_engine().record_top_layer_elements(identities.span());
 }
 
 // Assignment runs inside the insertion that connects a node, which happens before the subtree it
