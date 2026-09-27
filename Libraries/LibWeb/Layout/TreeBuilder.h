@@ -12,7 +12,7 @@
 namespace Web::Layout {
 
 // A layout tree build's walk runs on the render side; the document readies it.
-void prepare_layout_tree_build(DOM::Document&);
+RustFFI::FfiDocumentStyleForBuild document_style_for_build(DOM::Document&);
 void detach_top_layer_element_layout_subtree(DOM::Element&);
 
 // What a layout tree build owes the rows it stamped for their images, which the document attaches

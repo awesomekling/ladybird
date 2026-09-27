@@ -1732,7 +1732,6 @@ private:
 
     virtual void finalize() override final;
 
-    void prepare_layout_tree_build();
     void tear_down_layout_tree();
     void process_pending_top_layer_layout_changes();
 

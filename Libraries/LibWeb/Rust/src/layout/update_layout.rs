@@ -54,6 +54,18 @@ pub struct FfiLayoutUpdateHostCallbacks {
     pub take_in_frame_effects: unsafe extern "C" fn(*mut c_void, *const FfiLayoutFrameEffects),
     /// Installs what the style pass a flight ran published, and runs the rest of the style update.
     pub finish_submitted_style_update: unsafe extern "C" fn(*mut c_void),
+    /// Makes the document's style, which a tree build that may build the viewport needs, and reads the scroll offset
+    /// of the document's navigable, which the viewport's row holds.
+    pub document_style_for_build: unsafe extern "C" fn(*mut c_void) -> FfiDocumentStyleForBuild,
+}
+
+/// The document's style for a tree build that may build the viewport, as the document thread made it: the record the
+/// style engine holds, and the scroll offset of the document's navigable.
+#[derive(Clone, Copy, Debug)]
+#[repr(C)]
+pub struct FfiDocumentStyleForBuild {
+    pub record: u64,
+    pub viewport_scroll_offset: super::FfiCssPixelPoint,
 }
 
 /// Where a layout update ends.
@@ -315,6 +327,7 @@ pub(crate) struct LayoutUpdateHost {
     document_facts: unsafe extern "C" fn(*mut c_void) -> FfiLayoutUpdateDocumentFacts,
     take_in_frame_effects: unsafe extern "C" fn(*mut c_void, *const FfiLayoutFrameEffects),
     finish_submitted_style_update: unsafe extern "C" fn(*mut c_void),
+    document_style_for_build: unsafe extern "C" fn(*mut c_void) -> FfiDocumentStyleForBuild,
 }
 
 impl From<FfiLayoutUpdateHostCallbacks> for LayoutUpdateHost {
@@ -324,6 +337,7 @@ impl From<FfiLayoutUpdateHostCallbacks> for LayoutUpdateHost {
             document_facts: host.document_facts,
             take_in_frame_effects: host.take_in_frame_effects,
             finish_submitted_style_update: host.finish_submitted_style_update,
+            document_style_for_build: host.document_style_for_build,
         }
     }
 }
@@ -340,6 +354,10 @@ impl LayoutUpdateHost {
 
     fn take_in_frame_effects(&self, _: &crate::stage::MainThread, effects: &FfiLayoutFrameEffects) {
         unsafe { (self.take_in_frame_effects)(self.context, effects) }
+    }
+
+    fn document_style_for_build(&self, _: &crate::stage::MainThread) -> FfiDocumentStyleForBuild {
+        unsafe { (self.document_style_for_build)(self.context) }
     }
 }
 
@@ -692,6 +710,9 @@ enum DriveStop {
 pub(crate) struct OwnerLayoutUnit {
     frame: crate::stage_thread::CallerWaits<*mut LayoutFrame>,
     facts: FfiLayoutUpdateDocumentFacts,
+    /// The document's style, which the document thread made for the unit's tree build where the unit asked for it
+    /// ([`FrameStep::NeedsDocumentStyle`]). The owner hands the arena it before the unit runs.
+    document_style: Option<FfiDocumentStyleForBuild>,
     reply: crate::stage_thread::OwnerReplyTo<OwnerLayoutStep>,
     /// How the owner runs it. The owner reaches the layout pipeline only through the units it is sent, so what
     /// reaches the owner without reaching the pipeline (the unit tests' stage threads) links without it.
@@ -709,11 +730,17 @@ unsafe fn run_unit(
     run: unsafe fn(*mut LayoutFrame, FfiLayoutUpdateDocumentFacts) -> FrameStep,
     frame: *mut LayoutFrame,
     facts: FfiLayoutUpdateDocumentFacts,
+    document_style: Option<FfiDocumentStyleForBuild>,
     state: *mut ArenaHandle,
 ) -> FrameStep {
     // SAFETY: Guaranteed by the caller.
     unsafe {
         (*frame).state = state;
+        if let Some(document_style) = document_style {
+            (*frame)
+                .arena()
+                .publish_document_style(document_style.record, document_style.viewport_scroll_offset);
+        }
         let step = run(frame, facts);
         (*frame).resolve_owed_host_halves();
         (*frame).state = std::ptr::null_mut();
@@ -732,6 +759,7 @@ impl OwnerLayoutUnit {
         let Self {
             frame,
             facts,
+            document_style,
             reply,
             run,
         } = self;
@@ -750,7 +778,7 @@ impl OwnerLayoutUnit {
             // The faces the round wants are its document's, for that document's layout end to request.
             let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(state as u64);
             // SAFETY: As above.
-            let step = unsafe { run_unit(run, frame, facts, state) };
+            let step = unsafe { run_unit(run, frame, facts, document_style, state) };
             // SAFETY: The step goes back to the document thread, which waits for it.
             OwnerLayoutStep(unsafe { crate::stage_thread::CallerWaits::new(step) })
         });
@@ -764,7 +792,9 @@ impl OwnerLayoutUnit {
     unsafe fn ready_and_run_round(frame: *mut LayoutFrame, facts: FfiLayoutUpdateDocumentFacts) -> FrameStep {
         // SAFETY: Guaranteed by the caller.
         unsafe {
-            (*frame).ready_round(&facts);
+            if let RoundReadiness::NeedsDocumentStyle = (*frame).ready_round(&facts) {
+                return FrameStep::NeedsDocumentStyle { facts };
+            }
             (*frame).run_round_through_pass(facts)
         }
     }
@@ -778,8 +808,9 @@ impl OwnerLayoutUnit {
         // SAFETY: Guaranteed by the caller.
         unsafe {
             match (*frame).ready_round(&facts) {
-                (true, builds) => FrameStep::RoundReady { facts, builds },
-                (false, _) => (*frame).run_round_through_pass(facts),
+                RoundReadiness::LaysOut { builds } => FrameStep::RoundReady { facts, builds },
+                RoundReadiness::NeedsDocumentStyle => FrameStep::NeedsDocumentStyle { facts },
+                RoundReadiness::DoesNotLayOut => (*frame).run_round_through_pass(facts),
             }
         }
     }
@@ -848,6 +879,19 @@ enum FrameStep {
         facts: FfiLayoutUpdateDocumentFacts,
         builds: bool,
     },
+    /// The round whose style ran builds a tree that may build the viewport, which needs the document's style: the
+    /// document thread makes it, and the round is readied again with it, from `facts`.
+    NeedsDocumentStyle { facts: FfiLayoutUpdateDocumentFacts },
+}
+
+/// How [`LayoutFrame::ready_round`] readied the round whose style ran.
+enum RoundReadiness {
+    /// The round lays out, building a tree first where `builds`.
+    LaysOut { builds: bool },
+    /// The round does not lay out.
+    DoesNotLayOut,
+    /// The round builds a tree that needs the document's style, which the document thread has not handed the arena.
+    NeedsDocumentStyle,
 }
 
 impl LayoutFrame {
@@ -1033,27 +1077,43 @@ impl LayoutFrame {
     /// as it read the facts; a round that builds no tree lets it go. Answers whether the round lays out, and
     /// whether it builds. The style a flight runs decides whether the round lays out, and the flight reads the
     /// sources of its pass once it has applied that style.
-    fn ready_round(&mut self, facts: &FfiLayoutUpdateDocumentFacts) -> (bool, bool) {
+    fn ready_round(&mut self, facts: &FfiLayoutUpdateDocumentFacts) -> RoundReadiness {
         self.pass_sources = None;
         self.tree_build_document_style_node = None;
         self.connected_element_count = self
             .arena()
             .with_style_store(|engine| engine.tree().connected_element_count());
         if self.style_pass.is_some() {
-            return (true, false);
+            return RoundReadiness::LaysOut { builds: false };
         }
         if !self.round_lays_out_in_frame(facts) {
             self.arena().release_published_document_style();
-            return (false, false);
+            return RoundReadiness::DoesNotLayOut;
         }
         if self.needs_layout_tree_rebuild(facts) {
+            if self.build_needs_document_style(facts) {
+                return RoundReadiness::NeedsDocumentStyle;
+            }
             self.tree_build_document_style_node = Some(facts.document_style_node);
-            return (true, true);
+            return RoundReadiness::LaysOut { builds: true };
         }
         self.arena().release_published_document_style();
         // SAFETY: The frame runs for the update the arena is in, with the state the owner handed it.
         self.pass_sources = Some(unsafe { LayoutPassSources::read(self.state()) });
-        (true, false)
+        RoundReadiness::LaysOut { builds: false }
+    }
+
+    /// Whether the tree build the round readies needs the document's style, which the style engine does not hold
+    /// published for it: the build may build the viewport, and the document thread has not handed the arena the
+    /// document's style yet. A document hosting template contents builds no viewport.
+    fn build_needs_document_style(&self, facts: &FfiLayoutUpdateDocumentFacts) -> bool {
+        if self.inputs.is_template_contents_document || self.arena().holds_published_document_style() {
+            return false;
+        }
+        let document_needs_layout_tree_update = StyleNodeID::from_raw(facts.document_style_node)
+            .is_some_and(|document| self.arena().layout_tree_update_needs(document));
+        self.arena()
+            .tree_build_may_create_viewport(document_needs_layout_tree_update)
     }
 
     /// Walks the tree build the style round readied, in the frame. Its host half (the shells of the
@@ -1311,6 +1371,17 @@ impl LayoutFrame {
                         runs_style: document_style,
                     };
                 }
+                // The round is readied again with the document's style, which this thread makes. The marks a unit
+                // that runs the round was lent stay lent.
+                FrameStep::NeedsDocumentStyle { facts } => {
+                    let document_style = self.inputs.host.document_style_for_build(main_thread);
+                    let run = if stop_at_round {
+                        OwnerLayoutUnit::ready_round_for_flight
+                    } else {
+                        OwnerLayoutUnit::ready_and_run_round
+                    };
+                    self.run_unit_on_owner_with(document, facts, Some(document_style), run)
+                }
                 FrameStep::PassReady(pass) => {
                     // A unit ends at a step that needs the document thread, which a ready pass does not.
                     debug_assert!(false, "a unit on the owner runs the pass it readies");
@@ -1361,6 +1432,17 @@ impl LayoutFrame {
         facts: FfiLayoutUpdateDocumentFacts,
         run: unsafe fn(*mut LayoutFrame, FfiLayoutUpdateDocumentFacts) -> FrameStep,
     ) -> FrameStep {
+        self.run_unit_on_owner_with(document, facts, None, run)
+    }
+
+    /// As [`Self::run_unit_on_owner`], handing the arena `document_style` before the unit runs.
+    fn run_unit_on_owner_with(
+        &mut self,
+        document: crate::render_owner::DocumentId,
+        facts: FfiLayoutUpdateDocumentFacts,
+        document_style: Option<FfiDocumentStyleForBuild>,
+        run: unsafe fn(*mut LayoutFrame, FfiLayoutUpdateDocumentFacts) -> FrameStep,
+    ) -> FrameStep {
         let frame = std::ptr::from_mut(self);
         let outcome = crate::stage_thread::wait_for_owner(
             |reply| crate::render_owner::ToOwner::Layout {
@@ -1369,6 +1451,7 @@ impl LayoutFrame {
                     // SAFETY: This thread waits for the unit, and reaches the frame only once it has the answer.
                     frame: unsafe { crate::stage_thread::CallerWaits::new(frame) },
                     facts,
+                    document_style,
                     reply,
                     run,
                 }),
@@ -1377,7 +1460,9 @@ impl LayoutFrame {
             || {
                 // SAFETY: As above.
                 let state = unsafe { ArenaHandle::held_by_waiting_thread((*frame).inputs.arena_handle) };
-                OwnerLayoutStep(unsafe { crate::stage_thread::CallerWaits::new(run_unit(run, frame, facts, state)) })
+                OwnerLayoutStep(unsafe {
+                    crate::stage_thread::CallerWaits::new(run_unit(run, frame, facts, document_style, state))
+                })
             },
         );
         match outcome {
@@ -1748,6 +1833,7 @@ impl ClockLayoutFrame {
             FrameStep::NeedsStyle
             | FrameStep::RoundStarted { .. }
             | FrameStep::RoundReady { .. }
+            | FrameStep::NeedsDocumentStyle { .. }
             | FrameStep::PassReady(_) => false,
         }
     }

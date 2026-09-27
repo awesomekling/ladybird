@@ -271,19 +271,16 @@ bool attach_owed_generated_image(DOM::Document& document, Compositing::RustFFI::
     return image_was_available;
 }
 
-void prepare_layout_tree_build(DOM::Document& document)
+// The viewport's style is the document's, which the style computer makes on demand rather than
+// publishing, so a build that may build the viewport asks for it before it starts, with the
+// navigable's scroll offset the viewport's row holds.
+RustFFI::FfiDocumentStyleForBuild document_style_for_build(DOM::Document& document)
 {
-    auto* arena = document.layout_node_arena().handle();
-    // The viewport's style is the document's, which the style computer makes on demand rather than
-    // publishing, so a build that may build the viewport is handed it before it starts, with the
-    // navigable's scroll offset the viewport's row holds.
-    if (RustFFI::layout_arena_tree_build_may_create_viewport(arena, document.style_node_id().value())) {
-        auto& style_computer = document.style_computer();
-        auto document_style = style_computer.intern_anonymous_layout_style(*style_computer.create_document_style());
-        auto navigable = document.navigable();
-        auto viewport_scroll_offset = navigable ? navigable->viewport_scroll_offset() : CSSPixelPoint {};
-        RustFFI::layout_arena_publish_document_style_record(arena, document_style.value(), viewport_scroll_offset);
-    }
+    auto& style_computer = document.style_computer();
+    auto document_style = style_computer.intern_anonymous_layout_style(*style_computer.create_document_style());
+    auto navigable = document.navigable();
+    auto viewport_scroll_offset = navigable ? navigable->viewport_scroll_offset() : CSSPixelPoint {};
+    return { .record = document_style.value(), .viewport_scroll_offset = viewport_scroll_offset };
 }
 
 void detach_top_layer_element_layout_subtree(DOM::Element& element)

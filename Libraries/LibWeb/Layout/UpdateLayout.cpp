@@ -53,6 +53,7 @@ Layout::RustFFI::FfiLayoutUpdateHostCallbacks Document::layout_update_host_callb
         .document_facts = [](void* context) { return static_cast<Document*>(context)->layout_update_document_facts(); },
         .take_in_frame_effects = [](void* context, Layout::RustFFI::FfiLayoutFrameEffects const* effects) { static_cast<Document*>(context)->take_in_layout_frame_effects(*effects); },
         .finish_submitted_style_update = [](void* context) { static_cast<Document*>(context)->finish_style_update_submitted_in_flight(); },
+        .document_style_for_build = [](void* context) { return Layout::document_style_for_build(*static_cast<Document*>(context)); },
     };
 }
 
@@ -279,7 +280,7 @@ bool Document::update_style_and_layout_once(UpdateLayoutReason reason, Throttled
         update_style();
 
     // A round goes on from the facts and the selection the document reads once the list item renumbers and top layer
-    // changes its style leaves have gone through, with its tree build readied.
+    // changes its style leaves have gone through.
     Layout::RustFFI::FfiSelectionSnapshot selection {};
     Vector<Layout::RustFFI::FfiSelectionSnapshotNode> selection_nodes;
     auto read_round_facts = [&] {
@@ -290,7 +291,6 @@ bool Document::update_style_and_layout_once(UpdateLayoutReason reason, Throttled
             .facts = layout_update_document_facts(),
             .selection = read_selection(*this, selection, selection_nodes),
         };
-        prepare_layout_tree_build();
         return round;
     };
 

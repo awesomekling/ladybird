@@ -1827,15 +1827,6 @@ Compositing::RustFFI::NodeSlotId Document::layout_root_slot() const
     return Layout::RustFFI::layout_arena_layout_root(m_layout_node_arena->handle());
 }
 
-// Readies the document for a layout tree build of the layout round whose facts it reads: a build that may build the
-// viewport is handed the document's style. A document hosting template contents builds no layout tree.
-void Document::prepare_layout_tree_build()
-{
-    if (m_created_for_appropriate_template_contents)
-        return;
-    Layout::prepare_layout_tree_build(*this);
-}
-
 void Document::tear_down_layout_tree()
 {
     auto* layout_root = m_layout_node_arena ? layout_node_arena().node_if_live(layout_root_slot()) : nullptr;
