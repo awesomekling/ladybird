@@ -57,7 +57,7 @@ REPLAY = "style replay capture; replay builds only, or off unless an environment
 TEST_ONLY = "test only"
 MAIN_SIDE_COUNTER = "counter kept by the main side's doors, which a render stage never passes"
 GROW_ONLY = "process-wide behind a lock or atomic, and only grows; growing asks readers to keep more, never less"
-SUBMITTED_COUNT = "process-wide atomic count of live submitted stages; a thread counts its own before it asks, so zero means none of its own is in flight"
+SUBMITTED_COUNT = "process-wide atomic count of live submitted stages for a document's arena or style engine; a thread counts its own before it asks, so zero means none of its own is in flight"
 
 
 def render_stage_entries(reason, entries):
@@ -208,6 +208,7 @@ RENDER_STAGE_ALLOWED = {
             "stage_thread.rs:THREAD_SETUP",
             "stage_thread.rs:STAGE_HOLD",
             "stage_thread.rs:SUBMITTED",
+            "stage_thread.rs:PAINTING",
             "stage_thread.rs:FLIGHT_PREEMPTED",
             "stage_thread.rs:RUNNING_FLIGHT_STAGE",
             "flight.rs:TAKEN_BACK_OUTCOME",

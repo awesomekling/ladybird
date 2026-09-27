@@ -6990,9 +6990,10 @@ bool LocalNavigable::submit_presentation(PendingCompositorFrame& pending_frame)
     auto presentation = pending_frame.presentation;
     if (!presentation || !Layout::RustFFI::rust_stage_thread_submits_presentation() || !has_compositor_context())
         return false;
-    // The frame in flight presents what it records; a recording the main thread waited for is finished here.
+    // The frame in flight presents what it records, from the recording's ticket. A recording the main thread waited
+    // for, or one it took in already, is finished by consume-commit, and so is every frame of the ticket after it.
     auto* recording = pending_frame.recording.ptr();
-    if (recording && recording->run != Painting::RecordingRun::InSubmittedFrame)
+    if (recording && (recording->run != Painting::RecordingRun::InSubmittedFrame || !Layout::RustFFI::layout_arena_has_recording_in_flight(recording->arena)))
         return false;
     auto frame_sink = compositor_context().prepare_to_submit_frame_from_render_side();
     if (!frame_sink)
@@ -7006,8 +7007,8 @@ bool LocalNavigable::submit_presentation(PendingCompositorFrame& pending_frame)
     presentation->frame_sink = move(frame_sink);
     presentation->is_presented_by_frame_in_flight = true;
     m_presenter->lend_to_frame_in_flight();
-    // A presentation that publishes the recording from its ticket reaches no arena.
-    Layout::RustFFI::rust_stage_thread_submit_presentation(recording && !presentation->recording_ticket ? recording->arena : nullptr, recording ? recording->arena : nullptr, present_from_frame_in_flight, presentation.ptr());
+    // The presentation publishes the recording from its ticket and reaches no arena.
+    Layout::RustFFI::rust_stage_thread_submit_presentation(recording ? recording->arena : nullptr, present_from_frame_in_flight, presentation.ptr());
     return true;
 }
 

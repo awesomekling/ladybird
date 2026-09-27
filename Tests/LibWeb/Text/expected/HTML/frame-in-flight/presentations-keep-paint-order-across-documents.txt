@@ -1,0 +1,4 @@
+held as armed: true
+not presented ahead of the iframe's frame: true
+presented once released: true
+inner: rgb(0, 128, 0)

@@ -593,8 +593,9 @@ pub(crate) trait PublishesToHost {}
 
 impl PublishesToHost for crate::stage::MainThread<'_> {}
 
-/// The presentation stage of the frame in flight: it owns the arena whose recording it publishes,
-/// and the host lends it the resource storage the publication adds to until the frame is taken in.
+/// The presentation stage of the frame in flight, which publishes a recording from its ticket, or a
+/// flight's present stage, which owns the arena whose recording it publishes. The host lends it the
+/// resource storage the publication adds to until the frame is taken in.
 pub(crate) struct FramePresentation {
     not_send_or_sync: std::marker::PhantomData<*const ()>,
 }
