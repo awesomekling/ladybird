@@ -464,7 +464,7 @@ void NodeWithStyle::ImageObserver::image_style_value_did_update(CSS::ImageStyleV
 {
     VERIFY(m_owner);
 
-    // Beside a recording that owns the arena, the owner's facts are pushed once the frame has been taken in. By then
+    // Beside a frame that owns the arena, the owner's facts are pushed once the frame has been taken in. By then
     // its row may be gone, and its slot may hold another shell: only a shell still alive in its own slot is pushed.
     if (HTML::FrameScheduler::arena_changes_wait_for_frame(m_owner->document())) {
         HTML::main_thread_event_loop().frame_scheduler().defer_arena_change(GC::create_function(m_owner->document().heap(), [owner = m_owner, slot = slot_id(m_owner.ptr())] {
@@ -1129,9 +1129,8 @@ void Node::dom_node_style_node_changed(DOM::Node& dom_node, CSS::StyleNodeID old
     // goes through beside a frame too, ahead of any mark made under the new identity.
     if (arena && new_style_node != 0)
         RustFFI::layout_arena_clear_layout_tree_update_marks(arena->handle(), new_style_node.value());
-    // A recording in flight owns the arena and reads nothing of the style engine, and a layout pass in flight has
-    // what the document publishes to the engine wait for it, so the node goes on under its new identity beside
-    // either, and the arena takes the change in once the frame has been taken in.
+    // A layout pass or clock tick in flight has what the document publishes to the engine wait for it, so the node
+    // goes on under its new identity beside it, and the arena takes the change in once the frame has been taken in.
     if (HTML::FrameScheduler::arena_changes_wait_for_frame(dom_node.document())) {
         HTML::main_thread_event_loop().frame_scheduler().defer_arena_change(GC::create_function(dom_node.heap(), [node = GC::Ref { dom_node }, old_style_node, new_style_node] {
             apply_dom_node_style_node_change(node, old_style_node, new_style_node);

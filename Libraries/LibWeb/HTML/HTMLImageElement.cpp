@@ -135,7 +135,7 @@ void HTMLImageElement::set_needs_layout_update_or_repaint_after_image_data_chang
     CSS::record_element_replaced_content_input(*this);
     update_alt_text_shadow_tree();
 
-    // Beside a recording that owns the arena, the box is looked up once the frame has been taken in.
+    // Beside a frame that owns the arena, the box is looked up once the frame has been taken in.
     if (FrameScheduler::arena_changes_wait_for_frame(document())) {
         main_thread_event_loop().frame_scheduler().defer_arena_change(GC::create_function(heap(), [element = GC::Ref { *this }, reason] {
             element->update_layout_after_image_data_change(reason);
