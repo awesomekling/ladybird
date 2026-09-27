@@ -212,6 +212,17 @@ impl RenderState {
                     engine.reach_on_owner(|engine| demand.answer(engine))
                 }))
             }
+            Query::FinishOwnerStyleHostHalf => {
+                let engine = self.style_engine();
+                let arena = self.arena.arena();
+                if engine.is_null() {
+                    return Answer::of(query, self.arena.arena_mut());
+                }
+                // SAFETY: As for a style read: the document thread waits for the answer with the engine's token home.
+                Answer::Payment(OwedToHost(unsafe {
+                    engine.reach_on_owner(|_| arena.finish_flight_style_host_half().1)
+                }))
+            }
             _ => Answer::of(query, self.arena.arena_mut()),
         }
     }
@@ -267,6 +278,10 @@ pub(crate) enum Query {
     ShadowIncludingParentElement { node: StyleNodeID },
     /// Whether `row` still names a live row.
     RowIsLive { row: NodeSlotId },
+    /// Ends the host half of the batches the owner applied to the layout nodes as the document thread took a style
+    /// update's transactions, once the update has installed them: a row the install did not adopt the record of is
+    /// put back with the record its element holds. Answers what that owes the host.
+    FinishOwnerStyleHostHalf,
 }
 
 /// The answer to a [`Query`], of the variant the query asked for.
@@ -279,6 +294,16 @@ pub(crate) enum Answer {
     /// An element, or 0 for none.
     Element(u32),
     Is(bool),
+    Payment(OwedToHost),
+}
+
+/// What the owner's answer owes the host, which the document thread pays.
+pub(crate) struct OwedToHost(pub(crate) crate::layout::HostPayment);
+
+impl std::fmt::Debug for OwedToHost {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("OwedToHost")
+    }
 }
 
 impl Answer {
@@ -300,6 +325,17 @@ impl Answer {
             _ => {
                 debug_assert!(false, "an element is answered with an element");
                 0
+            }
+        }
+    }
+
+    /// What a query that owes the host answered.
+    pub(crate) fn payment(self) -> crate::layout::HostPayment {
+        match self {
+            Self::Payment(OwedToHost(payment)) => payment,
+            _ => {
+                debug_assert!(false, "a query that owes the host is answered with a payment");
+                crate::layout::HostPayment::nothing()
             }
         }
     }
@@ -346,6 +382,7 @@ impl Answer {
             Query::PreOrderLabelViolations { .. } => Self::Count(0),
             Query::ShadowIncludingParentElement { .. } => Self::Element(0),
             Query::RowIsLive { .. } => Self::Is(false),
+            Query::FinishOwnerStyleHostHalf => Self::Payment(OwedToHost(crate::layout::HostPayment::nothing())),
         }
     }
 
@@ -376,6 +413,7 @@ impl Answer {
             Query::PreOrderLabelViolations { root } => Self::Count(pre_order_label_violations(arena, root)),
             Query::ShadowIncludingParentElement { node } => Self::Element(arena.shadow_including_parent(node).element),
             Query::RowIsLive { row } => Self::Is(arena.slot_is_live(row)),
+            Query::FinishOwnerStyleHostHalf => Self::Payment(OwedToHost(arena.finish_flight_style_host_half().1)),
         }
     }
 }
