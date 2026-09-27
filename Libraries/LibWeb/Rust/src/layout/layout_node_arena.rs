@@ -2352,8 +2352,20 @@ impl LayoutNodeArena {
                 continue;
             }
             if row.new_style_record != row.old_style_record {
+                let previous_payloads = self.data(slot).style.get();
                 if self.set_node_style(slot, row.new_style_record) {
                     self.refresh_style_flags(slot);
+                }
+                // The host's install finds the record the row's already and resets nothing, so the caches
+                // a layout-affecting style change resets go here, as the host's install of the record does.
+                if self.style_change_affects_layout(
+                    row.old_style_record,
+                    row.new_style_record,
+                    previous_payloads.as_ptr(),
+                    self.data(slot).style.get().as_ptr(),
+                ) {
+                    self.bump_fragment_cache_epoch_of_self_and_ancestors(slot);
+                    self.reset_cached_intrinsic_sizes_of_self_and_ancestors(slot);
                 }
                 self.enroll_node_for_svg_paint_resources_sync(slot);
                 self.set_node_flag(slot, NodeFlag::HasAnimatedOpacityOrTransform, false);
@@ -3398,6 +3410,30 @@ impl LayoutNodeArena {
             }
             child = next_sibling;
         }
+    }
+
+    /// Whether a row going from `old_style_record` (with `old_payloads`) to `new_style_record` (with
+    /// `new_payloads`) changes its layout-affecting style, as the host's `set_style_record_identity()`
+    /// decides it: an animation-overlay record borrows other payloads than its base, so carrying one
+    /// counts as a layout-affecting change.
+    fn style_change_affects_layout(
+        &self,
+        old_style_record: u64,
+        new_style_record: u64,
+        old_payloads: *const c_void,
+        new_payloads: *const c_void,
+    ) -> bool {
+        let carries_overlay_or_is_missing = |style_record: u64| {
+            style_record == 0
+                || self.with_style_store(|engine| {
+                    engine
+                        .style_record_view(style_record)
+                        .is_none_or(|view| view.animation_overlay_identity != 0)
+                })
+        };
+        carries_overlay_or_is_missing(old_style_record)
+            || carries_overlay_or_is_missing(new_style_record)
+            || !style_payloads_equal_in_layout_affecting_groups(old_payloads, new_payloads)
     }
 
     fn apply_reinherited_style_record(
