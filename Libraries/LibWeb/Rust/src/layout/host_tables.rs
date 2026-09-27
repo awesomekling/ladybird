@@ -63,6 +63,11 @@ pub(crate) struct HostTables {
 }
 
 impl HostTables {
+    /// Whether the document traces its layout, and has the owners of the trace lines named once a frame is over.
+    pub(crate) fn traces_layout(&self) -> bool {
+        self.layout_trace_describe_node.get().is_some()
+    }
+
     /// The host tables of the arena `handle` names.
     ///
     /// # Safety

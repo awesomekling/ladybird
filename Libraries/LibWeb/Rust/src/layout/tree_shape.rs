@@ -83,7 +83,7 @@ impl StyleCell {
     }
 
     /// A reference of the row's own on its payloads, for a publication to hold.
-    fn owner(&self) -> Option<Arc<StyleRecordPayloads>> {
+    pub(crate) fn owner(&self) -> Option<Arc<StyleRecordPayloads>> {
         self.with_owner(|owner| owner.cloned())
     }
 

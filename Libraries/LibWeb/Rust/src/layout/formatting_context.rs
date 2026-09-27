@@ -2618,27 +2618,54 @@ impl DeferredLayoutCommitHostHalf {
         self.notifications.resized_a_hosted_navigable()
     }
 
-    /// Pays the host what the commit owed it and delivers the commit's notifications, then names
-    /// the owners of the trace lines the pass left.
+    /// Resolves what the commit owed the host from the arena, as the frame that made the commit left it, for the
+    /// document thread to pay without the arena, and closes the span the commit opened.
     ///
     /// # Safety
     ///
-    /// The arena must still be live, with no borrow taken during a pass still in use.
-    pub(crate) unsafe fn deliver(self, main_thread: &crate::stage::MainThread) {
+    /// The arena must still be live, with no borrow taken during a pass still in use, on the thread that owns it.
+    pub(crate) unsafe fn resolve(self) -> CommitPayment {
         let Self {
             arena_handle,
             handbacks,
             notifications,
         } = self;
-        let host = LayoutHost::of(main_thread);
         // SAFETY: Guaranteed by the caller.
         let arena = unsafe { LayoutNodeArena::from_handle(arena_handle) };
-        arena.finish_paying_taken_host_handbacks(main_thread, handbacks);
-        let viewport_row = arena.bound_viewport_row();
+        let payment = arena.resolve_host_handbacks(handbacks);
+        arena.end_layout_commit_handbacks();
+        CommitPayment {
+            payment,
+            notifications,
+            viewport_row: arena.bound_viewport_row(),
+        }
+    }
+}
+
+/// What a layout commit owes the host, resolved from the arena (see [`DeferredLayoutCommitHostHalf::resolve`]).
+#[must_use]
+pub(crate) struct CommitPayment {
+    payment: crate::layout::layout_node_arena::HostPayment,
+    notifications: commit::CommitNotifications,
+    /// The viewport's row as the commit left it, which the row resets it tells the host of name.
+    viewport_row: NodeSlotId,
+}
+
+impl CommitPayment {
+    /// Pays the host what the commit owed it and delivers the commit's notifications.
+    ///
+    /// # Safety
+    ///
+    /// On the document thread, with the document live.
+    pub(crate) unsafe fn deliver(self, main_thread: &crate::stage::MainThread) {
+        let Self {
+            payment,
+            notifications,
+            viewport_row,
+        } = self;
+        payment.pay(main_thread);
         // SAFETY: The host and shells remain live, and no arena borrow is active.
-        unsafe { notifications.notify_host(main_thread, &host, viewport_row) };
-        // SAFETY: Host callbacks have returned.
-        unsafe { LayoutNodeArena::from_handle(arena_handle) }.name_layout_trace_owners(main_thread);
+        unsafe { notifications.notify_host(main_thread, &LayoutHost::of(main_thread), viewport_row) };
     }
 }
 

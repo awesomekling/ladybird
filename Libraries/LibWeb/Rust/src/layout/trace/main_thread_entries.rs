@@ -23,5 +23,9 @@ unsafe extern "C" fn layout_arena_take_layout_trace(arena: *mut c_void, context:
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let arena = unsafe { LayoutNodeArena::from_handle(arena) };
     let text = arena.layout_trace.take(&main_thread, arena);
+    // The trace is over: nothing is left for a layout frame to name.
+    if let Some(host_tables) = main_thread.host_tables() {
+        host_tables.layout_trace_describe_node.set(None);
+    }
     unsafe { append_text(context, text.as_ptr(), text.len()) };
 }
