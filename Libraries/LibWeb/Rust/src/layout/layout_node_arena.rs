@@ -3630,7 +3630,10 @@ impl LayoutNodeArena {
     /// which the construction flags already answered, so this asks the published set for almost no
     /// row at all, and the overflow measurement need not ask the document who has focus.
     pub(crate) fn node_is_in_focused_text_control(&self, id: NodeSlotId) -> bool {
-        self.slot_is_live(id)
+        // Scrollable overflow asks this of every text fragment it measures; with no text control
+        // focused, no row can be in one.
+        !self.identities_in_focused_text_control.is_empty()
+            && self.slot_is_live(id)
             && crate::layout::node_facts::has_flag(self.data(id), NodeFlag::IsInUserAgentShadowTree)
             && self
                 .node_style_node(id)
