@@ -2345,13 +2345,17 @@ const _: () = {
     assert_send::<LayoutScratch>();
 };
 
-/// The arena's layout scratch, with what it keeps for the slots the arena freed or recorded as stale since the last
-/// pass dropped, so the stage never reads them.
-fn layout_scratch_for_stage<'a>(arena_handle: *mut c_void, arena: &LayoutNodeArena) -> &'a mut LayoutScratch {
-    // SAFETY: The scratch lives beside the arena for as long as the handle does.
-    let scratch = unsafe { LayoutScratch::from_handle(arena_handle) };
+/// The render state's arena and layout scratch for a stage, with what the scratch keeps for the slots the arena freed
+/// or recorded as stale since the last pass dropped, so the stage never reads them.
+///
+/// # Safety
+///
+/// `state` must be the live render state of the stage's document, which nothing else reaches while the stage runs.
+unsafe fn arena_and_scratch_for_stage<'a>(state: *mut ArenaHandle) -> (&'a mut LayoutNodeArena, &'a mut LayoutScratch) {
+    // SAFETY: Guaranteed by the caller.
+    let (arena, scratch) = unsafe { &mut *state }.arena_and_scratch();
     scratch.drop_slots(arena.take_intrinsic_size_caches_to_drop());
-    scratch
+    (arena, scratch)
 }
 
 /// The host-free full layout stage. Host callbacks require a `MainThread` capability, which this
@@ -2462,17 +2466,17 @@ fn run_root_layout_stage(stage: LayoutStageInput<'_>, scratch: &LayoutScratch) -
 ///
 /// # Safety
 ///
-/// `arena_handle` must be a live handle whose owner waits for this call, `root` its live viewport
-/// box, and nothing may have freed a row since `content` was read.
+/// `state` must be the live render state of the pass's document, which nothing else reaches while
+/// the pass runs, `root` its live viewport box, and nothing may have freed a row since `content`
+/// was read.
 pub(crate) unsafe fn prepare_root_layout_from_sources(
-    arena_handle: *mut c_void,
+    state: *mut ArenaHandle,
     root: NodeSlotId,
     content: super::layout_node_arena::EnrolledContentSources,
 ) {
-    assert!(!arena_handle.is_null(), "layout node arena handle is null");
     assert!(!root.is_invalid());
     // SAFETY: Guaranteed by the caller; the propagation borrows the arena only for its own call.
-    let arena = unsafe { LayoutNodeArena::from_handle(arena_handle) };
+    let arena = unsafe { &*state }.arena();
     arena.begin_layout_pass_preparation_handbacks();
     let propagation_facts = viewport_propagation::viewport_propagation_facts(arena);
     viewport_propagation::propagate_root_styles_to_viewport(
@@ -2484,7 +2488,7 @@ pub(crate) unsafe fn prepare_root_layout_from_sources(
     // The style rewrites enroll the affected boxes' text children for content sync, so the sync
     // follows them, and both precede the pass, which caches decoded style.
     // SAFETY: As above.
-    unsafe { super::layout_node_arena::apply_enrolled_content_sources(arena_handle, content) };
+    unsafe { super::layout_node_arena::apply_enrolled_content_sources(state, content) };
 }
 
 /// Computes the fragments of a root layout without the host, in the unit or the rendering update
@@ -2492,20 +2496,20 @@ pub(crate) unsafe fn prepare_root_layout_from_sources(
 ///
 /// # Safety
 ///
-/// `arena_handle` must be a live handle whose owner waits for this call, with the arena prepared
-/// by [`prepare_root_layout_from_sources`] and `root` its live viewport box.
+/// `state` must be the live render state of the pass's document, which nothing else reaches while
+/// the pass runs, with the arena prepared by [`prepare_root_layout_from_sources`] and `root` its
+/// live viewport box.
 pub(crate) unsafe fn compute_root_layout(
-    arena_handle: *mut c_void,
+    state: *mut ArenaHandle,
     root: NodeSlotId,
     viewport_inline_size_raw: i32,
     viewport_block_size_raw: i32,
     document_in_quirks_mode: bool,
     should_collect_devtools_layout_data: bool,
 ) -> LayoutStageOutput {
-    // SAFETY: The host keeps the arena and its published inputs alive and unchanged for the
-    // synchronous stage run, and nothing else borrows the arena while the stage holds it.
-    let arena = unsafe { LayoutNodeArena::from_handle_mut(arena_handle) };
-    let scratch = layout_scratch_for_stage(arena_handle, arena);
+    // SAFETY: Guaranteed by the caller; the arena's published inputs stay unchanged for the
+    // synchronous stage run.
+    let (arena, scratch) = unsafe { arena_and_scratch_for_stage(state) };
     let input = LayoutStageInput {
         arena,
         root,
@@ -2523,15 +2527,15 @@ pub(crate) unsafe fn compute_root_layout(
 ///
 /// # Safety
 ///
-/// `arena_handle` must be a live handle whose owner waits for this call or makes it itself, and
-/// `output` must be the computation of `root`, its live viewport box.
+/// `state` must be the live render state of the pass's document, which nothing else reaches while
+/// the pass runs, and `output` must be the computation of `root`, its live viewport box.
 pub(crate) unsafe fn commit_root_layout_to_arena(
-    arena_handle: *mut c_void,
+    state: *mut ArenaHandle,
     root: NodeSlotId,
     output: &LayoutStageOutput,
 ) -> PendingLayoutCommit {
     // SAFETY: Guaranteed by the caller.
-    unsafe { commit_entry_pass_to_arena(arena_handle, root, &output.0, CommittedEntry::Root) }
+    unsafe { commit_entry_pass_to_arena(state, root, &output.0, CommittedEntry::Root) }
 }
 
 /// Which layout entry a [`PendingLayoutCommit`] committed.
@@ -2544,7 +2548,7 @@ enum CommittedEntry {
 /// heard of the commit and the arena still counts the pass as running.
 #[must_use]
 pub(crate) struct PendingLayoutCommit {
-    arena_handle: *mut c_void,
+    state: *mut ArenaHandle,
     root: NodeSlotId,
     entry: CommittedEntry,
     notifications: commit::CommitNotifications,
@@ -2555,7 +2559,7 @@ pub(crate) struct PendingLayoutCommit {
 /// in order, for the frame's next join.
 #[must_use]
 pub(crate) struct DeferredLayoutCommitHostHalf {
-    arena_handle: *mut c_void,
+    state: *mut ArenaHandle,
     handbacks: crate::layout::layout_node_arena::HostHandbacks,
     notifications: commit::CommitNotifications,
 }
@@ -2573,19 +2577,18 @@ impl PendingLayoutCommit {
     /// later commit.
     pub(crate) unsafe fn settle_ahead_of_host(self) -> DeferredLayoutCommitHostHalf {
         let Self {
-            arena_handle,
+            state,
             root,
             entry,
             notifications,
         } = self;
         // SAFETY: Guaranteed by the caller; commit's mutable borrow has ended.
-        let arena = unsafe { LayoutNodeArena::from_handle(arena_handle) };
+        let (arena, scratch) = unsafe { &mut *state }.arena_and_scratch();
+        let arena: &LayoutNodeArena = arena;
         let handbacks = arena.take_host_handbacks_ahead_of_payment();
-        // SAFETY: The scratch lives beside the arena for as long as the handle does.
-        unsafe { LayoutScratch::from_handle(arena_handle) }.clear_inline_item_stashes();
+        scratch.clear_inline_item_stashes();
         arena.end_layout_pass();
-        // SAFETY: The scratch lives beside the arena for as long as the handle does.
-        unsafe { LayoutScratch::from_handle(arena_handle) }.end_layout_pass();
+        scratch.end_layout_pass();
         arena.reset_layout_update_flags_in_subtree(root);
         match entry {
             CommittedEntry::Root => arena.did_commit_full_layout(root),
@@ -2599,7 +2602,7 @@ impl PendingLayoutCommit {
         }
         arena.end_active_layout_pass();
         DeferredLayoutCommitHostHalf {
-            arena_handle,
+            state,
             handbacks,
             notifications,
         }
@@ -2626,12 +2629,12 @@ impl DeferredLayoutCommitHostHalf {
     /// The arena must still be live, with no borrow taken during a pass still in use, on the thread that owns it.
     pub(crate) unsafe fn resolve(self) -> CommitPayment {
         let Self {
-            arena_handle,
+            state,
             handbacks,
             notifications,
         } = self;
         // SAFETY: Guaranteed by the caller.
-        let arena = unsafe { LayoutNodeArena::from_handle(arena_handle) };
+        let arena = unsafe { &*state }.arena();
         let payment = arena.resolve_host_handbacks(handbacks);
         arena.end_layout_commit_handbacks();
         CommitPayment {
@@ -2690,28 +2693,25 @@ fn finish_entry_pass(
 }
 
 /// Commits the finished entry pass rooted at `commit_root` to the arena. What the commit owes the
-/// host waits in the handback span it opens, which [`DeferredLayoutCommitHostHalf::deliver`] pays.
+/// host waits in the handback span it opens, which [`CommitPayment::deliver`] pays once the frame has resolved it.
 ///
 /// # Safety
 ///
-/// `arena_handle` must be the live arena the pass computed against, its owner must wait for this
-/// call or make it itself, and no borrow taken during the pass may still be live.
+/// `state` must be the live render state the pass computed against, which nothing else reaches
+/// while the pass runs, and no borrow taken during the pass may still be live.
 unsafe fn commit_entry_pass_to_arena(
-    arena_handle: *mut c_void,
+    state: *mut ArenaHandle,
     commit_root: NodeSlotId,
     pass_fragments: &fragment_tree::CompletedPassFragments,
     entry: CommittedEntry,
 ) -> PendingLayoutCommit {
-    // SAFETY: Computation has finished and its input borrows are no longer used.
-    unsafe { LayoutNodeArena::from_handle(arena_handle) }.begin_layout_commit_handbacks();
-    // SAFETY: As above. Commit performs no host callbacks while it borrows the arena exclusively.
-    let notifications = commit::commit_replacing(
-        commit_root,
-        unsafe { LayoutNodeArena::from_handle_mut(arena_handle) },
-        pass_fragments,
-    );
+    // SAFETY: Guaranteed by the caller. Computation has finished and its input borrows are no longer
+    // used, and commit performs no host callbacks while it borrows the arena exclusively.
+    let arena = unsafe { &mut *state }.arena_mut();
+    arena.begin_layout_commit_handbacks();
+    let notifications = commit::commit_replacing(commit_root, arena, pass_fragments);
     PendingLayoutCommit {
-        arena_handle,
+        state,
         root: commit_root,
         entry,
         notifications,
@@ -2797,21 +2797,19 @@ fn compute_subtree_layout_stage(stage: LayoutStageInput<'_>, scratch: &LayoutScr
 ///
 /// # Safety
 ///
-/// `arena_handle` must be a live handle whose owner waits for this call, and `root` must be a live
-/// partial relayout boundary.
+/// `state` must be the live render state of the pass's document, which nothing else reaches while
+/// the pass runs, and `root` must be a live partial relayout boundary.
 pub(crate) unsafe fn compute_subtree_layout_fragments(
-    arena_handle: *mut c_void,
+    state: *mut ArenaHandle,
     root: NodeSlotId,
     viewport_inline_size_raw: i32,
     viewport_block_size_raw: i32,
     document_in_quirks_mode: bool,
 ) -> LayoutStageOutput {
-    assert!(!arena_handle.is_null(), "layout node arena handle is null");
     assert!(!root.is_invalid());
-    // SAFETY: The host keeps the arena and its published inputs alive and unchanged for the
-    // synchronous stage run, and nothing else borrows the arena while the stage holds it.
-    let arena = unsafe { LayoutNodeArena::from_handle_mut(arena_handle) };
-    let scratch = layout_scratch_for_stage(arena_handle, arena);
+    // SAFETY: Guaranteed by the caller; the arena's published inputs stay unchanged for the
+    // synchronous stage run.
+    let (arena, scratch) = unsafe { arena_and_scratch_for_stage(state) };
     let input = LayoutStageInput {
         arena,
         root,
@@ -2830,12 +2828,12 @@ pub(crate) unsafe fn compute_subtree_layout_fragments(
 ///
 /// As for [`commit_root_layout_to_arena`], with `root` a live partial relayout boundary.
 pub(crate) unsafe fn commit_subtree_layout_to_arena(
-    arena_handle: *mut c_void,
+    state: *mut ArenaHandle,
     root: NodeSlotId,
     output: &LayoutStageOutput,
 ) -> PendingLayoutCommit {
     // SAFETY: Guaranteed by the caller.
-    unsafe { commit_entry_pass_to_arena(arena_handle, root, &output.0, CommittedEntry::Subtree) }
+    unsafe { commit_entry_pass_to_arena(state, root, &output.0, CommittedEntry::Subtree) }
 }
 
 fn layout_subtree_with_frozen_root_geometry(run: &FormattingContextRun<'_>) {

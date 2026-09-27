@@ -229,7 +229,19 @@ impl Flight {
     /// Runs the flight's stages, on the stage thread, with the style engine's token lent to it as
     /// `style_engine`. The flight sends the token home once its layout rounds have run, and the
     /// stages after them reach no style engine.
-    pub(crate) fn run(mut self, mut style_engine: Option<StyleEngineLoan>) -> (FfiFlightOutcome, FlightRan) {
+    pub(crate) fn run(
+        mut self,
+        mut style_engine: Option<StyleEngineLoan>,
+        state: Option<*mut crate::layout::ArenaHandle>,
+    ) -> (FfiFlightOutcome, FlightRan) {
+        // SAFETY: The frame in flight owns the arena, and a flight of no document's render state names the one it
+        // runs in.
+        let state = state.unwrap_or_else(|| unsafe {
+            crate::layout::ArenaHandle::held_by_waiting_thread(self.arena as *mut c_void)
+        });
+        if let Some(layout) = self.layout.as_mut() {
+            layout.hand_state(state);
+        }
         let began = self.began;
         let mut reached = began;
         let mut next = began;

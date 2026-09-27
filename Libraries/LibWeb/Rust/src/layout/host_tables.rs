@@ -211,4 +211,23 @@ impl ArenaHandle {
     pub(crate) fn arena(&self) -> &LayoutNodeArena {
         &self.arena
     }
+
+    /// The arena and its layout scratch, which a layout pass reads and writes side by side.
+    pub(crate) fn arena_and_scratch(&mut self) -> (&mut LayoutNodeArena, &mut super::LayoutScratch) {
+        (&mut self.arena, &mut self.layout_scratch)
+    }
+
+    /// The render state of the document the handle `handle` a document thread holds names, for a job of the document
+    /// that runs on that thread, or beside it, rather than on the render owner, which hands the jobs it runs their
+    /// state: a job the owner cannot take (a test holds the run it would queue behind), a debug path that runs a unit
+    /// in place, or a stage the document thread submitted outside a rendering update. The one way from such a handle
+    /// to the state.
+    ///
+    /// # Safety
+    ///
+    /// `handle` must be a live handle from `layout_arena_create`, and nothing else may reach the state while the job
+    /// runs.
+    pub(crate) unsafe fn held_by_waiting_thread(handle: *mut c_void) -> *mut Self {
+        handle.cast()
+    }
 }
