@@ -77,7 +77,6 @@ pub struct FfiLayoutUpdateDocumentFacts {
     pub document_is_active: bool,
     /// The document node or one of its descendants needs a layout tree update.
     pub document_needs_layout_tree_build: bool,
-    pub container_query_evaluation_is_pending: bool,
     /// The document holds style input it has not handed to the style engine yet (media rules to
     /// evaluate again and style attributes to read again among it), or animation effects whose
     /// style it has yet to sample.
@@ -1607,7 +1606,9 @@ impl LayoutFrame {
         needs_layout_tree_rebuild: &mut bool,
     ) -> PartialRelayout {
         let partial_relayout_facts = FfiPartialRelayoutHostFacts {
-            container_query_evaluation_is_pending: facts.container_query_evaluation_is_pending,
+            container_query_evaluation_is_pending: self
+                .arena()
+                .with_style_store(|engine| engine.has_size_containers_needing_evaluation_after_layout()),
             should_collect_devtools_layout_data: facts.should_collect_devtools_layout_data,
         };
         if !self.arena().partial_relayout_may_be_attempted(
@@ -2682,7 +2683,6 @@ mod tests {
         FfiLayoutUpdateDocumentFacts {
             document_is_active: true,
             document_needs_layout_tree_build: false,
-            container_query_evaluation_is_pending: false,
             style_input_waits_on_document: false,
             top_layer_work_pending: false,
             should_collect_devtools_layout_data: false,
