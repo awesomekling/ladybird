@@ -545,39 +545,6 @@ fn shell_of(
 /// # Safety
 ///
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread;
-/// `index` in range.
-#[unsafe(no_mangle)]
-unsafe extern "C" fn layout_arena_hit_test_item_facts(
-    arena: *mut c_void,
-    index: usize,
-) -> crate::painting::host::FfiHitTestItemExport {
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
-    with_hit_test_list_items_only(arena, None, |list, arena| {
-        let item = &list.items[index];
-        assert!(
-            arena.paintable_row_is_populated(item.paintable),
-            "exporting a hit-test item for a non-live paintable"
-        );
-        assert!(
-            arena.paintable_row_is_populated(item.hit_node),
-            "exporting a hit-test item that names a non-live paintable"
-        );
-        Some(crate::painting::host::FfiHitTestItemExport {
-            can_produce_caret_position: item.can_produce_caret_position,
-            paintable: item.paintable,
-            hit_node: item.hit_node,
-            chrome_widget_kind: item.chrome_widget_kind,
-            caret_node_shell: arena.shell_if_live(&main_thread, item.caret_node),
-            caret_rect: item.caret_rect.into(),
-            context: item.context,
-        })
-    })
-    .expect("no hit-test list")
-}
-
-/// # Safety
-///
-/// `arena` must be a live handle from `layout_arena_create`, used on the document thread;
 /// `item_index` must be in range for the current hit-test list.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn layout_arena_hit_test_item_target_shell(arena: *mut c_void, item_index: usize) -> *mut c_void {
@@ -605,30 +572,6 @@ unsafe extern "C" fn layout_arena_hit_test_item_dispatch_shell(
         // SAFETY: The caller provides writable storage for the synchronous result.
         unsafe { *out_allow_pseudo_fallback = allow_pseudo_fallback };
         shell_of(&main_thread, arena, dispatch)
-    })
-}
-
-/// # Safety
-///
-/// `arena` must be a live handle from `layout_arena_create`, used on the document thread;
-/// `item_index` must be in range for the current hit-test list.
-#[unsafe(no_mangle)]
-unsafe extern "C" fn layout_arena_hit_test_resolve_hit(
-    arena: *mut c_void,
-    item_index: usize,
-    local_point: FfiCssPixelPoint,
-) -> crate::painting::host::FfiResolvedHit {
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
-    with_hit_test_list_items_only(arena, Default::default(), |list, arena| {
-        let resolved = list.resolve_hit(arena, item_index, local_point.into());
-        crate::painting::host::FfiResolvedHit {
-            dispatch_shell: shell_of(&main_thread, arena, resolved.dispatch),
-            allow_pseudo_fallback: resolved.allow_pseudo_fallback,
-            fallback_dispatch_shell: shell_of(&main_thread, arena, resolved.fallback_dispatch),
-            has_index_in_node: resolved.has_index_in_node,
-            index_in_node: resolved.index_in_node,
-            is_text_fragment: resolved.is_text_fragment,
-        }
     })
 }
 

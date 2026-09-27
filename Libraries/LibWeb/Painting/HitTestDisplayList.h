@@ -40,9 +40,12 @@ enum class CaretLineDirection : u8 {
     Next,
 };
 
+// A document's hit-test list with the rows it was recorded over, as the document published them for the main thread to
+// hit test (hit_test/snapshot.rs): finding what a point hits reads the snapshot, and nothing of the layout node arena.
 class WEB_API HitTestDisplayList : public RefCounted<HitTestDisplayList> {
 public:
     static NonnullRefPtr<HitTestDisplayList> create_from_rust_recording(u64 visual_context_tree_structural_epoch, Layout::NodeArena&, ChromeWidgetRegistry&);
+    ~HitTestDisplayList();
 
     u64 visual_context_tree_structural_epoch() const { return m_visual_context_tree_structural_epoch; }
     [[nodiscard]] bool is_current() const;
@@ -60,11 +63,11 @@ public:
     TraversalDecision hit_test_all(CSSPixelPoint, DOM::Document const&, double device_pixels_per_css_pixel, ChromeMetrics const&, Function<TraversalDecision(HitTestResult)> const&) const;
 
 private:
-    HitTestDisplayList(u64 visual_context_tree_structural_epoch, Layout::NodeArena&, ChromeWidgetRegistry&, u64 rust_generation);
+    HitTestDisplayList(u64 visual_context_tree_structural_epoch, Layout::NodeArena&, ChromeWidgetRegistry&, void const* snapshot);
 
     struct Item {
         size_t item_index { 0 };
-        Layout::RustFFI::FfiHitTestItemExport facts;
+        Layout::RustFFI::FfiHitTestSnapshotItem facts;
 
         size_t index() const { return item_index; }
         bool can_produce_caret_position() const { return facts.can_produce_caret_position; }
@@ -98,6 +101,7 @@ private:
     };
 
     struct QueryContext;
+    void publish_snapshot() const;
     static Optional<TopmostItem> topmost_item_from(Layout::RustFFI::FfiTopmostItem const&);
     [[nodiscard]] Item item(size_t index) const;
     [[nodiscard]] Layout::RustFFI::FfiCaretLineExport caret_line(size_t line_index) const { return Layout::RustFFI::layout_arena_hit_test_caret_line(m_arena->handle(), line_index); }
@@ -127,6 +131,8 @@ private:
     u64 m_visual_context_tree_structural_epoch { 0 };
     NonnullRefPtr<Layout::NodeArena> m_arena;
     NonnullRefPtr<ChromeWidgetRegistry> m_chrome_widget_registry;
+    // The HitTestSnapshot the list reads, which it releases.
+    mutable void const* m_snapshot { nullptr };
     u64 m_rust_generation { 0 };
 };
 

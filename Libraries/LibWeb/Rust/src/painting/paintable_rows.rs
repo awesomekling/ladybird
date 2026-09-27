@@ -1692,6 +1692,15 @@ impl LayoutNodeArena {
     /// Publishes the rows as they are now, for a recording to read while the arena goes on
     /// changing.
     pub(crate) fn freeze_paint_frame(&mut self) -> PublishedFrame {
+        self.freeze_frame(true)
+    }
+
+    /// Like [`Self::freeze_paint_frame`], for a reader that reads no paint damage: a hit test.
+    pub(crate) fn freeze_frame_without_damage(&mut self) -> PublishedFrame {
+        self.freeze_frame(false)
+    }
+
+    fn freeze_frame(&mut self, with_damage: bool) -> PublishedFrame {
         self.publish_paintable_rows();
         let rows = self
             .paintable_rows
@@ -1712,14 +1721,12 @@ impl LayoutNodeArena {
         };
         let shape = self.publish_paint_tree();
         let geometry_epoch = self.paintable_rows.absolute_rect_memo_epoch.get();
-        PublishedFrame::new(
-            rows,
-            shape,
-            self.paint_damage_for_frame(),
-            paint_state,
-            facts,
-            geometry_epoch,
-        )
+        let damage = if with_damage {
+            self.paint_damage_for_frame()
+        } else {
+            crate::painting::record::damage::FrameDamage::default()
+        };
+        PublishedFrame::new(rows, shape, damage, paint_state, facts, geometry_epoch)
     }
 
     /// Builds the structures a hit-test query derives from the list before the rows are
