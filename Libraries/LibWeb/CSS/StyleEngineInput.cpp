@@ -1480,17 +1480,8 @@ void record_slot_assignment_changed(HTML::HTMLSlotElement& slot)
     // membership test here, rather than `style_engine_for`.
     if (slot.style_node_id() == no_style_node || !slot.document().style_engine_tracks_tree())
         return;
-    // The list is the one assigned now, of the members that have an identity. A later change to it records it again,
-    // and the last list recorded goes in.
-    auto const& assigned = slot.assigned_nodes_internal();
-    Vector<StyleNodeID, 8> identities;
-    identities.ensure_capacity(assigned.size());
-    for (auto const& slottable : assigned) {
-        auto identity = slottable.visit([](auto const& node) { return node->style_node_id(); });
-        if (identity != no_style_node)
-            identities.unchecked_append(identity);
-    }
-    slot.document().render_inputs_for_write().style_engine().record_slot_assigned_nodes(slot.style_node_id(), identities.span());
+    // The list changes with every slottable that arrives, so it is read once, as the recorded input is submitted.
+    slot.document().render_inputs_for_write().style_engine().note_slot_assignment_changed(slot.style_node_id());
 }
 
 // The document's top layer, published whole whenever its membership changes.
@@ -1502,15 +1493,40 @@ void record_top_layer_elements_changed(DOM::Document& document)
 {
     if (!document.style_engine_tracks_tree())
         return;
-    // The top layer is recorded as it is now. A later change to it records it again, and the last one recorded goes in.
-    auto const& elements = document.top_layer_elements();
+    // As for a slot's assigned nodes, the top layer is read once, as the recorded input is submitted.
+    document.render_inputs_for_write().style_engine().note_top_layer_changed();
+}
+
+void record_changed_node_lists(DOM::Document& document, StyleEngine& style_engine)
+{
+    // Each list is the one the DOM holds now, of the members that have an identity: every node that arrived has taken
+    // it in, and one that departed has given it up.
     Vector<StyleNodeID, 8> identities;
-    identities.ensure_capacity(elements.size());
-    for (auto const& element : elements) {
-        if (element->style_node_id() != no_style_node)
-            identities.unchecked_append(element->style_node_id());
+    for (auto slot_identity : style_engine.take_slots_whose_assignment_changed()) {
+        // A slot that departed since its list changed has given up the identity the change named.
+        auto* slot = as_if<HTML::HTMLSlotElement>(document.style_computer().element_for_style_node(slot_identity).ptr());
+        if (!slot || slot->style_node_id() != slot_identity)
+            continue;
+        auto const& assigned = slot->assigned_nodes_internal();
+        identities.clear_with_capacity();
+        identities.ensure_capacity(assigned.size());
+        for (auto const& slottable : assigned) {
+            auto identity = slottable.visit([](auto const& node) { return node->style_node_id(); });
+            if (identity != no_style_node)
+                identities.unchecked_append(identity);
+        }
+        style_engine.record_slot_assigned_nodes(slot_identity, identities.span());
     }
-    document.render_inputs_for_write().style_engine().record_top_layer_elements(identities.span());
+    if (style_engine.take_top_layer_changed()) {
+        auto const& elements = document.top_layer_elements();
+        identities.clear_with_capacity();
+        identities.ensure_capacity(elements.size());
+        for (auto const& element : elements) {
+            if (element->style_node_id() != no_style_node)
+                identities.unchecked_append(element->style_node_id());
+        }
+        style_engine.record_top_layer_elements(identities.span());
+    }
 }
 
 // Assignment runs inside the insertion that connects a node, which happens before the subtree it

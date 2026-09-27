@@ -1,0 +1,7 @@
+last of a manual slot: rgb(0, 128, 0)
+first of a manual slot: rgb(0, 0, 255)
+last of a named slot: rgb(0, 128, 0)
+first of a named slot: rgb(0, 0, 255)
+slottable of a removed slot: rgb(0, 0, 0)
+dialog: fixed true
+closed dialog: none
