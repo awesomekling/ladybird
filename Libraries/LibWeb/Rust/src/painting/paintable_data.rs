@@ -220,9 +220,15 @@ pub(crate) struct CommittedSideData {
     // Only meaningful while is_self_painting(); assigned by the containing block's
     // assign_fragment_ownership().
     pub(crate) fragment_ownership: Option<std::sync::Arc<crate::painting::fragment_ownership::FragmentOwnershipFilter>>,
+    /// The paint-order decisions paint preparation gathered for the row, if it gathered them.
+    pub(crate) order_inputs: crate::painting::paint_order_plan::PaintOrderInputs,
 }
 
 impl CommittedSideData {
+    pub(crate) fn prepared_order_inputs(&self) -> Option<crate::painting::paint_order_plan::PaintOrderInputs> {
+        self.order_inputs.is_initialized().then_some(self.order_inputs)
+    }
+
     pub(crate) fn clear_committed_records(&mut self) {
         self.inline_content = None;
         self.piece_indices = None;

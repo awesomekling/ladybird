@@ -34,7 +34,7 @@ use crate::painting::layer_image_paint_facts::LayerImagePaintFacts;
 use crate::painting::paint_order_plan::PaintOrderInputs;
 use crate::painting::paintable_data::{CommittedSideData, PaintableData};
 use crate::painting::paintable_rows::{CommittedFragmentLinkSlot, CommittedSideDataRef, PAINTABLE_SLOTS_PER_CHUNK};
-use crate::painting::record::damage::PaintDamage;
+use crate::painting::record::damage::{FrameDamage, PaintDamage};
 use crate::painting::replaced_paint_facts::ReplacedPaintFacts;
 use crate::painting::stacking_context::entries::StackingContextEntries;
 use crate::painting::svg_paint_resources::SvgPaintResources;
@@ -50,6 +50,9 @@ pub(crate) struct PublishedRows {
     pub(super) fragment_links: ColumnSnapshot<CommittedFragmentLinkSlot, PAINTABLE_SLOTS_PER_CHUNK>,
     pub(super) side_data: ColumnSnapshot<CommittedSideData, PAINTABLE_SLOTS_PER_CHUNK>,
     pub(super) unique_node_ids: ColumnSnapshot<(NodeSlotId, i64), PAINTABLE_SLOTS_PER_CHUNK>,
+    pub(super) stacking_context_entries: ColumnSnapshot<Option<Arc<StackingContextEntries>>, PAINTABLE_SLOTS_PER_CHUNK>,
+    pub(super) visual_context_node_handles:
+        ColumnSnapshot<Option<Arc<BoxVisualContextNodeHandles>>, PAINTABLE_SLOTS_PER_CHUNK>,
     pub(super) scroll_offsets: Arc<ScrollOffsets>,
     pub(super) image_map_areas: Arc<ImageMapAreas>,
     pub(super) hit_test_list: Option<Arc<HitTestList>>,
@@ -63,6 +66,7 @@ pub(crate) struct PublishedFrame {
     nodes: ColumnSnapshot<PaintNode, SLOTS_PER_CHUNK>,
     /// Keeps the arena from reusing a slot this frame may name until the frame is dropped.
     _retired_slots: RetiredSlots,
+    damage: FrameDamage,
 }
 
 // A frame is read on whichever thread paints it while the document writes its live columns: it
@@ -77,12 +81,19 @@ impl PublishedFrame {
         rows: PublishedRows,
         nodes: ColumnSnapshot<PaintNode, SLOTS_PER_CHUNK>,
         retired_slots: RetiredSlots,
+        damage: FrameDamage,
     ) -> Self {
         Self {
             rows,
             nodes,
             _retired_slots: retired_slots,
+            damage,
         }
+    }
+
+    /// The paint damage the frame was published with.
+    pub(crate) fn damage(&self) -> &FrameDamage {
+        &self.damage
     }
 
     /// The node in a live slot, as the frame published it.
@@ -160,6 +171,23 @@ impl PublishedRows {
                 .get(id.slot_index() as usize)
                 .and_then(CommittedFragmentLinkSlot::link),
         )
+    }
+
+    pub(crate) fn visual_context_node_handles(&self, id: NodeSlotId) -> &BoxVisualContextNodeHandles {
+        self.paintable_row_is_populated(id)
+            .then(|| self.visual_context_node_handles.get(id.slot_index() as usize))
+            .flatten()
+            .and_then(|handles| handles.as_deref())
+            .unwrap_or(&crate::painting::visual_context::EMPTY_BOX_VISUAL_CONTEXT_NODE_HANDLES)
+    }
+
+    pub(crate) fn stacking_context_entries(&self, root: NodeSlotId) -> Option<&StackingContextEntries> {
+        if !self.paintable_row_is_populated(root) {
+            return None;
+        }
+        self.stacking_context_entries
+            .get(root.slot_index() as usize)
+            .and_then(|table| table.as_deref())
     }
 
     pub(crate) fn committed_side_data(&self, id: NodeSlotId) -> &CommittedSideData {
@@ -258,8 +286,10 @@ pub(crate) trait PaintRead: Sized {
     /// The fragments of its line root a box paints, when the line root assigned them.
     fn fragment_ownership_filter(&self, id: NodeSlotId) -> Option<FragmentOwnershipFilter>;
     fn paint_damage_of_row(&self, row: NodeSlotId) -> PaintDamage;
-    /// The paint-order inputs the row's paint state prepared, if it prepared them.
-    fn prepared_paint_order_inputs(&self, row: NodeSlotId) -> Option<PaintOrderInputs>;
+    /// The paint-order inputs paint preparation gathered for the row, if it gathered them.
+    fn prepared_paint_order_inputs(&self, row: NodeSlotId) -> Option<PaintOrderInputs> {
+        self.committed_side_data(row).prepared_order_inputs()
+    }
     fn stacking_context_entries(&self, root: NodeSlotId) -> Option<impl Deref<Target = StackingContextEntries> + '_>;
     fn damaged_paint_rows(&self) -> Vec<NodeSlotId>;
 
@@ -478,14 +508,6 @@ pub(crate) use read_live_layout_tree;
 /// `$arena` maps the implementing type to.
 macro_rules! read_live_paint_facts {
     ($arena:path) => {
-        fn with_paintable_visual_context_node_handles<R>(
-            &self,
-            id: crate::layout::node_data::NodeSlotId,
-            read: impl FnOnce(&crate::painting::visual_context::BoxVisualContextNodeHandles) -> R,
-        ) -> R {
-            crate::layout::LayoutNodeArena::with_paintable_visual_context_node_handles($arena(self), id, read)
-        }
-
         fn text_content(&self, id: crate::layout::node_data::NodeSlotId) -> Option<&crate::layout::TextContent> {
             crate::layout::LayoutNodeArena::text_content($arena(self), id)
         }
@@ -513,7 +535,15 @@ macro_rules! read_live_paint_facts {
         ) -> Option<crate::painting::layer_image_paint_facts::LayerImagePaintFacts> {
             crate::layout::LayoutNodeArena::layer_image_paint_facts($arena(self), id, list, computed_index)
         }
+    };
+}
 
+pub(crate) use read_live_paint_facts;
+
+/// Answers [`PaintRead`]'s reads of paint damage from the live arena that `$arena` maps the
+/// implementing type to.
+macro_rules! read_live_paint_damage {
+    ($arena:path) => {
         fn paint_damage_of_row(
             &self,
             row: crate::layout::node_data::NodeSlotId,
@@ -524,12 +554,21 @@ macro_rules! read_live_paint_facts {
         fn damaged_paint_rows(&self) -> Vec<crate::layout::node_data::NodeSlotId> {
             crate::layout::LayoutNodeArena::damaged_paint_rows($arena(self))
         }
+    };
+}
 
-        fn prepared_paint_order_inputs(
+pub(crate) use read_live_paint_damage;
+
+/// Answers [`PaintRead`]'s reads of the stacking context entry tables and visual context node
+/// handles from the live arena that `$arena` maps the implementing type to.
+macro_rules! read_live_stacking_context_entries {
+    ($arena:path) => {
+        fn with_paintable_visual_context_node_handles<R>(
             &self,
-            row: crate::layout::node_data::NodeSlotId,
-        ) -> Option<crate::painting::paint_order_plan::PaintOrderInputs> {
-            crate::layout::LayoutNodeArena::row_paint_state($arena(self), row).order_inputs()
+            id: crate::layout::node_data::NodeSlotId,
+            read: impl FnOnce(&crate::painting::visual_context::BoxVisualContextNodeHandles) -> R,
+        ) -> R {
+            crate::layout::LayoutNodeArena::with_paintable_visual_context_node_handles($arena(self), id, read)
         }
 
         fn stacking_context_entries(
@@ -543,7 +582,7 @@ macro_rules! read_live_paint_facts {
     };
 }
 
-pub(crate) use read_live_paint_facts;
+pub(crate) use read_live_stacking_context_entries;
 
 /// Answers every [`PaintRead`] read but the rows' from the live arena that `$arena` maps the
 /// implementing type to.
@@ -551,6 +590,8 @@ macro_rules! read_live_arena {
     ($arena:path) => {
         $crate::painting::published_frame::read_live_layout_tree!($arena);
         $crate::painting::published_frame::read_live_paint_facts!($arena);
+        $crate::painting::published_frame::read_live_paint_damage!($arena);
+        $crate::painting::published_frame::read_live_stacking_context_entries!($arena);
     };
 }
 
@@ -731,6 +772,26 @@ impl PaintRead for PaintSource<'_> {
             .fragment_ownership
             .as_deref()
             .cloned()
+    }
+
+    fn paint_damage_of_row(&self, row: NodeSlotId) -> PaintDamage {
+        self.frame.damage.of_row(row)
+    }
+
+    fn damaged_paint_rows(&self) -> Vec<NodeSlotId> {
+        self.frame.damage.rows()
+    }
+
+    fn stacking_context_entries(&self, root: NodeSlotId) -> Option<impl Deref<Target = StackingContextEntries> + '_> {
+        self.frame.rows.stacking_context_entries(root)
+    }
+
+    fn with_paintable_visual_context_node_handles<R>(
+        &self,
+        id: NodeSlotId,
+        read: impl FnOnce(&BoxVisualContextNodeHandles) -> R,
+    ) -> R {
+        read(self.frame.rows.visual_context_node_handles(id))
     }
 
     read_live_paint_facts!(PaintSource::arena);

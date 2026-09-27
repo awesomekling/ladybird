@@ -475,8 +475,11 @@ pub(crate) struct PaintableRowStore {
     pub(crate) row_paint_states: RefCell<Vec<RowPaintState>>,
     pub(crate) damage: DamageSet,
     visual_context_records: RefCell<Vec<Option<PaintableVisualContextRecord>>>,
+    /// The node handles of each row's visual context record, published with the rows for the
+    /// recording to read.
+    visual_context_node_handles: RefCell<VisualContextNodeHandleColumn>,
     pub(crate) stacking_context_entries:
-        RefCell<Vec<Option<Box<crate::painting::stacking_context::entries::StackingContextEntries>>>>,
+        RefCell<crate::painting::stacking_context::entries::StackingContextEntryColumn>,
     pub(crate) stacking_context_roots_flagged_for_resort: RefCell<Vec<NodeSlotId>>,
     line_roots_needing_fragment_ownership: RefCell<Vec<NodeSlotId>>,
     absolute_rect_memo: RefCell<Vec<Option<(NodeSlotId, u64, crate::css::css_pixels::CssPixelRect)>>>,
@@ -491,6 +494,24 @@ pub(crate) struct PaintableRowStore {
     image_map_areas: ImageMapAreaColumn,
     unique_node_ids: UniqueNodeIdColumn,
     visual_context_tree_inputs: Cell<crate::painting::host::FfiVisualContextTreeInputs>,
+}
+
+pub(crate) type VisualContextNodeHandleColumn =
+    CowColumn<Option<std::sync::Arc<BoxVisualContextNodeHandles>>, PAINTABLE_SLOTS_PER_CHUNK>;
+
+/// Sets the node handles published for a row, copying its chunk only when they change.
+fn publish_visual_context_node_handles(
+    column: &mut VisualContextNodeHandleColumn,
+    index: usize,
+    handles: Option<&BoxVisualContextNodeHandles>,
+) {
+    if column
+        .get(index)
+        .is_none_or(|published| published.as_deref() == handles)
+    {
+        return;
+    }
+    *column.get_mut(index).expect("the row is in the column") = handles.cloned().map(std::sync::Arc::new);
 }
 
 pub(crate) struct PaintableRows<Arena> {
@@ -1091,9 +1112,22 @@ impl LayoutNodeArena {
             return;
         }
         let inputs = crate::painting::paint_order_plan::PaintOrderInputs::gather(&self.paintable_rows(), row);
-        if self.row_paint_state(row).update_order_inputs(inputs) {
+        if self.update_paint_order_inputs(row, inputs) {
             self.note_paint_order_changed(row);
         }
+    }
+
+    /// Records the paint-order decisions gathered for a row, and returns whether they changed.
+    pub(crate) fn update_paint_order_inputs(
+        &self,
+        row: NodeSlotId,
+        inputs: crate::painting::paint_order_plan::PaintOrderInputs,
+    ) -> bool {
+        if self.live_committed_side_data(row).order_inputs == inputs {
+            return false;
+        }
+        self.committed_side_data_mut(row).order_inputs = inputs;
+        true
     }
 
     // A row whose ordering decisions changed is placed differently by its ancestors' plans and
@@ -1314,8 +1348,11 @@ impl LayoutNodeArena {
                 row_paint_states.push(RowPaintState::default());
                 absolute_rect_memo.push(None);
                 visual_context_records.push(None);
-                stacking_context_entries.push(None);
             }
+            stacking_context_entries.grow_to(side_data.len());
+            let visual_context_node_handles = store.visual_context_node_handles.get_mut();
+            visual_context_node_handles.grow_to(side_data.len());
+            publish_visual_context_node_handles(visual_context_node_handles, index, None);
 
             store.rows.grow_to(side_data.len());
             let committed_side_data = store.committed_side_data.get_mut();
@@ -1333,7 +1370,7 @@ impl LayoutNodeArena {
             absolute_rect_memo[index] = None;
             self.scrollable_overflow.rows_to_measure.get_mut().push(layout_node);
             visual_context_records[index] = None;
-            stacking_context_entries[index] = None;
+            crate::painting::stacking_context::entries::drop_table(&mut stacking_context_entries, index);
         }
         self.flush_committed_box_changes();
     }
@@ -1384,7 +1421,8 @@ impl LayoutNodeArena {
             .expect("invalid paintable arena slot ID") = CommittedSideData::default();
         store.row_paint_states.borrow()[index].clear();
         store.visual_context_records.borrow_mut()[index] = None;
-        store.stacking_context_entries.borrow_mut()[index] = None;
+        publish_visual_context_node_handles(store.visual_context_node_handles.get_mut(), index, None);
+        crate::painting::stacking_context::entries::drop_table(store.stacking_context_entries.get_mut(), index);
         self.flush_committed_box_changes();
     }
 
@@ -1419,15 +1457,21 @@ impl LayoutNodeArena {
 
     pub(crate) fn set_paintable_visual_context_record(&self, id: NodeSlotId, record: PaintableVisualContextRecord) {
         debug_assert!(self.paintable_row_is_populated(id));
-        let inputs = self.row_paint_state(id).order_inputs().map(|inputs| {
+        let prepared = self.live_committed_side_data(id).prepared_order_inputs();
+        let inputs = prepared.map(|inputs| {
             inputs.with_visual_context(
                 &record.stacking_context,
                 crate::painting::style_queries::z_index(self, id),
             )
         });
+        publish_visual_context_node_handles(
+            &mut self.paintable_rows.visual_context_node_handles.borrow_mut(),
+            id.slot_index() as usize,
+            Some(&record.node_handles),
+        );
         self.paintable_rows.visual_context_records.borrow_mut()[id.slot_index() as usize] = Some(record);
         if let Some(inputs) = inputs {
-            if self.row_paint_state(id).update_order_inputs(inputs) {
+            if self.update_paint_order_inputs(id, inputs) {
                 self.note_paint_order_changed(id);
             }
         } else {
@@ -1438,6 +1482,10 @@ impl LayoutNodeArena {
 
     pub(crate) fn drop_all_visual_context_records(&self) {
         self.paintable_rows.visual_context_records.borrow_mut().fill(None);
+        let mut handles = self.paintable_rows.visual_context_node_handles.borrow_mut();
+        for index in 0..self.paintable_row_count() {
+            publish_visual_context_node_handles(&mut handles, index, None);
+        }
     }
 
     pub(crate) fn with_paintable_visual_context_node_handles<R>(
@@ -1595,12 +1643,16 @@ impl LayoutNodeArena {
         let fragment_links = store.committed_fragment_links.get_mut();
         let side_data = store.committed_side_data.get_mut();
         let unique_node_ids = store.unique_node_ids.ids.get_mut();
+        let stacking_context_entries = store.stacking_context_entries.get_mut();
+        let visual_context_node_handles = store.visual_context_node_handles.get_mut();
         let Some(published) = &mut store.published else {
             store.published = Some(PublishedRows {
                 rows: store.rows.publish(),
                 fragment_links: fragment_links.publish(),
                 side_data: side_data.publish(),
                 unique_node_ids: unique_node_ids.publish(),
+                stacking_context_entries: stacking_context_entries.publish(),
+                visual_context_node_handles: visual_context_node_handles.publish(),
                 scroll_offsets: store.scroll_offsets.snapshot(),
                 image_map_areas: store.image_map_areas.snapshot(),
                 hit_test_list,
@@ -1620,6 +1672,12 @@ impl LayoutNodeArena {
         if unique_node_ids.written_since_publish() {
             published.unique_node_ids = unique_node_ids.publish();
         }
+        if stacking_context_entries.written_since_publish() {
+            published.stacking_context_entries = stacking_context_entries.publish();
+        }
+        if visual_context_node_handles.written_since_publish() {
+            published.visual_context_node_handles = visual_context_node_handles.publish();
+        }
         published.scroll_offsets = store.scroll_offsets.snapshot();
         published.image_map_areas = store.image_map_areas.snapshot();
         published.hit_test_list = hit_test_list;
@@ -1636,7 +1694,7 @@ impl LayoutNodeArena {
             .clone()
             .expect("the rows were just published");
         let (nodes, retired_slots) = self.publish_paint_tree();
-        PublishedFrame::new(rows, nodes, retired_slots)
+        PublishedFrame::new(rows, nodes, retired_slots, self.paint_damage_for_frame())
     }
 
     /// Builds the structures a hit-test query derives from the list before the rows are
