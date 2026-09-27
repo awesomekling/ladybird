@@ -623,24 +623,11 @@ void NodeWithStyle::apply_style(Row const& row, CSS::StyleRecordID style_record_
     }
 
     // What apply_style() does to the row, with no shell to keep a mirror of it. A shell made later is made from the row.
-    auto* arena = row.arena_handle();
-    auto slot = row.slot();
-    if (style_record_identity.value() != RustFFI::layout_arena_node_style_record(arena, slot))
-        RustFFI::layout_arena_release_node_style_record_pin_for_host(arena, slot);
-    bool const installed_ahead = RustFFI::layout_arena_take_animation_adoption(arena, slot, style_record_identity.value());
-    if (!installed_ahead)
-        RustFFI::layout_arena_set_node_style(arena, slot, style_record_identity.value(), style_payloads);
+    auto* old_image_observers = RustFFI::layout_arena_install_row_style(row.arena_handle(), row.slot(), style_record_identity.value(), style_payloads);
     did_update_row_style_record(document, dom_node, style_payloads);
-    if (!installed_ahead) {
-        RustFFI::layout_arena_set_node_flag(arena, slot, RustFFI::NodeFlag::HasAnimatedOpacityOrTransform, false);
-        RustFFI::layout_arena_reinherit_anonymous_descendants(arena, slot);
-    }
     // What attach_style_resources() does for a style that holds no images.
-    delete static_cast<ImageObserverSlots*>(RustFFI::layout_arena_replace_image_observers(arena, slot, nullptr));
-    RustFFI::layout_arena_note_style_image_resources_attached(arena, slot, false);
+    delete static_cast<ImageObserverSlots*>(old_image_observers);
     Painting::push_paint_facts_after_style_attach(row, const_cast<DOM::Node*>(dom_node), Painting::StyleHoldsImageValues::No);
-    if (RustFFI::layout_arena_node_generated_for(arena, slot) != 0)
-        RustFFI::layout_arena_pin_node_style_record_for_host(arena, slot, style_record_identity.value());
 }
 
 void NodeWithStyle::apply_style(CSS::StyleRecordID style_record_identity)
@@ -888,7 +875,8 @@ void NodeWithStyle::set_style_record_identity(Row const& row, CSS::StyleRecordID
     }
     auto* arena = row.arena_handle();
     auto slot = row.slot();
-    if (RustFFI::layout_arena_node_has_derived_style(arena, slot))
+    auto const row_style_record = RustFFI::layout_arena_row_style_record(arena, slot);
+    if (row_style_record.derived)
         return;
     auto& document = row.document();
     auto const& style_engine = document.style_computer().style_engine();
@@ -903,48 +891,26 @@ void NodeWithStyle::set_style_record_identity(Row const& row, CSS::StyleRecordID
         return;
     }
 
-    // What set_style_record_identity() does to the row, with no shell to keep a mirror of it.
-    auto const old_style_record_identity = CSS::StyleRecordID { RustFFI::layout_arena_node_style_record(arena, slot) };
-    if (old_style_record_identity == style_record_identity) {
-        // A record installed ahead of the host is the row's already, where the shell's mirror still names the old
-        // one, so the row takes its adoption here. The host's pin on the old record goes first, as for the shell;
-        // it follows the record the row now holds.
-        auto const pinned_style_record = RustFFI::layout_arena_node_style_record_pinned_by_host(arena, slot);
-        if (pinned_style_record != 0 && pinned_style_record != style_record_identity.value())
-            RustFFI::layout_arena_release_node_style_record_pin_for_host(arena, slot);
-        bool const installed_ahead = RustFFI::layout_arena_take_animation_adoption(arena, slot, style_record_identity.value());
-        if (!installed_ahead)
-            RustFFI::layout_arena_set_node_style(arena, slot, style_record_identity.value(), style_payloads);
-        did_update_row_style_record(document, dom_node, style_payloads);
-        if (pinned_style_record != 0)
-            RustFFI::layout_arena_pin_node_style_record_for_host(arena, slot, style_record_identity.value());
-        return;
+    // What set_style_record_identity() does to the row, with no shell to keep a mirror of it. A record installed ahead
+    // of the host is the row's already, where the shell's mirror still names the old one, so the row takes its
+    // adoption all the same.
+    auto const old_style_record_identity = CSS::StyleRecordID { row_style_record.record };
+    bool changes_layout_affecting_style = false;
+    if (old_style_record_identity != style_record_identity) {
+        auto const new_record_view = style_engine.style_record_view(style_record_identity);
+        ASSERT(new_record_view.present);
+        if (!new_record_view.present)
+            return;
+        CSS::StyleEngine::StyleRecordView old_record_view {};
+        if (!!old_style_record_identity)
+            old_record_view = style_engine.style_record_view(old_style_record_identity);
+        changes_layout_affecting_style = !old_record_view.present
+            || old_record_view.animation_overlay_identity != 0
+            || new_record_view.animation_overlay_identity != 0
+            || CSS::ComputedValues::layout_affecting_group_payloads_differ(old_record_view.payloads, new_record_view.payloads);
     }
-    auto const new_record_view = style_engine.style_record_view(style_record_identity);
-    ASSERT(new_record_view.present);
-    if (!new_record_view.present)
-        return;
-    bool should_repin_style_record = RustFFI::layout_arena_node_style_record_pinned_by_host(arena, slot) != 0;
-    CSS::StyleEngine::StyleRecordView old_record_view {};
-    if (!!old_style_record_identity)
-        old_record_view = style_engine.style_record_view(old_style_record_identity);
-    bool changes_layout_affecting_style = !old_record_view.present
-        || old_record_view.animation_overlay_identity != 0
-        || new_record_view.animation_overlay_identity != 0
-        || CSS::ComputedValues::layout_affecting_group_payloads_differ(old_record_view.payloads, new_record_view.payloads);
-
-    RustFFI::layout_arena_release_node_style_record_pin_for_host(arena, slot);
-    bool const installed_ahead = RustFFI::layout_arena_take_animation_adoption(arena, slot, style_record_identity.value());
-    if (!installed_ahead)
-        RustFFI::layout_arena_set_node_style(arena, slot, style_record_identity.value(), style_payloads);
+    RustFFI::layout_arena_replace_row_style_record(arena, slot, style_record_identity.value(), style_payloads, changes_layout_affecting_style);
     did_update_row_style_record(document, dom_node, style_payloads);
-    if (should_repin_style_record)
-        RustFFI::layout_arena_pin_node_style_record_for_host(arena, slot, style_record_identity.value());
-
-    if (changes_layout_affecting_style && !installed_ahead) {
-        RustFFI::layout_arena_bump_fragment_cache_epoch_of_self_and_ancestors(arena, slot);
-        RustFFI::layout_arena_reset_cached_intrinsic_sizes_of_self_and_ancestors(arena, slot);
-    }
 }
 
 void NodeWithStyle::pin_style_record_for_cxx_consumers()

@@ -446,6 +446,115 @@ unsafe extern "C" fn layout_arena_set_layout_display(arena: *mut c_void, node: N
     );
 }
 
+/// What the host's `NodeWithStyle::apply_style()` does to the arena for a row without a shell,
+/// taking a style that holds no images, in one call: the host's pin follows the record, an
+/// adoption left by a sample installed ahead is taken, and otherwise the record, its flags and
+/// the anonymous descendants' inherited style are written. Returns the image observers the row
+/// let go of, which the host deletes.
+///
+/// # Safety
+///
+/// The arena must be live on the document thread, `node` must name a live row with style, and
+/// `payloads` must be the payloads the style engine holds for `style_record`.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_install_row_style(
+    arena: *mut c_void,
+    node: NodeSlotId,
+    style_record: u64,
+    payloads: *const c_void,
+) -> *mut c_void {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    // SAFETY: As above.
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+    // SAFETY: As above.
+    let host_tables = unsafe { crate::layout::HostTables::from_handle(arena) };
+    // SAFETY: As above.
+    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
+    if style_record != arena.node_style_record(node) {
+        arena.release_node_style_record_pin_for_host(node);
+    }
+    // Taking the adoption hands the host a pin of its own, so this comes after the old pin went.
+    let installed_ahead = arena.take_animation_adoption(node, style_record);
+    if !installed_ahead {
+        if arena.set_node_style(node, style_record, payloads) {
+            arena.refresh_style_flags(node);
+        }
+        arena.enroll_node_for_svg_paint_resources_sync(node);
+        arena.set_node_flag(node, NodeFlag::HasAnimatedOpacityOrTransform, false);
+        arena.reinherit_anonymous_descendants(node, ShellStyleChangeNotice::Now(&main_thread));
+    }
+    let old_image_observers = arena.replace_image_observers(host_tables, node, std::ptr::null_mut());
+    arena.note_style_image_resources_attached(node, false);
+    // A pseudo-element's row can outlive its DOM pseudo-element's record until the tree is rebuilt.
+    if arena.node_generated_for(node) != 0 {
+        arena.pin_node_style_record_for_host(node, style_record);
+    }
+    old_image_observers
+}
+
+/// The record a row holds, and whether it holds one the arena derived for it rather than one the
+/// host installs.
+#[repr(C)]
+pub struct FfiRowStyleRecord {
+    pub derived: bool,
+    pub record: u64,
+}
+
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_row_style_record(arena: *mut c_void, node: NodeSlotId) -> FfiRowStyleRecord {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    // SAFETY: As above; the row's record and its pins are nothing a recording writes.
+    let arena = unsafe { LayoutNodeArena::from_handle_beside_recording(arena) };
+    FfiRowStyleRecord {
+        derived: arena.node_style_record_is_pinned_by_arena(node),
+        record: arena.node_style_record(node),
+    }
+}
+
+/// What the host's `NodeWithStyle::set_style_record_identity()` does to the arena for a row without
+/// a shell, in one call: the host's pin follows the record, an adoption left by a sample installed
+/// ahead is taken, and otherwise the record is written, with the caches of the row and its
+/// ancestors reset if `changes_layout_affecting_style` and the record is another than the row's.
+///
+/// # Safety
+///
+/// The arena must be live on the document thread, `node` must name a live row with style, and
+/// `payloads` must be the payloads the style engine holds for `style_record`.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_replace_row_style_record(
+    arena: *mut c_void,
+    node: NodeSlotId,
+    style_record: u64,
+    payloads: *const c_void,
+    changes_layout_affecting_style: bool,
+) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    // SAFETY: As above.
+    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
+    let keeps_record = arena.node_style_record(node) == style_record;
+    let pinned_by_host = arena.node_style_record_pinned_by_host(node);
+    // A record installed ahead of the host is the row's already; the host's pin on the old record
+    // still goes first.
+    if !keeps_record || (pinned_by_host != 0 && pinned_by_host != style_record) {
+        arena.release_node_style_record_pin_for_host(node);
+    }
+    // Taking the adoption hands the host a pin of its own, so this comes after the old pin went.
+    let installed_ahead = arena.take_animation_adoption(node, style_record);
+    if !installed_ahead {
+        if arena.set_node_style(node, style_record, payloads) {
+            arena.refresh_style_flags(node);
+        }
+        arena.enroll_node_for_svg_paint_resources_sync(node);
+    }
+    if pinned_by_host != 0 {
+        arena.pin_node_style_record_for_host(node, style_record);
+    }
+    if !keeps_record && changes_layout_affecting_style && !installed_ahead {
+        arena.bump_fragment_cache_epoch_of_self_and_ancestors(node);
+        arena.reset_cached_intrinsic_sizes_of_self_and_ancestors(node);
+    }
+}
+
 #[unsafe(no_mangle)]
 unsafe extern "C" fn layout_arena_reinherit_anonymous_descendants(arena: *mut c_void, node: NodeSlotId) {
     assert!(!arena.is_null(), "layout node arena handle is null");
