@@ -1743,6 +1743,8 @@ private:
     void process_pending_list_item_renumbers();
     void apply_layout_commit_effects(Layout::RustFFI::FfiLayoutCommitEffects const&);
     void take_in_layout_frame_effects(Layout::RustFFI::FfiLayoutFrameEffects const&);
+    void end_layout_frame_update(void* arena);
+    void retire_render_state(Layout::RustFFI::FfiRenderStateRetirement);
 
     void run_unloading_cleanup_steps();
 
@@ -2149,6 +2151,9 @@ private:
     // Whether an image box handed the provider it owns after a layout frame found its image already there, so it
     // lays out again with it.
     bool m_owed_image_provider_arrived_with_image { false };
+    // Whether the document is retiring its render state, which takes the frame in flight back first: the rows that
+    // frame leaves effects for are going away, so the document drops them (see take_in_layout_frame_effects()).
+    bool m_retiring_render_state { false };
     bool m_may_have_scroll_snap_areas { false };
     bool m_may_have_blocking_wheel_event_listener { false };
     bool m_may_have_dom_paint_facts { false };

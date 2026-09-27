@@ -97,17 +97,39 @@ void Document::renew_clock_layout_frame()
     Layout::RustFFI::layout_arena_renew_clock_layout_frame(arena->handle(), &round);
 }
 
+// Ends the layout update a layout frame ran on the document side, once the frame is over: the epochs the update began,
+// the arena's update, and the marks held beside the frame.
+void Document::end_layout_frame_update(void* arena)
+{
+    style_computer().end_style_record_view_epoch();
+    end_style_stabilization_epoch();
+    Layout::RustFFI::layout_arena_end_update_layout(arena);
+    release_held_invalidation_marks();
+    render_inputs_for_write().style_engine().publish_inputs_waiting_for_layout_pass();
+}
+
 // Takes in what a layout frame left for the document once it is over, in the order the frame leaves it, and ends the
 // layout update on the document side.
 void Document::take_in_layout_frame_effects(Layout::RustFFI::FfiLayoutFrameEffects const& effects)
 {
+    auto* arena = layout_node_arena().handle();
+
+    // A document retiring its render state takes the frame back only to end the update: the rows the frame owes
+    // resources, the commit it made and the rendering it prepared go away with the render state, and nothing of it is
+    // published. So what the frame leaves for the host is dropped, and the document is told nothing.
+    if (m_retiring_render_state) {
+        m_style_repaint_owed_to_flight = false;
+        m_style_repaint_owed_to_flight_invalidates_hit_test = false;
+        end_layout_frame_update(arena);
+        return;
+    }
+
     // The install of a style batch a flight applied owes the flight the repaint of the batch, which the flight's recording
     // is if it stands; otherwise the document paints again.
     if (effects.settles_flight_style_repaint)
         settle_style_repaint_owed_to_flight(effects.flight_style_repaint_recorded);
 
     // An image box that owns its image's provider is handed it here, and lays out again if the image is already there.
-    auto* arena = layout_node_arena().handle();
     for (auto const& owed : ReadonlySpan<Layout::RustFFI::FfiOwedImageResources> { effects.owed_image_resources, effects.owed_image_resources_count }) {
         bool image_was_available = false;
         switch (owed.tag) {
@@ -138,11 +160,7 @@ void Document::take_in_layout_frame_effects(Layout::RustFFI::FfiLayoutFrameEffec
     if (effects.prepare_for_rendering)
         prepare_for_rendering();
 
-    style_computer().end_style_record_view_epoch();
-    end_style_stabilization_epoch();
-    Layout::RustFFI::layout_arena_end_update_layout(arena);
-    release_held_invalidation_marks();
-    render_inputs_for_write().style_engine().publish_inputs_waiting_for_layout_pass();
+    end_layout_frame_update(arena);
 
     // A frame taken back in the middle of main-thread code tells the document nothing that can run script there: its
     // messages and the resnap wait for the next layout update to end, which runs before anything reads them.
