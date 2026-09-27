@@ -144,6 +144,9 @@ static void resolve_fonts(uintptr_t font_cascade_memo, void const* font_face_sna
     // connection the font provider's callbacks use belongs to the document thread. Inside this
     // scope those questions go out on the render side's own connection instead.
     Gfx::RenderSideFontScope render_side_font_scope;
+    // A face the published table says is pending stays pending for the batch: its live state is
+    // the document thread's, as is the font it may have loaded since.
+    Gfx::PublishedPendingFaceScope published_pending_face_scope;
     for (size_t index = 0; index < count; ++index)
         resolved_fonts[index] = resolve_font(memo, font_faces, requests[index]);
     for (u64 question = 0; question < render_side_font_scope.questions_that_reached_the_document_thread(); ++question)

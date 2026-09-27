@@ -7,6 +7,7 @@
 #pragma once
 
 #include <AK/Array.h>
+#include <AK/Atomic.h>
 #include <AK/AtomicRefCounted.h>
 #include <AK/Function.h>
 #include <AK/HashMap.h>
@@ -31,6 +32,18 @@ struct EmojiPresentationResult {
 };
 
 EmojiPresentationResult emoji_presentation_for_code_point(u32 code_point, Optional<u32> next_code_point);
+
+// While one is open on a thread, a pending face there is what the document published: pending, with
+// no font. A style font batch opens one, since it runs on whichever thread runs the pass, and asking
+// a face for its font reaches the document thread's face registry and face state.
+class PublishedPendingFaceScope {
+    AK_MAKE_NONCOPYABLE(PublishedPendingFaceScope);
+    AK_MAKE_NONMOVABLE(PublishedPendingFaceScope);
+
+public:
+    PublishedPendingFaceScope();
+    ~PublishedPendingFaceScope();
+};
 
 enum class PendingFontState : u8 {
     Invisible,
@@ -147,12 +160,8 @@ public:
         PendingFontState resolve() const { return m_resolve(); }
         // What resolve() would answer, without starting a load or a display-period timer.
         PendingFontState peek_state() const { return m_peek_state ? m_peek_state() : m_resolve(); }
-        Font const* resolved_font() const
-        {
-            if (!m_font && m_resolved_font)
-                m_font = m_resolved_font();
-            return m_font.ptr();
-        }
+        // The face's font once it has one. Inside a PublishedPendingFaceScope, none.
+        Font const* resolved_font() const;
 
     private:
         UnicodeRange m_enclosing_range;
@@ -166,7 +175,7 @@ public:
 
     void set_last_resort_font(NonnullRefPtr<Font> font)
     {
-        m_first_available_font_cache = nullptr;
+        m_first_available_font_cache.store(nullptr, AK::MemoryOrder::memory_order_relaxed);
         m_last_resort_font = move(font);
     }
     void set_system_font_fallback_callback(SystemFontFallbackCallback callback) { m_system_font_fallback_callback = move(callback); }
@@ -175,6 +184,7 @@ public:
 
 private:
     Vector<SnapshotEntry> snapshot_entries(Vector<Entry> const& fonts, bool include_pending_faces) const;
+    Gfx::Font const& find_first_available_font() const;
 
     RefPtr<Font const> m_last_resort_font;
     mutable Vector<Entry> m_fonts;
@@ -192,7 +202,7 @@ private:
     mutable Array<Font const*, 128> m_ascii_cache {};
 
     // This cannot share m_ascii_cache because the first available font does not need to contain a space glyph.
-    mutable Font const* m_first_available_font_cache { nullptr };
+    mutable Atomic<Font const*> m_first_available_font_cache { nullptr };
 
     // An owned `Arc<FrozenFontList>` from libgfx_rust, or null. Written once by freeze().
     void const* m_frozen_list { nullptr };

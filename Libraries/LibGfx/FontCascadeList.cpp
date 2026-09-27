@@ -29,6 +29,30 @@ static Singleton<HashMap<u64, FontCascadeList::PendingFace*>> s_pending_faces_by
 
 static Atomic<u64> s_next_pending_face_id { 1 };
 
+static thread_local u32 s_published_pending_face_scope_depth { 0 };
+
+PublishedPendingFaceScope::PublishedPendingFaceScope()
+{
+    ++s_published_pending_face_scope_depth;
+}
+
+PublishedPendingFaceScope::~PublishedPendingFaceScope()
+{
+    VERIFY(s_published_pending_face_scope_depth > 0);
+    --s_published_pending_face_scope_depth;
+}
+
+Font const* FontCascadeList::PendingFace::resolved_font() const
+{
+    // A face's live state belongs to the document thread, which also fills m_font; a scope that reads
+    // only what was published leaves both alone and finds the face as the table recorded it: pending.
+    if (s_published_pending_face_scope_depth != 0)
+        return nullptr;
+    if (!m_font && m_resolved_font)
+        m_font = m_resolved_font();
+    return m_font.ptr();
+}
+
 FontCascadeList::PendingFace::PendingFace(UnicodeRange enclosing, Vector<UnicodeRange> ranges, Function<PendingFontState()> resolve, Function<RefPtr<Font const>()> resolved_font, Function<PendingFontState()> peek_state)
     : m_enclosing_range(enclosing)
     , m_unicode_ranges(move(ranges))
@@ -87,13 +111,13 @@ EmojiPresentationResult emoji_presentation_for_code_point(u32 code_point, Option
 
 void FontCascadeList::add(NonnullRefPtr<Font const> font)
 {
-    m_first_available_font_cache = nullptr;
+    m_first_available_font_cache.store(nullptr, AK::MemoryOrder::memory_order_relaxed);
     m_fonts.append({ move(font), {} });
 }
 
 void FontCascadeList::add(NonnullRefPtr<Font const> font, Vector<UnicodeRange> unicode_ranges)
 {
-    m_first_available_font_cache = nullptr;
+    m_first_available_font_cache.store(nullptr, AK::MemoryOrder::memory_order_relaxed);
     if (unicode_ranges.is_empty()) {
         m_fonts.append({ move(font), {} });
         return;
@@ -132,7 +156,7 @@ void FontCascadeList::add_pending_face(Vector<UnicodeRange> unicode_ranges, Func
 void FontCascadeList::extend(FontCascadeList const& other)
 {
     m_ascii_cache.fill(nullptr);
-    m_first_available_font_cache = nullptr;
+    m_first_available_font_cache.store(nullptr, AK::MemoryOrder::memory_order_relaxed);
     for (auto const& pending : other.m_pending_faces)
         m_pending_faces.append({ m_fonts.size() + pending.font_index, pending.face });
     m_fonts.extend(other.m_fonts);
@@ -146,9 +170,18 @@ void FontCascadeList::extend_fallback(FontCascadeList const& other)
 // https://drafts.csswg.org/css-fonts/#first-available-font
 Gfx::Font const& FontCascadeList::first_available_font() const
 {
-    if (m_first_available_font_cache && m_pending_faces.is_empty())
-        return *m_first_available_font_cache;
+    // NB: A cascade the font memo holds is read by style font batches on any thread, so the cache is
+    //     atomic. Every thread that fills it stores a font this list owns.
+    if (auto const* cached = m_first_available_font_cache.load(AK::MemoryOrder::memory_order_relaxed); cached && m_pending_faces.is_empty())
+        return *cached;
 
+    auto const& font = find_first_available_font();
+    m_first_available_font_cache.store(&font, AK::MemoryOrder::memory_order_relaxed);
+    return font;
+}
+
+Gfx::Font const& FontCascadeList::find_first_available_font() const
+{
     // The first available font, used for example in the definition of font-relative lengths such as ex or in the
     // definition of the line-height property, is defined to be the first font for which the character U+0020 (space)
     // is not excluded by a unicode-range, given the font families in the font-family list (or a user agent’s default
@@ -170,33 +203,24 @@ Gfx::Font const& FontCascadeList::first_available_font() const
     };
 
     for (size_t font_index = 0; font_index < m_fonts.size(); ++font_index) {
-        if (auto* font = resolve_pending_faces(font_index)) {
-            m_first_available_font_cache = font;
+        if (auto* font = resolve_pending_faces(font_index))
             return *font;
-        }
         auto const& entry = m_fonts[font_index];
-        if (!entry.range_data.has_value()) {
-            m_first_available_font_cache = entry.font.ptr();
-            return *m_first_available_font_cache;
-        }
+        if (!entry.range_data.has_value())
+            return *entry.font;
         if (!entry.range_data->enclosing_range.contains(space_code_point))
             continue;
 
         for (auto const& range : entry.range_data->unicode_ranges) {
-            if (range.contains(space_code_point)) {
-                m_first_available_font_cache = entry.font.ptr();
-                return *m_first_available_font_cache;
-            }
+            if (range.contains(space_code_point))
+                return *entry.font;
         }
     }
 
-    if (auto* font = resolve_pending_faces(m_fonts.size())) {
-        m_first_available_font_cache = font;
+    if (auto* font = resolve_pending_faces(m_fonts.size()))
         return *font;
-    }
 
-    m_first_available_font_cache = m_last_resort_font.ptr();
-    return *m_first_available_font_cache;
+    return *m_last_resort_font;
 }
 
 Gfx::Font const& FontCascadeList::font_for_code_point(u32 code_point, EmojiPresentationResult emoji_presentation) const
