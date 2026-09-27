@@ -1670,7 +1670,7 @@ impl LayoutFrame {
     }
 }
 
-/// A layout frame a clock lease's ticks lay out in on the render side while the main thread idles
+/// A layout frame a document's clock ticks lay out in on the render side while the main thread idles
 /// (`LIBWEB_RENDER_CLOCK_FRAMES`). The main thread makes it with what its rounds read from the
 /// document (the facts, the selection), which nothing changes while it idles, and takes it in when
 /// it wakes: it pays what the rounds owe and applies their messages, as it takes in a submitted
@@ -1729,7 +1729,7 @@ impl ClockLayoutFrame {
     }
 }
 
-/// Takes in the layout frame of a clock lease's ticks, and ends the update the document began for
+/// Takes in the layout frame of a document's clock ticks, and ends the update the document began for
 /// it: pays what the rounds owe the document, and applies their messages at once, since the
 /// document thread takes the frame in at the top of its event loop, where they can run. Where the
 /// render side showed every tick that laid out in the frame, the document paints nothing again.
@@ -1747,7 +1747,7 @@ unsafe fn take_in_clock_layout_frame(
     unsafe { frame.frame.take_in_end(main_thread, FfiLayoutUpdateEnd::InUpdate) };
 }
 
-/// Makes the frame a clock lease's ticks lay out in, with the document as it stands now, which the
+/// Makes the frame a document's clock ticks lay out in, with the document as it stands now, which the
 /// document read into `round`.
 ///
 /// # Safety

@@ -148,7 +148,7 @@ pub(super) fn finish_layout_frame_taken_back(arena: *mut c_void, frame: LayoutFr
     });
 }
 
-/// Hands the clock lease of the document a fresh layout frame for its ticks to lay out in on the
+/// Hands the clock of the document a fresh layout frame for its ticks to lay out in on the
 /// render side while the document thread idles (see `ClockLayoutFrame`), with the document as it
 /// read itself into `round`.
 ///
@@ -168,10 +168,10 @@ unsafe extern "C" fn layout_arena_renew_clock_layout_frame(arena: *mut c_void, r
     crate::clock_frames::set_clock_layout_frame(arena, frame);
 }
 
-/// Takes in the layout frame the clock lease's ticks laid out in, if they did, and ends the layout
+/// Takes in the layout frame the document's clock ticks laid out in, if they did, and ends the layout
 /// update the document began for it: pays what the rounds owe the document and applies their
 /// messages, as a submitted pass's frame is taken in. Returns whether there was one; the document
-/// then renews the lease's frame (`layout_arena_renew_clock_layout_frame`).
+/// then renews the clock's frame (`layout_arena_renew_clock_layout_frame`).
 ///
 /// # Safety
 ///
@@ -183,7 +183,7 @@ unsafe extern "C" fn layout_arena_take_in_clock_layout_frame(arena: *mut c_void)
     let Some(frame) = crate::clock_frames::take_laid_out_clock_layout_frame(arena) else {
         return false;
     };
-    let shown_on_render_side = crate::clock_frames::rust_clock_lease_presented_since_adoption(arena);
+    let shown_on_render_side = crate::clock_frames::presented_since_adoption(arena);
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     abort_on_panic(|| {
         // SAFETY: As above.
@@ -192,7 +192,7 @@ unsafe extern "C" fn layout_arena_take_in_clock_layout_frame(arena: *mut c_void)
     true
 }
 
-/// Whether the clock lease's ticks laid out in its layout frame since the document last took it in.
+/// Whether the document's clock ticks laid out in its layout frame since the document last took it in.
 #[unsafe(no_mangle)]
 extern "C" fn layout_arena_clock_layout_frame_laid_out(arena: *mut c_void) -> bool {
     crate::clock_frames::clock_layout_frame_laid_out(arena)

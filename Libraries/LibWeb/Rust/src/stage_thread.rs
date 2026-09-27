@@ -488,29 +488,60 @@ pub(crate) unsafe fn submit_rendering_update(
     let hold_labels = std::iter::once(FLIGHT_STAGE)
         .chain(stage_holds.iter().copied())
         .collect();
+    // SAFETY: Guaranteed by the caller.
+    unsafe {
+        submit_to_owner(
+            FLIGHT_STAGE,
+            reach,
+            hold_labels,
+            arena,
+            |ticket| crate::render_owner::ToOwner::RenderingUpdate {
+                document,
+                update: Box::new(update),
+                ticket,
+            },
+            on_taken_back,
+        );
+    }
+}
+
+/// Like [`submit_stage_with_take_back`], for a clock tick of the document whose arena is `arena`, which the render
+/// owner runs as the message `tick` makes of its run: the frame holds the arena as the stage `clock`.
+///
+/// # Safety
+///
+/// As for [`submit_stage_with_take_back`].
+pub(crate) unsafe fn submit_clock_tick(
+    arena: *mut c_void,
+    tick: impl FnOnce(SubmittedRunTicket) -> crate::render_owner::ToOwner,
+    on_taken_back: impl FnOnce() + 'static,
+) {
+    // SAFETY: Guaranteed by the caller.
+    unsafe { submit_to_owner("clock", "clock", vec!["clock"], arena, tick, on_taken_back) };
+}
+
+/// Sends the render owner the message `message` makes of a submitted run labelled `label`, which the frame in flight
+/// holds as [`submit`] does.
+///
+/// # Safety
+///
+/// As for [`submit_stage_with_take_back`].
+unsafe fn submit_to_owner(
+    label: &'static str,
+    role: &'static str,
+    hold_labels: Vec<&'static str>,
+    arena: *mut c_void,
+    message: impl FnOnce(SubmittedRunTicket) -> crate::render_owner::ToOwner,
+    on_taken_back: impl FnOnce() + 'static,
+) {
     let thread = stage_thread().expect("only a stage thread runs submitted stages");
-    let (ticket, reply) = SubmittedRunTicket::new(thread, next_submitted_run(FLIGHT_STAGE, arena));
+    let (ticket, reply) = SubmittedRunTicket::new(thread, next_submitted_run(label, arena));
     tsan::release(thread);
-    if thread
-        .jobs
-        .send(StageMessage::Owner(crate::render_owner::ToOwner::RenderingUpdate {
-            document,
-            update: Box::new(update),
-            ticket,
-        }))
-        .is_err()
-    {
+    if thread.jobs.send(StageMessage::Owner(message(ticket))).is_err() {
         // The stage thread only goes away if the process is going away.
         std::process::abort();
     }
-    note_submitted(
-        FLIGHT_STAGE,
-        reach,
-        hold_labels,
-        arena,
-        reply,
-        Some(Box::new(on_taken_back)),
-    );
+    note_submitted(label, role, hold_labels, arena, reply, Some(Box::new(on_taken_back)));
 }
 
 /// # Safety
@@ -657,31 +688,8 @@ impl SubmittedRunTicket {
     }
 }
 
-/// A way onto the stage thread for a thread that submits no stages: the render clock's, which hands
-/// it the display ticks of the clock leases (see `crate::clock_frames`).
-pub(crate) struct DetachedJobSender {
-    thread: &'static StageThread,
-    jobs: Sender<StageMessage>,
-}
-
-impl DetachedJobSender {
-    /// Queues `job` behind what the stage thread has queued already; nobody waits for it. Returns
-    /// false, having dropped `job`, when the stage thread is gone, which it only is when the
-    /// process is.
-    pub(crate) fn send(&self, job: impl FnOnce() + Send + 'static) -> bool {
-        let thread = self.thread;
-        let job: Job = Box::new(move || {
-            tsan::acquire(thread);
-            job();
-            tsan::release(thread);
-        });
-        tsan::release(thread);
-        self.jobs.send(StageMessage::Run(job)).is_ok()
-    }
-}
-
-/// Runs `work` on the stage thread as a stage the main thread `caller` submitted for the arena
-/// `arena` would run, from a detached job: for that thread, which does not wait for it.
+/// Runs `work` on the Rendering thread as a stage the main thread `caller` submitted for the arena
+/// `arena` would run, from a message that thread does not wait for: for that thread.
 pub(crate) fn run_detached_for(caller: ThreadId, arena: usize, work: impl FnOnce()) {
     let waiting_caller = WAITING_CALLER.with(|waiting| waiting.replace(Some(caller)));
     let wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(arena as u64);
@@ -692,17 +700,10 @@ pub(crate) fn run_detached_for(caller: ThreadId, arena: usize, work: impl FnOnce
     WAITING_CALLER.with(|waiting| waiting.set(waiting_caller));
 }
 
-/// A sender of detached jobs, where the stages overlap the main thread; `None` without a stage
-/// thread (`LIBWEB_STAGE_OVERLAP=none`) or where it runs in lockstep with the main thread.
-pub(crate) fn detached_job_sender() -> Option<DetachedJobSender> {
-    if stage_thread_mode() != Some(StageThreadMode::Overlap) {
-        return None;
-    }
-    let thread = stage_thread()?;
-    Some(DetachedJobSender {
-        thread,
-        jobs: thread.jobs.clone(),
-    })
+/// Whether the render owner runs on a thread of its own beside the main thread: where the stages overlap it
+/// (`LIBWEB_STAGE_THREAD=overlap`), not without a stage thread (`LIBWEB_STAGE_OVERLAP=none`) or in lockstep with it.
+pub(crate) fn owner_runs_beside_main() -> bool {
+    stage_thread_mode() == Some(StageThreadMode::Overlap) && stage_thread().is_some()
 }
 
 /// Whether the stage thread is inside a stage the main thread submitted or waits for: a detached
