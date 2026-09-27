@@ -3158,7 +3158,6 @@ struct TreeBuildStageOutput {
     outcome: FfiLayoutTreeBuildOutcome,
     reports: Vec<crate::layout::commit::FfiCommitMessage>,
     handbacks: super::layout_node_arena::HostHandbacks,
-    replaced_layout_tree: bool,
 }
 
 /// What a finished layout tree build walk owes the host, and what it found out for the document.
@@ -3169,7 +3168,6 @@ struct TreeBuildStageOutput {
 pub(crate) struct TreeBuildHostHalf {
     reports: Vec<crate::layout::commit::FfiCommitMessage>,
     handbacks: super::layout_node_arena::HostHandbacks,
-    replaced_layout_tree: bool,
 }
 
 // The walk's handbacks name the shells they owe by id, so the walk crosses back on its own terms.
@@ -3179,12 +3177,6 @@ const _: () = {
 };
 
 impl TreeBuildHostHalf {
-    /// Whether the build placed a new viewport, whose tree the document gives a new paint state
-    /// once this is paid.
-    pub(crate) fn replaced_layout_tree(&self) -> bool {
-        self.replaced_layout_tree
-    }
-
     /// Pays what the walk let go of, as it would have while the walk ran: the boxes nodes gained or
     /// lost, the host-owned objects of the rows it freed, and the style changes of the shells of
     /// the boxes it kept. Then what the build found out goes to the document, in the order the
@@ -3227,16 +3219,8 @@ pub(crate) unsafe fn walk_layout_tree_build(
             outcome,
             reports,
             handbacks,
-            replaced_layout_tree,
         } = run_tree_build_stage(&host, document_style_node);
-        (
-            outcome,
-            TreeBuildHostHalf {
-                reports,
-                handbacks,
-                replaced_layout_tree,
-            },
-        )
+        (outcome, TreeBuildHostHalf { reports, handbacks })
     })
 }
 
@@ -3369,11 +3353,22 @@ fn run_tree_build_stage(host: &DomTreeBuilderHost, document_style_node: u32) -> 
     }
     arena.release_published_document_style();
     // A new viewport retires the tree it replaced, whatever of it the build did not take over, and
-    // the document's paint state with it, which the host half renews.
+    // the document's paint state with it, which the document renews once it has taken in what the
+    // build found out before.
     let replaced_layout_tree = replaced_layout_root.index != viewport.index;
     if replaced_layout_tree && arena.slot_is_live(replaced_layout_root) {
         prepare_subtree_for_detach(host.arena.cast(), replaced_layout_root);
         free_subtree_and_hand_back(host.arena, replaced_layout_root);
+    }
+    let mut reports = state.reports;
+    if replaced_layout_tree {
+        reports.push(crate::layout::commit::FfiCommitMessage {
+            style_node: 0,
+            other_style_node: 0,
+            kind: crate::layout::commit::FfiCommitMessageKind::LayoutTreeReplaced,
+            pending_face: 0,
+            pending_face_has_been_retried: false,
+        });
     }
     // SAFETY: The stage holds the arena alone, and no borrow above outlives the free.
     let arena = unsafe { &*host.arena };
@@ -3387,9 +3382,8 @@ fn run_tree_build_stage(host: &DomTreeBuilderHost, document_style_node: u32) -> 
             layout_tree_update_escaped_rebuild_roots: state.layout_tree_update_escaped_rebuild_roots,
             needs_another_build_pass: !state.layout_tree_rebuild_requests.is_empty(),
         },
-        reports: state.reports,
+        reports,
         handbacks,
-        replaced_layout_tree,
     }
 }
 

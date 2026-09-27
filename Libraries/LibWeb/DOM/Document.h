@@ -626,6 +626,8 @@ public:
     Painting::DocumentPaintState& paint_state();
     Painting::DocumentPaintState const& paint_state() const;
     [[nodiscard]] bool has_paint_state() const { return m_paint_state; }
+    // Gives the layout tree a tree build placed in place of the one before a new paint state.
+    void renew_paint_state();
     Compositing::AccumulatedVisualContextTree visual_context_tree() const;
     u64 visual_context_tree_structural_epoch() const;
     Compositing::ScrollStateSnapshot const& scroll_state_snapshot() const;

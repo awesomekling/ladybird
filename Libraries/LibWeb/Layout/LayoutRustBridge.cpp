@@ -380,8 +380,16 @@ void register_layout_host(NodeArena& arena, DOM::Document& document)
         .context = &document,
         .deliver_commit_messages = [](void* context, RustFFI::FfiCommitMessage const* messages, size_t count) {
             auto& document = *static_cast<DOM::Document*>(context);
-            for (size_t index = 0; index < count; ++index)
-                document.commit_messages().append(messages[index]);
+            for (auto const& message : ReadonlySpan<RustFFI::FfiCommitMessage> { messages, count }) {
+                // A new layout tree gets a new paint state once the document has taken in what the build found out
+                // before it, and before what comes after it.
+                if (message.kind == RustFFI::FfiCommitMessageKind::LayoutTreeReplaced) {
+                    document.commit_messages().apply_script_free();
+                    document.renew_paint_state();
+                    continue;
+                }
+                document.commit_messages().append(message);
+            }
             // The pass that produced them reads back what they change before it ends. They can arrive
             // as a forced join takes a frame back, so the continuations wait for the next drain point.
             document.commit_messages().apply_script_free(); },

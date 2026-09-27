@@ -66,9 +66,6 @@ Layout::RustFFI::FfiLayoutUpdateHostCallbacks Document::layout_update_host_callb
             if (auto navigable = document.navigable())
                 navigable->seal_flight_paint(document, !document.needs_style_update_after_layout(style_runs_in_flight)); },
         .prepare_layout_tree_build = [](void* context) -> u32 { return static_cast<Document*>(context)->prepare_layout_tree_build(); },
-        .renew_paint_state = [](void* context) {
-            auto& document = *static_cast<Document*>(context);
-            document.m_paint_state = make<Painting::DocumentPaintState>(document.layout_node_arena()); },
         .rebuild_list_owners_with_stale_item_counters = [](void* context, u32 const* list_owners, size_t count) {
             auto& document = *static_cast<Document*>(context);
             for (auto list_owner : ReadonlySpan<u32> { list_owners, count }) {

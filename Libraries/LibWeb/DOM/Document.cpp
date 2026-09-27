@@ -7093,6 +7093,11 @@ void Document::shared_declarative_refresh_steps(Utf16View input, GC::Ptr<HTML::H
     }
 }
 
+void Document::renew_paint_state()
+{
+    m_paint_state = make<Painting::DocumentPaintState>(layout_node_arena());
+}
+
 Painting::DocumentPaintState& Document::paint_state()
 {
     VERIFY(m_paint_state);
