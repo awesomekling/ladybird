@@ -318,7 +318,7 @@ impl Flight {
                     crate::stage_thread::hold_before_flight_stage("flight:record");
                     let paint = self.paint.take().expect("a flight that paints has sealed its paint");
                     // SAFETY: The frame in flight owns the arena, as the layout pass before it did.
-                    match unsafe { crate::painting::ffi::paint_in_flight(self.arena as *mut c_void, paint) } {
+                    match unsafe { crate::painting::ffi::paint_in_flight(state, paint) } {
                         Ok(products) => {
                             let stopped = products.stopped;
                             let presents = products.presentation.is_some();
@@ -340,7 +340,7 @@ impl Flight {
                     crate::stage_thread::hold_before_flight_stage("flight:present");
                     let products = ran.paint.as_ref().expect("a flight presents what it recorded");
                     // SAFETY: The frame in flight owns the arena, and the recording is pending in it.
-                    unsafe { crate::painting::ffi::present_in_flight(self.arena as *mut c_void, products) };
+                    unsafe { crate::painting::ffi::present_in_flight(state, products) };
                     reached = FfiFlightStage::Present;
                     Some(FfiFlightEndReason::Done)
                 }
@@ -352,7 +352,10 @@ impl Flight {
                             .as_mut()
                             .expect("a flight that runs a style pass holds its engine's token");
                         // SAFETY: The frame in flight owns the arena, and the pass has run.
-                        Some(style_engine.lend_to_this_thread(|engine| unsafe { self.apply_style_render_half(engine) }))
+                        Some(
+                            style_engine
+                                .lend_to_this_thread(|engine| unsafe { self.apply_style_render_half(engine, state) }),
+                        )
                     };
                     let applied_it = applied == Some(Ok(()));
                     FLIGHT_STYLE_DECISION.store(
@@ -407,10 +410,12 @@ impl Flight {
     ///
     /// # Safety
     ///
-    /// The frame in flight owns the arena, and the pass has run in `engine`.
+    /// The frame in flight owns the arena of the render state `state`, and the pass has run in
+    /// `engine`.
     unsafe fn apply_style_render_half(
         &self,
         engine: &crate::css::style::StyleEngine,
+        state: *mut crate::layout::ArenaHandle,
     ) -> Result<(), FfiFlightStyleDecline> {
         if !self
             .layout
@@ -421,7 +426,7 @@ impl Flight {
         }
         let rows = engine.rows_a_flight_applies(&self.viewport_propagation_sources)?;
         // SAFETY: Guaranteed by the caller.
-        let arena = unsafe { crate::layout::LayoutNodeArena::from_handle(self.arena as *mut c_void) };
+        let arena = unsafe { &*state }.arena();
         arena.apply_flight_style_rows(&rows)
     }
 }

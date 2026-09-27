@@ -1936,13 +1936,14 @@ pub(crate) fn take_sealed_flight_paint(arena_handle: *mut c_void) -> Option<Flig
 ///
 /// # Safety
 ///
-/// `arena_handle` must be a live arena the frame in flight owns, with no borrow of it held.
+/// `state` must be the live render state of the document the frame in flight is of, which the
+/// frame owns, with no borrow of it held.
 pub(crate) unsafe fn paint_in_flight(
-    arena_handle: *mut c_void,
+    state: *mut crate::layout::ArenaHandle,
     seal: FlightPaintSeal,
 ) -> Result<FlightPaintProducts, FlightPaintStop> {
     // SAFETY: Guaranteed by the caller.
-    let arena = unsafe { &mut *arena_handle.cast::<LayoutNodeArena>() };
+    let arena = unsafe { &mut *state }.arena_mut();
     let viewport = arena.layout_root();
     if arena.svg_paint_resources().needs_sync() {
         return Err(FlightPaintStop::SvgPaintResources);
@@ -2024,12 +2025,12 @@ pub(crate) unsafe fn paint_in_flight(
     let publishes_recording = inputs.publishes_recording;
     // SAFETY: The frame in flight owns the arena, and no borrow of it is held here.
     let output = record_display_list_stage(recording_stage_input(
-        unsafe { &mut *arena_handle.cast::<LayoutNodeArena>() },
+        unsafe { &mut *state }.arena_mut(),
         viewport,
         inputs,
     ));
     // SAFETY: The stage has returned its borrow.
-    let arena = unsafe { &*arena_handle.cast::<LayoutNodeArena>() };
+    let arena = unsafe { &*state }.arena();
     leave_pending_recording(
         arena,
         viewport,
@@ -2050,14 +2051,14 @@ pub(crate) unsafe fn paint_in_flight(
 ///
 /// # Safety
 ///
-/// `arena_handle` must be the live arena the frame in flight owns, whose recording the flight left
+/// `state` must be the live render state the frame in flight owns, whose recording the flight left
 /// pending, with no borrow of it held.
-pub(crate) unsafe fn present_in_flight(arena_handle: *mut c_void, products: &FlightPaintProducts) {
+pub(crate) unsafe fn present_in_flight(state: *mut crate::layout::ArenaHandle, products: &FlightPaintProducts) {
     let presentation = products
         .presentation
         .expect("a flight presents through the presentation sealed with its paint");
     // SAFETY: Guaranteed by the caller.
-    let arena = unsafe { arena_from_handle(arena_handle) };
+    let arena = unsafe { &*state }.arena();
     let tree = arena
         .paint_state()
         .borrow()
