@@ -90,9 +90,7 @@
 #include <LibWeb/Internals/Internals.h>
 #include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
-#include <LibWeb/Layout/NodeArena.h>
 #include <LibWeb/Layout/TreeBuilderRustFFI.h>
-#include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Loader/ContentBlocker.h>
 #include <LibWeb/Loader/ResourceLoader.h>
 #include <LibWeb/Page/EventHandler.h>
@@ -224,7 +222,7 @@ u64 Internals::layout_tree_pre_order_label_violation_count()
 u64 Internals::layout_tree_pre_order_relabel_count()
 {
     auto& document = window().associated_document();
-    return Layout::RustFFI::render_owner_arena_counts(document.layout_node_arena().render_document()).pre_order_relabels;
+    return Layout::RustFFI::render_owner_arena_counts(Layout::document_render_document(document)).pre_order_relabels;
 }
 
 u64 Internals::visual_context_tree_node_count()
@@ -1027,9 +1025,10 @@ WebIDL::UnsignedLongLong Internals::full_layout_count()
 
 void Internals::begin_layout_trace()
 {
-    Layout::RustFFI::layout_arena_begin_layout_trace(Layout::document_layout_arena(window().associated_document()),
-        [](void* node_shell, void* sink, void (*append)(void*, u8 const*, size_t)) {
-            auto description = static_cast<Layout::Node const*>(node_shell)->debug_description();
+    auto& document = window().associated_document();
+    Layout::RustFFI::layout_arena_begin_layout_trace(Layout::document_layout_arena(document), &document,
+        [](void* context, Compositing::RustFFI::NodeSlotId slot, void* sink, void (*append)(void*, u8 const*, size_t)) {
+            auto description = Painting::BoxSlot::of(*static_cast<DOM::Document const*>(context), slot).debug_description();
             append(sink, description.bytes().data(), description.bytes().size());
         });
 }
@@ -1247,12 +1246,12 @@ Utf16String Internals::dump_layout_tree(GC::Ref<DOM::Node> node)
 {
     node->document().update_layout(DOM::UpdateLayoutReason::Debugging);
 
-    auto* layout_node = node->layout_node();
-    if (!layout_node)
+    auto box = Painting::BoxSlot::bound_to(*node);
+    if (!box)
         return "(no layout node)"_utf16;
 
     StringBuilder builder;
-    Web::dump_tree(builder, *layout_node);
+    Painting::dump_layout_tree(builder, box, false);
     return dump_string_to_utf16(builder.to_string_without_validation());
 }
 
@@ -2140,10 +2139,11 @@ GC::Ref<JS::Object> Internals::compare_layout_tree_with_full_rebuild()
 
     auto snapshot_layout_tree = [&]() {
         document.update_layout(DOM::UpdateLayoutReason::Debugging);
-        VERIFY(document.layout_node());
+        auto viewport = Painting::BoxSlot::viewport_of(document);
+        VERIFY(viewport);
 
         StringBuilder builder;
-        Web::dump_tree(builder, *document.layout_node());
+        Painting::dump_layout_tree(builder, viewport, false);
         return builder.to_string_without_validation();
     };
 
@@ -2242,14 +2242,14 @@ u64 Internals::layout_arena_live_slot_count()
 {
     auto& document = window().associated_document();
     document.update_layout(DOM::UpdateLayoutReason::Debugging);
-    return Layout::RustFFI::render_owner_arena_counts(document.layout_node_arena().render_document()).live_slots;
+    return Layout::RustFFI::render_owner_arena_counts(Layout::document_render_document(document)).live_slots;
 }
 
 u64 Internals::layout_arena_shell_count()
 {
     auto& document = window().associated_document();
     document.update_layout(DOM::UpdateLayoutReason::Debugging);
-    return Layout::RustFFI::render_owner_arena_counts(document.layout_node_arena().render_document()).shells;
+    return Layout::RustFFI::render_owner_arena_counts(Layout::document_render_document(document)).shells;
 }
 
 GC::Ref<JS::Object> Internals::style_engine_transaction_reactions()

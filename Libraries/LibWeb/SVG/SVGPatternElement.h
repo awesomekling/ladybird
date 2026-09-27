@@ -62,8 +62,6 @@ public:
 
     Optional<Utf16String> href_attribute_value() const;
 
-    void push_paint_server_description(void* sink, Layout::Node const& target_layout_node) const;
-
     virtual CSS::ElementBoxKind box_kind() const override;
 
 protected:
