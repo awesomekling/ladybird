@@ -73,6 +73,10 @@ public:
     // Applies the messages that run no script, in order, and leaves the continuations queued.
     void apply_script_free();
 
+    // Whether a navigable container's committed viewport waits in the queue for a drain point, which
+    // leaves the documents the document embeds at their old viewports until then.
+    [[nodiscard]] bool has_queued_navigable_container_viewport() const;
+
 private:
     enum class Kind : u8 {
         BoxPresence,

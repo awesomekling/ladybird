@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/AnyOf.h>
 #include <AK/ScopeGuard.h>
 #include <LibGfx/FontCascadeList.h>
 #include <LibWeb/CSS/ScrollStateContainerQuery.h>
@@ -241,6 +242,11 @@ void CommitMessages::apply_script_free()
         }
     }
     m_messages = move(continuations);
+}
+
+bool CommitMessages::has_queued_navigable_container_viewport() const
+{
+    return any_of(m_messages, [](auto const& message) { return message.kind == Kind::NavigableContainerViewportCommitted; });
 }
 
 bool CommitMessages::is_continuation(Kind kind)

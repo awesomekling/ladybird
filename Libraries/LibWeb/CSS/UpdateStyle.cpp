@@ -1737,8 +1737,11 @@ bool embedding_document_chain_has_no_pending_style_or_layout_work(DOM::Document 
         if (!container || &container->document() == embedded_document)
             return true;
         auto& embedding_document = container->document();
+        // A frame taken back in the middle of main-thread code leaves the committed viewport of a container queued for
+        // the embedding document's next layout update, and the documents it embeds at their old viewports until then.
         if (!document_has_no_pending_style_work(embedding_document)
             || !embedding_document.layout_is_up_to_date()
+            || embedding_document.commit_messages().has_queued_navigable_container_viewport()
             || !container->has_style())
             return false;
         embedded_document = &embedding_document;
