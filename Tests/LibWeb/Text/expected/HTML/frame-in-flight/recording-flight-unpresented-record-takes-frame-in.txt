@@ -1,0 +1,7 @@
+held as armed: true
+dumped: true
+took the frame in: true
+left the frame's tail to the next rendering update: true
+ran the tail: true
+hit test finds the box: true
+color: rgb(0, 0, 255)
