@@ -420,7 +420,7 @@ static void record_element_arrived(DOM::Element& element, StyleComputer& style_c
         style_engine.record_size_query_container(identity);
     if (element.style_depends_on_size_container_query())
         style_engine.record_style_depends_on_size_container_query(identity);
-    Layout::record_table_spans_at_arrival(element);
+    Layout::publish_table_spans(element);
 }
 
 // A text node's row is built with the same fact an element's row records, and it decides what the
@@ -580,7 +580,7 @@ static void record_subtree_arrivals(DOM::Document& document, ReadonlySpan<GC::Re
         if (auto* element = as_if<DOM::Element>(*node); element && !element->scroll_offset({}).is_zero())
             Layout::publish_element_scroll_offset(*element);
         // Inertness, editability and the wheel-handler state are inherited from the place the node arrived in.
-        Layout::record_dom_paint_facts_at_arrival(*node);
+        Layout::publish_dom_paint_facts(*node);
         // As is being in the shadow tree of the focused text control.
         if (focused_text_control) {
             if (auto* shadow_root = as_if<DOM::ShadowRoot>(node->root()); shadow_root && shadow_root->host() == focused_text_control)
