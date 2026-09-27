@@ -1010,9 +1010,9 @@ void record_element_adjustment_facts(DOM::Element& element)
 }
 
 // What the element's `disabled` attribute makes of it. Only the element's own type and attribute
-// are read: what a disabled ancestor does to it follows from the published facts of that ancestor,
-// and is resolved where the question is asked. See `event_dispatch_is_disabled`.
-u8 element_form_control_disabled_facts(DOM::Element const& element)
+// are read: what a disabled ancestor does to it is resolved where the question is asked. See
+// `event_dispatch_is_disabled`.
+static u8 element_form_control_disabled_facts(DOM::Element const& element)
 {
     auto const* html_element = as_if<HTML::HTMLElement>(element);
     if (!html_element || !element.has_attribute(HTML::AttributeNames::disabled))
@@ -1025,22 +1025,27 @@ u8 element_form_control_disabled_facts(DOM::Element const& element)
     return 0;
 }
 
-void record_element_form_control_disabled_facts(DOM::Element& element)
-{
-    auto* style_engine = style_engine_for(element);
-    if (!style_engine || element.style_node_id() == no_style_node || has_pending_initial_features(element))
-        return;
-    publish_element_input(*style_engine, element, [facts = element_form_control_disabled_facts(element)](StyleInputScope const& input, StyleNodeID node) {
-        input.engine().set_element_form_control_disabled_facts(node, facts);
-    });
-}
-
 bool event_dispatch_is_disabled(DOM::Document& document, DOM::NodeIdentity identity)
 {
-    auto style_node = identity.style_node();
-    if (style_node == no_style_node)
+    auto node = identity.resolve(document);
+    if (!node)
         return false;
-    return document.style_computer().style_engine().event_dispatch_is_disabled(style_node);
+    // A text node is no form control, and it is not written under itself either: the answer for it is the answer for
+    // the element it is written under.
+    auto const* candidate = as_if<DOM::Element>(is<DOM::Text>(*node) ? node->parent() : node.ptr());
+    if (!candidate)
+        return false;
+    // The element itself counts only as a disabled control. What a `<fieldset disabled>` does to the elements under it,
+    // it does not do to itself.
+    if (element_form_control_disabled_facts(*candidate) & DisabledFormControl)
+        return true;
+    // The climb stops where a DOM parent walk stops, at a shadow root, so a host's `disabled` attribute does not reach
+    // into the shadow tree it holds.
+    for (auto ancestor = candidate->parent_element(); ancestor; ancestor = ancestor->parent_element()) {
+        if (element_form_control_disabled_facts(*ancestor) != 0)
+            return true;
+    }
+    return false;
 }
 
 void record_element_construction_facts(DOM::Element& element)
@@ -1339,12 +1344,6 @@ static void record_element_initial_features(DOM::Element& element)
     if (auto const& id = element.id(); id.has_value()) {
         publish_element_input(*style_engine, element, [name = style_engine->intern_atom(*id)](StyleInputScope const& input, StyleNodeID node) {
             input.engine().set_element_id_name(node, name);
-        });
-    }
-
-    if (auto facts = element_form_control_disabled_facts(element); facts != 0) {
-        publish_element_input(*style_engine, element, [facts](StyleInputScope const& input, StyleNodeID node) {
-            input.engine().set_element_form_control_disabled_facts(node, facts);
         });
     }
 
@@ -3235,10 +3234,6 @@ void record_element_attribute_changed(DOM::Element& element, Utf16FlyString cons
         || (is<HTML::HTMLInputElement>(element) && (name == HTML::AttributeNames::size || name == HTML::AttributeNames::type))
         || (is<HTML::HTMLCanvasElement>(element) && (name == HTML::AttributeNames::width || name == HTML::AttributeNames::height)))
         record_element_replaced_content_input(element);
-
-    // Whether an event aimed at this element, or at anything written under it, is dispatched at all.
-    if (name == HTML::AttributeNames::disabled)
-        record_element_form_control_disabled_facts(element);
 
     // Both values cross as atoms. Their text is recorded once per distinct value only when a
     // compiled selector for this attribute uses an operator that cannot compare atom identities,

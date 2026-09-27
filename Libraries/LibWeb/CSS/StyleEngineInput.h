@@ -198,7 +198,7 @@ enum ElementConstructionFact : u32 {
     IsHtmlImageElement = 1 << 7,
 };
 // What an element's `disabled` attribute makes of it, as the walk from a hit node to an event
-// target reads it. Mirrors the Rust `DISABLED_*` constants.
+// target reads it.
 enum ElementFormControlDisabledFact : u8 {
     // A button, input, select, textarea or form-associated custom element carrying the attribute.
     // It is disabled, and so is everything written under it.
@@ -240,12 +240,10 @@ enum class ElementBoxKind : u8 {
     InputText,
 };
 WEB_API u32 element_construction_facts(DOM::Element const&);
-WEB_API u8 element_form_control_disabled_facts(DOM::Element const&);
-WEB_API void record_element_form_control_disabled_facts(DOM::Element&);
 
 // Whether an event aimed at the node named by `identity` would reach a disabled form control on its
-// way out of the tree: the node itself is one, or one of the nodes it is written under is. Answered
-// from the published facts above, without asking a DOM node anything.
+// way out of the tree: the node itself is one, or one of the nodes it is written under is. Each
+// element on the way answers from its own type and attribute alone.
 WEB_API bool event_dispatch_is_disabled(DOM::Document&, DOM::NodeIdentity);
 WEB_API u32 element_style_adjustment_facts(DOM::Element const&);
 WEB_API u32 element_box_type_adjustment_facts(DOM::Element const&);
