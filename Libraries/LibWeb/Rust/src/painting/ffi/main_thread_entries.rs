@@ -208,7 +208,7 @@ unsafe extern "C" fn layout_arena_resolve_painted_vector_images(
 ) {
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let arena = unsafe { arena_from_handle(arena) };
-    let _write = arena.join_frame_for_main_side_write("painted vector images");
+    arena.join_frame_for_main_side_write("painted vector images");
     let mut last_painted = std::collections::HashSet::new();
     let prediction_inputs = {
         let paint_state = arena.paint_state().borrow();
@@ -280,7 +280,7 @@ unsafe extern "C" fn layout_arena_last_recording_missed_vector_images(arena: *mu
 unsafe extern "C" fn layout_arena_discard_retired_recording(arena: *mut c_void) -> bool {
     let arena_handle = arena;
     let arena = unsafe { arena_from_handle(arena) };
-    let _write = arena.join_frame_for_main_side_write("retired recording discard");
+    arena.join_frame_for_main_side_write("retired recording discard");
     let mut recording = arena.recording();
     let Some(generation) = recording
         .pending_recording()
@@ -308,15 +308,12 @@ unsafe extern "C" fn layout_arena_publish_recording(
 ) -> u64 {
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let arena = unsafe { arena_from_handle(arena) };
-    let _write = arena.join_frame_for_main_side_write("recording publication");
+    arena.join_frame_for_main_side_write("recording publication");
     let Some(pending) = arena.recording().pending_recording().take() else {
         return 0;
     };
     let publish = crate::painting::host::RecordingPublishHost::from(publish);
-    crate::painting::published_immutable::before_publication(arena);
-    let sequence = crate::painting::record::publish::publish_recording(arena, pending, &main_thread, &publish);
-    crate::painting::published_immutable::published(arena);
-    sequence
+    crate::painting::record::publish::publish_recording(arena, pending, &main_thread, &publish)
 }
 
 /// Hands the image frames of the published SVG filters to the host's resource storage. A visual
@@ -643,8 +640,6 @@ unsafe extern "C" fn layout_arena_sync_svg_paint_resources(
 ) -> bool {
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     use crate::painting::svg_paint_resources::{PublishedSvgFilter, PublishedSvgPaintServer, SvgPaintResourceKind};
-    let _writer =
-        crate::painting::published_immutable::enter_writer_if_unattributed("SVG paint resource synchronization");
     let arena = unsafe { arena_from_handle(arena) };
     let resources = arena.svg_paint_resources();
     if !resources.take_needs_sync() {

@@ -2205,7 +2205,6 @@ impl LayoutNodeArena {
         if !self.paintable_row_is_populated(slot) {
             return;
         }
-        let _writer = crate::painting::published_immutable::enter_writer("flight style render half");
         if marks.repaint {
             self.push_paint_damage_for_repaint(
                 slot,
@@ -2568,19 +2567,14 @@ impl LayoutNodeArena {
     /// wait happens as the writer borrows the arena ([`Self::from_handle`] joins an overlapping
     /// stage), and the frame's end has been taken in by the time it returns. What is left
     /// to check here is where waiting is impossible: a writer inside the frame itself, in a join
-    /// or with the stages in lockstep, must not write while a stage is on the stack. Every write
-    /// made inside the returned scope is attributed to `writer`.
+    /// or with the stages in lockstep, must not write while a stage is on the stack.
     #[track_caller]
-    pub(crate) fn join_frame_for_main_side_write(
-        &self,
-        writer: &'static str,
-    ) -> crate::painting::published_immutable::WriterScope {
+    pub(crate) fn join_frame_for_main_side_write(&self, writer: &'static str) {
         self.pass_main_side_door(writer);
-        crate::painting::published_immutable::enter_writer(writer)
     }
 
     /// Like [`Self::join_frame_for_main_side_write`], for a writer that goes on to write through
-    /// doors of its own, so that no write is made in a scope of this one.
+    /// doors of its own.
     fn pass_main_side_door(&self, writer: &'static str) {
         assert!(
             !self.a_stage_is_running(),
@@ -4304,10 +4298,6 @@ impl LayoutNodeArena {
             .map(|entry| entry.facts.clone())
     }
 
-    pub(crate) fn layer_image_paint_facts_for_verification(&self, id: NodeSlotId) -> String {
-        format!("{:?}", self.layer_image_paint_facts.borrow().get(&id))
-    }
-
     pub(crate) fn set_layer_image_paint_facts(
         &self,
         id: NodeSlotId,
@@ -4570,13 +4560,8 @@ impl LayoutNodeArena {
         self.data(id).dom_paint_facts.get() & fact as u8 != 0
     }
 
-    pub(crate) fn node_dom_paint_facts(&self, id: NodeSlotId) -> u8 {
-        self.data(id).dom_paint_facts.get()
-    }
-
     pub(crate) fn set_node_dom_paint_facts(&self, id: NodeSlotId, facts: u8) -> bool {
         self.assert_owner_thread();
-        crate::painting::published_immutable::note_row_mutation(self, id, "M5 layout_arena_set_node_dom_paint_facts");
         let mut any_changed = false;
         for row in self.rows_sharing_dom_node_with(id) {
             let data = self.write_shape(row);
@@ -6308,7 +6293,6 @@ pub unsafe extern "C" fn layout_arena_destroy(arena: *mut c_void) {
     let arena = handle.arena();
     arena.assert_owner_thread();
     assert_eq!(arena.live_count, 0, "layout node arena destroyed with live slots");
-    crate::painting::published_immutable::finish(arena);
     super::tree_build_seal::flush_census();
     super::main_side_census::flush();
 }
@@ -6757,7 +6741,7 @@ pub unsafe extern "C" fn layout_arena_set_node_retains_compositor_animated_conte
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on the document thread.
     let arena = unsafe { LayoutNodeArena::from_handle(arena) };
-    let _write = arena.join_frame_for_main_side_write(LayoutNodeArena::COMPOSITOR_ELIGIBILITY_WRITER);
+    arena.join_frame_for_main_side_write(LayoutNodeArena::COMPOSITOR_ELIGIBILITY_WRITER);
     arena.set_node_flag(id, NodeFlag::HasAnimatedOpacityOrTransform, value);
 }
 
@@ -6771,7 +6755,7 @@ pub unsafe extern "C" fn layout_arena_set_node_needs_compositor_animation_frame(
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on the document thread.
     let arena = unsafe { LayoutNodeArena::from_handle(arena) };
-    let _write = arena.join_frame_for_main_side_write(LayoutNodeArena::COMPOSITOR_ELIGIBILITY_WRITER);
+    arena.join_frame_for_main_side_write(LayoutNodeArena::COMPOSITOR_ELIGIBILITY_WRITER);
     arena.set_node_needs_compositor_animation_frame(id, kind, value);
 }
 
@@ -6827,7 +6811,7 @@ pub unsafe extern "C" fn layout_arena_set_pseudo_element_scroll_offset(
     };
     // SAFETY: As above.
     let arena = unsafe { LayoutNodeArena::from_handle_mut(arena) };
-    let _write = arena.join_frame_for_main_side_write(LayoutNodeArena::SCROLL_OFFSETS_WRITER);
+    arena.join_frame_for_main_side_write(LayoutNodeArena::SCROLL_OFFSETS_WRITER);
     arena.set_pseudo_element_scroll_offset(generator, pseudo_kind, offset);
 }
 
@@ -6859,7 +6843,7 @@ pub unsafe extern "C" fn layout_arena_set_element_scroll_offset(
     };
     // SAFETY: As above.
     let arena = unsafe { LayoutNodeArena::from_handle_mut(arena) };
-    let _write = arena.join_frame_for_main_side_write(LayoutNodeArena::SCROLL_OFFSETS_WRITER);
+    arena.join_frame_for_main_side_write(LayoutNodeArena::SCROLL_OFFSETS_WRITER);
     arena.set_element_scroll_offset(element, offset);
 }
 
@@ -6888,10 +6872,6 @@ pub unsafe extern "C" fn layout_arena_node_style_record_pinned_by_host(arena: *m
     unsafe { LayoutNodeArena::from_handle(arena) }.node_style_record_pinned_by_host(slot)
 }
 
-/// `Painting::PaintCacheInvalidationStage::DetachCleanup`, which is what the retired host-side
-/// preparation attributed its invalidation to.
-const PAINT_CACHE_INVALIDATION_STAGE_DETACH_CLEANUP: u8 = 2;
-
 /// Prepares `row` for leaving the layout tree. A detached box is read until its row is freed, so
 /// its style record is pinned for the host and its paint cache is cleaned here rather than through
 /// the journal, which would resolve the identity after a replacement row had been bound. The image
@@ -6910,12 +6890,7 @@ pub(crate) fn prepare_row_for_detach(arena: *mut c_void, row: NodeSlotId) {
     // SAFETY: The handle is the one this call was given, and the invalidation borrows the arena
     // for itself.
     unsafe {
-        crate::painting::ffi::layout_arena_paintable_invalidate_paint_cache(
-            arena,
-            row,
-            false,
-            PAINT_CACHE_INVALIDATION_STAGE_DETACH_CLEANUP,
-        );
+        crate::painting::ffi::layout_arena_paintable_invalidate_paint_cache(arena, row, false);
     }
     if is_node_with_style && arena_ref.rows_with_image_observers.borrow_mut().remove(&row) {
         arena_ref.hand_back(HostHandback::ImageObservers(row));
@@ -7030,7 +7005,7 @@ pub unsafe extern "C" fn layout_arena_move_pseudo_element_scroll_offsets(
     };
     // SAFETY: As above.
     let arena = unsafe { LayoutNodeArena::from_handle_mut(arena) };
-    let _write = arena.join_frame_for_main_side_write(LayoutNodeArena::SCROLL_OFFSETS_WRITER);
+    arena.join_frame_for_main_side_write(LayoutNodeArena::SCROLL_OFFSETS_WRITER);
     arena.move_pseudo_element_scroll_offsets(old_generator, new_generator);
 }
 
@@ -8463,10 +8438,10 @@ mod tests {
     #[test]
     fn main_side_scroll_offset_write_joins_the_frame() {
         let arena = LayoutNodeArena::new();
-        drop(arena.join_frame_for_main_side_write(LayoutNodeArena::SCROLL_OFFSETS_WRITER));
-        let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::Recording);
+        arena.join_frame_for_main_side_write(LayoutNodeArena::SCROLL_OFFSETS_WRITER);
+        let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::VisualContextUpdate);
         let write = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            drop(arena.join_frame_for_main_side_write(LayoutNodeArena::SCROLL_OFFSETS_WRITER));
+            arena.join_frame_for_main_side_write(LayoutNodeArena::SCROLL_OFFSETS_WRITER);
         }));
         assert!(
             write.is_err(),

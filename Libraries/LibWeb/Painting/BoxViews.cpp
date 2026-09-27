@@ -742,20 +742,20 @@ void set_needs_repaint(Layout::Row const& row, InvalidateDisplayList should_inva
     if (!identity) {
         // Anonymous rows cannot be resolved by the journal. The layout operation that owns them
         // keeps their slots live while this apply-only path pushes damage.
-        apply_repaint_damage(row, should_invalidate_display_list, RepaintDamageStage::AnonymousRow);
+        apply_repaint_damage(row, should_invalidate_display_list);
         return;
     }
     row.document().invalidation_journal().note_needs_repaint(identity, should_invalidate_display_list);
 }
 
-void apply_repaint_damage(Layout::Row const& row, InvalidateDisplayList should_invalidate_display_list, RepaintDamageStage stage)
+void apply_repaint_damage(Layout::Row const& row, InvalidateDisplayList should_invalidate_display_list)
 {
     if (!has_committed_box(row))
         return;
 
     auto& document = row.document();
     if (should_invalidate_display_list != InvalidateDisplayList::No) {
-        Layout::RustFFI::layout_arena_paintable_invalidate_for_repaint(row.arena_handle(), row.slot(), should_invalidate_display_list == InvalidateDisplayList::PaintCommandsAndHitTestList, to_underlying(stage));
+        Layout::RustFFI::layout_arena_paintable_invalidate_for_repaint(row.arena_handle(), row.slot(), should_invalidate_display_list == InvalidateDisplayList::PaintCommandsAndHitTestList);
 
         // The root element paints the body's propagated background, so a body repaint must also refresh the
         // root's cached background. Changes to the propagation source are handled during paint preparation.
@@ -769,13 +769,13 @@ void apply_repaint_damage(Layout::Row const& row, InvalidateDisplayList should_i
     BoxViewRepaintAccess::set_document_needs_repaint(document, should_invalidate_display_list);
 }
 
-void apply_repaint_damage(Layout::TextNode const& node, InvalidateDisplayList should_invalidate_display_list, RepaintDamageStage stage)
+void apply_repaint_damage(Layout::TextNode const& node, InvalidateDisplayList should_invalidate_display_list)
 {
     if (auto* containing_block = node.containing_block())
-        apply_repaint_damage(*containing_block, should_invalidate_display_list, stage);
+        apply_repaint_damage(*containing_block, should_invalidate_display_list);
 
     if (should_invalidate_display_list != InvalidateDisplayList::No)
-        Layout::RustFFI::layout_arena_invalidate_nearest_self_painting_inline_paint_cache(node.arena_handle(), Layout::Node::slot_id(&node), to_underlying(stage));
+        Layout::RustFFI::layout_arena_invalidate_nearest_self_painting_inline_paint_cache(node.arena_handle(), Layout::Node::slot_id(&node));
 }
 
 void set_needs_repaint_in_subtree(Layout::Row const& row)
@@ -784,18 +784,18 @@ void set_needs_repaint_in_subtree(Layout::Row const& row)
         return;
     auto identity = row.dom_node_identity();
     if (!identity) {
-        apply_subtree_repaint_damage(row, RepaintDamageStage::AnonymousRow);
-        apply_repaint_damage(row, InvalidateDisplayList::PaintCommandsAndHitTestList, RepaintDamageStage::AnonymousRow);
+        apply_subtree_repaint_damage(row);
+        apply_repaint_damage(row, InvalidateDisplayList::PaintCommandsAndHitTestList);
         return;
     }
     row.document().invalidation_journal().note_needs_repaint_in_subtree(identity);
 }
 
-void apply_subtree_repaint_damage(Layout::Row const& row, RepaintDamageStage stage)
+void apply_subtree_repaint_damage(Layout::Row const& row)
 {
     if (!has_committed_box(row))
         return;
-    Layout::RustFFI::layout_arena_paintable_invalidate_subtree_for_repaint(row.arena_handle(), row.slot(), to_underlying(stage));
+    Layout::RustFFI::layout_arena_paintable_invalidate_subtree_for_repaint(row.arena_handle(), row.slot());
 }
 
 void invalidate_paint_cache(Layout::Node const& node)
@@ -804,7 +804,7 @@ void invalidate_paint_cache(Layout::Node const& node)
     if (!identity) {
         // Anonymous rows have no stable DOM identity to put in the journal. Their owning layout
         // operation keeps the row alive, so applying this mark directly cannot target a new row.
-        apply_paint_cache_invalidation(node, PaintCacheInvalidation::PaintAndHitTest, PaintCacheInvalidationStage::AnonymousRow);
+        apply_paint_cache_invalidation(node, PaintCacheInvalidation::PaintAndHitTest);
         return;
     }
     const_cast<DOM::Document&>(node.document()).invalidation_journal().note_paint_cache_invalidation(identity, PaintCacheInvalidation::PaintAndHitTest);
@@ -815,16 +815,16 @@ void invalidate_propagated_text_decoration_caches(Layout::Row const& row)
     auto identity = row.dom_node_identity();
     if (!identity) {
         // See invalidate_paint_cache(): an anonymous row cannot be resolved from a journal entry.
-        apply_paint_cache_invalidation(row, PaintCacheInvalidation::PropagatedTextDecorations, PaintCacheInvalidationStage::AnonymousRow);
+        apply_paint_cache_invalidation(row, PaintCacheInvalidation::PropagatedTextDecorations);
         return;
     }
     row.document().invalidation_journal().note_paint_cache_invalidation(identity, PaintCacheInvalidation::PropagatedTextDecorations);
 }
 
-void apply_paint_cache_invalidation(Layout::Row const& row, PaintCacheInvalidation invalidation, PaintCacheInvalidationStage stage)
+void apply_paint_cache_invalidation(Layout::Row const& row, PaintCacheInvalidation invalidation)
 {
     Layout::RustFFI::layout_arena_paintable_invalidate_paint_cache(
-        row.arena_handle(), row.slot(), invalidation == PaintCacheInvalidation::PropagatedTextDecorations, to_underlying(stage));
+        row.arena_handle(), row.slot(), invalidation == PaintCacheInvalidation::PropagatedTextDecorations);
 }
 
 void repaint_after_style_change(Layout::Row const& row, CSS::RequiredInvalidationAfterStyleChange const& invalidation)

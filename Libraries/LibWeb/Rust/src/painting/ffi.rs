@@ -114,7 +114,7 @@ pub unsafe extern "C" fn layout_arena_paintable_set_scrollbar_enlarged(
     enlarged: bool,
 ) {
     let arena = unsafe { arena_from_handle_mut(arena) };
-    let _write = arena.join_frame_for_main_side_write("scrollbar interaction");
+    arena.join_frame_for_main_side_write("scrollbar interaction");
     let mut rows = arena.paintable_rows_mut();
     if !rows.paintable_row_is_populated(slot) {
         return;
@@ -340,14 +340,8 @@ pub unsafe extern "C" fn layout_arena_node_has_css_transform(arena: *mut c_void,
 pub unsafe extern "C" fn layout_arena_invalidate_nearest_self_painting_inline_paint_cache(
     arena: *mut c_void,
     node: NodeSlotId,
-    stage: u8,
 ) {
     let arena = unsafe { arena_from_handle(arena) };
-    let _writer = crate::painting::published_immutable::enter_writer(match stage {
-        0 => "journal drain",
-        1 => "anonymous row invalidation",
-        _ => "unknown repaint damage stage",
-    });
     if let Some(ancestor) =
         crate::painting::fragment_ownership::nearest_self_painting_inline_box(&arena.paintable_rows(), node)
     {
@@ -436,11 +430,6 @@ pub unsafe extern "C" fn layout_arena_committed_row(arena: *mut c_void, slot: No
 pub(crate) unsafe fn clear_paintable_row_of_node(arena: *mut c_void, layout_node: NodeSlotId) {
     let reset = {
         let arena = unsafe { arena_from_handle(arena) };
-        crate::painting::published_immutable::note_row_mutation(
-            arena,
-            layout_node,
-            "M1 layout_arena_paintable_cleared_from_node",
-        );
         arena.clear_committed_fragment_link(layout_node);
         arena.prepare_paintable_row_cleared_reset(layout_node)
     };
@@ -470,7 +459,7 @@ pub unsafe extern "C" fn layout_arena_selection_apply_snapshot(
     snapshot: *const FfiSelectionSnapshot,
 ) {
     let arena = unsafe { arena_from_handle_mut(arena) };
-    let _write = arena.join_frame_for_main_side_write(LayoutNodeArena::SELECTION_WRITER);
+    arena.join_frame_for_main_side_write(LayoutNodeArena::SELECTION_WRITER);
     // SAFETY: Guaranteed by the caller.
     let snapshot = unsafe { crate::painting::selection::SelectionSnapshot::from_ffi(&*snapshot) };
     snapshot.apply(arena);
@@ -482,7 +471,7 @@ pub unsafe extern "C" fn layout_arena_selection_apply_snapshot(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_selection_clear(arena: *mut c_void, viewport: NodeSlotId) {
     let arena = unsafe { arena_from_handle_mut(arena) };
-    let _write = arena.join_frame_for_main_side_write(LayoutNodeArena::SELECTION_WRITER);
+    arena.join_frame_for_main_side_write(LayoutNodeArena::SELECTION_WRITER);
     if !arena.paintable_row_is_populated(viewport) {
         return;
     }
@@ -1174,7 +1163,7 @@ pub unsafe extern "C" fn layout_arena_update_visual_viewport_transform(arena: *m
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_invalidate_scroll_state(arena: *mut c_void) {
     let arena = unsafe { arena_from_handle(arena) };
-    let _write = arena.join_frame_for_main_side_write(LayoutNodeArena::SCROLL_OFFSETS_WRITER);
+    arena.join_frame_for_main_side_write(LayoutNodeArena::SCROLL_OFFSETS_WRITER);
     arena
         .paint_state()
         .borrow_mut()
@@ -1308,7 +1297,6 @@ fn freeze_recording_frame(
                 inputs.css_viewport_rect,
             );
             if canvas_rect != source.root_background_canvas_rect {
-                let _writer = crate::painting::published_immutable::enter_writer_if_unattributed("recording preflight");
                 arena.push_paint_damage(root, crate::painting::record::damage::PaintDamage::DRAW_BACKGROUND);
             }
         }
@@ -1351,7 +1339,6 @@ fn record_display_list_stage(stage: RecordingStageInput<'_>) -> RecordingStageOu
         (&mut throwaway_tree, None, None)
     };
     let copies_from_published_frame = source_frame.is_some();
-    let pass = crate::painting::seal::enter(crate::painting::seal::Pass::Recording);
     crate::stage_thread::hold_here(crate::stage_thread::FfiStageHoldPoint::MidRecording);
     let recording = crate::painting::record::traversal::record_display_list(
         &frame,
@@ -1384,7 +1371,6 @@ fn record_display_list_stage(stage: RecordingStageInput<'_>) -> RecordingStageOu
                 false,
             )
         });
-    drop(pass);
     RecordingStageOutput {
         recording,
         recording_from_scratch,
@@ -2201,34 +2187,10 @@ pub unsafe extern "C" fn layout_arena_set_form_control_paint_facts(
     facts: crate::painting::host::FfiFormControlPaintFacts,
 ) -> bool {
     let arena = unsafe { arena_from_handle(arena) };
-    crate::painting::published_immutable::note_row_mutation(
-        arena,
-        slot,
-        "M6 layout_arena_set_form_control_paint_facts",
-    );
     arena.set_replaced_paint_facts(
         slot,
         crate::painting::replaced_paint_facts::ReplacedPaintFacts::FormControl(facts),
     )
-}
-
-/// # Safety
-///
-/// `arena` must be a live handle used on the document thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_before_invalidation_journal_drain(arena: *mut c_void) {
-    let arena = unsafe { arena_from_handle(arena) };
-    crate::painting::published_immutable::before_journal_publication(arena);
-}
-
-/// # Safety
-///
-/// `arena` must be a live handle used on the document thread and must have had a matching
-/// `layout_arena_before_invalidation_journal_drain` call.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_after_invalidation_journal_drain(arena: *mut c_void) {
-    let arena = unsafe { arena_from_handle(arena) };
-    crate::painting::published_immutable::after_journal_publication(arena);
 }
 
 /// # Safety
@@ -2241,7 +2203,6 @@ pub unsafe extern "C" fn layout_arena_set_canvas_paint_facts(
     facts: crate::painting::host::FfiCanvasPaintFacts,
 ) -> bool {
     let arena = unsafe { arena_from_handle(arena) };
-    crate::painting::published_immutable::note_row_mutation(arena, slot, "M6 layout_arena_set_canvas_paint_facts");
     arena.set_replaced_paint_facts(
         slot,
         crate::painting::replaced_paint_facts::ReplacedPaintFacts::Canvas(facts),
@@ -2260,7 +2221,6 @@ pub unsafe extern "C" fn layout_arena_set_layer_image_paint_facts(
     count: usize,
 ) -> bool {
     let arena = unsafe { arena_from_handle(arena) };
-    crate::painting::published_immutable::note_row_mutation(arena, slot, "M6 layout_arena_set_layer_image_paint_facts");
     let entries = if count == 0 {
         Vec::new()
     } else {
@@ -2289,11 +2249,6 @@ pub unsafe extern "C" fn layout_arena_set_replaced_image_paint_facts(
     facts: crate::painting::host::FfiReplacedImagePaintFacts,
 ) -> bool {
     let arena = unsafe { arena_from_handle(arena) };
-    crate::painting::published_immutable::note_row_mutation(
-        arena,
-        slot,
-        "M6 layout_arena_set_replaced_image_paint_facts",
-    );
     let facts = crate::painting::replaced_paint_facts::ImagePaintFacts::from_ffi(&facts);
     arena.set_replaced_paint_facts(
         slot,
@@ -2312,7 +2267,6 @@ pub unsafe extern "C" fn layout_arena_set_video_paint_facts(
     facts: crate::painting::host::FfiVideoPaintFacts,
 ) -> bool {
     let arena = unsafe { arena_from_handle(arena) };
-    crate::painting::published_immutable::note_row_mutation(arena, slot, "M6 layout_arena_set_video_paint_facts");
     let facts = crate::painting::replaced_paint_facts::VideoPaintFacts::from_ffi(&facts);
     arena.set_replaced_paint_facts(
         slot,
@@ -2330,11 +2284,6 @@ pub unsafe extern "C" fn layout_arena_set_navigable_container_paint_facts(
     facts: crate::painting::host::FfiNavigableContainerPaintFacts,
 ) -> bool {
     let arena = unsafe { arena_from_handle(arena) };
-    crate::painting::published_immutable::note_row_mutation(
-        arena,
-        slot,
-        "M7 layout_arena_set_navigable_container_paint_facts",
-    );
     arena.set_replaced_paint_facts(
         slot,
         crate::painting::replaced_paint_facts::ReplacedPaintFacts::NavigableContainer(facts),
@@ -2605,24 +2554,9 @@ pub unsafe extern "C" fn layout_arena_paintable_invalidate_paint_cache(
     arena: *mut c_void,
     paintable: NodeSlotId,
     propagated_text_decorations: bool,
-    stage: u8,
 ) {
     use crate::painting::record::damage::PaintDamage;
     let arena = unsafe { arena_from_handle(arena) };
-    let writer = match stage {
-        0 => "journal drain",
-        1 => "anonymous row invalidation",
-        2 => "layout detach cleanup",
-        3 => "paint fact reconciliation",
-        _ => "unknown paint-cache invalidation stage",
-    };
-    let _writer = crate::painting::published_immutable::enter_writer(writer);
-    crate::painting::published_immutable::note_row_mutation_with_writer(
-        arena,
-        paintable,
-        "M12 layout_arena_paintable_invalidate_paint_cache",
-        writer,
-    );
     if propagated_text_decorations {
         arena.push_propagated_text_decoration_damage(paintable);
     } else {
@@ -2647,15 +2581,9 @@ pub unsafe extern "C" fn layout_arena_paintable_invalidate_for_repaint(
     arena: *mut c_void,
     paintable: NodeSlotId,
     include_hit_test_items: bool,
-    stage: u8,
 ) {
     use crate::painting::record::damage::PaintDamage;
     let arena = unsafe { arena_from_handle(arena) };
-    let _writer = crate::painting::published_immutable::enter_writer(match stage {
-        0 => "journal drain",
-        1 => "anonymous row invalidation",
-        _ => "unknown repaint damage stage",
-    });
     let damage = if include_hit_test_items {
         PaintDamage::ALL_PRODUCERS
     } else {
@@ -2671,14 +2599,8 @@ pub unsafe extern "C" fn layout_arena_paintable_invalidate_for_repaint(
 pub unsafe extern "C" fn layout_arena_paintable_invalidate_subtree_for_repaint(
     arena: *mut c_void,
     paintable: NodeSlotId,
-    stage: u8,
 ) {
     let arena = unsafe { arena_from_handle(arena) };
-    let _writer = crate::painting::published_immutable::enter_writer(match stage {
-        0 => "journal drain",
-        1 => "anonymous row invalidation",
-        _ => "unknown repaint damage stage",
-    });
     arena.push_paint_damage_to_paint_subtree(paintable, crate::painting::record::damage::PaintDamage::ALL_PRODUCERS);
 }
 
@@ -3330,7 +3252,7 @@ pub unsafe extern "C" fn layout_arena_publish_scroll_offset(
     dom_target_stores_offset: bool,
 ) {
     let arena = unsafe { arena_from_handle(arena) };
-    let _write = arena.join_frame_for_main_side_write(LayoutNodeArena::SCROLL_OFFSETS_WRITER);
+    arena.join_frame_for_main_side_write(LayoutNodeArena::SCROLL_OFFSETS_WRITER);
     arena.set_node_flag(
         slot,
         crate::layout::node_data::NodeFlag::HasScrollOffset,
@@ -3397,7 +3319,7 @@ pub unsafe extern "C" fn layout_arena_publish_image_map_areas(
         })
         .collect::<Vec<_>>()
         .into_boxed_slice();
-    let _write = arena.join_frame_for_main_side_write("image map areas");
+    arena.join_frame_for_main_side_write("image map areas");
     arena.image_map_areas().publish(slot, published);
 }
 
@@ -3448,7 +3370,7 @@ pub unsafe extern "C" fn layout_arena_publish_visual_context_tree_inputs(
     inputs: crate::painting::host::FfiVisualContextTreeInputs,
 ) {
     let arena = unsafe { arena_from_handle(arena) };
-    let _write = arena.join_frame_for_main_side_write("visual context tree inputs");
+    arena.join_frame_for_main_side_write("visual context tree inputs");
     arena.publish_visual_context_tree_inputs(inputs);
 }
 

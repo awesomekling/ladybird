@@ -69,7 +69,7 @@ static void push_canvas_paint_facts_onto(HTML::HTMLCanvasElement const& canvas, 
     // This reconciles facts while a layout row is being published, so the damage belongs to that
     // publication rather than a later identity-based journal entry.
     if (changed && has_committed_box(layout_node))
-        apply_paint_cache_invalidation(layout_node, PaintCacheInvalidation::PaintAndHitTest, PaintCacheInvalidationStage::PaintFactReconciliation);
+        apply_paint_cache_invalidation(layout_node, PaintCacheInvalidation::PaintAndHitTest);
 }
 
 void push_canvas_paint_facts(HTML::HTMLCanvasElement const& canvas)
@@ -127,7 +127,7 @@ static void push_navigable_container_paint_facts_onto(HTML::NavigableContainer c
     if (reconciling == ReconcilingBeforeRecording::Yes) {
         // Recording reads these facts immediately below its call site, after the journal has
         // already drained. Reconcile and damage them as one named pre-recording stage.
-        apply_paint_cache_invalidation(layout_node, PaintCacheInvalidation::PaintAndHitTest, PaintCacheInvalidationStage::PaintFactReconciliation);
+        apply_paint_cache_invalidation(layout_node, PaintCacheInvalidation::PaintAndHitTest);
         return;
     }
     if (has_committed_box(layout_node))

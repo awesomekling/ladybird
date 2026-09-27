@@ -22,11 +22,9 @@
 //! follows is what the seal still permits, and why each of them is not a read of the document
 //! made by a running pass.
 //!
-//! Display-list recording now also has a compiler-enforced boundary: its input is `Sync`, its
-//! output is `Send`, and its runner receives neither [`crate::stage::MainThread`] nor a host
-//! callback table. Host calls therefore cannot be added to the runner through the supported
-//! interfaces. This runtime seal remains as redundant diagnostics until all pipeline stages use
-//! the same static boundary and the coordinator removes the seals together.
+//! Display-list recording is not watched here: its input is its own published frame, which is
+//! `Send + Sync`, and its runner receives neither [`crate::stage::MainThread`] nor a host callback
+//! table, so the compiler keeps host calls out of it.
 //!
 //! # The passes
 //!
@@ -79,8 +77,6 @@ use std::sync::OnceLock;
 pub(crate) enum Pass {
     /// No pass is running: a host call is an input, not a violation.
     None,
-    /// Display list recording, `layout_arena_record_display_list`.
-    Recording,
     /// The publish that hands a finished recording's resources to the host.
     RecordingPublish,
     /// The accumulated visual context build, and the rendering preparation around it.
@@ -97,7 +93,6 @@ impl Pass {
     fn name(self) -> &'static str {
         match self {
             Pass::None => "no pass",
-            Pass::Recording => "recording",
             Pass::RecordingPublish => "the recording publish",
             Pass::VisualContextUpdate => "the visual context update",
             Pass::ScrollStateRefresh => "the scroll state refresh",

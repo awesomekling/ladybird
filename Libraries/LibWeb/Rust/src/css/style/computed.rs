@@ -1114,7 +1114,6 @@ impl ComputedGroupSets {
             .style_records
             .find(hash, |_identity, candidate| *candidate == record)
         {
-            self.note_style_record_publication(self.final_base_style_record(identity), "base style record publication");
             return (identity, false);
         }
         let identity = self.style_records.take_free_identity().unwrap_or_else(|| {
@@ -1144,7 +1143,6 @@ impl ComputedGroupSets {
             .style_records_interned_since_reclamation
             .checked_add(1)
             .expect("style-record reclamation growth count overflow");
-        self.note_style_record_publication(self.final_base_style_record(identity), "base style record publication");
         (identity, true)
     }
 
@@ -2290,7 +2288,6 @@ impl ComputedGroupSets {
             record_updated: publication.record_updated,
             live_records: self.live_animation_overlay_assignments,
         };
-        self.note_style_record_publication(update.style_record, "animation overlay publication");
         Some(update)
     }
 
@@ -2560,7 +2557,7 @@ impl ComputedGroupSets {
         }
         let style_record_node_handle_changed =
             target.is_some() && previous_style_record_identity != Some(final_style_record_identity);
-        let publication = ComputedGroupPublication {
+        ComputedGroupPublication {
             previous_style_record_identity,
             style_record_identity: final_style_record_identity,
             new_groups,
@@ -2581,9 +2578,7 @@ impl ComputedGroupSets {
             live_animation_overlay_records: self.live_animation_overlay_assignments,
             is_pseudo,
             transferred,
-        };
-        self.note_style_record_publication(publication.style_record_identity, "computed style publication");
-        publication
+        }
     }
 
     pub(super) fn style_record_for_shared_assignment(
@@ -3807,70 +3802,6 @@ impl ComputedGroupSets {
         Some(retention)
     }
 
-    fn style_record_fingerprint(&self, final_style_record: FinalStyleRecordID) -> Option<u64> {
-        let (base_style_record, overlay) = if final_style_record.raw() & FinalStyleRecordID::ANIMATION_OVERLAY_TAG != 0
-        {
-            let slot = *self.animation_overlay_slots_by_record.get(&final_style_record)?;
-            let overlay = self.animation_overlay_slots.get(slot as usize)?.as_ref()?;
-            (overlay.base_style_record, Some(overlay))
-        } else {
-            let base_style_record = final_style_record.base_record()?;
-            if !self.style_record_generation_is_live(base_style_record, final_style_record.base_generation()) {
-                return None;
-            }
-            (base_style_record, None)
-        };
-        let record = self.style_records.get_index(base_style_record.index())?;
-        let mut hasher = fast_hasher();
-        final_style_record.hash(&mut hasher);
-        record.hash(&mut hasher);
-        for (index, payload) in self.sets[record.groups].payloads.iter().enumerate() {
-            style_group_payloads_hash(index, payload.as_ptr()).hash(&mut hasher);
-        }
-        if let Some(table) = record.longhand_table {
-            longhand_table_hash(self.computed_longhand_tables[table].table()).hash(&mut hasher);
-        }
-        if let Some(overlay) = overlay {
-            overlay.source_identity.hash(&mut hasher);
-            for (index, payload) in overlay.payloads.iter().enumerate() {
-                style_group_payloads_hash(index, payload.as_ptr()).hash(&mut hasher);
-            }
-        }
-        Some(hasher.finish())
-    }
-
-    fn note_style_record_publication(&self, style_record: FinalStyleRecordID, entry: &'static str) {
-        // Fingerprinting a record hashes every group payload it names, and these two sit on the
-        // reader entry points, so nothing may be hashed unless the verifier is on to read it.
-        if !crate::painting::published_immutable::enabled() {
-            return;
-        }
-        let Some(fingerprint) = self.style_record_fingerprint(style_record) else {
-            return;
-        };
-        crate::painting::published_immutable::publish_style_record(
-            self as *const ComputedGroupSets as usize,
-            style_record.raw(),
-            fingerprint,
-            entry,
-        );
-    }
-
-    fn verify_style_record(&self, style_record: FinalStyleRecordID, entry: &'static str) {
-        if !crate::painting::published_immutable::enabled() {
-            return;
-        }
-        let Some(fingerprint) = self.style_record_fingerprint(style_record) else {
-            return;
-        };
-        crate::painting::published_immutable::verify_style_record(
-            self as *const ComputedGroupSets as usize,
-            style_record.raw(),
-            fingerprint,
-            entry,
-        );
-    }
-
     /// Assert that a record the host reads was published: a base record whose longhand table is
     /// frozen, or an animation overlay whose slot is held. Only such a record is
     /// immutable, which is what lets the host read one anywhere, outside the drain as well as in it.
@@ -3909,7 +3840,6 @@ impl ComputedGroupSets {
 
     pub fn style_record_payloads(&self, raw_style_record: u64) -> Option<&[SharedPayload]> {
         let final_style_record = FinalStyleRecordID(raw_style_record);
-        self.verify_style_record(final_style_record, "style record payload read");
         self.debug_assert_style_record_is_published(raw_style_record);
         if raw_style_record & FinalStyleRecordID::ANIMATION_OVERLAY_TAG != 0 {
             let style_record = final_style_record;
@@ -4028,7 +3958,6 @@ impl ComputedGroupSets {
 
     pub(crate) fn style_record_view(&self, raw_style_record: u64) -> Option<StyleRecordView<'_>> {
         let final_style_record = FinalStyleRecordID(raw_style_record);
-        self.verify_style_record(final_style_record, "style record view read");
         self.debug_assert_style_record_is_published(raw_style_record);
         let (base_style_record, payloads, animation_overlay_identity, animated_overlay) =
             if let Some(style_record) = final_style_record.base_record() {
@@ -4243,7 +4172,6 @@ impl ComputedGroupSets {
 
 impl Drop for ComputedGroupSets {
     fn drop(&mut self) {
-        crate::painting::published_immutable::finish_style_engine(self as *const ComputedGroupSets as usize);
         for identity in self.groups.live_identities() {
             let group = self.groups.get(identity);
             release_group_payload(group.index, group.payload.as_ptr());

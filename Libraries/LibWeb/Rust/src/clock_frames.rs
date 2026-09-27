@@ -442,7 +442,6 @@ impl ClockLease {
         let arena = unsafe { &*(self.arena as *const LayoutNodeArena) };
         {
             use crate::painting::record::damage::PaintDamage;
-            let _writer = crate::painting::published_immutable::enter_writer("clock tick");
             for &(row, affects_hit_testing) in self.repaints.lock().expect("clock lease repaints").iter() {
                 if row.is_invalid() {
                     continue;
@@ -1246,7 +1245,6 @@ pub unsafe extern "C" fn rust_clock_lease_restore_host_records(arena: *mut c_voi
     count(&COUNTERS.restores);
     {
         use crate::painting::record::damage::PaintDamage;
-        let _writer = crate::painting::published_immutable::enter_writer("clock restore");
         for row in rows {
             arena_ref.push_paint_damage_for_repaint(row, PaintDamage::ALL_PRODUCERS);
         }
