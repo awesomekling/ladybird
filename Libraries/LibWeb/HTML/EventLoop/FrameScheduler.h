@@ -73,6 +73,10 @@ public:
         HighResolutionTime::DOMHighResTimeStamp frame_timestamp { 0 };
         // Where the flight ended, once consume-commit has taken it in.
         Optional<Layout::RustFFI::FfiFlightOutcome> flight_outcome {};
+        // For a flight that goes on to record its document, the navigable that sealed the paint it records. Consume-
+        // commit finishes that paint through it, even where the document lost its navigable beside the flight (a tab
+        // closed, a provisional navigable discarded).
+        GC::Ptr<LocalNavigable> sealed_flight_paint {};
     };
     Optional<SubmittedPass> submitted_pass;
 };
