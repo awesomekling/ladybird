@@ -101,6 +101,8 @@ WEB_API void apply_repaint_damage(Layout::Row const&, InvalidateDisplayList);
 WEB_API void apply_repaint_damage(Layout::TextNode const&, InvalidateDisplayList);
 WEB_API void apply_subtree_repaint_damage(Layout::Row const&);
 WEB_API void repaint_after_style_change(Layout::Row const&, CSS::RequiredInvalidationAfterStyleChange const&);
+// The render owner repainted the layout nodes of rows it applied a style batch to: the document's navigable paints again.
+WEB_API void repaint_document_after_owner_style_change(DOM::Document&, InvalidateDisplayList);
 
 WEB_API Layout::RustFFI::FfiRectToViewportTransform identity_rect_to_viewport_transform();
 WEB_API Layout::RustFFI::FfiRectToViewportTransform rect_to_viewport_transform(DOM::Document const&, Compositing::AccumulatedVisualContextTree const&);

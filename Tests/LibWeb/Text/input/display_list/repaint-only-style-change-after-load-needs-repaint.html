@@ -1,0 +1,36 @@
+<!doctype html>
+<script src="../include.js"></script>
+<style>
+    #box {
+        width: 100px;
+        height: 100px;
+        background-color: red;
+        outline: 0 solid red;
+    }
+</style>
+<div id="box"></div>
+<script>
+    promiseTest(async () => {
+        const nextFrame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+        const settle = async () => {
+            await nextFrame();
+            await nextFrame();
+        };
+        const report = (label) => {
+            getComputedStyle(box).backgroundColor;
+            println(`${label}: needsRepaint=${internals.needsRepaint}`);
+        };
+
+        await settle();
+        box.style.backgroundColor = "green";
+        report("background-color");
+
+        await settle();
+        box.style.outlineColor = "green";
+        report("outline-color");
+
+        await settle();
+        box.style.opacity = "0.5";
+        report("opacity");
+    });
+</script>

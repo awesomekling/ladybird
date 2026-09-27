@@ -29,6 +29,7 @@
 #include <LibWeb/Layout/LayoutRustFFI.h>
 #include <LibWeb/Layout/NodeArena.h>
 #include <LibWeb/Page/Page.h>
+#include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/StyleValueRustFFI.h>
 
 namespace Web::CSS {
@@ -1373,6 +1374,9 @@ StyleEngine::PublishedStyleTransaction StyleEngine::take_style_transaction(Style
             // The owner marked the visual contexts the rows moved, which the document's paint preparation updates.
             if (view.render_half_moved_visual_contexts && m_style_computer)
                 m_style_computer->document().set_needs_accumulated_visual_contexts_update(true);
+            // The owner marked the layout nodes it repainted, and the document's navigable paints them again.
+            if (view.render_half_repaint != 0 && m_style_computer)
+                Painting::repaint_document_after_owner_style_change(m_style_computer->document(), view.render_half_repaint == 2 ? InvalidateDisplayList::PaintCommandsAndHitTestList : InvalidateDisplayList::PaintCommands);
         }
     });
     auto bridge_microseconds = (MonotonicTime::now() - bridge_started_at).to_truncated_microseconds();

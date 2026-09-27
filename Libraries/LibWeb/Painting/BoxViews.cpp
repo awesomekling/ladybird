@@ -769,6 +769,11 @@ void apply_repaint_damage(Layout::Row const& row, InvalidateDisplayList should_i
     BoxViewRepaintAccess::set_document_needs_repaint(document, should_invalidate_display_list);
 }
 
+void repaint_document_after_owner_style_change(DOM::Document& document, InvalidateDisplayList should_invalidate_display_list)
+{
+    BoxViewRepaintAccess::set_document_needs_repaint(document, should_invalidate_display_list);
+}
+
 void apply_repaint_damage(Layout::TextNode const& node, InvalidateDisplayList should_invalidate_display_list)
 {
     if (auto* containing_block = node.containing_block())
