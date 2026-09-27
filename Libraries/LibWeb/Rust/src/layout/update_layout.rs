@@ -48,9 +48,6 @@ pub(crate) use main_thread_entries::MainThreadFfiEntry;
 pub struct FfiLayoutUpdateHostCallbacks {
     pub context: *mut c_void,
     pub document_facts: unsafe extern "C" fn(*mut c_void) -> FfiLayoutUpdateDocumentFacts,
-    /// Readies the document for a layout tree build, and answers with the document's style node,
-    /// which the build walks from.
-    pub prepare_layout_tree_build: unsafe extern "C" fn(*mut c_void) -> u32,
     /// Takes in what the frame left for the document, and ends the layout update on the document
     /// side. The document thread calls it as it takes in the frame's end, so the frame is over for
     /// the document once the update returns. The effects are valid for the call.
@@ -91,6 +88,9 @@ pub struct FfiLayoutUpdateDocumentFacts {
     pub document_in_quirks_mode: bool,
     pub viewport_inline_size_raw: i32,
     pub viewport_block_size_raw: i32,
+    /// The document's style node, which a layout tree build walks from. The document readies the build of a round
+    /// as it reads the round's facts: it hands a build that may build the viewport the document's style.
+    pub document_style_node: u32,
 }
 
 /// What the layout commits of a frame leave for the document, which it applies once the frame is
@@ -314,7 +314,6 @@ pub struct FfiLayoutTreeBuildStats {
 pub(crate) struct LayoutUpdateHost {
     context: *mut c_void,
     document_facts: unsafe extern "C" fn(*mut c_void) -> FfiLayoutUpdateDocumentFacts,
-    prepare_layout_tree_build: unsafe extern "C" fn(*mut c_void) -> u32,
     take_in_frame_effects: unsafe extern "C" fn(*mut c_void, *const FfiLayoutFrameEffects),
     finish_submitted_style_update: unsafe extern "C" fn(*mut c_void),
 }
@@ -324,7 +323,6 @@ impl From<FfiLayoutUpdateHostCallbacks> for LayoutUpdateHost {
         Self {
             context: host.context,
             document_facts: host.document_facts,
-            prepare_layout_tree_build: host.prepare_layout_tree_build,
             take_in_frame_effects: host.take_in_frame_effects,
             finish_submitted_style_update: host.finish_submitted_style_update,
         }
@@ -339,10 +337,6 @@ impl LayoutUpdateHost {
 
     fn document_facts(&self, _: &crate::stage::MainThread) -> FfiLayoutUpdateDocumentFacts {
         unsafe { (self.document_facts)(self.context) }
-    }
-
-    fn prepare_layout_tree_build(&self, _: &crate::stage::MainThread) -> u32 {
-        unsafe { (self.prepare_layout_tree_build)(self.context) }
     }
 
     fn take_in_frame_effects(&self, _: &crate::stage::MainThread, effects: &FfiLayoutFrameEffects) {
@@ -599,8 +593,6 @@ struct LayoutFrame {
     pass_sources: Option<LayoutPassSources>,
     /// The document style node of the tree build the style round readied.
     tree_build_document_style_node: Option<u32>,
-    /// The document's style node, as the document thread readied the document for a tree build of the round with.
-    document_style_node: u32,
     /// The document's selection as the style round of the round read it, if it has one.
     selection: Option<SelectionSnapshot>,
     /// What the frame's tree builds and commits owe the document thread, in the order the frame
@@ -858,7 +850,6 @@ impl LayoutFrame {
             connected_element_count: 0,
             pass_sources: None,
             tree_build_document_style_node: None,
-            document_style_node: 0,
             selection: None,
             owed_host_halves: Cell::default(),
             host_payments: Vec::new(),
@@ -1007,8 +998,9 @@ impl LayoutFrame {
     }
 
     /// Readies the rest of the round the document thread has run the style of, with the facts `facts` it read after
-    /// it, on the owner: the tree build when one comes first, with the document's style node the document thread
-    /// prepared it with, and otherwise the sources of the layout pass. Answers whether the round lays out, and
+    /// it, on the owner: the tree build when one comes first, from the document's style node, and otherwise the
+    /// sources of the layout pass. The document handed the round its style for a build that may build the viewport
+    /// as it read the facts; a round that builds no tree lets it go. Answers whether the round lays out, and
     /// whether it builds. The style a flight runs decides whether the round lays out, and the flight reads the
     /// sources of its pass once it has applied that style.
     fn ready_round(&mut self, facts: &FfiLayoutUpdateDocumentFacts) -> (bool, bool) {
@@ -1021,12 +1013,14 @@ impl LayoutFrame {
             return (true, false);
         }
         if !self.round_lays_out_in_frame(facts) {
+            self.arena().release_published_document_style();
             return (false, false);
         }
         if self.needs_layout_tree_rebuild(facts) {
-            self.tree_build_document_style_node = Some(self.document_style_node);
+            self.tree_build_document_style_node = Some(facts.document_style_node);
             return (true, true);
         }
+        self.arena().release_published_document_style();
         // SAFETY: The frame runs for the update the arena is in, on the thread that owns it.
         self.pass_sources = Some(unsafe { LayoutPassSources::read(self.inputs.arena_handle) });
         (true, false)
@@ -1256,7 +1250,7 @@ impl LayoutFrame {
                 }
                 FrameStep::NeedsStyle => match resumed_with.take() {
                     Some(round) => {
-                        let facts = self.finish_style_round(main_thread, round);
+                        let facts = self.finish_style_round(round);
                         if stop_at_round {
                             self.run_unit_on_owner(document, facts, OwnerLayoutUnit::ready_round_for_flight)
                         } else {
@@ -1422,23 +1416,12 @@ impl LayoutFrame {
     }
 
     /// Goes on with the round the loop started, once its style has run, with the facts the document read after the
-    /// list item renumbers and top layer changes the style left, and its selection, and readies the document for a
-    /// tree build the round may run. Style is the document's own loop over its elements, and a tree update mark is set
-    /// on the DOM node, which widens it to what the node's layout node and its document ask for. The commits of the
-    /// round stamp the selection states of the boxes they build from the selection as it is now, as nothing on the
-    /// document thread changes the tree until the frame is over.
-    fn finish_style_round(
-        &mut self,
-        main_thread: &crate::stage::MainThread,
-        round: LayoutRoundFacts,
-    ) -> FfiLayoutUpdateDocumentFacts {
+    /// list item renumbers and top layer changes the style left, and its selection, having readied itself for a tree
+    /// build the round may run. The commits of the round stamp the selection states of the boxes they build from the
+    /// selection as it is now, as nothing on the document thread changes the tree until the frame is over.
+    fn finish_style_round(&mut self, round: LayoutRoundFacts) -> FfiLayoutUpdateDocumentFacts {
         let LayoutRoundFacts { facts, selection } = round;
         self.selection = selection;
-        // A round whose style runs in the flight lays out the tree it has, and a document hosting template contents
-        // lays out nothing.
-        if self.style_pass.is_none() && !self.inputs.is_template_contents_document {
-            self.document_style_node = self.inputs.host.prepare_layout_tree_build(main_thread);
-        }
         facts
     }
 
@@ -1774,7 +1757,6 @@ unsafe fn make_clock_layout_frame(
             connected_element_count: 0,
             pass_sources: None,
             tree_build_document_style_node: None,
-            document_style_node: 0,
             selection,
             owed_host_halves: Cell::default(),
             host_payments: Vec::new(),
@@ -2630,6 +2612,7 @@ mod tests {
             document_in_quirks_mode: false,
             viewport_inline_size_raw: 0,
             viewport_block_size_raw: 0,
+            document_style_node: 0,
         }
     }
 

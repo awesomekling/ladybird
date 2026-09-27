@@ -271,7 +271,7 @@ bool attach_owed_generated_image(DOM::Document& document, Compositing::RustFFI::
     return image_was_available;
 }
 
-u32 prepare_layout_tree_build(DOM::Document& document)
+void prepare_layout_tree_build(DOM::Document& document)
 {
     auto* arena = document.layout_node_arena().handle();
     // The viewport's style is the document's, which the style computer makes on demand rather than
@@ -284,7 +284,6 @@ u32 prepare_layout_tree_build(DOM::Document& document)
         auto viewport_scroll_offset = navigable ? navigable->viewport_scroll_offset() : CSSPixelPoint {};
         RustFFI::layout_arena_publish_document_style_record(arena, document_style.value(), viewport_scroll_offset);
     }
-    return document.style_node_id().value();
 }
 
 void detach_top_layer_element_layout_subtree(DOM::Element& element)
