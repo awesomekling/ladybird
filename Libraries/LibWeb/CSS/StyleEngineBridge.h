@@ -222,6 +222,11 @@ public:
     void record_text_is_ascii_whitespace(StyleNodeID, bool);
     // The unique id the document knows a node by, which arrives with the node's identity.
     void record_unique_node_id(StyleNodeID, u64 unique_node_id);
+    // A shadow root's link to its host, the root a tree scope is named by, and a tree scope styled by the document's
+    // sheets rather than its own.
+    void record_shadow_root(StyleNodeID host, StyleNodeID shadow_root);
+    void record_tree_scope_root(TreeScopeID, StyleNodeID root);
+    void record_tree_scope_uses_document_sheets(TreeScopeID);
     // What a row built for an arriving node is painted and hit-tested with, and the spans of an arriving table cell or
     // column, which arrive with the node's identity.
     void record_dom_paint_facts(StyleNodeID, u8 facts);

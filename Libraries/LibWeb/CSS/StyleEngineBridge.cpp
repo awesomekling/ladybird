@@ -733,6 +733,21 @@ void StyleEngine::record_unique_node_id(StyleNodeID node, u64 unique_node_id)
     record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::ElementUniqueNodeId, .value = 0, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = 0, .data = static_cast<FlatPtr>(unique_node_id) });
 }
 
+void StyleEngine::record_shadow_root(StyleNodeID host, StyleNodeID shadow_root)
+{
+    record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::ShadowRoot, .value = 0, .node = host.value(), .parent = shadow_root.value(), .previous_sibling = 0, .facts = 0, .data = 0 });
+}
+
+void StyleEngine::record_tree_scope_root(TreeScopeID tree_scope, StyleNodeID root)
+{
+    record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::TreeScopeRoot, .value = 0, .node = root.value(), .parent = 0, .previous_sibling = 0, .facts = tree_scope.value(), .data = 0 });
+}
+
+void StyleEngine::record_tree_scope_uses_document_sheets(TreeScopeID tree_scope)
+{
+    record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::TreeScopeUsesDocumentSheets, .value = 0, .node = 0, .parent = 0, .previous_sibling = 0, .facts = tree_scope.value(), .data = 0 });
+}
+
 static StyleEngineFFI::FfiHostFactWrite dom_paint_facts_write(StyleNodeID node, u8 facts)
 {
     return { .kind = StyleEngineFFI::FfiHostFactKind::NodeDomPaintFacts, .value = facts, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = 0, .data = 0 };

@@ -1009,6 +1009,12 @@ pub enum FfiHostFactKind {
     /// `facts` holds the column span of the arriving table cell or column `node` in its low half
     /// and its row span in its high half, and `parent` its raw column span.
     ElementTableSpans = 18,
+    /// The shadow root `parent` is attached to the host `node`.
+    ShadowRoot = 19,
+    /// `node` is the root of the tree scope `facts`.
+    TreeScopeRoot = 20,
+    /// The tree scope `facts` is styled by the document's sheets rather than its own.
+    TreeScopeUsesDocumentSheets = 21,
 }
 
 /// Which element an `FfiReplacedContentInput` holds the values of.
@@ -2625,6 +2631,15 @@ unsafe fn apply_host_fact_writes(engine: &mut StyleEngine, writes: &[FfiHostFact
                     write.facts >> 16,
                     write.parent,
                 );
+            }
+            FfiHostFactKind::ShadowRoot => {
+                operations::set_shadow_root(engine, write.node, write.parent);
+            }
+            FfiHostFactKind::TreeScopeRoot => {
+                operations::set_tree_scope_root(engine, write.facts, write.node);
+            }
+            FfiHostFactKind::TreeScopeUsesDocumentSheets => {
+                operations::set_tree_scope_uses_document_sheets(engine, write.facts);
             }
             FfiHostFactKind::ElementAssociatedPseudoKind => {
                 operations::set_element_associated_pseudo_kind(engine, write.node, write.value);
