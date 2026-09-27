@@ -1780,7 +1780,7 @@ unsafe fn frame_state(arena_handle: *mut c_void) -> FfiLayoutFrameState {
         return FfiLayoutFrameState::InFlight;
     }
     // SAFETY: Guaranteed by the caller.
-    if unsafe { arena(arena_handle) }.update_layout_is_running() {
+    if unsafe { super::HostTables::beside_frame(arena_handle) }.layout_update_is_running() {
         FfiLayoutFrameState::MainInsideJoin
     } else {
         FfiLayoutFrameState::Idle
@@ -1809,8 +1809,8 @@ unsafe fn update_layout(
 ) -> FfiLayoutUpdateOutcome {
     let host = layout_update_host(main_thread);
     // SAFETY: Guaranteed by the caller.
-    assert!(
-        unsafe { arena(arena_handle) }.update_layout_is_running(),
+    debug_assert!(
+        unsafe { super::HostTables::beside_frame(arena_handle) }.layout_update_is_running(),
         "the layout update runs between layout_arena_begin_update_layout and its end"
     );
     let may_submit_pass = inputs.may_submit_pass;
@@ -2548,14 +2548,14 @@ pub unsafe extern "C" fn layout_arena_clear_layout_update_host_callbacks(arena: 
 pub unsafe extern "C" fn layout_arena_begin_update_layout(arena: *mut c_void) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
-    let arena_ref = unsafe { LayoutNodeArena::from_handle(arena) };
-    // The borrow above has joined a frame in flight that owns the arena, and the style update ahead of
-    // it one that reaches the document's style engine; a layout update never runs under either.
+    let host_tables = unsafe { super::HostTables::from_handle(arena) };
+    // Reaching the host tables has joined a frame in flight that owns the arena, and the style update
+    // ahead of it one that reaches the document's style engine; a layout update never runs under either.
     assert!(
         !crate::stage_thread::document_frame_in_flight(arena),
         "update_layout nested in a frame in flight"
     );
-    arena_ref.begin_update_layout();
+    host_tables.begin_layout_update();
 }
 
 /// # Safety

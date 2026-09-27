@@ -28,7 +28,7 @@ unsafe extern "C" fn layout_arena_end_update_layout(arena: *mut c_void) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }.end_update_layout();
+    unsafe { crate::layout::HostTables::from_handle(arena) }.end_layout_update();
     // Only this document's stages' wants: another document's stage may be running beside it.
     let messages: Vec<_> = libgfx_rust::font::take_wanted_pending_faces(arena as u64)
         .into_iter()

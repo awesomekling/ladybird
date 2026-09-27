@@ -51,18 +51,37 @@ pub(crate) struct HostTables {
     /// The generation of the document's render state, which retiring it moves on. See
     /// [`super::frame_retirement`].
     pub(super) frame_generation: Cell<u64>,
-    /// The document's layout tree update marks, while the tree build has not borrowed them. See
+    /// The document's layout tree update marks, which the arena reaches for the tree build they are lent to. See
     /// [`super::tree_update_marks`].
     pub(super) layout_tree_update_marks: RefCell<super::tree_update_marks::LayoutTreeUpdateMarks>,
-    /// Whether the tree build holds the marks, in the arena, for its walk.
+    /// Whether the tree build holds the marks, for its walk.
     pub(super) layout_tree_update_marks_are_lent: Cell<bool>,
     /// What the document thread wrote to the marks beside the frame they are lent to, in order,
     /// written once the frame has handed them back.
     pub(super) layout_tree_update_mark_writes_waiting_for_frame:
         RefCell<Vec<super::tree_update_marks::MarkWriteWaitingForFrame>>,
+    /// Whether the document runs a layout update, between `layout_arena_begin_update_layout` and its end.
+    layout_update_is_running: Cell<bool>,
 }
 
 impl HostTables {
+    /// Notes that the document runs a layout update. A document runs one at a time.
+    pub(crate) fn begin_layout_update(&self) {
+        let was_running = self.layout_update_is_running.replace(true);
+        debug_assert!(!was_running, "a layout update is already running");
+    }
+
+    /// Notes that the document's layout update is over.
+    pub(crate) fn end_layout_update(&self) {
+        let was_running = self.layout_update_is_running.replace(false);
+        debug_assert!(was_running, "no layout update is running");
+    }
+
+    /// Whether the document runs a layout update.
+    pub(crate) fn layout_update_is_running(&self) -> bool {
+        self.layout_update_is_running.get()
+    }
+
     /// Whether the document traces its layout, and has the owners of the trace lines named once a frame is over.
     pub(crate) fn traces_layout(&self) -> bool {
         self.layout_trace_describe_node.get().is_some()
