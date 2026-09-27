@@ -1387,7 +1387,7 @@ public:
                 pin_in(*arena, m_boxes);
             return;
         }
-        // Beside a recording that owns the arena, the pins wait for the frame with the rest of the removal's arena
+        // Beside a frame that owns the arena, the pins wait for the frame with the rest of the removal's arena
         // changes, ahead of the identity changes that unbind the rows. The removal lets go of the records' other pins
         // before then, and the boxes are read until their rows are freed, so the style engine reclaims no record until
         // the pins have landed.
@@ -1564,13 +1564,13 @@ void Node::update_layout_tree_for_removal(Node& parent, LayoutSubtreeRemoval rem
     if (removal == LayoutSubtreeRemoval::DetachInPlace && subtree_allows_layout_detach_for_removal(*this)) {
         if (HTML::FrameScheduler::arena_changes_wait_for_frame(document())) {
             // A parent without a box, such as one with display: contents, has none to take the node's box out of, and
-            // none for the removal to mark, so it is rebuilt as it would be without the recording: that marks the box
-            // its children are laid out in, which a read of layout beside the recording would otherwise find clean.
+            // none for the removal to mark, so it is rebuilt as it would be with no frame in flight: that marks the box
+            // its children are laid out in now rather than once the frame has been taken in.
             if (!parent.has_layout_box()) {
                 parent.set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::NodeRemove);
                 return;
             }
-            // A recording that owns the arena reads the boxes, so they stay in place until the frame has been taken in,
+            // A frame that owns the arena reads the boxes, so they stay in place until the frame has been taken in,
             // and are detached then, over the siblings they still have. The node's box is found by the identity the
             // node leaves with, and the change is kept outside the heap, so it roots the nodes it reads. The parent
             // needs a layout update either way, which the layout update that takes the frame in makes.
@@ -1616,7 +1616,7 @@ void Node::detach_remaining_layout_nodes_for_removal()
     });
     if (style_nodes.is_empty())
         return;
-    // Beside a recording that owns the arena, the rows stay bound under the nodes' identities until the frame has been
+    // Beside a frame that owns the arena, the rows stay bound under the nodes' identities until the frame has been
     // taken in, and are detached then, ahead of the identity changes.
     HTML::FrameScheduler::change_arena(document(), [style_nodes = move(style_nodes)](Layout::NodeArena& arena) {
         Layout::RustFFI::rust_detach_remaining_layout_rows_for_removal(arena.handle(), style_nodes.data(), style_nodes.size());

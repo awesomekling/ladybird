@@ -137,7 +137,7 @@ static void push_navigable_container_paint_facts_onto(HTML::NavigableContainer c
 // The facts are read from the container as it is at the drain.
 void push_navigable_container_paint_facts(HTML::NavigableContainer const& navigable_container)
 {
-    // Beside a recording that owns the arena, the box is looked up and its facts noted once the frame has been taken in.
+    // Beside a frame that owns the arena, the box is looked up and its facts noted once the frame has been taken in.
     if (HTML::FrameScheduler::arena_changes_wait_for_frame(navigable_container.document())) {
         HTML::main_thread_event_loop().frame_scheduler().defer_arena_change(GC::create_function(navigable_container.heap(), [navigable_container = GC::Ref { navigable_container }] {
             push_navigable_container_paint_facts(navigable_container);
@@ -346,7 +346,7 @@ static void push_video_paint_facts_onto(HTML::HTMLVideoElement const& video_elem
 
 void push_video_paint_facts(HTML::HTMLVideoElement const& video_element)
 {
-    // Beside a recording that owns the arena, the box is looked up and its facts pushed once the frame has been taken in.
+    // Beside a frame that owns the arena, the box is looked up and its facts pushed once the frame has been taken in.
     if (HTML::FrameScheduler::arena_changes_wait_for_frame(video_element.document())) {
         HTML::main_thread_event_loop().frame_scheduler().defer_arena_change(GC::create_function(video_element.heap(), [video_element = GC::Ref { video_element }] {
             push_video_paint_facts(video_element);

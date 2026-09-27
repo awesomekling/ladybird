@@ -227,13 +227,13 @@ public:
     void consume_commit(EventLoop::FrameConsumeSite);
 
     // Whether a main-side change to the arena of `document` waits for the frame in flight instead of joining it: only
-    // recordings, which read nothing of the style engine, and a layout pass, beside which what the document publishes
-    // to its style engine waits for the pass, own the arena, so what the document goes on to do beside them reaches
-    // the arena through the changes deferred here alone.
+    // a layout pass or a clock tick, beside which what the document publishes to its style engine waits for the frame,
+    // owns the arena, so what the document goes on to do beside it reaches the arena through the changes deferred here
+    // alone. A recording owns no arena.
     static bool arena_changes_wait_for_frame(DOM::Document const&);
 
-    // A change to an arena that waits for the frame in flight (see arena_changes_wait_for_frame()), which the recording
-    // owns until it is taken in. The arena takes the change in once the frame has been taken in, right after its
+    // A change to an arena that waits for the frame in flight (see arena_changes_wait_for_frame()), which owns the arena
+    // until it is taken in. The arena takes the change in once the frame has been taken in, right after its
     // consume-commit, where waiting for the frame at the change would have put it.
     void defer_arena_change(GC::Ref<GC::Function<void()>>);
 
@@ -243,8 +243,8 @@ public:
     static void change_arena(DOM::Document&, Function<void(Layout::NodeArena&)>);
 
     // Has the style engine of `document` reclaim no style record until the frame in flight has been taken in. A
-    // recording in flight reads the records its rows name, and an engine entry beside it can release the record a row
-    // names before the row takes its new one at the arena's doors.
+    // recording in flight reads the records its published frame names, which the document goes on to release beside
+    // it.
     void hold_style_records_for_frame(DOM::Document&);
 
     EventLoop& event_loop() { return m_event_loop; }
