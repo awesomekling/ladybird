@@ -723,7 +723,8 @@ pub unsafe extern "C" fn layout_arena_node_is_partial_relayout_boundary(arena: *
     unsafe { LayoutNodeArena::from_handle(arena) }.node_is_partial_relayout_boundary(node)
 }
 
-/// The facts the host owns that take an update off the partial relayout path.
+/// The facts that take an update off the partial relayout path: the style engine's pending container queries, and
+/// the host's devtools collection.
 #[derive(Clone, Copy)]
 pub(crate) struct FfiPartialRelayoutHostFacts {
     pub container_query_evaluation_is_pending: bool,

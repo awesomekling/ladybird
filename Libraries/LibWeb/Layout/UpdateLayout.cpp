@@ -65,7 +65,6 @@ Layout::RustFFI::FfiLayoutUpdateDocumentFacts Document::layout_update_document_f
     return {
         .document_is_active = document_is_active,
         .document_needs_layout_tree_build = needs_layout_tree_update() || child_needs_layout_tree_update(),
-        .container_query_evaluation_is_pending = has_size_containers_needing_evaluation_after_layout(),
         .style_input_waits_on_document = m_needs_animated_style_update
             || style_computer().style_engine().has_recorded_input()
             || style_computer().style_engine().has_install_feedback()
