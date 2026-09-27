@@ -2143,11 +2143,6 @@ impl LayoutNodeArena {
             if self.style_records[slot.slot_index() as usize].get() != row.old_style_record {
                 return Err(FfiFlightStyleDecline::StaleLayoutNode);
             }
-            // A relayout of a partial relayout boundary may stay confined to it, which the host
-            // decides from the element's pseudo-elements.
-            if layout_node_marks(row.damage).relayout && self.node_is_partial_relayout_boundary(slot) {
-                return Err(FfiFlightStyleDecline::RelayoutBoundary);
-            }
         }
         self.open_host_handback_span();
         self.flight_style_applied.set(true);
@@ -2179,7 +2174,7 @@ impl LayoutNodeArena {
                 self.mark_row_after_style_change_in_flight(marked, marks);
             }
             if marks.relayout {
-                self.set_needs_layout_update(slot, true);
+                self.mark_row_for_relayout_after_style_change(row.style_node, slot);
             }
             self.flight_style_damages
                 .borrow_mut()
@@ -2197,6 +2192,27 @@ impl LayoutNodeArena {
         if let Some(handbacks) = handbacks {
             self.finish_paying_taken_host_handbacks(main_thread, handbacks);
         }
+    }
+
+    /// Marks the row of the element `style_node` for a relayout its style change asks for. A relayout
+    /// of an absolutely positioned partial relayout boundary stays confined to it: the box
+    /// contributes nothing to ancestor layout, and partial relayout resolves the boundary's own size
+    /// and position again. A rendered ::backdrop keeps it from being confined, as the element's
+    /// style change covers the ::backdrop box, which is a sibling of the element's box, outside the
+    /// subtree the boundary covers.
+    fn mark_row_for_relayout_after_style_change(&self, style_node: StyleNodeID, slot: NodeSlotId) {
+        let confined = super::node_facts::kind_is_box(self.data(slot).kind.get())
+            && self
+                .node_style_if_live(slot)
+                .is_some_and(|style| style.is_absolutely_positioned())
+            && self.node_is_partial_relayout_boundary(slot)
+            && self
+                .bound_pseudo_element_row(style_node, super::node_data::GENERATED_FOR_BACKDROP)
+                .is_invalid();
+        if confined {
+            self.set_node_flag(slot, NodeFlag::NeedsOwnGeometryUpdate, true);
+        }
+        self.set_needs_layout_update(slot, !confined);
     }
 
     /// Repaints and marks the visual contexts of a row a style change in flight moved, as the host's

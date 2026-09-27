@@ -64,11 +64,9 @@ pub enum FfiFlightStyleDecline {
     LayoutNode,
     /// A row's layout node holds another record than the one the row moves away from.
     StaleLayoutNode,
-    /// A row relayouts a partial relayout boundary.
-    RelayoutBoundary,
 }
 
-pub(crate) const FLIGHT_STYLE_DECLINE_COUNT: usize = FfiFlightStyleDecline::RelayoutBoundary as usize + 1;
+pub(crate) const FLIGHT_STYLE_DECLINE_COUNT: usize = FfiFlightStyleDecline::StaleLayoutNode as usize + 1;
 
 impl StyleEngine {
     /// The rows of the batch the submitted style pass left that a flight applies to the layout
