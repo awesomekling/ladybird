@@ -122,12 +122,6 @@ void ChromeWidget::detach(Badge<ChromeWidgetRegistry>)
     m_slot = Compositing::RustFFI::NodeSlotId_INVALID;
 }
 
-PhysicalResizeAxes physical_resize_axes(Layout::Node const& node)
-{
-    auto axes = Layout::RustFFI::layout_arena_paintable_physical_resize_axes(node.arena_handle(), committed_row_slot(node));
-    return { axes.horizontal, axes.vertical };
-}
-
 Optional<ScrollbarData> compute_scrollbar_data(Layout::Node const& node, ScrollDirection direction, ChromeMetrics const& metrics, Compositing::ScrollStateSnapshot const* scroll_state_snapshot, ScrollbarSizing scrollbar_sizing)
 {
     auto& document = node.document();

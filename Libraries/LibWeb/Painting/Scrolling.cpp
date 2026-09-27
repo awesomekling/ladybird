@@ -22,53 +22,142 @@
 
 namespace Web::Painting {
 
-CSSPixelPoint scroll_offset(Layout::Node const& node)
+namespace {
+
+struct ScrollRow {
+    DOM::Document const& document;
+    void* arena { nullptr };
+    Compositing::RustFFI::NodeSlotId slot { Compositing::RustFFI::INVALID_NODE_SLOT_INDEX };
+
+    bool has_committed_box() const { return arena && Layout::RustFFI::layout_arena_has_committed_box(arena, slot); }
+};
+
+}
+
+static ScrollRow scroll_row(Layout::Node const& node)
 {
-    if (!has_committed_box(node))
+    return { node.document(), node.arena_handle(), committed_row_slot(node) };
+}
+
+static ScrollRow scroll_row(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto const* arena = document.layout_node_arena_if_created();
+    auto slot = committed_row_slot(document, identity);
+    if (!arena || slot.index == Compositing::RustFFI::INVALID_NODE_SLOT_INDEX)
+        return { document };
+    return { document, arena->handle(), slot };
+}
+
+static CSSPixelPoint scroll_offset(ScrollRow const& row)
+{
+    if (!row.has_committed_box())
         return {};
 
     // The box publishes the offset stored for what it is the box of, so this reads the arena
     // rather than asking the element, the pseudo-element or the navigable where that store is.
     // A write still in the journal lands first.
-    node.document().drain_invalidation_journal();
-    return Layout::RustFFI::layout_arena_published_scroll_offset(node.arena_handle(), committed_row_slot(node));
+    row.document.drain_invalidation_journal();
+    return Layout::RustFFI::layout_arena_published_scroll_offset(row.arena, row.slot);
 }
 
-CSSPixelPoint minimum_scroll_offset(Layout::Node const& node)
+static CSSPixelPoint minimum_scroll_offset(ScrollRow const& row)
 {
-    return Layout::RustFFI::layout_arena_paintable_minimum_scroll_offset(node.arena_handle(), committed_row_slot(node));
+    if (!row.arena)
+        return {};
+    return Layout::RustFFI::layout_arena_paintable_minimum_scroll_offset(row.arena, row.slot);
 }
 
-CSSPixelPoint maximum_scroll_offset(Layout::Node const& node)
+static CSSPixelPoint maximum_scroll_offset(ScrollRow const& row)
 {
-    return Layout::RustFFI::layout_arena_paintable_maximum_scroll_offset(node.arena_handle(), committed_row_slot(node));
+    if (!row.arena)
+        return {};
+    return Layout::RustFFI::layout_arena_paintable_maximum_scroll_offset(row.arena, row.slot);
 }
 
-CSSPixelPoint clamp_scroll_offset(Layout::Node const& node, CSSPixelPoint offset)
+static CSSPixelPoint clamp_scroll_offset(ScrollRow const& row, bool has_scrollable_overflow_rect, CSSPixelPoint offset)
 {
-    if (!Painting::scrollable_overflow_rect(node).has_value())
+    if (!has_scrollable_overflow_rect)
         return offset;
 
-    auto minimum_offset = minimum_scroll_offset(node);
-    auto maximum_offset = maximum_scroll_offset(node);
+    auto minimum_offset = minimum_scroll_offset(row);
+    auto maximum_offset = maximum_scroll_offset(row);
     return {
         clamp(offset.x(), minimum_offset.x(), maximum_offset.x()),
         clamp(offset.y(), minimum_offset.y(), maximum_offset.y()),
     };
 }
 
+static CSSPixelRect scroll_snapport_rect(ScrollRow const& row, CSSPixelRect scrollport)
+{
+    if (!row.has_committed_box())
+        return scrollport;
+    return Layout::RustFFI::layout_arena_scroll_snapport_rect(row.arena, row.slot, scrollport);
+}
+
+CSSPixelPoint scroll_offset(Layout::Node const& node)
+{
+    return scroll_offset(scroll_row(node));
+}
+
+CSSPixelPoint scroll_offset(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    return scroll_offset(scroll_row(document, identity));
+}
+
+CSSPixelPoint minimum_scroll_offset(Layout::Node const& node)
+{
+    return minimum_scroll_offset(scroll_row(node));
+}
+
+CSSPixelPoint minimum_scroll_offset(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    return minimum_scroll_offset(scroll_row(document, identity));
+}
+
+CSSPixelPoint maximum_scroll_offset(Layout::Node const& node)
+{
+    return maximum_scroll_offset(scroll_row(node));
+}
+
+CSSPixelPoint maximum_scroll_offset(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    return maximum_scroll_offset(scroll_row(document, identity));
+}
+
+CSSPixelPoint clamp_scroll_offset(Layout::Node const& node, CSSPixelPoint offset)
+{
+    return clamp_scroll_offset(scroll_row(node), Painting::scrollable_overflow_rect(node).has_value(), offset);
+}
+
+CSSPixelPoint clamp_scroll_offset(DOM::Document const& document, DOM::NodeIdentity identity, CSSPixelPoint offset)
+{
+    return clamp_scroll_offset(scroll_row(document, identity), Painting::scrollable_overflow_rect(document, identity).has_value(), offset);
+}
+
 CSSPixelRect scroll_snapport_rect(Layout::Node const& node)
 {
-    if (!has_committed_box(node))
+    auto row = scroll_row(node);
+    if (!row.has_committed_box())
         return {};
-    return scroll_snapport_rect(node, absolute_padding_box_rect(node));
+    return scroll_snapport_rect(row, absolute_padding_box_rect(node));
+}
+
+CSSPixelRect scroll_snapport_rect(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto row = scroll_row(document, identity);
+    if (!row.has_committed_box())
+        return {};
+    return scroll_snapport_rect(row, absolute_padding_box_rect(document, identity));
 }
 
 CSSPixelRect scroll_snapport_rect(Layout::Node const& node, CSSPixelRect scrollport)
 {
-    if (!has_committed_box(node))
-        return scrollport;
-    return Layout::RustFFI::layout_arena_scroll_snapport_rect(node.arena_handle(), committed_row_slot(node), scrollport);
+    return scroll_snapport_rect(scroll_row(node), scrollport);
+}
+
+CSSPixelRect scroll_snapport_rect(DOM::Document const& document, DOM::NodeIdentity identity, CSSPixelRect scrollport)
+{
+    return scroll_snapport_rect(scroll_row(document, identity), scrollport);
 }
 
 ViewportWheelOverflow overflow_values_applied_to_viewport_for_wheel_scrolling(DOM::Document const& document)
@@ -107,12 +196,24 @@ ViewportWheelOverflow overflow_values_applied_to_viewport_for_wheel_scrolling(DO
     };
 }
 
+static WheelScrollableAxes wheel_scrollable_axes(ScrollRow const& row)
+{
+    if (!row.arena)
+        return {};
+    auto overflow = overflow_values_applied_to_viewport_for_wheel_scrolling(row.document);
+    auto axes = Layout::RustFFI::layout_arena_paintable_wheel_scrollable_axes(
+        row.arena, row.slot, to_underlying(overflow.x), to_underlying(overflow.y));
+    return { axes.horizontal, axes.vertical };
+}
+
 WheelScrollableAxes wheel_scrollable_axes(Layout::Node const& node)
 {
-    auto overflow = overflow_values_applied_to_viewport_for_wheel_scrolling(node.document());
-    auto axes = Layout::RustFFI::layout_arena_paintable_wheel_scrollable_axes(
-        node.arena_handle(), committed_row_slot(node), to_underlying(overflow.x), to_underlying(overflow.y));
-    return { axes.horizontal, axes.vertical };
+    return wheel_scrollable_axes(scroll_row(node));
+}
+
+WheelScrollableAxes wheel_scrollable_axes(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    return wheel_scrollable_axes(scroll_row(document, identity));
 }
 
 bool could_be_scrolled_by_wheel_event(Layout::Node const& node, ScrollDirection direction)
@@ -121,9 +222,21 @@ bool could_be_scrolled_by_wheel_event(Layout::Node const& node, ScrollDirection 
     return direction == ScrollDirection::Horizontal ? axes.horizontal : axes.vertical;
 }
 
+bool could_be_scrolled_by_wheel_event(DOM::Document const& document, DOM::NodeIdentity identity, ScrollDirection direction)
+{
+    auto axes = wheel_scrollable_axes(document, identity);
+    return direction == ScrollDirection::Horizontal ? axes.horizontal : axes.vertical;
+}
+
 bool could_be_scrolled_by_wheel_event(Layout::Node const& node)
 {
     auto axes = wheel_scrollable_axes(node);
+    return axes.horizontal || axes.vertical;
+}
+
+bool could_be_scrolled_by_wheel_event(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto axes = wheel_scrollable_axes(document, identity);
     return axes.horizontal || axes.vertical;
 }
 

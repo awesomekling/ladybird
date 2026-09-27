@@ -110,11 +110,10 @@ void Scrollbar::note_enlarged_state_change()
 
 void Scrollbar::publish_enlarged_state(Badge<DOM::InvalidationJournal>)
 {
-    auto* node = layout_node();
-    if (!node)
+    if (!is_current())
         return;
     Layout::RustFFI::layout_arena_paintable_set_scrollbar_enlarged(
-        node->arena_handle(), committed_row_slot(*node), static_cast<Layout::RustFFI::ScrollDirection>(m_direction), is_enlarged());
+        arena().handle(), slot(), static_cast<Layout::RustFFI::ScrollDirection>(m_direction), is_enlarged());
 }
 
 void Scrollbar::mouse_enter()

@@ -61,7 +61,6 @@ struct PhysicalResizeAxes {
 };
 
 Optional<ScrollbarData> compute_scrollbar_data(Layout::Node const&, ScrollDirection, ChromeMetrics const&, Compositing::ScrollStateSnapshot const* = nullptr, ScrollbarSizing = ScrollbarSizing::Regular);
-PhysicalResizeAxes physical_resize_axes(Layout::Node const&);
 
 class Scrollbar;
 class ResizeHandle;
@@ -105,12 +104,13 @@ protected:
 
     Layout::Node* layout_node() const;
     Layout::NodeArena& arena() const { return m_arena; }
+    Compositing::RustFFI::NodeSlotId slot() const { return m_slot; }
+    bool is_current() const;
 
 private:
     friend class ChromeWidgetRegistry;
 
     void detach(Badge<ChromeWidgetRegistry>);
-    bool is_current() const;
     virtual void did_detach() { }
 
     NonnullRefPtr<Layout::NodeArena> m_arena;

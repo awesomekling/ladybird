@@ -6,8 +6,9 @@
 
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
-#include <LibWeb/Layout/Node.h>
+#include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Page/ElementResizeAction.h>
+#include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/Painting/ResizeHandle.h>
 #include <LibWeb/UIEvents/EventNames.h>
 #include <LibWeb/UIEvents/PointerEvent.h>
@@ -22,19 +23,18 @@ NonnullRefPtr<ResizeHandle> ResizeHandle::create(Layout::NodeArena& arena, Compo
 
 ResizeHandle::ResizeHandle(Layout::NodeArena& arena, Compositing::RustFFI::NodeSlotId slot)
     : ChromeWidget(arena, slot)
-    , m_element(layout_node()->dom_node_identity())
+    , m_element(arena.document() ? dom_node_identity_of_committed_slot(*arena.document(), slot) : DOM::NodeIdentity {})
 {
 }
 
 Optional<CSS::CursorPredefined> ResizeHandle::cursor() const
 {
-    auto* node = layout_node();
-    if (!node)
+    if (!is_current())
         return {};
-    auto axes = physical_resize_axes(*node);
+    auto axes = Layout::RustFFI::layout_arena_paintable_physical_resize_axes(arena().handle(), slot());
     if (axes.vertical) {
         if (axes.horizontal) {
-            if (Layout::RustFFI::layout_arena_paintable_is_chrome_mirrored(node->arena_handle(), committed_row_slot(*node)))
+            if (Layout::RustFFI::layout_arena_paintable_is_chrome_mirrored(arena().handle(), slot()))
                 return CSS::CursorPredefined::SwResize;
             return CSS::CursorPredefined::SeResize;
         }
