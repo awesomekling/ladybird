@@ -1915,12 +1915,19 @@ pub(crate) fn run_stage_on_stage_thread<R: Send>(stage: impl FnOnce() -> R + Sen
 }
 
 /// Whether a stage the caller waits for runs right here rather than on the stage thread: with the stages overlapping
-/// and no frame in flight, nothing runs on the stage thread for the caller, which would only wait for it. The stage
-/// runs as it does when nothing overlaps, without handing its state to another core and back.
+/// and no stage of the frame in flight reaching an arena, nothing runs on the stage thread for the caller, which would
+/// only wait for it. The stage runs as it does when nothing overlaps, without handing its state to another core and
+/// back. A recording in flight reaches no arena, so the stage runs beside it wherever it runs.
 fn runs_waited_for_stage_in_place() -> bool {
     stage_thread_mode() == Some(StageThreadMode::Overlap)
-        && !has_frame_in_flight()
+        && !frame_in_flight_reaches_an_arena()
         && stage_thread().is_some_and(|thread| std::thread::current().id() != thread.id)
+}
+
+/// Whether a stage of the frame in flight reaches an arena: any but its recordings and the presentations submitted
+/// with none.
+fn frame_in_flight_reaches_an_arena() -> bool {
+    SUBMITTED.with_borrow(|submitted| submitted.iter().any(|stage| stage.arena != 0 && !stage.is_lend()))
 }
 
 /// Whether a stage the caller waits for, for the document whose arena is `arena`, runs right here: with the stages
