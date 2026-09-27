@@ -302,7 +302,8 @@ public:
     void record_derived_element_style_input_change(StyleNodeID style_node, u8 reaction, u8 inherited_style_groups = 0);
     void record_tree_counting_style_input_change(StyleNodeID style_node);
     void record_flat_tree_descendant_style_input_changes(StyleNodeID style_node, u8 reaction, u8 inherited_style_groups = 0);
-    [[nodiscard]] Vector<StyleNodeID> viewport_dependent_style_nodes();
+    // Gives every row whose style depends on viewport metrics the derived reaction, where the engine's owner applies it.
+    void record_viewport_dependent_style_inputs(u8 reaction);
     [[nodiscard]] bool has_recorded_element_style_input_change(StyleNodeID style_node) const;
     void record_benchmark_marker(Utf16View);
     [[nodiscard]] bool has_recorded_input() const;

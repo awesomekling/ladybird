@@ -928,15 +928,9 @@ void StyleEngine::record_flat_tree_descendant_style_input_changes(StyleNodeID st
     record_flat_tree_descendant_style_inputs(style_node, reaction, inherited_style_groups);
 }
 
-Vector<StyleNodeID> StyleEngine::viewport_dependent_style_nodes()
+void StyleEngine::record_viewport_dependent_style_inputs(u8 reaction)
 {
-    auto view = StyleEngineFFI::style_engine_viewport_dependent_nodes(rust_handle());
-    Vector<StyleNodeID> nodes;
-    nodes.ensure_capacity(view.count);
-    for (auto node : ReadonlySpan<u32> { view.nodes, view.count })
-        nodes.unchecked_append(StyleNodeID { node });
-    StyleEngineFFI::style_engine_discard_viewport_dependent_nodes(rust_handle());
-    return nodes;
+    record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::ViewportDependentStyleInputs, .value = reaction, .node = 0, .parent = 0, .previous_sibling = 0, .facts = 0, .data = 0 });
 }
 
 bool StyleEngine::has_recorded_element_style_input_change(StyleNodeID style_node) const
