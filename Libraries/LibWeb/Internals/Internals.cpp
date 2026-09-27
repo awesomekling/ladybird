@@ -2163,10 +2163,6 @@ GC::Ref<JS::Object> Internals::style_engine_counters()
             JS::Value(static_cast<double>(value)),
             JS::default_attributes);
     }
-    object->define_direct_property(
-        "computedStyleRecordViewPins"_utf16_fly_string,
-        JS::Value(static_cast<double>(window().associated_document().style_computer().computed_style_record_view_pin_count())),
-        JS::default_attributes);
     return object;
 }
 

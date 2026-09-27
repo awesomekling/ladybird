@@ -45,6 +45,7 @@ public:
 
     [[nodiscard]] CSS::ComputedStyleRecordView computed_style() const;
     [[nodiscard]] CSS::StyleRecordID style_record_identity() const;
+    [[nodiscard]] CSS::PublishedStyleRecord const* published_style_record() const;
     [[nodiscard]] bool has_style() const { return !!style_record_identity(); }
     [[nodiscard]] void const* style_record_payloads() const;
     template<typename StyleGroup>

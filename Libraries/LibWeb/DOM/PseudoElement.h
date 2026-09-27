@@ -11,6 +11,7 @@
 #include <LibGC/CellAllocator.h>
 #include <LibJS/Heap/Cell.h>
 #include <LibWeb/CSS/PseudoElement.h>
+#include <LibWeb/CSS/PublishedStyleRecord.h>
 #include <LibWeb/Export.h>
 #include <LibWeb/Forward.h>
 #include <LibWeb/TreeNode.h>
@@ -36,6 +37,7 @@ public:
     virtual Node& root() const = 0;
 
     virtual CSS::StyleRecordID style_record_identity() const = 0;
+    virtual CSS::PublishedStyleRecord const* published_style_record() const = 0;
     virtual void update_animated_properties(Badge<Web::Animations::KeyframeEffect> const&, DOM::AbstractElement, Web::Animations::KeyframeEffect&, Web::Animations::AnimationUpdateContext&) = 0;
 };
 
@@ -56,11 +58,12 @@ public:
 
     virtual Node& root() const override;
 
-    virtual CSS::StyleRecordID style_record_identity() const override { return m_style_record_identity; }
+    virtual CSS::StyleRecordID style_record_identity() const override { return m_style_record ? m_style_record->identity() : CSS::StyleRecordID {}; }
+    virtual CSS::PublishedStyleRecord const* published_style_record() const override { return m_style_record; }
     void update_animated_properties(Badge<Web::Animations::KeyframeEffect> const&, DOM::AbstractElement, Web::Animations::KeyframeEffect&, Web::Animations::AnimationUpdateContext&) override;
-    void set_computed_style(CSS::StyleRecordID);
+    void set_computed_style(RefPtr<CSS::PublishedStyleRecord const>);
     void clear_computed_style(RefPtr<CSS::ComputedValues const> style_to_preserve_for_detachment = nullptr);
-    void refresh_computed_style(CSS::StyleRecordID);
+    void refresh_computed_style(NonnullRefPtr<CSS::PublishedStyleRecord const>);
 
     // The offset lives in the layout node arena, keyed by the generator's identity and this
     // pseudo-element's kind, so a box bound to the pseudo-element reads it without asking here.
@@ -70,7 +73,7 @@ public:
     virtual void visit_edges(JS::Cell::Visitor&) override;
 
 private:
-    void replace_style_record(CSS::StyleRecordID);
+    void replace_style_record(RefPtr<CSS::PublishedStyleRecord const>);
 
     // A pseudo-element has no identity of its own: its box is the row bound to its generator's
     // identity and its type in the layout node arena.
@@ -78,7 +81,7 @@ private:
     GC::Ptr<Element> m_originating_element;
     // The authoritative StyleEngine record. C++ compatibility consumers borrow the record-owned
     // computed-values view rather than retaining one complete style per pseudo-element.
-    CSS::StyleRecordID m_style_record_identity;
+    RefPtr<CSS::PublishedStyleRecord const> m_style_record;
 };
 
 // https://drafts.csswg.org/css-view-transitions/#pseudo-element-tree
@@ -112,6 +115,7 @@ class WEB_API ElementReferencePseudoElement : public PseudoElement {
     virtual Node& root() const override;
 
     virtual CSS::StyleRecordID style_record_identity() const override;
+    virtual CSS::PublishedStyleRecord const* published_style_record() const override;
     void update_animated_properties(Badge<Web::Animations::KeyframeEffect> const&, DOM::AbstractElement, Web::Animations::KeyframeEffect&, Web::Animations::AnimationUpdateContext&) override;
 
     GC::Ref<Element> const& referenced_element() const { return m_referenced_element; }

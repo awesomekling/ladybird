@@ -679,31 +679,28 @@ static RefPtr<ComputedValues const> compute_pseudo_element_style_for_cssom(DOM::
                     .pseudo_kind = to_underlying(kind),
                     .parent_highlight = kind == PseudoElement::Selection ? highlight_parent_style_record.value_or(StyleRecordID {}) : StyleRecordID {},
                 });
-            if (demand.is_absent && first_is_one_of(kind, PseudoElement::Before, PseudoElement::After)
+            if (demand.ffi.is_absent && first_is_one_of(kind, PseudoElement::Before, PseudoElement::After)
                 && !target.element().style_depends_on_size_container_query()) {
                 // A private absence does not replace the published match answer. Settle that
                 // answer before leaving C++'s negative pseudo computation out of this read.
                 auto published = answer_style_read_demand(join, style_computer.style_engine_queries(),
                     { .node = target.element().style_node_id(), .pseudo_kind = to_underlying(kind), .read_only = false });
-                if (published.is_absent) {
+                if (published.ffi.is_absent) {
                     environment_installations.append({ target, nullptr });
                     highlight_parent_style_record = StyleRecordID {};
                     return {};
                 }
-                if (published.record.style_record)
-                    demand = published;
+                if (published.record)
+                    demand = move(published);
             }
-            if (demand.record.style_record) {
-                auto record = StyleRecordID { demand.record.style_record };
-                auto view = style_computer.computed_style_record_view(record);
-                if (view) {
-                    bool environment_is_installable = false;
-                    auto custom_property_data = target.element().custom_property_environment_of_engine_record(record, environment_is_installable);
-                    if (environment_is_installable) {
-                        environment_installations.append({ target, move(custom_property_data) });
-                        highlight_parent_style_record = record;
-                        return ComputedValues::Builder { *view }.build();
-                    }
+            if (demand.record) {
+                ComputedStyleRecordView view { demand.record };
+                bool environment_is_installable = false;
+                auto custom_property_data = target.element().custom_property_environment_of_engine_record(*demand.record, environment_is_installable);
+                if (environment_is_installable) {
+                    environment_installations.append({ target, move(custom_property_data) });
+                    highlight_parent_style_record = demand.record->identity();
+                    return ComputedValues::Builder { *view }.build();
                 }
             }
         }
@@ -767,10 +764,10 @@ static Optional<PreparedComputedStyle> prepare_computed_style_and_layout_for_pro
     // so the leaf and its inheritance ancestors may still be stale at this point.
     // NB: Only the style record's presence and its display:none-subtree bit matter here, so probe
     //     those directly instead of materializing a full style record view.
-    auto style_record = abstract_element.style_record_identity();
+    auto const* style_record = abstract_element.published_style_record();
     bool const style_is_in_display_none_subtree = !layout_node
-        && !!style_record
-        && has_flag(abstract_element.document().style_computer().style_engine().style_record_dependency_flags(style_record), StyleRecordDependencyFlag::InDisplayNoneSubtree);
+        && style_record
+        && has_flag(style_record->dependency_flags(), StyleRecordDependencyFlag::InDisplayNoneSubtree);
     if (!style_record || style_is_in_display_none_subtree)
         abstract_element.document().update_style_for_element(abstract_element);
     else
@@ -874,11 +871,10 @@ Optional<StyleProperty> CSSStyleProperties::get_direct_property(PropertyNameAndI
             if (auto pseudo = abstract_element.pseudo_element(); pseudo.has_value()
                 && first_is_one_of(*pseudo, PseudoElement::Before, PseudoElement::After, PseudoElement::FirstLetter, PseudoElement::Marker, PseudoElement::Backdrop)) {
                 auto& style_computer = abstract_element.document().style_computer();
-                auto& engine = style_computer.style_engine();
                 DOM::Document::JoinScope join { abstract_element.document(), DOM::UpdateLayoutReason::ResolvedCSSStyleDeclarationProperty };
                 auto demand = answer_style_read_demand(join, style_computer.style_engine_queries(), { .node = abstract_element.element().style_node_id(), .pseudo_kind = to_underlying(*pseudo) });
-                if (demand.record.style_record) {
-                    auto identity = engine.style_record_custom_property_environment(StyleRecordID { demand.record.style_record });
+                if (demand.record) {
+                    auto identity = demand.record->custom_property_environment();
                     RefPtr<CustomPropertyData const> data;
                     if (StyleEngine::is_engine_custom_property_environment(identity)) {
                         data = style_computer.engine_custom_property_environment(identity);

@@ -42,12 +42,13 @@ pub(crate) struct AnonymousStyleOverrides {
     pub overflow_y: u8,
 }
 
-/// A record a layout row holds: pinned in the engine, with the row's own reference on its payloads.
-/// `payloads` is `None` only if the record was not live, which leaves the row without style.
+/// A record a layout row holds: pinned in the engine, with the row's own reference on the record as
+/// the engine published it. `published` is `None` only if the record was not live, which leaves the
+/// row without style.
 #[derive(Clone)]
 pub(crate) struct DerivedStyleRecord {
     pub record: u64,
-    pub payloads: Option<std::sync::Arc<super::record_payloads::StyleRecordPayloads>>,
+    pub published: Option<std::sync::Arc<super::published_record::PublishedStyleRecord>>,
 }
 
 trait LayoutStyleGroup: Clone + PartialEq {
@@ -438,12 +439,13 @@ impl StyleEngine {
         });
     }
 
-    /// Pins a live record for a layout row, and takes the row's reference on its payloads.
+    /// Pins a live record for a layout row, and takes the row's reference on the record as the engine
+    /// published it.
     pub(crate) fn pin_derived_style_record(&mut self, record: u64) -> DerivedStyleRecord {
         self.pin_layout_style_record(record);
-        let payloads = self.style_record_payload_owner(record).cloned();
-        debug_assert!(payloads.is_some(), "a record a layout row derives is live");
-        DerivedStyleRecord { record, payloads }
+        let published = self.publish_style_record(record);
+        debug_assert!(published.is_some(), "a record a layout row derives is live");
+        DerivedStyleRecord { record, published }
     }
 
     pub(crate) fn unpin_layout_style_record(&mut self, record: u64) {

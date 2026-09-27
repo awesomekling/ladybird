@@ -1679,7 +1679,8 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
         }
 
         CSS::StyleEngine::StyleRecordDelta style_record_delta { .old_style_record = old_style_record, .new_style_record = *engine_record };
-        auto engine_pseudo_element_style = style_computer.computed_style_record_view(*engine_record);
+        auto engine_pseudo_element_record = scope.engine().publish_style_record(scope, *engine_record);
+        CSS::ComputedStyleRecordView engine_pseudo_element_style { engine_pseudo_element_record };
         CSS::ComputedValues const* new_pseudo_element_style = engine_pseudo_element_style ? &*engine_pseudo_element_style : nullptr;
         if (style_record_is_unchanged(style_record_delta))
             ++document().style_invalidation_counters().unchanged_style_record_deltas;
@@ -1735,7 +1736,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
             // environment, or the one its own custom declarations resolved to over that. The engine
             // named it as it settled the record, where it could.
             if (!CSS::StyleEngineFFI::style_engine_take_pseudo_element_environment_named_in_settle(scope.engine().rust_handle(), style_node_id().value(), to_underlying(pseudo_element))) {
-                auto environment = scope.engine().style_record_custom_property_environment(*engine_record);
+                auto environment = engine_pseudo_element_record->custom_property_environment();
                 RefPtr<CSS::CustomPropertyData const> data;
                 if (CSS::StyleEngine::is_engine_custom_property_environment(environment)) {
                     data = style_computer.engine_custom_property_environment(environment);
@@ -1806,10 +1807,10 @@ static void note_svg_paint_resource_style_change(Element& element)
 
 // The records the element installed reach its layout nodes in the drain's render half, or at once
 // where no drain takes them.
-static void apply_layout_node_style_after_installation(Element& element, CSS::StyleEffectDrain* effect_drain, CSS::RequiredInvalidationAfterStyleChange const& invalidation)
+static void apply_layout_node_style_after_installation(CSS::StyleDrainScope const& scope, Element& element, CSS::StyleEffectDrain* effect_drain, CSS::RequiredInvalidationAfterStyleChange const& invalidation)
 {
     if (!effect_drain) {
-        element.apply_computed_style_to_layout_node_if_needed(invalidation);
+        element.apply_computed_style_to_layout_node_if_needed(scope, invalidation);
         return;
     }
     note_svg_paint_resource_style_change(element);
@@ -1819,7 +1820,7 @@ static void apply_layout_node_style_after_installation(Element& element, CSS::St
 CSS::RequiredInvalidationAfterStyleChange Element::install_engine_pseudo_element_records_after_sample(CSS::StyleDrainScope const& scope, bool& did_change_custom_properties, bool old_is_list_item, EnginePseudoElementRecords const* records, CSS::StyleEffectDrain* effect_drain)
 {
     auto invalidation = recompute_pseudo_element_styles(scope, did_change_custom_properties, old_is_list_item, records);
-    apply_layout_node_style_after_installation(*this, effect_drain, with_style_row_counter_style_invalidation(*this, invalidation));
+    apply_layout_node_style_after_installation(scope, *this, effect_drain, with_style_row_counter_style_invalidation(*this, invalidation));
     return invalidation;
 }
 
@@ -2048,10 +2049,10 @@ bool Element::apply_box_presence_change_in_place(SetNeedsLayoutTreeUpdateReason 
     return true;
 }
 
-void Element::apply_computed_style_to_layout_node_if_needed(CSS::RequiredInvalidationAfterStyleChange const& invalidation)
+void Element::apply_computed_style_to_layout_node_if_needed(CSS::StyleDrainScope const& scope, CSS::RequiredInvalidationAfterStyleChange const& invalidation)
 {
     note_svg_paint_resource_style_change(*this);
-    CSS::StyleEffectDrain::apply_layout_node_style(document(), style_node_id(), invalidation, style_record_identity(), CSS::StyleEffectDrain::pseudo_element_style_records_of(*this));
+    CSS::StyleEffectDrain::apply_layout_node_style(scope, document(), style_node_id(), invalidation, style_record_identity(), CSS::StyleEffectDrain::pseudo_element_style_records_of(*this));
 }
 
 void Element::record_style_query_custom_property_reference(Optional<CSS::PseudoElement> pseudo_element, Utf16FlyString const& name)
@@ -2210,10 +2211,10 @@ static void publish_anchor_names_in_engine(Scope const& scope, DOM::Document& do
     CSS::StyleEngineFFI::style_engine_publish_anchor_names(scope, scope.engine().rust_handle(), arena ? arena->handle() : nullptr);
 }
 
-RefPtr<CSS::CustomPropertyData const> Element::custom_property_environment_of_engine_record(CSS::StyleRecordID style_record, bool& installable) const
+RefPtr<CSS::CustomPropertyData const> Element::custom_property_environment_of_engine_record(CSS::PublishedStyleRecord const& style_record, bool& installable) const
 {
     auto& style_computer = document().style_computer();
-    auto identity = style_computer.style_engine().style_record_custom_property_environment(style_record);
+    auto identity = style_record.custom_property_environment();
     installable = true;
     if (identity == 0)
         return {};
@@ -2281,6 +2282,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
     auto old_style_record = style_record_identity();
     auto& counters = document().style_invalidation_counters();
     auto& style_computer = document().style_computer();
+    auto const published_new_style_record = scope.engine().publish_style_record(scope, new_style_record);
     auto recompute_started_at = MonotonicTime::now();
     ScopeGuard record_recompute_time = [&] {
         counters.style_recompute_microseconds += (MonotonicTime::now() - recompute_started_at).to_microseconds();
@@ -2327,7 +2329,8 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
     // engine resolved its own custom declarations to over that.
     auto install_custom_property_environment = [&](RefPtr<CSS::CustomPropertyData const> current) {
         bool installable = false;
-        auto data = custom_property_environment_of_engine_record(new_style_record, installable);
+        VERIFY(published_new_style_record);
+        auto data = custom_property_environment_of_engine_record(*published_new_style_record, installable);
         VERIFY(installable);
         return set_own_custom_property_data(scope, move(current), move(data));
     };
@@ -2349,7 +2352,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
         if (!CSS::deferring_engine_pseudo_installation())
             invalidation |= recompute_pseudo_element_styles(scope, did_change_custom_properties, false, &pseudo_element_records, pseudo_element_damages);
         publish_custom_property_names(move(custom_property_environment));
-        apply_layout_node_style_after_installation(*this, effect_drain, invalidation);
+        apply_layout_node_style_after_installation(scope, *this, effect_drain, invalidation);
         return invalidation;
     }
     // The engine derives records this way only when the element's animation names are exactly what
@@ -2366,13 +2369,13 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
         if (current_environment && current_environment->is_animation_overlay_for({ *this }))
             current_environment = current_environment->parent();
         auto const current_identity = current_environment ? current_environment->identity() : 0;
-        if (current_identity != scope.engine().style_record_custom_property_environment(new_style_record)) {
+        if (!published_new_style_record || current_identity != published_new_style_record->custom_property_environment()) {
             held_custom_property_environment = install_custom_property_environment(move(held_environment));
             did_change_custom_properties = true;
         } else {
             held_custom_property_environment = move(held_environment);
         }
-        auto new_computed_values = style_computer.computed_style_record_view(new_style_record);
+        CSS::ComputedStyleRecordView new_computed_values { published_new_style_record };
         VERIFY(new_computed_values);
         ElementDependentInvalidationState old_state {
             .row = layout_row(),
@@ -2436,17 +2439,16 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
     if (new_style_record != old_style_record || did_change_custom_properties)
         invalidate_descendant_styles_depending_on_style_container_query();
     if (comparison == EngineRecordComparison::AtInstallation) {
-        apply_layout_node_style_after_installation(*this, effect_drain, with_style_row_counter_style_invalidation(*this, result.invalidation));
+        apply_layout_node_style_after_installation(scope, *this, effect_drain, with_style_row_counter_style_invalidation(*this, result.invalidation));
     }
     return result.invalidation;
 }
 
 CSS::RequiredInvalidationAfterStyleChange Element::compare_engine_computed_style_record_after_sample(CSS::StyleDrainScope const& scope, CSS::StyleRecordID style_record_before_installation, CSS::RequiredInvalidationAfterStyleChange invalidation, CSS::StyleEffectDrain* effect_drain)
 {
-    auto& style_computer = document().style_computer();
     auto const style_record = style_record_identity();
     if (style_record != style_record_before_installation) {
-        auto new_computed_values = style_computer.computed_style_record_view(style_record);
+        auto new_computed_values = computed_style();
         VERIFY(new_computed_values);
         ElementDependentInvalidationState old_state {
             .row = layout_row(),
@@ -2463,7 +2465,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::compare_engine_computed_style
             document().style_invalidation_counters().element_computed_style_changes++;
         invalidation |= result.invalidation;
     }
-    apply_layout_node_style_after_installation(*this, effect_drain, with_style_row_counter_style_invalidation(*this, invalidation));
+    apply_layout_node_style_after_installation(scope, *this, effect_drain, with_style_row_counter_style_invalidation(*this, invalidation));
     return invalidation;
 }
 
@@ -2506,7 +2508,7 @@ void Element::clear_computed_styles_from_display_none_descendants(CSS::StyleDrai
         // retaining the record as the descendant's current computed style.
         if (auto* layout_node = element->unsafe_layout_node())
             layout_node->pin_style_record_for_detachment();
-        element->m_style_record_identity = 0;
+        element->m_style_record = nullptr;
         element->m_installed_display_is_contents = false;
         element->m_installed_display_is_list_item = false;
         scope.engine().set_element_container_query_inputs(scope, element->style_node_id(), {});
@@ -3271,7 +3273,7 @@ void Element::removed_from(IsSubtreeRoot is_subtree_root, Node* old_ancestor, No
     for_each_synthetic_pseudo_element([&](CSS::PseudoElement, SyntheticPseudoElement& pseudo_element) {
         for (auto* element = this; element; element = element->parent_or_shadow_host_element())
             ++element->m_animation_subtree_style_generation;
-        pseudo_element.set_computed_style(0);
+        pseudo_element.set_computed_style(nullptr);
     });
 }
 
@@ -5167,25 +5169,29 @@ size_t Element::attribute_list_size() const
 
 CSS::ComputedStyleRecordView Element::computed_style(Optional<CSS::PseudoElement> pseudo_element_type) const
 {
-    return document().style_computer().computed_style_record_view(style_record_identity(pseudo_element_type));
+    return CSS::ComputedStyleRecordView { published_style_record(pseudo_element_type) };
+}
+
+CSS::PublishedStyleRecord const* Element::published_style_record(Optional<CSS::PseudoElement> pseudo_element_type) const
+{
+    if (pseudo_element_type.has_value()) {
+        if (auto pseudo_element = get_pseudo_element(*pseudo_element_type); pseudo_element.has_value())
+            return pseudo_element->published_style_record();
+        return nullptr;
+    }
+    return m_style_record;
 }
 
 CSS::StyleRecordID Element::style_record_identity(Optional<CSS::PseudoElement> pseudo_element_type) const
 {
-    if (pseudo_element_type.has_value()) {
-        if (auto pseudo_element = get_pseudo_element(*pseudo_element_type); pseudo_element.has_value())
-            return pseudo_element->style_record_identity();
-        return 0;
-    }
-    return m_style_record_identity;
+    auto const* style_record = published_style_record(pseudo_element_type);
+    return style_record ? style_record->identity() : CSS::StyleRecordID {};
 }
 
 void const* Element::style_record_payloads(Optional<CSS::PseudoElement> pseudo_element_type) const
 {
-    auto style_record = style_record_identity(pseudo_element_type);
-    if (!style_record)
-        return nullptr;
-    return document().style_computer().style_engine().held_style_record_payloads(style_record);
+    auto const* style_record = published_style_record(pseudo_element_type);
+    return style_record ? style_record->payloads() : nullptr;
 }
 
 void Element::update_animated_properties(Badge<Web::Animations::KeyframeEffect> const& badge, Optional<CSS::PseudoElement> pseudo_element_type, Web::Animations::KeyframeEffect& effect, Web::Animations::AnimationUpdateContext& context)
@@ -5210,11 +5216,14 @@ void Element::update_animated_properties_for_abstract_element(Badge<Web::Animati
 void Element::replace_style_record(CSS::StyleDrainScope const& scope, CSS::StyleRecordID style_record_identity)
 {
     VERIFY(!style_record_identity || style_node_id() != 0);
-    auto old_style_record_identity = m_style_record_identity;
-    if (old_style_record_identity == style_record_identity)
+    if (this->style_record_identity() == style_record_identity)
         return;
-    m_style_record_identity = style_record_identity;
-    auto display = !!style_record_identity ? Optional<CSS::Display> { CSS::display_from_ffi_display(style_group<CSS::ComputedValues::BoxValues>()->display) } : Optional<CSS::Display> {};
+    m_style_record = scope.engine().publish_style_record(scope, style_record_identity);
+    // A record the drain installs is one the engine holds; if it is not, the element holds no style.
+    ASSERT(m_style_record || !style_record_identity);
+    if (!m_style_record)
+        style_record_identity = {};
+    auto display = m_style_record ? Optional<CSS::Display> { CSS::display_from_ffi_display(style_group<CSS::ComputedValues::BoxValues>()->display) } : Optional<CSS::Display> {};
     m_installed_display_is_contents = display.has_value() && display->is_contents();
     m_installed_display_is_list_item = display.has_value() && display->is_list_item();
     // What the element holds is what the rows and samples after it in the drain read: a document
@@ -5222,15 +5231,15 @@ void Element::replace_style_record(CSS::StyleDrainScope const& scope, CSS::Style
     if (style_node_id() != 0)
         scope.engine().set_element_container_query_inputs(scope, style_node_id(), style_record_identity);
     if (auto row = layout_row())
-        Layout::NodeWithStyle::set_style_record_identity(row, style_record_identity);
+        Layout::NodeWithStyle::set_style_record(row, m_style_record);
 }
 
 // An element leaving the tree holds no style; the engine hears so between passes.
 void Element::clear_style_record_on_removal()
 {
-    if (!m_style_record_identity)
+    if (!m_style_record)
         return;
-    m_style_record_identity = {};
+    m_style_record = nullptr;
     m_installed_display_is_contents = false;
     m_installed_display_is_list_item = false;
     if (auto style_node = style_node_id(); style_node != 0) {
@@ -5240,7 +5249,7 @@ void Element::clear_style_record_on_removal()
         });
     }
     if (auto row = layout_row())
-        Layout::NodeWithStyle::set_style_record_identity(row, {});
+        Layout::NodeWithStyle::set_style_record(row, nullptr);
 }
 
 void Element::set_computed_style(CSS::StyleDrainScope const& scope, Optional<CSS::PseudoElement> pseudo_element_type, CSS::StyleRecordID style_record_identity)
@@ -5249,10 +5258,10 @@ void Element::set_computed_style(CSS::StyleDrainScope const& scope, Optional<CSS
         ++element->m_animation_subtree_style_generation;
     if (pseudo_element_type.has_value()) {
         VERIFY(is_synthetic_pseudo_element(*pseudo_element_type));
-        if (!!style_record_identity)
-            ensure_synthetic_pseudo_element(*pseudo_element_type).set_computed_style(style_record_identity);
+        if (auto style_record = scope.engine().publish_style_record(scope, style_record_identity))
+            ensure_synthetic_pseudo_element(*pseudo_element_type).set_computed_style(move(style_record));
         else if (auto existing_pseudo_element = get_synthetic_pseudo_element(*pseudo_element_type); existing_pseudo_element.has_value())
-            existing_pseudo_element->set_computed_style(0);
+            existing_pseudo_element->set_computed_style(nullptr);
         return;
     }
     ++m_animation_style_generation;
@@ -5273,12 +5282,15 @@ void Element::refresh_computed_style(CSS::StyleDrainScope const& scope, Optional
         }
         auto pseudo_element = get_synthetic_pseudo_element(*pseudo_element_type);
         VERIFY(pseudo_element.has_value());
-        pseudo_element->refresh_computed_style(style_record_identity);
+        auto style_record = scope.engine().publish_style_record(scope, style_record_identity);
+        ASSERT(style_record);
+        if (style_record)
+            pseudo_element->refresh_computed_style(style_record.release_nonnull());
         return;
     }
 
     replace_style_record(scope, style_record_identity);
-    if (style_node_id() != 0 && scope.engine().style_record_view(style_record_identity).animation_overlay_identity != 0)
+    if (style_node_id() != 0 && m_style_record && m_style_record->is_animation_overlay())
         scope.engine().set_sampled_composition_identity(scope, style_node_id(), style_record_identity);
     VERIFY(has_style());
 }

@@ -231,7 +231,14 @@ pub struct FfiRecordDemandAnswer {
     pub is_provisional: bool,
     /// The node's `FfiStyleRowFact` word as the demand leaves it.
     pub row_facts: u32,
+    /// The answered record as a published value (see [`super::published_record`]), which the
+    /// caller owns one reference of; null where the answer is absent.
+    pub published_record: *const c_void,
 }
+
+// SAFETY: `published_record` is an owned `Arc` of a `PublishedStyleRecord`, which is `Send + Sync`,
+// in raw form: the answer moves the reference with it.
+unsafe impl Send for FfiRecordDemandAnswer {}
 
 /// One record slot per synthetic pseudo-element kind in a retried record.
 pub const RETRY_PSEUDO_RECORD_SLOTS: usize = 8;
@@ -3844,79 +3851,15 @@ pub unsafe extern "C" fn style_engine_assigned_style_record(
         .map_or(0, |record| record.raw())
 }
 
-/// Return the underlying base of a final record.
-///
-/// # Safety
-/// `engine` must be live and `style_record` must identify a live record.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_base_style_record_of(engine: StyleEngineHandle, style_record: u64) -> u64 {
-    let engine = unsafe { record_read_entrance(engine, "style_engine_base_style_record_of") };
-    engine
-        .retained
-        .computed_group_sets
-        .debug_assert_style_record_is_published(style_record);
-    engine.retained.computed_group_sets.base_style_record_of(style_record)
-}
-
-/// Returns the StyleEngine-owned group payload array for a base or live animation-overlay record.
+/// Replays an old capture's read of a record's group payloads, which the host no longer makes.
 ///
 /// # Safety
 /// `engine` must be live for this call and for every read through the returned pointer.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_style_record_payloads(
-    engine: StyleEngineHandle,
-    style_record: u64,
-) -> *const c_void {
-    let engine = unsafe { record_read_entrance(engine, "style_engine_style_record_payloads") };
-    let payloads = engine.style_record_payloads(style_record);
-    let result = payloads.map_or(std::ptr::null(), |payloads| payloads.as_ptr().cast());
-    let record_response = engine.recording_first_response(0, style_record);
-    if !record_response {
-        return result;
-    }
-    engine.record_boundary_call(EventKind::StyleRecordPayloads, |payload| {
-        payload.write_u64(style_record);
-        payload.write_bool(record_response);
-        payload.write_bool(payloads.is_some());
-        let Some(style_payloads) = payloads else {
-            return;
-        };
-        let semantic_payloads = if style_record & (1 << 63) != 0 {
-            style_payloads
-                .iter()
-                .map(|&pointer| {
-                    engine
-                        .recording_pointer_token(pointer.addr())
-                        .expect("an enabled recorder must tokenize the pointer")
-                })
-                .collect::<Vec<_>>()
-        } else {
-            engine
-                .recording_computed_group_identities(style_record)
-                .expect("a base style record must retain its computed groups")
-                .into_iter()
-                .map(|identity| u64::from(identity) + 1)
-                .collect()
-        };
-        payload.write_length(semantic_payloads.len());
-        for semantic_payload in semantic_payloads {
-            payload.write_u64(semantic_payload);
-        }
-    });
-    result
-}
-
-/// Returns the dependency flags of one final style record without accessing its group payloads.
-///
-/// # Safety
-/// `engine` must be live.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_style_record_dependency_flags(
-    engine: StyleEngineHandle,
-    style_record: u64,
-) -> u8 {
-    let engine = unsafe { record_read_entrance(engine, "style_engine_style_record_dependency_flags") };
-    engine.style_record_dependency_flags(style_record).unwrap_or(0)
+pub unsafe fn replay_style_record_payloads(engine: StyleEngineHandle, style_record: u64) -> *const c_void {
+    let engine = unsafe { engine.for_replay() };
+    engine
+        .style_record_payloads(style_record)
+        .map_or(std::ptr::null(), |payloads| payloads.as_ptr().cast())
 }
 
 /// What the winners the node's records were computed from read, beyond their cascade, one bit per
@@ -3983,25 +3926,6 @@ impl StyleEngine {
         }
         facts
     }
-}
-
-/// The raw custom-property environment identity a style record was published with.
-///
-/// # Safety
-/// `engine` must be live.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_style_record_custom_property_environment(
-    engine: StyleEngineHandle,
-    style_record: u64,
-) -> u64 {
-    let engine = unsafe { record_read_entrance(engine, "style_engine_style_record_custom_property_environment") };
-    engine
-        .computed_group_sets
-        .debug_assert_style_record_is_published(style_record);
-    engine
-        .computed_group_sets
-        .style_record_custom_property_environment(style_record)
-        .unwrap_or(0)
 }
 
 /// Computes what moving an element from one final style record to another damages, from the
@@ -4576,16 +4500,31 @@ pub unsafe extern "C" fn style_engine_take_settled_animation_definitions(
     }
 }
 
-/// Returns a synchronous borrowed view of a base or live animation-overlay record.
+/// The record as a published value that owns everything a read of it reads (see
+/// [`super::published_record`]), which the caller owns one reference of; null for a record the
+/// engine no longer holds. Only the drain installing what a pass published hands a record to the
+/// host this way: every read of it after is made through the value.
 ///
 /// # Safety
-/// `engine` must be live for this call and for every read through the returned pointers.
+/// `engine` must be live.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_style_record_view(
+pub unsafe extern "C" fn style_engine_publish_style_record(
     engine: StyleEngineHandle,
     style_record: u64,
-) -> FfiStyleRecordView {
-    let engine = unsafe { record_read_entrance(engine, "style_engine_style_record_view") };
+) -> *const c_void {
+    let engine = unsafe { record_read_entrance(engine, "style_engine_publish_style_record") };
+    if engine.recording_id().is_some() {
+        record_style_record_view(engine, style_record);
+    }
+    engine
+        .publish_style_record(style_record)
+        .map_or(std::ptr::null(), super::published_record::into_handle)
+}
+
+/// The engine's borrowed view of a base or live animation-overlay record, recorded as the host's
+/// first read of it: the host reads a record through what `style_engine_publish_style_record`
+/// published, which is this view of it.
+fn record_style_record_view(engine: &StyleEngine, style_record: u64) -> FfiStyleRecordView {
     let view = engine.style_record_view(style_record);
     let result = match &view {
         None => FfiStyleRecordView::missing(),
@@ -4677,6 +4616,14 @@ pub unsafe extern "C" fn style_engine_style_record_view(
         }
     });
     result
+}
+
+/// Replays an old capture's read of a record's view, which the host no longer makes.
+///
+/// # Safety
+/// `engine` must be live for this call and for every read through the returned pointers.
+pub unsafe fn replay_style_record_view(engine: StyleEngineHandle, style_record: u64) -> FfiStyleRecordView {
+    record_style_record_view(unsafe { engine.for_replay() }, style_record)
 }
 
 /// Removes the retained computed-input assignment for one pseudo-element kind.
@@ -4809,6 +4756,7 @@ fn answer_record_demand_for_host(
             is_absent: true,
             is_provisional: false,
             row_facts: 0,
+            published_record: std::ptr::null(),
         };
     };
     let mut result = match engine.answer_record_demand(
@@ -4829,15 +4777,22 @@ fn answer_record_demand_for_host(
             is_absent: false,
             is_provisional: answer.provisional,
             row_facts: 0,
+            published_record: std::ptr::null(),
         },
         super::publication::RecordDemandAnswer::Absent => FfiRecordDemandAnswer {
             record: FfiEngineComputedRecord::default(),
             is_absent: true,
             is_provisional: false,
             row_facts: 0,
+            published_record: std::ptr::null(),
         },
     };
     result.row_facts = engine.style_row_facts(node);
+    if !result.is_absent {
+        result.published_record = engine
+            .publish_style_record(result.record.style_record)
+            .map_or(std::ptr::null(), super::published_record::into_handle);
+    }
     engine.record_boundary_call(EventKind::AnswerRecordDemand, |payload| {
         payload.write_u32(node.raw());
         payload.write_u8(pseudo_kind);
@@ -4860,8 +4815,9 @@ fn answer_record_demand_for_host(
 
 /// The record of an element no rule reaches, computed from its presentational hints and its
 /// inline style alone over the initial values; see `declared_only_record`. `subject` is the
-/// document's style node. Returns a record nothing pins, which no sweep reclaims before the host
-/// next enters the engine, or zero when the engine cannot compute it.
+/// document's style node. Returns the record as a published value (see
+/// [`super::published_record`]), which the caller owns one reference of, or null when the engine
+/// cannot compute it. Nothing pins the record itself.
 ///
 /// # Safety
 /// `engine` must be live. `hints` must borrow `hint_count` `FfiDeclaredProperty` entries whose
@@ -4876,22 +4832,21 @@ pub unsafe extern "C" fn style_engine_declared_only_record(
     hints: *const c_void,
     hint_count: usize,
     inline_block: *const c_void,
-) -> u64 {
+) -> *const c_void {
     let engine = unsafe { engine_entrance(engine, "style_engine_declared_only_record") };
     abort_on_panic(|| {
         // A record held by no node is no event a replay could reproduce.
         let Some(subject) = StyleNodeID::from_raw(subject).filter(|_| engine.recording_id().is_none()) else {
-            return 0;
+            return std::ptr::null();
         };
         unsafe {
             with_declared_only_declarations(hint_kind, hints, hint_count, inline_block, |declarations| {
                 let Some(record) = engine.declared_only_record(subject, facts, declarations) else {
-                    return 0;
+                    return std::ptr::null();
                 };
-                // The host's pins are its own, in its table; the caller takes one if it reads the
-                // record past a view epoch.
+                let published = engine.publish_style_record(record.raw());
                 engine.unpin_style_record(record.raw());
-                record.raw()
+                published.map_or(std::ptr::null(), super::published_record::into_handle)
             })
         }
     })

@@ -1241,8 +1241,7 @@ bool KeyframeEffect::can_skip_per_frame_animation_tick() const
 static bool is_in_display_none_subtree_ignoring_animations(DOM::AbstractElement abstract_element)
 {
     if (abstract_element.pseudo_element().has_value()) {
-        auto const& style_engine = abstract_element.document().style_computer().style_engine();
-        if (CSS::style_record_display_is_none(style_engine, abstract_element.style_record_identity()))
+        if (CSS::style_record_display_is_none(abstract_element.published_style_record()))
             return true;
     }
     return abstract_element.element().has_inclusive_ancestor_with_display_none_ignoring_animations();

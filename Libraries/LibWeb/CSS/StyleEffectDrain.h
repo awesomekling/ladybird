@@ -141,7 +141,7 @@ public:
     // Marks what a row's change invalidates on the layout nodes the arena binds to its style node.
     static void apply_layout_invalidation(DOM::Document&, ViewportPropagationSources const&, StyleNodeID, RequiredInvalidationAfterStyleChange const&);
     // Applies the records a row installs to the layout nodes the arena binds to its style node.
-    static void apply_layout_node_style(DOM::Document&, StyleNodeID, RequiredInvalidationAfterStyleChange const&, StyleRecordID, PseudoElementStyleRecords const&);
+    static void apply_layout_node_style(StyleDrainScope const&, DOM::Document&, StyleNodeID, RequiredInvalidationAfterStyleChange const&, StyleRecordID, PseudoElementStyleRecords const&);
 
 private:
     void take_layout_node_style_records(DOM::Document&);

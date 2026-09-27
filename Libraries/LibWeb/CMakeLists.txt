@@ -207,6 +207,7 @@ set(SOURCES
     CSS/Parser/RuleContext.cpp
     CSS/Parser/SelectorParsing.cpp
     CSS/Percentage.cpp
+    CSS/PublishedStyleRecord.cpp
     CSS/Ratio.cpp
     CSS/Resolution.cpp
     CSS/ResolvedTransform.cpp

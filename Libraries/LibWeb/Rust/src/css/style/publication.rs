@@ -3979,6 +3979,20 @@ impl RetainedState {
             .map(|payloads| payloads.as_slice())
     }
 
+    /// The record as a value that owns everything a read of it reads, or `None` for a record the
+    /// engine no longer holds; see [`super::published_record`].
+    pub(crate) fn publish_style_record(
+        &self,
+        style_record: u64,
+    ) -> Option<std::sync::Arc<super::published_record::PublishedStyleRecord>> {
+        if !computed::ComputedGroupSets::record_is_animation_overlay(style_record)
+            && !self.computed_group_sets.final_style_record_is_live(style_record)
+        {
+            return None;
+        }
+        self.computed_group_sets.publish_style_record(style_record)
+    }
+
     /// The record's payloads as the value that owns them; see
     /// [`computed::ComputedGroupSets::style_record_payload_owner`].
     pub(crate) fn style_record_payload_owner(

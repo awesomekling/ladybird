@@ -12,9 +12,10 @@
 //! brings the rows of every node written since it last published up to date when it publishes
 //! again, so publishing costs the nodes written since, not the whole tree.
 //!
-//! A node's style is not in its [`PaintNode`]: the row owns its record's payloads through a
-//! [`StyleCell`], and the arena publishes those owners in a column of their own, so a publication
-//! holds every style it names and a row copies a reference count only when its style changes.
+//! A node's style is not in its [`PaintNode`]: the row owns its record, as the engine published it,
+//! through a [`StyleCell`], and the arena publishes those records in a column of their own, so a
+//! publication holds every style it names and a row copies a reference count only when its style
+//! changes.
 //!
 //! The fields a [`PaintNode`] copies are [`ShapeCell`]s. They read like a `Cell`, but only a
 //! [`ShapeWriter`] writes one, and only a [`Chunk`] hands out a writer, through which a write that
@@ -31,7 +32,7 @@
 use super::layout_node_arena::SLOTS_PER_CHUNK;
 use super::node_data::{NodeData, NodeKind, NodeSlotId, PaintNode, StylePayloadsRef};
 use crate::cow_column::{ColumnSnapshot, CowColumn};
-use crate::css::style::record_payloads::StyleRecordPayloads;
+use crate::css::style::published_record::PublishedStyleRecord;
 use std::cell::Cell;
 use std::ops::Deref;
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -63,9 +64,9 @@ impl<T: Copy> ShapeCell<T> {
     }
 }
 
-/// A node's style: the payloads of its record, which the row owns. It reads like a [`ShapeCell`] of
-/// the payload pointer, and only a [`ShapeWriter`] writes it.
-pub(crate) struct StyleCell(Cell<Option<Arc<StyleRecordPayloads>>>);
+/// A node's style: its record as the engine published it, which the row owns. It reads like a
+/// [`ShapeCell`] of the record's payload pointer, and only a [`ShapeWriter`] writes it.
+pub(crate) struct StyleCell(Cell<Option<Arc<PublishedStyleRecord>>>);
 
 impl StyleCell {
     pub(crate) const fn new() -> Self {
@@ -76,23 +77,28 @@ impl StyleCell {
     #[inline]
     pub(crate) fn get(&self) -> StylePayloadsRef {
         self.with_owner(|owner| {
-            owner.map_or(StylePayloadsRef::null(), |payloads| {
-                StylePayloadsRef::new(payloads.as_ptr())
+            owner.map_or(StylePayloadsRef::null(), |record| {
+                StylePayloadsRef::new(record.payloads.as_ptr())
             })
         })
     }
 
-    /// A reference of the row's own on its payloads, for a publication to hold.
-    pub(crate) fn owner(&self) -> Option<Arc<StyleRecordPayloads>> {
+    /// A reference of the row's own on its record, for a publication or the host to hold.
+    pub(crate) fn owner(&self) -> Option<Arc<PublishedStyleRecord>> {
         self.with_owner(|owner| owner.cloned())
     }
 
+    /// The dependency flags of the row's record, or zero for a row without style.
+    pub(crate) fn dependency_flags(&self) -> u8 {
+        self.with_owner(|owner| owner.map_or(0, |record| record.dependency_flags))
+    }
+
     fn owner_address(&self) -> usize {
-        self.with_owner(|owner| owner.map_or(0, |payloads| Arc::as_ptr(payloads).addr()))
+        self.with_owner(|owner| owner.map_or(0, |record| Arc::as_ptr(record).addr()))
     }
 
     #[inline]
-    fn with_owner<R>(&self, read: impl FnOnce(Option<&Arc<StyleRecordPayloads>>) -> R) -> R {
+    fn with_owner<R>(&self, read: impl FnOnce(Option<&Arc<PublishedStyleRecord>>) -> R) -> R {
         // SAFETY: The cell is not `Sync`, and `read` cannot reach the cell: every caller above hands
         // it a closure that only reads the owner it is given, so no write replaces the value while
         // the reference lives.
@@ -159,8 +165,8 @@ impl ShapeWriter<'_> {
         self.write(&self.data.compositor_animation_frame_kinds, kinds);
     }
 
-    pub(crate) fn set_style(&self, style: Option<Arc<StyleRecordPayloads>>) {
-        let address = style.as_ref().map_or(0, |payloads| Arc::as_ptr(payloads).addr());
+    pub(crate) fn set_style(&self, style: Option<Arc<PublishedStyleRecord>>) {
+        let address = style.as_ref().map_or(0, |record| Arc::as_ptr(record).addr());
         if self.data.style.owner_address() != address {
             self.written_rows.set(self.written_rows.get() | self.row_bit);
             drop(self.data.style.0.replace(style));
@@ -221,14 +227,14 @@ impl Chunk {
     }
 }
 
-/// A node's style owner as a published row. A row is the same as another when it names the same
-/// owner: an owner's payloads never change once published.
+/// A node's style record as a published row. A row is the same as another when it names the same
+/// record: a published record never changes.
 #[derive(Clone, Default)]
-pub(crate) struct PublishedStyle(pub(crate) Option<Arc<StyleRecordPayloads>>);
+pub(crate) struct PublishedStyle(pub(crate) Option<Arc<PublishedStyleRecord>>);
 
 impl PublishedStyle {
     fn address(&self) -> Option<usize> {
-        self.0.as_ref().map(|payloads| Arc::as_ptr(payloads).addr())
+        self.0.as_ref().map(|record| Arc::as_ptr(record).addr())
     }
 }
 

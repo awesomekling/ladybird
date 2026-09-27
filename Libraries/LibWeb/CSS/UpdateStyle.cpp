@@ -21,6 +21,7 @@
 #include <LibWeb/CSS/StyleEffectDrain.h>
 #include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/CSS/StyleInvalidation.h>
+#include <LibWeb/CSS/StyleReadDemand.h>
 #include <LibWeb/DOM/AbstractElement.h>
 #include <LibWeb/DOM/CommitMessages.h>
 #include <LibWeb/DOM/Document.h>
@@ -277,7 +278,16 @@ void StyleEffectDrain::take_layout_node_style_records(DOM::Document& document)
     }
 }
 
-void StyleEffectDrain::apply_layout_node_style(DOM::Document& document, StyleNodeID style_node, RequiredInvalidationAfterStyleChange const& invalidation, StyleRecordID style_record, PseudoElementStyleRecords const& pseudo_element_style_records)
+// The style being installed is held by its record; if it is not, the row keeps the style it has.
+static void apply_style_to_row(StyleDrainScope const& scope, Layout::Row const& row, StyleRecordID style_record)
+{
+    auto published = scope.engine().publish_style_record(scope, style_record);
+    ASSERT(published);
+    if (published)
+        Layout::NodeWithStyle::apply_style(row, *published);
+}
+
+void StyleEffectDrain::apply_layout_node_style(StyleDrainScope const& scope, DOM::Document& document, StyleNodeID style_node, RequiredInvalidationAfterStyleChange const& invalidation, StyleRecordID style_record, PseudoElementStyleRecords const& pseudo_element_style_records)
 {
     if (invalidation.needs_layout_tree_rebuild())
         return;
@@ -295,13 +305,13 @@ void StyleEffectDrain::apply_layout_node_style(DOM::Document& document, StyleNod
     auto applied_by_flight = marks_of_flight(*arena, style_node, false, style_record);
     if (applied_by_flight.has_value() && !moves_pseudo_element_records && flight_marks_cover(*applied_by_flight, invalidation)) {
         if (row && style_record.value() != 0)
-            Layout::NodeWithStyle::apply_style(row, style_record);
+            apply_style_to_row(scope, row, style_record);
         return;
     }
     (void)marks_of_flight(*arena, style_node, true);
     ++s_rows_the_flight_left_to_mark;
     if (row && style_record.value() != 0) {
-        Layout::NodeWithStyle::apply_style(row, style_record);
+        apply_style_to_row(scope, row, style_record);
         if (Painting::has_committed_box(row))
             Painting::repaint_after_style_change(row, invalidation);
     }
@@ -327,7 +337,7 @@ void StyleEffectDrain::apply_layout_node_style(DOM::Document& document, StyleNod
             continue;
         auto pseudo_element = static_cast<PseudoElement>(to_underlying(first_synthetic_pseudo_element) + index);
         if (auto pseudo_element_row = arena->bound_row(style_node, Layout::Node::encode_generated_for(pseudo_element))) {
-            Layout::NodeWithStyle::apply_style(pseudo_element_row, pseudo_element_style_record);
+            apply_style_to_row(scope, pseudo_element_row, pseudo_element_style_record);
             if (Painting::has_committed_box(pseudo_element_row))
                 Painting::repaint_after_style_change(pseudo_element_row, invalidation);
         }
@@ -345,7 +355,7 @@ void StyleEffectDrain::apply_render_half(StyleDrainScope const& scope, DOM::Docu
             auto const& pseudo_element_style_records = row->pseudo_element_style_records == NumericLimits<u32>::max()
                 ? no_pseudo_element_style_records
                 : m_pseudo_element_style_records[row->pseudo_element_style_records];
-            apply_layout_node_style(document, row->style_node, row->invalidation, *row->style_record, pseudo_element_style_records);
+            apply_layout_node_style(scope, document, row->style_node, row->invalidation, *row->style_record, pseudo_element_style_records);
             continue;
         }
         if (auto const* row = effect.get_pointer<RestoreRowDebts>()) {
@@ -664,10 +674,14 @@ static void apply_pseudo_element_samples_taken_by_engine(StyleDrainScope const& 
 // Whether the custom-property environment an engine-computed record was published with can be
 // installed: the one the element inherits - the parent's inheritable data, which is the parent's
 // own unless a registration made some of it non-inherited - or one the engine resolved over it.
-static bool engine_computed_record_environment_is_installable(DOM::Element& element, StyleRecordID style_record)
+static bool engine_computed_record_environment_is_installable(StyleDrainScope const& scope, DOM::Element& element, StyleRecordID style_record)
 {
+    // No record names no environment, which the element can always take.
+    auto published = scope.engine().publish_style_record(scope, style_record);
+    if (!published)
+        return !style_record;
     bool installable = false;
-    (void)element.custom_property_environment_of_engine_record(style_record, installable);
+    (void)element.custom_property_environment_of_engine_record(*published, installable);
     return installable;
 }
 
@@ -782,7 +796,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                 for (auto next = reaction_index + 1; next < reactions.size() && reactions[next].style_node == published_reaction.style_node && reactions[next].pseudo_kind != NumericLimits<u8>::max(); ++next) {
                     StyleRecordID record { reactions[next].new_style_record };
                     pseudo_element_records[reactions[next].pseudo_kind] = record;
-                    if (!!record && has_flag(scope.engine().style_record_dependency_flags(record), StyleRecordDependencyFlag::DependsOnViewportMetrics))
+                    if (auto published = scope.engine().publish_style_record(scope, record); published && has_flag(published->dependency_flags(), StyleRecordDependencyFlag::DependsOnViewportMetrics))
                         element->set_style_depends_on_viewport_metrics();
                 }
                 // What the settled pseudo-elements' container units read of the element's containers.
@@ -840,9 +854,8 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
             if (!element->has_style() && !engine_computed_record && !required_in_hidden_subtrees.contains(element->style_node_id())) {
                 bool hidden = false;
                 for (auto ancestor = DOM::AbstractElement { *element }.element_to_inherit_style_from(); ancestor.has_value(); ancestor = ancestor->element_to_inherit_style_from()) {
-                    auto identity = ancestor->style_record_identity();
-                    if (!!identity) {
-                        hidden = has_flag(document.style_computer().style_engine().style_record_dependency_flags(identity), StyleRecordDependencyFlag::InDisplayNoneSubtree);
+                    if (auto const* ancestor_style_record = ancestor->published_style_record()) {
+                        hidden = has_flag(ancestor_style_record->dependency_flags(), StyleRecordDependencyFlag::InDisplayNoneSubtree);
                         break;
                     }
                 }
@@ -989,7 +1002,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                     animation_plan = document.style_computer().take_settled_animation_plan(scope, StyleNodeID { reaction.style_node }, NumericLimits<u8>::max());
                 bool const has_animations_or_plan = animation_plan.has_value() || element->has_relevant_animations()
                     || element->has_associated_animations();
-                if (!engine_computed_record_environment_is_installable(*element, StyleRecordID { reaction.new_style_record })
+                if (!engine_computed_record_environment_is_installable(scope, *element, StyleRecordID { reaction.new_style_record })
                     || declarations_changed_during_apply(StyleNodeID { reaction.style_node })) {
                     // The record names declarations or an environment an earlier row of this batch
                     // has since moved. The move schedules the next transaction, whose pass computes
@@ -1601,15 +1614,16 @@ static void apply_targeted_style_invalidation(StyleDrainScope const& scope, DOM:
 
 // The engine answers a targeted read's demand for one element's record, or for one of its
 // pseudo-elements', in a style stage run of its own, before the host installs the answer.
-static StyleEngineFFI::FfiRecordDemandAnswer answer_targeted_record_demand(DOM::Element& element, Optional<PseudoElement> pseudo_element = {})
+static StyleReadDemandAnswer answer_targeted_record_demand(DOM::Element& element, Optional<PseudoElement> pseudo_element = {})
 {
-    return element.document().style_computer().style_engine_queries().answer_read_demand(element.style_node_id(),
-        pseudo_element.has_value() ? to_underlying(*pseudo_element) : NumericLimits<u8>::max(), false, true, pseudo_element.has_value(), {});
+    return adopt_style_read_demand_answer(element.document().style_computer().style_engine_queries().answer_read_demand(element.style_node_id(),
+        pseudo_element.has_value() ? to_underlying(*pseudo_element) : NumericLimits<u8>::max(), false, true, pseudo_element.has_value(), {}));
 }
 
 // Install the engine's answer for a targeted demand of one element.
-static Optional<RequiredInvalidationAfterStyleChange> install_targeted_record_demand_answer(StyleDrainScope const& scope, DOM::Element& element, StyleEngineFFI::FfiRecordDemandAnswer const& answer, bool& did_change_custom_properties)
+static Optional<RequiredInvalidationAfterStyleChange> install_targeted_record_demand_answer(StyleDrainScope const& scope, DOM::Element& element, StyleReadDemandAnswer const& demand_answer, bool& did_change_custom_properties)
 {
+    auto const& answer = demand_answer.ffi;
     auto& style_computer = element.document().style_computer();
     auto& engine = scope.engine();
 
@@ -1617,8 +1631,8 @@ static Optional<RequiredInvalidationAfterStyleChange> install_targeted_record_de
     // environment its installed ancestors hold. Should an answer not install, the element keeps
     // the record it has, and the style stage seal reports the row.
     bool environment_is_installable = false;
-    if (answer.record.style_record)
-        (void)element.custom_property_environment_of_engine_record(StyleRecordID { answer.record.style_record }, environment_is_installable);
+    if (demand_answer.record)
+        (void)element.custom_property_environment_of_engine_record(*demand_answer.record, environment_is_installable);
     ASSERT(environment_is_installable);
     if (!environment_is_installable) {
         static constexpr u8 refused_host_entry = 1;
@@ -1637,8 +1651,8 @@ static Optional<RequiredInvalidationAfterStyleChange> install_targeted_record_de
     // value move and asks for layout even when the composed style is unchanged.
     auto const old_style = element.computed_style();
     bool const samples_over_the_record = old_style
-        && engine.style_record_view(old_style_record).animation_overlay_identity != 0
-        && engine.style_record_view(StyleRecordID { answer.record.style_record }).animation_overlay_identity == 0;
+        && element.published_style_record()->is_animation_overlay()
+        && !demand_answer.record->is_animation_overlay();
     auto invalidation = element.apply_engine_computed_style_record(scope, StyleRecordID { answer.record.style_record }, pseudo_element_records, answer.record.uses_substitution, answer.row_facts, did_change_custom_properties,
         samples_over_the_record ? DOM::Element::EngineRecordComparison::AfterSample : DOM::Element::EngineRecordComparison::AtInstallation);
     if (!!old_style_record && element.associated_shadow_host_pseudo_element().has_value())
@@ -1710,8 +1724,8 @@ static bool install_targeted_styles(DOM::Document& document, GC::RootVector<GC::
             u32 row_facts = 0;
             for (auto kind : scroll_state_container_pseudo_elements) {
                 auto pseudo_answer = answer_targeted_record_demand(element, kind);
-                pseudo_records[to_underlying(kind)] = StyleRecordID { pseudo_answer.record.style_record };
-                row_facts = pseudo_answer.row_facts;
+                pseudo_records[to_underlying(kind)] = StyleRecordID { pseudo_answer.ffi.record.style_record };
+                row_facts = pseudo_answer.ffi.row_facts;
             }
             StyleEffectDrain::install(document, [&](StyleDrainScope const& scope) {
                 *installed |= element->apply_engine_computed_style_record(scope, element->style_record_identity(), pseudo_records, false, row_facts, did_change_custom_properties);
@@ -1926,9 +1940,8 @@ static bool update_style_for_element(DOM::Document& document, DOM::AbstractEleme
     }
 
     if (ran_regular_style_update && mode != StyleUpdateMode::OnlyIfNeeded) {
-        auto style_record = abstract_element.style_record_identity();
-        if (!!style_record
-            && !has_flag(document.style_computer().style_engine().style_record_dependency_flags(style_record), StyleRecordDependencyFlag::InDisplayNoneSubtree))
+        auto const* style_record = abstract_element.published_style_record();
+        if (style_record && !has_flag(style_record->dependency_flags(), StyleRecordDependencyFlag::InDisplayNoneSubtree))
             return true;
     }
 

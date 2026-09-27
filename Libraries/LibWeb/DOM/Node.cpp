@@ -1501,9 +1501,7 @@ private:
         if (!style_record_identity)
             return;
         // A connected subtree can still name a record reclaimed after its engine assignment
-        // moved. Removal clears that DOM identity, so only a live record needs a detachment pin.
-        if (!m_style_computer->style_record_payloads(style_record_identity))
-            return;
+        // moved. The engine keeps no record for a pin of one it has reclaimed.
         m_style_computer->pin_style_record(style_record_identity);
         m_dom_style_record_pins.append(style_record_identity);
     }
@@ -4774,12 +4772,11 @@ bool Node::has_inclusive_ancestor_with_display_none_ignoring_animations() const
 {
     // NB: Only each ancestor's display matters here, so read it out of the record's box group
     //     payload instead of materializing a full style record view.
-    auto const& style_engine = document().style_computer().style_engine();
     for (auto const* ancestor = this; ancestor; ancestor = ancestor->parent_or_shadow_host()) {
         auto const* ancestor_element = as_if<Element>(ancestor);
         if (!ancestor_element)
             continue;
-        if (CSS::style_record_display_is_none(style_engine, ancestor_element->style_record_identity()))
+        if (CSS::style_record_display_is_none(ancestor_element->published_style_record()))
             return true;
     }
     return false;

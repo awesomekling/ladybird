@@ -31,6 +31,7 @@ use super::intern_table::InternTable;
 use super::memory::MemoryCategory;
 use super::memory::MemoryController;
 use super::memory::MemoryLease;
+use super::published_record::PublishedStyleRecord;
 use super::record_payloads::{StylePayloadsHome, StyleRecordPayloads};
 use super::tree::PseudoElementKind;
 use super::tree::PseudoElementTarget;
@@ -53,7 +54,7 @@ use crate::css::style_value::retained_value_depends_on_color_scheme;
 use crate::css::style_value::retained_value_depends_on_current_color;
 use crate::css::style_value::retained_value_may_depend_on_font_metrics;
 use crate::layout::node_data::STYLE_GROUP_COUNT;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 // Bit 3 is a node-local production capability carried with publication and stripped before the
 // semantic fixed metadata is interned or exposed through a style-record view.
@@ -377,7 +378,10 @@ struct AnimationOverlayRecord {
     effective_custom_property_environment: u64,
     source_identity: u64,
     final_style_record: FinalStyleRecordID,
-    animated_overlay: Box<crate::css::animated_overlay::AnimatedOverlay>,
+    /// Shared with the record as the host reads it (see [`super::published_record`]).
+    animated_overlay: Arc<crate::css::animated_overlay::AnimatedOverlay>,
+    /// The record as the host reads it, made the first time it is handed to the host.
+    published: OnceLock<Arc<PublishedStyleRecord>>,
     payloads: Arc<StyleRecordPayloads>,
     /// Whether the composed payloads hold an `<image>` a layout node loads, which a sampled value
     /// can hold where the base does not.
@@ -800,6 +804,9 @@ pub struct ComputedGroupSets {
     style_records: InternTable<StyleRecordID, StyleRecord>,
     style_record_liveness: BitColumn,
     style_record_generations: Vec<u32>,
+    /// Each live base record as the value the host reads it through, made the first time the record
+    /// is handed to the host; see [`super::published_record`].
+    published_style_records: Vec<OnceLock<Arc<PublishedStyleRecord>>>,
     style_record_column: Vec<Option<StyleRecordID>>,
     base_style_record_pins: HashMap<StyleRecordID, u64>,
     /// The document thread's pins, as far as the engine may read them now.
@@ -854,6 +861,7 @@ impl Default for ComputedGroupSets {
             style_records: InternTable::default(),
             style_record_liveness: BitColumn::default(),
             style_record_generations: Vec::new(),
+            published_style_records: Vec::new(),
             style_record_column: Vec::new(),
             base_style_record_pins: HashMap::default(),
             host_pins: HostPinsLend::default(),
@@ -1135,7 +1143,9 @@ impl ComputedGroupSets {
         });
         if identity.index() == self.style_record_generations.len() {
             self.style_record_generations.push(0);
+            self.published_style_records.push(OnceLock::new());
         } else {
+            self.published_style_records[identity.index()] = OnceLock::new();
             let generation = &mut self.style_record_generations[identity.index()];
             *generation = generation
                 .checked_add(1)
@@ -1989,7 +1999,7 @@ impl ComputedGroupSets {
         &mut self,
         base_style_record: StyleRecordID,
         source_identity: u64,
-        animated_overlay: Box<crate::css::animated_overlay::AnimatedOverlay>,
+        animated_overlay: Arc<crate::css::animated_overlay::AnimatedOverlay>,
         payloads: &[SharedPayload],
     ) -> AnimationOverlayRecord {
         assert!(payloads.iter().all(|payload| !payload.is_null()));
@@ -2002,6 +2012,7 @@ impl ComputedGroupSets {
             animated_overlay,
             holds_image_values: style_group_payloads_hold_image_values(SharedPayload::as_pointer_slice(payloads)),
             payloads: Arc::new(StyleRecordPayloads::retain(payloads, &self.payloads_home)),
+            published: OnceLock::new(),
             pin_count: 0,
             is_assigned: true,
             is_retired: false,
@@ -2018,7 +2029,7 @@ impl ComputedGroupSets {
         let record = self.make_animation_overlay_record(
             base_style_record,
             source_identity,
-            Box::new(
+            Arc::new(
                 animated_overlay
                     .expect("animation overlay properties are missing")
                     .clone(),
@@ -2194,7 +2205,7 @@ impl ComputedGroupSets {
                 let record = self.make_animation_overlay_record(
                     base_style_record,
                     source_identity,
-                    Box::new(
+                    Arc::new(
                         animated_overlay
                             .expect("animation overlay properties are missing")
                             .clone(),
@@ -3689,6 +3700,8 @@ impl ComputedGroupSets {
             }
             let (changed, _) = self.style_record_liveness.set(identity.index(), false);
             assert!(changed, "retired base style-record identity must be live");
+            // What the host still holds of the record it holds by its own references.
+            self.published_style_records[identity.index()] = OnceLock::new();
         }
         for identity in self.sets.live_identities().collect::<Vec<_>>() {
             if reachable.sets[identity.index()] {
@@ -4019,6 +4032,77 @@ impl ComputedGroupSets {
             animation_overlay_identity,
             dependency_flags: fixed_metadata.dependency_flags,
         })
+    }
+
+    /// The record as a value that owns everything a read of it reads, one for each record; see
+    /// [`super::published_record`].
+    pub(crate) fn publish_style_record(&self, raw_style_record: u64) -> Option<Arc<PublishedStyleRecord>> {
+        let final_style_record = FinalStyleRecordID(raw_style_record);
+        let published = match final_style_record.base_record() {
+            Some(style_record) => {
+                if !self.style_record_generation_is_live(style_record, final_style_record.base_generation()) {
+                    return None;
+                }
+                self.published_style_records.get(style_record.index())?
+            }
+            None => {
+                let slot = *self.animation_overlay_slots_by_record.get(&final_style_record)?;
+                &self.animation_overlay_slots[slot as usize].as_ref()?.published
+            }
+        };
+        if let Some(record) = published.get() {
+            return Some(record.clone());
+        }
+        let record = self.make_published_style_record(final_style_record)?;
+        Some(published.get_or_init(|| record).clone())
+    }
+
+    fn make_published_style_record(&self, final_style_record: FinalStyleRecordID) -> Option<Arc<PublishedStyleRecord>> {
+        let (base_style_record, payloads, animation_overlay_identity, animated_overlay, overlay_holds_image_values) =
+            match final_style_record.base_record() {
+                Some(style_record) => {
+                    let record = self.style_records.get_index(style_record.index())?;
+                    (style_record, self.sets[record.groups].payloads.clone()?, 0, None, false)
+                }
+                None => {
+                    let slot = *self.animation_overlay_slots_by_record.get(&final_style_record)?;
+                    let overlay = self.animation_overlay_slots[slot as usize].as_ref()?;
+                    (
+                        overlay.base_style_record,
+                        overlay.payloads.clone(),
+                        overlay.source_identity,
+                        Some(overlay.animated_overlay.clone()),
+                        overlay.holds_image_values,
+                    )
+                }
+            };
+        if !self.style_record_is_live(base_style_record) {
+            return None;
+        }
+        let record = self.style_records.get_index(base_style_record.index())?;
+        let base_payloads = self.sets[record.groups].payloads.clone()?;
+        let fixed_metadata = self
+            .computed_fixed_metadata
+            .get_index(record.fixed_metadata.0 as usize)?;
+        let longhand_table = record
+            .longhand_table
+            .and_then(|identity| self.computed_longhand_tables.get_index(identity.0 as usize))
+            .and_then(|table| std::ptr::NonNull::new(table.table.as_ptr().cast_mut()))
+            // SAFETY: The catalog holds a reference to the frozen table for as long as it keeps it.
+            .map(|table| unsafe { super::published_record::SharedLonghandTable::retain(table) });
+        Some(Arc::new(PublishedStyleRecord {
+            style_record: final_style_record.raw(),
+            payloads,
+            base_payloads,
+            longhand_table,
+            animated_overlay,
+            pseudo_element_styles: fixed_metadata.pseudo_element_styles,
+            counter_style_environment_identity: fixed_metadata.counter_style_environment_identity,
+            animation_overlay_identity,
+            custom_property_environment: self.custom_property_environments[record.custom_properties],
+            dependency_flags: fixed_metadata.dependency_flags
+                | (u8::from(overlay_holds_image_values) * HOLDS_IMAGE_VALUES),
+        }))
     }
 
     /// Read the underlying style of a final record, including a retained old composition.
@@ -5021,7 +5105,7 @@ mod tests {
             crate::layout::node_data::NodeKind::InlineNode,
             super::super::layout_style::DerivedStyleRecord {
                 record,
-                payloads: sets.style_record_payload_owner(record).cloned(),
+                published: sets.publish_style_record(record),
             },
         );
         let frame = arena.freeze_paint_frame();
@@ -5040,6 +5124,56 @@ mod tests {
         assert_eq!(style.empty_cells(), 7);
 
         drop(frame);
+        assert_eq!(group_payload_refcount(table_group, payloads[table_group].as_ptr()), 1);
+        release_group_payload(table_group, payloads[table_group].as_ptr());
+    }
+
+    /// A record the host holds as the engine published it is read through what the value owns: the
+    /// engine hands out one value per record, and it stays readable after the catalog is gone.
+    #[test]
+    fn a_published_record_reads_its_style_after_the_catalog_is_gone() {
+        use crate::css::computed_values::{InheritedTableValues, group_payload_refcount};
+        use crate::css::style::published_record::{
+            into_handle, published_style_record_read, published_style_record_release,
+        };
+
+        let mut sets = ComputedGroupSets::default();
+        let target = ComputedStyleTarget::new(StyleNodeID::from_raw(1).unwrap(), u8::MAX);
+        let payloads = owned_payloads(2);
+        let table_group = crate::css::computed_value_types::STYLE_GROUP_INDEX_INHERITED_TABLE;
+        // SAFETY: The test holds the only reference to the fresh payload, which nothing reads yet.
+        unsafe { (*payloads[table_group].cast_mut().cast::<InheritedTableValues>()).empty_cells = 7 };
+        let record = publish_owned(&mut sets, target, &payloads, owned_longhand_table())
+            .style_record_identity
+            .raw();
+        // A reference of the test's own, to watch the others come and go.
+        retain_group_payload(table_group, payloads[table_group].as_ptr());
+
+        let published = sets.publish_style_record(record).expect("the record is live");
+        let again = sets.publish_style_record(record).expect("the record is live");
+        assert!(
+            Arc::ptr_eq(&published, &again),
+            "the engine hands out one value per record"
+        );
+        drop(again);
+        let handle = into_handle(published);
+
+        drop(sets);
+        // The catalog's own reference is gone with it; the published record's is left.
+        assert_eq!(group_payload_refcount(table_group, payloads[table_group].as_ptr()), 2);
+
+        // SAFETY: The handle is live until it is released below, and so is what the read points at.
+        let read = unsafe { published_style_record_read(handle) };
+        assert_eq!(read.style_record, record);
+        assert!(read.view.present);
+        assert!(
+            !read.view.longhand_table.is_null(),
+            "the record keeps its longhand table"
+        );
+        let table_values = unsafe { &*(*read.view.payloads.add(table_group)).cast::<InheritedTableValues>() };
+        assert_eq!(table_values.empty_cells, 7);
+
+        unsafe { published_style_record_release(handle) };
         assert_eq!(group_payload_refcount(table_group, payloads[table_group].as_ptr()), 1);
         release_group_payload(table_group, payloads[table_group].as_ptr());
     }

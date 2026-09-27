@@ -361,11 +361,11 @@ public:
     void republish_animation_name_registry();
     // The custom-property environment an engine-computed record was published with: the one the
     // element inherits, or one the engine resolved over it. Nothing when it cannot be installed.
-    [[nodiscard]] RefPtr<CSS::CustomPropertyData const> custom_property_environment_of_engine_record(CSS::StyleRecordID, bool& installable) const;
+    [[nodiscard]] RefPtr<CSS::CustomPropertyData const> custom_property_environment_of_engine_record(CSS::PublishedStyleRecord const&, bool& installable) const;
     void settle_pseudo_elements_in_next_pass(CSS::StyleDrainScope const&, bool old_is_list_item);
     void settle_pseudo_elements_over_moved_composition(CSS::StyleDrainScope const&);
     CSS::RequiredInvalidationAfterStyleChange install_engine_pseudo_element_records_after_sample(CSS::StyleDrainScope const&, bool& did_change_custom_properties, bool old_is_list_item, EnginePseudoElementRecords const*, CSS::StyleEffectDrain* = nullptr);
-    void apply_computed_style_to_layout_node_if_needed(CSS::RequiredInvalidationAfterStyleChange const&);
+    void apply_computed_style_to_layout_node_if_needed(CSS::StyleDrainScope const&, CSS::RequiredInvalidationAfterStyleChange const&);
 
     void set_needs_layout_tree_rebuild(SetNeedsLayoutTreeUpdateReason, CSS::LayoutTreeRebuildRoot);
     bool apply_box_presence_change_in_place(SetNeedsLayoutTreeUpdateReason);
@@ -384,6 +384,9 @@ public:
 
     [[nodiscard]] CSS::ComputedStyleRecordView computed_style(Optional<CSS::PseudoElement> = {}) const;
     [[nodiscard]] CSS::StyleRecordID style_record_identity(Optional<CSS::PseudoElement> = {}) const;
+    // The record the drain installed on the element or one of its pseudo-elements, which every read of its computed
+    // style is made through.
+    [[nodiscard]] CSS::PublishedStyleRecord const* published_style_record(Optional<CSS::PseudoElement> = {}) const;
     u64 animation_style_generation() const { return m_animation_style_generation; }
     u64 animation_subtree_style_generation() const { return m_animation_subtree_style_generation; }
     [[nodiscard]] bool has_style(Optional<CSS::PseudoElement> pseudo_element = {}) const { return !!style_record_identity(pseudo_element); }
@@ -956,10 +959,9 @@ private:
     GC::Ptr<CSS::CSSStyleProperties> m_inline_style;
     GC::Ptr<ShadowRoot> m_shadow_root;
 
-    // A consumer handle mirroring StyleEngine's authoritative style-record column. C++ consumers
-    // borrow the record-owned computed-values view rather than retaining one complete style per
-    // element.
-    CSS::StyleRecordID m_style_record_identity;
+    // The record the drain installed, as the engine published it: the element's computed style, shared with every
+    // element and layout row that holds the same record.
+    RefPtr<CSS::PublishedStyleRecord const> m_style_record;
     u64 m_animation_style_generation { 0 };
     u64 m_animation_subtree_style_generation { 0 };
     PublishedCustomPropertyNames m_published_custom_property_names;

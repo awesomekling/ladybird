@@ -706,10 +706,10 @@ public:
     [[nodiscard]] bool has_css_transform() const;
 
     void clear_image_observers();
-    void apply_style(CSS::StyleRecordID);
+    void apply_style(CSS::PublishedStyleRecord const&);
     // Applies the style to the row as apply_style() does to its shell, without making a shell for a row
     // that has none, unless the style or the box keeps what only a shell does.
-    static void apply_style(Row const&, CSS::StyleRecordID);
+    static void apply_style(Row const&, CSS::PublishedStyleRecord const&);
     void attach_style_resources();
     bool synchronize_table_span_data();
 
@@ -720,17 +720,17 @@ public:
     bool is_scroll_container() const;
 
     void set_computed_values(NonnullRefPtr<CSS::ComputedValues const>);
-    void set_style_record_identity(CSS::StyleRecordID);
-    // Sets the row's record as set_style_record_identity() does its shell's, without making a shell for a row that has
-    // none, unless the box can be a scroll snap container.
-    static void set_style_record_identity(Row const&, CSS::StyleRecordID);
+    void set_style_record(CSS::PublishedStyleRecord const*);
+    // Sets the row's record as set_style_record() does its shell's, without making a shell for a row that has none,
+    // unless the box can be a scroll snap container.
+    static void set_style_record(Row const&, CSS::PublishedStyleRecord const*);
     void refresh_style_from_arena(CSS::StyleRecordID, void const* payloads, bool should_attach_resources);
     // The pin lives on the node's arena row and is released with it, so
     // Document::tear_down_layout_tree() must free the layout root before the document's style
     // computer goes away. Every document destruction path goes through that teardown.
     void pin_style_record_for_cxx_consumers();
     void release_pinned_style_record();
-    void bind_generated_style_record(CSS::StyleRecordID);
+    void bind_generated_style_record(CSS::PublishedStyleRecord const*);
 
     void set_display(CSS::Display);
 
@@ -738,6 +738,7 @@ public:
 
 private:
     CSS::ComputedStyleRecordView computed_style_record_view() const;
+    CSS::StyleRecordDependencyFlag style_dependency_flags() const;
 
     virtual bool is_node_with_style() const final { return true; }
 

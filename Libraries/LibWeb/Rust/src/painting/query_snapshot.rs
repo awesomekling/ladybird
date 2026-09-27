@@ -136,7 +136,7 @@ impl QuerySnapshot {
             .and_then(|style| style.0.as_deref());
         Some(QueryFacts::of_style(
             node,
-            style.map(|payloads| ComputedValuesView::new(&payloads.as_ffi().groups)),
+            style.map(|record| ComputedValuesView::new(&record.payloads.as_ffi().groups)),
         ))
     }
 
