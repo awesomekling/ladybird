@@ -401,14 +401,18 @@ fn handle_message(message: ToOwner) {
             transaction,
             reply,
         } => reply.answer(|| {
-            let engine = with_state(document, |state| state.style_engine()).filter(|engine| !engine.is_null());
-            let Some(engine) = engine else {
+            let reached = with_state(document, |state| (state.style_engine(), state.arena_handle()))
+                .filter(|(engine, _)| !engine.is_null());
+            let Some((engine, arena)) = reached else {
                 debug_assert!(
                     false,
                     "the owner runs the style transaction of a document with an engine"
                 );
                 return Err(transaction);
             };
+            // The faces the transaction wants are this document's, for its layout end to request, whichever
+            // document's update the owner serves the transaction beside.
+            let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(arena as u64);
             // SAFETY: The engine is the document's, and the document thread waits for the transaction.
             Ok(unsafe { engine.reach_on_owner(|engine| transaction.run(engine)) })
         }),

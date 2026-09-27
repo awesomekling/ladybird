@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<iframe id="a" srcdoc="<body><div id=box style='height: 10px'></div></body>"></iframe>
+<iframe id="b" srcdoc="<style>@font-face { font-family: FaceB; src: url(../../../../Assets/Lato-Bold.ttf); } #text { font: 20px monospace; } #text.faced { font: 20px FaceB, monospace; }</style><body><span id=text>ABC</span></body>"></iframe>
+<script>
+    // A style pass the render owner runs for a forced read wants a face that has not loaded: the want is filed under
+    // the pass's document, and that document's layout end requests the face, also while another document's frame is
+    // in flight beside the read.
+    asyncTest(async done => {
+        if (document.readyState !== "complete")
+            await new Promise(resolve => window.addEventListener("load", resolve, { once: true }));
+        const docA = a.contentDocument;
+        const docB = b.contentDocument;
+        const text = docB.getElementById("text");
+        const face = [...docB.fonts][0];
+        const widthBefore = text.offsetWidth;
+        await twoFrames();
+
+        const result = await whileFrameInFlight("mid-recording", () => {
+            docA.getElementById("box").style.height = "20px";
+        }, frameInFlight => {
+            text.className = "faced";
+            return { ...frameInFlight, width: text.offsetWidth };
+        }, docA);
+        println(`read beside the frame: ${result.width > 0}`);
+
+        await face.loaded;
+        println(`face: ${face.status}`);
+        await twoFrames();
+        println(`the text width changed: ${text.offsetWidth !== widthBefore}`);
+        done();
+    });
+</script>
