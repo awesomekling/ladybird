@@ -51,11 +51,6 @@ pub struct FfiLayoutUpdateHostCallbacks {
     pub process_pending_list_item_renumbers: unsafe extern "C" fn(*mut c_void),
     pub process_pending_top_layer_layout_changes: unsafe extern "C" fn(*mut c_void),
     pub document_facts: unsafe extern "C" fn(*mut c_void) -> FfiLayoutUpdateDocumentFacts,
-    /// Seals what the recording the flight about to be submitted makes after its layout reads, if
-    /// the document may be recorded that way (see `layout_arena_seal_flight_paint`). The flag says
-    /// the flight runs the style of the layout's first round too, which the document's pending
-    /// style is.
-    pub seal_flight_paint: unsafe extern "C" fn(*mut c_void, bool),
     /// Readies the document for a layout tree build, and answers with the document's style node,
     /// which the build walks from.
     pub prepare_layout_tree_build: unsafe extern "C" fn(*mut c_void) -> u32,
@@ -251,6 +246,23 @@ pub enum FfiLayoutUpdateOutcome {
     /// The update's full layout pass runs beside the document thread. The frame in flight owns the
     /// arena, and the update ends once the document thread has taken the frame back.
     PassSubmitted,
+    /// The update readied its full layout pass as a flight, which goes on to record the document once
+    /// it has laid it out, if the document seals what that reads first. The document seals it, and
+    /// then submits the flight (`layout_arena_submit_prepared_flight`), which ends the update as a
+    /// submitted pass does.
+    FlightReady,
+    /// As `FlightReady`, for a flight that runs the style of the layout's first round too, which the
+    /// document's pending style is. The document seals the flight's paint ahead of that style, whose
+    /// render half the flight applies itself.
+    FlightWithStyleReady,
+}
+
+/// A flight a layout update readied, which waits for the document to seal what its recording reads
+/// before it is submitted.
+pub(crate) struct PreparedFlight {
+    pass: LayoutPassJob,
+    style: Option<crate::css::style::bridge::StylePassJob>,
+    viewport_propagation_sources: Vec<StyleNodeID>,
 }
 
 /// Confinement report of the most recent layout tree build, for tests observing whether a
@@ -270,7 +282,6 @@ pub(crate) struct LayoutUpdateHost {
     process_pending_list_item_renumbers: unsafe extern "C" fn(*mut c_void),
     process_pending_top_layer_layout_changes: unsafe extern "C" fn(*mut c_void),
     document_facts: unsafe extern "C" fn(*mut c_void) -> FfiLayoutUpdateDocumentFacts,
-    seal_flight_paint: unsafe extern "C" fn(*mut c_void, bool),
     prepare_layout_tree_build: unsafe extern "C" fn(*mut c_void) -> u32,
     read_selection:
         unsafe extern "C" fn(*mut c_void, *mut c_void, unsafe extern "C" fn(*mut c_void, *const FfiSelectionSnapshot)),
@@ -286,7 +297,6 @@ impl From<FfiLayoutUpdateHostCallbacks> for LayoutUpdateHost {
             process_pending_list_item_renumbers: host.process_pending_list_item_renumbers,
             process_pending_top_layer_layout_changes: host.process_pending_top_layer_layout_changes,
             document_facts: host.document_facts,
-            seal_flight_paint: host.seal_flight_paint,
             prepare_layout_tree_build: host.prepare_layout_tree_build,
             read_selection: host.read_selection,
             take_in_frame_effects: host.take_in_frame_effects,
@@ -315,10 +325,6 @@ impl LayoutUpdateHost {
 
     fn document_facts(&self, _: &crate::stage::MainThread) -> FfiLayoutUpdateDocumentFacts {
         unsafe { (self.document_facts)(self.context) }
-    }
-
-    fn seal_flight_paint(&self, _: &crate::stage::MainThread, style_runs_in_flight: bool) {
-        unsafe { (self.seal_flight_paint)(self.context, style_runs_in_flight) }
     }
 
     fn prepare_layout_tree_build(&self, _: &crate::stage::MainThread) -> u32 {
@@ -1606,23 +1612,33 @@ unsafe fn update_layout(
     };
     if crate::stage_thread::submits_flight() {
         // The flight goes on to record the document once it has laid it out, if the document seals what
-        // that reads now, with its style and the rest of the round's host steps done. A flight that runs
-        // the round's style as well seals it ahead of that style, whose render half it applies itself.
+        // that reads before it submits the flight, with its style and the rest of the round's host steps
+        // done.
         crate::painting::ffi::layout_arena_discard_sealed_flight_paint();
         let style = pass.take_style_pass();
-        host.seal_flight_paint(main_thread, style.is_some());
-        let flight = match style {
-            Some(style) => crate::flight::Flight::from_style_and_layout_pass(
-                arena_handle,
-                style,
-                pass,
-                viewport_propagation_sources,
-            ),
-            None => crate::flight::Flight::from_layout_pass(arena_handle, pass),
+        let outcome = match style {
+            Some(_) => FfiLayoutUpdateOutcome::FlightWithStyleReady,
+            None => FfiLayoutUpdateOutcome::FlightReady,
         };
-        // SAFETY: As below.
-        unsafe { crate::flight::submit(arena_handle, flight) };
-        return FfiLayoutUpdateOutcome::PassSubmitted;
+        let flight = PreparedFlight {
+            pass,
+            style,
+            viewport_propagation_sources,
+        };
+        let Some(host_tables) = main_thread.host_tables() else {
+            debug_assert!(false, "layout node arena has no host tables");
+            // With nowhere to keep the flight for the document to seal, it goes unsealed: it lays the
+            // document out and records nothing.
+            // SAFETY: Guaranteed by the caller.
+            unsafe { flight.submit(arena_handle) };
+            return FfiLayoutUpdateOutcome::PassSubmitted;
+        };
+        let prepared = host_tables.prepared_flight.replace(Some(flight));
+        debug_assert!(
+            prepared.is_none(),
+            "a document submits the flight it prepared before another"
+        );
+        return outcome;
     }
     let take_back = pass.take_back();
     // The pass reads the style engine through the arena, and takes the engine's token along.
@@ -1665,6 +1681,50 @@ unsafe fn update_layout(
 /// flight it submits, if the document asks for that.
 fn runs_style_in_flight(may_submit_pass: bool) -> bool {
     may_submit_pass && crate::stage_thread::submits("layout") && crate::stage_thread::submits_flight()
+}
+
+/// Submits the flight the document's layout update readied, once the document has sealed what its
+/// recording reads.
+///
+/// # Safety
+///
+/// As for [`update_layout`], right after it answered with a flight ready.
+unsafe fn submit_prepared_flight(main_thread: &crate::stage::MainThread, arena_handle: *mut c_void) {
+    let flight = main_thread
+        .host_tables()
+        .and_then(|host_tables| host_tables.prepared_flight.take());
+    debug_assert!(flight.is_some(), "the document's layout update readied a flight");
+    if let Some(flight) = flight {
+        // SAFETY: Guaranteed by the caller.
+        unsafe { flight.submit(arena_handle) };
+    }
+}
+
+impl PreparedFlight {
+    /// Submits the flight.
+    ///
+    /// # Safety
+    ///
+    /// As for [`update_layout`], which readied the flight.
+    unsafe fn submit(self, arena_handle: *mut c_void) {
+        let Self {
+            pass,
+            style,
+            viewport_propagation_sources,
+        } = self;
+        let flight = match style {
+            Some(style) => crate::flight::Flight::from_style_and_layout_pass(
+                arena_handle,
+                style,
+                pass,
+                viewport_propagation_sources,
+            ),
+            None => crate::flight::Flight::from_layout_pass(arena_handle, pass),
+        };
+        // SAFETY: The frame in flight owns what the flight's stages reach until the document thread
+        // takes it back: every document-thread path to the arena joins the frame first.
+        unsafe { crate::flight::submit(arena_handle, flight) };
+    }
 }
 
 /// A layout frame the document thread has driven up to its full layout pass, which it hands to a
