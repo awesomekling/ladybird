@@ -2248,6 +2248,16 @@ impl LayoutNodeArena {
                     PaintDamage::ALL_DRAW
                 },
             );
+            // The root paints the body's propagated background and caches what it painted, so a
+            // body repaint refreshes the root's cached background as well.
+            if self.node_flags_if_live(slot) & NodeFlag::IsBody as u32 != 0 {
+                let source = crate::layout::root_background_source(self);
+                if crate::painting::record::paint::background_resolution::body_background_is_propagated_to_root(
+                    self, slot, source,
+                ) {
+                    self.push_paint_damage(source.root_layout_node, PaintDamage::ALL_DRAW | PaintDamage::ALL_HIT);
+                }
+            }
         }
         if marks.propagated_text_decorations {
             self.push_propagated_text_decoration_damage(slot);
