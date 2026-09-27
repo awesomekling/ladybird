@@ -22,6 +22,9 @@ pub(crate) struct AnchorNameRegistry {
     /// The elements registered under a name in a tree scope. An element's place in the tree moves
     /// without its names moving, so they are put in tree order as they are published.
     by_name: HashMap<(TreeScopeID, usize), Vec<StyleNodeID>>,
+    /// The names registration moved since they were last published. Putting a name's elements in
+    /// tree order costs a sort, so a batch of registrations publishes each name it moved once.
+    unpublished: Vec<(TreeScopeID, usize)>,
 }
 
 impl AnchorNameRegistry {
@@ -52,14 +55,9 @@ pub(crate) struct AnchorNamesRegistered {
 
 impl StyleEngine {
     /// Register the anchor names of the record `style_record` installs on `node` in place of the
-    /// ones it registered before, and publish the names that moved to `arena`. A zero record
-    /// registers nothing: the element's style was discarded, or it left the tree.
-    pub(crate) fn register_anchor_names(
-        &mut self,
-        arena: Option<&LayoutNodeArena>,
-        node: StyleNodeID,
-        style_record: u64,
-    ) -> AnchorNamesRegistered {
+    /// ones it registered before. The names that moved wait for `publish_anchor_names`. A zero
+    /// record registers nothing: the element's style was discarded, or it left the tree.
+    pub(crate) fn register_anchor_names(&mut self, node: StyleNodeID, style_record: u64) -> AnchorNamesRegistered {
         let names: Vec<RetainedUtf16FlyString> = if style_record == 0 {
             Vec::new()
         } else {
@@ -92,7 +90,7 @@ impl StyleEngine {
             registry.by_element.insert(node, (tree_scope, names));
             return registered;
         }
-        let mut moved = Vec::new();
+        let moved = &mut registry.unpublished;
         if let Some((old_scope, old_names)) = old {
             for name in old_names {
                 let key = (old_scope, name.raw());
@@ -116,14 +114,21 @@ impl StyleEngine {
             }
             registry.by_element.insert(node, (tree_scope, names));
         }
-        if let Some(arena) = arena {
-            moved.sort_unstable();
-            moved.dedup();
-            for key in moved {
-                self.publish_anchor_name(arena, key);
-            }
-        }
         registered
+    }
+
+    /// Publish the names registration moved since the last publication to `arena`. Without an
+    /// arena they wait for one.
+    pub(crate) fn publish_anchor_names(&mut self, arena: Option<&LayoutNodeArena>) {
+        let Some(arena) = arena else {
+            return;
+        };
+        let mut moved = std::mem::take(&mut self.retained.anchor_names.unpublished);
+        moved.sort_unstable();
+        moved.dedup();
+        for key in moved {
+            self.publish_anchor_name(arena, key);
+        }
     }
 
     /// Publish the elements registered under a name in a tree scope to the arena, in tree order,
@@ -143,20 +148,43 @@ impl StyleEngine {
             host.raw()
         };
         let tree = &self.retained.tree;
-        let mut ordered: Vec<StyleNodeID> = Vec::new();
-        if let Some(elements) = self.retained.anchor_names.by_name.get(&(tree_scope, name)) {
-            for &element in elements {
-                let index = ordered
-                    .iter()
-                    .position(|&existing| {
-                        tree.is_live(element)
-                            && tree.is_live(existing)
-                            && tree.precedes_in_tree_order(element, existing)
-                    })
-                    .unwrap_or(ordered.len());
-                ordered.insert(index, element);
+        let elements = self
+            .retained
+            .anchor_names
+            .by_name
+            .get(&(tree_scope, name))
+            .map_or(&[][..], Vec::as_slice);
+        // An element's place in tree order is its root and the position among its siblings of each
+        // ancestor on the way down to it. A parent's children are numbered once for all of them. A
+        // retired element has no place any more and goes last.
+        let mut child_positions: HashMap<StyleNodeID, u32> = HashMap::default();
+        let mut keyed: Vec<(Vec<u32>, StyleNodeID)> = Vec::with_capacity(elements.len());
+        for &element in elements {
+            if !tree.is_live(element) {
+                keyed.push((vec![u32::MAX], element));
+                continue;
             }
+            let mut key = Vec::with_capacity(tree.depth(element) as usize + 1);
+            let mut node = element;
+            while let Some(parent) = tree.parent(node) {
+                if !child_positions.contains_key(&node) {
+                    let mut position = 0;
+                    let mut child = tree.first_element_child(parent);
+                    while let Some(sibling) = child {
+                        child_positions.insert(sibling, position);
+                        position += 1;
+                        child = tree.next_element_sibling(sibling);
+                    }
+                }
+                key.push(child_positions.get(&node).copied().unwrap_or(u32::MAX));
+                node = parent;
+            }
+            key.push(node.raw());
+            key.reverse();
+            keyed.push((key, element));
         }
+        keyed.sort_by(|(first, _), (second, _)| first.cmp(second));
+        let ordered: Vec<StyleNodeID> = keyed.into_iter().map(|(_, element)| element).collect();
         arena.set_anchor_name_elements(scope_host, name, &ordered);
     }
 }

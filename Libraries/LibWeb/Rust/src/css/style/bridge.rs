@@ -5145,28 +5145,35 @@ pub unsafe extern "C" fn style_engine_discard_container_effects(engine: *mut c_v
 }
 
 /// Registers the anchor names of the record `style_record` installs on an element in place of the
-/// ones it registered before, and publishes the names that moved to `arena`, which may be null. A
+/// ones it registered before. The names that moved wait for `style_engine_publish_anchor_names`. A
 /// zero record registers nothing. Returns bit 0 when the element had names registered, and bit 1
 /// when it has now.
 ///
 /// # Safety
-/// Engine must be live, and `arena` null or a live layout node arena.
+/// Engine must be live.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_register_anchor_names(
-    engine: *mut c_void,
-    arena: *mut c_void,
-    node: u32,
-    style_record: u64,
-) -> u8 {
+pub unsafe extern "C" fn style_engine_register_anchor_names(engine: *mut c_void, node: u32, style_record: u64) -> u8 {
     engine_entrance(engine, "style_engine_register_anchor_names");
     let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
     let Some(node) = StyleNodeID::from_raw(node) else {
         return 0;
     };
+    let registered = engine.register_anchor_names(node, style_record);
+    u8::from(registered.had_names) | (u8::from(registered.has_names) << 1)
+}
+
+/// Publishes the anchor names registration moved since the last publication to `arena`, which may
+/// be null, in which case they wait for an arena.
+///
+/// # Safety
+/// Engine must be live, and `arena` null or a live layout node arena.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_publish_anchor_names(engine: *mut c_void, arena: *mut c_void) {
+    engine_entrance(engine, "style_engine_publish_anchor_names");
+    let engine = unsafe { &mut *engine.cast::<StyleEngine>() };
     // SAFETY: The caller keeps the arena alive for this call.
     let arena = (!arena.is_null()).then(|| unsafe { crate::layout::LayoutNodeArena::from_handle(arena) });
-    let registered = engine.register_anchor_names(arena, node, style_record);
-    u8::from(registered.had_names) | (u8::from(registered.has_names) << 1)
+    engine.publish_anchor_names(arena);
 }
 
 /// Interns one name identity and returns its document-local atom.

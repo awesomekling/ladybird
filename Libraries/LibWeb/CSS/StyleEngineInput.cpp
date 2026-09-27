@@ -1575,7 +1575,8 @@ static void record_element_disconnecting(DOM::Element& element, TreeScopeID tree
     if (auto const* anchor_values = element.style_group<ComputedValues::AnchorValues>(); anchor_values && !anchor_values->anchor_names_span().is_empty()) {
         style_engine->publish_input([document = GC::Root<DOM::Document> { element.document() }, node](StyleInputScope const& input) {
             auto* arena = document->layout_node_arena_if_created();
-            (void)StyleEngineFFI::style_engine_register_anchor_names(input, input.engine().rust_handle(), arena ? arena->handle() : nullptr, node.value(), 0);
+            (void)StyleEngineFFI::style_engine_register_anchor_names(input, input.engine().rust_handle(), node.value(), 0);
+            StyleEngineFFI::style_engine_publish_anchor_names(input, input.engine().rust_handle(), arena ? arena->handle() : nullptr);
         });
         // Positioned boxes anywhere may hold geometry resolved against these names, which the
         // partial relayout planner's subtree check can no longer see.
