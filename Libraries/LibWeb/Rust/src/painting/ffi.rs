@@ -1548,7 +1548,6 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
 ) -> bool {
     // SAFETY: Guaranteed by the caller.
     unsafe { *submitted_ticket = std::ptr::null() };
-    crate::layout::main_side_census::note_rendering_update(arena_handle);
     // A recording of the document the frame in flight made (one a main-thread record, such as a display list dump,
     // reaches beside the frame) is the frame's to publish, which the frame's presentation may not, and which a read of
     // the arena may have taken in unpublished already: taking the frame in runs its consume, which publishes it.

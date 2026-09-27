@@ -40,9 +40,6 @@ pub(crate) struct HostTables {
     /// Observer sets the arena has handed back that a newer set displaced before the handback was
     /// paid, in the order they were displaced.
     pub(super) image_observer_sets_owed: RefCell<Vec<(NodeSlotId, *mut c_void)>>,
-    /// Whether the document's invalidation journal holds marks the render side has not taken yet.
-    /// The document only reports it while the main-side access census counts.
-    pub(super) invalidation_journal_pending: Cell<bool>,
     /// How the host names a node a layout trace mentions, set when tracing begins.
     pub(super) layout_trace_describe_node: Cell<Option<super::trace::DescribeNode>>,
     /// The generation of the document's render state, which retiring it moves on. See

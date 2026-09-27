@@ -25,18 +25,6 @@
 
 namespace Web::DOM {
 
-// The main-side access census counts how often the DOM side reaches render-owned state while the
-// journal holds marks the render side has not taken yet. It learns that from here, and only while
-// it counts.
-static void report_journal_pending_to_census(Document& document, bool pending)
-{
-    static bool const census_enabled = Layout::RustFFI::layout_main_side_census_enabled();
-    if (!census_enabled)
-        return;
-    if (auto* arena = document.layout_node_arena_if_created())
-        Layout::RustFFI::layout_arena_note_invalidation_journal_pending(arena->handle(), pending);
-}
-
 // A frame in flight never waits for the journal, so what is journaled while one is in flight is main-side work that
 // ran beside the frame.
 static void count_entry_during_flight(HTML::EventLoop::JournalEntryKind kind)
@@ -57,8 +45,6 @@ InvalidationJournal::~InvalidationJournal() = default;
 void InvalidationJournal::set_holds_next_generation(bool holds_next_generation)
 {
     m_holds_next_generation = holds_next_generation;
-    if (!holds_next_generation && !is_empty())
-        report_journal_pending_to_census(m_document, true);
 }
 
 bool InvalidationJournal::is_empty() const
@@ -75,8 +61,6 @@ bool InvalidationJournal::is_empty() const
 
 InvalidationJournal::Entry& InvalidationJournal::entry_for(NodeIdentity identity)
 {
-    if (is_empty() && !m_holds_next_generation)
-        report_journal_pending_to_census(m_document, true);
     auto index = m_entry_index_by_identity.ensure(identity, [&] {
         m_entries.append(Entry { .identity = identity, .rare = {} });
         return m_entries.size() - 1;
@@ -212,8 +196,6 @@ void InvalidationJournal::note_layer_image_paint_facts_cleared(NodeIdentity iden
 void InvalidationJournal::note_unanchored_paint_facts(Compositing::RustFFI::NodeSlotId slot, PaintFactsUpdate&& update)
 {
     count_entry_during_flight(HTML::EventLoop::JournalEntryKind::PaintFacts);
-    if (is_empty() && !m_holds_next_generation)
-        report_journal_pending_to_census(m_document, true);
     m_unanchored_paint_facts.append({ slot, move(update) });
     m_document.request_frame_for_journalled_repaint({});
     drain_if_the_render_side_is_reading();
@@ -286,8 +268,6 @@ static void refresh_editability_stamps(Node& node)
 void InvalidationJournal::note_selection_states()
 {
     count_entry_during_flight(HTML::EventLoop::JournalEntryKind::Selection);
-    if (is_empty() && !m_holds_next_generation)
-        report_journal_pending_to_census(m_document, true);
     m_selection_states_are_stale = true;
     drain_if_the_render_side_is_reading();
 }
@@ -328,8 +308,6 @@ void InvalidationJournal::note_pseudo_element_scroll_offset(NodeIdentity generat
 void InvalidationJournal::note_scrollbar_enlarged_state(Painting::Scrollbar& scrollbar)
 {
     count_entry_during_flight(HTML::EventLoop::JournalEntryKind::Scrollbar);
-    if (is_empty() && !m_holds_next_generation)
-        report_journal_pending_to_census(m_document, true);
     if (!m_scrollbars_with_stale_enlarged_state.contains_slow(NonnullRefPtr { scrollbar }))
         m_scrollbars_with_stale_enlarged_state.append(scrollbar);
     // Publishing a changed state damages the scrollbar's overlay, which only a rendering update
@@ -341,8 +319,6 @@ void InvalidationJournal::note_scrollbar_enlarged_state(Painting::Scrollbar& scr
 void InvalidationJournal::note_visual_context_box_dirty(Compositing::RustFFI::NodeSlotId slot, Layout::RustFFI::FfiVisualContextBoxDirtyKind kind)
 {
     count_entry_during_flight(HTML::EventLoop::JournalEntryKind::VisualContext);
-    if (is_empty() && !m_holds_next_generation)
-        report_journal_pending_to_census(m_document, true);
     m_visual_context_box_dirty_marks.append({ slot, kind });
     drain_if_the_render_side_is_reading();
 }
@@ -350,8 +326,6 @@ void InvalidationJournal::note_visual_context_box_dirty(Compositing::RustFFI::No
 void InvalidationJournal::note_visual_context_full_rebuild(Layout::RustFFI::FfiVisualContextGlobalRebuildReason reason)
 {
     count_entry_during_flight(HTML::EventLoop::JournalEntryKind::VisualContext);
-    if (is_empty() && !m_holds_next_generation)
-        report_journal_pending_to_census(m_document, true);
     if (!m_visual_context_full_rebuild_reasons.contains_slow(reason))
         m_visual_context_full_rebuild_reasons.append(reason);
     drain_if_the_render_side_is_reading();
@@ -360,8 +334,6 @@ void InvalidationJournal::note_visual_context_full_rebuild(Layout::RustFFI::FfiV
 void InvalidationJournal::note_svg_paint_resources_changed()
 {
     count_entry_during_flight(HTML::EventLoop::JournalEntryKind::VisualContext);
-    if (is_empty() && !m_holds_next_generation)
-        report_journal_pending_to_census(m_document, true);
     m_svg_paint_resources_changed = true;
     drain_if_the_render_side_is_reading();
 }
@@ -369,8 +341,6 @@ void InvalidationJournal::note_svg_paint_resources_changed()
 void InvalidationJournal::note_visual_viewport_transform()
 {
     count_entry_during_flight(HTML::EventLoop::JournalEntryKind::VisualContext);
-    if (is_empty() && !m_holds_next_generation)
-        report_journal_pending_to_census(m_document, true);
     m_visual_viewport_transform_is_stale = true;
     drain_if_the_render_side_is_reading();
 }
@@ -664,8 +634,6 @@ void InvalidationJournal::drain()
 
     if (exchange(m_scroll_state_is_stale, false))
         m_document.invalidate_scroll_state();
-
-    report_journal_pending_to_census(m_document, false);
 }
 
 }
