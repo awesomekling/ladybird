@@ -47,11 +47,11 @@ bool should_paint_viewport_scrollbars()
     return g_paint_viewport_scrollbars;
 }
 
-static bool body_background_is_propagated_to_root(Layout::NodeWithStyle const& layout_node)
+static bool body_background_is_propagated_to_root(Layout::Row const& row)
 {
-    if (!layout_node.is_body())
+    if (!row.has_flag(Layout::RustFFI::NodeFlag::IsBody))
         return false;
-    auto const* html_element = layout_node.document().html_element();
+    auto const* html_element = row.document().html_element();
     return html_element && html_element->should_use_body_background_properties();
 }
 
@@ -69,7 +69,8 @@ Compositing::RustFFI::NodeSlotId committed_row_slot(Layout::Node const& node)
 
 Compositing::RustFFI::NodeSlotId viewport_row_slot(DOM::Document const& document)
 {
-    return Layout::Node::slot_id(document.unsafe_layout_node());
+    auto const* arena = const_cast<DOM::Document&>(document).layout_node_arena_if_created();
+    return arena ? arena->bound_viewport_row().slot() : Layout::Row {}.slot();
 }
 
 Layout::RustFFI::FfiCommittedRow committed_row(Layout::Node const& node)
@@ -77,9 +78,9 @@ Layout::RustFFI::FfiCommittedRow committed_row(Layout::Node const& node)
     return Layout::RustFFI::layout_arena_committed_row(node.arena_handle(), committed_row_slot(node));
 }
 
-bool has_committed_box(Layout::Node const& node)
+bool has_committed_box(Layout::Row const& row)
 {
-    return Layout::RustFFI::layout_arena_has_committed_box(node.arena_handle(), committed_row_slot(node));
+    return Layout::RustFFI::layout_arena_has_committed_box(row.arena_handle(), row.slot());
 }
 
 Layout::Node* layout_node_for_committed_slot(Layout::NodeArena& arena, Compositing::RustFFI::NodeSlotId slot)
@@ -732,33 +733,33 @@ public:
     }
 };
 
-void set_needs_repaint(Layout::Node const& node, InvalidateDisplayList should_invalidate_display_list)
+void set_needs_repaint(Layout::Row const& row, InvalidateDisplayList should_invalidate_display_list)
 {
-    if (!has_committed_box(node))
+    if (!has_committed_box(row))
         return;
 
-    auto identity = node.dom_node_identity();
+    auto identity = row.dom_node_identity();
     if (!identity) {
         // Anonymous rows cannot be resolved by the journal. The layout operation that owns them
         // keeps their slots live while this apply-only path pushes damage.
-        apply_repaint_damage(node, should_invalidate_display_list, RepaintDamageStage::AnonymousRow);
+        apply_repaint_damage(row, should_invalidate_display_list, RepaintDamageStage::AnonymousRow);
         return;
     }
-    const_cast<DOM::Document&>(node.document()).invalidation_journal().note_needs_repaint(identity, should_invalidate_display_list);
+    row.document().invalidation_journal().note_needs_repaint(identity, should_invalidate_display_list);
 }
 
-void apply_repaint_damage(Layout::Node const& node, InvalidateDisplayList should_invalidate_display_list, RepaintDamageStage stage)
+void apply_repaint_damage(Layout::Row const& row, InvalidateDisplayList should_invalidate_display_list, RepaintDamageStage stage)
 {
-    if (!has_committed_box(node))
+    if (!has_committed_box(row))
         return;
 
-    auto& document = const_cast<DOM::Document&>(node.document());
+    auto& document = row.document();
     if (should_invalidate_display_list != InvalidateDisplayList::No) {
-        Layout::RustFFI::layout_arena_paintable_invalidate_for_repaint(node.arena_handle(), committed_row_slot(node), should_invalidate_display_list == InvalidateDisplayList::PaintCommandsAndHitTestList, to_underlying(stage));
+        Layout::RustFFI::layout_arena_paintable_invalidate_for_repaint(row.arena_handle(), row.slot(), should_invalidate_display_list == InvalidateDisplayList::PaintCommandsAndHitTestList, to_underlying(stage));
 
         // The root element paints the body's propagated background, so a body repaint must also refresh the
         // root's cached background. Changes to the propagation source are handled during paint preparation.
-        if (body_background_is_propagated_to_root(as<Layout::NodeWithStyle>(node))) {
+        if (body_background_is_propagated_to_root(row)) {
             if (auto const* document_element = document.document_element()) {
                 if (auto const* document_element_layout_node = document_element->unsafe_layout_node())
                     invalidate_paint_cache(*document_element_layout_node);
@@ -777,24 +778,24 @@ void apply_repaint_damage(Layout::TextNode const& node, InvalidateDisplayList sh
         Layout::RustFFI::layout_arena_invalidate_nearest_self_painting_inline_paint_cache(node.arena_handle(), Layout::Node::slot_id(&node), to_underlying(stage));
 }
 
-void set_needs_repaint_in_subtree(Layout::Node const& node)
+void set_needs_repaint_in_subtree(Layout::Row const& row)
 {
-    if (!has_committed_box(node))
+    if (!has_committed_box(row))
         return;
-    auto identity = node.dom_node_identity();
+    auto identity = row.dom_node_identity();
     if (!identity) {
-        apply_subtree_repaint_damage(node, RepaintDamageStage::AnonymousRow);
-        apply_repaint_damage(node, InvalidateDisplayList::PaintCommandsAndHitTestList, RepaintDamageStage::AnonymousRow);
+        apply_subtree_repaint_damage(row, RepaintDamageStage::AnonymousRow);
+        apply_repaint_damage(row, InvalidateDisplayList::PaintCommandsAndHitTestList, RepaintDamageStage::AnonymousRow);
         return;
     }
-    const_cast<DOM::Document&>(node.document()).invalidation_journal().note_needs_repaint_in_subtree(identity);
+    row.document().invalidation_journal().note_needs_repaint_in_subtree(identity);
 }
 
-void apply_subtree_repaint_damage(Layout::Node const& node, RepaintDamageStage stage)
+void apply_subtree_repaint_damage(Layout::Row const& row, RepaintDamageStage stage)
 {
-    if (!has_committed_box(node))
+    if (!has_committed_box(row))
         return;
-    Layout::RustFFI::layout_arena_paintable_invalidate_subtree_for_repaint(node.arena_handle(), committed_row_slot(node), to_underlying(stage));
+    Layout::RustFFI::layout_arena_paintable_invalidate_subtree_for_repaint(row.arena_handle(), row.slot(), to_underlying(stage));
 }
 
 void invalidate_paint_cache(Layout::Node const& node)
@@ -809,36 +810,36 @@ void invalidate_paint_cache(Layout::Node const& node)
     const_cast<DOM::Document&>(node.document()).invalidation_journal().note_paint_cache_invalidation(identity, PaintCacheInvalidation::PaintAndHitTest);
 }
 
-void invalidate_propagated_text_decoration_caches(Layout::Node const& node)
+void invalidate_propagated_text_decoration_caches(Layout::Row const& row)
 {
-    auto identity = node.dom_node_identity();
+    auto identity = row.dom_node_identity();
     if (!identity) {
         // See invalidate_paint_cache(): an anonymous row cannot be resolved from a journal entry.
-        apply_paint_cache_invalidation(node, PaintCacheInvalidation::PropagatedTextDecorations, PaintCacheInvalidationStage::AnonymousRow);
+        apply_paint_cache_invalidation(row, PaintCacheInvalidation::PropagatedTextDecorations, PaintCacheInvalidationStage::AnonymousRow);
         return;
     }
-    const_cast<DOM::Document&>(node.document()).invalidation_journal().note_paint_cache_invalidation(identity, PaintCacheInvalidation::PropagatedTextDecorations);
+    row.document().invalidation_journal().note_paint_cache_invalidation(identity, PaintCacheInvalidation::PropagatedTextDecorations);
 }
 
-void apply_paint_cache_invalidation(Layout::Node const& node, PaintCacheInvalidation invalidation, PaintCacheInvalidationStage stage)
+void apply_paint_cache_invalidation(Layout::Row const& row, PaintCacheInvalidation invalidation, PaintCacheInvalidationStage stage)
 {
     Layout::RustFFI::layout_arena_paintable_invalidate_paint_cache(
-        node.arena_handle(), committed_row_slot(node), invalidation == PaintCacheInvalidation::PropagatedTextDecorations, to_underlying(stage));
+        row.arena_handle(), row.slot(), invalidation == PaintCacheInvalidation::PropagatedTextDecorations, to_underlying(stage));
 }
 
-void repaint_after_style_change(Layout::Node const& node, CSS::RequiredInvalidationAfterStyleChange const& invalidation)
+void repaint_after_style_change(Layout::Row const& row, CSS::RequiredInvalidationAfterStyleChange const& invalidation)
 {
     if (invalidation.needs_repaint())
-        set_needs_repaint(node, invalidation.invalidates_hit_test_display_list() ? InvalidateDisplayList::PaintCommandsAndHitTestList : InvalidateDisplayList::PaintCommands);
+        set_needs_repaint(row, invalidation.invalidates_hit_test_display_list() ? InvalidateDisplayList::PaintCommandsAndHitTestList : InvalidateDisplayList::PaintCommands);
     if (invalidation.repaint_propagated_text_decorations)
-        invalidate_propagated_text_decoration_caches(node);
+        invalidate_propagated_text_decoration_caches(row);
     if (invalidation.needs_stacking_context_tree_rebuild()) {
-        auto& document = const_cast<DOM::Document&>(node.document());
-        document.schedule_accumulated_visual_context_update(node, DOM::Document::AccumulatedVisualContextUpdateScope::Structure);
-        auto const* table_wrapper_carrying_the_moved_table_properties
-            = display(node).is_table_inside() && node.parent() && node.parent()->is_table_wrapper() ? node.parent() : nullptr;
-        if (table_wrapper_carrying_the_moved_table_properties)
-            document.schedule_accumulated_visual_context_update(*table_wrapper_carrying_the_moved_table_properties, DOM::Document::AccumulatedVisualContextUpdateScope::Structure);
+        auto& document = row.document();
+        document.schedule_accumulated_visual_context_update(row, DOM::Document::AccumulatedVisualContextUpdateScope::Structure);
+        if (has_committed_box(row) && row.display().is_table_inside()) {
+            if (auto parent = row.linked(Layout::RustFFI::FfiNodeLink::Parent); parent && parent.kind() == Layout::RustFFI::NodeKind::TableWrapper)
+                document.schedule_accumulated_visual_context_update(parent, DOM::Document::AccumulatedVisualContextUpdateScope::Structure);
+        }
     }
 }
 

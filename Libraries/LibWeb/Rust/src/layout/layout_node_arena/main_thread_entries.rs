@@ -187,6 +187,97 @@ unsafe extern "C" fn layout_arena_bound_pseudo_element_shell(
     arena.node_shell(&main_thread, row)
 }
 
+/// A row the host names by its slot, with the shell the host made for it, if it made one.
+#[repr(C)]
+pub struct FfiBoundRow {
+    /// The row, or an invalid slot if there is none.
+    pub slot: NodeSlotId,
+    /// The row's shell, or null if nothing has asked for one yet.
+    pub shell: *mut c_void,
+    pub kind: NodeKind,
+}
+
+impl FfiBoundRow {
+    const NONE: Self = Self {
+        slot: NodeSlotId::INVALID,
+        shell: std::ptr::null_mut(),
+        kind: NodeKind::Unset,
+    };
+
+    fn of(arena: &LayoutNodeArena, main_thread: &crate::stage::MainThread, slot: NodeSlotId) -> Self {
+        if slot.is_invalid() {
+            return Self::NONE;
+        }
+        let data = arena.data(slot);
+        Self {
+            slot,
+            shell: data
+                .shell
+                .get()
+                .map_or(std::ptr::null_mut(), |shell| shell.host_object(main_thread)),
+            kind: data.kind.get(),
+        }
+    }
+}
+
+/// The row the element or text node with `style_node` is bound to, or, for a nonzero
+/// `generated_for`, the row of its pseudo-element of that kind. Unlike
+/// [`layout_arena_bound_shell`], this makes no shell.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_bound_row_of(arena: *mut c_void, style_node: u32, generated_for: u8) -> FfiBoundRow {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    let main_thread = unsafe { crate::stage::from_ffi_entry_beside_recording(&MAIN_THREAD_FFI_ENTRY, arena) };
+    let Some(style_node) = StyleNodeID::from_raw(style_node) else {
+        return FfiBoundRow::NONE;
+    };
+    // SAFETY: As for `layout_arena_bound_shell`: the binding, the row's kind and its shell are
+    // nothing a recording writes.
+    let arena = unsafe { LayoutNodeArena::from_handle_beside_recording(arena) };
+    let slot = if generated_for == 0 {
+        arena.bound_row(style_node)
+    } else {
+        arena.bound_pseudo_element_row(style_node, generated_for)
+    };
+    FfiBoundRow::of(arena, &main_thread, slot)
+}
+
+/// The viewport row the document is bound to. Unlike [`layout_arena_bound_viewport_shell`], this
+/// makes no shell.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_bound_viewport_row(arena: *mut c_void) -> FfiBoundRow {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    let main_thread = unsafe { crate::stage::from_ffi_entry_beside_recording(&MAIN_THREAD_FFI_ENTRY, arena) };
+    // SAFETY: As above.
+    let arena = unsafe { LayoutNodeArena::from_handle_beside_recording(arena) };
+    FfiBoundRow::of(arena, &main_thread, arena.bound_viewport_row())
+}
+
+/// The row `slot` links to by `link`, with its shell if one was made.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_linked_row(arena: *mut c_void, slot: NodeSlotId, link: FfiNodeLink) -> FfiBoundRow {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    let main_thread = unsafe { crate::stage::from_ffi_entry_beside_recording(&MAIN_THREAD_FFI_ENTRY, arena) };
+    // SAFETY: The C++ caller keeps the arena alive for this synchronous call. The links are
+    // nothing a recording writes.
+    let arena = unsafe { LayoutNodeArena::from_handle_beside_recording(arena) };
+    FfiBoundRow::of(arena, &main_thread, arena.node_link_slot(slot, link))
+}
+
+/// The row `slot` names, with its shell if one was made, or none if the row is no longer live,
+/// which a slot noted earlier may not be.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_row_if_live(arena: *mut c_void, slot: NodeSlotId) -> FfiBoundRow {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    let main_thread = unsafe { crate::stage::from_ffi_entry_beside_recording(&MAIN_THREAD_FFI_ENTRY, arena) };
+    // SAFETY: The C++ caller keeps the arena alive for this synchronous call. Which slots are live
+    // is nothing a recording writes.
+    let arena = unsafe { LayoutNodeArena::from_handle_beside_recording(arena) };
+    if !arena.slot_is_live(slot) {
+        return FfiBoundRow::NONE;
+    }
+    FfiBoundRow::of(arena, &main_thread, slot)
+}
+
 /// The shell of the viewport row the document is bound to, materialised if nothing has asked for
 /// it yet, or null.
 #[unsafe(no_mangle)]

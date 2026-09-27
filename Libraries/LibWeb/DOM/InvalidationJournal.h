@@ -28,6 +28,9 @@ class Scrollbar;
 
 namespace Web::DOM {
 
+// Writes paint facts to the row an entry resolves to at the drain. Nothing makes a shell for the row to hand it over.
+using PaintFactsUpdate = Function<void(Layout::Row const&)>;
+
 enum class PaintFactsFamily : u8 {
     LayerImage,
     ReplacedImage,
@@ -56,10 +59,13 @@ public:
     void note_dom_paint_facts(NodeIdentity, u8 facts);
     void note_canvas_paint_facts(NodeIdentity, bool has_content, i32 content_width, i32 content_height, u64 canvas_id, u64 content_generation);
     void note_form_control_paint_facts(NodeIdentity, bool enabled, bool checked, bool indeterminate, bool being_activated);
-    void note_paint_facts(NodeIdentity, PaintFactsFamily, Function<void(Layout::Node const&)>&&);
+    void note_paint_facts(NodeIdentity, PaintFactsFamily, PaintFactsUpdate&&);
+    // The node's row took a style that holds no image, so it has no layer image facts. This takes
+    // the place of any layer image update noted before it, as one noted after takes its place.
+    void note_layer_image_paint_facts_cleared(NodeIdentity);
     // The row, and every row it descends from, is built for no DOM node an entry could name, so
     // the update is made on the row itself at the drain, if it is still live.
-    void note_unanchored_paint_facts(Compositing::RustFFI::NodeSlotId, Function<void(Layout::Node const&)>&&);
+    void note_unanchored_paint_facts(Compositing::RustFFI::NodeSlotId, PaintFactsUpdate&&);
     void note_paint_cache_invalidation(NodeIdentity, Painting::PaintCacheInvalidation);
     // Whether the node is an editing host, or a text node that produces a fragment when empty,
     // may have changed, and the rows built for it restamp both at the drain.
@@ -129,10 +135,10 @@ private:
         bool form_control_checked { false };
         bool form_control_indeterminate { false };
         bool form_control_being_activated { false };
-        Function<void(Layout::Node const&)> layer_image_paint_facts_update;
-        Function<void(Layout::Node const&)> replaced_image_paint_facts_update;
-        Function<void(Layout::Node const&)> video_paint_facts_update;
-        Function<void(Layout::Node const&)> navigable_container_paint_facts_update;
+        PaintFactsUpdate layer_image_paint_facts_update;
+        PaintFactsUpdate replaced_image_paint_facts_update;
+        PaintFactsUpdate video_paint_facts_update;
+        PaintFactsUpdate navigable_container_paint_facts_update;
         Vector<PseudoElementScrollOffset, 1> pseudo_element_scroll_offsets;
     };
 
@@ -160,6 +166,8 @@ private:
         bool text_whitespace_state_changed { false };
         bool needs_svg_attribute_facts_publish { false };
         bool needs_table_spans_publish { false };
+        // Every style change of a row that holds no image clears its layer image facts, so this stays out of the rare facts.
+        bool clears_layer_image_paint_facts { false };
         OwnPtr<RareFacts> rare;
 
         RareFacts& ensure_rare()
@@ -185,7 +193,7 @@ private:
     bool m_selection_states_are_stale { false };
     struct UnanchoredPaintFacts {
         Compositing::RustFFI::NodeSlotId slot;
-        Function<void(Layout::Node const&)> update;
+        PaintFactsUpdate update;
     };
     Vector<UnanchoredPaintFacts> m_unanchored_paint_facts;
     Vector<NonnullRefPtr<Painting::Scrollbar>> m_scrollbars_with_stale_enlarged_state;

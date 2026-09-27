@@ -1424,22 +1424,53 @@ static CSS::StyleComputer::ComputedStyleInvalidation decode_style_record_invalid
     result.any_computed_value_changed = packed & to_underlying(CSS::StyleEngineFFI::FfiStyleInvalidationField::AnyComputedValueChanged);
     return result;
 }
+// The row of the pseudo-element's box, found without making a shell for a synthetic pseudo-element's.
+static Layout::Row pseudo_element_layout_row(Element const& element, CSS::PseudoElement pseudo_element)
+{
+    if (CSS::is_synthetic_pseudo_element(pseudo_element)) {
+        auto* arena = const_cast<Document&>(element.document()).layout_node_arena_if_created();
+        if (!arena)
+            return {};
+        return arena->bound_row(element.style_node_id(), Layout::Node::encode_generated_for(pseudo_element));
+    }
+    if (auto* layout_node = element.pseudo_element_unsafe_layout_node(pseudo_element))
+        return *layout_node;
+    return {};
+}
+
 struct ElementDependentInvalidationState {
-    Layout::NodeWithStyle const* layout_node { nullptr };
+    // The box's row, found without making a shell for it.
+    Layout::Row row;
     Optional<ValueComparingRefPtr<CSS::CounterStyle const>> list_counter_style;
     bool has_snapshot { false };
 
-    void snapshot()
+    // The counter style the box's marker renders from. Only a list item renders a marker, so only its counter style
+    // can matter; a display change to or from list-item rebuilds the box regardless.
+    static Optional<ValueComparingRefPtr<CSS::CounterStyle const>> list_counter_style_of(Layout::Row const& row, CSS::StyleScope const& style_scope)
     {
-        if (!layout_node)
-            return;
-        // Only a list item renders a marker, so only its counter style can matter; a display
-        // change to or from list-item rebuilds the box regardless.
-        if (layout_node->display().is_list_item()) {
-            if (auto const& list_style_type = layout_node->list_style_type(); list_style_type.has<RefPtr<CSS::CounterStyle const>>())
-                list_counter_style = list_style_type.get<RefPtr<CSS::CounterStyle const>>();
+        // A shell resolved the counter style when first asked and keeps it until its style changes; a row
+        // without one resolves it now, as a shell made now would.
+        if (auto const* shell = static_cast<Layout::NodeWithStyle const*>(row.shell_if_made())) {
+            if (!shell->display().is_list_item())
+                return {};
+            if (auto const& list_style_type = shell->list_style_type(); list_style_type.has<RefPtr<CSS::CounterStyle const>>())
+                return list_style_type.get<RefPtr<CSS::CounterStyle const>>();
+            return {};
         }
-        layout_node = nullptr;
+        if (!row.display().is_list_item())
+            return {};
+        auto list_style_type = Layout::NodeWithStyle::style_group_of<CSS::ComputedValues::InheritedListValues>(row.style_payloads()).list_style_type_value(style_scope);
+        if (list_style_type.has<RefPtr<CSS::CounterStyle const>>())
+            return list_style_type.get<RefPtr<CSS::CounterStyle const>>();
+        return {};
+    }
+
+    void snapshot(CSS::StyleScope const& style_scope)
+    {
+        if (!row)
+            return;
+        list_counter_style = list_counter_style_of(row, style_scope);
+        row = {};
         has_snapshot = true;
     }
 };
@@ -1547,13 +1578,8 @@ static void add_element_dependent_invalidation(CSS::RequiredInvalidationAfterSty
         }
     };
 
-    if (old_state.layout_node) {
-        Optional<ValueComparingRefPtr<CSS::CounterStyle const>> old_list_counter_style;
-        if (old_state.layout_node->display().is_list_item()) {
-            if (auto const& list_style_type = old_state.layout_node->list_style_type(); list_style_type.has<RefPtr<CSS::CounterStyle const>>())
-                old_list_counter_style = list_style_type.get<RefPtr<CSS::CounterStyle const>>();
-        }
-        compare(old_list_counter_style);
+    if (old_state.row) {
+        compare(ElementDependentInvalidationState::list_counter_style_of(old_state.row, abstract_element.element().style_scope()));
     } else if (old_state.has_snapshot) {
         compare(old_state.list_counter_style);
     }
@@ -1639,14 +1665,14 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
         auto pseudo_element_style = computed_style(pseudo_element);
         auto const* pseudo_element_values = pseudo_element_style ? &*pseudo_element_style : nullptr;
         ElementDependentInvalidationState old_state {
-            .layout_node = pseudo_element_unsafe_layout_node(pseudo_element),
+            .row = pseudo_element_layout_row(*this, pseudo_element),
             .list_counter_style = {},
             .has_snapshot = false,
         };
         RefPtr<CSS::ComputedValues const> style_to_preserve_for_detachment;
         if (pseudo_element_values && pseudo_element_values->animated_properties()) {
-            auto had_layout_node = !!old_state.layout_node;
-            old_state.snapshot();
+            auto had_layout_node = !!old_state.row;
+            old_state.snapshot(style_scope());
             if (had_layout_node)
                 style_to_preserve_for_detachment = CSS::ComputedValues::Builder { *pseudo_element_values }.build();
         }
@@ -2341,7 +2367,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
         auto new_computed_values = style_computer.computed_style_record_view(new_style_record);
         VERIFY(new_computed_values);
         ElementDependentInvalidationState old_state {
-            .layout_node = unsafe_layout_node(),
+            .row = layout_row(),
             .list_counter_style = {},
             .has_snapshot = false,
         };
@@ -2414,7 +2440,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::compare_engine_computed_style
         auto new_computed_values = style_computer.computed_style_record_view(style_record);
         VERIFY(new_computed_values);
         ElementDependentInvalidationState old_state {
-            .layout_node = unsafe_layout_node(),
+            .row = layout_row(),
             .list_counter_style = {},
             .has_snapshot = false,
         };
@@ -5137,8 +5163,8 @@ void Element::replace_style_record(CSS::StyleDrainScope const& scope, CSS::Style
     // element's record resolves `rem`, for one.
     if (style_node_id() != 0)
         scope.engine().set_element_container_query_inputs(scope, style_node_id(), style_record_identity);
-    if (auto* layout_node = unsafe_layout_node())
-        layout_node->set_style_record_identity(style_record_identity);
+    if (auto row = layout_row())
+        Layout::NodeWithStyle::set_style_record_identity(row, style_record_identity);
 }
 
 // An element leaving the tree holds no style; the engine hears so between passes.
@@ -5155,8 +5181,8 @@ void Element::clear_style_record_on_removal()
                 input.engine().set_element_container_query_inputs(input, style_node, {});
         });
     }
-    if (auto* layout_node = unsafe_layout_node())
-        layout_node->set_style_record_identity({});
+    if (auto row = layout_row())
+        Layout::NodeWithStyle::set_style_record_identity(row, {});
 }
 
 void Element::set_computed_style(CSS::StyleDrainScope const& scope, Optional<CSS::PseudoElement> pseudo_element_type, CSS::StyleRecordID style_record_identity)

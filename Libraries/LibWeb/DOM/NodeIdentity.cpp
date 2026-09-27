@@ -61,4 +61,17 @@ Layout::Node* NodeIdentity::bound_layout_node(Layout::NodeArena& arena) const
     VERIFY_NOT_REACHED();
 }
 
+Layout::Row NodeIdentity::bound_row(Layout::NodeArena const& arena) const
+{
+    switch (m_kind) {
+    case Kind::None:
+        return {};
+    case Kind::StyleNode:
+        return arena.bound_row(m_style_node);
+    case Kind::Document:
+        return arena.bound_viewport_row();
+    }
+    VERIFY_NOT_REACHED();
+}
+
 }

@@ -36,11 +36,6 @@ static_assert(offsetof(Compositing::RustFFI::NodeSlotId, index) == 0);
 static_assert(sizeof(RustFFI::NodeKind) == sizeof(u8));
 static_assert(sizeof(RustFFI::NodeFlag) == sizeof(u32));
 
-enum class LayoutUpdatePropagation : u8 {
-    ThroughAncestors,
-    BoundarySelfOnly,
-};
-
 enum class BindToPreparedArenaSlot {
     Yes,
 };
@@ -448,12 +443,20 @@ public:
 
     NonnullRefPtr<CSS::ComputedValues const> copy_computed_values() const;
     CSS::StyleRecordID style_record_identity() const { return m_style_record_identity; }
+    void const* style_payloads() const { return m_style_payloads; }
 
     template<typename StyleGroup>
     StyleGroup const& style_group() const
     {
         VERIFY(m_style_payloads);
-        auto const* payloads = static_cast<void const* const*>(m_style_payloads);
+        return style_group_of<StyleGroup>(m_style_payloads);
+    }
+
+    // A group of the style whose payloads a row holds, read without the row's shell.
+    template<typename StyleGroup>
+    static StyleGroup const& style_group_of(void const* style_payloads)
+    {
+        auto const* payloads = static_cast<void const* const*>(style_payloads);
         auto const* payload = payloads[StyleGroup::style_group_index];
         VERIFY(payload);
         return *static_cast<StyleGroup const*>(payload);
@@ -704,6 +707,9 @@ public:
 
     void clear_image_observers();
     void apply_style(CSS::StyleRecordID);
+    // Applies the style to the row as apply_style() does to its shell, without making a shell for a row
+    // that has none, unless the style or the box keeps what only a shell does.
+    static void apply_style(Row const&, CSS::StyleRecordID);
     void attach_style_resources();
     bool synchronize_table_span_data();
 
@@ -715,6 +721,9 @@ public:
 
     void set_computed_values(NonnullRefPtr<CSS::ComputedValues const>);
     void set_style_record_identity(CSS::StyleRecordID);
+    // Sets the row's record as set_style_record_identity() does its shell's, without making a shell for a row that has
+    // none, unless the box can be a scroll snap container.
+    static void set_style_record_identity(Row const&, CSS::StyleRecordID);
     void refresh_style_from_arena(CSS::StyleRecordID, void const* payloads, bool should_attach_resources);
     // The pin lives on the node's arena row and is released with it, so
     // Document::tear_down_layout_tree() must free the layout root before the document's style
