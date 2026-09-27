@@ -48,7 +48,6 @@ pub struct FfiLayoutUpdateHostCallbacks {
     pub process_pending_list_item_renumbers: unsafe extern "C" fn(*mut c_void),
     pub process_pending_top_layer_layout_changes: unsafe extern "C" fn(*mut c_void),
     pub document_facts: unsafe extern "C" fn(*mut c_void) -> FfiLayoutUpdateDocumentFacts,
-    pub needs_style_update_after_layout: unsafe extern "C" fn(*mut c_void) -> bool,
     pub prepare_for_rendering: unsafe extern "C" fn(*mut c_void),
     /// Seals what the recording the flight about to be submitted makes after its layout reads, if
     /// the document may be recorded that way (see `layout_arena_seal_flight_paint`). The flag says
@@ -119,6 +118,9 @@ pub struct FfiLayoutUpdateDocumentFacts {
     /// The document node or one of its descendants needs a layout tree update.
     pub document_needs_layout_tree_build: bool,
     pub container_query_evaluation_is_pending: bool,
+    /// The document holds style input it has not handed to the style engine yet, or animation
+    /// effects whose style it has yet to sample.
+    pub style_input_waits_on_document: bool,
     /// A top layer membership change or zone rebuild is waiting for the next pass.
     pub top_layer_work_pending: bool,
     pub should_collect_devtools_layout_data: bool,
@@ -215,7 +217,6 @@ pub(crate) struct LayoutUpdateHost {
     process_pending_list_item_renumbers: unsafe extern "C" fn(*mut c_void),
     process_pending_top_layer_layout_changes: unsafe extern "C" fn(*mut c_void),
     document_facts: unsafe extern "C" fn(*mut c_void) -> FfiLayoutUpdateDocumentFacts,
-    needs_style_update_after_layout: unsafe extern "C" fn(*mut c_void) -> bool,
     prepare_for_rendering: unsafe extern "C" fn(*mut c_void),
     seal_flight_paint: unsafe extern "C" fn(*mut c_void, bool),
     prepare_layout_tree_build: unsafe extern "C" fn(*mut c_void) -> u32,
@@ -243,7 +244,6 @@ impl From<FfiLayoutUpdateHostCallbacks> for LayoutUpdateHost {
             process_pending_list_item_renumbers: host.process_pending_list_item_renumbers,
             process_pending_top_layer_layout_changes: host.process_pending_top_layer_layout_changes,
             document_facts: host.document_facts,
-            needs_style_update_after_layout: host.needs_style_update_after_layout,
             prepare_for_rendering: host.prepare_for_rendering,
             seal_flight_paint: host.seal_flight_paint,
             prepare_layout_tree_build: host.prepare_layout_tree_build,
@@ -291,10 +291,6 @@ impl LayoutUpdateHost {
 
     fn document_facts(&self, _: &crate::stage::MainThread) -> FfiLayoutUpdateDocumentFacts {
         unsafe { (self.document_facts)(self.context) }
-    }
-
-    fn needs_style_update_after_layout(&self, _: &crate::stage::MainThread) -> bool {
-        unsafe { (self.needs_style_update_after_layout)(self.context) }
     }
 
     fn prepare_for_rendering(&self, _: &crate::stage::MainThread) {
@@ -393,6 +389,16 @@ fn layout_is_up_to_date(arena: &LayoutNodeArena, facts: &FfiLayoutUpdateDocument
         return true;
     }
     arena.layout_is_up_to_date(facts.document_needs_layout_tree_build)
+}
+
+/// Whether the document's style is to be updated again after its layout: for input the document
+/// still holds, for a container a style computation asked about before it had a box, or for a
+/// transaction the style engine has pending.
+fn style_update_follows_layout(arena: &LayoutNodeArena, facts: &FfiLayoutUpdateDocumentFacts) -> bool {
+    facts.style_input_waits_on_document
+        || arena.with_style_store(|engine| {
+            engine.has_size_containers_needing_evaluation_after_layout() || engine.has_pending_transaction()
+        })
 }
 
 /// The `TREEBUILD` and `LAYOUT` timing lines, off unless `LIBWEB_UPDATE_LAYOUT_TRACE` is set.
@@ -677,12 +683,6 @@ struct LayoutFrame {
     style_pass: Option<crate::css::style::bridge::StylePassJob>,
     /// Whether the frame's first round ran its style in the flight.
     style_ran_in_flight: bool,
-}
-
-/// The document facts together with what a join answered.
-struct Joined<T> {
-    value: T,
-    facts: FfiLayoutUpdateDocumentFacts,
 }
 
 /// A full layout pass a round has readied. Everything it reads is in hand, so it runs without the
@@ -1024,7 +1024,7 @@ impl LayoutFrame {
         let end = match end {
             FrameEnd::UnlessHostLeftWork => {
                 let facts = host.document_facts(main_thread);
-                if host.needs_style_update_after_layout(main_thread)
+                if style_update_follows_layout(arena, &facts)
                     || facts.top_layer_work_pending
                     || !layout_is_up_to_date(arena, &facts)
                 {
@@ -1279,17 +1279,11 @@ impl LayoutFrame {
     /// pending.
     fn run_out_of_rounds(&mut self, joins: &crate::stage_thread::MainJoins<'_>) -> FrameEnd {
         let list_owners_to_rebuild = std::mem::take(&mut self.list_owners_to_rebuild);
-        let Joined {
-            value: needs_style_update_after_layout,
-            facts,
-        } = self.join(joins, FrameJoin::FinalFacts, |main_thread, host| {
+        let facts = self.join(joins, FrameJoin::FinalFacts, |main_thread, host| {
             host.rebuild_list_owners_with_stale_item_counters(main_thread, &list_owners_to_rebuild);
-            Joined {
-                value: host.needs_style_update_after_layout(main_thread),
-                facts: host.document_facts(main_thread),
-            }
+            host.document_facts(main_thread)
         });
-        if needs_style_update_after_layout || !layout_is_up_to_date(self.arena(), &facts) {
+        if style_update_follows_layout(self.arena(), &facts) || !layout_is_up_to_date(self.arena(), &facts) {
             self.messages.stabilization_bound_failed = true;
         }
         FrameEnd::Over(FfiLayoutUpdateEnd::InUpdate)
@@ -1928,7 +1922,7 @@ unsafe fn finish_layout_frame_recorded_in_flight(
     let arena = unsafe { arena(arena_handle) };
     let facts = host.document_facts(main_thread);
     let recording_stands = !restored_style
-        && !host.needs_style_update_after_layout(main_thread)
+        && !style_update_follows_layout(arena, &facts)
         && !facts.top_layer_work_pending
         && layout_is_up_to_date(arena, &facts);
     // The install owed the flight the repaint of its batch whether the flight applied it or parked:
@@ -2107,6 +2101,7 @@ mod tests {
             document_is_active: true,
             document_needs_layout_tree_build: false,
             container_query_evaluation_is_pending: false,
+            style_input_waits_on_document: false,
             top_layer_work_pending: false,
             should_collect_devtools_layout_data: false,
             document_in_quirks_mode: false,
