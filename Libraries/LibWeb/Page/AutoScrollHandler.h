@@ -10,6 +10,7 @@
 #include <LibGC/Ptr.h>
 #include <LibJS/Heap/Cell.h>
 #include <LibWeb/Forward.h>
+#include <LibWeb/Painting/BoxSlot.h>
 #include <LibWebCommon/PixelUnits.h>
 
 namespace Web {
@@ -28,8 +29,8 @@ public:
 
     bool is_active() const { return m_active; }
 
-    static GC::Ptr<DOM::Element> find_scrollable_ancestor(Layout::Node const&);
-    static Layout::Node* auto_scroll_layout_node(DOM::Element&);
+    static GC::Ptr<DOM::Element> find_scrollable_ancestor(Painting::BoxSlot const&);
+    static Painting::BoxSlot auto_scroll_box(DOM::Element&);
 
 private:
     void activate();

@@ -10,6 +10,7 @@
 #include <LibGC/Ptr.h>
 #include <LibJS/Heap/Cell.h>
 #include <LibWeb/Forward.h>
+#include <LibWeb/Painting/BoxSlot.h>
 #include <LibWebCommon/PixelUnits.h>
 
 namespace Web {
@@ -23,7 +24,7 @@ public:
 
     void visit_edges(JS::Cell::Visitor&) const;
 
-    static GC::Ptr<DOM::Element> find_scrollable_ancestor(DOM::Document&, Layout::Node&);
+    static GC::Ptr<DOM::Element> find_scrollable_ancestor(DOM::Document&, Painting::BoxSlot const&);
 
     void update_mouse_position(CSSPixelPoint position) { m_mouse_position = position; }
     void perform_tick();
