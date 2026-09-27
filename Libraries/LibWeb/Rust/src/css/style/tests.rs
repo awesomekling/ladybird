@@ -7279,6 +7279,39 @@ fn shared_retained_answer_completion_reuses_compact_cascade_state() {
     }
 }
 
+fn gated_and_ungated_target_rules(engine: &mut StyleEngine, nodes: &[StyleNodeID]) -> (RuleID, RuleID) {
+    let ungated = add_target_rule(engine, StyleSheetObjectID(1), StyleAtomID(200));
+    let gated = add_target_rule(engine, StyleSheetObjectID(2), StyleAtomID(201));
+    engine.set_rule_declared_properties_with_values(ungated, &[(1, false, SpecifiedValueID(100))]);
+    engine.set_rule_declared_properties_with_values(gated, &[(1, false, SpecifiedValueID(200))]);
+    engine.set_rule_gated_by_container_query(gated);
+    for &node in nodes {
+        for kind in ElementDeclarationKind::ALL {
+            engine.set_element_declared_properties(node, kind, &[], Vec::new(), Vec::new(), Vec::new());
+        }
+    }
+    commit_test_setup(engine);
+    (ungated, gated)
+}
+
+#[test]
+fn a_moving_ancestor_leaves_a_gated_inventory_incomplete() {
+    let (mut engine, nodes) = nested_document();
+    let (ungated, gated) = gated_and_ungated_target_rules(&mut engine, &nodes);
+    let matches = vec![
+        concrete_rule_match(&engine, nodes[2], ungated, 0, None),
+        concrete_rule_match(&engine, nodes[2], gated, 1, None),
+    ];
+    // What held when the node's winners were published last is held.
+    assert!(engine.cascade_winner_inventory_is_complete(&matches, Some(nodes[2])));
+    assert!(engine.cascade_winner_inventory_is_complete_in_transaction(&matches, nodes[2], &[]));
+    // A container above the node is not final while an ancestor's answer moves.
+    assert!(!engine.cascade_winner_inventory_is_complete_in_transaction(&matches, nodes[2], &[nodes[0]]));
+    // A node without gated matches stays complete, and so does one whose descendant moves.
+    assert!(engine.cascade_winner_inventory_is_complete_in_transaction(&matches[..1], nodes[2], &[nodes[0]]));
+    assert!(engine.cascade_winner_inventory_is_complete_in_transaction(&matches, nodes[2], &[nodes[3]]));
+}
+
 #[test]
 fn closure_identity_stop_declines_stale_pseudo_rows() {
     let (mut engine, nodes) = nested_document();
