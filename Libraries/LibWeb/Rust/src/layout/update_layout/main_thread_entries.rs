@@ -73,30 +73,6 @@ unsafe extern "C" fn layout_arena_update_layout(
     })
 }
 
-/// Resumes the layout update that answered `NeedsStyle` or `NeedsRoundFacts`, once the document
-/// thread has run its style update if asked to and read the round's facts into `round`, and goes on
-/// with it as `layout_arena_update_layout` does.
-///
-/// # Safety
-///
-/// As for `layout_arena_update_layout`, right after the document did what the update returned for.
-/// `round` must be valid for the call, and so must the selection it points to, if any.
-#[unsafe(no_mangle)]
-unsafe extern "C" fn layout_arena_resume_update_layout(
-    arena: *mut c_void,
-    round: *const FfiLayoutRoundFacts,
-) -> FfiLayoutUpdateOutcome {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    assert!(!round.is_null());
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
-    abort_on_panic(|| {
-        // SAFETY: Guaranteed by the entry point's contract.
-        let round = unsafe { LayoutRoundFacts::from_ffi(&*round) };
-        // SAFETY: As above.
-        unsafe { resume_update_layout(&main_thread, arena, round) }
-    })
-}
-
 /// Whether the layout update the document thread is about to run, which may submit its full layout
 /// pass if `may_submit_pass`, runs its first round's style in the flight it submits. If it does,
 /// the style pass the document thread submits next is collected for the update, which it then

@@ -272,8 +272,8 @@ bool attach_owed_generated_image(DOM::Document& document, Compositing::RustFFI::
 }
 
 // The viewport's style is the document's, which the style computer makes on demand rather than
-// publishing, so a build that may build the viewport asks for it before it starts, with the
-// navigable's scroll offset the viewport's row holds.
+// publishing, so the document makes it for a round whose build may build the viewport as it reads
+// the round, with the navigable's scroll offset the viewport's row holds.
 RustFFI::FfiDocumentStyleForBuild document_style_for_build(DOM::Document& document)
 {
     auto& style_computer = document.style_computer();

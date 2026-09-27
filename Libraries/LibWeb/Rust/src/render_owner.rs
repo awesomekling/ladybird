@@ -17,15 +17,18 @@
 //! - a [`Query`]: a question about the document as of the changes sent before it, answered in one round trip
 //!   ([`Answer`]). The owner serves a waiting query between units: a rendering update in progress serves the
 //!   messages that arrived meanwhile after each unit (style, the layout rounds, paint preparation), so a query waits
-//!   for one unit of another document's update at most, and the update goes on after it.
+//!   for one unit of another document's update at most, and the update goes on after it. A query that needs the
+//!   document laid out first goes with the job of the layout frame that lays it out, which answers it as it ends.
 //!
 //! Every message reaches the owner through one FIFO ([`ToOwner`]), so a document's changes, its rendering updates,
 //! its queries and its destruction arrive in the order the main thread sent them. The owner never joins the main
-//! thread: where a rendering step still needs the main thread (the host steps of a style update around its passes,
-//! the end of a layout frame), the main thread runs it as its own between the units it sends the owner. The style
-//! computation itself is the owner's: every style transaction the main thread waits for runs on the owner
-//! ([`ToOwner::Style`]), with the engine the document's render state links, and so does the rest of each layout round
-//! ([`ToOwner::Layout`]).
+//! thread, and a job it runs never hands control back to the main thread before the job is over: the main thread
+//! sends what the job reads before it, and applies the typed effects the job leaves after it. The style computation
+//! is the owner's: every style transaction the main thread waits for runs on the owner ([`ToOwner::Style`]), with the
+//! engine the document's render state links, and so do the rounds of a layout frame ([`ToOwner::Layout`]), each job
+//! of which runs every round it starts to its end. Where a rendering step still needs the main thread (the host steps
+//! of a style update around its passes, what paying a tree build's host half leaves), the main thread runs it as its
+//! own after the job that left it, and sends the next job.
 //!
 //! During the port the main thread still reaches the arena and the style engine directly through the handles the
 //! owner gives out when it creates the state ([`FfiRenderDocument`]); those doors are what the flip deletes.
@@ -226,7 +229,7 @@ impl Answer {
     }
 
     /// Answers `query` from `arena` alone. A question the engine answers is left to the main thread.
-    fn of(query: Query, arena: &mut LayoutNodeArena) -> Self {
+    pub(crate) fn of(query: Query, arena: &mut LayoutNodeArena) -> Self {
         match query {
             Query::Geometry { node, kind } => Self::Geometry(answer_geometry(arena, node, kind)),
             Query::LayoutCounts => Self::LayoutCounts(LayoutCounts {
@@ -305,11 +308,11 @@ pub(crate) enum ToOwner {
         update: Box<RenderingUpdate>,
         ticket: crate::stage_thread::SubmittedRunTicket,
     },
-    /// Runs a unit of a layout frame of `document` for the document thread, which waits for it and runs the steps of
-    /// the frame that need it itself.
+    /// Runs a job of a layout frame of `document` for the document thread, which waits for it: every round the job
+    /// starts, to its end, with what the document thread read for the rounds before it sent the job.
     Layout {
         document: DocumentId,
-        unit: Box<crate::layout::update_layout::OwnerLayoutUnit>,
+        job: Box<crate::layout::update_layout::OwnerFrameJob>,
     },
     /// Runs a paint preparation pass over the render state of `document` for the document thread, which waits for it.
     Paint {
@@ -482,10 +485,10 @@ fn handle_message(message: ToOwner) {
             // SAFETY: The engine is the document's, and the document thread waits for the transaction.
             Ok(unsafe { engine.reach_on_owner(|engine| transaction.run(engine, true)) })
         }),
-        ToOwner::Layout { document, unit } => {
-            // The state's borrow ends before the unit runs, which may reach another document's state. The unit finds
+        ToOwner::Layout { document, job } => {
+            // The state's borrow ends before the job runs, which may reach another document's state. The job finds
             // the arena inside its answer, so that a panic there answers the waiting document thread.
-            (*unit).run(|| with_state(document, RenderState::state));
+            (*job).run(|| with_state(document, RenderState::state));
         }
         ToOwner::Paint { document, pass } => {
             // As for a layout unit, the pass finds the arena inside its answer.

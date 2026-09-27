@@ -28,9 +28,6 @@ pub(crate) struct HostTables {
     /// The flight the document's layout update readied, until the document has sealed what its
     /// recording reads and submits it.
     pub(super) prepared_flight: RefCell<Option<super::update_layout::PreparedFlight>>,
-    /// The document's layout update while it waits for the document to run the style of the round
-    /// it started.
-    pub(super) parked_layout_update: RefCell<Option<super::update_layout::ParkedLayoutUpdate>>,
     pub(super) shell_factory: Cell<Option<ShellFactory>>,
     pub(super) box_presence_host: Cell<Option<BoxPresenceHost>>,
     pub(super) shell_style_changed_host: Cell<Option<ShellStyleChangedHost>>,

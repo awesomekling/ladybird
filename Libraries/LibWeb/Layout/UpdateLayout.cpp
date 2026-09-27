@@ -45,7 +45,48 @@ static Layout::RustFFI::FfiSelectionSnapshot const* read_selection(Document& doc
     return &snapshot;
 }
 
-// The document-side steps of the layout update, which the Rust loop drives through this table.
+// What the document reads for a layout round once the round's style has run, with the storage the selection it read
+// lives in.
+struct LayoutRoundReading {
+    Layout::RustFFI::FfiSelectionSnapshot selection {};
+    Vector<Layout::RustFFI::FfiSelectionSnapshotNode> selection_nodes;
+    Layout::RustFFI::FfiLayoutRoundFacts round {};
+};
+
+// Whether the tree build of the next round may build the viewport: the document has none yet, the whole tree is to be
+// built again, or the document node itself is. A document hosting template contents builds no viewport.
+static bool layout_tree_build_may_create_viewport(Document& document)
+{
+    if (document.created_for_appropriate_template_contents())
+        return false;
+    return !document.has_layout_root()
+        || Layout::RustFFI::layout_arena_needs_full_layout_tree_update(document.layout_node_arena().handle())
+        || document.needs_layout_tree_update();
+}
+
+// A round goes on from the facts and the selection the document reads once the list item renumbers and top layer
+// changes its style leaves have gone through (`read_facts` takes those in, and reads the facts). A round whose tree
+// build may build the viewport is handed the document's style with them, which the document makes on demand rather
+// than publishing: the owner runs the round without asking for it.
+template<typename ReadFacts>
+static void read_layout_round(Document& document, LayoutRoundReading& reading, ReadFacts&& read_facts)
+{
+    auto facts = read_facts();
+    reading.selection_nodes.clear();
+    reading.round = {
+        .facts = facts,
+        .selection = read_selection(document, reading.selection, reading.selection_nodes),
+        .has_document_style = false,
+        .document_style = {},
+    };
+    if (layout_tree_build_may_create_viewport(document)) {
+        reading.round.has_document_style = true;
+        reading.round.document_style = Layout::document_style_for_build(document);
+    }
+}
+
+// The document-side steps of the layout update, which the Rust side runs through this table between the frame jobs it
+// sends the render owner.
 Layout::RustFFI::FfiLayoutUpdateHostCallbacks Document::layout_update_host_callbacks()
 {
     return {
@@ -53,7 +94,17 @@ Layout::RustFFI::FfiLayoutUpdateHostCallbacks Document::layout_update_host_callb
         .document_facts = [](void* context) { return static_cast<Document*>(context)->layout_update_document_facts(); },
         .take_in_frame_effects = [](void* context, Layout::RustFFI::FfiLayoutFrameEffects const* effects) { static_cast<Document*>(context)->take_in_layout_frame_effects(*effects); },
         .finish_submitted_style_update = [](void* context) { static_cast<Document*>(context)->finish_style_update_submitted_in_flight(); },
-        .document_style_for_build = [](void* context) { return Layout::document_style_for_build(*static_cast<Document*>(context)); },
+        .start_round = [](void* context, bool runs_style, void* sink) {
+            auto& document = *static_cast<Document*>(context);
+            if (runs_style)
+                document.update_style();
+            LayoutRoundReading reading;
+            read_layout_round(document, reading, [&] {
+                document.process_pending_list_item_renumbers();
+                document.process_pending_top_layer_layout_changes();
+                return document.layout_update_document_facts();
+            });
+            Layout::RustFFI::layout_frame_take_round(sink, &reading.round); },
     };
 }
 
@@ -93,6 +144,8 @@ void Document::renew_clock_layout_frame()
     Layout::RustFFI::FfiLayoutRoundFacts round {
         .facts = layout_update_document_facts(),
         .selection = read_selection(*this, selection, selection_nodes),
+        .has_document_style = false,
+        .document_style = {},
     };
     Layout::RustFFI::layout_arena_renew_clock_layout_frame(arena->handle(), &round);
 }
@@ -284,12 +337,11 @@ bool Document::update_style_and_layout_once(UpdateLayoutReason reason, Throttled
     style_computer().begin_style_record_view_epoch();
 
     // NB: The update, and the epochs begun above, end as the frame's end is taken in (take_in_layout_frame_effects):
-    //     before layout_arena_update_layout (or its resume) returns, or once a submitted pass's frame is taken back.
+    //     before layout_arena_update_layout returns, or once a submitted pass's frame is taken back.
 
     bool const may_submit_pass = pass_submission != LayoutPassSubmission::Wait;
     // The update's first round's style runs here, ahead of the update. One that runs in the flight begins here: its pass
     // is submitted for the update to collect, and the rest of the style update is installed as the flight is taken back.
-    // The style of a round after the first runs here too, as the round starts: the update returns for it, and resumes.
     bool const style_in_flight = pass_submission == LayoutPassSubmission::MaySubmitWithStyle
         && Layout::RustFFI::layout_arena_collect_style_pass_for_flight(arena.handle(), may_submit_pass);
     if (style_in_flight)
@@ -297,20 +349,12 @@ bool Document::update_style_and_layout_once(UpdateLayoutReason reason, Throttled
     else
         update_style();
 
-    // A round goes on from the facts and the selection the document reads once the list item renumbers and top layer
-    // changes its style leaves have gone through.
-    Layout::RustFFI::FfiSelectionSnapshot selection {};
-    Vector<Layout::RustFFI::FfiSelectionSnapshotNode> selection_nodes;
-    auto read_round_facts = [&] {
+    LayoutRoundReading first_round;
+    read_layout_round(*this, first_round, [&] {
         process_pending_list_item_renumbers();
         process_pending_top_layer_layout_changes();
-        selection_nodes.clear();
-        Layout::RustFFI::FfiLayoutRoundFacts round {
-            .facts = layout_update_document_facts(),
-            .selection = read_selection(*this, selection, selection_nodes),
-        };
-        return round;
-    };
+        return layout_update_document_facts();
+    });
 
     Layout::RustFFI::FfiLayoutUpdateInputs inputs {
         .reason_is_inspect_devtools_layout_data = reason == UpdateLayoutReason::InspectDevToolsLayoutData,
@@ -319,7 +363,7 @@ bool Document::update_style_and_layout_once(UpdateLayoutReason reason, Throttled
         .may_submit_pass = may_submit_pass,
         .style_in_flight = style_in_flight,
         .viewport_propagation_sources = {},
-        .first_round = read_round_facts(),
+        .first_round = first_round.round,
     };
     if (style_in_flight) {
         auto sources = CSS::StyleEffectDrain::viewport_propagation_sources_of(*this);
@@ -327,12 +371,6 @@ bool Document::update_style_and_layout_once(UpdateLayoutReason reason, Throttled
             inputs.viewport_propagation_sources[index] = sources[index].value();
     }
     auto outcome = Layout::RustFFI::layout_arena_update_layout(arena.handle(), &inputs);
-    while (outcome == Layout::RustFFI::FfiLayoutUpdateOutcome::NeedsStyle || outcome == Layout::RustFFI::FfiLayoutUpdateOutcome::NeedsRoundFacts) {
-        if (outcome == Layout::RustFFI::FfiLayoutUpdateOutcome::NeedsStyle)
-            update_style();
-        auto round = read_round_facts();
-        outcome = Layout::RustFFI::layout_arena_resume_update_layout(arena.handle(), &round);
-    }
     if (outcome == Layout::RustFFI::FfiLayoutUpdateOutcome::FlightReady || outcome == Layout::RustFFI::FfiLayoutUpdateOutcome::FlightWithStyleReady) {
         // The flight records the document after its layout only if the document seals what that reads before it submits
         // the flight. A document that is to update its style after the layout lays out again before it shows anything.
