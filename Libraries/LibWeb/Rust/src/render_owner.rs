@@ -633,10 +633,15 @@ pub(crate) unsafe fn run_style_transaction(
 ) -> crate::css::style::bridge::OwnerStyleTransactionView {
     let transaction = std::cell::Cell::new(Some(Box::new(transaction)));
     let ran = crate::stage_thread::wait_for_owner(
-        |reply| ToOwner::Style {
-            document,
-            transaction: transaction.take().expect("the transaction is sent once"),
-            reply,
+        |reply| {
+            let mut transaction = transaction.take().expect("the transaction is sent once");
+            // Its input goes ahead of it, as a change of its document.
+            transaction.send_input_to_owner(document);
+            ToOwner::Style {
+                document,
+                transaction,
+                reply,
+            }
         },
         || Err(transaction.take().expect("the transaction runs once")),
     );

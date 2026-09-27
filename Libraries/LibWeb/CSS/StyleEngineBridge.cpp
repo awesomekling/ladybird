@@ -999,7 +999,7 @@ void StyleEngine::submit_recorded_input(RecordedInputGoesTo goes_to)
     text_style_node_grant.resize(exchange(m_text_style_node_grant_request, 0));
 
     if (goes_to == RecordedInputGoesTo::SubmittedPass) {
-        // The pass copies the input as it is submitted, and applies it beside the document thread.
+        // The transaction copies the input as it is handed over, and applies it where its pass runs.
         m_recorded_input_for_pass = RecordedInputForPass {
             .tree_deltas = move(m_tree_deltas),
             .element_arrivals = move(m_element_arrivals),
@@ -1336,9 +1336,9 @@ StyleEngine::PublishedStyleTransaction StyleEngine::take_style_transaction(Style
     auto submission_started_at = MonotonicTime::now();
     StyleEngineFFI::FfiStyleTransactionView view {};
     MonotonicTime bridge_started_at = submission_started_at;
-    lend_style_transaction_inputs(RecordedInputGoesTo::Engine, [&](auto const& computation_inputs, void* layout_arena, auto const*) {
+    lend_style_transaction_inputs(RecordedInputGoesTo::SubmittedPass, [&](auto const& computation_inputs, void* layout_arena, InputTransaction const* input) {
         bridge_started_at = MonotonicTime::now();
-        view = StyleEngineFFI::style_engine_take_style_transaction(m_impl, root.value(), computation_inputs, layout_arena);
+        view = StyleEngineFFI::style_engine_take_style_transaction(m_impl, root.value(), computation_inputs, layout_arena, input);
     });
     auto bridge_microseconds = (MonotonicTime::now() - bridge_started_at).to_truncated_microseconds();
     return publish_style_transaction_view(view, (bridge_started_at - submission_started_at).to_truncated_microseconds(), bridge_microseconds);
