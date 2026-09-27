@@ -51,7 +51,10 @@ Layout::RustFFI::FfiLayoutUpdateHostCallbacks Document::layout_update_host_callb
                 .document_is_active = document_is_active,
                 .document_needs_layout_tree_build = document.needs_layout_tree_update() || document.child_needs_layout_tree_update(),
                 .container_query_evaluation_is_pending = document.has_size_containers_needing_evaluation_after_layout(),
-                .style_input_waits_on_document = document.m_needs_animated_style_update || document.style_computer().style_engine().has_recorded_input(),
+                .style_input_waits_on_document = document.m_needs_animated_style_update
+                    || document.style_computer().style_engine().has_recorded_input()
+                    || document.m_needs_media_rule_evaluation
+                    || !document.m_elements_with_dirty_style_attributes.is_empty(),
                 .top_layer_work_pending = document.m_top_layer_needs_layout_zone_rebuild || !document.m_elements_with_pending_top_layer_membership_change.is_empty(),
                 .should_collect_devtools_layout_data = document.page().client().has_active_devtools_client(),
                 .document_in_quirks_mode = document.in_quirks_mode(),
