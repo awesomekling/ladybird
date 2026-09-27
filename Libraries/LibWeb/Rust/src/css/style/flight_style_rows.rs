@@ -34,6 +34,9 @@ pub(crate) struct FlightStyleRow {
     pub(crate) payloads: *const c_void,
     /// What the move damages, packed as an `FfiStyleInvalidationField` word.
     pub(crate) damage: u32,
+    /// Whether the element is one the viewport takes its overflow, writing mode and direction
+    /// from, which only a full layout pass propagates again.
+    pub(crate) viewport_propagation_source: bool,
 }
 
 /// Why a flight leaves a style pass's batch to the host.
@@ -58,8 +61,6 @@ pub enum FfiFlightStyleDecline {
     CustomProperties,
     /// A row's records hold images or name anchors.
     Resources,
-    /// A row's element is one the viewport propagates from.
-    ViewportSource,
     /// A row's layout node is one the flight does not style.
     LayoutNode,
     /// A row's layout node holds another record than the one the row moves away from.
@@ -71,7 +72,7 @@ pub(crate) const FLIGHT_STYLE_DECLINE_COUNT: usize = FfiFlightStyleDecline::Stal
 impl StyleEngine {
     /// The rows of the batch the submitted style pass left that a flight applies to the layout
     /// nodes itself, or why it leaves the batch to the host. `viewport_propagation_sources` names
-    /// the elements the viewport propagates from, whose change only the host applies.
+    /// the elements the viewport propagates from.
     pub(crate) fn rows_a_flight_applies(
         &self,
         viewport_propagation_sources: &[StyleNodeID],
@@ -101,9 +102,6 @@ impl StyleEngine {
             }
             if answer.old_style_record == 0 || answer.new_style_record == 0 {
                 return Err(FfiFlightStyleDecline::FirstStyle);
-            }
-            if viewport_propagation_sources.contains(&node) {
-                return Err(FfiFlightStyleDecline::ViewportSource);
             }
             // The pass moves what a published row owes its transitions, animations and explicitly
             // inheriting children out of the engine's maps into the row, for the host's install.
@@ -181,6 +179,7 @@ impl StyleEngine {
                 new_style_record: answer.new_style_record,
                 payloads: payloads.as_ptr().cast::<c_void>(),
                 damage,
+                viewport_propagation_source: viewport_propagation_sources.contains(&node),
             });
         }
         Ok(rows)
