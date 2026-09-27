@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    @keyframes fade { from { opacity: 0 } to { opacity: 1 } }
+</style>
+<div id="hidden" style="display: none"></div>
+<svg width="20" height="20"><rect width="20" height="20" fill="url(#gradient)"/></svg>
+<script>
+    // A display:none subtree arrives with an animated span over an SVG gradient. The span keeps its style for the SVG
+    // elements below it, which wait for a later wave of the style pass than the span's: the span has animations the host
+    // samples as it installs it. The span's style is computed once, in the first wave, and not again in the next.
+    asyncTest(async done => {
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        const hidden = document.getElementById("hidden");
+        const before = internals.styleEngineCounters().engineFullDrivesStarted;
+        hidden.innerHTML = `<span id="span" style="animation: fade 1s"><svg><linearGradient id="gradient"><stop offset="0" stop-color="green"/></linearGradient></svg></span>`;
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        println(`style drives for the 4 arriving elements: ${internals.styleEngineCounters().engineFullDrivesStarted - before}`);
+        const span = document.getElementById("span");
+        println(`span has a style record: ${internals.styleRecordIdentity(span) !== 0}`);
+        println(`gradient has a style record: ${internals.styleRecordIdentity(document.getElementById("gradient")) !== 0}`);
+        hidden.style.display = "block";
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        println(`span animations once shown: ${span.getAnimations().length}`);
+        done();
+    });
+</script>
