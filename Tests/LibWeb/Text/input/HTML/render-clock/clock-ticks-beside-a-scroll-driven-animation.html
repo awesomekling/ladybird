@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<style>
+    body {
+        height: 5000px;
+        margin: 0;
+    }
+    #bar {
+        position: fixed;
+        top: 0;
+        height: 10px;
+        width: 0;
+        animation: grow linear both;
+        animation-timeline: scroll(root);
+    }
+    #box {
+        position: fixed;
+        top: 20px;
+        height: 10px;
+        width: 0;
+        animation: grow 20s linear;
+    }
+    @keyframes grow {
+        from {
+            width: 0;
+        }
+        to {
+            width: 1000px;
+        }
+    }
+</style>
+<div id="bar"></div>
+<div id="box"></div>
+<script src="../../include.js"></script>
+<script>
+    // The render clock ticks a page whose document timeline and scroll timeline both run animations. Its ticks sample
+    // the scroll timeline where the main thread last sampled it, so the scroll-driven width follows each scroll the
+    // main thread takes in, and the clock goes on ticking after it.
+    asyncTest(async done => {
+        const bar = document.getElementById("bar");
+        const enabled = internals.clockFramesEnabled();
+        const ticks = () => internals.getRenderClockCounters().ticksInstalled;
+        // Waits for the render clock to install a tick, however long the display takes to deliver it.
+        const nextTick = async () => {
+            const target = ticks() + 1;
+            do
+                await new Promise(resolve => setTimeout(resolve, 5));
+            while (enabled && ticks() < target);
+        };
+        const widthFollowsScroll = () => {
+            const maxScroll = document.documentElement.scrollHeight - innerHeight;
+            return Math.abs(bar.getBoundingClientRect().width - (1000 * scrollY) / maxScroll) < 1;
+        };
+
+        for (const offset of [1000, 3000]) {
+            scrollTo(0, offset);
+            // The rendering updates after the scroll sample the scroll timeline where the page is scrolled to.
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            await nextTick();
+            println(`scrolled to ${offset}: ${scrollY === offset}`);
+            println(`the render clock ticks the page: ${!enabled || internals.renderClockTicks(document)}`);
+            println(`width follows the scroll: ${widthFollowsScroll()}`);
+        }
+        done();
+    });
+</script>
