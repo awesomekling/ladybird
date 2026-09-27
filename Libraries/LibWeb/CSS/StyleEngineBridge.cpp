@@ -788,14 +788,58 @@ void StyleEngine::record_unique_node_id(StyleNodeID node, u64 unique_node_id)
     record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::ElementUniqueNodeId, .value = 0, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = 0, .data = static_cast<FlatPtr>(unique_node_id) });
 }
 
+static StyleEngineFFI::FfiHostFactWrite dom_paint_facts_write(StyleNodeID node, u8 facts)
+{
+    return { .kind = StyleEngineFFI::FfiHostFactKind::NodeDomPaintFacts, .value = facts, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = 0, .data = 0 };
+}
+
+static StyleEngineFFI::FfiHostFactWrite table_spans_write(StyleNodeID node, u16 column_span, u16 row_span, u32 raw_column_span)
+{
+    return { .kind = StyleEngineFFI::FfiHostFactKind::ElementTableSpans, .value = 0, .node = node.value(), .parent = raw_column_span, .previous_sibling = 0, .facts = static_cast<u32>(column_span) | (static_cast<u32>(row_span) << 16), .data = 0 };
+}
+
 void StyleEngine::record_dom_paint_facts(StyleNodeID node, u8 facts)
 {
-    record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::NodeDomPaintFacts, .value = facts, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = 0, .data = 0 });
+    m_arrival_fact_writes.dom_paint_facts.set(node.value(), m_host_fact_writes.size());
+    record_host_fact_write(dom_paint_facts_write(node, facts));
 }
 
 void StyleEngine::record_table_spans(StyleNodeID node, u16 column_span, u16 row_span, u32 raw_column_span)
 {
-    record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::ElementTableSpans, .value = 0, .node = node.value(), .parent = raw_column_span, .previous_sibling = 0, .facts = static_cast<u32>(column_span) | (static_cast<u32>(row_span) << 16), .data = 0 });
+    m_arrival_fact_writes.table_spans.set(node.value(), m_host_fact_writes.size());
+    record_host_fact_write(table_spans_write(node, column_span, row_span, raw_column_span));
+}
+
+// Rewrites the write recorded for the node's arrival in each journal that still holds one: the recorded input a
+// transaction has yet to take, and the journal recorded since.
+bool StyleEngine::change_arrival_fact_write(HashMap<u32, size_t> ArrivalFactWrites::* kind, StyleEngineFFI::FfiHostFactWrite write)
+{
+    bool changed = false;
+    auto change = [&](Vector<StyleEngineFFI::FfiHostFactWrite>& writes, ArrivalFactWrites const& arrival_fact_writes) {
+        auto index = (arrival_fact_writes.*kind).get(write.node);
+        if (!index.has_value())
+            return;
+        bool const names_the_arrival_write = *index < writes.size() && writes[*index].kind == write.kind && writes[*index].node == write.node;
+        ASSERT(names_the_arrival_write);
+        if (!names_the_arrival_write)
+            return;
+        writes[*index] = write;
+        changed = true;
+    };
+    if (m_recorded_input_for_pass.has_value())
+        change(m_recorded_input_for_pass->host_fact_writes, m_recorded_input_for_pass->arrival_fact_writes);
+    change(m_host_fact_writes, m_arrival_fact_writes);
+    return changed;
+}
+
+bool StyleEngine::change_arriving_dom_paint_facts(StyleNodeID node, u8 facts)
+{
+    return change_arrival_fact_write(&ArrivalFactWrites::dom_paint_facts, dom_paint_facts_write(node, facts));
+}
+
+bool StyleEngine::change_arriving_table_spans(StyleNodeID node, u16 column_span, u16 row_span, u32 raw_column_span)
+{
+    return change_arrival_fact_write(&ArrivalFactWrites::table_spans, table_spans_write(node, column_span, row_span, raw_column_span));
 }
 
 void StyleEngine::record_text_is_ascii_whitespace(StyleNodeID node, bool value)
@@ -998,6 +1042,7 @@ void StyleEngine::submit_recorded_input(RecordedInputGoesTo goes_to)
 
     // What the engine calls back into while it applies these records the next transaction's.
     auto host_fact_writes = move(m_host_fact_writes);
+    auto arrival_fact_writes = exchange(m_arrival_fact_writes, {});
     auto host_fact_text_data = move(m_host_fact_text_data);
     auto host_fact_replaced_content_inputs = move(m_host_fact_replaced_content_inputs);
     m_pending_atom_adoption_count = 0;
@@ -1026,6 +1071,7 @@ void StyleEngine::submit_recorded_input(RecordedInputGoesTo goes_to)
             .state_deltas = move(m_state_deltas),
             .element_declaration_deltas = move(m_element_declaration_deltas),
             .host_fact_writes = move(host_fact_writes),
+            .arrival_fact_writes = move(arrival_fact_writes),
             .host_fact_text_data = move(host_fact_text_data),
             .host_fact_replaced_content_inputs = move(host_fact_replaced_content_inputs),
             .style_node_grant = move(style_node_grant),

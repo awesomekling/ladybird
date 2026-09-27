@@ -109,7 +109,7 @@ static void publish_dom_paint_facts(DOM::Node const& dom_node, DomFactPublicatio
         auto& style_engine = document.style_computer().style_engine();
         if (publication == DomFactPublication::Arrival) {
             style_engine.record_dom_paint_facts(identity, facts);
-        } else {
+        } else if (!style_engine.change_arriving_dom_paint_facts(identity, facts)) {
             style_engine.publish_input([identity, facts](CSS::StyleInputScope const& input) {
                 input.engine().set_node_dom_paint_facts(identity, facts);
             });
@@ -1048,6 +1048,8 @@ static void publish_table_spans(DOM::Element const& element, DomFactPublication 
         style_engine.record_table_spans(identity, spans.column_span, spans.row_span, spans.raw_column_span);
         return;
     }
+    if (style_engine.change_arriving_table_spans(identity, spans.column_span, spans.row_span, spans.raw_column_span))
+        return;
     style_engine.publish_input([identity, spans](CSS::StyleInputScope const& input) {
         input.engine().set_element_table_spans(identity, spans.column_span, spans.row_span, spans.raw_column_span);
     });
