@@ -212,6 +212,7 @@ RENDER_STAGE_ALLOWED = {
             "stage_thread.rs:SUBMITTED",
             "stage_thread.rs:PAINTING",
             "stage_thread.rs:RUNNING_FLIGHT_STAGE",
+            "stage_thread.rs:RECALLED_WHILE_HELD",
             "flight.rs:TAKEN_BACK_OUTCOME",
             "flight.rs:TAKEN_BACK_PAINT",
             "flight.rs:FLIGHT_ENDS",

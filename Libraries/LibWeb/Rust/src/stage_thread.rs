@@ -682,6 +682,7 @@ impl SubmittedRunTicket {
         hold_here(FfiStageHoldPoint::BeforeCompletion);
         RUNNING_SUBMITTED_RUN.with(|running| running.set(None));
         RUNNING_FLIGHT_STAGE.with(|running| running.set(None));
+        RECALLED_WHILE_HELD.with(|recalled| recalled.set(false));
         // The caller keeps the receiver until it has taken this reply.
         let _ = to_caller.send(outcome);
         frame_completion_notify();
@@ -833,6 +834,8 @@ thread_local! {
     static RUNNING_SUBMITTED_RUN: Cell<Option<SubmittedRun>> = const { Cell::new(None) };
     // On the stage thread, the stage of the flight it is running, as a hold names it ("flight:record").
     static RUNNING_FLIGHT_STAGE: Cell<Option<&'static str>> = const { Cell::new(None) };
+    // On the owner, whether the main thread recalled the rendering update it runs while a test held the update's run.
+    static RECALLED_WHILE_HELD: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Which run a test's hold is armed for.
@@ -1105,8 +1108,33 @@ fn hold_at(point: FfiStageHoldPoint, flight_stage: Option<&'static str>) {
     hold.holding = hold.armed.take();
     hold.holding_thread = Some(std::thread::current().id());
     changed.notify_all();
+    // The owner holding a run goes on serving what may go between the run's units, as it does between any two: a
+    // style transaction or a question the main thread waits for meanwhile is the owner's to run, not the main thread's.
+    let serves = stage_thread().is_some_and(|thread| thread.id == std::thread::current().id());
+    if !serves {
+        while hold.holding.is_some() {
+            hold = changed.wait(hold).expect("the stage hold is never poisoned");
+        }
+        return;
+    }
+    let document = if run.arena == 0 {
+        crate::render_owner::DocumentId::default()
+    } else {
+        // SAFETY: The run's arena is live while its run is.
+        unsafe { crate::layout::ArenaHandle::document_of(run.arena as *const c_void) }
+    };
     while hold.holding.is_some() {
-        hold = changed.wait(hold).expect("the stage hold is never poisoned");
+        drop(hold);
+        if serve_messages_between_units(document) {
+            RECALLED_WHILE_HELD.with(|recalled| recalled.set(true));
+        }
+        hold = lock_stage_hold().0;
+        if hold.holding.is_some() {
+            hold = changed
+                .wait_timeout(hold, std::time::Duration::from_millis(1))
+                .expect("the stage hold is never poisoned")
+                .0;
+        }
     }
 }
 
@@ -1618,7 +1646,7 @@ pub(crate) fn serve_messages_between_units(document: crate::render_owner::Docume
     let Some(thread) = stage_thread() else {
         return false;
     };
-    let mut recalled = false;
+    let mut recalled = RECALLED_WHILE_HELD.with(|recalled| recalled.replace(false));
     while let Some(message) =
         INCOMING.with(|incoming| incoming.borrow().as_ref().and_then(|incoming| incoming.try_recv().ok()))
     {
@@ -1875,6 +1903,24 @@ pub(crate) fn wait_for_owner<R>(
     if has_frame_in_flight() && stage_thread_holds_run_for_queued_stage() {
         return Ok(here());
     }
+    send_and_wait(thread, message)
+}
+
+/// Sends the render owner, which is not the calling thread, the message `message` makes of where it answers, and waits
+/// for the answer, as [`wait_for_owner`] does, for what only the owner runs: the owner serves it between the units of
+/// whatever it runs, a run a test holds included. Answers `None` where there is no owner thread to send it to, or the
+/// calling thread is it.
+pub(crate) fn wait_for_owner_thread<R>(
+    message: impl FnOnce(OwnerReplyTo<R>) -> crate::render_owner::ToOwner,
+) -> Option<std::thread::Result<R>> {
+    let thread = stage_thread().filter(|thread| std::thread::current().id() != thread.id)?;
+    Some(send_and_wait(thread, message))
+}
+
+fn send_and_wait<R>(
+    thread: &'static StageThread,
+    message: impl FnOnce(OwnerReplyTo<R>) -> crate::render_owner::ToOwner,
+) -> std::thread::Result<R> {
     let (reply, answered) = channel();
     let message = message(OwnerReplyTo {
         thread,

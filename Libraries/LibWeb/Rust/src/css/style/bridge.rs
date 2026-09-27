@@ -5700,10 +5700,9 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
             grant,
             render_half,
         };
-        // SAFETY: The engine is the document's, and this thread reaches it again only once the owner has finished
-        // the transaction.
+        // This thread reaches the engine again only once the owner has finished the transaction.
         let OwnerStyleTransactionView(view, retired, applied) =
-            unsafe { crate::render_owner::run_style_transaction(document, engine.home(), transaction) };
+            crate::render_owner::run_style_transaction(document, transaction);
         // Font cascade lists and custom-property data are the document thread's to give up.
         crate::css::ffi_stats::release_deferred_font_cascade_lists();
         drop(retired);
@@ -5844,6 +5843,17 @@ pub(crate) struct OwnerStyleTransactionView(
 // the retired data goes to the document thread, which alone releases it.
 unsafe impl Send for OwnerStyleTransactionView {}
 
+impl OwnerStyleTransactionView {
+    /// The view of a transaction no owner ran, which answers nothing.
+    pub(crate) fn unanswered() -> Self {
+        Self(
+            FfiStyleTransactionView::default(),
+            RetiredCustomPropertyData { _data: Vec::new() },
+            None,
+        )
+    }
+}
+
 impl OwnerStyleTransaction {
     /// Sends the transaction's input to the owner as a change of `document`, which the transaction applies as its
     /// first step on the owner.
@@ -5853,13 +5863,13 @@ impl OwnerStyleTransaction {
         }
     }
 
-    /// Runs the transaction with the document's engine `engine`, on the render owner where
-    /// `on_owner`, which then applies the render half of its batch too where the host asked.
+    /// Runs the transaction with the document's engine `engine`, on the render owner, which then
+    /// applies the render half of its batch too where the host asked.
     ///
     /// # Safety
     ///
     /// The document thread waits for it, as the type requires.
-    pub(crate) unsafe fn run(self, engine: &mut StyleEngine, on_owner: bool) -> OwnerStyleTransactionView {
+    pub(crate) unsafe fn run(self, engine: &mut StyleEngine) -> OwnerStyleTransactionView {
         let (view, retired, applied) = match self {
             Self::Whole {
                 root,
@@ -5882,7 +5892,7 @@ impl OwnerStyleTransaction {
                 let output = run_style_pass(engine, root, committed_boxes, &timeline_samples);
                 let (mut view, retired) = finish_style_transaction(engine, root, output);
                 let mut applied = None;
-                if let Some(viewport_propagation_sources) = render_half.filter(|_| on_owner) {
+                if let Some(viewport_propagation_sources) = render_half {
                     // SAFETY: The owner holds the document's arena, and the document thread waits.
                     if let Some(effects) =
                         unsafe { apply_render_half_on_owner(engine, layout_arena, &viewport_propagation_sources) }
@@ -6247,10 +6257,9 @@ pub unsafe extern "C" fn style_engine_finish_submitted_style_transaction(
     let transaction = OwnerStyleTransaction::FinishSubmitted {
         host_named_atoms_beside_pass,
     };
-    // SAFETY: The engine is the document's, and this thread reaches it again only once the owner has finished the
-    // transaction.
+    // This thread reaches the engine again only once the owner has finished the transaction.
     let OwnerStyleTransactionView(view, retired, applied) =
-        unsafe { crate::render_owner::run_style_transaction(document, engine.home(), transaction) };
+        crate::render_owner::run_style_transaction(document, transaction);
     debug_assert!(
         applied.is_none(),
         "finishing a submitted transaction applies no batch on the owner"

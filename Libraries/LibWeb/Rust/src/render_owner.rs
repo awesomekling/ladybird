@@ -603,11 +603,11 @@ pub(crate) enum ToOwner {
         pass: Box<crate::painting::owner_pass::OwnerPaintPass>,
     },
     /// Runs the style transaction `transaction` of `document`, which the document thread takes and waits for: begins
-    /// it, runs its pass and finishes it. Answers with the transaction where the owner could not run it.
+    /// it, runs its pass and finishes it.
     Style {
         document: DocumentId,
         transaction: Box<crate::css::style::bridge::OwnerStyleTransaction>,
-        reply: crate::stage_thread::OwnerReplyTo<StyleTransactionRan>,
+        reply: crate::stage_thread::OwnerReplyTo<crate::css::style::bridge::OwnerStyleTransactionView>,
     },
     /// Answers `query` about `document` after its changes through `through`. The document thread waits.
     Ask {
@@ -755,22 +755,7 @@ fn handle_message(message: ToOwner) {
             document,
             transaction,
             reply,
-        } => reply.answer(|| {
-            let reached = with_state(document, |state| (state.style_engine(), state.arena_handle()))
-                .filter(|(engine, _)| !engine.is_null());
-            let Some((engine, arena)) = reached else {
-                debug_assert!(
-                    false,
-                    "the owner runs the style transaction of a document with an engine"
-                );
-                return Err(transaction);
-            };
-            // The faces the transaction wants are this document's, for its layout end to request, whichever
-            // document's update the owner serves the transaction beside.
-            let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(arena as u64);
-            // SAFETY: The engine is the document's, and the document thread waits for the transaction.
-            Ok(unsafe { engine.reach_on_owner(|engine| transaction.run(engine, true)) })
-        }),
+        } => reply.answer(|| run_style_on_owner(document, transaction)),
         ToOwner::Layout { document, job } => {
             // The state's borrow ends before the job runs, which may reach another document's state. The job finds
             // the arena inside its answer, so that a panic there answers the waiting document thread.
@@ -1189,43 +1174,60 @@ pub extern "C" fn render_owner_content_counter_styles_changed(
     }
 }
 
-/// What became of a style transaction the owner was sent: its answers, or the transaction where the owner could not
-/// run it.
-pub(crate) type StyleTransactionRan =
-    Result<crate::css::style::bridge::OwnerStyleTransactionView, Box<crate::css::style::bridge::OwnerStyleTransaction>>;
-
 /// Runs the style transaction `transaction` of `document`, which the calling document thread takes, on the owner, and
-/// waits for its answers. Where the owner does not run it (a test holds the run it would queue behind, or a bug of the
-/// sender's), the document thread runs it with the engine `engine` right here, as every door of the port does.
-///
-/// # Safety
-///
-/// `engine` must be the live engine of `document`, whose token is home, and the calling thread must reach nothing of
-/// it until this returns.
-pub(crate) unsafe fn run_style_transaction(
+/// waits for its answers. The owner serves it between the units of whatever it runs. Where the calling thread holds
+/// the document's render state, it is the owner (a process with no Rendering thread handles the owner's messages where
+/// they are sent, and a unit the owner runs may take a transaction), and runs the transaction as the owner does one it
+/// is sent.
+pub(crate) fn run_style_transaction(
     document: DocumentId,
-    engine: crate::css::style::StyleEngineHandle,
     transaction: crate::css::style::bridge::OwnerStyleTransaction,
 ) -> crate::css::style::bridge::OwnerStyleTransactionView {
-    let transaction = std::cell::Cell::new(Some(Box::new(transaction)));
-    let ran = crate::stage_thread::wait_for_owner(
-        |reply| {
-            let mut transaction = transaction.take().expect("the transaction is sent once");
-            // Its input goes ahead of it, as a change of its document.
-            transaction.send_input_to_owner(document);
-            ToOwner::Style {
-                document,
-                transaction,
-                reply,
-            }
-        },
-        || Err(transaction.take().expect("the transaction runs once")),
-    );
-    match ran.unwrap_or_else(|payload| std::panic::resume_unwind(payload)) {
-        Ok(view) => view,
-        // SAFETY: Guaranteed by the caller.
-        Err(transaction) => unsafe { transaction.run(engine.enter("style transaction the owner did not run"), false) },
+    let transaction = Box::new(transaction);
+    if STATES.with_borrow(|states| states.contains_key(&document)) {
+        // The input stays with the transaction, which applies it first.
+        return run_style_on_owner(document, transaction);
     }
+    let transaction = std::cell::Cell::new(Some(transaction));
+    let ran = crate::stage_thread::wait_for_owner_thread(|reply| {
+        let mut transaction = transaction.take().expect("the transaction is sent once");
+        // Its input goes ahead of it, as a change of its document.
+        transaction.send_input_to_owner(document);
+        ToOwner::Style {
+            document,
+            transaction,
+            reply,
+        }
+    });
+    match ran {
+        Some(ran) => ran.unwrap_or_else(|payload| std::panic::resume_unwind(payload)),
+        None => {
+            debug_assert!(false, "the style transaction of document {document:?} has no owner");
+            crate::css::style::bridge::OwnerStyleTransactionView::unanswered()
+        }
+    }
+}
+
+/// On the owner: runs the style transaction `transaction` of `document` with the engine its render state links, while
+/// the document thread waits for it.
+fn run_style_on_owner(
+    document: DocumentId,
+    transaction: Box<crate::css::style::bridge::OwnerStyleTransaction>,
+) -> crate::css::style::bridge::OwnerStyleTransactionView {
+    let reached = with_state(document, |state| (state.style_engine(), state.arena_handle()))
+        .filter(|(engine, _)| !engine.is_null());
+    let Some((engine, arena)) = reached else {
+        debug_assert!(
+            false,
+            "the owner runs the style transaction of a document with an engine"
+        );
+        return crate::css::style::bridge::OwnerStyleTransactionView::unanswered();
+    };
+    // The faces the transaction wants are this document's, for its layout end to request, whichever document's update
+    // the owner serves the transaction beside.
+    let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(arena as u64);
+    // SAFETY: The engine is the document's, and the document thread waits for the transaction.
+    unsafe { engine.reach_on_owner(|engine| transaction.run(engine)) }
 }
 
 /// Whether the style transactions of `document` run on the owner: a document the owner holds render state for, whose
