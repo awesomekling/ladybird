@@ -220,6 +220,8 @@ public:
     void record_dom_order_unlink(StyleNodeID node, StyleNodeID parent);
     void record_text_retirements(ReadonlySpan<StyleNodeID>);
     void record_text_is_ascii_whitespace(StyleNodeID, bool);
+    // The unique id the document knows a node by, which arrives with the node's identity.
+    void record_unique_node_id(StyleNodeID, u64 unique_node_id);
     void record_text_is_in_user_agent_shadow_tree(StyleNodeID, bool);
     void record_text_is_password_input(StyleNodeID, bool);
     void record_text_data(StyleNodeID, Utf16String const&);

@@ -419,9 +419,7 @@ static void record_element_arrived(DOM::Element& element, StyleComputer& style_c
     style_computer.register_style_node(identity, element);
     // The name the document knows the element by arrives with the identity. A box built for one of
     // the element's pseudo-elements answers by it even when the element itself has no box.
-    style_engine.publish_input([identity, unique_node_id = static_cast<u64>(element.unique_id().value())](StyleInputScope const& input) {
-        input.engine().set_element_unique_node_id(identity, unique_node_id);
-    });
+    style_engine.record_unique_node_id(identity, static_cast<u64>(element.unique_id().value()));
     element.publish_style_recomputes_on_environment_move();
     element.publish_size_container_query_facts();
     Layout::publish_table_spans(element);
@@ -477,7 +475,7 @@ void record_document_tree_tracked(DOM::Document& document)
     document.set_style_node_id(style_engine.mint_relation_only_style_node());
     // The viewport's row answers by the document's name, and the document's identity is where the
     // build can reach it without holding the document.
-    style_engine.set_element_unique_node_id(document.style_node_id(), static_cast<u64>(document.unique_id().value()));
+    style_engine.record_unique_node_id(document.style_node_id(), static_cast<u64>(document.unique_id().value()));
 }
 
 void record_subtree_connecting(DOM::Node& root)

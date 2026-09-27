@@ -989,6 +989,9 @@ pub enum FfiHostFactKind {
     /// the namespace atom `node`, with the reference the acquisition took. See
     /// `style_engine_acquire_host_qualified_atom`.
     AdoptQualifiedAtom = 15,
+    /// `data` is the unique id the document knows the node `node` by, which a box built for one of
+    /// the node's pseudo-elements answers by.
+    ElementUniqueNodeId = 16,
 }
 
 /// Which element an `FfiReplacedContentInput` holds the values of.
@@ -2557,6 +2560,9 @@ unsafe fn apply_host_fact_writes(engine: &mut StyleEngine, writes: &[FfiHostFact
             }
             FfiHostFactKind::ElementAdjustmentFacts => {
                 operations::set_element_adjustment_facts(engine, write.node, write.facts);
+            }
+            FfiHostFactKind::ElementUniqueNodeId => {
+                operations::set_element_unique_node_id(engine, write.node, write.data as u64);
             }
             FfiHostFactKind::ElementAssociatedPseudoKind => {
                 operations::set_element_associated_pseudo_kind(engine, write.node, write.value);
