@@ -741,6 +741,11 @@ enum ResolvedHostHandback {
 pub(crate) struct HostPayment(Vec<ResolvedHostHandback>);
 
 impl HostPayment {
+    /// The payment of nothing.
+    pub(crate) fn nothing() -> Self {
+        Self(Vec::new())
+    }
+
     /// Pays the host, in order.
     pub(crate) fn pay(self, main_thread: &crate::stage::MainThread) {
         use crate::layout::tree_mutation::{

@@ -593,6 +593,9 @@ unsafe extern "C" fn layout_arena_finish_owner_style_host_half(arena: *mut c_voi
         host_tables.hold_flight_style_damages(Default::default());
     }
     // SAFETY: Guaranteed by the caller.
-    let (_, payment) = unsafe { LayoutNodeArena::from_handle(arena) }.finish_flight_style_host_half();
-    payment.pay(&main_thread);
+    let document = unsafe { crate::layout::ArenaHandle::document_of(arena) };
+    // SAFETY: As above.
+    unsafe { crate::render_owner::ask(document, arena, crate::render_owner::Query::FinishOwnerStyleHostHalf) }
+        .payment()
+        .pay(&main_thread);
 }
