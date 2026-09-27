@@ -119,6 +119,11 @@ public:
 
     void set_element_parts(StyleNodeID node, ReadonlySpan<StyleAtomID> names, ReadonlySpan<StyleNodeID> hosts);
     void set_element_language(StyleNodeID node, StyleAtomID language, Utf16View tag);
+    void set_element_id_name(StyleNodeID node, StyleAtomID name);
+    void set_element_directionality(StyleNodeID node, StyleAtomID directionality);
+    void set_element_heading_level(StyleNodeID node, u8 level);
+    void set_element_custom_states(StyleNodeID node, ReadonlySpan<StyleAtomID> states);
+    void set_element_part_exposure(StyleNodeID node, StyleNodeID exposure);
     // Which longhand properties one of an element's own declarations covers, their canonical
     // specified values and their authored aliases, and whether the inventory has complete
     // continuation semantics.

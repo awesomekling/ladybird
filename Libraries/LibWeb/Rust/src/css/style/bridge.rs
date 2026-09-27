@@ -1082,6 +1082,17 @@ pub enum FfiHostFactKind {
     /// The viewport moved: every element or pseudo row whose style depends on viewport metrics
     /// takes the derived reaction `value`.
     ViewportDependentStyleInputs = 33,
+    /// `facts` is the atom the element `node` is known by to `getElementById`, or 0 for none.
+    ElementIdName = 34,
+    /// `facts` is the directionality atom of the element `node`.
+    ElementDirectionality = 35,
+    /// `value` is the heading level of the element `node`, 0 for no heading.
+    ElementHeadingLevel = 36,
+    /// The element `node` is in the custom state named by the atom `facts`, a list at a time as for
+    /// `SlotAssignedNode`. An empty list is one write with no `facts`.
+    ElementCustomState = 37,
+    /// `parent` is the outermost host the parts of the element `node` reach.
+    ElementPartExposure = 38,
 }
 
 /// Which element an `FfiReplacedContentInput` holds the values of.
@@ -2666,6 +2677,17 @@ unsafe fn apply_host_fact_writes(engine: &mut StyleEngine, writes: &[FfiHostFact
                 index += list.len();
                 continue;
             }
+            FfiHostFactKind::ElementCustomState => {
+                let list = node_list_run(&writes[index..index + run_length], true);
+                let states: Vec<u32> = list
+                    .iter()
+                    .filter(|member| member.facts != 0)
+                    .map(|member| member.facts)
+                    .collect();
+                operations::set_element_custom_states(engine, write.node, &states);
+                index += list.len();
+                continue;
+            }
             FfiHostFactKind::TopLayerElement => {
                 let list = node_list_run(&writes[index..index + run_length], false);
                 let elements: Vec<u32> = list.iter().map(|member| member.node).collect();
@@ -2699,6 +2721,18 @@ unsafe fn apply_host_fact_writes(engine: &mut StyleEngine, writes: &[FfiHostFact
                 // SAFETY: As for `TextData`.
                 let text = unsafe { ak::Utf16String::from_raw_owned(write.data) };
                 set_element_language(engine, write.node, write.facts, &text.to_utf16());
+            }
+            FfiHostFactKind::ElementIdName => {
+                operations::set_element_id_name(engine, write.node, write.facts);
+            }
+            FfiHostFactKind::ElementDirectionality => {
+                operations::set_element_directionality(engine, write.node, write.facts);
+            }
+            FfiHostFactKind::ElementHeadingLevel => {
+                operations::set_element_heading_level(engine, write.node, write.value);
+            }
+            FfiHostFactKind::ElementPartExposure => {
+                operations::set_element_part_exposure(engine, write.node, write.parent);
             }
             FfiHostFactKind::ElementAdjustmentFacts => {
                 operations::set_element_adjustment_facts(engine, write.node, write.facts);
