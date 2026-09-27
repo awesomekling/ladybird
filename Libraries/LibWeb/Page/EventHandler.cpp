@@ -88,6 +88,15 @@ namespace Web {
     if (auto event_result = (expression); event_result == EventResult::Cancelled) \
         return event_result;
 
+// The box the DOM node is bound to, as the document's hit-test snapshot names it.
+static Optional<Painting::HitBox> hit_box_bound_to(DOM::Document& document, DOM::NodeIdentity identity)
+{
+    auto const* hit_test_display_list = document.ensure_hit_test_display_list();
+    if (!hit_test_display_list)
+        return {};
+    return hit_test_display_list->bound_box_of(identity);
+}
+
 static GC::Ptr<DOM::Node> associated_descendant_editing_host(DOM::Node& node)
 {
     if (node.is_editing_host())
@@ -98,8 +107,8 @@ static GC::Ptr<DOM::Node> associated_descendant_editing_host(DOM::Node& node)
     }
 
     Optional<CSSPixelRect> hit_node_rect;
-    if (auto const* layout_node = node.layout_node(); layout_node && Painting::has_committed_box(*layout_node))
-        hit_node_rect = Painting::absolute_rect(*layout_node);
+    if (auto box = hit_box_bound_to(node.document(), DOM::NodeIdentity::of(node)); box.has_value() && box->has_committed_box())
+        hit_node_rect = box->absolute_rect();
 
     for (auto* ancestor = &node; ancestor; ancestor = ancestor->parent_or_shadow_host()) {
         GC::Ptr<DOM::Node> editing_host;
@@ -118,9 +127,9 @@ static GC::Ptr<DOM::Node> associated_descendant_editing_host(DOM::Node& node)
         if (editing_host && !has_multiple_editing_hosts) {
             if (ancestor == &node)
                 return editing_host;
-            auto const* editing_host_layout_node = editing_host->layout_node();
-            if (hit_node_rect.has_value() && editing_host_layout_node && Painting::has_committed_box(*editing_host_layout_node)
-                && hit_node_rect->intersects(Painting::absolute_rect(*editing_host_layout_node)))
+            auto editing_host_box = hit_node_rect.has_value() ? hit_box_bound_to(node.document(), DOM::NodeIdentity::of(*editing_host)) : Optional<Painting::HitBox> {};
+            if (editing_host_box.has_value() && editing_host_box->has_committed_box()
+                && hit_node_rect->intersects(editing_host_box->absolute_rect()))
                 return editing_host;
         }
 
@@ -538,18 +547,15 @@ EventResult EventHandler::handle_mousemove(CSSPixelPoint visual_viewport_positio
         auto caret_position = document->caret_position_from_point(visual_viewport_position);
         if (caret_position.has_value()) {
             document->set_caret_hit_test_debug_rect(caret_position->debug_rect);
-            auto layout_node_description = "(gone)"_string;
-            if (auto const* layout_node = caret_position->layout_node())
-                layout_node_description = layout_node->debug_description();
             auto boundary_description = "(gone)"_utf16;
             if (auto boundary_node = caret_position->boundary_node())
                 boundary_description = boundary_node->debug_description();
-            dbgln("Caret hit test: point=({}, {}) boundary=({}, {}) layout_node={} debug_rect={}",
+            dbgln("Caret hit test: point=({}, {}) boundary=({}, {}) box_slot={} debug_rect={}",
                 visual_viewport_position.x(),
                 visual_viewport_position.y(),
                 boundary_description,
                 caret_position->boundary.offset,
-                layout_node_description,
+                caret_position->paintable.index,
                 caret_position->debug_rect);
         } else {
             document->set_caret_hit_test_debug_rect({});
@@ -651,7 +657,7 @@ EventResult EventHandler::handle_mousemove(CSSPixelPoint visual_viewport_positio
         // NOTE: In some implementation environments, such as a browser, mousemove events can continue to fire if the
         //       user began a drag operation (e.g., a mouse button is pressed) and the pointing device has left the
         //       boundary of the user agent.
-        auto coordinates = compute_mouse_event_coordinates(visual_viewport_position, viewport_position, *document->layout_node());
+        auto coordinates = compute_mouse_event_coordinates(visual_viewport_position, viewport_position, *document);
         auto movement = compute_mouse_event_movement(screen_position);
         m_mousemove_previous_screen_position = screen_position;
 
@@ -754,7 +760,7 @@ EventResult EventHandler::handle_mouseup(CSSPixelPoint visual_viewport_position,
         // NB: Always fire a mouseup event if we've fired a mousedown event. Otherwise, web pages will not have a
         //     chance to end a drag that went outside the window.
         if (m_mousedown_target) {
-            auto coordinates = compute_mouse_event_coordinates(visual_viewport_position, viewport_position, *document->layout_node());
+            auto coordinates = compute_mouse_event_coordinates(visual_viewport_position, viewport_position, *document);
             dispatch_a_pointer_event_for_a_device_that_supports_hover(PointerEventType::PointerUp, document->html_element(), nullptr, coordinates, screen_position, {}, button, buttons, modifiers, click_count);
             return EventResult::Handled;
         }
@@ -803,8 +809,8 @@ EventResult EventHandler::handle_mouseup(CSSPixelPoint visual_viewport_position,
         // NB: Mouseup listeners may have invalidated layout. Click offsets are relative to the click target,
         //     which may differ from the mouseup target.
         document->update_layout(DOM::UpdateLayoutReason::EventHandlerHandleMouseUp);
-        if (auto* click_layout_node = click_target->layout_node())
-            coordinates = compute_mouse_event_coordinates(visual_viewport_position, viewport_position, *click_layout_node);
+        if (auto click_box = hit_box_bound_to(*document, DOM::NodeIdentity::of(*click_target)); click_box.has_value())
+            coordinates = compute_mouse_event_coordinates(visual_viewport_position, viewport_position, *click_box);
 
         // https://www.w3.org/TR/pointerevents3/#event-dispatch
         // Dispatch event to target following the [UIEVENTS] spec.
@@ -2532,12 +2538,12 @@ bool EventHandler::fire_click_events(GC::Ref<DOM::Node> node, MouseEventCoordina
     return run_activation_behavior;
 }
 
-EventHandler::MouseEventCoordinates EventHandler::compute_mouse_event_coordinates(CSSPixelPoint visual_viewport_position, CSSPixelPoint viewport_position, Layout::Node const& layout_node) const
+EventHandler::MouseEventCoordinates EventHandler::compute_mouse_event_coordinates(CSSPixelPoint visual_viewport_position, CSSPixelPoint viewport_position, DOM::Document& document) const
 {
-    auto page_offset = compute_mouse_event_page_offset(viewport_position);
-    auto scroll_offset = m_navigable->active_document()->navigable()->viewport_scroll_offset();
-    auto offset = compute_mouse_event_offset(visual_viewport_position.translated(scroll_offset), layout_node);
-    return { page_offset, visual_viewport_position, viewport_position, offset };
+    // The document's own box: the viewport.
+    if (auto viewport_box = hit_box_bound_to(document, DOM::NodeIdentity::of_document()); viewport_box.has_value())
+        return compute_mouse_event_coordinates(visual_viewport_position, viewport_position, *viewport_box);
+    return { compute_mouse_event_page_offset(viewport_position), visual_viewport_position, viewport_position, {} };
 }
 
 EventHandler::MouseEventCoordinates EventHandler::compute_mouse_event_coordinates(CSSPixelPoint visual_viewport_position, CSSPixelPoint viewport_position, Painting::HitBox const& box) const

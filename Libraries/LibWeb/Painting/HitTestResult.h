@@ -58,6 +58,9 @@ public:
     CSSPixelRect absolute_rect() const { return m_facts.absolute_rect; }
     CSSPixelPoint box_type_agnostic_position() const { return m_facts.box_type_agnostic_position; }
 
+    // The box the DOM node was bound to when the snapshot was published.
+    static Optional<HitBox> bound_box_in(NonnullRefPtr<HitTestSnapshot const>, DOM::NodeIdentity);
+
     Optional<HitBox> parent() const;
     // The box the DOM node was bound to in the same snapshot.
     Optional<HitBox> bound_box_of(DOM::NodeIdentity) const;

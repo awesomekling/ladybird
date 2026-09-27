@@ -7,9 +7,9 @@
 #include <AK/Math.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
+#include <LibWeb/DOM/InvalidationJournal.h>
 #include <LibWeb/HTML/LocalNavigable.h>
-#include <LibWeb/Layout/Node.h>
-#include <LibWeb/Layout/Viewport.h>
+#include <LibWeb/Layout/Box.h>
 #include <LibWeb/Page/AutoScrollHandler.h>
 #include <LibWeb/Page/MiddleButtonScrollHandler.h>
 #include <LibWeb/Painting/BoxViews.h>
@@ -26,18 +26,18 @@ MiddleButtonScrollHandler::MiddleButtonScrollHandler(DOM::Element& container, CS
     , m_origin(origin)
     , m_mouse_position(origin)
 {
-    auto const* layout_node = m_container_element->document().layout_node();
-    if (layout_node && Painting::has_committed_box(*layout_node))
-        Painting::set_needs_repaint(*layout_node, InvalidateDisplayList::PaintCommands);
+    auto& document = m_container_element->document();
+    if (document.has_committed_viewport_box())
+        document.invalidation_journal().note_needs_repaint(DOM::NodeIdentity::of_document(), InvalidateDisplayList::PaintCommands);
 }
 
 MiddleButtonScrollHandler::~MiddleButtonScrollHandler()
 {
     if (!m_container_element->document().layout_is_up_to_date())
         return;
-    auto const* layout_node = m_container_element->document().layout_node();
-    if (layout_node && Painting::has_committed_box(*layout_node))
-        Painting::set_needs_repaint(*layout_node, InvalidateDisplayList::PaintCommands);
+    auto& document = m_container_element->document();
+    if (document.has_committed_viewport_box())
+        document.invalidation_journal().note_needs_repaint(DOM::NodeIdentity::of_document(), InvalidateDisplayList::PaintCommands);
 }
 
 void MiddleButtonScrollHandler::visit_edges(JS::Cell::Visitor& visitor) const

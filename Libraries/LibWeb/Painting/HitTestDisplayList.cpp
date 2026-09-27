@@ -6,10 +6,11 @@
 
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/DOM/Document.h>
+#include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/Node.h>
 #include <LibWeb/DOM/ShadowRoot.h>
+#include <LibWeb/DOM/Text.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/Painting/ChromeMetrics.h>
 #include <LibWeb/Painting/ChromeWidget.h>
@@ -72,6 +73,12 @@ bool HitTestDisplayList::is_current() const
     return m_rust_generation != 0 && Layout::RustFFI::layout_arena_hit_test_list_generation(m_arena->handle()) == m_rust_generation;
 }
 
+Optional<HitBox> HitTestDisplayList::bound_box_of(DOM::NodeIdentity identity) const
+{
+    publish_snapshot();
+    return HitBox::bound_box_in(m_snapshot, identity);
+}
+
 HitTestDisplayList::Item HitTestDisplayList::item(size_t index) const
 {
     return { index, Layout::RustFFI::hit_test_snapshot_item(snapshot(), index) };
@@ -101,7 +108,11 @@ static u32 style_node_of(DOM::Node const* node)
         return document->style_node_id().value();
     if (auto const* shadow_root = as_if<DOM::ShadowRoot>(node))
         return shadow_root->style_node_id().value();
-    return Layout::Node::style_node_of(node).value();
+    if (auto const* element = as_if<DOM::Element>(node))
+        return element->style_node_id().value();
+    if (auto const* text = as_if<DOM::Text>(node))
+        return text->style_node_id().value();
+    return 0;
 }
 
 // Whether each caret line of the snapshot is in the scope: one of its caret items stands for the scope or for a node

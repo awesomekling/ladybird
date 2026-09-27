@@ -79,9 +79,15 @@ Optional<HitBox> HitBox::parent() const
     return of(m_snapshot, m_facts.parent);
 }
 
+Optional<HitBox> HitBox::bound_box_in(NonnullRefPtr<HitTestSnapshot const> snapshot, DOM::NodeIdentity identity)
+{
+    auto box = Layout::RustFFI::hit_test_snapshot_bound_box(snapshot->handle(), ffi_identity_of(identity));
+    return of(move(snapshot), box);
+}
+
 Optional<HitBox> HitBox::bound_box_of(DOM::NodeIdentity identity) const
 {
-    return of(m_snapshot, Layout::RustFFI::hit_test_snapshot_bound_box(m_snapshot->handle(), ffi_identity_of(identity)));
+    return bound_box_in(m_snapshot, identity);
 }
 
 CSSPixelPoint HitBox::transform_to_local_coordinates(DOM::Document const& document, CSSPixelPoint position) const

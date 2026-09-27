@@ -129,7 +129,7 @@ private:
     };
     bool fire_click_events(GC::Ref<DOM::Node>, MouseEventCoordinates const&, CSSPixelPoint screen_position, unsigned button, unsigned buttons, unsigned modifiers, int click_count);
 
-    MouseEventCoordinates compute_mouse_event_coordinates(CSSPixelPoint visual_viewport_position, CSSPixelPoint viewport_position, Layout::Node const& layout_node) const;
+    MouseEventCoordinates compute_mouse_event_coordinates(CSSPixelPoint visual_viewport_position, CSSPixelPoint viewport_position, DOM::Document&) const;
     MouseEventCoordinates compute_mouse_event_coordinates(CSSPixelPoint visual_viewport_position, CSSPixelPoint viewport_position, Painting::HitBox const&) const;
     CSSPixelPoint compute_mouse_event_page_offset(CSSPixelPoint event_client_offset) const;
     CSSPixelPoint compute_mouse_event_movement(CSSPixelPoint screen_position) const;
