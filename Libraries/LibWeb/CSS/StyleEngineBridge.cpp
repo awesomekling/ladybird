@@ -312,6 +312,36 @@ void StyleEngine::set_element_parts(StyleNodeID node, ReadonlySpan<StyleAtomID> 
         record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::ElementParts, .value = index == 0, .node = node.value(), .parent = hosts[index].value(), .previous_sibling = 0, .facts = names[index].value(), .data = 0 });
 }
 
+void StyleEngine::set_element_id_name(StyleNodeID node, StyleAtomID name)
+{
+    record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::ElementIdName, .value = 0, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = name.value(), .data = 0 });
+}
+
+void StyleEngine::set_element_directionality(StyleNodeID node, StyleAtomID directionality)
+{
+    record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::ElementDirectionality, .value = 0, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = directionality.value(), .data = 0 });
+}
+
+void StyleEngine::set_element_heading_level(StyleNodeID node, u8 level)
+{
+    record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::ElementHeadingLevel, .value = level, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = 0, .data = 0 });
+}
+
+void StyleEngine::set_element_custom_states(StyleNodeID node, ReadonlySpan<StyleAtomID> states)
+{
+    if (states.is_empty()) {
+        record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::ElementCustomState, .value = 1, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = 0, .data = 0 });
+        return;
+    }
+    for (size_t index = 0; index < states.size(); ++index)
+        record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::ElementCustomState, .value = index == 0, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = states[index].value(), .data = 0 });
+}
+
+void StyleEngine::set_element_part_exposure(StyleNodeID node, StyleNodeID exposure)
+{
+    record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::ElementPartExposure, .value = 0, .node = node.value(), .parent = exposure.value(), .previous_sibling = 0, .facts = 0, .data = 0 });
+}
+
 void StyleEngine::finish_sheet_rules_replacement(SheetID sheet)
 {
     publish_input([sheet](StyleInputScope const& input) {
