@@ -38,12 +38,11 @@
 #include <LibWeb/HTML/ImageRequest.h>
 #include <LibWeb/HTML/LocalNavigable.h>
 #include <LibWeb/HTML/NavigableContainer.h>
-#include <LibWeb/Layout/Box.h>
 #include <LibWeb/Layout/ImageProvider.h>
+#include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
 #include <LibWeb/Layout/Node.h>
-#include <LibWeb/Layout/TextNode.h>
-#include <LibWeb/Layout/Viewport.h>
+#include <LibWeb/Layout/NodeArena.h>
 #include <LibWeb/Page/EventHandler.h>
 #include <LibWeb/Page/MiddleButtonScrollHandler.h>
 #include <LibWeb/Page/Page.h>
@@ -243,7 +242,7 @@ void publish_visual_context_tree_inputs(DOM::Document& document)
     auto viewport_overflow = overflow_values_applied_to_viewport_for_wheel_scrolling(document);
     inputs.viewport_wheel_overflow_x = static_cast<u8>(to_underlying(viewport_overflow.x));
     inputs.viewport_wheel_overflow_y = static_cast<u8>(to_underlying(viewport_overflow.y));
-    Layout::RustFFI::layout_arena_publish_visual_context_tree_inputs(document.layout_node_arena().handle(), inputs);
+    Layout::RustFFI::layout_arena_publish_visual_context_tree_inputs(Layout::document_layout_arena(document), inputs);
 }
 
 }
@@ -265,7 +264,7 @@ Optional<Gfx::Filter> filter_from_functions(ReadonlySpan<Compositing::RustFFI::F
 
 static void* layout_arena_handle(DOM::Document const& document)
 {
-    return const_cast<DOM::Document&>(document).layout_node_arena().handle();
+    return Layout::document_layout_arena(const_cast<DOM::Document&>(document));
 }
 
 Layout::RustFFI::FfiVisualContextUpdateOutcome rust_update_accumulated_visual_contexts(DOM::Document& document)
@@ -294,12 +293,11 @@ Vector<u32> rust_owned_visual_context_node_indices(DOM::Document const& document
     return rust_owned_visual_context_node_indices(layout_arena_handle(document), committed_row_slot(document, identity), list);
 }
 
-bool rust_background_color_can_be_compositor_animated(Layout::Node const& layout_node)
+bool rust_background_color_can_be_compositor_animated(BoxSlot const& box)
 {
-    if (!has_committed_box(layout_node))
+    if (!has_committed_box(box))
         return false;
-    return Layout::RustFFI::layout_arena_background_color_can_be_compositor_animated(
-        layout_node.arena_handle(), committed_row_slot(layout_node));
+    return Layout::RustFFI::layout_arena_background_color_can_be_compositor_animated(box.arena(), box.slot());
 }
 
 bool rust_background_color_can_be_compositor_animated(DOM::Document const& document, DOM::NodeIdentity identity)
@@ -317,9 +315,11 @@ void const* retain_rust_main_visual_context_tree(DOM::Document const& document)
     return tree;
 }
 
-Layout::RustFFI::FfiPhysicalOverflowDirections rust_physical_overflow_directions(Layout::Node const& box)
+Layout::RustFFI::FfiPhysicalOverflowDirections rust_physical_overflow_directions(BoxSlot const& box)
 {
-    return Layout::RustFFI::layout_arena_physical_overflow_directions(box.arena_handle(), committed_row_slot(box));
+    if (!box)
+        return {};
+    return Layout::RustFFI::layout_arena_physical_overflow_directions(box.arena(), box.slot());
 }
 
 Layout::RustFFI::FfiPhysicalOverflowDirections rust_physical_overflow_directions(DOM::Document const& document, DOM::NodeIdentity identity)
@@ -330,17 +330,24 @@ Layout::RustFFI::FfiPhysicalOverflowDirections rust_physical_overflow_directions
     return Layout::RustFFI::layout_arena_physical_overflow_directions(layout_arena_handle(document), slot);
 }
 
-void register_geometry_host(Layout::NodeArena& arena)
+static void set_scroll_offset_from_render_side(DOM::Document& document, Compositing::RustFFI::NodeSlotId slot, CSSPixelPoint offset)
+{
+    set_scroll_offset(BoxSlot::of(document, slot), offset);
+    // The render side reads the offsets it handed over as soon as the handover is done.
+    document.drain_invalidation_journal();
+}
+
+void register_geometry_host(DOM::Document& document)
 {
     Layout::RustFFI::FfiGeometryHostCallbacks callbacks {
-        .context = nullptr,
-        .set_scroll_offset = [](void*, void* layout_node_shell, CSSPixelPoint offset) {
-            auto& box = *static_cast<Layout::Node*>(layout_node_shell);
-            set_scroll_offset(box, offset);
-            // The render side reads the offsets it handed over as soon as the handover is done.
-            box.document().drain_invalidation_journal(); },
+        .context = &document,
+        .set_scroll_offset = [](void* context, Compositing::RustFFI::NodeSlotId slot, CSSPixelPoint offset) { set_scroll_offset_from_render_side(*static_cast<DOM::Document*>(context), slot, offset); },
     };
-    Layout::RustFFI::layout_arena_set_geometry_host(arena.handle(), callbacks);
+    // Registered once the document has made its arena.
+    auto* arena = Layout::document_layout_arena_if_created(document);
+    if (!arena)
+        return;
+    Layout::RustFFI::layout_arena_set_geometry_host(arena, callbacks);
 }
 
 Layout::RustFFI::FfiRenderingPreparationOutcome rust_prepare_for_rendering(DOM::Document& document, bool visual_context_update_pending)
@@ -357,18 +364,20 @@ static bool declares_light_or_dark_color_scheme(ReadonlySpan<Utf16FlyString> sch
     return schemes.contains_slow("light"_utf16) || schemes.contains_slow("dark"_utf16);
 }
 
-CSS::ColorResolutionContext gradient_stop_color_resolution_context(Layout::NodeWithStyle const& layout_node)
+CSS::ColorResolutionContext gradient_stop_color_resolution_context(BoxSlot const& box)
 {
     void const* current_color_style_value_data = nullptr;
-    if (auto* dom_node = layout_node.dom_node()) {
+    if (auto dom_node = box.dom_node()) {
         if (auto* element = as_if<DOM::Element>(*dom_node)) {
             if (auto const* values = element->style_group<CSS::ComputedValues::InheritedTextValues>())
                 current_color_style_value_data = values->color_style_value.pointer;
         }
     }
+    auto const* ui_values = box.style_group<CSS::ComputedValues::InheritedUIValues>();
+    auto const* text_values = box.style_group<CSS::ComputedValues::InheritedTextValues>();
     return {
-        .color_scheme = layout_node.color_scheme(),
-        .current_color = layout_node.color(),
+        .color_scheme = ui_values ? ui_values->color_scheme_value() : CSS::PreferredColorScheme {},
+        .current_color = text_values ? text_values->color_value() : Color {},
         .current_color_style_value_data = current_color_style_value_data,
         .calculation_resolution_context = {},
     };
@@ -407,19 +416,25 @@ void rust_invalidate_scroll_state(DOM::Document& document)
     Layout::RustFFI::layout_arena_invalidate_scroll_state(layout_arena_handle(document));
 }
 
+// What the dumps and traces print for the box `slot` names.
+static void push_box_description(DOM::Document const& document, Compositing::RustFFI::NodeSlotId slot, void* description_sink)
+{
+    auto description = BoxSlot::of(document, slot).debug_description();
+    auto bytes = description.bytes();
+    Layout::RustFFI::layout_arena_paint_push_bytes(description_sink, bytes.data(), bytes.size());
+}
+
 Utf16String serialize_painting_dump(DOM::Document const& document, Compositing::AccumulatedVisualContextTree const& visual_context_tree, Compositing::DisplayList const& display_list, Compositing::DisplayListResourceStorage const& resource_storage)
 {
     struct DumpContext {
+        DOM::Document const& document;
         Compositing::DisplayListResourceStorage const& resource_storage;
         Utf16String dump;
-    } context { resource_storage, {} };
+    } context { document, resource_storage, {} };
 
     Layout::RustFFI::FfiPaintingDumpCallbacks callbacks {
         .context = &context,
-        .debug_description = [](void*, void* layout_node_shell, void* description_sink) {
-            auto description = static_cast<Layout::Node const*>(layout_node_shell)->debug_description();
-            auto bytes = description.bytes();
-            Layout::RustFFI::layout_arena_paint_push_bytes(description_sink, bytes.data(), bytes.size()); },
+        .debug_description = [](void* context_pointer, Compositing::RustFFI::NodeSlotId slot, void* description_sink) { push_box_description(static_cast<DumpContext*>(context_pointer)->document, slot, description_sink); },
         .command_bytes = [](void*, void const* display_list_pointer, size_t* byte_count) -> u8 const* {
             auto bytes = static_cast<Compositing::DisplayList const*>(display_list_pointer)->command_bytes();
             *byte_count = bytes.size();
@@ -448,13 +463,14 @@ static void append_bytes_to_string_builder(void* context, u8 const* bytes, size_
 
 void dump_stacking_context_tree(StringBuilder& builder, DOM::Document const& document)
 {
+    struct DumpContext {
+        DOM::Document const& document;
+        StringBuilder& builder;
+    } context { document, builder };
     Layout::RustFFI::FfiStackingContextDumpCallbacks callbacks {
-        .context = &builder,
-        .debug_description = [](void*, void* layout_node_shell, void* description_sink) {
-            auto description = static_cast<Layout::Node const*>(layout_node_shell)->debug_description();
-            auto bytes = description.bytes();
-            Layout::RustFFI::layout_arena_paint_push_bytes(description_sink, bytes.data(), bytes.size()); },
-        .append_text = append_bytes_to_string_builder,
+        .context = &context,
+        .debug_description = [](void* context_pointer, Compositing::RustFFI::NodeSlotId slot, void* description_sink) { push_box_description(static_cast<DumpContext*>(context_pointer)->document, slot, description_sink); },
+        .append_text = [](void* context_pointer, u8 const* bytes, size_t byte_count) { static_cast<DumpContext*>(context_pointer)->builder.append(StringView { bytes, byte_count }); },
     };
     Layout::RustFFI::layout_arena_dump_stacking_context_tree(
         layout_arena_handle(document), viewport_row_slot(document), callbacks);
@@ -465,13 +481,22 @@ static void push_bytes_to_dump_sink(void* sink, ReadonlyBytes bytes)
     Layout::RustFFI::layout_arena_paint_push_bytes(sink, bytes.data(), bytes.size());
 }
 
-static void dump_layout_tree(Layout::Node const& root, size_t initial_indent, bool interactive, void* output_context, void (*append_text)(void*, u8 const*, size_t))
+// What a layout tree dump of a document writes through: the document, whose rows the dump names by slot, and where the
+// dump goes.
+struct LayoutTreeDumpContext {
+    DOM::Document const& document;
+    void* output_context;
+    void (*append_text)(void*, u8 const*, size_t);
+};
+
+static void dump_layout_tree(BoxSlot const& root, size_t initial_indent, bool interactive, void* output_context, void (*append_text)(void*, u8 const*, size_t))
 {
+    LayoutTreeDumpContext context { root.document(), output_context, append_text };
     Layout::RustFFI::FfiLayoutTreeDumpCallbacks callbacks {
-        .context = output_context,
-        .describe_dom_node = [](void*, void* layout_node_pointer, void* tag_name_sink, void* identifier_sink) {
+        .context = &context,
+        .describe_dom_node = [](void* context_pointer, Compositing::RustFFI::NodeSlotId slot, void* tag_name_sink, void* identifier_sink) {
             // A row whose node has been removed no longer names one, and the dump says so.
-            auto const* dom_node = static_cast<Layout::Node const*>(layout_node_pointer)->dom_node();
+            auto dom_node = BoxSlot::of(static_cast<LayoutTreeDumpContext*>(context_pointer)->document, slot).dom_node();
             if (!dom_node) {
                 push_bytes_to_dump_sink(tag_name_sink, "(detached)"sv.bytes());
                 return;
@@ -492,32 +517,43 @@ static void dump_layout_tree(Layout::Node const& root, size_t initial_indent, bo
                 identifier_builder.append(class_name);
             }
             push_bytes_to_dump_sink(identifier_sink, identifier_builder.string_view().bytes()); },
-        .navigable_container_content_document = [](void*, void* layout_node_pointer, void* url_sink) -> Layout::RustFFI::FfiNestedLayoutRoot {
-            auto const* container = as_if<HTML::NavigableContainer>(static_cast<Layout::Node const*>(layout_node_pointer)->dom_node());
+        .navigable_container_content_document = [](void* context_pointer, Compositing::RustFFI::NodeSlotId slot, void* url_sink) -> Layout::RustFFI::FfiNestedLayoutRoot {
+            auto dom_node = BoxSlot::of(static_cast<LayoutTreeDumpContext*>(context_pointer)->document, slot).dom_node();
+            auto const* container = as_if<HTML::NavigableContainer>(dom_node.ptr());
             auto const* content_document = container ? container->content_document_without_origin_check() : nullptr;
             if (!content_document)
-                return { .has_document = false, .layout_root_shell = nullptr };
+                return { .has_document = false, .document = nullptr };
             auto serialized_url = content_document->url().serialize();
             push_bytes_to_dump_sink(url_sink, serialized_url.bytes());
             // The dump brings every hosted document's layout up to date first.
             ASSERT(content_document->layout_is_up_to_date());
-            return { .has_document = true, .layout_root_shell = const_cast<Layout::Viewport*>(content_document->unsafe_layout_node()) }; },
-        .svg_as_image_layout_root = [](void*, void* layout_node_pointer) -> void* {
-            auto const* image_element = as_if<HTML::HTMLImageElement>(static_cast<Layout::Node const*>(layout_node_pointer)->dom_node());
+            if (!BoxSlot::viewport_of(*content_document))
+                return { .has_document = true, .document = nullptr };
+            return { .has_document = true, .document = const_cast<DOM::Document*>(content_document) }; },
+        .svg_as_image_document = [](void* context_pointer, Compositing::RustFFI::NodeSlotId slot) -> void* {
+            auto dom_node = BoxSlot::of(static_cast<LayoutTreeDumpContext*>(context_pointer)->document, slot).dom_node();
+            auto const* image_element = as_if<HTML::HTMLImageElement>(dom_node.ptr());
             if (!image_element)
                 return nullptr;
             auto const* svg_image_data = as_if<SVG::SVGDecodedImageData>(image_element->current_request().image_data().ptr());
             if (!svg_image_data)
                 return nullptr;
-            return const_cast<Layout::Viewport*>(svg_image_data->svg_document().unsafe_layout_node()); },
-        .dump_nested_layout_tree = [](void*, void* layout_root_shell, size_t indent, bool interactive, void* output_sink) { dump_layout_tree(*static_cast<Layout::Node const*>(layout_root_shell), indent, interactive, output_sink, Layout::RustFFI::layout_arena_paint_push_bytes); },
-        .append_text = append_text,
+            auto& svg_document = svg_image_data->svg_document();
+            if (!BoxSlot::viewport_of(svg_document))
+                return nullptr;
+            return &const_cast<DOM::Document&>(svg_document); },
+        .dump_nested_layout_tree = [](void*, void* document, size_t indent, bool interactive, void* output_sink) { dump_layout_tree(BoxSlot::viewport_of(*static_cast<DOM::Document const*>(document)), indent, interactive, output_sink, Layout::RustFFI::layout_arena_paint_push_bytes); },
+        .append_text = [](void* context_pointer, u8 const* bytes, size_t byte_count) {
+            auto& context = *static_cast<LayoutTreeDumpContext*>(context_pointer);
+            context.append_text(context.output_context, bytes, byte_count); },
     };
-    Layout::RustFFI::layout_arena_dump_layout_tree(root.arena_handle(), Layout::Node::slot_id(&root), initial_indent, interactive, callbacks);
+    Layout::RustFFI::layout_arena_dump_layout_tree(root.arena(), root.slot(), initial_indent, interactive, callbacks);
 }
 
-void dump_layout_tree(StringBuilder& builder, Layout::Node const& root, bool interactive)
+void dump_layout_tree(StringBuilder& builder, BoxSlot const& root, bool interactive)
 {
+    if (!root)
+        return;
     dump_layout_tree(root, 0, interactive, &builder, append_bytes_to_string_builder);
 }
 
@@ -595,16 +631,16 @@ static OverlayLabelFonts overlay_label_fonts(float css_size, double device_pixel
 
 void take_recording_trace_if_pending(DOM::Document& document)
 {
-    StringBuilder trace;
+    struct TraceContext {
+        DOM::Document const& document;
+        StringBuilder trace;
+    } context { document, {} };
     bool has_pending_trace = Layout::RustFFI::layout_arena_take_recording_trace(
-        layout_arena_handle(document), &trace,
-        [](void*, void* layout_node_shell, void* description_sink) {
-            auto description = static_cast<Layout::Node const*>(layout_node_shell)->debug_description();
-            auto bytes = description.bytes();
-            Layout::RustFFI::layout_arena_paint_push_bytes(description_sink, bytes.data(), bytes.size()); },
-        append_bytes_to_string_builder);
+        layout_arena_handle(document), &context,
+        [](void* context_pointer, Compositing::RustFFI::NodeSlotId slot, void* description_sink) { push_box_description(static_cast<TraceContext*>(context_pointer)->document, slot, description_sink); },
+        [](void* context_pointer, u8 const* bytes, size_t byte_count) { static_cast<TraceContext*>(context_pointer)->trace.append(StringView { bytes, byte_count }); });
     if (has_pending_trace)
-        document.paint_state().append_recording_trace(MUST(trace.to_string()));
+        document.paint_state().append_recording_trace(MUST(context.trace.to_string()));
 }
 
 bool last_recording_missed_vector_images(DOM::Document const& document)
@@ -649,9 +685,9 @@ static void read_host_recording_inputs(HostRecordingInputs& host, DOM::Document&
     host.wheel_event_region_state = document.paint_state().collect_root_blocking_wheel_event_regions(document);
     auto const& wheel_event_region_state = host.wheel_event_region_state;
     auto& inputs = host.inputs;
-    if (overlay_inputs.highlighted_layout_node) {
+    if (overlay_inputs.highlighted_box) {
         inputs.has_inspector_highlight = true;
-        inputs.inspector_highlight_paintable = committed_row_slot(*overlay_inputs.highlighted_layout_node);
+        inputs.inspector_highlight_paintable = overlay_inputs.highlighted_box.slot();
     }
     inputs.tooltip_color = overlay_inputs.tooltip_color;
     inputs.tooltip_text_color = overlay_inputs.tooltip_text_color;
@@ -664,7 +700,7 @@ static void read_host_recording_inputs(HostRecordingInputs& host, DOM::Document&
     }
     for (auto const& highlight : overlay_inputs.grid_highlights) {
         ffi_grid_overlays.append({
-            .paintable = committed_row_slot(*highlight.layout_node),
+            .paintable = highlight.box.slot(),
             .color = highlight.options.color,
             .label_foreground_color = highlight.options.color.with_alpha(235).suggested_foreground_color(),
             .label_css_pixel_size = grid_label_fonts.css_font->pixel_size(),
@@ -679,7 +715,7 @@ static void read_host_recording_inputs(HostRecordingInputs& host, DOM::Document&
     auto& ffi_flex_overlays = host.flex_overlays;
     for (auto const& highlight : overlay_inputs.flex_highlights) {
         ffi_flex_overlays.append({
-            .paintable = committed_row_slot(*highlight.layout_node),
+            .paintable = highlight.box.slot(),
             .color = highlight.options.color,
         });
     }
@@ -688,10 +724,9 @@ static void read_host_recording_inputs(HostRecordingInputs& host, DOM::Document&
     inputs.caret_debug_rect = overlay_inputs.caret_debug_rect;
     auto& inspector_highlight_label_text = host.inspector_highlight_label_text;
     auto& inspector_label_fonts = host.inspector_label_fonts;
-    if (overlay_inputs.highlighted_layout_node) {
-        auto const& layout_node = *overlay_inputs.highlighted_layout_node;
-        auto border_rect = absolute_border_box_rect(layout_node);
-        inspector_highlight_label_text = ByteString::formatted("{} {}x{} @ {},{}", layout_node.debug_description(), border_rect.width(), border_rect.height(), border_rect.x(), border_rect.y());
+    if (auto const& box = overlay_inputs.highlighted_box) {
+        auto border_rect = absolute_border_box_rect(box);
+        inspector_highlight_label_text = ByteString::formatted("{} {}x{} @ {},{}", box.debug_description(), border_rect.width(), border_rect.height(), border_rect.x(), border_rect.y());
         inspector_label_fonts = overlay_label_fonts(12.0f, device_pixels_per_css_pixel);
         inputs.inspector_highlight_label = {
             .fonts = inspector_label_fonts.ffi(),
@@ -744,14 +779,14 @@ static void read_host_recording_inputs(HostRecordingInputs& host, DOM::Document&
         auto color_scheme = read_ahead_of_layout == ReadAheadOfLayout::Yes ? document.canvas_color_scheme_as_last_laid_out() : document.canvas_color_scheme();
         bool opaque_canvas = false;
         // NB: The container's document laid out ahead of this one's, which a flight reads ahead of its layout.
-        auto container_layout_node = [&]() -> Layout::NodeWithStyle const* {
+        auto container_ui_values = [&]() -> CSS::ComputedValues::InheritedUIValues const* {
             auto container_element = document.navigable()->container();
             if (!container_element)
                 return nullptr;
-            return read_ahead_of_layout == ReadAheadOfLayout::Yes ? container_element->unsafe_layout_node() : container_element->layout_node();
+            return BoxSlot::bound_to(*container_element).style_group<CSS::ComputedValues::InheritedUIValues>();
         };
-        if (auto const* container_node = container_layout_node()) {
-            auto container_scheme = container_node->color_scheme();
+        if (auto const* container_values = container_ui_values()) {
+            auto container_scheme = container_values->color_scheme_value();
             if (container_scheme == CSS::PreferredColorScheme::Auto)
                 container_scheme = CSS::PreferredColorScheme::Light;
             opaque_canvas = container_scheme != color_scheme;
@@ -1082,6 +1117,32 @@ Compositing::DisplayListResource record_image_paint_display_list(ImagePaint cons
             *static_cast<Optional<Compositing::DisplayListResource>*>(context) = Compositing::DisplayListResource { move(display_list), move(visual_context_tree) };
         });
     return recorded_display_list.release_value();
+}
+
+// For callers outside Painting that still hold a layout node; these go with the Layout classes.
+static BoxSlot box_slot(Layout::Node const& node)
+{
+    return BoxSlot::of(node.document(), Layout::Node::slot_id(&node));
+}
+
+void dump_layout_tree(StringBuilder& builder, Layout::Node const& root, bool interactive)
+{
+    dump_layout_tree(builder, box_slot(root), interactive);
+}
+
+bool rust_background_color_can_be_compositor_animated(Layout::Node const& layout_node)
+{
+    return rust_background_color_can_be_compositor_animated(box_slot(layout_node));
+}
+
+Layout::RustFFI::FfiPhysicalOverflowDirections rust_physical_overflow_directions(Layout::Node const& box)
+{
+    return rust_physical_overflow_directions(box_slot(box));
+}
+
+CSS::ColorResolutionContext gradient_stop_color_resolution_context(Layout::NodeWithStyle const& layout_node)
+{
+    return gradient_stop_color_resolution_context(box_slot(layout_node));
 }
 
 }

@@ -18,7 +18,6 @@ NodeArena::NodeArena()
     : m_render_document(RustFFI::render_owner_create_document())
 {
     VERIFY(m_render_document.arena);
-    Painting::register_geometry_host(*this);
 }
 
 NodeArena::~NodeArena()
