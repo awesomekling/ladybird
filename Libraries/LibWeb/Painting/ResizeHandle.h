@@ -13,7 +13,7 @@ namespace Web::Painting {
 
 class ResizeHandle final : public ChromeWidget {
 public:
-    static NonnullRefPtr<ResizeHandle> create(Layout::NodeArena&, Compositing::RustFFI::NodeSlotId);
+    static NonnullRefPtr<ResizeHandle> create(DOM::Document&, Compositing::RustFFI::NodeSlotId);
 
     virtual MouseAction handle_pointer_event(Utf16FlyString const& type, unsigned button, CSSPixelPoint visual_viewport_position) override;
     virtual void mouse_enter() override { }
@@ -22,7 +22,7 @@ public:
     virtual Optional<CSS::CursorPredefined> cursor() const override;
 
 private:
-    ResizeHandle(Layout::NodeArena&, Compositing::RustFFI::NodeSlotId);
+    ResizeHandle(DOM::Document&, Compositing::RustFFI::NodeSlotId);
 
     // The element the handle resizes, named rather than held: the handle outlives a pointer
     // gesture and resolves the name when one arrives.

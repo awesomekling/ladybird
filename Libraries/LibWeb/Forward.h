@@ -1028,6 +1028,7 @@ class Notification;
 
 namespace Web::Painting {
 
+class BoxSlot;
 class BoxViewRepaintAccess;
 class DocumentPaintState;
 

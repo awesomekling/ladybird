@@ -32,9 +32,9 @@
 #include <LibWeb/HTML/HTMLElement.h>
 #include <LibWeb/Layout/ImageProvider.h>
 #include <LibWeb/Layout/LayoutRustBridge.h>
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/Layout/NodeArena.h>
 #include <LibWeb/Painting/PaintableTypes.h>
+#include <LibWeb/Painting/PaintingRustBridge.h>
 #include <LibWeb/SVG/FragmentIdentifier.h>
 #include <LibWeb/SVG/SVGCircleElement.h>
 #include <LibWeb/SVG/SVGClipPathElement.h>
@@ -372,8 +372,23 @@ void* document_layout_arena_if_created(DOM::Document const& document)
     return arena ? arena->handle() : nullptr;
 }
 
-void register_layout_host(NodeArena& arena, DOM::Document& document)
+Optional<RustFFI::DocumentId> document_render_document_if_created(DOM::Document const& document)
 {
+    auto const* arena = document.layout_node_arena_if_created();
+    if (!arena)
+        return {};
+    return arena->render_document();
+}
+
+RustFFI::DocumentId document_render_document(DOM::Document& document)
+{
+    return document.layout_node_arena().render_document();
+}
+
+void register_layout_host(DOM::Document& document)
+{
+    auto* arena = document_layout_arena_if_created(document);
+    VERIFY(arena);
     static_assert(to_underlying(SVG::PreserveAspectRatio::Align::None) == 0);
     static_assert(to_underlying(SVG::PreserveAspectRatio::Align::xMinYMin) == 1);
     static_assert(to_underlying(SVG::PreserveAspectRatio::Align::xMidYMin) == 2);
@@ -406,8 +421,9 @@ void register_layout_host(NodeArena& arena, DOM::Document& document)
             // as a forced join takes a frame back, so the continuations wait for the next drain point.
             document.commit_messages().apply_script_free(); },
     };
-    RustFFI::layout_arena_set_layout_host_callbacks(arena.handle(), callbacks);
-    RustFFI::layout_arena_set_document_is_decoded_svg(arena.handle(), document.is_decoded_svg());
+    RustFFI::layout_arena_set_layout_host_callbacks(arena, callbacks);
+    RustFFI::layout_arena_set_document_is_decoded_svg(arena, document.is_decoded_svg());
+    Painting::register_geometry_host(document);
 }
 
 }
@@ -460,11 +476,6 @@ extern "C" WEB_API Web::Layout::RustFFI::FfiCodePointCategoryFacts ladybird_layo
     };
 }
 
-extern "C" WEB_API void ladybird_layout_node_shell_destroy(void* shell)
-{
-    Web::Layout::Node::delete_arena_owned_shell(*static_cast<Web::Layout::Node*>(shell));
-}
-
 extern "C" WEB_API void ladybird_layout_owned_image_provider_destroy(void* image_provider)
 {
     delete static_cast<Web::Layout::ImageProvider*>(image_provider);
@@ -473,9 +484,4 @@ extern "C" WEB_API void ladybird_layout_owned_image_provider_destroy(void* image
 extern "C" WEB_API void ladybird_layout_owned_image_provider_notify_detach(void* image_provider)
 {
     static_cast<Web::Layout::ImageProvider*>(image_provider)->layout_node_was_detached();
-}
-
-extern "C" WEB_API void ladybird_layout_image_observers_destroy(void* image_observers)
-{
-    Web::Layout::NodeWithStyle::delete_arena_owned_image_observers(*static_cast<Web::Layout::NodeWithStyle::ImageObserverSlots*>(image_observers));
 }

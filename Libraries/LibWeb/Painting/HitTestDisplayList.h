@@ -13,7 +13,6 @@
 #include <LibGC/Ptr.h>
 #include <LibWeb/Forward.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
-#include <LibWeb/Layout/NodeArena.h>
 #include <LibWeb/Painting/ChromeWidget.h>
 #include <LibWeb/Painting/HitTestResult.h>
 
@@ -44,7 +43,7 @@ enum class CaretLineDirection : u8 {
 // hit test (hit_test/snapshot.rs): finding what a point hits reads the snapshot, and nothing of the layout node arena.
 class WEB_API HitTestDisplayList : public RefCounted<HitTestDisplayList> {
 public:
-    static NonnullRefPtr<HitTestDisplayList> create_from_rust_recording(u64 visual_context_tree_structural_epoch, Layout::NodeArena&, ChromeWidgetRegistry&);
+    static NonnullRefPtr<HitTestDisplayList> create_from_rust_recording(u64 visual_context_tree_structural_epoch, DOM::Document&, ChromeWidgetRegistry&);
     ~HitTestDisplayList();
 
     u64 visual_context_tree_structural_epoch() const { return m_visual_context_tree_structural_epoch; }
@@ -65,7 +64,7 @@ public:
     TraversalDecision hit_test_all(CSSPixelPoint, DOM::Document const&, double device_pixels_per_css_pixel, ChromeMetrics const&, Function<TraversalDecision(HitTestResult)> const&) const;
 
 private:
-    HitTestDisplayList(u64 visual_context_tree_structural_epoch, Layout::NodeArena&, ChromeWidgetRegistry&, NonnullRefPtr<HitTestSnapshot const>);
+    HitTestDisplayList(u64 visual_context_tree_structural_epoch, DOM::Document&, ChromeWidgetRegistry&, NonnullRefPtr<HitTestSnapshot const>);
 
     struct Item {
         size_t item_index { 0 };
@@ -131,7 +130,7 @@ private:
     [[nodiscard]] Optional<CaretPosition> caret_position_for_line(size_t line_index, CSSPixelPoint local_point, CaretPositionMode) const;
 
     u64 m_visual_context_tree_structural_epoch { 0 };
-    NonnullRefPtr<Layout::NodeArena> m_arena;
+    GC::Weak<DOM::Document> m_document;
     NonnullRefPtr<ChromeWidgetRegistry> m_chrome_widget_registry;
     // The snapshot the list reads, which the hits it finds hold as well.
     mutable NonnullRefPtr<HitTestSnapshot const> m_snapshot;

@@ -816,7 +816,9 @@ set(SOURCES
     Page/ScreenWakeLockHandle.cpp
     Painting/Blending.cpp
     Painting/BoxModelMetrics.cpp
+    Painting/BoxSlot.cpp
     Painting/BoxViews.cpp
+    Painting/LayoutNodeViews.cpp
     Painting/PaintFacts.cpp
     Painting/ChromeWidget.cpp
     Painting/DocumentPaintState.cpp
@@ -828,6 +830,7 @@ set(SOURCES
     Painting/ResizeHandle.cpp
     Painting/Scrollbar.cpp
     Painting/Scrolling.cpp
+    Painting/StyleImageObservers.cpp
     Painting/ScrollSnap.cpp
     Painting/SvgPaintResources.cpp
     PerformanceTimeline/EntryTypes.cpp

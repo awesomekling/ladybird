@@ -18,8 +18,8 @@
 
 namespace Web::Painting {
 
-DocumentPaintState::DocumentPaintState(Layout::NodeArena& layout_node_arena)
-    : m_layout_node_arena(layout_node_arena)
+DocumentPaintState::DocumentPaintState(void* arena)
+    : m_arena(arena)
 {
 }
 
@@ -30,7 +30,7 @@ void DocumentPaintState::ensure_visual_context_tree(DOM::Document const& documen
 
 bool DocumentPaintState::has_visual_context_tree() const
 {
-    return Layout::RustFFI::layout_arena_has_visual_context_tree(m_layout_node_arena->handle());
+    return Layout::RustFFI::layout_arena_has_visual_context_tree(m_arena);
 }
 
 Compositing::AccumulatedVisualContextTree DocumentPaintState::visual_context_tree_without_update(DOM::Document const& document) const
@@ -47,7 +47,7 @@ Compositing::AccumulatedVisualContextTree DocumentPaintState::visual_context_tre
 u64 DocumentPaintState::visual_context_tree_structural_epoch(DOM::Document const& document) const
 {
     ensure_visual_context_tree(document);
-    return Layout::RustFFI::layout_arena_visual_context_tree_structural_epoch(m_layout_node_arena->handle());
+    return Layout::RustFFI::layout_arena_visual_context_tree_structural_epoch(m_arena);
 }
 
 BlockingWheelEventRegionState DocumentPaintState::collect_root_blocking_wheel_event_regions(DOM::Document& document)
@@ -116,13 +116,13 @@ void DocumentPaintState::update_visual_viewport_accumulated_visual_context(DOM::
 void DocumentPaintState::begin_compositor_animation_update(DOM::Document& document)
 {
     ensure_visual_context_tree(document);
-    Layout::RustFFI::layout_arena_begin_compositor_animation_update(m_layout_node_arena->handle());
+    Layout::RustFFI::layout_arena_begin_compositor_animation_update(m_arena);
 }
 
 void DocumentPaintState::publish_compositor_animations(DOM::Document& document, PublishPendingCompositorAnimations publish_pending)
 {
     ensure_visual_context_tree(document);
-    auto outcome = Layout::RustFFI::layout_arena_publish_compositor_animations(m_layout_node_arena->handle(), publish_pending == PublishPendingCompositorAnimations::Yes);
+    auto outcome = Layout::RustFFI::layout_arena_publish_compositor_animations(m_arena, publish_pending == PublishPendingCompositorAnimations::Yes);
     if (!outcome.published)
         return;
     m_visual_context_tree_needs_compositor_update = true;
@@ -134,7 +134,7 @@ void DocumentPaintState::publish_compositor_animations(DOM::Document& document, 
 
 void DocumentPaintState::republish_visual_animations(DOM::Document& document)
 {
-    if (!Layout::RustFFI::layout_arena_visual_context_tree_has_visual_animations(m_layout_node_arena->handle()))
+    if (!Layout::RustFFI::layout_arena_visual_context_tree_has_visual_animations(m_arena))
         return;
     m_visual_context_tree_needs_compositor_update = true;
     ++document.style_invalidation_counters().compositor_visual_animation_updates;
@@ -147,7 +147,7 @@ void DocumentPaintState::append_paint_command_cache_source_resources(Compositing
 
 void DocumentPaintState::invalidate_all_cached_paint(DOM::Document& document)
 {
-    Layout::RustFFI::layout_arena_invalidate_all_paint_caches(m_layout_node_arena->handle());
+    Layout::RustFFI::layout_arena_invalidate_all_paint_caches(m_arena);
     Painting::set_needs_repaint(document, DOM::NodeIdentity::of_document());
 }
 
@@ -169,14 +169,14 @@ void DocumentPaintState::refresh_scroll_state(DOM::Document& document)
 
 void DocumentPaintState::reset_selection_states(DOM::Document& document)
 {
-    Layout::RustFFI::layout_arena_selection_clear(m_layout_node_arena->handle(), viewport_row_slot(document));
+    Layout::RustFFI::layout_arena_selection_clear(m_arena, viewport_row_slot(document));
 }
 
 void DocumentPaintState::recompute_selection_states(DOM::Range& range)
 {
     Vector<Layout::RustFFI::FfiSelectionSnapshotNode> nodes;
     auto snapshot = read_selection_snapshot(range, nodes);
-    Layout::RustFFI::layout_arena_selection_apply_snapshot(m_layout_node_arena->handle(), &snapshot);
+    Layout::RustFFI::layout_arena_selection_apply_snapshot(m_arena, &snapshot);
 }
 
 // The nodes are the ones the selection states are stamped for, and what excludes them from selection is read here;

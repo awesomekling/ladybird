@@ -141,11 +141,16 @@ ScrollStateSnapshot ScrollStateQueryContainers::snapshot_for_query(DOM::Element&
 
 void ScrollStateQueryContainers::did_scroll_relatively(Layout::Node const& scrolling_box, CSSPixelPoint delta)
 {
+    did_scroll_relatively(Painting::BoxSlot::of(scrolling_box.document(), Layout::Node::slot_id(&scrolling_box)), delta);
+}
+
+void ScrollStateQueryContainers::did_scroll_relatively(Painting::BoxSlot const& scrolling_box, CSSPixelPoint delta)
+{
     DOM::Element* element = nullptr;
     if (!scrolling_box.is_viewport()) {
         if (scrolling_box.generated_for_pseudo_element().has_value())
             return;
-        element = const_cast<DOM::Element*>(as_if<DOM::Element>(scrolling_box.dom_node()));
+        element = as_if<DOM::Element>(scrolling_box.dom_node().ptr());
         if (!element)
             return;
     }

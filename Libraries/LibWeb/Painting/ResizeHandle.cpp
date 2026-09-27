@@ -16,14 +16,14 @@
 
 namespace Web::Painting {
 
-NonnullRefPtr<ResizeHandle> ResizeHandle::create(Layout::NodeArena& arena, Compositing::RustFFI::NodeSlotId slot)
+NonnullRefPtr<ResizeHandle> ResizeHandle::create(DOM::Document& document, Compositing::RustFFI::NodeSlotId slot)
 {
-    return adopt_ref(*new ResizeHandle(arena, slot));
+    return adopt_ref(*new ResizeHandle(document, slot));
 }
 
-ResizeHandle::ResizeHandle(Layout::NodeArena& arena, Compositing::RustFFI::NodeSlotId slot)
-    : ChromeWidget(arena, slot)
-    , m_element(arena.document() ? dom_node_identity_of_committed_slot(*arena.document(), slot) : DOM::NodeIdentity {})
+ResizeHandle::ResizeHandle(DOM::Document& document, Compositing::RustFFI::NodeSlotId slot)
+    : ChromeWidget(document, slot)
+    , m_element(dom_node_identity_of_committed_slot(document, slot))
 {
 }
 
@@ -31,10 +31,10 @@ Optional<CSS::CursorPredefined> ResizeHandle::cursor() const
 {
     if (!is_current())
         return {};
-    auto axes = Layout::RustFFI::layout_arena_paintable_physical_resize_axes(arena().handle(), slot());
+    auto axes = Layout::RustFFI::layout_arena_paintable_physical_resize_axes(arena(), slot());
     if (axes.vertical) {
         if (axes.horizontal) {
-            if (Layout::RustFFI::layout_arena_paintable_is_chrome_mirrored(arena().handle(), slot()))
+            if (Layout::RustFFI::layout_arena_paintable_is_chrome_mirrored(arena(), slot()))
                 return CSS::CursorPredefined::SwResize;
             return CSS::CursorPredefined::SeResize;
         }
@@ -52,7 +52,7 @@ MouseAction ResizeHandle::handle_pointer_event(Utf16FlyString const& type, unsig
         return MouseAction::None;
     }
 
-    auto* document = arena().document();
+    auto document = this->document();
     auto* element = document ? as_if<DOM::Element>(m_element.resolve(*document).ptr()) : nullptr;
     if (!element || !element->is_connected()) {
         m_resize_action.clear();

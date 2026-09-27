@@ -14,7 +14,6 @@
 #include <LibCompositing/Scrolling/ScrollState.h>
 #include <LibWeb/Export.h>
 #include <LibWeb/Forward.h>
-#include <LibWeb/Layout/NodeArena.h>
 
 namespace Web::Painting {
 
@@ -31,7 +30,8 @@ class WEB_API DocumentPaintState {
 public:
     AK_ALLOC_WITH_KMALLOC;
 
-    explicit DocumentPaintState(Layout::NodeArena&);
+    // `arena` is the document's layout rows, which outlive the document's paint state.
+    explicit DocumentPaintState(void* arena);
 
     void viewport_row_was_reset();
 
@@ -95,7 +95,7 @@ private:
     Vector<String> m_recording_traces;
     void ensure_visual_context_tree(DOM::Document const&) const;
 
-    NonnullRefPtr<Layout::NodeArena> m_layout_node_arena;
+    void* m_arena { nullptr };
 
     Compositing::ScrollStateSnapshot m_scroll_state_snapshot;
 

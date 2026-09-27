@@ -1392,7 +1392,7 @@ public:
 
     Compositing::SnappedAreas const& snapped_areas_of_scroll_container(Compositing::AsyncScrollNodeStableID const&) const;
     void set_snapped_areas_of_scroll_container(Compositing::AsyncScrollNodeStableID const&, Compositing::SnappedAreas);
-    void forget_snapped_areas_of_scroll_container(Layout::Node const&);
+    void forget_snapped_areas_of_scroll_container(Painting::BoxSlot const&);
 
     void schedule_list_item_renumber(Element& list_owner);
 
@@ -1413,7 +1413,7 @@ public:
     void set_may_have_dom_paint_facts() { m_may_have_dom_paint_facts = true; }
     [[nodiscard]] bool may_have_dom_paint_facts() const { return m_may_have_dom_paint_facts; }
 
-    void register_scroll_snap_container(Layout::Node const&);
+    void register_scroll_snap_container(Painting::BoxSlot const&);
     [[nodiscard]] Vector<Compositing::RustFFI::NodeSlotId> collect_scroll_snap_containers();
 
     virtual Vector<Utf16FlyString> supported_property_names() const override;

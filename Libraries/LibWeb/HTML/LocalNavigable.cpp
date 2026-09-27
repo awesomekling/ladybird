@@ -5081,7 +5081,7 @@ RefPtr<Painting::Scrollbar> LocalNavigable::scrollbar_dragged_by_compositor(Comp
     if (!scrolling_box || !Painting::has_committed_box(*scrolling_box))
         return nullptr;
     auto direction = scrollbar.vertical ? Painting::ScrollDirection::Vertical : Painting::ScrollDirection::Horizontal;
-    return document->chrome_widget_registry().get_or_create_scrollbar(document->layout_node_arena(), Painting::committed_row_slot(*scrolling_box), direction);
+    return document->chrome_widget_registry().get_or_create_scrollbar(*document, Painting::committed_row_slot(*scrolling_box), direction);
 }
 
 // NB: A scroll the compositor reports can arrive while layout is out of date, so this reads the committed layout.
@@ -7638,7 +7638,7 @@ GC::Ref<WebIDL::Promise> LocalNavigable::perform_a_scroll_of_an_element(DOM::Ele
         position, behavior, element, ScrollTrigger::Programmatic, relative_displacement);
 }
 
-bool LocalNavigable::perform_a_scroll_step_for_key_input(Layout::Node& scroll_container, CSSPixelPoint delta, Compositing::SnapSelectionStrategy::Type strategy_type)
+bool LocalNavigable::perform_a_scroll_step_for_key_input(Painting::BoxSlot const& scroll_container, CSSPixelPoint delta, Compositing::SnapSelectionStrategy::Type strategy_type)
 {
     if (perform_a_snapped_relative_user_scroll(scroll_container, delta, strategy_type, SnapStepAccumulation::UntilScrollFinishes))
         return true;
@@ -7677,7 +7677,7 @@ bool LocalNavigable::perform_a_scroll_step_for_key_input(Layout::Node& scroll_co
     return true;
 }
 
-bool LocalNavigable::perform_a_snapped_relative_user_scroll(Layout::Node& scroll_container, CSSPixelPoint delta, Compositing::SnapSelectionStrategy::Type strategy_type, SnapStepAccumulation step_accumulation, Compositing::ScrollAnimationKind animation_kind)
+bool LocalNavigable::perform_a_snapped_relative_user_scroll(Painting::BoxSlot const& scroll_container, CSSPixelPoint delta, Compositing::SnapSelectionStrategy::Type strategy_type, SnapStepAccumulation step_accumulation, Compositing::ScrollAnimationKind animation_kind)
 {
     auto document = active_document();
     if (!document)
@@ -7750,7 +7750,7 @@ bool LocalNavigable::perform_a_snapped_relative_user_scroll(Layout::Node& scroll
 }
 
 // https://drafts.csswg.org/css-scroll-snap-1/#choosing
-bool LocalNavigable::perform_a_snapped_momentum_scroll(Layout::Node& scroll_container, CSSPixelPoint momentum_delta)
+bool LocalNavigable::perform_a_snapped_momentum_scroll(Painting::BoxSlot const& scroll_container, CSSPixelPoint momentum_delta)
 {
     if (m_momentum_snap_position_selection == MomentumSnapPositionSelection::ScrollingToSelectedPosition)
         return true;
