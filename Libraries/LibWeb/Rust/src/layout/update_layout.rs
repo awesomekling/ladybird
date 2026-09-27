@@ -16,7 +16,8 @@ use super::formatting_context::{
     prepare_root_layout_from_sources,
 };
 use super::layout_node_arena::{
-    EnrolledContentSources, OwedImageResources, apply_enrolled_content_sources, read_enrolled_content_sources,
+    EnrolledContentSources, HostPayment, OwedImageResources, apply_enrolled_content_sources,
+    read_enrolled_content_sources,
 };
 use super::node_data::NodeSlotId;
 use super::node_facts;
@@ -72,7 +73,7 @@ pub enum FfiLayoutUpdateEnd {
 
 /// What the loop needs to know about the document at one point in time. Every host call can
 /// change these, so the loop asks again after each one it depends on.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 #[repr(C)]
 pub struct FfiLayoutUpdateDocumentFacts {
     /// The document is its navigable's active document; an inactive document counts as laid out.
@@ -552,60 +553,11 @@ enum OwedHostHalf {
 /// What the frame owes the document thread, as typed effects it applies without the arena.
 enum HostHalfPayment {
     /// The install of the style pass the frame's first round ran in its flight, and the rest of
-    /// the style update, which come before what the round's layout owes.
-    StyleInstall,
+    /// the style update, which come before what the round's layout owes, with what applying the
+    /// batch in flight handed back, if the flight applied it.
+    StyleInstall(Option<HostPayment>),
     TreeBuild(TreeBuildPayment),
     Commit(CommitPayment),
-}
-
-/// Takes back the layout tree update marks the frame lent a tree build, then pays what the frame
-/// owed the document thread, in the order the frame made it owe it.
-///
-/// # Safety
-///
-/// As for [`arena`], on the document thread, with no borrow of the arena held across the call and
-/// no stage of the frame reaching the arena meanwhile.
-unsafe fn pay_owed_host_halves(
-    main_thread: &crate::stage::MainThread,
-    host: &LayoutUpdateHost,
-    arena_handle: *mut c_void,
-    payments: Vec<HostHalfPayment>,
-) -> bool {
-    let mut restored_style = false;
-    // What the build owes the document can mark nodes for another build.
-    // SAFETY: Guaranteed by the caller.
-    unsafe { super::tree_update_marks::take_back_from_frame(arena_handle) };
-    let mut committed = false;
-    for payment in payments {
-        match payment {
-            // The install is the rest of the style update, as the commit of a style flight runs it
-            // at the join that takes the flight back, forced or not: a forced join in the middle of
-            // a DOM mutation runs it there as it does for the style flight.
-            // What applying the batch in flight handed back, the install reads: it is paid first.
-            HostHalfPayment::StyleInstall => {
-                // SAFETY: Guaranteed by the caller.
-                unsafe { arena(arena_handle) }.pay_flight_style_handbacks(main_thread);
-                host.finish_submitted_style_update(main_thread);
-                // SAFETY: Guaranteed by the caller.
-                restored_style |= unsafe { arena(arena_handle) }.finish_flight_style_host_half(main_thread);
-            }
-            HostHalfPayment::TreeBuild(payment) => payment.pay(main_thread),
-            HostHalfPayment::Commit(payment) => {
-                // SAFETY: Guaranteed by the caller.
-                unsafe { payment.deliver(main_thread) };
-                committed = true;
-            }
-        }
-    }
-    // A document that traces its layout names the owners of the lines the passes left.
-    if committed && main_thread.host_tables().is_some_and(super::HostTables::traces_layout) {
-        // SAFETY: Guaranteed by the caller. Host callbacks have returned.
-        unsafe { arena(arena_handle) }.name_layout_trace_owners(main_thread);
-    }
-    // What the document thread wrote to the marks beside the frame, it wrote after all of that.
-    // SAFETY: Guaranteed by the caller. The marks are handed back.
-    unsafe { super::tree_update_marks::write_marks_waiting_for_frame(arena_handle) };
-    restored_style
 }
 
 /// How a layout frame ends.
@@ -662,6 +614,11 @@ struct LayoutFrame {
     style_pass: Option<crate::css::style::bridge::StylePassJob>,
     /// Whether the frame's first round ran its style in the flight.
     style_ran_in_flight: bool,
+    /// Whether the flight applied the batch of the style it ran, as the flight left it.
+    flight_style_applied: bool,
+    /// What ending the host half of the flight's style left for the document thread: whether a row was put back,
+    /// and what that owes the host's shells.
+    flight_style_host_half: Option<(bool, HostPayment)>,
 }
 
 /// A full layout pass a round has readied. Everything it reads is in hand, so it runs without the
@@ -826,6 +783,36 @@ impl OwnerLayoutUnit {
         }
     }
 
+    /// Ends the host half of the style the frame's flight ran, leaving what that owes the document thread in the
+    /// frame.
+    ///
+    /// # Safety
+    ///
+    /// As for [`Self::ready_and_run_round`].
+    unsafe fn finish_flight_style_host_half(frame: *mut LayoutFrame, _: FfiLayoutUpdateDocumentFacts) -> FrameStep {
+        // SAFETY: Guaranteed by the caller.
+        unsafe { (*frame).flight_style_host_half = Some((*frame).arena().finish_flight_style_host_half()) };
+        FrameStep::NeedsStyle
+    }
+
+    /// Answers whether what paying the frame's host halves left, with the facts `facts` the document thread read
+    /// after it, is no style or layout work: the frame's end then, and otherwise another round.
+    ///
+    /// # Safety
+    ///
+    /// As for [`Self::ready_and_run_round`].
+    unsafe fn host_left_no_work(frame: *mut LayoutFrame, facts: FfiLayoutUpdateDocumentFacts) -> FrameStep {
+        // SAFETY: Guaranteed by the caller.
+        let arena = unsafe { (*frame).arena() };
+        if !style_update_follows_layout(arena, &facts)
+            && !facts.top_layer_work_pending
+            && layout_is_up_to_date(arena, &facts)
+        {
+            return FrameStep::Ended(FrameEnd::Over(FfiLayoutUpdateEnd::FrameTakenBack));
+        }
+        FrameStep::NeedsStyle
+    }
+
     /// # Safety
     ///
     /// As for [`Self::ready_and_run_round`].
@@ -878,6 +865,8 @@ impl LayoutFrame {
             round_style,
             style_pass: None,
             style_ran_in_flight: false,
+            flight_style_applied: false,
+            flight_style_host_half: None,
         }
     }
 
@@ -895,6 +884,71 @@ impl LayoutFrame {
         self.owe_host_half(OwedHostHalf::Commit(unsafe { pending_commit.settle_ahead_of_host() }));
     }
 
+    /// Takes back the layout tree update marks the frame lent a tree build, then pays what the frame owed the
+    /// document thread, in the order the frame made it owe it. Answers whether the host half of a style flight put
+    /// back a row the flight applied that the host did not install.
+    ///
+    /// # Safety
+    ///
+    /// On the document thread, for the update the arena is in, with no unit or stage of the frame outstanding.
+    unsafe fn pay_host_halves(&mut self, main_thread: &crate::stage::MainThread) -> bool {
+        let host = self.inputs.host;
+        let arena_handle = self.inputs.arena_handle;
+        let mut restored_style = false;
+        // What the build owes the document can mark nodes for another build.
+        // SAFETY: Guaranteed by the caller.
+        unsafe { super::tree_update_marks::take_back_from_frame(arena_handle) };
+        let mut committed = false;
+        for payment in std::mem::take(&mut self.host_payments) {
+            match payment {
+                // The install is the rest of the style update, as the commit of a style flight runs it
+                // at the join that takes the flight back, forced or not: a forced join in the middle of
+                // a DOM mutation runs it there as it does for the style flight.
+                // What applying the batch in flight handed back, the install reads: it is paid first.
+                HostHalfPayment::StyleInstall(handed_back) => {
+                    if let Some(handed_back) = handed_back {
+                        handed_back.pay(main_thread);
+                    }
+                    host.finish_submitted_style_update(main_thread);
+                    restored_style |= self.finish_flight_style_host_half(main_thread);
+                }
+                HostHalfPayment::TreeBuild(payment) => payment.pay(main_thread),
+                HostHalfPayment::Commit(payment) => {
+                    // SAFETY: Guaranteed by the caller.
+                    unsafe { payment.deliver(main_thread) };
+                    committed = true;
+                }
+            }
+        }
+        // A document that traces its layout names the owners of the lines the passes left.
+        if committed && main_thread.host_tables().is_some_and(super::HostTables::traces_layout) {
+            // SAFETY: Guaranteed by the caller. Host callbacks have returned.
+            unsafe { arena(arena_handle) }.name_layout_trace_owners(main_thread);
+        }
+        // What the document thread wrote to the marks beside the frame, it wrote after all of that.
+        // SAFETY: Guaranteed by the caller. The marks are handed back.
+        unsafe { super::tree_update_marks::write_marks_waiting_for_frame(arena_handle) };
+        restored_style
+    }
+
+    /// Ends the host half of the style the frame's flight ran, once the host has installed it, on the owner, and
+    /// pays what that owes the host's shells. Answers whether a row the flight applied was put back.
+    fn finish_flight_style_host_half(&mut self, main_thread: &crate::stage::MainThread) -> bool {
+        // SAFETY: The frame runs for the update the arena is in.
+        let document = unsafe { super::ArenaHandle::document_of(self.inputs.arena_handle) };
+        self.run_unit_on_owner(
+            document,
+            FfiLayoutUpdateDocumentFacts::default(),
+            OwnerLayoutUnit::finish_flight_style_host_half,
+        );
+        let Some((restored, payment)) = self.flight_style_host_half.take() else {
+            debug_assert!(false, "the owner ends the host half of a flight's style");
+            return false;
+        };
+        payment.pay(main_thread);
+        restored
+    }
+
     /// Resolves what the frame's tree builds and commits owe the document thread from the arena, as the unit that
     /// made them ends, for the document thread to pay without the arena, after what it owed before.
     ///
@@ -909,6 +963,28 @@ impl LayoutFrame {
                 OwedHostHalf::Commit(owed) => HostHalfPayment::Commit(unsafe { owed.resolve() }),
             };
             self.host_payments.push(payment);
+        }
+    }
+
+    /// Resolves what the style the frame's flight ran and applied left for the document thread, as the flight's
+    /// round ends: what applying the batch handed back, which the install pays first, and whether the flight applied
+    /// it.
+    fn resolve_flight_style(&mut self) {
+        if !self.style_ran_in_flight {
+            return;
+        }
+        let handed_back = self.arena().resolve_flight_style_handbacks();
+        self.flight_style_applied = self.arena().take_flight_style_applied();
+        let install = self
+            .host_payments
+            .iter_mut()
+            .find(|payment| matches!(payment, HostHalfPayment::StyleInstall(_)));
+        match install {
+            Some(HostHalfPayment::StyleInstall(slot)) => *slot = handed_back,
+            _ => debug_assert!(
+                handed_back.is_none(),
+                "a flight that applies its style owes the install"
+            ),
         }
     }
 
@@ -1124,17 +1200,9 @@ impl LayoutFrame {
     ///
     /// As for [`arena`], on the document thread, with no stage run of the frame outstanding.
     unsafe fn take_in_end(&mut self, main_thread: &crate::stage::MainThread, end: FfiLayoutUpdateEnd) {
-        let host = self.inputs.host;
         // SAFETY: Guaranteed by the caller.
-        unsafe {
-            pay_owed_host_halves(
-                main_thread,
-                &host,
-                self.inputs.arena_handle,
-                std::mem::take(&mut self.host_payments),
-            )
-        };
-        std::mem::take(&mut self.messages).take_in(main_thread, &host, end);
+        unsafe { self.pay_host_halves(main_thread) };
+        std::mem::take(&mut self.messages).take_in(main_thread, &self.inputs.host, end);
     }
 
     /// Pays what the frame owes the document thread, which may leave the document style or layout work, and reads
@@ -1144,17 +1212,9 @@ impl LayoutFrame {
     ///
     /// As for [`Self::take_in_end`].
     unsafe fn pay_and_read_facts(&mut self, main_thread: &crate::stage::MainThread) -> FfiLayoutUpdateDocumentFacts {
-        let host = self.inputs.host;
         // SAFETY: Guaranteed by the caller.
-        unsafe {
-            pay_owed_host_halves(
-                main_thread,
-                &host,
-                self.inputs.arena_handle,
-                std::mem::take(&mut self.host_payments),
-            )
-        };
-        host.document_facts(main_thread)
+        unsafe { self.pay_host_halves(main_thread) };
+        self.inputs.host.document_facts(main_thread)
     }
 
     /// Runs the frame's loop from the document thread, with the render owner. Each round starts here, with no unit
@@ -1317,16 +1377,8 @@ impl LayoutFrame {
     /// The frame must run for the update the arena is in, and no stage may reach it until this returns.
     unsafe fn start_first_round(&mut self, main_thread: &crate::stage::MainThread) -> LayoutRoundFacts {
         self.layout_pass += 1;
-        let host = self.inputs.host;
         // SAFETY: Guaranteed by the caller.
-        unsafe {
-            pay_owed_host_halves(
-                main_thread,
-                &host,
-                self.inputs.arena_handle,
-                std::mem::take(&mut self.host_payments),
-            );
-        }
+        unsafe { self.pay_host_halves(main_thread) };
         match std::mem::replace(&mut self.round_style, RoundStyle::OnDocumentThread) {
             RoundStyle::RanAhead(round) => round,
             RoundStyle::InFlight(round) => {
@@ -1337,7 +1389,7 @@ impl LayoutFrame {
                 debug_assert!(false, "the first round's facts come with the update");
                 // The round goes on with the facts as they are, and without a selection.
                 LayoutRoundFacts {
-                    facts: host.document_facts(main_thread),
+                    facts: self.inputs.host.document_facts(main_thread),
                     selection: None,
                 }
             }
@@ -1691,17 +1743,7 @@ unsafe fn take_in_clock_layout_frame(
     shown_on_render_side: bool,
 ) {
     frame.frame.messages.shown_on_render_side = shown_on_render_side;
-    let host = frame.frame.inputs.host;
     // SAFETY: Guaranteed by the caller.
-    unsafe {
-        pay_owed_host_halves(
-            main_thread,
-            &host,
-            frame.frame.inputs.arena_handle,
-            std::mem::take(&mut frame.frame.host_payments),
-        );
-    }
-    // SAFETY: As above.
     unsafe { frame.frame.take_in_end(main_thread, FfiLayoutUpdateEnd::InUpdate) };
 }
 
@@ -1739,6 +1781,8 @@ unsafe fn make_clock_layout_frame(
             round_style: RoundStyle::OnDocumentThread,
             style_pass: None,
             style_ran_in_flight: false,
+            flight_style_applied: false,
+            flight_style_host_half: None,
         },
         facts,
         laid_out: false,
@@ -2230,7 +2274,7 @@ impl LayoutPassJob {
         // owes it.
         let style = frame.style_pass.take();
         if style.is_some() {
-            frame.host_payments.push(HostHalfPayment::StyleInstall);
+            frame.host_payments.push(HostHalfPayment::StyleInstall(None));
             frame.style_ran_in_flight = true;
         }
         DrivenFrame::Pass(Box::new(Self {
@@ -2300,6 +2344,7 @@ impl LayoutPassJob {
         let may_be_presented = may_be_painted && frame.owes_the_host_no_work();
         // SAFETY: As above.
         unsafe { frame.resolve_owed_host_halves() };
+        frame.resolve_flight_style();
         // SAFETY: As above.
         *ran.lock().expect("a frame that ran left itself") =
             Some(unsafe { crate::stage_thread::FrameOwns::new(frame) });
@@ -2346,24 +2391,14 @@ impl LayoutPassTakeBack {
 ///
 /// On the document thread, which has just taken back the frame in flight that ran the round.
 unsafe fn finish_layout_frame(main_thread: &crate::stage::MainThread, mut frame: LayoutFrame) {
-    let host = frame.inputs.host;
     // SAFETY: The frame is the document thread's again, and it runs for the update the arena is in.
-    unsafe {
-        pay_owed_host_halves(
-            main_thread,
-            &host,
-            frame.inputs.arena_handle,
-            std::mem::take(&mut frame.host_payments),
-        );
-    }
+    unsafe { frame.pay_host_halves(main_thread) };
     // The list owners the round's build found showing stale counters were marked for the build of
     // the next layout update as its host half was paid, as the next style round would have marked
     // them.
     // The install owed the flight the repaint of a batch the flight applied, or parked and did not:
     // either way nothing recorded after it here.
     if frame.style_ran_in_flight {
-        // SAFETY: As above.
-        unsafe { arena(frame.inputs.arena_handle) }.take_flight_style_applied();
         frame.messages.flight_style_repaint_recorded = Some(false);
     }
     // SAFETY: As above.
@@ -2383,31 +2418,23 @@ unsafe fn finish_layout_frame_recorded_in_flight(
     mut frame: LayoutFrame,
 ) -> bool {
     let host = frame.inputs.host;
-    let arena_handle = frame.inputs.arena_handle;
     // A style row the flight applied that the host declined was put back: the recording shows
     // what the host did not install, and does not stand.
     // SAFETY: The frame is the document thread's again, and it runs for the update the arena is in.
-    let restored_style = unsafe {
-        pay_owed_host_halves(
-            main_thread,
-            &host,
-            arena_handle,
-            std::mem::take(&mut frame.host_payments),
-        )
-    };
-    // SAFETY: As above.
-    let arena = unsafe { arena(arena_handle) };
+    let restored_style = unsafe { frame.pay_host_halves(main_thread) };
     let facts = host.document_facts(main_thread);
+    // SAFETY: As above.
+    let document = unsafe { super::ArenaHandle::document_of(frame.inputs.arena_handle) };
     let recording_stands = !restored_style
-        && !style_update_follows_layout(arena, &facts)
-        && !facts.top_layer_work_pending
-        && layout_is_up_to_date(arena, &facts);
+        && matches!(
+            frame.run_unit_on_owner(document, facts, OwnerLayoutUnit::host_left_no_work),
+            FrameStep::Ended(_)
+        );
     // The install owed the flight the repaint of its batch whether the flight applied it or parked:
     // the recording is that repaint only if the flight applied the batch before it recorded.
     let mut messages = std::mem::take(&mut frame.messages);
     if frame.style_ran_in_flight {
-        let applied = arena.take_flight_style_applied();
-        messages.flight_style_repaint_recorded = Some(applied && recording_stands);
+        messages.flight_style_repaint_recorded = Some(frame.flight_style_applied && recording_stands);
     }
     messages.recorded_in_flight = recording_stands;
     messages.take_in(main_thread, &host, FfiLayoutUpdateEnd::FrameTakenBack);

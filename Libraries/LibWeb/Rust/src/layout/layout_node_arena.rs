@@ -2384,13 +2384,14 @@ impl LayoutNodeArena {
         Ok(())
     }
 
-    /// Pays what applying a flight's style batch handed back, ahead of the host installing the
-    /// batch, and closes the span the batch opened.
-    pub(crate) fn pay_flight_style_handbacks(&self, main_thread: &crate::stage::MainThread) {
-        let handbacks = self.flight_style_handbacks.borrow_mut().take();
-        if let Some(handbacks) = handbacks {
-            self.finish_paying_taken_host_handbacks(main_thread, handbacks);
-        }
+    /// Resolves what applying a flight's style batch handed back, which the document thread pays
+    /// ahead of the host installing the batch, and closes the span the batch opened. None where the
+    /// flight applied no batch.
+    pub(crate) fn resolve_flight_style_handbacks(&self) -> Option<HostPayment> {
+        let handbacks = self.flight_style_handbacks.borrow_mut().take()?;
+        let payment = self.resolve_host_handbacks(handbacks);
+        self.close_host_handback_span();
+        Some(payment)
     }
 
     /// Marks the layout node `slot` of the element a style row moves for the relayout the row asks
@@ -2500,14 +2501,18 @@ impl LayoutNodeArena {
             .map(|(damage, _)| *damage)
     }
 
-    /// Ends the host half of a flight's style: what the rows of the batch left to the host's
-    /// install that it did not take is dropped, and a record it did not adopt, and did not install
-    /// another one over, is put back over its row with the host's, which lays the row out again.
-    /// Answers whether one was.
-    pub(crate) fn finish_flight_style_host_half(&self, main_thread: &crate::stage::MainThread) -> bool {
+    /// Ends the host half of a flight's style, once the host has installed the batch: what the rows
+    /// of the batch left to the host's install that it did not take is dropped, and a record it did
+    /// not adopt, and did not install another one over, is put back over its row with the host's,
+    /// which lays the row out again. Answers whether one was, and what putting them back owes the
+    /// host's shells, for the document thread to pay.
+    pub(crate) fn finish_flight_style_host_half(&self) -> (bool, HostPayment) {
         self.flight_style_damages.borrow_mut().clear();
         let unadopted = std::mem::take(&mut *self.flight_style_adoptions.borrow_mut());
         let restored = !unadopted.is_empty();
+        // What the arena owed the host before stays owed, after what this owes.
+        let earlier = std::mem::take(&mut *self.host_handbacks.borrow_mut());
+        self.open_host_handback_span();
         for adoption in unadopted {
             let host_record_is_live =
                 self.with_style_store(|engine| engine.style_record_payloads(adoption.host_style_record).is_some());
@@ -2518,15 +2523,17 @@ impl LayoutNodeArena {
                 && self.style_records[adoption.slot.slot_index() as usize].get() == adoption.style_record
             {
                 self.install_row_style_over_host(adoption.slot, adoption.host_style_record, true);
-                self.reinherit_anonymous_descendants(adoption.slot, ShellStyleChangeNotice::Now(main_thread));
+                self.reinherit_anonymous_descendants(adoption.slot, ShellStyleChangeNotice::Handback);
             }
             self.with_style_engine(|engine| engine.unpin_layout_style_record(adoption.style_record));
         }
+        let handbacks = std::mem::replace(&mut *self.host_handbacks.borrow_mut(), earlier);
+        self.close_host_handback_span();
         debug_assert!(
             self.flight_style_handbacks.borrow().is_none(),
             "the style half's handbacks are paid ahead of the install"
         );
-        restored
+        (restored, self.resolve_host_handbacks(handbacks))
     }
 
     /// Install the record an animation sample published for `style_node` over the row its box is
@@ -4049,32 +4056,8 @@ impl LayoutNodeArena {
         std::mem::take(&mut *self.host_handbacks.borrow_mut())
     }
 
-    /// Pays what [`Self::take_host_handbacks_ahead_of_payment`] took, and anything paying it hands
-    /// back, ahead of what later commits owe, then closes the span the commit opened.
-    pub(crate) fn finish_paying_taken_host_handbacks(
-        &self,
-        main_thread: &crate::stage::MainThread,
-        handbacks: HostHandbacks,
-    ) {
-        self.pay_handbacks_ahead_of_queued(main_thread, handbacks);
-        self.close_host_handback_span();
-    }
-
-    /// Pays `handbacks`, which were let go of before what the arena owes the host now, and
-    /// anything paying them hands back, while what is owed now stays queued.
-    pub(crate) fn pay_handbacks_ahead_of_queued(
-        &self,
-        main_thread: &crate::stage::MainThread,
-        handbacks: HostHandbacks,
-    ) {
-        let later = std::mem::take(&mut *self.host_handbacks.borrow_mut());
-        self.pay_tree_build_handbacks(main_thread, handbacks);
-        self.pay_host_handbacks(main_thread);
-        *self.host_handbacks.borrow_mut() = later;
-    }
-
-    /// Opens the span of a layout pass's commit, which may run off the document thread. The
-    /// commit's host half closes it with [`Self::finish_paying_host_handbacks`].
+    /// Opens the span of a layout pass's commit, which may run off the document thread. Resolving the
+    /// commit's host half closes it with [`Self::end_layout_commit_handbacks`].
     pub(crate) fn begin_layout_commit_handbacks(&self) {
         self.open_host_handback_span();
     }
