@@ -16,11 +16,6 @@
 //! Without the variable, stages run on the calling thread, unless they overlap by default
 //! ([`OVERLAP_BY_DEFAULT`]).
 //!
-//! A stage run can also join its caller: [`run_overlappable_stage_with_joins`] hands the stage a [`MainJoins`],
-//! through which it runs a piece of main-thread work on the waiting caller and continues with the
-//! result. The caller runs only the work it is handed, and the stage thread runs only the stages
-//! the caller starts from inside that work, so the two still take turns.
-//!
 //! There is one stage thread per process. A WebContent process runs every document it hosts on its
 //! one main thread, so a thread per process is also a thread per event loop.
 //!
@@ -35,7 +30,6 @@
 //! loop inside a stage run, and the scheduler's consume-commit runs before the access goes on.
 
 use crate::css::ffi_stats::{StyleUpdateScope, install_style_update_scope, take_style_update_scope};
-use crate::stage::MainThread;
 use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -47,20 +41,11 @@ use std::sync::{Condvar, Mutex, OnceLock};
 use std::thread::ThreadId;
 
 type Job = Box<dyn FnOnce() + Send>;
-type JoinWork<'a> = Box<dyn for<'main> FnOnce(&MainThread<'main>) -> Result<(), Box<dyn Any + Send>> + Send + 'a>;
-type MainWork = JoinWork<'static>;
 
 enum StageMessage {
     Run(Job),
     /// A typed message to the render owner, which the Rendering thread is.
     Owner(crate::render_owner::ToOwner),
-    /// The caller has run the work the stage's innermost join handed it.
-    JoinFinished(Box<StyleUpdateScope>, Result<(), Box<dyn Any + Send>>),
-}
-
-enum CallerMessage {
-    Finished(StyleUpdateScope),
-    Join(MainWork, StyleUpdateScope),
 }
 
 // This crate is not instrumented by ThreadSanitizer, so TSan cannot see the ordering the stage
@@ -225,9 +210,6 @@ impl StageThread {
                             crate::render_owner::handle(message);
                             tsan::release(stage_thread().expect("only the Rendering thread is sent owner messages"));
                         }
-                        StageMessage::JoinFinished(..) => {
-                            debug_assert!(false, "a join finished with no stage waiting for it");
-                        }
                     }
                 }
             })
@@ -243,8 +225,7 @@ thread_local! {
     // On the stage thread, the thread waiting for the stage it is running, or the thread that
     // submitted it.
     static WAITING_CALLER: Cell<Option<ThreadId>> = const { Cell::new(None) };
-    // On the stage thread, where the caller's messages arrive. A stage waiting for a join reads
-    // them too, since the work it joined for can start stages of its own.
+    // On the stage thread, where the caller's messages arrive.
     static INCOMING: RefCell<Option<Receiver<StageMessage>>> = const { RefCell::new(None) };
     // On the stage thread, the messages that arrived while it ran something that could not take them, in the order
     // they arrived, ahead of everything still incoming.
@@ -257,8 +238,6 @@ thread_local! {
     // While above zero, the style engine entrances of this thread only wait for a stage that reaches
     // their engine (see rust_stage_thread_begin_style_engine_entrances_that_only_wait).
     static STYLE_ENGINE_ENTRANCES_ONLY_WAIT: Cell<u32> = const { Cell::new(0) };
-    // On the calling thread, how deep it is in work a stage joined it for.
-    static RUNNING_JOIN_WORK: Cell<u32> = const { Cell::new(0) };
     // On the calling thread, how many forced joins took a style pass back.
     static STYLE_PASS_FORCED_JOINS: Cell<u64> = const { Cell::new(0) };
     // On the calling thread, the call sites that forced a join already logged.
@@ -448,33 +427,12 @@ impl SubmittedStage {
     }
 }
 
-fn run_join_work(
-    thread: &'static StageThread,
-    main_thread: Option<&MainThread<'_>>,
-    work: MainWork,
-    style_update: StyleUpdateScope,
-) {
-    tsan::acquire(thread);
-    install_style_update_scope(style_update);
-    let main_thread = main_thread.expect("only a stage started with joins joins its caller");
-    RUNNING_JOIN_WORK.with(|depth| depth.set(depth.get() + 1));
-    let outcome = work(main_thread);
-    RUNNING_JOIN_WORK.with(|depth| depth.set(depth.get() - 1));
-    // The reply is built before the release, so its box is ordered before the stage reads it.
-    let reply = StageMessage::JoinFinished(Box::new(take_style_update_scope()), outcome);
-    tsan::release(thread);
-    if thread.jobs.send(reply).is_err() {
-        std::process::abort();
-    }
-}
-
 /// Whether the rendering update submits the stage `label` rather than waiting for it: under
 /// `LIBWEB_STAGE_THREAD=overlap`, with a frame scheduler, if `LIBWEB_STAGE_OVERLAP` names `label`,
-/// and only from the main thread's own code, not from work a stage joined it for.
+/// and only from the main thread.
 pub(crate) fn submits(label: &'static str) -> bool {
     stage_thread_mode() == Some(StageThreadMode::Overlap)
         && FRAME_SCHEDULER_HOST.get().is_some()
-        && RUNNING_JOIN_WORK.with(Cell::get) == 0
         && stage_thread().is_some_and(|thread| std::thread::current().id() != thread.id)
         && stage_overlaps(label)
 }
@@ -1302,7 +1260,8 @@ fn frame_completion_notify() {
 
 /// Whether the calling thread has submitted stages it has not taken back yet.
 pub(crate) fn has_frame_in_flight() -> bool {
-    frame_in_flight_reaches_an_arena() || PAINTING.with_borrow(|painting| !painting.is_empty())
+    SUBMITTED.with_borrow(|submitted| submitted.iter().any(|stage| !stage.is_lend()))
+        || PAINTING.with_borrow(|painting| !painting.is_empty())
 }
 
 /// Whether the frame in flight owns the arena `arena`.
@@ -1369,17 +1328,10 @@ pub(crate) fn take_frame_in_flight() -> bool {
     true
 }
 
-/// Whether the calling thread runs work a stage of the frame in flight joined it for, which reaches
-/// what the frame holds as the stage does.
-pub(crate) fn running_join_work() -> bool {
-    RUNNING_JOIN_WORK.with(Cell::get) != 0
-}
-
 /// Called where main-thread code reaches render-owned state: if the frame in flight owns the arena
 /// `arena` (or has any stage, for a null `arena`), waits for the frame, takes it back and runs the
-/// frame scheduler's consume-commit, so the access finds the document as the frame left it. Work a
-/// stage joined the main thread for belongs to that stage and does not wait. Logs each call site
-/// that forced a join once.
+/// frame scheduler's consume-commit, so the access finds the document as the frame left it. Logs
+/// each call site that forced a join once.
 #[track_caller]
 pub(crate) fn join_frame_in_flight(arena: *mut c_void) {
     let location = std::panic::Location::caller();
@@ -1396,9 +1348,6 @@ pub(crate) fn join_frame_in_flight_at(arena: *mut c_void, file: &'static str, li
             line,
             column,
         );
-        return;
-    }
-    if RUNNING_JOIN_WORK.with(Cell::get) != 0 {
         return;
     }
     let first_stage = SUBMITTED
@@ -1420,9 +1369,6 @@ pub(crate) fn join_document_frame_in_flight_at(arena: *mut c_void, file: &'stati
 /// on the paint lane: the frame's consume publishes it, as the frame's presentation may not have.
 #[track_caller]
 pub(crate) fn join_recording_in_flight_of(arena: *mut c_void) {
-    if RUNNING_JOIN_WORK.with(Cell::get) != 0 {
-        return;
-    }
     let recording_in_flight = PAINTING.with_borrow(|painting| {
         painting
             .iter()
@@ -1450,7 +1396,7 @@ fn join_frame_in_flight_for_stage(
     line: u32,
     column: u32,
 ) {
-    if no_stage_is_submitted() || RUNNING_JOIN_WORK.with(Cell::get) != 0 {
+    if no_stage_is_submitted() {
         return;
     }
     let reached_stage = SUBMITTED.with_borrow(|submitted| {
@@ -1513,15 +1459,17 @@ fn join_reached_stage(
         refuse_join_while_tearing_down_cells(file, line);
         return;
     }
-    // A flight the join waits for stops at the end of the stage it runs.
+    // The join takes the whole frame back, so each flight it waits for stops at the end of the stage it runs, or
+    // before its first if it has not begun.
     if label == FLIGHT_STAGE {
-        let flight_arena = SUBMITTED.with_borrow(|submitted| {
+        let flight_arenas = SUBMITTED.with_borrow(|submitted| {
             submitted
                 .iter()
-                .find(|stage| stage.label == FLIGHT_STAGE)
+                .filter(|stage| stage.label == FLIGHT_STAGE)
                 .map(|stage| stage.arena)
+                .collect::<Vec<_>>()
         });
-        if let Some(arena) = flight_arena {
+        for arena in flight_arenas {
             // SAFETY: A submitted stage's arena outlives the frame in flight.
             let document = unsafe { crate::layout::ArenaHandle::document_of(arena as *const c_void) };
             crate::render_owner::recall_rendering_update(document);
@@ -1856,7 +1804,8 @@ fn next_incoming() -> Option<StageMessage> {
 
 /// On the Rendering thread, between two units of the rendering update of `document` it runs: serves every message
 /// that has arrived and may be served in the middle of that update (a query, a layout unit a main thread waits for,
-/// changes to queue), and defers the rest, and every message after one it defers, for its own loop. Answers whether
+/// changes to queue, another document's destroy), and defers the rest, and every message about a document after one
+/// it defers about that document, for its own loop (see [`crate::render_owner::between_units`]). Answers whether
 /// the main thread recalled the update meanwhile, to take its frame back where it is.
 pub(crate) fn serve_messages_between_units(document: crate::render_owner::DocumentId) -> bool {
     let Some(thread) = stage_thread() else {
@@ -1866,13 +1815,22 @@ pub(crate) fn serve_messages_between_units(document: crate::render_owner::Docume
     while let Some(message) =
         INCOMING.with(|incoming| incoming.borrow().as_ref().and_then(|incoming| incoming.try_recv().ok()))
     {
+        let deferred = DEFERRED.with_borrow(|deferred| {
+            deferred
+                .iter()
+                .map(|message| match message {
+                    StageMessage::Owner(message) => Some(message.document()),
+                    StageMessage::Run(_) => None,
+                })
+                .collect::<Vec<_>>()
+        });
         let message = match message {
-            StageMessage::Owner(message) => match crate::render_owner::between_units(message, document) {
+            StageMessage::Owner(message) => match crate::render_owner::between_units(message, document, &deferred) {
                 crate::render_owner::BetweenUnits::Recalled => {
                     recalled = true;
                     continue;
                 }
-                crate::render_owner::BetweenUnits::Serve(message) if DEFERRED.with_borrow(VecDeque::is_empty) => {
+                crate::render_owner::BetweenUnits::Serve(message) => {
                     // What the message runs is not the update's run.
                     let running = RUNNING_SUBMITTED_RUN.with(|running| running.take());
                     tsan::acquire(thread);
@@ -1881,14 +1839,23 @@ pub(crate) fn serve_messages_between_units(document: crate::render_owner::Docume
                     RUNNING_SUBMITTED_RUN.with(|slot| slot.set(running));
                     continue;
                 }
-                crate::render_owner::BetweenUnits::Serve(message)
-                | crate::render_owner::BetweenUnits::Defer(message) => StageMessage::Owner(message),
+                crate::render_owner::BetweenUnits::Defer(message) => StageMessage::Owner(message),
             },
             message => message,
         };
         DEFERRED.with_borrow_mut(|deferred| deferred.push_back(message));
     }
     recalled
+}
+
+/// On the Rendering thread: whether a rendering update of `document` waits among the messages it deferred.
+pub(crate) fn defers_rendering_update_of(document: crate::render_owner::DocumentId) -> bool {
+    DEFERRED.with_borrow(|deferred| {
+        deferred.iter().any(|message| {
+            matches!(message, StageMessage::Owner(message @ crate::render_owner::ToOwner::RenderingUpdate { .. })
+                if message.document() == document)
+        })
+    })
 }
 
 /// The thread the running code acts for: on the stage thread, the thread that handed it the stage
@@ -1948,203 +1915,20 @@ fn acquire_stage_threads() {
 /// it with [`CallerWaits`].
 pub(crate) fn run_stage<R: Send>(stage: impl FnOnce() -> R + Send) -> R {
     match stage_thread() {
-        Some(_) if runs_waited_for_stage_in_place() => run_in_place(stage),
-        // SAFETY: The stage has no joins, and it is `Send`.
-        Some(thread) => unsafe { run_stage_on(thread, None, |_| stage()) },
+        // SAFETY: The stage is `Send`.
+        Some(thread) => unsafe { run_stage_on(thread, stage) },
         None => stage(),
     }
 }
 
-/// Runs `stage` on the stage thread if there is one, as [`run_stage`] does, but never right here for want of a frame in
-/// flight: a stage the stage thread is for runs there however little it would overlap. Without a stage thread
-/// (`LIBWEB_STAGE_OVERLAP=none`), or when called from the stage thread itself, `stage` runs right here.
-pub(crate) fn run_stage_on_stage_thread<R: Send>(stage: impl FnOnce() -> R + Send) -> R {
-    match stage_thread() {
-        // SAFETY: The stage has no joins, and it is `Send`.
-        Some(thread) => unsafe { run_stage_on(thread, None, |_| stage()) },
-        None => stage(),
-    }
-}
-
-/// Whether a stage the caller waits for runs right here rather than on the stage thread: with the stages overlapping
-/// and no stage of the frame in flight reaching an arena, nothing runs on the stage thread for the caller, which would
-/// only wait for it. The stage runs as it does when nothing overlaps, without handing its state to another core and
-/// back. A recording in flight reaches no arena, so the stage runs beside it wherever it runs.
-fn runs_waited_for_stage_in_place() -> bool {
-    stage_thread_mode() == Some(StageThreadMode::Overlap)
-        && !frame_in_flight_reaches_an_arena()
-        && stage_thread().is_some_and(|thread| std::thread::current().id() != thread.id)
-}
-
-/// Whether a stage of the frame in flight reaches an arena: any it submitted for a document's arena or style engine,
-/// and none of its recordings or presentations, which are paint stages.
-fn frame_in_flight_reaches_an_arena() -> bool {
-    SUBMITTED.with_borrow(|submitted| submitted.iter().any(|stage| !stage.is_lend()))
-}
-
-/// Whether a stage the caller waits for, for the document whose arena is `arena`, runs right here: with the stages
-/// overlapping, when no stage of the frame in flight is that document's. The frame's stages reach only their own
-/// documents' arenas and style engines, so the stage reaches nothing they own, and queued behind them it would only
-/// wait for another document's stages (a parent document's layout behind its iframe's recording).
-fn runs_waited_for_document_stage_in_place(arena: *const c_void) -> bool {
-    stage_thread_mode() == Some(StageThreadMode::Overlap)
-        && stage_thread().is_some_and(|thread| std::thread::current().id() != thread.id)
-        && SUBMITTED.with_borrow(|submitted| submitted.iter().all(|stage| stage.arena != arena as usize))
-}
-
-/// Runs `stage`, a stage for the document whose arena is `arena`, as [`run_stage`] does, or right here when no stage
-/// of the frame in flight is that document's.
+/// Runs `stage`, a stage for the document whose arena is `arena`, as [`run_stage`] does, with the faces it wants
+/// filed under that document.
 pub(crate) fn run_document_stage<R: Send>(arena: *const c_void, stage: impl FnOnce() -> R + Send) -> R {
     let owner = arena as u64;
-    let stage = move || {
+    run_stage(move || {
         let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(owner);
         stage()
-    };
-    run_stage_reaching(arena, stage)
-}
-
-/// Runs `stage`, which reaches the document whose arena is `arena` and no other, as [`run_stage`] does, or right here
-/// when no stage of the frame in flight is that document's: queued behind another document's stages on the stage
-/// thread, it would only wait for them. A null `arena` names no document, and the stage runs as [`run_stage`] runs it.
-pub(crate) fn run_stage_reaching<R: Send>(arena: *const c_void, stage: impl FnOnce() -> R + Send) -> R {
-    if !arena.is_null() && runs_waited_for_document_stage_in_place(arena) {
-        return run_in_place(stage);
-    }
-    run_stage(stage)
-}
-
-/// Runs `stage`, a stage for the document whose arena is `arena`, as [`run_stage_with_joins`] does, or right here when
-/// no stage of the frame in flight is that document's.
-///
-/// # Safety
-///
-/// As for [`run_stage_with_joins`].
-pub(crate) unsafe fn run_document_stage_with_joins<R: Send>(
-    main_thread: &MainThread<'_>,
-    arena: *const c_void,
-    stage: impl FnOnce(&MainJoins<'_>) -> R + Send,
-) -> R {
-    let owner = arena as u64;
-    let stage = move |joins: &MainJoins<'_>| {
-        let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(owner);
-        stage(joins)
-    };
-    if runs_waited_for_document_stage_in_place(arena) {
-        return run_in_place(|| stage(&MainJoins(JoinTarget::InPlace(Some(main_thread)))));
-    }
-    // SAFETY: Guaranteed by the caller.
-    unsafe { run_stage_with_joins(main_thread, stage) }
-}
-
-/// Runs `stage` right here, where nothing it starts is submitted and nothing it reaches joins a frame, as for the
-/// work a stage joins its caller for: a stage waited for is not one, and nothing it reaches is the frame's.
-fn run_in_place<R>(stage: impl FnOnce() -> R) -> R {
-    struct LeaveInPlaceStage;
-    impl Drop for LeaveInPlaceStage {
-        fn drop(&mut self) {
-            RUNNING_JOIN_WORK.with(|depth| depth.set(depth.get() - 1));
-        }
-    }
-    RUNNING_JOIN_WORK.with(|depth| depth.set(depth.get() + 1));
-    let _leave = LeaveInPlaceStage;
-    stage()
-}
-
-/// Runs `stage` as [`run_stage`] does, and lets it join the calling thread: while `stage` waits
-/// in [`MainJoins::join`], the calling thread runs the work the join hands it, with the main
-/// thread capability it holds.
-///
-/// A join is answered by the next reply the stage thread gets, which holds because one thread
-/// per process, the one its documents live on, starts the stages. A stage with joins is never
-/// submitted: its caller always waits for it.
-///
-/// # Safety
-///
-/// The work each join hands the calling thread may capture references to state that is neither
-/// `Send` nor `Sync`. The caller must ensure that no thread other than the stage thread can reach
-/// that state while the work runs. The stage thread itself cannot, since it waits for the result.
-pub(crate) unsafe fn run_stage_with_joins<R: Send>(
-    main_thread: &MainThread<'_>,
-    stage: impl FnOnce(&MainJoins<'_>) -> R + Send,
-) -> R {
-    match stage_thread() {
-        Some(_) if runs_waited_for_stage_in_place() => {
-            run_in_place(|| stage(&MainJoins(JoinTarget::InPlace(Some(main_thread)))))
-        }
-        // SAFETY: Guaranteed by the caller.
-        Some(thread) => unsafe { run_stage_on(thread, Some(main_thread), stage) },
-        None => stage(&MainJoins(JoinTarget::InPlace(Some(main_thread)))),
-    }
-}
-
-/// How a stage started by [`run_stage_with_joins`] reaches the thread that waits for it.
-pub(crate) struct MainJoins<'main>(JoinTarget<'main>);
-
-enum JoinTarget<'main> {
-    /// The stage runs on the calling thread itself; a stage started without joins has no main
-    /// thread to join.
-    InPlace(Option<&'main MainThread<'main>>),
-    Caller {
-        thread: &'static StageThread,
-        caller: Sender<CallerMessage>,
-    },
-}
-
-impl MainJoins<'_> {
-    /// Runs `work` on the thread that waits for this stage and returns its result. The stage waits
-    /// meanwhile, and runs any stage `work` starts.
-    pub(crate) fn join<R: Send>(&self, work: impl FnOnce(&MainThread<'_>) -> R) -> R {
-        let (thread, caller) = match &self.0 {
-            JoinTarget::InPlace(main_thread) => {
-                return work(main_thread.expect("only a stage started with joins joins its caller"));
-            }
-            JoinTarget::Caller { thread, caller } => (*thread, caller),
-        };
-        let mut result = None;
-        let slot = &mut result;
-        let work = CallerWaits(work);
-        let work: JoinWork<'_> = Box::new(move |main_thread| {
-            let work = work.into_inner();
-            std::panic::catch_unwind(AssertUnwindSafe(|| *slot = Some(work(main_thread))))
-        });
-        // SAFETY: The work borrows from this frame. The caller replies only once it has run the
-        // work and dropped it, and this function does not return before the reply arrives.
-        let work = unsafe { std::mem::transmute::<JoinWork<'_>, MainWork>(work) };
-        let request = CallerMessage::Join(work, take_style_update_scope());
-        tsan::release(thread);
-        if caller.send(request).is_err() {
-            // The caller waits for this stage, so it cannot have gone away.
-            std::process::abort();
-        }
-        loop {
-            match next_incoming() {
-                // The work started a stage of its own.
-                Some(StageMessage::Run(job)) => job(),
-                // The work asked the owner something and waits for the answer, or sent what an answer comes after. What
-                // else it sent the owner waits for the stage thread's own loop: a document's render state is not
-                // dropped under the stage.
-                Some(StageMessage::Owner(message)) => {
-                    if message.may_be_served_inside_a_stage() && DEFERRED.with_borrow(VecDeque::is_empty) {
-                        tsan::acquire(thread);
-                        crate::render_owner::handle(message);
-                        tsan::release(thread);
-                    } else {
-                        DEFERRED.with_borrow_mut(|deferred| deferred.push_back(StageMessage::Owner(message)));
-                    }
-                }
-                Some(StageMessage::JoinFinished(style_update, outcome)) => {
-                    tsan::acquire(thread);
-                    install_style_update_scope(*style_update);
-                    if let Err(payload) = outcome {
-                        std::panic::resume_unwind(payload);
-                    }
-                    break;
-                }
-                None => std::process::abort(),
-            }
-        }
-        result.expect("a join that finished without panicking has a result")
-    }
+    })
 }
 
 /// A value a submitted stage owns although the compiler cannot check that it may cross threads.
@@ -2201,23 +1985,19 @@ impl<F> CallerWaits<F> {
 
 /// # Safety
 ///
-/// As for [`run_stage_with_joins`]. A stage that joins needs `main_thread`.
-unsafe fn run_stage_on<R: Send>(
-    thread: &'static StageThread,
-    main_thread: Option<&MainThread<'_>>,
-    stage: impl FnOnce(&MainJoins<'_>) -> R + Send,
-) -> R {
+/// The stage may reach what the calling thread holds only while it waits.
+unsafe fn run_stage_on<R: Send>(thread: &'static StageThread, stage: impl FnOnce() -> R + Send) -> R {
     if std::thread::current().id() == thread.id {
-        return stage(&MainJoins(JoinTarget::InPlace(main_thread)));
+        return stage();
     }
     // This stage would queue behind the submitted ones, and a run a test holds there stays held, so
     // the stage runs right here instead, as it does without a stage thread. It reaches nothing a
     // submitted stage owns, and a wait for the held run in it lets that run go on as anywhere.
     if has_frame_in_flight() && stage_thread_holds_run_for_queued_stage() {
-        return stage(&MainJoins(JoinTarget::InPlace(main_thread)));
+        return stage();
     }
 
-    let (to_caller, from_stage) = channel::<CallerMessage>();
+    let (to_caller, from_stage) = channel::<StyleUpdateScope>();
     let mut outcome: Option<Result<R, Box<dyn Any + Send>>> = None;
     let slot = &mut outcome;
     let caller = std::thread::current().id();
@@ -2228,17 +2008,12 @@ unsafe fn run_stage_on<R: Send>(
         tsan::acquire(thread);
         let waiting_caller = WAITING_CALLER.with(|waiting| waiting.replace(Some(caller)));
         install_style_update_scope(style_update);
-        let joins = MainJoins(JoinTarget::Caller {
-            thread,
-            caller: to_caller.clone(),
-        });
-        *slot = Some(std::panic::catch_unwind(AssertUnwindSafe(|| stage(&joins))));
-        drop(joins);
+        *slot = Some(std::panic::catch_unwind(AssertUnwindSafe(stage)));
         let style_update = take_style_update_scope();
         WAITING_CALLER.with(|waiting| waiting.set(waiting_caller));
         tsan::release(thread);
         // The calling thread is waiting on this reply, so it cannot have gone away.
-        let _ = to_caller.send(CallerMessage::Finished(style_update));
+        let _ = to_caller.send(style_update);
     });
     // SAFETY: The job borrows from the calling thread's frame. It drops everything it captured
     // before it replies, and this function does not return before the reply arrives.
@@ -2250,13 +2025,7 @@ unsafe fn run_stage_on<R: Send>(
     }
     // A stage submitted earlier runs first; this stage queues behind it and does not reach what it
     // owns, so the caller waits for this stage's reply only.
-    let style_update = loop {
-        match from_stage.recv() {
-            Ok(CallerMessage::Finished(style_update)) => break style_update,
-            Ok(CallerMessage::Join(work, style_update)) => run_join_work(thread, main_thread, work, style_update),
-            Err(_) => std::process::abort(),
-        }
-    };
+    let style_update = from_stage.recv().unwrap_or_else(|_| std::process::abort());
     tsan::acquire(thread);
     install_style_update_scope(style_update);
     match outcome.expect("a finished stage leaves its outcome") {
@@ -2330,8 +2099,8 @@ pub(crate) fn wait_for_owner<R>(
 /// Runs `stage` on a stage thread of the unit tests' own, whatever the environment says.
 #[cfg(test)]
 pub(crate) fn run_stage_for_test<R: Send>(stage: impl FnOnce() -> R + Send) -> R {
-    // SAFETY: The stage has no joins, and it is `Send`.
-    unsafe { run_stage_on(tests::test_thread(), None, |_| stage()) }
+    // SAFETY: The stage is `Send`.
+    unsafe { run_stage_on(tests::test_thread(), stage) }
 }
 
 #[cfg(test)]
@@ -2341,15 +2110,6 @@ mod tests {
     pub(super) fn test_thread() -> &'static StageThread {
         static THREAD: OnceLock<StageThread> = OnceLock::new();
         THREAD.get_or_init(|| StageThread::spawn("Rendering"))
-    }
-
-    // A join pairs with the next reply the stage thread gets, so a test that joins needs a stage
-    // thread no other test is calling into at the same time.
-    fn joining_test_thread() -> &'static StageThread {
-        thread_local! {
-            static THREAD: &'static StageThread = Box::leak(Box::new(StageThread::spawn("Rendering")));
-        }
-        THREAD.with(|thread| *thread)
     }
 
     #[test]
@@ -2365,58 +2125,19 @@ mod tests {
     }
 
     #[test]
-    fn a_join_runs_on_the_caller_and_the_stages_it_starts_run_on_the_stage_thread() {
-        let main_thread = crate::stage::MainThread::for_test();
-        let caller = std::thread::current().id();
-        let mut state = 1;
-        // SAFETY: The join captures only the stage's own borrow of `state`.
-        let (stage_thread, joined_on, nested_stage_ran_on) = unsafe {
-            run_stage_on(joining_test_thread(), Some(&main_thread), |joins| {
-                state += 1;
-                let (joined_on, nested_stage_ran_on) = joins.join(|_| {
-                    state *= 10;
-                    (
-                        std::thread::current().id(),
-                        run_stage_on(joining_test_thread(), None, |_| std::thread::current().id()),
-                    )
-                });
-                (std::thread::current().id(), joined_on, nested_stage_ran_on)
-            })
+    fn a_panic_in_a_unit_for_a_waiting_thread_answers_it_and_the_owner_goes_on() {
+        let (reply, answered) = channel();
+        let unit = OwnerReplyTo::<u32> {
+            thread: test_thread(),
+            caller: std::thread::current().id(),
+            style_update: Box::new(take_style_update_scope()),
+            reply,
         };
-        assert_eq!(stage_thread, joining_test_thread().id);
-        assert_eq!(joined_on, caller);
-        assert_eq!(nested_stage_ran_on, joining_test_thread().id);
-        assert_eq!(state, 20);
-    }
-
-    #[test]
-    fn a_stage_started_inside_a_join_can_join_again() {
-        let main_thread = crate::stage::MainThread::for_test();
-        let caller = std::thread::current().id();
-        // SAFETY: Nothing is captured that another thread can reach.
-        let innermost = unsafe {
-            run_stage_on(joining_test_thread(), Some(&main_thread), |joins| {
-                joins.join(|main_thread| {
-                    run_stage_on(joining_test_thread(), Some(main_thread), |joins| {
-                        joins.join(|_| std::thread::current().id())
-                    })
-                })
-            })
-        };
-        assert_eq!(innermost, caller);
-    }
-
-    #[test]
-    fn a_panic_in_a_join_reaches_the_stage_and_then_the_caller() {
-        let main_thread = crate::stage::MainThread::for_test();
-        // SAFETY: Nothing is captured.
-        let outcome = std::panic::catch_unwind(AssertUnwindSafe(|| unsafe {
-            run_stage_on(joining_test_thread(), Some(&main_thread), |joins| {
-                joins.join(|_| -> () { panic!("join failed") })
-            })
-        }));
-        let payload = outcome.expect_err("the panic must reach the caller");
-        assert_eq!(payload.downcast_ref::<&str>(), Some(&"join failed"));
+        run_stage_for_test(move || unit.answer(|| panic!("unit failed")));
+        let (outcome, style_update) = answered.recv().expect("a unit that panicked answers");
+        install_style_update_scope(*style_update);
+        let payload = outcome.expect_err("the panic is the answer");
+        assert_eq!(payload.downcast_ref::<&str>(), Some(&"unit failed"));
         assert_eq!(run_stage_for_test(|| 7), 7);
     }
 

@@ -240,7 +240,7 @@ impl Flight {
         // Whether the main thread recalled the flight, to take the frame back where it is. Between its stages, the
         // flight serves what the owner was sent meanwhile that may go before the rest of it: a query waits for one
         // stage of it at most.
-        let mut recalled = false;
+        let mut recalled = crate::render_owner::take_recall(document);
         let mut first_stage = true;
         loop {
             if !std::mem::take(&mut first_stage) {

@@ -61,14 +61,12 @@ pub(crate) enum MarkWriteWaitingForFrame {
 }
 
 /// Whether a write to the marks of the document whose arena `handle` names waits for the frame in
-/// flight: the frame holds them, and the calling thread is not running work it joined it for.
+/// flight: the frame holds them.
 /// Such a write runs where joining the frame would have run it, once what the frame owed the
 /// document thread is paid (see [`write_marks_waiting_for_frame`]). Anything that reads a mark
 /// beside the frame joins it, which runs the waiting writes first.
 fn mark_writes_wait_for_frame(host_tables: &HostTables, handle: *mut c_void) -> bool {
-    host_tables.layout_tree_update_marks_are_lent.get()
-        && crate::stage_thread::frame_in_flight_owns(handle)
-        && !crate::stage_thread::running_join_work()
+    host_tables.layout_tree_update_marks_are_lent.get() && crate::stage_thread::frame_in_flight_owns(handle)
 }
 
 /// Retires the marks the node `style_node` names holds in the document whose arena `handle` names,

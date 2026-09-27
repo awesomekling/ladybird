@@ -1576,7 +1576,7 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
             viewport,
             recording_inputs,
         );
-        crate::stage_thread::run_stage_on_stage_thread(|| record_display_list_stage(input))
+        crate::stage_thread::run_stage(|| record_display_list_stage(input))
     };
     // SAFETY: The stage has returned the arena.
     let arena = unsafe { arena_from_handle(arena_handle) };

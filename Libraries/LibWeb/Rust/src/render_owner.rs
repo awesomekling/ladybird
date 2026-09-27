@@ -286,6 +286,20 @@ pub(crate) enum ToOwner {
 }
 
 impl ToOwner {
+    /// The document the message is about.
+    pub(crate) fn document(&self) -> DocumentId {
+        match self {
+            Self::Create { document, .. }
+            | Self::Changes { document, .. }
+            | Self::RenderingUpdate { document, .. }
+            | Self::Layout { document, .. }
+            | Self::Style { document, .. }
+            | Self::Ask { document, .. }
+            | Self::Recall { document }
+            | Self::Destroy { document } => *document,
+        }
+    }
+
     /// Whether the owner may handle the message inside a stage it runs for a document thread, which it waits for in
     /// the middle of: the message is a unit or a question a document thread waits for, or what those come after.
     pub(crate) fn may_be_served_inside_a_stage(&self) -> bool {
@@ -306,12 +320,23 @@ pub(crate) enum BetweenUnits {
     Defer(ToOwner),
 }
 
-/// Sorts `message`, which arrived while the owner runs a rendering update of `running`.
-pub(crate) fn between_units(message: ToOwner, running: DocumentId) -> BetweenUnits {
+/// Sorts `message`, which arrived while the owner runs a rendering update of `running`, after the messages it deferred
+/// meanwhile, which are about the documents `deferred` names (`None` for a message about no document it knows). A
+/// message goes after what it defers of its own document, so the messages of a document keep their order; those of
+/// another document go on. A recall goes first of all: it only ends an update.
+pub(crate) fn between_units(message: ToOwner, running: DocumentId, deferred: &[Option<DocumentId>]) -> BetweenUnits {
+    let document = message.document();
     match message {
-        ToOwner::Recall { document } if document == running => BetweenUnits::Recalled,
+        ToOwner::Recall { .. } if document == running => BetweenUnits::Recalled,
         ToOwner::Recall { .. } => BetweenUnits::Serve(message),
-        ToOwner::Destroy { document } if document != running => BetweenUnits::Serve(message),
+        message
+            if deferred
+                .iter()
+                .any(|deferred| deferred.is_none_or(|deferred| deferred == document)) =>
+        {
+            BetweenUnits::Defer(message)
+        }
+        ToOwner::Destroy { .. } if document != running => BetweenUnits::Serve(message),
         message if message.may_be_served_inside_a_stage() => BetweenUnits::Serve(message),
         message => BetweenUnits::Defer(message),
     }
@@ -320,6 +345,9 @@ pub(crate) fn between_units(message: ToOwner, running: DocumentId) -> BetweenUni
 thread_local! {
     // On the owner thread, the render state of each document it owns.
     static STATES: RefCell<HashMap<DocumentId, RenderState>> = RefCell::new(HashMap::new());
+    // On the owner thread, the documents whose rendering update the document thread recalled before the update began,
+    // which the update ends at its first unit.
+    static RECALLED: RefCell<std::collections::HashSet<DocumentId>> = RefCell::new(std::collections::HashSet::new());
     // On a document thread, the number of the last change it sent for each document.
     static SENT_THROUGH: RefCell<HashMap<DocumentId, ChangeSeq>> = RefCell::new(HashMap::new());
 }
@@ -385,9 +413,9 @@ fn handle_message(message: ToOwner) {
             Ok(unsafe { engine.reach_on_owner(|engine| transaction.run(engine)) })
         }),
         ToOwner::Layout { document, unit } => {
-            // The state's borrow ends before the unit runs, which may reach another document's state.
-            let arena = with_state(document, RenderState::arena_handle);
-            (*unit).run(arena);
+            // The state's borrow ends before the unit runs, which may reach another document's state. The unit finds
+            // the arena inside its answer, so that a panic there answers the waiting document thread.
+            (*unit).run(|| with_state(document, RenderState::arena_handle));
         }
         ToOwner::Ask {
             document,
@@ -404,7 +432,13 @@ fn handle_message(message: ToOwner) {
             })
             .unwrap_or_else(|| Answer::unanswered(query))
         }),
-        ToOwner::Recall { .. } => {}
+        ToOwner::Recall { document } => {
+            // A rendering update the owner deferred ends at its first unit. The update was sent before the recall, so
+            // where none waits, it is over already.
+            if crate::stage_thread::defers_rendering_update_of(document) {
+                RECALLED.with_borrow_mut(|recalled| recalled.insert(document));
+            }
+        }
         ToOwner::Destroy { document } => {
             let state = STATES.with_borrow_mut(|states| states.remove(&document));
             debug_assert!(state.is_some(), "document {document:?} destroyed twice");
@@ -413,6 +447,11 @@ fn handle_message(message: ToOwner) {
             }
         }
     }
+}
+
+/// On the owner thread, as the rendering update of `document` begins: whether the document thread recalled it already.
+pub(crate) fn take_recall(document: DocumentId) -> bool {
+    RECALLED.with_borrow_mut(|recalled| recalled.remove(&document))
 }
 
 /// Runs `operation` on the render state of `document`, on the owner thread. A message about a document with no
@@ -744,8 +783,9 @@ pub extern "C" fn render_owner_create_document() -> FfiRenderDocument {
 pub unsafe extern "C" fn render_owner_destroy_document(document: FfiRenderDocument) {
     let arena = document.arena;
     assert!(!arena.is_null(), "layout node arena handle is null");
-    // A frame in flight owns the arena until it is taken back.
-    crate::stage_thread::join_frame_in_flight(arena);
+    // A frame in flight owns the arena until it is taken back, and a stage of the document that reaches no arena (a
+    // style pass) its engine: the owner drops the state only once the main thread has taken back every stage of it.
+    crate::stage_thread::join_document_frame_in_flight_at(arena, file!(), line!(), column!());
     // The render side no longer ticks the document's animations.
     crate::clock_frames::rust_clock_lease_revoke(arena);
     crate::layout::flush_arena_censuses();
@@ -774,7 +814,7 @@ mod tests {
     fn a_running_update_defers_its_own_documents_destroy_and_serves_the_rest() {
         let running = DocumentId::mint();
         let other = DocumentId::mint();
-        let sorted = |message| match between_units(message, running) {
+        let sorted = |message| match between_units(message, running, &[]) {
             BetweenUnits::Recalled => "recalled",
             BetweenUnits::Serve(_) => "serve",
             BetweenUnits::Defer(_) => "defer",
@@ -791,6 +831,62 @@ mod tests {
         };
         assert_eq!(sorted(changes(running)), "serve");
         assert_eq!(sorted(changes(other)), "serve");
+    }
+
+    #[test]
+    fn a_running_update_keeps_each_documents_order_behind_what_it_deferred() {
+        let running = DocumentId::mint();
+        let deferred_document = DocumentId::mint();
+        let other = DocumentId::mint();
+        let sorted = |message, deferred: &[Option<DocumentId>]| match between_units(message, running, deferred) {
+            BetweenUnits::Recalled => "recalled",
+            BetweenUnits::Serve(_) => "serve",
+            BetweenUnits::Defer(_) => "defer",
+        };
+        let changes = |document| ToOwner::Changes {
+            document,
+            first: ChangeSeq(1),
+            changes: vec![Change::StyleInputs(InputForPass::empty())],
+        };
+        // A message of a document the owner deferred a message of goes after it; another document's goes on.
+        let deferred = [Some(deferred_document)];
+        assert_eq!(sorted(changes(deferred_document), &deferred), "defer");
+        assert_eq!(sorted(changes(other), &deferred), "serve");
+        assert_eq!(sorted(changes(running), &deferred), "serve");
+        assert_eq!(sorted(ToOwner::Destroy { document: other }, &deferred), "serve");
+        assert_eq!(
+            sorted(
+                ToOwner::Destroy {
+                    document: deferred_document
+                },
+                &deferred
+            ),
+            "defer"
+        );
+        // A recall goes first of all, even of a document with a deferred message: it only ends an update.
+        assert_eq!(
+            sorted(
+                ToOwner::Recall {
+                    document: deferred_document
+                },
+                &deferred
+            ),
+            "serve"
+        );
+        assert_eq!(sorted(ToOwner::Recall { document: running }, &deferred), "recalled");
+        // Behind a message about no document the owner knows, everything waits but a recall.
+        let deferred = [None];
+        assert_eq!(sorted(changes(other), &deferred), "defer");
+        assert_eq!(sorted(ToOwner::Destroy { document: other }, &deferred), "defer");
+        assert_eq!(sorted(ToOwner::Recall { document: running }, &deferred), "recalled");
+    }
+
+    #[test]
+    fn a_recall_with_no_deferred_update_leaves_the_next_update_alone() {
+        let document = DocumentId::mint();
+        // The update the recall is for was sent before it; with none deferred, it is over already.
+        handle(ToOwner::Recall { document });
+        assert!(!take_recall(document));
     }
 
     #[test]
