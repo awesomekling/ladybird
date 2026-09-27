@@ -817,7 +817,16 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
             if (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::SkippedHidden)
                 continue;
 
-            if (!element->has_style() && !required_in_hidden_subtrees.contains(element->style_node_id())) {
+            // The engine skips an unstyled row below a hidden ancestor itself, unless the row keeps its style for an SVG
+            // element or an animated one among the rows of the rest of the pass, which can come in a later wave than this
+            // one and so be missing from the set above. A record the engine computed says it did not skip the row, and the
+            // host installs it rather than leave the engine holding a record the element never received. The host decides
+            // by the set above only for a row it computes itself.
+            bool const engine_computed_record = reaction.new_style_record != 0
+                && (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::Computed
+                    || reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::RetriedAfterAncestors
+                    || reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::RetriedMaterialization);
+            if (!element->has_style() && !engine_computed_record && !required_in_hidden_subtrees.contains(element->style_node_id())) {
                 bool hidden = false;
                 for (auto ancestor = DOM::AbstractElement { *element }.element_to_inherit_style_from(); ancestor.has_value(); ancestor = ancestor->element_to_inherit_style_from()) {
                     auto identity = ancestor->style_record_identity();
