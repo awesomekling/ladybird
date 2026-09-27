@@ -84,16 +84,11 @@ static RustFFI::FfiNodeConstructionFacts build_node_construction_facts(GC::Ptr<D
     };
 }
 
-// What a row built for the node is painted and hit-tested with, published under the node's
+// What a row built for the node is painted and hit-tested with, recorded under the node's
 // identity for the rows the build has yet to stamp and journalled for the rows it already has.
 // Neither half needs the node to have a box, which is why this is not a row's own business: the
-// build reads the published answer for a node that gains one.
-enum class DomFactPublication {
-    Change,
-    Arrival,
-};
-
-static void publish_dom_paint_facts(DOM::Node const& dom_node, DomFactPublication publication)
+// build reads the recorded answer for a node that gains one.
+void publish_dom_paint_facts(DOM::Node const& dom_node)
 {
     auto& document = const_cast<DOM::Document&>(dom_node.document());
     auto facts = dom_paint_facts_of(&dom_node);
@@ -105,27 +100,10 @@ static void publish_dom_paint_facts(DOM::Node const& dom_node, DomFactPublicatio
     if (facts != 0)
         document.set_may_have_dom_paint_facts();
     auto identity = dom_node.is_document() ? document.style_node_id() : Node::style_node_of(&dom_node);
-    if (identity.value() != 0) {
-        auto& style_engine = document.render_inputs_for_write().style_engine();
-        if (publication == DomFactPublication::Arrival) {
-            style_engine.record_dom_paint_facts(identity, facts);
-        } else if (!style_engine.change_arriving_dom_paint_facts(identity, facts)) {
-            style_engine.publish_input([identity, facts](CSS::StyleInputScope const& input) {
-                input.engine().set_node_dom_paint_facts(identity, facts);
-            });
-        }
-    }
+    // A change is recorded as the arrival was, so the last one recorded is what goes in.
+    if (identity.value() != 0)
+        document.render_inputs_for_write().style_engine().record_dom_paint_facts(identity, facts);
     document.invalidation_journal().note_dom_paint_facts(DOM::NodeIdentity::of(dom_node), facts);
-}
-
-void publish_dom_paint_facts(DOM::Node const& dom_node)
-{
-    publish_dom_paint_facts(dom_node, DomFactPublication::Change);
-}
-
-void record_dom_paint_facts_at_arrival(DOM::Node const& dom_node)
-{
-    publish_dom_paint_facts(dom_node, DomFactPublication::Arrival);
 }
 
 // Whether a row built for the node sits in the user agent shadow tree of the focused text
@@ -1013,10 +991,10 @@ bool NodeWithStyle::synchronize_table_span_data()
     return RustFFI::layout_arena_set_table_spans(arena_handle(), slot_id(this), spans.column_span, spans.row_span, spans.raw_column_span);
 }
 
-// The spans a row built for a table cell or table column takes from its attributes, published
+// The spans a row built for a table cell or table column takes from its attributes, recorded
 // under the element's identity for the rows the build has yet to stamp. The rows the element
 // already has are synchronised by the attribute change that moved the spans.
-static void publish_table_spans(DOM::Element const& element, DomFactPublication publication)
+void publish_table_spans(DOM::Element const& element)
 {
     if (!is<HTML::HTMLTableCellElement>(element) && !is<HTML::HTMLTableColElement>(element))
         return;
@@ -1024,26 +1002,8 @@ static void publish_table_spans(DOM::Element const& element, DomFactPublication 
     if (identity.value() == 0)
         return;
     auto spans = table_spans_of(&element);
-    auto& style_engine = const_cast<DOM::Document&>(element.document()).render_inputs_for_write().style_engine();
-    if (publication == DomFactPublication::Arrival) {
-        style_engine.record_table_spans(identity, spans.column_span, spans.row_span, spans.raw_column_span);
-        return;
-    }
-    if (style_engine.change_arriving_table_spans(identity, spans.column_span, spans.row_span, spans.raw_column_span))
-        return;
-    style_engine.publish_input([identity, spans](CSS::StyleInputScope const& input) {
-        input.engine().set_element_table_spans(identity, spans.column_span, spans.row_span, spans.raw_column_span);
-    });
-}
-
-void publish_table_spans(DOM::Element const& element)
-{
-    publish_table_spans(element, DomFactPublication::Change);
-}
-
-void record_table_spans_at_arrival(DOM::Element const& element)
-{
-    publish_table_spans(element, DomFactPublication::Arrival);
+    // A change is recorded as the arrival was, so the last one recorded is what goes in.
+    const_cast<DOM::Document&>(element.document()).render_inputs_for_write().style_engine().record_table_spans(identity, spans.column_span, spans.row_span, spans.raw_column_span);
 }
 
 void NodeWithStyle::set_display(CSS::Display display)

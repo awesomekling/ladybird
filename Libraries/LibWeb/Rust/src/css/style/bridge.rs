@@ -1020,11 +1020,11 @@ pub enum FfiHostFactKind {
     /// `data` is the unique id the document knows the node `node` by, which a box built for one of
     /// the node's pseudo-elements answers by.
     ElementUniqueNodeId = 16,
-    /// `value` is how a row built for the node `node` is painted and hit-tested, published as the
-    /// node arrives. See `style_engine_set_node_dom_paint_facts`.
+    /// `value` is how a row built for the node `node` is painted and hit-tested, recorded as the
+    /// node arrives and as it changes.
     NodeDomPaintFacts = 17,
-    /// `facts` holds the column span of the arriving table cell or column `node` in its low half
-    /// and its row span in its high half, and `parent` its raw column span.
+    /// `facts` holds the column span of the table cell or column `node` in its low half and its row
+    /// span in its high half, and `parent` its raw column span, recorded as for `NodeDomPaintFacts`.
     ElementTableSpans = 18,
     /// The shadow root `parent` is attached to the host `node`.
     ShadowRoot = 19,

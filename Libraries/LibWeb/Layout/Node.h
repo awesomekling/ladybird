@@ -785,9 +785,5 @@ void publish_dom_paint_facts(DOM::Node const&);
 void publish_element_scroll_offset(DOM::Element const&);
 void publish_is_in_focused_text_control(DOM::Node const&);
 void publish_table_spans(DOM::Element const&);
-// As publish_dom_paint_facts() and publish_table_spans(), for a node that arrives: what they publish goes with the
-// node's arrival, in the style input the next transaction takes.
-void record_dom_paint_facts_at_arrival(DOM::Node const&);
-void record_table_spans_at_arrival(DOM::Element const&);
 
 }
