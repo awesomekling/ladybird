@@ -1195,7 +1195,6 @@ pub(crate) struct LayoutNodeArena {
     /// Whether a layout tree build placed content showing the `list-item` counter's value inside a
     /// list owner whose item counters are stale, since the reconciliation after the last build.
     stale_list_item_counter_rendered: Cell<bool>,
-    update_layout_running: Cell<bool>,
     /// Every box must be recreated by the next layout tree build; set when the tree is torn down
     /// or a build finds a box it cannot place among rebuilt roots, cleared by the full pass.
     needs_full_layout_tree_update: Cell<bool>,
@@ -1366,7 +1365,6 @@ impl LayoutNodeArena {
             pending_rebuilt_subtree_roots: RefCell::new(Vec::new()),
             pending_layout_tree_update_escaped_rebuild_roots: Cell::new(false),
             stale_list_item_counter_rendered: Cell::new(false),
-            update_layout_running: Cell::new(false),
             needs_full_layout_tree_update: Cell::new(false),
             partial_layout_count: Cell::new(0),
             full_layout_count: Cell::new(0),
@@ -2938,22 +2936,6 @@ impl LayoutNodeArena {
             engine.forget_list_owners_with_stale_item_counters(|_, _| true);
             list_owners
         })
-    }
-
-    /// A document runs one layout update at a time; a nested request is a caller bug.
-    pub(crate) fn begin_update_layout(&self) {
-        assert!(
-            !self.update_layout_running.replace(true),
-            "a layout update is already running"
-        );
-    }
-
-    pub(crate) fn end_update_layout(&self) {
-        assert!(self.update_layout_running.replace(false), "no layout update is running");
-    }
-
-    pub(crate) fn update_layout_is_running(&self) -> bool {
-        self.update_layout_running.get()
     }
 
     pub(crate) fn note_partial_layout(&self) {
