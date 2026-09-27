@@ -71,7 +71,7 @@ CSSPixelPoint SyntheticPseudoElement::scroll_offset() const
     auto* arena = m_originating_element->document().layout_node_arena_if_created();
     if (!arena)
         return {};
-    return Layout::RustFFI::layout_arena_pseudo_element_scroll_offset(arena->handle(),
+    return Layout::RustFFI::render_owner_pseudo_element_scroll_offset(arena->render_document(),
         m_originating_element->style_node_id().value(), Layout::Node::encode_generated_for(m_type));
 }
 

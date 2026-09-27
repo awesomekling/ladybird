@@ -106,7 +106,7 @@ bool document_may_have_scroll_snap_areas(DOM::Document const& document)
     if (document.may_have_scroll_snap_areas())
         return true;
     auto const* arena = document.layout_node_arena_if_created();
-    return arena && Layout::RustFFI::layout_arena_may_have_scroll_snap_areas(arena->handle());
+    return arena && Layout::RustFFI::render_owner_may_have_scroll_snap_areas(arena->render_document());
 }
 
 void take_built_scroll_snap_containers(DOM::Document& document)
@@ -119,7 +119,7 @@ void take_built_scroll_snap_containers(DOM::Document& document)
         bool is_scroll_snap_container { false };
     };
     Vector<BuiltScrollContainer> built_scroll_containers;
-    Layout::RustFFI::layout_arena_take_built_scroll_snap_containers(arena->handle(), &built_scroll_containers,
+    Layout::RustFFI::render_owner_take_built_scroll_snap_containers(arena->render_document(), &built_scroll_containers,
         [](void* context, Compositing::RustFFI::NodeSlotId slot, bool is_scroll_snap_container) {
             static_cast<Vector<BuiltScrollContainer>*>(context)->append({ slot, is_scroll_snap_container });
         });

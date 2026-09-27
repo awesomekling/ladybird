@@ -282,6 +282,69 @@ pub(crate) enum Query {
     /// update's transactions, once the update has installed them: a row the install did not adopt the record of is
     /// put back with the record its element holds. Answers what that owes the host.
     FinishOwnerStyleHostHalf,
+    /// A read of the document's layout arena.
+    Arena(ArenaQuery),
+}
+
+/// A read of a document's layout arena, which [`Query::Arena`] asks.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum ArenaQuery {
+    /// Whether a box of the document has ever been given a scroll snap type.
+    MayHaveScrollSnapAreas,
+    /// Takes the scroll containers finished layout tree builds gave a style, each with whether it snaps.
+    TakeBuiltScrollSnapContainers,
+    /// Whether the innermost list-item counter of an element counts forward and was created by it.
+    InnermostListItemCounterIsOwnForwardCounter(StyleNodeID),
+    /// What a pseudo-element's box has scrolled to.
+    PseudoElementScrollOffset { generator: StyleNodeID, pseudo_kind: u8 },
+    /// Whether the counter styles an element's or pseudo-element's generated content names differ from the ones its
+    /// box was built with.
+    ContentCounterStylesChanged(crate::layout::counters::CounterOwner),
+}
+
+/// The answer to an [`ArenaQuery`].
+#[derive(Debug)]
+pub(crate) enum ArenaAnswer {
+    Flag(bool),
+    Byte(u8),
+    Point(crate::layout::used_values::FfiCssPixelPoint),
+    BuiltScrollSnapContainers(Vec<(crate::layout::node_data::NodeSlotId, bool)>),
+}
+
+impl ArenaQuery {
+    fn left_to_host(self) -> ArenaAnswer {
+        match self {
+            ArenaQuery::MayHaveScrollSnapAreas | ArenaQuery::InnermostListItemCounterIsOwnForwardCounter(_) => {
+                ArenaAnswer::Flag(false)
+            }
+            ArenaQuery::TakeBuiltScrollSnapContainers => ArenaAnswer::BuiltScrollSnapContainers(Vec::new()),
+            ArenaQuery::PseudoElementScrollOffset { .. } => ArenaAnswer::Point(Default::default()),
+            ArenaQuery::ContentCounterStylesChanged(_) => {
+                ArenaAnswer::Byte(LayoutNodeArena::CONTENT_COUNTER_STYLES_NOT_RECORDED)
+            }
+        }
+    }
+
+    fn answer(self, arena: &mut LayoutNodeArena) -> ArenaAnswer {
+        match self {
+            ArenaQuery::MayHaveScrollSnapAreas => ArenaAnswer::Flag(arena.may_have_scroll_snap_areas()),
+            ArenaQuery::TakeBuiltScrollSnapContainers => {
+                ArenaAnswer::BuiltScrollSnapContainers(arena.take_built_scroll_snap_containers())
+            }
+            ArenaQuery::InnermostListItemCounterIsOwnForwardCounter(element) => ArenaAnswer::Flag(
+                arena
+                    .counters_sets()
+                    .borrow()
+                    .innermost_list_item_counter_is_own_forward_counter(element),
+            ),
+            ArenaQuery::PseudoElementScrollOffset { generator, pseudo_kind } => {
+                ArenaAnswer::Point(arena.pseudo_element_scroll_offset(generator, pseudo_kind))
+            }
+            ArenaQuery::ContentCounterStylesChanged(owner) => {
+                ArenaAnswer::Byte(arena.content_counter_styles_changed(owner))
+            }
+        }
+    }
 }
 
 /// The answer to a [`Query`], of the variant the query asked for.
@@ -290,6 +353,7 @@ pub(crate) enum Answer {
     Geometry(FfiGeometryReadAnswer),
     LayoutCounts(LayoutCounts),
     ComputedStyle(StyleReadAnswer),
+    Arena(ArenaAnswer),
     Count(u64),
     /// An element, or 0 for none.
     Element(u32),
@@ -370,6 +434,19 @@ pub(crate) struct LayoutCounts {
     pub(crate) partial_layouts: u64,
     pub(crate) full_layouts: u64,
     pub(crate) tree_builds: crate::layout::update_layout::FfiLayoutTreeBuildStats,
+    pub(crate) arena: FfiArenaCounts,
+}
+
+/// How many slots, shells and measurements a document's layout arena holds or has taken, for tests.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FfiArenaCounts {
+    pub live_slots: u64,
+    pub shells: u64,
+    pub pre_order_relabels: u64,
+    pub intrinsic_measurements: u64,
+    pub intrinsic_inline_measurements: u64,
+    pub table_cell_measurement_cache_misses: u64,
 }
 
 impl Answer {
@@ -383,6 +460,7 @@ impl Answer {
             Query::ShadowIncludingParentElement { .. } => Self::Element(0),
             Query::RowIsLive { .. } => Self::Is(false),
             Query::FinishOwnerStyleHostHalf => Self::Payment(OwedToHost(crate::layout::HostPayment::nothing())),
+            Query::Arena(query) => Self::Arena(query.left_to_host()),
         }
     }
 
@@ -408,12 +486,21 @@ impl Answer {
                 partial_layouts: arena.partial_layout_count(),
                 full_layouts: arena.full_layout_count(),
                 tree_builds: arena.layout_tree_build_stats(),
+                arena: FfiArenaCounts {
+                    live_slots: u64::from(arena.live_slot_count()),
+                    shells: u64::from(arena.shell_count()),
+                    pre_order_relabels: arena.pre_order_relabel_count(),
+                    intrinsic_measurements: arena.intrinsic_measurement_count(),
+                    intrinsic_inline_measurements: arena.intrinsic_inline_measurement_count(),
+                    table_cell_measurement_cache_misses: arena.table_cell_measurement_cache_miss_count(),
+                },
             }),
             Query::ComputedStyle(_) => Self::left_to_host(query),
             Query::PreOrderLabelViolations { root } => Self::Count(pre_order_label_violations(arena, root)),
             Query::ShadowIncludingParentElement { node } => Self::Element(arena.shadow_including_parent(node).element),
             Query::RowIsLive { row } => Self::Is(arena.slot_is_live(row)),
             Query::FinishOwnerStyleHostHalf => Self::Payment(OwedToHost(arena.finish_flight_style_host_half().1)),
+            Query::Arena(query) => Self::Arena(query.answer(arena)),
         }
     }
 }
@@ -608,6 +695,9 @@ thread_local! {
     static RECALLED: RefCell<std::collections::HashSet<DocumentId>> = RefCell::new(std::collections::HashSet::new());
     // On a document thread, the number of the last change it sent for each document.
     static SENT_THROUGH: RefCell<HashMap<DocumentId, ChangeSeq>> = RefCell::new(HashMap::new());
+    // On a document thread, the address of each document's arena it created, which names the frame in flight of the
+    // document: nothing reaches the arena through it.
+    static FRAME_KEYS: RefCell<HashMap<DocumentId, usize>> = RefCell::new(HashMap::new());
 }
 
 /// Handles `message`, on the owner thread. A panic in handling it ends that message, not the owner: a document thread
@@ -818,6 +908,7 @@ pub(crate) fn create_document() -> (DocumentId, *mut c_void) {
     );
     arena.adopt(document, std::thread::current().id());
     let address = std::ptr::from_mut::<ArenaHandle>(&mut arena).cast::<c_void>();
+    FRAME_KEYS.with_borrow_mut(|keys| keys.insert(document, address as usize));
     send(ToOwner::Create {
         document,
         arena: SpareArena(arena),
@@ -828,6 +919,7 @@ pub(crate) fn create_document() -> (DocumentId, *mut c_void) {
 /// Drops the render state of `document` on the owner. Nothing waits for it.
 pub(crate) fn destroy_document(document: DocumentId) {
     SENT_THROUGH.with_borrow_mut(|sent| sent.remove(&document));
+    FRAME_KEYS.with_borrow_mut(|keys| keys.remove(&document));
     send(ToOwner::Destroy { document });
 }
 
@@ -927,6 +1019,157 @@ pub(crate) unsafe fn ask_about(arena: *mut c_void, query: Query) -> Answer {
     let document = unsafe { ArenaHandle::document_of(arena) };
     // SAFETY: As above.
     unsafe { ask(document, arena, query) }
+}
+
+/// Asks the owner `query` about `document` and waits for the answer, as [`ask`] does, for a document thread that
+/// names no arena: where the owner cannot answer it, the question is left to the host.
+pub(crate) fn ask_owner(document: DocumentId, query: Query) -> Answer {
+    let through = sent_through(document);
+    let answer = crate::stage_thread::wait_for_owner(
+        |reply| ToOwner::Ask {
+            document,
+            through,
+            query,
+            reply,
+        },
+        || {
+            STATES
+                .with_borrow_mut(|states| states.get_mut(&document).map(|state| state.answer(query)))
+                .unwrap_or_else(|| Answer::left_to_host(query))
+        },
+    );
+    debug_assert!(answer.is_ok(), "the render owner panicked answering {query:?}");
+    Answer::of_outcome(query, answer)
+}
+
+/// The counts of the layout arena of `document`, which the owner answers, for tests.
+#[unsafe(no_mangle)]
+pub extern "C" fn render_owner_arena_counts(document: DocumentId) -> FfiArenaCounts {
+    if !document.is_valid() {
+        return FfiArenaCounts::default();
+    }
+    join_frame_of(document);
+    match ask_owner(document, Query::LayoutCounts) {
+        Answer::LayoutCounts(counts) => counts.arena,
+        _ => {
+            debug_assert!(false, "layout counts are answered with counts");
+            FfiArenaCounts::default()
+        }
+    }
+}
+
+/// On a document thread: takes back the frame in flight of `document`, if any, so that a read finds the document as
+/// the frame left it.
+#[track_caller]
+fn join_frame_of(document: DocumentId) {
+    if let Some(key) = FRAME_KEYS.with_borrow(|keys| keys.get(&document).copied()) {
+        crate::stage_thread::join_frame_in_flight(key as *mut c_void);
+    }
+}
+
+/// Asks the owner `query` of the layout arena of `document`, once its frame in flight is taken back.
+#[track_caller]
+fn ask_arena(document: DocumentId, query: ArenaQuery) -> ArenaAnswer {
+    if !document.is_valid() {
+        return query.left_to_host();
+    }
+    join_frame_of(document);
+    match ask_owner(document, Query::Arena(query)) {
+        Answer::Arena(answer) => answer,
+        _ => {
+            debug_assert!(false, "an arena query is answered from the arena");
+            query.left_to_host()
+        }
+    }
+}
+
+fn ask_arena_flag(document: DocumentId, query: ArenaQuery) -> bool {
+    match ask_arena(document, query) {
+        ArenaAnswer::Flag(flag) => flag,
+        _ => false,
+    }
+}
+
+/// Whether a box of `document` has ever been given a scroll snap type, by a restyle or by a layout tree build.
+#[unsafe(no_mangle)]
+pub extern "C" fn render_owner_may_have_scroll_snap_areas(document: DocumentId) -> bool {
+    ask_arena_flag(document, ArenaQuery::MayHaveScrollSnapAreas)
+}
+
+/// Hands the host the scroll containers finished layout tree builds of `document` gave a style, each with whether it
+/// was a scroll snap container then.
+///
+/// # Safety
+///
+/// `callback` must be callable with `context` for the duration of this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn render_owner_take_built_scroll_snap_containers(
+    document: DocumentId,
+    context: *mut c_void,
+    callback: unsafe extern "C" fn(*mut c_void, crate::layout::node_data::NodeSlotId, bool),
+) {
+    let ArenaAnswer::BuiltScrollSnapContainers(built) = ask_arena(document, ArenaQuery::TakeBuiltScrollSnapContainers)
+    else {
+        return;
+    };
+    for (row, is_scroll_snap_container) in built {
+        // SAFETY: Guaranteed by the caller.
+        unsafe { callback(context, row, is_scroll_snap_container) };
+    }
+}
+
+/// Whether the innermost list-item counter of the element with `style_node` in `document` counts forward and was
+/// created by that element.
+#[unsafe(no_mangle)]
+pub extern "C" fn render_owner_innermost_list_item_counter_is_own_forward_counter(
+    document: DocumentId,
+    style_node: u32,
+) -> bool {
+    let Some(element) = StyleNodeID::from_raw(style_node) else {
+        return false;
+    };
+    ask_arena_flag(
+        document,
+        ArenaQuery::InnermostListItemCounterIsOwnForwardCounter(element),
+    )
+}
+
+/// What the pseudo-element `pseudo_kind` of the element with `generator` in `document` has scrolled to.
+#[unsafe(no_mangle)]
+pub extern "C" fn render_owner_pseudo_element_scroll_offset(
+    document: DocumentId,
+    generator: u32,
+    pseudo_kind: u8,
+) -> crate::layout::used_values::FfiCssPixelPoint {
+    let Some(generator) = StyleNodeID::from_raw(generator) else {
+        return Default::default();
+    };
+    match ask_arena(
+        document,
+        ArenaQuery::PseudoElementScrollOffset { generator, pseudo_kind },
+    ) {
+        ArenaAnswer::Point(point) => point,
+        _ => Default::default(),
+    }
+}
+
+/// Whether the counter styles the record of the pseudo-element `generated_for` of the element `style_node` in
+/// `document` names now differ from the ones the box built for it renders from, as the `CONTENT_COUNTER_STYLES_*`
+/// answers.
+#[unsafe(no_mangle)]
+pub extern "C" fn render_owner_content_counter_styles_changed(
+    document: DocumentId,
+    style_node: u32,
+    generated_for: u8,
+) -> u8 {
+    let Some(element) = StyleNodeID::from_raw(style_node) else {
+        return LayoutNodeArena::CONTENT_COUNTER_STYLES_NOT_RECORDED;
+    };
+    let owner = crate::layout::counters::CounterOwner { element, generated_for };
+    match ask_arena(document, ArenaQuery::ContentCounterStylesChanged(owner)) {
+        ArenaAnswer::Byte(answer) => answer,
+        _ => LayoutNodeArena::CONTENT_COUNTER_STYLES_NOT_RECORDED,
+    }
 }
 
 /// What became of a style transaction the owner was sent: its answers, or the transaction where the owner could not
