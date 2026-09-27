@@ -75,11 +75,6 @@ public:
         Optional<Layout::RustFFI::FfiFlightOutcome> flight_outcome {};
     };
     Optional<SubmittedPass> submitted_pass;
-
-    // Whether the rest of the rendering update waits for its recordings instead of submitting them: after a flight whose
-    // recording did not stand, the rendering update records again at once rather than leave another frame in flight a
-    // task later.
-    bool waits_for_recordings { false };
 };
 
 // Runs the rendering update's frame beside the main thread under LIBWEB_STAGE_THREAD=overlap. One rendering update is
@@ -311,6 +306,11 @@ private:
     EventLoop& m_event_loop;
     State m_state { State::Idle };
     bool m_synchronous_update { false };
+    // Whether the rest of the rendering update waits for its recordings instead of submitting them: after a flight that
+    // recorded a frame the document has to paint again, the rendering update records again at once rather than leave
+    // another frame in flight a task later. It belongs to the rendering update, not to one of its tickets: a later
+    // document's pass ends the main half with a ticket of its own, and the recordings after it still wait.
+    bool m_rendering_update_waits_for_recordings { false };
     bool m_takes_in_next_recording_before_its_presentation { false };
     u64 m_recordings_taken_in_before_their_presentation { 0 };
     OwnPtr<FrameTicket> m_ticket;

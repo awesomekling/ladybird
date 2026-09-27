@@ -235,6 +235,7 @@ void FrameScheduler::begin_main_half(bool synchronous)
     VERIFY(m_state == State::Idle);
     VERIFY(!m_ticket);
     m_synchronous_update = synchronous;
+    m_rendering_update_waits_for_recordings = false;
     if (!synchronous && submits_frames()) {
         install_frame_scheduler_host(*this);
         // Only the main thread's own scheduler submits frames.
@@ -246,7 +247,7 @@ void FrameScheduler::begin_main_half(bool synchronous)
 
 Painting::RecordingRun FrameScheduler::recording_run() const
 {
-    if (m_state == State::MainHalf && m_ticket && !m_ticket->waits_for_recordings)
+    if (m_state == State::MainHalf && m_ticket && !m_rendering_update_waits_for_recordings)
         return Painting::RecordingRun::InSubmittedFrame;
     return Painting::RecordingRun::Now;
 }
@@ -257,7 +258,7 @@ Painting::RecordingOrigin FrameScheduler::recording_origin() const
         return Painting::RecordingOrigin::RenderingUpdate;
     if (m_synchronous_update)
         return Painting::RecordingOrigin::SynchronousRenderingUpdate;
-    if (m_ticket && m_ticket->waits_for_recordings)
+    if (m_ticket && m_rendering_update_waits_for_recordings)
         return Painting::RecordingOrigin::WaitsForRecordings;
     return Painting::RecordingOrigin::NoFrameScheduler;
 }
@@ -410,10 +411,13 @@ void FrameScheduler::commit()
                 end = FlightPaintEnd::Recorded;
             else if (outcome.end == Layout::RustFFI::FfiFlightEndReason::HostLeftWork)
                 end = FlightPaintEnd::RecordedAheadOfMoreWork;
-            if (navigable->finish_flight_paint(*document, end)) {
+            auto const finished = navigable->finish_flight_paint(*document, end);
+            if (finished.handed_off) {
                 m_event_loop.note_frame_painted({});
                 m_ticket->painted_local_roots.append(*navigable);
             }
+            if (finished.paints_again_after_recording)
+                m_rendering_update_waits_for_recordings = true;
         }
     }
     // A clock tick's document adopts what the tick installed before anything reads it, and then takes in what was
@@ -606,17 +610,12 @@ void FrameScheduler::resume_rendering_update_after_flight(FrameTicket::Submitted
     case FfiFlightStage::StyleRenderHalf:
         m_event_loop.resume_rendering_update_after_style({}, flight.documents, flight.document_index, flight.frame_timestamp);
         return;
+    // NB: A flight that recorded this rendering update's frame, and whose recording did not stand or whose presented
+    //     frame the document paints again, had consume-commit have the rest of the rendering update wait for its
+    //     recordings. Otherwise consume-commit handed off the frame the flight recorded, and the rest of the rendering
+    //     update runs as after the layout pass, and paints again only what was marked beside the flight.
     case FfiFlightStage::Rounds:
     case FfiFlightStage::PaintPrep:
-        // A flight that recorded after its layout, and whose recording did not stand, recorded this rendering update's
-        // frame already: the frame the document records again for what changed since goes as a frame whose recording
-        // the rendering update waits for.
-        if (flight.flight_outcome->end == Layout::RustFFI::FfiFlightEndReason::HostLeftWork)
-            m_ticket->waits_for_recordings = true;
-        m_event_loop.resume_rendering_update_after_layout({}, flight.documents, flight.document_index, flight.frame_timestamp);
-        return;
-    // NB: Consume-commit handed off the frame the flight recorded. The rest of the rendering update runs as after the
-    //     layout pass, and paints again only what was marked beside the flight.
     case FfiFlightStage::Record:
     case FfiFlightStage::Present:
         m_event_loop.resume_rendering_update_after_layout({}, flight.documents, flight.document_index, flight.frame_timestamp);

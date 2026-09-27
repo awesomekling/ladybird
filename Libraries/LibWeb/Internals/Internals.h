@@ -239,6 +239,7 @@ public:
     Utf16String wait_for_held_frame();
     bool held_frame_awaits_submission() const;
     void wait_for_stage_threads_beside_held_frame();
+    u64 frames_presented_by_flights(DOM::Document&) const;
     void take_in_next_recording_before_its_presentation(bool take);
     u64 recordings_taken_in_before_their_presentation() const;
     bool submits_layout_pass() const;

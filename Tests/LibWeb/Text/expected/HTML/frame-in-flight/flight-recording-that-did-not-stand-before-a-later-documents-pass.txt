@@ -1,0 +1,9 @@
+recorded: held as armed: true
+recorded: flight's frame painted again where it flew: true
+recorded: recording again waited for: true
+recorded: width 20, inner width 25
+presented: held as armed: true
+presented: flight's frame painted again where it flew: true
+presented: recording again waited for: true
+presented: width 30, inner width 35
+presented ahead of more work: true

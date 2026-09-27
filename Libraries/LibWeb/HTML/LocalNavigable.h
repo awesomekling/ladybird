@@ -355,7 +355,16 @@ public:
         // The flight presented what it recorded, and paying its layout's host halves left more work.
         PresentedAheadOfMoreWork,
     };
-    bool finish_flight_paint(DOM::Document&, FlightPaintEnd);
+    struct FinishedFlightPaint {
+        // The flight's frame was handed off: presented by the flight, or finished here.
+        bool handed_off { false };
+        // The flight recorded, and the navigable paints again in this rendering update: its recording did not stand, or
+        // the frame it presented does not show what the document is now.
+        bool paints_again_after_recording { false };
+    };
+    FinishedFlightPaint finish_flight_paint(DOM::Document&, FlightPaintEnd);
+    // For tests: how many frames of this navigable a flight presented.
+    u64 frames_presented_by_flights() const { return m_frames_presented_by_flights; }
     bool has_sealed_flight_paint() const { return m_flight_paint_seal; }
 
     bool needs_repaint() const { return m_needs_repaint; }
@@ -623,6 +632,7 @@ private:
 
     bool m_is_svg_page { false };
     bool m_needs_repaint { true };
+    u64 m_frames_presented_by_flights { 0 };
     bool m_needs_to_record_display_list { true };
 
     struct FlightPaintSeal;

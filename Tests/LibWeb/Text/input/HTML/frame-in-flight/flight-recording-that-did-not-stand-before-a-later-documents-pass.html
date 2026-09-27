@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<div id="box" style="width: 10px; height: 10px; background: green"></div>
+<iframe id="frame" style="width: 100px; height: 50px; border: 0" srcdoc="<body style='margin: 0'><div id=inner style='width: 20px; height: 20px; background: blue'></div></body>"></iframe>
+<script>
+    // This document's flight records (and presents, where flights present), and a node inserted beside it leaves its
+    // layout out of date: the document paints again, and the rest of the rendering update waits for that recording
+    // rather than leave another frame in flight a task later. A style change of the iframe beside the flight has the
+    // iframe's document submit a pass of its own after the flight, which ends the main half with a ticket of its own;
+    // the recording after it is still one the rendering update waits for. Nothing is printed until the end, as printing
+    // inserts nodes.
+    async function paintAgainAfterFlight(presents, inner, width, innerWidth) {
+        internals.setRenderPresents(presents);
+        internals.resetRenderingSchedulerCounters();
+        const facts = await whileFrameInFlight("before-run", () => {
+            box.style.width = `${width}px`;
+        }, frame => {
+            document.body.appendChild(document.createElement("span"));
+            inner.style.width = `${innerWidth}px`;
+            return frame;
+        }, document);
+        await twoFrames();
+        internals.resetRenderPresents();
+        const counters = internals.getRenderingSchedulerCounters();
+        const leftWork = Object.values(counters.flightEnds.hostLeftWork).reduce((sum, count) => sum + count, 0);
+        const flew = Object.values(counters.flightEnds).some(byStage => Object.values(byStage).some(count => count > 0));
+        return {
+            flew,
+            facts,
+            flightRecorded: facts.armed && facts.heldAt === "before-run" && leftWork >= 1,
+            presentedAheadOfMoreWork: counters.flightEnds.hostLeftWork.present >= 1,
+            waited: counters.recordingsWaitedFor.waitsForRecordings.count,
+            width: box.getBoundingClientRect().width,
+            innerWidth: inner.getBoundingClientRect().width,
+        };
+    }
+
+    asyncTest(async done => {
+        while (!frame.contentDocument?.getElementById("inner") || frame.contentDocument.readyState !== "complete")
+            await new Promise(resolve => frame.addEventListener("load", resolve, { once: true }));
+        const inner = frame.contentDocument.getElementById("inner");
+        // The iframe paints its first frames after its load: until it has nothing left to paint, this document's
+        // flights leave their paint to the rendering update.
+        for (let i = 0; i < 3; ++i)
+            await twoFrames();
+        const recorded = await paintAgainAfterFlight(false, inner, 20, 25);
+        const presented = await paintAgainAfterFlight(true, inner, 30, 35);
+        // Without flights (LIBWEB_FLIGHT=0) nothing records ahead of the rendering update.
+        const noFlights = !recorded.flew && !presented.flew;
+        for (const [name, run] of [["recorded", recorded], ["presented", presented]]) {
+            println(`${name}: held as armed: ${heldAsArmed(run.facts, "before-run")}`);
+            println(`${name}: flight's frame painted again where it flew: ${noFlights || run.flightRecorded}`);
+            println(`${name}: recording again waited for: ${!run.flightRecorded || run.waited >= 1}`);
+            println(`${name}: width ${run.width}, inner width ${run.innerWidth}`);
+        }
+        println(`presented ahead of more work: ${noFlights || presented.presentedAheadOfMoreWork}`);
+        done();
+    });
+</script>
