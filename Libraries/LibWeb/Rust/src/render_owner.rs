@@ -450,7 +450,7 @@ fn handle_message(message: ToOwner) {
         }
         ToOwner::Paint { document, pass } => {
             // As for a layout unit, the pass finds the arena inside its answer.
-            (*pass).run(|| with_state(document, RenderState::arena_handle));
+            (*pass).run(|| with_state(document, RenderState::state));
         }
         ToOwner::Ask {
             document,
@@ -645,7 +645,10 @@ pub(crate) unsafe fn ask(document: DocumentId, arena: *mut c_void, query: Query)
                 return answer;
             }
             // SAFETY: Guaranteed by the caller.
-            Answer::of(query, unsafe { &mut *arena.cast::<ArenaHandle>() }.arena_mut())
+            Answer::of(
+                query,
+                unsafe { &mut *ArenaHandle::held_by_waiting_thread(arena) }.arena_mut(),
+            )
         },
     );
     answer.unwrap_or_else(|_| {

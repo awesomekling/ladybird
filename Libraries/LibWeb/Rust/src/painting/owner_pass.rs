@@ -10,8 +10,8 @@
 use std::ffi::c_void;
 
 use crate::css::css_pixels::CssPixelPoint;
-use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::NodeSlotId;
+use crate::layout::{ArenaHandle, LayoutNodeArena};
 use crate::stage_thread::{CallerWaits, OwnerReplyTo};
 
 /// A paint preparation pass over a document's render state.
@@ -51,28 +51,28 @@ impl<A, R> Pass<A, R> {
     /// On the owner: runs the pass with the arena `arena` finds, with the faces it wants filed under the arena's
     /// document, and answers the waiting document thread. The arena is found inside the answer, so that a panic there
     /// answers the thread too.
-    fn run(self, arena: impl FnOnce() -> *mut c_void) {
+    fn run(self, state: impl FnOnce() -> *mut ArenaHandle) {
         let Self { arguments, body, reply } = self;
         reply.answer(|| {
-            let arena = arena();
-            let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(arena as u64);
-            // SAFETY: The document thread waits for the pass, and reaches nothing of the arena meanwhile.
-            body(unsafe { LayoutNodeArena::from_handle_mut(arena) }, arguments)
+            let state = state();
+            let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(state as u64);
+            // SAFETY: The document thread waits for the pass, and reaches nothing of the state meanwhile.
+            body(unsafe { &mut *state }.arena_mut(), arguments)
         });
     }
 }
 
 impl PaintPass {
-    fn run(self, arena: impl FnOnce() -> *mut c_void) {
+    fn run(self, state: impl FnOnce() -> *mut ArenaHandle) {
         match self {
-            Self::RootBackgroundAndOverflow(pass) => pass.run(arena),
-            Self::FinishRenderingPreparation(pass) => pass.run(arena),
-            Self::AccumulatedVisualContexts(pass) => pass.run(arena),
-            Self::VisualViewportTransform(pass) => pass.run(arena),
-            Self::ScrollState(pass) => pass.run(arena),
-            Self::ScrollableOverflow(pass) => pass.run(arena),
-            Self::HitTestList(pass) => pass.run(arena),
-            Self::Recording(pass) => pass.run(arena),
+            Self::RootBackgroundAndOverflow(pass) => pass.run(state),
+            Self::FinishRenderingPreparation(pass) => pass.run(state),
+            Self::AccumulatedVisualContexts(pass) => pass.run(state),
+            Self::VisualViewportTransform(pass) => pass.run(state),
+            Self::ScrollState(pass) => pass.run(state),
+            Self::ScrollableOverflow(pass) => pass.run(state),
+            Self::HitTestList(pass) => pass.run(state),
+            Self::Recording(pass) => pass.run(state),
         }
     }
 }
@@ -87,13 +87,18 @@ pub(crate) struct OwnerPaintPass {
 impl OwnerPaintPass {
     /// Runs the pass on the owner, with the arena of the render state `found` finds for the pass's document. Where the
     /// owner holds none (a bug of the sender's), the pass runs with the arena the document thread sent.
-    pub(crate) fn run(self, found: impl FnOnce() -> Option<*mut c_void>) {
+    pub(crate) fn run(self, found: impl FnOnce() -> Option<*mut ArenaHandle>) {
         let Self { arena: sent, pass } = self;
         let sent = sent.into_inner();
         pass.run(|| {
             let found = found();
-            debug_assert_eq!(found, Some(sent), "a paint pass runs with its document's arena");
-            found.unwrap_or(sent)
+            debug_assert_eq!(
+                found.map(<*mut ArenaHandle>::cast::<c_void>),
+                Some(sent),
+                "a paint pass runs with its document's arena"
+            );
+            // SAFETY: The document thread waits for the pass, and the arena it sent is its document's.
+            found.unwrap_or_else(|| unsafe { ArenaHandle::held_by_waiting_thread(sent) })
         });
     }
 }
