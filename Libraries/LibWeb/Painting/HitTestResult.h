@@ -12,6 +12,7 @@
 #include <AK/RefPtr.h>
 #include <AK/Types.h>
 #include <LibGC/Ptr.h>
+#include <LibGC/Weak.h>
 #include <LibWeb/DOM/AbstractRange.h>
 #include <LibWeb/DOM/NodeIdentity.h>
 #include <LibWeb/Forward.h>
@@ -82,16 +83,16 @@ struct WEB_API HitTestResult {
     DOM::NodeIdentity node;
     // The box whose style admitted the hit, if the snapshot names one.
     Optional<HitBox> box;
-    // The row of that box, which only scrolling still takes a layout node of.
+    // The row of that box, which a scroll the hit starts walks the containing block chain up from.
     Compositing::RustFFI::NodeSlotId hit_node;
-    NonnullRefPtr<Layout::NodeArena> arena;
+    GC::Weak<DOM::Document> document;
     RefPtr<ChromeWidget> chrome_widget {};
     size_t index_in_node { 0 };
     bool is_text_fragment { false };
 
     DOM::Node* dom_node() const;
-    // The layout node a scroll the hit starts walks the containing block chain up from.
-    Layout::Node* scrolling_layout_node() const { return layout_node_for_committed_slot(*arena, hit_node); }
+    // The box a scroll the hit starts walks the containing block chain up from.
+    BoxSlot scrolling_box() const;
 };
 
 // A boundary point that names its node instead of pointing at it. A node that left the tree since
@@ -106,7 +107,7 @@ struct WEB_API BoundaryIdentity {
 
 struct WEB_API CaretPosition {
     Compositing::RustFFI::NodeSlotId paintable;
-    NonnullRefPtr<Layout::NodeArena> arena;
+    GC::Weak<DOM::Document> document;
     BoundaryIdentity boundary;
     TextAffinity affinity { TextAffinity::Downstream };
     Optional<BoundaryIdentity> secondary_boundary {};
@@ -115,8 +116,8 @@ struct WEB_API CaretPosition {
     GC::Ptr<DOM::Node> boundary_node() const;
     Optional<DOM::BoundaryPoint> boundary_point() const;
     // The row the boundary's node is bound to, found in the arena rather than asked of that node.
-    Layout::Node* boundary_layout_node() const;
-    Layout::Node* layout_node() const { return layout_node_for_committed_slot(*arena, paintable); }
+    BoxSlot boundary_box() const;
+    BoxSlot box() const;
 };
 
 }

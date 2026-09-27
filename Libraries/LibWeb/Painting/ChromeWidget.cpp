@@ -7,7 +7,7 @@
 #include <AK/GenericShorthands.h>
 #include <LibCompositing/Scrolling/ScrollState.h>
 #include <LibWeb/DOM/Document.h>
-#include <LibWeb/Layout/Node.h>
+#include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/Painting/ChromeMetrics.h>
@@ -33,7 +33,7 @@ RefPtr<Scrollbar> ChromeWidgetRegistry::scrollbar(Compositing::RustFFI::NodeSlot
     return scrollbar && scrollbar->is_current() ? scrollbar : nullptr;
 }
 
-NonnullRefPtr<Scrollbar> ChromeWidgetRegistry::get_or_create_scrollbar(Layout::NodeArena& arena, Compositing::RustFFI::NodeSlotId slot, ScrollDirection direction)
+NonnullRefPtr<Scrollbar> ChromeWidgetRegistry::get_or_create_scrollbar(DOM::Document& document, Compositing::RustFFI::NodeSlotId slot, ScrollDirection direction)
 {
     auto& entry = m_entries.ensure(slot.index);
     auto& scrollbar = direction == ScrollDirection::Horizontal ? entry.horizontal_scrollbar : entry.vertical_scrollbar;
@@ -42,7 +42,7 @@ NonnullRefPtr<Scrollbar> ChromeWidgetRegistry::get_or_create_scrollbar(Layout::N
         scrollbar = nullptr;
     }
     if (!scrollbar)
-        scrollbar = Scrollbar::create(arena, slot, direction);
+        scrollbar = Scrollbar::create(document, slot, direction);
     return *scrollbar;
 }
 
@@ -54,7 +54,7 @@ RefPtr<ResizeHandle> ChromeWidgetRegistry::resize_handle(Compositing::RustFFI::N
     return entry->value.resize_handle && entry->value.resize_handle->is_current() ? entry->value.resize_handle : nullptr;
 }
 
-NonnullRefPtr<ResizeHandle> ChromeWidgetRegistry::get_or_create_resize_handle(Layout::NodeArena& arena, Compositing::RustFFI::NodeSlotId slot)
+NonnullRefPtr<ResizeHandle> ChromeWidgetRegistry::get_or_create_resize_handle(DOM::Document& document, Compositing::RustFFI::NodeSlotId slot)
 {
     auto& entry = m_entries.ensure(slot.index);
     if (entry.resize_handle && !entry.resize_handle->is_current()) {
@@ -62,7 +62,7 @@ NonnullRefPtr<ResizeHandle> ChromeWidgetRegistry::get_or_create_resize_handle(La
         entry.resize_handle = nullptr;
     }
     if (!entry.resize_handle)
-        entry.resize_handle = ResizeHandle::create(arena, slot);
+        entry.resize_handle = ResizeHandle::create(document, slot);
     return *entry.resize_handle;
 }
 
@@ -92,25 +92,30 @@ void ChromeWidgetRegistry::clear()
     m_entries.clear();
 }
 
-ChromeWidget::ChromeWidget(Layout::NodeArena& arena, Compositing::RustFFI::NodeSlotId slot)
-    : m_arena(arena)
+ChromeWidget::ChromeWidget(DOM::Document& document, Compositing::RustFFI::NodeSlotId slot)
+    : m_document(document)
     , m_slot(slot)
-    , m_row_reset_version(committed_row_reset_version(arena, slot))
+    , m_row_reset_version(committed_row_reset_version(document, slot))
 {
 }
 
-Layout::Node* ChromeWidget::layout_node() const
+BoxSlot ChromeWidget::box() const
 {
     if (!is_current())
-        return nullptr;
-    return layout_node_for_committed_slot(*m_arena, m_slot);
+        return {};
+    return committed_box(*m_document, m_slot);
+}
+
+void* ChromeWidget::arena() const
+{
+    return m_document ? Layout::document_layout_arena_if_created(*m_document) : nullptr;
 }
 
 bool ChromeWidget::is_current() const
 {
-    if (m_slot.index == Compositing::RustFFI::INVALID_NODE_SLOT_INDEX)
+    if (m_slot.index == Compositing::RustFFI::INVALID_NODE_SLOT_INDEX || !m_document)
         return false;
-    auto current_version = committed_row_reset_version(*m_arena, m_slot);
+    auto current_version = committed_row_reset_version(*m_document, m_slot);
     if (current_version == m_row_reset_version)
         return true;
     return false;
@@ -122,8 +127,10 @@ void ChromeWidget::detach(Badge<ChromeWidgetRegistry>)
     m_slot = Compositing::RustFFI::NodeSlotId_INVALID;
 }
 
-Optional<ScrollbarData> compute_scrollbar_data(Layout::Node const& node, ScrollDirection direction, ChromeMetrics const& metrics, Compositing::ScrollStateSnapshot const* scroll_state_snapshot, ScrollbarSizing scrollbar_sizing)
+Optional<ScrollbarData> compute_scrollbar_data(BoxSlot const& node, ScrollDirection direction, ChromeMetrics const& metrics, Compositing::ScrollStateSnapshot const* scroll_state_snapshot, ScrollbarSizing scrollbar_sizing)
 {
+    if (!node)
+        return {};
     auto& document = node.document();
     auto viewport_overflow = overflow_values_applied_to_viewport_for_wheel_scrolling(document);
     auto overflow_x = viewport_overflow.x;
@@ -134,7 +141,7 @@ Optional<ScrollbarData> compute_scrollbar_data(Layout::Node const& node, ScrollD
         device_scroll_offset = direction == ScrollDirection::Horizontal ? -own_offset.x() : -own_offset.y();
     }
     auto result = Layout::RustFFI::layout_arena_paintable_compute_scrollbar_data(
-        node.arena_handle(), committed_row_slot(node), static_cast<Layout::RustFFI::ScrollDirection>(direction),
+        node.arena(), node.slot(), static_cast<Layout::RustFFI::ScrollDirection>(direction),
         metrics, to_underlying(overflow_x), to_underlying(overflow_y), scrollbar_sizing == ScrollbarSizing::Enlarged,
         scroll_state_snapshot, device_scroll_offset, document.page().client().device_pixels_per_css_pixel());
     if (!result.has_value)

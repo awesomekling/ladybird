@@ -39,6 +39,7 @@ public:
     // for the element whose scrolling box it is. The direction is kept whether or not the element is a query container
     // yet, so a query that starts asking later reads it too.
     void did_scroll_relatively(Layout::Node const& scrolling_box, CSSPixelPoint delta);
+    void did_scroll_relatively(Painting::BoxSlot const& scrolling_box, CSSPixelPoint delta);
 
     enum class Snapshot : u8 {
         AllContainers,

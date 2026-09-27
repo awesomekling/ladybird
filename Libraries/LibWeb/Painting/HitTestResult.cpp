@@ -5,7 +5,6 @@
  */
 
 #include <LibWeb/DOM/Document.h>
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/HitTestResult.h>
 
@@ -117,10 +116,16 @@ CSSPixelPoint HitBox::inverse_transform_point(DOM::Document const& document, CSS
 
 DOM::Node* HitTestResult::dom_node() const
 {
-    auto* document = arena->document();
     if (!document)
         return nullptr;
     return node.resolve(*document).ptr();
+}
+
+BoxSlot HitTestResult::scrolling_box() const
+{
+    if (!document)
+        return {};
+    return committed_box(*document, hit_node);
 }
 
 Optional<DOM::BoundaryPoint> BoundaryIdentity::resolve(DOM::Document& document) const
@@ -133,7 +138,6 @@ Optional<DOM::BoundaryPoint> BoundaryIdentity::resolve(DOM::Document& document) 
 
 GC::Ptr<DOM::Node> CaretPosition::boundary_node() const
 {
-    auto* document = arena->document();
     if (!document)
         return nullptr;
     return boundary.node.resolve(*document);
@@ -141,15 +145,23 @@ GC::Ptr<DOM::Node> CaretPosition::boundary_node() const
 
 Optional<DOM::BoundaryPoint> CaretPosition::boundary_point() const
 {
-    auto* document = arena->document();
     if (!document)
         return {};
     return boundary.resolve(*document);
 }
 
-Layout::Node* CaretPosition::boundary_layout_node() const
+BoxSlot CaretPosition::boundary_box() const
 {
-    return boundary.node.bound_layout_node(*arena);
+    if (!document)
+        return {};
+    return BoxSlot::bound_to(*document, boundary.node);
+}
+
+BoxSlot CaretPosition::box() const
+{
+    if (!document)
+        return {};
+    return committed_box(*document, paintable);
 }
 
 }

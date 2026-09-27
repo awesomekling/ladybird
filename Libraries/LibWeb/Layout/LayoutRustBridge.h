@@ -34,6 +34,10 @@ namespace Web::Layout {
 // has none yet.
 WEB_API void* document_layout_arena(DOM::Document&);
 WEB_API void* document_layout_arena_if_created(DOM::Document const&);
+// The name the render owner knows the document's render state by, if the document has an arena.
+WEB_API Optional<RustFFI::DocumentId> document_render_document_if_created(DOM::Document const&);
+// The same, made now if the document has no arena yet.
+WEB_API RustFFI::DocumentId document_render_document(DOM::Document&);
 
 // A layout tree build's walk runs on the render side; the document readies it.
 RustFFI::FfiDocumentStyleForBuild document_style_for_build(DOM::Document&);
@@ -43,8 +47,8 @@ RustFFI::FfiDocumentStyleForBuild document_style_for_build(DOM::Document&);
 bool attach_owed_style_resources(DOM::Document&, Compositing::RustFFI::NodeSlotId, bool owns_content_replacement_image);
 bool attach_owed_generated_image(DOM::Document&, Compositing::RustFFI::NodeSlotId, u32 style_node, RustFFI::FfiPseudoElement, RustFFI::FfiGeneratedContentItem, Compositing::RustFFI::NodeSlotId pseudo_element_box);
 
-// Registers the document-side answers every layout pass needs on the arena, once per document.
-WEB_API void register_layout_host(NodeArena&, DOM::Document&);
+// Registers the document-side answers every layout pass needs on the document's arena, once it has one.
+WEB_API void register_layout_host(DOM::Document&);
 
 // Publishes what the SVG element's presentation attributes parse to, under its style node, and
 // retires that publication. An element's attributes are layout input that no pass can change, so

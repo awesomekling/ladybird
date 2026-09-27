@@ -679,7 +679,7 @@ Layout::NodeArena& Document::layout_node_arena()
     if (!m_layout_node_arena) {
         m_layout_node_arena = make_ref_counted<Layout::NodeArena>();
         m_layout_node_arena->set_document({}, this);
-        Layout::register_layout_host(*m_layout_node_arena, *this);
+        Layout::register_layout_host(*this);
         Layout::RustFFI::layout_arena_set_layout_update_host_callbacks(m_layout_node_arena->handle(), layout_update_host_callbacks());
         Layout::RustFFI::FfiStyleRecordHostCallbacks style_record_host_callbacks {
             .style_engine = style_computer().style_engine().rust_handle(),
@@ -7223,7 +7223,7 @@ void Document::shared_declarative_refresh_steps(Utf16View input, GC::Ptr<HTML::H
 
 void Document::renew_paint_state()
 {
-    m_paint_state = make<Painting::DocumentPaintState>(layout_node_arena());
+    m_paint_state = make<Painting::DocumentPaintState>(Layout::document_layout_arena(*this));
 }
 
 Painting::DocumentPaintState& Document::paint_state()
@@ -9867,34 +9867,38 @@ Vector<GC::Root<Range>> Document::find_matching_text(Utf16View query, CaseSensit
     // Ensure the layout tree exists before searching for text matches.
     update_layout(UpdateLayoutReason::DocumentFindMatchingText);
 
-    if (!layout_node())
+    auto viewport = Painting::BoxSlot::viewport_of(*this);
+    if (!viewport)
         return {};
 
-    Vector<GC::Root<Range>> matches;
+    struct SearchContext {
+        Document& document;
+        Vector<GC::Root<Range>> matches;
+    } context { *this, {} };
     auto query_view = Layout::RustFFI::FfiUtf16View {
         .ascii = query.has_ascii_storage() ? reinterpret_cast<u8 const*>(query.ascii_span().data()) : nullptr,
         .utf16 = query.has_ascii_storage() ? nullptr : reinterpret_cast<u16 const*>(query.utf16_span().data()),
         .length = query.length_in_code_units(),
     };
     Layout::RustFFI::layout_arena_find_matching_text(
-        layout_node()->arena_handle(), Layout::Node::slot_id(layout_node()), query_view,
+        viewport.arena(), viewport.slot(), query_view,
         case_sensitivity == CaseSensitivity::CaseSensitive,
-        [](void* layout_node) {
+        [](void* context, Compositing::RustFFI::NodeSlotId slot) {
             // Inert text is excluded from find-in-page.
-            auto const* text = as_if<DOM::Text>(static_cast<Layout::Node const*>(layout_node)->dom_node());
+            auto text = as_if<DOM::Text>(Painting::BoxSlot::of(static_cast<SearchContext*>(context)->document, slot).dom_node().ptr());
             return text && !text->is_inert();
         },
-        &matches, [](void* context, Layout::RustFFI::FfiDomTextRange match) {
-            auto* start = as_if<DOM::Text>(static_cast<Layout::Node*>(match.start_layout_node)->dom_node());
-            auto* end = as_if<DOM::Text>(static_cast<Layout::Node*>(match.end_layout_node)->dom_node());
+        &context, [](void* context_pointer, Layout::RustFFI::FfiDomTextRange match) {
+            auto& context = *static_cast<SearchContext*>(context_pointer);
+            auto* start = as_if<DOM::Text>(Painting::BoxSlot::of(context.document, match.start_layout_node).dom_node().ptr());
+            auto* end = as_if<DOM::Text>(Painting::BoxSlot::of(context.document, match.end_layout_node).dom_node().ptr());
             if (!start || !end || &start->root() != &end->root()
                 || !start->is_connected() || !end->is_connected()
                 || match.start_offset > start->length() || match.end_offset > end->length())
                 return;
-            static_cast<Vector<GC::Root<Range>>*>(context)->append(
-                Range::create(*start, match.start_offset, *end, match.end_offset)); });
+            context.matches.append(Range::create(*start, match.start_offset, *end, match.end_offset)); });
 
-    return matches;
+    return move(context.matches);
 }
 
 // https://dom.spec.whatwg.org/#document-allow-declarative-shadow-roots
@@ -10557,7 +10561,7 @@ void Document::set_snapped_areas_of_scroll_container(Compositing::AsyncScrollNod
     m_scroll_container_snapped_areas.set(stable_node_id, move(snapped_areas));
 }
 
-void Document::forget_snapped_areas_of_scroll_container(Layout::Node const& scroll_container)
+void Document::forget_snapped_areas_of_scroll_container(Painting::BoxSlot const& scroll_container)
 {
     if (m_scroll_container_snapped_areas.is_empty())
         return;
@@ -10565,9 +10569,9 @@ void Document::forget_snapped_areas_of_scroll_container(Layout::Node const& scro
         m_scroll_container_snapped_areas.remove(*stable_node_id);
 }
 
-void Document::register_scroll_snap_container(Layout::Node const& snap_container)
+void Document::register_scroll_snap_container(Painting::BoxSlot const& snap_container)
 {
-    auto snap_container_slot = Layout::Node::slot_id(&snap_container);
+    auto snap_container_slot = snap_container.slot();
     if (any_of(m_scroll_snap_containers, [&](auto registered_slot) { return registered_slot.index == snap_container_slot.index; }))
         return;
     m_scroll_snap_containers.append(snap_container_slot);
@@ -10639,19 +10643,24 @@ Optional<Painting::PendingDisplayListRecording> Document::begin_display_list_rec
     }
 
     Painting::InspectorOverlayInputs overlay_inputs;
-    if (auto const* layout_node = highlighted_layout_node(); layout_node && Painting::has_committed_box(*layout_node))
-        overlay_inputs.highlighted_layout_node = layout_node;
+    if (m_highlighted_node) {
+        auto highlighted_box = m_highlighted_pseudo_element.has_value() && m_highlighted_node->is_element()
+            ? Painting::BoxSlot::of_pseudo_element(static_cast<Element const&>(*m_highlighted_node), *m_highlighted_pseudo_element)
+            : Painting::BoxSlot::bound_to(*m_highlighted_node);
+        if (Painting::has_committed_box(highlighted_box))
+            overlay_inputs.highlighted_box = highlighted_box;
+    }
     auto const& palette = page().palette();
     overlay_inputs.tooltip_color = palette.color(Gfx::ColorRole::Tooltip);
     overlay_inputs.tooltip_text_color = palette.color(Gfx::ColorRole::TooltipText);
     overlay_inputs.tooltip_border_color = palette.threed_shadow1();
     for (auto const& flexbox_highlight : m_flexbox_highlights) {
-        if (auto const* layout_node = flexbox_highlight.node ? flexbox_highlight.node->unsafe_layout_node() : nullptr; layout_node && Painting::has_committed_box(*layout_node))
-            overlay_inputs.flex_highlights.append({ layout_node, flexbox_highlight.options });
+        if (auto box = flexbox_highlight.node ? Painting::BoxSlot::bound_to(*flexbox_highlight.node) : Painting::BoxSlot {}; Painting::has_committed_box(box))
+            overlay_inputs.flex_highlights.append({ box, flexbox_highlight.options });
     }
     for (auto const& grid_highlight : m_grid_highlights) {
-        if (auto const* layout_node = grid_highlight.node ? grid_highlight.node->unsafe_layout_node() : nullptr; layout_node && Painting::has_committed_box(*layout_node))
-            overlay_inputs.grid_highlights.append({ layout_node, grid_highlight.options });
+        if (auto box = grid_highlight.node ? Painting::BoxSlot::bound_to(*grid_highlight.node) : Painting::BoxSlot {}; Painting::has_committed_box(box))
+            overlay_inputs.grid_highlights.append({ box, grid_highlight.options });
     }
     if (config.should_show_caret_hit_test_debug_overlay)
         overlay_inputs.caret_debug_rect = m_caret_hit_test_debug_rect;
@@ -10687,7 +10696,7 @@ void Document::adopt_published_recording(Painting::PendingDisplayListRecording c
     // NB: A hit-test list invalidated after the recording was prepared stays invalidated.
     if (recording.hit_test_display_list_invalidations == m_hit_test_display_list_invalidations
         && (!published.is_paint_command_cache_source || !m_hit_test_display_list || !m_hit_test_display_list->is_current()))
-        m_hit_test_display_list = Painting::HitTestDisplayList::create_from_rust_recording(recording.visual_context_tree.structural_epoch(), layout_node_arena(), *m_chrome_widget_registry);
+        m_hit_test_display_list = Painting::HitTestDisplayList::create_from_rust_recording(recording.visual_context_tree.structural_epoch(), *this, *m_chrome_widget_registry);
 
     // A recording identical to the frame the arena published last publishes the paint command cache source it was
     // handed. For a render clock tick, that is the display list of the tick before it, which the document takes in too:
