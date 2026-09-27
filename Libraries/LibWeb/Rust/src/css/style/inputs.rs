@@ -1246,8 +1246,6 @@ impl RetainedState {
         self.tree.set_element_id_name(node, name, &mut self.memory);
     }
 
-    /// Record what the element's `disabled` attribute makes of it, as `DISABLED_FORM_CONTROL` and
-    /// `DISABLED_FIELD_SET`.
     /// Record the unique node id the document names the element by. It arrives with the identity
     /// and never changes while the element holds it.
     pub fn set_element_unique_node_id(&mut self, node: StyleNodeID, unique_node_id: i64) {
@@ -1286,16 +1284,6 @@ impl RetainedState {
 
     pub fn set_element_replaced_content_input(&mut self, node: StyleNodeID, input: super::tree::ReplacedContentInput) {
         self.tree.set_replaced_content_input(node, input, &mut self.memory);
-    }
-
-    pub fn set_element_form_control_disabled_facts(&mut self, node: StyleNodeID, facts: u8) {
-        self.tree.set_form_control_disabled_facts(node, facts, &mut self.memory);
-    }
-
-    /// Whether an event aimed at the node reaches a disabled form control on its way out.
-    #[must_use]
-    pub fn event_dispatch_is_disabled(&self, node: StyleNodeID) -> bool {
-        self.tree.event_dispatch_is_disabled(node)
     }
 
     /// The first element in tree order that answers to `name` inside `tree_scope`.
