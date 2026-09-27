@@ -250,9 +250,7 @@ impl TreeShape {
                     written &= written - 1;
                     let index = chunk_index * SLOTS_PER_CHUNK + offset;
                     let node = PaintNode::of(&chunk.slots[offset]);
-                    if self.nodes.get(index) != Some(&node) {
-                        *self.nodes.get_mut(index).expect("the column holds every chunk") = node;
-                    }
+                    self.nodes.set(index, node).expect("the column holds every chunk");
                 }
             }
         }

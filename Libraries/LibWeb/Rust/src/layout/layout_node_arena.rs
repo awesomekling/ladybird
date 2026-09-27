@@ -5361,10 +5361,7 @@ impl LayoutNodeArena {
             }
             self.published_text.grow_to(index + 1);
         }
-        let current = self.published_text.get(index).expect("the column was grown");
-        if !current.is_same_as(&published) {
-            *self.published_text.get_mut(index).expect("the column was grown") = published;
-        }
+        self.published_text.set(index, published).expect("the column was grown");
     }
 
     /// The text rows as they are now, for a frame to publish.

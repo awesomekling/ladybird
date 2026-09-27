@@ -5,13 +5,14 @@
  */
 
 use super::StackingContextFacts;
-use crate::cow_column::CowColumn;
+use crate::cow_column::{CowColumn, RowMut};
 use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::NodeSlotId;
 use crate::painting::paint_order;
 use crate::painting::paintable_rows::PAINTABLE_SLOTS_PER_CHUNK;
 use crate::painting::visual_context::dirty::VisualContextBoxDirtyKind;
 use std::cell::Ref;
+use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -20,7 +21,7 @@ pub(crate) struct NonzeroZIndexChildContext {
     pub slot: NodeSlotId,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct StackingContextEntries {
     pub child_contexts_with_nonzero_z_index: Vec<NonzeroZIndexChildContext>,
     pub stack_level_zero_boxes: Vec<NodeSlotId>,
@@ -49,18 +50,35 @@ impl StackingContextEntries {
 /// copies a table, and its chunk, only while a published frame shares them.
 pub(crate) type StackingContextEntryColumn = CowColumn<Option<Arc<StackingContextEntries>>, PAINTABLE_SLOTS_PER_CHUNK>;
 
-/// A root's table, for writing.
-fn table_mut(tables: &mut StackingContextEntryColumn, root: NodeSlotId) -> Option<&mut StackingContextEntries> {
+/// A root's table, for writing. It copies the table, and its row's chunk, only if a published
+/// frame shares them and the table changes.
+struct TableMut<'a>(
+    RowMut<&'a mut StackingContextEntryColumn, Option<Arc<StackingContextEntries>>, PAINTABLE_SLOTS_PER_CHUNK>,
+);
+
+impl Deref for TableMut<'_> {
+    type Target = StackingContextEntries;
+
+    fn deref(&self) -> &StackingContextEntries {
+        self.0.as_deref().expect("a table row holds a table")
+    }
+}
+
+impl DerefMut for TableMut<'_> {
+    fn deref_mut(&mut self) -> &mut StackingContextEntries {
+        Arc::make_mut(self.0.as_mut().expect("a table row holds a table"))
+    }
+}
+
+fn table_mut(tables: &mut StackingContextEntryColumn, root: NodeSlotId) -> Option<TableMut<'_>> {
     let index = root.slot_index() as usize;
     tables.get(index)?.as_ref()?;
-    tables.get_mut(index)?.as_mut().map(Arc::make_mut)
+    tables.row_mut(index).map(TableMut)
 }
 
 /// Drops the table of the root in a row, if it has one.
 pub(crate) fn drop_table(tables: &mut StackingContextEntryColumn, index: usize) {
-    if tables.get(index).is_some_and(Option::is_some) {
-        *tables.get_mut(index).expect("the row is in the column") = None;
-    }
+    tables.set(index, None);
 }
 
 impl LayoutNodeArena {
@@ -81,7 +99,9 @@ impl LayoutNodeArena {
         let mut tables = self.paintable_rows.stacking_context_entries.borrow_mut();
         let index = root.slot_index() as usize;
         if tables.get(index).is_some_and(Option::is_none) {
-            *tables.get_mut(index).expect("the row is in the column") = Some(Arc::default());
+            tables
+                .set(index, Some(Arc::default()))
+                .expect("the row is in the column");
         }
     }
 
@@ -98,7 +118,7 @@ impl LayoutNodeArena {
             return;
         }
         let mut tables = self.paintable_rows.stacking_context_entries.borrow_mut();
-        let Some(table) = table_mut(&mut tables, enclosing) else {
+        let Some(mut table) = table_mut(&mut tables, enclosing) else {
             return;
         };
         let mut composition_changed = false;
@@ -127,6 +147,7 @@ impl LayoutNodeArena {
             composition_changed |= table.inline_or_replaced_count == 0;
             table.inline_or_replaced_count += 1;
         }
+        drop(table);
         drop(tables);
         if composition_changed {
             self.note_stacking_context_composition_changed(enclosing);
@@ -139,7 +160,7 @@ impl LayoutNodeArena {
             return;
         }
         let mut tables = self.paintable_rows.stacking_context_entries.borrow_mut();
-        let Some(table) = table_mut(&mut tables, enclosing) else {
+        let Some(mut table) = table_mut(&mut tables, enclosing) else {
             return;
         };
         let mut composition_changed = false;
@@ -166,6 +187,7 @@ impl LayoutNodeArena {
             composition_changed |= table.inline_or_replaced_count == 1;
             table.inline_or_replaced_count = table.inline_or_replaced_count.saturating_sub(1);
         }
+        drop(table);
         drop(tables);
         if composition_changed {
             self.note_stacking_context_composition_changed(enclosing);
@@ -178,7 +200,7 @@ impl LayoutNodeArena {
         }
         self.note_stacking_context_composition_changed(root);
         let mut tables = self.paintable_rows.stacking_context_entries.borrow_mut();
-        let Some(table) = table_mut(&mut tables, root) else {
+        let Some(mut table) = table_mut(&mut tables, root) else {
             return;
         };
         if table.needs_resort {
@@ -240,7 +262,7 @@ impl LayoutNodeArena {
                 continue;
             }
             let mut tables = self.paintable_rows.stacking_context_entries.borrow_mut();
-            let Some(table) = table_mut(&mut tables, root) else {
+            let Some(mut table) = table_mut(&mut tables, root) else {
                 continue;
             };
             table.needs_resort = false;
@@ -277,7 +299,7 @@ impl LayoutNodeArena {
                 roots_in_visit_order.push(slot);
             }
             let mut tables = self.paintable_rows.stacking_context_entries.borrow_mut();
-            if let Some(table) = self
+            if let Some(mut table) = self
                 .paintable_row_is_populated(facts.enclosing_stacking_context)
                 .then(|| table_mut(&mut tables, facts.enclosing_stacking_context))
                 .flatten()
@@ -301,7 +323,7 @@ impl LayoutNodeArena {
         });
         let mut tables = self.paintable_rows.stacking_context_entries.borrow_mut();
         for root in roots_in_visit_order {
-            if let Some(table) = table_mut(&mut tables, root) {
+            if let Some(mut table) = table_mut(&mut tables, root) {
                 table
                     .child_contexts_with_nonzero_z_index
                     .sort_by_key(|entry| entry.z_index);

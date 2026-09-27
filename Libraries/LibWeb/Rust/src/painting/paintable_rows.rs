@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-use crate::cow_column::CowColumn;
+use crate::cow_column::{CowColumn, RowMut};
 use crate::css::css_pixels::{CssPixelPoint, CssPixelRect};
 use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::{NodeFlag, NodeSlotId};
@@ -425,16 +425,16 @@ impl UniqueNodeIdColumn {
         let index = slot.slot_index() as usize;
         let mut ids = self.ids.borrow_mut();
         ids.grow_to(index + 1);
-        *ids.get_mut(index).expect("the column grew to hold the slot") = (slot, id);
+        ids.set(index, (slot, id)).expect("the column grew to hold the slot");
     }
 
     pub(crate) fn forget(&self, slot: NodeSlotId) {
         if slot.is_invalid() || self.id(slot) == 0 {
             return;
         }
-        if let Some(entry) = self.ids.borrow_mut().get_mut(slot.slot_index() as usize) {
-            *entry = (NodeSlotId::INVALID, 0);
-        }
+        self.ids
+            .borrow_mut()
+            .set(slot.slot_index() as usize, (NodeSlotId::INVALID, 0));
     }
 }
 
@@ -446,6 +446,17 @@ pub(crate) struct CommittedFragmentLinkSlot {
     geometry_epoch: u32,
     geometry_is_current: bool,
     link: Option<std::sync::Arc<fragment_tree::FragmentLink>>,
+}
+
+impl PartialEq for CommittedFragmentLinkSlot {
+    fn eq(&self, other: &Self) -> bool {
+        self.layout_slot_generation == other.layout_slot_generation
+            && self.geometry_epoch == other.geometry_epoch
+            && self.geometry_is_current == other.geometry_is_current
+            && crate::cow_column::same_payload(self.link.as_ref(), other.link.as_ref(), |a, b| {
+                a.places_same_fragment_identically_to(b)
+            })
+    }
 }
 
 impl CommittedFragmentLinkSlot {
@@ -510,7 +521,9 @@ fn publish_visual_context_node_handles(
     {
         return;
     }
-    *column.get_mut(index).expect("the row is in the column") = handles.cloned().map(std::sync::Arc::new);
+    column
+        .set(index, handles.cloned().map(std::sync::Arc::new))
+        .expect("the row is in the column");
 }
 
 pub(crate) struct PaintableRows<Arena> {
@@ -556,8 +569,19 @@ impl Deref for CommittedSideDataRef<'_> {
     }
 }
 
+/// A row's paintable data, for writing. See [`RowMut`].
+pub(crate) type PaintableDataMut<'a> =
+    RowMut<&'a mut CowColumn<PaintableData, PAINTABLE_SLOTS_PER_CHUNK>, PaintableData, PAINTABLE_SLOTS_PER_CHUNK>;
+
+/// A row's committed side data, for writing. See [`RowMut`].
+pub(crate) type CommittedSideDataMut<'a> = RowMut<
+    RefMut<'a, CowColumn<CommittedSideData, PAINTABLE_SLOTS_PER_CHUNK>>,
+    CommittedSideData,
+    PAINTABLE_SLOTS_PER_CHUNK,
+>;
+
 pub(crate) trait PaintableRowsWrite: PaintableRowsRead {
-    fn paintable_data_mut(&mut self, id: NodeSlotId) -> &mut PaintableData;
+    fn paintable_data_mut(&mut self, id: NodeSlotId) -> PaintableDataMut<'_>;
 }
 
 impl<Arena> Deref for PaintableRows<Arena>
@@ -688,13 +712,13 @@ impl<Arena> PaintableRows<Arena>
 where
     Arena: DerefMut<Target = LayoutNodeArena>,
 {
-    pub(crate) fn paintable_data_mut(&mut self, id: NodeSlotId) -> &mut PaintableData {
+    pub(crate) fn paintable_data_mut(&mut self, id: NodeSlotId) -> PaintableDataMut<'_> {
         assert!(!id.is_invalid(), "invalid paintable arena slot ID");
         let data = self
             .arena
             .paintable_rows
             .rows
-            .get_mut(id.slot_index() as usize)
+            .row_mut(id.slot_index() as usize)
             .expect("invalid paintable arena slot ID");
         assert_eq!(
             data.slot_generation,
@@ -707,7 +731,7 @@ where
     pub(crate) fn begin_paintable_row_recommit(&mut self, id: NodeSlotId) {
         self.bump_paintable_row_reset_version(id);
         {
-            let data = self.paintable_data_mut(id);
+            let mut data = self.paintable_data_mut(id);
             data.offset = used_values::FfiCssPixelPoint::default();
             data.content_size = used_values::FfiCssPixelSize::default();
             data.local_padding_box_union = used_values::FfiCssPixelRect::default();
@@ -983,7 +1007,7 @@ impl<Arena> PaintableRowsWrite for PaintableRows<Arena>
 where
     Arena: DerefMut<Target = LayoutNodeArena>,
 {
-    fn paintable_data_mut(&mut self, id: NodeSlotId) -> &mut PaintableData {
+    fn paintable_data_mut(&mut self, id: NodeSlotId) -> PaintableDataMut<'_> {
         PaintableRows::paintable_data_mut(self, id)
     }
 }
@@ -1008,11 +1032,7 @@ impl PaintableRowStore {
     }
 
     pub(crate) fn invalidate_committed_geometry(&self, layout_slot_index: u32) {
-        if let Some(slot) = self
-            .committed_fragment_links
-            .borrow_mut()
-            .get_mut(layout_slot_index as usize)
-        {
+        if let Some(mut slot) = RowMut::new(self.committed_fragment_links.borrow_mut(), layout_slot_index as usize) {
             slot.geometry_is_current = false;
         }
     }
@@ -1051,8 +1071,8 @@ impl PaintableRowStore {
     ) {
         let mut slots = self.committed_fragment_links.borrow_mut();
         slots.grow_to(layout_slot_index as usize + 1);
-        let slot = slots
-            .get_mut(layout_slot_index as usize)
+        let mut slot = slots
+            .row_mut(layout_slot_index as usize)
             .expect("the column grew to hold the slot");
         let geometry_is_current = geometry_epoch.is_some();
         let geometry_epoch = geometry_epoch.unwrap_or_default();
@@ -1078,22 +1098,17 @@ impl PaintableRowStore {
         layout_slot_index: u32,
         layout_slot_generation: u8,
     ) -> Option<fragment_tree::FragmentLink> {
-        self.committed_fragment_links
-            .borrow_mut()
-            .get_mut(layout_slot_index as usize)
-            .filter(|slot| slot.layout_slot_generation == layout_slot_generation)
-            .and_then(|slot| slot.link.take())
-            .map(std::sync::Arc::unwrap_or_clone)
+        let mut slot = RowMut::new(self.committed_fragment_links.borrow_mut(), layout_slot_index as usize)?;
+        if slot.layout_slot_generation != layout_slot_generation || slot.link.is_none() {
+            return None;
+        }
+        slot.link.take().map(std::sync::Arc::unwrap_or_clone)
     }
 
     pub(crate) fn reset_committed_fragment_link_slot(&mut self, layout_slot_index: u32) {
-        if let Some(slot) = self
-            .committed_fragment_links
+        self.committed_fragment_links
             .get_mut()
-            .get_mut(layout_slot_index as usize)
-        {
-            *slot = CommittedFragmentLinkSlot::default();
-        }
+            .set(layout_slot_index as usize, CommittedFragmentLinkSlot::default());
     }
 }
 
@@ -1326,11 +1341,19 @@ impl LayoutNodeArena {
             store.rows.grow_to(side_data.len());
             let committed_side_data = store.committed_side_data.get_mut();
             committed_side_data.grow_to(side_data.len());
-            *committed_side_data.get_mut(index).expect("the row was just grown") = CommittedSideData::default();
-            *store.rows.get_mut(index).expect("the row was just grown") = PaintableData {
-                slot_generation: layout_node.generation(),
-                ..PaintableData::default()
-            };
+            committed_side_data
+                .set(index, CommittedSideData::default())
+                .expect("the row was just grown");
+            store
+                .rows
+                .set(
+                    index,
+                    PaintableData {
+                        slot_generation: layout_node.generation(),
+                        ..PaintableData::default()
+                    },
+                )
+                .expect("the row was just grown");
             side_data[index] = PaintableSideData {
                 overflow_style,
                 ..Default::default()
@@ -1381,13 +1404,16 @@ impl LayoutNodeArena {
         self.clear_absolute_rect_memo();
         let store = &mut self.paintable_rows;
         let index = id.slot_index() as usize;
-        *store.rows.get_mut(index).expect("invalid paintable arena slot ID") = PaintableData::default();
+        store
+            .rows
+            .set(index, PaintableData::default())
+            .expect("invalid paintable arena slot ID");
         store.side_data.borrow_mut()[index] = PaintableSideData::default();
-        *store
+        store
             .committed_side_data
             .get_mut()
-            .get_mut(index)
-            .expect("invalid paintable arena slot ID") = CommittedSideData::default();
+            .set(index, CommittedSideData::default())
+            .expect("invalid paintable arena slot ID");
         store.row_paint_states.borrow()[index].clear();
         store.visual_context_records.borrow_mut()[index] = None;
         publish_visual_context_node_handles(store.visual_context_node_handles.get_mut(), index, None);
@@ -1813,15 +1839,15 @@ impl LayoutNodeArena {
         })
     }
 
-    /// Writing copies the row's chunk if a published generation shares it, so a writer checks
-    /// first that it changes something.
-    pub(crate) fn committed_side_data_mut(&self, id: NodeSlotId) -> RefMut<'_, CommittedSideData> {
+    /// Writing copies the row's chunk only if a published generation shares it and the row
+    /// changes.
+    pub(crate) fn committed_side_data_mut(&self, id: NodeSlotId) -> CommittedSideDataMut<'_> {
         debug_assert!(self.paintable_row_is_populated(id));
-        RefMut::map(self.paintable_rows.committed_side_data.borrow_mut(), |side_data| {
-            side_data
-                .get_mut(id.slot_index() as usize)
-                .expect("invalid paintable arena slot ID")
-        })
+        RowMut::new(
+            self.paintable_rows.committed_side_data.borrow_mut(),
+            id.slot_index() as usize,
+        )
+        .expect("invalid paintable arena slot ID")
     }
 }
 
