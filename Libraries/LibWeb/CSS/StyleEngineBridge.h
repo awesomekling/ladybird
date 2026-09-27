@@ -170,7 +170,6 @@ public:
     StyleAtomID intern_atom(Utf16FlyString const&);
     // The engine keeps what a custom property's name spells, once per name, for the environments
     // it computes.
-    void note_custom_property_name(StyleAtomID, Utf16FlyString const&);
     // The store of an environment the engine resolved, with one strong reference transferred, and
     // the environment it was resolved over; null for one C++ published.
     [[nodiscard]] void const* borrow_engine_custom_property_environment(u64 identity, u64& parent_identity) const;
@@ -240,6 +239,9 @@ public:
     void record_size_query_container(StyleNodeID);
     void record_style_depends_on_size_container_query(StyleNodeID);
     void record_recomputes_on_environment_move(StyleNodeID);
+    void record_size_container_needs_evaluation_after_layout(StyleNodeID);
+    void record_children_explicitly_inherit(StyleNodeID);
+    void record_rule_conditions_hold(u64 rule_identity, bool holds);
     // What a row built for a node is painted and hit-tested with, and the spans of a table cell or column. Each is
     // recorded as the node arrives and again as it changes, and the last one recorded goes in.
     void record_dom_paint_facts(StyleNodeID, u8 facts);
@@ -509,6 +511,7 @@ private:
     PublishedStyleTransaction publish_style_transaction_view(StyleEngineFFI::FfiStyleTransactionView const&, i64 submission_microseconds, i64 bridge_microseconds);
     StyleEngineFFI::FfiInstallFeedback install_feedback() const;
     void record_host_fact_write(StyleEngineFFI::FfiHostFactWrite);
+    void record_element_language_write(u32 node, StyleAtomID language, Utf16View tag);
     void mint_style_nodes(Span<StyleNodeID>, Vector<StyleNodeID>& granted, size_t& grant_request, StyleEngineFFI::FfiHostFactKind, u8 value);
     bool refresh_attribute_value_text_requirements();
     // Which of a selector and an attr() read the value text of this name, as bits; zero if neither.

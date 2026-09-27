@@ -2145,10 +2145,8 @@ void Document::record_partial_relayout_escape(PartialRelayoutEscapeReason reason
 // committed their boxes.
 void Document::set_needs_container_query_evaluation_after_layout(Element const& query_container)
 {
-    render_inputs_for_write().style_engine().publish_input([query_container = GC::Root<Element> { const_cast<Element&>(query_container) }](CSS::StyleInputScope const& input) {
-        if (query_container->style_node_id() != 0)
-            CSS::StyleEngineFFI::style_engine_note_size_container_needs_evaluation_after_layout(input, input.engine().rust_handle(), query_container->style_node_id().value());
-    });
+    if (auto style_node = query_container.style_node_id(); style_node != 0)
+        render_inputs_for_write().style_engine().record_size_container_needs_evaluation_after_layout(style_node);
 }
 
 bool Document::has_size_containers_needing_evaluation_after_layout() const

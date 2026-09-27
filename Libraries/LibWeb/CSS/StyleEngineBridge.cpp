@@ -37,8 +37,6 @@ namespace Web::CSS {
 
 extern "C" void rust_style_seal_note_font_match_reached_document_thread();
 extern "C" void rust_font_face_snapshot_view(void const*, FontFaceSnapshotView*);
-extern "C" void style_engine_reset_custom_functions(void*);
-extern "C" void style_engine_publish_custom_function(void*, void const*, FlatPtr, FlatPtr, u32);
 
 bool StyleEngine::layout_pass_is_in_flight() const
 {
@@ -164,16 +162,14 @@ static_assert(!IsMoveAssignable<StyleEngine>);
 #include <LibWeb/StyleEngineBridgeGenerated.inc>
 
 StyleEngine::StyleEngine(DeviceClass device_class, StyleComputer* style_computer)
-    : m_impl(StyleEngineFFI::style_engine_create(device_class))
-    , m_host_style_record_pins(StyleEngineFFI::style_record_host_pins_create())
+    : m_host_style_record_pins(StyleEngineFFI::style_record_host_pins_create())
     , m_style_computer(style_computer)
-    , m_recording_stream(StyleEngineFFI::style_engine_recording_stream(rust_handle()))
 {
-    StyleEngineFFI::style_engine_lend_host_style_record_pins(rust_handle(), m_host_style_record_pins);
-    if (m_style_computer) {
+    // The engine is born with the pin table lent to it and, for a document that computes style, the font resolver
+    // installed, and answers the recording stream it records under.
+    m_impl = StyleEngineFFI::style_engine_create(device_class, m_host_style_record_pins, m_style_computer ? resolve_fonts : nullptr, &m_recording_stream);
+    if (m_style_computer)
         set_pseudo_element_style_deferred(to_underlying(PseudoElement::Selection), true);
-        StyleEngineFFI::style_engine_install_font_resolver(rust_handle(), resolve_fonts);
-    }
 }
 
 void StyleEngine::prepare_root_font_resolution(u64 font_environment_generation)
@@ -307,7 +303,12 @@ HashTable<StyleNodeID> StyleEngine::take_elements_awaiting_first_style_computati
 void StyleEngine::set_element_parts(StyleNodeID node, ReadonlySpan<StyleAtomID> names, ReadonlySpan<StyleNodeID> hosts)
 {
     VERIFY(names.size() == hosts.size());
-    StyleEngineFFI::style_engine_set_element_parts(rust_handle(), node.value(), reinterpret_cast<u32 const*>(names.data()), reinterpret_cast<u32 const*>(hosts.data()), names.size());
+    if (names.is_empty()) {
+        record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::ElementParts, .value = 1, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = 0, .data = 0 });
+        return;
+    }
+    for (size_t index = 0; index < names.size(); ++index)
+        record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::ElementParts, .value = index == 0, .node = node.value(), .parent = hosts[index].value(), .previous_sibling = 0, .facts = names[index].value(), .data = 0 });
 }
 
 void StyleEngine::finish_sheet_rules_replacement(SheetID sheet)
@@ -451,22 +452,6 @@ StyleAtomID StyleEngine::acquire_qualified_atom(StyleAtomID namespace_atom, Styl
     return atom;
 }
 
-void StyleEngine::note_custom_property_name(StyleAtomID atom, Utf16FlyString const& name)
-{
-    if (m_published_custom_property_names.contains(atom))
-        return;
-    m_published_custom_property_names.set(atom);
-    auto const view = name.view();
-    Vector<u16> code_units;
-    code_units.ensure_capacity(view.length_in_code_units());
-    for (size_t i = 0; i < view.length_in_code_units(); ++i)
-        code_units.unchecked_append(view.code_unit_at(i));
-    // The engine retains the fly string itself; this reference only carries it across.
-    auto raw = name.to_raw_leaked();
-    StyleEngineFFI::style_engine_note_custom_property_name(rust_handle(), atom.value(), raw, code_units.data(), code_units.size());
-    Utf16FlyString::unref_raw(raw);
-}
-
 void const* StyleEngine::borrow_engine_custom_property_environment(u64 identity, u64& parent_identity) const
 {
     return StyleEngineFFI::style_engine_borrow_engine_custom_property_environment(rust_handle(), identity, &parent_identity);
@@ -483,11 +468,7 @@ StyleAtomID StyleEngine::intern_language_atom(Utf16View text)
     if (atom == 0 || text.is_empty() || m_published_language_atoms.set(atom) != AK::HashSetResult::InsertedNewEntry)
         return atom;
 
-    Vector<u16> code_units;
-    code_units.ensure_capacity(text.length_in_code_units());
-    for (size_t i = 0; i < text.length_in_code_units(); ++i)
-        code_units.unchecked_append(text.code_unit_at(i));
-    StyleEngineFFI::style_engine_set_element_language(rust_handle(), 0, atom.value(), code_units.data(), code_units.size());
+    record_element_language_write(0, atom, text);
     return atom;
 }
 
@@ -614,17 +595,19 @@ u32 StyleEngine::attribute_value_text_readers(StyleAtomID name)
     });
 }
 
+void StyleEngine::record_element_language_write(u32 node, StyleAtomID language, Utf16View tag)
+{
+    record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::ElementLanguage, .value = 0, .node = node, .parent = 0, .previous_sibling = 0, .facts = language.value(), .data = m_host_fact_text_data.size() });
+    m_host_fact_text_data.append(Utf16String::from_utf16(tag));
+}
+
 void StyleEngine::set_element_language(StyleNodeID node, StyleAtomID language, Utf16View tag)
 {
     // A language range is not a name, so `:lang()` compares against the tag itself rather than
     // against the atom. The text is recorded once per language, not once per element.
-    Vector<u16> code_units;
-    if (language != 0 && !tag.is_empty() && m_published_language_atoms.set(language) == AK::HashSetResult::InsertedNewEntry) {
-        code_units.ensure_capacity(tag.length_in_code_units());
-        for (size_t i = 0; i < tag.length_in_code_units(); ++i)
-            code_units.unchecked_append(tag.code_unit_at(i));
-    }
-    StyleEngineFFI::style_engine_set_element_language(rust_handle(), node.value(), language.value(), code_units.data(), code_units.size());
+    if (language == 0 || tag.is_empty() || m_published_language_atoms.set(language) != AK::HashSetResult::InsertedNewEntry)
+        tag = {};
+    record_element_language_write(node.value(), language, tag);
 }
 
 // Recording input gives the next rendering update style work to do, but touches no layout tree
@@ -795,6 +778,21 @@ void StyleEngine::record_style_depends_on_size_container_query(StyleNodeID node)
 void StyleEngine::record_recomputes_on_environment_move(StyleNodeID node)
 {
     record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::RecomputesOnEnvironmentMove, .value = 0, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = 0, .data = 0 });
+}
+
+void StyleEngine::record_size_container_needs_evaluation_after_layout(StyleNodeID node)
+{
+    record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::SizeContainerNeedsEvaluationAfterLayout, .value = 0, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = 0, .data = 0 });
+}
+
+void StyleEngine::record_children_explicitly_inherit(StyleNodeID node)
+{
+    record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::ChildrenExplicitlyInherit, .value = 0, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = 0, .data = 0 });
+}
+
+void StyleEngine::record_rule_conditions_hold(u64 rule_identity, bool holds)
+{
+    record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::RuleConditionsHold, .value = holds, .node = 0, .parent = 0, .previous_sibling = 0, .facts = 0, .data = rule_identity });
 }
 
 void StyleEngine::record_dom_paint_facts(StyleNodeID node, u8 facts)
@@ -1017,7 +1015,7 @@ void StyleEngine::submit_recorded_input(RecordedInputGoesTo goes_to)
     // Each text data write hands the engine one reference to what it holds, and each replaced
     // content input write lends it the input for the call.
     for (auto& write : host_fact_writes) {
-        if (write.kind == StyleEngineFFI::FfiHostFactKind::TextData)
+        if (write.kind == StyleEngineFFI::FfiHostFactKind::TextData || write.kind == StyleEngineFFI::FfiHostFactKind::ElementLanguage)
             write.data = host_fact_text_data[write.data].to_raw_leaked();
         else if (write.kind == StyleEngineFFI::FfiHostFactKind::ElementReplacedContentInput)
             write.data = bit_cast<FlatPtr>(&host_fact_replaced_content_inputs[write.data]);
@@ -1213,11 +1211,11 @@ void StyleEngine::lend_style_transaction_inputs(RecordedInputGoesTo recorded_inp
 {
     submit_recorded_input(recorded_input_goes_to);
     publish_font_faces();
-    style_engine_reset_custom_functions(rust_handle());
     StyleEngineFFI::FfiDocumentStyleComputationInputs computation_inputs {};
     // Lent to the engine for the call below, which copies them.
     String document_base_url;
     Vector<StyleEngineFFI::FfiStyleSheetResourceContextEntry> resource_contexts;
+    Vector<StyleEngineFFI::FfiCustomFunctionEntry> custom_functions;
     if (m_style_computer) {
         auto const viewport_rect = m_style_computer->viewport_rect_for_style_environment();
         auto const* media_environment = m_style_computer->ensure_media_environment_for_style_update();
@@ -1243,8 +1241,7 @@ void StyleEngine::lend_style_transaction_inputs(RecordedInputGoesTo recorded_inp
             auto const& scope = *scopes[index].scope;
             auto tree_scope = scopes[index].tree_scope;
             scope.for_each_visible_function_definition([&](StyleScope::FunctionDefinitionAndScope const& definition) {
-                style_engine_publish_custom_function(rust_handle(), definition.function.handle(),
-                    bit_cast<FlatPtr>(&scope), bit_cast<FlatPtr>(&definition.scope), tree_scope);
+                custom_functions.append({ .function = definition.function.handle(), .caller_scope = bit_cast<FlatPtr>(&scope), .definition_scope = bit_cast<FlatPtr>(&definition.scope), .tree_scope = tree_scope });
                 append_scope(definition.scope, NumericLimits<u32>::max());
             });
         }
@@ -1305,6 +1302,8 @@ void StyleEngine::lend_style_transaction_inputs(RecordedInputGoesTo recorded_inp
             .media_feature_values = reinterpret_cast<StyleEngineFFI::FfiHostHandle>(media_environment->values),
             .media_feature_value_count = media_environment->value_count,
             .media_length_resolution_context = reinterpret_cast<StyleEngineFFI::FfiHostHandle>(media_environment->length_resolution_context),
+            .custom_functions = reinterpret_cast<StyleEngineFFI::FfiHostHandle>(custom_functions.data()),
+            .custom_function_count = custom_functions.size(),
         };
         if (auto supported = m_style_computer->document().supported_color_schemes(); supported.has_value()) {
             computation_inputs.has_document_supported_schemes = true;

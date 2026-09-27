@@ -57,6 +57,38 @@ pub(super) struct DocumentFunctionSnapshot {
 }
 
 impl DocumentFunctionSnapshot {
+    /// Takes the custom functions the transaction's inputs lend, leaving the inputs naming none.
+    ///
+    /// # Safety
+    /// The inputs' custom functions must point to `custom_function_count` live entries.
+    pub(super) unsafe fn take_from(inputs: &mut super::bridge::FfiDocumentStyleComputationInputs) -> Self {
+        let mut snapshot = Self::default();
+        if !inputs.custom_functions.is_none() && inputs.custom_function_count != 0 {
+            let entries = unsafe {
+                std::slice::from_raw_parts(
+                    inputs
+                        .custom_functions
+                        .as_pointer()
+                        .cast::<super::bridge::FfiCustomFunctionEntry>(),
+                    inputs.custom_function_count,
+                )
+            };
+            for entry in entries {
+                unsafe {
+                    snapshot.publish(
+                        entry.function.cast(),
+                        entry.caller_scope,
+                        entry.definition_scope,
+                        entry.tree_scope,
+                    );
+                };
+            }
+        }
+        inputs.custom_functions = super::bridge::FfiHostHandle::default();
+        inputs.custom_function_count = 0;
+        snapshot
+    }
+
     unsafe fn publish(
         &mut self,
         function: *const CompiledFunction,
@@ -87,28 +119,6 @@ pub(super) struct PreparedCustomFunctions {
     visibilities: Vec<FfiSubstitutionFunctionVisibility>,
     caller_scope: usize,
     reads_attributes: bool,
-}
-
-#[unsafe(no_mangle)]
-unsafe extern "C" fn style_engine_reset_custom_functions(engine: crate::css::style::StyleEngineInputHandle) {
-    let engine = unsafe { crate::css::style::bridge::engine_entrance(engine, "style_engine_reset_custom_functions") };
-    engine.document_function_snapshot = DocumentFunctionSnapshot::default();
-}
-
-#[unsafe(no_mangle)]
-unsafe extern "C" fn style_engine_publish_custom_function(
-    engine: crate::css::style::StyleEngineInputHandle,
-    function: *const CompiledFunction,
-    caller_scope: usize,
-    definition_scope: usize,
-    tree_scope: u32,
-) {
-    let engine = unsafe { crate::css::style::bridge::engine_entrance(engine, "style_engine_publish_custom_function") };
-    unsafe {
-        engine
-            .document_function_snapshot
-            .publish(function, caller_scope, definition_scope, tree_scope);
-    }
 }
 
 impl RetainedState {

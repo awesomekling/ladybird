@@ -3110,6 +3110,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         "FfiStyleInvalidationField".to_string(),
         "FfiStyleRowFact".to_string(),
         "FfiStyleSheetResourceContextEntry".to_string(),
+        "FfiCustomFunctionEntry".to_string(),
     ];
 
     generate_ffi_header(

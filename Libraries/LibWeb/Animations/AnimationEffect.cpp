@@ -1078,7 +1078,7 @@ static void install_taken_engine_sample(CSS::StyleDrainScope const& scope, DOM::
                 : is<DOM::ShadowRoot>(*parent)                 ? as<DOM::ShadowRoot>(*parent).style_node_id()
                                                                : CSS::StyleNodeID {};
             if (parent_style_node != 0)
-                CSS::StyleEngineFFI::style_engine_note_children_explicitly_inherit(scope, scope.engine().rust_handle(), parent_style_node.value());
+                scope.engine().record_children_explicitly_inherit(parent_style_node);
         }
     }
     // What the sample's container units read of the element's containers.

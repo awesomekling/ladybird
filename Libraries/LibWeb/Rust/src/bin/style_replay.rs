@@ -563,9 +563,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         names.push(event.payload.read_u32()?);
                         hosts.push(event.payload.read_u32()?);
                     }
-                    unsafe {
-                        bridge::style_engine_set_element_parts(engine, node, names.as_ptr(), hosts.as_ptr(), count)
-                    };
+                    unsafe { bridge::replay_set_element_parts(engine, node, &names, &hosts) };
                 }
                 EventKind::SetTextData => {
                     // A text node's characters are read by the layout tree build and by nothing in
@@ -580,13 +578,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let node = event.payload.read_u32()?;
                     let language = event.payload.read_u32()?;
                     let text = event.payload.read_u16_vec()?;
-                    let text_pointer = match text.is_empty() {
-                        true => std::ptr::null(),
-                        false => text.as_ptr(),
-                    };
-                    unsafe {
-                        bridge::style_engine_set_element_language(engine, node, language, text_pointer, text.len())
-                    };
+                    unsafe { bridge::replay_set_element_language(engine, node, language, &text) };
                 }
                 EventKind::MatchDocument => {
                     let engine = read_engine(&mut event.payload, &live_engines)?;
