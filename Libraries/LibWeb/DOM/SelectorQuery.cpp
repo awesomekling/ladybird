@@ -223,7 +223,7 @@ static void settle_connected_selector_query(Document& document)
     // a query made beside a frame in flight that reads the mirror waits for it first.
     document.join_frame_reaching_style_engine();
     document.synchronize_dirty_style_attributes();
-    document.style_computer().style_engine().prepare_selector_query();
+    document.style_computer().style_engine_queries().prepare_selector_query();
 }
 
 // The style-engine coordinates of one connected subtree query. Present tense on has_query_root: A document whose
@@ -365,7 +365,7 @@ void* SelectorQuery::engine_query(Document& document) const
     selector_handles.ensure_capacity(m_selectors.size());
     for (auto const& selector : m_selectors)
         selector_handles.unchecked_append(&selector->rust_selector());
-    auto& engine = document.style_computer().style_engine();
+    auto engine = document.style_computer().style_engine_queries();
     m_engine_query = engine.compile_selector_query(selector_handles);
     // The query can be the first to demand an attribute's value text, which the compile publishes: the engine is
     // prepared against it again before the query matches.
@@ -664,7 +664,7 @@ bool SelectorQuery::matches_in_style_engine(Element const& element, ParentNode c
         shadow_root = root->style_node_id();
 
     auto& document = const_cast<Document&>(element.document());
-    auto result = document.style_computer().style_engine().selector_query_matches(engine_query(document), element.style_node_id(), scope_root, shadow_root);
+    auto result = document.style_computer().style_engine_queries().selector_query_matches(engine_query(document), element.style_node_id(), scope_root, shadow_root);
     VERIFY(result.has_value());
     return *result;
 }
@@ -772,7 +772,7 @@ GC::Ptr<Element> SelectorQuery::query_first(ParentNode& root) const
     if (!subtree_query.has_query_root)
         return cache_result(nullptr);
     CSS::StyleNodeID matched;
-    if (document.style_computer().style_engine().selector_query_first(engine_query(document), subtree_query.query_root, subtree_query.include_root, subtree_query.scope_root, subtree_query.shadow_root, true, matched)) {
+    if (document.style_computer().style_engine_queries().selector_query_first(engine_query(document), subtree_query.query_root, subtree_query.include_root, subtree_query.scope_root, subtree_query.shadow_root, true, matched)) {
         if (!matched.value())
             return cache_result(nullptr);
         auto element = document.style_computer().element_for_style_node(matched);
@@ -830,7 +830,7 @@ GC::Ref<NodeList> SelectorQuery::query_all(ParentNode& root) const
             return create_node_list(elements);
 
         Vector<CSS::StyleNodeID> matches;
-        if (!document.style_computer().style_engine().selector_query_all(engine_query(document), subtree_query.query_root, subtree_query.include_root, subtree_query.scope_root, subtree_query.shadow_root, true, matches)) {
+        if (!document.style_computer().style_engine_queries().selector_query_all(engine_query(document), subtree_query.query_root, subtree_query.include_root, subtree_query.scope_root, subtree_query.shadow_root, true, matches)) {
             collect_matches(root, [&](auto& element) { return matches_in_style_engine(element, root); }, elements);
         } else {
             elements.ensure_capacity(matches.size());

@@ -211,7 +211,7 @@ void CSSTransition::publish_transitions(DOM::Element& element, Optional<PseudoEl
         });
     }
     auto slot = pseudo_element.has_value() ? static_cast<u8>(to_underlying(*pseudo_element) + 1) : static_cast<u8>(0);
-    StyleEngineFFI::style_engine_set_element_transitions(element.document().style_computer().style_engine().rust_handle(),
+    StyleEngineFFI::style_engine_set_element_transitions(element.document().render_inputs_for_write().style_engine().rust_handle(),
         element.style_node_id().value(), slot, transitions.data(), transitions.size());
 }
 

@@ -4862,7 +4862,7 @@ void LocalNavigable::perform_scroll_of_viewport_scrolling_box(CSSPixelPoint new_
         if (auto document = active_document()) {
             // The viewport's box publishes the offset the render side reads, journalled next to the
             // store it mirrors rather than at each caller.
-            document->invalidation_journal().note_scroll_offset(DOM::NodeIdentity::of_document(), true);
+            document->render_inputs_for_write().note_scroll_offset(DOM::NodeIdentity::of_document(), true);
             document->set_needs_repaint(Badge<HTML::LocalNavigable> {}, InvalidateDisplayList::No);
             document->inform_all_viewport_clients_about_the_current_viewport_rect();
         }

@@ -154,7 +154,7 @@ mod tests {
         unsafe extern "C" fn notify(_: *mut c_void, _: u32) {}
         unsafe {
             style_engine_native_rule_declarations_changed(
-                crate::css::style::StyleEngineHandle::for_test_engine(&raw mut engine),
+                crate::css::style::StyleEngineInputHandle::for_test_engine(&raw mut engine),
                 std::ptr::from_ref(rule).cast(),
                 std::ptr::null_mut(),
                 notify,

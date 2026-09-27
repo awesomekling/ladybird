@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+use crate::painting::geometry_read::GeometryRead;
 use crate::painting::published_frame::PaintRead;
 use crate::painting::record::trace::Observer;
 

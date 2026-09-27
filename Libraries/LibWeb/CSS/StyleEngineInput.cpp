@@ -92,7 +92,7 @@ static StyleEngine* style_engine_for(DOM::Node& node)
 {
     if (!node.is_connected() || !node.document().style_engine_tracks_tree())
         return nullptr;
-    return &node.document().style_computer().style_engine();
+    return &node.document().render_inputs_for_write().style_engine();
 }
 
 // Publish an input about the element: at once between passes, and once the pass in flight has drained
@@ -471,7 +471,7 @@ void record_document_tree_tracked(DOM::Document& document)
 {
     if (document.style_node_id() != no_style_node)
         return;
-    auto& style_engine = document.style_computer().style_engine();
+    auto& style_engine = document.render_inputs_for_write().style_engine();
     document.set_style_node_id(style_engine.mint_relation_only_style_node());
     // The viewport's row answers by the document's name, and the document's identity is where the
     // build can reach it without holding the document.
@@ -492,7 +492,7 @@ void record_subtree_connecting(DOM::Node& root)
 static void record_subtree_arrivals(DOM::Document& document, ReadonlySpan<GC::Ref<DOM::Node>> roots)
 {
     auto& style_computer = document.style_computer();
-    auto& style_engine = style_computer.style_engine();
+    auto& style_engine = document.render_inputs_for_write().style_engine();
     struct Arrival {
         GC::Ref<DOM::Node> node;
         TreeScopeID tree_scope;
@@ -588,7 +588,7 @@ static void record_subtree_arrivals(DOM::Document& document, ReadonlySpan<GC::Re
         // As is being in the shadow tree of the focused text control.
         if (focused_text_control) {
             if (auto* shadow_root = as_if<DOM::ShadowRoot>(node->root()); shadow_root && shadow_root->host() == focused_text_control)
-                document.invalidation_journal().note_is_in_focused_text_control(DOM::NodeIdentity::of(*node));
+                document.render_inputs_for_write().note_is_in_focused_text_control(DOM::NodeIdentity::of(*node));
         }
     }
 
@@ -720,7 +720,8 @@ void take_in_pending_style_arrivals(DOM::Document& document)
     if (s_taking_in_pending_style_arrivals || &document == s_document_whose_arrivals_wait)
         return;
     // Nodes that waited and left the tree again are counted too, and nothing is left of them to take in.
-    document.style_computer().style_engine().forget_pending_arrivals();
+    if (document.style_computer().style_engine().has_pending_arrivals())
+        document.render_inputs_for_write().style_engine().forget_pending_arrivals();
     if (!document.descendant_style_arrival_pending())
         return;
     TemporaryChange taking_in { s_taking_in_pending_style_arrivals, true };
@@ -1485,7 +1486,7 @@ void record_slot_assignment_changed(HTML::HTMLSlotElement& slot)
         return;
     // Beside a style pass, the list is the one assigned when the pass has drained, of the members that have an
     // identity then.
-    slot.document().style_computer().style_engine().publish_input([slot = GC::Root<HTML::HTMLSlotElement> { slot }](StyleInputScope const& input) {
+    slot.document().render_inputs_for_write().style_engine().publish_input([slot = GC::Root<HTML::HTMLSlotElement> { slot }](StyleInputScope const& input) {
         if (slot->style_node_id() == no_style_node)
             return;
         auto const& assigned = slot->assigned_nodes_internal();
@@ -1510,7 +1511,7 @@ void record_top_layer_elements_changed(DOM::Document& document)
     if (!document.style_engine_tracks_tree())
         return;
     // Beside a style pass, the top layer is published as it is when the pass has drained.
-    document.style_computer().style_engine().publish_input([document = GC::Root<DOM::Document> { document }](StyleInputScope const& input) {
+    document.render_inputs_for_write().style_engine().publish_input([document = GC::Root<DOM::Document> { document }](StyleInputScope const& input) {
         auto const& elements = document->top_layer_elements();
         Vector<StyleNodeID, 8> identities;
         identities.ensure_capacity(elements.size());
@@ -2351,7 +2352,7 @@ void record_shadow_root_connected(DOM::ShadowRoot& shadow_root)
 // rule is.
 static void publish_document_kind(DOM::Document& document)
 {
-    auto& style_engine = document.style_computer().style_engine();
+    auto& style_engine = document.render_inputs_for_write().style_engine();
     auto namespace_atom = document.document_type() == DOM::Document::Type::HTML
         ? style_engine.intern_case_sensitive_text_atom(Namespace::HTML.view())
         : StyleAtomID { 0 };
@@ -2547,7 +2548,7 @@ static RefPtr<SharedCompiledStyleSheet> shared_compiled_style_sheet_for(StyleShe
     if (!sheet_can_share_compiled_style_sheet(sheet))
         return nullptr;
     auto& style_computer = document.style_computer();
-    auto& style_engine = style_computer.style_engine();
+    auto& style_engine = style_computer.document().render_inputs_for_write().style_engine();
     SharedCompiledStyleSheetKey key { sheet.native_rules().shared_contents_identity(), sheet.style_resource_base_url().value_or(document.base_url()).serialize() };
     auto& shared_compiled_style_sheets = style_computer.shared_compiled_style_sheets();
     if (auto existing = shared_compiled_style_sheets.get(key); existing.has_value()) {
@@ -2578,16 +2579,16 @@ static RefPtr<SharedCompiledStyleSheet> shared_compiled_style_sheet_for(StyleShe
 // Beside a layout pass, which reads what the engine holds, the change waits for the pass to be taken back the same way.
 static bool leave_sheet_change_beside_pass(DOM::Document& document, Function<void()> change)
 {
-    auto& style_engine = document.style_computer().style_engine();
-    if (!Layout::RustFFI::rust_stage_thread_style_pass_holds_style_engine(style_engine.rust_handle()) && !style_engine.layout_pass_is_in_flight())
+    auto const& engine = document.style_computer().style_engine();
+    if (!Layout::RustFFI::rust_stage_thread_style_pass_holds_style_engine(engine.rust_handle()) && !engine.layout_pass_is_in_flight())
         return false;
-    style_engine.publish_input([change = move(change)](StyleInputScope const&) { change(); });
+    document.render_inputs_for_write().style_engine().publish_input([change = move(change)](StyleInputScope const&) { change(); });
     return true;
 }
 
 static void detach_shared_compiled_style_sheet_now(SharedCompiledStyleSheet& sheet, u64 occurrence, TreeScopeID tree_scope, StyleComputer& style_computer)
 {
-    auto& style_engine = style_computer.style_engine();
+    auto& style_engine = style_computer.document().render_inputs_for_write().style_engine();
     style_engine.detach_sheet_occurrence(tree_scope, occurrence);
     sheet.remove_attachment(tree_scope);
     if (sheet.has_attachments())
@@ -2649,7 +2650,7 @@ static void record_style_rule_inserted_in_now(u64 identity, bool changes_environ
         document.bump_style_environment_version();
 
     RuleCompilationContext context {
-        style_computer.style_engine(),
+        style_computer.document().render_inputs_for_write().style_engine(),
         sheet_id,
         StyleEngineRuleID { StyleEngineFFI::style_engine_native_rule_successor(style_computer.style_engine().rust_handle(), sheet.native_sheet().handle(), identity) },
         document,
@@ -2718,7 +2719,7 @@ void record_style_rule_removed(StyleSheetState& sheet_it_left, RustRule const& r
             StyleSheetState& sheet;
         } context { document, sheet_it_left };
         StyleEngineFFI::style_engine_remove_native_rule(
-            style_computer.style_engine().rust_handle(),
+            style_computer.document().render_inputs_for_write().style_engine().rust_handle(),
             sheet_it_left.native_sheet().handle(),
             rule.handle(),
             detached_import ? detached_import->native_sheet().handle() : nullptr,
@@ -2757,7 +2758,7 @@ void record_style_rule_selector_changed(CSSStyleRule& rule)
         auto sheet_id = style_computer.style_engine_sheet_id_for(*sheet);
         if (sheet_id == 0)
             return;
-        RuleCompilationContext context { style_computer.style_engine(), sheet_id, 0, document, style_computer };
+        RuleCompilationContext context { style_computer.document().render_inputs_for_write().style_engine(), sheet_id, 0, document, style_computer };
         compile_rules_into(context, *sheet, rule.native_rule().identity(), Parser::ValueParserFFI::NativeCompilationPurpose::Selectors);
     });
 }
@@ -2781,7 +2782,7 @@ void record_style_rule_declarations_changed(RustRule const& rule, StyleSheetStat
             GC::Ref<DOM::Document> document;
             bool changes_environment;
         } context { document, rule.type() != RustRule::Type::Keyframe && rule_change_needs_style_environment_bump(rule) };
-        auto& style_engine = document.style_computer().style_engine();
+        auto& style_engine = document.render_inputs_for_write().style_engine();
         if (StyleEngineFFI::style_engine_native_rule_declarations_changed(
                 style_engine.rust_handle(), rule.handle(), &context,
                 [](void* opaque, u32) {
@@ -2804,7 +2805,7 @@ void record_stylesheet_rules_replaced(StyleSheetState& sheet)
         auto sheet_id = style_computer.style_engine_sheet_id_for(sheet);
         if (sheet_id == 0)
             return;
-        auto& style_engine = style_computer.style_engine();
+        auto& style_engine = style_computer.document().render_inputs_for_write().style_engine();
         style_engine.begin_sheet_rules_replacement(sheet_id);
         RuleCompilationContext context { style_engine, sheet_id, 0, document, style_computer };
         compile_rules_into(context, sheet);
@@ -2819,7 +2820,7 @@ static void record_stylesheet_attached_now(StyleSheetState& sheet, DOM::Node& do
     document_or_shadow_root.document().note_style_sheet_set_change();
     publish_document_kind(document_or_shadow_root.document());
     auto& style_computer = document_or_shadow_root.document().style_computer();
-    auto& style_engine = style_computer.style_engine();
+    auto& style_engine = style_computer.document().render_inputs_for_write().style_engine();
     auto sheet_id = style_computer.style_engine_sheet_id_for(sheet);
     auto first_attachment = sheet_id == 0;
     auto tree_scope = tree_scope_of(document_or_shadow_root);
@@ -2935,7 +2936,7 @@ void record_non_author_stylesheets(DOM::Document& document)
         return;
 
     HTML::MainThreadPhases::Scope phase { HTML::MainThreadPhases::Phase::StyleUserAgentSheets };
-    auto& style_engine = style_computer.style_engine();
+    auto& style_engine = style_computer.document().render_inputs_for_write().style_engine();
     for (auto const& entry : recorded)
         style_engine.detach_sheet(entry.sheet_id, document_tree_scope);
     recorded.clear();
@@ -2996,7 +2997,7 @@ static void record_stylesheet_rule_conditions_now(StyleSheetState& engine_sheet,
     // sheet would lose those gates and could re-enable rules beneath a non-matching import.
     MediaEnvironmentSnapshot environment { document };
     Parser::ValueParserFFI::rust_style_sheet_publish_conditions(
-        engine_sheet.native_sheet().handle(), document.style_computer().style_engine().rust_handle(), environment.ffi_environment());
+        engine_sheet.native_sheet().handle(), document.render_inputs_for_write().style_engine().rust_handle(), environment.ffi_environment());
 }
 
 void record_stylesheet_rule_conditions(StyleSheetState& sheet, DOM::Document& document)
@@ -3027,7 +3028,7 @@ void record_stylesheet_conditions(StyleSheetState& sheet, DOM::Node& document_or
     auto sheet_id = style_computer.style_engine_sheet_id_for(*engine_sheet);
     if (sheet_id == 0)
         return;
-    style_computer.style_engine().publish_input([tree_scope = tree_scope_of(document_or_shadow_root), occurrence = sheet.style_engine_occurrence_id(), conditions_hold](StyleInputScope const& input) {
+    style_computer.document().render_inputs_for_write().style_engine().publish_input([tree_scope = tree_scope_of(document_or_shadow_root), occurrence = sheet.style_engine_occurrence_id(), conditions_hold](StyleInputScope const& input) {
         input.engine().set_sheet_occurrence_conditions(tree_scope, occurrence, conditions_hold);
     });
 }
@@ -3043,7 +3044,7 @@ static void record_stylesheet_detached_now(StyleSheetState& sheet, DOM::Node& do
     auto tree_scope = tree_scope_of(document_or_shadow_root);
     auto* shared_compiled_style_sheet = sheet.shared_compiled_style_sheet();
     if (!shared_compiled_style_sheet) {
-        style_computer.style_engine().detach_sheet_occurrence(tree_scope, sheet.style_engine_occurrence_id());
+        style_computer.document().render_inputs_for_write().style_engine().detach_sheet_occurrence(tree_scope, sheet.style_engine_occurrence_id());
         return;
     }
     detach_shared_compiled_style_sheet(*shared_compiled_style_sheet, sheet.style_engine_occurrence_id(), tree_scope, style_computer);

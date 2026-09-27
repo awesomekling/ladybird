@@ -147,8 +147,6 @@ static GC::Ptr<HTML::LocalNavigable> local_root_of(HTML::Window const& window)
 Internals::Internals(HTML::Window& window)
     : InternalsBase(window)
 {
-    // The join counters report how long before each join the page last dirtied render state.
-    DOM::Document::time_render_state_mutations_for_join_counters();
     // The rendering scheduler counters report the door passes.
     Layout::RustFFI::layout_arena_count_door_passes();
 }
@@ -1632,7 +1630,6 @@ GC::Ref<JS::Object> Internals::join_counters_object() const
         object->define_direct_property("totalNanoseconds"_utf16_fly_string, JS::Value(counters.total_nanoseconds), JS::default_attributes);
         object->define_direct_property("cleanReadNanoseconds"_utf16_fly_string, JS::Value(counters.clean_read_nanoseconds), JS::default_attributes);
         object->define_direct_property("maxNanoseconds"_utf16_fly_string, JS::Value(counters.max_nanoseconds), JS::default_attributes);
-        object->define_direct_property("nanosecondsSinceMutation"_utf16_fly_string, JS::Value(counters.nanoseconds_since_mutation), JS::default_attributes);
         object->define_direct_property("joinsThatPublishedNothing"_utf16_fly_string, JS::Value(counters.joins_that_published_nothing), JS::default_attributes);
         object->define_direct_property("frameWaits"_utf16_fly_string, JS::Value(counters.frame_waits), JS::default_attributes);
         object->define_direct_property("frameWaitNanoseconds"_utf16_fly_string, JS::Value(counters.frame_wait_nanoseconds), JS::default_attributes);
@@ -1650,7 +1647,6 @@ GC::Ref<JS::Object> Internals::join_counters_object() const
         totals.total_nanoseconds += counters.total_nanoseconds;
         totals.clean_read_nanoseconds += counters.clean_read_nanoseconds;
         totals.max_nanoseconds = max(totals.max_nanoseconds, counters.max_nanoseconds);
-        totals.nanoseconds_since_mutation += counters.nanoseconds_since_mutation;
         totals.joins_that_published_nothing += counters.joins_that_published_nothing;
         totals.frame_waits += counters.frame_waits;
         totals.frame_wait_nanoseconds += counters.frame_wait_nanoseconds;
@@ -2252,7 +2248,7 @@ GC::Ref<JS::Object> Internals::style_engine_transaction_reactions()
             MUST(tags->create_data_property_or_throw(index++, JS::PrimitiveString::create(vm(), identity)));
         }
     };
-    auto transaction_is_scoped = style_computer.style_engine().take_diagnostic_style_transaction(root->style_node_id(), move(consume));
+    auto transaction_is_scoped = document.render_inputs_for_write().style_engine().take_diagnostic_style_transaction(root->style_node_id(), move(consume));
 
     // Reading the transaction consumed the engine's pending work and threw the styles it computed
     // away, so every element the transaction reacted for is now one the document believes is
@@ -2274,7 +2270,7 @@ double Internals::style_engine_match_document()
     auto* root = document.document_element();
     if (!root || root->style_node_id() == 0)
         return -1;
-    auto matches = document.style_computer().style_engine().match_document(root->style_node_id());
+    auto matches = document.render_inputs_for_write().style_engine().match_document(root->style_node_id());
     if (matches == NumericLimits<size_t>::max())
         return -1;
     return static_cast<double>(matches);
@@ -2363,7 +2359,7 @@ Utf16String Internals::style_engine_matched_rules()
         if (!element || element->style_node_id() == 0)
             return TraversalDecision::Continue;
         Vector<CSS::StyleEngine::RuleMatch> matches;
-        if (!style_computer.style_engine().match_element(element->style_node_id(), matches, CSS::StyleEngine::MatchPurpose::Exact)) {
+        if (!style_computer.style_engine_queries().match_element(element->style_node_id(), matches, CSS::StyleEngine::MatchPurpose::Exact)) {
             builder.appendff("{}: the engine could not answer\n", describe(*element));
             return TraversalDecision::Continue;
         }
@@ -2781,7 +2777,7 @@ GC::Ref<JS::Object> Internals::style_invalidation_counters_object() const
     object->define_direct_property("registeredPropertiesCacheRebuilds"_utf16_fly_string, JS::Value(counters.registered_properties_cache_rebuilds), JS::default_attributes);
     object->define_direct_property("scopeRuleCacheBuilds"_utf16_fly_string, JS::Value(counters.scope_rule_cache_builds), JS::default_attributes);
     object->define_direct_property("styleQueryContainerScans"_utf16_fly_string, JS::Value(counters.style_query_container_scans), JS::default_attributes);
-    object->define_direct_property("sizeQueryContainerScanVisits"_utf16_fly_string, JS::Value(static_cast<double>(CSS::StyleEngineFFI::style_engine_size_query_container_scan_visits(window().associated_document().style_computer().style_engine().rust_handle(), false))), JS::default_attributes);
+    object->define_direct_property("sizeQueryContainerScanVisits"_utf16_fly_string, JS::Value(static_cast<double>(CSS::StyleEngineFFI::style_engine_size_query_container_scan_visits(window().associated_document().render_inputs_for_write().style_engine().rust_handle(), false))), JS::default_attributes);
     object->define_direct_property("styleEngineTransactionSetups"_utf16_fly_string, JS::Value(counters.style_engine_transaction_setups), JS::default_attributes);
     object->define_direct_property("styleEngineTransactionSetupMicroseconds"_utf16_fly_string, JS::Value(counters.style_engine_transaction_setup_microseconds), JS::default_attributes);
     object->define_direct_property("styleEnginePlanningMicroseconds"_utf16_fly_string, JS::Value(counters.style_update_bridge_microseconds), JS::default_attributes);

@@ -144,17 +144,27 @@ static RustDeclarationBlock const& declaration_of_rule(CSSRule const& rule)
     VERIFY_NOT_REACHED();
 }
 
+static Array<u64, 5> font_metrics_words(Length::FontMetrics const& metrics)
+{
+    return {
+        bit_cast<u64>(metrics.font_size.to_double()),
+        bit_cast<u64>(metrics.x_height.to_double()),
+        bit_cast<u64>(metrics.cap_height.to_double()),
+        bit_cast<u64>(metrics.zero_advance.to_double()),
+        bit_cast<u64>(metrics.line_height.to_double()),
+    };
+}
+
 StyleComputer::StyleComputer(DOM::Document& document)
     : m_document(document)
     , m_default_font_metrics(16, Platform::FontPlugin::the().default_font(16)->pixel_metrics(), InitialValues::line_height())
     , m_root_element_font_metrics(m_default_font_metrics)
-    , m_style_engine(StyleEngine::DeviceClass::ForegroundDesktop, this)
+    , m_style_engine(StyleEngine::DeviceClass::ForegroundDesktop, this, font_metrics_words(m_root_element_font_metrics).span(), m_root_element_font_metrics_depend_on_viewport_metrics)
 {
     // The style engine decides which groups a winner reaches from the dependency masks the default
     // group payloads register. Register them before the engine computes its first record, which is
     // the document element's, rather than when C++ first reads a group.
     style_group_default_payload(0);
-    set_root_element_font_metrics(m_root_element_font_metrics, m_root_element_font_metrics_depend_on_viewport_metrics);
 }
 
 void StyleComputer::finalize()
@@ -226,7 +236,7 @@ ComputedStyleRecordView StyleComputer::computed_style_record_view(StyleRecordID 
 {
     if (!style_record_identity)
         return {};
-    auto view = m_style_engine.style_record_view(style_record_identity);
+    auto view = m_style_engine.engine().style_record_view(style_record_identity);
     if (!view.present)
         return {};
     bool owns_style_record_pin = m_style_record_view_epoch_depth == 0 || view.animation_overlay_identity != 0;
@@ -241,32 +251,32 @@ void const* StyleComputer::style_record_payloads(StyleRecordID style_record_iden
 {
     if (!style_record_identity)
         return nullptr;
-    return m_style_engine.style_record_payloads(style_record_identity);
+    return m_style_engine.engine().style_record_payloads(style_record_identity);
 }
 
 void StyleComputer::pin_style_record(StyleRecordID style_record_identity) const
 {
     VERIFY(style_record_identity);
-    m_style_engine.pin_style_record(style_record_identity);
+    m_style_engine.engine().pin_style_record(style_record_identity);
 }
 
 void StyleComputer::unpin_style_record(StyleRecordID style_record_identity) const
 {
     VERIFY(style_record_identity);
-    m_style_engine.unpin_style_record(style_record_identity);
+    m_style_engine.engine().unpin_style_record(style_record_identity);
 }
 
 void StyleComputer::begin_style_record_view_epoch() const
 {
     if (m_style_record_view_epoch_depth++ == 0)
-        const_cast<StyleComputer&>(*this).m_style_engine.begin_style_record_view_epoch();
+        style_engine_queries().begin_style_record_view_epoch();
 }
 
 void StyleComputer::end_style_record_view_epoch() const
 {
     VERIFY(m_style_record_view_epoch_depth > 0);
     if (--m_style_record_view_epoch_depth == 0)
-        const_cast<StyleComputer&>(*this).m_style_engine.end_style_record_view_epoch();
+        style_engine_queries().end_style_record_view_epoch();
 }
 
 void StyleComputer::register_style_node(StyleNodeID style_node_id, DOM::Node& node)
@@ -317,9 +327,10 @@ void StyleComputer::unregister_style_node(StyleNodeID style_node_id)
         // A style node identity is reissued, so what was published under it leaves with it.
         if (auto* svg_element = as_if<SVG::SVGElement>(m_element_style_nodes[index].ptr()))
             Layout::clear_svg_attribute_facts(svg_element->document(), style_node_id);
-        m_style_engine.note_style_node_retired(style_node_id);
+        auto& style_engine = m_document->render_inputs_for_write().style_engine();
+        style_engine.note_style_node_retired(style_node_id);
         m_element_style_nodes[index] = nullptr;
-        m_style_engine.publish_input([style_node_id](StyleInputScope const& input) {
+        style_engine.publish_input([style_node_id](StyleInputScope const& input) {
             input.engine().consume_recorded_element_style_input_change(input, style_node_id);
         });
     }
@@ -346,7 +357,9 @@ GC::Ptr<DOM::Node> StyleComputer::node_for_style_node(StyleNodeID style_node_id)
 void StyleComputer::prepare_elements_for_style_computation()
 {
     for (;;) {
-        auto elements = m_style_engine.take_elements_awaiting_first_style_computation();
+        if (!style_engine().has_elements_awaiting_first_style_computation())
+            break;
+        auto elements = m_document->render_inputs_for_write().style_engine().take_elements_awaiting_first_style_computation();
         if (elements.is_empty())
             break;
         for (auto style_node : elements) {
@@ -1019,7 +1032,7 @@ void StyleComputer::start_needed_transitions(StyleDrainScope const& scope, Compu
     };
     // The lengths the transitions resolve against are those of the record the element installed.
     transition_animation_context.has_length_resolution_context = StyleValueFFI::rust_transition_length_resolution_context(
-        m_style_engine.rust_handle(), abstract_element.style_record_identity().value(), &transition_animation_context.length_resolution_context);
+        m_style_engine.engine().rust_handle(), abstract_element.style_record_identity().value(), &transition_animation_context.length_resolution_context);
     apply_committed_transform_reference_box(scope, abstract_element, transition_animation_context);
 
     struct PreparedTransition {
@@ -1186,7 +1199,7 @@ void StyleComputer::start_needed_transitions(StyleDrainScope const& scope, Compu
                 property.before_change_value = start_value;
         }
     } else {
-        m_style_engine.decide_transitions(
+        m_style_engine.engine().decide_transitions(
             before_change_style_record,
             new_style.computed_longhand_table(),
             new_style.animated_overlay(Badge<StyleComputer> {}),
@@ -1348,7 +1361,7 @@ void StyleComputer::register_style_engine_sheet_source(StyleSheetState const& sh
 Optional<StyleEngineRuleTarget> StyleComputer::style_engine_rule_target(StyleEngineRuleID rule_id) const
 {
     StyleEngineFFI::FfiNativeRuleTarget target {};
-    if (!StyleEngineFFI::style_engine_native_rule_target(m_style_engine.rust_handle(), rule_id.value(), &target))
+    if (!StyleEngineFFI::style_engine_native_rule_target(m_style_engine.engine().rust_handle(), rule_id.value(), &target))
         return {};
     RustDeclarationBlockSnapshot declaration { static_cast<Parser::ValueParserFFI::DeclarationBlockData const*>(target.declarations) };
     auto source = m_style_engine_sheet_sources.get(target.source_identity);
@@ -1371,7 +1384,7 @@ Optional<StyleEngineRuleTarget> StyleComputer::style_engine_rule_target(StyleEng
 
 StyleEngineRuleID StyleComputer::style_engine_rule_id_for(RustRule const& rule) const
 {
-    return StyleEngineRuleID { StyleEngineFFI::style_engine_native_rule_id(m_style_engine.rust_handle(), rule.identity()) };
+    return StyleEngineRuleID { StyleEngineFFI::style_engine_native_rule_id(m_style_engine.engine().rust_handle(), rule.identity()) };
 }
 
 SheetID StyleComputer::style_engine_sheet_id_for(StyleSheetState const& sheet) const
@@ -1754,7 +1767,7 @@ JsonArray StyleComputer::collect_devtools_applied_style_rules(DOM::AbstractEleme
         if (node == 0)
             return;
         Vector<StyleEngine::RuleMatch> matches;
-        if (!style_engine().match_element(node, matches, StyleEngine::MatchPurpose::Exact))
+        if (!style_engine_queries().match_element(node, matches, StyleEngine::MatchPurpose::Exact))
             return;
 
         // The engine reports the rules in the order the cascade applies them, and the panel lists
@@ -1840,14 +1853,14 @@ RefPtr<CustomPropertyData const> StyleComputer::engine_custom_property_environme
     if (did_materialize)
         *did_materialize = true;
     u64 parent_identity = 0;
-    auto const* store = m_style_engine.borrow_engine_custom_property_environment(identity, parent_identity);
+    auto const* store = m_style_engine.engine().borrow_engine_custom_property_environment(identity, parent_identity);
     if (!store)
         return {};
     // What an element's or a pseudo-element's animations composed its custom properties into is its
     // animation overlay, over the environment its record was resolved over.
     u32 owner_style_node = 0;
     u8 owner_pseudo_kind = 0;
-    if (StyleEngineFFI::style_engine_sampled_custom_property_environment_owner(m_style_engine.rust_handle(), identity, &owner_style_node, &owner_pseudo_kind)) {
+    if (StyleEngineFFI::style_engine_sampled_custom_property_environment_owner(m_style_engine.engine().rust_handle(), identity, &owner_style_node, &owner_pseudo_kind)) {
         auto index = style_node_index(StyleNodeID { owner_style_node });
         if (auto* owner = index < m_element_style_nodes.size() ? as_if<DOM::Element>(m_element_style_nodes[index].ptr()) : nullptr) {
             Optional<PseudoElement> owner_pseudo_element;
@@ -1885,21 +1898,6 @@ void StyleComputer::update_root_element_font_metrics(ComputedValues const& value
     //     installed, so only the host's copy is refreshed here.
     m_root_element_font_metrics = Length::FontMetrics { values.font_size(), values.font_list().first_available_font().pixel_metrics(), values.line_height() };
     m_root_element_font_metrics_depend_on_viewport_metrics = values.font_metrics_depend_on_viewport_metrics();
-}
-
-void StyleComputer::set_root_element_font_metrics(Length::FontMetrics const& metrics, bool depends_on_viewport_metrics) const
-{
-    m_root_element_font_metrics = metrics;
-    m_root_element_font_metrics_depend_on_viewport_metrics = depends_on_viewport_metrics;
-
-    Array<u64, 5> const words {
-        bit_cast<u64>(metrics.font_size.to_double()),
-        bit_cast<u64>(metrics.x_height.to_double()),
-        bit_cast<u64>(metrics.cap_height.to_double()),
-        bit_cast<u64>(metrics.zero_advance.to_double()),
-        bit_cast<u64>(metrics.line_height.to_double()),
-    };
-    m_style_engine.set_root_element_font_metrics(words.span(), depends_on_viewport_metrics);
 }
 
 CSSPixels StyleComputer::default_user_font_size()
@@ -1942,7 +1940,7 @@ ComputationContext StyleComputer::make_computation_context_for_property(Property
         : document().style_scope().style_engine_tree_scope().value();
     auto subject_inline_axis_is_horizontal = [&]() {
         auto writing_mode = [&](DOM::AbstractElement const& candidate) -> Optional<WritingMode> {
-            auto record = m_style_engine.style_record_view(candidate.style_record_identity());
+            auto record = m_style_engine.engine().style_record_view(candidate.style_record_identity());
             if (!record.present)
                 return {};
             auto const* inherited_box = static_cast<ComputedValuesFFI::InheritedBoxValues const*>(record.payloads[to_underlying(StyleGroupIndex::InheritedBoxValues)]);
@@ -2223,7 +2221,7 @@ StyleEngine::StyleRecordDelta StyleComputer::record_computed_style_inputs(Option
             animation_overlay_payloads[index] = values.style_group_payload(static_cast<StyleGroupIndex>(index));
     }
     auto pseudo_kind = pseudo_element_to_ffi(abstract_element.has_value() ? abstract_element->pseudo_element() : Optional<CSS::PseudoElement> {});
-    auto publication = const_cast<StyleComputer&>(*this).style_engine().publish_computed_groups(style_node_id, pseudo_kind, payloads, ComputedValues::inherited_style_group_count, custom_property_environment ? custom_property_environment->identity() : 0, false, counter_style_environment_identity, animation_overlay_identity, animated_properties ? animated_properties->overlay() : nullptr, animated_properties ? animation_overlay_payloads.span() : ReadonlySpan<void const*> {}, base.computed_longhand_table(), custom_property_environment ? custom_property_environment->rust_store() : nullptr);
+    auto publication = m_document->render_inputs_for_write().style_engine().publish_computed_groups(style_node_id, pseudo_kind, payloads, ComputedValues::inherited_style_group_count, custom_property_environment ? custom_property_environment->identity() : 0, false, counter_style_environment_identity, animation_overlay_identity, animated_properties ? animated_properties->overlay() : nullptr, animated_properties ? animation_overlay_payloads.span() : ReadonlySpan<void const*> {}, base.computed_longhand_table(), custom_property_environment ? custom_property_environment->rust_store() : nullptr);
     return publication;
 }
 
@@ -2258,7 +2256,7 @@ void StyleComputer::apply_animated_properties_to_reconstruction(ComputedStyleWor
 
 NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::reconstruct_computed_properties_for_animation(StyleRecordID style_record) const
 {
-    auto record = m_style_engine.style_record_view(style_record);
+    auto record = m_style_engine.engine().style_record_view(style_record);
     VERIFY(record.present);
     auto style = ComputedStyleWorkingSet::create_for_animation_update(
         static_cast<ComputedValuesFFI::ComputedLonghandTable const*>(record.longhand_table),

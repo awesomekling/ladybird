@@ -27,6 +27,7 @@ use crate::layout::tree_shape::{PublishedShape, PublishedStyle, RetiredSlots};
 use crate::layout::used_values::FfiCssPixelRect;
 use crate::layout::{RenderedText, RenderedTextBoundary, TextFragments};
 use crate::painting::fragment_ownership::FragmentOwnershipFilter;
+use crate::painting::geometry_read::{GeometryRead, read_live_geometry};
 use crate::painting::hit_test::HitTestList;
 use crate::painting::host::FfiLayerImageList;
 use crate::painting::image_map_areas::ImageMapAreas;
@@ -334,13 +335,7 @@ fn containing_block_by_walking_ancestors(read: &impl PaintRead, node: NodeSlotId
 
 /// The reads the display list recording makes of a document. The live arena answers them from the
 /// columns layout writes; a [`PublishedFrame`] answers them from what the document published.
-pub(crate) trait PaintRead: Sized {
-    fn paintable_data(&self, id: NodeSlotId) -> &PaintableData;
-    fn paintable_row_is_populated(&self, id: NodeSlotId) -> bool;
-    /// Reads the fragment link a populated row committed, from the same generation as its row.
-    fn with_committed_fragment_link<R>(&self, id: NodeSlotId, read: impl FnOnce(Option<&FragmentLink>) -> R) -> R;
-    /// The side data a populated row committed, from the same generation as its row.
-    fn committed_side_data(&self, id: NodeSlotId) -> CommittedSideDataRef<'_>;
+pub(crate) trait PaintRead: GeometryRead {
     fn with_paintable_visual_context_node_handles<R>(
         &self,
         id: NodeSlotId,
@@ -348,9 +343,6 @@ pub(crate) trait PaintRead: Sized {
     ) -> R;
 
     fn slot_is_live(&self, id: NodeSlotId) -> bool;
-    fn node_kind_if_live(&self, id: NodeSlotId) -> Option<NodeKind>;
-    fn node_flags_if_live(&self, id: NodeSlotId) -> u32;
-    fn node_parent_if_live(&self, id: NodeSlotId) -> Option<NodeSlotId>;
     fn node_first_child_if_live(&self, id: NodeSlotId) -> Option<NodeSlotId>;
     fn node_next_sibling_if_live(&self, id: NodeSlotId) -> Option<NodeSlotId>;
     fn node_containing_block_if_live(&self, id: NodeSlotId) -> Option<NodeSlotId>;
@@ -359,7 +351,6 @@ pub(crate) trait PaintRead: Sized {
     fn node_is_dom_backed(&self, id: NodeSlotId) -> bool;
     fn node_is_element_backed(&self, id: NodeSlotId) -> bool;
     fn node_is_out_of_flow_if_live(&self, id: NodeSlotId) -> bool;
-    fn node_is_fragmented_inline(&self, id: NodeSlotId) -> bool;
     fn node_is_atomic_inline(&self, id: NodeSlotId) -> bool;
     fn node_is_positioned(&self, id: NodeSlotId) -> bool;
     fn node_is_floating(&self, id: NodeSlotId) -> bool;
@@ -397,10 +388,6 @@ pub(crate) trait PaintRead: Sized {
     fn stacking_context_entries(&self, root: NodeSlotId) -> Option<impl Deref<Target = StackingContextEntries> + '_>;
     fn damaged_paint_rows(&self) -> Vec<NodeSlotId>;
 
-    /// The absolute rect memoized for a box, if any.
-    fn memoized_absolute_rect(&self, id: NodeSlotId) -> Option<CssPixelRect>;
-    fn memoize_absolute_rect(&self, id: NodeSlotId, rect: CssPixelRect);
-
     fn dom_offset_for_rendered_text_offset(
         &self,
         id: NodeSlotId,
@@ -427,16 +414,6 @@ pub(crate) trait PaintRead: Sized {
         self.rendered_text(id)
             .expect("text must be published before mapping DOM offsets")
             .rendered_text_offset_for_dom_offset(offset, boundary)
-    }
-
-    /// The line root whose committed side data holds an inline box's pieces, read from the same
-    /// generation as the rows.
-    fn inline_pieces_root(&self, inline_paintable: NodeSlotId) -> Option<NodeSlotId> {
-        if !self.paintable_row_is_populated(inline_paintable) {
-            return None;
-        }
-        let root = self.paintable_data(inline_paintable).containing_block;
-        (self.paintable_row_is_populated(root) && crate::painting::node_painting::has_lines(self, root)).then_some(root)
     }
 
     /// Visits the layout subtree under `root` in pre-order, descending into a node's children only
@@ -513,24 +490,6 @@ macro_rules! read_live_layout_tree {
             crate::layout::LayoutNodeArena::slot_is_live($arena(self), id)
         }
 
-        fn node_kind_if_live(
-            &self,
-            id: crate::layout::node_data::NodeSlotId,
-        ) -> Option<crate::layout::node_data::NodeKind> {
-            crate::layout::LayoutNodeArena::node_kind_if_live($arena(self), id)
-        }
-
-        fn node_flags_if_live(&self, id: crate::layout::node_data::NodeSlotId) -> u32 {
-            crate::layout::LayoutNodeArena::node_flags_if_live($arena(self), id)
-        }
-
-        fn node_parent_if_live(
-            &self,
-            id: crate::layout::node_data::NodeSlotId,
-        ) -> Option<crate::layout::node_data::NodeSlotId> {
-            crate::layout::LayoutNodeArena::node_parent_if_live($arena(self), id)
-        }
-
         fn node_first_child_if_live(
             &self,
             id: crate::layout::node_data::NodeSlotId,
@@ -563,10 +522,6 @@ macro_rules! read_live_layout_tree {
 
         fn node_is_out_of_flow_if_live(&self, id: crate::layout::node_data::NodeSlotId) -> bool {
             crate::layout::LayoutNodeArena::node_is_out_of_flow_if_live($arena(self), id)
-        }
-
-        fn node_is_fragmented_inline(&self, id: crate::layout::node_data::NodeSlotId) -> bool {
-            crate::layout::LayoutNodeArena::node_is_fragmented_inline($arena(self), id)
         }
 
         fn node_is_atomic_inline(&self, id: crate::layout::node_data::NodeSlotId) -> bool {
@@ -731,7 +686,7 @@ macro_rules! read_live_arena {
 
 pub(crate) use read_live_arena;
 
-impl PaintRead for LayoutNodeArena {
+impl GeometryRead for LayoutNodeArena {
     fn paintable_data(&self, id: NodeSlotId) -> &PaintableData {
         self.live_paintable_data(id)
     }
@@ -756,6 +711,10 @@ impl PaintRead for LayoutNodeArena {
         LayoutNodeArena::memoize_absolute_rect(self, id, rect);
     }
 
+    read_live_geometry!(std::convert::identity);
+}
+
+impl PaintRead for LayoutNodeArena {
     read_live_arena!(std::convert::identity);
 }
 
@@ -774,7 +733,7 @@ impl<'a> PaintSource<'a> {
     }
 }
 
-impl PaintRead for PaintSource<'_> {
+impl GeometryRead for PaintSource<'_> {
     fn paintable_data(&self, id: NodeSlotId) -> &PaintableData {
         self.frame.rows.paintable_data(id)
     }
@@ -801,10 +760,6 @@ impl PaintRead for PaintSource<'_> {
             .set(id, self.frame.geometry_epoch, rect);
     }
 
-    fn slot_is_live(&self, id: NodeSlotId) -> bool {
-        self.frame.node(id).is_some()
-    }
-
     fn node_kind_if_live(&self, id: NodeSlotId) -> Option<NodeKind> {
         self.frame.node(id).map(|node| node.kind)
     }
@@ -815,6 +770,18 @@ impl PaintRead for PaintSource<'_> {
 
     fn node_parent_if_live(&self, id: NodeSlotId) -> Option<NodeSlotId> {
         PublishedFrame::link(self.frame.node(id)?.parent)
+    }
+
+    fn node_is_fragmented_inline(&self, id: NodeSlotId) -> bool {
+        self.frame
+            .node_and_style(id)
+            .is_some_and(|(node, style)| node_facts::node_is_fragmented_inline(node, style))
+    }
+}
+
+impl PaintRead for PaintSource<'_> {
+    fn slot_is_live(&self, id: NodeSlotId) -> bool {
+        self.frame.node(id).is_some()
     }
 
     fn node_first_child_if_live(&self, id: NodeSlotId) -> Option<NodeSlotId> {
@@ -853,12 +820,6 @@ impl PaintRead for PaintSource<'_> {
         self.frame
             .node_and_style(id)
             .is_some_and(|(node, style)| node_facts::node_is_out_of_flow(node, style))
-    }
-
-    fn node_is_fragmented_inline(&self, id: NodeSlotId) -> bool {
-        self.frame
-            .node_and_style(id)
-            .is_some_and(|(node, style)| node_facts::node_is_fragmented_inline(node, style))
     }
 
     fn node_is_atomic_inline(&self, id: NodeSlotId) -> bool {

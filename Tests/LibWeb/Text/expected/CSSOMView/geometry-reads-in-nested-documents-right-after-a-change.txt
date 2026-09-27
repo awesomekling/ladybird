@@ -1,0 +1,7 @@
+initial: outer 200 200, inner 200 200
+outer iframe resized in the top document: outer 300 300, inner 300 300
+outer iframe resized by attribute: outer 250 250, inner 250 250
+iframe moved in the top document: outer 0, inner 0, iframe 40
+middle document padded: outer 220 220, inner 220 220, iframe 250
+innermost box narrowed: outer 220 220, inner 110 110
+alternating: 95 190 105 210 115 230

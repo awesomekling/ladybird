@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+body {
+    margin: 0;
+}
+#above {
+    height: 20px;
+}
+iframe {
+    border: none;
+    height: 100px;
+}
+</style>
+<div id="above"></div>
+<iframe id="outer" width="200" srcdoc="<style>body { margin: 0 } iframe { border: none; width: 100%; height: 50px; display: block }</style><div id=fill style='height: 10px'></div><iframe id=inner srcdoc=&quot;<style>body { margin: 0 }</style><div id=fill style='height: 10px'></div>&quot;></iframe>"></iframe>
+<script>
+function waitForLoad(iframe) {
+    return new Promise(resolve => {
+        if (iframe.contentDocument && iframe.contentDocument.readyState === "complete" && iframe.contentDocument.getElementById("fill"))
+            resolve();
+        else
+            iframe.addEventListener("load", () => resolve(), { once: true });
+    });
+}
+
+asyncTest(async done => {
+    const outer = document.getElementById("outer");
+    await waitForLoad(outer);
+    const inner = outer.contentDocument.getElementById("inner");
+    await waitForLoad(inner);
+
+    // Printing changes the document, so what is printed is collected until the reads are over.
+    const lines = [];
+    const outerFill = outer.contentDocument.getElementById("fill");
+    const innerFill = inner.contentDocument.getElementById("fill");
+    const readTwice = (what, read) => {
+        const first = read();
+        const second = read();
+        lines.push(`${what}: ${first}${first === second ? "" : ` (then ${second})`}`);
+    };
+    const widths = () => `outer ${outerFill.getBoundingClientRect().width} ${outerFill.offsetWidth}, inner ${innerFill.getBoundingClientRect().width} ${innerFill.offsetWidth}`;
+
+    readTwice("initial", widths);
+
+    // A change to the document that embeds them moves what the embedded documents lay out in.
+    outer.style.width = "300px";
+    readTwice("outer iframe resized in the top document", widths);
+
+    outer.width = "250";
+    outer.style.width = "";
+    readTwice("outer iframe resized by attribute", widths);
+
+    // A change to the top document that moves the iframe does not move a box inside it: the rects are in its viewport.
+    document.getElementById("above").style.height = "40px";
+    readTwice("iframe moved in the top document", () => `outer ${outerFill.getBoundingClientRect().y}, inner ${innerFill.getBoundingClientRect().y}, iframe ${outer.getBoundingClientRect().y}`);
+
+    // A change to the middle document moves what the innermost one lays out in, and nothing of the top document.
+    outer.contentDocument.body.style.paddingLeft = "30px";
+    readTwice("middle document padded", () => `${widths()}, iframe ${outer.getBoundingClientRect().width}`);
+
+    // A change inside the innermost document.
+    innerFill.style.width = "50%";
+    readTwice("innermost box narrowed", widths);
+
+    // Reads alternating between the documents with a change between each.
+    const alternating = [];
+    for (const width of [220, 240, 260]) {
+        outer.width = String(width);
+        alternating.push(innerFill.getBoundingClientRect().width);
+        alternating.push(outerFill.offsetWidth);
+    }
+    lines.push(`alternating: ${alternating.join(" ")}`);
+
+    for (const line of lines)
+        println(line);
+    done();
+});
+</script>

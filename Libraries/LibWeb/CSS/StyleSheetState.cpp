@@ -689,7 +689,7 @@ bool StyleSheetState::evaluate_media_queries(DOM::Document const& document, Pars
     // The rule conditions that flipped go to the engine as published input: at once, or beside a pass in flight once
     // it has been drained, in order with the sheet changes around them.
     if (!flipped.identities.is_empty()) {
-        mutable_document.style_computer().style_engine().publish_input([flipped = move(flipped)](StyleInputScope const& input) {
+        mutable_document.render_inputs_for_write().style_engine().publish_input([flipped = move(flipped)](StyleInputScope const& input) {
             Parser::ValueParserFFI::rust_style_sheet_publish_rule_conditions_hold(input.engine().rust_handle(), flipped.identities.data(), flipped.holds.data(), flipped.identities.size());
         });
     }

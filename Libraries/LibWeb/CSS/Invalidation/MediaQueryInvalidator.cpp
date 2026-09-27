@@ -49,7 +49,7 @@ void evaluate_media_rules_and_publish_conditions(DOM::Document& document)
 
             for (auto const& entry : document.style_computer().non_author_style_sheets()) {
                 if (entry.sheet.ptr() == &style_sheet) {
-                    document.style_computer().style_engine().set_sheet_conditions_hold(
+                    document.render_inputs_for_write().style_engine().set_sheet_conditions_hold(
                         entry.sheet_id, !style_sheet.disabled() && style_sheet.native_media_list().matches());
                     break;
                 }

@@ -205,7 +205,8 @@ use exact_matcher::ExactMatcher;
 
 pub use computed::HOLDS_IMAGE_VALUES;
 pub use counter_context::StyleEngine;
-pub use engine_home::StyleEngineHandle;
+pub(crate) use engine_home::ThroughRenderInputs;
+pub use engine_home::{StyleEngineHandle, StyleEngineInputHandle};
 pub use inputs::{PublishedBoxFacts, PublishedTextSource, TextStyleParentFacts};
 
 use batch_matcher::AncestorRequirements;

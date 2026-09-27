@@ -296,7 +296,7 @@ mod tests {
         let initial = engine.current_rule_version(id).declaration_block;
         unsafe {
             style_engine_native_rule_declarations_changed(
-                crate::css::style::StyleEngineHandle::for_test_engine(&raw mut engine),
+                crate::css::style::StyleEngineInputHandle::for_test_engine(&raw mut engine),
                 Rc::as_ptr(&child).cast(),
                 (&raw mut notifications).cast(),
                 notify,
@@ -308,7 +308,7 @@ mod tests {
         engine.next_declaration_block_version();
         unsafe {
             style_engine_native_rule_declarations_changed(
-                crate::css::style::StyleEngineHandle::for_test_engine(&raw mut engine),
+                crate::css::style::StyleEngineInputHandle::for_test_engine(&raw mut engine),
                 Rc::as_ptr(&child).cast(),
                 (&raw mut notifications).cast(),
                 notify,
@@ -320,7 +320,7 @@ mod tests {
         rust_rule_list_clear(children);
         unsafe {
             style_engine_native_rule_declarations_changed(
-                crate::css::style::StyleEngineHandle::for_test_engine(&raw mut engine),
+                crate::css::style::StyleEngineInputHandle::for_test_engine(&raw mut engine),
                 Rc::as_ptr(&child).cast(),
                 (&raw mut notifications).cast(),
                 notify,

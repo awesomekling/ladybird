@@ -549,11 +549,13 @@ pub unsafe extern "C" fn rust_style_sheet_evaluate_media_queries(
 /// `identities` and `holds` must point to `count` values each.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_style_sheet_publish_rule_conditions_hold(
-    engine: crate::css::style::StyleEngineHandle,
+    engine: crate::css::style::StyleEngineInputHandle,
     identities: *const u64,
     holds: *const bool,
     count: usize,
 ) {
+    // The handle the document's render inputs gave out, to write the engine through.
+    let engine = engine.home();
     if count == 0 {
         return;
     }
@@ -580,9 +582,11 @@ pub unsafe extern "C" fn rust_style_sheet_publish_rule_conditions_hold(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_style_sheet_publish_conditions(
     sheet: &NativeStyleSheet,
-    engine: crate::css::style::StyleEngineHandle,
+    engine: crate::css::style::StyleEngineInputHandle,
     environment: FfiMediaEnvironment,
 ) {
+    // The handle the document's render inputs gave out, to write the engine through.
+    let engine = engine.home();
     let engine = unsafe { engine.enter("rust_style_sheet_publish_conditions") };
     sheet.publish_conditions(engine, unsafe { environment.borrow() });
 }
@@ -646,7 +650,7 @@ fn cascade_layer_order<'a>(sheets: impl IntoIterator<Item = &'a NativeStyleSheet
 pub unsafe extern "C" fn rust_style_sheet_publish_layer_order(
     sheets: *const *const NativeStyleSheet,
     count: usize,
-    engine: crate::css::style::StyleEngineHandle,
+    engine: crate::css::style::StyleEngineInputHandle,
     tree_scope: u32,
     previously_had_layers: bool,
     context: *mut c_void,
@@ -654,6 +658,8 @@ pub unsafe extern "C" fn rust_style_sheet_publish_layer_order(
     layer_context: *mut c_void,
     record_layer: unsafe extern "C" fn(*mut c_void, *const u16, usize),
 ) -> bool {
+    // The handle the document's render inputs gave out, to write the engine through.
+    let engine = engine.home();
     engine.bring_home("rust_style_sheet_publish_layer_order");
     let sheets = if count == 0 {
         &[][..]

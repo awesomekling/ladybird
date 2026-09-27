@@ -111,7 +111,7 @@ static CSS::StyleAtomID svg_reference_fragment_atom(DOM::Element& element, Optio
     if (!url.has_value() || !url->fragment().has_value())
         return {};
     auto fragment = SVG::decode_fragment_identifier(*url->fragment());
-    auto& style_engine = element.document().style_computer().style_engine();
+    auto style_engine = element.document().style_computer().style_engine_queries();
     return style_engine.intern_atom(Utf16FlyString::from_utf16(fragment.utf16_view()));
 }
 
@@ -128,7 +128,7 @@ static CSS::StyleAtomID svg_style_reference_fragment_atom(DOM::Element& element,
     if (!fragment_offset.has_value())
         return {};
     auto fragment = SVG::decode_fragment_identifier(url->url().substring_view(fragment_offset.value() + 1));
-    auto& style_engine = element.document().style_computer().style_engine();
+    auto style_engine = element.document().style_computer().style_engine_queries();
     return style_engine.intern_atom(Utf16FlyString::from_utf16(fragment.utf16_view()));
 }
 

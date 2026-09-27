@@ -1348,7 +1348,7 @@ mod tests {
             crate::css::style_sheet::rust_style_sheet_publish_layer_order(
                 sheets.as_ptr(),
                 sheets.len(),
-                crate::css::style::StyleEngineHandle::for_test_engine(&raw mut engine),
+                crate::css::style::StyleEngineInputHandle::for_test_engine(&raw mut engine),
                 0,
                 false,
                 std::ptr::null_mut(),

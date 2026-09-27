@@ -82,7 +82,7 @@ WebIDL::ExceptionOr<GC::Ref<UserTiming::PerformanceMark>> Performance::mark(Utf1
 {
     auto& realm = relevant_global_object().shape().realm();
     if (is<HTML::Window>(realm.global_object()))
-        as<HTML::Window>(realm.global_object()).associated_document().style_computer().style_engine().record_benchmark_marker(mark_name);
+        as<HTML::Window>(realm.global_object()).associated_document().style_computer().style_engine_queries().record_benchmark_marker(mark_name);
     // Workers keep their own marks.
     if (HTML::window_from_global_object(relevant_global_object()))
         HTML::MainThreadPhases::did_write_benchmark_mark(mark_name);

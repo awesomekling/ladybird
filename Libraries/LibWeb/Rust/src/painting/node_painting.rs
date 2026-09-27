@@ -5,7 +5,7 @@
  */
 
 use crate::layout::node_data::{NodeKind, NodeSlotId};
-use crate::painting::published_frame::PaintRead;
+use crate::painting::geometry_read::GeometryRead;
 
 pub(crate) const fn has_paintable(kind: NodeKind) -> bool {
     !matches!(
@@ -19,15 +19,15 @@ pub(crate) const fn has_paintable(kind: NodeKind) -> bool {
     )
 }
 
-pub(crate) fn is_fragmented_inline(arena: &impl PaintRead, node: NodeSlotId) -> bool {
+pub(crate) fn is_fragmented_inline(arena: &impl GeometryRead, node: NodeSlotId) -> bool {
     arena.node_is_fragmented_inline(node)
 }
 
-pub(crate) fn is_inline(arena: &impl PaintRead, node: NodeSlotId) -> bool {
+pub(crate) fn is_inline(arena: &impl GeometryRead, node: NodeSlotId) -> bool {
     is_fragmented_inline(arena, node)
 }
 
-pub(crate) fn has_lines(arena: &impl PaintRead, node: NodeSlotId) -> bool {
+pub(crate) fn has_lines(arena: &impl GeometryRead, node: NodeSlotId) -> bool {
     let Some(kind) = arena.node_kind_if_live(node) else {
         return false;
     };

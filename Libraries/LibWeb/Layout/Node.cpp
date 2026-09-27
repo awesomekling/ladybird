@@ -106,7 +106,7 @@ static void publish_dom_paint_facts(DOM::Node const& dom_node, DomFactPublicatio
         document.set_may_have_dom_paint_facts();
     auto identity = dom_node.is_document() ? document.style_node_id() : Node::style_node_of(&dom_node);
     if (identity.value() != 0) {
-        auto& style_engine = document.style_computer().style_engine();
+        auto& style_engine = document.render_inputs_for_write().style_engine();
         if (publication == DomFactPublication::Arrival) {
             style_engine.record_dom_paint_facts(identity, facts);
         } else if (!style_engine.change_arriving_dom_paint_facts(identity, facts)) {
@@ -1042,7 +1042,7 @@ static void publish_table_spans(DOM::Element const& element, DomFactPublication 
     if (identity.value() == 0)
         return;
     auto spans = table_spans_of(&element);
-    auto& style_engine = const_cast<DOM::Document&>(element.document()).style_computer().style_engine();
+    auto& style_engine = const_cast<DOM::Document&>(element.document()).render_inputs_for_write().style_engine();
     if (publication == DomFactPublication::Arrival) {
         style_engine.record_table_spans(identity, spans.column_span, spans.row_span, spans.raw_column_span);
         return;

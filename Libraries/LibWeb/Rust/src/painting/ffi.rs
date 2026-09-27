@@ -15,6 +15,7 @@ use crate::layout::used_values::FfiCssPixelSize;
 use crate::painting::display_list::commands::{ContextRef, SpatialNodeIndex};
 use crate::painting::filter_bytes::{FfiFilterFunction, filter_functions_graph};
 use crate::painting::force_dark::ForceDarkRole;
+use crate::painting::geometry_read::GeometryRead;
 use crate::painting::host::visual_context::FfiSvgFilterPrimitive;
 use crate::painting::paintable_data::*;
 use crate::painting::paintable_rows::{MainSidePaintableRows, PaintableRowsRead, with_inline_pieces};
@@ -2755,6 +2756,27 @@ unsafe fn rect_to_viewport_transform_from_ffi(
         scroll_offsets: unsafe { ffi_slice(transform.scroll_offsets, transform.scroll_offsets_len) },
         device_pixels_per_css_pixel: transform.device_pixels_per_css_pixel,
     })
+}
+
+/// Publishes the document's committed geometry as a query snapshot, or returns null while a stage
+/// runs (the rows are then the stage's, not committed ones) or where the rows cannot be published. The caller releases the snapshot with `query_snapshot_release`.
+///
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread, and
+/// `viewport.device_scroll_offsets` must address `viewport.device_scroll_offsets_len` points.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_publish_query_snapshot(
+    arena: *mut c_void,
+    viewport: crate::painting::query_snapshot::FfiQuerySnapshotViewport,
+) -> *const c_void {
+    if unsafe { arena_from_handle(arena) }.a_stage_is_running() {
+        return std::ptr::null();
+    }
+    let Some(snapshot) = unsafe { arena_from_handle_mut(arena) }.publish_query_snapshot(&viewport) else {
+        return std::ptr::null();
+    };
+    crate::painting::query_snapshot::into_handle(snapshot)
 }
 
 /// # Safety

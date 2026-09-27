@@ -865,13 +865,13 @@ static void apply_animation_overlay(CSS::StyleDrainScope const& scope, DOM::Abst
     // exact feedback action so the ordinary reaction path re-cascades that base before the
     // frame becomes observable.
     if (animated_property_invalidation.requires_base_style_recomputation)
-        target->document().style_computer().style_engine().record_derived_element_style_input_change(
+        target->document().render_inputs_for_write().style_engine().record_derived_element_style_input_change(
             target->style_node_id(), CSS::StyleEngine::PublishedStyle | CSS::StyleEngine::RecomputeStyle);
 
     // The pseudo-elements inherit from the composition: the next pass settles them over it, as the ordinary
     // transaction settles the descendants below.
     if (!element.pseudo_element().has_value() && invalidation.inherited_style_changed() && !CSS::deferring_engine_pseudo_installation()) {
-        target->document().style_computer().style_engine().set_sampled_composition_identity(scope, target->style_node_id(), target->style_record_identity());
+        scope.engine().set_sampled_composition_identity(scope, target->style_node_id(), target->style_record_identity());
         target->settle_pseudo_elements_over_moved_composition(scope);
     }
 
@@ -893,7 +893,7 @@ static void apply_animation_overlay(CSS::StyleDrainScope const& scope, DOM::Abst
                 inherited_style_groups = CSS::RequiredInvalidationAfterStyleChange::all_inherited_style_groups;
         }
         if (inherited_style_groups != 0)
-            target->document().style_computer().style_engine().record_flat_tree_descendant_style_input_changes(
+            target->document().render_inputs_for_write().style_engine().record_flat_tree_descendant_style_input_changes(
                 target->style_node_id(),
                 CSS::StyleEngine::InheritedStyle,
                 inherited_style_groups);
@@ -918,8 +918,9 @@ static void apply_animation_overlay(CSS::StyleDrainScope const& scope, DOM::Abst
         return;
 
     if (invalidation.needs_relayout()) {
+        // The arena marked the layout itself as it installed the style.
         if (installed_in_arena != InstalledInArena::No)
-            target->document().note_render_state_mutation();
+            (void)target->document().render_inputs_for_write();
         else
             target->set_needs_layout_update(DOM::SetNeedsLayoutReason::KeyframeEffect);
     }

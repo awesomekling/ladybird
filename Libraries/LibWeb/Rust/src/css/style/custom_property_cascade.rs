@@ -90,14 +90,14 @@ pub(super) struct PreparedCustomFunctions {
 }
 
 #[unsafe(no_mangle)]
-unsafe extern "C" fn style_engine_reset_custom_functions(engine: crate::css::style::StyleEngineHandle) {
+unsafe extern "C" fn style_engine_reset_custom_functions(engine: crate::css::style::StyleEngineInputHandle) {
     let engine = unsafe { crate::css::style::bridge::engine_entrance(engine, "style_engine_reset_custom_functions") };
     engine.document_function_snapshot = DocumentFunctionSnapshot::default();
 }
 
 #[unsafe(no_mangle)]
 unsafe extern "C" fn style_engine_publish_custom_function(
-    engine: crate::css::style::StyleEngineHandle,
+    engine: crate::css::style::StyleEngineInputHandle,
     function: *const CompiledFunction,
     caller_scope: usize,
     definition_scope: usize,

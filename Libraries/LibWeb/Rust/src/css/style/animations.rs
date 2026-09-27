@@ -2388,7 +2388,7 @@ impl Drop for HostKeyframeSets {
 /// `engine` must be live; `release` must accept `sets` once, on the main thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_unpublish_tree_scope_animation_keyframes(
-    engine: super::StyleEngineHandle,
+    engine: super::StyleEngineInputHandle,
     tree_scope: u32,
     shadow_root_identity: usize,
     sets: *mut std::ffi::c_void,
@@ -2412,7 +2412,7 @@ pub unsafe extern "C" fn style_engine_unpublish_tree_scope_animation_keyframes(
         drop(sets);
     };
     // SAFETY: Guaranteed by the caller.
-    unsafe { engine.write_or_defer(entry, unpublish) };
+    unsafe { engine.home().write_or_defer(entry, unpublish) };
 }
 
 impl super::StyleEngine {

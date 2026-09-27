@@ -679,7 +679,7 @@ void StyleScope::publish_cascade_layer_order(StyleSheetState* pending_attachment
 
     m_published_layer_ranks.clear();
     m_has_published_named_layer_order = Parser::ValueParserFFI::rust_style_sheet_publish_layer_order(
-        sheets.data(), sheets.size(), document().style_computer().style_engine().rust_handle(),
+        sheets.data(), sheets.size(), document().render_inputs_for_write().style_engine().rust_handle(),
         style_engine_tree_scope().value(), m_has_published_named_layer_order, &document(),
         [](void* document) { static_cast<DOM::Document*>(document)->flush_deferred_style_change_event(); },
         &m_published_layer_ranks,
@@ -753,7 +753,7 @@ void StyleScope::unpublish_animation_keyframes(DOM::Document& publisher)
     using KeyframeSets = Vector<NonnullRefPtr<Animations::KeyframeEffect::KeyFrameSet const>>;
     auto* sets = new KeyframeSets(move(m_published_keyframe_sets));
     style_engine_unpublish_tree_scope_animation_keyframes(
-        publisher.style_computer().style_engine().rust_handle(), shadow_root->style_engine_tree_scope().value(),
+        publisher.render_inputs_for_write().style_engine().rust_handle(), shadow_root->style_engine_tree_scope().value(),
         bit_cast<FlatPtr>(shadow_root), sets, [](void* sets) { delete static_cast<KeyframeSets*>(sets); });
 }
 
@@ -1247,7 +1247,7 @@ void StyleScope::publish_counter_styles() const
         // computation can reach, so it stays out of the engine's way until there is something to
         // say.
         if (scope.m_counter_style_environment_identity != 0) {
-            document().style_computer().style_engine().set_counter_style_environment_identity(
+            document().render_inputs_for_write().style_engine().set_counter_style_environment_identity(
                 scope.style_engine_tree_scope().value(), scope.m_counter_style_environment_identity);
         }
     };

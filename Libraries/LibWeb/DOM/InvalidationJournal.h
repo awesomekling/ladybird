@@ -52,10 +52,10 @@ public:
     explicit InvalidationJournal(Document&);
     ~InvalidationJournal();
 
-    void note_needs_layout_update(NodeIdentity, SetNeedsLayoutReason, Layout::LayoutUpdatePropagation);
+    // The marks that only repaint. The marks that can move a box, or change what a geometry read converts its rects
+    // through, are made through the document's render inputs (RenderInputs).
     void note_needs_repaint(NodeIdentity, InvalidateDisplayList);
     void note_needs_repaint_in_subtree(NodeIdentity);
-    void note_needs_layout_tree_update(NodeIdentity, SetNeedsLayoutTreeUpdateReason);
     void note_dom_paint_facts(NodeIdentity, u8 facts);
     void note_canvas_paint_facts(NodeIdentity, bool has_content, i32 content_width, i32 content_height, u64 canvas_id, u64 content_generation);
     void note_form_control_paint_facts(NodeIdentity, bool enabled, bool checked, bool indeterminate, bool being_activated);
@@ -67,42 +67,12 @@ public:
     // the update is made on the row itself at the drain, if it is still live.
     void note_unanchored_paint_facts(Compositing::RustFFI::NodeSlotId, PaintFactsUpdate&&);
     void note_paint_cache_invalidation(NodeIdentity, Painting::PaintCacheInvalidation);
-    // Whether the node is an editing host, or a text node that produces a fragment when empty,
-    // may have changed, and the rows built for it restamp both at the drain.
-    void note_editability_stamps(NodeIdentity);
-    // Whether the node is in the shadow tree of the focused text control may have changed, and the
-    // node's identity and rows publish the new answer at the drain.
-    void note_is_in_focused_text_control(NodeIdentity);
     // The document's selection changed, and the rows it covers restamp their selection states from
     // the selection's range as it is at the drain.
     void note_selection_states();
-    // The scroll offset the element or the document's viewport stores changed, and the rows built
-    // for it publish the new one at the drain.
-    void note_scroll_offset(NodeIdentity, bool offset_changed);
-    // The render side is where a pseudo-element's scroll offset is stored, so the entry carries it.
-    void note_pseudo_element_scroll_offset(NodeIdentity generator, CSS::PseudoElement, CSSPixelPoint, bool offset_changed);
     // Whether the scrollbar is enlarged may have changed, and it publishes the answer it has at the
     // drain to the row it is built for.
     void note_scrollbar_enlarged_state(Painting::Scrollbar&);
-    // The text node's data changed, and the mirror and the text's box take what it holds at the
-    // drain. Whether it was nothing but ASCII whitespace may have changed as well.
-    void note_text_data(Text&, bool whitespace_state_changed);
-    // The SVG element's presentation attributes changed, and the rows built for it take the values
-    // it parses at the drain.
-    void note_svg_attribute_facts(NodeIdentity);
-    // The table cell's or column's span attributes changed, and the mirror and the row built for it
-    // take the spans it has at the drain.
-    void note_table_spans(NodeIdentity);
-    // The accumulated visual contexts built from the row's box need the given kind of update.
-    void note_visual_context_box_dirty(Compositing::RustFFI::NodeSlotId, Layout::RustFFI::FfiVisualContextBoxDirtyKind);
-    // Every accumulated visual context needs rebuilding, for the given reason.
-    void note_visual_context_full_rebuild(Layout::RustFFI::FfiVisualContextGlobalRebuildReason);
-    // The SVG paint resources may have changed, and the enrolled ones resync at the next visual
-    // context update.
-    void note_svg_paint_resources_changed();
-    // The visual viewport moved or zoomed, and the visual context tree takes the transform it has
-    // at the drain.
-    void note_visual_viewport_transform();
 
     // Writes every entry through to the render side and empties the journal.
     void drain();
@@ -130,6 +100,41 @@ public:
     };
 
 private:
+    // Only the document's render inputs make these, which drop the query snapshot the document published first.
+    friend class RenderInputs;
+    void note_needs_layout_update(NodeIdentity, SetNeedsLayoutReason, Layout::LayoutUpdatePropagation);
+    void note_needs_layout_tree_update(NodeIdentity, SetNeedsLayoutTreeUpdateReason);
+    // Whether the node is an editing host, or a text node that produces a fragment when empty,
+    // may have changed, and the rows built for it restamp both at the drain.
+    void note_editability_stamps(NodeIdentity);
+    // Whether the node is in the shadow tree of the focused text control may have changed, and the
+    // node's identity and rows publish the new answer at the drain.
+    void note_is_in_focused_text_control(NodeIdentity);
+    // The scroll offset the element or the document's viewport stores changed, and the rows built
+    // for it publish the new one at the drain.
+    void note_scroll_offset(NodeIdentity, bool offset_changed);
+    // The render side is where a pseudo-element's scroll offset is stored, so the entry carries it.
+    void note_pseudo_element_scroll_offset(NodeIdentity generator, CSS::PseudoElement, CSSPixelPoint, bool offset_changed);
+    // The text node's data changed, and the mirror and the text's box take what it holds at the
+    // drain. Whether it was nothing but ASCII whitespace may have changed as well.
+    void note_text_data(Text&, bool whitespace_state_changed);
+    // The SVG element's presentation attributes changed, and the rows built for it take the values
+    // it parses at the drain.
+    void note_svg_attribute_facts(NodeIdentity);
+    // The table cell's or column's span attributes changed, and the mirror and the row built for it
+    // take the spans it has at the drain.
+    void note_table_spans(NodeIdentity);
+    // The accumulated visual contexts built from the row's box need the given kind of update.
+    void note_visual_context_box_dirty(Compositing::RustFFI::NodeSlotId, Layout::RustFFI::FfiVisualContextBoxDirtyKind);
+    // Every accumulated visual context needs rebuilding, for the given reason.
+    void note_visual_context_full_rebuild(Layout::RustFFI::FfiVisualContextGlobalRebuildReason);
+    // The SVG paint resources may have changed, and the enrolled ones resync at the next visual
+    // context update.
+    void note_svg_paint_resources_changed();
+    // The visual viewport moved or zoomed, and the visual context tree takes the transform it has
+    // at the drain.
+    void note_visual_viewport_transform();
+
     struct PseudoElementScrollOffset {
         CSS::PseudoElement type;
         CSSPixelPoint offset;

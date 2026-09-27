@@ -184,9 +184,11 @@ private:
     [[nodiscard]] CSSPixelRect viewport_rect() const { return m_viewport_rect; }
 
 public:
-    // The document's StyleEngine.
-    [[nodiscard]] StyleEngine& style_engine() { return m_style_engine; }
-    [[nodiscard]] StyleEngine const& style_engine() const { return m_style_engine; }
+    // The document's StyleEngine, to read. It is written through the document's render inputs only
+    // (DOM::Document::render_inputs_for_write()).
+    [[nodiscard]] StyleEngine const& style_engine() const { return m_style_engine.engine(); }
+    // What a read asks of the engine that changes no answer of a pass (StyleEngineQueries).
+    [[nodiscard]] StyleEngineQueries style_engine_queries() const { return StyleEngineQueries { const_cast<StyleEngine&>(m_style_engine.engine()) }; }
 
     // The user-agent and user sheets attached to this document's StyleEngine. User-agent sheets are
     // shared between documents, so a per-document identity cannot live on the sheet itself.
@@ -219,11 +221,6 @@ public:
     [[nodiscard]] TreeScopeID allocate_tree_scope() { return ++m_next_tree_scope; }
 
 private:
-    // The only way the root element font metrics ever change. A `rem` inside a keyframe resolves
-    // against them, so the style stage reads the mirror's copy, and that copy is only right if
-    // every write comes through here.
-    void set_root_element_font_metrics(Length::FontMetrics const&, bool depends_on_viewport_metrics) const;
-
     GC::Ref<DOM::Document> m_document;
 
     Length::FontMetrics m_default_font_metrics;
@@ -280,7 +277,30 @@ private:
 
     CSSPixelRect m_viewport_rect;
 
-    mutable StyleEngine m_style_engine;
+    // Hands the engine out to write only to the document's render inputs, so that no write to it, here or anywhere,
+    // leaves the query snapshot the document published in place.
+    class StyleEngineCell {
+        AK_MAKE_NONCOPYABLE(StyleEngineCell);
+        AK_MAKE_NONMOVABLE(StyleEngineCell);
+
+    public:
+        // The engine starts out with the root element's font metrics the style computer starts out with.
+        StyleEngineCell(StyleEngine::DeviceClass device_class, StyleComputer* style_computer, ReadonlySpan<u64> root_element_font_metrics, bool root_element_font_metrics_depend_on_viewport_metrics)
+            : m_engine(device_class, style_computer)
+        {
+            m_engine.set_root_element_font_metrics(root_element_font_metrics, root_element_font_metrics_depend_on_viewport_metrics);
+        }
+        StyleEngine const& engine() const { return m_engine; }
+        void visit_edges(GC::Cell::Visitor& visitor) { m_engine.visit_edges(visitor); }
+
+    private:
+        friend class DOM::RenderInputs;
+        StyleEngine& engine_for_write() { return m_engine; }
+
+        StyleEngine m_engine;
+    };
+    friend class DOM::RenderInputs;
+    StyleEngineCell m_style_engine;
     mutable u64 m_computed_style_record_view_pin_count { 0 };
     mutable u32 m_style_record_view_epoch_depth { 0 };
     // Indexed by each kind's dense index; see style_node_is_text().

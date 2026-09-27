@@ -113,6 +113,7 @@ public:
     }
     [[nodiscard]] bool has_deferred_element_initial_features(StyleNodeID style_node) const { return m_nodes_with_pending_initial_features.contains(style_node); }
     HashTable<StyleNodeID> take_deferred_element_initial_features();
+    [[nodiscard]] bool has_elements_awaiting_first_style_computation() const { return !m_nodes_awaiting_first_style_computation.is_empty(); }
     HashTable<StyleNodeID> take_elements_awaiting_first_style_computation();
 
     void set_element_parts(StyleNodeID node, ReadonlySpan<StyleAtomID> names, ReadonlySpan<StyleNodeID> hosts);
@@ -294,6 +295,7 @@ public:
     // Nodes that connected without taking an identity yet count as recorded input: they arrive when the input is
     // next submitted.
     void note_pending_arrivals(size_t count);
+    [[nodiscard]] bool has_pending_arrivals() const { return m_pending_arrival_count > 0; }
     void forget_pending_arrivals() { m_pending_arrival_count = 0; }
     // How many inputs are recorded for the next submission, which is what settling for a selector query costs.
     [[nodiscard]] size_t recorded_input_count() const;
@@ -595,6 +597,43 @@ private:
     size_t m_pending_arrival_count { 0 };
     size_t m_text_style_node_grant_request { 0 };
     bool m_css_transitions_may_observe_style_changes { false };
+};
+
+// What a read asks of the document's style engine beyond what a const engine answers: interning a name, compiling and
+// running a selector query, matching the rules of one element, marking a benchmark, and keeping the records a read
+// views alive while it views them. None of it is an input: it changes no answer of a style or layout pass, so it needs
+// none of the document's render inputs (DOM::RenderInputs) and leaves the query snapshot the document published in
+// place. It reaches nothing else of the engine.
+class StyleEngineQueries {
+public:
+    StyleEngine const& engine() const { return m_engine; }
+
+    StyleAtomID intern_atom(Utf16FlyString const& name) const { return m_engine.intern_atom(name); }
+    void* compile_selector_query(ReadonlySpan<void const*> selectors) const { return m_engine.compile_selector_query(selectors); }
+    void prepare_selector_query() const { m_engine.prepare_selector_query(); }
+    Optional<bool> selector_query_matches(void const* query, StyleNodeID node, StyleNodeID scope_root, StyleNodeID shadow_root) const { return m_engine.selector_query_matches(query, node, scope_root, shadow_root); }
+    Optional<bool> selector_query_matches_without_document_root(void const* query, StyleNodeID node, StyleNodeID scope_root, StyleNodeID shadow_root) const { return m_engine.selector_query_matches_without_document_root(query, node, scope_root, shadow_root); }
+    bool selector_query_all(void* query, StyleNodeID root, bool include_root, StyleNodeID scope_root, StyleNodeID shadow_root, bool has_document_root, Vector<StyleNodeID>& matches) const { return m_engine.selector_query_all(query, root, include_root, scope_root, shadow_root, has_document_root, matches); }
+    bool selector_query_first(void* query, StyleNodeID root, bool include_root, StyleNodeID scope_root, StyleNodeID shadow_root, bool has_document_root, StyleNodeID& matched) const { return m_engine.selector_query_first(query, root, include_root, scope_root, shadow_root, has_document_root, matched); }
+    bool match_element(StyleNodeID node, Vector<StyleEngine::RuleMatch>& matches, StyleEngine::MatchPurpose purpose) const { return m_engine.match_element(node, matches, purpose); }
+    void record_benchmark_marker(Utf16View name) const { m_engine.record_benchmark_marker(name); }
+    void begin_style_record_view_epoch() const { m_engine.begin_style_record_view_epoch(); }
+    // The record of an element or one of its pseudo-elements that no style update installs, as a CSSOM read asks for
+    // it. Settling the published match answer as it answers is settling what a pass would answer.
+    StyleEngineFFI::FfiRecordDemandAnswer answer_read_demand(StyleNodeID node, u8 pseudo_kind, bool exclude_inline_style, bool targeted, bool read_only, StyleRecordID parent_highlight) const
+    {
+        return StyleEngineFFI::style_engine_answer_read_demand(m_engine.rust_handle(), node.value(), pseudo_kind, exclude_inline_style, targeted, read_only, parent_highlight.value());
+    }
+    void end_style_record_view_epoch() const { m_engine.end_style_record_view_epoch(); }
+
+private:
+    friend class StyleComputer;
+    explicit StyleEngineQueries(StyleEngine& engine)
+        : m_engine(engine)
+    {
+    }
+
+    StyleEngine& m_engine;
 };
 
 }

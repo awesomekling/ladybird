@@ -206,7 +206,7 @@ interface Internals {
     // Returns what the synchronous reads of render state ("joins") in this document have cost.
     // Keys: totals, and byReason with one entry per UpdateLayoutReason that was named at least
     // once. Each holds calls, joins, cleanReads, nested, totalNanoseconds,
-    // cleanReadNanoseconds, maxNanoseconds and nanosecondsSinceMutation (summed over the joins).
+    // cleanReadNanoseconds and maxNanoseconds.
     [ImplementedAs=join_counters_object] object getJoinCounters();
     // LIBWEB_RENDER_CLOCK_FRAMES: the clock lease ticks the main thread adopted that installed a sample.
     unsigned long long clockTicksPresented();

@@ -202,7 +202,7 @@ bool ScrollStateQueryContainers::snapshot_post_layout_state(DOM::Document& docum
         if (snapshot != container.snapshot) {
             container.snapshot = snapshot;
             any_state_changed = true;
-            document.style_computer().style_engine().record_size_container_query_dependents(element->style_node_id());
+            document.render_inputs_for_write().style_engine().record_size_container_query_dependents(element->style_node_id());
         }
         published_snapshots.append({
             .style_node = element->style_node_id().value(),
@@ -218,7 +218,7 @@ bool ScrollStateQueryContainers::snapshot_post_layout_state(DOM::Document& docum
         // A container that goes away with state still has styles that read it, and they read no state now.
         if (container.has_value() && container->snapshot != ScrollStateSnapshot {} && element->is_connected()) {
             any_state_changed = true;
-            document.style_computer().style_engine().record_size_container_query_dependents(element->style_node_id());
+            document.render_inputs_for_write().style_engine().record_size_container_query_dependents(element->style_node_id());
         }
         published_snapshots.append({
             .style_node = element->style_node_id().value(),

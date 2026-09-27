@@ -9,6 +9,7 @@ use crate::layout::node_data::{NodeKind, NodeSlotId};
 use crate::painting::display_list::builder::PendingInlineClip;
 use crate::painting::display_list::commands::ContextRef;
 use crate::painting::display_list::recorder::{IsolatedGroupEffects, OpenRecorderGroup};
+use crate::painting::geometry_read::GeometryRead;
 use crate::painting::node_painting;
 use crate::painting::published_frame::PaintRead;
 use crate::painting::record::order_tree::ProducerKind;

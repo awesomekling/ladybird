@@ -112,7 +112,7 @@ void invalidate_style_after_attribute_change(
         // shadow host's element-backed pseudo-elements read its attributes too, and are driven
         // again with it.
         if (element.style_uses_attr_css_function()) {
-            auto& style_engine = element.document().style_computer().style_engine();
+            auto& style_engine = element.document().render_inputs_for_write().style_engine();
             style_engine.record_derived_element_style_input_change(element.style_node_id(), StyleEngine::RecomputeStyle);
             if (auto shadow_root = element.shadow_root()) {
                 shadow_root->for_each_in_subtree_of_type<DOM::Element>([&](DOM::Element& shadow_element) {

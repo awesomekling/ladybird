@@ -39,6 +39,44 @@ use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct StyleEngineHandle(*mut c_void);
 
+/// What C++ holds to send one document's style engine an input or run its style update: the same
+/// home as a [`StyleEngineHandle`], which C++ reads the engine through. Only a style engine C++ may
+/// write hands it out, and only the document's render inputs give that out, dropping the query
+/// snapshot the document published: every entrance that takes the engine to write takes one of
+/// these, and a read's handle does not convert to it.
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct StyleEngineInputHandle(StyleEngineHandle);
+
+impl StyleEngineInputHandle {
+    /// The home the handle names, to enter.
+    pub(crate) fn home(self) -> StyleEngineHandle {
+        self.0
+    }
+
+    /// That the document thread came through its render inputs' one entrance to take this handle.
+    pub(crate) fn through_render_inputs(self) -> ThroughRenderInputs {
+        ThroughRenderInputs(())
+    }
+
+    /// The replay tool stands in for the host, and for its render inputs with it.
+    pub fn standing_in_for_render_inputs(handle: StyleEngineHandle) -> Self {
+        Self(handle)
+    }
+
+    /// A unit test stands in for the host as well, for an engine it owns.
+    #[cfg(test)]
+    pub(crate) fn for_test_engine(engine: *mut StyleEngine) -> Self {
+        Self(StyleEngineHandle::for_test_engine(engine))
+    }
+}
+
+/// That the document thread came through its render inputs' one entrance, which dropped the query snapshot its document
+/// published: only a [`StyleEngineInputHandle`] makes one. What the thread sends the render owner as a change of the
+/// document takes one along, so no input reaches the owner beside a snapshot that says the document is as it was.
+#[derive(Clone, Copy)]
+pub(crate) struct ThroughRenderInputs(());
+
 /// The right to reach one style engine. Exactly one exists per engine: only the engine's home makes
 /// it, and it cannot be cloned. It is `Send`, so a stage can take it along, and not `Sync`, so a
 /// shared borrow of it stays on the thread that holds it.

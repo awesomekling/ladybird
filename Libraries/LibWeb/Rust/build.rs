@@ -698,10 +698,9 @@ fn generate_style_engine_boundary(manifest_dir: &Path, out_dir: &Path) -> Result
             .get("receiver")
             .and_then(serde_json::Value::as_str)
             .unwrap_or("mut");
-        let cpp_const = object
-            .get("cpp_const")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(receiver == "const");
+        // A C++ method is const exactly when the operation reads the engine: one that writes it takes
+        // the handle only a style engine C++ may write hands out.
+        let cpp_const = receiver == "const";
         if let Some(ffi) = ffi
             && !ffi_names.insert(ffi)
         {
@@ -754,11 +753,16 @@ fn generate_style_engine_boundary(manifest_dir: &Path, out_dir: &Path) -> Result
                 (rust_type, cpp_type, writer, reader)
             }
         };
-        let engine_type = "crate::css::style::StyleEngineHandle";
-        let engine_binding = if receiver == "const" {
-            "engine: &crate::css::style::StyleEngine"
+        // An operation that writes the engine takes the handle the document's render inputs give
+        // out; one that reads it takes the handle C++ reads through.
+        let (engine_type, engine_binding, engine_entrance) = if receiver == "const" {
+            (
+                "crate::css::style::StyleEngineHandle",
+                "engine: &crate::css::style::StyleEngine",
+                "engine_read_entrance",
+            )
         } else {
-            "engine"
+            ("crate::css::style::StyleEngineInputHandle", "engine", "engine_entrance")
         };
         let replay_engine_borrow = "engine.for_replay()";
 
@@ -784,7 +788,7 @@ fn generate_style_engine_boundary(manifest_dir: &Path, out_dir: &Path) -> Result
             // an update runs.
             writeln!(
                 rust,
-                "    abort_on_panic(|| {{\n        let {engine_binding} = unsafe {{ crate::css::style::bridge::engine_entrance(engine, \"{ffi}\") }};"
+                "    abort_on_panic(|| {{\n        let {engine_binding} = unsafe {{ crate::css::style::bridge::{engine_entrance}(engine, \"{ffi}\") }};"
             )?;
         }
         let native_receiver = if receiver == "const" {
@@ -989,9 +993,9 @@ fn generate_style_engine_boundary(manifest_dir: &Path, out_dir: &Path) -> Result
                 cpp_definitions.push_str("    ");
             }
             if let Some((_, scope_name)) = scope_parameter {
-                write!(cpp_definitions, "StyleEngineFFI::{ffi}({scope_name}, m_impl")?;
+                write!(cpp_definitions, "StyleEngineFFI::{ffi}({scope_name}, rust_handle()")?;
             } else {
-                write!(cpp_definitions, "StyleEngineFFI::{ffi}(m_impl")?;
+                write!(cpp_definitions, "StyleEngineFFI::{ffi}(rust_handle()")?;
             }
             for (name, kind, _) in &parsed_arguments {
                 if matches!(
@@ -3326,6 +3330,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             manifest_dir.join("src/painting/layout_tree_dump.rs"),
             manifest_dir.join("src/painting/ffi.rs"),
             manifest_dir.join("src/painting/ffi/main_thread_entries.rs"),
+            manifest_dir.join("src/painting/query_snapshot.rs"),
             manifest_dir.join("src/stage_thread.rs"),
             manifest_dir.join("src/clock_frames.rs"),
             manifest_dir.join("src/flight.rs"),

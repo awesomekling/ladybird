@@ -178,7 +178,7 @@ WebIDL::ExceptionOr<void> CharacterData::replace_data(size_t offset, size_t coun
 
     // NB: Called during DOM text mutation, layout is stale.
     if (auto* text = as_if<Text>(*this))
-        document().invalidation_journal().note_text_data(*text, old_data.is_ascii_whitespace() != m_data.is_ascii_whitespace());
+        document().render_inputs_for_write().note_text_data(*text, old_data.is_ascii_whitespace() != m_data.is_ascii_whitespace());
 
     bump_character_data_version();
 

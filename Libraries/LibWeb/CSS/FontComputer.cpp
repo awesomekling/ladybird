@@ -85,7 +85,7 @@ void FontComputer::bump_environment_generation()
     // A style update holds the table it was given for its whole length, so a change made while one
     // is running has to reach it here or the rest of that update resolves against a table the
     // document has already left behind.
-    document().style_computer().style_engine().publish_font_faces();
+    document().render_inputs_for_write().style_engine().publish_font_faces();
 }
 
 void const* FontComputer::build_font_face_snapshot() const
@@ -516,7 +516,7 @@ static void record_font_input_change(DOM::Element& element)
     // Derived, not recorded: this is not C++ asking for a computation only it can do. The change
     // is to the published `@font-face` table, which the engine holds and versions, so the engine
     // settles the element's record itself wherever the rest of its reaction lets it.
-    element.document().style_computer().style_engine().record_derived_element_style_input_change(
+    element.document().render_inputs_for_write().style_engine().record_derived_element_style_input_change(
         element.style_node_id(), StyleEngine::PublishedStyle | StyleEngine::RecomputeStyle | StyleEngine::FontInputsChanged, font_group);
 }
 
@@ -526,10 +526,10 @@ static void record_font_input_change(DOM::Element& element)
 // taken back the same way.
 static bool leave_font_change_beside_pass(DOM::Document& document, Function<void()> change)
 {
-    auto& style_engine = document.style_computer().style_engine();
-    if (!Layout::RustFFI::rust_stage_thread_style_pass_holds_style_engine(style_engine.rust_handle()) && !style_engine.layout_pass_is_in_flight())
+    auto const& engine = document.style_computer().style_engine();
+    if (!Layout::RustFFI::rust_stage_thread_style_pass_holds_style_engine(engine.rust_handle()) && !engine.layout_pass_is_in_flight())
         return false;
-    style_engine.publish_input([change = move(change)](StyleInputScope const&) { change(); });
+    document.render_inputs_for_write().style_engine().publish_input([change = move(change)](StyleInputScope const&) { change(); });
     return true;
 }
 

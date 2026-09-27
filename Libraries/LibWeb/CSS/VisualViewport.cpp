@@ -230,7 +230,7 @@ void VisualViewport::reset()
 
 void VisualViewport::update_accumulated_visual_context()
 {
-    m_document->invalidation_journal().note_visual_viewport_transform();
+    m_document->render_inputs_for_write().note_visual_viewport_transform();
 }
 
 }

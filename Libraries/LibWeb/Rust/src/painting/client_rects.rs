@@ -7,6 +7,7 @@
 use crate::css::css_pixels::{CssPixelRect, CssPixels};
 use crate::layout::node_data::{NodeFlag, NodeKind, NodeSlotId};
 use crate::layout::node_facts;
+use crate::painting::geometry_read::GeometryRead;
 use crate::painting::node_painting;
 use crate::painting::paintable_geometry;
 use crate::painting::paintable_rows::{PaintableRowsRead, with_inline_pieces};
@@ -58,7 +59,7 @@ pub(crate) fn can_compute_client_rects_without_visual_context_update(
 }
 
 fn for_each_inline_piece_border_box_rect(
-    arena: &impl PaintableRowsRead,
+    arena: &impl GeometryRead,
     inline_paintable: NodeSlotId,
     mut push_rect: impl FnMut(CssPixelRect),
 ) {
@@ -77,7 +78,7 @@ fn for_each_inline_piece_border_box_rect(
 
 // https://drafts.csswg.org/cssom-view/#dom-element-getclientrects
 pub(crate) fn for_each_client_rect(
-    arena: &impl PaintableRowsRead,
+    arena: &impl GeometryRead,
     layout_node: NodeSlotId,
     rect_to_viewport_transform: Option<&RectToViewportTransform<'_>>,
     mut push_rect: impl FnMut(CssPixelRect),
@@ -124,7 +125,7 @@ pub(crate) fn for_each_client_rect(
 
 // https://drafts.csswg.org/cssom-view/#dom-element-getboundingclientrect
 pub(crate) fn bounding_client_rect(
-    arena: &impl PaintableRowsRead,
+    arena: &impl GeometryRead,
     layout_node: NodeSlotId,
     rect_to_viewport_transform: Option<&RectToViewportTransform<'_>>,
 ) -> CssPixelRect {
