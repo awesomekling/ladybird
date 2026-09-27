@@ -7354,13 +7354,6 @@ pub unsafe extern "C" fn layout_arena_clear_style_record_host_callbacks(arena: *
     unsafe { LayoutNodeArena::from_handle(arena) }.set_style_engine(crate::css::style::StyleEngineHandle::null());
 }
 
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_layout_pass_is_running(arena: *mut c_void) -> bool {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }.layout_pass_is_running()
-}
-
 /// # Safety
 ///
 /// `arena` must be a live handle on the document thread.
