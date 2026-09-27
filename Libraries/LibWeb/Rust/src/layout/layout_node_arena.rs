@@ -47,6 +47,7 @@ use std::thread;
 mod main_thread_entries;
 
 pub(crate) use main_thread_entries::MainThreadFfiEntry;
+pub(crate) use main_thread_entries::OwnerAppliedStyle;
 
 pub(crate) const SLOTS_PER_CHUNK: usize = 256;
 /// How many kinds of synthetic pseudo-element a row can be generated for, from `::after` to

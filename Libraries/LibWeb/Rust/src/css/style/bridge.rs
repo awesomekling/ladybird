@@ -5506,11 +5506,17 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
         };
         // SAFETY: The engine is the document's, and this thread reaches it again only once the owner has finished
         // the transaction.
-        let OwnerStyleTransactionView(view, retired) =
+        let OwnerStyleTransactionView(view, retired, applied) =
             unsafe { crate::render_owner::run_style_transaction(document, engine, transaction) };
         // Font cascade lists and custom-property data are the document thread's to give up.
         crate::css::ffi_stats::release_deferred_font_cascade_lists();
         drop(retired);
+        // What the owner handed back of applying the batch is paid, and what its rows marked held for the install,
+        // before the host installs the batch, which reads both.
+        if let Some(applied) = applied {
+            // SAFETY: This is the document thread's FFI entry, and the arena is the one the owner applied the batch to.
+            unsafe { applied.hand_to_host(layout_arena) };
+        }
         return view;
     }
     // An engine of no document's render state (one a document never made, as a unit test's) runs its transaction
@@ -5629,9 +5635,14 @@ impl StyleNodeGrant {
     }
 }
 
-/// The answers of an [`OwnerStyleTransaction`], which the owner left in the engine for the document thread to read, and
-/// the custom-property data it retired, which the document thread releases.
-pub(crate) struct OwnerStyleTransactionView(FfiStyleTransactionView, RetiredCustomPropertyData);
+/// The answers of an [`OwnerStyleTransaction`], which the owner left in the engine for the document thread to read, the
+/// custom-property data it retired, which the document thread releases, and what applying the batch to the layout
+/// nodes left, if the owner applied it, which the document thread hands to the host before the host installs the batch.
+pub(crate) struct OwnerStyleTransactionView(
+    FfiStyleTransactionView,
+    RetiredCustomPropertyData,
+    Option<crate::layout::OwnerAppliedStyle>,
+);
 
 // SAFETY: The view points into the engine, which nothing changes until the document thread's next entrance of it, and
 // the retired data goes to the document thread, which alone releases it.
@@ -5653,7 +5664,7 @@ impl OwnerStyleTransaction {
     ///
     /// The document thread waits for it, as the type requires.
     pub(crate) unsafe fn run(self, engine: &mut StyleEngine, on_owner: bool) -> OwnerStyleTransactionView {
-        let (view, retired) = match self {
+        let (view, retired, applied) = match self {
             Self::Whole {
                 root,
                 computation_inputs,
@@ -5674,6 +5685,7 @@ impl OwnerStyleTransaction {
                 let timeline_samples = engine.animation_timeline_samples().clone();
                 let output = run_style_pass(engine, root, committed_boxes, &timeline_samples);
                 let (mut view, retired) = finish_style_transaction(engine, root, output);
+                let mut applied = None;
                 if let Some(viewport_propagation_sources) = render_half.filter(|_| on_owner) {
                     // SAFETY: The owner holds the document's arena, and the document thread waits.
                     if let Some(effects) =
@@ -5682,15 +5694,19 @@ impl OwnerStyleTransaction {
                         view.render_half_applied = true;
                         view.render_half_moved_visual_contexts = effects.moved_visual_contexts;
                         view.render_half_repaint = effects.repaint;
+                        applied = Some(effects.applied);
                     }
                 }
-                (view, retired)
+                (view, retired, applied)
             }
             Self::FinishSubmitted {
                 host_named_atoms_beside_pass,
-            } => finish_submitted_style_transaction(engine, host_named_atoms_beside_pass),
+            } => {
+                let (view, retired) = finish_submitted_style_transaction(engine, host_named_atoms_beside_pass);
+                (view, retired, None)
+            }
         };
-        OwnerStyleTransactionView(view, retired)
+        OwnerStyleTransactionView(view, retired, applied)
     }
 }
 
@@ -5720,7 +5736,11 @@ unsafe fn apply_render_half_on_owner(
     arena.apply_flight_style_rows(&rows).ok()?;
     // No flight reads whether one applied a batch: the host's render half ends with the update.
     arena.take_flight_style_applied();
-    let mut effects = OwnerRenderHalfEffects::default();
+    let mut effects = OwnerRenderHalfEffects {
+        moved_visual_contexts: false,
+        repaint: 0,
+        applied: crate::layout::OwnerAppliedStyle::take_from(arena),
+    };
     for row in &rows {
         let marks = super::style_invalidation::layout_node_marks(row.damage);
         effects.moved_visual_contexts |= marks.visual_context != 0 || marks.stacking_context;
@@ -5733,12 +5753,13 @@ unsafe fn apply_render_half_on_owner(
 
 /// What the rows the owner applied of a batch ask of the document, which the host applies once it
 /// has the transaction back: the owner marked the layout nodes, but the document's navigable is the
-/// host's to have painted again.
-#[derive(Default)]
+/// host's to have painted again, and what applying the rows handed back and marked is the host's to
+/// pay and read as it installs the batch.
 struct OwnerRenderHalfEffects {
     moved_visual_contexts: bool,
     /// As [`FfiStyleTransactionView::render_half_repaint`].
     repaint: u8,
+    applied: crate::layout::OwnerAppliedStyle,
 }
 
 /// Takes the pending style transaction as [`style_engine_take_style_transaction`] does, and hands
@@ -6021,8 +6042,12 @@ pub unsafe extern "C" fn style_engine_finish_submitted_style_transaction(
     };
     // SAFETY: The engine is the document's, and this thread reaches it again only once the owner has finished the
     // transaction.
-    let OwnerStyleTransactionView(view, retired) =
+    let OwnerStyleTransactionView(view, retired, applied) =
         unsafe { crate::render_owner::run_style_transaction(document, engine, transaction) };
+    debug_assert!(
+        applied.is_none(),
+        "finishing a submitted transaction applies no batch on the owner"
+    );
     // Font cascade lists and custom-property data are the document thread's to give up.
     crate::css::ffi_stats::release_deferred_font_cascade_lists();
     drop(retired);
