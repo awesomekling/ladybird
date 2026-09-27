@@ -2727,7 +2727,7 @@ unsafe fn layout_counts(arena: *mut c_void) -> crate::render_owner::LayoutCounts
     // SAFETY: As above.
     match unsafe { crate::render_owner::ask(document, arena, crate::render_owner::Query::LayoutCounts) } {
         crate::render_owner::Answer::LayoutCounts(counts) => counts,
-        crate::render_owner::Answer::Geometry(_) => {
+        crate::render_owner::Answer::Geometry(_) | crate::render_owner::Answer::ComputedStyle(_) => {
             debug_assert!(false, "layout counts are answered with counts");
             crate::render_owner::LayoutCounts::default()
         }

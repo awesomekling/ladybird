@@ -38,8 +38,8 @@ inline StyleReadDemandAnswer adopt_style_read_demand_answer(StyleEngineFFI::FfiR
     return { answer, PublishedStyleRecord::adopt(answer.published_record) };
 }
 
-// The read holds the JoinScope it joined the frame in flight under, and the engine answers it in a
-// style stage run of its own: the host computes nothing, and only reads the published answer.
+// The read holds the JoinScope it joined the frame in flight under, and the render owner answers it with the engine of
+// the document's render state (Query::ComputedStyle): the host computes nothing, and only reads the published answer.
 inline StyleReadDemandAnswer answer_style_read_demand(DOM::Document::JoinScope const&, StyleEngineQueries engine, StyleReadDemand const& demand)
 {
     return adopt_style_read_demand_answer(engine.answer_read_demand(demand.node, demand.pseudo_kind.value_or(NumericLimits<u8>::max()), demand.exclude_inline_style, demand.targeted,

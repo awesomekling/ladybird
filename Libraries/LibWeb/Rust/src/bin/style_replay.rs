@@ -747,7 +747,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     // A demand no longer declines; older recordings name no cause either.
                     let _ = event.payload.read_bytes()?;
                     let actual = unsafe {
-                        bridge::style_engine_answer_read_demand(
+                        bridge::replay_answer_read_demand(
                             engine,
                             node,
                             pseudo_kind,
