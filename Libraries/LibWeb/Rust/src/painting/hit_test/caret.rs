@@ -5,8 +5,9 @@
  */
 
 use super::*;
+use crate::painting::hit_test::read::CaretRead;
 use crate::painting::host::{FfiCaretPositionQuery, FfiHitTestQueryCallbacks};
-use crate::painting::paintable_rows::PaintableRowsRead;
+use crate::painting::published_frame::PaintRead;
 use crate::painting::text_fragment::CaretMatch;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -141,7 +142,7 @@ impl Default for ClosestLine {
 impl HitTestList {
     pub(crate) fn caret_line_for_position(
         &self,
-        arena: &impl PaintableRowsRead,
+        arena: &impl CaretRead,
         query: &FfiCaretPositionQuery,
         offset: usize,
         affinity_is_downstream: bool,
@@ -167,7 +168,7 @@ impl HitTestList {
 
     fn item_position_match(
         &self,
-        arena: &impl PaintableRowsRead,
+        arena: &impl CaretRead,
         query: &FfiCaretPositionQuery,
         item_index: usize,
         offset: usize,
@@ -314,7 +315,7 @@ impl HitTestList {
 
     pub(crate) fn caret_item_for_line(
         &self,
-        arena: &impl PaintableRowsRead,
+        arena: &impl PaintRead,
         line_index: usize,
         local_point: CssPixelPoint,
         mode: CaretPositionMode,
@@ -428,12 +429,7 @@ impl HitTestList {
             || inline_axis_end(line.rect, writing_mode) <= inline_axis_start(item.rect, writing_mode)
     }
 
-    fn line_in_scope(
-        &self,
-        arena: &impl PaintableRowsRead,
-        callbacks: &FfiHitTestQueryCallbacks,
-        line_index: usize,
-    ) -> bool {
+    fn line_in_scope(&self, arena: &impl CaretRead, callbacks: &FfiHitTestQueryCallbacks, line_index: usize) -> bool {
         let line = &self.caret_lines[line_index];
         for caret_item_index in line.first_caret_item_index..=line.last_caret_item_index {
             let Some(slot) = self.item_target_slot(arena, self.caret_item_indices[caret_item_index]) else {
@@ -449,7 +445,7 @@ impl HitTestList {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn find_closest_line(
         &self,
-        arena: &impl PaintableRowsRead,
+        arena: &impl CaretRead,
         visual_context_tree: &VisualContextTree,
         callbacks: &FfiHitTestQueryCallbacks,
         point: CssPixelPoint,
@@ -603,7 +599,7 @@ impl HitTestList {
 
     pub(crate) fn adjacent_line(
         &self,
-        arena: &impl PaintableRowsRead,
+        arena: &impl CaretRead,
         callbacks: &FfiHitTestQueryCallbacks,
         current_line_index: usize,
         direction: CaretLineDirection,

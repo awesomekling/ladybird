@@ -7,6 +7,7 @@
 pub mod caret;
 pub mod geometry;
 pub mod query;
+pub mod read;
 pub mod resolve;
 
 use crate::css::css_pixels::CssPixels;
@@ -15,7 +16,7 @@ use crate::css::style::fast_hash::FastMap;
 use crate::layout::node_data::NodeSlotId;
 use crate::painting::display_list::commands::ContextRef;
 use crate::painting::host::FfiHitTestQueryCallbacks;
-use crate::painting::paintable_rows::PaintableRowsRead;
+use crate::painting::published_frame::PaintRead;
 use crate::painting::visual_context::{ClipBehavior, VisualContextTree};
 use std::sync::Arc;
 
@@ -168,7 +169,7 @@ impl HitTestList {
         items.extend_from_slice(source);
     }
 
-    pub(crate) fn caret_line_rect_for_item(rows: &impl PaintableRowsRead, item: &HitTestItem) -> CssPixelRect {
+    pub(crate) fn caret_line_rect_for_item(rows: &impl PaintRead, item: &HitTestItem) -> CssPixelRect {
         let Some(line_rect) = geometry::containing_line_box_rect(rows, item) else {
             return item.caret_rect;
         };
@@ -194,7 +195,7 @@ impl HitTestList {
         }
     }
 
-    pub(crate) fn build_caret_lines_if_needed(&mut self, arena: &impl PaintableRowsRead) {
+    pub(crate) fn build_caret_lines_if_needed(&mut self, arena: &impl PaintRead) {
         if self.caret_lines_built {
             return;
         }
@@ -281,7 +282,7 @@ impl HitTestList {
         }
     }
 
-    fn add_item_to_caret_items(&mut self, rows: &impl PaintableRowsRead, item_index: usize) {
+    fn add_item_to_caret_items(&mut self, rows: &impl PaintRead, item_index: usize) {
         let item = &self.items[item_index];
         let caret_item_index = self.caret_item_indices.len();
         self.caret_item_indices.push(item_index);

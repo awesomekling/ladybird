@@ -134,7 +134,8 @@ unsafe extern "C" fn layout_arena_paintable_event_dispatch_node_shell(
 ) -> *mut c_void {
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let paintable_rows = unsafe { main_side_paintable_rows(arena) };
-    crate::painting::hit_test::resolve::event_dispatch_shell_for_paintable(&main_thread, &paintable_rows, slot)
+    let dispatch = crate::painting::hit_test::resolve::event_dispatch_slot_for_paintable(&paintable_rows, slot);
+    shell_of(&main_thread, &paintable_rows, dispatch)
 }
 
 /// # Safety
@@ -531,6 +532,16 @@ unsafe extern "C" fn layout_arena_for_each_subtree_fragment_rect(
     });
 }
 
+/// The layout node of a row a hit test named. The hit test names rows; which layout node a row is,
+/// is the arena's.
+fn shell_of(
+    main_thread: &crate::stage::MainThread,
+    arena: &crate::layout::LayoutNodeArena,
+    slot: Option<crate::layout::node_data::NodeSlotId>,
+) -> *mut c_void {
+    slot.map_or(std::ptr::null_mut(), |slot| arena.shell_if_live(main_thread, slot))
+}
+
 /// # Safety
 ///
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread;
@@ -572,7 +583,8 @@ unsafe extern "C" fn layout_arena_hit_test_item_facts(
 unsafe extern "C" fn layout_arena_hit_test_item_target_shell(arena: *mut c_void, item_index: usize) -> *mut c_void {
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     with_hit_test_list_items_only(arena, std::ptr::null_mut(), |list, arena| {
-        list.item_target_shell(&main_thread, arena, item_index)
+        let target = list.item_target_slot(arena, item_index);
+        shell_of(&main_thread, arena, target)
     })
 }
 
@@ -589,10 +601,10 @@ unsafe extern "C" fn layout_arena_hit_test_item_dispatch_shell(
 ) -> *mut c_void {
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     with_hit_test_list_items_only(arena, std::ptr::null_mut(), |list, arena| {
-        let (shell, allow_pseudo_fallback) = list.item_dispatch_shell(&main_thread, arena, item_index);
+        let (dispatch, allow_pseudo_fallback) = list.item_dispatch_slot(arena, item_index);
         // SAFETY: The caller provides writable storage for the synchronous result.
         unsafe { *out_allow_pseudo_fallback = allow_pseudo_fallback };
-        shell
+        shell_of(&main_thread, arena, dispatch)
     })
 }
 
@@ -608,7 +620,15 @@ unsafe extern "C" fn layout_arena_hit_test_resolve_hit(
 ) -> crate::painting::host::FfiResolvedHit {
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     with_hit_test_list_items_only(arena, Default::default(), |list, arena| {
-        list.resolve_hit(&main_thread, arena, item_index, local_point.into())
+        let resolved = list.resolve_hit(arena, item_index, local_point.into());
+        crate::painting::host::FfiResolvedHit {
+            dispatch_shell: shell_of(&main_thread, arena, resolved.dispatch),
+            allow_pseudo_fallback: resolved.allow_pseudo_fallback,
+            fallback_dispatch_shell: shell_of(&main_thread, arena, resolved.fallback_dispatch),
+            has_index_in_node: resolved.has_index_in_node,
+            index_in_node: resolved.index_in_node,
+            is_text_fragment: resolved.is_text_fragment,
+        }
     })
 }
 
@@ -625,13 +645,21 @@ unsafe extern "C" fn layout_arena_hit_test_resolve_caret(
 ) -> crate::painting::host::FfiResolvedCaret {
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     with_hit_test_list_items_only(arena, Default::default(), |list, arena| {
-        list.resolve_caret(
-            &main_thread,
+        let resolved = list.resolve_caret(
             arena,
             item_index,
             local_point.into(),
             crate::painting::hit_test::caret::CaretPositionType::from_u8(position_type),
-        )
+        );
+        crate::painting::host::FfiResolvedCaret {
+            has_position: resolved.has_position,
+            node_shell: shell_of(&main_thread, arena, resolved.node),
+            boundary: resolved.boundary,
+            offset: resolved.offset,
+            affinity_is_upstream: resolved.affinity_is_upstream,
+            has_debug_rect: resolved.has_debug_rect,
+            debug_rect: resolved.debug_rect.into(),
+        }
     })
 }
 
