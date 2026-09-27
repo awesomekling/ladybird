@@ -668,24 +668,10 @@ impl<'pass> NodeFacts<'pass> {
         self.callbacks.computed_values_view_if_styled(parent)
     }
 
+    #[inline]
     fn replaced_content(&self) -> crate::layout::FfiReplacedContentFacts {
-        // An <svg> root's natural size resolves the lengths its element published against its style and the viewport,
-        // so the pass negotiates it rather than reading synced facts.
         if self.data().kind.get() == NodeKind::SVGSVGBox {
-            let mut facts = derived_replaced_content_facts(self.data(), ReplacedContentInput::None);
-            if !self.node_has_size_containment() {
-                let (width, height, aspect_ratio) =
-                    super::svg_formatting_context::svg_root_natural_size(&self.callbacks, self.node);
-                set_auto_content_facts(
-                    &mut facts,
-                    AutoContentSize {
-                        width,
-                        height,
-                        aspect_ratio,
-                    },
-                );
-            }
-            return facts;
+            return self.svg_root_replaced_content();
         }
         let Some(facts) = self.callbacks.replaced_content_facts(self.node) else {
             // The kind check is cheap enough for release builds; the style
@@ -701,6 +687,26 @@ impl<'pass> NodeFacts<'pass> {
             );
             return crate::layout::FfiReplacedContentFacts::default();
         };
+        facts
+    }
+
+    /// An <svg> root's natural size resolves the lengths its element published against its style and the viewport,
+    /// so the pass negotiates it rather than reading synced facts.
+    #[cold]
+    fn svg_root_replaced_content(&self) -> crate::layout::FfiReplacedContentFacts {
+        let mut facts = derived_replaced_content_facts(self.data(), ReplacedContentInput::None);
+        if !self.node_has_size_containment() {
+            let (width, height, aspect_ratio) =
+                super::svg_formatting_context::svg_root_natural_size(&self.callbacks, self.node);
+            set_auto_content_facts(
+                &mut facts,
+                AutoContentSize {
+                    width,
+                    height,
+                    aspect_ratio,
+                },
+            );
+        }
         facts
     }
 
