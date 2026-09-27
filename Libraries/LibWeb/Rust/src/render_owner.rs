@@ -177,12 +177,23 @@ pub(crate) enum Query {
         node: StyleNodeID,
         kind: FfiGeometryReadKind,
     },
+    /// How many layout passes and tree builds the document's layout has run, for tests.
+    LayoutCounts,
 }
 
 /// The answer to a [`Query`], of the variant the query asked for.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Answer {
     Geometry(FfiGeometryReadAnswer),
+    LayoutCounts(LayoutCounts),
+}
+
+/// How many layout passes and tree builds a document's layout has run.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct LayoutCounts {
+    pub(crate) partial_layouts: u64,
+    pub(crate) full_layouts: u64,
+    pub(crate) tree_builds: crate::layout::update_layout::FfiLayoutTreeBuildStats,
 }
 
 impl Answer {
@@ -190,12 +201,18 @@ impl Answer {
     fn unanswered(query: Query) -> Self {
         match query {
             Query::Geometry { .. } => Self::Geometry(FfiGeometryReadAnswer::default()),
+            Query::LayoutCounts => Self::LayoutCounts(LayoutCounts::default()),
         }
     }
 
     fn of(query: Query, arena: &mut LayoutNodeArena) -> Self {
         match query {
             Query::Geometry { node, kind } => Self::Geometry(answer_geometry(arena, node, kind)),
+            Query::LayoutCounts => Self::LayoutCounts(LayoutCounts {
+                partial_layouts: arena.partial_layout_count(),
+                full_layouts: arena.full_layout_count(),
+                tree_builds: arena.layout_tree_build_stats(),
+            }),
         }
     }
 }
@@ -745,6 +762,10 @@ pub extern "C" fn render_owner_take_geometry_answer() -> FfiGeometryReadAnswer {
     ASKED.set(None);
     match ANSWERED.take() {
         Some(Answer::Geometry(answer)) => answer,
+        Some(_) => {
+            debug_assert!(false, "a geometry read is answered with geometry");
+            FfiGeometryReadAnswer::default()
+        }
         None => FfiGeometryReadAnswer::default(),
     }
 }
