@@ -429,24 +429,33 @@ void FontCascadeMemo::take_changed(FontFaceSnapshotView const& snapshot, Functio
     });
 }
 
-Vector<ComputedFontFamily> computed_font_families_from_style_value(StyleValue const& font_family)
+// Reads the engine's value data without wrapping it in a StyleValue, so the style stage's font
+// batch can call this on any thread.
+Vector<ComputedFontFamily> computed_font_families_from_value_data(StyleValueFFI::StyleValueData const& font_family)
 {
-    Vector<ComputedFontFamily> font_families;
-    auto const& values = font_family.as_value_list().values();
-    font_families.ensure_capacity(values.size());
-    for (auto const& value : values) {
-        if (value->is_keyword()) {
-            auto generic_family = keyword_to_generic_font_family(value->to_keyword());
-            VERIFY(generic_family.has_value());
-            font_families.unchecked_append(generic_family.release_value());
-        } else {
-            font_families.unchecked_append(ComputedFontFamilyName {
-                .name = string_from_style_value(value),
-                .syntax = value->is_string() ? ComputedFontFamilySyntax::String : ComputedFontFamilySyntax::CustomIdent,
-            });
+    auto count = StyleValueFFI::rust_style_value_copy_computed_font_families(&font_family, nullptr, 0);
+    Vector<StyleValueFFI::FfiComputedFontFamilyEntry> entries;
+    entries.resize(count);
+    VERIFY(StyleValueFFI::rust_style_value_copy_computed_font_families(&font_family, entries.data(), entries.size()) == count);
+
+    Vector<ComputedFontFamily> families;
+    families.ensure_capacity(count);
+    for (auto const& entry : entries) {
+        if (entry.kind == StyleValueFFI::COMPUTED_FONT_FAMILY_GENERIC) {
+            auto family = keyword_to_generic_font_family(static_cast<Keyword>(entry.keyword));
+            VERIFY(family.has_value());
+            families.unchecked_append(family.release_value());
+            continue;
         }
+        VERIFY(entry.kind == StyleValueFFI::COMPUTED_FONT_FAMILY_CUSTOM_IDENT || entry.kind == StyleValueFFI::COMPUTED_FONT_FAMILY_STRING);
+        families.unchecked_append(ComputedFontFamilyName {
+            .name = css_string_from_rust(entry.string),
+            .syntax = entry.kind == StyleValueFFI::COMPUTED_FONT_FAMILY_STRING
+                ? ComputedFontFamilySyntax::String
+                : ComputedFontFamilySyntax::CustomIdent,
+        });
     }
-    return font_families;
+    return families;
 }
 
 NonnullRefPtr<Gfx::FontCascadeList const> resolve_font_cascade(FontFaceSnapshotView const& snapshot, ReadonlySpan<ComputedFontFamily const> font_families, CSSPixels const& font_size, int slope, double font_weight, Percentage const& font_width, FontOpticalSizing font_optical_sizing, HashMap<Utf16FlyString, double> const& font_variation_settings, FontFeatureData const& font_feature_data, FontFeatureValuesProvider const* font_feature_values_provider)

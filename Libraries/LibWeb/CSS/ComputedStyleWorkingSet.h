@@ -289,14 +289,16 @@ enum class FontResolutionFeatureInput : u8 {
     Count,
 };
 
-[[nodiscard]] Optional<FontVariantNumeric> font_variant_numeric_from_style_value(StyleValue const&);
-[[nodiscard]] Optional<FontVariantAlternates> font_variant_alternates_from_style_value(StyleValue const&);
-[[nodiscard]] Optional<FontVariantEastAsian> font_variant_east_asian_from_style_value(StyleValue const&);
-[[nodiscard]] Optional<FontVariantLigatures> font_variant_ligatures_from_style_value(StyleValue const&);
-[[nodiscard]] HashMap<Utf16FlyString, u8> font_feature_settings_from_style_value(StyleValue const&);
-[[nodiscard]] HashMap<Utf16FlyString, double> font_variation_settings_from_style_value(StyleValue const&);
-[[nodiscard]] FontFeatureData font_feature_data_from_style_values(ReadonlySpan<StyleValue const*>);
-[[nodiscard]] HashMap<Utf16FlyString, double> font_variation_settings_from_style_values(ReadonlySpan<StyleValue const*>);
+// These read the engine's value data directly and never wrap it in a StyleValue, whose reference
+// count is not atomic: the style stage's font batch calls them on whichever thread runs the pass.
+[[nodiscard]] Optional<FontVariantNumeric> font_variant_numeric_from_value_data(StyleValueFFI::StyleValueData const&);
+[[nodiscard]] Optional<FontVariantAlternates> font_variant_alternates_from_value_data(StyleValueFFI::StyleValueData const&);
+[[nodiscard]] Optional<FontVariantEastAsian> font_variant_east_asian_from_value_data(StyleValueFFI::StyleValueData const&);
+[[nodiscard]] Optional<FontVariantLigatures> font_variant_ligatures_from_value_data(StyleValueFFI::StyleValueData const&);
+[[nodiscard]] HashMap<Utf16FlyString, u8> font_feature_settings_from_value_data(StyleValueFFI::StyleValueData const&);
+[[nodiscard]] HashMap<Utf16FlyString, double> font_variation_settings_from_value_data(StyleValueFFI::StyleValueData const&);
+[[nodiscard]] FontFeatureData font_feature_data_from_value_data(ReadonlySpan<StyleValueFFI::StyleValueData const*>);
+[[nodiscard]] HashMap<Utf16FlyString, double> font_variation_settings_from_value_data(ReadonlySpan<StyleValueFFI::StyleValueData const*>);
 
 // How many C++ longhand wrappers have been minted process-wide, counting the on-demand mints
 // property() performs and the specified-value wrappers the drive's side effects still need.
