@@ -11570,8 +11570,12 @@ fn replay_ffi_reclaims_the_non_empty_recorded_atom_set() {
             computation_inputs,
             std::ptr::null_mut(),
             std::ptr::null(),
-            std::ptr::null(),
-            0,
+            bridge::FfiInstallFeedback {
+                applied_style_reactions: std::ptr::null(),
+                applied_style_reaction_count: 0,
+                pseudo_element_settles: std::ptr::null(),
+                pseudo_element_settle_count: 0,
+            },
             bridge::FfiOwnerRenderHalf {
                 applies: false,
                 viewport_propagation_sources: std::ptr::null(),

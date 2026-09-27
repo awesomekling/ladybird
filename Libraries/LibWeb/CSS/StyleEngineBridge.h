@@ -292,7 +292,14 @@ public:
     // names the inherited groups its style moved, and `facts` says what else the application found. It goes to the
     // engine with that transaction.
     void record_applied_style_reaction(StyleNodeID, u8 reaction, u8 inherited_style_groups_changed, u32 facts);
-    [[nodiscard]] bool has_applied_style_reactions() const { return !m_applied_style_reactions.is_empty(); }
+    // Leave the element's synthetic pseudo-elements for the next transaction's pass to settle, as the drain installed a
+    // composition they inherit from after the pass that settled the element: `old_is_list_item` is whether the element
+    // generated a marker before, and `held_pseudo_records` the records the host holds for its pseudo-elements, one per
+    // kind. It goes to the engine with that transaction.
+    void settle_pseudo_elements_in_next_pass(StyleDrainScope const&, StyleNodeID, bool old_is_list_item, ReadonlySpan<u64> held_pseudo_records);
+    // Whether the host's installs handed back anything the next transaction takes (see record_applied_style_reaction()
+    // and settle_pseudo_elements_in_next_pass()).
+    [[nodiscard]] bool has_install_feedback() const { return !m_applied_style_reactions.is_empty() || !m_pseudo_element_settles.is_empty(); }
     // Whether a `:has()` or `:empty` selector may take part in the next transaction, letting a node anywhere decide an
     // element's style.
     [[nodiscard]] bool may_have_child_dependent_selectors() const;
@@ -471,6 +478,7 @@ private:
     void publish_inputs_queued_during_pass();
     void lend_style_transaction_inputs(RecordedInputGoesTo, Function<void(StyleEngineFFI::FfiDocumentStyleComputationInputs const&, void* layout_arena, InputTransaction const* input)> const&);
     PublishedStyleTransaction publish_style_transaction_view(StyleEngineFFI::FfiStyleTransactionView const&, i64 submission_microseconds, i64 bridge_microseconds);
+    StyleEngineFFI::FfiInstallFeedback install_feedback() const;
     void record_host_fact_write(StyleEngineFFI::FfiHostFactWrite);
     void mint_style_nodes(Span<StyleNodeID>, Vector<StyleNodeID>& granted, size_t& grant_request, StyleEngineFFI::FfiHostFactKind, u8 value);
     bool refresh_attribute_value_text_requirements();
@@ -531,6 +539,7 @@ private:
     // The reactions the host applied since the last transaction. They are no input the host recorded, which a pass in
     // flight holds back: they go with the next transaction, which is the next wave of the style update that applied them.
     Vector<StyleEngineFFI::FfiAppliedStyleReaction> m_applied_style_reactions;
+    Vector<StyleEngineFFI::FfiPseudoElementSettle> m_pseudo_element_settles;
     bool m_owner_applied_render_half { false };
     // How many of the host fact writes are atom adoptions, which are no input to style.
     size_t m_pending_atom_adoption_count { 0 };
