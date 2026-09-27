@@ -6738,19 +6738,6 @@ pub unsafe extern "C" fn layout_arena_note_rows_share_dom_node(
     unsafe { LayoutNodeArena::from_handle(arena) }.note_rows_share_dom_node(bound_row, added_row);
 }
 
-/// The row the element or text node with `style_node` is bound to, or an invalid slot if it has
-/// none. Unlike its shell, asking for the row makes nothing.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_bound_row(arena: *mut c_void, style_node: u32) -> NodeSlotId {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    let Some(style_node) = StyleNodeID::from_raw(style_node) else {
-        return NodeSlotId::INVALID;
-    };
-    // SAFETY: The C++ wrapper keeps the arena alive for this call and
-    // serializes all access on the document thread.
-    unsafe { LayoutNodeArena::from_handle(arena) }.bound_row(style_node)
-}
-
 /// Pins, for the host, the style record of the box the element or text node with `style_node` is
 /// bound to, or of the box of its pseudo-element of kind `generated_for`, so that the box keeps
 /// its style readable once the node has left the document. A text box has no record of its own.
