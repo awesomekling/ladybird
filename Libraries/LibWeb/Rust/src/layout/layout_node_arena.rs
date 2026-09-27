@@ -589,7 +589,7 @@ pub const BOX_PRESENCE_HAS_COMMITTED_BOX: u8 = 1 << 1;
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct FfiStyleRecordHostCallbacks {
-    pub style_engine: *mut c_void,
+    pub style_engine: crate::css::style::StyleEngineHandle,
     pub context: *mut c_void,
     pub shell_style_changed: unsafe extern "C" fn(*mut c_void, *mut c_void, u64, *const c_void, bool),
 }
@@ -639,7 +639,7 @@ pub(crate) struct FreedSubtree {
     paintable_row_resets: Vec<crate::painting::paintable_rows::PaintableRowReset>,
     arena_pinned_style_records: Vec<u64>,
     host_pinned_style_records: Vec<u64>,
-    style_engine: *mut c_void,
+    style_engine: crate::css::style::StyleEngineHandle,
     host_style_record_pins: Option<HostPinsHandle>,
 }
 
@@ -763,7 +763,7 @@ impl FreedSubtree {
     }
 
     fn unpin_style_records(
-        style_engine: *mut c_void,
+        style_engine: crate::css::style::StyleEngineHandle,
         host_style_record_pins: Option<HostPinsHandle>,
         arena_pinned_style_records: Vec<u64>,
         host_pinned_style_records: Vec<u64>,
@@ -778,37 +778,43 @@ impl FreedSubtree {
             return;
         }
         // The arena's own pins are the engine's, which a style pass in flight owns.
-        crate::stage_thread::join_frame_for_style_engine_entrance(style_engine, "freed subtree style record pins");
+        // SAFETY: Registration and unregistration keep the style engine live.
+        let engine = unsafe { style_engine.enter("freed subtree style record pins") };
         for style_record in arena_pinned_style_records {
-            // SAFETY: Registration and unregistration keep the style engine live.
-            unsafe { &mut *style_engine.cast::<StyleEngine>() }.unpin_layout_style_record(style_record);
+            engine.unpin_layout_style_record(style_record);
         }
     }
 }
 
 /// Pins a record for the host's readers in the document thread's table, or with the engine when
 /// no document thread has one (an engine a test drives).
-fn pin_host_style_record(style_engine: *mut c_void, host_style_record_pins: Option<HostPinsHandle>, record: u64) {
+fn pin_host_style_record(
+    style_engine: crate::css::style::StyleEngineHandle,
+    host_style_record_pins: Option<HostPinsHandle>,
+    record: u64,
+) {
     match host_style_record_pins {
         // SAFETY: The arena's owner is the document thread, or runs while it waits.
         Some(pins) => unsafe { pins.pins() }.pin(record),
         None => {
-            crate::stage_thread::join_frame_for_style_engine_entrance(style_engine, "host style record pin");
             // SAFETY: Registration and unregistration keep the style engine live.
-            unsafe { &mut *style_engine.cast::<StyleEngine>() }.pin_layout_style_record(record);
+            unsafe { style_engine.enter("host style record pin") }.pin_layout_style_record(record);
         }
     }
 }
 
 /// Releases a pin [`pin_host_style_record`] took.
-fn unpin_host_style_record(style_engine: *mut c_void, host_style_record_pins: Option<HostPinsHandle>, record: u64) {
+fn unpin_host_style_record(
+    style_engine: crate::css::style::StyleEngineHandle,
+    host_style_record_pins: Option<HostPinsHandle>,
+    record: u64,
+) {
     match host_style_record_pins {
         // SAFETY: As for `pin_host_style_record`.
         Some(pins) => unsafe { pins.pins() }.unpin(record),
         None => {
-            crate::stage_thread::join_frame_for_style_engine_entrance(style_engine, "host style record unpin");
             // SAFETY: Registration and unregistration keep the style engine live.
-            unsafe { &mut *style_engine.cast::<StyleEngine>() }.unpin_layout_style_record(record);
+            unsafe { style_engine.enter("host style record unpin") }.unpin_layout_style_record(record);
         }
     }
 }
@@ -873,7 +879,7 @@ pub(crate) struct StaleWalkFacts {
 /// carries the engine along as a `&mut StyleEngine` would be carried: the link is `Send` exactly
 /// when the engine is.
 #[derive(Clone, Copy)]
-struct StyleEngineLink(*mut c_void);
+struct StyleEngineLink(crate::css::style::StyleEngineHandle);
 
 // SAFETY: The link stands for an exclusive borrow of the engine, which the compiler checks is
 // `Send`. The engine is only reached through it by whoever holds the arena exclusively, while the
@@ -1180,7 +1186,7 @@ impl LayoutNodeArena {
             document_style_node: Cell::new(None),
             may_have_auto_content_visibility: Cell::new(false),
             may_have_scroll_snap_areas: Cell::new(false),
-            style_engine: Cell::new(StyleEngineLink(std::ptr::null_mut())),
+            style_engine: Cell::new(StyleEngineLink(crate::css::style::StyleEngineHandle::null())),
             host_style_record_pins: Cell::new(None),
             host_hears_box_presence: Cell::new(false),
             host_handbacks: RefCell::new(HostHandbacks::default()),
@@ -2510,12 +2516,12 @@ impl LayoutNodeArena {
         self.style_records_pinned_by_host[id.slot_index() as usize].get()
     }
 
-    pub(crate) fn set_style_engine(&self, style_engine: *mut c_void) {
+    pub(crate) fn set_style_engine(&self, style_engine: crate::css::style::StyleEngineHandle) {
         self.style_engine.set(StyleEngineLink(style_engine));
         self.host_style_record_pins.set(None);
         if !style_engine.is_null() {
             // SAFETY: The registered style engine outlives this arena's live nodes.
-            let engine = unsafe { &mut *style_engine.cast::<StyleEngine>() };
+            let engine = unsafe { style_engine.enter("layout arena style engine link") };
             engine.install_layout_style_snapshots(self.layout_style_snapshots.clone());
             self.host_style_record_pins.set(engine.host_style_record_pins());
         }
@@ -2787,18 +2793,22 @@ impl LayoutNodeArena {
     }
 
     /// The style engine the arena's nodes take their style from, or null before it has one.
-    pub(crate) fn style_engine_handle(&self) -> *mut c_void {
+    pub(crate) fn style_engine_handle(&self) -> crate::css::style::StyleEngineHandle {
         self.style_engine.get().0
     }
 
     /// The style engine, for a read or write of it through the arena. A style pass in flight owns
     /// the engine but not the arena, so a main-side access joins the pass here, as an entrance of
     /// the engine's own does.
-    fn style_engine(&self) -> *mut c_void {
+    ///
+    /// # Safety
+    ///
+    /// No other borrow of the engine may be live while the returned one is used.
+    unsafe fn style_engine<'a>(&self) -> &'a mut StyleEngine {
         let style_engine = self.style_engine.get().0;
         assert!(!style_engine.is_null(), "layout node arena has no style record host");
-        crate::stage_thread::join_frame_for_style_engine_entrance(style_engine, "layout arena style engine access");
-        style_engine
+        // SAFETY: The engine outlives the arena's live nodes, and the caller guarantees the rest.
+        unsafe { style_engine.enter("layout arena style engine access") }
     }
 
     // The engine outlives the arena's live nodes. No host callback runs while this
@@ -2806,10 +2816,8 @@ impl LayoutNodeArena {
     /// Borrows the style store for one read-only query. Nothing the query calls may reach back
     /// into the arena for another style-store read: this borrow stands for the whole query.
     pub(crate) fn with_style_store<T>(&self, query: impl FnOnce(&StyleEngine) -> T) -> T {
-        let style_engine = self.style_engine();
-        // SAFETY: As with `with_style_engine`, the engine outlives the arena's live nodes and no
-        // host callback runs while the borrow is active.
-        unsafe { query(&*style_engine.cast::<StyleEngine>()) }
+        // SAFETY: As with `with_style_engine`, no host callback runs while the borrow is active.
+        query(unsafe { self.style_engine() })
     }
 
     /// The committed content box of the element `style_node` names changed along an axis its
@@ -2827,8 +2835,8 @@ impl LayoutNodeArena {
     }
 
     fn with_style_engine<T>(&self, callback: impl FnOnce(&mut StyleEngine) -> T) -> T {
-        let style_engine = self.style_engine();
-        unsafe { callback(&mut *style_engine.cast::<StyleEngine>()) }
+        // SAFETY: No host callback runs while the borrow is active.
+        callback(unsafe { self.style_engine() })
     }
 
     /// Everything one step of the stale-subtree walk reads out of the style mirror, taken in one
@@ -3010,13 +3018,10 @@ impl LayoutNodeArena {
     pub(crate) fn element_construction_facts(&self, style_node: Option<StyleNodeID>) -> u32 {
         match style_node {
             Some(style_node) => {
-                let style_engine = self.style_engine.get().0;
-                if style_engine.is_null() {
+                if self.style_engine_handle().is_null() {
                     return 0;
                 }
-                // SAFETY: As with `with_style_engine`, the engine outlives the arena's live nodes
-                // and no host callback runs while the borrow is active.
-                unsafe { &*style_engine.cast::<StyleEngine>() }.element_construction_facts(style_node)
+                self.with_style_store(|engine| engine.element_construction_facts(style_node))
             }
             _ => 0,
         }
@@ -3027,7 +3032,7 @@ impl LayoutNodeArena {
     /// mirror, has none.
     pub(crate) fn replaced_content_input(&self, id: NodeSlotId) -> ReplacedContentInput {
         match self.node_style_node(id) {
-            Some(style_node) if style_node.element_index().is_some() && !self.style_engine().is_null() => {
+            Some(style_node) if style_node.element_index().is_some() && !self.style_engine_handle().is_null() => {
                 self.with_style_store(|engine| engine.element_replaced_content_input(style_node))
             }
             _ => ReplacedContentInput::None,
@@ -3065,13 +3070,10 @@ impl LayoutNodeArena {
     pub(crate) fn element_box_kind(&self, style_node: Option<StyleNodeID>) -> ElementBoxKind {
         match style_node {
             Some(style_node) if style_node.element_index().is_some() => {
-                let style_engine = self.style_engine.get().0;
-                if style_engine.is_null() {
+                if self.style_engine_handle().is_null() {
                     return ElementBoxKind::FromDisplay;
                 }
-                // SAFETY: As with `with_style_engine`, the engine outlives the arena's live nodes
-                // and no host callback runs while the borrow is active.
-                ElementBoxKind::from_raw(unsafe { &*style_engine.cast::<StyleEngine>() }.element_box_kind(style_node))
+                ElementBoxKind::from_raw(self.with_style_store(|engine| engine.element_box_kind(style_node)))
             }
             _ => ElementBoxKind::FromDisplay,
         }
@@ -4541,19 +4543,17 @@ impl LayoutNodeArena {
         }
         // A document being torn down drops its style record host before the last publication is
         // cleared. The engine it named is going with it, so there is nothing left to retain for.
-        let style_engine = self.style_engine.get().0;
-        if style_engine.is_null() {
+        if self.style_engine_handle().is_null() {
             return;
         }
-        // SAFETY: As with `with_style_engine`, the engine outlives the arena's live nodes and no
-        // host callback runs while the borrow is active.
-        let engine = unsafe { &mut *style_engine.cast::<StyleEngine>() };
-        for atom in retained {
-            engine.retain_published_atom(crate::css::style::index::StyleAtomID(atom));
-        }
-        for atom in released {
-            engine.release_published_atom(crate::css::style::index::StyleAtomID(atom));
-        }
+        self.with_style_engine(|engine| {
+            for atom in retained {
+                engine.retain_published_atom(crate::css::style::index::StyleAtomID(atom));
+            }
+            for atom in released {
+                engine.release_published_atom(crate::css::style::index::StyleAtomID(atom));
+            }
+        });
     }
 
     pub(crate) fn node_has_dom_paint_fact(&self, id: NodeSlotId, fact: DomPaintFact) -> bool {
@@ -7274,7 +7274,7 @@ pub unsafe extern "C" fn layout_arena_clear_style_record_host_callbacks(arena: *
         .shell_style_changed_host
         .set(None);
     // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }.set_style_engine(std::ptr::null_mut());
+    unsafe { LayoutNodeArena::from_handle(arena) }.set_style_engine(crate::css::style::StyleEngineHandle::null());
 }
 
 #[unsafe(no_mangle)]

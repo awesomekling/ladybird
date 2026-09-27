@@ -2651,7 +2651,7 @@ pub struct FfiLonghandTransactionInput {
     pub font_length_resolution_context: FfiLengthResolutionContext,
     pub font_environment_generation: u64,
     pub tree_scope: u32,
-    pub style_engine: *const c_void,
+    pub style_engine: crate::css::style::StyleEngineHandle,
     pub custom_property_store: *const c_void,
     pub resolved_parent_custom_property_store: *const c_void,
     pub resolved_parent_custom_property_environment: u64,
@@ -2947,7 +2947,7 @@ pub const SUBSTITUTION_MARK_DASHED_FUNCTION: u8 = 1 << 4;
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct FfiHostAnimationSample {
-    pub style_engine: *mut c_void,
+    pub style_engine: crate::css::style::StyleEngineHandle,
     pub style_node: u32,
     pub pseudo_kind: u8,
     pub identities: *const u64,
@@ -3422,7 +3422,7 @@ pub(crate) fn sample_settled_row(
         false => unsafe { rust_animated_overlay_clone_inherited(record_overlay) },
     };
     let input = FfiHostAnimationSample {
-        style_engine: std::ptr::null_mut(),
+        style_engine: crate::css::style::StyleEngineHandle::null(),
         style_node: node.raw(),
         pseudo_kind,
         identities: std::ptr::null(),
@@ -3645,7 +3645,7 @@ pub(crate) fn sample_transition_step(
         (false, true) => unsafe { rust_animated_overlay_clone_inherited(record_overlay) },
     };
     let input = FfiHostAnimationSample {
-        style_engine: std::ptr::null_mut(),
+        style_engine: crate::css::style::StyleEngineHandle::null(),
         style_node: node.raw(),
         pseudo_kind,
         identities: std::ptr::null(),
@@ -4347,7 +4347,7 @@ pub struct FfiComputePropertiesInput {
     pub store: *const CascadedPropertyStore,
     pub custom_property_store: *const c_void,
     pub custom_property_registry: *const c_void,
-    pub style_engine: *const c_void,
+    pub style_engine: crate::css::style::StyleEngineHandle,
     pub style_node: u32,
     pub pseudo_kind: u8,
     pub previous_style_record: u64,

@@ -69,6 +69,7 @@ mod custom_property_environments;
 mod deferred_pseudo;
 #[cfg(test)]
 mod differential_tests;
+pub(crate) mod engine_home;
 pub(crate) mod engine_sample;
 pub(crate) mod engine_sample_check;
 mod environment_move;
@@ -203,6 +204,7 @@ use exact_matcher::ExactMatcher;
 
 pub use computed::HOLDS_IMAGE_VALUES;
 pub use counter_context::StyleEngine;
+pub use engine_home::StyleEngineHandle;
 pub use inputs::{PublishedBoxFacts, PublishedTextSource, TextStyleParentFacts};
 
 use batch_matcher::AncestorRequirements;

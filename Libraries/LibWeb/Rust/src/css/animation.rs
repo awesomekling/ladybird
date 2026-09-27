@@ -6929,17 +6929,17 @@ fn finish_resolved_animation_properties(resolved: ResolvedAnimationDeclarations)
 /// `style_engine` must be a live style engine, and both out-parameters must be writable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_published_animation_current_key(
-    style_engine: *const std::ffi::c_void,
+    style_engine: crate::css::style::StyleEngineHandle,
     style_node: u32,
     slot: u8,
     effect_identity: u64,
     is_resolved_out: *mut bool,
     key_out: *mut f64,
 ) -> bool {
-    crate::stage_thread::join_frame_for_style_engine_entrance(style_engine, "rust_published_animation_current_key");
+    let engine: &crate::css::style::StyleEngine =
+        unsafe { crate::css::style::bridge::engine_entrance(style_engine, "rust_published_animation_current_key") };
     use crate::css::style::animations;
 
-    let engine = unsafe { &*style_engine.cast::<crate::css::style::StyleEngine>() };
     let Some(node) = crate::css::style::tree::StyleNodeID::from_raw(style_node) else {
         return false;
     };
@@ -7001,16 +7001,13 @@ pub unsafe extern "C" fn rust_animation_timing_rows_composite_order(
 /// store, and `value` must be a live style value.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_substitute_compositor_keyframe_value(
-    style_engine: *const std::ffi::c_void,
+    style_engine: crate::css::style::StyleEngineHandle,
     custom_property_store: *const std::ffi::c_void,
     property_id: u16,
     value: *const crate::css::style_value::StyleValueData,
 ) -> *const crate::css::style_value::StyleValueData {
-    crate::stage_thread::join_frame_for_style_engine_entrance(
-        style_engine,
-        "rust_substitute_compositor_keyframe_value",
-    );
-    let engine = unsafe { &*style_engine.cast::<crate::css::style::StyleEngine>() };
+    let engine: &crate::css::style::StyleEngine =
+        unsafe { style_engine.enter("rust_substitute_compositor_keyframe_value") };
     let written = unsafe {
         crate::css::style_value::RetainedStyleValueData::from_retained_pointer(
             crate::css::style_value::retain_style_value(value),
