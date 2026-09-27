@@ -1423,8 +1423,8 @@ pub(crate) fn frame_in_flight_for_dom_tree_mutation(arena: *mut c_void) -> Frame
     if no_stage_is_submitted() {
         return FrameForDomTreeMutation::GoesOnBeside { owns_arena: false };
     }
-    // SAFETY: The caller passes a live arena. No stage writes its link to the style engine.
-    let engine = unsafe { &*arena.cast::<crate::layout::LayoutNodeArena>() }.style_engine_handle();
+    // SAFETY: The caller passes a live arena, whose host tables hold the document's style engine.
+    let engine = unsafe { crate::layout::HostTables::beside_frame(arena) }.style_engine();
     let holder = engine.holder();
     let reaches_style_engine = !engine.is_home();
     SUBMITTED.with_borrow(|submitted| {

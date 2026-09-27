@@ -2127,7 +2127,7 @@ unsafe fn go_on_from_driven_frame(
     let take_back = pass.take_back();
     // The pass reads the style engine through the arena, and takes the engine's token along.
     // SAFETY: Guaranteed by the caller.
-    let style_engine = unsafe { LayoutNodeArena::from_handle(arena_handle) }.style_engine_handle();
+    let style_engine = unsafe { super::HostTables::beside_frame(arena_handle) }.style_engine();
     let (loan, settlement) = (!style_engine.is_null())
         .then(|| {
             style_engine.lend(
@@ -2534,9 +2534,9 @@ pub unsafe extern "C" fn layout_arena_join_frame_reaching_style_engine(
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: The caller passes a string that lives for the rest of the process.
     let file = unsafe { crate::stage_thread::call_site_file(file, file_length) };
-    // SAFETY: Guaranteed by the caller. No stage writes the arena's link to its style engine.
-    unsafe { &*arena.cast::<crate::layout::LayoutNodeArena>() }
-        .style_engine_handle()
+    // SAFETY: Guaranteed by the caller.
+    unsafe { super::HostTables::beside_frame(arena) }
+        .style_engine()
         .bring_home_at(file, line, 0);
 }
 

@@ -510,7 +510,7 @@ pub(crate) unsafe fn submit(arena: *mut c_void, flight: Flight) {
     let reach = flight.reach();
     let stage_holds = flight.stage_holds();
     // SAFETY: Guaranteed by the caller: the document thread still owns the arena.
-    let style_engine = unsafe { &*arena.cast::<crate::layout::LayoutNodeArena>() }.style_engine_handle();
+    let style_engine = unsafe { crate::layout::HostTables::beside_frame(arena) }.style_engine();
     let (loan, settlement) = flight.lend_style_engine(style_engine).unzip();
     let take_back = flight.take_back();
     let began = flight.began;
