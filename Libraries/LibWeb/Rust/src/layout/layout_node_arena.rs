@@ -2077,6 +2077,11 @@ impl LayoutNodeArena {
         self.with_style_engine(|engine| engine.unpin_layout_style_record(record));
     }
 
+    /// Whether the node is marked for a layout tree update.
+    pub(crate) fn layout_tree_update_needs(&self, node: StyleNodeID) -> bool {
+        self.layout_tree_update_marks().borrow().needs(node)
+    }
+
     /// The reasons the node's layout tree update mark permits reusing its box, if any.
     pub(crate) fn layout_tree_update_reuse_reasons(&self, node: StyleNodeID) -> u8 {
         self.layout_tree_update_marks().borrow().reuse_reasons(node)
@@ -6247,13 +6252,25 @@ impl LayoutNodeArena {
     /// navigable's scroll offset. The viewport's row holds the offset without the document's node
     /// storing one, so it is not flagged as holding one.
     pub(crate) fn adopt_published_document_style(&self, viewport: NodeSlotId) {
-        let derived = self
-            .published_document_style
-            .take()
-            .expect("a build that builds the viewport is handed the document's style");
-        self.apply_reinherited_style_record(viewport, derived, ShellStyleChangeNotice::Handback);
+        let derived = self.published_document_style.take();
+        debug_assert!(
+            derived.is_some(),
+            "a build that builds the viewport is handed the document's style"
+        );
+        // Without it, the viewport's row keeps the style it was built with.
+        if let Some(derived) = derived {
+            self.apply_reinherited_style_record(viewport, derived, ShellStyleChangeNotice::Handback);
+        }
         self.scroll_offsets()
             .publish(viewport, self.published_viewport_scroll_offset.get().into());
+    }
+
+    /// Whether the arena holds the document's style for the build about to run.
+    pub(crate) fn holds_published_document_style(&self) -> bool {
+        let published = self.published_document_style.take();
+        let holds = published.is_some();
+        self.published_document_style.set(published);
+        holds
     }
 
     /// Releases the document's style if the build did not build a viewport to take it.
@@ -7228,32 +7245,6 @@ pub unsafe extern "C" fn layout_arena_take_built_scroll_snap_containers(
         // SAFETY: Guaranteed by the caller.
         unsafe { callback(context, row, is_scroll_snap_container) };
     }
-}
-
-/// # Safety
-///
-/// The arena must be live on the document thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_tree_build_may_create_viewport(
-    arena: *mut c_void,
-    document_style_node: u32,
-) -> bool {
-    let document_needs_layout_tree_update = StyleNodeID::from_raw(document_style_node)
-        // SAFETY: As above.
-        .is_some_and(|document| unsafe { with_document_marks(arena, |marks| marks.needs(document)) });
-    unsafe { LayoutNodeArena::from_handle(arena) }.tree_build_may_create_viewport(document_needs_layout_tree_update)
-}
-
-/// # Safety
-///
-/// The arena and record must be live on the document thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_publish_document_style_record(
-    arena: *mut c_void,
-    record: u64,
-    viewport_scroll_offset: FfiCssPixelPoint,
-) {
-    unsafe { LayoutNodeArena::from_handle(arena) }.publish_document_style(record, viewport_scroll_offset);
 }
 
 /// Install the record an animation sample published for a style node over its bound row ahead of
