@@ -155,7 +155,7 @@ impl<O: Observer> PaintRecorder<'_, O> {
     pub(crate) fn record_box_phase_inside_resource(&mut self, owner: NodeSlotId, phase: PaintPhase) {
         debug_assert!(self.is_recording_svg_resource_content());
         let kind = draw_kind(phase);
-        if self.is_cancelled() || self.producer_is_skipped(owner, kind) {
+        if self.producer_is_skipped(owner, kind) {
             self.observer
                 .observe(|log| log.leaf(Operation::Producer(owner, kind), Action::Skip, true));
             return;
@@ -168,13 +168,6 @@ impl<O: Observer> PaintRecorder<'_, O> {
 
 impl<O: Observer> AssemblyHost for PaintRecorder<'_, O> {
     fn plan_scope(&mut self, scope: PaintScope) -> ScopePlan {
-        // A cancelled recording's scopes are inactive: the assembly records nothing below them.
-        if self.is_cancelled() {
-            return ScopePlan {
-                active: false,
-                items: SmallVec::new(),
-            };
-        }
         let use_prepared_inputs = self.plan_from_prepared_inputs;
         let plan = PaintScopePlan::build(
             self.layout_arena,
@@ -202,7 +195,7 @@ impl<O: Observer> AssemblyHost for PaintRecorder<'_, O> {
             self.recorder.is_producer_boundary(),
             "a producer starts at a closed group boundary without ambient state"
         );
-        if self.is_cancelled() || self.producer_is_skipped(owner, kind) {
+        if self.producer_is_skipped(owner, kind) {
             self.observer
                 .observe(|log| log.leaf(Operation::Producer(owner, kind), Action::Skip, true));
             return ProducerOutcome { live: false };

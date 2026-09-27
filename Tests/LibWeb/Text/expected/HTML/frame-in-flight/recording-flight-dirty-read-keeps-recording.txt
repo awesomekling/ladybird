@@ -1,9 +1,6 @@
 held as armed: true
 read: 20
-cancelled the recording: false
 presented nothing of it: true
 presented again: true
-recorded again on the Rendering thread: false
-recorded again while the main thread waited: 0
 hit test finds the grown box: true
 color: rgb(0, 0, 255)

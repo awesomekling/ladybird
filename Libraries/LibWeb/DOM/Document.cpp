@@ -851,18 +851,6 @@ Document::JoinScope::JoinScope(Document& document, UpdateLayoutReason reason)
     : m_document(document)
     , m_reason(reason)
 {
-    // A read that script waits for outside the rendering update, of a document the page dirtied beside its recording in
-    // flight, or embedded in one it dirtied, does not wait out that recording, which shows the document as the read is
-    // about to change it: it cancels it, and the next rendering update records what the read leaves behind. A read of a
-    // document still clean, such as getComputedStyle() of one the page left alone, changes nothing the recording shows,
-    // and waits for it.
-    void const* cancels_recording_of = nullptr;
-    if (auto const* arena = m_document.layout_node_arena_if_created(); arena
-        && !HTML::main_thread_event_loop().running_rendering_task()
-        && Layout::RustFFI::rust_stage_thread_reads_beside_recording_of(arena->handle())
-        && !is_clean_with_embedding_documents(m_document))
-        cancels_recording_of = arena->handle();
-    Layout::RustFFI::rust_stage_thread_begin_read(cancels_recording_of);
     // A read of render state waits for the frame in flight before it asks anything, and the
     // cleanliness check below already asks the style engine. A read of committed geometry that a
     // clean document answers goes on beside its recording in flight, which changes no geometry.
@@ -903,7 +891,6 @@ Document::JoinScope::JoinScope(Document& document, UpdateLayoutReason reason)
 
 Document::JoinScope::~JoinScope()
 {
-    Layout::RustFFI::rust_stage_thread_end_read();
     --m_document.m_join_depth;
     if (m_is_nested)
         return;

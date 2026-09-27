@@ -325,8 +325,6 @@ struct SubmittedStage {
     // For a lend (see [`lend_arena`]), what takes the arena back: the main thread runs it where it
     // would wait for a stage to finish.
     recall: Option<Box<dyn FnOnce()>>,
-    // For a recording, how a read that waits for it asks it to stop (see [`RecordingCancel`]).
-    recording_cancel: Option<std::sync::Arc<RecordingCancel>>,
     _count: SubmittedStageCount,
 }
 
@@ -530,178 +528,12 @@ pub(crate) unsafe fn submit_stage_with_take_back(
     }
 }
 
-/// How the main thread asks a recording in flight to stop, and how the recording says it did. A
-/// script that reads layout right after a rendering update would otherwise wait out the whole
-/// recording of the frame that update submitted, which shows the document as it was before the
-/// read. A cancelled recording leaves nothing to publish: its frame is not presented, and the
-/// rendering update records the document again.
-#[derive(Default)]
-pub(crate) struct RecordingCancel {
-    requested: std::sync::atomic::AtomicBool,
-    cancelled: std::sync::atomic::AtomicBool,
-}
-
-impl RecordingCancel {
-    /// Whether the main thread asked the recording to stop. The recording stops at the next
-    /// producer or scope it reaches, and then counts as cancelled.
-    pub(crate) fn is_requested(&self) -> bool {
-        self.requested.load(Ordering::Relaxed)
-    }
-
-    /// Called by the recording once it has stopped short: what it made is to be dropped.
-    pub(crate) fn note_cancelled(&self) {
-        self.cancelled.store(true, Ordering::Relaxed);
-    }
-
-    pub(crate) fn was_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::Relaxed)
-    }
-}
-
-/// How long a document may go without a presented frame because reads cancelled its recordings.
-/// Past that, a read waits for the recording in flight as it would without cancellation, so a
-/// script that reads layout after every rendering update still sees frames reach the screen.
-const LONGEST_WAIT_FOR_A_FRAME_OF_CANCELLED_RECORDINGS: std::time::Duration = std::time::Duration::from_millis(100);
-
-fn recording_cancellation_enabled() -> bool {
-    static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| std::env::var_os("LIBWEB_CANCEL_RECORDINGS").is_none_or(|value| value != "0"))
-}
-
-thread_local! {
-    // On the main thread, the reads of render state it is in, innermost last, and for each the arena
-    // whose recording in flight it may cancel, or 0. A forced join inside these reads cancels those
-    // recordings instead of waiting for them.
-    static READS: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
-    // On the main thread, for each arena whose last recording was cancelled, when the first
-    // recording since its last presented one was.
-    static FRAMES_OWED_SINCE: RefCell<Vec<(usize, std::time::Instant)>> = const { RefCell::new(Vec::new()) };
-    // On the main thread, how many recordings reads cancelled.
-    static RECORDINGS_CANCELLED_BY_READS: Cell<u64> = const { Cell::new(0) };
-    // On the main thread, the arenas whose last recording was cancelled and not yet made again.
-    static RECORDINGS_TO_REDO: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
-    // On the main thread, how the recordings made again after a cancellation were made, by
-    // [`RecordingRedo`].
-    static RECORDINGS_REDONE: Cell<[u64; 3]> = const { Cell::new([0; 3]) };
-}
-
-/// How a document whose recording a read cancelled is recorded again.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-#[repr(u8)]
-pub enum RecordingRedo {
-    /// In a frame submitted to the Rendering thread, which the main thread does not wait for.
-    Submitted = 0,
-    /// In a flight on the Rendering thread.
-    InFlight = 1,
-    /// With the main thread waiting for it.
-    WhileMainWaits = 2,
-}
-
-/// Notes, on the main thread, that the arena `arena` is being recorded `how`.
-pub(crate) fn note_recording_made(arena: usize, how: RecordingRedo) {
-    let redone = RECORDINGS_TO_REDO.with_borrow_mut(|to_redo| {
-        let position = to_redo.iter().position(|owing| *owing == arena)?;
-        to_redo.swap_remove(position);
-        Some(())
-    });
-    if redone.is_some() {
-        RECORDINGS_REDONE.with(|counts| {
-            let mut value = counts.get();
-            value[how as usize] += 1;
-            counts.set(value);
-        });
-    }
-}
-
-/// How many recordings a read cancelled were made again `how` on the calling thread so far.
-#[unsafe(no_mangle)]
-pub extern "C" fn rust_stage_thread_cancelled_recordings_redone(how: RecordingRedo) -> u64 {
-    RECORDINGS_REDONE.with(Cell::get)[how as usize]
-}
-
-/// How many recordings in flight reads cancelled on the calling thread so far.
-#[unsafe(no_mangle)]
-pub extern "C" fn rust_stage_thread_recordings_cancelled_by_reads() -> u64 {
-    RECORDINGS_CANCELLED_BY_READS.with(Cell::get)
-}
-
-/// Begins a read of render state. With a non-null `cancels_recording_of` (a read script waits for
-/// outside the rendering update, of a document dirtied beside its recording in flight, so the
-/// recording shows a document the read is about to change), a forced join until the matching
-/// [`rust_stage_thread_end_read`] cancels the recording in flight of that arena rather than
-/// waiting for it.
-#[unsafe(no_mangle)]
-pub extern "C" fn rust_stage_thread_begin_read(cancels_recording_of: *const c_void) {
-    READS.with_borrow_mut(|reads| reads.push(cancels_recording_of as usize));
-}
-
-/// Ends the innermost read [`rust_stage_thread_begin_read`] began.
-#[unsafe(no_mangle)]
-pub extern "C" fn rust_stage_thread_end_read() {
-    READS.with_borrow_mut(|reads| reads.pop());
-}
-
-/// Asks the recordings of the frame in flight that the reads in progress may cancel to stop,
-/// unless the document one records has gone without a frame for too long already.
-fn cancel_recordings_a_read_waits_for() {
-    if READS.with_borrow(|reads| reads.iter().all(|arena| *arena == 0)) || !recording_cancellation_enabled() {
-        return;
-    }
-    SUBMITTED.with_borrow(|submitted| {
-        for stage in submitted {
-            let Some(cancel) = &stage.recording_cancel else {
-                continue;
-            };
-            if !READS.with_borrow(|reads| reads.contains(&stage.arena)) {
-                continue;
-            }
-            let owed_too_long = FRAMES_OWED_SINCE.with_borrow(|owed| {
-                owed.iter().any(|(arena, since)| {
-                    *arena == stage.arena && since.elapsed() >= LONGEST_WAIT_FOR_A_FRAME_OF_CANCELLED_RECORDINGS
-                })
-            });
-            if !owed_too_long {
-                cancel.requested.store(true, Ordering::Relaxed);
-            }
-        }
-    });
-}
-
-/// Notes, as the main thread takes a recording of the arena `arena` back, whether it was cancelled.
-fn note_recording_taken_back(arena: usize, cancelled: bool) {
-    if cancelled {
-        RECORDINGS_CANCELLED_BY_READS.with(|count| count.set(count.get() + 1));
-        RECORDINGS_TO_REDO.with_borrow_mut(|to_redo| {
-            if !to_redo.contains(&arena) {
-                to_redo.push(arena);
-            }
-        });
-    }
-    FRAMES_OWED_SINCE.with_borrow_mut(|owed| {
-        let position = owed.iter().position(|(owing, _)| *owing == arena);
-        match (cancelled, position) {
-            (true, None) => owed.push((arena, std::time::Instant::now())),
-            (false, Some(position)) => {
-                owed.swap_remove(position);
-            }
-            _ => {}
-        }
-    });
-}
-
 /// Submits the display list recording `stage` of the document whose arena is `arena` to the frame
 /// in flight. The recording reaches no arena: it owns the frame it records and the recorder state it
 /// records with, and answers on a ticket. So it is submitted with none, and no door, read, style
 /// update or arena change of the document waits for it; only the frame's own take-back takes it in.
-/// `arena` names the document for the bookkeeping of cancelled recordings, and `cancel` is how a
-/// read would ask the recording to stop.
-pub(crate) fn submit_recording(
-    arena: *mut c_void,
-    cancel: std::sync::Arc<RecordingCancel>,
-    stage: impl FnOnce() + Send + 'static,
-) {
-    let taken_back = cancel.clone();
-    let arena_address = arena as usize;
+/// `arena` names the document a test's hold names the recording by.
+pub(crate) fn submit_recording(arena: *mut c_void, stage: impl FnOnce() + Send + 'static) {
     // SAFETY: The stage is submitted with no arena, and holds nothing else the main thread reaches.
     unsafe {
         submit(
@@ -710,17 +542,11 @@ pub(crate) fn submit_recording(
             vec!["recording"],
             None,
             std::ptr::null_mut(),
-            arena_address,
+            arena as usize,
             stage,
-            Some(Box::new(move || {
-                note_recording_taken_back(arena_address, taken_back.was_cancelled());
-            })),
+            None,
         );
     }
-    SUBMITTED.with_borrow_mut(|submitted| {
-        let stage = submitted.last_mut().expect("the recording was just submitted");
-        stage.recording_cancel = Some(cancel);
-    });
 }
 
 /// How a flight tells the calling thread it is done with the style engine: once its layout has run,
@@ -880,7 +706,6 @@ unsafe fn submit(
             on_taken_back,
             recall: None,
             _count: SubmittedStageCount::new(),
-            recording_cancel: None,
         });
     });
     tsan::release(thread);
@@ -991,7 +816,6 @@ pub(crate) unsafe fn lend_arena(
                 let _ = to_caller.send(Ok(()));
             })),
             _count: SubmittedStageCount::new(),
-            recording_cancel: None,
         });
     });
 }
@@ -1609,7 +1433,6 @@ fn join_frame_in_flight_for_stage(
     if label == FLIGHT_STAGE {
         FLIGHT_PREEMPTED.store(true, Ordering::Release);
     }
-    cancel_recordings_a_read_waits_for();
     take_frame_in_flight();
     // SAFETY: Called on the main thread, with the frame taken back.
     unsafe { (host.consume_commit)() }
@@ -2302,7 +2125,6 @@ mod tests {
                     on_taken_back: None,
                     recall: None,
                     _count: SubmittedStageCount::new(),
-                    recording_cancel: None,
                 })
             });
         };
@@ -2329,88 +2151,6 @@ mod tests {
     }
 
     #[test]
-    fn a_read_script_waits_for_cancels_recordings_unless_their_document_owes_a_frame_too_long() {
-        let submit = |arena: usize| {
-            let (_to_caller, from_stage) = channel::<StageOutcome>();
-            let cancel = std::sync::Arc::new(RecordingCancel::default());
-            SUBMITTED.with_borrow_mut(|submitted| {
-                submitted.push(SubmittedStage {
-                    label: "recording",
-                    role: "recording",
-                    hold_labels: vec!["recording"],
-                    arena,
-                    document: arena,
-                    owns_arena: true,
-                    style_engine: 0,
-                    style_engine_released: None,
-                    from_stage,
-                    outcome: None,
-                    on_taken_back: None,
-                    recall: None,
-                    recording_cancel: Some(cancel.clone()),
-                    _count: SubmittedStageCount::new(),
-                });
-            });
-            cancel
-        };
-        let first = submit(0x10);
-        let second = submit(0x20);
-
-        let read = |arena: usize| rust_stage_thread_begin_read(arena as *const c_void);
-
-        // A read inside the rendering update, or of a document still clean, waits.
-        read(0);
-        cancel_recordings_a_read_waits_for();
-        rust_stage_thread_end_read();
-        assert!(!first.is_requested() && !second.is_requested());
-
-        // A read script waits for cancels the recording of the dirty document it reads, even from a
-        // read nested in it, and waits for the others.
-        read(0x10);
-        read(0);
-        cancel_recordings_a_read_waits_for();
-        rust_stage_thread_end_read();
-        rust_stage_thread_end_read();
-        assert!(first.is_requested() && !second.is_requested());
-        SUBMITTED.with_borrow_mut(Vec::clear);
-
-        // A document whose recordings were cancelled for too long gets its next one presented.
-        note_recording_taken_back(0x10, true);
-        FRAMES_OWED_SINCE.with_borrow_mut(|owed| {
-            owed[0].1 -= LONGEST_WAIT_FOR_A_FRAME_OF_CANCELLED_RECORDINGS;
-        });
-        let owing = submit(0x10);
-        let other = submit(0x20);
-        read(0x10);
-        read(0x20);
-        cancel_recordings_a_read_waits_for();
-        rust_stage_thread_end_read();
-        rust_stage_thread_end_read();
-        assert!(!owing.is_requested() && other.is_requested());
-        SUBMITTED.with_borrow_mut(Vec::clear);
-
-        // Once one of its recordings is presented, its recordings may be cancelled again.
-        note_recording_taken_back(0x10, false);
-        let presented = submit(0x10);
-        read(0x10);
-        cancel_recordings_a_read_waits_for();
-        rust_stage_thread_end_read();
-        assert!(presented.is_requested());
-        SUBMITTED.with_borrow_mut(Vec::clear);
-        FRAMES_OWED_SINCE.with_borrow_mut(Vec::clear);
-
-        // A cancelled recording counts as redone by the next recording of its arena, and only once.
-        let redone = |how| rust_stage_thread_cancelled_recordings_redone(how);
-        let before = redone(RecordingRedo::Submitted);
-        note_recording_made(0x10, RecordingRedo::Submitted);
-        note_recording_made(0x10, RecordingRedo::Submitted);
-        note_recording_made(0x30, RecordingRedo::WhileMainWaits);
-        assert_eq!(redone(RecordingRedo::Submitted), before + 1);
-        assert_eq!(redone(RecordingRedo::WhileMainWaits), 0);
-        RECORDINGS_TO_REDO.with_borrow_mut(Vec::clear);
-    }
-
-    #[test]
     fn a_read_goes_on_beside_a_recording_and_its_presentation_only() {
         let submit = |label: &'static str, arena: usize| {
             let (to_caller, from_stage) = channel::<StageOutcome>();
@@ -2431,7 +2171,6 @@ mod tests {
                     on_taken_back: None,
                     recall: None,
                     _count: SubmittedStageCount::new(),
-                    recording_cancel: None,
                 })
             });
         };

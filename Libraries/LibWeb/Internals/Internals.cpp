@@ -1959,21 +1959,6 @@ u64 Internals::forced_join_count(Utf16String const& stage) const
     return Layout::RustFFI::rust_stage_thread_forced_joins(label.bytes().data(), label.bytes().size());
 }
 
-u64 Internals::recordings_cancelled_by_reads() const
-{
-    return Layout::RustFFI::rust_stage_thread_recordings_cancelled_by_reads();
-}
-
-u64 Internals::cancelled_recordings_redone(Utf16String const& how) const
-{
-    auto label = how.to_utf8();
-    if (label == "submitted"sv)
-        return Layout::RustFFI::rust_stage_thread_cancelled_recordings_redone(Layout::RustFFI::RecordingRedo::Submitted);
-    if (label == "flight"sv)
-        return Layout::RustFFI::rust_stage_thread_cancelled_recordings_redone(Layout::RustFFI::RecordingRedo::InFlight);
-    return Layout::RustFFI::rust_stage_thread_cancelled_recordings_redone(Layout::RustFFI::RecordingRedo::WhileMainWaits);
-}
-
 bool Internals::frame_in_flight_holds_document() const
 {
     auto const& document = window().associated_document();

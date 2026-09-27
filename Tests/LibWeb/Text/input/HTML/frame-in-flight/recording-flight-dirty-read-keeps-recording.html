@@ -7,39 +7,28 @@
 </style>
 <div id="box"></div>
 <script>
-    // A read of layout that script waits for outside the rendering update does not wait out the recording in flight,
-    // nor cancel it: the recording reaches no arena (it records a frame the document published), so the read lays out
-    // at once beside it. The next rendering update records and presents the document as the read left it.
+    // A read of layout that script waits for outside the rendering update does not wait out the recording in flight:
+    // the recording reaches no arena (it records a frame the document published), so the read lays out at once beside
+    // it. The next rendering update records and presents the document as the read left it.
     asyncTest(async done => {
-        const redone = () => ({
-            rendering: internals.cancelledRecordingsRedone("submitted") + internals.cancelledRecordingsRedone("flight"),
-            mainWaits: internals.cancelledRecordingsRedone("main-waits"),
-        });
-        const redoneBefore = redone();
         let presentedBefore = 0;
         const result = await whileFrameInFlight("mid-recording", () => {
             box.style.backgroundColor = "blue";
         }, frame => {
             presentedBefore = internals.presentedSceneEpoch();
-            const cancelledBefore = internals.recordingsCancelledByReads();
             box.style.height = "20px";
             const height = box.offsetHeight;
             return {
                 ...frame,
                 height,
-                cancelled: internals.recordingsCancelledByReads() - cancelledBefore,
                 presentedAtRead: internals.presentedSceneEpoch(),
             };
         });
         println(`held as armed: ${heldAsArmed(result, "mid-recording")}`);
         println(`read: ${result.height}`);
-        println(`cancelled the recording: ${!result.armed || result.cancelled === 1}`);
         println(`presented nothing of it: ${!result.armed || result.presentedAtRead === presentedBefore}`);
         await twoFrames();
         println(`presented again: ${!result.armed || internals.presentedSceneEpoch() > presentedBefore}`);
-        const redoneAfter = redone();
-        println(`recorded again on the Rendering thread: ${!result.armed || redoneAfter.rendering - redoneBefore.rendering === 1}`);
-        println(`recorded again while the main thread waited: ${redoneAfter.mainWaits - redoneBefore.mainWaits}`);
         println(`hit test finds the grown box: ${document.elementFromPoint(50, 15) === box}`);
         println(`color: ${getComputedStyle(box).backgroundColor}`);
         done();
