@@ -60,7 +60,6 @@ public:
     void note_style_container_query_dependencies(NodeIdentity, u8 dependencies);
     void note_style_query_container_usage(NodeIdentity, u8 usage);
     void note_scroll_state_query_container_usage(NodeIdentity);
-    void note_style_query_needs_evaluation_after_layout(NodeIdentity);
     void note_style_viewport_dependency(NodeIdentity);
 
     // Applies only style-stage reports, leaving layout and event messages at their existing drains.
@@ -88,7 +87,6 @@ private:
         StyleContainerQueryDependencies,
         StyleQueryContainerUsage,
         ScrollStateQueryContainerUsage,
-        StyleQueryNeedsEvaluationAfterLayout,
         StyleViewportDependency,
         PendingFontFaceWanted,
         TopLayerZoneRebuildNeeded,

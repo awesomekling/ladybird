@@ -123,16 +123,6 @@ void CommitMessages::note_scroll_state_query_container_usage(NodeIdentity identi
     });
 }
 
-void CommitMessages::note_style_query_needs_evaluation_after_layout(NodeIdentity identity)
-{
-    m_style_messages.append(Message {
-        .identity = identity,
-        .kind = Kind::StyleQueryNeedsEvaluationAfterLayout,
-        .pseudo_element = {},
-        .custom_property_name = {},
-    });
-}
-
 void CommitMessages::note_style_viewport_dependency(NodeIdentity identity)
 {
     m_style_messages.append(Message {
@@ -316,10 +306,6 @@ void CommitMessages::apply(Message const& message)
     case Kind::ScrollStateQueryContainerUsage:
         if (auto* element = as_if<Element>(message.identity.resolve(m_document).ptr()))
             m_document.scroll_state_query_containers().snapshot_for_query(*element);
-        return;
-    case Kind::StyleQueryNeedsEvaluationAfterLayout:
-        if (auto* element = as_if<Element>(message.identity.resolve(m_document).ptr()))
-            m_document.set_needs_container_query_evaluation_after_layout(*element);
         return;
     case Kind::StyleViewportDependency:
         if (auto* element = as_if<Element>(message.identity.resolve(m_document).ptr()))
