@@ -278,17 +278,20 @@ Layout::RustFFI::FfiVisualContextUpdateOutcome rust_update_accumulated_visual_co
     return outcome;
 }
 
-Vector<u32> rust_owned_visual_context_node_indices(Layout::Node const& layout_node, Layout::RustFFI::FfiVisualContextBoxNodeList list)
+static Vector<u32> rust_owned_visual_context_node_indices(void* arena, Compositing::RustFFI::NodeSlotId slot, Layout::RustFFI::FfiVisualContextBoxNodeList list)
 {
     Vector<u32> indices;
-    if (!has_committed_box(layout_node))
-        return indices;
-    auto* arena = layout_node.arena_handle();
-    auto slot = committed_row_slot(layout_node);
     indices.resize(Layout::RustFFI::layout_arena_paintable_visual_context_node_count(arena, slot, list));
     if (!indices.is_empty())
         Layout::RustFFI::layout_arena_paintable_visual_context_copy_node_indices(arena, slot, list, indices.data(), indices.size());
     return indices;
+}
+
+Vector<u32> rust_owned_visual_context_node_indices(DOM::Document const& document, DOM::NodeIdentity identity, Layout::RustFFI::FfiVisualContextBoxNodeList list)
+{
+    if (!has_committed_box(document, identity))
+        return {};
+    return rust_owned_visual_context_node_indices(layout_arena_handle(document), committed_row_slot(document, identity), list);
 }
 
 bool rust_background_color_can_be_compositor_animated(Layout::Node const& layout_node)
@@ -297,6 +300,14 @@ bool rust_background_color_can_be_compositor_animated(Layout::Node const& layout
         return false;
     return Layout::RustFFI::layout_arena_background_color_can_be_compositor_animated(
         layout_node.arena_handle(), committed_row_slot(layout_node));
+}
+
+bool rust_background_color_can_be_compositor_animated(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    if (!has_committed_box(document, identity))
+        return false;
+    return Layout::RustFFI::layout_arena_background_color_can_be_compositor_animated(
+        layout_arena_handle(document), committed_row_slot(document, identity));
 }
 
 void const* retain_rust_main_visual_context_tree(DOM::Document const& document)
@@ -309,6 +320,14 @@ void const* retain_rust_main_visual_context_tree(DOM::Document const& document)
 Layout::RustFFI::FfiPhysicalOverflowDirections rust_physical_overflow_directions(Layout::Node const& box)
 {
     return Layout::RustFFI::layout_arena_physical_overflow_directions(box.arena_handle(), committed_row_slot(box));
+}
+
+Layout::RustFFI::FfiPhysicalOverflowDirections rust_physical_overflow_directions(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto slot = committed_row_slot(document, identity);
+    if (slot.index == Compositing::RustFFI::INVALID_NODE_SLOT_INDEX)
+        return {};
+    return Layout::RustFFI::layout_arena_physical_overflow_directions(layout_arena_handle(document), slot);
 }
 
 void register_geometry_host(Layout::NodeArena& arena)
@@ -351,6 +370,18 @@ CSS::ColorResolutionContext gradient_stop_color_resolution_context(Layout::NodeW
         .color_scheme = layout_node.color_scheme(),
         .current_color = layout_node.color(),
         .current_color_style_value_data = current_color_style_value_data,
+        .calculation_resolution_context = {},
+    };
+}
+
+CSS::ColorResolutionContext gradient_stop_color_resolution_context(DOM::Element const& element)
+{
+    auto const* text_values = element.style_group<CSS::ComputedValues::InheritedTextValues>();
+    auto const* ui_values = element.style_group<CSS::ComputedValues::InheritedUIValues>();
+    return {
+        .color_scheme = ui_values ? ui_values->color_scheme_value() : CSS::PreferredColorScheme {},
+        .current_color = text_values ? text_values->color_value() : Color {},
+        .current_color_style_value_data = text_values ? text_values->color_style_value.pointer : nullptr,
         .calculation_resolution_context = {},
     };
 }

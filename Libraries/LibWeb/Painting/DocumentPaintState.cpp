@@ -11,8 +11,6 @@
 #include <LibWeb/DOM/Text.h>
 #include <LibWeb/HTML/LocalNavigable.h>
 #include <LibWeb/HTML/Window.h>
-#include <LibWeb/Layout/TextNode.h>
-#include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/Painting/DocumentPaintState.h>
 #include <LibWeb/Painting/PaintingRustBridge.h>
@@ -150,7 +148,7 @@ void DocumentPaintState::append_paint_command_cache_source_resources(Compositing
 void DocumentPaintState::invalidate_all_cached_paint(DOM::Document& document)
 {
     Layout::RustFFI::layout_arena_invalidate_all_paint_caches(m_layout_node_arena->handle());
-    Painting::set_needs_repaint(*document.unsafe_layout_node());
+    Painting::set_needs_repaint(document, DOM::NodeIdentity::of_document());
 }
 
 void DocumentPaintState::refresh_scroll_state(DOM::Document& document)

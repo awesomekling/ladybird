@@ -33,7 +33,13 @@
 
 namespace Web::Painting {
 
-static void push_form_control_paint_facts_onto(HTML::HTMLInputElement const& input, Layout::Node const& layout_node)
+static Layout::Row bound_row(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto const* arena = document.layout_node_arena_if_created();
+    return arena && identity ? identity.bound_row(*arena) : Layout::Row {};
+}
+
+static void push_form_control_paint_facts_onto(HTML::HTMLInputElement const& input, Layout::Row const& row)
 {
     Layout::RustFFI::FfiFormControlPaintFacts facts {
         .enabled = input.enabled(),
@@ -41,7 +47,7 @@ static void push_form_control_paint_facts_onto(HTML::HTMLInputElement const& inp
         .indeterminate = input.indeterminate(),
         .being_activated = input.is_being_activated(),
     };
-    Layout::RustFFI::layout_arena_set_form_control_paint_facts(layout_node.arena_handle(), Layout::Node::slot_id(&layout_node), facts);
+    Layout::RustFFI::layout_arena_set_form_control_paint_facts(row.arena_handle(), row.slot(), facts);
 }
 
 void push_form_control_paint_facts(HTML::HTMLInputElement& input)
@@ -55,7 +61,7 @@ void push_form_control_paint_facts(HTML::HTMLInputElement& input)
         DOM::NodeIdentity::of(input), input.enabled(), input.checked(), input.indeterminate(), input.is_being_activated());
 }
 
-static void push_canvas_paint_facts_onto(HTML::HTMLCanvasElement const& canvas, Layout::Node const& layout_node)
+static void push_canvas_paint_facts_onto(HTML::HTMLCanvasElement const& canvas, Layout::Row const& row)
 {
     Layout::RustFFI::FfiCanvasPaintFacts facts {};
     if (auto content_size = canvas.canvas_surface_content_size(); content_size.has_value()) {
@@ -65,17 +71,16 @@ static void push_canvas_paint_facts_onto(HTML::HTMLCanvasElement const& canvas, 
         facts.canvas_id = canvas.canvas_id().value().value();
         facts.content_generation = canvas.content_generation();
     }
-    bool changed = Layout::RustFFI::layout_arena_set_canvas_paint_facts(layout_node.arena_handle(), Layout::Node::slot_id(&layout_node), facts);
+    bool changed = Layout::RustFFI::layout_arena_set_canvas_paint_facts(row.arena_handle(), row.slot(), facts);
     // This reconciles facts while a layout row is being published, so the damage belongs to that
     // publication rather than a later identity-based journal entry.
-    if (changed && has_committed_box(layout_node))
-        apply_paint_cache_invalidation(layout_node, PaintCacheInvalidation::PaintAndHitTest);
+    if (changed && has_committed_box(row))
+        apply_paint_cache_invalidation(row, PaintCacheInvalidation::PaintAndHitTest);
 }
 
 void push_canvas_paint_facts(HTML::HTMLCanvasElement const& canvas)
 {
-    auto const* layout_node = canvas.unsafe_layout_node();
-    if (!layout_node || layout_node->kind() != Layout::RustFFI::NodeKind::CanvasBox)
+    if (bound_row_kind(canvas.document(), DOM::NodeIdentity::of(canvas)) != Layout::RustFFI::NodeKind::CanvasBox)
         return;
     auto content_size = canvas.canvas_surface_content_size();
     const_cast<DOM::Document&>(canvas.document()).invalidation_journal().note_canvas_paint_facts(DOM::NodeIdentity::of(canvas), content_size.has_value(), content_size.has_value() ? content_size->width() : 0, content_size.has_value() ? content_size->height() : 0, content_size.has_value() ? canvas.canvas_id().value().value() : 0, content_size.has_value() ? canvas.content_generation() : 0);
@@ -108,7 +113,7 @@ enum class ReconcilingBeforeRecording : u8 {
     Yes,
 };
 
-static void push_navigable_container_paint_facts_onto(HTML::NavigableContainer const& navigable_container, Layout::Node const& layout_node, ReconcilingBeforeRecording reconciling = ReconcilingBeforeRecording::No)
+static void push_navigable_container_paint_facts_onto(HTML::NavigableContainer const& navigable_container, Layout::Row const& row, ReconcilingBeforeRecording reconciling = ReconcilingBeforeRecording::No)
 {
     Layout::RustFFI::FfiNavigableContainerPaintFacts facts {};
     if (auto context_id = composited_context_id_for_navigable_container(navigable_container); context_id.has_value()) {
@@ -121,17 +126,17 @@ static void push_navigable_container_paint_facts_onto(HTML::NavigableContainer c
         facts.local_content_navigable.namespace_id = content_navigable->id().namespace_id;
         facts.local_content_navigable.local_id = content_navigable->id().local_id;
     }
-    bool changed = Layout::RustFFI::layout_arena_set_navigable_container_paint_facts(layout_node.arena_handle(), Layout::Node::slot_id(&layout_node), facts);
+    bool changed = Layout::RustFFI::layout_arena_set_navigable_container_paint_facts(row.arena_handle(), row.slot(), facts);
     if (!changed)
         return;
     if (reconciling == ReconcilingBeforeRecording::Yes) {
         // Recording reads these facts immediately below its call site, after the journal has
         // already drained. Reconcile and damage them as one named pre-recording stage.
-        apply_paint_cache_invalidation(layout_node, PaintCacheInvalidation::PaintAndHitTest);
+        apply_paint_cache_invalidation(row, PaintCacheInvalidation::PaintAndHitTest);
         return;
     }
-    if (has_committed_box(layout_node))
-        invalidate_paint_cache(layout_node);
+    if (has_committed_box(row))
+        invalidate_paint_cache(navigable_container.document(), DOM::NodeIdentity::of(navigable_container));
 }
 
 // The facts are read from the container as it is at the drain.
@@ -144,14 +149,12 @@ void push_navigable_container_paint_facts(HTML::NavigableContainer const& naviga
         }));
         return;
     }
-    auto const* layout_node = navigable_container.unsafe_layout_node();
-    if (!layout_node || layout_node->kind() != Layout::RustFFI::NodeKind::NavigableContainerViewport)
+    if (bound_row_kind(navigable_container.document(), DOM::NodeIdentity::of(navigable_container)) != Layout::RustFFI::NodeKind::NavigableContainerViewport)
         return;
     const_cast<DOM::Document&>(navigable_container.document()).invalidation_journal().note_paint_facts(DOM::NodeIdentity::of(navigable_container), DOM::PaintFactsFamily::NavigableContainer, [](Layout::Row const& current_row) {
         if (current_row.kind() != Layout::RustFFI::NodeKind::NavigableContainerViewport)
             return;
-        auto const& current_layout_node = current_row.shell();
-        push_navigable_container_paint_facts_onto(as<HTML::NavigableContainer>(*current_layout_node.dom_node()), current_layout_node);
+        push_navigable_container_paint_facts_onto(as<HTML::NavigableContainer>(*current_row.shell().dom_node()), current_row);
     });
 }
 
@@ -162,10 +165,12 @@ void reconcile_navigable_container_paint_facts(DOM::Document const& document, Re
             continue;
         // Ahead of the layout a flight runs, the boxes are those the last layout left. A box the flight's tree build
         // makes is given its facts as that build's host half commits it.
-        auto const* layout_node = ahead_of_layout == ReconcileAheadOfLayout::Yes ? navigable_container->unsafe_layout_node() : navigable_container->layout_node();
-        if (!layout_node || !is_navigable_container_viewport_paintable(*layout_node))
+        auto row = bound_row(document, DOM::NodeIdentity::of(*navigable_container));
+        if (row && ahead_of_layout == ReconcileAheadOfLayout::No)
+            VERIFY(document.layout_is_up_to_date());
+        if (!row || row.kind() != Layout::RustFFI::NodeKind::NavigableContainerViewport || !has_committed_box(row))
             continue;
-        push_navigable_container_paint_facts_onto(*navigable_container, *layout_node, ReconcilingBeforeRecording::Yes);
+        push_navigable_container_paint_facts_onto(*navigable_container, row, ReconcilingBeforeRecording::Yes);
     }
 }
 
@@ -281,17 +286,17 @@ void push_layer_image_paint_facts(Layout::NodeWithStyle const& layout_node)
     });
 }
 
-void push_replaced_image_paint_facts(Layout::ImageProvider const& image_provider, Layout::Node const& layout_node)
+void push_replaced_image_paint_facts(Layout::ImageProvider const& image_provider, Layout::Row const& row)
 {
-    if (layout_node.kind() != Layout::RustFFI::NodeKind::ImageBox && layout_node.kind() != Layout::RustFFI::NodeKind::SVGImageBox)
+    if (row.kind() != Layout::RustFFI::NodeKind::ImageBox && row.kind() != Layout::RustFFI::NodeKind::SVGImageBox)
         return;
     Optional<Gfx::ImageFrameHandle> current_frame_handle;
     Layout::RustFFI::FfiReplacedImagePaintFacts facts {
         .natural = natural_size_facts(image_provider.intrinsic_width(), image_provider.intrinsic_height(), image_provider.intrinsic_aspect_ratio()),
         .content = image_content_facts(image_provider.decoded_image_data(), current_frame_handle),
     };
-    auto target_slot = Layout::Node::slot_id(&layout_node);
-    note_paint_facts(layout_node, DOM::PaintFactsFamily::ReplacedImage, [target_slot, facts, current_frame_handle = move(current_frame_handle)](Layout::Row const& anchor_row) {
+    auto target_slot = row.slot();
+    note_paint_facts(row, DOM::PaintFactsFamily::ReplacedImage, [target_slot, facts, current_frame_handle = move(current_frame_handle)](Layout::Row const& anchor_row) {
         (void)current_frame_handle;
         auto current_row = anchor_row.arena().row_if_live(target_slot);
         if (!current_row)
@@ -303,7 +308,7 @@ void push_replaced_image_paint_facts(Layout::ImageProvider const& image_provider
     });
 }
 
-static void push_video_paint_facts_onto(HTML::HTMLVideoElement const& video_element, Layout::Node const& layout_node)
+static void push_video_paint_facts_onto(HTML::HTMLVideoElement const& video_element, Layout::Row const& row)
 {
     Layout::RustFFI::FfiVideoPaintFacts facts {};
     Optional<Gfx::ImageFrameHandle> poster_frame_handle;
@@ -333,8 +338,8 @@ static void push_video_paint_facts_onto(HTML::HTMLVideoElement const& video_elem
         facts.representation = Layout::RustFFI::FfiVideoRepresentation::TransparentBlack;
         break;
     }
-    auto target_slot = Layout::Node::slot_id(&layout_node);
-    note_paint_facts(layout_node, DOM::PaintFactsFamily::Video, [target_slot, facts, poster_frame_handle = move(poster_frame_handle)](Layout::Row const& anchor_row) {
+    auto target_slot = row.slot();
+    note_paint_facts(row, DOM::PaintFactsFamily::Video, [target_slot, facts, poster_frame_handle = move(poster_frame_handle)](Layout::Row const& anchor_row) {
         (void)poster_frame_handle;
         auto current_row = anchor_row.arena().row_if_live(target_slot);
         if (!current_row || current_row.kind() != Layout::RustFFI::NodeKind::VideoBox)
@@ -353,10 +358,10 @@ void push_video_paint_facts(HTML::HTMLVideoElement const& video_element)
         }));
         return;
     }
-    auto const* layout_node = video_element.unsafe_layout_node();
-    if (!layout_node || layout_node->kind() != Layout::RustFFI::NodeKind::VideoBox)
+    auto row = bound_row(video_element.document(), DOM::NodeIdentity::of(video_element));
+    if (!row || row.kind() != Layout::RustFFI::NodeKind::VideoBox)
         return;
-    push_video_paint_facts_onto(video_element, *layout_node);
+    push_video_paint_facts_onto(video_element, row);
 }
 
 // The `<area>` elements of the image map an image is associated with, in tree order, each named
@@ -388,8 +393,8 @@ void push_image_map_area_facts(HTML::HTMLImageElement& image_element)
 {
     // Any box an image has answers for its map, including the one it takes when it renders as its
     // alt text, which is where the association was read from before it was published.
-    if (auto const* layout_node = image_element.unsafe_layout_node())
-        push_image_map_area_facts_onto(image_element, *layout_node);
+    if (auto row = bound_row(image_element.document(), DOM::NodeIdentity::of(image_element)))
+        push_image_map_area_facts_onto(image_element, row);
 }
 
 // Which map an image is associated with is a hash-name reference resolved against the image's
@@ -438,22 +443,22 @@ void push_paint_facts_after_style_attach(Layout::Row const& row, DOM::Node* dom_
     switch (row.kind()) {
     case Layout::RustFFI::NodeKind::CheckBox:
     case Layout::RustFFI::NodeKind::RadioButton:
-        push_form_control_paint_facts_onto(as<HTML::HTMLInputElement>(*dom_node), row.shell());
+        push_form_control_paint_facts_onto(as<HTML::HTMLInputElement>(*dom_node), row);
         break;
     case Layout::RustFFI::NodeKind::CanvasBox:
-        push_canvas_paint_facts_onto(as<HTML::HTMLCanvasElement>(*dom_node), row.shell());
+        push_canvas_paint_facts_onto(as<HTML::HTMLCanvasElement>(*dom_node), row);
         break;
     case Layout::RustFFI::NodeKind::ImageBox:
         push_image_box_paint_facts(static_cast<Layout::Box const&>(row.shell()));
         break;
     case Layout::RustFFI::NodeKind::SVGImageBox:
-        push_replaced_image_paint_facts(as<SVG::SVGImageElement>(*dom_node), row.shell());
+        push_replaced_image_paint_facts(as<SVG::SVGImageElement>(*dom_node), row);
         break;
     case Layout::RustFFI::NodeKind::VideoBox:
-        push_video_paint_facts_onto(as<HTML::HTMLVideoElement>(*dom_node), row.shell());
+        push_video_paint_facts_onto(as<HTML::HTMLVideoElement>(*dom_node), row);
         break;
     case Layout::RustFFI::NodeKind::NavigableContainerViewport:
-        push_navigable_container_paint_facts_onto(as<HTML::NavigableContainer>(*dom_node), row.shell());
+        push_navigable_container_paint_facts_onto(as<HTML::NavigableContainer>(*dom_node), row);
         break;
     default:
         break;

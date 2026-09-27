@@ -55,10 +55,10 @@ static bool body_background_is_propagated_to_root(Layout::Row const& row)
     return html_element && html_element->should_use_body_background_properties();
 }
 
-GC::Ptr<SVG::SVGFilterElement> resolve_svg_filter_reference(CSS::ComputedValuesFFI::ComputedStyleValueHandle const& url_value, Layout::NodeWithStyle const& layout_node)
+GC::Ptr<SVG::SVGFilterElement> resolve_svg_filter_reference(CSS::ComputedValuesFFI::ComputedStyleValueHandle const& url_value, DOM::Document const& document)
 {
     auto fragment = CSS::ComputedFilterView::url_fragment(url_value);
-    auto referenced_element = fragment.is_empty() ? nullptr : layout_node.document().get_element_by_id(fragment);
+    auto referenced_element = fragment.is_empty() ? nullptr : document.get_element_by_id(fragment);
     return referenced_element ? as_if<SVG::SVGFilterElement>(*referenced_element) : nullptr;
 }
 
@@ -73,9 +73,68 @@ Compositing::RustFFI::NodeSlotId viewport_row_slot(DOM::Document const& document
     return arena ? arena->bound_viewport_row().slot() : Layout::Row {}.slot();
 }
 
-Layout::RustFFI::FfiCommittedRow committed_row(Layout::Node const& node)
+namespace {
+
+// A committed box as the views read it: the document's layout rows and the row's slot in them.
+struct BoxSlot {
+    DOM::Document const* document { nullptr };
+    void* arena { nullptr };
+    Compositing::RustFFI::NodeSlotId slot { Compositing::RustFFI::INVALID_NODE_SLOT_INDEX };
+    Optional<Layout::RustFFI::NodeKind> kind;
+
+    explicit operator bool() const { return arena && slot.index != Compositing::RustFFI::INVALID_NODE_SLOT_INDEX; }
+};
+
+}
+
+static BoxSlot box_slot(Layout::Node const& node)
 {
-    return Layout::RustFFI::layout_arena_committed_row(node.arena_handle(), committed_row_slot(node));
+    return { &node.document(), node.arena_handle(), committed_row_slot(node), node.kind() };
+}
+
+static BoxSlot box_slot(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto const* arena = document.layout_node_arena_if_created();
+    if (!arena || !identity || (identity != DOM::NodeIdentity::of_document() && identity.style_node().value() == 0)) {
+        BoxSlot none;
+        none.document = &document;
+        return none;
+    }
+    auto row = identity == DOM::NodeIdentity::of_document()
+        ? Layout::RustFFI::layout_arena_bound_viewport_row(arena->handle())
+        : Layout::RustFFI::layout_arena_bound_row_of(arena->handle(), identity.style_node().value(), 0);
+    return { &document, arena->handle(), row.slot, row.kind };
+}
+
+static Layout::RustFFI::FfiCommittedRow committed_row(BoxSlot const& node)
+{
+    if (!node)
+        return {};
+    return Layout::RustFFI::layout_arena_committed_row(node.arena, node.slot);
+}
+
+static bool has_committed_box(BoxSlot const& node)
+{
+    return node && Layout::RustFFI::layout_arena_has_committed_box(node.arena, node.slot);
+}
+
+Optional<Layout::RustFFI::NodeKind> bound_row_kind(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto box = box_slot(document, identity);
+    if (!box)
+        return {};
+    return box.kind;
+}
+
+Compositing::RustFFI::NodeSlotId committed_row_slot(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    return box_slot(document, identity).slot;
+}
+
+bool has_committed_box(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto box = box_slot(document, identity);
+    return box && Layout::RustFFI::layout_arena_has_committed_box(box.arena, box.slot);
 }
 
 bool has_committed_box(Layout::Row const& row)
@@ -93,49 +152,65 @@ u64 committed_row_reset_version(Layout::NodeArena& arena, Compositing::RustFFI::
     return Layout::RustFFI::layout_arena_paintable_row_reset_version(arena.handle(), slot);
 }
 
+u64 committed_row_reset_version(DOM::Document const& document, Compositing::RustFFI::NodeSlotId slot)
+{
+    auto const* arena = document.layout_node_arena_if_created();
+    return arena ? Layout::RustFFI::layout_arena_paintable_row_reset_version(arena->handle(), slot) : 0;
+}
+
+DOM::NodeIdentity dom_node_identity_of_committed_slot(DOM::Document const& document, Compositing::RustFFI::NodeSlotId slot)
+{
+    auto const* arena = document.layout_node_arena_if_created();
+    if (!arena || slot.index == Compositing::RustFFI::INVALID_NODE_SLOT_INDEX)
+        return {};
+    if (auto row = arena->row_if_live(slot))
+        return row.dom_node_identity();
+    return {};
+}
+
 static PixelBox pixel_box_from_ffi(Layout::RustFFI::FfiPixelBox const& box)
 {
     return { box.top, box.right, box.bottom, box.left };
 }
 
-CSSPixelRect absolute_rect(Layout::Node const& node)
+static CSSPixelRect absolute_rect(BoxSlot const& node)
 {
-    return Layout::RustFFI::layout_arena_paintable_absolute_rect(node.arena_handle(), committed_row_slot(node));
+    return Layout::RustFFI::layout_arena_paintable_absolute_rect(node.arena, node.slot);
 }
 
-CSSPixelRect absolute_padding_box_rect(Layout::Node const& node)
+static CSSPixelRect absolute_padding_box_rect(BoxSlot const& node)
 {
-    return Layout::RustFFI::layout_arena_paintable_absolute_padding_box_rect(node.arena_handle(), committed_row_slot(node));
+    return Layout::RustFFI::layout_arena_paintable_absolute_padding_box_rect(node.arena, node.slot);
 }
 
-CSSPixelRect absolute_border_box_rect(Layout::Node const& node)
+static CSSPixelRect absolute_border_box_rect(BoxSlot const& node)
 {
-    return Layout::RustFFI::layout_arena_paintable_absolute_border_box_rect(node.arena_handle(), committed_row_slot(node));
+    return Layout::RustFFI::layout_arena_paintable_absolute_border_box_rect(node.arena, node.slot);
 }
 
-CSSPixelPoint absolute_position(Layout::Node const& node)
+static CSSPixelPoint absolute_position(BoxSlot const& node)
 {
     return absolute_rect(node).location();
 }
 
-CSSPixelSize content_size(Layout::Node const& node)
+static CSSPixelSize content_size(BoxSlot const& node)
 {
-    return Layout::RustFFI::layout_arena_paintable_content_size(node.arena_handle(), committed_row_slot(node));
+    return Layout::RustFFI::layout_arena_paintable_content_size(node.arena, node.slot);
 }
 
-CSSPixels content_width(Layout::Node const& node)
+static CSSPixels content_width(BoxSlot const& node)
 {
     return content_size(node).width();
 }
 
-CSSPixels content_height(Layout::Node const& node)
+static CSSPixels content_height(BoxSlot const& node)
 {
     return content_size(node).height();
 }
 
-BoxModelMetrics box_model(Layout::Node const& node)
+static BoxModelMetrics box_model(BoxSlot const& node)
 {
-    auto metrics = Layout::RustFFI::layout_arena_paintable_box_model(node.arena_handle(), committed_row_slot(node));
+    auto metrics = Layout::RustFFI::layout_arena_paintable_box_model(node.arena, node.slot);
     return {
         .margin = pixel_box_from_ffi(metrics.margin),
         .padding = pixel_box_from_ffi(metrics.padding),
@@ -144,27 +219,27 @@ BoxModelMetrics box_model(Layout::Node const& node)
     };
 }
 
-CSSPixels border_box_width(Layout::Node const& node)
+static CSSPixels border_box_width(BoxSlot const& node)
 {
     auto border_box = box_model(node).border_box();
     return content_width(node) + border_box.left + border_box.right;
 }
 
-CSSPixels border_box_height(Layout::Node const& node)
+static CSSPixels border_box_height(BoxSlot const& node)
 {
     auto border_box = box_model(node).border_box();
     return content_height(node) + border_box.top + border_box.bottom;
 }
 
-bool has_scrollable_overflow(Layout::Node const& node)
+static bool has_scrollable_overflow(BoxSlot const& node)
 {
-    auto overflow = Layout::RustFFI::layout_arena_paintable_scrollable_overflow(node.arena_handle(), committed_row_slot(node));
+    auto overflow = Layout::RustFFI::layout_arena_paintable_scrollable_overflow(node.arena, node.slot);
     return overflow.has_value && overflow.value.has_scrollable_overflow;
 }
 
-Optional<CSSPixelRect> scrollable_overflow_rect(Layout::Node const& node)
+static Optional<CSSPixelRect> scrollable_overflow_rect(BoxSlot const& node)
 {
-    auto overflow = Layout::RustFFI::layout_arena_paintable_scrollable_overflow(node.arena_handle(), committed_row_slot(node));
+    auto overflow = Layout::RustFFI::layout_arena_paintable_scrollable_overflow(node.arena, node.slot);
     if (!overflow.has_value)
         return {};
     return overflow.value.rect;
@@ -191,7 +266,7 @@ bool visible_for_hit_testing(Layout::Node const& node)
     return as<Layout::NodeWithStyle>(node).pointer_events() != CSS::PointerEvents::None;
 }
 
-bool has_stacking_context(Layout::Node const& node)
+static bool has_stacking_context(BoxSlot const& node)
 {
     return committed_row(node).establishes_stacking_context;
 }
@@ -203,9 +278,9 @@ CSS::Display display(Layout::Node const& node)
     return as<Layout::NodeWithStyle>(node).display();
 }
 
-bool is_positioned(Layout::Node const& node)
+static bool is_positioned(BoxSlot const& node)
 {
-    return Layout::RustFFI::layout_arena_paintable_is_positioned(node.arena_handle(), committed_row_slot(node));
+    return Layout::RustFFI::layout_arena_paintable_is_positioned(node.arena, node.slot);
 }
 
 CSS::StyleRecordID style_record_identity(Layout::Node const& node)
@@ -215,21 +290,21 @@ CSS::StyleRecordID style_record_identity(Layout::Node const& node)
     return as<Layout::NodeWithStyle>(node).style_record_identity();
 }
 
-bool is_navigable_container_viewport_paintable(Layout::Node const& node)
+static bool is_navigable_container_viewport_paintable(BoxSlot const& node)
 {
-    return has_committed_box(node) && node.kind() == Layout::RustFFI::NodeKind::NavigableContainerViewport;
+    return has_committed_box(node) && node.kind.value() == Layout::RustFFI::NodeKind::NavigableContainerViewport;
 }
 
-bool is_viewport_paintable(Layout::Node const& node)
+static bool is_viewport_paintable(BoxSlot const& node)
 {
-    return has_committed_box(node) && node.kind() == Layout::RustFFI::NodeKind::Viewport;
+    return has_committed_box(node) && node.kind.value() == Layout::RustFFI::NodeKind::Viewport;
 }
 
-bool is_paintable_with_lines(Layout::Node const& node)
+static bool is_paintable_with_lines(BoxSlot const& node)
 {
     if (!has_committed_box(node))
         return false;
-    switch (node.kind()) {
+    switch (node.kind.value()) {
     case Layout::RustFFI::NodeKind::Viewport:
     case Layout::RustFFI::NodeKind::BlockContainer:
     case Layout::RustFFI::NodeKind::LegendBox:
@@ -241,83 +316,83 @@ bool is_paintable_with_lines(Layout::Node const& node)
     case Layout::RustFFI::NodeKind::SVGForeignObjectBox:
         return true;
     case Layout::RustFFI::NodeKind::ListItemBox:
-        return !node.is_fragmented_inline();
+        return !Layout::RustFFI::layout_arena_node_is_fragmented_inline(node.arena, node.slot);
     default:
         return false;
     }
 }
 
-bool is_inline_paintable(Layout::Node const& node)
+static bool is_inline_paintable(BoxSlot const& node)
 {
-    return has_committed_box(node) && node.is_fragmented_inline();
+    return has_committed_box(node) && Layout::RustFFI::layout_arena_node_is_fragmented_inline(node.arena, node.slot);
 }
 
-bool is_svg_svg_paintable(Layout::Node const& node)
+static bool is_svg_svg_paintable(BoxSlot const& node)
 {
-    return has_committed_box(node) && node.kind() == Layout::RustFFI::NodeKind::SVGSVGBox;
+    return has_committed_box(node) && node.kind.value() == Layout::RustFFI::NodeKind::SVGSVGBox;
 }
 
-bool has_accumulated_visual_context(Layout::Node const& node)
+static bool has_accumulated_visual_context(BoxSlot const& node)
 {
     return committed_row(node).has_accumulated_visual_context;
 }
 
-Compositing::ContextRef accumulated_visual_context(Layout::Node const& node)
+static Compositing::ContextRef accumulated_visual_context(BoxSlot const& node)
 {
     return committed_row(node).accumulated_visual_context;
 }
 
-Compositing::ContextRef accumulated_visual_context_for_descendants(Layout::Node const& node)
+static Compositing::ContextRef accumulated_visual_context_for_descendants(BoxSlot const& node)
 {
     return committed_row(node).accumulated_visual_context_for_descendants;
 }
 
-Compositing::SpatialNodeIndex enclosing_scroll_node_index(Layout::Node const& node)
+static Compositing::SpatialNodeIndex enclosing_scroll_node_index(BoxSlot const& node)
 {
     auto row = committed_row(node);
     return row.is_populated ? row.enclosing_scroll_node_index : Compositing::VISUAL_VIEWPORT_NODE_INDEX;
 }
 
-Compositing::SpatialNodeIndex own_scroll_node_index(Layout::Node const& node)
+static Compositing::SpatialNodeIndex own_scroll_node_index(BoxSlot const& node)
 {
     auto row = committed_row(node);
     return row.is_populated ? row.own_scroll_node_index : Compositing::VISUAL_VIEWPORT_NODE_INDEX;
 }
 
-Gfx::Path const* committed_svg_path(Layout::Node const& node)
+static Gfx::Path const* committed_svg_path(BoxSlot const& node)
 {
-    return static_cast<Gfx::Path const*>(Layout::RustFFI::layout_arena_paintable_computed_svg_path(node.arena_handle(), committed_row_slot(node)));
+    return static_cast<Gfx::Path const*>(Layout::RustFFI::layout_arena_paintable_computed_svg_path(node.arena, node.slot));
 }
 
-CSSPixelSize svg_viewport_size(Layout::Node const& node)
+static CSSPixelSize svg_viewport_size(BoxSlot const& node)
 {
-    return Layout::RustFFI::layout_arena_paintable_svg_viewport_size(node.arena_handle(), committed_row_slot(node));
+    return Layout::RustFFI::layout_arena_paintable_svg_viewport_size(node.arena, node.slot);
 }
 
-Optional<Gfx::AffineTransform> svg_viewport_transform(Layout::Node const& node)
+static Optional<Gfx::AffineTransform> svg_viewport_transform(BoxSlot const& node)
 {
-    auto result = Layout::RustFFI::layout_arena_paintable_svg_viewport_transform(node.arena_handle(), committed_row_slot(node));
+    auto result = Layout::RustFFI::layout_arena_paintable_svg_viewport_transform(node.arena, node.slot);
     if (!result.has_value)
         return {};
     auto const& transform = result.transform;
     return Gfx::AffineTransform { transform.a, transform.b, transform.c, transform.d, transform.e, transform.f };
 }
 
-CSS::RustStyleValueHandle used_value_for_grid_template(Layout::Node const& node, CSS::PropertyID property)
+static CSS::RustStyleValueHandle used_value_for_grid_template(BoxSlot const& node, CSS::PropertyID property)
 {
     VERIFY(property == CSS::PropertyID::GridTemplateColumns || property == CSS::PropertyID::GridTemplateRows);
-    auto* value = Layout::RustFFI::layout_arena_paintable_used_grid_tracks(node.arena_handle(), committed_row_slot(node), property == CSS::PropertyID::GridTemplateColumns);
+    auto* value = Layout::RustFFI::layout_arena_paintable_used_grid_tracks(node.arena, node.slot, property == CSS::PropertyID::GridTemplateColumns);
     if (!value)
         return {};
     return CSS::RustStyleValueHandle { static_cast<CSS::StyleValueFFI::StyleValueData const*>(value) };
 }
 
-CSSPixelPoint box_type_agnostic_position(Layout::Node const& node)
+static CSSPixelPoint box_type_agnostic_position(BoxSlot const& node)
 {
     if (!has_committed_box(node))
         return {};
     if (is_inline_paintable(node)) {
-        auto result = Layout::RustFFI::layout_arena_inline_paintable_first_piece_position(node.arena_handle(), committed_row_slot(node));
+        auto result = Layout::RustFFI::layout_arena_inline_paintable_first_piece_position(node.arena, node.slot);
         if (result.has_value)
             return { result.x, result.y };
     }
@@ -348,11 +423,11 @@ static Optional<Layout::RustFFI::FfiCaretRectResult> caret_at_atomic_child(Layou
         return {};
     auto resolve = [&](size_t child_offset) -> Optional<Layout::RustFFI::FfiCaretRectResult> {
         auto const* child = node->child_at_index(child_offset);
-        auto* child_layout_node = child ? child->unsafe_layout_node() : nullptr;
-        if (!child_layout_node || !child_layout_node->is_atomic_inline())
+        auto child_slot = child ? committed_row_slot(layout_node.document(), DOM::NodeIdentity::of(*child)) : Compositing::RustFFI::NodeSlotId { Compositing::RustFFI::INVALID_NODE_SLOT_INDEX };
+        if (child_slot.index == Compositing::RustFFI::INVALID_NODE_SLOT_INDEX || !Layout::RustFFI::layout_arena_node_is_atomic_inline(layout_node.arena_handle(), child_slot))
             return {};
         auto result = Layout::RustFFI::layout_arena_atomic_inline_caret_rect_for_position(
-            layout_node.arena_handle(), Layout::Node::slot_id(child_layout_node), child_offset < offset);
+            layout_node.arena_handle(), child_slot, child_offset < offset);
         if (!result.found)
             return {};
         return result;
@@ -389,11 +464,11 @@ CSSPixelRect caret_rect_for_child_offset(Layout::Node const& block, size_t offse
     //     Use the text fragment's position and font metrics instead of the empty-block fallback.
     auto caret_rect_in_text = [&](DOM::Node const* node, size_t text_offset) -> Optional<CSSPixelRect> {
         auto const* text = as_if<DOM::Text>(node);
-        auto const* layout_node = text ? text->unsafe_layout_node() : nullptr;
-        if (!layout_node)
+        auto text_slot = text ? committed_row_slot(block.document(), DOM::NodeIdentity::of(*text)) : Compositing::RustFFI::NodeSlotId { Compositing::RustFFI::INVALID_NODE_SLOT_INDEX };
+        if (text_slot.index == Compositing::RustFFI::INVALID_NODE_SLOT_INDEX)
             return {};
         auto result = Layout::RustFFI::layout_arena_text_caret_rect_for_position(
-            block.arena_handle(), Layout::Node::slot_id(layout_node), text_offset, true);
+            block.arena_handle(), text_slot, text_offset, true);
         if (result.found)
             return result.rect;
         return {};
@@ -519,7 +594,7 @@ Layout::RustFFI::FfiCaretPaint resolve_document_caret_paint(DOM::Document& docum
     if (!layout_node || !has_committed_box(*layout_node))
         return caret;
     auto const& styled_node = as<Layout::NodeWithStyle>(*layout_node);
-    if (is_inline_paintable(*layout_node)) {
+    if (is_inline_paintable(box_slot(*layout_node))) {
         if (auto atomic_caret = caret_at_atomic_child(*layout_node, cursor_position->offset()); atomic_caret.has_value()) {
             if (layout_node_is_visible(styled_node))
                 fill(Layout::RustFFI::FfiCaretPaintKind::InBlock, atomic_caret->owner_paintable, atomic_caret->nearest_self_painting_inline, atomic_caret->rect, styled_node.caret_color());
@@ -550,10 +625,10 @@ Layout::RustFFI::FfiFocusedTextControlSelection resolve_focused_text_control_sel
     auto selection_end = text_control->selection_end();
     if (selection_start == selection_end)
         return selection;
-    auto const* text_layout_node = text_node->unsafe_layout_node();
-    if (!text_layout_node)
+    auto text_slot = committed_row_slot(document, DOM::NodeIdentity::of(*text_node));
+    if (text_slot.index == Compositing::RustFFI::INVALID_NODE_SLOT_INDEX)
         return selection;
-    selection.text_node = Layout::Node::slot_id(text_layout_node);
+    selection.text_node = text_slot;
     selection.start = selection_start;
     selection.end = selection_end;
     return selection;
@@ -575,20 +650,21 @@ Layout::RustFFI::FfiFocusedAreaOutline resolve_focused_area_outline(DOM::Documen
     auto image_element = map_element->first_painted_image_with_focusable_shapes();
     if (!image_element)
         return outline;
-    auto const* layout_node = image_element->layout_node();
-    if (!layout_node || !has_committed_box(*layout_node))
+    auto image_identity = DOM::NodeIdentity::of(*image_element);
+    if (!has_committed_box(document, image_identity))
         return outline;
+    VERIFY(document.layout_is_up_to_date());
     auto area_computed_values = area_element->computed_style();
     if (!area_computed_values || area_computed_values->outline_style() != CSS::OutlineStyle::Auto)
         return outline;
-    auto outline_data = Painting::outline_data(*layout_node, *area_computed_values);
+    auto outline_data = Painting::outline_data(*image_element, *area_computed_values);
     if (!outline_data.has_value())
         return outline;
-    auto path = area_element->shape_path(absolute_rect(*layout_node).size());
+    auto path = area_element->shape_path(absolute_rect(document, image_identity).size());
     if (!path.has_value())
         return outline;
     path_bytes = path->serialize_to_bytes();
-    outline.image = committed_row_slot(*layout_node);
+    outline.image = committed_row_slot(document, image_identity);
     outline.path_bytes = path_bytes.data();
     outline.path_byte_count = path_bytes.size();
     outline.color = outline_data->color;
@@ -596,12 +672,12 @@ Layout::RustFFI::FfiFocusedAreaOutline resolve_focused_area_outline(DOM::Documen
     return outline;
 }
 
-static Optional<CSS::BorderData> border_data_for_outline(Layout::Node const& layout_node, Color outline_color, CSS::OutlineStyle outline_style, CSSPixels outline_width)
+static Optional<CSS::BorderData> border_data_for_outline(DOM::Element const& element, Color outline_color, CSS::OutlineStyle outline_style, CSSPixels outline_width)
 {
     CSS::LineStyle line_style;
     if (outline_style == CSS::OutlineStyle::Auto) {
         line_style = CSS::LineStyle::Solid;
-        outline_color = CSS::KeywordStyleValue::create(CSS::Keyword::Accentcolor)->to_color(CSS::ColorResolutionContext::for_layout_node_with_style(*static_cast<Layout::NodeWithStyle const*>(&layout_node))).value();
+        outline_color = CSS::KeywordStyleValue::create(CSS::Keyword::Accentcolor)->to_color(CSS::ColorResolutionContext::for_element(DOM::AbstractElement { element })).value();
         outline_width = 2;
     } else {
         line_style = CSS::keyword_to_line_style(CSS::to_keyword(outline_style)).value_or(CSS::LineStyle::None);
@@ -617,30 +693,30 @@ static Optional<CSS::BorderData> border_data_for_outline(Layout::Node const& lay
     };
 }
 
-Optional<CSS::BorderData> outline_data(Layout::Node const& node, CSS::ComputedValues const& computed_values)
+Optional<CSS::BorderData> outline_data(DOM::Element const& element, CSS::ComputedValues const& computed_values)
 {
-    if (!has_committed_box(node))
+    if (!has_committed_box(element.document(), DOM::NodeIdentity::of(element)))
         return {};
 
     // The `auto` outline is the UA focus ring; like native controls, it is only shown while the window has focus.
-    auto navigable = node.document().navigable();
+    auto navigable = element.document().navigable();
     if (computed_values.outline_style() == CSS::OutlineStyle::Auto && (!navigable || !navigable->is_focused()))
         return {};
 
-    return border_data_for_outline(node, computed_values.outline_color(), computed_values.outline_style(), computed_values.outline_width());
+    return border_data_for_outline(element, computed_values.outline_color(), computed_values.outline_style(), computed_values.outline_width());
 }
 
-CSSPixelRect transform_reference_box(Layout::Node const& node)
+static CSSPixelRect transform_reference_box(BoxSlot const& node)
 {
-    return Layout::RustFFI::layout_arena_paintable_transform_reference_box(node.arena_handle(), committed_row_slot(node));
+    return Layout::RustFFI::layout_arena_paintable_transform_reference_box(node.arena, node.slot);
 }
 
-CSSPixelRect transform_rect_to_viewport(Layout::Node const& node, CSSPixelRect const& rect, Compositing::AccumulatedVisualContextTree::IncludeVisualViewportTransform include_visual_viewport_transform)
+static CSSPixelRect transform_rect_to_viewport(BoxSlot const& node, CSSPixelRect const& rect, Compositing::AccumulatedVisualContextTree::IncludeVisualViewportTransform include_visual_viewport_transform)
 {
     auto row = committed_row(node);
     if (!row.is_populated)
         return {};
-    auto const& document = node.document();
+    auto const& document = *node.document;
     if (!document.is_rendered())
         return rect;
     auto pixel_ratio = static_cast<float>(document.page().client().device_pixels_per_css_pixel());
@@ -650,12 +726,12 @@ CSSPixelRect transform_rect_to_viewport(Layout::Node const& node, CSSPixelRect c
     return (result * (1.f / pixel_ratio)).to_type<CSSPixels>();
 }
 
-Optional<CSSPixelPoint> transform_point_to_local(Layout::Node const& node, CSSPixelPoint position)
+static Optional<CSSPixelPoint> transform_point_to_local(BoxSlot const& node, CSSPixelPoint position)
 {
     auto row = committed_row(node);
     if (!row.is_populated)
         return {};
-    auto const& document = node.document();
+    auto const& document = *node.document;
     if (!document.is_rendered())
         return position;
     auto pixel_ratio = static_cast<float>(document.page().client().device_pixels_per_css_pixel());
@@ -667,12 +743,12 @@ Optional<CSSPixelPoint> transform_point_to_local(Layout::Node const& node, CSSPi
     return (*result / pixel_ratio).to_type<CSSPixels>();
 }
 
-CSSPixelPoint inverse_transform_point(Layout::Node const& node, CSSPixelPoint position)
+static CSSPixelPoint inverse_transform_point(BoxSlot const& node, CSSPixelPoint position)
 {
     auto row = committed_row(node);
     if (!row.is_populated)
         return {};
-    auto const& document = node.document();
+    auto const& document = *node.document;
     if (!document.is_rendered())
         return position;
     auto pixel_ratio = static_cast<float>(document.page().client().device_pixels_per_css_pixel());
@@ -680,17 +756,17 @@ CSSPixelPoint inverse_transform_point(Layout::Node const& node, CSSPixelPoint po
     return (result / pixel_ratio).to_type<CSSPixels>();
 }
 
-CSSPixelPoint transform_to_local_coordinates(Layout::Node const& node, CSSPixelPoint position)
+static CSSPixelPoint transform_to_local_coordinates(BoxSlot const& node, CSSPixelPoint position)
 {
     if (!has_committed_box(node))
         return {};
     return transform_point_to_local(node, position).value_or(position);
 }
 
-Optional<String> grid_layout_json(Layout::Node const& node, UniqueNodeID container_node_id)
+static Optional<String> grid_layout_json(BoxSlot const& node, UniqueNodeID container_node_id)
 {
     Optional<String> result;
-    Layout::RustFFI::layout_arena_paintable_grid_layout_json(node.arena_handle(), committed_row_slot(node), container_node_id.value(), &result,
+    Layout::RustFFI::layout_arena_paintable_grid_layout_json(node.arena, node.slot, container_node_id.value(), &result,
         [](void* context, u8 const* bytes, size_t length) {
             *static_cast<Optional<String>*>(context) = MUST(String::from_utf8(StringView { bytes, length }));
         });
@@ -706,12 +782,12 @@ static i64 devtools_node_id_for_style_node(void* context, u32 style_node)
     return dom_node ? dom_node->unique_id().value() : -1;
 }
 
-Optional<String> flex_layout_json(Layout::Node const& node, UniqueNodeID container_node_id)
+static Optional<String> flex_layout_json(BoxSlot const& node, UniqueNodeID container_node_id)
 {
     Optional<String> result;
-    auto& document = const_cast<DOM::Document&>(node.document());
+    auto& document = const_cast<DOM::Document&>(*node.document);
     Layout::RustFFI::layout_arena_paintable_flex_layout_json(
-        node.arena_handle(), committed_row_slot(node), container_node_id.value(), &result,
+        node.arena, node.slot, container_node_id.value(), &result,
         [](void* context, u8 const* bytes, size_t length) {
             *static_cast<Optional<String>*>(context) = MUST(String::from_utf8(StringView { bytes, length }));
         },
@@ -761,8 +837,8 @@ void apply_repaint_damage(Layout::Row const& row, InvalidateDisplayList should_i
         // root's cached background. Changes to the propagation source are handled during paint preparation.
         if (body_background_is_propagated_to_root(row)) {
             if (auto const* document_element = document.document_element()) {
-                if (auto const* document_element_layout_node = document_element->unsafe_layout_node())
-                    invalidate_paint_cache(*document_element_layout_node);
+                if (auto identity = DOM::NodeIdentity::of(*document_element); bound_row_kind(document, identity).has_value())
+                    invalidate_paint_cache(document, identity);
             }
         }
     }
@@ -781,6 +857,20 @@ void apply_repaint_damage(Layout::TextNode const& node, InvalidateDisplayList sh
 
     if (should_invalidate_display_list != InvalidateDisplayList::No)
         Layout::RustFFI::layout_arena_invalidate_nearest_self_painting_inline_paint_cache(node.arena_handle(), Layout::Node::slot_id(&node));
+}
+
+void set_needs_repaint(DOM::Document& document, DOM::NodeIdentity identity, InvalidateDisplayList should_invalidate_display_list)
+{
+    if (!identity || !has_committed_box(document, identity))
+        return;
+    document.invalidation_journal().note_needs_repaint(identity, should_invalidate_display_list);
+}
+
+void set_needs_repaint_in_subtree(DOM::Document& document, DOM::NodeIdentity identity)
+{
+    if (!identity || !has_committed_box(document, identity))
+        return;
+    document.invalidation_journal().note_needs_repaint_in_subtree(identity);
 }
 
 void set_needs_repaint_in_subtree(Layout::Row const& row)
@@ -803,23 +893,16 @@ void apply_subtree_repaint_damage(Layout::Row const& row)
     Layout::RustFFI::layout_arena_paintable_invalidate_subtree_for_repaint(row.arena_handle(), row.slot());
 }
 
-void invalidate_paint_cache(Layout::Node const& node)
+void invalidate_paint_cache(DOM::Document const& document, DOM::NodeIdentity identity)
 {
-    auto identity = node.dom_node_identity();
-    if (!identity) {
-        // Anonymous rows have no stable DOM identity to put in the journal. Their owning layout
-        // operation keeps the row alive, so applying this mark directly cannot target a new row.
-        apply_paint_cache_invalidation(node, PaintCacheInvalidation::PaintAndHitTest);
-        return;
-    }
-    const_cast<DOM::Document&>(node.document()).invalidation_journal().note_paint_cache_invalidation(identity, PaintCacheInvalidation::PaintAndHitTest);
+    const_cast<DOM::Document&>(document).invalidation_journal().note_paint_cache_invalidation(identity, PaintCacheInvalidation::PaintAndHitTest);
 }
 
 void invalidate_propagated_text_decoration_caches(Layout::Row const& row)
 {
     auto identity = row.dom_node_identity();
     if (!identity) {
-        // See invalidate_paint_cache(): an anonymous row cannot be resolved from a journal entry.
+        // An anonymous row cannot be resolved from a journal entry.
         apply_paint_cache_invalidation(row, PaintCacheInvalidation::PropagatedTextDecorations);
         return;
     }
@@ -866,33 +949,534 @@ Layout::RustFFI::FfiRectToViewportTransform rect_to_viewport_transform(DOM::Docu
     };
 }
 
-Vector<CSSPixelRect> client_rects(Layout::Node const& node, Layout::RustFFI::FfiRectToViewportTransform const& rect_to_viewport_transform)
+static Vector<CSSPixelRect> client_rects(BoxSlot const& node, Layout::RustFFI::FfiRectToViewportTransform const& rect_to_viewport_transform)
 {
     Vector<CSSPixelRect> rects;
     Layout::RustFFI::layout_arena_client_rects(
-        node.arena_handle(), committed_row_slot(node), rect_to_viewport_transform, &rects,
+        node.arena, node.slot, rect_to_viewport_transform, &rects,
         [](void* context, CSSPixelRect rect) {
             static_cast<Vector<CSSPixelRect>*>(context)->append(rect);
         });
     return rects;
 }
 
-CSSPixelRect bounding_client_rect(Layout::Node const& node, Layout::RustFFI::FfiRectToViewportTransform const& rect_to_viewport_transform)
+static CSSPixelRect bounding_client_rect(BoxSlot const& node, Layout::RustFFI::FfiRectToViewportTransform const& rect_to_viewport_transform)
 {
-    return Layout::RustFFI::layout_arena_bounding_client_rect(node.arena_handle(), committed_row_slot(node), rect_to_viewport_transform);
+    return Layout::RustFFI::layout_arena_bounding_client_rect(node.arena, node.slot, rect_to_viewport_transform);
 }
 
-CSSPixelPoint cumulative_scroll_compensation(Layout::Node const& node)
+static CSSPixelPoint cumulative_scroll_compensation(BoxSlot const& node)
 {
     auto index = enclosing_scroll_node_index(node);
     if (index == Compositing::VISUAL_VIEWPORT_NODE_INDEX)
         return {};
-    auto const& document = node.document();
+    auto const& document = *node.document;
     if (!document.is_rendered())
         return {};
     auto pixel_ratio = static_cast<float>(document.page().client().device_pixels_per_css_pixel());
     auto device_offset = document.visual_context_tree().cumulative_scroll_chain_offset(index, document.scroll_state_snapshot());
     return { CSSPixels::nearest_value_for(device_offset.x() / pixel_ratio), CSSPixels::nearest_value_for(device_offset.y() / pixel_ratio) };
+}
+
+CSSPixelRect absolute_rect(Layout::Node const& node)
+{
+    return absolute_rect(box_slot(node));
+}
+
+CSSPixelRect absolute_rect(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto box = box_slot(document, identity);
+    if (!box)
+        return {};
+    return absolute_rect(box);
+}
+
+CSSPixelRect absolute_padding_box_rect(Layout::Node const& node)
+{
+    return absolute_padding_box_rect(box_slot(node));
+}
+
+CSSPixelRect absolute_padding_box_rect(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto box = box_slot(document, identity);
+    if (!box)
+        return {};
+    return absolute_padding_box_rect(box);
+}
+
+CSSPixelRect absolute_border_box_rect(Layout::Node const& node)
+{
+    return absolute_border_box_rect(box_slot(node));
+}
+
+CSSPixelRect absolute_border_box_rect(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto box = box_slot(document, identity);
+    if (!box)
+        return {};
+    return absolute_border_box_rect(box);
+}
+
+CSSPixelPoint absolute_position(Layout::Node const& node)
+{
+    return absolute_position(box_slot(node));
+}
+
+CSSPixelPoint absolute_position(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto box = box_slot(document, identity);
+    if (!box)
+        return {};
+    return absolute_position(box);
+}
+
+CSSPixelSize content_size(Layout::Node const& node)
+{
+    return content_size(box_slot(node));
+}
+
+CSSPixelSize content_size(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto box = box_slot(document, identity);
+    if (!box)
+        return {};
+    return content_size(box);
+}
+
+CSSPixels content_width(Layout::Node const& node)
+{
+    return content_width(box_slot(node));
+}
+
+CSSPixels content_width(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto box = box_slot(document, identity);
+    if (!box)
+        return {};
+    return content_width(box);
+}
+
+CSSPixels content_height(Layout::Node const& node)
+{
+    return content_height(box_slot(node));
+}
+
+CSSPixels content_height(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto box = box_slot(document, identity);
+    if (!box)
+        return {};
+    return content_height(box);
+}
+
+BoxModelMetrics box_model(Layout::Node const& node)
+{
+    return box_model(box_slot(node));
+}
+
+BoxModelMetrics box_model(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto box = box_slot(document, identity);
+    if (!box)
+        return {};
+    return box_model(box);
+}
+
+CSSPixels border_box_width(Layout::Node const& node)
+{
+    return border_box_width(box_slot(node));
+}
+
+CSSPixels border_box_width(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto box = box_slot(document, identity);
+    if (!box)
+        return {};
+    return border_box_width(box);
+}
+
+CSSPixels border_box_height(Layout::Node const& node)
+{
+    return border_box_height(box_slot(node));
+}
+
+CSSPixels border_box_height(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto box = box_slot(document, identity);
+    if (!box)
+        return {};
+    return border_box_height(box);
+}
+
+bool has_scrollable_overflow(Layout::Node const& node)
+{
+    return has_scrollable_overflow(box_slot(node));
+}
+
+bool has_scrollable_overflow(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto box = box_slot(document, identity);
+    if (!box)
+        return {};
+    return has_scrollable_overflow(box);
+}
+
+Optional<CSSPixelRect> scrollable_overflow_rect(Layout::Node const& node)
+{
+    return scrollable_overflow_rect(box_slot(node));
+}
+
+Optional<CSSPixelRect> scrollable_overflow_rect(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto box = box_slot(document, identity);
+    if (!box)
+        return {};
+    return scrollable_overflow_rect(box);
+}
+
+bool is_positioned(Layout::Node const& node)
+{
+    return is_positioned(box_slot(node));
+}
+
+bool is_positioned(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto box = box_slot(document, identity);
+    if (!box)
+        return {};
+    return is_positioned(box);
+}
+
+CSSPixelSize svg_viewport_size(Layout::Node const& node)
+{
+    return svg_viewport_size(box_slot(node));
+}
+
+CSSPixelSize svg_viewport_size(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto box = box_slot(document, identity);
+    if (!box)
+        return {};
+    return svg_viewport_size(box);
+}
+
+Optional<Gfx::AffineTransform> svg_viewport_transform(Layout::Node const& node)
+{
+    return svg_viewport_transform(box_slot(node));
+}
+
+Optional<Gfx::AffineTransform> svg_viewport_transform(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto box = box_slot(document, identity);
+    if (!box)
+        return {};
+    return svg_viewport_transform(box);
+}
+
+CSSPixelRect transform_reference_box(Layout::Node const& node)
+{
+    return transform_reference_box(box_slot(node));
+}
+
+CSSPixelRect transform_reference_box(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto box = box_slot(document, identity);
+    if (!box)
+        return {};
+    return transform_reference_box(box);
+}
+
+Vector<CSSPixelRect> client_rects(Layout::Node const& node, Layout::RustFFI::FfiRectToViewportTransform const& rect_to_viewport_transform)
+{
+    return client_rects(box_slot(node), rect_to_viewport_transform);
+}
+
+Vector<CSSPixelRect> client_rects(DOM::Document const& document, DOM::NodeIdentity identity, Layout::RustFFI::FfiRectToViewportTransform const& rect_to_viewport_transform)
+{
+    auto box = box_slot(document, identity);
+    if (!box)
+        return {};
+    return client_rects(box, rect_to_viewport_transform);
+}
+
+CSSPixelRect bounding_client_rect(Layout::Node const& node, Layout::RustFFI::FfiRectToViewportTransform const& rect_to_viewport_transform)
+{
+    return bounding_client_rect(box_slot(node), rect_to_viewport_transform);
+}
+
+CSSPixelRect bounding_client_rect(DOM::Document const& document, DOM::NodeIdentity identity, Layout::RustFFI::FfiRectToViewportTransform const& rect_to_viewport_transform)
+{
+    auto box = box_slot(document, identity);
+    if (!box)
+        return {};
+    return bounding_client_rect(box, rect_to_viewport_transform);
+}
+
+bool is_visible(DOM::Element const& element)
+{
+    if (!has_committed_box(element.document(), DOM::NodeIdentity::of(element)))
+        return false;
+    auto const* inherited_box = element.style_group<CSS::ComputedValues::InheritedBoxValues>();
+    auto const* effects = element.style_group<CSS::ComputedValues::EffectsValues>();
+    if (!inherited_box || !effects)
+        return false;
+    return static_cast<CSS::Visibility>(inherited_box->visibility) == CSS::Visibility::Visible && effects->opacity != 0;
+}
+
+bool visible_for_hit_testing(DOM::Element const& element)
+{
+    if (!has_committed_box(element.document(), DOM::NodeIdentity::of(element)))
+        return false;
+    if (element.is_inert())
+        return false;
+    auto const* ui = element.style_group<CSS::ComputedValues::InheritedUIValues>();
+    return ui && ui->pointer_events_value() != CSS::PointerEvents::None;
+}
+
+CSS::Display display(DOM::Element const& element)
+{
+    if (!has_committed_box(element.document(), DOM::NodeIdentity::of(element)))
+        return {};
+    auto const* box_values = element.style_group<CSS::ComputedValues::BoxValues>();
+    return box_values ? CSS::display_from_ffi_display(box_values->display) : CSS::Display {};
+}
+
+bool has_stacking_context(Layout::Node const& node)
+{
+    return has_stacking_context(box_slot(node));
+}
+
+bool has_stacking_context(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto box = box_slot(document, identity);
+    return has_stacking_context(box);
+}
+
+bool has_accumulated_visual_context(Layout::Node const& node)
+{
+    return has_accumulated_visual_context(box_slot(node));
+}
+
+bool has_accumulated_visual_context(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto box = box_slot(document, identity);
+    return has_accumulated_visual_context(box);
+}
+
+Compositing::ContextRef accumulated_visual_context(Layout::Node const& node)
+{
+    return accumulated_visual_context(box_slot(node));
+}
+
+Compositing::ContextRef accumulated_visual_context(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto box = box_slot(document, identity);
+    return accumulated_visual_context(box);
+}
+
+Compositing::ContextRef accumulated_visual_context_for_descendants(Layout::Node const& node)
+{
+    return accumulated_visual_context_for_descendants(box_slot(node));
+}
+
+Compositing::ContextRef accumulated_visual_context_for_descendants(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto box = box_slot(document, identity);
+    return accumulated_visual_context_for_descendants(box);
+}
+
+Compositing::SpatialNodeIndex enclosing_scroll_node_index(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto box = box_slot(document, identity);
+    return enclosing_scroll_node_index(box);
+}
+
+Compositing::SpatialNodeIndex own_scroll_node_index(Layout::Node const& node)
+{
+    return own_scroll_node_index(box_slot(node));
+}
+
+Compositing::SpatialNodeIndex own_scroll_node_index(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto box = box_slot(document, identity);
+    return own_scroll_node_index(box);
+}
+
+CSSPixelRect transform_rect_to_viewport(Layout::Node const& node, CSSPixelRect const& rect, Compositing::AccumulatedVisualContextTree::IncludeVisualViewportTransform include_visual_viewport_transform)
+{
+    return transform_rect_to_viewport(box_slot(node), rect, include_visual_viewport_transform);
+}
+
+CSSPixelRect transform_rect_to_viewport(DOM::Document const& document, DOM::NodeIdentity identity, CSSPixelRect const& rect, Compositing::AccumulatedVisualContextTree::IncludeVisualViewportTransform include_visual_viewport_transform)
+{
+    auto box = box_slot(document, identity);
+    return transform_rect_to_viewport(box, rect, include_visual_viewport_transform);
+}
+
+Optional<CSSPixelPoint> transform_point_to_local(DOM::Document const& document, DOM::NodeIdentity identity, CSSPixelPoint position)
+{
+    auto box = box_slot(document, identity);
+    return transform_point_to_local(box, position);
+}
+
+CSSPixelPoint inverse_transform_point(Layout::Node const& node, CSSPixelPoint position)
+{
+    return inverse_transform_point(box_slot(node), position);
+}
+
+CSSPixelPoint inverse_transform_point(DOM::Document const& document, DOM::NodeIdentity identity, CSSPixelPoint position)
+{
+    auto box = box_slot(document, identity);
+    return inverse_transform_point(box, position);
+}
+
+CSSPixelPoint cumulative_scroll_compensation(Layout::Node const& node)
+{
+    return cumulative_scroll_compensation(box_slot(node));
+}
+
+CSSPixelPoint cumulative_scroll_compensation(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto box = box_slot(document, identity);
+    return cumulative_scroll_compensation(box);
+}
+
+Gfx::Path const* committed_svg_path(Layout::Node const& node)
+{
+    return committed_svg_path(box_slot(node));
+}
+
+Gfx::Path const* committed_svg_path(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto box = box_slot(document, identity);
+    if (!box)
+        return {};
+    return committed_svg_path(box);
+}
+
+CSS::RustStyleValueHandle used_value_for_grid_template(Layout::Node const& node, CSS::PropertyID property)
+{
+    return used_value_for_grid_template(box_slot(node), property);
+}
+
+CSS::RustStyleValueHandle used_value_for_grid_template(DOM::Document const& document, DOM::NodeIdentity identity, CSS::PropertyID property)
+{
+    auto box = box_slot(document, identity);
+    if (!box)
+        return {};
+    return used_value_for_grid_template(box, property);
+}
+
+bool is_navigable_container_viewport_paintable(Layout::Node const& node)
+{
+    return is_navigable_container_viewport_paintable(box_slot(node));
+}
+
+bool is_navigable_container_viewport_paintable(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto box = box_slot(document, identity);
+    if (!box)
+        return {};
+    return is_navigable_container_viewport_paintable(box);
+}
+
+bool is_viewport_paintable(Layout::Node const& node)
+{
+    return is_viewport_paintable(box_slot(node));
+}
+
+bool is_viewport_paintable(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto box = box_slot(document, identity);
+    if (!box)
+        return {};
+    return is_viewport_paintable(box);
+}
+
+bool is_paintable_with_lines(Layout::Node const& node)
+{
+    return is_paintable_with_lines(box_slot(node));
+}
+
+bool is_paintable_with_lines(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto box = box_slot(document, identity);
+    if (!box)
+        return {};
+    return is_paintable_with_lines(box);
+}
+
+bool is_inline_paintable(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto box = box_slot(document, identity);
+    if (!box)
+        return {};
+    return is_inline_paintable(box);
+}
+
+bool is_svg_svg_paintable(Layout::Node const& node)
+{
+    return is_svg_svg_paintable(box_slot(node));
+}
+
+bool is_svg_svg_paintable(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto box = box_slot(document, identity);
+    if (!box)
+        return {};
+    return is_svg_svg_paintable(box);
+}
+
+CSSPixelPoint box_type_agnostic_position(Layout::Node const& node)
+{
+    return box_type_agnostic_position(box_slot(node));
+}
+
+CSSPixelPoint box_type_agnostic_position(DOM::Document const& document, DOM::NodeIdentity identity)
+{
+    auto box = box_slot(document, identity);
+    if (!box)
+        return {};
+    return box_type_agnostic_position(box);
+}
+
+CSSPixelPoint transform_to_local_coordinates(Layout::Node const& node, CSSPixelPoint position)
+{
+    return transform_to_local_coordinates(box_slot(node), position);
+}
+
+CSSPixelPoint transform_to_local_coordinates(DOM::Document const& document, DOM::NodeIdentity identity, CSSPixelPoint position)
+{
+    auto box = box_slot(document, identity);
+    if (!box)
+        return {};
+    return transform_to_local_coordinates(box, position);
+}
+
+Optional<String> grid_layout_json(Layout::Node const& node, UniqueNodeID container_node_id)
+{
+    return grid_layout_json(box_slot(node), container_node_id);
+}
+
+Optional<String> grid_layout_json(DOM::Document const& document, DOM::NodeIdentity identity, UniqueNodeID container_node_id)
+{
+    auto box = box_slot(document, identity);
+    if (!box)
+        return {};
+    return grid_layout_json(box, container_node_id);
+}
+
+Optional<String> flex_layout_json(Layout::Node const& node, UniqueNodeID container_node_id)
+{
+    return flex_layout_json(box_slot(node), container_node_id);
+}
+
+Optional<String> flex_layout_json(DOM::Document const& document, DOM::NodeIdentity identity, UniqueNodeID container_node_id)
+{
+    auto box = box_slot(document, identity);
+    if (!box)
+        return {};
+    return flex_layout_json(box, container_node_id);
 }
 
 }

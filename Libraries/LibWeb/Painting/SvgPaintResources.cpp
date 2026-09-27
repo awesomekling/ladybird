@@ -18,7 +18,7 @@ namespace Web::Painting {
 
 static bool push_svg_filter_reference(void const* url_value, Layout::NodeWithStyle const& layout_node, void* sink)
 {
-    auto filter_element = resolve_svg_filter_reference({ .pointer = url_value }, layout_node);
+    auto filter_element = resolve_svg_filter_reference({ .pointer = url_value }, layout_node.document());
     if (!filter_element)
         return false;
     filter_element->push_primitives(sink);
