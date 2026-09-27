@@ -157,7 +157,7 @@ void CanvasTextDrawingStyles<CanvasType>::set_font(Utf16View font)
 
     CSS::ComputedFontCacheKey key {
         .tree_scope = tree_scope,
-        .font_families = CSS::computed_font_families_from_style_value(*font_family),
+        .font_families = CSS::computed_font_families_from_value_data(*font_family->rust_style_value_data()),
         .font_optical_sizing = CSS::FontOpticalSizing::Auto,
         .font_size = computed_font_size->as_length().length().absolute_length_to_px(),
         .font_slope = computed_font_style->as_font_style().to_font_slope(),

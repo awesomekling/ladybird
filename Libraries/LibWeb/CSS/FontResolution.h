@@ -75,7 +75,7 @@ using FontFeatureValuesProvider = Function<HashMap<FontFeatureValueKey, Vector<u
 
 // The `font-family` list, as the matcher wants it: generic families kept apart from names, and a
 // name's syntax kept so that a custom ident and a string do not compare equal.
-[[nodiscard]] Vector<ComputedFontFamily> computed_font_families_from_style_value(StyleValue const& font_family);
+[[nodiscard]] Vector<ComputedFontFamily> computed_font_families_from_value_data(StyleValueFFI::StyleValueData const& font_family);
 
 // The cascades already resolved from a document's `@font-face` tables. This is retained render
 // state, not document state: a memo of a pure function of the published table and the request.

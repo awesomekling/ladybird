@@ -93,40 +93,31 @@ void StyleEngine::publish_inputs_queued_during_pass()
 // stage's own thread run this batch instead of joining the document's.
 static StyleEngineFFI::FfiResolvedFont resolve_font(FontCascadeMemo& memo, FontFaceSnapshotView const& font_faces, StyleEngineFFI::FfiFontResolutionRequest request)
 {
-    // The engine holds the family value as an opaque handle, never as a pointer it could
-    // follow; the bridge is where it becomes one again.
-    auto font_family = StyleValue::adopt_rust_style_value_data(StyleValueFFI::rust_style_value_retain(
-        reinterpret_cast<StyleValueFFI::StyleValueData const*>(request.font_family)));
+    // The engine holds these values as opaque handles, never as pointers it could follow; the
+    // bridge is where they become the engine's value data again. They are read as that data and
+    // never wrapped in a StyleValue: this runs on whichever thread runs the pass, and a
+    // StyleValue's reference count (the process-wide interned keywords' among them) is not atomic.
+    // Each request the engine batches retains the values it names, so they outlive this call.
+    auto value_data = [](StyleEngineFFI::FfiHostHandle handle) {
+        return reinterpret_cast<StyleValueFFI::StyleValueData const*>(handle);
+    };
     // A numeric variant selects shaping features, so it belongs to the resolution rather than to
     // the record. The engine names nothing when it is `normal`.
     // The engine names a value for each input it did not leave at its initial value; the rest are
     // absent and the assembler reads them as the initial value they are.
-    Vector<RefPtr<StyleValue const>> retained_feature_values;
-    Vector<StyleValue const*> feature_values;
-    retained_feature_values.ensure_capacity(to_underlying(FontResolutionFeatureInput::Count));
-    feature_values.ensure_capacity(to_underlying(FontResolutionFeatureInput::Count));
-    for (size_t index = 0; index < to_underlying(FontResolutionFeatureInput::Count); ++index) {
-        auto handle = request.font_feature_values[index];
-        if (!handle) {
-            retained_feature_values.unchecked_append(nullptr);
-            feature_values.unchecked_append(nullptr);
-            continue;
-        }
-        retained_feature_values.unchecked_append(StyleValue::adopt_rust_style_value_data(
-            StyleValueFFI::rust_style_value_retain(reinterpret_cast<StyleValueFFI::StyleValueData const*>(handle))));
-        feature_values.unchecked_append(retained_feature_values.last().ptr());
-    }
-    auto font_feature_data = font_feature_data_from_style_values(feature_values);
+    Array<StyleValueFFI::StyleValueData const*, to_underlying(FontResolutionFeatureInput::Count)> feature_values;
+    for (size_t index = 0; index < feature_values.size(); ++index)
+        feature_values[index] = value_data(request.font_feature_values[index]);
     ComputedFontCacheKey key {
         .tree_scope = request.tree_scope,
-        .font_families = computed_font_families_from_style_value(*font_family),
+        .font_families = computed_font_families_from_value_data(*value_data(request.font_family)),
         .font_optical_sizing = static_cast<FontOpticalSizing>(request.font_optical_sizing),
         .font_size = CSSPixels::from_raw(request.font_size_raw),
         .font_slope = request.font_slope,
         .font_weight = request.font_weight,
         .font_width = Percentage(request.font_width),
-        .font_variation_settings = font_variation_settings_from_style_values(feature_values),
-        .font_feature_data = move(font_feature_data),
+        .font_variation_settings = font_variation_settings_from_value_data(feature_values.span()),
+        .font_feature_data = font_feature_data_from_value_data(feature_values.span()),
     };
     auto font_list = memo.resolve(font_faces, move(key));
     // The metric probe must not load a face: the first available font answers without one.

@@ -2341,6 +2341,25 @@ pub unsafe extern "C" fn rust_style_value_computed_number(value: *const c_void) 
     }
 }
 
+/// Resolves a calculation that needs no context to a number into `output`, and says whether it
+/// resolved. It reads the value only, so any thread may call it.
+///
+/// # Safety
+/// `value` must point at live Calculated StyleValueData and `output` at a writable f64.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_style_value_resolve_calculated_number_without_context(
+    value: *const c_void,
+    output: *mut f64,
+) -> bool {
+    match crate::css::calc::resolve_calculated_number_without_context(unsafe { &*(value as *const StyleValueData) }) {
+        Some(number) => {
+            unsafe { output.write(number) };
+            true
+        }
+        None => false,
+    }
+}
+
 /// Reads the primitive payload of a computed percentage.
 ///
 /// # Safety
