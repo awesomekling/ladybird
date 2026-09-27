@@ -1315,8 +1315,7 @@ fn frame_completion_notify() {
 
 /// Whether the calling thread has submitted stages it has not taken back yet.
 pub(crate) fn has_frame_in_flight() -> bool {
-    SUBMITTED.with_borrow(|submitted| submitted.iter().any(|stage| !stage.is_lend()))
-        || PAINTING.with_borrow(|painting| !painting.is_empty())
+    frame_in_flight_reaches_an_arena() || PAINTING.with_borrow(|painting| !painting.is_empty())
 }
 
 /// Whether the frame in flight owns the arena `arena`.
@@ -1953,10 +1952,10 @@ fn runs_waited_for_stage_in_place() -> bool {
         && stage_thread().is_some_and(|thread| std::thread::current().id() != thread.id)
 }
 
-/// Whether a stage of the frame in flight reaches an arena: any but its recordings and the presentations submitted
-/// with none.
+/// Whether a stage of the frame in flight reaches an arena: any it submitted for a document's arena or style engine,
+/// and none of its recordings or presentations, which are paint stages.
 fn frame_in_flight_reaches_an_arena() -> bool {
-    SUBMITTED.with_borrow(|submitted| submitted.iter().any(|stage| stage.arena != 0 && !stage.is_lend()))
+    SUBMITTED.with_borrow(|submitted| submitted.iter().any(|stage| !stage.is_lend()))
 }
 
 /// Whether a stage the caller waits for, for the document whose arena is `arena`, runs right here: with the stages
