@@ -781,6 +781,12 @@ void StyleEngine::record_text_retirements(ReadonlySpan<StyleNodeID> nodes)
         record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::RetireText, .value = 0, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = 0, .data = 0 });
 }
 
+void StyleEngine::record_unique_node_id(StyleNodeID node, u64 unique_node_id)
+{
+    static_assert(sizeof(FlatPtr) == sizeof(u64));
+    record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::ElementUniqueNodeId, .value = 0, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = 0, .data = static_cast<FlatPtr>(unique_node_id) });
+}
+
 void StyleEngine::record_text_is_ascii_whitespace(StyleNodeID node, bool value)
 {
     record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::TextIsAsciiWhitespace, .value = value, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = 0, .data = 0 });
