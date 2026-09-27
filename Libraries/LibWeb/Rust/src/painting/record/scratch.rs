@@ -10,7 +10,7 @@ use crate::painting::record::hit_test_items::HitTestFacts;
 use crate::painting::record::paint::text::SelectionStyleAnswer;
 use crate::painting::record::{BasePaintFacts, PatternTileKey};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::Arc;
 
 #[derive(Clone, Copy)]
 struct StampedEntry<T> {
@@ -103,19 +103,6 @@ impl RecordingScratch {
 
     memo_table!(base_paint_facts, set_base_paint_facts, base_paint_facts, BasePaintFacts);
     memo_table!(hit_test_facts, set_hit_test_facts, hit_test_facts, HitTestFacts);
-}
-
-/// Where the workspace waits between runs, so that one run's tables are the next run's
-/// allocations. Only the run that holds the guard can reach the workspace, which is what the
-/// stage needs and all it needs; parking it here rather than among the arena's columns keeps
-/// the recording stage's input free of it.
-#[derive(Default)]
-pub(crate) struct RecordingScratchSlot(Mutex<RecordingScratch>);
-
-impl RecordingScratchSlot {
-    pub(crate) fn take_for_run(&self) -> MutexGuard<'_, RecordingScratch> {
-        self.0.lock().expect("recording scratch is not held across a panic")
-    }
 }
 
 const _: () = {

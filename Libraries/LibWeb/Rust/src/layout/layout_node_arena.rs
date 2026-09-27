@@ -1097,7 +1097,6 @@ pub(crate) struct LayoutNodeArena {
     pub(crate) hit_test_list: RefCell<Option<std::sync::Arc<crate::painting::hit_test::HitTestList>>>,
     // Where the recording stage's workspace waits between runs. It is not a column: nothing
     // outside a running recording may reach it, and it is no part of the committed paint state.
-    recording_scratch: crate::painting::record::scratch::RecordingScratchSlot,
     pub(crate) scrollable_overflow: crate::painting::scrollable_overflow::ScrollableOverflowState,
     pub(crate) partial_relayout_boundary_roots: RefCell<Vec<NodeSlotId>>,
     nodes_with_layout_update_flags: RefCell<Vec<NodeSlotId>>,
@@ -1232,7 +1231,6 @@ impl LayoutNodeArena {
             paintable_rows: crate::painting::paintable_rows::PaintableRowStore::default(),
             paint_state: RefCell::new(crate::painting::paint_state::PaintState::default()),
             hit_test_list: RefCell::new(None),
-            recording_scratch: crate::painting::record::scratch::RecordingScratchSlot::default(),
             scrollable_overflow: Default::default(),
             partial_relayout_boundary_roots: RefCell::new(Vec::new()),
             nodes_with_layout_update_flags: RefCell::new(Vec::new()),
@@ -5783,10 +5781,6 @@ impl LayoutNodeArena {
 
     pub(crate) fn paint_state(&self) -> &RefCell<crate::painting::paint_state::PaintState> {
         &self.paint_state
-    }
-
-    pub(crate) fn recording_scratch(&self) -> &crate::painting::record::scratch::RecordingScratchSlot {
-        &self.recording_scratch
     }
 
     pub(crate) fn node_flags_if_live(&self, id: NodeSlotId) -> u32 {
