@@ -51,7 +51,6 @@ Layout::RustFFI::FfiLayoutUpdateHostCallbacks Document::layout_update_host_callb
     return {
         .context = this,
         .document_facts = [](void* context) { return static_cast<Document*>(context)->layout_update_document_facts(); },
-        .prepare_layout_tree_build = [](void* context) -> u32 { return static_cast<Document*>(context)->prepare_layout_tree_build(); },
         .take_in_frame_effects = [](void* context, Layout::RustFFI::FfiLayoutFrameEffects const* effects) { static_cast<Document*>(context)->take_in_layout_frame_effects(*effects); },
         .finish_submitted_style_update = [](void* context) { static_cast<Document*>(context)->finish_style_update_submitted_in_flight(); },
     };
@@ -77,6 +76,7 @@ Layout::RustFFI::FfiLayoutUpdateDocumentFacts Document::layout_update_document_f
         .document_in_quirks_mode = in_quirks_mode(),
         .viewport_inline_size_raw = viewport_rect.width().raw_value(),
         .viewport_block_size_raw = viewport_rect.height().raw_value(),
+        .document_style_node = style_node_id().value(),
     };
 }
 
@@ -277,17 +277,19 @@ bool Document::update_style_and_layout_once(UpdateLayoutReason reason, Throttled
         update_style();
 
     // A round goes on from the facts and the selection the document reads once the list item renumbers and top layer
-    // changes its style leaves have gone through.
+    // changes its style leaves have gone through, with its tree build readied.
     Layout::RustFFI::FfiSelectionSnapshot selection {};
     Vector<Layout::RustFFI::FfiSelectionSnapshotNode> selection_nodes;
     auto read_round_facts = [&] {
         process_pending_list_item_renumbers();
         process_pending_top_layer_layout_changes();
         selection_nodes.clear();
-        return Layout::RustFFI::FfiLayoutRoundFacts {
+        Layout::RustFFI::FfiLayoutRoundFacts round {
             .facts = layout_update_document_facts(),
             .selection = read_selection(*this, selection, selection_nodes),
         };
+        prepare_layout_tree_build();
+        return round;
     };
 
     Layout::RustFFI::FfiLayoutUpdateInputs inputs {
