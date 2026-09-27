@@ -14,7 +14,9 @@
 #include <LibWeb/DOM/AbstractElement.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
+#include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
+#include <LibWeb/Layout/Node.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/Painting/CompositorAnimationEffectState.h>
@@ -190,9 +192,9 @@ static CompositorAnimationTargetBox target_box(CompositorAnimationKeyframes::Dat
     return { committed_row_slot(document, target_node), [&document, target_node] { return transform_reference_box(document, target_node); } };
 }
 
-static CompositorAnimationTargetBox target_box(CompositorAnimationKeyframes::Data const&, Layout::Node const& layout_node)
+static CompositorAnimationTargetBox target_box(CompositorAnimationKeyframes::Data const&, BoxSlot const& box)
 {
-    return { committed_row_slot(layout_node), [&layout_node] { return transform_reference_box(layout_node); } };
+    return { box.slot(), [&box] { return transform_reference_box(box); } };
 }
 
 static Layout::RustFFI::FfiCompositorAnimationRequest compositor_animation_request(CompositorAnimationKeyframes::Data const& data, CompositorAnimationTargetBox const& target, Compositing::RustFFI::FfiVisualAnimationTargetKind target_kind)
@@ -235,9 +237,9 @@ static Layout::RustFFI::FfiCompositorAnimationRequest compositor_animation_reque
     return request;
 }
 
-bool CompositorAnimationKeyframes::transform_preserves_axes(Layout::Node const& layout_node) const
+bool CompositorAnimationKeyframes::transform_preserves_axes(BoxSlot const& box) const
 {
-    return transform_preserves_axes(target_box(*m_data, layout_node));
+    return transform_preserves_axes(target_box(*m_data, box));
 }
 
 bool CompositorAnimationKeyframes::transform_preserves_axes(DOM::NodeIdentity target_node) const
@@ -252,9 +254,9 @@ bool CompositorAnimationKeyframes::transform_preserves_axes(CompositorAnimationT
     return Layout::RustFFI::compositor_animation_effect_transform_preserves_axes(&request, &host);
 }
 
-bool CompositorAnimationKeyframes::only_translates_horizontally(Layout::Node const& layout_node) const
+bool CompositorAnimationKeyframes::only_translates_horizontally(BoxSlot const& box) const
 {
-    return only_translates_horizontally(target_box(*m_data, layout_node));
+    return only_translates_horizontally(target_box(*m_data, box));
 }
 
 bool CompositorAnimationKeyframes::only_translates_horizontally(DOM::NodeIdentity target_node) const
@@ -269,11 +271,6 @@ bool CompositorAnimationKeyframes::only_translates_horizontally(CompositorAnimat
     return Layout::RustFFI::compositor_animation_effect_only_translates_horizontally(&request, &host);
 }
 
-static void* layout_arena_handle(DOM::Document& document)
-{
-    return document.layout_node_arena().handle();
-}
-
 CompositorAnimationEffectState::CompositorAnimationEffectState()
     : m_handle(Layout::RustFFI::compositor_animation_effect_state_create())
 {
@@ -284,9 +281,9 @@ CompositorAnimationEffectState::~CompositorAnimationEffectState()
     Layout::RustFFI::compositor_animation_effect_state_destroy(m_handle);
 }
 
-CompositorAnimationEffectState::BuildOutcome CompositorAnimationEffectState::build(CompositorAnimationKeyframes const& keyframes, Layout::Node const& layout_node, Compositing::RustFFI::FfiVisualAnimationTargetKind target_kind, TimingAnchor timing_anchor)
+CompositorAnimationEffectState::BuildOutcome CompositorAnimationEffectState::build(CompositorAnimationKeyframes const& keyframes, BoxSlot const& box, Compositing::RustFFI::FfiVisualAnimationTargetKind target_kind, TimingAnchor timing_anchor)
 {
-    return build(keyframes, target_box(*keyframes.m_data, layout_node), target_kind, timing_anchor);
+    return build(keyframes, target_box(*keyframes.m_data, box), target_kind, timing_anchor);
 }
 
 CompositorAnimationEffectState::BuildOutcome CompositorAnimationEffectState::build(CompositorAnimationKeyframes const& keyframes, DOM::NodeIdentity target_node, Compositing::RustFFI::FfiVisualAnimationTargetKind target_kind, TimingAnchor timing_anchor)
@@ -314,7 +311,7 @@ CompositorAnimationEffectState::BuildOutcome CompositorAnimationEffectState::bui
     request.timing.easing = CSS::to_ffi_easing_descriptor<Compositing::RustFFI::FfiEasingDescriptor>(effect.timing_function(), effect_easing_points);
 
     auto host = compositor_animation_host(data);
-    auto outcome = Layout::RustFFI::compositor_animation_effect_build(m_handle, layout_arena_handle(data.target.document()), &request, &host);
+    auto outcome = Layout::RustFFI::compositor_animation_effect_build(m_handle, Layout::document_layout_arena(data.target.document()), &request, &host);
     return {
         .built = outcome.built,
         .missing_visual_context_node = outcome.missing_visual_context_node,
@@ -339,7 +336,7 @@ void CompositorAnimationEffectState::clear_pending()
 
 void CompositorAnimationEffectState::publish_pending(DOM::Document& document, ReuseRetainedTimingAnchors reuse_retained_timing_anchors)
 {
-    Layout::RustFFI::compositor_animation_effect_publish_pending(m_handle, layout_arena_handle(document), reuse_retained_timing_anchors == ReuseRetainedTimingAnchors::Yes);
+    Layout::RustFFI::compositor_animation_effect_publish_pending(m_handle, Layout::document_layout_arena(document), reuse_retained_timing_anchors == ReuseRetainedTimingAnchors::Yes);
 }
 
 bool CompositorAnimationEffectState::has_retained() const
@@ -355,6 +352,22 @@ void CompositorAnimationEffectState::clear_retained()
 void CompositorAnimationEffectState::reset()
 {
     Layout::RustFFI::compositor_animation_effect_reset(m_handle);
+}
+
+// For callers outside Painting that still hold a layout node; these go with the Layout classes.
+bool CompositorAnimationKeyframes::transform_preserves_axes(Layout::Node const& layout_node) const
+{
+    return transform_preserves_axes(BoxSlot::of(layout_node.document(), Layout::Node::slot_id(&layout_node)));
+}
+
+bool CompositorAnimationKeyframes::only_translates_horizontally(Layout::Node const& layout_node) const
+{
+    return only_translates_horizontally(BoxSlot::of(layout_node.document(), Layout::Node::slot_id(&layout_node)));
+}
+
+CompositorAnimationEffectState::BuildOutcome CompositorAnimationEffectState::build(CompositorAnimationKeyframes const& keyframes, Layout::Node const& layout_node, Compositing::RustFFI::FfiVisualAnimationTargetKind target_kind, TimingAnchor timing_anchor)
+{
+    return build(keyframes, BoxSlot::of(layout_node.document(), Layout::Node::slot_id(&layout_node)), target_kind, timing_anchor);
 }
 
 }
