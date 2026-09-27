@@ -9,6 +9,7 @@ pub mod geometry;
 pub mod query;
 pub mod read;
 pub mod resolve;
+pub mod snapshot;
 
 use crate::css::css_pixels::CssPixels;
 use crate::css::css_pixels::{CssPixelPoint, CssPixelRect};

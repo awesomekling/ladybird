@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-use crate::layout::node_data::NodeSlotId;
 use crate::layout::used_values;
 use crate::painting::display_list::commands::ContextRef;
 use std::ffi::c_void;
@@ -150,17 +149,6 @@ pub struct FfiCaretLineForPosition {
     pub line_index: usize,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-#[repr(C)]
-pub struct FfiResolvedHit {
-    pub dispatch_shell: *mut c_void,
-    pub allow_pseudo_fallback: bool,
-    pub fallback_dispatch_shell: *mut c_void,
-    pub has_index_in_node: bool,
-    pub index_in_node: usize,
-    pub is_text_fragment: bool,
-}
-
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[repr(u8)]
 pub enum FfiCaretBoundaryKind {
@@ -181,18 +169,6 @@ pub struct FfiResolvedCaret {
     pub affinity_is_upstream: bool,
     pub has_debug_rect: bool,
     pub debug_rect: used_values::FfiCssPixelRect,
-}
-
-#[derive(Clone, Copy, Debug)]
-#[repr(C)]
-pub struct FfiHitTestItemExport {
-    pub can_produce_caret_position: bool,
-    pub paintable: NodeSlotId,
-    pub hit_node: NodeSlotId,
-    pub chrome_widget_kind: u8,
-    pub caret_node_shell: *mut c_void,
-    pub caret_rect: used_values::FfiCssPixelRect,
-    pub context: ContextRef,
 }
 
 #[derive(Clone, Copy, Debug, Default)]

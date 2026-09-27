@@ -42,7 +42,7 @@ pub(crate) unsafe fn arena_from_handle<'a>(arena: *mut c_void) -> &'a LayoutNode
 /// SAFETY: `arena` must be a live handle from `layout_arena_create`, exclusively borrowed for
 /// this call on the document thread. No C++ callback may re-enter the arena during the borrow.
 #[track_caller]
-unsafe fn arena_from_handle_mut<'a>(arena: *mut c_void) -> &'a mut LayoutNodeArena {
+pub(crate) unsafe fn arena_from_handle_mut<'a>(arena: *mut c_void) -> &'a mut LayoutNodeArena {
     unsafe { LayoutNodeArena::from_handle_mut(arena) }
 }
 
@@ -3725,27 +3725,6 @@ pub unsafe extern "C" fn layout_arena_publish_compositor_animations(
 
 /// # Safety
 ///
-/// `arena` must be a live handle from `layout_arena_create`, used on the document thread; the
-/// sink pointer must stay valid for this synchronous call.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_hit_test_visit_chrome_widgets(
-    arena: *mut c_void,
-    sink: *mut c_void,
-    visit: unsafe extern "C" fn(*mut c_void, NodeSlotId, u8),
-) {
-    with_hit_test_list_items_only(arena, (), |list, _arena| {
-        for item in list.items.iter() {
-            if item.chrome_widget_kind == crate::painting::hit_test::CHROME_WIDGET_NONE {
-                continue;
-            }
-            // SAFETY: The C++ host consumes the visit synchronously.
-            unsafe { visit(sink, item.paintable, item.chrome_widget_kind) };
-        }
-    });
-}
-
-/// # Safety
-///
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread;
 /// the callback context and function pointers must remain valid for this synchronous call.
 #[unsafe(no_mangle)]
@@ -3976,7 +3955,9 @@ fn with_hit_test_list_spatial_indexes_and_visual_context_tree<R>(
     })
 }
 
-fn ffi_topmost(item: Option<crate::painting::hit_test::query::TopmostItem>) -> crate::painting::host::FfiTopmostItem {
+pub(crate) fn ffi_topmost(
+    item: Option<crate::painting::hit_test::query::TopmostItem>,
+) -> crate::painting::host::FfiTopmostItem {
     match item {
         Some(item) => crate::painting::host::FfiTopmostItem {
             has_item: true,
@@ -3985,21 +3966,6 @@ fn ffi_topmost(item: Option<crate::painting::hit_test::query::TopmostItem>) -> c
         },
         None => crate::painting::host::FfiTopmostItem::default(),
     }
-}
-
-/// # Safety
-///
-/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_hit_test_find_topmost_item(
-    arena: *mut c_void,
-    callbacks: crate::painting::host::FfiHitTestQueryCallbacks,
-    point: FfiCssPixelPoint,
-) -> crate::painting::host::FfiTopmostItem {
-    with_hit_test_list_spatial_indexes_and_visual_context_tree(arena, false, Default::default(), |list, tree, arena| {
-        let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::HitTest);
-        ffi_topmost(list.find_topmost_item(arena, tree, &callbacks, point.into()))
-    })
 }
 
 /// # Safety
@@ -4019,28 +3985,6 @@ pub unsafe extern "C" fn layout_arena_hit_test_find_topmost_items_for_caret(
             hit_item: ffi_topmost(hit_item),
         }
     })
-}
-
-/// # Safety
-///
-/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_hit_test_all(
-    arena: *mut c_void,
-    callbacks: crate::painting::host::FfiHitTestQueryCallbacks,
-    point: FfiCssPixelPoint,
-    push_context: *mut c_void,
-    push: unsafe extern "C" fn(*mut c_void, usize),
-) {
-    let indices =
-        with_hit_test_list_spatial_indexes_and_visual_context_tree(arena, false, Vec::new(), |list, tree, arena| {
-            let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::HitTest);
-            list.hit_test_all(arena, tree, &callbacks, point.into())
-        });
-    for index in indices {
-        // SAFETY: The C++ sink consumes the index synchronously.
-        unsafe { push(push_context, index) };
-    }
 }
 
 /// # Safety
