@@ -184,6 +184,9 @@ void CommitMessages::append(Layout::RustFFI::FfiCommitMessage const& message)
             .pending_face_has_been_retried = message.pending_face_has_been_retried,
         });
         return;
+    case Layout::RustFFI::FfiCommitMessageKind::LayoutTreeReplaced:
+        // The layout host takes this one in itself, after the others the delivery carries.
+        VERIFY_NOT_REACHED();
     case Layout::RustFFI::FfiCommitMessageKind::SvgResourceReferenced:
         m_messages.append(Message {
             .identity = identity,

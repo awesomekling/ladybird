@@ -28,6 +28,10 @@ pub enum FfiCommitMessageKind {
     /// cannot start the load itself: the fetch, the font-display timer and the load-event delayer
     /// are all document state. This one is about the document itself.
     PendingFontFaceWanted,
+    /// A tree build placed a new viewport in place of the one before, whose paint state went with
+    /// it: the document gives the new tree a new paint state once it has taken in what the build
+    /// found out before this. This one is about the document itself.
+    LayoutTreeReplaced,
 }
 
 /// One thing the render side has to tell the document. The node it is about is named by the style

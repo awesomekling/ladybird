@@ -57,9 +57,6 @@ pub struct FfiLayoutUpdateHostCallbacks {
     /// Readies the document for a layout tree build, and answers with the document's style node,
     /// which the build walks from.
     pub prepare_layout_tree_build: unsafe extern "C" fn(*mut c_void) -> u32,
-    /// Gives the document's new layout tree, which a tree build placed in place of the one before,
-    /// a new paint state.
-    pub renew_paint_state: unsafe extern "C" fn(*mut c_void),
     /// Marks the list owners the frame found showing stale list-item counters for a layout tree
     /// rebuild, named by their style nodes.
     pub rebuild_list_owners_with_stale_item_counters: unsafe extern "C" fn(*mut c_void, *const u32, usize),
@@ -220,7 +217,6 @@ pub(crate) struct LayoutUpdateHost {
     prepare_for_rendering: unsafe extern "C" fn(*mut c_void),
     seal_flight_paint: unsafe extern "C" fn(*mut c_void, bool),
     prepare_layout_tree_build: unsafe extern "C" fn(*mut c_void) -> u32,
-    renew_paint_state: unsafe extern "C" fn(*mut c_void),
     rebuild_list_owners_with_stale_item_counters: unsafe extern "C" fn(*mut c_void, *const u32, usize),
     read_selection:
         unsafe extern "C" fn(*mut c_void, *mut c_void, unsafe extern "C" fn(*mut c_void, *const FfiSelectionSnapshot)),
@@ -247,7 +243,6 @@ impl From<FfiLayoutUpdateHostCallbacks> for LayoutUpdateHost {
             prepare_for_rendering: host.prepare_for_rendering,
             seal_flight_paint: host.seal_flight_paint,
             prepare_layout_tree_build: host.prepare_layout_tree_build,
-            renew_paint_state: host.renew_paint_state,
             rebuild_list_owners_with_stale_item_counters: host.rebuild_list_owners_with_stale_item_counters,
             read_selection: host.read_selection,
             apply_layout_commit_effects: host.apply_layout_commit_effects,
@@ -303,21 +298,6 @@ impl LayoutUpdateHost {
 
     fn prepare_layout_tree_build(&self, _: &crate::stage::MainThread) -> u32 {
         unsafe { (self.prepare_layout_tree_build)(self.context) }
-    }
-
-    /// Pays what a tree build owed the document thread beyond its own join, then renews the
-    /// document's paint state if the build replaced its layout tree.
-    fn pay_tree_build_host_half(
-        &self,
-        main_thread: &crate::stage::MainThread,
-        arena: &LayoutNodeArena,
-        host_half: TreeBuildHostHalf,
-    ) {
-        let replaced_layout_tree = host_half.replaced_layout_tree();
-        host_half.pay(main_thread, arena);
-        if replaced_layout_tree {
-            unsafe { (self.renew_paint_state)(self.context) }
-        }
     }
 
     fn rebuild_list_owners_with_stale_item_counters(&self, _: &crate::stage::MainThread, list_owners: &[StyleNodeID]) {
@@ -629,9 +609,7 @@ unsafe fn pay_owed_host_halves(
                 restored_style |= unsafe { arena(arena_handle) }.finish_flight_style_host_half(main_thread);
             }
             // SAFETY: Guaranteed by the caller.
-            OwedHostHalf::TreeBuild(owed) => {
-                host.pay_tree_build_host_half(main_thread, unsafe { arena(arena_handle) }, owed);
-            }
+            OwedHostHalf::TreeBuild(owed) => owed.pay(main_thread, unsafe { arena(arena_handle) }),
             // SAFETY: Guaranteed by the caller.
             OwedHostHalf::Commit(owed) => unsafe { owed.deliver(main_thread) },
         }
