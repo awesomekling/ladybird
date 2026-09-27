@@ -213,7 +213,14 @@ EventHandler::EventHandler(Badge<HTML::LocalNavigable>, HTML::LocalNavigable& na
 
 EventHandler::~EventHandler() = default;
 
-Layout::Node* EventHandler::Target::layout_node() const
+Painting::HitBox const* EventHandler::Target::committed_box() const
+{
+    if (!box.has_value() || !box->has_committed_box())
+        return nullptr;
+    return &*box;
+}
+
+Layout::Node* EventHandler::Target::layout_node_of_hit_box() const
 {
     return Painting::layout_node_for_committed_slot(*arena, hit_node);
 }
@@ -252,10 +259,49 @@ static CSS::UserSelect user_select_used_value_for_caret_position(Painting::Caret
 // navigable hosting its content whenever that navigable changes, so the hit names it without the
 // DOM. Content hosted by another process has no local navigable here; the UI process dispatches
 // events over it to the process hosting it, so the event is dropped either way.
-static GC::Ptr<HTML::LocalNavigable> local_content_navigable_of(Layout::Node const& layout_node)
+// A layout node, read as an event dispatch reads the box a hit went through. The wheel paths start from the layout node
+// of a latched target, not from a hit, until scrolling reads the boxes of a snapshot as well.
+class LayoutNodeBox {
+public:
+    explicit LayoutNodeBox(Layout::Node& layout_node)
+        : m_layout_node(&layout_node)
+    {
+    }
+
+    Layout::Node& layout_node() const { return *m_layout_node; }
+    bool is_navigable_container_viewport() const { return Painting::is_navigable_container_viewport_paintable(*m_layout_node); }
+    Optional<CSS::PseudoElement> generated_for_pseudo_element() const { return m_layout_node->generated_for_pseudo_element(); }
+    DOM::NodeIdentity identity() const { return m_layout_node->is_anonymous() ? DOM::NodeIdentity {} : m_layout_node->dom_node_identity(); }
+    DOM::NodeIdentity generator_identity() const { return m_layout_node->pseudo_element_generator_identity(); }
+    Layout::RustFFI::FfiCrossProcessId local_content_navigable() const
+    {
+        return Layout::RustFFI::layout_arena_navigable_container_local_content_navigable(m_layout_node->arena_handle(), Layout::Node::slot_id(m_layout_node));
+    }
+    CSSPixelRect absolute_rect() const { return Painting::absolute_rect(*m_layout_node); }
+    CSSPixelPoint transform_to_local_coordinates(DOM::Document const&, CSSPixelPoint position) const { return Painting::transform_to_local_coordinates(*m_layout_node, position); }
+
+    Optional<LayoutNodeBox> parent() const
+    {
+        if (auto* parent = m_layout_node->parent())
+            return LayoutNodeBox { *parent };
+        return {};
+    }
+
+    Optional<LayoutNodeBox> bound_box_of(DOM::NodeIdentity identity) const
+    {
+        if (auto* layout_node = identity.bound_layout_node(m_layout_node->node_arena()))
+            return LayoutNodeBox { *layout_node };
+        return {};
+    }
+
+private:
+    Layout::Node* m_layout_node { nullptr };
+};
+
+template<typename Box>
+static GC::Ptr<HTML::LocalNavigable> local_content_navigable_of(Box const& box)
 {
-    auto published = Layout::RustFFI::layout_arena_navigable_container_local_content_navigable(
-        layout_node.arena_handle(), Layout::Node::slot_id(&layout_node));
+    auto published = box.local_content_navigable();
     HTML::CrossProcessId content_navigable { .namespace_id = published.namespace_id, .local_id = published.local_id };
     if (content_navigable == HTML::CrossProcessId {})
         return {};
@@ -264,14 +310,15 @@ static GC::Ptr<HTML::LocalNavigable> local_content_navigable_of(Layout::Node con
 
 // An event over content another process hosts is that process's to handle, at the position in the content's viewport.
 // It is recorded for a caller that can forward it, and dropped for one that cannot.
-static Optional<EventResult> dispatch_event_to_nested_navigable(Layout::Node const& layout_node, GC::Ptr<DOM::Node> node, CSSPixelPoint viewport_position, Optional<RemoteInputEventTarget>* remote_target, Function<EventResult(EventHandler&, CSSPixelPoint)> dispatch)
+template<typename Box>
+static Optional<EventResult> dispatch_event_to_nested_navigable(Box const& box, GC::Ptr<DOM::Node> node, CSSPixelPoint viewport_position, Optional<RemoteInputEventTarget>* remote_target, Function<EventResult(EventHandler&, CSSPixelPoint)> dispatch)
 {
     if (!node)
         return {};
 
-    if (Painting::is_navigable_container_viewport_paintable(layout_node)) {
-        auto position = Painting::transform_to_local_coordinates(layout_node, viewport_position) - Painting::absolute_rect(layout_node).location();
-        if (auto local_navigable = local_content_navigable_of(layout_node))
+    if (box.is_navigable_container_viewport()) {
+        auto position = box.transform_to_local_coordinates(node->document(), viewport_position) - box.absolute_rect().location();
+        if (auto local_navigable = local_content_navigable_of(box))
             return dispatch(local_navigable->event_handler(), position);
         // Content hosted by another process has no published local navigable; the container names the remote one.
         if (auto content_navigable = as_if<HTML::NavigableContainer>(*node)->content_navigable(); content_navigable && remote_target) {
@@ -293,37 +340,39 @@ static bool identity_names_element(DOM::NodeIdentity identity)
     return style_node != CSS::StyleNodeID {} && !CSS::style_node_is_text(style_node);
 }
 
-static bool parent_element_for_event_dispatch(Layout::Node& target_layout_node, GC::Ptr<DOM::Node>& node, Layout::Node*& layout_node)
+// Climbs from the box a hit went through to the element an event there is dispatched to, and the box its offset is
+// measured from, both as the hit-test snapshot the hit was found in names them.
+template<typename Box>
+static bool parent_element_for_event_dispatch(Box const& target_box, DOM::Document& document, GC::Ptr<DOM::Node>& node, Optional<Box>& box)
 {
-    auto& arena = target_layout_node.node_arena();
     auto identity = DOM::NodeIdentity::of(*node);
-    layout_node = &target_layout_node;
-    if (target_layout_node.is_generated_for_backdrop_pseudo_element()
-        || target_layout_node.is_generated_for_after_pseudo_element()
-        || target_layout_node.is_generated_for_before_pseudo_element()) {
-        identity = target_layout_node.pseudo_element_generator_identity();
-        if (auto* generator_layout_node = identity.bound_layout_node(arena))
-            layout_node = generator_layout_node;
+    box = target_box;
+    if (auto pseudo_element = target_box.generated_for_pseudo_element();
+        pseudo_element.has_value() && first_is_one_of(*pseudo_element, CSS::PseudoElement::Backdrop, CSS::PseudoElement::After, CSS::PseudoElement::Before)) {
+        identity = target_box.generator_identity();
+        if (auto generator_box = target_box.bound_box_of(identity); generator_box.has_value())
+            box = move(generator_box);
     }
 
     // An event aimed at a disabled form control is not dispatched, and neither is one aimed at
     // anything written under one. Both follow from facts the element published when its `disabled`
     // attribute last moved, so the answer costs no DOM walk.
-    if (CSS::event_dispatch_is_disabled(*arena.document(), identity))
+    if (CSS::event_dispatch_is_disabled(document, identity))
         return false;
 
-    while (layout_node && identity && !identity_names_element(identity)) {
-        auto row_identity = layout_node->is_anonymous() ? DOM::NodeIdentity {} : layout_node->dom_node_identity();
-        if (row_identity && row_identity != identity) {
-            identity = row_identity;
+    while (identity && !identity_names_element(identity)) {
+        auto box_identity = box->identity();
+        if (box_identity && box_identity != identity) {
+            identity = box_identity;
             continue;
         }
-        if (!layout_node->parent())
+        auto parent = box->parent();
+        if (!parent.has_value())
             break;
-        layout_node = layout_node->parent();
+        box = move(parent);
     }
-    node = identity.resolve(*arena.document());
-    return node && layout_node;
+    node = identity.resolve(document);
+    return node != nullptr;
 }
 
 static void set_page_cursor(Page& page, Gfx::Cursor cursor)
@@ -366,8 +415,8 @@ EventResult EventHandler::handle_mousedown(CSSPixelPoint visual_viewport_positio
         return EventResult::Dropped;
     }
 
-    auto* target_layout_node = target->layout_node();
-    if (!target_layout_node)
+    auto const* target_box = target->committed_box();
+    if (!target_box)
         return EventResult::Dropped;
 
     if (!node)
@@ -390,7 +439,7 @@ EventResult EventHandler::handle_mousedown(CSSPixelPoint visual_viewport_positio
     m_mousedown_click_count = click_count;
 
     if (!scrollbar_dragged_by_compositor.has_value()) {
-        auto dispath_result = dispatch_event_to_nested_navigable(*target_layout_node, node, visual_viewport_position, remote_target, [=](EventHandler& event_handler, CSSPixelPoint position) -> EventResult {
+        auto dispath_result = dispatch_event_to_nested_navigable(*target_box, node, visual_viewport_position, remote_target, [=](EventHandler& event_handler, CSSPixelPoint position) -> EventResult {
             return event_handler.handle_mousedown(position, screen_position, button, buttons, modifiers, click_count, {}, remote_target);
         });
         if (dispath_result.has_value())
@@ -407,8 +456,8 @@ EventResult EventHandler::handle_mousedown(CSSPixelPoint visual_viewport_positio
     // https://www.w3.org/TR/uievents/#topmost-event-target
     // The topmost event target MUST be the element highest in the rendering order which is capable of being an
     // event target.
-    Layout::Node* layout_node = nullptr;
-    if (!parent_element_for_event_dispatch(*target_layout_node, node, layout_node))
+    Optional<Painting::HitBox> dispatch_box;
+    if (!parent_element_for_event_dispatch(*target_box, *document, node, dispatch_box))
         return EventResult::Dropped;
 
     m_mousedown_target = node;
@@ -417,7 +466,7 @@ EventResult EventHandler::handle_mousedown(CSSPixelPoint visual_viewport_positio
     m_last_mousedown_target = node;
     m_mousedown_visual_viewport_position = visual_viewport_position;
 
-    auto coordinates = compute_mouse_event_coordinates(visual_viewport_position, viewport_position, *layout_node);
+    auto coordinates = compute_mouse_event_coordinates(visual_viewport_position, viewport_position, *dispatch_box);
     auto dispatch_result = dispatch_a_pointer_event_for_a_device_that_supports_hover(PointerEventType::PointerDown, *node, chrome_widget, coordinates, screen_position, {}, button, buttons, modifiers, click_count);
 
     bool is_context_menu_trigger = button == UIEvents::MouseButton::Secondary;
@@ -564,11 +613,11 @@ EventResult EventHandler::handle_mousemove(CSSPixelPoint visual_viewport_positio
         if (!node)
             return EventResult::Dropped;
 
-        auto* target_layout_node = target->layout_node();
-        if (!target_layout_node)
+        auto const* target_box = target->committed_box();
+        if (!target_box)
             return EventResult::Dropped;
 
-        auto dispath_result = dispatch_event_to_nested_navigable(*target_layout_node, node, visual_viewport_position, remote_target, [&](EventHandler& event_handler, CSSPixelPoint position) {
+        auto dispath_result = dispatch_event_to_nested_navigable(*target_box, node, visual_viewport_position, remote_target, [&](EventHandler& event_handler, CSSPixelPoint position) {
             return event_handler.handle_mousemove(position, screen_position, buttons, modifiers, remote_target);
         });
         if (dispath_result.has_value()) {
@@ -584,14 +633,14 @@ EventResult EventHandler::handle_mousemove(CSSPixelPoint visual_viewport_positio
         // https://www.w3.org/TR/uievents/#topmost-event-target
         // The topmost event target MUST be the element highest in the rendering order which is capable of being an
         // event target.
-        Layout::Node* layout_node = nullptr;
-        bool found_parent_element = parent_element_for_event_dispatch(*target_layout_node, node, layout_node);
+        Optional<Painting::HitBox> dispatch_box;
+        bool found_parent_element = parent_element_for_event_dispatch(*target_box, *document, node, dispatch_box);
 
         if (found_parent_element) {
-            update_cursor(target_layout_node, DOM::NodeIdentity::of(*node), chrome_widget, hit_text_fragment);
+            update_cursor(target->layout_node_of_hit_box(), DOM::NodeIdentity::of(*node), chrome_widget, hit_text_fragment);
             clear_cursor.disarm();
 
-            auto coordinates = compute_mouse_event_coordinates(visual_viewport_position, viewport_position, *layout_node);
+            auto coordinates = compute_mouse_event_coordinates(visual_viewport_position, viewport_position, *dispatch_box);
             auto movement = compute_mouse_event_movement(screen_position);
             m_mousemove_previous_screen_position = screen_position;
 
@@ -713,14 +762,14 @@ EventResult EventHandler::handle_mouseup(CSSPixelPoint visual_viewport_position,
         return EventResult::Dropped;
     }
 
-    auto* target_layout_node = target->layout_node();
-    if (!target_layout_node)
+    auto const* target_box = target->committed_box();
+    if (!target_box)
         return EventResult::Dropped;
 
     if (!node)
         return EventResult::Dropped;
 
-    auto dispath_result = dispatch_event_to_nested_navigable(*target_layout_node, node, visual_viewport_position, remote_target, [&](EventHandler& event_handler, CSSPixelPoint position) {
+    auto dispath_result = dispatch_event_to_nested_navigable(*target_box, node, visual_viewport_position, remote_target, [&](EventHandler& event_handler, CSSPixelPoint position) {
         return event_handler.handle_mouseup(position, screen_position, button, buttons, modifiers, remote_target);
     });
     if (dispath_result.has_value())
@@ -734,11 +783,11 @@ EventResult EventHandler::handle_mouseup(CSSPixelPoint visual_viewport_position,
     // https://www.w3.org/TR/uievents/#topmost-event-target
     // The topmost event target MUST be the element highest in the rendering order which is capable of being an
     // event target.
-    Layout::Node* layout_node = nullptr;
-    if (!parent_element_for_event_dispatch(*target_layout_node, node, layout_node))
+    Optional<Painting::HitBox> dispatch_box;
+    if (!parent_element_for_event_dispatch(*target_box, *document, node, dispatch_box))
         return EventResult::Dropped;
 
-    auto coordinates = compute_mouse_event_coordinates(visual_viewport_position, viewport_position, *layout_node);
+    auto coordinates = compute_mouse_event_coordinates(visual_viewport_position, viewport_position, *dispatch_box);
     [[maybe_unused]] auto dispatch_result = dispatch_a_pointer_event_for_a_device_that_supports_hover(PointerEventType::PointerUp, *node, chrome_widget, coordinates, screen_position, {}, button, buttons, modifiers, click_count);
 
 #if defined(AK_OS_MACOS)
@@ -796,6 +845,12 @@ static CSSPixelPoint compute_mouse_event_offset(CSSPixelPoint position, Layout::
 
     // and terminate these steps.
     return offset;
+}
+
+// As compute_mouse_event_offset() above, for the box a hit-test snapshot names.
+static CSSPixelPoint compute_mouse_event_offset(DOM::Document const& document, CSSPixelPoint position, Painting::HitBox const& box)
+{
+    return box.inverse_transform_point(document, position) - box.box_type_agnostic_position();
 }
 
 struct VisualViewportPanAxes {
@@ -924,7 +979,7 @@ EventResult EventHandler::handle_mousewheel(CSSPixelPoint visual_viewport_positi
     if (!wheel_event_target_layout_node) {
         hit_test_target = target_for_mouse_position(visual_viewport_position);
         if (hit_test_target.has_value()) {
-            wheel_event_target_layout_node = hit_test_target->layout_node();
+            wheel_event_target_layout_node = hit_test_target->layout_node_of_hit_box();
             wheel_event_target_node = hit_test_target->dom_node();
             latch_gesture_to_wheel_event_target(*hit_test_target, wheel_event_target_layout_node);
         }
@@ -1014,7 +1069,7 @@ EventResult EventHandler::handle_mousewheel(CSSPixelPoint visual_viewport_positi
         auto* walk_start = validated_wheel_scroll_latch_target_layout_node(*document);
         if (!walk_start) {
             if (auto fresh_hit_test_target = target_for_mouse_position(visual_viewport_position); fresh_hit_test_target.has_value()) {
-                walk_start = fresh_hit_test_target->layout_node();
+                walk_start = fresh_hit_test_target->layout_node_of_hit_box();
                 latch_gesture_to_wheel_event_target(*fresh_hit_test_target, walk_start);
             }
         }
@@ -1042,7 +1097,7 @@ EventResult EventHandler::handle_mousewheel(CSSPixelPoint visual_viewport_positi
         // A gesture this navigable latched to a scrolling box of its own is not offered to a nested navigable again.
         bool offer_to_nested_navigable = !continues_latched_gesture || m_wheel_scroll_latch->gesture_handed_to_nested_navigable;
         if (offer_to_nested_navigable) {
-            if (auto result = dispatch_event_to_nested_navigable(*wheel_event_target_layout_node, wheel_event_target_node, visual_viewport_position, remote_target, [screen_position, button, buttons, modifiers, wheel_delta_x, wheel_delta_y, wheel_delta_precision, scroll_gesture_phase, async_scroll_performed_default_action, async_scroll_operation, remote_target](EventHandler& event_handler, CSSPixelPoint position) -> EventResult {
+            if (auto result = dispatch_event_to_nested_navigable(LayoutNodeBox { *wheel_event_target_layout_node }, wheel_event_target_node, visual_viewport_position, remote_target, [screen_position, button, buttons, modifiers, wheel_delta_x, wheel_delta_y, wheel_delta_precision, scroll_gesture_phase, async_scroll_performed_default_action, async_scroll_operation, remote_target](EventHandler& event_handler, CSSPixelPoint position) -> EventResult {
                     return event_handler.handle_mousewheel(position, screen_position, button, buttons, modifiers, wheel_delta_x, wheel_delta_y, wheel_delta_precision, scroll_gesture_phase, async_scroll_performed_default_action, async_scroll_operation, remote_target);
                 });
                 result.has_value()) {
@@ -1060,7 +1115,7 @@ EventResult EventHandler::handle_mousewheel(CSSPixelPoint visual_viewport_positi
                     document->update_layout(DOM::UpdateLayoutReason::EventHandlerHandleMouseWheel);
                     wheel_event_target_layout_node = has_committed_root_box() ? validated_wheel_scroll_latch_target_layout_node(*document) : nullptr;
                 } else {
-                    wheel_event_target_layout_node = hit_test_target->layout_node();
+                    wheel_event_target_layout_node = hit_test_target->layout_node_of_hit_box();
                 }
                 if (!wheel_event_target_layout_node)
                     return EventResult::Dropped;
@@ -1103,9 +1158,10 @@ EventResult EventHandler::dispatch_wheel_event(Layout::Node& hit_layout_node, CS
         return EventResult::Dropped;
 
     // NB: Search for the first parent of the hit target that's an element.
-    Layout::Node* layout_node = nullptr;
-    if (!parent_element_for_event_dispatch(hit_layout_node, node, layout_node))
+    Optional<LayoutNodeBox> dispatch_box;
+    if (!parent_element_for_event_dispatch(LayoutNodeBox { hit_layout_node }, *document, node, dispatch_box))
         return EventResult::Dropped;
+    auto* layout_node = &dispatch_box->layout_node();
 
     auto viewport_position = document->visual_viewport()->map_to_layout_viewport(visual_viewport_position);
     auto page_offset = compute_mouse_event_page_offset(viewport_position);
@@ -1132,21 +1188,21 @@ EventResult EventHandler::dispatch_synthetic_pinch_wheel_event(CSSPixelPoint vis
     if (!target.has_value())
         return EventResult::Dropped;
 
-    auto* target_layout_node = target->layout_node();
+    auto const* target_box = target->committed_box();
     auto target_dom_node = target->dom_node();
-    if (!target_layout_node || !target_dom_node)
+    if (!target_box || !target_dom_node)
         return EventResult::Dropped;
 
-    if (auto result = dispatch_event_to_nested_navigable(*target_layout_node, target_dom_node, visual_viewport_position, nullptr, [screen_position, modifiers, wheel_delta_y](EventHandler& event_handler, CSSPixelPoint position) -> EventResult {
+    if (auto result = dispatch_event_to_nested_navigable(*target_box, target_dom_node, visual_viewport_position, nullptr, [screen_position, modifiers, wheel_delta_y](EventHandler& event_handler, CSSPixelPoint position) -> EventResult {
             return event_handler.dispatch_synthetic_pinch_wheel_event(position, screen_position, modifiers, wheel_delta_y);
         });
         result.has_value()) {
         if (result.value() == EventResult::Handled || result.value() == EventResult::Cancelled)
             return result.value();
-        target_layout_node = target->layout_node();
-        if (!target_layout_node)
-            return EventResult::Dropped;
     }
+    auto* target_layout_node = target->layout_node_of_hit_box();
+    if (!target_layout_node)
+        return EventResult::Dropped;
 
     modifiers |= UIEvents::KeyModifier::Mod_Ctrl;
     return dispatch_wheel_event(*target_layout_node, visual_viewport_position, screen_position, UIEvents::MouseButton::None, UIEvents::MouseButton::None, modifiers, 0, wheel_delta_y, true);
@@ -1233,11 +1289,11 @@ void EventHandler::update_hover_after_scroll(CSSPixelPoint visual_viewport_posit
     if (!node)
         return;
 
-    auto* target_layout_node = target->layout_node();
-    if (!target_layout_node)
+    auto const* target_box = target->committed_box();
+    if (!target_box)
         return;
 
-    auto dispatch_result = dispatch_event_to_nested_navigable(*target_layout_node, node, visual_viewport_position, nullptr, [&](EventHandler& event_handler, CSSPixelPoint position) {
+    auto dispatch_result = dispatch_event_to_nested_navigable(*target_box, node, visual_viewport_position, nullptr, [&](EventHandler& event_handler, CSSPixelPoint position) {
         event_handler.update_hover_after_scroll(position, screen_position, button, buttons, modifiers);
         return EventResult::Handled;
     });
@@ -1246,14 +1302,14 @@ void EventHandler::update_hover_after_scroll(CSSPixelPoint visual_viewport_posit
         return;
     }
 
-    Layout::Node* layout_node = nullptr;
-    if (!parent_element_for_event_dispatch(*target_layout_node, node, layout_node))
+    Optional<Painting::HitBox> dispatch_box;
+    if (!parent_element_for_event_dispatch(*target_box, *document, node, dispatch_box))
         return;
 
     update_hovered_chrome_widget(chrome_widget);
-    update_cursor(target_layout_node, DOM::NodeIdentity::of(*node), chrome_widget, hit_text_fragment);
+    update_cursor(target->layout_node_of_hit_box(), DOM::NodeIdentity::of(*node), chrome_widget, hit_text_fragment);
 
-    auto coordinates = compute_mouse_event_coordinates(visual_viewport_position, viewport_position, *layout_node);
+    auto coordinates = compute_mouse_event_coordinates(visual_viewport_position, viewport_position, *dispatch_box);
     report_hover_target(node, DOM::HoverEventData {
                                   .screen_position = screen_position,
                                   .page_offset = coordinates.page_offset,
@@ -1798,11 +1854,11 @@ EventResult EventHandler::handle_drag_and_drop_event(DragEvent::Type type, CSSPi
     if (!node)
         return EventResult::Dropped;
 
-    auto* target_layout_node = target->layout_node();
-    if (!target_layout_node)
+    auto const* target_box = target->committed_box();
+    if (!target_box)
         return EventResult::Dropped;
 
-    auto dispath_result = dispatch_event_to_nested_navigable(*target_layout_node, node, visual_viewport_position, nullptr, [&](EventHandler& event_handler, CSSPixelPoint position) {
+    auto dispath_result = dispatch_event_to_nested_navigable(*target_box, node, visual_viewport_position, nullptr, [&](EventHandler& event_handler, CSSPixelPoint position) {
         return event_handler.handle_drag_and_drop_event(type, position, screen_position, button, buttons, modifiers, move(files));
     });
     if (dispath_result.has_value())
@@ -1810,7 +1866,7 @@ EventResult EventHandler::handle_drag_and_drop_event(DragEvent::Type type, CSSPi
 
     auto page_offset = compute_mouse_event_page_offset(viewport_position);
     auto scroll_offset = document.navigable()->viewport_scroll_offset();
-    auto offset = compute_mouse_event_offset(visual_viewport_position.translated(scroll_offset), *target_layout_node);
+    auto offset = compute_mouse_event_offset(document, visual_viewport_position.translated(scroll_offset), *target_box);
 
     auto was_dragging = should_ignore_device_input_event();
     ScopeGuard update_keyboard_routing = [&] {
@@ -2484,6 +2540,15 @@ EventHandler::MouseEventCoordinates EventHandler::compute_mouse_event_coordinate
     return { page_offset, visual_viewport_position, viewport_position, offset };
 }
 
+EventHandler::MouseEventCoordinates EventHandler::compute_mouse_event_coordinates(CSSPixelPoint visual_viewport_position, CSSPixelPoint viewport_position, Painting::HitBox const& box) const
+{
+    auto page_offset = compute_mouse_event_page_offset(viewport_position);
+    auto const& document = *m_navigable->active_document();
+    auto scroll_offset = document.navigable()->viewport_scroll_offset();
+    auto offset = compute_mouse_event_offset(document, visual_viewport_position.translated(scroll_offset), box);
+    return { page_offset, visual_viewport_position, viewport_position, offset };
+}
+
 CSSPixelPoint EventHandler::compute_mouse_event_page_offset(CSSPixelPoint event_client_offset) const
 {
     // https://w3c.github.io/csswg-drafts/cssom-view/#dom-mouseevent-pagex
@@ -2553,6 +2618,7 @@ Optional<EventHandler::Target> EventHandler::target_for_mouse_position(CSSPixelP
 
     if (auto result = document->hit_test(position); result.has_value()) {
         return Target {
+            .box = move(result->box),
             .hit_node = result->hit_node,
             .arena = result->arena,
             .chrome_widget = result->chrome_widget,
@@ -2613,7 +2679,7 @@ void EventHandler::run_mousedown_default_actions(DOM::Document& document, CSSPix
                 return;
         }
 
-        if (auto* hit_layout_node = hit->layout_node()) {
+        if (auto* hit_layout_node = hit->scrolling_layout_node()) {
             if (auto container = MiddleButtonScrollHandler::find_scrollable_ancestor(document, *hit_layout_node))
                 m_middle_button_scroll_handler = make<MiddleButtonScrollHandler>(*container, visual_viewport_position);
         }
@@ -2737,11 +2803,11 @@ bool EventHandler::select_word_for_dictionary_lookup(CSSPixelPoint visual_viewpo
     if (!result.has_value())
         return false;
 
-    auto* target_layout_node = result->layout_node();
-    if (!target_layout_node)
+    auto const* target_box = result->committed_box();
+    if (!target_box)
         return false;
 
-    if (auto dispatch_result = dispatch_event_to_nested_navigable(*target_layout_node, result->dom_node(), visual_viewport_position, nullptr, [](EventHandler& event_handler, CSSPixelPoint position) -> EventResult {
+    if (auto dispatch_result = dispatch_event_to_nested_navigable(*target_box, result->dom_node(), visual_viewport_position, nullptr, [](EventHandler& event_handler, CSSPixelPoint position) -> EventResult {
             return event_handler.select_word_for_dictionary_lookup(position) ? EventResult::Handled : EventResult::Dropped;
         });
         dispatch_result.has_value()) {
@@ -2923,7 +2989,7 @@ void EventHandler::maybe_show_context_menu(GC::Ref<DOM::Node> node, MouseEventCo
         return;
     GC::Ref<DOM::Node> node_under_pointer = *hit->dom_node();
     GC::Ref<DOM::Node> node_of_box_under_pointer = node_under_pointer;
-    if (auto* dom_node = hit->layout_node()->dom_node())
+    if (auto dom_node = hit->box.has_value() ? hit->box->identity().resolve(*document) : nullptr)
         node_of_box_under_pointer = *dom_node;
     else if (!is<DOM::Element>(*node_under_pointer)) {
         if (auto* parent_element = node_under_pointer->parent_or_shadow_host_element())

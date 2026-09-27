@@ -2931,19 +2931,27 @@ pub unsafe extern "C" fn layout_arena_inline_paintable_first_piece_position(
     arena: *mut c_void,
     inline_paintable: NodeSlotId,
 ) -> FfiOptionalCssPixelPoint {
-    let mut result = FfiOptionalCssPixelPoint {
-        has_value: false,
-        x: CssPixels::from_raw(0),
-        y: CssPixels::from_raw(0),
-    };
     let paintable_rows = unsafe { main_side_paintable_rows(arena) };
-    let Some(root) = paintable_rows.inline_pieces_root(inline_paintable) else {
-        return result;
-    };
-    let root_position = crate::painting::paintable_geometry::absolute_position(&paintable_rows, root);
-    let border_widths = crate::painting::paintable_geometry::committed_border(&paintable_rows, inline_paintable);
-    let padding_widths = crate::painting::paintable_geometry::committed_padding(&paintable_rows, inline_paintable);
-    with_inline_pieces(&paintable_rows, inline_paintable, |piece, _data| {
+    let position = inline_first_piece_position(&paintable_rows, inline_paintable);
+    FfiOptionalCssPixelPoint {
+        has_value: position.is_some(),
+        x: position.map_or(CssPixels::from_raw(0), |position| position.x),
+        y: position.map_or(CssPixels::from_raw(0), |position| position.y),
+    }
+}
+
+/// The absolute position of the padding box of an inline box's first piece, or none for an inline
+/// box with no pieces.
+pub(crate) fn inline_first_piece_position(
+    rows: &impl GeometryRead,
+    inline_paintable: NodeSlotId,
+) -> Option<CssPixelPoint> {
+    let root = rows.inline_pieces_root(inline_paintable)?;
+    let root_position = crate::painting::paintable_geometry::absolute_position(rows, root);
+    let border_widths = crate::painting::paintable_geometry::committed_border(rows, inline_paintable);
+    let padding_widths = crate::painting::paintable_geometry::committed_padding(rows, inline_paintable);
+    let mut result = None;
+    with_inline_pieces(rows, inline_paintable, |piece, _data| {
         let border_rect = CssPixelRect::from(piece.border_box_rect);
         let rect = if piece.is_geometry_only_placeholder {
             border_rect
@@ -2951,9 +2959,10 @@ pub unsafe extern "C" fn layout_arena_inline_paintable_first_piece_position(
             let padding_rect = piece.shrunken_by_present_edges(border_rect, border_widths);
             piece.shrunken_by_present_edges(padding_rect, padding_widths)
         };
-        result.has_value = true;
-        result.x = rect.x + root_position.x;
-        result.y = rect.y + root_position.y;
+        result = Some(CssPixelPoint {
+            x: rect.x + root_position.x,
+            y: rect.y + root_position.y,
+        });
         false
     });
     result
