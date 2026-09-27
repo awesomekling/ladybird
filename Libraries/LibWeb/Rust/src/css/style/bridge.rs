@@ -1676,6 +1676,7 @@ pub unsafe extern "C" fn style_engine_set_tree_scope_animation_keyframes(
             buffers,
         );
     }
+    engine.count_animation_keyframe_scopes();
 }
 
 /// How one effect's description travels across the boundary: a header naming the ranges of the flat

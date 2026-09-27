@@ -329,6 +329,9 @@ define_counters! {
     TransitionProofWinnerGap => "transitionProofWinnerGap",
     TransitionProofPriorityWin => "transitionProofPriorityWin",
     SharedStyleRecordHits => "sharedStyleRecordHits",
+
+    // How many style scopes hold a published `@keyframes` row now.
+    AnimationKeyframeScopes => "animationKeyframeScopes",
 }
 
 const RECORD_BAIL_FIRST: usize = Counter::EngineComputedRecordDeltas as usize;

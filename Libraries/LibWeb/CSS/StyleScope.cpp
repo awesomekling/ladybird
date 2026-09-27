@@ -738,19 +738,22 @@ void StyleScope::publish_animation_keyframes()
 // A shadow root's scope stops existing when the root does, and another root can be allocated at the
 // same address. Give up the row before that can happen, so neither the keyframe sets it named nor
 // the identity the cascade attributes a declaration to outlives the scope.
-void StyleScope::unpublish_animation_keyframes()
+//
+// The row is in the engine of the document the scope published it through, which an adopted root has
+// already left: its tree scope number names another scope in the engine of the document it joins.
+void StyleScope::unpublish_animation_keyframes(DOM::Document& publisher)
 {
     auto* shadow_root = as_if<DOM::ShadowRoot>(*m_node);
     if (!shadow_root || shadow_root->style_engine_tree_scope().value() == 0)
         return;
-    if (!document().style_engine_tracks_tree())
+    if (!publisher.style_engine_tracks_tree())
         return;
     // A garbage collection's finalizer gets here, which must not wait for a stage that holds the engine: the engine
     // gives the row up once it can, and the sets the row names stay alive until it has.
     using KeyframeSets = Vector<NonnullRefPtr<Animations::KeyframeEffect::KeyFrameSet const>>;
     auto* sets = new KeyframeSets(move(m_published_keyframe_sets));
     style_engine_unpublish_tree_scope_animation_keyframes(
-        document().style_computer().style_engine().rust_handle(), shadow_root->style_engine_tree_scope().value(),
+        publisher.style_computer().style_engine().rust_handle(), shadow_root->style_engine_tree_scope().value(),
         bit_cast<FlatPtr>(shadow_root), sets, [](void* sets) { delete static_cast<KeyframeSets*>(sets); });
 }
 

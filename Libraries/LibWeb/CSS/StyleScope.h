@@ -126,7 +126,7 @@ public:
     void publish_cascade_layer_order(StyleSheetState* pending_attachment = nullptr);
     [[nodiscard]] u32 published_layer_index(Utf16FlyString const& qualified_layer_name) const;
     void publish_animation_keyframes();
-    void unpublish_animation_keyframes();
+    void unpublish_animation_keyframes(DOM::Document& publisher);
     void invalidate_user_style_sheet();
 
     void for_each_stylesheet(CascadeOrigin, Function<void(CSS::StyleSheetState&)> const&) const;
