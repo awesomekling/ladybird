@@ -97,13 +97,18 @@ namespace Web::HTML {
 static void set_own_inline_style(DOM::Element& element, CSS::CSSStyleProperties const& defaults)
 {
     auto current = element.inline_style();
-    bool const holds_own_copy = current && current->owner_node().has_value();
-    // Every value change asks again, and nearly always the element holds the defaults already: comparing the
-    // declarations answers that without serializing both sides. The element's copy shares the declarations it was
-    // given, so declarations that compare unequal are different ones, which a placeholder showing or hiding makes.
-    if (holds_own_copy && current->properties() == defaults.properties() && current->custom_properties().is_empty() && defaults.custom_properties().is_empty())
-        return;
-    // The copy shares the defaults' declarations until either changes, which the comparison above answers first.
+    // Every value change asks again, and nearly always the element holds the defaults already. The element's copy
+    // shares the declarations it was given until either changes, so whether it still shares them answers that without
+    // building a view of either side's declarations.
+    if (current && current->owner_node().has_value()) {
+        auto const* current_declarations = CSS::Parser::ValueParserFFI::rust_declaration_block_snapshot(current->declaration_block().handle());
+        auto const* default_declarations = CSS::Parser::ValueParserFFI::rust_declaration_block_snapshot(defaults.declaration_block().handle());
+        bool const holds_the_defaults = current_declarations == default_declarations;
+        CSS::Parser::ValueParserFFI::rust_declaration_data_release(current_declarations);
+        CSS::Parser::ValueParserFFI::rust_declaration_data_release(default_declarations);
+        if (holds_the_defaults)
+            return;
+    }
     auto style = CSS::CSSStyleProperties::create_element_inline_style({ element });
     style->set_declarations_from(defaults);
     element.set_inline_style(style);
