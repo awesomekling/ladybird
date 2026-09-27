@@ -1088,7 +1088,7 @@ void StyleScope::build_counter_style_cache()
         publish_counter_styles();
     };
 
-    // OPTIMIZATION: The predefined counter styles are the same for every document (they all come from Default.css),
+    // OPTIMIZATION: The predefined counter styles are the same for every document (see user_agent_counter_style_rules()),
     //               and so is what a document that defines no counter style of its own registers. Every new iframe
     //               and SVG image registers them in its first style update, so they are made once.
     static auto& user_agent_registered_counter_styles = *new HashMap<Utf16FlyString, NonnullRefPtr<CSS::CounterStyle const>>;
