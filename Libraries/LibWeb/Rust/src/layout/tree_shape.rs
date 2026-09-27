@@ -318,7 +318,9 @@ impl TreeShape {
                     written &= written - 1;
                     let index = chunk_index * SLOTS_PER_CHUNK + offset;
                     let data = &chunk.slots[offset];
-                    self.nodes.set(index, PaintNode::of(data)).expect("the column holds every chunk");
+                    self.nodes
+                        .set(index, PaintNode::of(data))
+                        .expect("the column holds every chunk");
                     // Clone the owner only for a row whose owner changed.
                     let published_style = self.styles.get(index).and_then(PublishedStyle::address);
                     if published_style.unwrap_or(0) != data.style.owner_address() {

@@ -3256,7 +3256,10 @@ impl LayoutNodeArena {
         notice: ShellStyleChangeNotice<'_>,
     ) {
         let previous_payloads = self.data(slot).style.get();
-        let derived_payloads = derived.payloads.as_ref().map_or(std::ptr::null(), |payloads| payloads.as_ptr());
+        let derived_payloads = derived
+            .payloads
+            .as_ref()
+            .map_or(std::ptr::null(), |payloads| payloads.as_ptr());
         let changes_layout_affecting_style =
             !style_payloads_equal_in_layout_affecting_groups(previous_payloads.as_ptr(), derived_payloads);
         self.replace_arena_pinned_style_record(slot, derived);
@@ -7886,7 +7889,14 @@ mod tests {
             &home,
         ));
         let slot = arena.allocate_unbound();
-        arena.stamp_anonymous_box(slot, NodeKind::InlineNode, DerivedStyleRecord { record: 7, payloads: Some(payloads) });
+        arena.stamp_anonymous_box(
+            slot,
+            NodeKind::InlineNode,
+            DerivedStyleRecord {
+                record: 7,
+                payloads: Some(payloads),
+            },
+        );
         assert_eq!(arena.data(slot).kind.get(), NodeKind::InlineNode);
         assert!(arena.data(slot).flags.get() & NodeFlag::Anonymous as u32 != 0);
         assert!(arena.data(slot).flags.get() & NodeFlag::HasStyle as u32 != 0);
