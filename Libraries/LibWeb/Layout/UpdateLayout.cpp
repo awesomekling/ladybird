@@ -60,7 +60,6 @@ Layout::RustFFI::FfiLayoutUpdateHostCallbacks Document::layout_update_host_callb
                 .viewport_inline_size_raw = viewport_rect.width().raw_value(),
                 .viewport_block_size_raw = viewport_rect.height().raw_value(),
             }; },
-        .prepare_for_rendering = [](void* context) { static_cast<Document*>(context)->prepare_for_rendering(); },
         .seal_flight_paint = [](void* context, bool style_runs_in_flight) {
             auto& document = *static_cast<Document*>(context);
             // A document that is to update its style after the layout lays out again before it shows anything. The style
@@ -77,43 +76,73 @@ Layout::RustFFI::FfiLayoutUpdateHostCallbacks Document::layout_update_host_callb
             Vector<Layout::RustFFI::FfiSelectionSnapshotNode> nodes;
             auto snapshot = Painting::read_selection_snapshot(*range, nodes);
             receive(sink, &snapshot); },
-        .apply_layout_commit_effects = [](void* context, Layout::RustFFI::FfiLayoutCommitEffects const* effects) { static_cast<Document*>(context)->apply_layout_commit_effects(*effects); },
-        .note_full_layouts_performed = [](void* context, u64 count) { static_cast<Document*>(context)->style_invalidation_counters().relayouts_performed += count; },
-        .record_stabilization_bound_failure = [](void* context) { ++static_cast<Document*>(context)->m_style_invalidation_counters.style_stabilization_bound_failures; },
-        .attach_style_resources = [](void* context, Compositing::RustFFI::NodeSlotId slot, bool owns_content_replacement_image) {
-            auto& document = *static_cast<Document*>(context);
-            if (Layout::attach_owed_style_resources(document, slot, owns_content_replacement_image))
-                document.m_owed_image_provider_arrived_with_image = true; },
-        .attach_generated_image = [](void* context, Compositing::RustFFI::NodeSlotId slot, u32 style_node, Layout::RustFFI::FfiPseudoElement pseudo_element, Layout::RustFFI::FfiGeneratedContentItem item, Compositing::RustFFI::NodeSlotId pseudo_element_box) {
-            auto& document = *static_cast<Document*>(context);
-            if (Layout::attach_owed_generated_image(document, slot, style_node, pseudo_element, item, pseudo_element_box))
-                document.m_owed_image_provider_arrived_with_image = true; },
-        .finish_update_layout = [](void* context, Layout::RustFFI::FfiLayoutUpdateEnd end) {
-            auto& document = *static_cast<Document*>(context);
-            document.style_computer().end_style_record_view_epoch();
-            document.end_style_stabilization_epoch();
-            Layout::RustFFI::layout_arena_end_update_layout(document.layout_node_arena().handle());
-            document.release_held_invalidation_marks();
-            document.style_computer().style_engine().publish_inputs_waiting_for_layout_pass();
-
-            // A frame taken back in the middle of main-thread code tells the document nothing that can run script there:
-            // its messages and the resnap wait for the next layout update to end, which runs before anything reads them.
-            if (end == Layout::RustFFI::FfiLayoutUpdateEnd::FrameTakenBack)
-                return;
-
-            // Whatever the pass told the document takes effect before the read that joined for it. That
-            // includes the web font faces it reached while they wait on their load.
-            document.apply_commit_messages();
-
-            if (document.m_needs_scroll_container_resnap) {
-                if (auto navigable = document.navigable(); navigable && navigable->active_document().ptr() == &document)
-                    navigable->re_snap_scroll_containers_after_layout_change();
-            }
-
-            document.page().client().flush_pending_dom_mutations(); },
+        .take_in_frame_effects = [](void* context, Layout::RustFFI::FfiLayoutFrameEffects const* effects) { static_cast<Document*>(context)->take_in_layout_frame_effects(*effects); },
         .finish_submitted_style_update = [](void* context) { static_cast<Document*>(context)->finish_style_update_submitted_in_flight(); },
-        .settle_flight_style_repaint = [](void* context, bool recorded_in_flight) { static_cast<Document*>(context)->settle_style_repaint_owed_to_flight(recorded_in_flight); },
     };
+}
+
+// Takes in what a layout frame left for the document once it is over, in the order the frame leaves it, and ends the
+// layout update on the document side.
+void Document::take_in_layout_frame_effects(Layout::RustFFI::FfiLayoutFrameEffects const& effects)
+{
+    // The install of a style batch a flight applied owes the flight the repaint of the batch, which the flight's recording
+    // is if it stands; otherwise the document paints again.
+    if (effects.settles_flight_style_repaint)
+        settle_style_repaint_owed_to_flight(effects.flight_style_repaint_recorded);
+
+    // An image box that owns its image's provider is handed it here, and lays out again if the image is already there.
+    auto* arena = layout_node_arena().handle();
+    for (auto const& owed : ReadonlySpan<Layout::RustFFI::FfiOwedImageResources> { effects.owed_image_resources, effects.owed_image_resources_count }) {
+        bool image_was_available = false;
+        switch (owed.tag) {
+        case Layout::RustFFI::FfiOwedImageResources::Tag::StyleResources: {
+            auto const& resources = owed.style_resources;
+            if (!Layout::RustFFI::layout_arena_hand_over_owed_image_resources(arena, resources.row))
+                continue;
+            image_was_available = Layout::attach_owed_style_resources(*this, resources.row, resources.owns_content_replacement_image);
+            break;
+        }
+        case Layout::RustFFI::FfiOwedImageResources::Tag::GeneratedImage: {
+            auto const& image = owed.generated_image;
+            if (!Layout::RustFFI::layout_arena_hand_over_owed_image_resources(arena, image.row))
+                continue;
+            image_was_available = Layout::attach_owed_generated_image(*this, image.row, image.generator, image.pseudo_element, image.item, image.pseudo_element_box);
+            break;
+        }
+        }
+        if (image_was_available)
+            m_owed_image_provider_arrived_with_image = true;
+    }
+
+    m_style_invalidation_counters.relayouts_performed += effects.full_layouts_performed;
+
+    if (effects.commit.layout_committed)
+        apply_layout_commit_effects(effects.commit);
+
+    if (effects.prepare_for_rendering)
+        prepare_for_rendering();
+
+    style_computer().end_style_record_view_epoch();
+    end_style_stabilization_epoch();
+    Layout::RustFFI::layout_arena_end_update_layout(arena);
+    release_held_invalidation_marks();
+    style_computer().style_engine().publish_inputs_waiting_for_layout_pass();
+
+    // A frame taken back in the middle of main-thread code tells the document nothing that can run script there: its
+    // messages and the resnap wait for the next layout update to end, which runs before anything reads them.
+    if (effects.end == Layout::RustFFI::FfiLayoutUpdateEnd::FrameTakenBack)
+        return;
+
+    // Whatever the pass told the document takes effect before the read that joined for it. That includes the web font
+    // faces it reached while they wait on their load.
+    apply_commit_messages();
+
+    if (m_needs_scroll_container_resnap) {
+        if (auto navigable = this->navigable(); navigable && navigable->active_document().ptr() == this)
+            navigable->re_snap_scroll_containers_after_layout_change();
+    }
+
+    page().client().flush_pending_dom_mutations();
 }
 
 void Document::update_layout(UpdateLayoutReason reason)
@@ -220,8 +249,8 @@ bool Document::update_style_and_layout_once(UpdateLayoutReason reason, Throttled
     // during layout tree construction and layout do not need individual record pins.
     style_computer().begin_style_record_view_epoch();
 
-    // NB: The update, and the epochs begun above, end as the frame's end is taken in (finish_update_layout in the host
-    //     callbacks): before layout_arena_update_layout returns, or once a submitted pass's frame is taken back.
+    // NB: The update, and the epochs begun above, end as the frame's end is taken in (take_in_layout_frame_effects):
+    //     before layout_arena_update_layout returns, or once a submitted pass's frame is taken back.
 
     bool const may_submit_pass = pass_submission != LayoutPassSubmission::Wait;
     // The update's first round's style runs here, ahead of the update. One that runs in the flight begins here: its pass
