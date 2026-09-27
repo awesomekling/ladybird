@@ -138,6 +138,8 @@ impl ArenaHandle {
     /// Makes the arena the render state of `document`'s, which the document thread `document_thread` acts for.
     pub(crate) fn adopt(&mut self, document: crate::render_owner::DocumentId, document_thread: std::thread::ThreadId) {
         self.arena.adopt(document, document_thread);
+        self.arena
+            .link_layout_tree_update_marks(&self.host_tables.layout_tree_update_marks);
     }
 
     pub(crate) fn arena_mut(&mut self) -> &mut LayoutNodeArena {

@@ -856,6 +856,14 @@ fn tell_shell_of_style(
     };
 }
 
+/// Where the arena reaches its document's layout tree update marks: in the host tables beside it.
+#[derive(Clone, Copy)]
+struct DocumentMarksLink(*const RefCell<LayoutTreeUpdateMarks>);
+
+// SAFETY: The arena reaches the marks only in a tree build the document thread lent them to, which it reaches nothing
+// of meanwhile, wherever the arena is.
+unsafe impl Send for DocumentMarksLink {}
+
 /// The node a layout row can be bound to: an element or text node, named by its identity, a
 /// pseudo-element, which has no identity of its own and is named by its generator's identity and
 /// its kind, or the document, which is bound to a viewport row.
@@ -1119,9 +1127,11 @@ pub(crate) struct LayoutNodeArena {
     /// holds one control's shadow tree and is empty the rest of the time.
     identities_in_focused_text_control: HashSet<StyleNodeID>,
     /// What the DOM asks the next layout tree build to rebuild, written where the DOM changes and
-    /// retired by the build that answers it. The document thread owns the marks and lends them here
-    /// for the build alone (see [`super::tree_update_marks`]); the rest of the time this is empty.
-    layout_tree_update_marks: RefCell<LayoutTreeUpdateMarks>,
+    /// retired by the build that answers it. The document thread owns the marks, in the host tables
+    /// beside the arena, which this points to once the document adopts the arena, and lends them to
+    /// the build alone (see [`super::tree_update_marks`]). An arena of no document holds its own.
+    layout_tree_update_marks: Cell<DocumentMarksLink>,
+    own_layout_tree_update_marks: RefCell<LayoutTreeUpdateMarks>,
     /// The rows that own an image provider, for a row whose image comes from its style rather than
     /// from a DOM element. The provider is made for the row and is of no use without it, so the
     /// arena hands it back when the row is freed, rather than leaving it on a shell that the arena
@@ -1332,7 +1342,8 @@ impl LayoutNodeArena {
             pseudo_element_scroll_offsets: HashMap::default(),
             element_scroll_offsets: HashMap::default(),
             identities_in_focused_text_control: HashSet::default(),
-            layout_tree_update_marks: RefCell::new(LayoutTreeUpdateMarks::default()),
+            layout_tree_update_marks: Cell::new(DocumentMarksLink(std::ptr::null())),
+            own_layout_tree_update_marks: RefCell::new(LayoutTreeUpdateMarks::default()),
             rows_with_owned_image_provider: RefCell::new(HashSet::default()),
             owned_image_natural_sizes: RefCell::new(HashMap::default()),
             rows_with_image_observers: RefCell::new(HashSet::default()),
@@ -2021,20 +2032,30 @@ impl LayoutNodeArena {
 
     /// The reasons the node's layout tree update mark permits reusing its box, if any.
     pub(crate) fn layout_tree_update_reuse_reasons(&self, node: StyleNodeID) -> u8 {
-        self.layout_tree_update_marks.borrow().reuse_reasons(node)
+        self.layout_tree_update_marks().borrow().reuse_reasons(node)
     }
 
-    /// The layout tree update marks the tree build holds, for host work it joins the document
-    /// thread for while it holds them.
-    pub(super) fn layout_tree_update_marks_held_by_the_build(&self) -> std::cell::RefMut<'_, LayoutTreeUpdateMarks> {
-        self.layout_tree_update_marks.borrow_mut()
+    /// The layout tree update marks the tree build reads and retires: the document thread's, which it lends the build.
+    fn layout_tree_update_marks(&self) -> &RefCell<LayoutTreeUpdateMarks> {
+        let DocumentMarksLink(marks) = self.layout_tree_update_marks.get();
+        if marks.is_null() {
+            return &self.own_layout_tree_update_marks;
+        }
+        // SAFETY: The marks are in the host tables beside the arena, which live as long as it does, and the document
+        // thread reaches them only while it has not lent them to the build (see `super::tree_update_marks`).
+        unsafe { &*marks }
+    }
+
+    /// Has the arena reach the document's layout tree update marks at `marks`, in the host tables beside it.
+    pub(super) fn link_layout_tree_update_marks(&self, marks: &RefCell<LayoutTreeUpdateMarks>) {
+        self.layout_tree_update_marks.set(DocumentMarksLink(marks));
     }
 
     /// Retires the tree update marks a node gives up along with its stale box. A shadow root has
     /// no box of its own, so the mark it gives up is its host's as well; only the node's own
     /// child mark goes, as the host may still have other children to update.
     pub(crate) fn retire_layout_tree_update_marks_of_cleared_node(&self, node: StyleNodeID) {
-        let mut marks = self.layout_tree_update_marks.borrow_mut();
+        let mut marks = self.layout_tree_update_marks().borrow_mut();
         let mut current = node;
         while marks.merge(current, false, 0) {
             let Some(host) = self.with_style_store(|engine| engine.tree().host_of(current)) else {
@@ -3115,7 +3136,7 @@ impl LayoutNodeArena {
         let Some(style_node) = style_node else {
             return;
         };
-        self.layout_tree_update_marks.borrow_mut().clear(style_node);
+        self.layout_tree_update_marks().borrow_mut().clear(style_node);
     }
 
     /// Whether `style_node` itself holds a layout tree update mark. An anonymous row names no node
@@ -3124,7 +3145,7 @@ impl LayoutNodeArena {
         let Some(style_node) = style_node else {
             return false;
         };
-        self.layout_tree_update_marks.borrow().needs(style_node)
+        self.layout_tree_update_marks().borrow().needs(style_node)
     }
 
     /// The element above `element` in the shadow-including tree, and whether the step to it crossed
@@ -3178,7 +3199,7 @@ impl LayoutNodeArena {
         let Some(style_node) = style_node else {
             return false;
         };
-        self.layout_tree_update_marks.borrow().child_needs(style_node)
+        self.layout_tree_update_marks().borrow().child_needs(style_node)
     }
 
     /// The element type facts the style store holds for `style_node`. A text node, an anonymous
