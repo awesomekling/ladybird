@@ -230,6 +230,11 @@ public:
     // The nodes assigned to a slot, and the document's top layer, each a whole list at a time.
     void record_slot_assigned_nodes(StyleNodeID slot, ReadonlySpan<StyleNodeID> assigned);
     void record_top_layer_elements(ReadonlySpan<StyleNodeID> elements);
+    // What an element's style asked of size query containers, which finds the dependents a container's new box moves,
+    // and that a moved custom-property environment computes it again. None of them is ever taken back.
+    void record_size_query_container(StyleNodeID);
+    void record_style_depends_on_size_container_query(StyleNodeID);
+    void record_recomputes_on_environment_move(StyleNodeID);
     // What a row built for an arriving node is painted and hit-tested with, and the spans of an arriving table cell or
     // column, which arrive with the node's identity.
     void record_dom_paint_facts(StyleNodeID, u8 facts);

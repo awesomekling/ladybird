@@ -614,6 +614,7 @@ public:
     // unconditionally.
     void set_is_style_query_container() { m_is_style_query_container = true; }
     bool is_style_query_container() const { return m_is_style_query_container; }
+    bool is_size_query_container() const { return m_is_size_query_container; }
     void set_is_size_query_container()
     {
         if (m_is_size_query_container)
