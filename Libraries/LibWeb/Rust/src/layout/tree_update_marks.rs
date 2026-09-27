@@ -10,21 +10,19 @@
 //!
 //! The DOM writes and reads the marks at any time, a frame in flight included, and a mark must never
 //! wait for a frame that does not read them. So the document thread owns them, beside the arena in
-//! its host tables, and lends them to the arena for the one stage that reads them: the layout frame
-//! lends them as its style round readies a tree build, and takes them back, with what the build
-//! retired, the next time the document thread pays what the frame owes it. The stale box clear a
+//! its host tables, where the arena reaches them, and lends them to the one stage that reads them:
+//! the layout frame lends them as its style round readies a tree build, and takes them back, with
+//! what the build retired, the next time the document thread pays what the frame owes it. The stale box clear a
 //! top layer member's detach runs outside a build borrows them the same way. A frame in flight that
 //! holds them is joined by whatever reads them beside it, and its take-back hands them back. A
 //! write beside it (a retirement, a fold, a child bit) waits for the take-back instead.
 
-use super::LayoutNodeArena;
 use super::host_tables::HostTables;
 use crate::css::style::tree::StyleNodeID;
 use std::ffi::c_void;
 
-/// Runs `access` on the layout tree update marks of the document whose arena `handle` names: its
-/// own, or the ones its tree build holds if the access is host work the build joined the document
-/// thread for.
+/// Runs `access` on the layout tree update marks of the document whose arena `handle` names, once
+/// the frame in flight that holds them, if one does, has run all of its stages.
 ///
 /// # Safety
 ///
@@ -37,12 +35,6 @@ pub(crate) unsafe fn with_document_marks<R>(
     let host_tables = unsafe { HostTables::beside_frame(handle) };
     // SAFETY: Guaranteed by the caller.
     unsafe { join_frame_in_flight_holding_marks(handle) };
-    if host_tables.layout_tree_update_marks_are_lent.get() {
-        // SAFETY: Guaranteed by the caller. The frame that holds the marks waits for this access,
-        // or has run all of its stages.
-        let arena = unsafe { LayoutNodeArena::from_handle(handle) };
-        return access(&mut arena.layout_tree_update_marks_held_by_the_build());
-    }
     access(&mut host_tables.layout_tree_update_marks.borrow_mut())
 }
 
@@ -208,8 +200,8 @@ unsafe fn join_frame_in_flight_holding_marks(handle: *mut c_void) {
     }
 }
 
-/// Lends the document's layout tree update marks to its arena for the tree build a layout frame
-/// has readied, which reads and retires them there.
+/// Lends the document's layout tree update marks to the tree build a layout frame has readied, which
+/// reads and retires them where they are, through the arena's link to them.
 ///
 /// # Safety
 ///
@@ -222,9 +214,6 @@ pub(crate) unsafe fn lend_to_frame(handle: *mut c_void) {
         !host_tables.layout_tree_update_marks_are_lent.get(),
         "a tree build walks alone"
     );
-    // SAFETY: Guaranteed by the caller: nothing else reaches the arena.
-    let arena = unsafe { &*handle.cast::<LayoutNodeArena>() };
-    *arena.layout_tree_update_marks_held_by_the_build() = host_tables.layout_tree_update_marks.take();
     host_tables.layout_tree_update_marks_are_lent.set(true);
 }
 
@@ -235,16 +224,9 @@ pub(crate) unsafe fn lend_to_frame(handle: *mut c_void) {
 /// As for [`lend_to_frame`].
 pub(crate) unsafe fn take_back_from_frame(handle: *mut c_void) {
     // SAFETY: Guaranteed by the caller. The host tables sit beside the arena, not in it.
-    let host_tables = unsafe { HostTables::beside_frame(handle) };
-    if !host_tables.layout_tree_update_marks_are_lent.get() {
-        return;
-    }
-    // SAFETY: Guaranteed by the caller: nothing else reaches the arena.
-    let arena = unsafe { &*handle.cast::<LayoutNodeArena>() };
-    host_tables
-        .layout_tree_update_marks
-        .replace(std::mem::take(&mut *arena.layout_tree_update_marks_held_by_the_build()));
-    host_tables.layout_tree_update_marks_are_lent.set(false);
+    unsafe { HostTables::beside_frame(handle) }
+        .layout_tree_update_marks_are_lent
+        .set(false);
 }
 
 /// Lends the document's layout tree update marks to the arena for `clear`, the stale box clear a
@@ -260,18 +242,12 @@ pub(crate) unsafe fn lend_to_stale_box_clear<R>(handle: *mut c_void, clear: impl
     let host_tables = unsafe { HostTables::beside_frame(handle) };
     // SAFETY: Guaranteed by the caller.
     unsafe { join_frame_in_flight_holding_marks(handle) };
-    // Host work a layout frame joined the document thread for finds the marks lent already.
+    // Marks lent already stay lent.
     if host_tables.layout_tree_update_marks_are_lent.get() {
         return clear();
     }
-    // SAFETY: Guaranteed by the caller. No frame is in flight once the arena is borrowed.
-    let arena = unsafe { LayoutNodeArena::from_handle(handle) };
-    *arena.layout_tree_update_marks_held_by_the_build() = host_tables.layout_tree_update_marks.take();
     host_tables.layout_tree_update_marks_are_lent.set(true);
     let result = clear();
-    host_tables
-        .layout_tree_update_marks
-        .replace(std::mem::take(&mut *arena.layout_tree_update_marks_held_by_the_build()));
     host_tables.layout_tree_update_marks_are_lent.set(false);
     result
 }
