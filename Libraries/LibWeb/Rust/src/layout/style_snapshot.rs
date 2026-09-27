@@ -6,16 +6,16 @@
 
 //! Layout outputs retained for the next style stage.
 //!
-//! Layout gathers a commit's rows privately and applies them to the published generation at once,
-//! under its write lock, when the commit completes, so no style evaluation observes a partly
-//! committed table. The published generation changes in place; it is copied only where a reader
-//! still holds it.
+//! Layout gathers a commit's rows privately, in its arena, and applies them to the published
+//! generation at once, under its write lock, when the commit completes, so no style evaluation
+//! observes a partly committed table. The published generation changes in place; it is copied only
+//! where a reader still holds it.
 
 use crate::css::style::tree::StyleNodeID;
 use crate::layout::used_values::FfiCssPixelSize;
 use crate::layout::{LayoutNodeArena, node_data::NodeSlotId};
 use std::ffi::c_void;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct LayoutStyleSnapshotRow {
@@ -64,7 +64,7 @@ impl SnapshotGeneration {
 }
 
 #[derive(Clone, Copy)]
-struct CommittedGeometry {
+pub(crate) struct CommittedGeometry {
     node: StyleNodeID,
     content_width_raw: i32,
     content_height_raw: i32,
@@ -73,47 +73,40 @@ struct CommittedGeometry {
     writing_mode: u8,
 }
 
+/// The rows of the layout commit in progress, which the arena that commits gathers for itself.
 #[derive(Default)]
-struct BuildingCommit {
+pub(crate) struct LayoutStyleSnapshotCommit {
     layout_commit_generation: Option<u64>,
     rows: Vec<CommittedGeometry>,
 }
 
-#[derive(Default)]
-pub(crate) struct LayoutStyleSnapshotStore {
-    published: RwLock<Arc<SnapshotGeneration>>,
-    building: Mutex<BuildingCommit>,
-}
-
-impl LayoutStyleSnapshotStore {
-    pub(crate) fn begin_layout_commit(&self, generation: u64) {
-        let mut building = self.building.lock().unwrap();
+impl LayoutStyleSnapshotCommit {
+    pub(crate) fn begin(&mut self, generation: u64) {
         debug_assert!(
-            building.layout_commit_generation.is_none(),
+            self.layout_commit_generation.is_none(),
             "layout snapshot commit began inside another"
         );
-        building.layout_commit_generation = Some(generation);
-        building.rows.clear();
+        self.layout_commit_generation = Some(generation);
+        self.rows.clear();
     }
 
-    pub(crate) fn publish_geometry(
-        &self,
+    pub(crate) fn push(
+        &mut self,
         node: StyleNodeID,
         size: FfiCssPixelSize,
         has_committed_box: bool,
         writing_mode: u8,
         style_record: u64,
     ) {
-        let mut building = self.building.lock().unwrap();
         debug_assert!(
-            building.layout_commit_generation.is_some(),
+            self.layout_commit_generation.is_some(),
             "layout snapshot geometry published outside a commit"
         );
         debug_assert!(
             node.element_index().is_some(),
             "layout snapshot geometry published for a text node"
         );
-        building.rows.push(CommittedGeometry {
+        self.rows.push(CommittedGeometry {
             node,
             content_width_raw: size.width.raw_value(),
             content_height_raw: size.height.raw_value(),
@@ -122,18 +115,25 @@ impl LayoutStyleSnapshotStore {
             writing_mode,
         });
     }
+}
 
-    pub(crate) fn finish_layout_commit(&self) {
-        let mut building = self.building.lock().unwrap();
-        let Some(generation) = building.layout_commit_generation.take() else {
+#[derive(Default)]
+pub(crate) struct LayoutStyleSnapshotStore {
+    published: RwLock<Arc<SnapshotGeneration>>,
+}
+
+impl LayoutStyleSnapshotStore {
+    /// Applies a commit's rows to the published generation, leaving the commit empty for the next.
+    pub(crate) fn finish_layout_commit(&self, commit: &mut LayoutStyleSnapshotCommit) {
+        let Some(generation) = commit.layout_commit_generation.take() else {
             debug_assert!(false, "layout snapshot commit finished without beginning");
-            building.rows.clear();
+            commit.rows.clear();
             return;
         };
         let mut published = self.published.write().unwrap();
         let next = Arc::make_mut(&mut published);
         next.layout_commit_generation = generation;
-        for geometry in building.rows.drain(..) {
+        for geometry in commit.rows.drain(..) {
             let Some(row) = next.row_mut(geometry.node) else {
                 continue;
             };
@@ -195,11 +195,19 @@ impl LayoutStyleSnapshotStore {
 
 impl LayoutNodeArena {
     pub(crate) fn begin_layout_style_snapshot_commit(&self) {
-        self.layout_style_snapshots
-            .begin_layout_commit(self.layout_commit_generation());
+        self.layout_style_snapshot_commit
+            .borrow_mut()
+            .begin(self.layout_commit_generation());
     }
 
-    pub(crate) fn publish_layout_style_snapshot_geometry(&self, node: NodeSlotId, writing_mode: u8) {
+    /// Gathers the node's row for the style snapshot. `laid_out_content_size` is the content size of
+    /// the fragment this commit just linked the node's populated row to, which is what the row reads.
+    pub(crate) fn publish_layout_style_snapshot_geometry(
+        &self,
+        node: NodeSlotId,
+        writing_mode: u8,
+        laid_out_content_size: Option<FfiCssPixelSize>,
+    ) {
         // Style asks layout only about elements.
         let Some(style_node) = self
             .node_style_node(node)
@@ -213,11 +221,17 @@ impl LayoutNodeArena {
         let rows = self.paintable_rows();
         let has_committed_box = rows.paintable_row_is_populated(node);
         let size = if has_committed_box {
-            crate::painting::paintable_geometry::committed_content_size(&rows, node)
+            laid_out_content_size
+                .unwrap_or_else(|| crate::painting::paintable_geometry::committed_content_size(&rows, node))
         } else {
             FfiCssPixelSize::default()
         };
-        self.layout_style_snapshots.publish_geometry(
+        debug_assert!(
+            laid_out_content_size.is_none_or(|laid_out| !has_committed_box
+                || laid_out == crate::painting::paintable_geometry::committed_content_size(&rows, node)),
+            "a committed row reads another content size than the fragment linked to it"
+        );
+        self.layout_style_snapshot_commit.borrow_mut().push(
             style_node,
             size,
             has_committed_box,
@@ -227,7 +241,8 @@ impl LayoutNodeArena {
     }
 
     pub(crate) fn finish_layout_style_snapshot_commit(&self) {
-        self.layout_style_snapshots.finish_layout_commit();
+        self.layout_style_snapshots
+            .finish_layout_commit(&mut self.layout_style_snapshot_commit.borrow_mut());
     }
 }
 
@@ -264,8 +279,9 @@ mod tests {
     fn a_layout_generation_becomes_visible_only_when_finished() {
         let store = LayoutStyleSnapshotStore::default();
         let node = StyleNodeID::element(1);
-        store.begin_layout_commit(7);
-        store.publish_geometry(
+        let mut commit = LayoutStyleSnapshotCommit::default();
+        commit.begin(7);
+        commit.push(
             node,
             FfiCssPixelSize {
                 width: CssPixels::from_raw(11),
@@ -276,7 +292,7 @@ mod tests {
             17,
         );
         assert!(store.row(node).is_none());
-        store.finish_layout_commit();
+        store.finish_layout_commit(&mut commit);
         assert_eq!(
             store.row(node),
             Some(LayoutStyleSnapshotRow {
@@ -294,15 +310,16 @@ mod tests {
     fn scroll_state_updates_preserve_geometry_and_retirement_clears_the_row() {
         let store = LayoutStyleSnapshotStore::default();
         let node = StyleNodeID::element(1);
-        store.begin_layout_commit(3);
-        store.publish_geometry(
+        let mut commit = LayoutStyleSnapshotCommit::default();
+        commit.begin(3);
+        commit.push(
             node,
             FfiCssPixelSize::default(),
             true,
             crate::css::css_enums::writing_mode::HORIZONTAL_TB,
             19,
         );
-        store.finish_layout_commit();
+        store.finish_layout_commit(&mut commit);
         store.publish_scroll_states(&[FfiLayoutStyleScrollState {
             style_node: node.raw(),
             stuck: 1,

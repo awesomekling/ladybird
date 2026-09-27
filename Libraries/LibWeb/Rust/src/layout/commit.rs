@@ -120,10 +120,15 @@ fn commit_subtree(
 
     let mut has_pending_inline_box_geometry = false;
     let mut line_root_changes_for_children = enclosing_line_root_changes;
+    let mut laid_out_content_size = None;
     if let Some(link) = entry
         && prepared.has_paintable_row
     {
         let fragment = &link.fragment;
+        laid_out_content_size = Some(FfiCssPixelSize {
+            width: fragment.content_inline_size,
+            height: fragment.content_block_size,
+        });
         debug_assert!(
             fragment.computed_svg_path.is_some()
                 || !matches!(
@@ -167,7 +172,7 @@ fn commit_subtree(
         });
     paintables
         .arena()
-        .publish_layout_style_snapshot_geometry(node, writing_mode);
+        .publish_layout_style_snapshot_geometry(node, writing_mode, laid_out_content_size);
 
     paintables.stamp_containing_block(node, entry);
     if reuses_committed_subtree {

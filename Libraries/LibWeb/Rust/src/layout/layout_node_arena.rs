@@ -1139,6 +1139,8 @@ pub(crate) struct LayoutNodeArena {
     /// What the running pass has to tell the document, waiting for the commit that delivers it.
     messages_reported_during_pass: RefCell<Vec<super::commit::FfiCommitMessage>>,
     pub(crate) layout_style_snapshots: std::sync::Arc<super::style_snapshot::LayoutStyleSnapshotStore>,
+    /// The style snapshot rows of the layout commit in progress.
+    pub(crate) layout_style_snapshot_commit: RefCell<super::style_snapshot::LayoutStyleSnapshotCommit>,
     owner_thread: thread::ThreadId,
 }
 
@@ -1251,6 +1253,7 @@ impl LayoutNodeArena {
             nodes_enrolled_for_replaced_content_facts_sync: RefCell::new(Vec::new()),
             messages_reported_during_pass: RefCell::new(Vec::new()),
             layout_style_snapshots: Default::default(),
+            layout_style_snapshot_commit: RefCell::default(),
             owner_thread: thread::current().id(),
         }
     }
