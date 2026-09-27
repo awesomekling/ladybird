@@ -1570,7 +1570,11 @@ bool StyleEngine::has_deferred_element_style_inputs() const
 
 bool StyleEngine::has_deferred_element_style_input(StyleNodeID style_node) const
 {
-    return StyleEngineFFI::style_engine_has_deferred_element_style_input(rust_handle(), style_node.value());
+    if (StyleEngineFFI::style_engine_has_deferred_element_style_input(rust_handle(), style_node.value()))
+        return true;
+    // What the reactions held for the next transaction derive for the element is owed to it as well.
+    return !m_applied_style_reactions.is_empty()
+        && StyleEngineFFI::style_engine_applied_style_reactions_derive_input(rust_handle(), style_node.value(), m_applied_style_reactions.data(), m_applied_style_reactions.size());
 }
 
 bool StyleEngine::defer_pending_transaction_for_geometry_read()

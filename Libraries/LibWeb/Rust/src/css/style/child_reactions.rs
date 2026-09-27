@@ -115,16 +115,26 @@ impl StyleEngineState {
     /// applied to an element it inherits from derives once the next transaction takes it.
     #[must_use]
     pub fn owes_element_style_input(&self, node: StyleNodeID) -> bool {
-        if self.has_deferred_element_style_input(node) {
-            return true;
-        }
+        self.has_deferred_element_style_input(node)
+            || self.applied_style_reactions_derive_input(node, self.host.applied_style_reactions.iter().copied())
+    }
+
+    /// Whether one of the reactions C++ applied, `applied`, derives a style input for `node` once
+    /// a transaction takes it: the host holds what it applied since the last transaction until the
+    /// next one takes it, and a read of `node` before then owes `node` that input.
+    #[must_use]
+    pub(super) fn applied_style_reactions_derive_input(
+        &self,
+        node: StyleNodeID,
+        applied: impl IntoIterator<Item = AppliedStyleReaction>,
+    ) -> bool {
         let mut derived = Vec::new();
-        self.host.applied_style_reactions.iter().any(|applied| {
+        applied.into_iter().any(|applied| {
             if !self.retained.tree.is_live(applied.node) {
                 return false;
             }
             derived.clear();
-            self.derive_applied_style_reaction(applied, &mut derived);
+            self.derive_applied_style_reaction(&applied, &mut derived);
             derived.iter().any(|child| child.child == node && child.reaction != 0)
         })
     }
@@ -412,6 +422,18 @@ pub(super) struct AppliedStyleReaction {
     reaction: u8,
     inherited_style_groups_changed: u8,
     facts: u32,
+}
+
+impl AppliedStyleReaction {
+    /// The reaction the host applied as `reaction`, or `None` for a node that is none.
+    pub(super) fn from_host(reaction: &super::bridge::FfiAppliedStyleReaction) -> Option<Self> {
+        Some(Self {
+            node: StyleNodeID::from_raw(reaction.node)?,
+            reaction: reaction.reaction,
+            inherited_style_groups_changed: reaction.inherited_style_groups_changed,
+            facts: reaction.facts,
+        })
+    }
 }
 
 /// One child reaction a parent's applied reaction derives.

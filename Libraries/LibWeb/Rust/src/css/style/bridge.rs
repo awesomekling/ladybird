@@ -2439,6 +2439,33 @@ impl InputForPass {
     }
 }
 
+/// Whether one of the style reactions the host applied since the last transaction and holds for the
+/// next, `applied` (`count` of them), derives a style input for `node` once that transaction takes
+/// it. A read of `node` before then owes `node` that input, which the engine does not hold yet.
+///
+/// # Safety
+/// `engine` must be live for this call, and `applied` must point at `count` reactions.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_applied_style_reactions_derive_input(
+    engine: StyleEngineHandle,
+    node: u32,
+    applied: *const FfiAppliedStyleReaction,
+    count: usize,
+) -> bool {
+    let engine = unsafe { engine_read_entrance(engine, "style_engine_applied_style_reactions_derive_input") };
+    let Some(node) = StyleNodeID::from_raw(node) else {
+        return false;
+    };
+    // SAFETY: Guaranteed by the caller.
+    let applied = unsafe { borrow(applied, count) };
+    engine.applied_style_reactions_derive_input(
+        node,
+        applied
+            .iter()
+            .filter_map(super::child_reactions::AppliedStyleReaction::from_host),
+    )
+}
+
 /// Keeps the elements whose pseudo-elements the host left for the next transaction's pass to settle.
 fn settle_pseudo_elements_in_next_pass(engine: &mut StyleEngine, settles: &[FfiPseudoElementSettle]) {
     for settle in settles {
