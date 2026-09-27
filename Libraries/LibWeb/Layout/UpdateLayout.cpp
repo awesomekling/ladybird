@@ -60,12 +60,6 @@ Layout::RustFFI::FfiLayoutUpdateHostCallbacks Document::layout_update_host_callb
                 .viewport_inline_size_raw = viewport_rect.width().raw_value(),
                 .viewport_block_size_raw = viewport_rect.height().raw_value(),
             }; },
-        .seal_flight_paint = [](void* context, bool style_runs_in_flight) {
-            auto& document = *static_cast<Document*>(context);
-            // A document that is to update its style after the layout lays out again before it shows anything. The style
-            // a flight runs ahead of its layout is not such an update: the flight's take-back installs it.
-            if (auto navigable = document.navigable())
-                navigable->seal_flight_paint(document, !document.needs_style_update_after_layout(style_runs_in_flight)); },
         .prepare_layout_tree_build = [](void* context) -> u32 { return static_cast<Document*>(context)->prepare_layout_tree_build(); },
         .read_selection = [](void* context, void* sink, void (*receive)(void*, Layout::RustFFI::FfiSelectionSnapshot const*)) {
             auto& document = *static_cast<Document*>(context);
@@ -276,7 +270,18 @@ bool Document::update_style_and_layout_once(UpdateLayoutReason reason, Throttled
         for (size_t index = 0; index < sources.size() && index < 2; ++index)
             inputs.viewport_propagation_sources[index] = sources[index].value();
     }
-    return Layout::RustFFI::layout_arena_update_layout(arena.handle(), &inputs) == Layout::RustFFI::FfiLayoutUpdateOutcome::PassSubmitted;
+    auto outcome = Layout::RustFFI::layout_arena_update_layout(arena.handle(), &inputs);
+    if (outcome == Layout::RustFFI::FfiLayoutUpdateOutcome::FlightReady || outcome == Layout::RustFFI::FfiLayoutUpdateOutcome::FlightWithStyleReady) {
+        // The flight records the document after its layout only if the document seals what that reads before it submits
+        // the flight. A document that is to update its style after the layout lays out again before it shows anything.
+        // The style a flight runs ahead of its layout is not such an update: the flight's take-back installs it.
+        bool style_runs_in_flight = outcome == Layout::RustFFI::FfiLayoutUpdateOutcome::FlightWithStyleReady;
+        if (auto navigable = this->navigable())
+            navigable->seal_flight_paint(*this, !needs_style_update_after_layout(style_runs_in_flight));
+        Layout::RustFFI::layout_arena_submit_prepared_flight(arena.handle());
+        return true;
+    }
+    return outcome == Layout::RustFFI::FfiLayoutUpdateOutcome::PassSubmitted;
 }
 
 }

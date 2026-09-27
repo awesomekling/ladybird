@@ -25,6 +25,9 @@ use std::ffi::c_void;
 pub(crate) struct HostTables {
     pub(super) layout_host: Cell<Option<FfiLayoutHostCallbacks>>,
     pub(super) layout_update_host: Cell<Option<LayoutUpdateHost>>,
+    /// The flight the document's layout update readied, until the document has sealed what its
+    /// recording reads and submits it.
+    pub(super) prepared_flight: RefCell<Option<super::update_layout::PreparedFlight>>,
     pub(super) shell_factory: Cell<Option<ShellFactory>>,
     pub(super) box_presence_host: Cell<Option<BoxPresenceHost>>,
     pub(super) shell_style_changed_host: Cell<Option<ShellStyleChangedHost>>,

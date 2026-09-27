@@ -93,6 +93,23 @@ unsafe extern "C" fn layout_arena_collect_style_pass_for_flight(arena: *mut c_vo
     true
 }
 
+/// Submits the flight the document's layout update readied (see
+/// `FfiLayoutUpdateOutcome::FlightReady`), once the document has sealed what its recording reads.
+///
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread, whose `layout_arena_update_layout` just
+/// answered with a flight ready.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_submit_prepared_flight(arena: *mut c_void) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+    abort_on_panic(|| {
+        // SAFETY: Guaranteed by the entry point's contract.
+        unsafe { submit_prepared_flight(&main_thread, arena) }
+    });
+}
+
 /// Ends the layout frame of the document `arena` names once the document thread has taken back the
 /// frame in flight that ran its round, and ends the update.
 /// The document thread runs it where it takes the frame back, ahead of anything else that reaches
