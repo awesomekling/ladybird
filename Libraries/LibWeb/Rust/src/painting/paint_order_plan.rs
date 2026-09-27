@@ -687,11 +687,11 @@ mod tests {
         }
         arena.paintable_rows_mut().paintable_data_mut(child).offset.x = CssPixels::from_integer(100);
         let after_move = PaintOrderInputs::gather(&arena.paintable_rows(), child);
-        assert!(!arena.row_paint_state(child).update_order_inputs(after_move));
+        assert!(!arena.update_paint_order_inputs(child, after_move));
         let data = arena.write_shape(child);
         data.set_flags(data.flags.get() | NodeFlag::IsFlexItem as u32);
         let as_flex_item = PaintOrderInputs::gather(&arena.paintable_rows(), child);
-        assert!(arena.row_paint_state(child).update_order_inputs(as_flex_item));
+        assert!(arena.update_paint_order_inputs(child, as_flex_item));
     }
 
     #[test]
