@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Node.h>
 #include <LibWeb/DOM/ShadowRoot.h>
@@ -81,12 +82,6 @@ HitTestDisplayList::Item HitTestDisplayList::item(size_t index) const
     return { index, Layout::RustFFI::hit_test_snapshot_item(m_snapshot, index) };
 }
 
-static DOM::Node const* dom_node_for_shell(void* shell)
-{
-    auto const* layout_node = static_cast<Layout::Node const*>(shell);
-    return layout_node ? layout_node->dom_node() : nullptr;
-}
-
 Optional<CSSPixelPoint> HitTestDisplayList::local_point_for_visual_context(Compositing::ContextRef context, CSSPixelPoint point, DOM::Document const& document, double device_pixels_per_css_pixel) const
 {
     auto pixel_ratio = static_cast<float>(device_pixels_per_css_pixel);
@@ -114,17 +109,41 @@ static u32 style_node_of(DOM::Node const* node)
     return Layout::Node::style_node_of(node).value();
 }
 
+// Whether each caret line of the snapshot is in the scope: one of its caret items stands for the scope or for a node
+// below it in the DOM tree. The snapshot names the nodes; which of them lie in the scope is the DOM's to answer. A scope
+// from another document holds none of this document's nodes.
+static Vector<bool> caret_lines_in_scope(void const* snapshot, DOM::Document* arena_document, DOM::Node const& scope)
+{
+    Vector<bool> lines_in_scope;
+    if (!arena_document || &scope.document() != arena_document)
+        return lines_in_scope;
+    struct Visit {
+        DOM::Document& document;
+        DOM::Node const& scope;
+        Vector<bool>& lines_in_scope;
+    } visit { *arena_document, scope, lines_in_scope };
+    Layout::RustFFI::hit_test_snapshot_visit_caret_line_nodes(snapshot, &visit, [](void* sink, size_t line_index, u32 style_node) {
+        auto& visit = *static_cast<Visit*>(sink);
+        if (line_index < visit.lines_in_scope.size() && visit.lines_in_scope[line_index])
+            return;
+        auto node = visit.document.style_computer().node_for_style_node(CSS::StyleNodeID { style_node });
+        if (!node || !visit.scope.is_inclusive_ancestor_of(*node))
+            return;
+        if (line_index >= visit.lines_in_scope.size())
+            visit.lines_in_scope.resize(line_index + 1);
+        visit.lines_in_scope[line_index] = true;
+    });
+    return lines_in_scope;
+}
+
 struct HitTestDisplayList::QueryContext {
     GC::Ptr<DOM::Document const> document;
     double device_pixels_per_css_pixel { 1 };
     ChromeMetrics const* chrome_metrics { nullptr };
-    GC::Ptr<DOM::Node const> scope { nullptr };
+    Vector<bool> lines_in_scope {};
 
-    // A scope from another document names nothing in this arena, so it is dropped rather than
-    // mistaken for one of this document's identities.
-    Layout::RustFFI::FfiHitTestQueryCallbacks callbacks(DOM::Document const* arena_document)
+    Layout::RustFFI::FfiHitTestQueryCallbacks callbacks()
     {
-        auto scope_in_this_document = scope && arena_document && &scope->document() == arena_document;
         auto scroll_offsets = document ? document->scroll_state_snapshot().device_offsets() : ReadonlySpan<Gfx::FloatPoint> {};
         Layout::RustFFI::FfiHitTestQueryCallbacks callbacks {
             .context = this,
@@ -135,8 +154,8 @@ struct HitTestDisplayList::QueryContext {
             .chrome_metrics = {},
             .viewport_wheel_overflow_x = 0,
             .viewport_wheel_overflow_y = 0,
-            .scope = scope_in_this_document ? style_node_of(scope.ptr()) : 0,
-            .document = style_node_of(arena_document),
+            .lines_in_scope = lines_in_scope.data(),
+            .lines_in_scope_len = lines_in_scope.size(),
         };
         if (chrome_metrics)
             callbacks.chrome_metrics = *chrome_metrics;
@@ -182,23 +201,23 @@ Optional<HitTestDisplayList::TopmostItem> HitTestDisplayList::topmost_item_from(
 
 Optional<HitTestDisplayList::TopmostItem> HitTestDisplayList::find_topmost_item(CSSPixelPoint point, DOM::Document const& document, double device_pixels_per_css_pixel, ChromeMetrics const& chrome_metrics) const
 {
-    QueryContext context { &document, device_pixels_per_css_pixel, &chrome_metrics, nullptr };
-    return topmost_item_from(Layout::RustFFI::hit_test_snapshot_find_topmost_item(m_snapshot, context.callbacks(m_arena->document()), point));
+    QueryContext context { &document, device_pixels_per_css_pixel, &chrome_metrics };
+    return topmost_item_from(Layout::RustFFI::hit_test_snapshot_find_topmost_item(m_snapshot, context.callbacks(), point));
 }
 
 void HitTestDisplayList::find_topmost_items_for_caret(CSSPixelPoint point, DOM::Document const& document, double device_pixels_per_css_pixel, ChromeMetrics const& chrome_metrics, Optional<TopmostItem>& caret_item, Optional<TopmostItem>& hit_item) const
 {
-    QueryContext context { &document, device_pixels_per_css_pixel, &chrome_metrics, nullptr };
-    auto items = Layout::RustFFI::layout_arena_hit_test_find_topmost_items_for_caret(m_arena->handle(), context.callbacks(m_arena->document()), point);
+    QueryContext context { &document, device_pixels_per_css_pixel, &chrome_metrics };
+    auto items = Layout::RustFFI::hit_test_snapshot_find_topmost_items_for_caret(m_snapshot, context.callbacks(), point);
     caret_item = topmost_item_from(items.caret_item);
     hit_item = topmost_item_from(items.hit_item);
 }
 
 Vector<size_t> HitTestDisplayList::hit_item_indices_topmost_first(CSSPixelPoint point, DOM::Document const& document, double device_pixels_per_css_pixel, ChromeMetrics const& chrome_metrics) const
 {
-    QueryContext context { &document, device_pixels_per_css_pixel, &chrome_metrics, nullptr };
+    QueryContext context { &document, device_pixels_per_css_pixel, &chrome_metrics };
     Vector<size_t> indices;
-    Layout::RustFFI::hit_test_snapshot_all(m_snapshot, context.callbacks(m_arena->document()), point, &indices, [](void* sink, size_t index) {
+    Layout::RustFFI::hit_test_snapshot_all(m_snapshot, context.callbacks(), point, &indices, [](void* sink, size_t index) {
         static_cast<Vector<size_t>*>(sink)->append(index);
     });
     return indices;
@@ -206,12 +225,12 @@ Vector<size_t> HitTestDisplayList::hit_item_indices_topmost_first(CSSPixelPoint 
 
 size_t HitTestDisplayList::item_index_at_line_edge(size_t line_index, CaretPositionType type) const
 {
-    return Layout::RustFFI::layout_arena_hit_test_item_at_line_edge(m_arena->handle(), line_index, to_underlying(type));
+    return Layout::RustFFI::hit_test_snapshot_item_at_line_edge(m_snapshot, line_index, to_underlying(type));
 }
 
 Optional<HitTestDisplayList::CaretItemForLine> HitTestDisplayList::caret_item_for_line(size_t line_index, CSSPixelPoint local_point, CaretPositionMode mode) const
 {
-    auto result = Layout::RustFFI::layout_arena_hit_test_caret_item_for_line(m_arena->handle(), line_index, local_point, to_underlying(mode));
+    auto result = Layout::RustFFI::hit_test_snapshot_caret_item_for_line(m_snapshot, line_index, local_point, to_underlying(mode));
     if (!result.has_item)
         return {};
     return CaretItemForLine { result.item_index, static_cast<CaretPositionType>(result.position_type) };
@@ -219,13 +238,15 @@ Optional<HitTestDisplayList::CaretItemForLine> HitTestDisplayList::caret_item_fo
 
 bool HitTestDisplayList::item_is_inline_adjacent_to_line(size_t item_index, size_t line_index) const
 {
-    return Layout::RustFFI::layout_arena_hit_test_item_is_inline_adjacent_to_line(m_arena->handle(), item_index, line_index);
+    return Layout::RustFFI::hit_test_snapshot_item_is_inline_adjacent_to_line(m_snapshot, item_index, line_index);
 }
 
 HitTestDisplayList::ClosestLine HitTestDisplayList::find_closest_line(CSSPixelPoint point, DOM::Document const& document, double device_pixels_per_css_pixel, CaretPositionMode mode, DOM::Node const* scope_dom_node, Compositing::AccumulatedVisualContextTree::ClipBehavior clip_behavior) const
 {
-    QueryContext context { &document, device_pixels_per_css_pixel, nullptr, scope_dom_node };
-    auto result = Layout::RustFFI::layout_arena_hit_test_find_closest_line(m_arena->handle(), context.callbacks(m_arena->document()), point, to_underlying(mode), scope_dom_node != nullptr, clip_behavior == Compositing::AccumulatedVisualContextTree::ClipBehavior::Respect);
+    QueryContext context { &document, device_pixels_per_css_pixel, nullptr };
+    if (scope_dom_node)
+        context.lines_in_scope = caret_lines_in_scope(m_snapshot, m_arena->document(), *scope_dom_node);
+    auto result = Layout::RustFFI::hit_test_snapshot_find_closest_line(m_snapshot, context.callbacks(), point, to_underlying(mode), scope_dom_node != nullptr, clip_behavior == Compositing::AccumulatedVisualContextTree::ClipBehavior::Respect);
     ClosestLine closest_line;
     if (result.has_index)
         closest_line.index = result.index;
@@ -249,33 +270,24 @@ RefPtr<ChromeWidget> HitTestDisplayList::chrome_widget_for_item(Item item) const
     VERIFY_NOT_REACHED();
 }
 
+static DOM::NodeIdentity identity_of(Layout::RustFFI::FfiHitNodeIdentity);
+
 DOM::Node const* HitTestDisplayList::item_dom_node(size_t item_index) const
 {
-    return dom_node_for_shell(Layout::RustFFI::layout_arena_hit_test_item_target_shell(m_arena->handle(), item_index));
+    auto* document = m_arena->document();
+    if (!document)
+        return nullptr;
+    return item_identity(item_index).resolve(*document).ptr();
 }
 
 DOM::NodeIdentity HitTestDisplayList::item_identity(size_t item_index) const
 {
-    auto const* layout_node = static_cast<Layout::Node const*>(Layout::RustFFI::layout_arena_hit_test_item_target_shell(m_arena->handle(), item_index));
-    return layout_node ? layout_node->dom_node_identity() : DOM::NodeIdentity {};
-}
-
-static DOM::NodeIdentity identity_for_dispatch_node(Layout::Node const* layout_node, bool allow_pseudo_fallback)
-{
-    if (!layout_node)
-        return {};
-    if (auto identity = layout_node->dom_node_identity(); !identity.is_none())
-        return identity;
-    if (allow_pseudo_fallback && layout_node->is_generated_for_pseudo_element())
-        return layout_node->pseudo_element_generator_identity();
-    return {};
+    return identity_of(Layout::RustFFI::hit_test_snapshot_item_target_node(m_snapshot, item_index));
 }
 
 DOM::NodeIdentity HitTestDisplayList::event_dispatch_identity_for_item(size_t item_index) const
 {
-    bool allow_pseudo_fallback = false;
-    auto* shell = Layout::RustFFI::layout_arena_hit_test_item_dispatch_shell(m_arena->handle(), item_index, &allow_pseudo_fallback);
-    return identity_for_dispatch_node(static_cast<Layout::Node const*>(shell), allow_pseudo_fallback);
+    return identity_of(Layout::RustFFI::hit_test_snapshot_item_dispatch_node(m_snapshot, item_index));
 }
 
 DOM::Node const* HitTestDisplayList::event_dispatch_dom_node_for_item(size_t item_index) const
@@ -327,10 +339,11 @@ HitTestResult HitTestDisplayList::hit_test_result_for_item(Item item, CSSPixelPo
 
 Optional<CaretPosition> HitTestDisplayList::caret_position_for_item(Item item, CSSPixelPoint local_point, CaretPositionType type) const
 {
-    auto resolved = Layout::RustFFI::layout_arena_hit_test_resolve_caret(m_arena->handle(), item.index(), local_point, to_underlying(type));
-    if (!resolved.has_position || !resolved.node_shell)
+    auto resolved = Layout::RustFFI::hit_test_snapshot_resolve_caret(m_snapshot, item.index(), local_point, to_underlying(type));
+    auto* document = m_arena->document();
+    if (!resolved.has_position || !document)
         return {};
-    auto* dom_node = static_cast<Layout::Node*>(resolved.node_shell)->dom_node();
+    auto dom_node = identity_of(resolved.node).resolve(*document);
     if (!dom_node)
         return {};
 
@@ -397,7 +410,7 @@ Optional<CaretPosition> HitTestDisplayList::caret_position_at_line_edge(DOM::Nod
         return {};
     publish_snapshot();
     CaretPositionQueryContext context { node, offset };
-    auto line = Layout::RustFFI::layout_arena_hit_test_caret_line_for_position(m_arena->handle(), context.query, offset, affinity == TextAffinity::Downstream);
+    auto line = Layout::RustFFI::hit_test_snapshot_caret_line_for_position(m_snapshot, context.query, offset, affinity == TextAffinity::Downstream);
     if (!line.has_line)
         return {};
     auto type = edge == CaretLineEdge::Start ? CaretPositionType::Before : CaretPositionType::After;
@@ -410,13 +423,13 @@ Optional<CaretPosition> HitTestDisplayList::caret_position_on_adjacent_line(DOM:
         return {};
     publish_snapshot();
     CaretPositionQueryContext position_context { node, offset };
-    auto current_line = Layout::RustFFI::layout_arena_hit_test_caret_line_for_position(m_arena->handle(), position_context.query, offset, affinity == TextAffinity::Downstream);
+    auto current_line = Layout::RustFFI::hit_test_snapshot_caret_line_for_position(m_snapshot, position_context.query, offset, affinity == TextAffinity::Downstream);
     if (!current_line.has_line)
         return {};
 
     // INTEROP: Vertical caret movement in Chromium, WebKit, and Gecko follows rendered line geometry rather than DOM
-    QueryContext context { nullptr, 1, nullptr, &scope };
-    auto adjacent = Layout::RustFFI::layout_arena_hit_test_adjacent_line(m_arena->handle(), context.callbacks(m_arena->document()), current_line.line_index, direction == CaretLineDirection::Next ? 1 : 0, inline_coordinate.raw_value());
+    QueryContext context { nullptr, 1, nullptr, caret_lines_in_scope(m_snapshot, m_arena->document(), scope) };
+    auto adjacent = Layout::RustFFI::hit_test_snapshot_adjacent_line(m_snapshot, context.callbacks(), current_line.line_index, direction == CaretLineDirection::Next ? 1 : 0, inline_coordinate.raw_value());
     if (!adjacent.has_line)
         return {};
     // Reuse point-to-caret resolution after choosing the line so text, atomic boxes, and empty lines share one rule for
@@ -430,10 +443,10 @@ Optional<CSSPixels> HitTestDisplayList::caret_line_block_coordinate(DOM::Node co
         return {};
     publish_snapshot();
     CaretPositionQueryContext context { node, offset };
-    auto line = Layout::RustFFI::layout_arena_hit_test_caret_line_for_position(m_arena->handle(), context.query, offset, affinity == TextAffinity::Downstream);
+    auto line = Layout::RustFFI::hit_test_snapshot_caret_line_for_position(m_snapshot, context.query, offset, affinity == TextAffinity::Downstream);
     if (!line.has_line)
         return {};
-    return CSSPixels::from_raw(Layout::RustFFI::layout_arena_hit_test_line_block_coordinate(m_arena->handle(), line.line_index));
+    return CSSPixels::from_raw(Layout::RustFFI::hit_test_snapshot_line_block_coordinate(m_snapshot, line.line_index));
 }
 
 Optional<CaretPosition> HitTestDisplayList::caret_position_for_line(size_t line_index, CSSPixelPoint local_point, CaretPositionMode mode) const

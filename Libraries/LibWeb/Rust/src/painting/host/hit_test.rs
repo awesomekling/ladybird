@@ -19,14 +19,25 @@ pub struct FfiHitTestQueryCallbacks {
     pub chrome_metrics: crate::painting::ffi::FfiChromeMetrics,
     pub viewport_wheel_overflow_x: u8,
     pub viewport_wheel_overflow_y: u8,
-    /// The node a scoped caret line search is confined to, or 0 for an unscoped one. A line is in
-    /// scope when one of its caret items stands for this node or for a node below it.
-    pub scope: u32,
-    /// The node the document's own children belong to, which a scope naming the document is.
-    pub document: u32,
+    /// For a caret line search confined to a DOM node, whether each caret line is in scope: one of
+    /// its caret items stands for that node or for a node below it in the DOM tree, which the host
+    /// decides from the nodes a snapshot names for the line
+    /// (`hit_test_snapshot_visit_caret_line_nodes`). Empty for an unscoped search; a line past
+    /// the end is out of scope.
+    pub lines_in_scope: *const bool,
+    pub lines_in_scope_len: usize,
 }
 
 impl FfiHitTestQueryCallbacks {
+    pub(crate) fn line_is_in_scope(&self, line_index: usize) -> bool {
+        if self.lines_in_scope.is_null() {
+            return false;
+        }
+        // SAFETY: The host keeps the mask alive for the synchronous query.
+        let lines_in_scope = unsafe { std::slice::from_raw_parts(self.lines_in_scope, self.lines_in_scope_len) };
+        lines_in_scope.get(line_index).copied().unwrap_or(false)
+    }
+
     pub(crate) fn scroll_offsets(&self) -> &[libgfx_rust::FloatPoint] {
         if self.scroll_offsets.is_null() {
             return &[];
@@ -163,7 +174,8 @@ pub enum FfiCaretBoundaryKind {
 #[repr(C)]
 pub struct FfiResolvedCaret {
     pub has_position: bool,
-    pub node_shell: *mut c_void,
+    /// The DOM node the position is in, as the host names one.
+    pub node: crate::painting::hit_test::snapshot::FfiHitNodeIdentity,
     pub boundary: FfiCaretBoundaryKind,
     pub offset: usize,
     pub affinity_is_upstream: bool,

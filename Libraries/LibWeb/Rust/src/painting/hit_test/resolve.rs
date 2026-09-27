@@ -6,7 +6,6 @@
 
 use super::*;
 use crate::layout::node_data::NodeFlag;
-use crate::painting::hit_test::read::CaretRead;
 use crate::painting::host::FfiCaretBoundaryKind;
 use crate::painting::paintable_data::SELECTION_STATE_START_AND_END;
 use crate::painting::published_frame::PaintRead;
@@ -44,7 +43,7 @@ pub(crate) fn empty_line_is_anchored_to_its_forced_break(arena: &impl PaintRead,
 /// The DOM node a row stands for, named the way the host names one: by the style node, or by 0
 /// for a row that stands for no node of its own. An anonymous row stands for none, and so does
 /// the viewport row, whose node is the document and which the style mirror holds no identity for.
-pub(crate) fn row_dom_style_node(arena: &impl CaretRead, slot: NodeSlotId) -> u32 {
+pub(crate) fn row_dom_style_node(arena: &impl PaintRead, slot: NodeSlotId) -> u32 {
     if !arena.node_is_dom_backed(slot) {
         return 0;
     }
@@ -52,21 +51,6 @@ pub(crate) fn row_dom_style_node(arena: &impl CaretRead, slot: NodeSlotId) -> u3
         return 0;
     }
     arena.node_style_node(slot).map_or(0, |style_node| style_node.raw())
-}
-
-/// Whether the node a row stands for is `scope` or lies below it in the DOM tree. The scope is a
-/// node the host named before the query, and the answer is read out of the style mirror, which
-/// carries the DOM child sequence the test walks.
-pub(crate) fn row_is_in_scope(arena: &impl CaretRead, scope: u32, document: u32, slot: NodeSlotId) -> bool {
-    use crate::css::style::tree::StyleNodeID;
-    let (Some(scope), Some(document), Some(node)) = (
-        StyleNodeID::from_raw(scope),
-        StyleNodeID::from_raw(document),
-        StyleNodeID::from_raw(row_dom_style_node(arena, slot)),
-    ) else {
-        return false;
-    };
-    arena.node_is_in_dom_subtree_of(node, scope, document)
 }
 
 impl HitTestList {
@@ -120,7 +104,7 @@ impl HitTestList {
 
     pub(crate) fn resolve_caret(
         &self,
-        arena: &impl CaretRead,
+        arena: &impl PaintRead,
         item_index: usize,
         local_point: CssPixelPoint,
         position_type: crate::painting::hit_test::caret::CaretPositionType,
@@ -137,8 +121,8 @@ impl HitTestList {
                             + fragment.length_in_code_units
                             + fragment.trailing_whitespace_length_in_code_units;
                         if arena
-                            .text_content_length(fragment.layout_node)
-                            .is_some_and(|length| end < length)
+                            .rendered_text(fragment.layout_node)
+                            .is_some_and(|text| end < text.text.len())
                         {
                             fragment.dom_end_offset_with_trailing_whitespace
                         } else {

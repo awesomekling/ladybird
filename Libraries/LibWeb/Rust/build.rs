@@ -3326,6 +3326,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             manifest_dir.join("src/painting/host/visual_context.rs"),
             manifest_dir.join("src/painting/host/hit_test.rs"),
             manifest_dir.join("src/painting/hit_test/snapshot.rs"),
+            manifest_dir.join("src/painting/hit_test/snapshot_caret.rs"),
             manifest_dir.join("src/painting/host/paint.rs"),
             manifest_dir.join("src/painting/display_list/dump.rs"),
             manifest_dir.join("src/painting/stacking_context/dump.rs"),
