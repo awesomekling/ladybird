@@ -556,20 +556,42 @@ unsafe extern "C" fn layout_arena_reinherit_anonymous_descendants(arena: *mut c_
         .reinherit_anonymous_descendants(node, ShellStyleChangeNotice::Now(&main_thread));
 }
 
-/// Pays what the render owner handed back as it applied the batch of a style transaction to the
-/// layout nodes of the rows' elements, before the host installs the batch, which reads it.
-///
-/// # Safety
-///
-/// The arena must be live on the document thread, and the owner must have applied a batch to it
-/// whose handbacks are unpaid.
-#[unsafe(no_mangle)]
-unsafe extern "C" fn layout_arena_pay_owner_style_handbacks(arena: *mut c_void) {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
-    // SAFETY: Guaranteed by the caller.
-    if let Some(payment) = unsafe { LayoutNodeArena::from_handle(arena) }.resolve_flight_style_handbacks() {
-        payment.pay(&main_thread);
+/// What the render owner left of applying the batch of a style transaction to the layout nodes of
+/// the rows' elements, which the document thread takes with the transaction, before the host
+/// installs the batch: what applying it handed back, and what each row marked of its element's
+/// layout nodes, with the record it installed, which the install reads to leave a covered row alone.
+pub(crate) struct OwnerAppliedStyle {
+    handed_back: Option<HostPayment>,
+    damages: HashMap<StyleNodeID, (u32, u64)>,
+}
+
+impl OwnerAppliedStyle {
+    /// Takes what applying a batch left in `arena`, on the render owner, which applied it just now.
+    pub(crate) fn take_from(arena: &LayoutNodeArena) -> Self {
+        Self {
+            handed_back: arena.resolve_flight_style_handbacks(),
+            damages: arena.take_flight_style_damages(),
+        }
+    }
+
+    /// Pays what applying the batch handed back, and holds what the rows marked in the host tables
+    /// of `arena`, beside what earlier transactions of the style update left there, for the host's
+    /// install to read.
+    ///
+    /// # Safety
+    ///
+    /// On the document thread, from an FFI entry whose C++ contract requires it; `arena` must be
+    /// the live arena the owner applied the batch to.
+    pub(crate) unsafe fn hand_to_host(self, arena: *mut c_void) {
+        assert!(!arena.is_null(), "layout node arena handle is null");
+        // SAFETY: Guaranteed by the caller.
+        let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+        if let Some(payment) = self.handed_back {
+            payment.pay(&main_thread);
+        }
+        if let Some(host_tables) = main_thread.host_tables() {
+            host_tables.hold_owner_style_damages(self.damages);
+        }
     }
 }
 
@@ -584,6 +606,10 @@ unsafe extern "C" fn layout_arena_pay_owner_style_handbacks(arena: *mut c_void) 
 unsafe extern "C" fn layout_arena_finish_owner_style_host_half(arena: *mut c_void) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+    // What the rows the owner applied marked that the install did not take goes with the update.
+    if let Some(host_tables) = main_thread.host_tables() {
+        host_tables.hold_flight_style_damages(Default::default());
+    }
     // SAFETY: Guaranteed by the caller.
     let (_, payment) = unsafe { LayoutNodeArena::from_handle(arena) }.finish_flight_style_host_half();
     payment.pay(&main_thread);

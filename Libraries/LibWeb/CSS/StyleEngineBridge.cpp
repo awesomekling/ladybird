@@ -1421,9 +1421,9 @@ StyleEngine::PublishedStyleTransaction StyleEngine::take_style_transaction(Style
     lend_style_transaction_inputs(RecordedInputGoesTo::Transaction, [&](auto const& computation_inputs, void* layout_arena, InputTransaction const* input) {
         bridge_started_at = MonotonicTime::now();
         view = StyleEngineFFI::style_engine_take_style_transaction(m_impl, root.value(), computation_inputs, layout_arena, input, install_feedback(), render_half);
-        // What applying the batch handed back is paid before the host installs the batch, which reads it.
+        // What applying the batch handed back was paid, and what its rows marked held for the install, as the
+        // transaction came back.
         if (view.render_half_applied) {
-            Layout::RustFFI::layout_arena_pay_owner_style_handbacks(layout_arena);
             m_owner_applied_render_half = true;
             // The owner marked the visual contexts the rows moved, which the document's paint preparation updates.
             if (view.render_half_moved_visual_contexts && m_style_computer)

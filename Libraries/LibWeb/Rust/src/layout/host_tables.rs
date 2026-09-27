@@ -101,6 +101,13 @@ impl HostTables {
         *self.flight_style_damages.borrow_mut() = damages;
     }
 
+    /// Holds what the rows of a style batch the render owner applied marked, beside what the batches it applied
+    /// earlier in the style update left, for the host to read as it installs the batch; what the host does not take
+    /// goes as the style update ends.
+    pub(crate) fn hold_owner_style_damages(&self, damages: HashMap<crate::css::style::tree::StyleNodeID, (u32, u64)>) {
+        self.flight_style_damages.borrow_mut().extend(damages);
+    }
+
     /// Takes what the flight marked of the layout nodes of `style_node`'s element as it applied the style row the
     /// host installs now, or `None` if it applied none for it.
     pub(crate) fn take_flight_style_damage(&self, style_node: crate::css::style::tree::StyleNodeID) -> Option<u32> {
