@@ -1151,6 +1151,8 @@ pub(crate) struct LayoutNodeArena {
     /// The style snapshot rows of the layout commit in progress.
     pub(crate) layout_style_snapshot_commit: RefCell<super::style_snapshot::LayoutStyleSnapshotCommit>,
     owner_thread: thread::ThreadId,
+    /// The document whose render state holds the arena.
+    pub(super) document: crate::render_owner::DocumentId,
 }
 
 impl LayoutNodeArena {
@@ -1271,6 +1273,7 @@ impl LayoutNodeArena {
             layout_style_snapshots: Default::default(),
             layout_style_snapshot_commit: RefCell::default(),
             owner_thread,
+            document: crate::render_owner::DocumentId::default(),
         }
     }
 
@@ -1327,12 +1330,19 @@ impl LayoutNodeArena {
     }
 
     /// Makes `owner_thread` the document thread the arena answers to, before any node is allocated in it.
-    pub(crate) fn set_owner_thread(&mut self, owner_thread: thread::ThreadId) {
+    /// Makes the arena the render state of `document`'s, which the document thread `owner_thread` acts for.
+    pub(crate) fn adopt(&mut self, document: crate::render_owner::DocumentId, owner_thread: thread::ThreadId) {
         debug_assert_eq!(
             self.live_count, 0,
             "an arena changes document threads before it holds nodes"
         );
+        self.document = document;
         self.owner_thread = owner_thread;
+    }
+
+    /// The document whose render state holds the arena.
+    pub(crate) fn document(&self) -> crate::render_owner::DocumentId {
+        self.document
     }
 
     pub(crate) fn assert_owner_thread(&self) {
@@ -2585,13 +2595,6 @@ impl LayoutNodeArena {
     /// payload pointers that a replacement would invalidate under it.
     pub(crate) fn layout_pass_is_running(&self) -> bool {
         self.active_layout_pass_depth.get() > 0
-    }
-
-    /// Runs `stage` as a render stage: on the stage thread under `LIBWEB_STAGE_THREAD=lockstep`, here
-    /// otherwise. The stage has the arena to itself while this thread waits for it.
-    pub(crate) fn run_stage<R: Send>(&mut self, stage: impl FnOnce(&mut Self) -> R + Send) -> R {
-        let arena = std::ptr::from_mut(self).cast_const().cast::<c_void>();
-        crate::stage_thread::run_document_stage(arena, move || stage(self))
     }
 
     /// True while a render stage is on the stack: a layout pass, a layout tree build, or a paint

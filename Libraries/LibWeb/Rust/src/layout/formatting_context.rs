@@ -2487,7 +2487,8 @@ pub(crate) unsafe fn prepare_root_layout_from_sources(
     unsafe { super::layout_node_arena::apply_enrolled_content_sources(arena_handle, content) };
 }
 
-/// Computes the fragments of a root layout without the host, on the stage thread.
+/// Computes the fragments of a root layout without the host, in the unit or the rendering update
+/// the render owner runs it in.
 ///
 /// # Safety
 ///
@@ -2513,7 +2514,7 @@ pub(crate) unsafe fn compute_root_layout(
         document_in_quirks_mode,
         should_collect_devtools_layout_data,
     };
-    crate::stage_thread::run_document_stage(arena_handle, move || run_root_layout_stage(input, scratch))
+    run_root_layout_stage(input, scratch)
 }
 
 /// Commits a computed root layout to the arena without the host. The arena half is settled by
@@ -2764,7 +2765,8 @@ fn compute_subtree_layout_stage(stage: LayoutStageInput<'_>, scratch: &LayoutScr
     LayoutStageOutput(pass_fragments)
 }
 
-/// Computes the fragments of one partial relayout boundary without the host, on the stage thread.
+/// Computes the fragments of one partial relayout boundary without the host, in the unit or the
+/// rendering update the render owner runs it in.
 ///
 /// # Safety
 ///
@@ -2791,7 +2793,7 @@ pub(crate) unsafe fn compute_subtree_layout_fragments(
         document_in_quirks_mode,
         should_collect_devtools_layout_data: false,
     };
-    crate::stage_thread::run_document_stage(arena_handle, move || compute_subtree_layout_stage(input, scratch))
+    compute_subtree_layout_stage(input, scratch)
 }
 
 /// Commits a computed partial relayout boundary to the arena without the host, leaving the host
