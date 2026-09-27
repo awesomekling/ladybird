@@ -1,6 +1,6 @@
 held as armed: true
 width at join: 100
-join took the frame in: true
+join took the frame in: false
 width after mutation: 123
 computed width: 123px
 tail ran by the next task: true

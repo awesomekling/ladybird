@@ -7009,7 +7009,8 @@ bool LocalNavigable::submit_presentation(PendingCompositorFrame& pending_frame)
     presentation->frame_sink = move(frame_sink);
     presentation->is_presented_by_frame_in_flight = true;
     m_presenter->lend_to_frame_in_flight();
-    Layout::RustFFI::rust_stage_thread_submit_presentation(recording ? recording->arena : nullptr, present_from_frame_in_flight, presentation.ptr());
+    // A presentation that publishes the recording from its ticket reaches no arena.
+    Layout::RustFFI::rust_stage_thread_submit_presentation(recording && !presentation->recording_ticket ? recording->arena : nullptr, recording ? recording->arena : nullptr, present_from_frame_in_flight, presentation.ptr());
     return true;
 }
 

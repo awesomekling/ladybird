@@ -7,6 +7,6 @@ offsets beside the recording is the committed one: true
 clients beside the recording is the committed one: true
 box: 12,12 292x26
 dirty: held as armed: true
-dirty: took the recording in: true
+dirty: took the recording in: false
 dirty: height: 46
 elementFromPoint beside a recording: box

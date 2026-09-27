@@ -7,9 +7,9 @@
 </style>
 <div id="box"></div>
 <script>
-    // A read of layout that script waits for outside the rendering update does not wait out the recording in flight:
-    // it cancels it and lays out at once. The cancelled frame shows nothing, and the next rendering update records
-    // and presents the document as the read left it, recording it again on the Rendering thread.
+    // A read of layout that script waits for outside the rendering update does not wait out the recording in flight,
+    // nor cancel it: the recording reaches no arena (it records a frame the document published), so the read lays out
+    // at once beside it. The next rendering update records and presents the document as the read left it.
     asyncTest(async done => {
         const redone = () => ({
             rendering: internals.cancelledRecordingsRedone("submitted") + internals.cancelledRecordingsRedone("flight"),

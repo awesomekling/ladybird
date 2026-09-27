@@ -3,5 +3,5 @@ read: 30
 container recording still held: true
 held as armed: true
 read: 40
-container recording still held: false
+container recording still held: true
 after: rgb(0, 128, 0) 120 40
