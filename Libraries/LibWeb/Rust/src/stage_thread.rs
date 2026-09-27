@@ -1378,6 +1378,20 @@ pub(crate) fn join_document_frame_in_flight_at(arena: *mut c_void, file: &'stati
     join_frame_in_flight_for_stage(|stage| stage.arena == arena as usize, file, line, column);
 }
 
+/// Like [`join_frame_in_flight`], for the recording of the document whose arena is `arena` in flight,
+/// which is submitted with no arena: the frame's consume publishes it, as the frame's presentation may
+/// not have.
+#[track_caller]
+pub(crate) fn join_recording_in_flight_of(arena: *mut c_void) {
+    let location = std::panic::Location::caller();
+    join_frame_in_flight_for_stage(
+        |stage| stage.role == "recording" && stage.document == arena as usize,
+        location.file(),
+        location.line(),
+        location.column(),
+    );
+}
+
 /// If a stage of the frame in flight is `reached`, waits for the frame, takes it back and runs the
 /// frame scheduler's consume-commit, as [`join_frame_in_flight`] describes.
 fn join_frame_in_flight_for_stage(

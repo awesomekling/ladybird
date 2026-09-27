@@ -1546,23 +1546,20 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
     run: FfiRecordingRun,
 ) -> bool {
     crate::layout::main_side_census::note_rendering_update(arena_handle);
+    // A recording of the document the frame in flight made (one a main-thread record, such as a display list dump,
+    // reaches beside the frame) is the frame's to publish, which the frame's presentation may not, and which a read of
+    // the arena may have taken in unpublished already: taking the frame in runs its consume, which publishes it.
+    crate::stage_thread::join_recording_in_flight_of(arena_handle);
     let arena = unsafe { arena_from_handle(arena_handle) };
     {
         let mut recording = arena.recording();
-        // With the frame scheduler, a recording left unpublished is a frame the scheduler dropped, which it never
-        // does, so that is checked in every build.
-        if crate::stage_thread::submits("recording") {
-            assert!(
-                recording.pending_recording().is_none(),
-                "a frame was dropped: its recording was not published before the next one started"
-            );
-        }
+        // A recording left unpublished is a frame dropped, which neither the frame scheduler nor the join above
+        // leaves; should one be, it is dropped unpublished.
         debug_assert!(
             recording.pending_recording().is_none(),
-            "a recording must be published before the next one starts"
+            "a frame was dropped: its recording was not published before the next one started"
         );
-        *recording.pending_recording_trace() = None;
-        *recording.pending_recording() = None;
+        recording.discard_pending_recording();
     }
     let recording_inputs = {
         let paint_state = arena.paint_state().borrow();
@@ -1994,11 +1991,11 @@ pub(crate) unsafe fn paint_in_flight(
     }
     {
         let mut recording = arena.recording();
-        assert!(
+        debug_assert!(
             recording.pending_recording().is_none(),
             "a frame was dropped: its recording was not published before the next one started"
         );
-        *recording.pending_recording_trace() = None;
+        recording.discard_pending_recording();
     }
     let should_paint_overlay = inputs.should_paint_overlay;
     let publishes_recording = inputs.publishes_recording;
