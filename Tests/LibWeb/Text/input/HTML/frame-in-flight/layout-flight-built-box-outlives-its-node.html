@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<div id="container"></div>
+<script>
+    // A layout pass in flight builds boxes for elements that paint from facts their DOM node keeps, and the elements
+    // go away beside it: removed, or adopted into another document. The pass is taken back afterwards, and the boxes it
+    // built are handed their style resources with no DOM node left to take those facts from. They paint from their
+    // style until the removal takes them away.
+    const image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
+    function makeElements() {
+        const elements = [];
+        elements.push(document.createElement("video"));
+        elements.push(document.createElement("canvas"));
+        elements.push(document.createElement("iframe"));
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        elements.push(checkbox);
+        const radio = document.createElement("input");
+        radio.type = "radio";
+        elements.push(radio);
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        const svgImage = document.createElementNS("http://www.w3.org/2000/svg", "image");
+        svgImage.setAttribute("href", image);
+        svgImage.setAttribute("width", "10");
+        svgImage.setAttribute("height", "10");
+        svg.appendChild(svgImage);
+        elements.push(svg);
+        const generated = document.createElement("span");
+        generated.className = "generated";
+        elements.push(generated);
+        return elements;
+    }
+
+    asyncTest(async done => {
+        const style = document.createElement("style");
+        style.textContent = `.generated::before { content: url(${image}); }`;
+        document.head.appendChild(style);
+        await twoFrames();
+
+        const otherDocument = document.implementation.createHTMLDocument();
+        for (const [name, goAway] of [
+            ["removed", element => element.remove()],
+            ["adopted", element => otherDocument.body.appendChild(otherDocument.adoptNode(element))],
+        ]) {
+            for (const point of ["before-run", "before-completion"]) {
+                let elements = [];
+                const held = await whileLayoutInFlight(point, () => {
+                    elements = makeElements();
+                    for (const element of elements)
+                        container.appendChild(element);
+                }, frameInFlight => {
+                    for (const element of elements)
+                        goAway(element);
+                    // Reading layout takes the pass back.
+                    return { ...frameInFlight, width: container.offsetWidth };
+                });
+                println(`${name}, ${point}: held as armed: ${layoutHeldAsArmed(held, point)}, container laid out: ${held.width > 0}, children left: ${container.childElementCount}`);
+                await twoFrames();
+            }
+        }
+        println(`layout passes held: ${layoutHoldsWereHeld(4)}`);
+        done();
+    });
+</script>
