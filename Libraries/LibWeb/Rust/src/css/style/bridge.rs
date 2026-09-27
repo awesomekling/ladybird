@@ -5278,6 +5278,7 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
     computation_inputs: FfiDocumentStyleComputationInputs,
     layout_arena: *mut c_void,
 ) -> FfiStyleTransactionView {
+    let engine_handle = engine;
     let engine = unsafe { engine_entrance(engine, "style_engine_take_style_transaction") };
     let Some(root) = StyleNodeID::from_raw(root) else {
         return FfiStyleTransactionView::default();
@@ -5290,10 +5291,49 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
     let committed_boxes = unsafe { super::animations::CommittedTransformReferenceBoxes::lend(layout_arena) };
     // The pass samples at the times the host published for this update.
     let timeline_samples = engine_on_stage.animation_timeline_samples().clone();
+    // SAFETY: The host passes its document's live layout arena, or null.
+    let document = (!layout_arena.is_null())
+        .then(|| unsafe { crate::layout::ArenaHandle::document_of(layout_arena) })
+        .filter(|document| crate::render_owner::runs_style_of(*document));
+    if let Some(document) = document {
+        let pass = OwnerStylePass {
+            root,
+            committed_boxes,
+            timeline_samples,
+        };
+        // SAFETY: The engine is the document's, entered just now, and this thread reaches it again only once the
+        // owner has run the pass.
+        let OwnerStylePassOutput(output) =
+            unsafe { crate::render_owner::run_style_pass(document, engine_handle, pass) };
+        return finish_style_transaction(engine, root, output);
+    }
     let output = crate::stage_thread::run_stage_reaching(layout_arena, move || {
         run_style_pass(engine_on_stage, root, committed_boxes, &timeline_samples)
     });
     finish_style_transaction(engine, root, output)
+}
+
+/// A pass of a style transaction the document thread took, which the render owner runs with the style engine of the
+/// document's render state while the thread waits for it.
+pub(crate) struct OwnerStylePass {
+    root: StyleNodeID,
+    committed_boxes: super::animations::CommittedTransformReferenceBoxes,
+    timeline_samples: super::animations::AnimationTimelineSamples,
+}
+
+/// What an [`OwnerStylePass`] left, which the document thread finishes the transaction with.
+pub(crate) struct OwnerStylePassOutput(FfiStyleTransactionOutput);
+
+impl OwnerStylePass {
+    /// Runs the pass with the document's engine `engine`.
+    pub(crate) fn run(self, engine: &mut StyleEngine) -> OwnerStylePassOutput {
+        let Self {
+            root,
+            committed_boxes,
+            timeline_samples,
+        } = self;
+        OwnerStylePassOutput(run_style_pass(engine, root, committed_boxes, &timeline_samples))
+    }
 }
 
 /// Takes the pending style transaction as [`style_engine_take_style_transaction`] does, and hands
