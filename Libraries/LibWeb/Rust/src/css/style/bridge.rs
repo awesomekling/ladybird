@@ -5793,9 +5793,6 @@ fn finish_style_transaction(
     }
     // Font cascade lists the transaction's font resolutions gave up on the stage thread.
     crate::css::ffi_stats::release_deferred_font_cascade_lists();
-    // The custom-property data the transaction retired is the document thread's to release, once the transaction is
-    // over: the caller drops it there.
-    let retired_custom_property_data = std::mem::take(&mut engine.host.retired_custom_property_data);
     output.reclaimed_style_atoms = std::mem::take(&mut engine.host.reclaimed_style_atoms)
         .into_iter()
         .map(|reclaimed| FfiReclaimedStyleAtom {
@@ -5865,6 +5862,10 @@ fn finish_style_transaction(
         connected_element_count: engine.connected_element_count(),
         style_atoms_swept: output.style_atoms_swept,
     };
+    // The custom-property data the transaction retired is the document thread's to release, once the transaction is
+    // over: the caller drops it there. It is taken last, so that a panic in the steps before leaves it with the engine
+    // rather than dropping it on whichever thread runs the transaction.
+    let retired_custom_property_data = std::mem::take(&mut engine.host.retired_custom_property_data);
     (
         view,
         RetiredCustomPropertyData {
