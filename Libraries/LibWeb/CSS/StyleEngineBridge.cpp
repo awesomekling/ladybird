@@ -1133,6 +1133,13 @@ void StyleEngine::flush()
     StyleEngineFFI::style_engine_flush(m_impl);
 }
 
+void StyleEngine::flush_without_document_root()
+{
+    flush();
+    // Without a root there is no transaction to take them, as the engine holds back its element style inputs.
+    m_install_feedback_held_back = true;
+}
+
 bool StyleEngine::take_diagnostic_style_transaction(StyleNodeID root, Function<void(ReadonlySpan<StyleNodeID>)>&& consume)
 {
     Vector<StyleNodeID> reaction_nodes;
@@ -1356,6 +1363,7 @@ void StyleEngine::lend_style_transaction_inputs(RecordedInputGoesTo recorded_inp
     ScopeGuard install_feedback_went = [&] {
         m_applied_style_reactions.clear_with_capacity();
         m_pseudo_element_settles.clear_with_capacity();
+        m_install_feedback_held_back = false;
     };
     if (!m_recorded_input_for_pass.has_value()) {
         take(computation_inputs, layout_arena, nullptr);
@@ -1518,6 +1526,7 @@ void StyleEngine::settle_pseudo_elements_in_next_pass(StyleDrainScope const&, St
     for (size_t kind = 0; kind < held_pseudo_records.size(); ++kind)
         settle.held_pseudo_records[kind] = held_pseudo_records[kind];
     m_pseudo_element_settles.append(settle);
+    m_install_feedback_held_back = false;
 }
 
 StyleEngineFFI::FfiInstallFeedback StyleEngine::install_feedback() const
@@ -1538,6 +1547,7 @@ void StyleEngine::record_applied_style_reaction(StyleNodeID style_node, u8 react
         .inherited_style_groups_changed = inherited_style_groups_changed,
         .facts = facts,
     });
+    m_install_feedback_held_back = false;
 }
 
 bool StyleEngine::pending_transaction_may_affect_layout_geometry()

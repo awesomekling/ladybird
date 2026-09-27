@@ -309,8 +309,9 @@ public:
     // kind. It goes to the engine with that transaction.
     void settle_pseudo_elements_in_next_pass(StyleDrainScope const&, StyleNodeID, bool old_is_list_item, ReadonlySpan<u64> held_pseudo_records);
     // Whether the host's installs handed back anything the next transaction takes (see record_applied_style_reaction()
-    // and settle_pseudo_elements_in_next_pass()).
-    [[nodiscard]] bool has_install_feedback() const { return !m_applied_style_reactions.is_empty() || !m_pseudo_element_settles.is_empty(); }
+    // and settle_pseudo_elements_in_next_pass()). What a flush without a document root held back is not owed: it goes
+    // with the first transaction with a root, which something else asks for.
+    [[nodiscard]] bool has_install_feedback() const { return !m_install_feedback_held_back && (!m_applied_style_reactions.is_empty() || !m_pseudo_element_settles.is_empty()); }
     // Whether a `:has()` or `:empty` selector may take part in the next transaction, letting a node anywhere decide an
     // element's style.
     [[nodiscard]] bool may_have_child_dependent_selectors() const;
@@ -329,6 +330,9 @@ public:
 
     // Submits everything recorded since the last flush as one transaction and normalizes it.
     void flush();
+    // Flushes as flush() does while the document has no root to take a transaction from, holding back what the host's
+    // installs handed back for the first transaction with one.
+    void flush_without_document_root();
 
     using PublishedStyleDelta = StyleEngineFFI::FfiStyleDelta;
     struct PublishedTransactionVersion {
@@ -551,6 +555,7 @@ private:
     // flight holds back: they go with the next transaction, which is the next wave of the style update that applied them.
     Vector<StyleEngineFFI::FfiAppliedStyleReaction> m_applied_style_reactions;
     Vector<StyleEngineFFI::FfiPseudoElementSettle> m_pseudo_element_settles;
+    bool m_install_feedback_held_back { false };
     bool m_owner_applied_render_half { false };
     // How many of the host fact writes are atom adoptions, which are no input to style.
     size_t m_pending_atom_adoption_count { 0 };

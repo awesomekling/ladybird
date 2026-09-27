@@ -470,7 +470,7 @@ static Optional<StyleNodeID> begin_style_engine_transaction(DOM::Document& docum
     document.style_invalidation_counters().style_update_submission_microseconds += setup_microseconds;
     auto* root = document.document_element();
     if (!root || root->style_node_id() == 0) {
-        style_computer.style_engine().flush();
+        style_computer.style_engine().flush_without_document_root();
         return {};
     }
     return root->style_node_id();
