@@ -1310,20 +1310,6 @@ void ContextState::did_deliver_clock_tick(MonotonicTime frame_time)
     m_clock_tick_pacer.did_deliver(frame_time);
 }
 
-void ContextState::clock_tick_scroll_offsets(Vector<Compositing::AsyncScrollNodeStableID>& scroll_nodes, Vector<Compositing::CSSPixelPoint>& scroll_offsets) const
-{
-    auto nodes = m_async_scroll_tree.scroll_nodes();
-    scroll_nodes.ensure_capacity(nodes.size());
-    scroll_offsets.ensure_capacity(nodes.size());
-    for (auto const& node : nodes) {
-        auto offset = m_async_scroll_tree.css_scroll_offset_for_node(node.node_id, m_scroll_state_snapshot);
-        if (!offset.has_value())
-            continue;
-        scroll_nodes.unchecked_append(node.stable_node_id);
-        scroll_offsets.unchecked_append(*offset);
-    }
-}
-
 Optional<Gfx::IntRect> ContextState::pending_present_frame_viewport_rect() const
 {
     if (!m_pending_present_frame.has_value())

@@ -29,7 +29,7 @@ struct TestWebContentClient final : public Compositor::CompositorStateWebContent
     virtual void dispatch_key_event_to_web_content(u64, Compositing::KeyEvent const&) override { }
     virtual void request_rendering_update() override { }
     virtual void rendering_opportunity(Compositing::CompositorContextId, i64, double) override { }
-    virtual void clock_tick(Compositing::CompositorContextId, i64, double, Vector<Compositing::AsyncScrollNodeStableID> const&, Vector<Compositing::CSSPixelPoint> const&) override { }
+    virtual void clock_tick(Compositing::CompositorContextId, i64, double) override { }
     virtual void async_scroll_updates(Compositing::CompositorContextId, Compositing::PendingAsyncScrollUpdates const&) override { }
     virtual void create_video_edge(Media::VideoSinkHandle) override { }
     virtual void release_video_edge(Media::VideoSinkHandle) override { }
@@ -522,7 +522,7 @@ struct ClockTickRecordingWebContentClient final : public Compositor::CompositorS
     virtual void dispatch_key_event_to_web_content(u64, Compositing::KeyEvent const&) override { }
     virtual void request_rendering_update() override { }
     virtual void rendering_opportunity(Compositing::CompositorContextId, i64, double) override { ++rendering_opportunities; }
-    virtual void clock_tick(Compositing::CompositorContextId, i64 frame_time_nanoseconds, double, Vector<Compositing::AsyncScrollNodeStableID> const&, Vector<Compositing::CSSPixelPoint> const&) override { clock_tick_times.append(frame_time_nanoseconds); }
+    virtual void clock_tick(Compositing::CompositorContextId, i64 frame_time_nanoseconds, double) override { clock_tick_times.append(frame_time_nanoseconds); }
     virtual void async_scroll_updates(Compositing::CompositorContextId, Compositing::PendingAsyncScrollUpdates const&) override { }
     virtual void create_video_edge(Media::VideoSinkHandle) override { }
     virtual void release_video_edge(Media::VideoSinkHandle) override { }
@@ -641,7 +641,7 @@ struct RecordingWebContentClient final : public Compositor::CompositorStateWebCo
     virtual void dispatch_key_event_to_web_content(u64, Compositing::KeyEvent const&) override { }
     virtual void request_rendering_update() override { events.append("request_rendering_update"_string); }
     virtual void rendering_opportunity(Compositing::CompositorContextId, i64, double) override { }
-    virtual void clock_tick(Compositing::CompositorContextId, i64, double, Vector<Compositing::AsyncScrollNodeStableID> const&, Vector<Compositing::CSSPixelPoint> const&) override { }
+    virtual void clock_tick(Compositing::CompositorContextId, i64, double) override { }
     virtual void async_scroll_updates(Compositing::CompositorContextId, Compositing::PendingAsyncScrollUpdates const& updates) override
     {
         events.append("async_scroll_updates"_string);
