@@ -679,7 +679,8 @@ static RefPtr<ComputedValues const> compute_pseudo_element_style_for_cssom(DOM::
                     .pseudo_kind = to_underlying(kind),
                     .parent_highlight = kind == PseudoElement::Selection ? highlight_parent_style_record.value_or(StyleRecordID {}) : StyleRecordID {},
                 });
-            if (demand.ffi.is_absent && first_is_one_of(kind, PseudoElement::Before, PseudoElement::After)
+            // A read nothing answered is not asked again.
+            if (demand.ffi.is_absent && !demand.ffi.unanswered && first_is_one_of(kind, PseudoElement::Before, PseudoElement::After)
                 && !target.element().style_depends_on_size_container_query()) {
                 // A private absence does not replace the published match answer. Settle that
                 // answer before leaving C++'s negative pseudo computation out of this read.

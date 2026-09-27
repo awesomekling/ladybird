@@ -146,11 +146,13 @@ impl RenderState {
                 let engine = self.style_engine();
                 if engine.is_null() {
                     debug_assert!(false, "the owner answers the style reads of a document with an engine");
-                    return Answer::unanswered(query);
+                    return Answer::left_to_host(query);
                 }
                 // SAFETY: The engine is the document's, and the document thread waits for the answer with the
                 // engine's token home.
-                Answer::ComputedStyle(Some(unsafe { engine.reach_on_owner(|engine| demand.answer(engine)) }))
+                Answer::ComputedStyle(StyleReadAnswer::Answered(unsafe {
+                    engine.reach_on_owner(|engine| demand.answer(engine))
+                }))
             }
             _ => Answer::of(query, self.arena.arena_mut()),
         }
@@ -205,9 +207,19 @@ pub(crate) enum Query {
 pub(crate) enum Answer {
     Geometry(FfiGeometryReadAnswer),
     LayoutCounts(LayoutCounts),
-    /// The record the demand answered, as the value the main thread reads it through; none where the owner left the
-    /// demand to the main thread.
-    ComputedStyle(Option<crate::css::style::bridge::RecordDemandAnswer>),
+    ComputedStyle(StyleReadAnswer),
+}
+
+/// What became of a [`Query::ComputedStyle`].
+#[derive(Debug)]
+pub(crate) enum StyleReadAnswer {
+    /// The record the demand answered, as the value the main thread reads it through.
+    Answered(crate::css::style::bridge::RecordDemandAnswer),
+    /// The owner holds no engine of the document to answer with: the main thread answers the demand.
+    LeftToHost,
+    /// The owner panicked answering the demand, which it may have left half done in the engine. Nothing answers it
+    /// again: the read goes unanswered.
+    Unanswered,
 }
 
 /// How many layout passes and tree builds a document's layout has run.
@@ -220,12 +232,26 @@ pub(crate) struct LayoutCounts {
 
 impl Answer {
     /// The answer that leaves the question to the main thread, as it answered it before the owner did.
-    fn unanswered(query: Query) -> Self {
+    fn left_to_host(query: Query) -> Self {
         match query {
             Query::Geometry { .. } => Self::Geometry(FfiGeometryReadAnswer::default()),
             Query::LayoutCounts => Self::LayoutCounts(LayoutCounts::default()),
-            Query::ComputedStyle(_) => Self::ComputedStyle(None),
+            Query::ComputedStyle(_) => Self::ComputedStyle(StyleReadAnswer::LeftToHost),
         }
+    }
+
+    /// The answer to a question the owner panicked answering. What the owner reached may be half changed, so the
+    /// main thread is not left to answer it again from there.
+    fn unanswered(query: Query) -> Self {
+        match query {
+            Query::ComputedStyle(_) => Self::ComputedStyle(StyleReadAnswer::Unanswered),
+            Query::Geometry { .. } | Query::LayoutCounts => Self::left_to_host(query),
+        }
+    }
+
+    /// The answer the document thread takes of what the owner did with `query`.
+    fn of_outcome(query: Query, outcome: std::thread::Result<Self>) -> Self {
+        outcome.unwrap_or_else(|_| Self::unanswered(query))
     }
 
     /// Answers `query` from `arena` alone. A question the engine answers is left to the main thread.
@@ -237,7 +263,7 @@ impl Answer {
                 full_layouts: arena.full_layout_count(),
                 tree_builds: arena.layout_tree_build_stats(),
             }),
-            Query::ComputedStyle(_) => Self::unanswered(query),
+            Query::ComputedStyle(_) => Self::left_to_host(query),
         }
     }
 }
@@ -507,7 +533,7 @@ fn handle_message(message: ToOwner) {
                 );
                 state.answer(query)
             })
-            .unwrap_or_else(|| Answer::unanswered(query))
+            .unwrap_or_else(|| Answer::left_to_host(query))
         }),
         ToOwner::Recall { document } => {
             // A rendering update the owner deferred ends at its first unit. The update was sent before the recall, so
@@ -671,7 +697,8 @@ pub(crate) fn recall_rendering_update(document: DocumentId) {
 
 /// Asks the owner `query` about `document`, whose arena the calling document thread names as `arena`, and waits for
 /// the answer, as of every change the thread sent before. Where the owner cannot answer it (a test holds the run it
-/// would queue behind), the thread reads its arena right here, as every door of the port does.
+/// would queue behind), the thread reads its arena right here, as every door of the port does. A question the owner
+/// panicked answering is [`Answer::unanswered`].
 ///
 /// # Safety
 ///
@@ -698,10 +725,8 @@ pub(crate) unsafe fn ask(document: DocumentId, arena: *mut c_void, query: Query)
             )
         },
     );
-    answer.unwrap_or_else(|_| {
-        debug_assert!(false, "the render owner panicked answering {query:?}");
-        Answer::unanswered(query)
-    })
+    debug_assert!(answer.is_ok(), "the render owner panicked answering {query:?}");
+    Answer::of_outcome(query, answer)
 }
 
 /// What became of a style transaction the owner was sent: its answers, or the transaction where the owner could not
@@ -1049,6 +1074,48 @@ mod tests {
             });
             let applied = with_state(document, |state| state.changes.take_through(seq).len()).unwrap();
             assert_eq!(applied, 1);
+            handle(ToOwner::Destroy { document });
+            STATES.with_borrow(|states| states.is_empty())
+        });
+        assert!(owner.join().unwrap());
+    }
+
+    // The owner of a test build panics answering the style read of a document with no engine.
+    #[cfg(debug_assertions)]
+    #[test]
+    fn a_style_read_the_owner_panicked_answering_goes_unanswered_on_the_host() {
+        let owner = std::thread::spawn(|| {
+            let document = DocumentId::mint();
+            let arena = Box::new(ArenaHandle::new_for(document, std::thread::current().id()));
+            handle(ToOwner::Create {
+                document,
+                arena: SpareArena(arena),
+            });
+            let query = Query::ComputedStyle(crate::css::style::bridge::RecordDemand {
+                node: 1,
+                pseudo_kind: u8::MAX,
+                exclude_inline_style: false,
+                targeted: false,
+                read_only: true,
+                parent_highlight: 0,
+            });
+            let (reply, answered) = crate::stage_thread::owner_reply_for_test();
+            handle(ToOwner::Ask {
+                document,
+                through: ChangeSeq::default(),
+                query,
+                reply,
+            });
+            let outcome = answered();
+            assert!(outcome.is_err(), "the owner panicked answering");
+            // The host takes the read as unanswered, and does not answer it again with the engine the owner left.
+            let answer = crate::css::style::bridge::host_answer_of_owner_read(Answer::of_outcome(query, outcome));
+            assert!(
+                answer.is_some_and(|answer| answer.unanswered && answer.is_absent && answer.published_record.is_null()),
+                "the host answers the read without the engine"
+            );
+            // A read the owner leaves to the host is the host's to answer.
+            assert!(crate::css::style::bridge::host_answer_of_owner_read(Answer::left_to_host(query)).is_none());
             handle(ToOwner::Destroy { document });
             STATES.with_borrow(|states| states.is_empty())
         });

@@ -234,6 +234,23 @@ pub struct FfiRecordDemandAnswer {
     /// The answered record as a published value (see [`super::published_record`]), which the
     /// caller owns one reference of; null where the answer is absent.
     pub published_record: *const c_void,
+    /// Whether nothing answered the demand: the render owner panicked answering it, and may have
+    /// left it half done in the engine, so nothing answers it again. Absent as well.
+    pub unanswered: bool,
+}
+
+impl FfiRecordDemandAnswer {
+    /// The answer of an absent record.
+    fn absent() -> Self {
+        Self {
+            record: FfiEngineComputedRecord::default(),
+            is_absent: true,
+            is_provisional: false,
+            row_facts: 0,
+            published_record: std::ptr::null(),
+            unanswered: false,
+        }
+    }
 }
 
 // SAFETY: `published_record` is null, or an owned `Arc` of a `PublishedStyleRecord`, which is
@@ -4881,12 +4898,31 @@ pub unsafe extern "C" fn style_engine_answer_read_demand(
                 crate::render_owner::Query::ComputedStyle(demand),
             )
         };
-        if let crate::render_owner::Answer::ComputedStyle(Some(answer)) = answer {
-            return answer.into_ffi();
+        if let Some(answer) = host_answer_of_owner_read(answer) {
+            return answer;
         }
     }
     let engine = unsafe { engine_entrance(engine, "style_engine_answer_read_demand") };
     abort_on_panic(|| crate::stage_thread::run_stage(move || demand.answer(engine))).into_ffi()
+}
+
+/// The host's answer to a style read the render owner was asked, or none where the owner left the
+/// demand to the host. A read the owner panicked answering is not answered again: the engine may
+/// hold the demand half done.
+pub(crate) fn host_answer_of_owner_read(answer: crate::render_owner::Answer) -> Option<FfiRecordDemandAnswer> {
+    use crate::render_owner::{Answer, StyleReadAnswer};
+    match answer {
+        Answer::ComputedStyle(StyleReadAnswer::Answered(answer)) => Some(answer.into_ffi()),
+        Answer::ComputedStyle(StyleReadAnswer::Unanswered) => Some(FfiRecordDemandAnswer {
+            unanswered: true,
+            ..FfiRecordDemandAnswer::absent()
+        }),
+        Answer::ComputedStyle(StyleReadAnswer::LeftToHost) => None,
+        Answer::Geometry(_) | Answer::LayoutCounts(_) => {
+            debug_assert!(false, "a style read is answered with a style record");
+            None
+        }
+    }
 }
 
 /// Replays a recorded record demand.
@@ -4925,13 +4961,7 @@ fn answer_record_demand_for_host(
     parent_highlight: u64,
 ) -> FfiRecordDemandAnswer {
     let Some(node) = StyleNodeID::from_raw(node) else {
-        return FfiRecordDemandAnswer {
-            record: FfiEngineComputedRecord::default(),
-            is_absent: true,
-            is_provisional: false,
-            row_facts: 0,
-            published_record: std::ptr::null(),
-        };
+        return FfiRecordDemandAnswer::absent();
     };
     let mut result = match engine.answer_record_demand(
         node,
@@ -4952,14 +4982,9 @@ fn answer_record_demand_for_host(
             is_provisional: answer.provisional,
             row_facts: 0,
             published_record: std::ptr::null(),
+            unanswered: false,
         },
-        super::publication::RecordDemandAnswer::Absent => FfiRecordDemandAnswer {
-            record: FfiEngineComputedRecord::default(),
-            is_absent: true,
-            is_provisional: false,
-            row_facts: 0,
-            published_record: std::ptr::null(),
-        },
+        super::publication::RecordDemandAnswer::Absent => FfiRecordDemandAnswer::absent(),
     };
     result.row_facts = engine.style_row_facts(node);
     engine.record_boundary_call(EventKind::AnswerRecordDemand, |payload| {
