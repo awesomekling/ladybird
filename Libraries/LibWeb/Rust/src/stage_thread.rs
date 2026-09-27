@@ -302,8 +302,12 @@ struct SubmittedStage {
     // The labels a test's hold may name to hold this run: its own, and those of the stages of a
     // flight it may run ("flight:style").
     hold_labels: Vec<&'static str>,
-    // The arena of the document the stage runs for, as the handle the main thread knows it by.
+    // The arena the stage reaches, as the handle the main thread knows it by, or 0 for a stage that
+    // reaches none.
     arena: usize,
+    // The document the stage runs for, as the handle the main thread knows its arena by: `arena`, or
+    // for a recording, which reaches no arena, its document's. A test's hold names a stage by it.
+    document: usize,
     // Whether the stage owns `arena` while it runs. A style pass does not: it reaches only its
     // style engine, and the main thread goes on writing the arena beside it.
     owns_arena: bool,
@@ -495,7 +499,7 @@ fn inputs_wait_for_take_back(label: &str) -> bool {
 /// main-thread path to it has to go through [`join_frame_in_flight`] first.
 pub(crate) unsafe fn submit_stage(label: &'static str, arena: *mut c_void, stage: impl FnOnce() + Send + 'static) {
     // SAFETY: Guaranteed by the caller.
-    unsafe { submit(label, label, vec![label], None, arena, stage, None) }
+    unsafe { submit(label, label, vec![label], None, arena, arena as usize, stage, None) }
 }
 
 /// Like [`submit_stage`], and has the main thread run `on_taken_back` once it has taken the stage
@@ -519,6 +523,7 @@ pub(crate) unsafe fn submit_stage_with_take_back(
             vec![label],
             None,
             arena,
+            arena as usize,
             stage,
             Some(Box::new(on_taken_back)),
         );
@@ -684,24 +689,33 @@ fn note_recording_taken_back(arena: usize, cancelled: bool) {
     });
 }
 
-/// Like [`submit_stage`] for the recording `stage` of the arena `arena`, which a read that would
-/// wait for it may ask to stop through `cancel`.
-///
-/// # Safety
-///
-/// As for [`submit_stage`].
-pub(crate) unsafe fn submit_cancellable_recording(
+/// Submits the display list recording `stage` of the document whose arena is `arena` to the frame
+/// in flight. The recording reaches no arena: it owns the frame it records and the recorder state it
+/// records with, and answers on a ticket. So it is submitted with none, and no door, read, style
+/// update or arena change of the document waits for it; only the frame's own take-back takes it in.
+/// `arena` names the document for the bookkeeping of cancelled recordings, and `cancel` is how a
+/// read would ask the recording to stop.
+pub(crate) fn submit_recording(
     arena: *mut c_void,
     cancel: std::sync::Arc<RecordingCancel>,
     stage: impl FnOnce() + Send + 'static,
 ) {
     let taken_back = cancel.clone();
     let arena_address = arena as usize;
-    // SAFETY: Guaranteed by the caller.
+    // SAFETY: The stage is submitted with no arena, and holds nothing else the main thread reaches.
     unsafe {
-        submit_stage_with_take_back("recording", arena, stage, move || {
-            note_recording_taken_back(arena_address, taken_back.was_cancelled());
-        });
+        submit(
+            "recording",
+            "recording",
+            vec!["recording"],
+            None,
+            std::ptr::null_mut(),
+            arena_address,
+            stage,
+            Some(Box::new(move || {
+                note_recording_taken_back(arena_address, taken_back.was_cancelled());
+            })),
+        );
     }
     SUBMITTED.with_borrow_mut(|submitted| {
         let stage = submitted.last_mut().expect("the recording was just submitted");
@@ -789,6 +803,7 @@ pub(crate) unsafe fn submit_flight(
             hold_labels,
             Some(releases_style_engine.0.clone()),
             arena,
+            arena as usize,
             stage,
             Some(Box::new(on_taken_back)),
         );
@@ -798,12 +813,14 @@ pub(crate) unsafe fn submit_flight(
 /// # Safety
 ///
 /// As for [`submit_stage`].
+#[allow(clippy::too_many_arguments)]
 unsafe fn submit(
     label: &'static str,
     role: &'static str,
     hold_labels: Vec<&'static str>,
     style_engine_released: Option<std::sync::Arc<std::sync::atomic::AtomicU8>>,
     arena: *mut c_void,
+    document: usize,
     stage: impl FnOnce() + Send + 'static,
     on_taken_back: Option<Box<dyn FnOnce()>>,
 ) {
@@ -819,6 +836,7 @@ unsafe fn submit(
     let run = SubmittedRun {
         label,
         arena: arena as usize,
+        document,
         number: NEXT_SUBMITTED_RUN.fetch_add(1, Ordering::Relaxed),
     };
     let job: Job = Box::new(move || {
@@ -853,6 +871,7 @@ unsafe fn submit(
             role,
             hold_labels,
             arena: arena as usize,
+            document,
             owns_arena: role != "style",
             style_engine: style_engine_of_stage(role, arena),
             style_engine_released,
@@ -959,6 +978,7 @@ pub(crate) unsafe fn lend_arena(
             role: LEND_STAGE,
             hold_labels: vec![LEND_STAGE],
             arena: arena as usize,
+            document: arena as usize,
             owns_arena: true,
             // SAFETY: Guaranteed by the caller; the main thread still owns the arena.
             style_engine: unsafe { &*arena.cast::<crate::layout::LayoutNodeArena>() }.style_engine_handle() as usize,
@@ -1047,6 +1067,8 @@ pub extern "C" fn rust_stage_thread_submits_presentation() -> bool {
 /// Submits `present(context)` to the frame in flight as a presentation stage, which runs once the
 /// stages submitted before it have (a navigable's recording among them). With a non-null `arena`
 /// the stage owns that arena, whose recording it publishes; without one it reaches no arena.
+/// `document` is the arena of the document whose frame it presents, which it may not reach, by
+/// which a test's hold names it.
 ///
 /// # Safety
 ///
@@ -1056,6 +1078,7 @@ pub extern "C" fn rust_stage_thread_submits_presentation() -> bool {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_stage_thread_submit_presentation(
     arena: *mut c_void,
+    document: *const c_void,
     present: unsafe extern "C" fn(*mut c_void),
     context: *mut c_void,
 ) {
@@ -1073,6 +1096,7 @@ pub unsafe extern "C" fn rust_stage_thread_submit_presentation(
             vec![PRESENTATION_STAGE],
             None,
             arena,
+            document as usize,
             move || {
                 let context = context.into_inner();
                 present(context);
@@ -1152,6 +1176,7 @@ pub enum FfiStageHoldPoint {
 struct SubmittedRun {
     label: &'static str,
     arena: usize,
+    document: usize,
     // In submission order, from 1.
     number: u64,
 }
@@ -1274,7 +1299,7 @@ pub extern "C" fn rust_stage_thread_wait_for_held_stage(timeout_ms: u32, held_at
         let submitted_armed_run = SUBMITTED.with_borrow_mut(|submitted| {
             submitted.iter_mut().any(|stage| {
                 hold_names_stage(&armed.label, &stage.hold_labels)
-                    && (armed.arena == 0 || armed.arena == stage.arena)
+                    && (armed.arena == 0 || armed.arena == stage.document)
                     && !stage.poll()
             })
         });
@@ -1306,7 +1331,7 @@ pub extern "C" fn rust_stage_thread_armed_hold_awaits_submission() -> bool {
         !submitted.is_empty()
             && !submitted.iter_mut().any(|stage| {
                 hold_names_stage(&armed.label, &stage.hold_labels)
-                    && (armed.arena == 0 || armed.arena == stage.arena)
+                    && (armed.arena == 0 || armed.arena == stage.document)
                     && !stage.poll()
             })
     })
@@ -1344,7 +1369,7 @@ fn stage_thread_holds_run_for_queued_stage() -> bool {
         let armed_run_pending = SUBMITTED.with_borrow_mut(|submitted| {
             submitted.iter_mut().any(|stage| {
                 hold_names_stage(&armed.label, &stage.hold_labels)
-                    && (armed.arena == 0 || armed.arena == stage.arena)
+                    && (armed.arena == 0 || armed.arena == stage.document)
                     && !stage.poll()
             })
         });
@@ -1405,7 +1430,7 @@ fn hold_at(point: FfiStageHoldPoint, flight_stage: Option<&'static str>) {
             .unwrap_or(run.label);
         armed.label.split('|').any(|stage| stage == held_label)
             && armed.point == point
-            && (armed.arena == 0 || armed.arena == run.arena)
+            && (armed.arena == 0 || armed.arena == run.document)
     });
     if !holds_run || run.number < hold.first_holdable_run {
         return;
@@ -2269,6 +2294,7 @@ mod tests {
                     hold_labels: vec![label],
                     style_engine_released: None,
                     arena,
+                    document: arena,
                     owns_arena: label != "style",
                     style_engine,
                     from_stage,
@@ -2313,6 +2339,7 @@ mod tests {
                     role: "recording",
                     hold_labels: vec!["recording"],
                     arena,
+                    document: arena,
                     owns_arena: true,
                     style_engine: 0,
                     style_engine_released: None,
@@ -2395,6 +2422,7 @@ mod tests {
                     role: label,
                     hold_labels: vec![label],
                     arena,
+                    document: arena,
                     owns_arena: true,
                     style_engine: 0,
                     style_engine_released: None,

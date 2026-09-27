@@ -27,6 +27,7 @@
 #include <LibWeb/DOM/Node.h>
 #include <LibWeb/DOM/ShadowRoot.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
+#include <LibWeb/HTML/EventLoop/FrameScheduler.h>
 #include <LibWeb/HTML/FormAssociatedElement.h>
 #include <LibWeb/HTML/HTMLBRElement.h>
 #include <LibWeb/HTML/HTMLCanvasElement.h>
@@ -765,9 +766,13 @@ Optional<PendingDisplayListRecording> begin_rust_display_list_recording(DOM::Doc
     if (!Layout::RustFFI::layout_arena_record_display_list(arena, viewport_row_slot(document), inputs, ffi_run))
         return {};
     // NB: The render side may still record while the main thread waits, if the frame scheduler does not submit recordings.
-    auto const submitted = Layout::RustFFI::layout_arena_frame_state(arena) == Layout::RustFFI::FfiLayoutFrameState::InFlight;
+    auto const submitted = Layout::RustFFI::layout_arena_has_recording_in_flight(arena);
     if (!submitted)
         HTML::main_thread_event_loop().did_wait_for_recording(current_recording_origin(), rust_timer.elapsed_time().to_nanoseconds());
+    // The recording reads the style records its frame's rows name while the document goes on beside it: the engine
+    // reclaims none of them until the frame has been taken in.
+    else
+        HTML::main_thread_event_loop().frame_scheduler().hold_style_records_for_frame(document);
     return PendingDisplayListRecording {
         .document = document,
         .arena = arena,

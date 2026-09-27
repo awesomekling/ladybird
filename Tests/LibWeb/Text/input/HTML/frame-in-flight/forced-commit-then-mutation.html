@@ -6,10 +6,9 @@
 </style>
 <div id="box"></div>
 <script>
-    // A layout read with layout to do while the frame records forces a join: it waits for the frame, takes it in
-    // (consume-commit, no script) and reads committed layout. (A clean document's read goes on beside the recording.)
-    // A mutation right after it must reach the next frame, and the tail of the joined frame must still run once the
-    // stack is empty.
+    // A layout read with layout to do while the frame records lays out beside the recording, which reaches no arena
+    // (it records a frame the document published): it does not take the frame in. A mutation right after it must reach
+    // the next frame, and the tail of the frame must still run once the stack is empty.
     asyncTest(async done => {
         const frame = await whileFrameInFlight("mid-recording", () => {
             box.style.backgroundColor = "green";

@@ -51,7 +51,7 @@
             println(`${key} beside the recording is the committed one: ${result.geometry[key] === after[key]}`);
         println(`box: ${after.offsets}`);
 
-        // A dirty document has to lay out first, and takes the recording in.
+        // A dirty document lays out first, beside the recording, which reaches no arena.
         box.style.height = "30px";
         await twoFrames();
         const dirty = await whileFrameInFlight("mid-recording", repaint, frame => {

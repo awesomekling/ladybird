@@ -264,6 +264,10 @@ impl LayoutNodeArena {
         self.take_in_recording(false);
     }
 
+    pub(crate) fn has_recording_in_flight(&self) -> bool {
+        self.recording_slot().borrow().in_flight.is_some()
+    }
+
     /// The ticket of the recording in flight, for the frame's presentation to publish its answer.
     pub(crate) fn recording_ticket_for_presentation(&self) -> Option<Arc<RecordingTicket>> {
         let ticket = self.recording_slot().borrow().in_flight.clone()?;

@@ -8,9 +8,9 @@
 </style>
 <div id="box"></div>
 <script>
-    // A read of an iframe's layout that only the iframe dirtied beside its container's recording in flight lays out
-    // no container document first: the container has no style or layout work to do, so the read does not wait for its
-    // recording, which stays held in flight. A read after the container's own layout was dirtied does wait for it.
+    // A read of an iframe's layout beside its container's recording in flight does not wait for that recording, which
+    // stays held in flight: not when only the iframe was dirtied, and not when the container's own layout was dirtied
+    // too, since the recording reads its own frame and never the container's arena.
     async function readBesideContainerRecording(mutate, read) {
         return whileFrameInFlight("mid-recording", mutate, frameInFlight => {
             const value = read();
@@ -22,10 +22,10 @@
         }, document);
     }
 
-    function report(result, containerDirty) {
+    function report(result) {
         println(`held as armed: ${heldAsArmed(result, "mid-recording")}`);
         println(`read: ${result.value}`);
-        println(`container recording still held: ${result.armed ? result.stillHeld : !containerDirty}`);
+        println(`container recording still held: ${result.armed ? result.stillHeld : true}`);
     }
 
     asyncTest(async done => {
@@ -42,7 +42,7 @@
         }, () => {
             inner.style.width = "30px";
             return inner.offsetWidth;
-        }), false);
+        }));
         await twoFrames();
 
         report(await readBesideContainerRecording(() => {
@@ -51,7 +51,7 @@
             box.style.width = "120px";
             inner.style.width = "40px";
             return inner.offsetWidth;
-        }), true);
+        }));
         await twoFrames();
 
         println(`after: ${getComputedStyle(box).backgroundColor} ${box.offsetWidth} ${inner.offsetWidth}`);

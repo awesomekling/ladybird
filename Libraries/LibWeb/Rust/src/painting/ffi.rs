@@ -1650,8 +1650,7 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
         arena.recording().await_recording(ticket);
         let cancel = job.cancel();
         crate::stage_thread::note_recording_made(arena_handle as usize, crate::stage_thread::RecordingRedo::Submitted);
-        // SAFETY: As above.
-        unsafe { crate::stage_thread::submit_cancellable_recording(arena_handle, cancel, move || job.run()) };
+        crate::stage_thread::submit_recording(arena_handle, cancel, move || job.run());
         return true;
     }
     crate::stage_thread::note_recording_made(
@@ -2131,6 +2130,18 @@ pub unsafe extern "C" fn layout_arena_publish_recording_in_frame(
     // NB: The published-rows verifier keeps its baseline per thread, on the main thread; it sees this
     //     publication as the rows the next main-side publication finds.
     crate::painting::record::publish::publish_recording(arena, pending, &presentation, &publish)
+}
+
+/// Whether a recording of the arena's document is in flight: submitted, and not taken in yet.
+///
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_has_recording_in_flight(arena: *mut c_void) -> bool {
+    // SAFETY: The caller passes a live handle. This reads only the recording slot, which the recording in flight does
+    // not reach, so it goes through no door that would take the recording in.
+    unsafe { &*arena.cast::<LayoutNodeArena>() }.has_recording_in_flight()
 }
 
 /// The ticket of the recording of the arena's document in flight, retained for the frame's

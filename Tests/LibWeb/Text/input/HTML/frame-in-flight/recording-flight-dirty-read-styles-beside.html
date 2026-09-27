@@ -13,9 +13,9 @@
 <div id="container"><div id="box"></div></div>
 <div id="hidden"><span id="hiddenSpan">hidden</span></div>
 <script>
-    // A read of layout geometry that finds the document dirty beside a recording of it in flight starts its style
-    // update beside the recording, which reaches no style engine, and takes the recording in once: where the update
-    // installs a style in a box the recording reads, or else for its layout.
+    // A read of layout geometry that finds the document dirty beside a recording of it in flight runs its style update
+    // and its layout as it would with no frame in flight: the recording reaches no style engine and no arena (it records
+    // a frame the document published), so the read neither takes it in nor needs a style update of its own beside it.
     // The rendering update records a change that lays nothing out: where a flight runs layout and recording in one, a
     // change that lays out goes into the flight, and a read has to wait for its layout.
     let repaints = 0;
@@ -49,7 +49,7 @@
     }
 
     asyncTest(async done => {
-        // The update restyles a box, and takes the recording in as it installs that style.
+        // The update restyles a box, beside the recording.
         const restyled = await readBesideRecording(() => {
             container.className = "tall";
             box.style.width = "200px";
@@ -58,7 +58,7 @@
         println(`restyled box: transitions started: ${box.getAnimations().length}`);
         println(`restyled box: ::before: ${getComputedStyle(box, "::before").content}`);
 
-        // The update reaches no box, and the recording is taken in only for the layout.
+        // The update reaches no box.
         const boxless = await readBesideRecording(() => {
             hidden.className = "other";
         }, () => box.offsetHeight);
