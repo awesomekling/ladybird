@@ -782,13 +782,20 @@ static StyleEngineFFI::FfiRowSampledInPass resample_installed_record_after_host_
 // without one.
 static bool transition_step_names_each_property(StyleEngineFFI::FfiTransitionStepDecidedInPass const& step, ReadonlySpan<PropertyID> matching_property_ids, ReadonlySpan<PropertyID> existing_property_ids)
 {
+    // A `transition: all` names every longhand, so the lists are looked up by property, not scanned.
     ReadonlySpan<StyleEngineFFI::FfiTransitionStepAction> actions { step.actions, step.action_count };
-    auto names = [&](PropertyID property_id) {
-        return any_of(actions, [&](auto const& action) { return action.property_id == to_underlying(property_id); });
-    };
+    HashTable<u16> named_property_ids;
+    named_property_ids.ensure_capacity(actions.size());
+    for (auto const& action : actions)
+        named_property_ids.set(action.property_id);
+    auto names = [&](PropertyID property_id) { return named_property_ids.contains(to_underlying(property_id)); };
+    HashTable<PropertyID> matching_property_id_set;
+    matching_property_id_set.ensure_capacity(matching_property_ids.size());
+    for (auto property_id : matching_property_ids)
+        matching_property_id_set.set(property_id);
     size_t property_count = matching_property_ids.size();
     for (auto property_id : existing_property_ids) {
-        if (!matching_property_ids.contains_slow(property_id))
+        if (!matching_property_id_set.contains(property_id))
             ++property_count;
     }
     return actions.size() == property_count && all_of(matching_property_ids, names) && all_of(existing_property_ids, names);
@@ -1153,13 +1160,15 @@ void StyleComputer::start_needed_transitions(StyleDrainScope const& scope, Compu
         // transition it starts runs from and to.
         ReadonlySpan<StyleEngineFFI::FfiTransitionStepAction> decided_actions { decided->actions, decided->action_count };
         ASSERT(decided_actions.size() == ffi_properties.size());
+        // A property takes the last action the pass names it in. A `transition: all` names every
+        // longhand, so the actions are looked up by property, not scanned for each.
+        HashMap<u16, StyleEngineFFI::FfiTransitionStepAction const*> decided_action_by_property;
+        decided_action_by_property.ensure_capacity(decided_actions.size());
+        for (auto const& action : decided_actions)
+            decided_action_by_property.set(action.property_id, &action);
         for (size_t index = 0; index < ffi_properties.size(); ++index) {
             auto& property = ffi_properties[index];
-            StyleEngineFFI::FfiTransitionStepAction const* decided_action = nullptr;
-            for (auto const& action : decided_actions) {
-                if (action.property_id == property.property_id)
-                    decided_action = &action;
-            }
+            auto const* decided_action = decided_action_by_property.get(property.property_id).value_or(nullptr);
             ASSERT(decided_action);
             auto kind = static_cast<StyleValueFFI::FfiTransitionActionKind>(decided_action->kind);
             actions[index] = {
