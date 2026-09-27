@@ -118,6 +118,8 @@ DOM::NodeIdentity Row::dom_node_identity() const
 
 void const* Row::style_payloads() const
 {
+    // A text row holds no style of its own.
+    VERIFY(!is_text());
     if (m_shell)
         return static_cast<NodeWithStyle const&>(*m_shell).style_payloads();
     return RustFFI::layout_arena_node_style_payloads(m_arena->handle(), m_slot);
