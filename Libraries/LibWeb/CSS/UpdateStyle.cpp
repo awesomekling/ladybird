@@ -1624,6 +1624,9 @@ static StyleReadDemandAnswer answer_targeted_record_demand(DOM::Element& element
 static Optional<RequiredInvalidationAfterStyleChange> install_targeted_record_demand_answer(StyleDrainScope const& scope, DOM::Element& element, StyleReadDemandAnswer const& demand_answer, bool& did_change_custom_properties)
 {
     auto const& answer = demand_answer.ffi;
+    // A demand nothing answered leaves the element the record it has.
+    if (answer.unanswered)
+        return {};
     auto& style_computer = element.document().style_computer();
     auto& engine = scope.engine();
 
