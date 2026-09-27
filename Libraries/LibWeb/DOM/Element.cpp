@@ -1487,7 +1487,7 @@ static bool content_counter_styles_changed(DOM::AbstractElement const& abstract_
     auto const generated_for = abstract_element.pseudo_element().has_value()
         ? Layout::Node::encode_generated_for(*abstract_element.pseudo_element())
         : 0;
-    return Layout::RustFFI::layout_arena_content_counter_styles_changed(arena->handle(), abstract_element.element().style_node_id().value(), generated_for)
+    return Layout::RustFFI::render_owner_content_counter_styles_changed(arena->render_document(), abstract_element.element().style_node_id().value(), generated_for)
         == Layout::RustFFI::CONTENT_COUNTER_STYLES_CHANGED;
 }
 

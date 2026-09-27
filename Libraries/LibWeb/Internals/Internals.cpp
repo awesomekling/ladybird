@@ -88,6 +88,7 @@
 #include <LibWeb/HTML/WindowProxy.h>
 #include <LibWeb/Internals/InternalGamepad.h>
 #include <LibWeb/Internals/Internals.h>
+#include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
 #include <LibWeb/Layout/NodeArena.h>
 #include <LibWeb/Layout/TreeBuilderRustFFI.h>
@@ -136,6 +137,25 @@ static Compositing::ScrollGesturePhase scroll_gesture_phase_from(Bindings::Scrol
 }
 
 GC_DEFINE_ALLOCATOR(Internals);
+
+// The row the node, or its pseudo-element of the given kind, is bound to in its document's arena; an invalid slot if
+// there is none.
+static Compositing::RustFFI::NodeSlotId bound_slot_of(DOM::Node const& node, Optional<CSS::PseudoElement> pseudo_element = {})
+{
+    auto* arena = Layout::document_layout_arena_if_created(node.document());
+    if (!arena)
+        return Compositing::RustFFI::NodeSlotId_INVALID;
+    if (node.is_document())
+        return Layout::RustFFI::layout_arena_bound_viewport_row(arena).slot;
+    auto style_node = DOM::NodeIdentity::of(node).style_node();
+    u8 generated_for = pseudo_element.has_value() ? static_cast<u8>(to_underlying(*pseudo_element)) + 1 : 0;
+    return Layout::RustFFI::layout_arena_bound_row_of(arena, style_node.value(), generated_for).slot;
+}
+
+static bool is_valid_slot(Compositing::RustFFI::NodeSlotId slot)
+{
+    return slot.index != Compositing::RustFFI::INVALID_NODE_SLOT_INDEX;
+}
 
 static GC::Ptr<HTML::LocalNavigable> local_root_of(HTML::Window const& window)
 {
@@ -191,20 +211,20 @@ u64 Internals::visual_context_pending_dirty_box_count()
     auto& document = window().associated_document();
     if (!document.has_committed_viewport_box())
         return 0;
-    return Layout::RustFFI::layout_arena_visual_context_pending_dirty_box_count(document.layout_node_arena().handle());
+    return Layout::RustFFI::layout_arena_visual_context_pending_dirty_box_count(Layout::document_layout_arena(document));
 }
 
 u64 Internals::layout_tree_pre_order_label_violation_count()
 {
     auto& document = window().associated_document();
     return Layout::RustFFI::layout_arena_pre_order_label_violation_count(
-        document.layout_node_arena().handle(), Painting::viewport_row_slot(document));
+        Layout::document_layout_arena(document), Painting::viewport_row_slot(document));
 }
 
 u64 Internals::layout_tree_pre_order_relabel_count()
 {
     auto& document = window().associated_document();
-    return Layout::RustFFI::layout_arena_pre_order_relabel_count(document.layout_node_arena().handle());
+    return Layout::RustFFI::render_owner_arena_counts(document.layout_node_arena().render_document()).pre_order_relabels;
 }
 
 u64 Internals::visual_context_tree_node_count()
@@ -248,19 +268,27 @@ GC::Ref<JS::Object> Internals::visual_context_node_indices(DOM::Element& element
     auto& document = window().associated_document();
     document.update_layout(DOM::UpdateLayoutReason::Debugging);
     document.update_paint_and_hit_testing_properties_if_needed();
-    auto const* layout_node = element.layout_node();
+    auto slot = bound_slot_of(element);
+    auto* arena = Layout::document_layout_arena_if_created(document);
+    auto has_committed_box = is_valid_slot(slot) && Layout::RustFFI::layout_arena_has_committed_box(arena, slot);
     auto owned_indices_as_array = [&](Layout::RustFFI::FfiVisualContextBoxNodeList list) -> GC::Ref<JS::Array> {
         Vector<u32> indices;
-        if (layout_node)
-            indices = Painting::rust_owned_visual_context_node_indices(*layout_node, list);
+        if (has_committed_box) {
+            indices.resize(Layout::RustFFI::layout_arena_paintable_visual_context_node_count(arena, slot, list));
+            if (!indices.is_empty())
+                Layout::RustFFI::layout_arena_paintable_visual_context_copy_node_indices(arena, slot, list, indices.data(), indices.size());
+        }
         return JS::Array::create_from<u32>(realm, indices.span(), [](u32 index) { return JS::Value { index }; });
+    };
+    auto has_compositor_animation_frame = [&](Layout::RustFFI::CompositorAnimationFrameKind kind) {
+        return is_valid_slot(slot) && Layout::RustFFI::layout_arena_node_has_compositor_animation_frame(arena, slot, kind);
     };
     auto object = JS::Object::create(realm, nullptr);
     object->define_direct_property("spatial"_utf16_fly_string, owned_indices_as_array(Layout::RustFFI::FfiVisualContextBoxNodeList::SpatialNodes), JS::default_attributes);
     object->define_direct_property("clips"_utf16_fly_string, owned_indices_as_array(Layout::RustFFI::FfiVisualContextBoxNodeList::ClipNodes), JS::default_attributes);
     object->define_direct_property("effects"_utf16_fly_string, owned_indices_as_array(Layout::RustFFI::FfiVisualContextBoxNodeList::EffectNodes), JS::default_attributes);
-    object->define_direct_property("needsCompositorEffectsLayer"_utf16_fly_string, JS::Value(layout_node && layout_node->needs_compositor_effects_layer()), JS::default_attributes);
-    object->define_direct_property("needsCompositorBackgroundColorFrame"_utf16_fly_string, JS::Value(layout_node && layout_node->needs_compositor_background_color_frame()), JS::default_attributes);
+    object->define_direct_property("needsCompositorEffectsLayer"_utf16_fly_string, JS::Value(has_compositor_animation_frame(Layout::RustFFI::CompositorAnimationFrameKind::Opacity)), JS::default_attributes);
+    object->define_direct_property("needsCompositorBackgroundColorFrame"_utf16_fly_string, JS::Value(has_compositor_animation_frame(Layout::RustFFI::CompositorAnimationFrameKind::BackgroundColor)), JS::default_attributes);
     return object;
 }
 
@@ -661,15 +689,17 @@ void Internals::mouse_down(double x, double y, WebIDL::UnsignedShort click_count
 void Internals::mouse_down_on_scrollbar_dragged_by_compositor(double x, double y, DOM::Element& scroller, bool vertical)
 {
     scroller.document().update_layout(DOM::UpdateLayoutReason::InternalsHitTest);
-    auto const* scrolling_box = scroller.layout_node();
-    VERIFY(scrolling_box);
-    auto scroller_stable_node_id = Painting::async_scroll_node_stable_id(*scrolling_box);
-    VERIFY(scroller_stable_node_id.has_value());
+    VERIFY(is_valid_slot(bound_slot_of(scroller)));
+    auto scroller_stable_node_id = Compositing::AsyncScrollNodeStableID {
+        .node_id = scroller.unique_id(),
+        .kind = Compositing::async_scroll_node_kind_for(Compositing::CompositorScrollNodeKind::Element),
+        .pseudo_element_type = 0,
+    };
 
     auto& page = this->page();
     auto position = page.css_to_device_point({ x, y });
     page.handle_mousedown(position, position, UIEvents::MouseButton::Primary, 0, 0, 1,
-        Compositing::ScrollbarDraggedByCompositor { .scroller_stable_node_id = *scroller_stable_node_id, .vertical = vertical });
+        Compositing::ScrollbarDraggedByCompositor { .scroller_stable_node_id = scroller_stable_node_id, .vertical = vertical });
 }
 
 void Internals::mouse_up(double x, double y, WebIDL::UnsignedShort button, WebIDL::UnsignedShort modifiers)
@@ -997,7 +1027,7 @@ WebIDL::UnsignedLongLong Internals::full_layout_count()
 
 void Internals::begin_layout_trace()
 {
-    Layout::RustFFI::layout_arena_begin_layout_trace(window().associated_document().layout_node_arena().handle(),
+    Layout::RustFFI::layout_arena_begin_layout_trace(Layout::document_layout_arena(window().associated_document()),
         [](void* node_shell, void* sink, void (*append)(void*, u8 const*, size_t)) {
             auto description = static_cast<Layout::Node const*>(node_shell)->debug_description();
             append(sink, description.bytes().data(), description.bytes().size());
@@ -1012,7 +1042,7 @@ void Internals::update_layout_for_testing()
 Utf16String Internals::take_layout_trace()
 {
     StringBuilder builder;
-    Layout::RustFFI::layout_arena_take_layout_trace(window().associated_document().layout_node_arena().handle(), &builder,
+    Layout::RustFFI::layout_arena_take_layout_trace(Layout::document_layout_arena(window().associated_document()), &builder,
         [](void* context, u8 const* bytes, size_t length) {
             static_cast<StringBuilder*>(context)->append(StringView { bytes, length });
         });
@@ -1021,22 +1051,22 @@ Utf16String Internals::take_layout_trace()
 
 WebIDL::UnsignedLongLong Internals::table_cell_measurement_cache_miss_count()
 {
-    return window().associated_document().layout_node_arena().table_cell_measurement_cache_miss_count();
+    return Layout::RustFFI::layout_arena_table_cell_measurement_cache_miss_count(Layout::document_layout_arena(window().associated_document()));
 }
 
 WebIDL::UnsignedLongLong Internals::intrinsic_inline_measurement_count()
 {
-    return window().associated_document().layout_node_arena().intrinsic_inline_measurement_count();
+    return Layout::RustFFI::layout_arena_intrinsic_inline_measurement_count(Layout::document_layout_arena(window().associated_document()));
 }
 
 WebIDL::UnsignedLongLong Internals::retained_inline_item_count()
 {
-    return window().associated_document().layout_node_arena().retained_inline_item_count();
+    return Layout::RustFFI::layout_arena_retained_inline_item_count(Layout::document_layout_arena(window().associated_document()));
 }
 
 WebIDL::UnsignedLongLong Internals::intrinsic_measurement_count()
 {
-    return window().associated_document().layout_node_arena().intrinsic_measurement_count();
+    return Layout::RustFFI::layout_arena_intrinsic_measurement_count(Layout::document_layout_arena(window().associated_document()));
 }
 
 WebIDL::UnsignedLongLong Internals::accumulated_visual_context_tree_build_count()
@@ -1051,13 +1081,13 @@ void Internals::begin_display_list_trace()
 {
     auto& document = window().associated_document();
     (void)document.paint_state().take_recording_traces();
-    Layout::RustFFI::layout_arena_set_recording_trace_enabled(document.layout_node_arena().handle(), true);
+    Layout::RustFFI::layout_arena_set_recording_trace_enabled(Layout::document_layout_arena(document), true);
 }
 
 Utf16String Internals::take_display_list_trace()
 {
     auto& document = window().associated_document();
-    Layout::RustFFI::layout_arena_set_recording_trace_enabled(document.layout_node_arena().handle(), false);
+    Layout::RustFFI::layout_arena_set_recording_trace_enabled(Layout::document_layout_arena(document), false);
     StringBuilder builder;
     for (auto const& trace : document.paint_state().take_recording_traces())
         builder.append(trace);
@@ -1240,7 +1270,7 @@ Utf16String Internals::stacking_context_structure_verification_report()
     document.update_paint_and_hit_testing_properties_if_needed();
     StringBuilder builder;
     Layout::RustFFI::layout_arena_stacking_context_structure_verification_report(
-        document.layout_node_arena().handle(), Painting::viewport_row_slot(document), &builder,
+        Layout::document_layout_arena(document), Painting::viewport_row_slot(document), &builder,
         [](void* context, u8 const* bytes, size_t byte_count) {
             static_cast<StringBuilder*>(context)->append(StringView { bytes, byte_count });
         });
@@ -1849,10 +1879,10 @@ static bool hold_next_submitted_stage(StringView label, Utf16String const& point
     void* arena = nullptr;
     if (document) {
         // A document without an arena has no stage to hold.
-        auto* node_arena = document->layout_node_arena_if_created();
+        auto* node_arena = Layout::document_layout_arena_if_created(*document);
         if (!node_arena)
             return false;
-        arena = node_arena->handle();
+        arena = node_arena;
     }
     return Layout::RustFFI::rust_stage_thread_hold_next_submitted_stage(reinterpret_cast<u8 const*>(label.characters_without_null_termination()), label.length(), hold_point, arena);
 }
@@ -2173,8 +2203,8 @@ u64 Internals::style_record_identity(DOM::Element& element)
 u64 Internals::layout_style_record_identity(DOM::Element& element)
 {
     element.document().update_layout(DOM::UpdateLayoutReason::Debugging);
-    auto const* layout_node = element.layout_node();
-    return layout_node ? layout_node->style_record_identity().value() : 0;
+    auto slot = bound_slot_of(element);
+    return is_valid_slot(slot) ? Layout::RustFFI::layout_arena_node_style_record(Layout::document_layout_arena(element.document()), slot) : 0;
 }
 
 u64 Internals::before_style_record_identity(DOM::Element& element)
@@ -2185,38 +2215,41 @@ u64 Internals::before_style_record_identity(DOM::Element& element)
 u64 Internals::before_layout_style_record_identity(DOM::Element& element)
 {
     element.document().update_layout(DOM::UpdateLayoutReason::Debugging);
-    auto const* layout_node = element.pseudo_element_layout_node(CSS::PseudoElement::Before);
-    return layout_node ? layout_node->style_record_identity().value() : 0;
+    auto slot = bound_slot_of(element, CSS::PseudoElement::Before);
+    return is_valid_slot(slot) ? Layout::RustFFI::layout_arena_node_style_record(Layout::document_layout_arena(element.document()), slot) : 0;
 }
 
 u64 Internals::paint_style_record_identity(DOM::Element& element)
 {
     element.document().update_layout(DOM::UpdateLayoutReason::Debugging);
-    auto const* layout_node = element.layout_node();
-    if (!layout_node || !Painting::has_committed_box(*layout_node))
+    auto slot = bound_slot_of(element);
+    if (!is_valid_slot(slot))
         return 0;
-    return Painting::style_record_identity(*layout_node).value();
+    auto* arena = Layout::document_layout_arena(element.document());
+    if (!Layout::RustFFI::layout_arena_has_committed_box(arena, slot))
+        return 0;
+    return Layout::RustFFI::layout_arena_node_style_record(arena, slot);
 }
 
 u64 Internals::layout_node_identity(DOM::Node& node)
 {
     node.document().update_layout(DOM::UpdateLayoutReason::Debugging);
-    auto const* layout_node = node.layout_node();
-    return layout_node ? static_cast<u64>(layout_node->arena_slot_index()) + 1 : 0;
+    auto slot = bound_slot_of(node);
+    return is_valid_slot(slot) ? static_cast<u64>(slot.index) + 1 : 0;
 }
 
 u64 Internals::layout_arena_live_slot_count()
 {
     auto& document = window().associated_document();
     document.update_layout(DOM::UpdateLayoutReason::Debugging);
-    return Layout::RustFFI::layout_arena_live_slot_count(document.layout_node_arena().handle());
+    return Layout::RustFFI::render_owner_arena_counts(document.layout_node_arena().render_document()).live_slots;
 }
 
 u64 Internals::layout_arena_shell_count()
 {
     auto& document = window().associated_document();
     document.update_layout(DOM::UpdateLayoutReason::Debugging);
-    return Layout::RustFFI::layout_arena_shell_count(document.layout_node_arena().handle());
+    return Layout::RustFFI::render_owner_arena_counts(document.layout_node_arena().render_document()).shells;
 }
 
 GC::Ref<JS::Object> Internals::style_engine_transaction_reactions()
@@ -2635,7 +2668,10 @@ String Internals::viewport_overflow_x()
 {
     auto& document = window().associated_document();
     document.update_layout(DOM::UpdateLayoutReason::Debugging);
-    auto overflow = document.layout_node()->overflow_x();
+    auto viewport_slot = bound_slot_of(document);
+    VERIFY(is_valid_slot(viewport_slot));
+    CSS::ComputedStyleRecordView viewport_style { CSS::PublishedStyleRecord::adopt(Layout::RustFFI::layout_arena_node_published_style_record(Layout::document_layout_arena(document), viewport_slot)) };
+    auto overflow = viewport_style->overflow_x();
     switch (overflow) {
     case CSS::Overflow::Auto:
         return "auto"_string;
@@ -2790,7 +2826,7 @@ GC::Ref<JS::Object> Internals::style_invalidation_counters_object() const
     object->define_direct_property("customPropertyCycleParticipants"_utf16_fly_string, JS::Value(counters.custom_property_cycle_participants), JS::default_attributes);
     object->define_direct_property("styleCascadeMicroseconds"_utf16_fly_string, JS::Value(counters.style_cascade_microseconds), JS::default_attributes);
     object->define_direct_property("styleValuesMicroseconds"_utf16_fly_string, JS::Value(counters.style_values_microseconds), JS::default_attributes);
-    object->define_direct_property("scrollableOverflowRecalculations"_utf16_fly_string, JS::Value(Layout::RustFFI::layout_arena_scrollable_overflow_recalculation_count(document.layout_node_arena().handle(), false)), JS::default_attributes);
+    object->define_direct_property("scrollableOverflowRecalculations"_utf16_fly_string, JS::Value(Layout::RustFFI::layout_arena_scrollable_overflow_recalculation_count(Layout::document_layout_arena(document), false)), JS::default_attributes);
     return object;
 }
 

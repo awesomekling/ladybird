@@ -1042,7 +1042,6 @@ void Document::finalize()
         Layout::RustFFI::layout_arena_clear_layout_host_callbacks(m_layout_node_arena->handle());
         Layout::RustFFI::layout_arena_clear_layout_update_host_callbacks(m_layout_node_arena->handle());
         Layout::RustFFI::layout_arena_clear_shell_factory(m_layout_node_arena->handle());
-        VERIFY(Layout::RustFFI::layout_arena_live_slot_count(m_layout_node_arena->handle()) == 0);
         m_layout_node_arena->set_document({}, nullptr);
     }
     CSS::ComputedValuesFFI::rust_custom_property_registry_destroy(m_rust_custom_property_registry);

@@ -2690,10 +2690,6 @@ impl LayoutNodeArena {
         }
     }
 
-    pub(crate) fn animation_adoption_log_is_empty(&self) -> bool {
-        self.animation_adoption_log.borrow().is_empty()
-    }
-
     pub(crate) fn set_node_style(&self, id: NodeSlotId, style_record: u64) -> bool {
         self.assert_owner_thread();
         // NB: A test may drive an arena that has no engine, whose rows have no style.
@@ -6509,37 +6505,23 @@ fn counter_owner(style_node: u32, generated_for: u8) -> Option<super::counters::
     StyleNodeID::from_raw(style_node).map(|element| super::counters::CounterOwner { element, generated_for })
 }
 
-/// Whether the counter styles the record of the pseudo-element `generated_for` of the element
-/// `style_node` names now differ from the ones the box built for it renders from. Answers
-/// `CONTENT_COUNTER_STYLES_NOT_RECORDED` while no box of that pseudo-element has recorded any,
-/// which is every element that generates no content.
-///
-/// # Safety
-///
-/// The arena must remain valid for the duration of the call.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_content_counter_styles_changed(
-    arena: *mut c_void,
-    style_node: u32,
-    generated_for: u8,
-) -> u8 {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    let Some(owner) = counter_owner(style_node, generated_for) else {
-        return CONTENT_COUNTER_STYLES_NOT_RECORDED;
-    };
-    // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on the
-    // document thread.
-    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
-    match super::generated_content::content_counter_styles_changed(arena, owner) {
-        None => CONTENT_COUNTER_STYLES_NOT_RECORDED,
-        Some(false) => CONTENT_COUNTER_STYLES_UNCHANGED,
-        Some(true) => CONTENT_COUNTER_STYLES_CHANGED,
-    }
-}
-
 pub const CONTENT_COUNTER_STYLES_NOT_RECORDED: u8 = 0;
 pub const CONTENT_COUNTER_STYLES_UNCHANGED: u8 = 1;
 pub const CONTENT_COUNTER_STYLES_CHANGED: u8 = 2;
+
+impl LayoutNodeArena {
+    pub(crate) const CONTENT_COUNTER_STYLES_NOT_RECORDED: u8 = CONTENT_COUNTER_STYLES_NOT_RECORDED;
+
+    /// Whether the counter styles `owner`'s record names differ from the ones its box was built with, as the
+    /// `CONTENT_COUNTER_STYLES_*` answers.
+    pub(crate) fn content_counter_styles_changed(&self, owner: super::counters::CounterOwner) -> u8 {
+        match super::generated_content::content_counter_styles_changed(self, owner) {
+            None => CONTENT_COUNTER_STYLES_NOT_RECORDED,
+            Some(false) => CONTENT_COUNTER_STYLES_UNCHANGED,
+            Some(true) => CONTENT_COUNTER_STYLES_CHANGED,
+        }
+    }
+}
 
 /// The text the content of the pseudo-element `generated_for` of the element `style_node` names last
 /// resolved to, the way accessibility reads it: the alt text when there is one, otherwise every
@@ -6564,37 +6546,6 @@ pub unsafe extern "C" fn layout_arena_generated_content_accessible_text(
         .generated_content()
         .borrow();
     ak::Utf16String::from_utf16(generated_content.accessible_text(owner)).into_raw()
-}
-
-/// Whether the innermost `list-item` counter in the counters set of the element `style_node` names
-/// counts forward and was created by that element.
-///
-/// # Safety
-///
-/// The arena must remain valid for the duration of the call.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_innermost_list_item_counter_is_own_forward_counter(
-    arena: *mut c_void,
-    style_node: u32,
-) -> bool {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    let Some(element) = StyleNodeID::from_raw(style_node) else {
-        return false;
-    };
-    // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on the
-    // document thread.
-    unsafe { LayoutNodeArena::from_handle(arena) }
-        .counters_sets()
-        .borrow()
-        .innermost_list_item_counter_is_own_forward_counter(element)
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_live_slot_count(arena: *mut c_void) -> u32 {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: The C++ wrapper keeps the arena alive for this call and
-    // serializes all access on the document thread.
-    unsafe { LayoutNodeArena::from_handle(arena) }.live_slot_count()
 }
 
 #[unsafe(no_mangle)]
@@ -6633,17 +6584,6 @@ pub unsafe extern "C" fn layout_arena_intrinsic_inline_measurement_count(arena: 
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: The C++ wrapper keeps the arena alive and serializes access on the document thread.
     unsafe { LayoutNodeArena::from_handle(arena) }.intrinsic_inline_measurement_count()
-}
-
-/// # Safety
-///
-/// The arena must remain valid for the duration of the call.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_pre_order_relabel_count(arena: *mut c_void) -> u64 {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: The C++ wrapper keeps the arena alive for this call and
-    // serializes all access on the document thread.
-    unsafe { LayoutNodeArena::from_handle(arena) }.pre_order_relabel_count()
 }
 
 #[unsafe(no_mangle)]
@@ -6939,20 +6879,6 @@ pub unsafe extern "C" fn layout_arena_node_style_node(arena: *mut c_void, id: No
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_pseudo_element_scroll_offset(
-    arena: *mut c_void,
-    generator: u32,
-    pseudo_kind: u8,
-) -> FfiCssPixelPoint {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    let Some(generator) = StyleNodeID::from_raw(generator) else {
-        return FfiCssPixelPoint::default();
-    };
-    // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }.pseudo_element_scroll_offset(generator, pseudo_kind)
-}
-
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_set_pseudo_element_scroll_offset(
     arena: *mut c_void,
     generator: u32,
@@ -7199,38 +7125,6 @@ pub unsafe extern "C" fn layout_arena_set_node_style(arena: *mut c_void, id: Nod
     arena.enroll_node_for_svg_paint_resources_sync(id);
 }
 
-/// # Safety
-///
-/// The arena must be live on the document thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_may_have_scroll_snap_areas(arena: *mut c_void) -> bool {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }.may_have_scroll_snap_areas()
-}
-
-/// Hands the host the scroll containers finished layout tree builds gave a style, each with
-/// whether it was a scroll snap container then.
-///
-/// # Safety
-///
-/// The arena must be live on the document thread, and `callback` must be callable with `context`
-/// for the duration of this call.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_take_built_scroll_snap_containers(
-    arena: *mut c_void,
-    context: *mut c_void,
-    callback: unsafe extern "C" fn(*mut c_void, NodeSlotId, bool),
-) {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: As above.
-    let built = unsafe { LayoutNodeArena::from_handle(arena) }.take_built_scroll_snap_containers();
-    for (row, is_scroll_snap_container) in built {
-        // SAFETY: Guaranteed by the caller.
-        unsafe { callback(context, row, is_scroll_snap_container) };
-    }
-}
-
 /// Install the record an animation sample published for a style node over its bound row ahead of
 /// the host, which adopts it as it installs the sample. False where the host installs it itself.
 ///
@@ -7268,16 +7162,6 @@ pub unsafe extern "C" fn layout_arena_take_animation_adoption(
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
     unsafe { LayoutNodeArena::from_handle(arena) }.take_animation_adoption(node, style_record)
-}
-
-/// # Safety
-///
-/// The arena must be live on the document thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_animation_adoption_log_is_empty(arena: *mut c_void) -> bool {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }.animation_adoption_log_is_empty()
 }
 
 #[unsafe(no_mangle)]
@@ -7325,13 +7209,6 @@ pub unsafe extern "C" fn layout_arena_node_style_dependency_flags(arena: *mut c_
         .data(id)
         .style
         .dependency_flags()
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_shell_count(arena: *mut c_void) -> u32 {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }.shell_count()
 }
 
 #[unsafe(no_mangle)]
