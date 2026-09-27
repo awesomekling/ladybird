@@ -5278,7 +5278,33 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
     computation_inputs: FfiDocumentStyleComputationInputs,
     layout_arena: *mut c_void,
 ) -> FfiStyleTransactionView {
-    let engine_handle = engine;
+    // SAFETY: The host passes its document's live layout arena, or null.
+    let document = (!layout_arena.is_null())
+        .then(|| unsafe { crate::layout::ArenaHandle::document_of(layout_arena) })
+        .filter(|document| crate::render_owner::runs_style_of(*document));
+    if let Some(document) = document {
+        // The owner takes the whole transaction: it begins it with the inputs the host froze, runs its pass and
+        // finishes it, and the host reads the answers it left. This thread only brings the engine's token home, so
+        // that no stage holds the engine meanwhile.
+        engine.bring_home("style_engine_take_style_transaction");
+        super::seal::note_engine_call("style_engine_take_style_transaction");
+        let Some(root) = StyleNodeID::from_raw(root) else {
+            return FfiStyleTransactionView::default();
+        };
+        let transaction = OwnerStyleTransaction {
+            root,
+            computation_inputs,
+            layout_arena,
+        };
+        // SAFETY: The engine is the document's, and this thread reaches it again only once the owner has finished
+        // the transaction.
+        let OwnerStyleTransactionView(view, retired) =
+            unsafe { crate::render_owner::run_style_transaction(document, engine, transaction) };
+        // Font cascade lists and custom-property data are the document thread's to give up.
+        crate::css::ffi_stats::release_deferred_font_cascade_lists();
+        drop(retired);
+        return view;
+    }
     let engine = unsafe { engine_entrance(engine, "style_engine_take_style_transaction") };
     let Some(root) = StyleNodeID::from_raw(root) else {
         return FfiStyleTransactionView::default();
@@ -5291,48 +5317,56 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
     let committed_boxes = unsafe { super::animations::CommittedTransformReferenceBoxes::lend(layout_arena) };
     // The pass samples at the times the host published for this update.
     let timeline_samples = engine_on_stage.animation_timeline_samples().clone();
-    // SAFETY: The host passes its document's live layout arena, or null.
-    let document = (!layout_arena.is_null())
-        .then(|| unsafe { crate::layout::ArenaHandle::document_of(layout_arena) })
-        .filter(|document| crate::render_owner::runs_style_of(*document));
-    if let Some(document) = document {
-        let pass = OwnerStylePass {
-            root,
-            committed_boxes,
-            timeline_samples,
-        };
-        // SAFETY: The engine is the document's, entered just now, and this thread reaches it again only once the
-        // owner has run the pass.
-        let OwnerStylePassOutput(output) =
-            unsafe { crate::render_owner::run_style_pass(document, engine_handle, pass) };
-        return finish_style_transaction(engine, root, output);
-    }
     let output = crate::stage_thread::run_stage_reaching(layout_arena, move || {
         run_style_pass(engine_on_stage, root, committed_boxes, &timeline_samples)
     });
-    finish_style_transaction(engine, root, output)
+    finish_style_transaction(engine, root, output).0
 }
 
-/// A pass of a style transaction the document thread took, which the render owner runs with the style engine of the
-/// document's render state while the thread waits for it.
-pub(crate) struct OwnerStylePass {
+/// A style transaction the document thread takes, which the render owner begins, runs the pass of and finishes with
+/// the style engine of the document's render state while the thread waits for it.
+pub(crate) struct OwnerStyleTransaction {
     root: StyleNodeID,
-    committed_boxes: super::animations::CommittedTransformReferenceBoxes,
-    timeline_samples: super::animations::AnimationTimelineSamples,
+    /// What the host froze for the transaction. What it points to is the document thread's, which keeps it as it is
+    /// while it waits.
+    computation_inputs: FfiDocumentStyleComputationInputs,
+    /// The document's layout arena, which the owner holds: the pass samples its committed boxes.
+    layout_arena: *mut c_void,
 }
 
-/// What an [`OwnerStylePass`] left, which the document thread finishes the transaction with.
-pub(crate) struct OwnerStylePassOutput(FfiStyleTransactionOutput);
+// SAFETY: The document thread waits for the transaction, keeping what its inputs point to live and unchanged, and the
+// owner that runs it holds the arena.
+unsafe impl Send for OwnerStyleTransaction {}
 
-impl OwnerStylePass {
-    /// Runs the pass with the document's engine `engine`.
-    pub(crate) fn run(self, engine: &mut StyleEngine) -> OwnerStylePassOutput {
+/// The answers of an [`OwnerStyleTransaction`], which the owner left in the engine for the document thread to read, and
+/// the custom-property data it retired, which the document thread releases.
+pub(crate) struct OwnerStyleTransactionView(FfiStyleTransactionView, RetiredCustomPropertyData);
+
+// SAFETY: The view points into the engine, which nothing changes until the document thread's next entrance of it, and
+// the retired data goes to the document thread, which alone releases it.
+unsafe impl Send for OwnerStyleTransactionView {}
+
+impl OwnerStyleTransaction {
+    /// Runs the transaction with the document's engine `engine`.
+    ///
+    /// # Safety
+    ///
+    /// The document thread waits for it, as the type requires.
+    pub(crate) unsafe fn run(self, engine: &mut StyleEngine) -> OwnerStyleTransactionView {
         let Self {
             root,
-            committed_boxes,
-            timeline_samples,
+            computation_inputs,
+            layout_arena,
         } = self;
-        OwnerStylePassOutput(run_style_pass(engine, root, committed_boxes, &timeline_samples))
+        // SAFETY: Guaranteed by the caller.
+        unsafe { begin_style_transaction(engine, computation_inputs) };
+        // SAFETY: As above.
+        let committed_boxes = unsafe { super::animations::CommittedTransformReferenceBoxes::lend(layout_arena) };
+        // The pass samples at the times the host published for this update.
+        let timeline_samples = engine.animation_timeline_samples().clone();
+        let output = run_style_pass(engine, root, committed_boxes, &timeline_samples);
+        let (view, retired) = finish_style_transaction(engine, root, output);
+        OwnerStyleTransactionView(view, retired)
     }
 }
 
@@ -5593,7 +5627,7 @@ pub unsafe extern "C" fn style_engine_finish_submitted_style_transaction(
         .take()
         .expect("the submitted style pass has run");
     engine.computed_group_sets.finish_pass_beside_host_pins();
-    finish_style_transaction(engine, root, *output)
+    finish_style_transaction(engine, root, *output).0
 }
 
 /// Freezes a style transaction's inputs in the engine before its pass runs.
@@ -5739,7 +5773,7 @@ fn finish_style_transaction(
     engine: &mut StyleEngine,
     root: StyleNodeID,
     mut output: FfiStyleTransactionOutput,
-) -> FfiStyleTransactionView {
+) -> (FfiStyleTransactionView, RetiredCustomPropertyData) {
     // What each element row's node holds now travels with the row, and a computed row takes the
     // debts its computation left: the host settles them as it installs the row, or hands them back.
     settle_style_row_facts(engine, &mut output);
@@ -5759,7 +5793,9 @@ fn finish_style_transaction(
     }
     // Font cascade lists the transaction's font resolutions gave up on the stage thread.
     crate::css::ffi_stats::release_deferred_font_cascade_lists();
-    engine.host.retired_custom_property_data.clear();
+    // The custom-property data the transaction retired is the document thread's to release, once the transaction is
+    // over: the caller drops it there.
+    let retired_custom_property_data = std::mem::take(&mut engine.host.retired_custom_property_data);
     output.reclaimed_style_atoms = std::mem::take(&mut engine.host.reclaimed_style_atoms)
         .into_iter()
         .map(|reclaimed| FfiReclaimedStyleAtom {
@@ -5817,7 +5853,7 @@ fn finish_style_transaction(
     }
     engine.install_ffi_style_transaction_output(output);
     let output = &engine.host.ffi_style_transaction_output;
-    FfiStyleTransactionView {
+    let view = FfiStyleTransactionView {
         transaction_version: output.transaction_version,
         program_version: output.program_version,
         answers: output.answers.as_ptr(),
@@ -5828,7 +5864,19 @@ fn finish_style_transaction(
         only_derived_child_reactions: output.only_derived_child_reactions,
         connected_element_count: engine.connected_element_count(),
         style_atoms_swept: output.style_atoms_swept,
-    }
+    };
+    (
+        view,
+        RetiredCustomPropertyData {
+            _data: retired_custom_property_data,
+        },
+    )
+}
+
+/// The custom-property data a style transaction retired, which only the document thread releases.
+/// Dropping it releases the data.
+pub(crate) struct RetiredCustomPropertyData {
+    _data: Vec<super::inputs::RetainedCustomPropertyData>,
 }
 
 /// Orders a completed reaction batch for direct application in C++: each inheritance branch
