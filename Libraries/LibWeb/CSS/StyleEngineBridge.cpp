@@ -24,6 +24,7 @@
 #include <LibWeb/CSS/StyleSheetState.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/ShadowRoot.h>
+#include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
 #include <LibWeb/Layout/NodeArena.h>
 #include <LibWeb/Page/Page.h>
@@ -1113,44 +1114,57 @@ void StyleEngine::discard_style_transaction_outputs(StyleDrainScope const& scope
 
 namespace {
 
-// A style sheet's resource context as a rule's cascaded values read it, keyed by its native
-// sheet: an imported sheet has its own.
-struct CollectedStyleSheetResourceContext {
-    u64 source_identity { 0 };
-    String base_url;
-    bool has_base_url { false };
-    bool origin_clean { false };
+struct StyleSheetResourceContextCollection {
+    DOM::Document& document;
+    // The base URL of the document's sheets that have neither a base URL nor a location of their
+    // own, which StyleSheetState::style_resource_base_url() resolves against the document.
+    String const& document_api_base_url;
+    HashTable<StyleSheetState const*> collected {};
+    Vector<CollectedStyleSheetResourceContext> contexts {};
 };
 
-void collect_style_sheet_resource_context(StyleSheetState& sheet, Vector<CollectedStyleSheetResourceContext>& contexts)
+Optional<String> style_resource_base_url(StyleSheetState const& sheet, StyleSheetResourceContextCollection const& collection)
 {
-    auto base_url = sheet.style_resource_base_url();
-    contexts.append({
+    if (!sheet.base_url().has_value() && !sheet.location().has_value() && sheet.owning_document().ptr() == &collection.document)
+        return collection.document_api_base_url;
+    if (auto base_url = sheet.style_resource_base_url(); base_url.has_value())
+        return base_url->to_string();
+    return {};
+}
+
+void collect_style_sheet_resource_context(StyleSheetState& sheet, StyleSheetResourceContextCollection& collection)
+{
+    // A sheet's context is its own, whichever scope reaches it: a constructed sheet adopted by many
+    // shadow roots is collected once.
+    if (collection.collected.set(&sheet) != AK::HashSetResult::InsertedNewEntry)
+        return;
+    auto base_url = style_resource_base_url(sheet, collection);
+    collection.contexts.append({
         .source_identity = Parser::ValueParserFFI::rust_style_sheet_identity(sheet.native_sheet().handle()),
-        .base_url = base_url.has_value() ? base_url->to_string() : String {},
+        .base_url = base_url.value_or(String {}),
         .has_base_url = base_url.has_value(),
         .origin_clean = sheet.is_origin_clean(),
     });
     for (auto const& import : sheet.import_rules()) {
         if (auto* imported = import->loaded_style_sheet())
-            collect_style_sheet_resource_context(*imported, contexts);
+            collect_style_sheet_resource_context(*imported, collection);
     }
     // A sheet whose rules are compiled from a shared snapshot has those rules name the snapshot's
     // native sheet, which shares the sheet's base URL.
     if (auto* shared = sheet.shared_compiled_style_sheet(); shared && &shared->contents() != &sheet)
-        collect_style_sheet_resource_context(shared->contents(), contexts);
+        collect_style_sheet_resource_context(shared->contents(), collection);
 }
 
-Vector<CollectedStyleSheetResourceContext> collect_style_sheet_resource_contexts(DOM::Document& document)
+Vector<CollectedStyleSheetResourceContext> collect_style_sheet_resource_contexts(DOM::Document& document, String const& document_api_base_url)
 {
-    Vector<CollectedStyleSheetResourceContext> contexts;
-    Function<void(StyleSheetState&)> collect = [&](StyleSheetState& sheet) { collect_style_sheet_resource_context(sheet, contexts); };
+    StyleSheetResourceContextCollection collection { .document = document, .document_api_base_url = document_api_base_url };
+    Function<void(StyleSheetState&)> collect = [&](StyleSheetState& sheet) { collect_style_sheet_resource_context(sheet, collection); };
     for (auto origin : { CascadeOrigin::UserAgent, CascadeOrigin::User, CascadeOrigin::Author })
         document.style_scope().for_each_stylesheet(origin, collect);
     document.for_each_shadow_root([&](DOM::ShadowRoot& shadow_root) {
         shadow_root.style_scope().for_each_stylesheet(CascadeOrigin::Author, collect);
     });
-    return contexts;
+    return move(collection.contexts);
 }
 
 }
@@ -1165,7 +1179,6 @@ void StyleEngine::lend_style_transaction_inputs(RecordedInputGoesTo recorded_inp
     StyleEngineFFI::FfiDocumentStyleComputationInputs computation_inputs {};
     // Lent to the engine for the call below, which copies them.
     String document_base_url;
-    Vector<CollectedStyleSheetResourceContext> collected_resource_contexts;
     Vector<StyleEngineFFI::FfiStyleSheetResourceContextEntry> resource_contexts;
     if (m_style_computer) {
         auto const viewport_rect = m_style_computer->viewport_rect_for_style_environment();
@@ -1200,8 +1213,18 @@ void StyleEngine::lend_style_transaction_inputs(RecordedInputGoesTo recorded_inp
         auto const& root_font_metrics = m_style_computer->root_element_font_metrics();
         auto const& initial_font = m_style_computer->document().font_computer().initial_font();
         Length::FontMetrics const initial_font_metrics { CSSPixels { initial_font.pixel_size() }, initial_font.pixel_metrics(), InitialValues::line_height() };
-        document_base_url = m_style_computer->document().serialized_base_url();
-        collected_resource_contexts = collect_style_sheet_resource_contexts(m_style_computer->document());
+        document_base_url = document.serialized_base_url();
+        auto document_api_base_url = HTML::relevant_settings_object(document).api_base_url().to_string();
+        if (!m_style_sheet_resource_contexts.has_value()
+            || m_style_sheet_resource_contexts->style_sheet_set_generation != document.style_sheet_set_generation()
+            || m_style_sheet_resource_contexts->document_api_base_url != document_api_base_url) {
+            m_style_sheet_resource_contexts = StyleSheetResourceContexts {
+                .contexts = collect_style_sheet_resource_contexts(document, document_api_base_url),
+                .style_sheet_set_generation = document.style_sheet_set_generation(),
+                .document_api_base_url = move(document_api_base_url),
+            };
+        }
+        auto const& collected_resource_contexts = m_style_sheet_resource_contexts->contexts;
         resource_contexts.ensure_capacity(collected_resource_contexts.size());
         for (auto const& context : collected_resource_contexts) {
             resource_contexts.unchecked_append({

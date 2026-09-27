@@ -9537,11 +9537,13 @@ Optional<Utf16String> Document::get_style_sheet_source(CSS::StyleSheetIdentifier
 void Document::register_shadow_root(Badge<DOM::ShadowRoot>, DOM::ShadowRoot& shadow_root)
 {
     m_shadow_roots.append(shadow_root);
+    note_style_sheet_set_change();
 }
 
 void Document::unregister_shadow_root(Badge<DOM::ShadowRoot>, DOM::ShadowRoot& shadow_root)
 {
     m_shadow_roots.remove(shadow_root);
+    note_style_sheet_set_change();
     // The style computation resolves an animation's keyframes from what each scope published, by
     // pointer. This scope is leaving the document, so it gives up what it published before the
     // keyframe sets it named can go away with it.

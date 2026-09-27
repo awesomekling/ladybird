@@ -388,6 +388,7 @@ void StyleScope::populate_rule_cache(StyleRuleCache& rule_cache)
 
 void StyleScope::invalidate_style_cache()
 {
+    document().note_style_sheet_set_change();
     invalidate_counter_style_cache();
     m_style_cache = nullptr;
     m_sheetless_shadow_root_style_cache = nullptr;
