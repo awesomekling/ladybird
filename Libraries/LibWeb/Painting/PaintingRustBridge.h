@@ -88,7 +88,7 @@ WEB_API Compositor::PublishedDisplayList publish_rust_display_list_recording(Pen
 
 // Like publish_rust_display_list_recording(), from the presentation stage of the frame in flight: from the recording's
 // ticket, without reaching the arena, if the recording was submitted with one, or else from the arena the frame owns.
-WEB_API Compositor::PublishedDisplayList publish_rust_display_list_recording_in_frame(PendingDisplayListRecording&, void const* recording_ticket, Compositing::DisplayList* paint_command_cache_source, Compositing::DisplayListResourceSet const& paint_command_cache_source_resources, Compositor::PresentationSource&);
+WEB_API Optional<Compositor::PublishedDisplayList> publish_rust_display_list_recording_in_frame(PendingDisplayListRecording&, void const* recording_ticket, Compositing::DisplayList* paint_command_cache_source, Compositing::DisplayListResourceSet const& paint_command_cache_source_resources, Compositor::PresentationSource&);
 // Takes the trace of the document's last recording, if one was asked for.
 WEB_API void take_recording_trace_if_pending(DOM::Document&);
 

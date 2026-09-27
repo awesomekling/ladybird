@@ -6940,6 +6940,8 @@ static void present_from_frame_in_flight(void* context)
     Optional<Compositor::PublishedDisplayList> published;
     if (presentation.recording) {
         published = Painting::publish_rust_display_list_recording_in_frame(*presentation.recording, presentation.recording_ticket, presentation.paint_command_cache_source.ptr(), presentation.inputs.paint_command_cache_source_resources, presentation.source);
+        if (!published.has_value())
+            return;
         if (published->becomes_paint_command_cache_source)
             presentation.inputs.paint_command_cache_source_resources = published->command_resources;
         presentation.published = published;
