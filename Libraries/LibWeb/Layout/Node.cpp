@@ -623,7 +623,7 @@ void NodeWithStyle::apply_style(Row const& row, CSS::StyleRecordID style_record_
     }
 
     // What apply_style() does to the row, with no shell to keep a mirror of it. A shell made later is made from the row.
-    auto* old_image_observers = RustFFI::layout_arena_install_row_style(row.arena_handle(), row.slot(), style_record_identity.value(), style_payloads);
+    auto* old_image_observers = RustFFI::layout_arena_install_row_style(row.arena_handle(), row.slot(), style_record_identity.value());
     did_update_row_style_record(document, dom_node, style_payloads);
     // What attach_style_resources() does for a style that holds no images.
     delete static_cast<ImageObserverSlots*>(old_image_observers);
@@ -909,7 +909,7 @@ void NodeWithStyle::set_style_record_identity(Row const& row, CSS::StyleRecordID
             || new_record_view.animation_overlay_identity != 0
             || CSS::ComputedValues::layout_affecting_group_payloads_differ(old_record_view.payloads, new_record_view.payloads);
     }
-    RustFFI::layout_arena_replace_row_style_record(arena, slot, style_record_identity.value(), style_payloads, changes_layout_affecting_style);
+    RustFFI::layout_arena_replace_row_style_record(arena, slot, style_record_identity.value(), changes_layout_affecting_style);
     did_update_row_style_record(document, dom_node, style_payloads);
 }
 
@@ -951,7 +951,7 @@ void NodeWithStyle::publish_style_record_to_node_data()
     auto const* payloads = document().style_computer().style_engine().held_style_record_payloads(m_style_record_identity);
     VERIFY(payloads);
     m_style_payloads = payloads;
-    RustFFI::layout_arena_set_node_style(arena_handle(), slot_id(this), m_style_record_identity.value(), payloads);
+    RustFFI::layout_arena_set_node_style(arena_handle(), slot_id(this), m_style_record_identity.value());
     did_update_style_record();
 }
 

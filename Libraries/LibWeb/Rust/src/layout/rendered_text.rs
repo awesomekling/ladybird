@@ -694,7 +694,7 @@ mod tests {
         arena.set_text_content(node, text);
         assert!(!arena.text_content_needs_sync(node));
 
-        arena.set_node_style(parent, 1, std::ptr::null());
+        arena.set_node_style(parent, 1);
         let pending = arena.pending_text_nodes_for_content_sync();
         assert_eq!(pending, [node]);
         assert!(arena.text_content_needs_sync(node));

@@ -244,11 +244,6 @@ public:
     // pointer of its own.
     static void change_arena(DOM::Document&, Function<void(Layout::NodeArena&)>);
 
-    // Has the style engine of `document` reclaim no style record until the frame in flight has been taken in. A
-    // recording in flight reads the records its published frame names, which the document goes on to release beside
-    // it.
-    void hold_style_records_for_frame(DOM::Document&);
-
     EventLoop& event_loop() { return m_event_loop; }
 
     void visit_edges(JS::Cell::Visitor&);
@@ -354,7 +349,6 @@ private:
 
     // In the order the changes were made, which is the order the arena takes them in.
     Vector<GC::Ref<GC::Function<void()>>> m_deferred_arena_changes;
-    Vector<GC::Ref<DOM::Document>> m_documents_holding_style_records;
 };
 
 // LIBWEB_RENDER_CLOCK_FRAMES: A read of render state that script makes. Whatever it reaches may take the arenas of leased

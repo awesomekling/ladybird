@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-use super::tree_shape::ShapeCell;
+use super::tree_shape::{ShapeCell, StyleCell};
 use crate::layout::CssPixels;
 use std::cell::Cell;
 use std::ffi::c_void;
@@ -216,8 +216,8 @@ pub struct FfiNodeConstructionFacts {
     pub style_node: u32,
 }
 
-/// A node's data. The fields a [`PaintNode`] copies are [`ShapeCell`]s, which only the arena
-/// writes (see [`super::tree_shape`]).
+/// A node's data. The fields a [`PaintNode`] copies are [`ShapeCell`]s, and its style is a
+/// [`StyleCell`]; only the arena writes them (see [`super::tree_shape`]).
 #[repr(C)]
 pub(crate) struct NodeData {
     pub parent: ShapeCell<NodeSlotId>,
@@ -242,7 +242,7 @@ pub(crate) struct NodeData {
     pub table_row_span: Cell<u16>,
     pub dom_paint_facts: ShapeCell<u8>,
     pub ancestor_facts: Cell<u8>,
-    pub style: ShapeCell<StylePayloadsRef>,
+    pub style: StyleCell,
     pub shell: Cell<Option<ShellId>>,
 }
 
@@ -259,7 +259,6 @@ pub(crate) struct PaintNode {
     pub(crate) parent: NodeSlotId,
     pub(crate) first_child: NodeSlotId,
     pub(crate) next_sibling: NodeSlotId,
-    pub(crate) style: StylePayloadsRef,
 }
 
 impl Default for PaintNode {
@@ -274,7 +273,6 @@ impl Default for PaintNode {
             parent: NodeSlotId::INVALID,
             first_child: NodeSlotId::INVALID,
             next_sibling: NodeSlotId::INVALID,
-            style: StylePayloadsRef::null(),
         }
     }
 }
@@ -291,7 +289,6 @@ impl PaintNode {
             parent: data.parent.get(),
             first_child: data.first_child.get(),
             next_sibling: data.next_sibling.get(),
-            style: data.style.get(),
         }
     }
 }
@@ -315,7 +312,7 @@ impl Default for NodeData {
             dom_paint_facts: ShapeCell::new(0),
             ancestor_facts: Cell::new(0),
             fragment_cache_epoch: Cell::new(0),
-            style: ShapeCell::new(StylePayloadsRef::null()),
+            style: StyleCell::new(),
             shell: Cell::new(None),
         }
     }
