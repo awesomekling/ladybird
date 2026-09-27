@@ -126,14 +126,22 @@ impl StyleEngine {
         let mut moved = std::mem::take(&mut self.retained.anchor_names.unpublished);
         moved.sort_unstable();
         moved.dedup();
+        // The tree holds still while the names are published, so a parent's children are numbered once for all of them.
+        let mut child_positions = HashMap::default();
         for key in moved {
-            self.publish_anchor_name(arena, key);
+            self.publish_anchor_name(arena, key, &mut child_positions);
         }
     }
 
     /// Publish the elements registered under a name in a tree scope to the arena, in tree order,
-    /// named by the scope's shadow host, or by nothing for the document tree.
-    fn publish_anchor_name(&self, arena: &LayoutNodeArena, (tree_scope, name): (TreeScopeID, usize)) {
+    /// named by the scope's shadow host, or by nothing for the document tree. `child_positions` holds
+    /// each element's position among its siblings, for the parents numbered so far.
+    fn publish_anchor_name(
+        &self,
+        arena: &LayoutNodeArena,
+        (tree_scope, name): (TreeScopeID, usize),
+        child_positions: &mut HashMap<StyleNodeID, u32>,
+    ) {
         let scope_host = if tree_scope == TreeScopeID::DOCUMENT {
             0
         } else {
@@ -155,9 +163,7 @@ impl StyleEngine {
             .get(&(tree_scope, name))
             .map_or(&[][..], Vec::as_slice);
         // An element's place in tree order is its root and the position among its siblings of each
-        // ancestor on the way down to it. A parent's children are numbered once for all of them. A
-        // retired element has no place any more and goes last.
-        let mut child_positions: HashMap<StyleNodeID, u32> = HashMap::default();
+        // ancestor on the way down to it. A retired element has no place any more and goes last.
         let mut keyed: Vec<(Vec<u32>, StyleNodeID)> = Vec::with_capacity(elements.len());
         for &element in elements {
             if !tree.is_live(element) {
