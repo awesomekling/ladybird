@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+use super::layout_node_arena::LayoutUpdateMarksHandle;
 use super::node_data::NodeSlotId;
 use super::text_transform::{TextRenderingOptions, may_require_bidi_processing, render_text};
 use super::{ComputedValuesView, LayoutNodeArena};
@@ -114,7 +115,11 @@ fn transform_uses_locale(transform: u8) -> bool {
 /// The arena and root must be live on the document thread. This only enrolls
 /// text; source views are requested after DOM language invalidation completes.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_enroll_text_after_language_change(arena: *mut c_void, root: NodeSlotId) -> bool {
+pub unsafe extern "C" fn layout_arena_enroll_text_after_language_change(
+    marks: LayoutUpdateMarksHandle,
+    root: NodeSlotId,
+) -> bool {
+    let arena = marks.arena;
     // SAFETY: The DOM invalidator lends the live arena for this traversal.
     let arena = unsafe { LayoutNodeArena::from_handle(arena) };
     let mut changed = false;
@@ -431,7 +436,8 @@ fn sync_text_content(arena: &mut LayoutNodeArena, id: NodeSlotId) {
 ///
 /// The arena must be exclusively available and `id` must name a live text node.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_invalidate_text_content(arena: *mut c_void, id: NodeSlotId) {
+pub unsafe extern "C" fn layout_arena_invalidate_text_content(marks: LayoutUpdateMarksHandle, id: NodeSlotId) {
+    let arena = marks.arena;
     // SAFETY: DOM mutation publishes invalidation outside layout and painting.
     unsafe { LayoutNodeArena::from_handle_mut(arena) }.invalidate_text_content(id);
 }

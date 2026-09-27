@@ -123,13 +123,6 @@ static bool image_element_dimensions_may_depend_on_intrinsic_size(Layout::Box co
     return false;
 }
 
-static void reset_intrinsic_size_caches_after_image_data_change(Layout::Box& image_box)
-{
-    image_box.bump_fragment_cache_epoch_of_self_and_ancestors();
-    Layout::RustFFI::layout_arena_reset_cached_intrinsic_sizes_of_self_and_ancestors(
-        image_box.arena_handle(), Layout::Node::slot_id(&image_box));
-}
-
 void HTMLImageElement::set_needs_layout_update_or_repaint_after_image_data_change(DOM::SetNeedsLayoutReason reason)
 {
     CSS::record_element_replaced_content_input(*this);
@@ -165,7 +158,7 @@ void HTMLImageElement::update_layout_after_image_data_change(DOM::SetNeedsLayout
         return;
     }
 
-    reset_intrinsic_size_caches_after_image_data_change(*image_box);
+    document().render_inputs_for_write().reset_intrinsic_size_caches_of_self_and_ancestors(*image_box);
     image_provider_contents_changed();
 }
 

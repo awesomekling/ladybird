@@ -5,11 +5,9 @@
  */
 
 #include <AK/Assertions.h>
-#include <AK/Debug.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Node.h>
 #include <LibWeb/DOM/NodeIdentity.h>
-#include <LibWeb/HTML/LocalNavigable.h>
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/Layout/NodeArena.h>
 #include <LibWeb/Painting/PaintingRustBridge.h>
@@ -128,19 +126,6 @@ void const* Row::style_payloads() const
 CSS::Display Row::display() const
 {
     return CSS::display_from_ffi_display(NodeWithStyle::style_group_of<CSS::ComputedValues::BoxValues>(style_payloads()).display);
-}
-
-void Row::set_needs_layout_update(DOM::SetNeedsLayoutReason reason, LayoutUpdatePropagation propagation) const
-{
-    if constexpr (UPDATE_LAYOUT_DEBUG) {
-        // NOTE: We check some conditions here to avoid debug spam in documents that don't do layout.
-        if (!has_flag(RustFFI::NodeFlag::NeedsLayoutUpdate)) {
-            auto navigable = document().navigable();
-            if (navigable && navigable->active_document() == GC::Ptr { &document() })
-                dbgln_if(UPDATE_LAYOUT_DEBUG, "NEED LAYOUT {}", DOM::to_string(reason));
-        }
-    }
-    RustFFI::layout_arena_set_needs_layout_update(m_arena->handle(), m_slot, propagation == LayoutUpdatePropagation::ThroughAncestors);
 }
 
 u64 NodeArena::table_cell_measurement_cache_miss_count() const

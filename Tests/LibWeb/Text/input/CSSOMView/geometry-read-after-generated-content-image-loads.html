@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<style>
+    #generated {
+        display: inline-block;
+    }
+</style>
+<script src="../include.js"></script>
+<span id="generated"></span>
+<script>
+    asyncTest(async done => {
+        // Once the page has loaded and is hidden, no parser step and no rendering update writes the document, so only
+        // the image load does between the reads.
+        await new Promise(resolve => window.addEventListener("load", resolve));
+        internals.setSystemVisibilityState("hidden");
+
+        const generated = document.getElementById("generated");
+        const size = () => `${generated.offsetWidth}x${generated.offsetHeight} ${generated.getBoundingClientRect().width}x${generated.getBoundingClientRect().height}`;
+        // An image nothing asked for yet, so it is still loading when the ::before box is built for it.
+        const url = `../../../Assets/120.png?${Date.now()}`;
+        const style = document.createElement("style");
+        style.textContent = `#generated::before { content: url(${url}); }`;
+        document.head.appendChild(style);
+        // The read builds the ::before image box, which starts the image loading, and leaves layout up to date.
+        const whileLoading = size();
+
+        // An image of the same URL shares the ::before image's request, so its load event follows the load that lays
+        // the ::before image box out at its size. The read then has to see that size.
+        const image = new Image();
+        image.onload = () => {
+            // Printing changes the document, so it waits until the read is over.
+            const afterLoad = size();
+            println(`while loading: ${whileLoading}`);
+            println(`after load: ${afterLoad}`);
+            internals.setSystemVisibilityState("visible");
+            done();
+        };
+        image.src = url;
+    });
+</script>

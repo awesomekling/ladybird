@@ -94,12 +94,12 @@ void SyntheticPseudoElement::set_layout_node(Layout::NodeWithStyle* value)
     auto* bound_row = unsafe_layout_node();
     if (bound_row && bound_row != value) {
         bound_row->pin_style_record_for_detachment();
-        Layout::RustFFI::layout_arena_set_node_flag(bound_row->arena_handle(), Layout::Node::slot_id(bound_row), Layout::RustFFI::NodeFlag::IsPseudoElementPrincipalBox, false);
+        Layout::RustFFI::layout_arena_set_node_flag(bound_row->arena_handle(), Layout::Node::slot_id(bound_row), Layout::RustFFI::HostNodeFlag::IsPseudoElementPrincipalBox, false);
         Layout::RustFFI::layout_arena_unbind_row(bound_row->arena_handle(), Layout::Node::slot_id(bound_row));
     }
     // The box becomes the pseudo-element's box here, which is when it starts holding its scroll offset.
     if (value) {
-        Layout::RustFFI::layout_arena_set_node_flag(value->arena_handle(), Layout::Node::slot_id(value), Layout::RustFFI::NodeFlag::IsPseudoElementPrincipalBox, true);
+        Layout::RustFFI::layout_arena_set_node_flag(value->arena_handle(), Layout::Node::slot_id(value), Layout::RustFFI::HostNodeFlag::IsPseudoElementPrincipalBox, true);
         Layout::RustFFI::layout_arena_bind_row(value->arena_handle(), Layout::Node::slot_id(value));
         value->publish_scroll_offset();
     }

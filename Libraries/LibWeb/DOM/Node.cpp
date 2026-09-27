@@ -1544,8 +1544,8 @@ void Node::update_layout_tree_for_removal(Node& parent, LayoutSubtreeRemoval rem
     }
 
     // Takes the removed node's box out of the parent's in place if the layout tree lets it go, and reports whether it did.
-    auto detach_layout_subtree_for_removal = [](Layout::NodeArena& arena, Layout::RustFFI::FfiRemovedBoxPlace const& place, Node& parent) {
-        auto detach = Layout::RustFFI::rust_detach_removed_box_in_place(arena.handle(), &place);
+    auto detach_layout_subtree_for_removal = [](Layout::RustFFI::FfiRemovedBoxPlace const& place, Node& parent) {
+        auto detach = parent.document().render_inputs_for_write().detach_removed_box_in_place(place);
         if (detach == Layout::RustFFI::FfiRemovedBoxDetach::NotAllowed)
             return false;
         if (detach == Layout::RustFFI::FfiRemovedBoxDetach::DetachedAbsposOfParent) {
@@ -1574,16 +1574,16 @@ void Node::update_layout_tree_for_removal(Node& parent, LayoutSubtreeRemoval rem
             // needs a layout update either way, which the layout update that takes the frame in makes.
             auto style_node = style_node_of(*this);
             parent.set_needs_layout_update(SetNeedsLayoutReason::LayoutTreeUpdate);
-            HTML::FrameScheduler::change_arena(document(), [detach_layout_subtree_for_removal, style_node, parent = GC::make_root(parent), previous_sibling = GC::make_root(previous_sibling()), next_sibling = GC::make_root(next_sibling())](Layout::NodeArena& arena) {
+            HTML::FrameScheduler::change_arena(document(), [detach_layout_subtree_for_removal, style_node, parent = GC::make_root(parent), previous_sibling = GC::make_root(previous_sibling()), next_sibling = GC::make_root(next_sibling())](Layout::NodeArena&) {
                 auto place = removed_box_place(style_node, *parent, previous_sibling.ptr(), next_sibling.ptr(), Layout::RustFFI::FfiDetachedBoxLevel::FromStyle);
-                if (!detach_layout_subtree_for_removal(arena, place, *parent))
+                if (!detach_layout_subtree_for_removal(place, *parent))
                     parent->set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::NodeRemove);
             });
             return;
         }
-        if (auto* arena = document().layout_node_arena_if_created()) {
+        if (document().layout_node_arena_if_created()) {
             auto place = removed_box_place(style_node_of(*this), parent, previous_sibling(), next_sibling(), Layout::RustFFI::FfiDetachedBoxLevel::FromStyle);
-            if (detach_layout_subtree_for_removal(*arena, place, parent))
+            if (detach_layout_subtree_for_removal(place, parent))
                 return;
         }
     }
@@ -2745,12 +2745,12 @@ void Node::apply_layout_tree_update_mark(SetNeedsLayoutTreeUpdateReason reason)
             is_structural_boundary_self_rebuild_reason(reason));
 
         if (classification.marks_partial_relayout_boundary_self_only) {
-            row.set_needs_layout_update(SetNeedsLayoutReason::LayoutTreeUpdate, Layout::LayoutUpdatePropagation::BoundarySelfOnly);
+            document().render_inputs_for_write().set_needs_layout_update(row, SetNeedsLayoutReason::LayoutTreeUpdate, Layout::LayoutUpdatePropagation::BoundarySelfOnly);
         } else if (reason == SetNeedsLayoutTreeUpdateReason::NodeInsertBefore) {
             // What an insertion invalidates depends on the boxes it attaches, which only the layout tree build knows.
-            Layout::RustFFI::layout_arena_defer_child_list_insertion_layout_update(row.arena_handle(), row.slot());
+            document().render_inputs_for_write().defer_child_list_insertion_layout_update(row);
         } else {
-            row.set_needs_layout_update(SetNeedsLayoutReason::LayoutTreeUpdate, Layout::LayoutUpdatePropagation::ThroughAncestors);
+            document().render_inputs_for_write().set_needs_layout_update(row, SetNeedsLayoutReason::LayoutTreeUpdate, Layout::LayoutUpdatePropagation::ThroughAncestors);
         }
 
         // FIXME: Escalating a rebuild past anonymous parents is not optimal, and we should

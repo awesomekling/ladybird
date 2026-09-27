@@ -64,7 +64,6 @@ public:
     void const* style_payloads() const;
     // The display of the style the row holds.
     CSS::Display display() const;
-    void set_needs_layout_update(DOM::SetNeedsLayoutReason, LayoutUpdatePropagation) const;
 
 private:
     NodeArena const* m_arena { nullptr };

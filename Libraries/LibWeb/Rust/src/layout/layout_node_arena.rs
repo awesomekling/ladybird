@@ -33,8 +33,8 @@ use crate::layout::ComputedValuesView;
 use crate::layout::CssPixels;
 use crate::layout::FfiReplacedContentFacts;
 use crate::layout::node_data::{
-    AncestorFact, DomPaintFact, FfiNodeConstructionFacts, FfiNodeLink, FfiStylePayloads, MAX_NODE_SLOT_COUNT, NodeData,
-    NodeFlag, NodeKind, NodeSlotId, ShellId,
+    AncestorFact, DomPaintFact, FfiNodeConstructionFacts, FfiNodeLink, FfiStylePayloads, HostNodeFlag,
+    MAX_NODE_SLOT_COUNT, NodeData, NodeFlag, NodeKind, NodeSlotId, ShellId,
 };
 use crate::layout::used_values::FfiCssPixelPoint;
 use std::cell::Cell;
@@ -6683,9 +6683,10 @@ pub unsafe extern "C" fn layout_arena_node_generated_for(arena: *mut c_void, id:
 /// in this arena.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_bump_fragment_cache_epoch_of_self_and_ancestors(
-    arena: *mut c_void,
+    marks: LayoutUpdateMarksHandle,
     node: NodeSlotId,
 ) {
+    let arena = marks.arena;
     // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
     unsafe { LayoutNodeArena::from_handle(arena) }.bump_fragment_cache_epoch_of_self_and_ancestors(node);
 }
@@ -6778,11 +6779,30 @@ pub unsafe extern "C" fn layout_arena_pin_bound_box_style_record_for_detachment(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_set_node_flag(arena: *mut c_void, id: NodeSlotId, flag: NodeFlag, value: bool) {
+pub unsafe extern "C" fn layout_arena_set_node_flag(
+    arena: *mut c_void,
+    id: NodeSlotId,
+    flag: HostNodeFlag,
+    value: bool,
+) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: The C++ wrapper keeps the arena alive for this call and
     // serializes all access on the document thread.
-    unsafe { LayoutNodeArena::from_handle(arena) }.set_node_flag(id, flag, value);
+    unsafe { LayoutNodeArena::from_handle(arena) }.set_node_flag(id, flag.into(), value);
+}
+
+/// Mark the node `id` names to have its own geometry updated by the next layout, without laying out
+/// its subtree again.
+///
+/// # Safety
+///
+/// The arena must remain valid for the duration of the call, and `id` must name a live node in it.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_set_needs_own_geometry_update(marks: LayoutUpdateMarksHandle, id: NodeSlotId) {
+    let arena = marks.arena;
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    // SAFETY: As above.
+    unsafe { LayoutNodeArena::from_handle(arena) }.set_node_flag(id, NodeFlag::NeedsOwnGeometryUpdate, true);
 }
 
 /// What the door of one main-side writer cost: how often it was passed, and how often and for how
@@ -7129,10 +7149,11 @@ pub unsafe extern "C" fn layout_arena_set_owned_image_provider(
 /// image's provider.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_set_owned_image_natural_size(
-    arena: *mut c_void,
+    marks: LayoutUpdateMarksHandle,
     slot: NodeSlotId,
     facts: FfiReplacedContentFacts,
 ) {
+    let arena = marks.arena;
     assert!(!arena.is_null(), "layout node arena handle is null");
     let has_aspect_ratio = facts.auto_content_aspect_ratio_denominator != CssPixels::default();
     let natural_size = NaturalSize {
@@ -7512,6 +7533,17 @@ pub unsafe extern "C" fn layout_arena_layout_tree_update_reuse_reasons(arena: *m
 #[repr(C)]
 pub struct LayoutTreeUpdateMarksHandle {
     arena: *mut c_void,
+}
+
+/// What C++ holds to write what the next layout of one document's arena lays out again from: the
+/// layout update marks of its nodes, the intrinsic size and fragment caches those marks reset, and the
+/// natural sizes of the images its boxes own. The arena, as only the document's render inputs hand it
+/// out (DOM::RenderInputs), which drop the query snapshot the document published first: a geometry
+/// read the snapshot answers would not see the relayout any of these writes asks for. The arena's own
+/// handle does not convert to it.
+#[repr(C)]
+pub struct LayoutUpdateMarksHandle {
+    pub(super) arena: *mut c_void,
 }
 
 /// Fold a layout tree update mark into the one the node `style_node` names holds, answering

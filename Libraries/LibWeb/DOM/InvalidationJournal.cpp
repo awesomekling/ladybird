@@ -436,7 +436,7 @@ static void publish_table_spans(Element& element)
     Layout::publish_table_spans(element);
     if (auto* layout_node = element.unsafe_layout_node()) {
         if (layout_node->synchronize_table_span_data())
-            layout_node->set_needs_layout_update(SetNeedsLayoutReason::TableSpanAttributeChange);
+            element.document().render_inputs_for_write().set_needs_layout_update(*layout_node, SetNeedsLayoutReason::TableSpanAttributeChange);
     }
 }
 
@@ -463,7 +463,7 @@ static void publish_text_data(Text& text, bool whitespace_state_changed)
         text_layout_node->invalidate_text_for_rendering();
 
         // We also need to relayout.
-        text_layout_node->set_needs_layout_update(SetNeedsLayoutReason::CharacterDataReplaceData);
+        text.document().render_inputs_for_write().set_needs_layout_update(*text_layout_node, SetNeedsLayoutReason::CharacterDataReplaceData);
 
         if (whitespace_state_changed)
             text.set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::CharacterDataReplaceData);
@@ -601,7 +601,7 @@ void InvalidationJournal::drain()
             if (!row)
                 continue;
             if (entry.needs_layout_update)
-                row.set_needs_layout_update(entry.layout_reason, entry.layout_propagation);
+                row.document().render_inputs_for_write().set_needs_layout_update(row, entry.layout_reason, entry.layout_propagation);
             if (entry.has_dom_paint_facts) {
                 auto changed = Layout::RustFFI::layout_arena_set_node_dom_paint_facts(row.arena_handle(), row.slot(), entry.dom_paint_facts);
                 if (changed && node)
