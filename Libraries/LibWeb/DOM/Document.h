@@ -1738,6 +1738,7 @@ private:
 
     void process_pending_list_item_renumbers();
     void apply_layout_commit_effects(Layout::RustFFI::FfiLayoutCommitEffects const&);
+    void take_in_layout_frame_effects(Layout::RustFFI::FfiLayoutFrameEffects const&);
 
     void run_unloading_cleanup_steps();
 

@@ -51,7 +51,6 @@ pub struct FfiLayoutUpdateHostCallbacks {
     pub process_pending_list_item_renumbers: unsafe extern "C" fn(*mut c_void),
     pub process_pending_top_layer_layout_changes: unsafe extern "C" fn(*mut c_void),
     pub document_facts: unsafe extern "C" fn(*mut c_void) -> FfiLayoutUpdateDocumentFacts,
-    pub prepare_for_rendering: unsafe extern "C" fn(*mut c_void),
     /// Seals what the recording the flight about to be submitted makes after its layout reads, if
     /// the document may be recorded that way (see `layout_arena_seal_flight_paint`). The flag says
     /// the flight runs the style of the layout's first round too, which the document's pending
@@ -64,30 +63,12 @@ pub struct FfiLayoutUpdateHostCallbacks {
     /// receives with the second as its context. The snapshot is valid for that call.
     pub read_selection:
         unsafe extern "C" fn(*mut c_void, *mut c_void, unsafe extern "C" fn(*mut c_void, *const FfiSelectionSnapshot)),
-    /// Applies what the frame's layout commits leave for the document once the frame is over.
-    pub apply_layout_commit_effects: unsafe extern "C" fn(*mut c_void, *const FfiLayoutCommitEffects),
-    pub note_full_layouts_performed: unsafe extern "C" fn(*mut c_void, u64),
-    pub record_stabilization_bound_failure: unsafe extern "C" fn(*mut c_void),
-    /// Attaches the image resources a box's style asks for, which a tree build in the frame owed
-    /// it. Principal and pseudo-element boxes both go through this; nothing about it depends on
-    /// which the box is. The flag says the box replaces its element's contents with a single
-    /// image, which it owns the provider for.
-    pub attach_style_resources: unsafe extern "C" fn(*mut c_void, NodeSlotId, bool),
-    /// Gives an image a pseudo-element's generated content names the provider it renders, and
-    /// attaches its box's style resources. The arguments are the image's row, the element the
-    /// pseudo-element is generated for, the pseudo-element, the content item, and the
-    /// pseudo-element's own box.
-    pub attach_generated_image:
-        unsafe extern "C" fn(*mut c_void, NodeSlotId, u32, FfiPseudoElement, FfiGeneratedContentItem, NodeSlotId),
-    /// Ends the layout update on the document side. The document thread calls it as it takes in
-    /// the frame's end, so the frame is over for the document once the update returns.
-    pub finish_update_layout: unsafe extern "C" fn(*mut c_void, FfiLayoutUpdateEnd),
+    /// Takes in what the frame left for the document, and ends the layout update on the document
+    /// side. The document thread calls it as it takes in the frame's end, so the frame is over for
+    /// the document once the update returns. The effects are valid for the call.
+    pub take_in_frame_effects: unsafe extern "C" fn(*mut c_void, *const FfiLayoutFrameEffects),
     /// Installs what the style pass a flight ran published, and runs the rest of the style update.
     pub finish_submitted_style_update: unsafe extern "C" fn(*mut c_void),
-    /// Settles the repaint the install of a style batch a flight applied owes, as the flight's frame
-    /// ends: the flight's recording is that repaint if it stands (the flag), and otherwise the
-    /// document paints again.
-    pub settle_flight_style_repaint: unsafe extern "C" fn(*mut c_void, bool),
 }
 
 /// Where a layout update ends.
@@ -164,6 +145,82 @@ pub struct FfiClampedScrollOffset {
     pub offset: FfiCssPixelPoint,
 }
 
+/// An image resource a tree build in the frame owes a row it stamped, which the document attaches once
+/// the frame is over, if the row is still live then.
+#[derive(Clone, Copy)]
+#[repr(C, u8)]
+// NB: The fields are read by C++ through the FFI.
+#[allow(dead_code)]
+pub enum FfiOwedImageResources {
+    /// The resources the row's style asks for. Principal and pseudo-element boxes both owe these;
+    /// nothing about them depends on which the box is. The flag says the box replaces its
+    /// element's contents with a single image, which it owns the provider for.
+    StyleResources {
+        row: NodeSlotId,
+        owns_content_replacement_image: bool,
+    },
+    /// The provider an image a pseudo-element's generated content names renders, and its box's style
+    /// resources: the image's row, the element the pseudo-element is generated for, the
+    /// pseudo-element, the content item, and the pseudo-element's own box.
+    GeneratedImage {
+        row: NodeSlotId,
+        generator: u32,
+        pseudo_element: FfiPseudoElement,
+        item: FfiGeneratedContentItem,
+        pseudo_element_box: NodeSlotId,
+    },
+}
+
+impl FfiOwedImageResources {
+    fn new(row: NodeSlotId, owed: OwedImageResources) -> Self {
+        match owed {
+            OwedImageResources::StyleResources {
+                owns_content_replacement_image,
+            } => Self::StyleResources {
+                row,
+                owns_content_replacement_image,
+            },
+            OwedImageResources::GeneratedImage {
+                generator,
+                pseudo_element,
+                item,
+                pseudo_element_box,
+            } => Self::GeneratedImage {
+                row,
+                generator: generator.raw(),
+                pseudo_element,
+                item,
+                pseudo_element_box,
+            },
+        }
+    }
+}
+
+/// What a layout frame leaves for the document once it is over. The document takes it in as one,
+/// in the order of the fields, and then ends the layout update on its side where `end` says.
+#[repr(C)]
+pub struct FfiLayoutFrameEffects {
+    /// For a frame whose flight ran the style of its first round: the install owed the flight the
+    /// repaint of the style batch, which the flight's recording is if it stands
+    /// (`flight_style_repaint_recorded`), and otherwise the document paints again.
+    pub settles_flight_style_repaint: bool,
+    pub flight_style_repaint_recorded: bool,
+    /// The image resources the frame's tree builds owe the rows they stamped, in the order the
+    /// builds came to owe them: the images to load and observe, and the providers of the images
+    /// that image boxes show. A later build in the frame can have freed a row it was owed for, so
+    /// the document hands each over through `layout_arena_hand_over_owed_image_resources`, which
+    /// answers whether the row is still live.
+    pub owed_image_resources: *const FfiOwedImageResources,
+    pub owed_image_resources_count: usize,
+    pub full_layouts_performed: u64,
+    /// What the frame's layout commits leave for the document, if one committed.
+    pub commit: FfiLayoutCommitEffects,
+    /// Whether the frame found nothing to lay out, and leaves the rendering preparation to the
+    /// document.
+    pub prepare_for_rendering: bool,
+    pub end: FfiLayoutUpdateEnd,
+}
+
 /// What one layout update was asked for.
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -213,20 +270,12 @@ pub(crate) struct LayoutUpdateHost {
     process_pending_list_item_renumbers: unsafe extern "C" fn(*mut c_void),
     process_pending_top_layer_layout_changes: unsafe extern "C" fn(*mut c_void),
     document_facts: unsafe extern "C" fn(*mut c_void) -> FfiLayoutUpdateDocumentFacts,
-    prepare_for_rendering: unsafe extern "C" fn(*mut c_void),
     seal_flight_paint: unsafe extern "C" fn(*mut c_void, bool),
     prepare_layout_tree_build: unsafe extern "C" fn(*mut c_void) -> u32,
     read_selection:
         unsafe extern "C" fn(*mut c_void, *mut c_void, unsafe extern "C" fn(*mut c_void, *const FfiSelectionSnapshot)),
-    apply_layout_commit_effects: unsafe extern "C" fn(*mut c_void, *const FfiLayoutCommitEffects),
-    note_full_layouts_performed: unsafe extern "C" fn(*mut c_void, u64),
-    record_stabilization_bound_failure: unsafe extern "C" fn(*mut c_void),
-    attach_style_resources: unsafe extern "C" fn(*mut c_void, NodeSlotId, bool),
-    attach_generated_image:
-        unsafe extern "C" fn(*mut c_void, NodeSlotId, u32, FfiPseudoElement, FfiGeneratedContentItem, NodeSlotId),
-    finish_update_layout: unsafe extern "C" fn(*mut c_void, FfiLayoutUpdateEnd),
+    take_in_frame_effects: unsafe extern "C" fn(*mut c_void, *const FfiLayoutFrameEffects),
     finish_submitted_style_update: unsafe extern "C" fn(*mut c_void),
-    settle_flight_style_repaint: unsafe extern "C" fn(*mut c_void, bool),
 }
 
 impl From<FfiLayoutUpdateHostCallbacks> for LayoutUpdateHost {
@@ -237,18 +286,11 @@ impl From<FfiLayoutUpdateHostCallbacks> for LayoutUpdateHost {
             process_pending_list_item_renumbers: host.process_pending_list_item_renumbers,
             process_pending_top_layer_layout_changes: host.process_pending_top_layer_layout_changes,
             document_facts: host.document_facts,
-            prepare_for_rendering: host.prepare_for_rendering,
             seal_flight_paint: host.seal_flight_paint,
             prepare_layout_tree_build: host.prepare_layout_tree_build,
             read_selection: host.read_selection,
-            apply_layout_commit_effects: host.apply_layout_commit_effects,
-            note_full_layouts_performed: host.note_full_layouts_performed,
-            record_stabilization_bound_failure: host.record_stabilization_bound_failure,
-            attach_style_resources: host.attach_style_resources,
-            attach_generated_image: host.attach_generated_image,
-            finish_update_layout: host.finish_update_layout,
+            take_in_frame_effects: host.take_in_frame_effects,
             finish_submitted_style_update: host.finish_submitted_style_update,
-            settle_flight_style_repaint: host.settle_flight_style_repaint,
         }
     }
 }
@@ -263,10 +305,6 @@ impl LayoutUpdateHost {
         unsafe { (self.finish_submitted_style_update)(self.context) }
     }
 
-    fn settle_flight_style_repaint(&self, _: &crate::stage::MainThread, recorded_in_flight: bool) {
-        unsafe { (self.settle_flight_style_repaint)(self.context, recorded_in_flight) }
-    }
-
     fn process_pending_list_item_renumbers(&self, _: &crate::stage::MainThread) {
         unsafe { (self.process_pending_list_item_renumbers)(self.context) }
     }
@@ -277,10 +315,6 @@ impl LayoutUpdateHost {
 
     fn document_facts(&self, _: &crate::stage::MainThread) -> FfiLayoutUpdateDocumentFacts {
         unsafe { (self.document_facts)(self.context) }
-    }
-
-    fn prepare_for_rendering(&self, _: &crate::stage::MainThread) {
-        unsafe { (self.prepare_for_rendering)(self.context) }
     }
 
     fn seal_flight_paint(&self, _: &crate::stage::MainThread, style_runs_in_flight: bool) {
@@ -302,44 +336,8 @@ impl LayoutUpdateHost {
         selection
     }
 
-    fn apply_layout_commit_effects(&self, _: &crate::stage::MainThread, effects: &FfiLayoutCommitEffects) {
-        unsafe { (self.apply_layout_commit_effects)(self.context, effects) }
-    }
-
-    fn note_full_layouts_performed(&self, _: &crate::stage::MainThread, count: u64) {
-        unsafe { (self.note_full_layouts_performed)(self.context, count) }
-    }
-
-    fn record_stabilization_bound_failure(&self, _: &crate::stage::MainThread) {
-        unsafe { (self.record_stabilization_bound_failure)(self.context) }
-    }
-
-    /// Attaches what a tree build in the frame owed `row`, which must be live.
-    fn attach_image_resources(&self, _: &crate::stage::MainThread, row: NodeSlotId, owed: OwedImageResources) {
-        match owed {
-            OwedImageResources::StyleResources {
-                owns_content_replacement_image,
-            } => unsafe { (self.attach_style_resources)(self.context, row, owns_content_replacement_image) },
-            OwedImageResources::GeneratedImage {
-                generator,
-                pseudo_element,
-                item,
-                pseudo_element_box,
-            } => unsafe {
-                (self.attach_generated_image)(
-                    self.context,
-                    row,
-                    generator.raw(),
-                    pseudo_element,
-                    item,
-                    pseudo_element_box,
-                );
-            },
-        }
-    }
-
-    fn finish_update_layout(&self, _: &crate::stage::MainThread, end: FfiLayoutUpdateEnd) {
-        unsafe { (self.finish_update_layout)(self.context, end) }
+    fn take_in_frame_effects(&self, _: &crate::stage::MainThread, effects: &FfiLayoutFrameEffects) {
+        unsafe { (self.take_in_frame_effects)(self.context, effects) }
     }
 }
 
@@ -482,10 +480,14 @@ struct RoundAfterStyle {
     selection: Option<SelectionSnapshot>,
 }
 
-/// What a finished layout frame leaves for the document thread to apply.
+/// What a finished layout frame leaves for the document thread, which takes it in as one once the
+/// frame is over (see [`FfiLayoutFrameEffects`]).
 #[must_use]
 #[derive(Default)]
 struct FrameMessages {
+    /// For a frame whose flight ran the style of its first round: whether the flight's recording is
+    /// the repaint the install of the style batch owes it.
+    flight_style_repaint_recorded: Option<bool>,
     prepare_for_rendering: bool,
     full_layouts_performed: u64,
     stabilization_bound_failed: bool,
@@ -511,24 +513,29 @@ struct FrameMessages {
 }
 
 impl FrameMessages {
-    fn apply(self, main_thread: &crate::stage::MainThread, host: &LayoutUpdateHost, arena: &LayoutNodeArena) {
-        // A later build in the frame can have freed a row it was owed for.
-        for (row, owed) in self.owed_image_resources {
-            if !arena.slot_is_live(row) {
-                continue;
-            }
-            arena.note_owned_provider_handed_over(row);
-            host.attach_image_resources(main_thread, row, owed);
-        }
-        if self.full_layouts_performed > 0 {
-            host.note_full_layouts_performed(main_thread, self.full_layouts_performed);
-        }
-        if self.layout_committed {
-            let boxes = self.boxes_with_auto_content_visibility.as_deref();
-            host.apply_layout_commit_effects(
-                main_thread,
-                &FfiLayoutCommitEffects {
-                    layout_committed: true,
+    /// Hands the document what the frame left for it, and ends the update on the document side where
+    /// `end` says.
+    fn take_in(self, main_thread: &crate::stage::MainThread, host: &LayoutUpdateHost, end: FfiLayoutUpdateEnd) {
+        assert!(
+            !self.stabilization_bound_failed,
+            "the layout update did not stabilize within its exact bound"
+        );
+        let owed_image_resources: Vec<_> = self
+            .owed_image_resources
+            .into_iter()
+            .map(|(row, owed)| FfiOwedImageResources::new(row, owed))
+            .collect();
+        let boxes = self.boxes_with_auto_content_visibility.as_deref();
+        host.take_in_frame_effects(
+            main_thread,
+            &FfiLayoutFrameEffects {
+                settles_flight_style_repaint: self.flight_style_repaint_recorded.is_some(),
+                flight_style_repaint_recorded: self.flight_style_repaint_recorded == Some(true),
+                owed_image_resources: owed_image_resources.as_ptr(),
+                owed_image_resources_count: owed_image_resources.len(),
+                full_layouts_performed: self.full_layouts_performed,
+                commit: FfiLayoutCommitEffects {
+                    layout_committed: self.layout_committed,
                     layout_tree_changed: self.layout_tree_changed,
                     boxes_with_auto_content_visibility_collected: boxes.is_some(),
                     boxes_with_auto_content_visibility: boxes.map_or(std::ptr::null(), <[NodeSlotId]>::as_ptr),
@@ -538,15 +545,10 @@ impl FrameMessages {
                     shown_on_render_side: self.shown_on_render_side,
                     recorded_in_flight: self.recorded_in_flight,
                 },
-            );
-        }
-        if self.stabilization_bound_failed {
-            host.record_stabilization_bound_failure(main_thread);
-            unreachable!("the layout update did not stabilize within its exact bound");
-        }
-        if self.prepare_for_rendering {
-            host.prepare_for_rendering(main_thread);
-        }
+                prepare_for_rendering: self.prepare_for_rendering,
+                end,
+            },
+        );
     }
 }
 
@@ -1003,8 +1005,7 @@ impl LayoutFrame {
             }
             FrameEnd::Over(end) => end,
         };
-        std::mem::take(&mut self.messages).apply(main_thread, &host, arena);
-        host.finish_update_layout(main_thread, end);
+        std::mem::take(&mut self.messages).take_in(main_thread, &host, end);
         true
     }
 
@@ -1872,7 +1873,7 @@ unsafe fn finish_layout_frame(main_thread: &crate::stage::MainThread, mut frame:
     if frame.style_ran_in_flight {
         // SAFETY: As above.
         unsafe { arena(frame.inputs.arena_handle) }.take_flight_style_applied();
-        host.settle_flight_style_repaint(main_thread, false);
+        frame.messages.flight_style_repaint_recorded = Some(false);
     }
     // SAFETY: As above.
     let over = unsafe { frame.take_in_end(main_thread, FrameEnd::Over(FfiLayoutUpdateEnd::FrameTakenBack)) };
@@ -1907,14 +1908,13 @@ unsafe fn finish_layout_frame_recorded_in_flight(
         && layout_is_up_to_date(arena, &facts);
     // The install owed the flight the repaint of its batch whether the flight applied it or parked:
     // the recording is that repaint only if the flight applied the batch before it recorded.
+    let mut messages = std::mem::take(&mut frame.messages);
     if frame.style_ran_in_flight {
         let applied = arena.take_flight_style_applied();
-        host.settle_flight_style_repaint(main_thread, applied && recording_stands);
+        messages.flight_style_repaint_recorded = Some(applied && recording_stands);
     }
-    let mut messages = std::mem::take(&mut frame.messages);
     messages.recorded_in_flight = recording_stands;
-    messages.apply(main_thread, &host, arena);
-    host.finish_update_layout(main_thread, FfiLayoutUpdateEnd::FrameTakenBack);
+    messages.take_in(main_thread, &host, FfiLayoutUpdateEnd::FrameTakenBack);
     recording_stands
 }
 
@@ -1995,6 +1995,26 @@ pub unsafe extern "C" fn layout_arena_join_frame_owning_arena(
     // SAFETY: The caller passes a string that lives for the rest of the process.
     let file = unsafe { crate::stage_thread::call_site_file(file, file_length) };
     crate::stage_thread::join_frame_in_flight_at(arena, file, line, 0);
+}
+
+/// Hands `row` the image resources a finished layout frame owed it (see
+/// [`FfiLayoutFrameEffects::owed_image_resources`]), if a later build in the frame did not free it:
+/// the image box stops waiting for the provider it owns, which the document attaches next. Answers
+/// whether the row is live.
+///
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread, which is taking in the frame's effects.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_hand_over_owed_image_resources(arena: *mut c_void, row: NodeSlotId) -> bool {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    // SAFETY: As above.
+    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
+    if !arena.slot_is_live(row) {
+        return false;
+    }
+    arena.note_owned_provider_handed_over(row);
+    true
 }
 
 /// # Safety

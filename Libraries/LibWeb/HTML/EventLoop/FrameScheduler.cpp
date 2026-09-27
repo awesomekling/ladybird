@@ -680,7 +680,7 @@ static bool take_in_clock_layout_frame(DOM::Document& document)
     if (!arena || !Layout::RustFFI::layout_arena_clock_layout_frame_laid_out(arena->handle()))
         return false;
     // The ticks' rounds ran as the rest of a layout update, which begins and ends here, around their frame: its end is
-    // taken in as a submitted pass's frame is taken back (finish_update_layout in the host callbacks).
+    // taken in as a submitted pass's frame is taken back (Document::take_in_layout_frame_effects).
     Layout::RustFFI::layout_arena_begin_update_layout(arena->handle());
     document.begin_style_stabilization_epoch();
     document.style_computer().begin_style_record_view_epoch();
