@@ -7,7 +7,7 @@
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/HTML/LocalNavigable.h>
-#include <LibWeb/Layout/NodeArena.h>
+#include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/DocumentPaintState.h>
 #include <LibWeb/Painting/QueryView.h>
@@ -16,7 +16,7 @@ namespace Web::Painting {
 
 RefPtr<QuerySnapshot const> QuerySnapshot::publish(DOM::Document const& document, QueryVisualContexts visual_contexts)
 {
-    auto const* arena = document.layout_node_arena_if_created();
+    auto* arena = Layout::document_layout_arena_if_created(document);
     if (!arena)
         return nullptr;
     auto navigable = document.navigable();
@@ -29,7 +29,7 @@ RefPtr<QuerySnapshot const> QuerySnapshot::publish(DOM::Document const& document
         .device_scroll_offsets_len = device_scroll_offsets.size(),
         .device_pixels_per_css_pixel = static_cast<float>(document.page().client().device_pixels_per_css_pixel()),
     };
-    auto const* handle = Layout::RustFFI::layout_arena_publish_query_snapshot(arena->handle(), viewport);
+    auto const* handle = Layout::RustFFI::layout_arena_publish_query_snapshot(arena, viewport);
     if (!handle)
         return nullptr;
     return adopt_ref(*new QuerySnapshot(handle, visual_contexts));

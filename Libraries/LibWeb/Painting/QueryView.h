@@ -33,7 +33,6 @@ class QuerySnapshot : public RefCounted<QuerySnapshot> {
 public:
     // Null while a stage runs: the arena then has no committed geometry to publish.
     static RefPtr<QuerySnapshot const> publish(DOM::Document const&, QueryVisualContexts);
-    static RefPtr<QuerySnapshot const> publish(DOM::Document const& document, Layout::NodeArena&, QueryVisualContexts visual_contexts) { return publish(document, visual_contexts); }
     ~QuerySnapshot();
 
     QueryVisualContexts visual_contexts() const { return m_visual_contexts; }
