@@ -44,10 +44,6 @@ pub(crate) use main_thread_entries::MainThreadFfiEntry;
 #[repr(C)]
 pub struct FfiLayoutUpdateHostCallbacks {
     pub context: *mut c_void,
-    /// Runs the document's style update as a round after the first starts: container queries make
-    /// style depend on the layout of the round before. The first round's style runs ahead of the
-    /// update.
-    pub update_style: unsafe extern "C" fn(*mut c_void),
     pub process_pending_list_item_renumbers: unsafe extern "C" fn(*mut c_void),
     pub process_pending_top_layer_layout_changes: unsafe extern "C" fn(*mut c_void),
     pub document_facts: unsafe extern "C" fn(*mut c_void) -> FfiLayoutUpdateDocumentFacts,
@@ -255,6 +251,10 @@ pub enum FfiLayoutUpdateOutcome {
     /// document's pending style is. The document seals the flight's paint ahead of that style, whose
     /// render half the flight applies itself.
     FlightWithStyleReady,
+    /// The round the update started has style for the document thread to run: it runs its style
+    /// update, then resumes the update (`layout_arena_resume_update_layout`), which goes on from
+    /// there as it would have.
+    NeedsStyle,
 }
 
 /// A flight a layout update readied, which waits for the document to seal what its recording reads
@@ -278,7 +278,6 @@ pub struct FfiLayoutTreeBuildStats {
 #[derive(Clone, Copy)]
 pub(crate) struct LayoutUpdateHost {
     context: *mut c_void,
-    update_style: unsafe extern "C" fn(*mut c_void),
     process_pending_list_item_renumbers: unsafe extern "C" fn(*mut c_void),
     process_pending_top_layer_layout_changes: unsafe extern "C" fn(*mut c_void),
     document_facts: unsafe extern "C" fn(*mut c_void) -> FfiLayoutUpdateDocumentFacts,
@@ -293,7 +292,6 @@ impl From<FfiLayoutUpdateHostCallbacks> for LayoutUpdateHost {
     fn from(host: FfiLayoutUpdateHostCallbacks) -> Self {
         Self {
             context: host.context,
-            update_style: host.update_style,
             process_pending_list_item_renumbers: host.process_pending_list_item_renumbers,
             process_pending_top_layer_layout_changes: host.process_pending_top_layer_layout_changes,
             document_facts: host.document_facts,
@@ -307,10 +305,6 @@ impl From<FfiLayoutUpdateHostCallbacks> for LayoutUpdateHost {
 
 impl LayoutUpdateHost {
     // SAFETY (for every call below): The C++ host answers synchronously from its live document.
-    fn update_style(&self, _: &crate::stage::MainThread) {
-        unsafe { (self.update_style)(self.context) }
-    }
-
     fn finish_submitted_style_update(&self, _: &crate::stage::MainThread) {
         unsafe { (self.finish_submitted_style_update)(self.context) }
     }
@@ -624,7 +618,8 @@ enum FrameEnd {
 /// Where a style round's style runs.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum RoundStyle {
-    /// On the document thread, as the round starts: a round after the first.
+    /// On the document thread, as the round starts, which the update returns to for it: a round
+    /// after the first.
     OnDocumentThread,
     /// On the document thread ahead of the update: the first round's.
     RanAhead,
@@ -720,6 +715,16 @@ struct LaidOutPass {
     commit_host_half: DeferredLayoutCommitHostHalf,
     facts: FfiLayoutUpdateDocumentFacts,
     started: Option<Instant>,
+}
+
+/// Where the loop of a layout frame the document thread drives stops.
+enum DriveStop {
+    /// The frame has ended, and the update with it.
+    Ended,
+    /// The first round that lays out has run its style, and the rest of it runs with these facts.
+    AtRound(FfiLayoutUpdateDocumentFacts),
+    /// The round the loop started has style for the document thread to run before it goes on.
+    ForDocumentStyle,
 }
 
 /// Where a layout frame goes on once a step of it has run.
@@ -1015,11 +1020,13 @@ impl LayoutFrame {
         true
     }
 
-    /// Runs the frame's loop from the document thread. Each round's style runs here, with no stage
-    /// run outstanding, and each step after it runs as a stage of its own. With `stop_at_round`, the
-    /// loop stops once the style of the first round that lays out has run, and answers the facts
-    /// the rest of that round runs with, for it to go in flight, and the frame has not ended;
-    /// otherwise the loop goes on until the frame has ended.
+    /// Runs the frame's loop from the document thread. Each round starts here, with no stage run
+    /// outstanding, and each step after its style runs as a stage of its own. A round that has style
+    /// for the document to run stops the loop, which goes on with `resumed_after_document_style`
+    /// once the document has run it. With `stop_at_round`, the loop stops once the style of the
+    /// first round that lays out has run, and answers the facts the rest of that round runs with,
+    /// for it to go in flight, and the frame has not ended; otherwise the loop goes on until the
+    /// frame has ended.
     ///
     /// # Safety
     ///
@@ -1028,27 +1035,32 @@ impl LayoutFrame {
         &mut self,
         main_thread: &crate::stage::MainThread,
         stop_at_round: bool,
-    ) -> Option<FfiLayoutUpdateDocumentFacts> {
+        resumed_after_document_style: bool,
+    ) -> DriveStop {
         let mut step = FrameStep::NeedsStyle;
+        let mut round_started = resumed_after_document_style;
         loop {
             // SAFETY (for the steps below): Guaranteed by the caller, and the document thread
             // waits for each stage.
             step = match step {
                 FrameStep::Ended(end) => {
                     if unsafe { self.take_in_end(main_thread, end) } {
-                        return None;
+                        return DriveStop::Ended;
                     }
                     FrameStep::NeedsStyle
                 }
-                FrameStep::NeedsStyle if !self.may_start_round() => unsafe {
+                FrameStep::NeedsStyle if !round_started && !self.may_start_round() => unsafe {
                     self.run_stage(main_thread, |frame, joins| {
                         FrameStep::Ended(frame.run_out_of_rounds(joins))
                     })
                 },
                 FrameStep::NeedsStyle => {
-                    let facts = unsafe { self.run_style_round(main_thread) };
+                    if !std::mem::take(&mut round_started) && unsafe { self.start_style_round(main_thread) } {
+                        return DriveStop::ForDocumentStyle;
+                    }
+                    let facts = unsafe { self.finish_style_round(main_thread) };
                     if stop_at_round && (self.style_pass.is_some() || self.round_lays_out_in_frame(&facts)) {
-                        return Some(facts);
+                        return DriveStop::AtRound(facts);
                     }
                     unsafe { self.run_stage(main_thread, move |frame, _| frame.run_round(facts)) }
                 }
@@ -1099,19 +1111,14 @@ impl LayoutFrame {
     }
 
     /// Starts a round on the document thread, with no stage run outstanding: pays what the frame
-    /// owes the document thread, then marks the list owners the last build found showing stale
-    /// counters for a layout tree rebuild, runs style (unless the first round's ran ahead of the
-    /// update) and the list item renumbers and top layer changes it leaves, and reads the facts
-    /// after them. When the round lays out, it readies what
-    /// comes next: the tree build, or the sources of the layout pass when no tree build comes
-    /// first. Style is the document's own loop over its elements, and a tree update mark is set on
-    /// the DOM node, which widens it to what the node's layout node and its document ask for.
+    /// owes the document thread. Answers whether the round has style for the document thread to run
+    /// before the frame goes on, which it runs once the update has returned to it.
     ///
     /// # Safety
     ///
     /// The frame must run for the update the arena is in, and no stage may reach it until this
     /// returns.
-    unsafe fn run_style_round(&mut self, main_thread: &crate::stage::MainThread) -> FfiLayoutUpdateDocumentFacts {
+    unsafe fn start_style_round(&mut self, main_thread: &crate::stage::MainThread) -> bool {
         self.layout_pass += 1;
         let host = self.inputs.host;
         // SAFETY: Guaranteed by the caller.
@@ -1132,23 +1139,35 @@ impl LayoutFrame {
             // document. Otherwise the document's style update would find nothing to do.
             RoundStyle::OnDocumentThread => {
                 let facts = host.document_facts(main_thread);
-                if style_update_follows_layout(self.arena(), &facts)
+                style_update_follows_layout(self.arena(), &facts)
                     || self
                         .arena()
                         .with_style_store(|engine| engine.has_deferred_element_style_inputs())
-                {
-                    host.update_style(main_thread);
-                }
             }
-            RoundStyle::RanAhead => {}
+            RoundStyle::RanAhead => false,
             RoundStyle::InFlight => {
                 debug_assert!(
                     !self.arena().layout_root().is_invalid() && !self.arena().needs_full_layout_tree_update(),
                     "a round whose style runs in the flight lays out the tree it has"
                 );
                 self.style_pass = crate::css::style::bridge::take_style_pass_collected_for_flight();
+                false
             }
         }
+    }
+
+    /// Goes on with the round [`Self::start_style_round`] started, once its style has run: runs the
+    /// list item renumbers and top layer changes the style leaves, and reads the facts after them.
+    /// When the round lays out, it readies what comes next: the tree build, or the sources of the
+    /// layout pass when no tree build comes first. Style is the document's own loop over its
+    /// elements, and a tree update mark is set on the DOM node, which widens it to what the node's
+    /// layout node and its document ask for.
+    ///
+    /// # Safety
+    ///
+    /// As for [`Self::start_style_round`].
+    unsafe fn finish_style_round(&mut self, main_thread: &crate::stage::MainThread) -> FfiLayoutUpdateDocumentFacts {
+        let host = self.inputs.host;
         host.process_pending_list_item_renumbers(main_thread);
         host.process_pending_top_layer_layout_changes(main_thread);
         let facts = host.document_facts(main_thread);
@@ -1562,12 +1581,14 @@ unsafe fn frame_state(arena_handle: *mut c_void) -> FfiLayoutFrameState {
     }
 }
 
-/// Runs the layout update as one frame. The document thread drives the stabilization loop: it runs
-/// the style of each round itself, and the rest of the round as a stage run, which joins the
-/// document thread for the steps listed in [`FrameJoin`]. Once the frame ends, the document thread
-/// takes in its end: it pays what the frame still owes, goes on with another round if that left
-/// style or layout work pending, and otherwise applies the frame's messages and ends the update on
-/// the document side, so the document is idle once this returns.
+/// Runs the layout update as one frame. The document thread drives the stabilization loop: it starts
+/// each round itself, and runs the rest of the round as a stage run, which joins the document thread
+/// for the steps listed in [`FrameJoin`]. A round after the first that has style to run returns to
+/// the document for it ([`FfiLayoutUpdateOutcome::NeedsStyle`]), which resumes the update once it
+/// has run it. Once the frame ends, the document thread takes in its end: it pays what the frame
+/// still owes, goes on with another round if that left style or layout work pending, and otherwise
+/// applies the frame's messages and ends the update on the document side, so the document is idle
+/// once the update returns finished.
 /// A frame whose full layout pass is submitted ends that way once the document thread takes it
 /// back instead.
 ///
@@ -1607,8 +1628,93 @@ unsafe fn update_layout(
         "the document submits the style of a layout update that runs it in the flight"
     );
     // SAFETY: Guaranteed by the caller.
-    let Some(mut pass) = (unsafe { LayoutPassJob::prepare(main_thread, inputs, submits_pass, style_in_flight) }) else {
-        return FfiLayoutUpdateOutcome::Finished;
+    let driven = unsafe { LayoutPassJob::prepare(main_thread, inputs, submits_pass, style_in_flight) };
+    // SAFETY: As above.
+    unsafe {
+        go_on_from_driven_frame(
+            main_thread,
+            arena_handle,
+            driven,
+            submits_pass,
+            viewport_propagation_sources,
+        )
+    }
+}
+
+/// A layout update whose frame stopped for the document thread to run the style of the round it
+/// started, which the document resumes once it has.
+pub(crate) struct ParkedLayoutUpdate {
+    frame: Box<LayoutFrame>,
+    submits_pass: bool,
+    viewport_propagation_sources: Vec<StyleNodeID>,
+}
+
+/// Resumes the layout update of the document, which returned to the document thread for the style
+/// of the round it started, once the document has run that style.
+///
+/// # Safety
+///
+/// As for [`update_layout`], after it answered [`FfiLayoutUpdateOutcome::NeedsStyle`] for the arena
+/// and the document ran its style update.
+unsafe fn resume_update_layout(
+    main_thread: &crate::stage::MainThread,
+    arena_handle: *mut c_void,
+) -> FfiLayoutUpdateOutcome {
+    let parked = main_thread
+        .host_tables()
+        .and_then(|host_tables| host_tables.parked_layout_update.take());
+    let Some(ParkedLayoutUpdate {
+        frame,
+        submits_pass,
+        viewport_propagation_sources,
+    }) = parked
+    else {
+        unreachable!("a layout update is resumed after it returned for style");
+    };
+    // SAFETY: Guaranteed by the caller.
+    let driven = unsafe { LayoutPassJob::drive_frame(main_thread, *frame, submits_pass, true) };
+    // SAFETY: As above.
+    unsafe {
+        go_on_from_driven_frame(
+            main_thread,
+            arena_handle,
+            driven,
+            submits_pass,
+            viewport_propagation_sources,
+        )
+    }
+}
+
+/// Goes on with a layout update from where the document thread's drive of its frame stopped: parks
+/// a frame that stopped for the document's style, and readies or submits the full layout pass a
+/// frame readied.
+///
+/// # Safety
+///
+/// As for [`update_layout`].
+unsafe fn go_on_from_driven_frame(
+    main_thread: &crate::stage::MainThread,
+    arena_handle: *mut c_void,
+    driven: DrivenFrame,
+    submits_pass: bool,
+    viewport_propagation_sources: Vec<StyleNodeID>,
+) -> FfiLayoutUpdateOutcome {
+    let mut pass = match driven {
+        DrivenFrame::Ended => return FfiLayoutUpdateOutcome::Finished,
+        DrivenFrame::ForDocumentStyle(frame) => {
+            let parked = ParkedLayoutUpdate {
+                frame,
+                submits_pass,
+                viewport_propagation_sources,
+            };
+            let host_tables = main_thread
+                .host_tables()
+                .expect("a document whose layout update runs has host tables");
+            let previous = host_tables.parked_layout_update.replace(Some(parked));
+            debug_assert!(previous.is_none(), "a document runs one layout update at a time");
+            return FfiLayoutUpdateOutcome::NeedsStyle;
+        }
+        DrivenFrame::Pass(pass) => *pass,
     };
     if crate::stage_thread::submits_flight() {
         // The flight goes on to record the document once it has laid it out, if the document seals what
@@ -1739,6 +1845,16 @@ pub(crate) struct LayoutPassJob {
     ran: std::sync::Arc<std::sync::Mutex<Option<crate::stage_thread::FrameOwns<LayoutFrame>>>>,
 }
 
+/// Where the document thread's drive of a layout frame left it.
+enum DrivenFrame {
+    /// The frame ended on the document thread, and the update with it.
+    Ended,
+    /// The frame stopped for the document to run the style of the round it started.
+    ForDocumentStyle(Box<LayoutFrame>),
+    /// The frame readied the full layout pass it runs in flight.
+    Pass(Box<LayoutPassJob>),
+}
+
 /// How far a frame made from the arena after a layout round in flight may go before the round is
 /// taken back.
 pub(crate) struct RoundInFlight {
@@ -1759,8 +1875,8 @@ pub(crate) struct LayoutPassTakeBack {
 
 impl LayoutPassJob {
     /// Drives the layout frame of `inputs` on the document thread up to its full layout pass, if
-    /// `submits_pass`, and returns the pass. Returns `None` if the frame ended on the document
-    /// thread instead.
+    /// `submits_pass`, and returns the pass, unless the frame ended on the document thread instead,
+    /// or stopped for the document's style.
     ///
     /// # Safety
     ///
@@ -1770,8 +1886,8 @@ impl LayoutPassJob {
         inputs: FrameInputs,
         submits_pass: bool,
         style_in_flight: bool,
-    ) -> Option<Self> {
-        let mut frame = LayoutFrame {
+    ) -> DrivenFrame {
+        let frame = LayoutFrame {
             inputs,
             messages: FrameMessages::default(),
             layout_pass: 0,
@@ -1789,7 +1905,28 @@ impl LayoutPassJob {
             style_ran_in_flight: false,
         };
         // SAFETY: Guaranteed by the caller.
-        let facts = unsafe { frame.drive(main_thread, submits_pass) }?;
+        unsafe { Self::drive_frame(main_thread, frame, submits_pass, false) }
+    }
+
+    /// Drives `frame` on the document thread, as [`Self::prepare`] does, from the start of a round
+    /// or, `resumed_after_document_style`, once the document has run the style of the round it
+    /// started.
+    ///
+    /// # Safety
+    ///
+    /// As for [`Self::prepare`].
+    unsafe fn drive_frame(
+        main_thread: &crate::stage::MainThread,
+        mut frame: LayoutFrame,
+        submits_pass: bool,
+        resumed_after_document_style: bool,
+    ) -> DrivenFrame {
+        // SAFETY: Guaranteed by the caller.
+        let facts = match unsafe { frame.drive(main_thread, submits_pass, resumed_after_document_style) } {
+            DriveStop::Ended => return DrivenFrame::Ended,
+            DriveStop::ForDocumentStyle => return DrivenFrame::ForDocumentStyle(Box::new(frame)),
+            DriveStop::AtRound(facts) => facts,
+        };
         // The style round paid what the frame owed. What the round in flight comes to owe (its tree
         // build's host half, its commits' host halves) is paid as the frame is taken back: tasks that
         // run beside the flight and would read it reach it through the arena's doors, which join.
@@ -1804,14 +1941,14 @@ impl LayoutPassJob {
             frame.owed_host_halves.get_mut().push(OwedHostHalf::StyleInstall);
             frame.style_ran_in_flight = true;
         }
-        Some(Self {
+        DrivenFrame::Pass(Box::new(Self {
             arena_handle: frame.inputs.arena_handle as usize,
             // SAFETY: Guaranteed by the caller.
             frame: unsafe { crate::stage_thread::FrameOwns::new(frame) },
             style,
             facts,
             ran: std::sync::Arc::new(std::sync::Mutex::new(None)),
-        })
+        }))
     }
 
     /// What the document thread runs once it has taken the frame back.
