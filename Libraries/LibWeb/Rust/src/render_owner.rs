@@ -762,6 +762,29 @@ mod tests {
     }
 
     #[test]
+    fn a_running_update_defers_its_own_documents_destroy_and_serves_the_rest() {
+        let running = DocumentId::mint();
+        let other = DocumentId::mint();
+        let sorted = |message| match between_units(message, running) {
+            BetweenUnits::Recalled => "recalled",
+            BetweenUnits::Serve(_) => "serve",
+            BetweenUnits::Defer(_) => "defer",
+        };
+        // Its own document's state is dropped only once the update is over, after what it defers before it.
+        assert_eq!(sorted(ToOwner::Destroy { document: running }), "defer");
+        assert_eq!(sorted(ToOwner::Destroy { document: other }), "serve");
+        assert_eq!(sorted(ToOwner::Recall { document: running }), "recalled");
+        assert_eq!(sorted(ToOwner::Recall { document: other }), "serve");
+        let changes = |document| ToOwner::Changes {
+            document,
+            first: ChangeSeq(1),
+            changes: vec![Change::StyleInputs(InputForPass::empty())],
+        };
+        assert_eq!(sorted(changes(running)), "serve");
+        assert_eq!(sorted(changes(other)), "serve");
+    }
+
+    #[test]
     fn document_ids_are_minted_without_the_owner() {
         let first = DocumentId::mint();
         let second = DocumentId::mint();
