@@ -1669,7 +1669,9 @@ unsafe fn resume_update_layout(
         viewport_propagation_sources,
     }) = parked
     else {
-        unreachable!("a layout update is resumed after it returned for style");
+        debug_assert!(false, "a layout update is resumed after it returned for style");
+        // With no frame to go on with, the update has nothing left to do.
+        return FfiLayoutUpdateOutcome::Finished;
     };
     // SAFETY: Guaranteed by the caller.
     let driven = unsafe { LayoutPassJob::drive_frame(main_thread, *frame, submits_pass, true) };
@@ -1702,14 +1704,28 @@ unsafe fn go_on_from_driven_frame(
     let mut pass = match driven {
         DrivenFrame::Ended => return FfiLayoutUpdateOutcome::Finished,
         DrivenFrame::ForDocumentStyle(frame) => {
+            let Some(host_tables) = main_thread.host_tables() else {
+                debug_assert!(false, "a document whose layout update runs has host tables");
+                // With nowhere to park the frame, it goes on without the document's style for the
+                // round, which the next rendering update runs.
+                // SAFETY: Guaranteed by the caller.
+                let driven = unsafe { LayoutPassJob::drive_frame(main_thread, *frame, submits_pass, true) };
+                // SAFETY: As above.
+                return unsafe {
+                    go_on_from_driven_frame(
+                        main_thread,
+                        arena_handle,
+                        driven,
+                        submits_pass,
+                        viewport_propagation_sources,
+                    )
+                };
+            };
             let parked = ParkedLayoutUpdate {
                 frame,
                 submits_pass,
                 viewport_propagation_sources,
             };
-            let host_tables = main_thread
-                .host_tables()
-                .expect("a document whose layout update runs has host tables");
             let previous = host_tables.parked_layout_update.replace(Some(parked));
             debug_assert!(previous.is_none(), "a document runs one layout update at a time");
             return FfiLayoutUpdateOutcome::NeedsStyle;
