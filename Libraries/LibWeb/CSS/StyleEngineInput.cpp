@@ -412,8 +412,14 @@ static void record_element_arrived(DOM::Element& element, StyleComputer& style_c
     // The name the document knows the element by arrives with the identity. A box built for one of
     // the element's pseudo-elements answers by it even when the element itself has no box.
     style_engine.record_unique_node_id(identity, static_cast<u64>(element.unique_id().value()));
-    element.publish_style_recomputes_on_environment_move();
-    element.publish_size_container_query_facts();
+    // What an earlier identity's styles asked of the environment and of size query containers goes in with the
+    // arrival: nothing reads it for this identity before a transaction has taken the arrival in.
+    if (element.style_uses_if_css_function() || element.style_uses_inherit_css_function() || element.style_uses_custom_function() || element.style_depends_on_style_container_query())
+        style_engine.record_recomputes_on_environment_move(identity);
+    if (element.is_size_query_container())
+        style_engine.record_size_query_container(identity);
+    if (element.style_depends_on_size_container_query())
+        style_engine.record_style_depends_on_size_container_query(identity);
     Layout::record_table_spans_at_arrival(element);
 }
 

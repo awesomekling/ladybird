@@ -1021,6 +1021,13 @@ pub enum FfiHostFactKind {
     SlotAssignedNode = 22,
     /// `node` is in the document's top layer, a list at a time as for `SlotAssignedNode`.
     TopLayerElement = 23,
+    /// A container query selected the element `node` as its size query container.
+    SizeQueryContainer = 24,
+    /// A size query or container-relative unit decided the style of the element `node`.
+    StyleDependsOnSizeContainerQuery = 25,
+    /// A moved custom-property environment computes the element `node` again: its style reads the
+    /// environment other than through `var()`.
+    RecomputesOnEnvironmentMove = 26,
 }
 
 /// Which element an `FfiReplacedContentInput` holds the values of.
@@ -2671,6 +2678,21 @@ unsafe fn apply_host_fact_writes(engine: &mut StyleEngine, writes: &[FfiHostFact
             }
             FfiHostFactKind::TreeScopeUsesDocumentSheets => {
                 operations::set_tree_scope_uses_document_sheets(engine, write.facts);
+            }
+            FfiHostFactKind::SizeQueryContainer => {
+                if let Some(node) = StyleNodeID::from_raw(write.node) {
+                    engine.note_size_query_container(node);
+                }
+            }
+            FfiHostFactKind::StyleDependsOnSizeContainerQuery => {
+                if let Some(node) = StyleNodeID::from_raw(write.node) {
+                    engine.note_style_depends_on_size_container_query(node);
+                }
+            }
+            FfiHostFactKind::RecomputesOnEnvironmentMove => {
+                if let Some(node) = StyleNodeID::from_raw(write.node) {
+                    engine.note_element_recomputes_on_environment_move(node);
+                }
             }
             FfiHostFactKind::ElementAssociatedPseudoKind => {
                 operations::set_element_associated_pseudo_kind(engine, write.node, write.value);

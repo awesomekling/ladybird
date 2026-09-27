@@ -768,6 +768,21 @@ void StyleEngine::record_top_layer_elements(ReadonlySpan<StyleNodeID> elements)
         record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::TopLayerElement, .value = index == 0, .node = elements[index].value(), .parent = 0, .previous_sibling = 0, .facts = 0, .data = 0 });
 }
 
+void StyleEngine::record_size_query_container(StyleNodeID node)
+{
+    record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::SizeQueryContainer, .value = 0, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = 0, .data = 0 });
+}
+
+void StyleEngine::record_style_depends_on_size_container_query(StyleNodeID node)
+{
+    record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::StyleDependsOnSizeContainerQuery, .value = 0, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = 0, .data = 0 });
+}
+
+void StyleEngine::record_recomputes_on_environment_move(StyleNodeID node)
+{
+    record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::RecomputesOnEnvironmentMove, .value = 0, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = 0, .data = 0 });
+}
+
 static StyleEngineFFI::FfiHostFactWrite dom_paint_facts_write(StyleNodeID node, u8 facts)
 {
     return { .kind = StyleEngineFFI::FfiHostFactKind::NodeDomPaintFacts, .value = facts, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = 0, .data = 0 };
