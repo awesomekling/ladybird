@@ -691,13 +691,18 @@ int HTMLElement::offset_top() const
         return 0;
 
     // NOTE: Ensure that layout is up-to-date before looking at metrics.
-    const_cast<DOM::Document&>(document()).update_layout_if_needed_for_node(*this, DOM::UpdateLayoutReason::HTMLElementOffsetTop);
-
-    auto const* layout_node = principal_layout_node();
-    if (!layout_node || !Painting::has_committed_box(*layout_node))
-        return 0;
-
-    CSSPixels top_border_edge_of_element = Painting::absolute_border_box_rect(*layout_node).y();
+    auto answer = const_cast<DOM::Document&>(document()).update_layout_answering_geometry_read(*this, DOM::UpdateLayoutReason::HTMLElementOffsetTop, Layout::RustFFI::FfiGeometryReadKind::BorderBox);
+    CSSPixels top_border_edge_of_element;
+    if (answer.has_value()) {
+        if (!answer->has_box)
+            return 0;
+        top_border_edge_of_element = CSSPixelRect(answer->rect).y();
+    } else {
+        auto const* layout_node = principal_layout_node();
+        if (!layout_node || !Painting::has_committed_box(*layout_node))
+            return 0;
+        top_border_edge_of_element = Painting::absolute_border_box_rect(*layout_node).y();
+    }
 
     // 2. If the offsetParent of the element is null
     //    return the y-coordinate of the top border edge of the first CSS layout box associated with the element,
@@ -735,13 +740,18 @@ int HTMLElement::offset_left() const
         return 0;
 
     // NOTE: Ensure that layout is up-to-date before looking at metrics.
-    const_cast<DOM::Document&>(document()).update_layout_if_needed_for_node(*this, DOM::UpdateLayoutReason::HTMLElementOffsetLeft);
-
-    auto const* layout_node = principal_layout_node();
-    if (!layout_node || !Painting::has_committed_box(*layout_node))
-        return 0;
-
-    CSSPixels left_border_edge_of_element = Painting::absolute_border_box_rect(*layout_node).x();
+    auto answer = const_cast<DOM::Document&>(document()).update_layout_answering_geometry_read(*this, DOM::UpdateLayoutReason::HTMLElementOffsetLeft, Layout::RustFFI::FfiGeometryReadKind::BorderBox);
+    CSSPixels left_border_edge_of_element;
+    if (answer.has_value()) {
+        if (!answer->has_box)
+            return 0;
+        left_border_edge_of_element = CSSPixelRect(answer->rect).x();
+    } else {
+        auto const* layout_node = principal_layout_node();
+        if (!layout_node || !Painting::has_committed_box(*layout_node))
+            return 0;
+        left_border_edge_of_element = Painting::absolute_border_box_rect(*layout_node).x();
+    }
 
     // 2. If the offsetParent of the element is null
     //    return the x-coordinate of the left border edge of the first CSS layout box associated with the element,
@@ -775,7 +785,9 @@ int HTMLElement::offset_left() const
 int HTMLElement::offset_width() const
 {
     // NOTE: Ensure that layout is up-to-date before looking at metrics.
-    const_cast<DOM::Document&>(document()).update_layout_if_needed_for_node(*this, DOM::UpdateLayoutReason::HTMLElementOffsetWidth);
+    auto answer = const_cast<DOM::Document&>(document()).update_layout_answering_geometry_read(*this, DOM::UpdateLayoutReason::HTMLElementOffsetWidth, Layout::RustFFI::FfiGeometryReadKind::BorderBox);
+    if (answer.has_value())
+        return answer->has_box ? round(CSSPixelRect(answer->rect).width()).to_int() : 0;
 
     // 1. If the element does not have any associated box return zero and terminate this algorithm.
     auto const* layout_node = principal_layout_node();
@@ -794,7 +806,9 @@ int HTMLElement::offset_width() const
 int HTMLElement::offset_height() const
 {
     // NOTE: Ensure that layout is up-to-date before looking at metrics.
-    const_cast<DOM::Document&>(document()).update_layout_if_needed_for_node(*this, DOM::UpdateLayoutReason::HTMLElementOffsetHeight);
+    auto answer = const_cast<DOM::Document&>(document()).update_layout_answering_geometry_read(*this, DOM::UpdateLayoutReason::HTMLElementOffsetHeight, Layout::RustFFI::FfiGeometryReadKind::BorderBox);
+    if (answer.has_value())
+        return answer->has_box ? round(CSSPixelRect(answer->rect).height()).to_int() : 0;
 
     // 1. If the element does not have any associated box return zero and terminate this algorithm.
     auto const* layout_node = principal_layout_node();

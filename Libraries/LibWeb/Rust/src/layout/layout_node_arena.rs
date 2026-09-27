@@ -1154,7 +1154,13 @@ pub(crate) struct LayoutNodeArena {
 }
 
 impl LayoutNodeArena {
+    #[cfg(test)]
     pub(crate) fn new() -> Self {
+        Self::new_for(thread::current().id())
+    }
+
+    /// An arena whose document thread is `owner_thread`.
+    pub(crate) fn new_for(owner_thread: thread::ThreadId) -> Self {
         Self {
             chunks: Vec::new(),
             chunks_by_address: Vec::new(),
@@ -1264,7 +1270,7 @@ impl LayoutNodeArena {
             messages_reported_during_pass: RefCell::new(Vec::new()),
             layout_style_snapshots: Default::default(),
             layout_style_snapshot_commit: RefCell::default(),
-            owner_thread: thread::current().id(),
+            owner_thread,
         }
     }
 
@@ -1312,6 +1318,21 @@ impl LayoutNodeArena {
             let id = NodeSlotId::new(slot, metadata.generation);
             self.data(id).fragment_cache_epoch.get() == validity.fragment_cache_epoch
         });
+    }
+
+    /// Checks, where its render state drops it, that the document thread freed every node of the arena.
+    /// Whether the arena holds no node, as it does once its document has freed its tree.
+    pub(crate) fn is_retired(&self) -> bool {
+        self.live_count == 0
+    }
+
+    /// Makes `owner_thread` the document thread the arena answers to, before any node is allocated in it.
+    pub(crate) fn set_owner_thread(&mut self, owner_thread: thread::ThreadId) {
+        debug_assert_eq!(
+            self.live_count, 0,
+            "an arena changes document threads before it holds nodes"
+        );
+        self.owner_thread = owner_thread;
     }
 
     pub(crate) fn assert_owner_thread(&self) {
@@ -6250,11 +6271,6 @@ pub(crate) struct NodeAllocation {
     pub(crate) slot: NodeSlotId,
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn layout_arena_create() -> *mut c_void {
-    Box::into_raw(Box::new(super::ArenaHandle::new())).cast()
-}
-
 /// Whether the row is an image box that owns its image's provider and has not been handed it yet,
 /// which it is from the tree build that stamps it until the frame the build runs in is over.
 ///
@@ -6280,23 +6296,6 @@ pub unsafe extern "C" fn layout_arena_note_style_image_resources_attached(
 ) {
     // SAFETY: The C++ wrapper keeps the arena alive for this call.
     unsafe { LayoutNodeArena::from_handle(arena) }.note_style_image_resources_attached(slot, attached);
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_destroy(arena: *mut c_void) {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // A frame in flight owns the arena until it is taken back.
-    crate::stage_thread::join_frame_in_flight(arena);
-    // The render side no longer ticks the document's animations.
-    crate::clock_frames::rust_clock_lease_revoke(arena);
-    // SAFETY: The handle came from layout_arena_create and ownership is
-    // transferred back exactly once by the C++ RAII wrapper.
-    let handle = unsafe { Box::from_raw(arena.cast::<super::ArenaHandle>()) };
-    let arena = handle.arena();
-    arena.assert_owner_thread();
-    assert_eq!(arena.live_count, 0, "layout node arena destroyed with live slots");
-    super::tree_build_seal::flush_census();
-    super::main_side_census::flush();
 }
 
 /// Detaches `node` from its parent and frees its subtree, handing back what the rows held. Answers
@@ -8739,7 +8738,8 @@ mod tests {
     #[test]
     fn a_dom_tree_mutation_takes_back_an_arena_lent_with_no_style_engine() {
         use std::rc::Rc;
-        let arena = super::layout_arena_create();
+        let mut arena_handle = Box::new(crate::layout::ArenaHandle::new());
+        let arena: *mut c_void = std::ptr::from_mut(&mut *arena_handle).cast();
         let recalled = Rc::new(Cell::new(false));
         let taken_back = Rc::new(Cell::new(false));
         // SAFETY: Nothing is in flight, and nothing but this thread reaches the arena.
@@ -8760,8 +8760,7 @@ mod tests {
         unsafe { super::layout_arena_join_frame_for_dom_tree_mutation(arena) };
         assert!(recalled.get() && taken_back.get());
         assert!(!crate::stage_thread::has_lent_arena());
-        // SAFETY: The arena came from layout_arena_create and nothing holds it any more.
-        unsafe { super::layout_arena_destroy(arena) };
+        drop(arena_handle);
     }
 }
 

@@ -38,6 +38,7 @@ use crate::css::ffi_stats::{StyleUpdateScope, install_style_update_scope, take_s
 use crate::stage::MainThread;
 use std::any::Any;
 use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
 use std::ffi::c_void;
 use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -51,6 +52,8 @@ type MainWork = JoinWork<'static>;
 
 enum StageMessage {
     Run(Job),
+    /// A typed message to the render owner, which the Rendering thread is.
+    Owner(crate::render_owner::ToOwner),
     /// The caller has run the work the stage's innermost join handed it.
     JoinFinished(Box<StyleUpdateScope>, Result<(), Box<dyn Any + Send>>),
 }
@@ -217,7 +220,14 @@ impl StageThread {
                 while let Some(message) = next_message() {
                     match message {
                         StageMessage::Run(job) => job(),
-                        StageMessage::JoinFinished(..) => unreachable!("a join finished with no stage waiting for it"),
+                        StageMessage::Owner(message) => {
+                            tsan::acquire(stage_thread().expect("only the Rendering thread is sent owner messages"));
+                            crate::render_owner::handle(message);
+                            tsan::release(stage_thread().expect("only the Rendering thread is sent owner messages"));
+                        }
+                        StageMessage::JoinFinished(..) => {
+                            debug_assert!(false, "a join finished with no stage waiting for it");
+                        }
                     }
                 }
             })
@@ -236,6 +246,9 @@ thread_local! {
     // On the stage thread, where the caller's messages arrive. A stage waiting for a join reads
     // them too, since the work it joined for can start stages of its own.
     static INCOMING: RefCell<Option<Receiver<StageMessage>>> = const { RefCell::new(None) };
+    // On the stage thread, the messages that arrived while it ran something that could not take them, in the order
+    // they arrived, ahead of everything still incoming.
+    static DEFERRED: RefCell<VecDeque<StageMessage>> = const { RefCell::new(VecDeque::new()) };
     // On the calling thread, the stages it has submitted for a document's arena or style engine and
     // not taken back yet, in submission order, and likewise the recordings and presentations it has
     // submitted to the paint lane, which reach neither. Together they are the frame in flight.
@@ -507,16 +520,6 @@ pub(crate) fn submit_recording(arena: *mut c_void, stage: impl FnOnce() + Send +
     submit_paint_stage("recording", arena as usize, stage);
 }
 
-/// Set by a forced join of a flight: the flight runs no further stage than the one it is in, so the
-/// join waits for that stage alone. The rendering update goes on from where the flight stopped once
-/// it is taken back, as it would have after that stage on its own.
-static FLIGHT_PREEMPTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// On the stage thread, between the stages of a flight: whether a forced join is waiting for it.
-pub(crate) fn flight_is_preempted() -> bool {
-    FLIGHT_PREEMPTED.load(Ordering::Acquire)
-}
-
 /// The label of a flight: one stage run that runs the stages of a rendering update one after
 /// another (see `crate::flight`).
 pub(crate) const FLIGHT_STAGE: &str = "flight";
@@ -527,35 +530,48 @@ pub(crate) fn submits_flight() -> bool {
     submits("style") && submits("layout") && stage_overlaps(FLIGHT_STAGE)
 }
 
-/// Like [`submit_stage_with_take_back`], for a flight that may run the stages up to `reach`: the
-/// frame holds the document as a submitted stage `reach` would, which holds it as every stage
-/// before it does. A test's hold on one of `stage_holds`, the stages the flight may run, holds it.
+/// Like [`submit_stage_with_take_back`], for the rendering update `update` of the document whose arena is `arena`,
+/// which the render owner runs as the frame's flight: the frame holds the document as a submitted stage `reach`
+/// would, which holds it as every stage before it does. A test's hold on one of `stage_holds`, the stages the flight
+/// may run, holds it.
 ///
 /// # Safety
 ///
 /// As for [`submit_stage_with_take_back`].
-pub(crate) unsafe fn submit_flight(
+pub(crate) unsafe fn submit_rendering_update(
     reach: &'static str,
     stage_holds: &[&'static str],
     arena: *mut c_void,
-    stage: impl FnOnce() + Send + 'static,
+    document: crate::render_owner::DocumentId,
+    update: crate::render_owner::RenderingUpdate,
     on_taken_back: impl FnOnce() + 'static,
 ) {
-    FLIGHT_PREEMPTED.store(false, Ordering::Release);
     let hold_labels = std::iter::once(FLIGHT_STAGE)
         .chain(stage_holds.iter().copied())
         .collect();
-    // SAFETY: Guaranteed by the caller.
-    unsafe {
-        submit(
-            FLIGHT_STAGE,
-            reach,
-            hold_labels,
-            arena,
-            stage,
-            Some(Box::new(on_taken_back)),
-        );
+    let thread = stage_thread().expect("only a stage thread runs submitted stages");
+    let (ticket, reply) = SubmittedRunTicket::new(thread, next_submitted_run(FLIGHT_STAGE, arena));
+    tsan::release(thread);
+    if thread
+        .jobs
+        .send(StageMessage::Owner(crate::render_owner::ToOwner::RenderingUpdate {
+            document,
+            update: Box::new(update),
+            ticket,
+        }))
+        .is_err()
+    {
+        // The stage thread only goes away if the process is going away.
+        std::process::abort();
     }
+    note_submitted(
+        FLIGHT_STAGE,
+        reach,
+        hold_labels,
+        arena,
+        reply,
+        Some(Box::new(on_taken_back)),
+    );
 }
 
 /// # Safety
@@ -570,17 +586,32 @@ unsafe fn submit(
     on_taken_back: Option<Box<dyn FnOnce()>>,
 ) {
     let thread = stage_thread().expect("only a stage thread runs submitted stages");
+    let run = next_submitted_run(label, arena);
+    let reply = send_submitted_run(thread, run, stage);
+    note_submitted(label, role, hold_labels, arena, reply, on_taken_back);
+}
+
+fn next_submitted_run(label: &'static str, arena: *mut c_void) -> SubmittedRun {
     debug_assert!(
         submits(label) || (label == FLIGHT_STAGE && submits_flight()),
         "the stage {label} is not submitted"
     );
-    let run = SubmittedRun {
+    SubmittedRun {
         label,
         arena: arena as usize,
         document: arena as usize,
         number: NEXT_SUBMITTED_RUN.fetch_add(1, Ordering::Relaxed),
-    };
-    let reply = send_submitted_run(thread, run, stage);
+    }
+}
+
+fn note_submitted(
+    label: &'static str,
+    role: &'static str,
+    hold_labels: Vec<&'static str>,
+    arena: *mut c_void,
+    reply: StageReply,
+    on_taken_back: Option<Box<dyn FnOnce()>>,
+) {
     SUBMITTED.with(|submitted| {
         let mut submitted = submitted.borrow_mut();
         debug_assert!(
@@ -627,9 +658,51 @@ fn send_submitted_run(
     run: SubmittedRun,
     stage: impl FnOnce() + Send + 'static,
 ) -> StageReply {
-    let (to_caller, from_stage) = channel::<StageOutcome>();
-    let caller = std::thread::current().id();
-    let job: Job = Box::new(move || {
+    let (ticket, reply) = SubmittedRunTicket::new(thread, run);
+    let job: Job = Box::new(move || ticket.run(stage));
+    tsan::release(thread);
+    if thread.jobs.send(StageMessage::Run(job)).is_err() {
+        // The stage thread only goes away if the process is going away.
+        std::process::abort();
+    }
+    reply
+}
+
+/// A run the main thread submitted, as the thread it is sent to receives it: which run it is, and how it answers the
+/// main thread once it has run.
+pub(crate) struct SubmittedRunTicket {
+    thread: &'static StageThread,
+    run: SubmittedRun,
+    caller: ThreadId,
+    to_caller: Sender<StageOutcome>,
+}
+
+impl SubmittedRunTicket {
+    fn new(thread: &'static StageThread, run: SubmittedRun) -> (Self, StageReply) {
+        let (to_caller, from_stage) = channel::<StageOutcome>();
+        let ticket = Self {
+            thread,
+            run,
+            caller: std::thread::current().id(),
+            to_caller,
+        };
+        (
+            ticket,
+            StageReply {
+                from_stage,
+                outcome: None,
+            },
+        )
+    }
+
+    /// Runs `stage` as the submitted run, on the thread the run was sent to, and answers the main thread.
+    pub(crate) fn run(self, stage: impl FnOnce()) {
+        let Self {
+            thread,
+            run,
+            caller,
+            to_caller,
+        } = self;
         RUNNING_SUBMITTED_RUN.with(|running| running.set(Some(run)));
         hold_here(FfiStageHoldPoint::BeforeRun);
         tsan::acquire(thread);
@@ -649,15 +722,6 @@ fn send_submitted_run(
         // The caller keeps the receiver until it has taken this reply.
         let _ = to_caller.send(outcome);
         frame_completion_notify();
-    });
-    tsan::release(thread);
-    if thread.jobs.send(StageMessage::Run(job)).is_err() {
-        // The stage thread only goes away if the process is going away.
-        std::process::abort();
-    }
-    StageReply {
-        from_stage,
-        outcome: None,
     }
 }
 
@@ -1451,7 +1515,17 @@ fn join_reached_stage(
     }
     // A flight the join waits for stops at the end of the stage it runs.
     if label == FLIGHT_STAGE {
-        FLIGHT_PREEMPTED.store(true, Ordering::Release);
+        let flight_arena = SUBMITTED.with_borrow(|submitted| {
+            submitted
+                .iter()
+                .find(|stage| stage.label == FLIGHT_STAGE)
+                .map(|stage| stage.arena)
+        });
+        if let Some(arena) = flight_arena {
+            // SAFETY: A submitted stage's arena outlives the frame in flight.
+            let document = unsafe { crate::layout::ArenaHandle::document_of(arena as *const c_void) };
+            crate::render_owner::recall_rendering_update(document);
+        }
     }
     take_frame_in_flight();
     // SAFETY: Called on the main thread, with the frame taken back.
@@ -1748,8 +1822,73 @@ pub(crate) unsafe fn call_site_file(file: *const u8, file_length: usize) -> &'st
     std::str::from_utf8(bytes).unwrap_or("<non-UTF-8 file name>")
 }
 
+/// Sends `message` to the render owner, the Rendering thread. Hands it back where the calling thread is the owner:
+/// without a Rendering thread, or on it.
+pub(crate) fn send_to_owner(message: crate::render_owner::ToOwner) -> Result<(), crate::render_owner::ToOwner> {
+    let Some(thread) = stage_thread().filter(|thread| std::thread::current().id() != thread.id) else {
+        return Err(message);
+    };
+    tsan::release(thread);
+    if thread.jobs.send(StageMessage::Owner(message)).is_err() {
+        // The Rendering thread only goes away if the process is going away.
+        std::process::abort();
+    }
+    Ok(())
+}
+
+/// Tells TSan about the ordering a reply from the render owner gave the calling thread.
+pub(crate) fn acquire_owner() {
+    if let Some(thread) = stage_thread() {
+        tsan::acquire(thread);
+    }
+}
+
+/// The next message of the stage thread's own loop: the oldest deferred one, or the next to arrive.
 fn next_message() -> Option<StageMessage> {
+    DEFERRED.with_borrow_mut(VecDeque::pop_front).or_else(next_incoming)
+}
+
+/// The next message to arrive, for a wait inside something the stage thread runs, which leaves what it defers for the
+/// stage thread's own loop.
+fn next_incoming() -> Option<StageMessage> {
     INCOMING.with(|incoming| incoming.borrow().as_ref().and_then(|incoming| incoming.recv().ok()))
+}
+
+/// On the Rendering thread, between two units of the rendering update of `document` it runs: serves every message
+/// that has arrived and may be served in the middle of that update (a query, a layout unit a main thread waits for,
+/// changes to queue), and defers the rest, and every message after one it defers, for its own loop. Answers whether
+/// the main thread recalled the update meanwhile, to take its frame back where it is.
+pub(crate) fn serve_messages_between_units(document: crate::render_owner::DocumentId) -> bool {
+    let Some(thread) = stage_thread() else {
+        return false;
+    };
+    let mut recalled = false;
+    while let Some(message) =
+        INCOMING.with(|incoming| incoming.borrow().as_ref().and_then(|incoming| incoming.try_recv().ok()))
+    {
+        let message = match message {
+            StageMessage::Owner(message) => match crate::render_owner::between_units(message, document) {
+                crate::render_owner::BetweenUnits::Recalled => {
+                    recalled = true;
+                    continue;
+                }
+                crate::render_owner::BetweenUnits::Serve(message) if DEFERRED.with_borrow(VecDeque::is_empty) => {
+                    // What the message runs is not the update's run.
+                    let running = RUNNING_SUBMITTED_RUN.with(|running| running.take());
+                    tsan::acquire(thread);
+                    crate::render_owner::handle(message);
+                    tsan::release(thread);
+                    RUNNING_SUBMITTED_RUN.with(|slot| slot.set(running));
+                    continue;
+                }
+                crate::render_owner::BetweenUnits::Serve(message)
+                | crate::render_owner::BetweenUnits::Defer(message) => StageMessage::Owner(message),
+            },
+            message => message,
+        };
+        DEFERRED.with_borrow_mut(|deferred| deferred.push_back(message));
+    }
+    recalled
 }
 
 /// The thread the running code acts for: on the stage thread, the thread that handed it the stage
@@ -1978,9 +2117,21 @@ impl MainJoins<'_> {
             std::process::abort();
         }
         loop {
-            match next_message() {
+            match next_incoming() {
                 // The work started a stage of its own.
                 Some(StageMessage::Run(job)) => job(),
+                // The work asked the owner something and waits for the answer, or sent what an answer comes after. What
+                // else it sent the owner waits for the stage thread's own loop: a document's render state is not
+                // dropped under the stage.
+                Some(StageMessage::Owner(message)) => {
+                    if message.may_be_served_inside_a_stage() && DEFERRED.with_borrow(VecDeque::is_empty) {
+                        tsan::acquire(thread);
+                        crate::render_owner::handle(message);
+                        tsan::release(thread);
+                    } else {
+                        DEFERRED.with_borrow_mut(|deferred| deferred.push_back(StageMessage::Owner(message)));
+                    }
+                }
                 Some(StageMessage::JoinFinished(style_update, outcome)) => {
                     tsan::acquire(thread);
                     install_style_update_scope(*style_update);
@@ -2112,6 +2263,68 @@ unsafe fn run_stage_on<R: Send>(
         Ok(value) => value,
         Err(payload) => std::panic::resume_unwind(payload),
     }
+}
+
+/// Where the render owner answers a main thread that waits for it, and what it acts for meanwhile: the unit it runs
+/// for the waiting thread runs inside that thread's open style update, as a stage the thread waits for does.
+pub(crate) struct OwnerReplyTo<R> {
+    thread: &'static StageThread,
+    caller: ThreadId,
+    style_update: Box<StyleUpdateScope>,
+    reply: Sender<(std::thread::Result<R>, Box<StyleUpdateScope>)>,
+}
+
+impl<R> OwnerReplyTo<R> {
+    /// On the owner: answers with what `unit` answers, acting for the waiting thread. A panic in `unit` goes to the
+    /// waiting thread as its answer, and the owner goes on.
+    pub(crate) fn answer(self, unit: impl FnOnce() -> R) {
+        let Self {
+            thread,
+            caller,
+            style_update,
+            reply,
+        } = self;
+        tsan::acquire(thread);
+        let waiting_caller = WAITING_CALLER.with(|waiting| waiting.replace(Some(caller)));
+        install_style_update_scope(*style_update);
+        let outcome = std::panic::catch_unwind(AssertUnwindSafe(unit));
+        let style_update = Box::new(take_style_update_scope());
+        WAITING_CALLER.with(|waiting| waiting.set(waiting_caller));
+        tsan::release(thread);
+        // The waiting thread keeps the receiver until it has the answer.
+        let _ = reply.send((outcome, style_update));
+    }
+}
+
+/// Sends the render owner the message `message` makes of where it answers, and waits for the answer. The owner joins
+/// the calling thread for nothing: the thread only waits. Where there is no owner to send it to (no Rendering thread,
+/// or the calling thread is it), or the message would queue behind a run a test holds, `here` answers right here.
+pub(crate) fn wait_for_owner<R>(
+    message: impl FnOnce(OwnerReplyTo<R>) -> crate::render_owner::ToOwner,
+    here: impl FnOnce() -> R,
+) -> std::thread::Result<R> {
+    let Some(thread) = stage_thread().filter(|thread| std::thread::current().id() != thread.id) else {
+        return Ok(here());
+    };
+    if has_frame_in_flight() && stage_thread_holds_run_for_queued_stage() {
+        return Ok(here());
+    }
+    let (reply, answered) = channel();
+    let message = message(OwnerReplyTo {
+        thread,
+        caller: std::thread::current().id(),
+        style_update: Box::new(take_style_update_scope()),
+        reply,
+    });
+    tsan::release(thread);
+    if thread.jobs.send(StageMessage::Owner(message)).is_err() {
+        // The Rendering thread only goes away if the process is going away.
+        std::process::abort();
+    }
+    let (outcome, style_update) = answered.recv().unwrap_or_else(|_| std::process::abort());
+    tsan::acquire(thread);
+    install_style_update_scope(*style_update);
+    outcome
 }
 
 /// Runs `stage` on a stage thread of the unit tests' own, whatever the environment says.

@@ -24,6 +24,7 @@ pub(crate) mod cow_column;
 pub mod css;
 pub mod layout;
 pub mod painting;
+pub(crate) mod render_owner;
 pub(crate) mod stage;
 pub(crate) mod stage_thread;
 pub mod svg;

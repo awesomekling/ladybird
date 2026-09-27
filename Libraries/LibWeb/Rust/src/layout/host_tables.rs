@@ -96,18 +96,49 @@ pub(crate) struct ArenaHandle {
     arena: LayoutNodeArena,
     host_tables: HostTables,
     layout_scratch: super::LayoutScratch,
+    /// The document whose render state holds the arena.
+    document: crate::render_owner::DocumentId,
 }
 
 // A handle is also a pointer to its arena.
 const _: () = assert!(std::mem::offset_of!(ArenaHandle, arena) == 0);
 
 impl ArenaHandle {
+    /// An arena of no document's render state, owned by the calling thread.
+    #[cfg(test)]
     pub(crate) fn new() -> Self {
+        Self::new_for(crate::render_owner::DocumentId::default(), std::thread::current().id())
+    }
+
+    /// The arena of the render state of `document`, which the document thread `document_thread` acts for.
+    pub(crate) fn new_for(document: crate::render_owner::DocumentId, document_thread: std::thread::ThreadId) -> Self {
         Self {
-            arena: LayoutNodeArena::new(),
+            arena: LayoutNodeArena::new_for(document_thread),
             host_tables: HostTables::default(),
             layout_scratch: super::LayoutScratch::default(),
+            document,
         }
+    }
+
+    /// The document whose render state holds the arena `handle` names.
+    ///
+    /// # Safety
+    ///
+    /// As for [`HostTables::from_handle`].
+    pub(crate) unsafe fn document_of(handle: *const c_void) -> crate::render_owner::DocumentId {
+        assert!(!handle.is_null(), "layout node arena handle is null");
+        // SAFETY: Guaranteed by the caller. The projection does not borrow the arena beside it.
+        unsafe { *std::ptr::addr_of!((*handle.cast::<ArenaHandle>()).document) }
+    }
+
+    /// Makes the arena the render state of `document`'s, which the document thread `document_thread` acts for.
+    pub(crate) fn adopt(&mut self, document: crate::render_owner::DocumentId, document_thread: std::thread::ThreadId) {
+        self.document = document;
+        self.arena.set_owner_thread(document_thread);
+    }
+
+    pub(crate) fn arena_mut(&mut self) -> &mut LayoutNodeArena {
+        &mut self.arena
     }
 
     /// The layout scratch of the arena `handle` names.

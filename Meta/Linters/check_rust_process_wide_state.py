@@ -57,6 +57,7 @@ REPLAY = "style replay capture; replay builds only, or off unless an environment
 TEST_ONLY = "test only"
 MAIN_SIDE_COUNTER = "counter kept by the main side's doors, which a render stage never passes"
 GROW_ONLY = "process-wide behind a lock or atomic, and only grows; growing asks readers to keep more, never less"
+RENDER_OWNER = "the render owner's registry and protocol: state only the owner thread or only a document thread reaches, or shared by design behind a mutex or atomic"
 SUBMITTED_COUNT = "process-wide atomic count of live submitted stages for a document's arena or style engine; a thread counts its own before it asks, so zero means none of its own is in flight"
 STYLE_ENGINE_TOKEN = "the style engine token's handoff: a stage's lend of the token it holds to its own thread, and the main thread's wait for one to come home"
 
@@ -214,7 +215,6 @@ RENDER_STAGE_ALLOWED = {
             "stage_thread.rs:STAGE_HOLD",
             "stage_thread.rs:SUBMITTED",
             "stage_thread.rs:PAINTING",
-            "stage_thread.rs:FLIGHT_PREEMPTED",
             "stage_thread.rs:RUNNING_FLIGHT_STAGE",
             "flight.rs:TAKEN_BACK_OUTCOME",
             "flight.rs:TAKEN_BACK_PAINT",
@@ -232,6 +232,18 @@ RENDER_STAGE_ALLOWED = {
             "stage_thread.rs:RUNNING_SUBMITTED_RUN",
             "stage_thread.rs:PRESENTATIONS_SUBMITTED",
             "stage_thread.rs:TAKE_BACKS_THAT_WAITED_FOR_PRESENTATION",
+        ],
+    ),
+    **render_stage_entries(
+        RENDER_OWNER,
+        [
+            "render_owner.rs:NEXT",
+            "render_owner.rs:STATES",
+            "render_owner.rs:SENT_THROUGH",
+            "render_owner.rs:SPARE",
+            "render_owner.rs:ASKED",
+            "render_owner.rs:ANSWERED",
+            "stage_thread.rs:DEFERRED",
         ],
     ),
     **render_stage_entries(

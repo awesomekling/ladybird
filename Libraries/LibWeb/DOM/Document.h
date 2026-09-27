@@ -565,6 +565,9 @@ public:
     void owe_style_repaint_to_flight(bool invalidates_hit_test);
     void settle_style_repaint_owed_to_flight(bool recorded_in_flight);
     void update_layout_if_needed_for_node(Node const&, UpdateLayoutReason);
+    // Updates the layout for a geometry read about `element`, and answers the read from the update that ran for it on the
+    // Rendering thread, if one did and could.
+    Optional<Layout::RustFFI::FfiGeometryReadAnswer> update_layout_answering_geometry_read(Element const&, UpdateLayoutReason, Layout::RustFFI::FfiGeometryReadKind);
     [[nodiscard]] u64 partial_layout_count() const;
     [[nodiscard]] u64 full_layout_count() const;
     [[nodiscard]] bool layout_is_up_to_date() const;
@@ -1377,6 +1380,8 @@ public:
     bool has_enrolled_svg_paint_resources() const;
     void schedule_full_accumulated_visual_context_rebuild(Layout::RustFFI::FfiVisualContextGlobalRebuildReason);
     bool can_compute_client_rects_without_accumulated_visual_contexts_update(Layout::Node const&) const;
+    // The document's half of can_compute_client_rects_without_accumulated_visual_contexts_update().
+    bool client_rects_need_no_accumulated_visual_contexts_update() const;
     void schedule_accumulated_visual_context_update(Element&, AccumulatedVisualContextUpdateScope);
     void schedule_accumulated_visual_context_update(Layout::Row const&, AccumulatedVisualContextUpdateScope);
 

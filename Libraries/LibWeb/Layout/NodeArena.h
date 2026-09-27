@@ -92,7 +92,9 @@ public:
     Row bound_row(CSS::StyleNodeID style_node, u8 generated_for = 0) const;
     // The viewport row the document is bound to, found without making a shell for it.
     Row bound_viewport_row() const;
-    void* handle() const { return m_handle; }
+    void* handle() const { return m_render_document.arena; }
+    // The name of the document's render state, which the Rendering thread owns.
+    RustFFI::DocumentId render_document() const { return m_render_document.document; }
     u64 table_cell_measurement_cache_miss_count() const;
     u64 retained_inline_item_count() const;
     u64 intrinsic_measurement_count() const;
@@ -102,7 +104,7 @@ public:
     void set_document(Badge<DOM::Document>, DOM::Document* document) { m_document = document; }
 
 private:
-    void* m_handle { nullptr };
+    RustFFI::FfiRenderDocument m_render_document;
     GC::RawPtr<DOM::Document> m_document;
 };
 

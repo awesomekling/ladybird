@@ -17,9 +17,9 @@ use crate::css::style::bridge::StylePassJob;
 use crate::css::style::engine_home::{Holder, Owed, StyleEngineLoan, StyleEngineSettlement};
 use crate::css::style::flight_style_rows::{FLIGHT_STYLE_DECLINE_COUNT, FfiFlightStyleDecline};
 use crate::layout::update_layout::{LayoutPassJob, LayoutPassTakeBack};
+use crate::render_owner::{FrameEffects, RenderingUpdate};
 use std::cell::Cell;
 use std::ffi::c_void;
-use std::sync::{Arc, Mutex};
 
 /// The stages of a flight, in the order it runs them.
 #[repr(u8)]
@@ -116,7 +116,7 @@ pub(crate) struct Flight {
 
 /// What a flight's stages left for the main thread, besides where it ended.
 #[derive(Default)]
-struct FlightRan {
+pub(crate) struct FlightRan {
     paint: Option<crate::painting::ffi::FlightPaintProducts>,
     /// For a flight that ran its layout's style: whether it applied the style's batch to the arena
     /// itself, or why it left it to the document thread.
@@ -229,13 +229,23 @@ impl Flight {
     /// Runs the flight's stages, on the stage thread, with the style engine's token lent to it as
     /// `style_engine`. The flight sends the token home once its layout rounds have run, and the
     /// stages after them reach no style engine.
-    fn run(mut self, mut style_engine: Option<StyleEngineLoan>) -> (FfiFlightOutcome, FlightRan) {
+    pub(crate) fn run(mut self, mut style_engine: Option<StyleEngineLoan>) -> (FfiFlightOutcome, FlightRan) {
         let began = self.began;
         let mut reached = began;
         let mut next = began;
         let mut ran = FlightRan::default();
         let mut may_be_presented = false;
+        // SAFETY: The frame in flight owns the arena.
+        let document = unsafe { crate::layout::ArenaHandle::document_of(self.arena as *const c_void) };
+        // Whether the main thread recalled the flight, to take the frame back where it is. Between its stages, the
+        // flight serves what the owner was sent meanwhile that may go before the rest of it: a query waits for one
+        // stage of it at most.
+        let mut recalled = false;
+        let mut first_stage = true;
         loop {
+            if !std::mem::take(&mut first_stage) {
+                recalled |= crate::stage_thread::serve_messages_between_units(document);
+            }
             let end = match next {
                 FfiFlightStage::Style => {
                     crate::stage_thread::hold_before_flight_stage("flight:style");
@@ -278,8 +288,10 @@ impl Flight {
                     next = FfiFlightStage::PaintPrep;
                     if self.paint.is_none() {
                         Some(FfiFlightEndReason::PaintNotSealed)
-                    } else if crate::stage_thread::flight_is_preempted()
-                        || (owed == Owed::TakeBack && crate::css::style::engine_home::main_waits_for_arrival())
+                    } else if {
+                        recalled |= crate::stage_thread::serve_messages_between_units(document);
+                        recalled
+                    } || (owed == Owed::TakeBack && crate::css::style::engine_home::main_waits_for_arrival())
                     {
                         // The main thread waits for the token, which comes home owing the
                         // take-back: it takes the flight in next.
@@ -321,7 +333,7 @@ impl Flight {
                     Some(FfiFlightEndReason::Done)
                 }
                 FfiFlightStage::StyleRenderHalf if self.layout.is_some() => {
-                    let applied = if crate::stage_thread::flight_is_preempted() {
+                    let applied = if recalled {
                         None
                     } else {
                         let style_engine = style_engine
@@ -477,35 +489,31 @@ pub extern "C" fn rust_flight_applies_its_style() -> bool {
 /// As for [`crate::stage_thread::submit_stage_with_take_back`]: what each of the flight's stages reaches, the
 /// frame in flight owns until the main thread takes it back.
 pub(crate) unsafe fn submit(arena: *mut c_void, flight: Flight) {
-    let outcome = Arc::new(Mutex::new(None));
-    let outcome_of_stage = outcome.clone();
+    let (effects, effects_of_update) = std::sync::mpsc::channel::<crate::stage_thread::FrameOwns<FrameEffects>>();
     let reach = flight.reach();
     let stage_holds = flight.stage_holds();
     // SAFETY: Guaranteed by the caller: the document thread still owns the arena.
     let style_engine = unsafe { &*arena.cast::<crate::layout::LayoutNodeArena>() }.style_engine_handle();
     let (loan, settlement) = flight.lend_style_engine(style_engine).unzip();
     let take_back = flight.take_back();
+    // SAFETY: Guaranteed by the caller.
+    let document = unsafe { crate::layout::ArenaHandle::document_of(arena) };
     FLIGHT_STYLE_DECISION.store(STYLE_UNDECIDED, std::sync::atomic::Ordering::Release);
     // SAFETY: Guaranteed by the caller.
     unsafe {
-        crate::stage_thread::submit_flight(
+        crate::stage_thread::submit_rendering_update(
             reach,
             stage_holds,
             arena,
-            move || {
-                let ran = flight.run(loan);
-                *outcome_of_stage.lock().expect("a flight that ran left its outcome") =
-                    Some(crate::stage_thread::FrameOwns::new(ran));
-            },
+            document,
+            RenderingUpdate::new(flight, loan, effects),
             move || {
                 if let Some(settlement) = settlement {
                     settlement.settle();
                 }
-                let (mut outcome, ran) = outcome
-                    .lock()
-                    .expect("a flight that ran left its outcome")
-                    .take()
-                    .expect("a flight is taken back once it has run")
+                let FrameEffects { mut outcome, ran } = effects_of_update
+                    .try_recv()
+                    .expect("a rendering update that was taken back sent its effects")
                     .into_inner();
                 take_back.finish(&mut outcome);
                 if let Some(style) = ran.style {
