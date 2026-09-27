@@ -36,9 +36,9 @@
 //!   them. `FfiLayoutHostCallbacks::deliver_commit_messages`, sent from
 //!   `commit::CommitNotifications::notify_host`.
 //! - box presence - a row telling the document that it gained or lost a box, and the paintable
-//!   row resets that ride with it. Commit queues them, and `DeferredLayoutCommitHostHalf::deliver` pays them
-//!   with the main thread capability through `LayoutNodeArena::finish_paying_taken_host_handbacks` once
-//!   commit has returned.
+//!   row resets that ride with it. Commit queues them, `DeferredLayoutCommitHostHalf::resolve` resolves them
+//!   from the arena as the unit that made the commit ends, and `CommitPayment::deliver` pays them with the main
+//!   thread capability.
 //!
 //! **Inputs synced before a pass.** None are host calls any more: the replaced content facts are
 //! derived in the arena from what the elements and owned image providers published, and the
