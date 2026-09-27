@@ -231,18 +231,6 @@ public:
     // answering for itself: what a row holds depends on whether it is the one the node is bound to.
     void publish_to_every_row_built_for_dom_node(void (Node::*publish)());
 
-    // Any invalidation below a node must reach every ancestor's epoch: cached runs capture
-    // subtree structure, and unlike intrinsic-size invalidation there is no absolutely-positioned
-    // or SVG boundary — those descendants' fragments live in ancestor run trees. The arena runs
-    // the same walk for every structural change; this serves content changes that never
-    // restructure the tree.
-    void bump_fragment_cache_epoch_of_self_and_ancestors();
-
-    // Set when a style change altered geometry-determining properties of this node itself, so
-    // a partial relayout must re-resolve its own size and position instead of reusing them.
-    void set_needs_own_geometry_update() { set_flag(RustFFI::NodeFlag::NeedsOwnGeometryUpdate, true); }
-    void set_needs_layout_update(DOM::SetNeedsLayoutReason, LayoutUpdatePropagation = LayoutUpdatePropagation::ThroughAncestors);
-
     bool is_generated_for_pseudo_element() const { return generated_for() != 0; }
     Optional<CSS::PseudoElement> generated_for_pseudo_element() const
     {
@@ -330,12 +318,12 @@ public:
     NodeWithStyle const* parent() const;
 
     bool children_are_inline() const { return has_flag(RustFFI::NodeFlag::ChildrenAreInline); }
-    void set_children_are_inline(bool value) { set_flag(RustFFI::NodeFlag::ChildrenAreInline, value); }
+    void set_children_are_inline(bool value) { set_flag(RustFFI::HostNodeFlag::ChildrenAreInline, value); }
 
-    void set_list_marker_is_inside(bool value) { set_flag(RustFFI::NodeFlag::ListMarkerIsInside, value); }
+    void set_list_marker_is_inside(bool value) { set_flag(RustFFI::HostNodeFlag::ListMarkerIsInside, value); }
 
     bool is_editing_host() const { return has_flag(RustFFI::NodeFlag::IsEditingHost); }
-    void set_is_editing_host(bool value) { set_flag(RustFFI::NodeFlag::IsEditingHost, value); }
+    void set_is_editing_host(bool value) { set_flag(RustFFI::HostNodeFlag::IsEditingHost, value); }
 
     // https://drafts.csswg.org/css-ui/#propdef-user-select
     CSS::UserSelect user_select_used_value() const;
@@ -368,7 +356,7 @@ protected:
         RustFFI::layout_arena_set_node_needs_compositor_animation_frame(m_arena->handle(), m_slot, kind, value);
     }
 
-    void set_flag(RustFFI::NodeFlag flag, bool value)
+    void set_flag(RustFFI::HostNodeFlag flag, bool value)
     {
         RustFFI::layout_arena_set_node_flag(m_arena->handle(), m_slot, flag, value);
     }

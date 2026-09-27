@@ -9,6 +9,7 @@
 //! mint the capability nor call an entry that does.
 
 use super::*;
+use crate::layout::layout_node_arena::LayoutUpdateMarksHandle;
 
 pub(crate) struct MainThreadFfiEntry {
     _private: (),
@@ -102,9 +103,10 @@ unsafe extern "C" fn rust_removed_box_detachable_in_place(
 /// must point to a valid place.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn rust_detach_removed_box_in_place(
-    arena: *mut c_void,
+    marks: LayoutUpdateMarksHandle,
     place: *const FfiRemovedBoxPlace,
 ) -> FfiRemovedBoxDetach {
+    let arena = marks.arena;
     assert!(!arena.is_null() && !place.is_null());
     // SAFETY: The entry point's contract puts this call on the document thread.
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };

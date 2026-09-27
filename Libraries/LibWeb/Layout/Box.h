@@ -31,7 +31,7 @@ public:
     // outside the box asks for it by itself, so only the box names it.
     void set_owned_image_provider(NonnullOwnPtr<ImageProvider>);
 
-    void set_replaced_box_can_have_children(bool value) { set_flag(RustFFI::NodeFlag::ReplacedBoxCanHaveChildren, value); }
+    void set_replaced_box_can_have_children(bool value) { set_flag(RustFFI::HostNodeFlag::ReplacedBoxCanHaveChildren, value); }
 
     virtual ~Box() override;
 

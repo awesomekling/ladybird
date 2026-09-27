@@ -4,11 +4,13 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/Debug.h>
 #include <LibWeb/Animations/KeyframeEffect.h>
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/RenderInputs.h>
+#include <LibWeb/HTML/LocalNavigable.h>
 #include <LibWeb/Layout/NodeArena.h>
 
 namespace Web::DOM {
@@ -91,6 +93,97 @@ void RenderInputs::note_svg_paint_resources_changed()
 void RenderInputs::note_visual_viewport_transform()
 {
     m_document.invalidation_journal().note_visual_viewport_transform();
+}
+
+// The arena's layout update marks, and the caches and natural sizes that go with them, are written through here,
+// and nowhere else.
+static Layout::RustFFI::LayoutUpdateMarksHandle layout_update_marks(Layout::NodeArena& arena)
+{
+    return { .arena = arena.handle() };
+}
+
+// A row is written through the render inputs of the document its arena belongs to, which drop that document's
+// snapshot. One handed to another document's inputs is written through its own.
+static bool is_row_of(Layout::Row const& row, Document& document)
+{
+    bool is_own_row = &row.document() == &document;
+    ASSERT(is_own_row);
+    return is_own_row;
+}
+
+void RenderInputs::set_needs_layout_update(Layout::Row const& row, SetNeedsLayoutReason reason, Layout::LayoutUpdatePropagation propagation)
+{
+    if (!is_row_of(row, m_document)) {
+        row.document().render_inputs_for_write().set_needs_layout_update(row, reason, propagation);
+        return;
+    }
+    if constexpr (UPDATE_LAYOUT_DEBUG) {
+        // NOTE: We check some conditions here to avoid debug spam in documents that don't do layout.
+        if (!row.has_flag(Layout::RustFFI::NodeFlag::NeedsLayoutUpdate)) {
+            auto navigable = m_document.navigable();
+            if (navigable && navigable->active_document() == GC::Ptr { &m_document })
+                dbgln_if(UPDATE_LAYOUT_DEBUG, "NEED LAYOUT {}", to_string(reason));
+        }
+    }
+    Layout::RustFFI::layout_arena_set_needs_layout_update(layout_update_marks(row.arena()), row.slot(), propagation == Layout::LayoutUpdatePropagation::ThroughAncestors);
+}
+
+void RenderInputs::set_needs_own_geometry_update(Layout::Row const& row)
+{
+    if (!is_row_of(row, m_document)) {
+        row.document().render_inputs_for_write().set_needs_own_geometry_update(row);
+        return;
+    }
+    Layout::RustFFI::layout_arena_set_needs_own_geometry_update(layout_update_marks(row.arena()), row.slot());
+}
+
+void RenderInputs::reset_intrinsic_size_caches_of_self_and_ancestors(Layout::Row const& row)
+{
+    if (!is_row_of(row, m_document)) {
+        row.document().render_inputs_for_write().reset_intrinsic_size_caches_of_self_and_ancestors(row);
+        return;
+    }
+    Layout::RustFFI::layout_arena_bump_fragment_cache_epoch_of_self_and_ancestors(layout_update_marks(row.arena()), row.slot());
+    Layout::RustFFI::layout_arena_reset_cached_intrinsic_sizes_of_self_and_ancestors(layout_update_marks(row.arena()), row.slot());
+}
+
+void RenderInputs::set_owned_image_natural_size(Layout::Row const& row, Layout::RustFFI::FfiReplacedContentFacts const& facts)
+{
+    if (!is_row_of(row, m_document)) {
+        row.document().render_inputs_for_write().set_owned_image_natural_size(row, facts);
+        return;
+    }
+    Layout::RustFFI::layout_arena_set_owned_image_natural_size(layout_update_marks(row.arena()), row.slot(), facts);
+}
+
+Layout::RustFFI::FfiRemovedBoxDetach RenderInputs::detach_removed_box_in_place(Layout::RustFFI::FfiRemovedBoxPlace const& place)
+{
+    return Layout::RustFFI::rust_detach_removed_box_in_place(layout_update_marks(m_document.layout_node_arena()), &place);
+}
+
+void RenderInputs::defer_child_list_insertion_layout_update(Layout::Row const& row)
+{
+    if (!is_row_of(row, m_document)) {
+        row.document().render_inputs_for_write().defer_child_list_insertion_layout_update(row);
+        return;
+    }
+    Layout::RustFFI::layout_arena_defer_child_list_insertion_layout_update(layout_update_marks(row.arena()), row.slot());
+}
+
+void RenderInputs::invalidate_text_content(Layout::Row const& row)
+{
+    if (!is_row_of(row, m_document)) {
+        row.document().render_inputs_for_write().invalidate_text_content(row);
+        return;
+    }
+    Layout::RustFFI::layout_arena_invalidate_text_content(layout_update_marks(row.arena()), row.slot());
+}
+
+bool RenderInputs::enroll_text_after_language_change(Layout::Row const& row)
+{
+    if (!is_row_of(row, m_document))
+        return row.document().render_inputs_for_write().enroll_text_after_language_change(row);
+    return Layout::RustFFI::layout_arena_enroll_text_after_language_change(layout_update_marks(row.arena()), row.slot());
 }
 
 // The arena's layout tree update marks are written through here, and nowhere else.

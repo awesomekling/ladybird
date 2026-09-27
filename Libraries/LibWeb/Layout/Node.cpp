@@ -276,11 +276,6 @@ StringView Node::class_name() const
     VERIFY_NOT_REACHED();
 }
 
-void Node::bump_fragment_cache_epoch_of_self_and_ancestors()
-{
-    RustFFI::layout_arena_bump_fragment_cache_epoch_of_self_and_ancestors(arena_handle(), slot_id(this));
-}
-
 void* Node::arena_handle() const
 {
     return m_arena->handle();
@@ -684,7 +679,7 @@ void NodeWithStyle::apply_style(CSS::PublishedStyleRecord const& style_record)
         did_update_style_record();
     } else {
         publish_style_record_to_node_data();
-        set_flag(RustFFI::NodeFlag::HasAnimatedOpacityOrTransform, false);
+        set_flag(RustFFI::HostNodeFlag::HasAnimatedOpacityOrTransform, false);
         // A style change can introduce the properties that make a node carry replaced-content facts,
         // such as size containment arriving on a kept layout node.
         RustFFI::layout_arena_reinherit_anonymous_descendants(arena_handle(), slot_id(this));
@@ -883,10 +878,8 @@ void NodeWithStyle::set_style_record(CSS::PublishedStyleRecord const* style_reco
     if (should_repin_style_record)
         pin_style_record_for_cxx_consumers();
 
-    if (changes_layout_affecting_style && !installed_ahead) {
-        bump_fragment_cache_epoch_of_self_and_ancestors();
-        RustFFI::layout_arena_reset_cached_intrinsic_sizes_of_self_and_ancestors(arena_handle(), slot_id(this));
-    }
+    if (changes_layout_affecting_style && !installed_ahead)
+        document().render_inputs_for_write().reset_intrinsic_size_caches_of_self_and_ancestors(*this);
 }
 
 void NodeWithStyle::set_style_record(Row const& row, CSS::PublishedStyleRecord const* style_record)
@@ -1370,10 +1363,6 @@ bool NodeWithStyle::has_size_containment() const
         return true;
 
     return false;
-}
-void Node::set_needs_layout_update(DOM::SetNeedsLayoutReason reason, LayoutUpdatePropagation propagation)
-{
-    Row(*this).set_needs_layout_update(reason, propagation);
 }
 
 }

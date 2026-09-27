@@ -159,6 +159,35 @@ pub enum NodeFlag {
     EstablishesFixedPositionContainingBlock = 0x8000_0000,
 }
 
+/// The node flags the host sets on a row. The marks that make the next layout lay a node out again
+/// (`NeedsLayoutUpdate`, `NeedsOwnGeometryUpdate`) are not among them: those are render inputs, set
+/// only through the handle the document's render inputs hand out (`LayoutUpdateMarksHandle`).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum HostNodeFlag {
+    ChildrenAreInline = 1 << 2,
+    IsEditingHost = 1 << 17,
+    ReplacedBoxCanHaveChildren = 1 << 18,
+    IsPseudoElementPrincipalBox = 1 << 19,
+    ProducesLineBoxFragmentWhenEmpty = 1 << 22,
+    ListMarkerIsInside = 1 << 23,
+    HasAnimatedOpacityOrTransform = 1 << 29,
+}
+
+impl From<HostNodeFlag> for NodeFlag {
+    fn from(flag: HostNodeFlag) -> Self {
+        match flag {
+            HostNodeFlag::ChildrenAreInline => NodeFlag::ChildrenAreInline,
+            HostNodeFlag::IsEditingHost => NodeFlag::IsEditingHost,
+            HostNodeFlag::ReplacedBoxCanHaveChildren => NodeFlag::ReplacedBoxCanHaveChildren,
+            HostNodeFlag::IsPseudoElementPrincipalBox => NodeFlag::IsPseudoElementPrincipalBox,
+            HostNodeFlag::ProducesLineBoxFragmentWhenEmpty => NodeFlag::ProducesLineBoxFragmentWhenEmpty,
+            HostNodeFlag::ListMarkerIsInside => NodeFlag::ListMarkerIsInside,
+            HostNodeFlag::HasAnimatedOpacityOrTransform => NodeFlag::HasAnimatedOpacityOrTransform,
+        }
+    }
+}
+
 /// Facts a node takes from its ancestors. They are derived when the node is attached or its
 /// ancestors' styles change, so laying out a subtree never reads above it to learn them.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

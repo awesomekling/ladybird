@@ -109,7 +109,7 @@ private:
                 return;
             m_owner.publish_natural_size();
             m_owner.image_provider_contents_changed();
-            m_owner.m_layout_node->set_needs_layout_update(DOM::SetNeedsLayoutReason::GeneratedContentImageFinishedLoading);
+            m_owner.m_layout_node->document().render_inputs_for_write().set_needs_layout_update(*m_owner.m_layout_node, DOM::SetNeedsLayoutReason::GeneratedContentImageFinishedLoading);
         }
 
     private:
@@ -138,7 +138,7 @@ private:
             facts.auto_content_aspect_ratio_numerator = natural_size.aspect_ratio->numerator();
             facts.auto_content_aspect_ratio_denominator = natural_size.aspect_ratio->denominator();
         }
-        RustFFI::layout_arena_set_owned_image_natural_size(m_layout_node->arena_handle(), Node::slot_id(m_layout_node.ptr()), facts);
+        m_layout_node->document().render_inputs_for_write().set_owned_image_natural_size(*m_layout_node, facts);
     }
 
     CSS::SizeWithAspectRatio natural_size() const
@@ -241,7 +241,7 @@ bool attach_owed_style_resources(DOM::Document& document, Compositing::RustFFI::
         attach_content_replacement_image(image_box);
         image_was_available = image_box.image_provider().is_image_available();
         if (image_was_available)
-            image_box.set_needs_layout_update(DOM::SetNeedsLayoutReason::GeneratedContentImageFinishedLoading);
+            document.render_inputs_for_write().set_needs_layout_update(image_box, DOM::SetNeedsLayoutReason::GeneratedContentImageFinishedLoading);
     }
     as<NodeWithStyle>(*layout_node).attach_style_resources();
     return image_was_available;
@@ -266,7 +266,7 @@ bool attach_owed_generated_image(DOM::Document& document, Compositing::RustFFI::
     attach_owned_image_provider(image_box, const_cast<CSS::AbstractImageStyleValue&>(*image));
     bool image_was_available = image_box.image_provider().is_image_available();
     if (image_was_available)
-        image_box.set_needs_layout_update(DOM::SetNeedsLayoutReason::GeneratedContentImageFinishedLoading);
+        document.render_inputs_for_write().set_needs_layout_update(image_box, DOM::SetNeedsLayoutReason::GeneratedContentImageFinishedLoading);
     image_box.attach_style_resources();
     return image_was_available;
 }

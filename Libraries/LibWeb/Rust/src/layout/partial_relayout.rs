@@ -7,6 +7,7 @@
 use crate::layout::LayoutNodeArena;
 use crate::layout::abspos_inputs::AbsposLayoutInputs;
 use crate::layout::formatting_context::{FormattingContextType, formatting_context_type_created_by_node_data};
+use crate::layout::layout_node_arena::LayoutUpdateMarksHandle;
 use crate::layout::node_data::{NodeFlag, NodeKind, NodeSlotId};
 use crate::layout::node_facts;
 use std::ffi::c_void;
@@ -746,9 +747,10 @@ pub unsafe extern "C" fn layout_arena_record_partial_relayout_escape(arena: *mut
 /// in this arena.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_reset_cached_intrinsic_sizes_of_self_and_ancestors(
-    arena: *mut c_void,
+    marks: LayoutUpdateMarksHandle,
     node: NodeSlotId,
 ) {
+    let arena = marks.arena;
     // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
     unsafe { LayoutNodeArena::from_handle(arena) }.reset_cached_intrinsic_sizes_of_self_and_ancestors(node);
 }
@@ -773,7 +775,11 @@ pub unsafe extern "C" fn layout_arena_classify_layout_tree_update(
 /// The arena must remain valid for the duration of the call, and `parent` must name a live node
 /// in this arena.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_defer_child_list_insertion_layout_update(arena: *mut c_void, parent: NodeSlotId) {
+pub unsafe extern "C" fn layout_arena_defer_child_list_insertion_layout_update(
+    marks: LayoutUpdateMarksHandle,
+    parent: NodeSlotId,
+) {
+    let arena = marks.arena;
     // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
     unsafe { LayoutNodeArena::from_handle(arena) }.defer_child_list_insertion_layout_update(parent);
 }
@@ -798,10 +804,11 @@ pub unsafe extern "C" fn layout_arena_note_contained_abspos_child_removal(
 /// in this arena.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_set_needs_layout_update(
-    arena: *mut c_void,
+    marks: LayoutUpdateMarksHandle,
     node: NodeSlotId,
     propagate_through_ancestors: bool,
 ) {
+    let arena = marks.arena;
     // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
     unsafe { LayoutNodeArena::from_handle(arena) }.set_needs_layout_update(node, propagate_through_ancestors);
 }

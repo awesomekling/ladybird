@@ -59,7 +59,7 @@ bool TextNode::update_produces_line_box_fragment_when_empty_flag()
     }();
     if (has_flag(RustFFI::NodeFlag::ProducesLineBoxFragmentWhenEmpty) == produces_line_box_fragment_when_empty)
         return false;
-    set_flag(RustFFI::NodeFlag::ProducesLineBoxFragmentWhenEmpty, produces_line_box_fragment_when_empty);
+    set_flag(RustFFI::HostNodeFlag::ProducesLineBoxFragmentWhenEmpty, produces_line_box_fragment_when_empty);
     return true;
 }
 
@@ -99,7 +99,7 @@ RustFFI::FfiTextSourceRange TextNode::word_range_at(size_t dom_offset) const
 
 void TextNode::invalidate_text_for_rendering()
 {
-    RustFFI::layout_arena_invalidate_text_content(arena_handle(), slot_id(this));
+    document().render_inputs_for_write().invalidate_text_content(*this);
 }
 
 Utf16View TextNode::text_for_rendering() const
