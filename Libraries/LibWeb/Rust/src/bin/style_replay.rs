@@ -18,6 +18,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 use std::time::Instant;
 
+use libweb_rust::css::style::StyleEngineHandle;
 use libweb_rust::css::style::bridge;
 use libweb_rust::css::style::bridge::FfiCascadeOrigin;
 use libweb_rust::css::style::bridge::FfiElementArrival;
@@ -101,7 +102,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         // Engine IDs and style-record tokens are sequential counters in the recorder, so lookups
         // that run once per event index dense arrays instead of hashing. Replay is short-lived;
         // the arrays are sized by the largest token seen and never shrink.
-        let mut live_engines = Vec::<Option<*mut c_void>>::new();
+        let mut live_engines = Vec::<Option<StyleEngineHandle>>::new();
         let mut match_answer_identity_mappings = Vec::<MatchAnswerIdentityMapping>::new();
         let mut engine_count = 0_u64;
         let mut event_count = 0_u64;
@@ -259,7 +260,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let row_count =
                         (tree.len() + features.len() + states.len() + declarations.len() + element_style_inputs.len())
                             as u64;
-                    *pending_changed_rows.entry(engine as usize).or_default() += row_count;
+                    *pending_changed_rows.entry(engine.address()).or_default() += row_count;
                     let transaction = FfiStyleInputTransaction {
                         tree_deltas: tree.as_ptr(),
                         tree_delta_count: tree.len(),
@@ -313,7 +314,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         &mut selected_boundary_time,
                         &mut phase_times,
                     );
-                    let changed_rows = pending_changed_rows.remove(&(engine as usize)).unwrap_or(0);
+                    let changed_rows = pending_changed_rows.remove(&engine.address()).unwrap_or(0);
                     if selected {
                         amplification.record(changed_rows, &before, &after);
                         if let (Some(before), Some(after)) = (&detailed_before, &detailed_after) {
@@ -508,7 +509,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         &mut selected_boundary_time,
                         &mut phase_times,
                     );
-                    let changed_rows = pending_changed_rows.remove(&(engine as usize)).unwrap_or(0);
+                    let changed_rows = pending_changed_rows.remove(&engine.address()).unwrap_or(0);
                     if selected {
                         amplification.record(changed_rows, &before, &after);
                         if let (Some(before), Some(after)) = (&detailed_before, &detailed_after) {
@@ -1590,7 +1591,7 @@ struct DetailedCounterLedger {
 }
 
 impl DetailedCounterReader {
-    fn new(engine: *mut c_void) -> Self {
+    fn new(engine: StyleEngineHandle) -> Self {
         let mut names = Vec::new();
         for index in 0.. {
             let mut value = 0_u64;
@@ -1605,7 +1606,7 @@ impl DetailedCounterReader {
         Self { names }
     }
 
-    fn read(&self, engine: *mut c_void) -> Vec<u64> {
+    fn read(&self, engine: StyleEngineHandle) -> Vec<u64> {
         (0..self.names.len())
             .map(|index| read_counter_value(engine, index))
             .collect()
@@ -1647,7 +1648,7 @@ impl DetailedCounterLedger {
 }
 
 impl AmplificationCounterReader {
-    fn new(engine: *mut c_void) -> Self {
+    fn new(engine: StyleEngineHandle) -> Self {
         let mut reader = Self {
             ingress_touched: usize::MAX,
             selector_changed: Vec::new(),
@@ -1698,7 +1699,7 @@ impl AmplificationCounterReader {
         reader
     }
 
-    fn read(&self, engine: *mut c_void) -> AmplificationCounters {
+    fn read(&self, engine: StyleEngineHandle) -> AmplificationCounters {
         let sum = |indices: &[usize]| indices.iter().map(|&index| read_counter_value(engine, index)).sum();
         AmplificationCounters {
             ingress_touched: read_counter_value(engine, self.ingress_touched),
@@ -1775,7 +1776,7 @@ fn amplification_stage_report(changed_rows: u64, touched_rows: u64, flushes: u64
     })
 }
 
-fn read_counter_value(engine: *mut c_void, index: usize) -> u64 {
+fn read_counter_value(engine: StyleEngineHandle, index: usize) -> u64 {
     let mut value = 0_u64;
     let mut name_length = 0_usize;
     let name = unsafe { bridge::style_engine_counter(engine, index, &mut value, &mut name_length) };
@@ -1972,8 +1973,8 @@ fn read_document_style_computation_inputs(
 #[inline]
 fn read_engine_indexed(
     payload: &mut PayloadReader,
-    live_engines: &[Option<*mut c_void>],
-) -> Result<(usize, *mut c_void), Box<dyn std::error::Error>> {
+    live_engines: &[Option<StyleEngineHandle>],
+) -> Result<(usize, StyleEngineHandle), Box<dyn std::error::Error>> {
     let engine_id = payload.read_u64()?;
     let index = usize::try_from(engine_id)?;
     let Some(pointer) = live_engines.get(index).copied().flatten() else {
@@ -2002,8 +2003,8 @@ fn style_record_replay_index(style_record: u64) -> Result<usize, std::num::TryFr
 #[inline]
 fn read_engine(
     payload: &mut PayloadReader,
-    live_engines: &[Option<*mut c_void>],
-) -> Result<*mut c_void, Box<dyn std::error::Error>> {
+    live_engines: &[Option<StyleEngineHandle>],
+) -> Result<StyleEngineHandle, Box<dyn std::error::Error>> {
     let engine_id = payload.read_u64()?;
     let Some(pointer) = usize::try_from(engine_id)
         .ok()
@@ -2279,7 +2280,10 @@ fn write_style_transaction_outputs(
     payload.write_u32_slice(&outputs.reclaimed_atoms);
 }
 
-fn replay_atom_mappings(engine: *mut c_void, payload: &mut PayloadReader) -> Result<(), Box<dyn std::error::Error>> {
+fn replay_atom_mappings(
+    engine: StyleEngineHandle,
+    payload: &mut PayloadReader,
+) -> Result<(), Box<dyn std::error::Error>> {
     let count = payload.read_length()?;
     for _ in 0..count {
         match payload.read_u8()? {

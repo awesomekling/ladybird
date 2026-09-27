@@ -281,10 +281,12 @@ impl ClockLease {
         let arena_handle = self.arena as *mut c_void;
         // SAFETY: The caller owns the arena, which the lease's registration keeps alive.
         let arena = unsafe { &*arena_handle.cast::<LayoutNodeArena>() };
-        let engine = arena.style_engine_handle().cast::<StyleEngine>();
+        let engine = arena.style_engine_handle();
         if engine.is_null() {
             return FfiClockTickOutcome::NeedsMain;
         }
+        // SAFETY: The caller owns the engine; no other borrow of it is live here.
+        let engine: *mut StyleEngine = unsafe { engine.enter("clock tick") };
         // SAFETY: The caller owns the engine; no other borrow of it is live here.
         let mut samples = unsafe { &*engine }
             .animation_timeline_samples()
@@ -474,10 +476,12 @@ impl ClockLease {
     unsafe fn pin_host_records(&self) {
         // SAFETY: Guaranteed by the caller.
         let arena = unsafe { &*(self.arena as *const LayoutNodeArena) };
-        let engine = arena.style_engine_handle().cast::<StyleEngine>();
+        let engine = arena.style_engine_handle();
         if engine.is_null() {
             return;
         }
+        // SAFETY: As above.
+        let engine: *mut StyleEngine = unsafe { engine.enter("clock lease host record pins") };
         let mut pins = Vec::new();
         for target in self.targets.lock().expect("clock lease targets").iter() {
             // SAFETY: As above.
@@ -503,10 +507,12 @@ impl ClockLease {
         }
         // SAFETY: Guaranteed by the caller.
         let arena = unsafe { &*(self.arena as *const LayoutNodeArena) };
-        let engine = arena.style_engine_handle().cast::<StyleEngine>();
+        let engine = arena.style_engine_handle();
         if engine.is_null() {
             return;
         }
+        // SAFETY: As above.
+        let engine: *mut StyleEngine = unsafe { engine.enter("clock lease host record pins") };
         for record in pins {
             // SAFETY: As above.
             unsafe { &mut *engine }.unpin_layout_style_record(record);
@@ -874,12 +880,10 @@ pub unsafe extern "C" fn rust_clock_lease_submit_tick(arena: *mut c_void, time: 
     let tick = move || {
         // The main thread pins and unpins its host's records beside the tick, which may read none of them.
         // SAFETY: The stage owns the arena and its engine, as below.
-        let engine = unsafe { &*arena_of(&lease) }
-            .style_engine_handle()
-            .cast::<StyleEngine>();
+        let engine = unsafe { &*arena_of(&lease) }.style_engine_handle();
         // SAFETY: As above.
         debug_assert!(
-            engine.is_null() || !unsafe { &*engine }.reads_host_style_record_pins(),
+            engine.is_null() || !unsafe { engine.enter("clock tick") }.reads_host_style_record_pins(),
             "a clock tick beside the main thread reads the host's style-record pins"
         );
         // SAFETY: The stage owns the arena, as below.
@@ -888,17 +892,15 @@ pub unsafe extern "C" fn rust_clock_lease_submit_tick(arena: *mut c_void, time: 
     // The main thread's pin table is its own until it has taken the tick back, as it is beside a style
     // pass in flight.
     // SAFETY: Guaranteed by the caller: the main thread owns the engine until the submit below.
-    let engine = unsafe { LayoutNodeArena::from_handle(arena) }
-        .style_engine_handle()
-        .cast::<StyleEngine>();
+    let engine = unsafe { LayoutNodeArena::from_handle(arena) }.style_engine_handle();
     if !engine.is_null() {
         // SAFETY: As above.
-        unsafe { &mut *engine }.begin_clock_lend_beside_host_pins();
+        unsafe { engine.enter("clock tick submission") }.begin_clock_lend_beside_host_pins();
     }
     let taken_back = move || {
         if !engine.is_null() {
             // SAFETY: The main thread owns the engine again, which outlives the tick of its arena.
-            unsafe { &mut *engine }.finish_clock_lend_beside_host_pins();
+            unsafe { engine.enter("clock tick take-back") }.finish_clock_lend_beside_host_pins();
         }
     };
     // SAFETY: The stage reaches the arena and its engine only, which the `clock` stage owns until
@@ -1093,18 +1095,16 @@ pub unsafe extern "C" fn rust_clock_lend_to_busy_main(arena: *mut c_void, relend
     // The task pins and unpins its records at any moment beside the ticks, which read its pin table
     // no more until it has taken the engine back.
     // SAFETY: Guaranteed by the caller.
-    let engine = unsafe { LayoutNodeArena::from_handle(arena) }
-        .style_engine_handle()
-        .cast::<StyleEngine>();
+    let engine = unsafe { LayoutNodeArena::from_handle(arena) }.style_engine_handle();
     if !engine.is_null() {
         // SAFETY: The main thread owns the engine until the lend below.
-        unsafe { &mut *engine }.begin_clock_lend_beside_host_pins();
+        unsafe { engine.enter("clock lend") }.begin_clock_lend_beside_host_pins();
     }
     let recall = move || {
         take_arena_back(arena as usize);
         if !engine.is_null() {
             // SAFETY: The main thread owns the engine again, which outlives the lend of its arena.
-            unsafe { &mut *engine }.finish_clock_lend_beside_host_pins();
+            unsafe { engine.enter("clock lend recall") }.finish_clock_lend_beside_host_pins();
         }
     };
     let taken_back = move || {
@@ -1700,12 +1700,10 @@ fn run_render_clock_tick_at(context: u64, frame_time_nanoseconds: i64, scroll_of
             // A task pins and unpins its host's records beside the tick, which may read none of them.
             if beside_task {
                 // SAFETY: As below.
-                let engine = unsafe { &*(lease.arena as *const LayoutNodeArena) }
-                    .style_engine_handle()
-                    .cast::<StyleEngine>();
+                let engine = unsafe { &*(lease.arena as *const LayoutNodeArena) }.style_engine_handle();
                 // SAFETY: As below.
                 debug_assert!(
-                    engine.is_null() || !unsafe { &*engine }.reads_host_style_record_pins(),
+                    engine.is_null() || !unsafe { engine.enter("clock tick") }.reads_host_style_record_pins(),
                     "a clock tick beside a task reads the host's style-record pins"
                 );
             }

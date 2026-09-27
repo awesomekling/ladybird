@@ -677,7 +677,22 @@ bool StyleSheetState::evaluate_media_queries(DOM::Document const& document, Pars
         state = m_document_media_states.end() - 1;
     }
     MediaEnvironmentSnapshot environment { document };
-    result = Parser::ValueParserFFI::rust_style_sheet_evaluate_media_queries(m_native_sheet.handle(), environment.ffi_environment(), (*state)->state, mutable_document.style_computer().style_engine().rust_handle());
+    struct FlippedConditions {
+        Vector<u64> identities;
+        Vector<bool> holds;
+    } flipped;
+    result = Parser::ValueParserFFI::rust_style_sheet_evaluate_media_queries(m_native_sheet.handle(), environment.ffi_environment(), (*state)->state, &flipped, [](void* opaque, u64 identity, bool holds) {
+        auto& flipped = *static_cast<FlippedConditions*>(opaque);
+        flipped.identities.append(identity);
+        flipped.holds.append(holds);
+    });
+    // The rule conditions that flipped go to the engine as published input: at once, or beside a pass in flight once
+    // it has been drained, in order with the sheet changes around them.
+    if (!flipped.identities.is_empty()) {
+        mutable_document.style_computer().style_engine().publish_input([flipped = move(flipped)](StyleInputScope const& input) {
+            Parser::ValueParserFFI::rust_style_sheet_publish_rule_conditions_hold(input.engine().rust_handle(), flipped.identities.data(), flipped.holds.data(), flipped.identities.size());
+        });
+    }
     if (result.sheet_changed)
         record_conditions_for_owners();
     if (result.any_changed) {

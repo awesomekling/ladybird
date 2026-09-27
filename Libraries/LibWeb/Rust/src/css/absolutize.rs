@@ -2210,10 +2210,9 @@ pub unsafe extern "C" fn rust_random_sharing_input_dependencies(value: *const St
 pub unsafe extern "C" fn rust_random_sharing_absolutize(
     value: *const StyleValueData,
     length: *const core::ffi::c_void,
-    engine: *mut core::ffi::c_void,
+    engine: crate::css::style::StyleEngineHandle,
     node: u32,
 ) -> *const StyleValueData {
-    crate::stage_thread::join_frame_for_style_engine_entrance(engine, "rust_random_sharing_absolutize");
     let data = unsafe { &*value };
     let StyleValueData::RandomValueSharing {
         fixed_value,
@@ -2225,7 +2224,7 @@ pub unsafe extern "C" fn rust_random_sharing_absolutize(
     else {
         unreachable!();
     };
-    let mut engine = unsafe { engine.cast::<crate::css::style::StyleEngine>().as_mut() };
+    let mut engine = (!engine.is_null()).then(|| unsafe { engine.enter("rust_random_sharing_absolutize") });
     let node = crate::css::style::tree::StyleNodeID::from_raw(node);
     let fixed = match fixed_value.optional_data() {
         Some(fixed) => {

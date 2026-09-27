@@ -672,7 +672,7 @@ fn generate_style_engine_boundary(manifest_dir: &Path, out_dir: &Path) -> Result
          fn replay_generated_boundary_event(\n\
              kind: EventKind,\n\
              payload: &mut PayloadReader<'_>,\n\
-             live_engines: &[Option<*mut c_void>],\n\
+             live_engines: &[Option<StyleEngineHandle>],\n\
          ) -> Result<bool, Box<dyn std::error::Error>> {\n\
              match kind {\n",
     );
@@ -754,17 +754,13 @@ fn generate_style_engine_boundary(manifest_dir: &Path, out_dir: &Path) -> Result
                 (rust_type, cpp_type, writer, reader)
             }
         };
-        let engine_type = if receiver == "const" {
-            "*const c_void"
+        let engine_type = "crate::css::style::StyleEngineHandle";
+        let engine_binding = if receiver == "const" {
+            "engine: &crate::css::style::StyleEngine"
         } else {
-            "*mut c_void"
+            "engine"
         };
-        let engine_borrow = if receiver == "const" {
-            "&*engine.cast::<crate::css::style::StyleEngine>()"
-        } else {
-            "&mut *engine.cast::<crate::css::style::StyleEngine>()"
-        };
-        let replay_engine_borrow = engine_borrow.replace("crate::", "libweb_rust::");
+        let replay_engine_borrow = "engine.for_replay()";
 
         if let Some(ffi) = ffi {
             writeln!(
@@ -784,13 +780,12 @@ fn generate_style_engine_boundary(manifest_dir: &Path, out_dir: &Path) -> Result
                 rust.push_str(") {\n");
             }
             // A main-thread entrance waits for a frame in flight that reaches the engine before it
-            // borrows the engine.
+            // borrows the engine, and the style seal counts every entry point the host calls while
+            // an update runs.
             writeln!(
                 rust,
-                "    abort_on_panic(|| {{\n        crate::stage_thread::join_frame_for_style_engine_entrance(engine, \"{ffi}\");\n        let engine = unsafe {{ {engine_borrow} }};"
+                "    abort_on_panic(|| {{\n        let {engine_binding} = unsafe {{ crate::css::style::bridge::engine_entrance(engine, \"{ffi}\") }};"
             )?;
-            // The style seal counts every entry point the host calls while an update runs.
-            writeln!(rust, "        crate::css::style::seal::note_engine_call(\"{ffi}\");")?;
         }
         let native_receiver = if receiver == "const" {
             "&StyleEngine"

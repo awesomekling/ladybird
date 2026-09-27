@@ -351,14 +351,14 @@ fn prepare_transition_values(
 /// properties, `actions` must point at writable storage for `property_count` actions.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_decide_transitions(
-    style_engine: *const std::ffi::c_void,
+    style_engine: crate::css::style::StyleEngineHandle,
     before_style_record: u64,
     after_longhand_table: *const std::ffi::c_void,
     after_animated_overlay: *const std::ffi::c_void,
     input: *mut FfiTransitionInput,
     actions: *mut FfiTransitionAction,
 ) {
-    crate::stage_thread::join_frame_for_style_engine_entrance(style_engine, "rust_decide_transitions");
+    style_engine.bring_home("rust_decide_transitions");
     crate::css::ffi_stats::rust_style_ffi_note_transition_decision();
     let input = unsafe { &mut *input };
     let properties = if input.property_count == 0 {
@@ -369,8 +369,8 @@ pub unsafe extern "C" fn rust_decide_transitions(
     if properties.is_empty() {
         return;
     }
-    let style_engine = unsafe { style_engine.cast::<crate::css::style::StyleEngine>().as_ref() }
-        .expect("transition decisions require a style engine");
+    assert!(!style_engine.is_null(), "transition decisions require a style engine");
+    let style_engine: &crate::css::style::StyleEngine = unsafe { style_engine.enter("rust_decide_transitions") };
     let after_table = unsafe {
         after_longhand_table
             .cast::<crate::css::computed_longhand_table::ComputedLonghandTable>()
@@ -447,15 +447,12 @@ pub(crate) fn decide_transitions(
 /// `context` writable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_transition_length_resolution_context(
-    style_engine: *const std::ffi::c_void,
+    style_engine: crate::css::style::StyleEngineHandle,
     style_record: u64,
     context: *mut crate::css::animation::FfiAnimationLengthResolutionContext,
 ) -> bool {
-    crate::stage_thread::join_frame_for_style_engine_entrance(
-        style_engine,
-        "rust_transition_length_resolution_context",
-    );
-    let style_engine = unsafe { &*style_engine.cast::<crate::css::style::StyleEngine>() };
+    let style_engine: &crate::css::style::StyleEngine =
+        unsafe { style_engine.enter("rust_transition_length_resolution_context") };
     let Some(length) = style_engine.transition_length_resolution_context(style_record) else {
         return false;
     };
@@ -605,7 +602,7 @@ mod tests {
         };
         unsafe {
             rust_decide_transitions(
-                std::ptr::null(),
+                crate::css::style::StyleEngineHandle::null(),
                 0,
                 std::ptr::null(),
                 std::ptr::null(),

@@ -1009,7 +1009,9 @@ pub extern "C" fn rust_stage_thread_presentation_counters() -> FfiPresentationCo
 /// samples the document's animations), a flight, which runs the first two, and a lend.
 fn style_engine_of_stage(arena: *mut c_void) -> usize {
     // SAFETY: The stage has not been sent yet, so the main thread still owns the arena.
-    unsafe { &*arena.cast::<crate::layout::LayoutNodeArena>() }.style_engine_handle() as usize
+    unsafe { &*arena.cast::<crate::layout::LayoutNodeArena>() }
+        .style_engine_handle()
+        .address()
 }
 
 /// Where in a submitted run of a stage a test's hold makes the stage thread wait.
@@ -1602,13 +1604,16 @@ pub extern "C" fn rust_stage_thread_style_pass_forced_joins() -> u64 {
 /// the one frame beside which a main-side write to that engine's document can queue its style inputs
 /// for the pass's drain instead of joining it.
 #[unsafe(no_mangle)]
-pub extern "C" fn rust_stage_thread_only_style_pass_in_flight_for(engine: *const c_void) -> bool {
+pub extern "C" fn rust_stage_thread_only_style_pass_in_flight_for(
+    engine: crate::css::style::StyleEngineHandle,
+) -> bool {
+    let engine = engine.address();
     SUBMITTED.with(|submitted| {
         let submitted = submitted.borrow();
         !submitted.is_empty()
             && submitted
                 .iter()
-                .all(|stage| stage.role == "style" && stage.style_engine == engine as usize)
+                .all(|stage| stage.role == "style" && stage.style_engine == engine)
     })
 }
 
@@ -1616,12 +1621,13 @@ pub extern "C" fn rust_stage_thread_only_style_pass_in_flight_for(engine: *const
 /// samples it: what the host publishes to that engine beside it waits for the stage to be taken
 /// back (see `StyleEngine::publish_input`).
 #[unsafe(no_mangle)]
-pub extern "C" fn rust_stage_thread_layout_pass_in_flight_for(engine: *const c_void) -> bool {
+pub extern "C" fn rust_stage_thread_layout_pass_in_flight_for(engine: crate::css::style::StyleEngineHandle) -> bool {
+    let engine = engine.address();
     !no_stage_is_submitted()
         && SUBMITTED.with_borrow(|submitted| {
             submitted
                 .iter()
-                .any(|stage| inputs_wait_for_take_back(stage.role) && stage.style_engine == engine as usize)
+                .any(|stage| inputs_wait_for_take_back(stage.role) && stage.style_engine == engine)
         })
 }
 
@@ -1747,43 +1753,44 @@ pub unsafe extern "C" fn rust_stage_thread_forced_joins(label: *const u8, label_
 /// nothing on the main thread may read or write the engine beside it. A join here is a main-side
 /// operation that entered the engine with no door of its own, and the forced-join log names it by
 /// its entrance.
-pub(crate) fn join_frame_for_style_engine_entrance(engine: *const c_void, entry: &'static str) {
+pub(crate) fn join_frame_for_style_engine_entrance(engine: crate::css::style::StyleEngineHandle, entry: &'static str) {
+    join_frame_reaching_style_engine(engine, entry, |stage, engine| stage.reaches_style_engine(engine));
+}
+
+/// Like [`join_frame_for_style_engine_entrance`], for an entrance that only reads what a record
+/// holds, which a published record keeps as it is whatever else the engine does.
+pub(crate) fn join_frame_for_style_engine_entrance_to_read_records(
+    engine: crate::css::style::StyleEngineHandle,
+    entry: &'static str,
+) {
+    join_frame_reaching_style_engine(engine, entry, |stage, engine| {
+        stage.reaches_style_engine_for_record_read(engine)
+    });
+}
+
+fn join_frame_reaching_style_engine(
+    engine: crate::css::style::StyleEngineHandle,
+    entry: &'static str,
+    reaches: impl Fn(&SubmittedStage, usize) -> bool,
+) {
     if engine.is_null() || no_stage_is_submitted() || RUNNING_JOIN_WORK.with(Cell::get) != 0 {
         return;
     }
+    let engine = engine.address();
     if STYLE_ENGINE_ENTRANCES_ONLY_WAIT.with(Cell::get) != 0 {
         wait_for_submitted_stages_reaching(engine);
         return;
     }
-    if STYLE_ENGINE_RECORD_READS.contains(&entry) {
-        join_frame_in_flight_for_stage(
-            |stage| stage.reaches_style_engine_for_record_read(engine as usize),
-            entry,
-            0,
-            0,
-        );
-        return;
-    }
-    join_frame_in_flight_for_stage(|stage| stage.reaches_style_engine(engine as usize), entry, 0, 0);
+    join_frame_in_flight_for_stage(|stage| reaches(stage, engine), entry, 0, 0);
 }
-
-/// The style engine entrances that only read what a record holds, which a published record keeps
-/// as it is whatever else the engine does.
-const STYLE_ENGINE_RECORD_READS: &[&str] = &[
-    "style_engine_style_record_payloads",
-    "style_engine_style_record_view",
-    "style_engine_style_record_dependency_flags",
-    "style_engine_style_record_custom_property_environment",
-    "style_engine_base_style_record_of",
-];
 
 /// Waits for every stage of the calling thread's frame in flight that reaches the style engine
 /// `engine` to finish, and leaves the frame in flight for its consume.
-fn wait_for_submitted_stages_reaching(engine: *const c_void) {
+fn wait_for_submitted_stages_reaching(engine: usize) {
     let waited = SUBMITTED.with(|submitted| {
         let mut waited = false;
         for stage in submitted.borrow_mut().iter_mut() {
-            if stage.reaches_style_engine(engine as usize) {
+            if stage.reaches_style_engine(engine) {
                 stage.wait_until_finished();
                 waited = true;
             }
@@ -1812,12 +1819,12 @@ pub extern "C" fn rust_stage_thread_end_style_engine_entrances_that_only_wait() 
 
 /// The label of the calling thread's submitted stage that reaches the style engine `engine`.
 #[cfg(test)]
-fn label_of_submitted_stage_reaching(engine: *const c_void) -> Option<&'static str> {
+fn label_of_submitted_stage_reaching(engine: crate::css::style::StyleEngineHandle) -> Option<&'static str> {
     SUBMITTED.with(|submitted| {
         submitted
             .borrow()
             .iter()
-            .find(|stage| stage.style_engine == engine as usize)
+            .find(|stage| stage.style_engine == engine.address())
             .map(|stage| stage.label)
     })
 }
@@ -2303,18 +2310,24 @@ mod tests {
             });
         };
         submit("clock", 0x10, 0x3000);
-        assert_eq!(label_of_submitted_stage_reaching(engine as *const c_void), None);
+        assert_eq!(
+            label_of_submitted_stage_reaching(crate::css::style::StyleEngineHandle::for_test(engine)),
+            None
+        );
         submit("layout", 0x20, engine);
         assert_eq!(
-            label_of_submitted_stage_reaching(engine as *const c_void),
+            label_of_submitted_stage_reaching(crate::css::style::StyleEngineHandle::for_test(engine)),
             Some("layout")
         );
-        assert_eq!(label_of_submitted_stage_reaching(0x2000 as *const c_void), None);
+        assert_eq!(
+            label_of_submitted_stage_reaching(crate::css::style::StyleEngineHandle::for_test(0x2000)),
+            None
+        );
 
         // An entrance that only waits leaves the finished stage in flight, with its outcome, for
         // the frame's consume.
         rust_stage_thread_begin_style_engine_entrances_that_only_wait();
-        join_frame_for_style_engine_entrance(engine as *const c_void, "test entrance");
+        join_frame_for_style_engine_entrance(crate::css::style::StyleEngineHandle::for_test(engine), "test entrance");
         rust_stage_thread_end_style_engine_entrances_that_only_wait();
         assert!(SUBMITTED.with(|submitted| {
             let submitted = submitted.borrow();
