@@ -1655,8 +1655,6 @@ GC::Ref<JS::Object> Internals::join_counters_object() const
         object->define_direct_property("joinsThatPublishedNothing"_utf16_fly_string, JS::Value(counters.joins_that_published_nothing), JS::default_attributes);
         object->define_direct_property("frameWaits"_utf16_fly_string, JS::Value(counters.frame_waits), JS::default_attributes);
         object->define_direct_property("frameWaitNanoseconds"_utf16_fly_string, JS::Value(counters.frame_wait_nanoseconds), JS::default_attributes);
-        object->define_direct_property("stylesBesideRecording"_utf16_fly_string, JS::Value(counters.styles_beside_recording), JS::default_attributes);
-        object->define_direct_property("stylesFinishedBesideRecording"_utf16_fly_string, JS::Value(counters.styles_finished_beside_recording), JS::default_attributes);
         return object;
     };
 
@@ -1675,8 +1673,6 @@ GC::Ref<JS::Object> Internals::join_counters_object() const
         totals.joins_that_published_nothing += counters.joins_that_published_nothing;
         totals.frame_waits += counters.frame_waits;
         totals.frame_wait_nanoseconds += counters.frame_wait_nanoseconds;
-        totals.styles_beside_recording += counters.styles_beside_recording;
-        totals.styles_finished_beside_recording += counters.styles_finished_beside_recording;
         if (counters.calls == 0)
             continue;
         auto name = Utf16FlyString::from_utf16(DOM::to_string(static_cast<DOM::UpdateLayoutReason>(reason)));

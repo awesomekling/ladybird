@@ -807,58 +807,13 @@ u64 Document::layout_commit_generation() const
     return Layout::RustFFI::layout_arena_layout_commit_generation(m_layout_node_arena->handle());
 }
 
-// Whether the document, and those it is embedded in, have nothing to lay out: a layout of an embedding document can
-// change the viewport of the documents embedded in it.
-static bool is_clean_with_embedding_documents(Document const& document)
-{
-    if (!document.is_clean_for_layout_geometry_read())
-        return false;
-    auto const* embedded_document = &document;
-    while (auto navigable = embedded_document->navigable()) {
-        auto embedding_document = navigable->container_document();
-        if (!embedding_document || embedding_document.ptr() == embedded_document)
-            return true;
-        if (!embedding_document->is_clean_for_layout_geometry_read())
-            return false;
-        embedded_document = embedding_document.ptr();
-    }
-    return true;
-}
-
-// Whether a read for `reason` of the document's committed geometry is answered beside the recording of the document
-// in flight: the recording changes no geometry, and the read finds nothing to lay out, in the document or in those it
-// is embedded in. The read then reads the rows the document's layout published before the recording went in flight.
-static bool reads_committed_geometry_beside_recording(Document const& document, UpdateLayoutReason reason)
-{
-    auto const* arena = document.layout_node_arena_if_created();
-    if (!arena || !reason_reads_layout_geometry(reason) || !Layout::RustFFI::rust_stage_thread_reads_beside_recording_of(arena->handle()))
-        return false;
-    return is_clean_with_embedding_documents(document);
-}
-
-// Whether a read for `reason` of a document with something to lay out starts its style update beside the recording of
-// the document in flight: the recording reaches no style engine, and what the update writes to the arena, such as the
-// style of a box it restyles, takes the recording in at the arena's doors.
-static bool styles_beside_recording(Document const& document, UpdateLayoutReason reason)
-{
-    auto const* arena = document.layout_node_arena_if_created();
-    return arena && reason_reads_layout_geometry(reason) && Layout::RustFFI::rust_stage_thread_styles_beside_recording_of(arena->handle());
-}
-
 Document::JoinScope::JoinScope(Document& document, UpdateLayoutReason reason)
     : m_document(document)
     , m_reason(reason)
 {
     // A read of render state waits for the frame in flight before it asks anything, and the
-    // cleanliness check below already asks the style engine. A read of committed geometry that a
-    // clean document answers goes on beside its recording in flight, which changes no geometry.
-    // One that finds it dirty starts its style update beside the recording too, and takes the
-    // recording in where that update writes the arena, or else before its layout.
-    if (!reads_committed_geometry_beside_recording(m_document, m_reason)) {
-        m_styles_beside_recording = styles_beside_recording(m_document, m_reason);
-        if (!m_styles_beside_recording)
-            m_document.join_frame_in_flight();
-    }
+    // cleanliness check below already asks the style engine.
+    m_document.join_frame_in_flight();
     auto& counters = m_document.m_join_counters[to_underlying(m_reason)];
     ++counters.calls;
 
@@ -906,33 +861,6 @@ Document::JoinScope::~JoinScope()
     // LIBWEB_RENDER_CLOCK_FRAMES: A read that took the arenas back from the render clock's ticks mid-task lends them
     // again once it is over, if the task changed nothing a tick would show.
     HTML::main_thread_event_loop().frame_scheduler().relend_clock_leases_after_read();
-}
-
-// The style update of a read that starts it beside the recording of the document in flight. It is the style update the
-// layout update would start with, so that one finds nothing left to do but what it asks of layout.
-void Document::JoinScope::update_style_beside_recording(ThrottledAnimationSamplingScope animation_sampling_scope) const
-{
-    // A read the style update makes of a document it lays out runs no second one inside it.
-    static bool s_running_style_update_beside_recording = false;
-    if (!m_styles_beside_recording || s_running_style_update_beside_recording)
-        return;
-    if (auto navigable = m_document.navigable(); !navigable || navigable->active_document().ptr() != &m_document)
-        return;
-    auto const* arena = m_document.layout_node_arena_if_created();
-    if (!arena || !Layout::RustFFI::rust_stage_thread_styles_beside_recording_of(arena->handle()))
-        return;
-    // The layout update flushes these before its style update, which this one runs ahead of.
-    if (animation_sampling_scope == ThrottledAnimationSamplingScope::Document)
-        m_document.flush_throttled_animation_style_update();
-    auto& counters = m_document.m_join_counters[to_underlying(m_reason)];
-    ++counters.styles_beside_recording;
-    {
-        TemporaryChange running { s_running_style_update_beside_recording, true };
-        m_document.update_style_beside_recording();
-    }
-    // One that installed a style in a box the recording reads took the recording in at the arena's door.
-    if (Layout::RustFFI::rust_stage_thread_styles_beside_recording_of(arena->handle()))
-        ++counters.styles_finished_beside_recording;
 }
 
 void Document::JoinScope::note_extra_pass() const
@@ -2453,14 +2381,6 @@ bool Document::layout_is_up_to_date() const
     // Beside the recording in flight, which went in flight only once the layout was up to date, what was marked since
     // is in the journals, which draining would take the recording in for, or in the tree update flags. A mark made
     // beside the frame waits in the held journal until the frame is taken in.
-    if (m_layout_node_arena && Layout::RustFFI::rust_stage_thread_reads_beside_recording_of(m_layout_node_arena->handle())) {
-        if (!m_invalidation_journal->is_empty() || !m_held_invalidation_journal->is_empty())
-            return false;
-        if (!navigable() || navigable()->active_document().ptr() != this)
-            return true;
-        return !needs_layout_tree_update() && !child_needs_layout_tree_update();
-    }
-
     // NB: Draining is what makes this exact: every question about pending layout work comes
     //     through here, so no journalled mark can hide behind an up-to-date answer.
     drain_invalidation_journal();
@@ -2912,13 +2832,6 @@ void Document::take_in_flight_paint(bool handed_accumulated_visual_contexts_upda
 
 void Document::update_paint_and_hit_testing_properties_if_needed()
 {
-    // Beside the recording in flight, the paint properties are those it was prepared with until something is marked
-    // (in the held journal, if beside the frame) or a visual context update is asked for: the recording changes none
-    // of them.
-    if (m_layout_node_arena && Layout::RustFFI::rust_stage_thread_reads_beside_recording_of(m_layout_node_arena->handle())
-        && m_invalidation_journal->is_empty() && m_held_invalidation_journal->is_empty() && !m_needs_accumulated_visual_contexts_update)
-        return;
-
     // NB: Called during paint property resolution.
     // Everything that reads paint state comes through here, so the marks that describe it go
     // through first.

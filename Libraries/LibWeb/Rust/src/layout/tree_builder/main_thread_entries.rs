@@ -87,9 +87,9 @@ unsafe extern "C" fn rust_removed_box_detachable_in_place(
 ) -> bool {
     assert!(!arena.is_null() && !place.is_null());
     // SAFETY: The entry point's contract puts this call on the document thread.
-    let _main_thread = unsafe { crate::stage::from_ffi_entry_beside_recording(&MAIN_THREAD_FFI_ENTRY, arena) };
-    // SAFETY: Guaranteed by the entry point's contract. The rows and links it reads are nothing a recording writes.
-    let arena = unsafe { LayoutNodeArena::from_handle_beside_recording(arena) };
+    let _main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+    // SAFETY: Guaranteed by the entry point's contract.
+    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
     removed_box_detachable_in_place(arena, unsafe { &*place }).is_some()
 }
 
@@ -116,7 +116,7 @@ unsafe extern "C" fn rust_detach_removed_box_in_place(
     };
     // SAFETY: Guaranteed by the entry point's contract.
     unsafe {
-        LayoutNodeArena::from_handle_mut(arena).release_published_paintable_rows_for_main_side_write();
+        LayoutNodeArena::from_handle_mut(arena).release_published_paintable_rows();
         super::layout_node_arena::paying_host_handbacks(&main_thread, arena, || {
             detach_removed_box_in_place(arena.cast(), layout_node, parent)
         })

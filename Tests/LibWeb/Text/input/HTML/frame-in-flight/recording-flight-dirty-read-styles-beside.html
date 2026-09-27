@@ -26,24 +26,18 @@
             box.style.backgroundColor = ++repaints % 2 ? "green" : "blue";
         }, frame => {
             mutate();
-            const before = internals.getJoinCounters().totals;
             const joinsBefore = internals.forcedJoinCount("recording");
             const value = read();
-            const after = internals.getJoinCounters().totals;
             return {
                 ...frame,
                 value,
-                started: after.stylesBesideRecording - before.stylesBesideRecording,
-                finished: after.stylesFinishedBesideRecording - before.stylesFinishedBesideRecording,
                 joins: internals.forcedJoinCount("recording") - joinsBefore,
             };
         });
     }
 
-    function report(name, result, finishedBeside) {
+    function report(name, result) {
         println(`${name}: held as armed: ${heldAsArmed(result, "mid-recording")}`);
-        println(`${name}: style update started beside the recording: ${!result.armed || result.started === 1}`);
-        println(`${name}: style update finished beside the recording: ${!result.armed ? finishedBeside : result.finished === 1}`);
         println(`${name}: took the recording in once: ${!result.armed || result.joins === 1}`);
         println(`${name}: read: ${result.value}`);
     }
@@ -54,7 +48,7 @@
             container.className = "tall";
             box.style.width = "200px";
         }, () => box.offsetHeight);
-        report("restyled box", restyled, false);
+        report("restyled box", restyled);
         println(`restyled box: transitions started: ${box.getAnimations().length}`);
         println(`restyled box: ::before: ${getComputedStyle(box, "::before").content}`);
 
@@ -62,7 +56,7 @@
         const boxless = await readBesideRecording(() => {
             hidden.className = "other";
         }, () => box.offsetHeight);
-        report("no box restyled", boxless, true);
+        report("no box restyled", boxless);
         println(`no box restyled: color: ${getComputedStyle(hiddenSpan).color}`);
         done();
     });

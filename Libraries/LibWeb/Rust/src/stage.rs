@@ -98,24 +98,6 @@ pub(crate) unsafe fn from_ffi_entry<'host>(_: &impl FfiEntry, arena_handle: *mut
     unsafe { MainThread::from_ffi_entry(Some(HostTables::from_handle(arena_handle))) }
 }
 
-/// Like [`from_ffi_entry`], for an entry that goes on beside a recording of the arena in flight that it does not take in
-/// (see [`crate::stage_thread::reads_beside_recording_of`]): no stage reaches the host tables.
-///
-/// # Safety
-///
-/// As for [`from_ffi_entry`].
-pub(crate) unsafe fn from_ffi_entry_beside_recording<'host>(
-    entry: &impl FfiEntry,
-    arena_handle: *mut c_void,
-) -> MainThread<'host> {
-    if !crate::stage_thread::reads_beside_recording_of(arena_handle) {
-        // SAFETY: Guaranteed by the caller.
-        return unsafe { from_ffi_entry(entry, arena_handle) };
-    }
-    // SAFETY: As in `from_ffi_entry`; the host tables are the document thread's beside a frame.
-    unsafe { MainThread::from_ffi_entry(Some(HostTables::beside_frame(arena_handle))) }
-}
-
 macro_rules! ffi_entry {
     ($entry:path) => {
         impl private::FfiEntry for $entry {}

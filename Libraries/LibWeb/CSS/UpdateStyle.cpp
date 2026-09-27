@@ -2028,18 +2028,6 @@ void Document::update_style()
     CSS::update_style(*this);
 }
 
-// The style update of a read that starts it beside the recording of this document in flight (see JoinScope): the
-// recording reaches no style engine, and what the update writes to the arena takes the recording in at its doors. Like a
-// style update for one element beside the recording, it can release a record a row names before the row takes its new
-// one, so the engine reclaims no record until the frame is taken in.
-void Document::update_style_beside_recording()
-{
-    HTML::main_thread_event_loop().frame_scheduler().hold_style_records_for_frame(*this);
-    update_selection_style_observability();
-    HTML::MainThreadPhases::Scope phase { HTML::MainThreadPhases::style_phase(*this) };
-    CSS::update_style(*this);
-}
-
 bool Document::submit_style_for_rendering_update()
 {
     join_frame_in_flight();
@@ -2095,22 +2083,10 @@ void Document::settle_style_repaint_owed_to_flight(bool recorded_in_flight)
     set_needs_repaint(InvalidateDisplayList::No);
 }
 
-// A style update for one element reads and writes nothing a recording in flight reads, and what it changes in the arena
-// joins at the arena's doors, so beside a recording of the document it does not take the recording in. It can release
-// the record a row names before the row takes its new one, though, so the engine reclaims no record until then.
-static bool updates_element_style_beside_recording(Document const& document)
-{
-    auto const* arena = document.layout_node_arena_if_created();
-    return arena && Layout::RustFFI::rust_stage_thread_reads_beside_recording_of(arena->handle());
-}
-
 bool Document::update_style_for_element(AbstractElement const& abstract_element)
 {
     HTML::ClockLendReadScope clock_lend_read_scope;
-    if (!updates_element_style_beside_recording(*this))
-        join_frame_in_flight();
-    else
-        HTML::main_thread_event_loop().frame_scheduler().hold_style_records_for_frame(*this);
+    join_frame_in_flight();
     update_selection_style_observability();
     flush_throttled_animation_style_update_for_node(abstract_element.element());
     return CSS::update_style_for_element(*this, abstract_element, StyleUpdateMode::Normal);
@@ -2119,10 +2095,7 @@ bool Document::update_style_for_element(AbstractElement const& abstract_element)
 bool Document::update_style_for_element(AbstractElement const& abstract_element, StyleUpdateMode mode)
 {
     HTML::ClockLendReadScope clock_lend_read_scope;
-    if (!updates_element_style_beside_recording(*this))
-        join_frame_in_flight();
-    else
-        HTML::main_thread_event_loop().frame_scheduler().hold_style_records_for_frame(*this);
+    join_frame_in_flight();
     update_selection_style_observability();
     flush_throttled_animation_style_update_for_node(abstract_element.element());
     return CSS::update_style_for_element(*this, abstract_element, mode);
