@@ -426,17 +426,19 @@ pub unsafe extern "C" fn layout_arena_committed_row(arena: *mut c_void, slot: No
 ///
 /// # Safety
 ///
-/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
-pub(crate) unsafe fn clear_paintable_row_of_node(arena: *mut c_void, layout_node: NodeSlotId) {
+/// `arena` must be live, on the thread that owns it, with no borrow of it held across the call.
+pub(crate) unsafe fn clear_paintable_row_of_node(arena: *mut LayoutNodeArena, layout_node: NodeSlotId) {
     let reset = {
-        let arena = unsafe { arena_from_handle(arena) };
+        // SAFETY: Guaranteed by the caller.
+        let arena = unsafe { &*arena };
         arena.clear_committed_fragment_link(layout_node);
         arena.prepare_paintable_row_cleared_reset(layout_node)
     };
     if let Some(reset) = reset {
-        unsafe { arena_from_handle(arena) }.hand_back_paintable_row_reset(reset);
-        let arena = unsafe { arena_from_handle_mut(arena) };
-        arena.paintable_row_cleared(reset);
+        // SAFETY: As above.
+        unsafe { &*arena }.hand_back_paintable_row_reset(reset);
+        // SAFETY: As above; the shared borrow has ended.
+        unsafe { &mut *arena }.paintable_row_cleared(reset);
     }
 }
 

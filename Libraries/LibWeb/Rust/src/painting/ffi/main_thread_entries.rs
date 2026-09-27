@@ -119,7 +119,7 @@ unsafe extern "C" fn layout_arena_paintable_cleared_from_node(arena: *mut c_void
     unsafe {
         arena_from_handle_mut(arena).release_published_paintable_rows();
         crate::layout::paying_host_handbacks(&main_thread, arena, || {
-            clear_paintable_row_of_node(arena, layout_node);
+            clear_paintable_row_of_node(arena_from_handle_mut(arena), layout_node);
         });
     }
 }
