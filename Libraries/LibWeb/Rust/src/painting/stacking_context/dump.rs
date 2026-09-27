@@ -24,26 +24,22 @@ const MAIN_THREAD_FFI_ENTRY: MainThreadFfiEntry = MainThreadFfiEntry { _private:
 pub struct FfiStackingContextDumpCallbacks {
     pub context: *mut c_void,
     pub debug_description:
-        unsafe extern "C" fn(context: *mut c_void, layout_node_shell: *mut c_void, description_sink: *mut c_void),
+        unsafe extern "C" fn(context: *mut c_void, layout_node: NodeSlotId, description_sink: *mut c_void),
     pub append_text: unsafe extern "C" fn(context: *mut c_void, bytes: *const u8, byte_count: usize),
 }
 
 struct StackingContextDumpHost<'a> {
     callbacks: FfiStackingContextDumpCallbacks,
-    main_thread: &'a crate::stage::MainThread<'a>,
+    _main_thread: &'a crate::stage::MainThread<'a>,
 }
 
 impl StackingContextDumpHost<'_> {
-    fn debug_description(&self, layout_node_shell: *mut c_void) -> String {
+    fn debug_description(&self, layout_node: NodeSlotId) -> String {
         let mut description = Vec::new();
         // SAFETY: The C++ host fills the description sink synchronously through the exported push
         // function.
         unsafe {
-            (self.callbacks.debug_description)(
-                self.callbacks.context,
-                layout_node_shell,
-                (&raw mut description).cast(),
-            );
+            (self.callbacks.debug_description)(self.callbacks.context, layout_node, (&raw mut description).cast());
         };
         String::from_utf8_lossy(&description).into_owned()
     }
@@ -68,7 +64,7 @@ pub unsafe extern "C" fn layout_arena_dump_stacking_context_tree(
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let callbacks = StackingContextDumpHost {
         callbacks,
-        main_thread: &main_thread,
+        _main_thread: &main_thread,
     };
     // SAFETY: The caller guarantees a live arena handle borrowed for this call.
     let arena = unsafe { LayoutNodeArena::from_handle(arena) };
@@ -93,7 +89,7 @@ fn visit(
     } else {
         push_line(
             output,
-            &callbacks.debug_description(arena.node_shell(callbacks.main_thread, root)),
+            &callbacks.debug_description(root),
             paintable_geometry::absolute_rect_or_default(&arena.paintable_rows(), root),
             effective_z_index(arena, root),
             has_css_transform(arena, root),

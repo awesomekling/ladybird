@@ -16,7 +16,14 @@ mod main_thread_entries;
 pub(crate) use main_thread_entries::MainThreadFfiEntry;
 
 type AppendText = unsafe extern "C" fn(*mut c_void, *const u8, usize);
-pub(crate) type DescribeNode = unsafe extern "C" fn(*mut c_void, *mut c_void, AppendText);
+pub(crate) type DescribeNode = unsafe extern "C" fn(*mut c_void, NodeSlotId, *mut c_void, AppendText);
+
+/// How the host names a node a layout trace mentions: the callback and the context it is called with.
+#[derive(Clone, Copy)]
+pub(crate) struct NodeDescriber {
+    pub(crate) describe: DescribeNode,
+    pub(crate) context: *mut c_void,
+}
 
 struct Trace {
     lines: Vec<Line>,
@@ -104,7 +111,7 @@ impl LayoutTrace {
             .expect("a layout trace names its nodes through the callback it began with");
         let names: Vec<(usize, String)> = unnamed
             .into_iter()
-            .map(|(index, owner)| (index, owner_name(main_thread, arena, owner, describe)))
+            .map(|(index, owner)| (index, owner_name(arena, owner, describe)))
             .collect();
         if let Some(trace) = self.0.borrow_mut().as_mut() {
             for (index, name) in names {
@@ -171,12 +178,7 @@ impl LayoutTrace {
     }
 }
 
-fn owner_name(
-    main_thread: &crate::stage::MainThread,
-    arena: &LayoutNodeArena,
-    root: NodeSlotId,
-    describe: DescribeNode,
-) -> String {
+fn owner_name(arena: &LayoutNodeArena, root: NodeSlotId, describer: NodeDescriber) -> String {
     if arena.data(root).kind.get() == NodeKind::Viewport {
         return "@viewport".into();
     }
@@ -184,33 +186,36 @@ fn owner_name(
         // SAFETY: describe receives this live vector and supplies bytes valid for this call.
         unsafe { &mut *sink.cast::<Vec<u8>>() }.extend_from_slice(unsafe { std::slice::from_raw_parts(bytes, length) });
     }
-    // A row nothing has materialised a shell for is named from the row, the way its shell would
-    // describe itself, since materialising one would ask the document something mid-pass.
+    // An anonymous row and a text row are named from the row, the way the host would describe them.
     let data = arena.data(root);
-    if data.shell.get().is_none() {
-        let kind = data.kind.get();
-        if data.flags.get() & NodeFlag::Anonymous as u32 != 0 {
-            return format!("{kind:?}(anonymous)");
-        }
-        if kind == NodeKind::TextNode {
-            return format!("{kind:?}<#text>");
-        }
+    let kind = data.kind.get();
+    if data.flags.get() & NodeFlag::Anonymous as u32 != 0 {
+        return format!("{kind:?}(anonymous)");
+    }
+    if kind == NodeKind::TextNode {
+        return format!("{kind:?}<#text>");
     }
     let mut bytes = Vec::<u8>::new();
-    // SAFETY: the traced run holds the arena and its shells alive; describe copies
-    // the node's description synchronously without changing layout.
-    unsafe { describe(arena.shell_if_live(main_thread, root), (&raw mut bytes).cast(), append) };
+    // SAFETY: describe copies the node's description synchronously without changing layout.
+    unsafe { (describer.describe)(describer.context, root, (&raw mut bytes).cast(), append) };
     String::from_utf8(bytes).expect("layout trace label must be UTF-8")
 }
 
 /// # Safety
-/// The arena must be live. The callback must remain valid until tracing stops and
-/// must synchronously describe its live node shell without mutating layout.
+/// The arena must be live. The callback and its context must remain valid until tracing stops, and
+/// the callback must synchronously describe the row it is handed without mutating layout.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_begin_layout_trace(arena: *mut c_void, describe_node: DescribeNode) {
+pub unsafe extern "C" fn layout_arena_begin_layout_trace(
+    arena: *mut c_void,
+    context: *mut c_void,
+    describe_node: DescribeNode,
+) {
     unsafe { super::HostTables::from_handle(arena) }
         .layout_trace_describe_node
-        .set(Some(describe_node));
+        .set(Some(NodeDescriber {
+            describe: describe_node,
+            context,
+        }));
     unsafe { LayoutNodeArena::from_handle(arena) }.layout_trace.begin();
 }
 

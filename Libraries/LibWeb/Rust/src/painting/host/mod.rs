@@ -40,7 +40,7 @@ pub struct FfiGeometryHostCallbacks {
     /// never from inside one.
     pub set_scroll_offset: unsafe extern "C" fn(
         *mut std::ffi::c_void,
-        *mut std::ffi::c_void,
+        crate::layout::node_data::NodeSlotId,
         crate::layout::used_values::FfiCssPixelPoint,
     ),
 }
@@ -50,7 +50,7 @@ pub(crate) struct GeometryHostCallbacks {
     context: *mut std::ffi::c_void,
     set_scroll_offset: unsafe extern "C" fn(
         *mut std::ffi::c_void,
-        *mut std::ffi::c_void,
+        crate::layout::node_data::NodeSlotId,
         crate::layout::used_values::FfiCssPixelPoint,
     ),
 }
@@ -67,17 +67,17 @@ impl From<FfiGeometryHostCallbacks> for GeometryHostCallbacks {
 impl GeometryHostCallbacks {
     /// # Safety
     ///
-    /// `layout_node_shell` must be a live layout node shell. The host re-enters geometry
-    /// queries and writes the store the offset lives in, so no arena or cache borrow may be
-    /// held across this call and no pass may be running.
+    /// `layout_node` must name a live row. The host re-enters geometry queries and writes the
+    /// store the offset lives in, so no arena or cache borrow may be held across this call and no
+    /// pass may be running.
     pub(crate) unsafe fn set_scroll_offset(
         &self,
         _: &crate::stage::MainThread,
-        layout_node_shell: *mut std::ffi::c_void,
+        layout_node: crate::layout::node_data::NodeSlotId,
         offset: crate::layout::used_values::FfiCssPixelPoint,
     ) {
         crate::painting::seal::note_host_call("set_scroll_offset");
-        // SAFETY: The caller guarantees the shell is live and no borrow is held.
-        unsafe { (self.set_scroll_offset)(self.context, layout_node_shell, offset) };
+        // SAFETY: The caller guarantees the row is live and no borrow is held.
+        unsafe { (self.set_scroll_offset)(self.context, layout_node, offset) };
     }
 }

@@ -946,11 +946,10 @@ pub(crate) fn hand_over_clamped_scroll_offsets(
         return;
     };
     for (slot, offset) in clamped {
-        let shell = arena.shell_if_live(main_thread, slot);
-        if !shell.is_null() {
-            // SAFETY: The registered host receives a live shell. No mutable arena or cache
-            // borrow is held while it re-enters geometry queries to store the offset.
-            unsafe { host.set_scroll_offset(main_thread, shell, offset.into()) };
+        if arena.slot_is_live(slot) {
+            // SAFETY: The registered host receives a live row. No mutable arena or cache borrow
+            // is held while it re-enters geometry queries to store the offset.
+            unsafe { host.set_scroll_offset(main_thread, slot, offset.into()) };
         }
     }
 }

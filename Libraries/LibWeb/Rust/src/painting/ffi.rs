@@ -2696,7 +2696,8 @@ pub unsafe extern "C" fn layout_arena_paintable_computed_svg_path(
 pub struct FfiCaretRectResult {
     pub found: bool,
     pub rect: FfiCssPixelRect,
-    pub style_source: *mut c_void,
+    /// The row whose style the caret is painted with.
+    pub style_source: NodeSlotId,
     pub owner_paintable: NodeSlotId,
     pub nearest_self_painting_inline: NodeSlotId,
 }
@@ -2730,7 +2731,7 @@ pub unsafe extern "C" fn layout_arena_text_caret_rect_in_dom_range(
 pub struct FfiEmptyLineCaretRect {
     pub has_value: bool,
     pub rect: FfiCssPixelRect,
-    pub style_source: *mut c_void,
+    pub style_source: NodeSlotId,
 }
 
 #[repr(C)]

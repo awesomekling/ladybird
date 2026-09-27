@@ -106,18 +106,13 @@ impl MappedText {
         })
     }
 
-    fn dom_range(
-        &self,
-        main_thread: &crate::stage::MainThread,
-        arena: &LayoutNodeArena,
-        range: Range<usize>,
-    ) -> Option<FfiDomTextRange> {
+    fn dom_range(&self, arena: &LayoutNodeArena, range: Range<usize>) -> Option<FfiDomTextRange> {
         let start = self.dom_position(arena, range.start, Start)?;
         let end = self.dom_position(arena, range.end, End)?;
         Some(FfiDomTextRange {
-            start_layout_node: arena.node_shell(main_thread, start.node),
+            start_layout_node: start.node,
             start_offset: start.offset,
-            end_layout_node: arena.node_shell(main_thread, end.node),
+            end_layout_node: end.node,
             end_offset: end.offset,
         })
     }
@@ -294,20 +289,20 @@ impl SearchTextBuilder {
 enum SearchNode {
     Skip,
     Break,
-    Text(*mut c_void),
+    Text,
 }
 
 impl SearchNode {
-    fn text(main_thread: &crate::stage::MainThread, arena: &LayoutNodeArena, node: NodeSlotId) -> Self {
+    fn text(arena: &LayoutNodeArena, node: NodeSlotId) -> Self {
         // Generated text renders no DOM text, so only a DOM-backed row can be searched.
         match arena.node_is_dom_backed(node) {
-            true => SearchNode::Text(arena.node_shell(main_thread, node)),
+            true => SearchNode::Text,
             false => SearchNode::Skip,
         }
     }
 }
 
-fn search_node(main_thread: &crate::stage::MainThread, arena: &LayoutNodeArena, node: NodeSlotId) -> SearchNode {
+fn search_node(arena: &LayoutNodeArena, node: NodeSlotId) -> SearchNode {
     let data = arena.data(node);
     if node_style_view(data).is_some_and(|style| style.display().is_none()) {
         return SearchNode::Skip;
@@ -319,17 +314,17 @@ fn search_node(main_thread: &crate::stage::MainThread, arena: &LayoutNodeArena, 
     if kind_is_text(data.kind.get()) {
         let style = node_style_view(arena.data(data.parent.get())).expect("text parent has style");
         if style.visibility() == visibility::VISIBLE && style.effects().opacity != 0.0 {
-            return SearchNode::text(main_thread, arena, node);
+            return SearchNode::text(arena, node);
         }
     }
     SearchNode::Skip
 }
 
 unsafe fn ensure_searchable_text(
-    main_thread: &crate::stage::MainThread,
     arena: *mut LayoutNodeArena,
     viewport: NodeSlotId,
-    is_searchable: unsafe extern "C" fn(*mut c_void) -> bool,
+    context: *mut c_void,
+    is_searchable: unsafe extern "C" fn(*mut c_void, NodeSlotId) -> bool,
 ) {
     let nodes = {
         // SAFETY: The caller lends the live arena for traversal before callbacks.
@@ -344,12 +339,12 @@ unsafe fn ensure_searchable_text(
     let mut builder = SearchTextBuilder::default();
     for node in nodes {
         // SAFETY: The tree is live and no borrowed data escapes classification.
-        match search_node(main_thread, unsafe { &*arena }, node) {
+        match search_node(unsafe { &*arena }, node) {
             SearchNode::Skip => {}
             SearchNode::Break => builder.flush(),
-            SearchNode::Text(layout_node) => {
+            SearchNode::Text => {
                 // SAFETY: This only reads DOM eligibility. No arena borrow crosses it.
-                if !unsafe { is_searchable(layout_node) } {
+                if !unsafe { is_searchable(context, node) } {
                     continue;
                 }
                 // SAFETY: The text is attached, and the DOM callback has returned.
@@ -370,9 +365,9 @@ unsafe fn ensure_searchable_text(
 /// from the identity the row carries.
 #[repr(C)]
 pub struct FfiDomTextRange {
-    pub start_layout_node: *mut c_void,
+    pub start_layout_node: NodeSlotId,
     pub start_offset: usize,
-    pub end_layout_node: *mut c_void,
+    pub end_layout_node: NodeSlotId,
     pub end_offset: usize,
 }
 
@@ -468,25 +463,16 @@ mod tests {
         let mut builder = SearchTextBuilder::default();
         builder.append(expanded, &arena.text_content(expanded).unwrap().text, false);
         for rendered in [1..2, 2..3, 1..3] {
-            let range = builder
-                .current
-                .dom_range(&crate::stage::MainThread::for_test(), &arena, rendered)
-                .unwrap();
+            let range = builder.current.dom_range(&arena, rendered).unwrap();
             assert_eq!((range.start_offset, range.end_offset), (1, 2));
         }
-        let range = builder
-            .current
-            .dom_range(&crate::stage::MainThread::for_test(), &arena, 4..6)
-            .unwrap();
+        let range = builder.current.dom_range(&arena, 4..6).unwrap();
         assert_eq!((range.start_offset, range.end_offset), (3, 5));
 
         let contracted = node(&mut arena, "ix", 0, 3, vec![edit(0, 2, 0, 1)]);
         let mut builder = SearchTextBuilder::default();
         builder.append(contracted, &arena.text_content(contracted).unwrap().text, false);
-        let range = builder
-            .current
-            .dom_range(&crate::stage::MainThread::for_test(), &arena, 0..1)
-            .unwrap();
+        let range = builder.current.dom_range(&arena, 0..1).unwrap();
         assert_eq!((range.start_offset, range.end_offset), (0, 2));
     }
 

@@ -1532,7 +1532,7 @@ mod tests {
                 first: seq,
                 changes: vec![Change::StyleInputs(InputForPass::empty())],
             });
-            let applied = with_state(document, |state| state.changes.take_through(seq).len()).unwrap();
+            let applied = with_state(document, |state| state.changes.take_through(seq, |_| true).len()).unwrap();
             assert_eq!(applied, 1);
             handle(ToOwner::Destroy { document });
             STATES.with_borrow(|states| states.is_empty())

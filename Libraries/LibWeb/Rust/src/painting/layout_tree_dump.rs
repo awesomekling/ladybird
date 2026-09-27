@@ -30,7 +30,8 @@ const MAIN_THREAD_FFI_ENTRY: MainThreadFfiEntry = MainThreadFfiEntry { _private:
 #[repr(C)]
 pub struct FfiNestedLayoutRoot {
     pub has_document: bool,
-    pub layout_root_shell: *mut c_void,
+    /// The nested document, which the host dumps; null if it has no layout.
+    pub document: *mut c_void,
 }
 
 #[derive(Clone, Copy)]
@@ -39,19 +40,20 @@ pub struct FfiLayoutTreeDumpCallbacks {
     pub context: *mut c_void,
     pub describe_dom_node: unsafe extern "C" fn(
         context: *mut c_void,
-        layout_node: *mut c_void,
+        layout_node: NodeSlotId,
         tag_name_sink: *mut c_void,
         identifier_sink: *mut c_void,
     ),
     pub navigable_container_content_document: unsafe extern "C" fn(
         context: *mut c_void,
-        layout_node: *mut c_void,
+        layout_node: NodeSlotId,
         url_sink: *mut c_void,
     ) -> FfiNestedLayoutRoot,
-    pub svg_as_image_layout_root: unsafe extern "C" fn(context: *mut c_void, layout_node: *mut c_void) -> *mut c_void,
+    /// The document an SVG image renders, or null.
+    pub svg_as_image_document: unsafe extern "C" fn(context: *mut c_void, layout_node: NodeSlotId) -> *mut c_void,
     pub dump_nested_layout_tree: unsafe extern "C" fn(
         context: *mut c_void,
-        layout_root_shell: *mut c_void,
+        document: *mut c_void,
         indent: usize,
         interactive: bool,
         output_sink: *mut c_void,
@@ -61,11 +63,11 @@ pub struct FfiLayoutTreeDumpCallbacks {
 
 struct LayoutTreeDumpHost<'a> {
     callbacks: FfiLayoutTreeDumpCallbacks,
-    main_thread: &'a crate::stage::MainThread<'a>,
+    _main_thread: &'a crate::stage::MainThread<'a>,
 }
 
 impl LayoutTreeDumpHost<'_> {
-    fn describe_dom_node(&self, layout_node: *mut c_void, tag_name_sink: &mut Vec<u8>, identifier_sink: &mut Vec<u8>) {
+    fn describe_dom_node(&self, layout_node: NodeSlotId, tag_name_sink: &mut Vec<u8>, identifier_sink: &mut Vec<u8>) {
         // SAFETY: The C++ host fills both sinks synchronously through the exported push function.
         unsafe {
             (self.callbacks.describe_dom_node)(
@@ -77,7 +79,7 @@ impl LayoutTreeDumpHost<'_> {
         }
     }
 
-    fn navigable_container_content_document(&self, layout_node: *mut c_void) -> Option<(Vec<u8>, *mut c_void)> {
+    fn navigable_container_content_document(&self, layout_node: NodeSlotId) -> Option<(Vec<u8>, *mut c_void)> {
         let mut url = Vec::new();
         // SAFETY: The C++ host fills the url sink synchronously through the exported push function.
         let nested = unsafe {
@@ -87,28 +89,22 @@ impl LayoutTreeDumpHost<'_> {
                 (&raw mut url).cast(),
             )
         };
-        nested.has_document.then_some((url, nested.layout_root_shell))
+        nested.has_document.then_some((url, nested.document))
     }
 
-    fn svg_as_image_layout_root(&self, layout_node: *mut c_void) -> *mut c_void {
-        // SAFETY: The C++ host answers synchronously from a live layout node.
-        unsafe { (self.callbacks.svg_as_image_layout_root)(self.callbacks.context, layout_node) }
+    fn svg_as_image_document(&self, layout_node: NodeSlotId) -> *mut c_void {
+        // SAFETY: The C++ host answers synchronously for a live row.
+        unsafe { (self.callbacks.svg_as_image_document)(self.callbacks.context, layout_node) }
     }
 
-    fn dump_nested_layout_tree(
-        &self,
-        layout_root_shell: *mut c_void,
-        indent: usize,
-        interactive: bool,
-        output: &mut Vec<u8>,
-    ) {
+    fn dump_nested_layout_tree(&self, document: *mut c_void, indent: usize, interactive: bool, output: &mut Vec<u8>) {
         // SAFETY: The C++ host re-enters the dump for the nested document's own arena and appends
         // into the output sink synchronously through the exported push function; no reference to
         // the output vector is alive across the call.
         unsafe {
             (self.callbacks.dump_nested_layout_tree)(
                 self.callbacks.context,
-                layout_root_shell,
+                document,
                 indent,
                 interactive,
                 (&raw mut *output).cast(),
@@ -139,7 +135,7 @@ pub unsafe extern "C" fn layout_arena_dump_layout_tree(
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let callbacks = LayoutTreeDumpHost {
         callbacks,
-        main_thread: &main_thread,
+        _main_thread: &main_thread,
     };
     let context = LayoutTreeDumpContext {
         arena_handle: arena,
@@ -405,11 +401,7 @@ fn push_layout_node_line(
     if node_facts::has_flag(data, NodeFlag::Anonymous) {
         output.extend_from_slice(b"(anonymous)");
     } else {
-        context.callbacks.describe_dom_node(
-            arena.node_shell(context.callbacks.main_thread, slot),
-            output,
-            &mut identifier,
-        );
+        context.callbacks.describe_dom_node(slot, output, &mut identifier);
     }
     output.extend_from_slice(if is_box { palette.off } else { "" }.as_bytes());
     output.extend_from_slice(identifier_color.as_bytes());
@@ -452,10 +444,8 @@ unsafe fn dump_layout_node(output: &mut Vec<u8>, context: &LayoutTreeDumpContext
         };
         push_layout_node_line(output, arena, data, slot, context);
         let kind = data.kind.get();
-        // The host reads the row's DOM node, which the row names by identity, through the shell.
-        let layout_node = arena
-            .node_is_dom_backed(slot)
-            .then(|| arena.node_shell(context.callbacks.main_thread, slot));
+        // The host reads the row's DOM node, which the row names by identity.
+        let layout_node = arena.node_is_dom_backed(slot).then_some(slot);
         let nested_navigable_document = (kind == NodeKind::NavigableContainerViewport)
             .then(|| {
                 layout_node.and_then(|layout_node| context.callbacks.navigable_container_content_document(layout_node))
@@ -475,17 +465,14 @@ unsafe fn dump_layout_node(output: &mut Vec<u8>, context: &LayoutTreeDumpContext
         )
     };
 
-    if let Some((url, nested_layout_root_shell)) = nested_navigable_document {
+    if let Some((url, nested_document)) = nested_navigable_document {
         output.extend_from_slice(b" (url: ");
         output.extend_from_slice(&url);
         output.extend_from_slice(b")\n");
-        if !nested_layout_root_shell.is_null() {
-            context.callbacks.dump_nested_layout_tree(
-                nested_layout_root_shell,
-                indent + 1,
-                context.interactive,
-                output,
-            );
+        if !nested_document.is_null() {
+            context
+                .callbacks
+                .dump_nested_layout_tree(nested_document, indent + 1, context.interactive, output);
         }
     }
 
@@ -503,16 +490,13 @@ unsafe fn dump_layout_node(output: &mut Vec<u8>, context: &LayoutTreeDumpContext
     output.push(b'\n');
 
     if let Some(layout_node) = layout_node {
-        let svg_as_image_layout_root = context.callbacks.svg_as_image_layout_root(layout_node);
-        if !svg_as_image_layout_root.is_null() {
+        let svg_as_image_document = context.callbacks.svg_as_image_document(layout_node);
+        if !svg_as_image_document.is_null() {
             push_indent(output, indent + 1);
             output.extend_from_slice(b"(SVG-as-image isolated context)\n");
-            context.callbacks.dump_nested_layout_tree(
-                svg_as_image_layout_root,
-                indent + 1,
-                context.interactive,
-                output,
-            );
+            context
+                .callbacks
+                .dump_nested_layout_tree(svg_as_image_document, indent + 1, context.interactive, output);
         }
     }
 
