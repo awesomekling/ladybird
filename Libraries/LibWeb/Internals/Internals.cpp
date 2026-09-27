@@ -1943,6 +1943,12 @@ void Internals::wait_for_stage_threads_beside_held_frame()
     Layout::RustFFI::rust_stage_thread_wait_for_threads_beside_held_run();
 }
 
+u64 Internals::frames_presented_by_flights(DOM::Document& document) const
+{
+    auto navigable = document.navigable();
+    return navigable ? navigable->frames_presented_by_flights() : 0;
+}
+
 void Internals::take_in_next_recording_before_its_presentation(bool take)
 {
     HTML::main_thread_event_loop().frame_scheduler().take_in_next_recording_before_its_presentation(take);

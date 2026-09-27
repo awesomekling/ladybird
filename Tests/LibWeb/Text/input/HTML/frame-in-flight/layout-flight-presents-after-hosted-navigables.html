@@ -14,11 +14,19 @@
         return internals.getRenderingSchedulerCounters().flightEnds;
     }
 
+    // Which navigable a flight presented is counted per navigable: a count of all flights that presented would pass
+    // whichever of the two presented.
     async function step(mutate) {
         internals.resetRenderingSchedulerCounters();
+        const parentBefore = internals.framesPresentedByFlights(document);
+        const iframeBefore = internals.framesPresentedByFlights(frame.contentDocument);
         mutate();
         await twoFrames();
-        return flightEnds();
+        return {
+            ends: flightEnds(),
+            parent: internals.framesPresentedByFlights(document) - parentBefore,
+            iframe: internals.framesPresentedByFlights(frame.contentDocument) - iframeBefore,
+        };
     }
 
     asyncTest(async done => {
@@ -41,10 +49,11 @@
 
         // Without flights (LIBWEB_FLIGHT=0) nothing presents ahead of the rendering update.
         const flew = ends => Object.values(ends).some(byStage => Object.values(byStage).some(count => count > 0));
-        const noFlights = !flew(parentOnly) && !flew(parentAndChild) && !flew(resize);
-        println(`parent alone presents in its flight: ${noFlights || parentOnly.done.present >= 1}`);
-        println(`parent beside a painting iframe: only the iframe presented ${noFlights || parentAndChild.done.present === 1}, refused its paint ${noFlights || parentAndChild.paintNotSealed.rounds >= 1}`);
-        println(`parent resizing its iframe: only the iframe presented ${noFlights || resize.done.present === 1}, stopped after layout ${noFlights || resize.roundLeftWork.rounds >= 1}`);
+        const noFlights = !flew(parentOnly.ends) && !flew(parentAndChild.ends) && !flew(resize.ends);
+        const onlyTheIframePresented = step => step.parent === 0 && step.iframe === 1;
+        println(`parent alone presents in its flight: ${noFlights || parentOnly.parent >= 1}`);
+        println(`parent beside a painting iframe: only the iframe presented ${noFlights || onlyTheIframePresented(parentAndChild)}, refused its paint ${noFlights || parentAndChild.ends.paintNotSealed.rounds >= 1}`);
+        println(`parent resizing its iframe: only the iframe presented ${noFlights || onlyTheIframePresented(resize)}, stopped after layout ${noFlights || resize.ends.roundLeftWork.rounds >= 1}`);
         println(`width: ${box.getBoundingClientRect().width}`);
         println(`inner width: ${inner.getBoundingClientRect().width}`);
         println(`iframe viewport width: ${frame.contentWindow.innerWidth}`);

@@ -7292,7 +7292,7 @@ bool LocalNavigable::seal_flight_paint_now(DOM::Document& document, bool may_pre
     return true;
 }
 
-bool LocalNavigable::finish_flight_paint(DOM::Document& document, FlightPaintEnd end)
+LocalNavigable::FinishedFlightPaint LocalNavigable::finish_flight_paint(DOM::Document& document, FlightPaintEnd end)
 {
     auto seal = move(m_flight_paint_seal);
     VERIFY(seal);
@@ -7316,11 +7316,14 @@ bool LocalNavigable::finish_flight_paint(DOM::Document& document, FlightPaintEnd
                 .presentation = presentation->presentation,
             };
             finish_painting_next_frame(presented_frame);
+            ++m_frames_presented_by_flights;
             // The frame shows what the flight laid out. Should the layout's host halves have left more work, or a task
             // beside the flight have changed what it laid out, the rendering update paints again.
-            if (end == FlightPaintEnd::PresentedAheadOfMoreWork || !document.has_paint_state() || !document.layout_is_up_to_date())
+            if (end == FlightPaintEnd::PresentedAheadOfMoreWork || !document.has_paint_state() || !document.layout_is_up_to_date()) {
                 m_needs_repaint = m_needs_to_record_display_list = true;
-            return true;
+                return { .handed_off = true, .paints_again_after_recording = true };
+            }
+            return { .handed_off = true };
         }
         m_presenter->take_back_from_frame_in_flight();
     }
@@ -7330,7 +7333,7 @@ bool LocalNavigable::finish_flight_paint(DOM::Document& document, FlightPaintEnd
     };
     if (end == FlightPaintEnd::NotRecorded || !document.has_paint_state()) {
         paint_again();
-        return false;
+        return { .paints_again_after_recording = end != FlightPaintEnd::NotRecorded };
     }
 
     // https://drafts.csswg.org/css-color-adjust-1/#color-scheme-effect
@@ -7356,7 +7359,7 @@ bool LocalNavigable::finish_flight_paint(DOM::Document& document, FlightPaintEnd
     });
     if (Painting::discard_retired_rust_display_list_recording(*recording)) {
         paint_again();
-        return false;
+        return { .paints_again_after_recording = true };
     }
 
     // The recording does not stand if paying the layout's host halves left more work, if a task beside the flight tore
@@ -7371,7 +7374,7 @@ bool LocalNavigable::finish_flight_paint(DOM::Document& document, FlightPaintEnd
     if (!stands) {
         (void)document.finish_display_list_recording(*recording);
         paint_again();
-        return false;
+        return { .paints_again_after_recording = true };
     }
     if (canvas_background_color.has_value())
         page().client().page_did_change_background_color(*canvas_background_color);
@@ -7393,7 +7396,7 @@ bool LocalNavigable::finish_flight_paint(DOM::Document& document, FlightPaintEnd
             pending_frame.presentation->inputs.present_viewport_rect = page().css_to_device_rect(viewport_rect()).to_type<int>();
     }
     finish_painting_next_frame(pending_frame);
-    return true;
+    return { .handed_off = true };
 }
 
 void LocalNavigable::finish_painting_next_frame(PendingCompositorFrame& pending_frame)

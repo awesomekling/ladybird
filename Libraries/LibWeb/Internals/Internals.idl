@@ -273,6 +273,8 @@ interface Internals {
     // Waits for every thread that runs the frame in flight's stages, but the one holding a run for a hold, to run what
     // it was handed before: a stage that is not queued behind the held run has run by then.
     undefined waitForStageThreadsBesideHeldFrame();
+    // How many frames of the navigable of `document` a flight presented.
+    unsigned long long framesPresentedByFlights(Document document);
     // Has the next frame the rendering update records in flight take its recording in before the frame's presentation
     // is submitted, as a forced join during the main half would: the frame in flight then does not present it, and
     // consume-commit does. recordingsTakenInBeforeTheirPresentation() counts the recordings taken in so. A test that
