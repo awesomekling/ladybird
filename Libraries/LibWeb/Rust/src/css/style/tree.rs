@@ -26,6 +26,10 @@ use super::fast_hash::FastSet as HashSet;
 use smallvec::SmallVec;
 use std::cmp::Ordering;
 use std::num::NonZeroU32;
+use std::sync::Mutex;
+use std::sync::MutexGuard;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering as AtomicOrdering;
 
 use super::capacity::capacity_bytes;
 use super::column::BitColumn;
@@ -772,6 +776,11 @@ pub struct StyleNodeTree {
 
     capacity_bytes: u64,
 
+    /// The slot table `style_reaction_order_ranks` ranks a batch in, kept between batches so that
+    /// a batch writes only the slots it reaches instead of filling one for every element.
+    reaction_rank_slots: Mutex<StyleReactionRankSlots>,
+    reaction_rank_slot_writes: AtomicU64,
+
     #[cfg(test)]
     depth_recompute_visits: usize,
 }
@@ -817,6 +826,8 @@ impl StyleNodeTree {
             previous_sibling: Vec::new(),
             text: TextRows::default(),
             capacity_bytes: 0,
+            reaction_rank_slots: Mutex::default(),
+            reaction_rank_slot_writes: AtomicU64::new(0),
             #[cfg(test)]
             depth_recompute_visits: 0,
         };
@@ -1963,57 +1974,79 @@ impl StyleNodeTree {
 
     /// Rank a batch in the same dependency order as `compare_style_reaction_order`.
     /// Each ancestor is visited once, even for a deep chain of reacting descendants.
-    pub fn style_reaction_order_ranks(&self, nodes: impl IntoIterator<Item = StyleNodeID>) -> StyleReactionRanks {
-        // A batch this small reaches too few nodes to repay filling a slot for every element.
-        const MINIMUM_SLOTTED_BATCH: usize = 16;
-        let nodes: Vec<StyleNodeID> = nodes.into_iter().collect();
-        let mut ranks = StyleReactionRanks::new(if nodes.len() >= MINIMUM_SLOTTED_BATCH {
-            self.parent.len()
-        } else {
-            0
-        });
-        let mut edges: Vec<(StyleNodeID, u8, StyleNodeID)> = Vec::new();
+    pub fn style_reaction_order_ranks(&self, nodes: impl IntoIterator<Item = StyleNodeID>) -> StyleReactionRanks<'_> {
+        // While another batch's ranks hold the slot table, this batch keeps every value in the
+        // overflow map instead.
+        let mut slots = self.reaction_rank_slots.try_lock().ok();
+        if let Some(slots) = &mut slots
+            && slots.by_slot.len() < self.parent.len()
+        {
+            let added = self.parent.len() - slots.by_slot.len();
+            slots.by_slot.resize(self.parent.len(), StyleReactionRanks::UNSEEN);
+            self.reaction_rank_slot_writes
+                .fetch_add(added as u64, AtomicOrdering::Relaxed);
+        }
+        let mut ranks = StyleReactionRanks::new(slots, &self.reaction_rank_slot_writes);
+        // Each node reached links the edge to it into its parent's child list, whose head the
+        // parent's slot holds: a parent's children are then found without sorting every edge.
+        let mut edges: Vec<StyleReactionEdge> = Vec::new();
         let mut roots = Vec::new();
-        for mut node in nodes {
-            while ranks.insert_seen(node) {
-                if let Some((parent, branch)) = self.style_reaction_parent(node) {
-                    edges.push((parent, branch, node));
-                    node = parent;
-                } else {
+        for node in nodes {
+            if ranks.get(node) != StyleReactionRanks::UNSEEN {
+                continue;
+            }
+            ranks.mark_reached(node, StyleReactionRanks::SEEN);
+            let mut node = node;
+            loop {
+                let Some((parent, branch)) = self.style_reaction_parent(node) else {
                     roots.push(node);
                     break;
+                };
+                let parent_head = ranks.get(parent);
+                edges.push(StyleReactionEdge {
+                    branch,
+                    child: node,
+                    next: (parent_head < StyleReactionRanks::SEEN).then_some(parent_head),
+                });
+                let head = edges.len() as u32 - 1;
+                if parent_head != StyleReactionRanks::UNSEEN {
+                    ranks.set(parent, head);
+                    break;
                 }
+                ranks.mark_reached(parent, head);
+                node = parent;
             }
         }
-        // The existing order uses identity within each branch, not DOM sibling order. Each parent's
-        // children form one run of the edges, largest first, so the stack pops them smallest first.
+        // The existing order uses identity within each branch, not DOM sibling order. Children
+        // are pushed largest first, so the stack pops them smallest first.
         roots.sort_unstable_by(|first, second| second.cmp(first));
-        edges.sort_unstable_by(|first, second| {
-            first
-                .0
-                .cmp(&second.0)
-                .then_with(|| (second.1, second.2).cmp(&(first.1, first.2)))
-        });
-        for (index, &(parent, _, _)) in edges.iter().enumerate().rev() {
-            ranks.set(parent, index);
-        }
         let mut pending = roots;
+        let mut children: Vec<(u8, StyleNodeID)> = Vec::new();
         let mut next_rank = 0;
         while let Some(node) = pending.pop() {
-            let first_edge = ranks.get(node);
+            let mut edge = Some(ranks.get(node)).filter(|&head| head < StyleReactionRanks::SEEN);
             ranks.set(node, next_rank);
             next_rank += 1;
-            if first_edge != StyleReactionRanks::SEEN {
-                pending.extend(
-                    edges[first_edge..]
-                        .iter()
-                        .take_while(|&&(parent, _, _)| parent == node)
-                        .map(|&(_, _, child)| child),
-                );
+            children.clear();
+            while let Some(index) = edge {
+                let StyleReactionEdge { branch, child, next } = edges[index as usize];
+                children.push((branch, child));
+                edge = next;
             }
+            if children.len() > 1 {
+                children.sort_unstable_by(|first, second| second.cmp(first));
+            }
+            pending.extend(children.iter().map(|&(_, child)| child));
         }
         ranks.len = next_rank;
         ranks
+    }
+
+    /// How many slot table entries ranking reaction order has written, counting the entries it
+    /// grew the table by and the ones it cleared again after each batch.
+    #[must_use]
+    pub fn reaction_rank_slot_writes(&self) -> u64 {
+        self.reaction_rank_slot_writes.load(AtomicOrdering::Relaxed)
     }
 
     fn style_reaction_parent(&self, node: StyleNodeID) -> Option<(StyleNodeID, u8)> {
@@ -2393,56 +2426,87 @@ pub struct Preorder<'a> {
     next: Option<StyleNodeID>,
 }
 
-/// The ranks `StyleNodeTree::style_reaction_order_ranks` gives a batch and its ancestors, by
-/// element slot. While ranking, a slot holds a mark that the node was seen, then the first edge to
-/// its children, then its rank. An identity past the slots, which is every identity for a small
-/// batch, keeps its value in `overflow`.
-pub struct StyleReactionRanks {
-    by_slot: Vec<usize>,
-    overflow: HashMap<StyleNodeID, usize>,
-    len: usize,
+/// An edge from a reached node's parent to it, linked into the parent's list of reached children.
+#[derive(Clone, Copy)]
+struct StyleReactionEdge {
+    branch: u8,
+    child: StyleNodeID,
+    next: Option<u32>,
 }
 
-impl StyleReactionRanks {
-    const UNSEEN: usize = usize::MAX;
-    const SEEN: usize = usize::MAX - 1;
+/// The slot table `StyleNodeTree::style_reaction_order_ranks` ranks in, which holds `UNSEEN` at
+/// every slot between batches.
+#[derive(Default)]
+struct StyleReactionRankSlots {
+    by_slot: Vec<u32>,
+}
 
-    fn new(slot_count: usize) -> Self {
+/// The ranks `StyleNodeTree::style_reaction_order_ranks` gives a batch and its ancestors, by
+/// element slot. While ranking, a slot holds a mark that the node was seen, then the head of its
+/// list of reached children, then its rank. An identity past the slots, or every identity while
+/// another batch holds the table, keeps its value in `overflow`. Dropping the ranks clears the
+/// slots the batch reached and returns the table.
+pub struct StyleReactionRanks<'a> {
+    slots: Option<MutexGuard<'a, StyleReactionRankSlots>>,
+    writes: &'a AtomicU64,
+    slot_writes: u64,
+    reached: Vec<StyleNodeID>,
+    overflow: HashMap<StyleNodeID, u32>,
+    len: u32,
+}
+
+impl<'a> StyleReactionRanks<'a> {
+    const UNSEEN: u32 = u32::MAX;
+    const SEEN: u32 = u32::MAX - 1;
+
+    fn new(slots: Option<MutexGuard<'a, StyleReactionRankSlots>>, writes: &'a AtomicU64) -> Self {
         Self {
-            by_slot: vec![Self::UNSEEN; slot_count],
+            slots,
+            writes,
+            slot_writes: 0,
+            reached: Vec::new(),
             overflow: HashMap::default(),
             len: 0,
         }
     }
 
-    fn get(&self, node: StyleNodeID) -> usize {
-        match self.by_slot.get(node.element_slot()) {
+    fn get(&self, node: StyleNodeID) -> u32 {
+        match self
+            .slots
+            .as_ref()
+            .and_then(|slots| slots.by_slot.get(node.element_slot()))
+        {
             Some(&value) => value,
             None => self.overflow.get(&node).copied().unwrap_or(Self::UNSEEN),
         }
     }
 
-    fn set(&mut self, node: StyleNodeID, value: usize) {
-        match self.by_slot.get_mut(node.element_slot()) {
-            Some(slot) => *slot = value,
+    fn set(&mut self, node: StyleNodeID, value: u32) {
+        match self
+            .slots
+            .as_mut()
+            .and_then(|slots| slots.by_slot.get_mut(node.element_slot()))
+        {
+            Some(slot) => {
+                *slot = value;
+                self.slot_writes += 1;
+            }
             None => {
                 self.overflow.insert(node, value);
             }
         }
     }
 
-    fn insert_seen(&mut self, node: StyleNodeID) -> bool {
-        if self.get(node) != Self::UNSEEN {
-            return false;
-        }
-        self.set(node, Self::SEEN);
-        true
+    /// Set the first value of a node the batch has not reached before, so the drop clears it.
+    fn mark_reached(&mut self, node: StyleNodeID, value: u32) {
+        self.reached.push(node);
+        self.set(node, value);
     }
 
     /// How many nodes have a rank: the batch and every ancestor it reaches.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.len
+        self.len as usize
     }
 
     #[must_use]
@@ -2452,16 +2516,40 @@ impl StyleReactionRanks {
 
     #[must_use]
     pub fn capacity_bytes(&self) -> u64 {
-        (self.by_slot.capacity() * size_of::<usize>()
-            + self.overflow.capacity() * (size_of::<StyleNodeID>() + size_of::<usize>() + 1)) as u64
+        (self
+            .slots
+            .as_ref()
+            .map_or(0, |slots| slots.by_slot.capacity() * size_of::<u32>())
+            + self.reached.capacity() * size_of::<StyleNodeID>()
+            + self.overflow.capacity() * (size_of::<StyleNodeID>() + size_of::<u32>() + 1)) as u64
     }
 }
 
-impl std::ops::Index<&StyleNodeID> for StyleReactionRanks {
-    type Output = usize;
+impl Drop for StyleReactionRanks<'_> {
+    fn drop(&mut self) {
+        let Some(slots) = &mut self.slots else {
+            return;
+        };
+        let mut writes = self.slot_writes;
+        for node in &self.reached {
+            if let Some(slot) = slots.by_slot.get_mut(node.element_slot()) {
+                *slot = Self::UNSEEN;
+                writes += 1;
+            }
+        }
+        self.writes.fetch_add(writes, AtomicOrdering::Relaxed);
+    }
+}
 
-    fn index(&self, node: &StyleNodeID) -> &usize {
-        let value = match self.by_slot.get(node.element_slot()) {
+impl std::ops::Index<&StyleNodeID> for StyleReactionRanks<'_> {
+    type Output = u32;
+
+    fn index(&self, node: &StyleNodeID) -> &u32 {
+        let value = match self
+            .slots
+            .as_ref()
+            .and_then(|slots| slots.by_slot.get(node.element_slot()))
+        {
             Some(value) => value,
             None => &self.overflow[node],
         };
@@ -3073,7 +3161,6 @@ mod tests {
             reactions.extend(leaves.iter().rev());
             reactions.push(*branch);
         }
-        assert!(reactions.len() >= 16, "the batch must be wide enough to rank by slot");
         let ranks = fixture.tree.style_reaction_order_ranks(reactions.iter().copied());
         for &first in &reactions {
             for &second in &reactions {
@@ -3082,6 +3169,38 @@ mod tests {
                     fixture.tree.compare_style_reaction_order(first, second)
                 );
             }
+        }
+    }
+
+    #[test]
+    fn reaction_ranks_write_only_the_slots_a_batch_reaches() {
+        let mut fixture = TreeFixture::new();
+        let root = fixture.element();
+        let leaves: Vec<_> = (0..1000).map(|_| fixture.element()).collect();
+        fixture.attach_children(root, &leaves);
+        drop(fixture.tree.style_reaction_order_ranks([leaves[0]]));
+        let before = fixture.tree.reaction_rank_slot_writes();
+
+        let batch: Vec<_> = leaves.iter().copied().step_by(50).collect();
+        let ranks = fixture.tree.style_reaction_order_ranks(batch.iter().copied());
+        // While the first batch's ranks hold the slot table, a second batch ranks without it.
+        let nested = fixture.tree.style_reaction_order_ranks(batch.iter().rev().copied());
+        assert_eq!(nested.len(), batch.len() + 1);
+        for node in &batch {
+            assert_eq!(ranks[node], nested[node]);
+        }
+        drop(nested);
+        drop(ranks);
+        // Each leaf in the batch is marked, the root is linked to once per leaf, and all 21 nodes
+        // reached are ranked and cleared: nothing is written for the 980 leaves outside the batch.
+        let writes = fixture.tree.reaction_rank_slot_writes() - before;
+        assert_eq!(writes, 2 * batch.len() as u64 + 2 * (batch.len() as u64 + 1));
+
+        // The drop cleared every slot the batch reached, so the next batch ranks from scratch.
+        let again = fixture.tree.style_reaction_order_ranks(batch.iter().rev().copied());
+        assert_eq!(again.len(), batch.len() + 1);
+        for pair in batch.windows(2) {
+            assert!(again[&pair[0]] < again[&pair[1]]);
         }
     }
 

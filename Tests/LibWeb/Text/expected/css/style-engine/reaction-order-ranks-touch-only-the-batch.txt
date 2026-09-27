@@ -1,0 +1,2 @@
+ranked 20-element batches: true
+rank slot writes per flush stay below the element count: true
