@@ -2189,18 +2189,24 @@ static bool has_anchor_names(Element const& element)
 }
 
 // The style engine keeps the anchor names installed records register, by tree scope, and publishes
-// them to the arena layout finds anchors in. A zero record withdraws the element's names. Returns
-// whether the element had names registered.
+// them to the arena layout finds anchors in once a batch of registrations is done. A zero record
+// withdraws the element's names. Returns whether the element had names registered.
 template<typename Scope>
 static bool register_anchor_names_in_engine(Scope const& scope, DOM::Document& document, CSS::StyleNodeID style_node, CSS::StyleRecordID style_record, bool has_names)
 {
-    auto* arena = document.layout_node_arena_if_created();
     // A document that registers a name is one that lays out, so the arena the fact belongs to is
     // worth creating here rather than replaying the registry later.
-    if (!arena && has_names)
-        arena = &document.layout_node_arena();
-    auto registered = CSS::StyleEngineFFI::style_engine_register_anchor_names(scope, scope.engine().rust_handle(), arena ? arena->handle() : nullptr, style_node.value(), style_record.value());
+    if (has_names)
+        (void)document.layout_node_arena();
+    auto registered = CSS::StyleEngineFFI::style_engine_register_anchor_names(scope, scope.engine().rust_handle(), style_node.value(), style_record.value());
     return registered & 1;
+}
+
+template<typename Scope>
+static void publish_anchor_names_in_engine(Scope const& scope, DOM::Document& document)
+{
+    auto* arena = document.layout_node_arena_if_created();
+    CSS::StyleEngineFFI::style_engine_publish_anchor_names(scope, scope.engine().rust_handle(), arena ? arena->handle() : nullptr);
 }
 
 RefPtr<CSS::CustomPropertyData const> Element::custom_property_environment_of_engine_record(CSS::StyleRecordID style_record, bool& installable) const
@@ -2330,9 +2336,10 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
         // with the pseudo-element styles it still computes.
         auto custom_property_environment = install_custom_property_environment(custom_property_data({}));
         set_computed_style(scope, {}, new_style_record);
-        if (!effect_drain)
+        if (!effect_drain) {
             register_anchor_names(scope);
-        else if (!computed_style()->anchor_names().is_empty())
+            publish_anchor_names_in_engine(scope, document());
+        } else if (!computed_style()->anchor_names().is_empty())
             effect_drain->append(CSS::StyleEffectDrain::AnchorNames { style_node_id() });
         if (is_document_element())
             style_computer.update_root_element_font_metrics(*computed_style());
@@ -2389,9 +2396,10 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
                 counters.element_computed_style_changes++;
         }
         set_computed_style(scope, {}, new_style_record);
-        if (!effect_drain)
+        if (!effect_drain) {
             register_anchor_names(scope);
-        else if (!old_computed_values->anchor_names().is_empty() || !new_computed_values->anchor_names().is_empty())
+            publish_anchor_names_in_engine(scope, document());
+        } else if (!old_computed_values->anchor_names().is_empty() || !new_computed_values->anchor_names().is_empty())
             effect_drain->append(CSS::StyleEffectDrain::AnchorNames { style_node_id() });
         if (is_document_element()) {
             // Root-relative units read document-global font metrics rather than inherited style.
@@ -2507,6 +2515,7 @@ void Element::clear_computed_styles_from_display_none_descendants(CSS::StyleDrai
         });
         return TraversalDecision::Continue;
     });
+    publish_anchor_names_in_engine(scope, document());
 }
 
 void Element::invalidate_descendant_styles_depending_on_style_container_query()

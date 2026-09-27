@@ -398,6 +398,9 @@ void StyleEffectDrain::apply_render_half(StyleDrainScope const& scope, DOM::Docu
                 VERIFY_NOT_REACHED();
             });
     }
+    // The rows registered their anchor names, and each name they moved is published once.
+    auto* arena = document.layout_node_arena_if_created();
+    StyleEngineFFI::style_engine_publish_anchor_names(scope, scope.engine().rust_handle(), arena ? arena->handle() : nullptr);
     m_render_effects.clear();
     m_pseudo_element_style_records.clear();
 }
