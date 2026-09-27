@@ -108,7 +108,7 @@ pub(crate) struct Flight {
     began: FfiFlightStage,
     arena: usize,
     style: Option<StylePassJob>,
-    /// The elements the viewport propagates from, whose style changes the document thread applies.
+    /// The elements the viewport propagates from, a relayout of which is not a partial one.
     viewport_propagation_sources: Vec<crate::css::style::tree::StyleNodeID>,
     layout: Option<LayoutPassJob>,
     paint: Option<crate::painting::ffi::FlightPaintSeal>,
