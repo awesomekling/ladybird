@@ -181,10 +181,10 @@ pub extern "C" fn rust_stage_thread_set_thread_setup(setup: extern "C" fn()) {
 const STAGE_THREAD_STACK_SIZE: usize = 8 * 1024 * 1024;
 
 impl StageThread {
-    fn spawn() -> Self {
+    fn spawn(name: &str) -> Self {
         let (jobs, incoming) = channel::<StageMessage>();
         let thread = std::thread::Builder::new()
-            .name("Rendering".into())
+            .name(name.into())
             .stack_size(STAGE_THREAD_STACK_SIZE)
             .spawn(move || {
                 if let Some(setup) = THREAD_SETUP.get() {
@@ -597,7 +597,12 @@ unsafe fn submit(
     stage: impl FnOnce() + Send + 'static,
     on_taken_back: Option<Box<dyn FnOnce()>>,
 ) {
-    let thread = stage_thread().expect("only a stage thread runs submitted stages");
+    // A stage for a document that reaches none of its arena runs on the paint lane, if there is one.
+    let thread = (arena.is_null() && document != 0)
+        .then(paint_lane)
+        .flatten()
+        .or_else(stage_thread)
+        .expect("only a stage thread runs submitted stages");
     debug_assert!(
         submits(label)
             || (label == PRESENTATION_STAGE && submits_presentation())
@@ -1271,7 +1276,7 @@ pub(crate) fn take_frame_in_flight() -> bool {
     {
         note_take_back_waited_for_presentation();
     }
-    let thread = stage_thread().expect("only a stage thread runs submitted stages");
+    stage_thread().expect("only a stage thread runs submitted stages");
     let mut panic = None;
     let mut on_taken_back = Vec::new();
     for mut stage in stages {
@@ -1280,7 +1285,7 @@ pub(crate) fn take_frame_in_flight() -> bool {
         }
         on_taken_back.extend(stage.on_taken_back.take());
     }
-    tsan::acquire(thread);
+    acquire_stage_threads();
     if let Some(payload) = panic {
         std::panic::resume_unwind(payload);
     }
@@ -1430,8 +1435,8 @@ fn wait_for_submitted_stages() {
         submitted.iter_mut().for_each(SubmittedStage::wait_until_finished);
         !submitted.is_empty()
     });
-    if let Some(thread) = stage_thread().filter(|_| waited) {
-        tsan::acquire(thread);
+    if waited {
+        acquire_stage_threads();
     }
 }
 
@@ -1626,8 +1631,8 @@ fn wait_for_submitted_stages_reaching(engine: *const c_void) {
         }
         waited
     });
-    if let Some(thread) = stage_thread().filter(|_| waited) {
-        tsan::acquire(thread);
+    if waited {
+        acquire_stage_threads();
     }
 }
 
@@ -1738,8 +1743,37 @@ pub(crate) fn acting_thread() -> ThreadId {
 fn stage_thread() -> Option<&'static StageThread> {
     static STAGE_THREAD: OnceLock<Option<StageThread>> = OnceLock::new();
     STAGE_THREAD
-        .get_or_init(|| stage_thread_mode().map(|_| StageThread::spawn()))
+        .get_or_init(|| stage_thread_mode().map(|_| StageThread::spawn("Rendering")))
         .as_ref()
+}
+
+static PAINT_LANE: OnceLock<Option<StageThread>> = OnceLock::new();
+
+/// The thread that runs the stages a frame submits for a document without reaching its arena: its
+/// display list recordings, which record a frame the document published, and the presentations
+/// that publish them from their tickets (unless LIBWEB_PAINT_LANE=0). Nothing the Rendering thread
+/// runs for the main thread, such as a style or layout pass the main thread waits for, queues
+/// behind them.
+fn paint_lane() -> Option<&'static StageThread> {
+    PAINT_LANE
+        .get_or_init(|| {
+            let enabled = std::env::var_os("LIBWEB_PAINT_LANE").is_none_or(|value| value != "0");
+            stage_thread_mode()
+                .filter(|_| enabled)
+                .map(|_| StageThread::spawn("Painting"))
+        })
+        .as_ref()
+}
+
+/// Tells TSan about the ordering waiting for the frame's stages gave the calling thread: with every
+/// thread that runs them.
+fn acquire_stage_threads() {
+    if let Some(thread) = stage_thread() {
+        tsan::acquire(thread);
+    }
+    if let Some(lane) = PAINT_LANE.get().and_then(Option::as_ref) {
+        tsan::acquire(lane);
+    }
 }
 
 /// Runs `stage` on the stage thread if there is one, and returns its result once it has finished;
@@ -2058,14 +2092,14 @@ mod tests {
 
     pub(super) fn test_thread() -> &'static StageThread {
         static THREAD: OnceLock<StageThread> = OnceLock::new();
-        THREAD.get_or_init(StageThread::spawn)
+        THREAD.get_or_init(|| StageThread::spawn("Rendering"))
     }
 
     // A join pairs with the next reply the stage thread gets, so a test that joins needs a stage
     // thread no other test is calling into at the same time.
     fn joining_test_thread() -> &'static StageThread {
         thread_local! {
-            static THREAD: &'static StageThread = Box::leak(Box::new(StageThread::spawn()));
+            static THREAD: &'static StageThread = Box::leak(Box::new(StageThread::spawn("Rendering")));
         }
         THREAD.with(|thread| *thread)
     }

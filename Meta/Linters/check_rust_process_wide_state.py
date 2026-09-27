@@ -201,6 +201,7 @@ RENDER_STAGE_ALLOWED = {
         STAGE_THREAD,
         [
             "stage_thread.rs:STAGE_THREAD",
+            "stage_thread.rs:PAINT_LANE",
             "stage_thread.rs:THREAD",
             "stage_thread.rs:WAITING_CALLER",
             "stage_thread.rs:INCOMING",
