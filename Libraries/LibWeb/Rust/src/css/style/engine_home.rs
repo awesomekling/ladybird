@@ -143,21 +143,32 @@ pub(crate) fn main_waits_for_arrival() -> bool {
     MAIN_WAITS_FOR_ARRIVAL.load(Ordering::Acquire)
 }
 
+/// Runs `run` with `engine`, whose home is `home`, which whatever `run` calls reaches through the engine's handle or
+/// its document's arena too.
+///
+/// # Safety
+///
+/// Nothing else reaches the engine until this returns.
+unsafe fn reach_on_this_thread<T>(home: usize, engine: *mut StyleEngine, run: impl FnOnce(&mut StyleEngine) -> T) -> T {
+    struct Restore((usize, *mut StyleEngine));
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            LENT_TO_THIS_THREAD.set(self.0);
+        }
+    }
+    let _restore = Restore(LENT_TO_THIS_THREAD.replace((home, engine)));
+    // SAFETY: Guaranteed by the caller.
+    run(unsafe { &mut *engine })
+}
+
 impl StyleEngineLoan {
     /// Runs `run` with the engine, which is lent to the calling thread meanwhile: whatever `run`
     /// calls that reaches the engine through its handle or its document's arena reaches it through
     /// this loan.
     pub(crate) fn lend_to_this_thread<T>(&mut self, run: impl FnOnce(&mut StyleEngine) -> T) -> T {
-        struct Restore((usize, *mut StyleEngine));
-        impl Drop for Restore {
-            fn drop(&mut self) {
-                LENT_TO_THIS_THREAD.set(self.0);
-            }
-        }
         let engine = self.token.as_ref().expect("a loan holds its token").engine.as_ptr();
-        let _restore = Restore(LENT_TO_THIS_THREAD.replace((self.home, engine)));
         // SAFETY: The loan holds the token, and so the right to reach the engine.
-        run(unsafe { &mut *engine })
+        unsafe { reach_on_this_thread(self.home, engine, run) }
     }
 
     /// Sends the token home: the stage is done with the engine, and the main thread owes its frame
@@ -398,6 +409,21 @@ impl StyleEngineHandle {
         let home = unsafe { Rc::from_raw(self.0.cast::<StyleEngineHome>().cast_const()) };
         // SAFETY: The home owned the engine, which `create` leaked into it, and its token is home.
         unsafe { Box::from_raw(home.engine.as_ptr()) }
+    }
+
+    /// On the render owner, in a unit it runs with the render state of the engine's document: runs `run` with the
+    /// engine, which whatever `run` calls reaches through the handle too. The owner takes no token: it holds the
+    /// document's render state, and the main thread waits for the unit.
+    ///
+    /// # Safety
+    ///
+    /// The handle must name a live engine whose token is home, and the main thread must wait for the unit, reaching
+    /// nothing of the engine, until this returns.
+    pub(crate) unsafe fn reach_on_owner<T>(self, run: impl FnOnce(&mut StyleEngine) -> T) -> T {
+        // Only the engine's address is read of the home, which the main thread does not write while it waits.
+        let engine = self.home().engine.as_ptr();
+        // SAFETY: Guaranteed by the caller.
+        unsafe { reach_on_this_thread(self.address(), engine, run) }
     }
 
     /// Names the layout arena of the engine's document, which the stages that take the token run for.

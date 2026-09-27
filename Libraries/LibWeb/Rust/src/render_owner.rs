@@ -21,8 +21,11 @@
 //!
 //! Every message reaches the owner through one FIFO ([`ToOwner`]), so a document's changes, its rendering updates,
 //! its queries and its destruction arrive in the order the main thread sent them. The owner never joins the main
-//! thread: where a rendering step still needs the main thread (a layout round's style, the end of a layout frame), the
-//! main thread runs it as its own between the units it sends the owner ([`ToOwner::Layout`]).
+//! thread: where a rendering step still needs the main thread (the host steps of a style update around its passes,
+//! the end of a layout frame), the main thread runs it as its own between the units it sends the owner. The style
+//! computation itself is the owner's: every style pass the main thread waits for runs on the owner
+//! ([`ToOwner::Style`]), with the engine the document's render state links, and so does the rest of each layout round
+//! ([`ToOwner::Layout`]).
 //!
 //! During the port the main thread still reaches the arena and the style engine directly through the handles the
 //! owner gives out when it creates the state ([`FfiRenderDocument`]); those doors are what the flip deletes.
@@ -134,6 +137,12 @@ impl RenderState {
     /// Answers `query` from the state as the units before it left it.
     fn answer(&mut self, query: Query) -> Answer {
         Answer::of(query, self.arena.arena_mut())
+    }
+
+    /// The document's style engine, which the arena links (null before it links one). The units the owner runs for the
+    /// document reach it through [`crate::css::style::StyleEngineHandle::reach_on_owner`].
+    fn style_engine(&self) -> crate::css::style::StyleEngineHandle {
+        self.arena.arena().style_engine_handle()
     }
 
     /// The handle of the state's arena, which the units the owner runs for the document reach it through.
@@ -255,6 +264,13 @@ pub(crate) enum ToOwner {
         document: DocumentId,
         unit: Box<crate::layout::update_layout::OwnerLayoutUnit>,
     },
+    /// Runs the style pass `pass` of a style transaction of `document`, which the document thread took and waits for.
+    /// Answers with the pass where the owner could not run it.
+    Style {
+        document: DocumentId,
+        pass: Box<crate::css::style::bridge::OwnerStylePass>,
+        reply: crate::stage_thread::OwnerReplyTo<StylePassRan>,
+    },
     /// Answers `query` about `document` after its changes through `through`. The document thread waits.
     Ask {
         document: DocumentId,
@@ -275,7 +291,7 @@ impl ToOwner {
     pub(crate) fn may_be_served_inside_a_stage(&self) -> bool {
         matches!(
             self,
-            Self::Create { .. } | Self::Changes { .. } | Self::Layout { .. } | Self::Ask { .. }
+            Self::Create { .. } | Self::Changes { .. } | Self::Style { .. } | Self::Layout { .. } | Self::Ask { .. }
         )
     }
 }
@@ -352,6 +368,15 @@ fn handle_message(message: ToOwner) {
             );
             ticket.run(|| update.run());
         }
+        ToOwner::Style { document, pass, reply } => reply.answer(|| {
+            let engine = with_state(document, |state| state.style_engine()).filter(|engine| !engine.is_null());
+            let Some(engine) = engine else {
+                debug_assert!(false, "the owner runs the style pass of a document with an engine");
+                return Err(pass);
+            };
+            // SAFETY: The engine is the document's, and the document thread waits for the pass.
+            Ok(unsafe { engine.reach_on_owner(|engine| pass.run(engine)) })
+        }),
         ToOwner::Layout { document, unit } => {
             // The state's borrow ends before the unit runs, which may reach another document's state.
             let arena = with_state(document, RenderState::arena_handle);
@@ -519,6 +544,46 @@ pub(crate) unsafe fn ask(document: DocumentId, arena: *mut c_void, query: Query)
         debug_assert!(false, "the render owner panicked answering {query:?}");
         Answer::unanswered(query)
     })
+}
+
+/// What became of a style pass the owner was sent: its output, or the pass where the owner could not run it.
+pub(crate) type StylePassRan =
+    Result<crate::css::style::bridge::OwnerStylePassOutput, Box<crate::css::style::bridge::OwnerStylePass>>;
+
+/// Runs the style pass `pass` of `document`, whose transaction the calling document thread took, on the owner, and
+/// waits for it. Where the owner does not run it (a test holds the run it would queue behind, or a bug of the
+/// sender's), the document thread runs it with the engine `engine` right here, as every door of the port does.
+///
+/// # Safety
+///
+/// `engine` must be the live engine of `document`, and the calling thread must reach nothing of it until this
+/// returns.
+pub(crate) unsafe fn run_style_pass(
+    document: DocumentId,
+    engine: crate::css::style::StyleEngineHandle,
+    pass: crate::css::style::bridge::OwnerStylePass,
+) -> crate::css::style::bridge::OwnerStylePassOutput {
+    let pass = std::cell::Cell::new(Some(Box::new(pass)));
+    let ran = crate::stage_thread::wait_for_owner(
+        |reply| ToOwner::Style {
+            document,
+            pass: pass.take().expect("the pass is sent once"),
+            reply,
+        },
+        || Err(pass.take().expect("the pass runs once")),
+    );
+    match ran.unwrap_or_else(|payload| std::panic::resume_unwind(payload)) {
+        Ok(output) => output,
+        // SAFETY: Guaranteed by the caller.
+        Err(pass) => pass.run(unsafe { engine.enter("style pass the owner did not run") }),
+    }
+}
+
+/// Whether the style passes of `document` run on the owner: a document the owner holds render state for, whose
+/// passes a document thread waits for. The style update around each pass stays the document thread's (its host steps
+/// begin the transaction and install what the pass published), but the pass, the style computation, is the owner's.
+pub(crate) fn runs_style_of(document: DocumentId) -> bool {
+    document.is_valid()
 }
 
 thread_local! {
