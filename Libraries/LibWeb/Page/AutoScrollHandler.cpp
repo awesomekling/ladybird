@@ -7,6 +7,7 @@
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/DocumentFragment.h>
 #include <LibWeb/DOM/Element.h>
+#include <LibWeb/DOM/NodeIdentity.h>
 #include <LibWeb/HTML/LocalNavigable.h>
 #include <LibWeb/Layout/Box.h>
 #include <LibWeb/Layout/Viewport.h>
@@ -36,15 +37,15 @@ static CSSPixelRect compute_effective_auto_scroll_edge(CSSPixelRect const& scrol
         effective(scrollport.left() - viewport_rect.left()));
 }
 
-static Optional<CSSPixelRect> scrollport_rect_in_viewport(Layout::Node const& layout_node)
+static Optional<CSSPixelRect> scrollport_rect_in_viewport(DOM::Document const& document, DOM::NodeIdentity identity)
 {
-    auto scrollport = Painting::absolute_padding_box_rect(layout_node);
+    auto scrollport = Painting::absolute_padding_box_rect(document, identity);
 
     // The viewport's scrollport is already in viewport coordinates.
-    if (Painting::is_viewport_paintable(layout_node))
+    if (Painting::is_viewport_paintable(document, identity))
         return scrollport;
 
-    return Painting::transform_rect_to_viewport(layout_node, scrollport);
+    return Painting::transform_rect_to_viewport(document, identity, scrollport);
 }
 
 // Returns scroll speed in CSS pixels per second for each axis, based on how far the mouse is past the auto scroll edge.
@@ -95,7 +96,7 @@ CSSPixelPoint AutoScrollHandler::process(CSSPixelPoint mouse_position)
     if (!layout_node)
         return mouse_position;
 
-    auto scrollport = scrollport_rect_in_viewport(*layout_node);
+    auto scrollport = scrollport_rect_in_viewport(m_container_element->document(), DOM::NodeIdentity::of(layout_node->dom_node()));
     if (!scrollport.has_value())
         return mouse_position;
 
@@ -169,7 +170,7 @@ void AutoScrollHandler::perform_tick()
         return;
     }
 
-    auto scrollport = scrollport_rect_in_viewport(*layout_node);
+    auto scrollport = scrollport_rect_in_viewport(m_container_element->document(), DOM::NodeIdentity::of(layout_node->dom_node()));
     if (!scrollport.has_value()) {
         deactivate();
         return;
