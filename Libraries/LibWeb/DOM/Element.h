@@ -646,8 +646,6 @@ public:
     // Which principal box this element asks for, before its computed style has a say.
     virtual CSS::ElementBoxKind box_kind() const;
 
-    static Layout::NodeWithStyle* create_layout_node_for_display_type(DOM::Document&, CSS::Display const&, CSS::LayoutStyle, Element*);
-
     virtual void did_receive_focus() { }
     virtual void did_lose_focus() { }
     bool should_indicate_focus() const;
@@ -655,6 +653,9 @@ public:
 
     Layout::NodeWithStyle* pseudo_element_layout_node(CSS::PseudoElement) const;
     Layout::NodeWithStyle* pseudo_element_unsafe_layout_node(CSS::PseudoElement) const;
+    // Whether a layout tree build gave the pseudo-element a box: the one the arena binds to this element's identity and
+    // the pseudo-element's type, or the box of the element an element-backed pseudo-element stands in for.
+    bool has_pseudo_element_box(CSS::PseudoElement) const;
 
     bool has_synthetic_pseudo_elements() const;
 

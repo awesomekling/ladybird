@@ -26,6 +26,13 @@ class KeyframeEffect;
 
 namespace Web::DOM {
 
+// How the layout rows generated for a pseudo-element name it beside its generator's identity: 0 names no pseudo-element.
+constexpr u8 encode_generated_for(CSS::PseudoElement pseudo_element)
+{
+    static_assert(static_cast<u8>(CSS::PseudoElement::UnknownWebKit) < 0xff);
+    return static_cast<u8>(pseudo_element) + 1;
+}
+
 class WEB_API PseudoElement : public JS::Cell {
     GC_CELL(PseudoElement, JS::Cell);
     GC_DECLARE_ALLOCATOR(PseudoElement);
@@ -33,6 +40,8 @@ class WEB_API PseudoElement : public JS::Cell {
 public:
     virtual Layout::NodeWithStyle* layout_node() const = 0;
     virtual Layout::NodeWithStyle* unsafe_layout_node() const = 0;
+    // Whether a layout tree build gave the pseudo-element a box, which the arena keeps bound to it.
+    virtual bool has_box() const = 0;
 
     virtual Node& root() const = 0;
 
@@ -54,6 +63,7 @@ public:
 
     Layout::NodeWithStyle* layout_node() const override;
     Layout::NodeWithStyle* unsafe_layout_node() const override;
+    bool has_box() const override;
     void set_layout_node(Layout::NodeWithStyle*);
 
     virtual Node& root() const override;
@@ -111,6 +121,7 @@ class WEB_API ElementReferencePseudoElement : public PseudoElement {
 
     Layout::NodeWithStyle* layout_node() const override;
     Layout::NodeWithStyle* unsafe_layout_node() const override;
+    bool has_box() const override;
 
     virtual Node& root() const override;
 

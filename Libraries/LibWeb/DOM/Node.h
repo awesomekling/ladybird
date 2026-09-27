@@ -423,6 +423,12 @@ public:
     // one, and whether a layout pass committed geometry for it. Both are bits the render side
     // commits as it changes them, so asking is a read of the node, not of render state.
     [[nodiscard]] bool has_layout_box() const { return m_has_layout_box; }
+    // Where the box the node is bound to sits in the layout tree, as Layout::RustFFI::BOX_PLACEMENT_* bits: none for a
+    // node without a box. The arena is read by the node's identity, and no layout node is made for it.
+    [[nodiscard]] u8 box_placement() const;
+    // The display of the style the node's box holds, which is the node's own record until a style update installs the
+    // next one in the box.
+    [[nodiscard]] Optional<CSS::Display> box_display() const;
     [[nodiscard]] bool is_rendered() const { return m_has_committed_box; }
     // Only the render side writes these, as it changes the boxes they describe.
     void set_box_presence(bool has_layout_box, bool has_committed_box)
