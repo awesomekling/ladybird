@@ -41,7 +41,7 @@ pub(crate) struct HostTables {
     /// paid, in the order they were displaced.
     pub(super) image_observer_sets_owed: RefCell<Vec<(NodeSlotId, *mut c_void)>>,
     /// How the host names a node a layout trace mentions, set when tracing begins.
-    pub(super) layout_trace_describe_node: Cell<Option<super::trace::DescribeNode>>,
+    pub(super) layout_trace_describe_node: Cell<Option<super::trace::NodeDescriber>>,
     /// The generation of the document's render state, which retiring it moves on. See
     /// [`super::frame_retirement`].
     pub(super) frame_generation: Cell<u64>,

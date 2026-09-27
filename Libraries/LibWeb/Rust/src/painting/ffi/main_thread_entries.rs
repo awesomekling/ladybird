@@ -18,8 +18,7 @@ const MAIN_THREAD_FFI_ENTRY: MainThreadFfiEntry = MainThreadFfiEntry { _private:
 
 /// # Safety
 ///
-/// `arena` must be a live handle from `layout_arena_create`, used on the document thread. The
-/// host callback receives live layout node shells.
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn layout_arena_scrolling_box_for_scroll_step(
     arena: *mut c_void,
@@ -28,8 +27,8 @@ unsafe extern "C" fn layout_arena_scrolling_box_for_scroll_step(
     delta: FfiCssPixelPoint,
     viewport_wheel_overflow_x: u8,
     viewport_wheel_overflow_y: u8,
-) -> *mut c_void {
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+) -> NodeSlotId {
+    let _main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let paintable_rows = unsafe { main_side_paintable_rows(arena) };
     let scrolling_box = crate::painting::scroll_chain::scrolling_box_for_scroll_step(
         &paintable_rows,
@@ -42,13 +41,13 @@ unsafe extern "C" fn layout_arena_scrolling_box_for_scroll_step(
         },
         &scroll_offset_reader(&paintable_rows),
     );
-    paintable_rows.shell_if_live(&main_thread, scrolling_box)
+    live_slot(&paintable_rows, scrolling_box)
 }
 
 /// # Safety
 ///
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread. The
-/// host callback receives live layout node shells.
+/// host callback receives the slot of each box.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn layout_arena_for_each_wheel_scrollable_box_in_containing_block_chain(
     arena: *mut c_void,
@@ -58,9 +57,9 @@ unsafe extern "C" fn layout_arena_for_each_wheel_scrollable_box_in_containing_bl
     viewport_wheel_overflow_x: u8,
     viewport_wheel_overflow_y: u8,
     context: *mut c_void,
-    push_scrollable_box: unsafe extern "C" fn(*mut c_void, *mut c_void, f64, f64),
+    push_scrollable_box: unsafe extern "C" fn(*mut c_void, NodeSlotId, f64, f64),
 ) {
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+    let _main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let paintable_rows = unsafe { main_side_paintable_rows(arena) };
     crate::painting::scroll_chain::for_each_wheel_scrollable_box_in_containing_block_chain(
         &paintable_rows,
@@ -73,15 +72,8 @@ unsafe extern "C" fn layout_arena_for_each_wheel_scrollable_box_in_containing_bl
         },
         &scroll_offset_reader(&paintable_rows),
         |node, accepted_delta_x, accepted_delta_y| {
-            // SAFETY: The C++ callback appends the shell and deltas to a caller-owned collection.
-            unsafe {
-                push_scrollable_box(
-                    context,
-                    paintable_rows.node_shell(&main_thread, node),
-                    accepted_delta_x,
-                    accepted_delta_y,
-                );
-            }
+            // SAFETY: The C++ callback appends the slot and deltas to a caller-owned collection.
+            unsafe { push_scrollable_box(context, node, accepted_delta_x, accepted_delta_y) };
         },
     );
 }
@@ -95,8 +87,8 @@ unsafe extern "C" fn layout_arena_first_wheel_scrollable_box_in_containing_block
     start: NodeSlotId,
     viewport_wheel_overflow_x: u8,
     viewport_wheel_overflow_y: u8,
-) -> *mut c_void {
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+) -> NodeSlotId {
+    let _main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let paintable_rows = unsafe { main_side_paintable_rows(arena) };
     let scrollable_box = crate::painting::scroll_chain::first_wheel_scrollable_box_in_containing_block_chain(
         &paintable_rows,
@@ -106,7 +98,7 @@ unsafe extern "C" fn layout_arena_first_wheel_scrollable_box_in_containing_block
             y: viewport_wheel_overflow_y,
         },
     );
-    paintable_rows.shell_if_live(&main_thread, scrollable_box)
+    live_slot(&paintable_rows, scrollable_box)
 }
 
 /// # Safety
@@ -128,27 +120,24 @@ unsafe extern "C" fn layout_arena_paintable_cleared_from_node(arena: *mut c_void
 ///
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
 #[unsafe(no_mangle)]
-unsafe extern "C" fn layout_arena_paintable_event_dispatch_node_shell(
-    arena: *mut c_void,
-    slot: NodeSlotId,
-) -> *mut c_void {
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+unsafe extern "C" fn layout_arena_paintable_event_dispatch_slot(arena: *mut c_void, slot: NodeSlotId) -> NodeSlotId {
+    let _main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let paintable_rows = unsafe { main_side_paintable_rows(arena) };
     let dispatch = crate::painting::hit_test::resolve::event_dispatch_slot_for_paintable(&paintable_rows, slot);
-    shell_of(&main_thread, &paintable_rows, dispatch)
+    dispatch.map_or(NodeSlotId::INVALID, |slot| live_slot(&paintable_rows, slot))
 }
 
 /// # Safety
 ///
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
 #[unsafe(no_mangle)]
-unsafe extern "C" fn layout_arena_paintable_layout_node_shell(arena: *mut c_void, slot: NodeSlotId) -> *mut c_void {
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+unsafe extern "C" fn layout_arena_paintable_committed_slot(arena: *mut c_void, slot: NodeSlotId) -> NodeSlotId {
+    let _main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let arena = unsafe { arena_from_handle(arena) };
     if !arena.paintable_row_is_populated(slot) {
-        return std::ptr::null_mut();
+        return NodeSlotId::INVALID;
     }
-    arena.shell_if_live(&main_thread, slot)
+    live_slot(arena, slot)
 }
 
 /// # Safety
@@ -183,19 +172,19 @@ unsafe extern "C" fn layout_arena_prepare_for_rendering(
 ///
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread. The
 /// host callback receives each snap area's geometry, valid for the duration of the call, and the
-/// area's live layout node shell.
+/// area's slot.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn layout_arena_for_each_snap_area(
     arena: *mut c_void,
     snap_container: NodeSlotId,
     context: *mut c_void,
-    push_snap_area: unsafe extern "C" fn(*mut c_void, *const crate::painting::host::FfiSnapAreaGeometry, *mut c_void),
+    push_snap_area: unsafe extern "C" fn(*mut c_void, *const crate::painting::host::FfiSnapAreaGeometry, NodeSlotId),
 ) {
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+    let _main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let paintable_rows = unsafe { main_side_paintable_rows(arena) };
     crate::painting::scroll_snap::for_each_snap_area(&paintable_rows, snap_container, |slot, area| {
         // SAFETY: The C++ callback copies the geometry into a caller-owned collection.
-        unsafe { push_snap_area(context, &raw const area, paintable_rows.node_shell(&main_thread, slot)) };
+        unsafe { push_snap_area(context, &raw const area, slot) };
     });
 }
 
@@ -350,16 +339,16 @@ unsafe extern "C" fn layout_arena_publish_svg_filter_image_frames(
 /// # Safety
 ///
 /// `arena` must be a live handle from `layout_arena_create`; `describe_node` and `append_text`
-/// are called synchronously with `context`, and the shells handed to `describe_node` are the
-/// last recording's live paintable shells.
+/// are called synchronously with `context`, and `describe_node` is handed the slots of the last
+/// recording's rows.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn layout_arena_take_recording_trace(
     arena: *mut c_void,
     context: *mut c_void,
-    describe_node: unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void),
+    describe_node: unsafe extern "C" fn(*mut c_void, NodeSlotId, *mut c_void),
     append_text: unsafe extern "C" fn(*mut c_void, *const u8, usize),
 ) -> bool {
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+    let _main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let arena = unsafe { arena_from_handle(arena) };
     let (pending, recording) = {
         let Some(pending) = arena.recording().pending_recording_trace().take() else {
@@ -378,9 +367,8 @@ unsafe extern "C" fn layout_arena_take_recording_trace(
             return "@viewport".into();
         }
         let mut name = Vec::<u8>::new();
-        // SAFETY: the last recording's paintable shells are still live, and the host copies the
-        // description synchronously into the sink.
-        unsafe { describe_node(context, arena.shell_if_live(&main_thread, slot), (&raw mut name).cast()) };
+        // SAFETY: the host copies the description synchronously into the sink.
+        unsafe { describe_node(context, live_slot(arena, slot), (&raw mut name).cast()) };
         String::from_utf8(name).expect("trace label must be UTF-8")
     };
     let text = format!(
@@ -404,11 +392,11 @@ unsafe extern "C" fn layout_arena_text_caret_rect_for_position(
     offset: usize,
     affinity_is_downstream: bool,
 ) -> FfiCaretRectResult {
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+    let _main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let mut result = FfiCaretRectResult {
         found: false,
         rect: FfiCssPixelRect::default(),
-        style_source: std::ptr::null_mut(),
+        style_source: NodeSlotId::INVALID,
         owner_paintable: NodeSlotId::INVALID,
         nearest_self_painting_inline: NodeSlotId::INVALID,
     };
@@ -422,7 +410,7 @@ unsafe extern "C" fn layout_arena_text_caret_rect_for_position(
     };
     result.found = true;
     result.rect = answer.rect.into();
-    result.style_source = paintable_rows.shell_if_live(&main_thread, answer.style_source);
+    result.style_source = live_slot(&paintable_rows, answer.style_source);
     result.owner_paintable = answer.owner;
     result.nearest_self_painting_inline =
         crate::painting::fragment_ownership::nearest_self_painting_inline_box(&paintable_rows, answer.node)
@@ -440,11 +428,11 @@ unsafe extern "C" fn layout_arena_atomic_inline_caret_rect_for_position(
     primary: NodeSlotId,
     after: bool,
 ) -> FfiCaretRectResult {
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+    let _main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let mut result = FfiCaretRectResult {
         found: false,
         rect: FfiCssPixelRect::default(),
-        style_source: std::ptr::null_mut(),
+        style_source: NodeSlotId::INVALID,
         owner_paintable: NodeSlotId::INVALID,
         nearest_self_painting_inline: NodeSlotId::INVALID,
     };
@@ -454,7 +442,7 @@ unsafe extern "C" fn layout_arena_atomic_inline_caret_rect_for_position(
     };
     result.found = true;
     result.rect = answer.rect.into();
-    result.style_source = paintable_rows.shell_if_live(&main_thread, answer.style_source);
+    result.style_source = live_slot(&paintable_rows, answer.style_source);
     result.owner_paintable = answer.owner;
     result.nearest_self_painting_inline =
         crate::painting::fragment_ownership::nearest_self_painting_inline_box(&paintable_rows, answer.node)
@@ -473,11 +461,11 @@ unsafe extern "C" fn layout_arena_paintable_empty_line_caret_rect(
     primary: NodeSlotId,
     offset: usize,
 ) -> FfiEmptyLineCaretRect {
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+    let _main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let mut result = FfiEmptyLineCaretRect {
         has_value: false,
         rect: FfiCssPixelRect::default(),
-        style_source: std::ptr::null_mut(),
+        style_source: NodeSlotId::INVALID,
     };
     let paintable_rows = unsafe { main_side_paintable_rows(arena) };
     if !paintable_rows.paintable_row_is_populated(block) {
@@ -496,8 +484,8 @@ unsafe extern "C" fn layout_arena_paintable_empty_line_caret_rect(
         if target.offset == offset {
             result.has_value = true;
             result.rect = target.rect.into();
-            result.style_source = paintable_rows.shell_if_live(
-                &main_thread,
+            result.style_source = live_slot(
+                &paintable_rows,
                 crate::painting::text_fragment::style_source(&paintable_rows, first_fragment),
             );
             break;
@@ -514,46 +502,46 @@ unsafe extern "C" fn layout_arena_for_each_subtree_fragment_rect(
     arena: *mut c_void,
     root: NodeSlotId,
     context: *mut c_void,
-    consume: unsafe extern "C" fn(*mut c_void, *mut c_void, FfiCssPixelRect),
+    consume: unsafe extern "C" fn(*mut c_void, NodeSlotId, FfiCssPixelRect),
 ) {
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+    let _main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let paintable_rows = unsafe { main_side_paintable_rows(arena) };
     if !paintable_rows.paintable_row_is_populated(root) {
         return;
     }
     crate::painting::paint_order::for_each_in_paint_subtree(&paintable_rows, root, |current| {
         for fragment in paintable_rows.committed_side_data(current).fragments() {
-            let shell = paintable_rows.shell_if_live(&main_thread, fragment.layout_node);
+            let slot = live_slot(&paintable_rows, fragment.layout_node);
             let rect = crate::painting::text_fragment::absolute_rect(&paintable_rows, fragment).into();
             crate::painting::seal::note_host_call("for_each_subtree_fragment_rect_consume");
             // SAFETY: The consumer copies its plain-data arguments synchronously.
-            unsafe { consume(context, shell, rect) };
+            unsafe { consume(context, slot, rect) };
         }
     });
 }
 
-/// The layout node of a row a hit test named. The hit test names rows; which layout node a row is,
-/// is the arena's.
-fn shell_of(
-    main_thread: &crate::stage::MainThread,
-    arena: &crate::layout::LayoutNodeArena,
-    slot: Option<crate::layout::node_data::NodeSlotId>,
-) -> *mut c_void {
-    slot.map_or(std::ptr::null_mut(), |slot| arena.shell_if_live(main_thread, slot))
+/// `slot` if its row is live, or an invalid slot.
+fn live_slot(arena: &crate::layout::LayoutNodeArena, slot: NodeSlotId) -> NodeSlotId {
+    if arena.slot_is_live(slot) {
+        slot
+    } else {
+        NodeSlotId::INVALID
+    }
 }
 
 /// # Safety
 ///
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread, and
-/// both resolvers must answer synchronously from a live layout node shell and only push into
-/// the sink whose pointer they receive.
+/// both resolvers must answer synchronously with `context` for the row the slot names and only push
+/// into the sink whose pointer they receive.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn layout_arena_sync_svg_paint_resources(
     arena: *mut c_void,
-    resolve_filter: unsafe extern "C" fn(*mut c_void, *const c_void, *mut c_void) -> bool,
-    resolve_paint_server: unsafe extern "C" fn(*mut c_void, bool, *mut c_void),
+    context: *mut c_void,
+    resolve_filter: unsafe extern "C" fn(*mut c_void, NodeSlotId, *const c_void, *mut c_void) -> bool,
+    resolve_paint_server: unsafe extern "C" fn(*mut c_void, NodeSlotId, bool, *mut c_void),
 ) -> bool {
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+    let _main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     use crate::painting::svg_paint_resources::{PublishedSvgFilter, PublishedSvgPaintServer, SvgPaintResourceKind};
     let arena = unsafe { arena_from_handle(arena) };
     let resources = arena.svg_paint_resources();
@@ -570,15 +558,9 @@ unsafe extern "C" fn layout_arena_sync_svg_paint_resources(
             let is_stroke = kind == SvgPaintResourceKind::Stroke;
             let mut published = PublishedSvgPaintServer::None;
             crate::painting::seal::note_host_call("resolve_paint_server");
-            // SAFETY: The host resolves synchronously from the live shell and only pushes into
-            // the sink it is handed.
-            unsafe {
-                resolve_paint_server(
-                    arena.shell_if_live(&main_thread, slot),
-                    is_stroke,
-                    (&raw mut published).cast(),
-                );
-            }
+            // SAFETY: The host resolves synchronously for the live row and only pushes into the
+            // sink it is handed.
+            unsafe { resolve_paint_server(context, slot, is_stroke, (&raw mut published).cast()) };
             if resources.publish_paint_server(slot, kind, published) {
                 any_changed = true;
                 use crate::painting::record::damage::PaintDamage;
@@ -596,7 +578,6 @@ unsafe extern "C" fn layout_arena_sync_svg_paint_resources(
             resources.withdraw(slot, kind);
             continue;
         }
-        let shell = arena.shell_if_live(&main_thread, slot);
         let mut published = PublishedSvgFilter::default();
         for operation in filter_list.operations.as_slice() {
             if operation.kind != crate::painting::css_filter::FILTER_KIND_URL {
@@ -604,9 +585,10 @@ unsafe extern "C" fn layout_arena_sync_svg_paint_resources(
             }
             let mut primitives: Vec<SvgFilterPrimitive> = Vec::new();
             crate::painting::seal::note_host_call("resolve_filter");
-            // SAFETY: The host resolves synchronously from the live shell and only pushes into the
+            // SAFETY: The host resolves synchronously for the live row and only pushes into the
             // primitive list it is handed as its sink.
-            let resolved = unsafe { resolve_filter(shell, operation.url_value.pointer, (&raw mut primitives).cast()) };
+            let resolved =
+                unsafe { resolve_filter(context, slot, operation.url_value.pointer, (&raw mut primitives).cast()) };
             published = PublishedSvgFilter {
                 failed: !resolved,
                 primitives: if resolved { primitives } else { Vec::new() },

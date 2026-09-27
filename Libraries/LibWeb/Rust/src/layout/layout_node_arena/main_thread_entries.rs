@@ -111,6 +111,17 @@ unsafe extern "C" fn layout_arena_node_containing_block_shell_if_live(
     unsafe { LayoutNodeArena::from_handle(arena) }.node_containing_block_shell_if_live(&main_thread, id)
 }
 
+/// The containing block of the row `id` names, or an invalid slot if it has none or it is no longer live.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_node_containing_block_slot_if_live(arena: *mut c_void, id: NodeSlotId) -> NodeSlotId {
+    // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
+    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
+    arena
+        .node_containing_block_if_live(id)
+        .filter(|containing_block| arena.slot_is_live(*containing_block))
+        .unwrap_or(NodeSlotId::INVALID)
+}
+
 /// The shell of the row the element or text node with `style_node` is bound to, materialised if
 /// nothing has asked for it yet, or null if the node has no row.
 #[unsafe(no_mangle)]
