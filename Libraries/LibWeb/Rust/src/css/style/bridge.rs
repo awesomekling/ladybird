@@ -286,6 +286,9 @@ pub struct FfiStyleTransactionView {
     /// A row the owner applied moved the visual contexts of its layout nodes, which the document's
     /// next paint preparation updates.
     pub render_half_moved_visual_contexts: bool,
+    /// A row the owner applied repainted its layout nodes, which the document's navigable paints
+    /// again: 0 for none, 1 with the paint commands, 2 with the hit test items too.
+    pub render_half_repaint: u8,
 }
 
 /// A host-owned object the engine names but never follows.
@@ -488,6 +491,7 @@ impl Default for FfiStyleTransactionView {
             style_atoms_swept: false,
             render_half_applied: false,
             render_half_moved_visual_contexts: false,
+            render_half_repaint: 0,
         }
     }
 }
@@ -5673,11 +5677,12 @@ impl OwnerStyleTransaction {
                 let (mut view, retired) = finish_style_transaction(engine, root, output);
                 if let Some(viewport_propagation_sources) = render_half.filter(|_| on_owner) {
                     // SAFETY: The owner holds the document's arena, and the document thread waits.
-                    if let Some(moved_visual_contexts) =
+                    if let Some(effects) =
                         unsafe { apply_render_half_on_owner(engine, layout_arena, &viewport_propagation_sources) }
                     {
                         view.render_half_applied = true;
-                        view.render_half_moved_visual_contexts = moved_visual_contexts;
+                        view.render_half_moved_visual_contexts = effects.moved_visual_contexts;
+                        view.render_half_repaint = effects.repaint;
                     }
                 }
                 (view, retired)
@@ -5692,9 +5697,9 @@ impl OwnerStyleTransaction {
 
 /// Applies the batch a style transaction the owner took left to the layout nodes of the rows'
 /// elements, as a flight applies its pass's: each row's record, and what the row's move marks of
-/// layout, paint and the visual contexts, which the host's install then leaves alone. Answers
-/// whether a row moved the visual contexts of its layout nodes if it applied the batch; a batch any
-/// row of which the host styles in a way of its own is the host's to apply whole.
+/// layout, paint and the visual contexts, which the host's install then leaves alone. Answers what
+/// the rows' moves ask of the document if it applied the batch; a batch any row of which the host
+/// styles in a way of its own is the host's to apply whole.
 ///
 /// # Safety
 ///
@@ -5703,7 +5708,7 @@ unsafe fn apply_render_half_on_owner(
     engine: &StyleEngine,
     layout_arena: *mut c_void,
     viewport_propagation_sources: &[StyleNodeID],
-) -> Option<bool> {
+) -> Option<OwnerRenderHalfEffects> {
     if layout_arena.is_null() {
         return None;
     }
@@ -5716,10 +5721,25 @@ unsafe fn apply_render_half_on_owner(
     arena.apply_flight_style_rows(&rows).ok()?;
     // No flight reads whether one applied a batch: the host's render half ends with the update.
     arena.take_flight_style_applied();
-    Some(rows.iter().any(|row| {
+    let mut effects = OwnerRenderHalfEffects::default();
+    for row in &rows {
         let marks = super::style_invalidation::layout_node_marks(row.damage);
-        marks.visual_context != 0 || marks.stacking_context
-    }))
+        effects.moved_visual_contexts |= marks.visual_context != 0 || marks.stacking_context;
+        if marks.repaint {
+            effects.repaint = effects.repaint.max(if marks.repaint_hit_test { 2 } else { 1 });
+        }
+    }
+    Some(effects)
+}
+
+/// What the rows the owner applied of a batch ask of the document, which the host applies once it
+/// has the transaction back: the owner marked the layout nodes, but the document's navigable is the
+/// host's to have painted again.
+#[derive(Default)]
+struct OwnerRenderHalfEffects {
+    moved_visual_contexts: bool,
+    /// As [`FfiStyleTransactionView::render_half_repaint`].
+    repaint: u8,
 }
 
 /// Takes the pending style transaction as [`style_engine_take_style_transaction`] does, and hands
@@ -6259,6 +6279,7 @@ fn finish_style_transaction(
         style_atoms_swept: output.style_atoms_swept,
         render_half_applied: false,
         render_half_moved_visual_contexts: false,
+        render_half_repaint: 0,
     };
     // The custom-property data the transaction retired is the document thread's to release, once the transaction is
     // over: the caller drops it there. It is taken last, so that a panic in the steps before leaves it with the engine
