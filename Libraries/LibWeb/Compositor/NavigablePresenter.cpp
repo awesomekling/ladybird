@@ -6,8 +6,14 @@
 
 #include <LibCore/Environment.h>
 #include <LibWeb/Compositor/NavigablePresenter.h>
+#include <LibWeb/Layout/LayoutRustFFI.h>
 
 namespace Web::Compositor {
+
+Presentation::~Presentation()
+{
+    Layout::RustFFI::layout_recording_ticket_release(recording_ticket);
+}
 
 static Optional<bool> s_render_presents_for_testing;
 

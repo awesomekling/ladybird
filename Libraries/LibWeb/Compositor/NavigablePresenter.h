@@ -131,6 +131,7 @@ public:
         , paint_command_cache_source(move(paint_command_cache_source))
     {
     }
+    ~Presentation();
 
     SealedPresentationSource source;
     PresentationInputs inputs;
@@ -142,6 +143,9 @@ public:
     // scheduler's ticket), and the sink it hands the frame to.
     RefPtr<NavigablePresenter> presenter;
     Painting::PendingDisplayListRecording* recording { nullptr };
+    // The ticket of the recording, if it was submitted with one: the presentation publishes the recording from it, without
+    // reaching the document's arena. Released with the presentation.
+    void const* recording_ticket { nullptr };
     u64 render_state_generation { 0 };
     RefPtr<CompositorFrameSink> frame_sink;
     bool is_presented_by_frame_in_flight { false };
