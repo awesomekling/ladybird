@@ -3329,6 +3329,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             manifest_dir.join("src/stage_thread.rs"),
             manifest_dir.join("src/clock_frames.rs"),
             manifest_dir.join("src/flight.rs"),
+            manifest_dir.join("src/render_owner.rs"),
         ],
         &out_dir,
         Path::new("Layout/LayoutRustFFI.h"),

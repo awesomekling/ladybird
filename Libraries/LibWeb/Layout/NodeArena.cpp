@@ -17,45 +17,45 @@
 namespace Web::Layout {
 
 NodeArena::NodeArena()
-    : m_handle(RustFFI::layout_arena_create())
+    : m_render_document(RustFFI::render_owner_create_document())
 {
-    VERIFY(m_handle);
+    VERIFY(m_render_document.arena);
     Painting::register_geometry_host(*this);
 }
 
 NodeArena::~NodeArena()
 {
-    RustFFI::layout_arena_destroy(m_handle);
+    RustFFI::render_owner_destroy_document(m_render_document);
 }
 
 Compositing::RustFFI::NodeSlotId NodeArena::allocate(RustFFI::FfiNodeConstructionFacts const& construction_facts)
 {
-    return RustFFI::layout_arena_allocate(m_handle, construction_facts);
+    return RustFFI::layout_arena_allocate(handle(), construction_facts);
 }
 
 void NodeArena::free_subtree(Compositing::RustFFI::NodeSlotId root)
 {
-    RustFFI::layout_arena_free_subtree(m_handle, root);
+    RustFFI::layout_arena_free_subtree(handle(), root);
 }
 
 Node* NodeArena::node_if_live(Compositing::RustFFI::NodeSlotId slot) const
 {
-    return static_cast<Node*>(RustFFI::layout_arena_node_shell_if_live(m_handle, slot));
+    return static_cast<Node*>(RustFFI::layout_arena_node_shell_if_live(handle(), slot));
 }
 
 Row NodeArena::row_if_live(Compositing::RustFFI::NodeSlotId slot) const
 {
-    return { *this, RustFFI::layout_arena_row_if_live(m_handle, slot) };
+    return { *this, RustFFI::layout_arena_row_if_live(handle(), slot) };
 }
 
 Row NodeArena::bound_row(CSS::StyleNodeID style_node, u8 generated_for) const
 {
-    return { *this, RustFFI::layout_arena_bound_row_of(m_handle, style_node.value(), generated_for) };
+    return { *this, RustFFI::layout_arena_bound_row_of(handle(), style_node.value(), generated_for) };
 }
 
 Row NodeArena::bound_viewport_row() const
 {
-    return { *this, RustFFI::layout_arena_bound_viewport_row(m_handle) };
+    return { *this, RustFFI::layout_arena_bound_viewport_row(handle()) };
 }
 
 Row::Row(NodeArena const& arena, RustFFI::FfiBoundRow const& row)
@@ -145,22 +145,22 @@ void Row::set_needs_layout_update(DOM::SetNeedsLayoutReason reason, LayoutUpdate
 
 u64 NodeArena::table_cell_measurement_cache_miss_count() const
 {
-    return RustFFI::layout_arena_table_cell_measurement_cache_miss_count(m_handle);
+    return RustFFI::layout_arena_table_cell_measurement_cache_miss_count(handle());
 }
 
 u64 NodeArena::retained_inline_item_count() const
 {
-    return RustFFI::layout_arena_retained_inline_item_count(m_handle);
+    return RustFFI::layout_arena_retained_inline_item_count(handle());
 }
 
 u64 NodeArena::intrinsic_measurement_count() const
 {
-    return RustFFI::layout_arena_intrinsic_measurement_count(m_handle);
+    return RustFFI::layout_arena_intrinsic_measurement_count(handle());
 }
 
 u64 NodeArena::intrinsic_inline_measurement_count() const
 {
-    return RustFFI::layout_arena_intrinsic_inline_measurement_count(m_handle);
+    return RustFFI::layout_arena_intrinsic_inline_measurement_count(handle());
 }
 
 bool destroy_layout_subtree(Node& node)

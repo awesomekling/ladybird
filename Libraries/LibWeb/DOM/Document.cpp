@@ -2194,6 +2194,21 @@ void Document::apply_layout_commit_effects(Layout::RustFFI::FfiLayoutCommitEffec
         inform_all_viewport_clients_about_the_current_viewport_rect();
 }
 
+Optional<Layout::RustFFI::FfiGeometryReadAnswer> Document::update_layout_answering_geometry_read(Element const& element, UpdateLayoutReason reason, Layout::RustFFI::FfiGeometryReadKind kind)
+{
+    auto* arena = layout_node_arena_if_created();
+    if (!arena || element.style_node_id() == 0) {
+        update_layout_if_needed_for_node(element, reason);
+        return {};
+    }
+    Layout::RustFFI::render_owner_begin_geometry_query(arena->render_document(), element.style_node_id().value(), kind);
+    update_layout_if_needed_for_node(element, reason);
+    auto answer = Layout::RustFFI::render_owner_take_geometry_answer();
+    if (!answer.answered)
+        return {};
+    return answer;
+}
+
 void Document::update_layout_if_needed_for_node(Node const& node, UpdateLayoutReason reason)
 {
     if (!node.is_connected())
@@ -2850,6 +2865,14 @@ void Document::update_paint_and_hit_testing_properties_if_needed()
     // the snapshot must be derived only after structure work is done.
     if (has_committed_viewport_box())
         paint_state().refresh_scroll_state(*this);
+}
+
+bool Document::client_rects_need_no_accumulated_visual_contexts_update() const
+{
+    if (!m_needs_accumulated_visual_contexts_update)
+        return false;
+    auto navigable = this->navigable();
+    return !navigable || navigable->viewport_scroll_offset().is_zero();
 }
 
 bool Document::can_compute_client_rects_without_accumulated_visual_contexts_update(Layout::Node const& layout_node) const

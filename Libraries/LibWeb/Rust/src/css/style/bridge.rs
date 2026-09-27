@@ -2216,6 +2216,22 @@ pub(crate) struct InputForPass {
 }
 
 impl InputForPass {
+    /// A transaction that writes nothing.
+    #[cfg(test)]
+    pub(crate) fn empty() -> Self {
+        Self {
+            tree: Vec::new(),
+            arrivals: Vec::new(),
+            arrival_custom_state_atoms: Vec::new(),
+            features: Vec::new(),
+            states: Vec::new(),
+            declarations: Vec::new(),
+            element_style_inputs: Vec::new(),
+            host_fact_writes: Vec::new(),
+            replaced_content_inputs: Vec::new(),
+        }
+    }
+
     /// # Safety
     /// As for [`style_engine_apply_transaction`]'s `transaction`. What its host fact writes hand over
     /// is this transaction's from now on.
@@ -2251,7 +2267,7 @@ impl InputForPass {
 
     /// Applies the transaction as [`style_engine_apply_transaction`] does, but for the grant, which
     /// answered the host as it handed the transaction over.
-    fn apply(mut self, engine: &mut StyleEngine) {
+    pub(crate) fn apply(mut self, engine: &mut StyleEngine) {
         let mut host_fact_writes = std::mem::take(&mut self.host_fact_writes);
         for write in &mut host_fact_writes {
             if write.kind == FfiHostFactKind::ElementReplacedContentInput {
@@ -5303,7 +5319,7 @@ pub unsafe extern "C" fn style_engine_submit_style_transaction(
     // SAFETY: Guaranteed by the caller.
     let mut pass = unsafe { prepare_style_pass(engine, root, computation_inputs, layout_arena, input) };
     // A layout frame that runs its first round's style in its flight takes the pass along instead.
-    let Some(pass) = STYLE_PASS_FOR_FLIGHT.with(|collected| match collected.borrow_mut().as_mut() {
+    let Some(mut pass) = STYLE_PASS_FOR_FLIGHT.with(|collected| match collected.borrow_mut().as_mut() {
         Some(slot) => {
             // The frame goes on to read the engine on the document thread before its flight runs the
             // pass, so the input goes in now.
@@ -5315,6 +5331,8 @@ pub unsafe extern "C" fn style_engine_submit_style_transaction(
     }) else {
         return;
     };
+    // SAFETY: As above.
+    unsafe { pass.send_input_to_owner(layout_arena) };
     if crate::stage_thread::submits_flight() {
         // SAFETY: As above.
         unsafe { crate::flight::submit(layout_arena, crate::flight::Flight::from_style_pass(layout_arena, pass)) };
@@ -5365,14 +5383,26 @@ pub(crate) struct StylePassJob {
     snapshot: super::animations::CommittedTransformReferenceBoxSnapshot,
     timeline_samples: super::animations::AnimationTimelineSamples,
     /// The input the host recorded since the last transaction, which the pass applies first.
-    input: Option<InputForPass>,
+    input: PassInput,
+}
+
+/// Where the input a style pass applies first is.
+enum PassInput {
+    None,
+    /// With the pass, until it is sent to the owner or applied on the document thread.
+    Here(InputForPass),
+    /// Sent to the owner as a change of `document`: the pass applies that document's changes through `through`.
+    Sent {
+        document: crate::render_owner::DocumentId,
+        through: crate::render_owner::ChangeSeq,
+    },
 }
 
 impl StylePassJob {
     /// Applies the pass's input to its engine `engine` on the document thread, before the pass is
     /// submitted.
     fn apply_input_on_document_thread(&mut self, engine: StyleEngineHandle) {
-        let Some(input) = self.input.take() else {
+        let PassInput::Here(input) = std::mem::replace(&mut self.input, PassInput::None) else {
             return;
         };
         // SAFETY: The pass has not been submitted, so the engine's token is home.
@@ -5381,6 +5411,25 @@ impl StylePassJob {
             .counters
             .bump(super::instrumentation::Counter::InputTransactionsAppliedOnDocumentThread);
         input.apply(engine);
+    }
+
+    /// Sends the pass's input to the owner of `layout_arena`'s render state as a change, which the pass applies as its
+    /// first step on the owner.
+    ///
+    /// # Safety
+    ///
+    /// `layout_arena` must be the live arena of the pass's document.
+    unsafe fn send_input_to_owner(&mut self, layout_arena: *const c_void) {
+        // SAFETY: Guaranteed by the caller.
+        let document = unsafe { crate::layout::ArenaHandle::document_of(layout_arena) };
+        if !document.is_valid() {
+            return;
+        }
+        let PassInput::Here(input) = std::mem::replace(&mut self.input, PassInput::None) else {
+            return;
+        };
+        let through = crate::render_owner::send_change(document, crate::render_owner::Change::StyleInputs(input));
+        self.input = PassInput::Sent { document, through };
     }
 
     /// Runs the pass, on the stage the engine's token is lent to as `loan`.
@@ -5399,10 +5448,16 @@ impl StylePassJob {
         root: StyleNodeID,
         snapshot: &super::animations::CommittedTransformReferenceBoxSnapshot,
         timeline_samples: &super::animations::AnimationTimelineSamples,
-        input: Option<InputForPass>,
+        input: PassInput,
     ) {
-        if let Some(input) = input {
-            input.apply(engine);
+        match input {
+            PassInput::None => {}
+            PassInput::Here(input) => input.apply(engine),
+            PassInput::Sent { document, through } => crate::render_owner::apply_changes_through(
+                document,
+                through,
+                &mut crate::render_owner::ChangeTarget { style_engine: engine },
+            ),
         }
         // SAFETY: The pass owns the snapshot for as long as it runs.
         let committed_boxes = unsafe { super::animations::CommittedTransformReferenceBoxes::taken_along(snapshot) };
@@ -5473,7 +5528,7 @@ pub(crate) unsafe fn prepare_style_pass(
         root,
         snapshot,
         timeline_samples,
-        input,
+        input: input.map_or(PassInput::None, PassInput::Here),
     }
 }
 

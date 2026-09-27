@@ -3011,7 +3011,14 @@ static QueryResult query_client_rects_after_layout_update(Element const& element
     HTML::ClockLendReadScope clock_lend_read_scope;
 
     // NOTE: Ensure that layout is up-to-date before looking at metrics.
-    const_cast<Document&>(document).update_layout_if_needed_for_node(element, UpdateLayoutReason::ElementGetClientRects);
+    if constexpr (IsSame<QueryResult, CSSPixelRect>) {
+        // The update that ran for the read answers it where it ran.
+        auto answer = const_cast<Document&>(document).update_layout_answering_geometry_read(element, UpdateLayoutReason::ElementGetClientRects, Layout::RustFFI::FfiGeometryReadKind::BoundingClientRect);
+        if (answer.has_value() && (!answer->has_box || document.client_rects_need_no_accumulated_visual_contexts_update()))
+            return answer->rect;
+    } else {
+        const_cast<Document&>(document).update_layout_if_needed_for_node(element, UpdateLayoutReason::ElementGetClientRects);
+    }
 
     // 1. If the element on which it was invoked does not have an associated layout box return an empty DOMRectList
     //    object and stop this algorithm.

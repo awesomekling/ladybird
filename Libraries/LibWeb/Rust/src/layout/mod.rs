@@ -109,3 +109,9 @@ pub(crate) use style_values::StyleValues;
 pub(crate) use tree_builder::MainThreadFfiEntry as TreeBuildMainThreadFfiEntry;
 pub(crate) use update_layout::MainThreadFfiEntry as UpdateMainThreadFfiEntry;
 pub(crate) use used_values::{FfiCssPixelPoint, FfiCssPixelRect, FfiCssPixelSize, SizeConstraint, UsedValues};
+
+/// Flushes what the document thread counted about its arenas, as a document's render state goes away.
+pub(crate) fn flush_arena_censuses() {
+    tree_build_seal::flush_census();
+    main_side_census::flush();
+}
