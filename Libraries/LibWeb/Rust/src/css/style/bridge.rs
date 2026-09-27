@@ -1063,6 +1063,56 @@ pub struct FfiAppliedStyleReaction {
     pub facts: u32,
 }
 
+/// An element whose synthetic pseudo-elements the host left for the next pass to settle, as it
+/// installed a composition they inherit from after the pass that settled the element. See
+/// `StyleEngineState::settle_pseudo_elements_in_next_pass`.
+#[derive(Clone, Copy, Debug)]
+#[repr(C)]
+pub struct FfiPseudoElementSettle {
+    pub node: u32,
+    pub old_is_list_item: bool,
+    pub held_pseudo_records: [u64; RETRY_PSEUDO_RECORD_SLOTS],
+}
+
+/// What the host's install of a batch hands back for the next transaction, the next wave of its
+/// style update: the reactions it applied, and the elements whose pseudo-elements it left to settle.
+/// Every array is borrowed for the duration of the call.
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct FfiInstallFeedback {
+    pub applied_style_reactions: *const FfiAppliedStyleReaction,
+    pub applied_style_reaction_count: usize,
+    pub pseudo_element_settles: *const FfiPseudoElementSettle,
+    pub pseudo_element_settle_count: usize,
+}
+
+impl FfiInstallFeedback {
+    /// # Safety
+    /// Each array must point at its stated count for `'a`.
+    unsafe fn borrow<'a>(&self) -> InstallFeedback<'a> {
+        // SAFETY: Guaranteed by the caller.
+        unsafe {
+            InstallFeedback {
+                applied_style_reactions: borrow(self.applied_style_reactions, self.applied_style_reaction_count),
+                pseudo_element_settles: borrow(self.pseudo_element_settles, self.pseudo_element_settle_count),
+            }
+        }
+    }
+}
+
+/// The rows of an [`FfiInstallFeedback`].
+#[derive(Clone, Copy)]
+pub(crate) struct InstallFeedback<'a> {
+    applied_style_reactions: &'a [FfiAppliedStyleReaction],
+    pseudo_element_settles: &'a [FfiPseudoElementSettle],
+}
+
+impl InstallFeedback<'_> {
+    fn is_empty(&self) -> bool {
+        self.applied_style_reactions.is_empty() && self.pseudo_element_settles.is_empty()
+    }
+}
+
 /// One flat style input transaction. Every array is borrowed for the duration of the call.
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -2247,6 +2297,8 @@ pub(crate) struct InputForPass {
     /// The reactions the host applied as it installed the batches before, which the transaction
     /// derives the children's reactions from.
     applied_style_reactions: Vec<FfiAppliedStyleReaction>,
+    /// The elements whose pseudo-elements the host left for the transaction's pass to settle.
+    pseudo_element_settles: Vec<FfiPseudoElementSettle>,
 }
 
 impl InputForPass {
@@ -2264,23 +2316,24 @@ impl InputForPass {
             host_fact_writes: Vec::new(),
             replaced_content_inputs: Vec::new(),
             applied_style_reactions: Vec::new(),
+            pseudo_element_settles: Vec::new(),
         }
     }
 
     /// What the host hands over with a transaction it takes or submits: the input it recorded, if
-    /// it recorded any, and the reactions it applied as it installed the batches before.
+    /// it recorded any, and what its install of the batches before handed back.
     ///
     /// # Safety
     /// `input` is null or as for [`Self::take_from`].
     unsafe fn handed_over(
         input: *const FfiStyleInputTransaction,
-        applied_style_reactions: &[FfiAppliedStyleReaction],
+        install_feedback: InstallFeedback<'_>,
     ) -> Option<Self> {
         // SAFETY: Guaranteed by the caller.
         let mut handed_over = match unsafe { input.as_ref() } {
             // SAFETY: Guaranteed by the caller.
             Some(input) => unsafe { Self::take_from(input) },
-            None if applied_style_reactions.is_empty() => return None,
+            None if install_feedback.is_empty() => return None,
             None => Self {
                 tree: Vec::new(),
                 arrivals: Vec::new(),
@@ -2292,9 +2345,11 @@ impl InputForPass {
                 host_fact_writes: Vec::new(),
                 replaced_content_inputs: Vec::new(),
                 applied_style_reactions: Vec::new(),
+                pseudo_element_settles: Vec::new(),
             },
         };
-        handed_over.applied_style_reactions = applied_style_reactions.to_vec();
+        handed_over.applied_style_reactions = install_feedback.applied_style_reactions.to_vec();
+        handed_over.pseudo_element_settles = install_feedback.pseudo_element_settles.to_vec();
         Some(handed_over)
     }
 
@@ -2329,12 +2384,16 @@ impl InputForPass {
             host_fact_writes,
             replaced_content_inputs,
             applied_style_reactions: Vec::new(),
+            pseudo_element_settles: Vec::new(),
         }
     }
 
     /// Applies the transaction as [`style_engine_apply_transaction`] does, but for the grant, which
     /// answered the host as it handed the transaction over.
     pub(crate) fn apply(mut self, engine: &mut StyleEngine) {
+        // The host left the settles before it recorded what the rest of the transaction applies,
+        // whose removals end the settles of the nodes they retire.
+        settle_pseudo_elements_in_next_pass(engine, &self.pseudo_element_settles);
         let mut host_fact_writes = std::mem::take(&mut self.host_fact_writes);
         for write in &mut host_fact_writes {
             if write.kind == FfiHostFactKind::ElementReplacedContentInput {
@@ -2358,6 +2417,18 @@ impl InputForPass {
             },
         );
         record_applied_style_reactions(engine, &self.applied_style_reactions);
+    }
+}
+
+/// Keeps the elements whose pseudo-elements the host left for the next transaction's pass to settle.
+fn settle_pseudo_elements_in_next_pass(engine: &mut StyleEngine, settles: &[FfiPseudoElementSettle]) {
+    for settle in settles {
+        operations::settle_pseudo_elements_in_next_pass(
+            engine,
+            settle.node,
+            settle.old_is_list_item,
+            &settle.held_pseudo_records,
+        );
     }
 }
 
@@ -5349,13 +5420,12 @@ fn record_interned_atom(engine: &mut StyleEngine, raw: usize, atom: StyleAtomID)
 
 /// Takes the pending style transaction and returns its versioned semantic match answers. The
 /// transaction applies `input`, the style input the host recorded since the last one, first, and
-/// keeps the `applied_style_reactions` the host applied as it installed the batches before.
+/// keeps the `install_feedback` the host's install of the batches before handed back.
 ///
 /// # Safety
 /// `engine` must be live, and `layout_arena` the document's live layout arena or null. `input` is
 /// null or as for [`style_engine_apply_transaction`]'s `transaction`, its grant arrays kept live
-/// until the call returns, and `applied_style_reactions` points at `applied_style_reaction_count`
-/// reactions. `render_half` says whether the render owner applies the batch to the layout nodes
+/// until the call returns, and each array of `install_feedback` points at its stated count. `render_half` says whether the render owner applies the batch to the layout nodes
 /// itself, its viewport propagation sources pointing at their stated count. The returned answer
 /// slice remains valid until the next mutable `style_engine_*` entry point or an explicit discard of
 /// the transaction outputs.
@@ -5366,12 +5436,11 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
     computation_inputs: FfiDocumentStyleComputationInputs,
     layout_arena: *mut c_void,
     input: *const FfiStyleInputTransaction,
-    applied_style_reactions: *const FfiAppliedStyleReaction,
-    applied_style_reaction_count: usize,
+    install_feedback: FfiInstallFeedback,
     render_half: FfiOwnerRenderHalf,
 ) -> FfiStyleTransactionView {
     // SAFETY: Guaranteed by the caller.
-    let applied_style_reactions = unsafe { borrow(applied_style_reactions, applied_style_reaction_count) };
+    let install_feedback = unsafe { install_feedback.borrow() };
     // SAFETY: The host passes its document's live layout arena, or null.
     let document = (!layout_arena.is_null())
         .then(|| unsafe { crate::layout::ArenaHandle::document_of(layout_arena) })
@@ -5388,7 +5457,7 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
         // SAFETY: Guaranteed by the caller.
         let grant = unsafe { input.as_ref() }.map_or_else(StyleNodeGrant::default, StyleNodeGrant::of);
         // SAFETY: As above.
-        let input = unsafe { InputForPass::handed_over(input, applied_style_reactions) }
+        let input = unsafe { InputForPass::handed_over(input, install_feedback) }
             .map_or(PassInput::None, |input| PassInput::Here(Box::new(input)));
         // SAFETY: Guaranteed by the caller.
         let render_half = render_half.applies.then(|| unsafe {
@@ -5424,12 +5493,13 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
         "a document's style transaction runs on the render owner"
     );
     let engine = unsafe { engine_entrance(engine, "style_engine_take_style_transaction") };
+    settle_pseudo_elements_in_next_pass(engine, install_feedback.pseudo_element_settles);
     // SAFETY: Guaranteed by the caller.
     if let Some(input) = unsafe { input.as_ref() } {
         // SAFETY: As above.
         unsafe { apply_input_transaction_on_document_thread(engine, input) };
     }
-    record_applied_style_reactions(engine, applied_style_reactions);
+    record_applied_style_reactions(engine, install_feedback.applied_style_reactions);
     let Some(root) = StyleNodeID::from_raw(root) else {
         return FfiStyleTransactionView::default();
     };
@@ -5647,22 +5717,13 @@ pub unsafe extern "C" fn style_engine_submit_style_transaction(
     computation_inputs: FfiDocumentStyleComputationInputs,
     layout_arena: *mut c_void,
     input: *const FfiStyleInputTransaction,
-    applied_style_reactions: *const FfiAppliedStyleReaction,
-    applied_style_reaction_count: usize,
+    install_feedback: FfiInstallFeedback,
 ) {
     // SAFETY: Guaranteed by the caller.
-    let applied_style_reactions = unsafe { borrow(applied_style_reactions, applied_style_reaction_count) };
+    let install_feedback = unsafe { install_feedback.borrow() };
     // SAFETY: Guaranteed by the caller.
-    let mut pass = unsafe {
-        prepare_style_pass(
-            engine,
-            root,
-            computation_inputs,
-            layout_arena,
-            input,
-            applied_style_reactions,
-        )
-    };
+    let mut pass =
+        unsafe { prepare_style_pass(engine, root, computation_inputs, layout_arena, input, install_feedback) };
     // A layout frame that runs its first round's style in its flight takes the pass along instead.
     let Some(mut pass) = STYLE_PASS_FOR_FLIGHT.with(|collected| match collected.borrow_mut().as_mut() {
         Some(slot) => {
@@ -5842,7 +5903,7 @@ pub(crate) unsafe fn prepare_style_pass(
     computation_inputs: FfiDocumentStyleComputationInputs,
     layout_arena: *mut c_void,
     input: *const FfiStyleInputTransaction,
-    applied_style_reactions: &[FfiAppliedStyleReaction],
+    install_feedback: InstallFeedback<'_>,
 ) -> StylePassJob {
     let engine = unsafe { engine_entrance(engine, "style_engine_take_style_transaction") };
     assert!(
@@ -5860,7 +5921,7 @@ pub(crate) unsafe fn prepare_style_pass(
         unsafe { StyleNodeGrant::of(transaction).grant(engine) };
     }
     // SAFETY: Guaranteed by the caller.
-    let input = unsafe { InputForPass::handed_over(input, applied_style_reactions) };
+    let input = unsafe { InputForPass::handed_over(input, install_feedback) };
     engine.computed_group_sets.begin_pass_beside_host_pins();
     // SAFETY: Guaranteed by the caller.
     unsafe { begin_style_transaction(engine, computation_inputs) };

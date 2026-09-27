@@ -1290,7 +1290,10 @@ void StyleEngine::lend_style_transaction_inputs(RecordedInputGoesTo recorded_inp
     auto* layout_node_arena = m_style_computer ? &m_style_computer->document().layout_node_arena() : nullptr;
     auto* layout_arena = layout_node_arena ? layout_node_arena->handle() : nullptr;
     // The transaction takes the reactions the host applied along, whatever else it takes.
-    ScopeGuard applied_style_reactions_went = [&] { m_applied_style_reactions.clear_with_capacity(); };
+    ScopeGuard install_feedback_went = [&] {
+        m_applied_style_reactions.clear_with_capacity();
+        m_pseudo_element_settles.clear_with_capacity();
+    };
     if (!m_recorded_input_for_pass.has_value()) {
         take(computation_inputs, layout_arena, nullptr);
         return;
@@ -1346,7 +1349,7 @@ StyleEngine::PublishedStyleTransaction StyleEngine::take_style_transaction(Style
     };
     lend_style_transaction_inputs(RecordedInputGoesTo::Transaction, [&](auto const& computation_inputs, void* layout_arena, InputTransaction const* input) {
         bridge_started_at = MonotonicTime::now();
-        view = StyleEngineFFI::style_engine_take_style_transaction(m_impl, root.value(), computation_inputs, layout_arena, input, m_applied_style_reactions.data(), m_applied_style_reactions.size(), render_half);
+        view = StyleEngineFFI::style_engine_take_style_transaction(m_impl, root.value(), computation_inputs, layout_arena, input, install_feedback(), render_half);
         // What applying the batch handed back is paid before the host installs the batch, which reads it.
         if (view.render_half_applied) {
             Layout::RustFFI::layout_arena_pay_owner_style_handbacks(layout_arena);
@@ -1364,7 +1367,7 @@ void StyleEngine::submit_style_transaction(StyleNodeID root)
 {
     auto submission_started_at = MonotonicTime::now();
     lend_style_transaction_inputs(RecordedInputGoesTo::Transaction, [&](auto const& computation_inputs, void* layout_arena, InputTransaction const* input) {
-        StyleEngineFFI::style_engine_submit_style_transaction(m_impl, root.value(), computation_inputs, layout_arena, input, m_applied_style_reactions.data(), m_applied_style_reactions.size());
+        StyleEngineFFI::style_engine_submit_style_transaction(m_impl, root.value(), computation_inputs, layout_arena, input, install_feedback());
     });
     m_submitted_style_transaction_microseconds = (MonotonicTime::now() - submission_started_at).to_truncated_microseconds();
     m_submitted_pass_in_flight = true;
@@ -1435,7 +1438,30 @@ bool StyleEngine::may_have_child_dependent_selectors() const
 
 bool StyleEngine::has_pending_transaction() const
 {
-    return has_recorded_input() || has_applied_style_reactions() || StyleEngineFFI::style_engine_has_pending_transaction(m_impl);
+    return has_recorded_input() || has_install_feedback() || StyleEngineFFI::style_engine_has_pending_transaction(m_impl);
+}
+
+void StyleEngine::settle_pseudo_elements_in_next_pass(StyleDrainScope const&, StyleNodeID style_node, bool old_is_list_item, ReadonlySpan<u64> held_pseudo_records)
+{
+    StyleEngineFFI::FfiPseudoElementSettle settle {
+        .node = style_node.value(),
+        .old_is_list_item = old_is_list_item,
+        .held_pseudo_records = {},
+    };
+    VERIFY(held_pseudo_records.size() <= array_size(settle.held_pseudo_records));
+    for (size_t kind = 0; kind < held_pseudo_records.size(); ++kind)
+        settle.held_pseudo_records[kind] = held_pseudo_records[kind];
+    m_pseudo_element_settles.append(settle);
+}
+
+StyleEngineFFI::FfiInstallFeedback StyleEngine::install_feedback() const
+{
+    return {
+        .applied_style_reactions = m_applied_style_reactions.data(),
+        .applied_style_reaction_count = m_applied_style_reactions.size(),
+        .pseudo_element_settles = m_pseudo_element_settles.data(),
+        .pseudo_element_settle_count = m_pseudo_element_settles.size(),
+    };
 }
 
 void StyleEngine::record_applied_style_reaction(StyleNodeID style_node, u8 reaction, u8 inherited_style_groups_changed, u32 facts)
