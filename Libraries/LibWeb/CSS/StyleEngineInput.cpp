@@ -2188,7 +2188,7 @@ static void record_element_inline_style_properties(DOM::Element& element)
     // applied beside one. A recording reaches none, and the declarations are recorded beside it.
     // Beside a style pass they are recorded as they are, and wait for its drain. Beside a layout
     // pass they are recorded as they are too: its frame applied every transaction before it.
-    if (!Layout::RustFFI::rust_stage_thread_only_style_pass_in_flight_for(style_engine->rust_handle()) && !style_engine->layout_pass_is_in_flight())
+    if (!Layout::RustFFI::rust_stage_thread_style_pass_holds_style_engine(style_engine->rust_handle()) && !style_engine->layout_pass_is_in_flight())
         element.document().join_frame_reaching_style_engine();
     auto const inline_style = element.inline_style();
     // What the block holds now: an edit made before the transaction crosses records a write of its own.
@@ -2581,7 +2581,7 @@ static RefPtr<SharedCompiledStyleSheet> shared_compiled_style_sheet_for(StyleShe
 static bool leave_sheet_change_beside_pass(DOM::Document& document, Function<void()> change)
 {
     auto& style_engine = document.style_computer().style_engine();
-    if (!Layout::RustFFI::rust_stage_thread_only_style_pass_in_flight_for(style_engine.rust_handle()) && !style_engine.layout_pass_is_in_flight())
+    if (!Layout::RustFFI::rust_stage_thread_style_pass_holds_style_engine(style_engine.rust_handle()) && !style_engine.layout_pass_is_in_flight())
         return false;
     style_engine.publish_input([change = move(change)](StyleInputScope const&) { change(); });
     return true;

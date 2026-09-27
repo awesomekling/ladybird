@@ -2265,7 +2265,7 @@ void Document::flush_deferred_style_change_event()
     // publishes waits for it to be taken back. What the mutation writes to the arena waits at the
     // arena's doors.
     auto& style_engine = style_computer().style_engine();
-    if (!Layout::RustFFI::rust_stage_thread_only_style_pass_in_flight_for(style_engine.rust_handle()) && !style_engine.layout_pass_is_in_flight())
+    if (!Layout::RustFFI::rust_stage_thread_style_pass_holds_style_engine(style_engine.rust_handle()) && !style_engine.layout_pass_is_in_flight())
         join_frame_reaching_style_engine();
     if (!style_engine.has_deferred_geometry_transaction())
         return;

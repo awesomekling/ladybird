@@ -12,7 +12,9 @@
 //! where the flight ended, on the path a rendering update that submitted that stage on its own
 //! would have taken.
 
+use crate::css::style::StyleEngineHandle;
 use crate::css::style::bridge::StylePassJob;
+use crate::css::style::engine_home::{Holder, Owed, StyleEngineLoan};
 use crate::css::style::flight_style_rows::{FLIGHT_STYLE_DECLINE_COUNT, FfiFlightStyleDecline};
 use crate::layout::update_layout::{LayoutPassJob, LayoutPassTakeBack};
 use std::cell::Cell;
@@ -106,13 +108,10 @@ pub(crate) struct Flight {
     began: FfiFlightStage,
     arena: usize,
     style: Option<StylePassJob>,
-    /// The engine the style pass runs in, which the flight reads the pass's batch from.
-    style_engine: usize,
     /// The elements the viewport propagates from, whose style changes the document thread applies.
     viewport_propagation_sources: Vec<crate::css::style::tree::StyleNodeID>,
     layout: Option<LayoutPassJob>,
     paint: Option<crate::painting::ffi::FlightPaintSeal>,
-    releases_style_engine: crate::stage_thread::FlightReleasesStyleEngine,
 }
 
 /// What a flight's stages left for the main thread, besides where it ended.
@@ -135,12 +134,10 @@ impl Flight {
         Self {
             began: FfiFlightStage::Style,
             arena: arena as usize,
-            style_engine: style.engine_address(),
             viewport_propagation_sources: Vec::new(),
             style: Some(style),
             layout: None,
             paint: None,
-            releases_style_engine: Default::default(),
         }
     }
 
@@ -151,11 +148,9 @@ impl Flight {
             began: FfiFlightStage::Rounds,
             arena: arena as usize,
             style: None,
-            style_engine: 0,
             viewport_propagation_sources: Vec::new(),
             layout: Some(layout),
             paint: crate::painting::ffi::take_sealed_flight_paint(arena),
-            releases_style_engine: Default::default(),
         }
     }
 
@@ -174,12 +169,10 @@ impl Flight {
         Self {
             began: FfiFlightStage::Style,
             arena: arena as usize,
-            style_engine: style.engine_address(),
             viewport_propagation_sources,
             style: Some(style),
             layout: Some(layout),
             paint: crate::painting::ffi::take_sealed_flight_paint(arena),
-            releases_style_engine: Default::default(),
         }
     }
 
@@ -213,14 +206,30 @@ impl Flight {
         if self.layout.is_some() { "layout" } else { "style" }
     }
 
+    /// Lends the flight the token of its document's style engine `style_engine`: as to a layout
+    /// pass, which may send it home as soon as its rounds have run, or to a style pass alone. On the
+    /// document thread.
+    fn lend_style_engine(&self, style_engine: StyleEngineHandle) -> Option<StyleEngineLoan> {
+        if style_engine.is_null() {
+            return None;
+        }
+        Some(match (self.layout.is_some(), self.began) {
+            (true, FfiFlightStage::Style) => style_engine.lend(Holder::LayoutPass, Owed::Install),
+            (true, _) => style_engine.lend(Holder::LayoutPass, Owed::Nothing),
+            (false, _) => style_engine.lend(Holder::StylePass, Owed::TakeBack),
+        })
+    }
+
     fn take_back(&self) -> FlightTakeBack {
         FlightTakeBack {
             layout: self.layout.as_ref().map(LayoutPassJob::take_back),
         }
     }
 
-    /// Runs the flight's stages, on the stage thread.
-    fn run(mut self) -> (FfiFlightOutcome, FlightRan) {
+    /// Runs the flight's stages, on the stage thread, with the style engine's token lent to it as
+    /// `style_engine`. The flight sends the token home once its layout rounds have run, and the
+    /// stages after them reach no style engine.
+    fn run(mut self, mut style_engine: Option<StyleEngineLoan>) -> (FfiFlightOutcome, FlightRan) {
         let began = self.began;
         let mut reached = began;
         let mut next = began;
@@ -231,7 +240,11 @@ impl Flight {
                 FfiFlightStage::Style => {
                     crate::stage_thread::hold_before_flight_stage("flight:style");
                     let style = self.style.take().expect("a flight that begins with style has its pass");
-                    style.run();
+                    style.run(
+                        style_engine
+                            .as_mut()
+                            .expect("a flight that runs a style pass holds its engine's token"),
+                    );
                     reached = FfiFlightStage::Style;
                     next = FfiFlightStage::StyleRenderHalf;
                     None
@@ -242,26 +255,34 @@ impl Flight {
                         .layout
                         .take()
                         .expect("a flight that begins with layout has its pass");
-                    let round = layout.run();
+                    let round = match style_engine.as_mut() {
+                        Some(style_engine) => style_engine.lend_to_this_thread(|_| layout.run()),
+                        None => layout.run(),
+                    };
                     may_be_presented = round.may_be_presented;
-                    // What the flight runs after its layout reads nothing of the style engine. The
-                    // main thread's writes may go on beside it only if what the round owes the
-                    // document thread reaches no node they could change: no tree build or image
-                    // to pay for, no rebuild to ask for. A flight that ran the round's style keeps
-                    // the engine until the document thread has installed the batch it published,
-                    // but for reads of the records, which the install does not change.
-                    if round.may_be_presented {
-                        if self.began == FfiFlightStage::Style {
-                            self.releases_style_engine.release_for_record_reads();
-                        } else {
-                            self.releases_style_engine.release();
-                        }
+                    // What the flight runs after its layout reads nothing of the style engine, so
+                    // it sends the token home. The main thread's writes may go on beside it only if
+                    // what the round owes the document thread reaches no node they could change: no
+                    // tree build or image to pay for, no rebuild to ask for. A flight that ran the
+                    // round's style still owes the document thread the install of the batch it
+                    // published, which lets only reads of the records go on.
+                    let owed = match (round.may_be_presented, self.began) {
+                        (false, _) => Owed::TakeBack,
+                        (true, FfiFlightStage::Style) => Owed::Install,
+                        (true, _) => Owed::Nothing,
+                    };
+                    if let Some(style_engine) = style_engine.take() {
+                        style_engine.send_home(owed);
                     }
                     reached = FfiFlightStage::Rounds;
                     next = FfiFlightStage::PaintPrep;
                     if self.paint.is_none() {
                         Some(FfiFlightEndReason::PaintNotSealed)
-                    } else if crate::stage_thread::flight_is_preempted() {
+                    } else if crate::stage_thread::flight_is_preempted()
+                        || (owed == Owed::TakeBack && crate::css::style::engine_home::main_waits_for_arrival())
+                    {
+                        // The main thread waits for the token, which comes home owing the
+                        // take-back: it takes the flight in next.
                         Some(FfiFlightEndReason::Preempted)
                     } else if !round.may_be_painted {
                         Some(FfiFlightEndReason::RoundLeftWork)
@@ -303,8 +324,11 @@ impl Flight {
                     let applied = if crate::stage_thread::flight_is_preempted() {
                         None
                     } else {
-                        // SAFETY: The frame in flight owns the engine the pass ran in, and the arena.
-                        Some(unsafe { self.apply_style_render_half() })
+                        let style_engine = style_engine
+                            .as_mut()
+                            .expect("a flight that runs a style pass holds its engine's token");
+                        // SAFETY: The frame in flight owns the arena, and the pass has run.
+                        Some(style_engine.lend_to_this_thread(|engine| unsafe { self.apply_style_render_half(engine) }))
                     };
                     let applied_it = applied == Some(Ok(()));
                     FLIGHT_STYLE_DECISION.store(
@@ -320,8 +344,11 @@ impl Flight {
                     }
                     if applied_it {
                         let layout = self.layout.as_mut().expect("a flight that lays out has its pass");
+                        let style_engine = style_engine
+                            .as_mut()
+                            .expect("a flight that runs a style pass holds its engine's token");
                         // SAFETY: As above.
-                        unsafe { layout.ready_after_style_in_flight() };
+                        style_engine.lend_to_this_thread(|_| unsafe { layout.ready_after_style_in_flight() });
                         reached = FfiFlightStage::StyleRenderHalf;
                         next = FfiFlightStage::Rounds;
                         None
@@ -356,10 +383,11 @@ impl Flight {
     ///
     /// # Safety
     ///
-    /// The frame in flight owns the engine the pass ran in and the arena, and the pass has run.
-    unsafe fn apply_style_render_half(&self) -> Result<(), FfiFlightStyleDecline> {
-        // SAFETY: Guaranteed by the caller.
-        let engine = unsafe { &*(self.style_engine as *const crate::css::style::StyleEngine) };
+    /// The frame in flight owns the arena, and the pass has run in `engine`.
+    unsafe fn apply_style_render_half(
+        &self,
+        engine: &crate::css::style::StyleEngine,
+    ) -> Result<(), FfiFlightStyleDecline> {
         if !self
             .layout
             .as_ref()
@@ -446,14 +474,16 @@ pub extern "C" fn rust_flight_applies_its_style() -> bool {
 ///
 /// # Safety
 ///
-/// As for [`crate::stage_thread::submit_stage`]: what each of the flight's stages reaches, the
+/// As for [`crate::stage_thread::submit_stage_with_take_back`]: what each of the flight's stages reaches, the
 /// frame in flight owns until the main thread takes it back.
 pub(crate) unsafe fn submit(arena: *mut c_void, flight: Flight) {
     let outcome = Arc::new(Mutex::new(None));
     let outcome_of_stage = outcome.clone();
     let reach = flight.reach();
     let stage_holds = flight.stage_holds();
-    let releases_style_engine = flight.releases_style_engine.clone();
+    // SAFETY: Guaranteed by the caller: the document thread still owns the arena.
+    let style_engine = unsafe { &*arena.cast::<crate::layout::LayoutNodeArena>() }.style_engine_handle();
+    let loan = flight.lend_style_engine(style_engine);
     let take_back = flight.take_back();
     FLIGHT_STYLE_DECISION.store(STYLE_UNDECIDED, std::sync::atomic::Ordering::Release);
     // SAFETY: Guaranteed by the caller.
@@ -461,14 +491,16 @@ pub(crate) unsafe fn submit(arena: *mut c_void, flight: Flight) {
         crate::stage_thread::submit_flight(
             reach,
             stage_holds,
-            &releases_style_engine,
             arena,
             move || {
-                let ran = flight.run();
+                let ran = flight.run(loan);
                 *outcome_of_stage.lock().expect("a flight that ran left its outcome") =
                     Some(crate::stage_thread::FrameOwns::new(ran));
             },
             move || {
+                if !style_engine.is_null() {
+                    style_engine.settle();
+                }
                 let (mut outcome, ran) = outcome
                     .lock()
                     .expect("a flight that ran left its outcome")

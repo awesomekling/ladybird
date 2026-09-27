@@ -604,7 +604,7 @@ StyleAtomID StyleEngine::intern_attribute_value(StyleAtomID name, Utf16String co
     // Beside a style pass the engine is the pass's: the text, and whether the name asks for it, wait for its drain
     // with the attribute change that names the value. Beside a layout pass, which reads what the engine holds, they
     // wait for the pass to be taken back.
-    if (Layout::RustFFI::rust_stage_thread_only_style_pass_in_flight_for(m_impl) || layout_pass_is_in_flight()) {
+    if (Layout::RustFFI::rust_stage_thread_style_pass_holds_style_engine(m_impl) || layout_pass_is_in_flight()) {
         publish_input([name, atom, value](StyleInputScope const& input) {
             auto& engine = input.engine();
             if (auto readers = engine.attribute_value_text_readers(name))
@@ -1430,7 +1430,7 @@ bool StyleEngine::has_deferred_geometry_transaction() const
     // The submitted pass took the transaction a geometry read deferred with the rest of its inputs, and only a
     // geometry read, which takes the pass back first, defers another one. A layout pass is submitted once the
     // frame's style rounds have applied every transaction, a deferred one included.
-    if (Layout::RustFFI::rust_stage_thread_only_style_pass_in_flight_for(m_impl) || layout_pass_is_in_flight())
+    if (Layout::RustFFI::rust_stage_thread_style_pass_holds_style_engine(m_impl) || layout_pass_is_in_flight())
         return false;
     return StyleEngineFFI::style_engine_has_deferred_geometry_transaction(m_impl);
 }
