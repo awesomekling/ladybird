@@ -748,6 +748,26 @@ void StyleEngine::record_tree_scope_uses_document_sheets(TreeScopeID tree_scope)
     record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::TreeScopeUsesDocumentSheets, .value = 0, .node = 0, .parent = 0, .previous_sibling = 0, .facts = tree_scope.value(), .data = 0 });
 }
 
+void StyleEngine::record_slot_assigned_nodes(StyleNodeID slot, ReadonlySpan<StyleNodeID> assigned)
+{
+    if (assigned.is_empty()) {
+        record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::SlotAssignedNode, .value = 1, .node = slot.value(), .parent = 0, .previous_sibling = 0, .facts = 0, .data = 0 });
+        return;
+    }
+    for (size_t index = 0; index < assigned.size(); ++index)
+        record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::SlotAssignedNode, .value = index == 0, .node = slot.value(), .parent = assigned[index].value(), .previous_sibling = 0, .facts = 0, .data = 0 });
+}
+
+void StyleEngine::record_top_layer_elements(ReadonlySpan<StyleNodeID> elements)
+{
+    if (elements.is_empty()) {
+        record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::TopLayerElement, .value = 1, .node = 0, .parent = 0, .previous_sibling = 0, .facts = 0, .data = 0 });
+        return;
+    }
+    for (size_t index = 0; index < elements.size(); ++index)
+        record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::TopLayerElement, .value = index == 0, .node = elements[index].value(), .parent = 0, .previous_sibling = 0, .facts = 0, .data = 0 });
+}
+
 static StyleEngineFFI::FfiHostFactWrite dom_paint_facts_write(StyleNodeID node, u8 facts)
 {
     return { .kind = StyleEngineFFI::FfiHostFactKind::NodeDomPaintFacts, .value = facts, .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = 0, .data = 0 };

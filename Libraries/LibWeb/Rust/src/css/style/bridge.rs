@@ -1015,6 +1015,12 @@ pub enum FfiHostFactKind {
     TreeScopeRoot = 20,
     /// The tree scope `facts` is styled by the document's sheets rather than its own.
     TreeScopeUsesDocumentSheets = 21,
+    /// `parent` is assigned to the slot `node`. A list starts with a write whose `value` is 1, and
+    /// the writes after it for the same slot with `value` 0 go on with it. An empty list is one
+    /// write with no `parent`.
+    SlotAssignedNode = 22,
+    /// `node` is in the document's top layer, a list at a time as for `SlotAssignedNode`.
+    TopLayerElement = 23,
 }
 
 /// Which element an `FfiReplacedContentInput` holds the values of.
@@ -2535,6 +2541,17 @@ impl Drop for InputForPass {
     }
 }
 
+/// The writes of the node list that starts `run`: its first write and the ones after it that go on
+/// with it, for the same slot where `per_slot`.
+fn node_list_run(run: &[FfiHostFactWrite], per_slot: bool) -> &[FfiHostFactWrite] {
+    debug_assert_eq!(run[0].value, 1, "a node list starts with a write that says so");
+    let length = 1 + run[1..]
+        .iter()
+        .take_while(|member| member.value == 0 && (!per_slot || member.node == run[0].node))
+        .count();
+    &run[..length]
+}
+
 /// Apply the host's fact writes in the order it made them. Each is recorded as the boundary call
 /// it stands for, so a replay applies it on its own.
 ///
@@ -2595,6 +2612,20 @@ unsafe fn apply_host_fact_writes(engine: &mut StyleEngine, writes: &[FfiHostFact
                     .collect();
                 operations::retire_text_style_nodes(engine, &nodes);
                 index += run_length;
+                continue;
+            }
+            FfiHostFactKind::SlotAssignedNode => {
+                let list = node_list_run(&writes[index..index + run_length], true);
+                let assigned: Vec<u32> = list.iter().map(|member| member.parent).collect();
+                operations::set_slot_assigned_nodes(engine, write.node, &assigned);
+                index += list.len();
+                continue;
+            }
+            FfiHostFactKind::TopLayerElement => {
+                let list = node_list_run(&writes[index..index + run_length], false);
+                let elements: Vec<u32> = list.iter().map(|member| member.node).collect();
+                operations::set_top_layer_elements(engine, &elements);
+                index += list.len();
                 continue;
             }
             FfiHostFactKind::UnlinkFromDomOrder => {
