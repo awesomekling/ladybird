@@ -219,6 +219,8 @@ void StyleEffectDrain::install(DOM::Document& document, Function<void(StyleDrain
     // style seal counts apart from the pass's round trips.
     rust_style_seal_set_in_effect_drain(true);
     auto& style_engine = document.style_computer().style_engine();
+    // Declared first, so the install's marks are written through once the rest of the drain has ended.
+    DOM::InvalidationJournal::WriteThroughDeferral const write_through_deferral { document.invalidation_journal() };
     StyleDrainScope const scope { style_engine };
     style_engine.enter_effect_drain(scope);
     ScopeGuard end_effect_drain = [&] {
