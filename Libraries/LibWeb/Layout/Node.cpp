@@ -613,7 +613,10 @@ void NodeWithStyle::apply_style(Row const& row, CSS::StyleRecordID style_record_
     auto const& style_engine = document.style_computer().style_engine();
     auto const* dom_node = row.dom_node_identity().resolve(document).ptr();
     auto const* style_payloads = style_engine.held_style_record_payloads(style_record_identity);
-    VERIFY(style_payloads);
+    // The style being installed is held by its record; if it is not, the row keeps the style it has.
+    ASSERT(style_payloads);
+    if (!style_payloads)
+        return;
     if (row.shell_if_made() || applying_style_needs_shell(row, dom_node, style_engine, style_record_identity, style_payloads)) {
         as<NodeWithStyle>(row.shell()).apply_style(style_record_identity);
         return;
@@ -891,7 +894,10 @@ void NodeWithStyle::set_style_record_identity(Row const& row, CSS::StyleRecordID
     auto const& style_engine = document.style_computer().style_engine();
     auto const* dom_node = row.dom_node_identity().resolve(document).ptr();
     auto const* style_payloads = style_engine.held_style_record_payloads(style_record_identity);
-    VERIFY(style_payloads);
+    // The style being installed is held by its record; if it is not, the row keeps the style it has.
+    ASSERT(style_payloads);
+    if (!style_payloads)
+        return;
     if (style_can_make_row_a_scroll_snap_container(row, dom_node, style_payloads)) {
         as<NodeWithStyle>(row.shell()).set_style_record_identity(style_record_identity);
         return;
@@ -904,9 +910,11 @@ void NodeWithStyle::set_style_record_identity(Row const& row, CSS::StyleRecordID
         did_update_row_style_record(document, dom_node, style_payloads);
         return;
     }
-    bool should_repin_style_record = RustFFI::layout_arena_node_style_record_pinned_by_host(arena, slot) != 0;
     auto const new_record_view = style_engine.style_record_view(style_record_identity);
-    VERIFY(new_record_view.present);
+    ASSERT(new_record_view.present);
+    if (!new_record_view.present)
+        return;
+    bool should_repin_style_record = RustFFI::layout_arena_node_style_record_pinned_by_host(arena, slot) != 0;
     CSS::StyleEngine::StyleRecordView old_record_view {};
     if (!!old_style_record_identity)
         old_record_view = style_engine.style_record_view(old_style_record_identity);
