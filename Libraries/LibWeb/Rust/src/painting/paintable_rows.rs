@@ -738,9 +738,6 @@ where
 /// arena.
 pub(crate) struct CommittedPaintableRows<'a> {
     arena: &'a LayoutNodeArena,
-    /// Whether a recording of the arena is in flight, which writes the absolute rect memo: the view
-    /// reads around it.
-    beside_recording: bool,
 }
 
 impl Deref for CommittedPaintableRows<'_> {
@@ -785,16 +782,11 @@ impl PaintRead for CommittedPaintableRows<'_> {
     read_live_arena!(std::ops::Deref::deref);
 
     fn memoized_absolute_rect(&self, id: NodeSlotId) -> Option<crate::css::css_pixels::CssPixelRect> {
-        if self.beside_recording {
-            return None;
-        }
         self.arena.memoized_absolute_rect(id)
     }
 
     fn memoize_absolute_rect(&self, id: NodeSlotId, rect: crate::css::css_pixels::CssPixelRect) {
-        if !self.beside_recording {
-            self.arena.memoize_absolute_rect(id, rect);
-        }
+        self.arena.memoize_absolute_rect(id, rect);
     }
 }
 
@@ -1608,20 +1600,6 @@ impl LayoutNodeArena {
         self.paintable_rows.published = None;
     }
 
-    /// Lets a main-side writer write the rows' chunks in place. It runs after the frame holding
-    /// the arena is taken in, so nothing reads the rows as last published until the main side
-    /// reads them again, which publishes them anew.
-    pub(crate) fn release_published_paintable_rows_for_main_side_write(&mut self) {
-        let reads_beside_recording = crate::stage_thread::reads_beside_recording_of(std::ptr::from_ref(self).cast());
-        debug_assert!(
-            !reads_beside_recording,
-            "a main-side write of the rows runs beside a recording that reads them"
-        );
-        if !reads_beside_recording {
-            self.release_published_paintable_rows();
-        }
-    }
-
     /// Hands the main side the rows as they are now, if a writer changed them since they were last
     /// handed over.
     pub(crate) fn publish_paintable_rows(&mut self) {
@@ -1748,23 +1726,7 @@ impl LayoutNodeArena {
     pub(crate) fn committed_paintable_rows(&mut self) -> CommittedPaintableRows<'_> {
         self.measure_scrollable_overflow_on_stage_before_publication();
         self.publish_paintable_rows();
-        CommittedPaintableRows {
-            arena: self,
-            beside_recording: false,
-        }
-    }
-
-    /// The paintable rows as last published, read beside a recording of the arena in flight. The
-    /// recording published them before it was submitted, and changes none of them.
-    pub(crate) fn rows_beside_recording(&self) -> CommittedPaintableRows<'_> {
-        assert!(
-            self.paintable_rows.published.is_some(),
-            "a recording publishes the rows before it is submitted"
-        );
-        CommittedPaintableRows {
-            arena: self,
-            beside_recording: true,
-        }
+        CommittedPaintableRows { arena: self }
     }
 
     pub(crate) fn live_paintable_data(&self, id: NodeSlotId) -> &PaintableData {

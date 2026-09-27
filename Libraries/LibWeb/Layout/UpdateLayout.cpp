@@ -134,7 +134,6 @@ void Document::update_layout(UpdateLayoutReason reason, ThrottledAnimationSampli
 {
     HTML::MainThreadPhases::Scope phase { HTML::MainThreadPhases::layout_phase(*this) };
     JoinScope join_scope { *this, reason };
-    join_scope.update_style_beside_recording(animation_sampling_scope);
 
     // An image box that owns its image's provider is handed it once the frame that built the box is over, and the
     // frame lays it out without an image. If the image was already there, the box lays out again with it before the

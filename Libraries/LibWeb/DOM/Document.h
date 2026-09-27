@@ -1301,10 +1301,6 @@ public:
         // total_nanoseconds: the time a read cost main because a frame did not finish before script needed it.
         u64 frame_waits { 0 };
         u64 frame_wait_nanoseconds { 0 };
-        // Reads that started their style update beside the recording in flight, which they took in only once the update
-        // installed a style the recording reads, or for their layout. Of those, the ones whose update finished beside it.
-        u64 styles_beside_recording { 0 };
-        u64 styles_finished_beside_recording { 0 };
     };
     using JoinCountersByReason = Array<JoinCounters, update_layout_reason_count>;
     // Whether style and layout already describe the current DOM, so that a read of layout geometry
@@ -1348,8 +1344,6 @@ public:
         JoinScope(Document&, UpdateLayoutReason);
         ~JoinScope();
 
-        // Runs the read's style update beside the recording in flight, if the read joins it only for its layout.
-        void update_style_beside_recording(ThrottledAnimationSamplingScope) const;
         // Notes a further pass of the same read, which the first pass already charges time for.
         void note_extra_pass() const;
         // Notes that the read blocked on the frame in flight for the given time before it could go on.
@@ -1363,7 +1357,6 @@ public:
         u64 m_style_transaction_version { 0 };
         bool m_is_nested { false };
         bool m_render_state_was_clean { false };
-        bool m_styles_beside_recording { false };
     };
 
     // Confinement report of the most recent layout tree build, for tests observing whether a
@@ -2047,7 +2040,6 @@ private:
     bool m_selection_styles_are_observable { false };
     bool m_needs_selection_style_update { true };
     void update_selection_style_observability();
-    void update_style_beside_recording();
 
     // NOTE: This is a cache to make finding the first <base href> or <base target> element O(1).
     GC::Ptr<HTML::HTMLBaseElement> m_first_base_element_with_href_in_tree_order;

@@ -44,7 +44,7 @@ unsafe extern "C" fn layout_arena_free_subtree(arena: *mut c_void, root: NodeSlo
     // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on
     // the document thread.
     unsafe {
-        (*arena.cast::<LayoutNodeArena>()).release_published_paintable_rows_for_main_side_write();
+        (*arena.cast::<LayoutNodeArena>()).release_published_paintable_rows();
         paying_host_handbacks(&main_thread, arena, || {
             crate::layout::tree_mutation::free_subtree_and_hand_back(arena.cast::<LayoutNodeArena>(), root);
         });
@@ -63,7 +63,7 @@ unsafe extern "C" fn layout_arena_detach_and_free_subtree(arena: *mut c_void, no
     // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on
     // the document thread.
     unsafe {
-        (*arena.cast::<LayoutNodeArena>()).release_published_paintable_rows_for_main_side_write();
+        (*arena.cast::<LayoutNodeArena>()).release_published_paintable_rows();
         paying_host_handbacks(&main_thread, arena, || detach_and_free_subtree(arena.cast(), node))
     }
 }
@@ -100,9 +100,9 @@ unsafe extern "C" fn layout_arena_pre_order_label_violation_count(arena: *mut c_
 #[unsafe(no_mangle)]
 unsafe extern "C" fn layout_arena_node_shell_if_live(arena: *mut c_void, id: NodeSlotId) -> *mut c_void {
     // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
-    let main_thread = unsafe { crate::stage::from_ffi_entry_beside_recording(&MAIN_THREAD_FFI_ENTRY, arena) };
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle_beside_recording(arena) }.shell_if_live(&main_thread, id)
+    unsafe { LayoutNodeArena::from_handle(arena) }.shell_if_live(&main_thread, id)
 }
 
 #[unsafe(no_mangle)]
@@ -111,9 +111,9 @@ unsafe extern "C" fn layout_arena_node_link_shell(
     id: NodeSlotId,
     link: FfiNodeLink,
 ) -> *mut c_void {
-    let main_thread = unsafe { crate::stage::from_ffi_entry_beside_recording(&MAIN_THREAD_FFI_ENTRY, arena) };
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
-    unsafe { LayoutNodeArena::from_handle_beside_recording(arena) }.node_link_shell(&main_thread, id, link)
+    unsafe { LayoutNodeArena::from_handle(arena) }.node_link_shell(&main_thread, id, link)
 }
 
 #[unsafe(no_mangle)]
@@ -121,10 +121,9 @@ unsafe extern "C" fn layout_arena_node_containing_block_shell_if_live(
     arena: *mut c_void,
     id: NodeSlotId,
 ) -> *mut c_void {
-    let main_thread = unsafe { crate::stage::from_ffi_entry_beside_recording(&MAIN_THREAD_FFI_ENTRY, arena) };
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
-    unsafe { LayoutNodeArena::from_handle_beside_recording(arena) }
-        .node_containing_block_shell_if_live(&main_thread, id)
+    unsafe { LayoutNodeArena::from_handle(arena) }.node_containing_block_shell_if_live(&main_thread, id)
 }
 
 /// The shell of the row the element or text node with `style_node` is bound to, materialised if
@@ -132,14 +131,13 @@ unsafe extern "C" fn layout_arena_node_containing_block_shell_if_live(
 #[unsafe(no_mangle)]
 unsafe extern "C" fn layout_arena_bound_shell(arena: *mut c_void, style_node: u32) -> *mut c_void {
     assert!(!arena.is_null(), "layout node arena handle is null");
-    let main_thread = unsafe { crate::stage::from_ffi_entry_beside_recording(&MAIN_THREAD_FFI_ENTRY, arena) };
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let Some(style_node) = StyleNodeID::from_raw(style_node) else {
         return std::ptr::null_mut();
     };
     // SAFETY: The C++ wrapper keeps the arena alive for this call and
-    // serializes all access on the document thread. The shell and the row it is bound to are
-    // nothing a recording writes.
-    let arena = unsafe { LayoutNodeArena::from_handle_beside_recording(arena) };
+    // serializes all access on the document thread.
+    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
     let row = arena.bound_row(style_node);
     if row.is_invalid() {
         return std::ptr::null_mut();
@@ -152,13 +150,12 @@ unsafe extern "C" fn layout_arena_bound_shell(arena: *mut c_void, style_node: u3
 #[unsafe(no_mangle)]
 unsafe extern "C" fn layout_arena_shadow_including_parent_element(arena: *mut c_void, style_node: u32) -> u32 {
     assert!(!arena.is_null(), "layout node arena handle is null");
-    let _main_thread = unsafe { crate::stage::from_ffi_entry_beside_recording(&MAIN_THREAD_FFI_ENTRY, arena) };
+    let _main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let Some(style_node) = StyleNodeID::from_raw(style_node) else {
         return 0;
     };
-    // SAFETY: The C++ caller keeps the arena alive for this synchronous call. The ancestry is
-    // nothing a recording writes.
-    unsafe { LayoutNodeArena::from_handle_beside_recording(arena) }
+    // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
+    unsafe { LayoutNodeArena::from_handle(arena) }
         .shadow_including_parent(style_node)
         .element
 }
@@ -172,14 +169,13 @@ unsafe extern "C" fn layout_arena_bound_pseudo_element_shell(
     generated_for: u8,
 ) -> *mut c_void {
     assert!(!arena.is_null(), "layout node arena handle is null");
-    let main_thread = unsafe { crate::stage::from_ffi_entry_beside_recording(&MAIN_THREAD_FFI_ENTRY, arena) };
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let Some(style_node) = StyleNodeID::from_raw(style_node) else {
         return std::ptr::null_mut();
     };
     // SAFETY: The C++ wrapper keeps the arena alive for this call and
-    // serializes all access on the document thread. The shell and the row it is bound to are
-    // nothing a recording writes.
-    let arena = unsafe { LayoutNodeArena::from_handle_beside_recording(arena) };
+    // serializes all access on the document thread.
+    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
     let row = arena.bound_pseudo_element_row(style_node, generated_for);
     if row.is_invalid() {
         return std::ptr::null_mut();
@@ -226,13 +222,12 @@ impl FfiBoundRow {
 #[unsafe(no_mangle)]
 unsafe extern "C" fn layout_arena_bound_row_of(arena: *mut c_void, style_node: u32, generated_for: u8) -> FfiBoundRow {
     assert!(!arena.is_null(), "layout node arena handle is null");
-    let main_thread = unsafe { crate::stage::from_ffi_entry_beside_recording(&MAIN_THREAD_FFI_ENTRY, arena) };
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let Some(style_node) = StyleNodeID::from_raw(style_node) else {
         return FfiBoundRow::NONE;
     };
-    // SAFETY: As for `layout_arena_bound_shell`: the binding, the row's kind and its shell are
-    // nothing a recording writes.
-    let arena = unsafe { LayoutNodeArena::from_handle_beside_recording(arena) };
+    // SAFETY: As for `layout_arena_bound_shell`.
+    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
     let slot = if generated_for == 0 {
         arena.bound_row(style_node)
     } else {
@@ -246,9 +241,9 @@ unsafe extern "C" fn layout_arena_bound_row_of(arena: *mut c_void, style_node: u
 #[unsafe(no_mangle)]
 unsafe extern "C" fn layout_arena_bound_viewport_row(arena: *mut c_void) -> FfiBoundRow {
     assert!(!arena.is_null(), "layout node arena handle is null");
-    let main_thread = unsafe { crate::stage::from_ffi_entry_beside_recording(&MAIN_THREAD_FFI_ENTRY, arena) };
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     // SAFETY: As above.
-    let arena = unsafe { LayoutNodeArena::from_handle_beside_recording(arena) };
+    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
     FfiBoundRow::of(arena, &main_thread, arena.bound_viewport_row())
 }
 
@@ -256,10 +251,9 @@ unsafe extern "C" fn layout_arena_bound_viewport_row(arena: *mut c_void) -> FfiB
 #[unsafe(no_mangle)]
 unsafe extern "C" fn layout_arena_linked_row(arena: *mut c_void, slot: NodeSlotId, link: FfiNodeLink) -> FfiBoundRow {
     assert!(!arena.is_null(), "layout node arena handle is null");
-    let main_thread = unsafe { crate::stage::from_ffi_entry_beside_recording(&MAIN_THREAD_FFI_ENTRY, arena) };
-    // SAFETY: The C++ caller keeps the arena alive for this synchronous call. The links are
-    // nothing a recording writes.
-    let arena = unsafe { LayoutNodeArena::from_handle_beside_recording(arena) };
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+    // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
+    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
     FfiBoundRow::of(arena, &main_thread, arena.node_link_slot(slot, link))
 }
 
@@ -268,10 +262,9 @@ unsafe extern "C" fn layout_arena_linked_row(arena: *mut c_void, slot: NodeSlotI
 #[unsafe(no_mangle)]
 unsafe extern "C" fn layout_arena_row_if_live(arena: *mut c_void, slot: NodeSlotId) -> FfiBoundRow {
     assert!(!arena.is_null(), "layout node arena handle is null");
-    let main_thread = unsafe { crate::stage::from_ffi_entry_beside_recording(&MAIN_THREAD_FFI_ENTRY, arena) };
-    // SAFETY: The C++ caller keeps the arena alive for this synchronous call. Which slots are live
-    // is nothing a recording writes.
-    let arena = unsafe { LayoutNodeArena::from_handle_beside_recording(arena) };
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+    // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
+    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
     if !arena.slot_is_live(slot) {
         return FfiBoundRow::NONE;
     }
@@ -283,9 +276,9 @@ unsafe extern "C" fn layout_arena_row_if_live(arena: *mut c_void, slot: NodeSlot
 #[unsafe(no_mangle)]
 unsafe extern "C" fn layout_arena_bound_viewport_shell(arena: *mut c_void) -> *mut c_void {
     assert!(!arena.is_null(), "layout node arena handle is null");
-    let main_thread = unsafe { crate::stage::from_ffi_entry_beside_recording(&MAIN_THREAD_FFI_ENTRY, arena) };
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     // SAFETY: As above.
-    let arena = unsafe { LayoutNodeArena::from_handle_beside_recording(arena) };
+    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
     let row = arena.bound_viewport_row();
     if row.is_invalid() {
         return std::ptr::null_mut();
@@ -503,8 +496,8 @@ pub struct FfiRowStyleRecord {
 #[unsafe(no_mangle)]
 unsafe extern "C" fn layout_arena_row_style_record(arena: *mut c_void, node: NodeSlotId) -> FfiRowStyleRecord {
     assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: As above; the row's record and its pins are nothing a recording writes.
-    let arena = unsafe { LayoutNodeArena::from_handle_beside_recording(arena) };
+    // SAFETY: As above.
+    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
     FfiRowStyleRecord {
         derived: arena.node_style_record_is_pinned_by_arena(node),
         record: arena.node_style_record(node),

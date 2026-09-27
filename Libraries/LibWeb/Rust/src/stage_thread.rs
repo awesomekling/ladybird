@@ -128,59 +128,6 @@ fn overlapping_stages() -> &'static [String] {
     })
 }
 
-/// Whether a main-side read of a document's committed geometry may be answered beside a recording of that document
-/// in flight instead of taking the recording in (unless `LIBWEB_READS_BESIDE_RECORDING=0`). The recording writes no
-/// geometry.
-fn reads_beside_recording_enabled() -> bool {
-    static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| std::env::var_os("LIBWEB_READS_BESIDE_RECORDING").is_none_or(|value| value != "0"))
-}
-
-/// Whether the frame in flight holds the document whose arena is `arena` only for its recordings and their
-/// presentation, and a read of that document's committed geometry reads the rows its layout published instead of
-/// taking the frame in. The recording reads those rows and writes none of them, and the view it lends the main side is
-/// published before it is submitted. The presentation publishes the recording to the arena's paint state and live
-/// hit-test list, which that view does not read: it reads the hit-test list and visual context tree published with the
-/// rows, and memoizes nothing.
-pub(crate) fn reads_beside_recording_of(arena: *const c_void) -> bool {
-    if no_stage_is_submitted() || !reads_beside_recording_enabled() || RUNNING_JOIN_WORK.with(Cell::get) != 0 {
-        return false;
-    }
-    SUBMITTED.with_borrow(|submitted| {
-        let mut stages = submitted
-            .iter()
-            .filter(|stage| stage.arena == arena as usize)
-            .peekable();
-        stages.peek().is_some() && stages.all(|stage| stage.role == "recording" || stage.role == PRESENTATION_STAGE)
-    })
-}
-
-/// Whether a read that finds the document whose arena is `arena` dirty beside a frame that holds it only for its
-/// recordings starts its style update beside them (unless `LIBWEB_STYLE_BESIDE_RECORDING=0`). The recording reaches
-/// no style engine, and what the update writes to the arena takes the frame in at the arena's doors.
-pub(crate) fn styles_beside_recording_of(arena: *const c_void) -> bool {
-    static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| std::env::var_os("LIBWEB_STYLE_BESIDE_RECORDING").is_none_or(|value| value != "0"))
-        && reads_beside_recording_of(arena)
-}
-
-/// See [`styles_beside_recording_of`].
-#[unsafe(no_mangle)]
-pub extern "C" fn rust_stage_thread_styles_beside_recording_of(arena: *const c_void) -> bool {
-    styles_beside_recording_of(arena)
-}
-
-/// Whether a recording submitted for an arena lends the main side the rows its layout published.
-pub(crate) fn recordings_lend_published_rows() -> bool {
-    reads_beside_recording_enabled()
-}
-
-/// See [`reads_beside_recording_of`].
-#[unsafe(no_mangle)]
-pub extern "C" fn rust_stage_thread_reads_beside_recording_of(arena: *const c_void) -> bool {
-    reads_beside_recording_of(arena)
-}
-
 /// What the frame scheduler on the main thread does for a submitted stage.
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -2168,43 +2115,6 @@ mod tests {
             submitted.len() == 2 && submitted[0].outcome.is_none() && submitted[1].outcome.is_some()
         }));
         SUBMITTED.with(|submitted| submitted.borrow_mut().clear());
-    }
-
-    #[test]
-    fn a_read_goes_on_beside_a_recording_and_its_presentation_only() {
-        let submit = |label: &'static str, arena: usize| {
-            let (to_caller, from_stage) = channel::<StageOutcome>();
-            // The stage has finished.
-            let _ = to_caller.send(Ok(()));
-            SUBMITTED.with_borrow_mut(|submitted| {
-                submitted.push(SubmittedStage {
-                    label,
-                    role: label,
-                    hold_labels: vec![label],
-                    arena,
-                    document: arena,
-                    owns_arena: true,
-                    style_engine: 0,
-                    style_engine_released: None,
-                    from_stage,
-                    outcome: None,
-                    on_taken_back: None,
-                    recall: None,
-                    _count: SubmittedStageCount::new(),
-                })
-            });
-        };
-        let arena = 0x10 as *const c_void;
-        assert!(!reads_beside_recording_of(arena));
-        submit("recording", 0x10);
-        assert!(reads_beside_recording_of(arena));
-        // The presentation publishes the recording to what the read does not read.
-        submit(PRESENTATION_STAGE, 0x10);
-        assert!(reads_beside_recording_of(arena));
-        assert!(!reads_beside_recording_of(0x20 as *const c_void));
-        submit("layout", 0x10);
-        assert!(!reads_beside_recording_of(arena));
-        SUBMITTED.with_borrow_mut(Vec::clear);
     }
 
     #[test]
