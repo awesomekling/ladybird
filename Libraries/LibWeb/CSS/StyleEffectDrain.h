@@ -156,4 +156,8 @@ private:
 // Whether the style update submitted is one whose pass runs in a layout flight, which installs it as it is taken back.
 [[nodiscard]] bool style_update_submitted_in_layout_flight();
 
+// Whether every embedding document up the container chain of `document` needs no style or layout work: a style update
+// of `document` then lays none of them out first.
+[[nodiscard]] bool embedding_document_chain_has_no_pending_style_or_layout_work(DOM::Document const&);
+
 }

@@ -87,7 +87,6 @@ enum class DocumentWithoutBrowsingContext {
 };
 static void update_style(DOM::Document&, DocumentWithoutBrowsingContext = DocumentWithoutBrowsingContext::Skip);
 static bool update_style_for_element(DOM::Document&, DOM::AbstractElement const&, StyleUpdateMode);
-static bool embedding_document_chain_has_no_pending_style_or_layout_work(DOM::Document const&);
 
 // https://drafts.csswg.org/css-overflow-3/#overflow-propagation
 // https://drafts.csswg.org/css-writing-modes-4/#principal-flow
@@ -1720,7 +1719,7 @@ static bool document_has_no_pending_style_work(DOM::Document const& document)
 
 // Whether every embedding document up the container chain needs no style or layout work — so, bringing the embedding
 // chain up to date couldn't invalidate anything in this document.
-static bool embedding_document_chain_has_no_pending_style_or_layout_work(DOM::Document const& document)
+bool embedding_document_chain_has_no_pending_style_or_layout_work(DOM::Document const& document)
 {
     auto const* embedded_document = &document;
     while (auto navigable = embedded_document->navigable()) {
