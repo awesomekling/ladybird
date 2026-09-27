@@ -2211,7 +2211,9 @@ void Document::update_layout_if_needed_for_node(Node const& node, UpdateLayoutRe
             auto embedding_document = navigable->container_document();
             if (!embedding_document || embedding_document.ptr() == embedded_document)
                 return true;
-            if (!embedding_document->is_clean_for_layout_geometry_read())
+            // A container's committed viewport that waits in the queue has yet to reach the documents it embeds.
+            if (!embedding_document->is_clean_for_layout_geometry_read()
+                || embedding_document->commit_messages().has_queued_navigable_container_viewport())
                 return false;
             embedded_document = embedding_document.ptr();
         }

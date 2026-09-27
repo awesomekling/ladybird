@@ -1,5 +1,5 @@
 held as armed: true
-child viewport width: 200
+child viewport width: 300
 child media query matches: true
-child box: 200x16
+child box: 300x40
 layout passes held: true
