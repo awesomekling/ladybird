@@ -8,8 +8,6 @@
 #include <AK/HashMap.h>
 #include <AK/Mutex.h>
 #include <AK/NeverDestroyed.h>
-#include <AK/ScopeGuard.h>
-#include <AK/TemporaryChange.h>
 #include <AK/Time.h>
 #include <LibCore/EventLoop.h>
 #include <LibWeb/Animations/Animation.h>
@@ -38,57 +36,10 @@
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/PendingDisplayListRecording.h>
 #include <LibWeb/StyleEngineRustFFI.h>
-#include <time.h>
-
-#if defined(AK_OS_MACOS)
-#    include <mach/mach.h>
-#    include <pthread.h>
-#endif
 
 namespace Web::HTML {
 
 static FrameScheduler* s_frame_scheduler_with_host = nullptr;
-
-// How long the main thread may spend putting the ticks' samples back under its tasks before the render clock leaves its
-// arenas alone until the main thread next idles: each costs a layout of the animated rows. A task that reads once per
-// frame spends a small share of its time on them; one whose restores cost it more than this share stops them.
-static constexpr u64 clock_lend_restore_nanoseconds_allowed_anyway = 4'000'000;
-static constexpr u64 clock_lend_restore_share_of_wake_divisor = 10;
-
-// The time the calling thread has run, in nanoseconds: what a restore costs the main thread, whether or not a loaded
-// machine preempted it meanwhile.
-static u64 thread_cpu_time_nanoseconds()
-{
-#if defined(AK_OS_WINDOWS)
-    return MonotonicTime::now().nanoseconds();
-#elif defined(AK_OS_MACOS)
-    // NB: clock_gettime(CLOCK_THREAD_CPUTIME_ID) is the thread_selfusage system call here, which the sandbox of the
-    //     helper processes kills them for. The thread's basic info is a message to its own thread port.
-    thread_basic_info_data_t info {};
-    mach_msg_type_number_t count = THREAD_BASIC_INFO_COUNT;
-    if (thread_info(pthread_mach_thread_np(pthread_self()), THREAD_BASIC_INFO, reinterpret_cast<thread_info_t>(&info), &count) != KERN_SUCCESS)
-        return MonotonicTime::now().nanoseconds();
-    auto microseconds = (static_cast<u64>(info.user_time.seconds) + static_cast<u64>(info.system_time.seconds)) * 1'000'000
-        + static_cast<u64>(info.user_time.microseconds) + static_cast<u64>(info.system_time.microseconds);
-    return microseconds * 1'000;
-#else
-    timespec time {};
-    VERIFY(clock_gettime(CLOCK_THREAD_CPUTIME_ID, &time) == 0);
-    return static_cast<u64>(time.tv_sec) * 1'000'000'000 + static_cast<u64>(time.tv_nsec);
-#endif
-}
-
-// How long a task has to run for the next one to find the leases lent: a task that follows a long task is likely long
-// too. This is the threshold of a long task in the Long Tasks API.
-static constexpr double clock_lend_long_task_milliseconds = 50;
-
-// NB: Only the main thread's event loop takes in frames.
-static FrameScheduler::ClockLendFrameWaits s_clock_lend_frame_waits;
-
-FrameScheduler::ClockLendFrameWaits FrameScheduler::clock_lend_frame_waits()
-{
-    return s_clock_lend_frame_waits;
-}
 
 // LIBWEB_RENDER_CLOCK_FRAMES: A render clock ticks the leases while the main thread idles, and tells it where a tick
 // ended one. The stage thread reaches the main thread through this.
@@ -138,10 +89,6 @@ static void install_render_clock_host()
         LocalNavigable::present_render_clock_frame(*kit);
         return true;
     });
-    Layout::RustFFI::rust_render_clock_set_lend_taken_back([](void* arena) {
-        if (s_frame_scheduler_with_host)
-            s_frame_scheduler_with_host->clock_lend_taken_back(arena);
-    });
     static Core::EventLoopIdleObserver const s_idle_observer {
         .will_block = [] {
             if (s_frame_scheduler_with_host)
@@ -149,9 +96,6 @@ static void install_render_clock_host()
         .did_wake = [] {
             if (s_frame_scheduler_with_host)
                 s_frame_scheduler_with_host->main_thread_did_wake(); },
-        .did_not_block = [] {
-            if (s_frame_scheduler_with_host)
-                s_frame_scheduler_with_host->main_thread_did_not_block(); },
     };
     Core::set_idle_observer_for_current_thread(&s_idle_observer);
     {
@@ -224,10 +168,6 @@ bool FrameScheduler::submits_frames()
 
 void FrameScheduler::begin_main_half(bool synchronous)
 {
-    // The rendering update moves the timelines on from where the render clock's ticks left them.
-    take_back_clock_lend_for_adoption();
-    m_rendering_update_began_with_clock_lease = !m_clock_leases.is_empty();
-    m_rendering_update_ended_clock_lease_for_frame_callbacks = false;
     // A rendering update that has to start now (a synchronous one, or one a rendering opportunity started while the
     // tail was still pending) finishes the previous frame first.
     if (m_state != State::Idle)
@@ -485,55 +425,6 @@ void FrameScheduler::consume_finished_frame()
     m_event_loop.run_consume_tail([this] { run_tail(); });
 }
 
-// The render clock ticks nothing beside a frame in flight, and a rendering update ends the lease of a document with
-// animation frame callbacks, which its tail grants again. A task that begins beside the frame of one that began with a
-// clock lease would get no ticks for as long as it runs: the main thread finishes that frame first, and lends the lease
-// its tail granted to the task. It waits for the frame only for a task that is likely long: one that follows a long
-// task, or, for a document with animation frame callbacks, whose rendering updates end its lease at every display frame,
-// one the main thread woke up for. A main thread busy with short tasks goes on beside the frame, and lends the leases
-// once it has taken the frame in. Where the frame's tail ran at step 1 already, the main thread only lends the leases.
-void FrameScheduler::finish_frame_for_clock_lend()
-{
-    if (!Layout::RustFFI::rust_clock_frames_enabled())
-        return;
-    // NB: A frame a test holds stays in flight for the tasks the test runs beside it.
-    bool const finishes_frame = m_rendering_update_began_with_clock_lease
-        && ((m_rendering_update_ended_clock_lease_for_frame_callbacks && m_main_thread_idled_since_task) || m_last_task_milliseconds >= clock_lend_long_task_milliseconds)
-        && !Layout::RustFFI::rust_stage_thread_hold_armed_or_holding();
-    bool const takes_frame_in = finishes_frame && (m_state == State::InFlight || m_state == State::CommittedTailPending);
-    auto const start_nanoseconds = takes_frame_in ? MonotonicTime::now().nanoseconds() : 0;
-    if (takes_frame_in) {
-        ++s_clock_lend_frame_waits.frames_taken_in;
-        if (m_state == State::InFlight && !Layout::RustFFI::rust_stage_thread_frame_in_flight_has_finished())
-            ++s_clock_lend_frame_waits.waits;
-    }
-    ScopeGuard count_time = [&] {
-        if (takes_frame_in)
-            s_clock_lend_frame_waits.nanoseconds += MonotonicTime::now().nanoseconds() - start_nanoseconds;
-    };
-    while (finishes_frame && (m_state == State::InFlight || m_state == State::CommittedTailPending)) {
-        if (m_state == State::InFlight) {
-            if (!m_event_loop.may_consume_commit(EventLoop::FrameConsumeSite::StepOne))
-                return;
-            Layout::RustFFI::rust_stage_thread_take_frame_in_flight();
-            consume_commit(EventLoop::FrameConsumeSite::StepOne);
-        }
-        if (m_state != State::CommittedTailPending || !m_event_loop.may_run_consume_tail())
-            return;
-        // As in consume_finished_frame().
-        if (m_ticket->submitted_pass.has_value()) {
-            run_tail();
-            m_event_loop.perform_a_microtask_checkpoint();
-            continue;
-        }
-        m_event_loop.run_consume_tail([this] { run_tail(); });
-    }
-    // NB: A lend that no frame kept back stays as the main thread left it at its wake, where it planned the leases
-    //     already.
-    if (m_state == State::Idle && exchange(m_clock_lend_waits_for_frame, false))
-        lend_clock_leases_to_busy_main(false);
-}
-
 u64 FrameScheduler::finish_frame_now()
 {
     u64 waited_nanoseconds = 0;
@@ -649,11 +540,6 @@ void FrameScheduler::change_arena(DOM::Document& document, Function<void(Layout:
     auto* arena = document.layout_node_arena_if_created();
     if (!arena)
         return;
-    // A task's change to the arena, such as a removal taking its boxes out of it ahead of the next layout update, would
-    // show half done in the ticks' frames: the render clock leaves the rest of the task to the main thread.
-    auto& scheduler = main_thread_event_loop().frame_scheduler();
-    if (!scheduler.m_event_loop.running_rendering_task() && (scheduler.m_clock_lend_taken_back || Layout::RustFFI::rust_clock_lend_is_active()))
-        scheduler.suspend_clock_lend(ClockLendSuspension::Write);
     if (!arena_changes_wait_for_frame(document)) {
         change(*arena);
         return;
@@ -712,9 +598,6 @@ struct ClockLeasePlan {
     // The timeline time at which the document has something observable to do: an event, a phase change, the end of an
     // effect. No tick samples at or past it.
     double deadline { AK::Infinity<double> };
-    // The deadline of ticks beside a task of the main thread's: the next phase change or end of an effect. The main
-    // thread sends the events of the iterations they pass once the task is over, as it would without them.
-    double deadline_beside_task { AK::Infinity<double> };
 };
 
 struct EffectBoundaries {
@@ -810,10 +693,6 @@ static bool moves_boxes(Animations::KeyframeEffect const& effect)
     return false;
 }
 
-// Whether a lease plan leaves a document's layout that is not up to date to the render clock's ticks, which lay out the
-// layout tree as the main thread last built it (see FrameScheduler::relend_clock_leases_after_mutation()).
-static bool s_clock_lease_plan_leaves_layout_to_ticks = false;
-
 static Optional<ClockLeasePlan> clock_lease_plan(DOM::Document& document)
 {
     if (!Layout::RustFFI::rust_stage_thread_submits_clock())
@@ -827,7 +706,7 @@ static Optional<ClockLeasePlan> clock_lease_plan(DOM::Document& document)
     //     scroll-driven animation's document in place is that a layout that changes a scroller's scroll range makes
     //     its timelines stale, which the main thread's rendering update takes care of after its layout. A tick keeps
     //     the range the main thread last laid out.
-    if (document.needs_animated_style_update() || (!s_clock_lease_plan_leaves_layout_to_ticks && !document.layout_is_up_to_date()))
+    if (document.needs_animated_style_update() || !document.layout_is_up_to_date())
         return {};
     if (auto blocker = document.layout_overlap_blocker(); blocker.has_value() && *blocker != DOM::LayoutOverlapBlocker::ScrollTimeline)
         return {};
@@ -913,7 +792,6 @@ static Optional<ClockLeasePlan> clock_lease_plan(DOM::Document& document)
             if (!boundaries.has_value())
                 return {};
             plan.deadline = min(plan.deadline, timeline_time->value + (boundaries->next_boundary - local_time->value) / animation.playback_rate());
-            plan.deadline_beside_task = min(plan.deadline_beside_task, timeline_time->value + (boundaries->next_phase_change - local_time->value) / animation.playback_rate());
             if (!ticks_effect)
                 continue;
             if (intersections_are_observed && moves_boxes(keyframe_effect))
@@ -947,13 +825,7 @@ void FrameScheduler::revoke_clock_lease(size_t index)
             Layout::RustFFI::rust_clock_lease_set_paused(arena->handle(), true);
         return;
     }
-    // No tick may run beside what ending the lease reaches, and the documents take in what the ticks sampled first.
-    auto document = m_clock_leases[index].document;
-    take_back_clock_lend_for_adoption();
-    auto held = m_clock_leases.find_first_index_if([&](auto const& hold) { return hold.document.ptr() == document.ptr(); });
-    if (!held.has_value())
-        return;
-    auto hold = m_clock_leases.take(*held);
+    auto hold = m_clock_leases.take(index);
     // What the render clock's ticks laid out and presented goes in before the lease that holds it ends.
     take_in_clock_layout_frame(*hold.document);
     replace_render_clock_kit(hold, {});
@@ -1009,7 +881,7 @@ void FrameScheduler::grant_clock_leases()
         u64 context_id = 0;
         if (auto navigable = document->navigable(); navigable && navigable->has_compositor_context())
             context_id = navigable->compositor_context().id().value();
-        Layout::RustFFI::rust_clock_lease_grant(document->layout_node_arena_if_created()->handle(), context_id, timeline->style_engine_identity(), timeline_zero, timeline_time, plan->deadline, plan->deadline_beside_task);
+        Layout::RustFFI::rust_clock_lease_grant(document->layout_node_arena_if_created()->handle(), context_id, timeline->style_engine_identity(), timeline_zero, timeline_time, plan->deadline);
         Vector<Layout::RustFFI::FfiClockLeaseScrollTimeline> scroll_timelines;
         for (auto const& scroll_timeline : plan->scroll_timelines)
             scroll_timelines.append(scroll_timeline.lease);
@@ -1027,8 +899,6 @@ void FrameScheduler::grant_clock_leases()
         }
         replace_render_clock_kit(hold, move(kit));
     }
-    // A task that runs before the main thread next wakes gets these leases lent (see finish_frame_for_clock_lend()).
-    m_clock_lend_waits_for_frame = !m_clock_leases.is_empty();
 }
 
 // Takes in what the ticks presented from the lease's kit, and has them present from `kit` from now on.
@@ -1112,11 +982,6 @@ void FrameScheduler::revoke_clock_lease_of(DOM::Document const& document)
 
 void FrameScheduler::main_thread_will_idle()
 {
-    // The task is over: what the ticks installed beside it is the documents' now, and nothing lends the arenas again
-    // until the main thread wakes.
-    m_clock_lend_suspended = true;
-    m_main_thread_idled_since_task = true;
-    take_back_clock_lend_for_adoption();
     // A tick a test injected finds no lease to take it.
     if (m_clock_leases.is_empty() && !m_injected_clock_ticks.is_empty()) {
         auto ticks = move(m_injected_clock_ticks);
@@ -1190,10 +1055,6 @@ void FrameScheduler::inject_render_clock_tick(double frame_time, Function<void(b
 
 void FrameScheduler::main_thread_did_wake()
 {
-    m_clock_lend_taken_back = false;
-    m_clock_lend_suspended = false;
-    m_clock_lend_woke_at_nanoseconds = MonotonicTime::now().nanoseconds();
-    m_clock_lend_restore_nanoseconds = 0;
     if (Layout::RustFFI::rust_render_clock_main_did_wake())
         adopt_render_clock_ticks();
     // The ticks a test injected have run: what waits for them goes on once the documents adopted them.
@@ -1204,41 +1065,6 @@ void FrameScheduler::main_thread_did_wake()
                 end(true);
         });
     }
-    // The render clock goes on ticking the leases while the main thread runs its tasks.
-    lend_clock_leases_to_busy_main(false);
-}
-
-void FrameScheduler::main_thread_did_not_block()
-{
-    // Nothing else ends a lend here for a main thread that never idles: it would lend once, at its last wake, and a
-    // task that took the arenas back or went over the restore budget would stop the ticks until it idles again.
-    if (m_clock_leases.is_empty())
-        return;
-    // A lend no tick has used since stays as it is: a loop that goes round thousands of times a second would otherwise
-    // plan and pin the leases again at every turn. Only while every arena it lent is still lent, though: one a task
-    // took back, or a garbage collection, the ticks would otherwise miss until the main thread idles.
-    bool const every_lent_arena_is_lent = !m_clock_lent_arenas.is_empty() && all_of(m_clock_lent_arenas, [](void* arena) { return Layout::RustFFI::rust_clock_lend_holds(arena); });
-    if (every_lent_arena_is_lent && !m_clock_lend_suspended && !Layout::RustFFI::rust_clock_lend_has_ticks_to_adopt())
-        return;
-    take_back_clock_lend_for_adoption();
-    m_clock_lend_taken_back = false;
-    m_clock_lend_suspended = false;
-    m_clock_lend_woke_at_nanoseconds = MonotonicTime::now().nanoseconds();
-    m_clock_lend_restore_nanoseconds = 0;
-    lend_clock_leases_to_busy_main(false);
-}
-
-// Takes back the arenas lent to the render clock's ticks while the main thread ran a task, and has the documents adopt
-// what the ticks installed, as they do when the main thread wakes.
-void FrameScheduler::take_back_clock_lend_for_adoption()
-{
-    m_clock_lent_arenas.clear();
-    if (!exchange(m_clock_lent_this_wake, false))
-        return;
-    // What a read put back under the task, the documents adopt too.
-    if (Layout::RustFFI::rust_clock_lend_end_for_adoption())
-        adopt_render_clock_ticks();
-    Layout::RustFFI::rust_clock_lend_release_host_pins();
 }
 
 void FrameScheduler::adopt_render_clock_ticks()
@@ -1276,155 +1102,8 @@ void FrameScheduler::adopt_render_clock_ticks()
     }
 }
 
-// The render clock goes on ticking the leases while the main thread runs a task. A lent arena stands in the frame in
-// flight, so whatever the task reaches of it or of its style engine takes it back first, and the document's rows hold
-// its own records again, laid out at its own time (see clock_lend_taken_back()).
-void FrameScheduler::lend_clock_leases_to_busy_main(bool relend)
-{
-    if (m_clock_leases.is_empty() || m_clock_lend_suspended || m_render_clock_suspended || !Layout::RustFFI::rust_clock_frames_enabled())
-        return;
-    // The tail of the frame grants the leases again: the main thread lends them before its next task (see
-    // finish_frame_for_clock_lend()).
-    if (m_state != State::Idle || Layout::RustFFI::rust_stage_thread_has_frame_in_flight()) {
-        m_clock_lend_waits_for_frame = true;
-        return;
-    }
-    m_clock_lend_waits_for_frame = false;
-    // A lend again lends what a read took back; the others are still lent.
-    if (!relend && Layout::RustFFI::rust_clock_lend_is_active())
-        return;
-    // A tick would show what the task changed since the ticks last had the arenas, before the task is over.
-    if (relend) {
-        for (auto const& hold : m_clock_leases) {
-            if (hold.document->layout_commit_generation() != hold.lend_layout_commit_generation
-                || hold.document->style_computer().style_engine().published_transaction_version().transaction != hold.lend_style_transaction) {
-                suspend_clock_lend(ClockLendSuspension::Write);
-                return;
-            }
-        }
-    }
-    // As when the main thread idles, a lease its document no longer plans the same way waits for the rendering update.
-    Vector<void*> arenas;
-    for (auto& hold : m_clock_leases) {
-        auto* arena = hold.document->layout_node_arena_if_created();
-        if (!arena || Layout::RustFFI::rust_clock_lend_holds(arena->handle()))
-            continue;
-        auto plan = hold.render_clock_context.has_value() && hold.render_clock_kit ? clock_lease_plan(*hold.document) : Optional<ClockLeasePlan> {};
-        // A lend again goes on ticking from the samples the documents have not adopted yet.
-        bool ticks = plan.has_value() && plan->effects == hold.effects && (relend || publish_clock_lease_targets(hold));
-        Layout::RustFFI::rust_clock_lease_set_paused(arena->handle(), !ticks);
-        if (!ticks)
-            continue;
-        hold.lend_layout_commit_generation = hold.document->layout_commit_generation();
-        hold.lend_style_transaction = hold.document->style_computer().style_engine().published_transaction_version().transaction;
-        arenas.append(arena->handle());
-    }
-    for (auto* arena : arenas) {
-        if (!Layout::RustFFI::rust_clock_lend_to_busy_main(arena, relend))
-            continue;
-        m_clock_lent_this_wake = true;
-        if (!m_clock_lent_arenas.contains_slow(arena))
-            m_clock_lent_arenas.append(arena);
-    }
-    m_clock_lend_taken_back = false;
-}
-
-void FrameScheduler::clock_lend_taken_back(void* arena)
-{
-    m_clock_lend_taken_back = true;
-    auto held = m_clock_leases.find_first_index_if([&](auto const& hold) {
-        auto const* document_arena = hold.document->layout_node_arena_if_created();
-        return document_arena && document_arena->handle() == arena;
-    });
-    if (!held.has_value())
-        return;
-    auto document = m_clock_leases[*held].document;
-    // The task reads its document at its own time, not at the ticks'.
-    auto start_nanoseconds = thread_cpu_time_nanoseconds();
-    auto restore = Layout::RustFFI::rust_clock_lease_restore_host_records(arena);
-    if (restore != Layout::RustFFI::FfiClockRestore::Nothing) {
-        take_in_clock_layout_frame(*document);
-        auto now_nanoseconds = MonotonicTime::now().nanoseconds();
-        m_clock_lend_restore_nanoseconds += thread_cpu_time_nanoseconds() - start_nanoseconds;
-        auto allowed_nanoseconds = max(clock_lend_restore_nanoseconds_allowed_anyway, (now_nanoseconds - m_clock_lend_woke_at_nanoseconds) / clock_lend_restore_share_of_wake_divisor);
-        if (restore == Layout::RustFFI::FfiClockRestore::NeedsMain || m_clock_lend_restore_nanoseconds > allowed_nanoseconds)
-            suspend_clock_lend(ClockLendSuspension::Budget);
-    }
-    held = m_clock_leases.find_first_index_if([&](auto const& hold) { return hold.document.ptr() == document.ptr(); });
-    if (!held.has_value())
-        return;
-    auto& hold = m_clock_leases[*held];
-    hold.lend_layout_commit_generation = document->layout_commit_generation();
-    hold.lend_style_transaction = document->style_computer().style_engine().published_transaction_version().transaction;
-}
-
-static u32 s_clock_lend_read_depth = 0;
-
-ClockLendReadScope::ClockLendReadScope()
-{
-    ++s_clock_lend_read_depth;
-}
-
-ClockLendReadScope::~ClockLendReadScope()
-{
-    if (--s_clock_lend_read_depth == 0)
-        main_thread_event_loop().frame_scheduler().relend_clock_leases_after_read();
-}
-
-bool ClockLendReadScope::is_active()
-{
-    return s_clock_lend_read_depth > 0;
-}
-
-void FrameScheduler::relend_clock_leases_after_read()
-{
-    // The outermost read lends them again once it is over.
-    if (ClockLendReadScope::is_active())
-        return;
-    if (!m_clock_lend_taken_back || m_clock_lend_suspended || m_event_loop.running_rendering_task())
-        return;
-    lend_clock_leases_to_busy_main(true);
-}
-
-// A DOM mutation takes the leased arenas back where it reaches the style engine, and nothing lends them again before the
-// task is over unless a read of render state follows. Once the outermost mutation is over, the ticks may have them again
-// beside what it left for the next layout update: they lay out the layout tree as the main thread last built it, so
-// what the task inserted or removed shows only once the task is over, as it would without them. A tree the next update
-// has to build in full, the ticks leave to the main thread. They sample over the records the host holds, and the style
-// inputs the mutation recorded apply once the documents have adopted the ticks, as those of a task that ran beside
-// them do. A style change the task published would show before the task is over, and suspends the lend.
-void FrameScheduler::relend_clock_leases_after_mutation()
-{
-    if (ClockLendReadScope::is_active())
-        return;
-    if (!m_clock_lend_taken_back || m_clock_lend_suspended || m_event_loop.running_rendering_task())
-        return;
-    // NB: The transaction a geometry read deferred goes on with the next style change, which a tick must not merge into.
-    for (auto const& hold : m_clock_leases) {
-        if (hold.document->style_computer().style_engine().has_deferred_geometry_transaction())
-            return;
-    }
-    TemporaryChange leaves_layout_to_ticks { s_clock_lease_plan_leaves_layout_to_ticks, true };
-    lend_clock_leases_to_busy_main(true);
-}
-
-void FrameScheduler::did_present_beside_clock_lend()
-{
-    // Frames at the task's time and at the ticks' would take turns on screen.
-    if (m_clock_lent_this_wake && !m_event_loop.running_rendering_task())
-        suspend_clock_lend(ClockLendSuspension::Write);
-}
-
-void FrameScheduler::suspend_clock_lend(ClockLendSuspension reason)
-{
-    if (exchange(m_clock_lend_suspended, true))
-        return;
-    Layout::RustFFI::rust_clock_lend_note_suspended(reason == ClockLendSuspension::Write ? Layout::RustFFI::FfiClockLendSuspension::Write : Layout::RustFFI::FfiClockLendSuspension::Budget);
-}
-
 void FrameScheduler::set_render_clock_suspended(bool suspended)
 {
-    take_back_clock_lend_for_adoption();
     m_render_clock_suspended = suspended;
     if (suspended) {
         for (auto& hold : m_clock_leases)
@@ -1467,7 +1146,6 @@ void FrameScheduler::prepare_clock_ticks(ReadonlySpan<GC::Root<DOM::Document>> d
         bool const frame_callbacks = has_animation_frame_callbacks(*document);
         auto plan = renders && arena && Layout::RustFFI::rust_clock_lease_is_live(arena->handle()) && !frame_callbacks ? clock_lease_plan(*document) : Optional<ClockLeasePlan> {};
         if (!plan.has_value() || plan->effects != m_clock_leases[index].effects) {
-            m_rendering_update_ended_clock_lease_for_frame_callbacks |= frame_callbacks;
             revoke_clock_lease(index);
             continue;
         }

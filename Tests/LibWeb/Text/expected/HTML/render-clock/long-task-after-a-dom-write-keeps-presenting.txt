@@ -1,4 +1,0 @@
-leases lent before the write: true
-frames presented after the write: true
-ticks needing the main thread: 0
-the text shows once the task is over: true

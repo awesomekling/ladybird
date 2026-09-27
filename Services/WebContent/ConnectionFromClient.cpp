@@ -531,23 +531,12 @@ void ConnectionFromClient::attach_render_clock()
             bool created { false };
             ~Sender() { Web::Layout::RustFFI::rust_render_clock_sender_destroy(sender); }
         };
-        auto render_clock = Web::Compositor::RenderClock::create([sender = make<Sender>()](Compositing::CompositorContextId context_id, i64 frame_time_nanoseconds, double, ReadonlySpan<Compositing::AsyncScrollNodeStableID> scroll_nodes, ReadonlySpan<Compositing::CSSPixelPoint> scroll_offsets) {
+        auto render_clock = Web::Compositor::RenderClock::create([sender = make<Sender>()](Compositing::CompositorContextId context_id, i64 frame_time_nanoseconds, double, ReadonlySpan<Compositing::AsyncScrollNodeStableID>, ReadonlySpan<Compositing::CSSPixelPoint>) {
             if (!exchange(sender->created, true))
                 sender->sender = Web::Layout::RustFFI::rust_render_clock_sender_create();
             if (!sender->sender)
                 return;
-            Vector<Web::Layout::RustFFI::FfiClockTickScrollOffset> offsets;
-            offsets.ensure_capacity(min(scroll_nodes.size(), scroll_offsets.size()));
-            for (size_t index = 0; index < scroll_nodes.size() && index < scroll_offsets.size(); ++index) {
-                offsets.unchecked_append({
-                    .node_id = scroll_nodes[index].node_id.value(),
-                    .kind = to_underlying(scroll_nodes[index].kind),
-                    .pseudo_element_type = scroll_nodes[index].pseudo_element_type,
-                    .x = scroll_offsets[index].x().to_double(),
-                    .y = scroll_offsets[index].y().to_double(),
-                });
-            }
-            (void)Web::Layout::RustFFI::rust_render_clock_post_tick(sender->sender, context_id.value(), frame_time_nanoseconds, offsets.data(), offsets.size());
+            (void)Web::Layout::RustFFI::rust_render_clock_post_tick(sender->sender, context_id.value(), frame_time_nanoseconds);
         });
         if (render_clock.is_error()) {
             dbgln("WebContent: Unable to create the render clock: {}", render_clock.error());

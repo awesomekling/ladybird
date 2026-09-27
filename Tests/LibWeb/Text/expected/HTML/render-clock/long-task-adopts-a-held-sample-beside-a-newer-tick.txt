@@ -1,3 +1,0 @@
-held boxes hold: true
-moving boxes moved: true
-the text shows once the task is over: true

@@ -333,14 +333,6 @@ void EventLoop::process()
         m_finished_frame_consumer->function()();
     }
 
-    // LIBWEB_RENDER_CLOCK_FRAMES: A task may need the frame in flight finished first, and the leases its tail granted
-    //                             lent, for the render clock to tick beside it.
-    if (m_finished_frame_consumer && m_task_queue->has_runnable_tasks()) {
-        TemporaryChange at_step_one { m_calling_finished_frame_consumer, true };
-        MainThreadPhases::Scope phase { MainThreadPhases::Phase::FrameConsumer };
-        m_frame_scheduler->finish_frame_for_clock_lend();
-    }
-
     // AD-HOC: A rendering task that held its rendering opportunity while a frame was in flight is queued again once
     //         the render side has finished that frame.
     queue_held_rendering_task_if_frame_finished();
@@ -390,7 +382,6 @@ void EventLoop::process()
     if (oldest_task && oldest_task->source() != Task::Source::Rendering) {
         m_rendering_task_ran_ahead_since_last_task = false;
         auto task_duration = task_end_time - task_start_time;
-        m_frame_scheduler->note_task_ran(task_duration);
         auto task_duration_microseconds = static_cast<u64>(task_duration * 1000.0);
         ++m_rendering_scheduler_counters.tasks_between_updates;
         m_rendering_scheduler_counters.task_microseconds_between_updates += task_duration_microseconds;

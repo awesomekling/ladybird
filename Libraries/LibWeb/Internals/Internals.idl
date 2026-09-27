@@ -217,12 +217,8 @@ interface Internals {
     unsigned long long clockTicksReceived();
     // LIBWEB_RENDER_CLOCK_FRAMES: whether document holds a clock lease a render clock ticks.
     boolean renderClockTicks(Document document);
-    // LIBWEB_RENDER_CLOCK_FRAMES: whether the main thread lends the arenas of leased documents to the render clock's
-    // ticks beside the task running now.
-    boolean clockLendActive();
     // What the render clock did with them: ticksPosted, ticksFolded, ticksRun, ticksInstalled, ticksNeedingMain and
-    // why it dropped the others; and the frames in flight the main thread took in before a task to lend them
-    // (lendFramesTakenIn), how many of those it waited for (lendFrameWaits), and for how long (lendFrameNanoseconds).
+    // why it dropped the others.
     object getRenderClockCounters();
     // How many animation lists of an element published their timing rows to the style engine (listsPublished), and how
     // many were built the same as they were last published and published nothing (listsUnchanged).

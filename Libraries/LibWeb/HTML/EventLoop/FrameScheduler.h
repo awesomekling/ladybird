@@ -159,24 +159,8 @@ public:
     void revoke_clock_lease_of(DOM::Document const&);
     // The main thread's outermost event loop is about to block: the render clock may tick the leases until it wakes.
     void main_thread_will_idle();
-    // The main thread woke: the documents adopt what the render clock's ticks installed while it idled, and the render
-    // clock goes on ticking the leases while the main thread runs its tasks.
+    // The main thread woke: the documents adopt what the render clock's ticks installed while it idled.
     void main_thread_did_wake();
-    // The main thread's outermost event loop went round without blocking: its tasks keep it busy. The documents adopt
-    // what the render clock's ticks installed beside the tasks it ran, as they would had it idled, and the ticks go on
-    // beside the next ones.
-    void main_thread_did_not_block();
-    // Something the main thread reached took back the arena of a leased document mid-task: the document's rows hold its
-    // own records again, laid out at its own time.
-    void clock_lend_taken_back(void* arena);
-    // A read of render state ended: the render clock may go on ticking the leases if the task changed nothing since.
-    void relend_clock_leases_after_read();
-    // A DOM mutation script made ended: the render clock may go on ticking the leases beside what it left for the next
-    // layout update to build.
-    void relend_clock_leases_after_mutation();
-    // The main thread presented a frame of its own mid-task, which shows its documents at the task's time: the render
-    // clock's ticks, which show them at theirs, present no more beside the task.
-    void did_present_beside_clock_lend();
     // A render clock tick ended a lease; the rendering update takes over.
     void render_clock_needs_main();
     // For tests: whether leases are left to the main thread's rendering updates, with no render clock armed.
@@ -204,24 +188,6 @@ public:
     bool finish_finished_frames();
     // Whether a frame is in flight that the render side has not finished yet.
     bool has_unfinished_frame() const;
-
-    // LIBWEB_RENDER_CLOCK_FRAMES: The event loop ran a task other than a rendering task, for `milliseconds`.
-    void note_task_ran(double milliseconds)
-    {
-        m_last_task_milliseconds = milliseconds;
-        m_main_thread_idled_since_task = false;
-    }
-    // At step 1, before the event loop runs a task: finishes the frame in flight where a clock lease would tick beside
-    // the task once it is in, and lends the leases a frame kept from being lent.
-    void finish_frame_for_clock_lend();
-    // Test only: how many times finish_frame_for_clock_lend() took in a frame, how many of those times the render side
-    // had not finished it yet, and how long taking them in took in total.
-    struct ClockLendFrameWaits {
-        u64 frames_taken_in { 0 };
-        u64 waits { 0 };
-        u64 nanoseconds { 0 };
-    };
-    static ClockLendFrameWaits clock_lend_frame_waits();
 
     // Takes in the frame the render side has handed back: publishes its recordings and hands off their compositor
     // frames. Runs no script: what the render side told the documents (their commit messages, which can dispatch
@@ -274,23 +240,10 @@ private:
         Optional<double> timeline_time_for_update {};
         // What the render clock's ticks present the document's frames with.
         OwnPtr<LocalNavigable::RenderClockFrameKit> render_clock_kit {};
-        // The document's layout commit generation and published style transaction when the ticks last had its arena,
-        // or when the main thread last took it back from them: a task that moves either changed what a tick would show.
-        u64 lend_layout_commit_generation { 0 };
-        u64 lend_style_transaction { 0 };
         // Whether the lease ends once the document has adopted the tick in flight: it was revoked beside it.
         bool revoke_at_adoption { false };
     };
-    void lend_clock_leases_to_busy_main(bool relend);
-    void take_back_clock_lend_for_adoption();
     void adopt_render_clock_ticks();
-    enum class ClockLendSuspension : u8 {
-        // The task changed what a tick would show.
-        Write,
-        // The task's restores took too much of its time, or only a layout update of the main thread's could lay them out.
-        Budget,
-    };
-    void suspend_clock_lend(ClockLendSuspension);
     void replace_render_clock_kit(ClockLeaseHold&, OwnPtr<LocalNavigable::RenderClockFrameKit>);
     void update_render_clock(ClockLeaseHold&, Optional<Compositing::CompositorContextId>);
     bool publish_clock_lease_targets(ClockLeaseHold const&);
@@ -314,30 +267,6 @@ private:
 
     Vector<ClockLeaseHold> m_clock_leases;
     bool m_render_clock_suspended { false };
-    // Whether the main thread lent the leased arenas to the render clock since it last took in what the ticks sampled.
-    bool m_clock_lent_this_wake { false };
-    // The arenas lent to the ticks since the main thread last took the lends in.
-    Vector<void*> m_clock_lent_arenas;
-    // Whether something the main thread reached took the leased arenas back from the render clock mid-task.
-    bool m_clock_lend_taken_back { false };
-    // Whether the main thread lends the arenas no more until it next idles.
-    bool m_clock_lend_suspended { false };
-    // When the main thread last woke, and how much of its time restores took since.
-    u64 m_clock_lend_woke_at_nanoseconds { 0 };
-    u64 m_clock_lend_restore_nanoseconds { 0 };
-    // How long the last task other than a rendering task ran.
-    double m_last_task_milliseconds { 0 };
-    // Whether the main thread idled since it last ran a task other than a rendering task.
-    bool m_main_thread_idled_since_task { false };
-    // Whether the leases wait for a lend that a frame in flight, or one whose tail has not run, kept back: the tail
-    // that grants them runs after the main thread woke.
-    bool m_clock_lend_waits_for_frame { false };
-    // Whether the rendering update running now, or whose frame is in flight, began with a clock lease.
-    bool m_rendering_update_began_with_clock_lease { false };
-    // Whether the rendering update running now, or whose frame is in flight, ended a clock lease of a document with
-    // animation frame callbacks, which its tail grants again.
-    bool m_rendering_update_ended_clock_lease_for_frame_callbacks { false };
-
     // The display ticks tests injected, waiting for the main thread to go idle, and those the render side runs now.
     struct InjectedClockTick {
         double frame_time { 0 };
@@ -349,20 +278,6 @@ private:
 
     // In the order the changes were made, which is the order the arena takes them in.
     Vector<GC::Ref<GC::Function<void()>>> m_deferred_arena_changes;
-};
-
-// LIBWEB_RENDER_CLOCK_FRAMES: A read of render state that script makes. Whatever it reaches may take the arenas of leased
-// documents back from the render clock's ticks mid-task; once the outermost such read is over, the ticks may have them
-// again (see FrameScheduler::relend_clock_leases_after_read()).
-class ClockLendReadScope {
-    AK_MAKE_NONCOPYABLE(ClockLendReadScope);
-    AK_MAKE_NONMOVABLE(ClockLendReadScope);
-
-public:
-    ClockLendReadScope();
-    ~ClockLendReadScope();
-
-    static bool is_active();
 };
 
 }

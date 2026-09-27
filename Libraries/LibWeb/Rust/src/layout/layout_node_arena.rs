@@ -2420,22 +2420,6 @@ impl LayoutNodeArena {
         }
     }
 
-    /// Puts back the host's record over every row an animation sample installed a record over ahead
-    /// of the host, which has not adopted them yet: the host goes on reading its rows at its own
-    /// time. Marks each row for layout, and returns the rows with the samples' records, whose pins
-    /// go to the caller.
-    pub(crate) fn restore_animation_adoptions(&self) -> Vec<(NodeSlotId, u64)> {
-        self.assert_owner_thread();
-        let restored = std::mem::take(&mut *self.animation_adoption_log.borrow_mut());
-        let mut rows = Vec::with_capacity(restored.len());
-        for adoption in restored {
-            // The host holds its record, so the engine has its payloads.
-            self.install_row_style_over_host(adoption.slot, adoption.host_style_record, true);
-            rows.push((adoption.slot, adoption.style_record));
-        }
-        rows
-    }
-
     /// Whether an animation sample installed `style_record` over `slot` ahead of the host, which is
     /// adopting it now: the record leaves the log, and its pin is released to the host's. An
     /// animation-overlay record the engine no longer assigns lives by that pin alone, so the host
@@ -8736,34 +8720,6 @@ mod tests {
         let second_data = &*arena.data(second.slot);
         assert_eq!(caches.table_cell_measurement_cache_get(&arena, second_data, key), None);
         arena.free_subtree(second.slot).destroy_shells_and_invoke_callbacks();
-    }
-
-    #[test]
-    fn a_dom_tree_mutation_takes_back_an_arena_lent_with_no_style_engine() {
-        use std::rc::Rc;
-        let mut arena_handle = Box::new(crate::layout::ArenaHandle::new());
-        let arena: *mut c_void = std::ptr::from_mut(&mut *arena_handle).cast();
-        let recalled = Rc::new(Cell::new(false));
-        let taken_back = Rc::new(Cell::new(false));
-        // SAFETY: Nothing is in flight, and nothing but this thread reaches the arena.
-        unsafe {
-            crate::stage_thread::lend_arena(
-                arena,
-                {
-                    let recalled = recalled.clone();
-                    move || recalled.set(true)
-                },
-                {
-                    let taken_back = taken_back.clone();
-                    move || taken_back.set(true)
-                },
-            );
-        }
-        // SAFETY: The arena is live, and this is its document thread.
-        unsafe { super::layout_arena_join_frame_for_dom_tree_mutation(arena) };
-        assert!(recalled.get() && taken_back.get());
-        assert!(!crate::stage_thread::has_lent_arena());
-        drop(arena_handle);
     }
 }
 

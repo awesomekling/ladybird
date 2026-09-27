@@ -1564,11 +1564,6 @@ bool Internals::render_clock_ticks(DOM::Document const& document) const
     return HTML::main_thread_event_loop().frame_scheduler().render_clock_ticks(document);
 }
 
-bool Internals::clock_lend_active() const
-{
-    return Layout::RustFFI::rust_clock_lend_is_active();
-}
-
 void Internals::set_render_clock_suspended(bool suspended)
 {
     HTML::main_thread_event_loop().frame_scheduler().set_render_clock_suspended(suspended);
@@ -1607,22 +1602,8 @@ GC::Ref<JS::Object> Internals::get_render_clock_counters() const
     define("ticksPresented"sv, counters.ticks_presented);
     define("ticksNeedingMain"sv, counters.ticks_needing_main);
     define("ticksMovingVisualContexts"sv, counters.ticks_moving_visual_contexts);
-    define("ticksMidTask"sv, counters.ticks_mid_task);
-    define("ticksFollowingScroll"sv, counters.ticks_following_scroll);
     define("ticksWakingMainToAdopt"sv, counters.ticks_waking_main_to_adopt);
     define("ticksMissedAskingMain"sv, counters.ticks_missed_asking_main);
-    define("lends"sv, counters.lends);
-    define("relends"sv, counters.relends);
-    define("recalls"sv, counters.recalls);
-    define("restores"sv, counters.restores);
-    define("restoreNanoseconds"sv, counters.restore_nanoseconds);
-    define("restoresNeedingMain"sv, counters.restores_needing_main);
-    define("lendsSuspendedWrite"sv, counters.lends_suspended_write);
-    define("lendsSuspendedBudget"sv, counters.lends_suspended_budget);
-    auto frame_waits = HTML::FrameScheduler::clock_lend_frame_waits();
-    define("lendFramesTakenIn"sv, frame_waits.frames_taken_in);
-    define("lendFrameWaits"sv, frame_waits.waits);
-    define("lendFrameNanoseconds"sv, frame_waits.nanoseconds);
     return object;
 }
 

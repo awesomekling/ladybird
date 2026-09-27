@@ -858,9 +858,6 @@ Document::JoinScope::~JoinScope()
         ++counters.joins_that_published_nothing;
     }
     counters.max_nanoseconds = max(counters.max_nanoseconds, elapsed);
-    // LIBWEB_RENDER_CLOCK_FRAMES: A read that took the arenas back from the render clock's ticks mid-task lends them
-    // again once it is over, if the task changed nothing a tick would show.
-    HTML::main_thread_event_loop().frame_scheduler().relend_clock_leases_after_read();
 }
 
 void Document::JoinScope::note_extra_pass() const
@@ -10626,8 +10623,6 @@ Painting::HitTestDisplayList const* Document::ensure_hit_test_display_list()
         TemporaryChange origin { Painting::current_recording_origin(), Painting::RecordingOrigin::HitTest };
         if (!navigable->record_display_list_and_scroll_state({ .paint_overlay = true }))
             return nullptr;
-        // LIBWEB_RENDER_CLOCK_FRAMES: That frame shows the document at the task's time.
-        HTML::main_thread_event_loop().frame_scheduler().did_present_beside_clock_lend();
     }
 
     return m_hit_test_display_list.ptr();

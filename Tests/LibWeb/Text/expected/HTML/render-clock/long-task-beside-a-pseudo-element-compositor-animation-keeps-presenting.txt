@@ -1,2 +1,0 @@
-the pseudo-element's animation runs on the compositor: true
-frames presented during the task: true
