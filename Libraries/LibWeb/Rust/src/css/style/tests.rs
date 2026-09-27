@@ -11390,6 +11390,11 @@ fn replay_ffi_reclaims_the_non_empty_recorded_atom_set() {
             std::ptr::null(),
             std::ptr::null(),
             0,
+            bridge::FfiOwnerRenderHalf {
+                applies: false,
+                viewport_propagation_sources: std::ptr::null(),
+                viewport_propagation_source_count: 0,
+            },
         )
     };
 

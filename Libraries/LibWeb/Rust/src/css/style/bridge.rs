@@ -279,6 +279,13 @@ pub struct FfiStyleTransactionView {
     pub only_derived_child_reactions: bool,
     /// The elements connected to the document as the transaction was taken.
     pub connected_element_count: u32,
+    /// The render owner applied the batch's rows to the layout nodes of their elements as it took
+    /// the transaction, as a flight does for its pass: the host pays what that handed back before
+    /// it installs the batch, and ends that render half once its style update has installed it.
+    pub render_half_applied: bool,
+    /// A row the owner applied moved the visual contexts of its layout nodes, which the document's
+    /// next paint preparation updates.
+    pub render_half_moved_visual_contexts: bool,
 }
 
 /// A host-owned object the engine names but never follows.
@@ -479,6 +486,8 @@ impl Default for FfiStyleTransactionView {
             only_derived_child_reactions: false,
             connected_element_count: 0,
             style_atoms_swept: false,
+            render_half_applied: false,
+            render_half_moved_visual_contexts: false,
         }
     }
 }
@@ -5346,8 +5355,10 @@ fn record_interned_atom(engine: &mut StyleEngine, raw: usize, atom: StyleAtomID)
 /// `engine` must be live, and `layout_arena` the document's live layout arena or null. `input` is
 /// null or as for [`style_engine_apply_transaction`]'s `transaction`, its grant arrays kept live
 /// until the call returns, and `applied_style_reactions` points at `applied_style_reaction_count`
-/// reactions. The returned answer slice remains valid until the next mutable `style_engine_*` entry
-/// point or an explicit discard of the transaction outputs.
+/// reactions. `render_half` says whether the render owner applies the batch to the layout nodes
+/// itself, its viewport propagation sources pointing at their stated count. The returned answer
+/// slice remains valid until the next mutable `style_engine_*` entry point or an explicit discard of
+/// the transaction outputs.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_take_style_transaction(
     engine: StyleEngineHandle,
@@ -5357,6 +5368,7 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
     input: *const FfiStyleInputTransaction,
     applied_style_reactions: *const FfiAppliedStyleReaction,
     applied_style_reaction_count: usize,
+    render_half: FfiOwnerRenderHalf,
 ) -> FfiStyleTransactionView {
     // SAFETY: Guaranteed by the caller.
     let applied_style_reactions = unsafe { borrow(applied_style_reactions, applied_style_reaction_count) };
@@ -5378,12 +5390,23 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
         // SAFETY: As above.
         let input = unsafe { InputForPass::handed_over(input, applied_style_reactions) }
             .map_or(PassInput::None, |input| PassInput::Here(Box::new(input)));
+        // SAFETY: Guaranteed by the caller.
+        let render_half = render_half.applies.then(|| unsafe {
+            borrow(
+                render_half.viewport_propagation_sources,
+                render_half.viewport_propagation_source_count,
+            )
+            .iter()
+            .filter_map(|&node| StyleNodeID::from_raw(node))
+            .collect()
+        });
         let transaction = OwnerStyleTransaction::Whole {
             root,
             computation_inputs,
             layout_arena,
             input,
             grant,
+            render_half,
         };
         // SAFETY: The engine is the document's, and this thread reaches it again only once the owner has finished
         // the transaction.
@@ -5436,11 +5459,26 @@ pub(crate) enum OwnerStyleTransaction {
         input: PassInput,
         /// Where the engine writes the identities it grants the host with the input.
         grant: StyleNodeGrant,
+        /// Whether the owner applies the batch's rows to the layout nodes of their elements itself, with the elements
+        /// the viewport propagates from.
+        render_half: Option<Vec<StyleNodeID>>,
     },
     /// The transaction whose pass a rendering update of the document ran, which the owner finishes once the document
     /// thread has taken the update's frame back. An atom the host named beside the pass may be one the pass found
     /// unused, where `host_named_atoms_beside_pass`.
     FinishSubmitted { host_named_atoms_beside_pass: bool },
+}
+
+/// Whether the render owner applies the batch of a style transaction it takes to the layout nodes of
+/// the rows' elements itself: the host asks where the layout tree is one the next layout lays out
+/// as it is, and names the elements the viewport propagates its overflow, writing mode and direction
+/// from.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FfiOwnerRenderHalf {
+    pub applies: bool,
+    pub viewport_propagation_sources: *const u32,
+    pub viewport_propagation_source_count: usize,
 }
 
 // SAFETY: The document thread waits for the transaction, keeping what its inputs and its grant point to live and
@@ -5511,12 +5549,13 @@ impl OwnerStyleTransaction {
         }
     }
 
-    /// Runs the transaction with the document's engine `engine`.
+    /// Runs the transaction with the document's engine `engine`, on the render owner where
+    /// `on_owner`, which then applies the render half of its batch too where the host asked.
     ///
     /// # Safety
     ///
     /// The document thread waits for it, as the type requires.
-    pub(crate) unsafe fn run(self, engine: &mut StyleEngine) -> OwnerStyleTransactionView {
+    pub(crate) unsafe fn run(self, engine: &mut StyleEngine, on_owner: bool) -> OwnerStyleTransactionView {
         let (view, retired) = match self {
             Self::Whole {
                 root,
@@ -5524,6 +5563,7 @@ impl OwnerStyleTransaction {
                 layout_arena,
                 input,
                 grant,
+                render_half,
             } => {
                 // SAFETY: Guaranteed by the caller.
                 unsafe { grant.grant(engine) };
@@ -5536,7 +5576,17 @@ impl OwnerStyleTransaction {
                 // The pass samples at the times the host published for this update.
                 let timeline_samples = engine.animation_timeline_samples().clone();
                 let output = run_style_pass(engine, root, committed_boxes, &timeline_samples);
-                finish_style_transaction(engine, root, output)
+                let (mut view, retired) = finish_style_transaction(engine, root, output);
+                if let Some(viewport_propagation_sources) = render_half.filter(|_| on_owner) {
+                    // SAFETY: The owner holds the document's arena, and the document thread waits.
+                    if let Some(moved_visual_contexts) =
+                        unsafe { apply_render_half_on_owner(engine, layout_arena, &viewport_propagation_sources) }
+                    {
+                        view.render_half_applied = true;
+                        view.render_half_moved_visual_contexts = moved_visual_contexts;
+                    }
+                }
+                (view, retired)
             }
             Self::FinishSubmitted {
                 host_named_atoms_beside_pass,
@@ -5544,6 +5594,38 @@ impl OwnerStyleTransaction {
         };
         OwnerStyleTransactionView(view, retired)
     }
+}
+
+/// Applies the batch a style transaction the owner took left to the layout nodes of the rows'
+/// elements, as a flight applies its pass's: each row's record, and what the row's move marks of
+/// layout, paint and the visual contexts, which the host's install then leaves alone. Answers
+/// whether a row moved the visual contexts of its layout nodes if it applied the batch; a batch any
+/// row of which the host styles in a way of its own is the host's to apply whole.
+///
+/// # Safety
+///
+/// On the render owner, which holds `layout_arena`, the live arena of the engine's document.
+unsafe fn apply_render_half_on_owner(
+    engine: &StyleEngine,
+    layout_arena: *mut c_void,
+    viewport_propagation_sources: &[StyleNodeID],
+) -> Option<bool> {
+    if layout_arena.is_null() {
+        return None;
+    }
+    let rows = engine.rows_the_owner_applies(viewport_propagation_sources).ok()?;
+    if rows.is_empty() {
+        return None;
+    }
+    // SAFETY: Guaranteed by the caller.
+    let arena = unsafe { crate::layout::LayoutNodeArena::from_handle(layout_arena) };
+    arena.apply_flight_style_rows(&rows).ok()?;
+    // No flight reads whether one applied a batch: the host's render half ends with the update.
+    arena.take_flight_style_applied();
+    Some(rows.iter().any(|row| {
+        let marks = super::style_invalidation::layout_node_marks(row.damage);
+        marks.visual_context != 0 || marks.stacking_context
+    }))
 }
 
 /// Takes the pending style transaction as [`style_engine_take_style_transaction`] does, and hands
@@ -6090,6 +6172,8 @@ fn finish_style_transaction(
         only_derived_child_reactions: output.only_derived_child_reactions,
         connected_element_count: engine.connected_element_count(),
         style_atoms_swept: output.style_atoms_swept,
+        render_half_applied: false,
+        render_half_moved_visual_contexts: false,
     };
     // The custom-property data the transaction retired is the document thread's to release, once the transaction is
     // over: the caller drops it there. It is taken last, so that a panic in the steps before leaves it with the engine

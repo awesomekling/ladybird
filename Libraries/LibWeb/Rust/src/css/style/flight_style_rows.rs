@@ -77,9 +77,30 @@ impl StyleEngine {
         let Some((_, output)) = self.host.submitted_style_pass_output.as_ref() else {
             return Err(FfiFlightStyleDecline::NoBatch);
         };
+        self.rows_applied_ahead_of_host(output.answers(), viewport_propagation_sources)
+    }
+
+    /// The rows of the batch the style transaction the render owner took left, which the owner
+    /// applies to the layout nodes itself as the transaction ends, as a flight does for its pass,
+    /// or why it leaves the batch to the host.
+    pub(crate) fn rows_the_owner_applies(
+        &self,
+        viewport_propagation_sources: &[StyleNodeID],
+    ) -> Result<Vec<FlightStyleRow>, FfiFlightStyleDecline> {
+        self.rows_applied_ahead_of_host(
+            self.host.ffi_style_transaction_output.answers(),
+            viewport_propagation_sources,
+        )
+    }
+
+    fn rows_applied_ahead_of_host(
+        &self,
+        answers: &[super::bridge::FfiStyleDelta],
+        viewport_propagation_sources: &[StyleNodeID],
+    ) -> Result<Vec<FlightStyleRow>, FfiFlightStyleDecline> {
         let animated_nodes: HashSet<StyleNodeID> = self.animated_nodes().collect();
-        let mut rows = Vec::with_capacity(output.answers().len());
-        for answer in output.answers() {
+        let mut rows = Vec::with_capacity(answers.len());
+        for answer in answers {
             if answer.gap == FfiStyleDeltaGap::SkippedHidden {
                 continue;
             }

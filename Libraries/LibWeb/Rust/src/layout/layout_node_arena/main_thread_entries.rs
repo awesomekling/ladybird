@@ -547,3 +547,36 @@ unsafe extern "C" fn layout_arena_reinherit_anonymous_descendants(arena: *mut c_
     unsafe { LayoutNodeArena::from_handle(arena) }
         .reinherit_anonymous_descendants(node, ShellStyleChangeNotice::Now(&main_thread));
 }
+
+/// Pays what the render owner handed back as it applied the batch of a style transaction to the
+/// layout nodes of the rows' elements, before the host installs the batch, which reads it.
+///
+/// # Safety
+///
+/// The arena must be live on the document thread, and the owner must have applied a batch to it
+/// whose handbacks are unpaid.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_pay_owner_style_handbacks(arena: *mut c_void) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+    // SAFETY: Guaranteed by the caller.
+    if let Some(payment) = unsafe { LayoutNodeArena::from_handle(arena) }.resolve_flight_style_handbacks() {
+        payment.pay(&main_thread);
+    }
+}
+
+/// Ends the host half of the batches the render owner applied to the layout nodes as the host took a
+/// style update's transactions, once the update has installed them: a row the install did not adopt
+/// the record of is put back with the record its element holds.
+///
+/// # Safety
+///
+/// The arena must be live on the document thread.
+#[unsafe(no_mangle)]
+unsafe extern "C" fn layout_arena_finish_owner_style_host_half(arena: *mut c_void) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+    // SAFETY: Guaranteed by the caller.
+    let (_, payment) = unsafe { LayoutNodeArena::from_handle(arena) }.finish_flight_style_host_half();
+    payment.pay(&main_thread);
+}
