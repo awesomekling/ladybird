@@ -38,9 +38,8 @@ class WEB_API RenderClock {
 public:
     AK_ALLOC_WITH_KMALLOC;
 
-    // Runs on the clock thread, for each tick delivered to an armed context, with the scroll offsets (CSS pixels) of
-    // the context's scroll nodes as the Compositor held them at the tick.
-    using PostTick = Function<void(Compositing::CompositorContextId, i64 frame_time_nanoseconds, double frame_interval_milliseconds, ReadonlySpan<Compositing::AsyncScrollNodeStableID> scroll_nodes, ReadonlySpan<Compositing::CSSPixelPoint> scroll_offsets)>;
+    // Runs on the clock thread, for each tick delivered to an armed context.
+    using PostTick = Function<void(Compositing::CompositorContextId, i64 frame_time_nanoseconds, double frame_interval_milliseconds)>;
 
     static ErrorOr<NonnullOwnPtr<RenderClock>> create(PostTick);
     ~RenderClock();
@@ -81,7 +80,7 @@ private:
     ErrorOr<IPC::TransportHandle> replace_channel();
     void request_clock_tick(Compositing::CompositorContextId, ArmedContext const&);
     void restart_watchdog(Compositing::CompositorContextId, ArmedContext&);
-    void did_receive_clock_tick(Compositing::CompositorContextId, i64 frame_time_nanoseconds, double frame_interval_milliseconds, ReadonlySpan<Compositing::AsyncScrollNodeStableID> scroll_nodes, ReadonlySpan<Compositing::CSSPixelPoint> scroll_offsets);
+    void did_receive_clock_tick(Compositing::CompositorContextId, i64 frame_time_nanoseconds, double frame_interval_milliseconds);
     void did_lose_channel();
     void did_destroy_channel() { m_channels_destroyed.fetch_add(1, AK::MemoryOrder::memory_order_relaxed); }
     void clear_armed_contexts();

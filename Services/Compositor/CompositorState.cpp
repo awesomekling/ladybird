@@ -750,12 +750,7 @@ void CompositorState::deliver_clock_tick(Compositing::CompositorContextId contex
 {
     auto frame_interval = context.clock_tick_frame_interval(display_refresh_rate);
     context.did_deliver_clock_tick(frame_time);
-    // The render clock's ticks sample scroll-driven animations at the offsets the compositor scrolled to, which the
-    // main thread may not have taken in yet.
-    Vector<Compositing::AsyncScrollNodeStableID> scroll_nodes;
-    Vector<Compositing::CSSPixelPoint> scroll_offsets;
-    context.clock_tick_scroll_offsets(scroll_nodes, scroll_offsets);
-    context.web_content_client().clock_tick(context_id, frame_time.nanoseconds(), frame_interval, scroll_nodes, scroll_offsets);
+    context.web_content_client().clock_tick(context_id, frame_time.nanoseconds(), frame_interval);
 }
 
 void CompositorState::hurry_rendering_opportunity(Compositing::CompositorContextId context_id)

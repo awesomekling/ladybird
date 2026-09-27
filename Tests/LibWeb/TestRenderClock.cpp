@@ -69,7 +69,7 @@ private:
             return;
         }
         if (m_answer == Answer::AtOnce) {
-            async_clock_tick(context_id, MonotonicTime::now().nanoseconds(), 1000.0 / maximum_frames_per_second, {}, {});
+            async_clock_tick(context_id, MonotonicTime::now().nanoseconds(), 1000.0 / maximum_frames_per_second);
             return;
         }
         m_pending_requests.set(context_id);
@@ -79,7 +79,7 @@ private:
     {
         auto frame_time = MonotonicTime::now().nanoseconds();
         for (auto context_id : m_pending_requests)
-            async_clock_tick(context_id, frame_time, 4.0, {}, {});
+            async_clock_tick(context_id, frame_time, 4.0);
         m_pending_requests.clear();
     }
 
@@ -131,7 +131,7 @@ TEST_CASE(a_render_clock_resumes_on_a_new_channel_after_losing_one)
 {
     Core::EventLoop event_loop;
     PostedTicks posted;
-    OwnPtr<Web::Compositor::RenderClock> clock = MUST(Web::Compositor::RenderClock::create([&](auto, i64, double, auto, auto) { posted.post(); }));
+    OwnPtr<Web::Compositor::RenderClock> clock = MUST(Web::Compositor::RenderClock::create([&](auto, i64, double) { posted.post(); }));
 
     auto compositor_a = FakeCompositor::create(MUST(clock->attach()));
     clock->arm(context_id, 60);
@@ -174,7 +174,7 @@ TEST_CASE(a_render_clock_asks_again_when_a_request_goes_unanswered)
 {
     Core::EventLoop event_loop;
     PostedTicks posted;
-    OwnPtr<Web::Compositor::RenderClock> clock = MUST(Web::Compositor::RenderClock::create([&](auto, i64, double, auto, auto) { posted.post(); }));
+    OwnPtr<Web::Compositor::RenderClock> clock = MUST(Web::Compositor::RenderClock::create([&](auto, i64, double) { posted.post(); }));
 
     auto compositor = FakeCompositor::create(MUST(clock->attach()));
     compositor->drop_next_requests(1);
@@ -202,7 +202,7 @@ TEST_CASE(a_render_clock_posts_nothing_once_destroyed_under_load)
 
     for (size_t iteration = 0; iteration < 200; ++iteration) {
         sentinel.destroyed.store(false);
-        OwnPtr<Web::Compositor::RenderClock> clock = MUST(Web::Compositor::RenderClock::create([&](auto, i64, double, auto, auto) {
+        OwnPtr<Web::Compositor::RenderClock> clock = MUST(Web::Compositor::RenderClock::create([&](auto, i64, double) {
             sentinel.posts_in_progress.fetch_add(1);
             if (sentinel.destroyed.load())
                 sentinel.posts_after_destruction.fetch_add(1);
