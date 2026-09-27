@@ -281,7 +281,7 @@ pub unsafe extern "C" fn layout_arena_paintable_wheel_scrollable_axes(
 pub unsafe extern "C" fn layout_arena_set_chrome_state_callback(
     arena: *mut c_void,
     context: *mut c_void,
-    callback: unsafe extern "C" fn(*mut c_void, NodeSlotId, PaintableRowResetKind),
+    callback: unsafe extern "C" fn(*mut c_void, NodeSlotId, PaintableRowResetKind, bool),
 ) {
     unsafe { crate::layout::HostTables::from_handle(arena) }
         .chrome_state_callback

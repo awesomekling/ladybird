@@ -81,11 +81,17 @@ impl CommitNotifications {
     /// # Safety
     ///
     /// The host must keep the document and node shells alive until these synchronous
-    /// notifications return. No mutable arena borrow may be active.
-    pub(crate) unsafe fn notify_host(self, main_thread: &crate::stage::MainThread, host: &LayoutHost) {
+    /// notifications return. No mutable arena borrow may be active. `viewport_row` is the row the
+    /// document's viewport is bound to.
+    pub(crate) unsafe fn notify_host(
+        self,
+        main_thread: &crate::stage::MainThread,
+        host: &LayoutHost,
+        viewport_row: NodeSlotId,
+    ) {
         for reset in self.row_resets {
             super::tree_build_seal::note_host_call("paintable_row_reset");
-            reset.invoke_callback_on_main_thread(main_thread);
+            reset.invoke_callback_on_main_thread(main_thread, viewport_row);
         }
         if !self.messages.is_empty() {
             super::tree_build_seal::note_host_call("deliver_commit_messages");

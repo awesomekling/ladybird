@@ -760,10 +760,10 @@ Layout::NodeArena& Document::layout_node_arena()
         });
         Layout::RustFFI::layout_arena_set_chrome_state_callback(
             m_layout_node_arena->handle(), this,
-            [](void* context, Compositing::RustFFI::NodeSlotId slot, Layout::RustFFI::PaintableRowResetKind kind) {
+            [](void* context, Compositing::RustFFI::NodeSlotId slot, Layout::RustFFI::PaintableRowResetKind kind, bool is_viewport_row) {
                 auto& document = *static_cast<Document*>(context);
                 document.chrome_widget_registry().drop_widgets_for_slot(slot);
-                if (kind == Layout::RustFFI::PaintableRowResetKind::Recommitted && Painting::viewport_row_slot(document).index == slot.index)
+                if (kind == Layout::RustFFI::PaintableRowResetKind::Recommitted && is_viewport_row)
                     document.paint_state().viewport_row_was_reset();
             });
     }

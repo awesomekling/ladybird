@@ -2631,10 +2631,11 @@ impl DeferredLayoutCommitHostHalf {
         } = self;
         let host = LayoutHost::of(main_thread);
         // SAFETY: Guaranteed by the caller.
-        unsafe { LayoutNodeArena::from_handle(arena_handle) }
-            .finish_paying_taken_host_handbacks(main_thread, handbacks);
+        let arena = unsafe { LayoutNodeArena::from_handle(arena_handle) };
+        arena.finish_paying_taken_host_handbacks(main_thread, handbacks);
+        let viewport_row = arena.bound_viewport_row();
         // SAFETY: The host and shells remain live, and no arena borrow is active.
-        unsafe { notifications.notify_host(main_thread, &host) };
+        unsafe { notifications.notify_host(main_thread, &host, viewport_row) };
         // SAFETY: Host callbacks have returned.
         unsafe { LayoutNodeArena::from_handle(arena_handle) }.name_layout_trace_owners(main_thread);
     }

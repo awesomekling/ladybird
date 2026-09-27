@@ -359,9 +359,11 @@ mod tests {
     }
 }
 
+/// The document's callback for a reset row: the row, how it was reset, and whether it is the row the
+/// document's viewport is bound to.
 pub(crate) type ChromeStateCallback = (
     *mut c_void,
-    unsafe extern "C" fn(*mut c_void, NodeSlotId, PaintableRowResetKind),
+    unsafe extern "C" fn(*mut c_void, NodeSlotId, PaintableRowResetKind, bool),
 );
 
 #[derive(Clone, Copy)]
@@ -372,7 +374,13 @@ pub(crate) struct PaintableRowReset {
 }
 
 impl PaintableRowReset {
-    pub(crate) fn invoke_callback_on_main_thread(self, main_thread: &crate::stage::MainThread) {
+    /// Tells the document about the reset, where `viewport_row` is the row its viewport is bound to
+    /// now, which the arena knows without the document asking it once for every reset row.
+    pub(crate) fn invoke_callback_on_main_thread(
+        self,
+        main_thread: &crate::stage::MainThread,
+        viewport_row: NodeSlotId,
+    ) {
         if !self.notifies_chrome_state {
             return;
         }
@@ -381,7 +389,7 @@ impl PaintableRowReset {
             .and_then(|host_tables| host_tables.chrome_state_callback.get())
         {
             // SAFETY: Registration and unregistration keep the callback context live.
-            unsafe { callback(context, self.slot, self.kind) };
+            unsafe { callback(context, self.slot, self.kind, self.slot == viewport_row) };
         }
     }
 }
