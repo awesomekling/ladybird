@@ -113,6 +113,22 @@ public:
     // it is drained only once the document holds the journal again, after the frame is over.
     void set_holds_next_generation(bool);
 
+    // While the render side reads, what the journal notes is written through at once, except while a style
+    // install runs: nothing in it reads what the drain writes, and the layout that does comes after it. What
+    // the install notes is written through in one drain as the outermost scope ends.
+    class WriteThroughDeferral {
+        AK_MAKE_NONCOPYABLE(WriteThroughDeferral);
+        AK_MAKE_NONMOVABLE(WriteThroughDeferral);
+
+    public:
+        explicit WriteThroughDeferral(InvalidationJournal&);
+        ~WriteThroughDeferral();
+
+    private:
+        InvalidationJournal& m_journal;
+        bool m_was_deferring { false };
+    };
+
 private:
     struct PseudoElementScrollOffset {
         CSS::PseudoElement type;
@@ -207,6 +223,7 @@ private:
     bool m_visual_viewport_transform_is_stale { false };
     bool m_draining { false };
     bool m_holds_next_generation { false };
+    bool m_defers_write_through { false };
 };
 
 }

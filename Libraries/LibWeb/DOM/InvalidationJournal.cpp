@@ -511,8 +511,21 @@ void InvalidationJournal::publish_scroll_offsets(Node& node, Entry const& entry)
 // the next drain, and the next frame starts with one.
 void InvalidationJournal::drain_if_the_render_side_is_reading()
 {
-    if (!m_holds_next_generation && m_document.is_running_update_layout())
+    if (!m_holds_next_generation && !m_defers_write_through && m_document.is_running_update_layout())
         drain();
+}
+
+InvalidationJournal::WriteThroughDeferral::WriteThroughDeferral(InvalidationJournal& journal)
+    : m_journal(journal)
+    , m_was_deferring(exchange(journal.m_defers_write_through, true))
+{
+}
+
+InvalidationJournal::WriteThroughDeferral::~WriteThroughDeferral()
+{
+    m_journal.m_defers_write_through = m_was_deferring;
+    if (!m_was_deferring && !m_journal.is_empty())
+        m_journal.drain_if_the_render_side_is_reading();
 }
 
 void InvalidationJournal::drain()
