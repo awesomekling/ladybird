@@ -1997,6 +1997,7 @@ impl PublishedEffect {
 }
 
 /// The flat buffers one element's effect descriptions travel in.
+#[derive(Default)]
 pub struct PublishedEffectBuffers<'a> {
     pub effects: &'a [super::bridge::FfiPublishedAnimationEffect],
     pub keyframes: &'a [super::bridge::FfiPublishedAnimationKeyframe],
@@ -2355,6 +2356,56 @@ impl AnimationKeyframes {
         }
         self.in_scope(TreeScopeID::DOCUMENT, &name)
     }
+}
+
+/// The references to a scope's keyframe sets the host hands over with the scope's row, which it lets
+/// go of through `release` once the row is gone: until then, a plan the engine owes may still name
+/// one of the sets.
+struct HostKeyframeSets {
+    sets: *mut std::ffi::c_void,
+    release: unsafe extern "C" fn(*mut std::ffi::c_void),
+}
+
+impl Drop for HostKeyframeSets {
+    fn drop(&mut self) {
+        // SAFETY: The host handed the references over with `release`, and they are let go of once.
+        unsafe { (self.release)(self.sets) };
+    }
+}
+
+/// Gives up the `@keyframes` row of a shadow root's scope, which is on its way out, with the
+/// references to the keyframe sets it names, `sets`, which the engine lets go of through `release`
+/// once the row is gone. It never waits for the engine: a garbage collection's finalizer calls it,
+/// and while a stage holds the engine's token, the row goes once the token is home.
+///
+/// # Safety
+/// `engine` must be live; `release` must accept `sets` once, on the main thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_unpublish_tree_scope_animation_keyframes(
+    engine: super::StyleEngineHandle,
+    tree_scope: u32,
+    shadow_root_identity: usize,
+    sets: *mut std::ffi::c_void,
+    release: unsafe extern "C" fn(*mut std::ffi::c_void),
+) {
+    let entry = "style_engine_unpublish_tree_scope_animation_keyframes";
+    super::seal::note_engine_call(entry);
+    let sets = HostKeyframeSets { sets, release };
+    let unpublish = move |engine: &mut super::StyleEngine| {
+        // SAFETY: An empty row names no style value.
+        unsafe {
+            engine.set_tree_scope_animation_keyframes(
+                TreeScopeID(tree_scope),
+                shadow_root_identity,
+                &[],
+                &[],
+                PublishedEffectBuffers::default(),
+            );
+        }
+        drop(sets);
+    };
+    // SAFETY: Guaranteed by the caller.
+    unsafe { engine.write_or_defer(entry, unpublish) };
 }
 
 /// The animation definitions a record the engine settled leaves for the host to apply, in the shape
