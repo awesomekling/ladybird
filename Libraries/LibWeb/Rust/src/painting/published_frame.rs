@@ -16,7 +16,6 @@
 use crate::cow_column::ColumnSnapshot;
 use crate::css::computed_value_views::ComputedValuesView;
 use crate::css::css_pixels::{CssPixelPoint, CssPixelRect};
-use crate::css::style::fast_hash::FastMap;
 use crate::layout::LayoutNodeArena;
 use crate::layout::PublishedTextSlot;
 use crate::layout::SLOTS_PER_CHUNK;
@@ -39,6 +38,7 @@ use crate::painting::paint_state::{PaintState, SelectionPseudoStyles};
 use crate::painting::paintable_data::{CommittedSideData, PaintableData};
 use crate::painting::paintable_rows::{CommittedFragmentLinkSlot, CommittedSideDataRef, PAINTABLE_SLOTS_PER_CHUNK};
 use crate::painting::record::damage::{FrameDamage, PaintDamage};
+use crate::painting::record::recorder_state::AbsoluteRectMemo;
 use crate::painting::replaced_paint_facts::{ReplacedPaintFacts, ReplacedPaintFactsTable};
 use crate::painting::selection::SelectionRange;
 use crate::painting::stacking_context::entries::StackingContextEntries;
@@ -78,6 +78,9 @@ pub(crate) struct PublishedFrame {
     damage: FrameDamage,
     paint_state: PublishedPaintState,
     facts: PublishedPaintFacts,
+    /// The document's absolute rect memo epoch when the frame was published: a rect computed from a
+    /// frame with the same epoch holds for this one.
+    geometry_epoch: u64,
 }
 
 /// The document's text rows and its replaced, layer image and SVG paint resource tables, as they
@@ -149,6 +152,7 @@ impl PublishedFrame {
         damage: FrameDamage,
         paint_state: PublishedPaintState,
         facts: PublishedPaintFacts,
+        geometry_epoch: u64,
     ) -> Self {
         Self {
             rows,
@@ -157,6 +161,7 @@ impl PublishedFrame {
             damage,
             paint_state,
             facts,
+            geometry_epoch,
         }
     }
 
@@ -760,16 +765,13 @@ impl PaintRead for LayoutNodeArena {
 /// answer.
 pub(crate) struct PaintSource<'a> {
     frame: &'a PublishedFrame,
-    // The absolute rects this recording computed, which are the frame's for as long as it lives.
-    absolute_rect_memo: RefCell<FastMap<NodeSlotId, CssPixelRect>>,
+    // The recorder's absolute rects, which hold for this frame where they carry its geometry epoch.
+    absolute_rects: &'a RefCell<AbsoluteRectMemo>,
 }
 
 impl<'a> PaintSource<'a> {
-    pub(crate) fn new(frame: &'a PublishedFrame) -> Self {
-        Self {
-            frame,
-            absolute_rect_memo: RefCell::default(),
-        }
+    pub(crate) fn new(frame: &'a PublishedFrame, absolute_rects: &'a RefCell<AbsoluteRectMemo>) -> Self {
+        Self { frame, absolute_rects }
     }
 }
 
@@ -791,11 +793,13 @@ impl PaintRead for PaintSource<'_> {
     }
 
     fn memoized_absolute_rect(&self, id: NodeSlotId) -> Option<CssPixelRect> {
-        self.absolute_rect_memo.borrow().get(&id).copied()
+        self.absolute_rects.borrow().get(id, self.frame.geometry_epoch)
     }
 
     fn memoize_absolute_rect(&self, id: NodeSlotId, rect: CssPixelRect) {
-        self.absolute_rect_memo.borrow_mut().insert(id, rect);
+        self.absolute_rects
+            .borrow_mut()
+            .set(id, self.frame.geometry_epoch, rect);
     }
 
     fn slot_is_live(&self, id: NodeSlotId) -> bool {

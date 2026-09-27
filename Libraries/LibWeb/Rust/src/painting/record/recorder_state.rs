@@ -4,9 +4,12 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+use crate::css::css_pixels::CssPixelRect;
+use crate::layout::node_data::NodeSlotId;
 use crate::painting::record::order_tree::PaintOrderTree;
 use crate::painting::record::scratch::RecordingScratch;
 use crate::painting::record::{PublishedHitTestItems, RecordingOutput};
+use std::cell::RefCell;
 use std::sync::Arc;
 
 /// What the display list recording keeps from one recording of a document to the next. Only the
@@ -22,6 +25,30 @@ pub(crate) struct RecorderState {
     pub(crate) paint_order_tree: PaintOrderTree,
     /// The recording's workspace, whose tables one recording leaves for the next to reuse.
     pub(crate) scratch: RecordingScratch,
+    /// The absolute rects the recordings computed, which stay valid while the document's geometry
+    /// does.
+    pub(crate) absolute_rects: RefCell<AbsoluteRectMemo>,
+}
+
+/// Each row's absolute rect, with the geometry epoch of the frame it was computed from.
+#[derive(Default)]
+pub(crate) struct AbsoluteRectMemo {
+    rects: Vec<Option<(NodeSlotId, u64, CssPixelRect)>>,
+}
+
+impl AbsoluteRectMemo {
+    pub(crate) fn get(&self, id: NodeSlotId, epoch: u64) -> Option<CssPixelRect> {
+        let (memoized_id, memoized_epoch, rect) = (*self.rects.get(id.slot_index() as usize)?)?;
+        (memoized_id == id && memoized_epoch == epoch).then_some(rect)
+    }
+
+    pub(crate) fn set(&mut self, id: NodeSlotId, epoch: u64, rect: CssPixelRect) {
+        let index = id.slot_index() as usize;
+        if self.rects.len() <= index {
+            self.rects.resize(index + 1, None);
+        }
+        self.rects[index] = Some((id, epoch, rect));
+    }
 }
 
 const _: () = {
