@@ -377,10 +377,7 @@ fn paint_server_style<O: Observer>(
     } else {
         SvgPaintResourceKind::Fill
     };
-    let published = recorder
-        .layout_arena
-        .svg_paint_resources()
-        .published_paint_server(paintable, kind)?;
+    let published = recorder.layout_arena.published_svg_paint_server(paintable, kind)?;
     match &*published {
         PublishedSvgPaintServer::Gradient(gradient) => Some(gradient_paint_style(gradient, paint_context)),
         PublishedSvgPaintServer::Pattern(pattern) => pattern_paint_style(recorder, pattern, paint_context),
@@ -389,12 +386,12 @@ fn paint_server_style<O: Observer>(
 }
 
 fn references_pattern<O: Observer>(recorder: &PaintRecorder<'_, O>, paintable: NodeSlotId) -> bool {
-    let resources = recorder.layout_arena.svg_paint_resources();
     [SvgPaintResourceKind::Fill, SvgPaintResourceKind::Stroke]
         .iter()
         .any(|kind| {
-            resources
-                .published_paint_server(paintable, *kind)
+            recorder
+                .layout_arena
+                .published_svg_paint_server(paintable, *kind)
                 .is_some_and(|published| matches!(&*published, PublishedSvgPaintServer::Pattern(_)))
         })
 }

@@ -112,6 +112,11 @@ impl<T: Clone + Default, const CHUNK: usize> CowColumn<T, CHUNK> {
 }
 
 impl<T, const CHUNK: usize> ColumnSnapshot<T, CHUNK> {
+    /// How many rows the snapshot has room for: every row index below it may be read.
+    pub(crate) fn slot_capacity(&self) -> usize {
+        self.chunks.len() * CHUNK
+    }
+
     #[inline]
     pub(crate) fn get(&self, index: usize) -> Option<&T> {
         Some(&self.chunks.get(index / CHUNK)?.0[index % CHUNK])

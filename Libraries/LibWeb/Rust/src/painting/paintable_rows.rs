@@ -1693,8 +1693,27 @@ impl LayoutNodeArena {
             .published
             .clone()
             .expect("the rows were just published");
+        let hit_test_item_capacity_hint = self.hit_test_list.get_mut().as_ref().map_or(0, |list| list.items.len());
+        let paint_state = crate::painting::published_frame::PublishedPaintState::new(
+            &self.paint_state().borrow(),
+            hit_test_item_capacity_hint,
+        );
+        let (replaced, layer_images) = self.publish_paint_fact_tables();
+        let facts = crate::painting::published_frame::PublishedPaintFacts {
+            text: self.publish_text(),
+            replaced,
+            layer_images,
+            svg_paint_resources: self.svg_paint_resources().publish(),
+        };
         let (nodes, retired_slots) = self.publish_paint_tree();
-        PublishedFrame::new(rows, nodes, retired_slots, self.paint_damage_for_frame())
+        PublishedFrame::new(
+            rows,
+            nodes,
+            retired_slots,
+            self.paint_damage_for_frame(),
+            paint_state,
+            facts,
+        )
     }
 
     /// Builds the structures a hit-test query derives from the list before the rows are

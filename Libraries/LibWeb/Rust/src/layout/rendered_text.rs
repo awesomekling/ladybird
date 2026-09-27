@@ -33,20 +33,66 @@ pub struct RenderedTextEdit {
 
 /// Rendered text and its DOM offset mapping are published and invalidated together.
 /// Rust builds this snapshot from source text and rendering options; layout and painting read it.
+/// It is immutable once built, so a published frame shares it.
 #[derive(Default)]
-pub(crate) struct TextContent {
+pub(crate) struct RenderedText {
     pub(crate) text: Vec<u16>,
     pub(crate) untransformed_text_is_ascii_whitespace: bool,
     pub(crate) may_require_bidi_processing: bool,
     dom_start_offset: usize,
     dom_length_in_code_units: usize,
     edits: Vec<RenderedTextEdit>,
-    grapheme_segmenter: OnceCell<super::text_chunker::GraphemeSegmenter>,
-    chunks: RefCell<Option<Arc<CachedTextChunks>>>,
-    pub(super) rendering_key: Option<TextRenderingKey>,
     /// The DOM text as it was written, kept only under an SVG text box: SVG text shapes the
     /// element's raw character data, not the white-space-collapsed rendering every other box uses.
     pub(crate) svg_source_text: Option<Box<[u16]>>,
+}
+
+/// What a frame publishes of a text row: its rendered text, and the first-letter row that
+/// renders the start of its source.
+#[derive(Clone)]
+pub(crate) struct PublishedTextSlot {
+    pub(crate) generation: u8,
+    pub(crate) first_letter: NodeSlotId,
+    pub(crate) rendered: Option<Arc<RenderedText>>,
+}
+
+impl Default for PublishedTextSlot {
+    fn default() -> Self {
+        Self {
+            generation: 0,
+            first_letter: NodeSlotId::INVALID,
+            rendered: None,
+        }
+    }
+}
+
+impl PublishedTextSlot {
+    pub(super) fn is_same_as(&self, other: &Self) -> bool {
+        self.generation == other.generation
+            && self.first_letter == other.first_letter
+            && match (&self.rendered, &other.rendered) {
+                (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+                (None, None) => true,
+                _ => false,
+            }
+    }
+}
+
+/// A text row's rendered text, with what layout caches beside it.
+#[derive(Default)]
+pub(crate) struct TextContent {
+    rendered: Arc<RenderedText>,
+    grapheme_segmenter: OnceCell<super::text_chunker::GraphemeSegmenter>,
+    chunks: RefCell<Option<Arc<CachedTextChunks>>>,
+    pub(super) rendering_key: Option<TextRenderingKey>,
+}
+
+impl std::ops::Deref for TextContent {
+    type Target = RenderedText;
+
+    fn deref(&self) -> &RenderedText {
+        &self.rendered
+    }
 }
 
 // DOM mutations explicitly invalidate this key. Style changes enroll the node
@@ -139,16 +185,20 @@ impl TextContent {
     #[cfg(test)]
     pub(super) fn for_test(text: &str, dom_start: usize, dom_length: usize, edits: Vec<RenderedTextEdit>) -> Self {
         Self {
-            text: text.encode_utf16().collect(),
-            dom_start_offset: dom_start,
-            dom_length_in_code_units: dom_length,
-            edits,
+            rendered: Arc::new(RenderedText {
+                text: text.encode_utf16().collect(),
+                dom_start_offset: dom_start,
+                dom_length_in_code_units: dom_length,
+                edits,
+                ..RenderedText::default()
+            }),
             ..Self::default()
         }
     }
 
-    pub(super) fn dom_range(&self) -> std::ops::Range<usize> {
-        self.dom_start_offset..self.dom_start_offset + self.dom_length_in_code_units
+    /// The rendered text, as a frame publishes it.
+    pub(crate) fn rendered(&self) -> &Arc<RenderedText> {
+        &self.rendered
     }
 
     pub(super) fn is_password_input(&self) -> bool {
@@ -179,6 +229,17 @@ impl TextContent {
         entry
     }
 
+    pub(crate) fn grapheme_segmenter(&self) -> &super::text_chunker::GraphemeSegmenter {
+        self.grapheme_segmenter
+            .get_or_init(|| super::text_chunker::GraphemeSegmenter::new(&self.text))
+    }
+}
+
+impl RenderedText {
+    pub(super) fn dom_range(&self) -> std::ops::Range<usize> {
+        self.dom_start_offset..self.dom_start_offset + self.dom_length_in_code_units
+    }
+
     pub(crate) fn has_same_content_as(&self, other: &Self) -> bool {
         self.text == other.text
             && self.untransformed_text_is_ascii_whitespace == other.untransformed_text_is_ascii_whitespace
@@ -186,11 +247,6 @@ impl TextContent {
             && self.dom_start_offset == other.dom_start_offset
             && self.dom_length_in_code_units == other.dom_length_in_code_units
             && self.edits == other.edits
-    }
-
-    pub(crate) fn grapheme_segmenter(&self) -> &super::text_chunker::GraphemeSegmenter {
-        self.grapheme_segmenter
-            .get_or_init(|| super::text_chunker::GraphemeSegmenter::new(&self.text))
     }
 
     pub(crate) fn dom_offset_for_rendered_text_offset(&self, offset: usize, boundary: RenderedTextBoundary) -> usize {
@@ -355,13 +411,15 @@ fn sync_text_content(arena: &mut LayoutNodeArena, id: NodeSlotId) {
             super::node_facts::kind_is_svg_text(arena.data(parent).kind.get()).then(|| Box::from(&source[..]));
         let rendered = render_text(source, key.locale.as_deref(), key.options);
         let content = TextContent {
-            svg_source_text,
-            may_require_bidi_processing: may_require_bidi_processing(&rendered.text),
-            text: rendered.text,
-            untransformed_text_is_ascii_whitespace,
-            dom_start_offset: source_range.start,
-            dom_length_in_code_units: source_range.length,
-            edits: rendered.edits,
+            rendered: Arc::new(RenderedText {
+                svg_source_text,
+                may_require_bidi_processing: may_require_bidi_processing(&rendered.text),
+                text: rendered.text,
+                untransformed_text_is_ascii_whitespace,
+                dom_start_offset: source_range.start,
+                dom_length_in_code_units: source_range.length,
+                edits: rendered.edits,
+            }),
             grapheme_segmenter: OnceCell::new(),
             chunks: RefCell::default(),
             rendering_key: Some(key),

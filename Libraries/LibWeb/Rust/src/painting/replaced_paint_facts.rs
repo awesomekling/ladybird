@@ -72,6 +72,10 @@ pub(crate) enum ReplacedPaintFacts {
     Video(VideoPaintFacts),
 }
 
+/// Each row's replaced paint facts.
+pub(crate) type ReplacedPaintFactsTable =
+    crate::css::style::fast_hash::FastMap<crate::layout::node_data::NodeSlotId, ReplacedPaintFacts>;
+
 impl ReplacedPaintFacts {
     pub(crate) fn image(self) -> Option<ImagePaintFacts> {
         match self {

@@ -1052,6 +1052,8 @@ pub(crate) struct LayoutNodeArena {
     default_scroll_shift_anchors: RefCell<Vec<DefaultScrollShiftAnchorSlot>>,
     any_default_scroll_shift_anchor_ever_stored: Cell<bool>,
     text_nodes: Vec<TextNodeSlot>,
+    /// What frames publish of `text_nodes`, kept in step with it.
+    published_text: crate::cow_column::CowColumn<super::rendered_text::PublishedTextSlot, SLOTS_PER_CHUNK>,
     pub(super) searchable_text: Option<Vec<super::text_queries::MappedText>>,
     replaced_content_facts: Vec<ReplacedContentFactsSlot>,
     raw_table_column_spans: HashMap<NodeSlotId, u32>,
@@ -1059,9 +1061,10 @@ pub(crate) struct LayoutNodeArena {
     /// keeps image observers and cursor style values on its shell, so only such a row has anything
     /// for a later attach to clear. Nearly no row is ever in here.
     style_image_resources_attached: RefCell<HashSet<NodeSlotId>>,
-    replaced_paint_facts: RefCell<HashMap<NodeSlotId, crate::painting::replaced_paint_facts::ReplacedPaintFacts>>,
+    // Shared with the frames published since they last changed.
+    replaced_paint_facts: RefCell<std::sync::Arc<crate::painting::replaced_paint_facts::ReplacedPaintFactsTable>>,
     layer_image_paint_facts:
-        RefCell<HashMap<NodeSlotId, Vec<crate::painting::layer_image_paint_facts::LayerImagePaintFactsEntry>>>,
+        RefCell<std::sync::Arc<crate::painting::layer_image_paint_facts::LayerImagePaintFactsTable>>,
     svg_paint_resources: crate::painting::svg_paint_resources::SvgPaintResources,
     /// The SVG presentation attributes the document published for an element, keyed by the
     /// element's style node rather than by a row. An SVG element that draws nothing itself - the
@@ -1207,12 +1210,13 @@ impl LayoutNodeArena {
             default_scroll_shift_anchors: RefCell::new(Vec::new()),
             any_default_scroll_shift_anchor_ever_stored: Cell::new(false),
             text_nodes: Vec::new(),
+            published_text: Default::default(),
             searchable_text: None,
             replaced_content_facts: Vec::new(),
             raw_table_column_spans: HashMap::default(),
             style_image_resources_attached: RefCell::new(HashSet::default()),
-            replaced_paint_facts: RefCell::new(HashMap::default()),
-            layer_image_paint_facts: RefCell::new(HashMap::default()),
+            replaced_paint_facts: RefCell::default(),
+            layer_image_paint_facts: RefCell::default(),
             svg_paint_resources: crate::painting::svg_paint_resources::SvgPaintResources::default(),
             svg_attribute_facts: HashMap::default(),
             svg_points: HashMap::default(),
@@ -1548,6 +1552,7 @@ impl LayoutNodeArena {
         self.paintable_rows.reset_committed_fragment_link_slot(index);
         if let Some(slot) = self.text_nodes.get_mut(index as usize) {
             *slot = TextNodeSlot::default();
+            self.publish_text_slot(index as usize);
         }
         self.text_nodes_enrolled_for_content_sync.get_mut().remove(&id);
         if let Some(slot) = self.replaced_content_facts.get_mut(index as usize) {
@@ -1558,10 +1563,17 @@ impl LayoutNodeArena {
         self.raw_table_column_spans.remove(&id);
         self.style_image_resources_attached.get_mut().remove(&id);
         self.image_boxes_awaiting_owned_provider.get_mut().remove(&id);
-        self.replaced_paint_facts.get_mut().remove(&id);
-        self.layer_image_paint_facts.get_mut().remove(&id);
+        if self.replaced_paint_facts.get_mut().contains_key(&id) {
+            std::sync::Arc::make_mut(self.replaced_paint_facts.get_mut()).remove(&id);
+        }
+        if self.layer_image_paint_facts.get_mut().contains_key(&id) {
+            std::sync::Arc::make_mut(self.layer_image_paint_facts.get_mut()).remove(&id);
+        }
         self.svg_paint_resources.forget_slot(id);
-        self.paint_state.get_mut().selection_pseudo_styles.remove(&id);
+        let selection_pseudo_styles = &mut self.paint_state.get_mut().selection_pseudo_styles;
+        if selection_pseudo_styles.contains_key(&id) {
+            std::sync::Arc::make_mut(selection_pseudo_styles).remove(&id);
+        }
         let data = self.data_mut(index);
         debug_assert!(
             data.parent.get().is_invalid()
@@ -4243,6 +4255,19 @@ impl LayoutNodeArena {
             .is_some_and(|flags| flags & crate::css::style::HOLDS_IMAGE_VALUES != 0)
     }
 
+    /// The replaced and layer image paint facts as they are now, for a frame to publish.
+    pub(crate) fn publish_paint_fact_tables(
+        &self,
+    ) -> (
+        std::sync::Arc<crate::painting::replaced_paint_facts::ReplacedPaintFactsTable>,
+        std::sync::Arc<crate::painting::layer_image_paint_facts::LayerImagePaintFactsTable>,
+    ) {
+        (
+            self.replaced_paint_facts.borrow().clone(),
+            self.layer_image_paint_facts.borrow().clone(),
+        )
+    }
+
     pub(crate) fn replaced_paint_facts(
         &self,
         id: NodeSlotId,
@@ -4294,11 +4319,14 @@ impl LayoutNodeArena {
         }
         let mut table = self.layer_image_paint_facts.borrow_mut();
         let changed = if entries.is_empty() {
-            table.remove(&id).is_some_and(|previous| !previous.is_empty())
+            table.contains_key(&id)
+                && std::sync::Arc::make_mut(&mut table)
+                    .remove(&id)
+                    .is_some_and(|previous| !previous.is_empty())
         } else if table.get(&id) == Some(&entries) {
             false
         } else {
-            table.insert(id, entries);
+            std::sync::Arc::make_mut(&mut table).insert(id, entries);
             true
         };
         drop(table);
@@ -4327,7 +4355,7 @@ impl LayoutNodeArena {
             if table.get(&row) == Some(&facts) {
                 continue;
             }
-            table.insert(row, facts.clone());
+            std::sync::Arc::make_mut(&mut table).insert(row, facts.clone());
             drop(table);
             any_changed = true;
             self.push_paint_damage_for_repaint(row, crate::painting::record::damage::PaintDamage::DRAW_FOREGROUND);
@@ -5326,6 +5354,39 @@ impl LayoutNodeArena {
         slot.state.get_or_insert_with(Default::default)
     }
 
+    /// Brings what frames publish of a text slot in step with it.
+    fn publish_text_slot(&mut self, index: usize) {
+        let published = self
+            .text_nodes
+            .get(index)
+            .and_then(|slot| {
+                let state = slot.state.as_deref()?;
+                Some(super::rendered_text::PublishedTextSlot {
+                    generation: slot.generation,
+                    first_letter: state.first_letter,
+                    rendered: state.content.as_ref().map(|content| content.rendered().clone()),
+                })
+            })
+            .unwrap_or_default();
+        if self.published_text.get(index).is_none() {
+            if published.rendered.is_none() && published.first_letter.is_invalid() {
+                return;
+            }
+            self.published_text.grow_to(index + 1);
+        }
+        let current = self.published_text.get(index).expect("the column was grown");
+        if !current.is_same_as(&published) {
+            *self.published_text.get_mut(index).expect("the column was grown") = published;
+        }
+    }
+
+    /// The text rows as they are now, for a frame to publish.
+    pub(crate) fn publish_text(
+        &mut self,
+    ) -> crate::cow_column::ColumnSnapshot<super::rendered_text::PublishedTextSlot, SLOTS_PER_CHUNK> {
+        self.published_text.publish()
+    }
+
     fn text_node_state(&self, id: NodeSlotId) -> Option<&TextNodeState> {
         if !self.slot_is_live(id) {
             return None;
@@ -5345,6 +5406,7 @@ impl LayoutNodeArena {
             return;
         }
         state.content = Some(content);
+        self.publish_text_slot(id.slot_index() as usize);
         self.searchable_text = None;
         // Publication can happen through a C++ text read before the enrolled
         // sync runs. Invalidate here so every publication invalidates layout,
@@ -5491,6 +5553,8 @@ impl LayoutNodeArena {
             length: source_length - letter_end,
         });
         remainder_state.first_letter = first_letter;
+        self.publish_text_slot(first_letter.slot_index() as usize);
+        self.publish_text_slot(remainder.slot_index() as usize);
         self.invalidate_text_content(first_letter);
         self.invalidate_text_content(remainder);
     }

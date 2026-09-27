@@ -475,7 +475,7 @@ fn paint_image_layer<O: Observer>(
             {
                 // Select an existing space above scrolling, retaining the clips and effects
                 // of the background paint. Background attachment doesn't add AVC nodes.
-                let tree = recorder.paint_state.visual_context.tree.as_ref().unwrap();
+                let tree = recorder.paint_state.visual_context_tree.as_ref().unwrap();
                 let mut spatial = recorder.data(paintable).accumulated_visual_context.spatial;
                 let mut index = spatial;
                 while index != VISUAL_VIEWPORT_NODE_INDEX {
