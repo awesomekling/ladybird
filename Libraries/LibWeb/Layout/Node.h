@@ -398,37 +398,6 @@ public:
 
     virtual ~NodeWithStyle() override;
 
-    class ImageObserver final : public CSS::ImageStyleValue::Client {
-    public:
-        AK_ALLOC_WITH_KMALLOC;
-
-        ImageObserver(NodeWithStyle&, NonnullRefPtr<CSS::ImageStyleValue const> image);
-        virtual ~ImageObserver() override;
-
-        virtual void image_style_value_did_update(CSS::ImageStyleValue&) override;
-
-    private:
-        WeakPtr<NodeWithStyle> m_owner;
-        NonnullRefPtr<CSS::ImageStyleValue const> m_image;
-    };
-
-    // The set a node's style asks for belongs to the arena, which deletes it with the node's row.
-    struct ImageObserverSlots {
-        AK_ALLOC_WITH_KMALLOC;
-
-        Vector<OwnPtr<ImageObserver>> background_layers;
-        Vector<OwnPtr<ImageObserver>> mask_layers;
-        Vector<OwnPtr<ImageObserver>> cursors;
-        OwnPtr<ImageObserver> border_image_source;
-        OwnPtr<ImageObserver> list_style_image;
-    };
-    static void delete_arena_owned_image_observers(ImageObserverSlots&);
-
-    ImageObserver const* background_image_observer(size_t layer_index) const;
-    ImageObserver const* mask_image_observer(size_t layer_index) const;
-    ImageObserver const* cursor_image_observer(size_t cursor_index) const;
-    ImageObserver const* border_image_source_observer() const;
-
     NonnullRefPtr<CSS::ComputedValues const> copy_computed_values() const;
     CSS::StyleRecordID style_record_identity() const { return m_style_record_identity; }
     void const* style_payloads() const { return m_style_payloads; }
@@ -551,7 +520,6 @@ public:
     ReadonlySpan<Utf16FlyString> color_schemes() const { return style_group<CSS::ComputedValues::InheritedUIValues>().color_schemes_span(); }
     bool color_scheme_only() const { return style_group<CSS::ComputedValues::InheritedUIValues>().color_scheme_only; }
     ReadonlySpan<CSS::ComputedValuesFFI::ComputedCursor> cursor() const { return style_group<CSS::ComputedValues::InheritedUIValues>().cursor_span(); }
-    ReadonlySpan<RefPtr<CSS::CursorStyleValue const>> cursor_style_values() const { return m_cursor_style_values; }
     CSS::PointerEvents pointer_events() const { return style_group<CSS::ComputedValues::InheritedUIValues>().pointer_events_value(); }
     CSS::Appearance appearance() const { return static_cast<CSS::Appearance>(style_group<CSS::ComputedValues::MiscResetValues>().appearance); }
     CSS::WillChange will_change() const { return style_group<CSS::ComputedValues::MiscResetValues>().will_change_value(); }
@@ -735,12 +703,10 @@ private:
     void publish_style_record_to_node_data();
     void did_update_style_record();
 
-    void rebuild_image_observers();
+    void rebuild_image_observers(Vector<RefPtr<CSS::CursorStyleValue const>> cursor_style_values);
     void const* m_style_payloads { nullptr };
     bool has_layout_derived_style() const;
     CSS::StyleRecordID m_style_record_identity;
-    ImageObserverSlots* image_observers() const;
-    Vector<RefPtr<CSS::CursorStyleValue const>> m_cursor_style_values;
     mutable Optional<Vector<CSS::BackgroundLayerData>> m_background_layers;
     mutable Optional<Vector<CSS::BackgroundLayerData>> m_mask_layers;
     mutable Optional<CSS::BorderImageData> m_border_image;

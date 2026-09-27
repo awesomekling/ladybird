@@ -61,7 +61,7 @@ private:
 
     virtual CSS::ElementBoxKind box_kind() const override;
     virtual void decoded_image_data_did_update() override { image_provider_contents_changed(); }
-    virtual Layout::Node const* image_provider_layout_node() const override;
+    virtual Painting::BoxSlot image_provider_box() const override;
 
     Optional<URL::URL> m_href;
 

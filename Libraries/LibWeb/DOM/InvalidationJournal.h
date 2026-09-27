@@ -29,7 +29,7 @@ class Scrollbar;
 namespace Web::DOM {
 
 // Writes paint facts to the row an entry resolves to at the drain. Nothing makes a shell for the row to hand it over.
-using PaintFactsUpdate = Function<void(Layout::Row const&)>;
+using PaintFactsUpdate = Function<void(Painting::BoxSlot const&)>;
 
 enum class PaintFactsFamily : u8 {
     LayerImage,
