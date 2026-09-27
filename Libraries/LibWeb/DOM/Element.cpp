@@ -5499,11 +5499,7 @@ void Element::publish_style_recomputes_on_environment_move() const
         return;
     if (!m_style_uses_if_css_function && !m_style_uses_inherit_css_function && !m_style_uses_custom_function && !m_style_depends_on_style_container_query)
         return;
-    auto& style_engine = const_cast<CSS::StyleEngine&>(document().style_computer().style_engine());
-    style_engine.publish_input([element = GC::Root<Element> { const_cast<Element&>(*this) }](CSS::StyleInputScope const& input) {
-        if (element->style_node_id() != 0)
-            CSS::StyleEngineFFI::style_engine_note_element_recomputes_on_environment_move(input, input.engine().rust_handle(), element->style_node_id().value());
-    });
+    const_cast<Document&>(document()).render_inputs_for_write().style_engine().record_recomputes_on_environment_move(style_node);
 }
 
 void Element::publish_size_container_query_facts() const
@@ -5513,17 +5509,11 @@ void Element::publish_size_container_query_facts() const
         return;
     if (!m_is_size_query_container && !m_style_depends_on_size_container_query)
         return;
-    auto& engine = const_cast<CSS::StyleEngine&>(document().style_computer().style_engine());
-    engine.publish_input([element = GC::Root<Element> { const_cast<Element&>(*this) }, is_size_query_container = m_is_size_query_container, style_depends_on_size_container_query = m_style_depends_on_size_container_query](CSS::StyleInputScope const& input) {
-        auto style_node = element->style_node_id();
-        if (style_node == 0)
-            return;
-        auto* style_engine = input.engine().rust_handle();
-        if (is_size_query_container)
-            CSS::StyleEngineFFI::style_engine_note_size_query_container(input, style_engine, style_node.value());
-        if (style_depends_on_size_container_query)
-            CSS::StyleEngineFFI::style_engine_note_style_depends_on_size_container_query(input, style_engine, style_node.value());
-    });
+    auto& engine = const_cast<Document&>(document()).render_inputs_for_write().style_engine();
+    if (m_is_size_query_container)
+        engine.record_size_query_container(style_node);
+    if (m_style_depends_on_size_container_query)
+        engine.record_style_depends_on_size_container_query(style_node);
 }
 
 RefPtr<CSS::CustomPropertyData const> Element::custom_property_data(Optional<CSS::PseudoElement> pseudo_element) const

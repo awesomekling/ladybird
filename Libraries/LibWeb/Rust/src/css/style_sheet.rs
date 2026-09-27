@@ -523,7 +523,7 @@ pub extern "C" fn rust_style_sheet_reset_media_state(sheet: &NativeStyleSheet) {
 
 /// Evaluate media queries throughout the sheet graph from one document environment snapshot, and
 /// hand `flipped(context, rule identity, holds)` each rule whose conditions flipped, for the host to
-/// publish to the document's engine (see [`rust_style_sheet_publish_rule_conditions_hold`]).
+/// publish to the document's engine (recorded as `FfiHostFactKind::RuleConditionsHold` writes).
 ///
 /// # Safety
 /// The environment must contain valid media feature data, and `flipped` must be safe to call with
@@ -540,39 +540,6 @@ pub unsafe extern "C" fn rust_style_sheet_evaluate_media_queries(
         // SAFETY: Guaranteed by the caller.
         unsafe { flipped(context, identity, holds) };
     })
-}
-
-/// Publishes whether the conditions of each rule `identities` names hold, as `holds` says, to the
-/// document's engine: what a media evaluation found flipped.
-///
-/// # Safety
-/// `identities` and `holds` must point to `count` values each.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_style_sheet_publish_rule_conditions_hold(
-    engine: crate::css::style::StyleEngineInputHandle,
-    identities: *const u64,
-    holds: *const bool,
-    count: usize,
-) {
-    // The handle the document's render inputs gave out, to write the engine through.
-    let engine = engine.home();
-    if count == 0 {
-        return;
-    }
-    // SAFETY: Guaranteed by the caller.
-    let (identities, holds) = unsafe {
-        (
-            std::slice::from_raw_parts(identities, count),
-            std::slice::from_raw_parts(holds, count),
-        )
-    };
-    // SAFETY: The engine is live on the document thread.
-    let engine = unsafe { engine.enter("rust_style_sheet_publish_rule_conditions_hold") };
-    for (&identity, &holds) in identities.iter().zip(holds) {
-        if let Some(rule) = engine.native_rule_id(identity) {
-            crate::css::style::bridge::operations::set_rule_conditions_hold(engine, rule.0 + 1, holds);
-        }
-    }
 }
 
 /// Publish inherited condition gates directly into the document engine.

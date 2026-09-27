@@ -324,7 +324,6 @@
     "style_engine_native_container_effect",
     "style_engine_native_container_effect_count",
     "style_engine_native_container_effects_release",
-    "style_engine_note_children_explicitly_inherit",
     "style_engine_pseudo_element_record_damage",
     "style_engine_publish_anchor_names",
     "style_engine_published_pseudo_style_mask",
@@ -351,10 +350,6 @@
   "input_scoped": [
     "style_engine_apply_transaction",
     "style_engine_consume_element_style_input",
-    "style_engine_note_element_recomputes_on_environment_move",
-    "style_engine_note_size_container_needs_evaluation_after_layout",
-    "style_engine_note_size_query_container",
-    "style_engine_note_style_depends_on_size_container_query",
     "style_engine_prepare_root_font_resolution",
     "style_engine_publish_anchor_names",
     "style_engine_publish_font_face_snapshot",

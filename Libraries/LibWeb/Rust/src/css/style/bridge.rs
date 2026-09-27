@@ -400,6 +400,21 @@ pub struct FfiDocumentStyleComputationInputs {
     pub media_feature_values: FfiHostHandle,
     pub media_feature_value_count: usize,
     pub media_length_resolution_context: FfiHostHandle,
+    /// The document's visible custom functions, `FfiCustomFunctionEntry`s, copied at the
+    /// transaction boundary.
+    pub custom_functions: FfiHostHandle,
+    pub custom_function_count: usize,
+}
+
+/// One custom function definition a caller scope can see, as the host publishes it for a
+/// transaction.
+#[derive(Clone, Copy, Debug)]
+#[repr(C)]
+pub struct FfiCustomFunctionEntry {
+    pub function: *const c_void,
+    pub caller_scope: usize,
+    pub definition_scope: usize,
+    pub tree_scope: u32,
 }
 
 /// One style sheet's resource context, keyed by the identity of its native sheet: the base URL a
@@ -447,6 +462,8 @@ impl Default for FfiDocumentStyleComputationInputs {
             media_feature_values: FfiHostHandle { address: 0 },
             media_feature_value_count: 0,
             media_length_resolution_context: FfiHostHandle { address: 0 },
+            custom_functions: FfiHostHandle { address: 0 },
+            custom_function_count: 0,
         }
     }
 }
@@ -1045,6 +1062,20 @@ pub enum FfiHostFactKind {
     /// A moved custom-property environment computes the element `node` again: its style reads the
     /// environment other than through `var()`.
     RecomputesOnEnvironmentMove = 26,
+    /// A style computation asked about the container `node` before it had a committed box.
+    SizeContainerNeedsEvaluationAfterLayout = 27,
+    /// A keyframe-borne `inherit` on a non-inherited property marked the children of `node` as
+    /// explicitly inheriting it.
+    ChildrenExplicitlyInherit = 28,
+    /// `facts` is the language atom of the element `node`, or of no element for none, and `data`
+    /// the tag `:lang()` compares against, as for `TextData` (empty once the language has one).
+    ElementLanguage = 29,
+    /// `value` says whether the conditions of the rule the host knows by the identity `data` hold:
+    /// what a media evaluation found flipped.
+    RuleConditionsHold = 30,
+    /// The element `node` exposes the part named by the atom `facts` for the host `parent`, a
+    /// list at a time as for `SlotAssignedNode`. An empty list is one write with no `parent`.
+    ElementParts = 31,
 }
 
 /// Which element an `FfiReplacedContentInput` holds the values of.
@@ -1538,9 +1569,22 @@ impl StyleEngineState {
     }
 }
 
-/// Creates one document's style engine.
+/// Creates one document's style engine, with the document thread's pin table lent to it (see
+/// [`super::host_pins`]) and, for a document that computes style, `resolve` installed as its font
+/// resolver. Writes the recording stream the engine records under, or zero, to `recording_stream`.
+///
+/// # Safety
+/// `pins` must come from [`style_record_host_pins_create`] and outlive the engine, and
+/// `recording_stream` must be valid for a write.
 #[unsafe(no_mangle)]
-pub extern "C" fn style_engine_create(device_class: FfiDeviceClass) -> *mut c_void {
+pub unsafe extern "C" fn style_engine_create(
+    device_class: FfiDeviceClass,
+    pins: *mut c_void,
+    resolve: Option<
+        unsafe extern "C" fn(usize, *const c_void, *const FfiFontResolutionRequest, *mut FfiResolvedFont, usize),
+    >,
+    recording_stream: *mut u64,
+) -> *mut c_void {
     super::seal::note_engine_call("style_engine_create");
     let device_class = device_class.decode();
     let mut engine = Box::new(StyleEngine::new(device_class));
@@ -1554,6 +1598,17 @@ pub extern "C" fn style_engine_create(device_class: FfiDeviceClass) -> *mut c_vo
             payload.write_u32_slice(output_masks);
         }
     });
+    // SAFETY: Guaranteed by the caller.
+    let handle = unsafe { super::host_pins::HostPinsHandle::new(pins.cast()) };
+    engine
+        .computed_group_sets
+        .lend_host_pins(super::host_pins::HostPinsLend::Lent(handle));
+    if let Some(resolve) = resolve {
+        engine.host.font_resolver = Some(super::font_resolution::FontResolverHost::new(resolve));
+        engine.retained.font_resolution = Some(super::font_resolution::FontResolutionCache::default());
+    }
+    // SAFETY: Guaranteed by the caller.
+    unsafe { recording_stream.write(engine.recording_id().unwrap_or(0)) };
     StyleEngineHandle::create(engine).into_ffi()
 }
 
@@ -1609,36 +1664,6 @@ pub unsafe extern "C" fn style_record_host_pins_begin_pin_waiting_for_frame(pins
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_record_host_pins_end_pin_waiting_for_frame(pins: *const c_void) {
     unsafe { &*pins.cast::<super::host_pins::HostStyleRecordPins>() }.end_pin_waiting_for_frame();
-}
-
-/// Lends the document thread's pin table to the engine, which reads it wherever it would reclaim a
-/// style record while the document thread waits on it.
-///
-/// # Safety
-/// `engine` must be live; `pins` must come from [`style_record_host_pins_create`] and outlive it.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_lend_host_style_record_pins(engine: StyleEngineInputHandle, pins: *mut c_void) {
-    let engine = unsafe { engine_entrance(engine, "style_engine_lend_host_style_record_pins") };
-    // SAFETY: Guaranteed by the caller.
-    let handle = unsafe { super::host_pins::HostPinsHandle::new(pins.cast()) };
-    engine
-        .computed_group_sets
-        .lend_host_pins(super::host_pins::HostPinsLend::Lent(handle));
-}
-
-/// Installs the document's synchronous platform font resolver once.
-///
-/// # Safety
-/// The context and callback must remain valid until the engine is destroyed.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_install_font_resolver(
-    engine: StyleEngineInputHandle,
-    resolve: unsafe extern "C" fn(usize, *const c_void, *const FfiFontResolutionRequest, *mut FfiResolvedFont, usize),
-) {
-    let engine = unsafe { engine_entrance(engine, "style_engine_install_font_resolver") };
-    assert!(engine.host.font_resolver.is_none(), "font resolver is installed once");
-    engine.host.font_resolver = Some(super::font_resolution::FontResolverHost::new(resolve));
-    engine.retained.font_resolution = Some(super::font_resolution::FontResolutionCache::default());
 }
 
 /// Publishes the document's `@font-face` table for the generation this update computes against.
@@ -2542,7 +2567,9 @@ impl Drop for InputForPass {
         for write in &self.host_fact_writes {
             match write.kind {
                 // SAFETY: The write transfers one reference to a live string.
-                FfiHostFactKind::TextData => drop(unsafe { ak::Utf16String::from_raw_owned(write.data) }),
+                FfiHostFactKind::TextData | FfiHostFactKind::ElementLanguage => {
+                    drop(unsafe { ak::Utf16String::from_raw_owned(write.data) });
+                }
                 FfiHostFactKind::ElementInlineStyleProperties if write.data != 0 => {
                     // SAFETY: The write transfers one reference to the snapshot.
                     drop(unsafe {
@@ -2645,6 +2672,20 @@ unsafe fn apply_host_fact_writes(engine: &mut StyleEngine, writes: &[FfiHostFact
                 index += list.len();
                 continue;
             }
+            FfiHostFactKind::ElementParts => {
+                let list = node_list_run(&writes[index..index + run_length], true);
+                if let Some(node) = StyleNodeID::from_raw(write.node) {
+                    let pairs = list
+                        .iter()
+                        .filter_map(|member| {
+                            StyleNodeID::from_raw(member.parent).map(|host| (StyleAtomID(member.facts), host))
+                        })
+                        .collect::<Vec<_>>();
+                    set_element_parts(engine, node, &pairs);
+                }
+                index += list.len();
+                continue;
+            }
             FfiHostFactKind::TopLayerElement => {
                 let list = node_list_run(&writes[index..index + run_length], false);
                 let elements: Vec<u32> = list.iter().map(|member| member.node).collect();
@@ -2668,6 +2709,16 @@ unsafe fn apply_host_fact_writes(engine: &mut StyleEngine, writes: &[FfiHostFact
                 // SAFETY: The caller vouches that the write transfers one reference to a live string.
                 let data = unsafe { ak::Utf16String::from_raw_owned(write.data) };
                 set_text_data(engine, write.node, data);
+            }
+            FfiHostFactKind::RuleConditionsHold => {
+                if let Some(rule) = engine.native_rule_id(write.data as u64) {
+                    operations::set_rule_conditions_hold(engine, rule.0 + 1, write.value != 0);
+                }
+            }
+            FfiHostFactKind::ElementLanguage => {
+                // SAFETY: As for `TextData`.
+                let text = unsafe { ak::Utf16String::from_raw_owned(write.data) };
+                set_element_language(engine, write.node, write.facts, &text.to_utf16());
             }
             FfiHostFactKind::ElementAdjustmentFacts => {
                 operations::set_element_adjustment_facts(engine, write.node, write.facts);
@@ -2709,6 +2760,16 @@ unsafe fn apply_host_fact_writes(engine: &mut StyleEngine, writes: &[FfiHostFact
             FfiHostFactKind::RecomputesOnEnvironmentMove => {
                 if let Some(node) = StyleNodeID::from_raw(write.node) {
                     engine.note_element_recomputes_on_environment_move(node);
+                }
+            }
+            FfiHostFactKind::SizeContainerNeedsEvaluationAfterLayout => {
+                if let Some(node) = StyleNodeID::from_raw(write.node) {
+                    engine.note_size_container_needs_evaluation_after_layout(node);
+                }
+            }
+            FfiHostFactKind::ChildrenExplicitlyInherit => {
+                if let Some(node) = StyleNodeID::from_raw(write.node) {
+                    engine.note_children_explicitly_inherit(node);
                 }
             }
             FfiHostFactKind::ElementAssociatedPseudoKind => {
@@ -3017,44 +3078,20 @@ pub(crate) fn publish_style_rule_selectors(
         super::selector::replay::write(engine.selector_program_for_rule(RuleID(rule - 1)), payload);
     });
 }
-/// Records the shadow parts an element exposes and which host each name reaches.
-///
-/// # Safety
-/// `engine` must be live, and `names` and `hosts` must each point to `count` values.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_set_element_parts(
-    engine: StyleEngineInputHandle,
-    node: u32,
-    names: *const u32,
-    hosts: *const u32,
-    count: usize,
-) {
-    let engine = unsafe { engine_entrance(engine, "style_engine_set_element_parts") };
-    let Some(node) = StyleNodeID::from_raw(node) else {
-        return;
-    };
-    let pairs: Vec<(StyleAtomID, StyleNodeID)> = match count == 0 || names.is_null() || hosts.is_null() {
-        true => Vec::new(),
-        false => {
-            let names = unsafe { std::slice::from_raw_parts(names, count) };
-            let hosts = unsafe { std::slice::from_raw_parts(hosts, count) };
-            names
-                .iter()
-                .zip(hosts.iter())
-                .filter_map(|(name, host)| StyleNodeID::from_raw(*host).map(|host| (StyleAtomID(*name), host)))
-                .collect()
-        }
-    };
-    engine.set_element_parts(node, &pairs);
+
+/// Records the parts the element exposes, each by its name and the host it is exposed for.
+fn set_element_parts(engine: &mut StyleEngine, node: StyleNodeID, pairs: &[(StyleAtomID, StyleNodeID)]) {
+    engine.set_element_parts(node, pairs);
     engine.record_boundary_call(EventKind::SetElementParts, |payload| {
         payload.write_u32(node.raw());
         payload.write_length(pairs.len());
-        for (name, host) in &pairs {
+        for (name, host) in pairs {
             payload.write_u32(name.0);
             payload.write_u32(host.raw());
         }
     });
 }
+
 /// Records the characters a text node holds, as the document spells them.
 fn set_text_data(engine: &mut StyleEngine, node: u32, data: ak::Utf16String) {
     engine.record_boundary_call(EventKind::SetTextData, |payload| {
@@ -3068,22 +3105,8 @@ fn set_text_data(engine: &mut StyleEngine, node: u32, data: ak::Utf16String) {
 }
 
 /// Records the element's resolved language, as its primary subtag atom.
-///
-/// # Safety
-/// `engine` must be live.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_set_element_language(
-    engine: StyleEngineInputHandle,
-    node: u32,
-    language: u32,
-    text: *const u16,
-    text_length: usize,
-) {
-    let engine = unsafe { engine_entrance(engine, "style_engine_set_element_language") };
-    let text = match language != 0 && !text.is_null() {
-        true => unsafe { std::slice::from_raw_parts(text, text_length) },
-        false => &[],
-    };
+fn set_element_language(engine: &mut StyleEngine, node: u32, language: u32, text: &[u16]) {
+    let text = if language != 0 { text } else { &[] };
     if language != 0 && !text.is_empty() {
         // A range is not a name, so `:lang()` compares against the tag itself. It is recorded
         // once per language rather than once per element.
@@ -5146,31 +5169,6 @@ pub unsafe extern "C" fn style_engine_cascaded_custom_property_importance(
     engine.cascaded_custom_property_importance(node, (pseudo_kind != u8::MAX).then_some(pseudo_kind), name_raw)
 }
 
-/// Records what a custom property's name atom spells, and the fly string it is. The fly string is
-/// retained and never recorded: a replay has no strings, and names its entries by atom alone.
-///
-/// # Safety
-/// `engine` must be live, `raw` must be a live `AK::Utf16FlyString` raw representation, and `text`
-/// must name `length` code units.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_note_custom_property_name(
-    engine: StyleEngineInputHandle,
-    name: u32,
-    raw: usize,
-    text: *const u16,
-    length: usize,
-) {
-    let engine = unsafe { engine_entrance(engine, "style_engine_note_custom_property_name") };
-    if name == 0 || (length != 0 && text.is_null()) {
-        return;
-    }
-    let text = match length {
-        0 => &[],
-        _ => unsafe { std::slice::from_raw_parts(text, length) },
-    };
-    unsafe { note_native_custom_property_name(engine, StyleAtomID(name), raw, text) };
-}
-
 // The raw identity must remain a live Utf16FlyString for the native engine to retain it.
 unsafe fn note_native_custom_property_name(engine: &mut StyleEngine, name: StyleAtomID, raw: usize, text: &[u16]) {
     unsafe { engine.note_custom_property_name(name, raw, text) };
@@ -5178,6 +5176,32 @@ unsafe fn note_native_custom_property_name(engine: &mut StyleEngine, name: Style
         payload.write_u32(name.0);
         payload.write_u16_slice(text);
     });
+}
+
+/// Replays recorded element parts.
+///
+/// # Safety
+/// `engine` must be live.
+pub unsafe fn replay_set_element_parts(engine: StyleEngineHandle, node: u32, names: &[u32], hosts: &[u32]) {
+    let engine = unsafe { engine.for_replay() };
+    let Some(node) = StyleNodeID::from_raw(node) else {
+        return;
+    };
+    let pairs = names
+        .iter()
+        .zip(hosts)
+        .filter_map(|(name, host)| StyleNodeID::from_raw(*host).map(|host| (StyleAtomID(*name), host)))
+        .collect::<Vec<_>>();
+    set_element_parts(engine, node, &pairs);
+}
+
+/// Replays a recorded element language.
+///
+/// # Safety
+/// `engine` must be live.
+pub unsafe fn replay_set_element_language(engine: StyleEngineHandle, node: u32, language: u32, text: &[u16]) {
+    let engine = unsafe { engine.for_replay() };
+    set_element_language(engine, node, language, text);
 }
 
 /// Replays a recorded custom-property name without a fly string behind it.
@@ -5431,19 +5455,6 @@ pub unsafe extern "C" fn style_engine_native_rule_target(
     true
 }
 
-/// The host marked a node's children as explicitly inheriting a non-inherited property, from a
-/// keyframe-borne `inherit` its animation sample found.
-///
-/// # Safety
-/// Engine must be live.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_note_children_explicitly_inherit(engine: StyleEngineInputHandle, node: u32) {
-    let engine = unsafe { engine_entrance(engine, "style_engine_note_children_explicitly_inherit") };
-    if let Some(node) = StyleNodeID::from_raw(node) {
-        engine.note_children_explicitly_inherit(node);
-    }
-}
-
 /// Whether the engine holds a style pass the host has taken only some waves of.
 ///
 /// # Safety
@@ -5604,16 +5615,6 @@ pub extern "C" fn style_engine_release_host_qualified_atom(namespace: u32, name:
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_release_host_atom(raw: usize, atom: u32) {
     super::atoms::release_raw_without_adoption(raw, StyleAtomID(atom));
-}
-
-/// The recording stream the engine records under, or zero. It is fixed when the engine is created.
-///
-/// # Safety
-/// `engine` must be live.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_recording_stream(engine: StyleEngineHandle) -> u64 {
-    let engine: &StyleEngine = unsafe { engine.enter("style_engine_recording_stream") };
-    engine.recording_id().unwrap_or(0)
 }
 
 pub(crate) fn intern_native_text(engine: &mut StyleEngine, units: &[u16]) -> StyleAtomID {
@@ -6281,6 +6282,8 @@ unsafe fn begin_style_transaction(engine: &mut StyleEngine, mut computation_inpu
         unsafe { super::resource_contexts::DocumentResourceContexts::take_from(&mut computation_inputs) };
     engine.document_media_snapshot =
         unsafe { super::custom_property_cascade::DocumentMediaSnapshot::take_from(&mut computation_inputs) };
+    engine.document_function_snapshot =
+        unsafe { super::custom_property_cascade::DocumentFunctionSnapshot::take_from(&mut computation_inputs) };
     let resource_contexts_moved = engine.document_resource_contexts.moved_for_records(&resource_contexts);
     engine.document_resource_contexts = resource_contexts;
     engine.custom_property_registrations_changed = engine
@@ -6704,40 +6707,6 @@ pub unsafe extern "C" fn style_engine_element_custom_property_data(
         StyleNodeID::from_raw(node).map_or((std::ptr::null(), 0), |node| engine.element_custom_property_data(node));
     unsafe { *identity = environment };
     data
-}
-
-/// Notes that the element's style reads what a moved custom-property environment can change other
-/// than through `var()`.
-///
-/// # Safety
-/// `engine` must be live.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_note_element_recomputes_on_environment_move(
-    engine: StyleEngineInputHandle,
-    node: u32,
-) {
-    let engine = unsafe { engine_entrance(engine, "style_engine_note_element_recomputes_on_environment_move") };
-    let Some(node) = StyleNodeID::from_raw(node) else {
-        return;
-    };
-    engine.note_element_recomputes_on_environment_move(node);
-}
-
-/// Whether a moved custom-property environment computes the element again: its style reads a name
-/// through `var()`, or reads the environment another way the host noted.
-///
-/// # Safety
-/// `engine` must be live.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_environment_move_needs_recompute(
-    engine: StyleEngineInputHandle,
-    node: u32,
-) -> bool {
-    let engine = unsafe { engine_entrance(engine, "style_engine_environment_move_needs_recompute") };
-    let Some(node) = StyleNodeID::from_raw(node) else {
-        return true;
-    };
-    engine.element_recomputes_on_environment_move(node) || engine.node_style_reads_custom_properties(node)
 }
 
 /// Keeps the custom-property environment one of an element's synthetic pseudo-elements now holds. A
@@ -7490,51 +7459,6 @@ mod tests {
         assert!(nodes.windows(2).all(|pair| pair[0] < pair[1]));
         assert!(engine.memory().bytes_in_category(MemoryCategory::RelationColumns) > 0);
     }
-}
-
-/// Notes that a size query or container-relative unit resolved against the element.
-///
-/// # Safety
-/// `engine` must be live.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_note_size_query_container(engine: StyleEngineInputHandle, node: u32) {
-    let engine = unsafe { engine_entrance(engine, "style_engine_note_size_query_container") };
-    let Some(node) = StyleNodeID::from_raw(node) else {
-        return;
-    };
-    engine.note_size_query_container(node);
-}
-
-/// Notes that a size query or container-relative unit decided the element's style.
-///
-/// # Safety
-/// `engine` must be live.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_note_style_depends_on_size_container_query(
-    engine: StyleEngineInputHandle,
-    node: u32,
-) {
-    let engine = unsafe { engine_entrance(engine, "style_engine_note_style_depends_on_size_container_query") };
-    let Some(node) = StyleNodeID::from_raw(node) else {
-        return;
-    };
-    engine.note_style_depends_on_size_container_query(node);
-}
-
-/// Notes that a style computation asked about a container that had no committed box yet.
-///
-/// # Safety
-/// `engine` must be live.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_note_size_container_needs_evaluation_after_layout(
-    engine: StyleEngineInputHandle,
-    node: u32,
-) {
-    let engine = unsafe { engine_entrance(engine, "style_engine_note_size_container_needs_evaluation_after_layout") };
-    let Some(node) = StyleNodeID::from_raw(node) else {
-        return;
-    };
-    engine.note_size_container_needs_evaluation_after_layout(node);
 }
 
 /// Whether a container asked about before it had a box still waits for the layout that gives it one.
