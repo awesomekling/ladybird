@@ -770,6 +770,35 @@ void StyleScope::invalidate_counter_style_cache()
     });
 }
 
+namespace {
+
+struct UserAgentCounterStyleRule {
+    Utf16FlyString layer_prefix;
+    CounterStyleDefinition definition;
+};
+
+}
+
+// OPTIMIZATION: The user-agent sheets are process-wide and never change, and none of their @counter-style rules sits
+//               under a condition or names a length, so the definitions they declare are the same for every document.
+//               Every document's scope registers them, which a new iframe or SVG image does in its first style
+//               update, so they are made from the rules once.
+static Vector<UserAgentCounterStyleRule> const& user_agent_counter_style_rules(StyleSheetState const& style_sheet, ComputationContext const& computation_context)
+{
+    static auto& rules_by_sheet = *new HashMap<StyleSheetState const*, Vector<UserAgentCounterStyleRule>>;
+    return rules_by_sheet.ensure(&style_sheet, [&] {
+        Vector<UserAgentCounterStyleRule> rules;
+        style_sheet.for_each_effective_rule_data(TraversalOrder::Preorder, [&](RustRuleView const& rule, Utf16View layer_prefix) {
+            if (rule.type() != RustRule::Type::CounterStyle)
+                return;
+            auto name = Utf16FlyString { rule.name() };
+            if (auto definition = CounterStyleDefinition::from_descriptors(name.view(), rule.descriptors(), computation_context); definition.has_value())
+                rules.append({ Utf16FlyString::from_utf16(layer_prefix), definition.release_value() });
+        });
+        return rules;
+    });
+}
+
 void StyleScope::build_counter_style_cache()
 {
     HTML::MainThreadPhases::Scope phase { HTML::MainThreadPhases::Phase::StyleScopeCaches };
@@ -983,6 +1012,11 @@ void StyleScope::build_counter_style_cache()
         .length_resolution_context = CSS::Length::ResolutionContext::for_document(document())
     };
 
+    auto const loses_to_existing_definition = [&](Utf16FlyString const& name, CounterStylePriority priority) {
+        auto existing = counter_style_priorities.get(name);
+        return existing.has_value() && (existing->origin > priority.origin || (existing->origin == priority.origin && existing->layer > priority.layer));
+    };
+
     auto collect_counter_style_definitions = [&](CSS::CascadeOrigin cascade_origin, CSS::StyleSheetState const& style_sheet) {
         if (!style_sheet.native_media_list().matches())
             return;
@@ -999,6 +1033,20 @@ void StyleScope::build_counter_style_cache()
             }
         }();
         auto const& rule_sheet = style_sheet.shared_compiled_style_sheet() ? style_sheet.shared_compiled_style_sheet()->contents() : style_sheet;
+        if (cascade_origin == CSS::CascadeOrigin::UserAgent) {
+            for (auto const& rule : user_agent_counter_style_rules(rule_sheet, computation_context)) {
+                auto const& name = rule.definition.name();
+                CounterStylePriority priority {
+                    .origin = origin_priority,
+                    .layer = published_layer_index(rule.layer_prefix),
+                };
+                if (loses_to_existing_definition(name, priority))
+                    continue;
+                counter_style_definitions.set(name, rule.definition);
+                counter_style_priorities.set(name, priority);
+            }
+            return;
+        }
         rule_sheet.for_each_effective_rule_data(TraversalOrder::Preorder, [&](RustRuleView const& rule, Utf16View layer_prefix) {
             if (rule.type() != RustRule::Type::CounterStyle)
                 return;
@@ -1007,10 +1055,8 @@ void StyleScope::build_counter_style_cache()
                 .origin = origin_priority,
                 .layer = published_layer_index(Utf16FlyString::from_utf16(layer_prefix)),
             };
-            if (auto existing = counter_style_priorities.get(name); existing.has_value()) {
-                if (existing->origin > priority.origin || (existing->origin == priority.origin && existing->layer > priority.layer))
-                    return;
-            }
+            if (loses_to_existing_definition(name, priority))
+                return;
             if (auto const& definition = CSS::CounterStyleDefinition::from_descriptors(name.view(), rule.descriptors(), computation_context); definition.has_value()) {
                 counter_style_definitions.set(definition->name(), *definition);
                 counter_style_priorities.set(definition->name(), priority);
