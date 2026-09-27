@@ -40,6 +40,9 @@ pub(crate) struct PresentedRecording {
 enum TicketState {
     Recording,
     Answered(Box<RecordingAnswer>),
+    // The recording unwound before it answered, taking the recorder state with it. Its panic
+    // continues where the main thread takes its stage back.
+    Abandoned,
     Presenting,
     Presented(Box<PresentedRecording>),
     TakenIn,
@@ -54,13 +57,37 @@ pub(crate) struct RecordingTicket {
     presented_by_frame: AtomicBool,
 }
 
+/// How a submitted recording answers on its ticket, which only it can. Dropped without answering, as
+/// when the recording panics, it leaves the ticket abandoned, so nothing that waits for the answer
+/// waits forever.
+pub(crate) struct RecordingAnswerer(Option<Arc<RecordingTicket>>);
+
+impl RecordingAnswerer {
+    /// On the recording's stage, once it has run.
+    pub(crate) fn answer(mut self, answer: RecordingAnswer) {
+        let ticket = self.0.take().expect("a recording answers once");
+        ticket.set(TicketState::Answered(Box::new(answer)));
+    }
+}
+
+impl Drop for RecordingAnswerer {
+    fn drop(&mut self) {
+        if let Some(ticket) = self.0.take() {
+            ticket.set(TicketState::Abandoned);
+        }
+    }
+}
+
 impl RecordingTicket {
-    pub(crate) fn new() -> Arc<Self> {
-        Arc::new(Self {
+    /// A ticket, and the one answerer that answers on it.
+    pub(crate) fn new() -> (Arc<Self>, RecordingAnswerer) {
+        let ticket = Arc::new(Self {
             state: Mutex::new(TicketState::Recording),
             changed: Condvar::new(),
             presented_by_frame: AtomicBool::new(false),
-        })
+        });
+        let answerer = RecordingAnswerer(Some(ticket.clone()));
+        (ticket, answerer)
     }
 
     fn lock(&self) -> MutexGuard<'_, TicketState> {
@@ -74,14 +101,14 @@ impl RecordingTicket {
         self.changed.notify_all();
     }
 
-    /// On the recording's stage, once it has run.
-    pub(crate) fn answer(&self, answer: RecordingAnswer) {
-        self.set(TicketState::Answered(Box::new(answer)));
-    }
-
     /// On the document thread, as the frame's presentation is submitted: it publishes the answer.
     pub(crate) fn will_be_presented(&self) {
         self.presented_by_frame.store(true, Ordering::Relaxed);
+    }
+
+    /// On the presentation stage: whether the recording unwound, and left nothing to present.
+    pub(crate) fn was_abandoned(&self) -> bool {
+        matches!(*self.wait_for_answer(), TicketState::Abandoned)
     }
 
     fn wait_for_answer(&self) -> MutexGuard<'_, TicketState> {
@@ -132,11 +159,12 @@ impl RecordingTicket {
     /// with `wait`, or returning nothing if it is not yet.
     fn take(&self, wait: bool) -> Option<TicketState> {
         let mut state = self.lock();
+        let mut released_holds = false;
         loop {
             let is_final = match &*state {
                 TicketState::Recording | TicketState::Presenting => false,
                 TicketState::Answered(_) => !self.presented_by_frame.load(Ordering::Relaxed),
-                TicketState::Presented(_) => true,
+                TicketState::Abandoned | TicketState::Presented(_) => true,
                 TicketState::TakenIn => unreachable!("a document takes a recording in once"),
             };
             if is_final {
@@ -144,6 +172,11 @@ impl RecordingTicket {
             }
             if !wait {
                 return None;
+            }
+            // A test's hold on the recording or its presentation would keep them from answering.
+            if !released_holds {
+                crate::stage_thread::release_holds_on_recording();
+                released_holds = true;
             }
             state = self
                 .changed
@@ -270,7 +303,51 @@ impl LayoutNodeArena {
                     presented.publishes_recording,
                 );
             }
+            // The recording unwound with the recorder state: the next one starts from none.
+            TicketState::Abandoned => {}
             TicketState::Recording | TicketState::Presenting | TicketState::TakenIn => unreachable!(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn panic_while_recording(answerer: RecordingAnswerer) -> std::thread::JoinHandle<()> {
+        std::thread::spawn(move || {
+            let _answerer = answerer;
+            panic!("the recording failed");
+        })
+    }
+
+    #[test]
+    fn a_recording_that_panics_leaves_its_ticket_abandoned_for_the_presentation() {
+        let (ticket, answerer) = RecordingTicket::new();
+        ticket.will_be_presented();
+        assert!(panic_while_recording(answerer).join().is_err());
+        assert!(ticket.was_abandoned());
+        assert!(
+            ticket
+                .present::<()>(|_, _| unreachable!("an abandoned recording presents nothing"))
+                .is_none()
+        );
+        assert!(matches!(ticket.take(true), Some(TicketState::Abandoned)));
+    }
+
+    #[test]
+    fn a_document_waiting_for_a_recording_that_panics_takes_in_nothing() {
+        let arena = LayoutNodeArena::new();
+        let (ticket, answerer) = RecordingTicket::new();
+        arena.recording().await_recording(ticket.clone());
+        ticket.will_be_presented();
+        let recording = panic_while_recording(answerer);
+        {
+            let mut taken_in = arena.recording();
+            assert!(taken_in.pending_recording().is_none());
+            assert!(taken_in.recorder().published_recording.is_none());
+        }
+        assert!(!arena.has_recording_in_flight());
+        assert!(recording.join().is_err());
     }
 }

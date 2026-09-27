@@ -1177,6 +1177,12 @@ fn release_hold_on(hold_labels: &[&'static str]) {
     }
 }
 
+/// Called where the main thread waits for a recording in flight to answer on its ticket, which is not
+/// a join: a test's hold on the recording or its presentation would keep it from answering.
+pub(crate) fn release_holds_on_recording() {
+    release_hold_on(&["recording", PRESENTATION_STAGE]);
+}
+
 /// Called before the main thread queues a stage behind the submitted ones. A held run stays held
 /// until its test releases it, whatever the main thread queues behind it, so this waits until an
 /// armed hold holds its run, or until no submitted run it could hold is left. Returns whether the
