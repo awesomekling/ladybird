@@ -885,7 +885,7 @@ enum class PublicationSite : u8 {
     FrameInFlight,
 };
 
-static Compositor::PublishedDisplayList publish_rust_display_list_recording(PublicationSite site, PendingDisplayListRecording& recording, void const* recording_ticket, Compositing::DisplayList* paint_command_cache_source, Compositing::DisplayListResourceSet const& paint_command_cache_source_resources, Compositor::PresentationSource& source)
+static Optional<Compositor::PublishedDisplayList> publish_rust_display_list_recording(PublicationSite site, PendingDisplayListRecording& recording, void const* recording_ticket, Compositing::DisplayList* paint_command_cache_source, Compositing::DisplayListResourceSet const& paint_command_cache_source_resources, Compositor::PresentationSource& source)
 {
     auto* arena = recording.arena;
     RecordingPublishStorage publish_storage { recording.resource_storage };
@@ -896,8 +896,12 @@ static Compositor::PublishedDisplayList publish_rust_display_list_recording(Publ
     // is published in and read back from its arena.
     Layout::RustFFI::FfiPresentedRecording presented {};
     if (recording_ticket) {
-        VERIFY(site == PublicationSite::FrameInFlight);
-        VERIFY(Layout::RustFFI::layout_recording_ticket_publish_in_frame(recording_ticket, recording_publish_callbacks(publish_storage), &presented));
+        ASSERT(site == PublicationSite::FrameInFlight);
+        // The frame presents an answered recording once; a ticket with nothing to present shows nothing.
+        bool const did_present = Layout::RustFFI::layout_recording_ticket_publish_in_frame(recording_ticket, recording_publish_callbacks(publish_storage), &presented);
+        ASSERT(did_present);
+        if (!did_present)
+            return {};
     } else {
         if (site == PublicationSite::FrameInFlight)
             Layout::RustFFI::layout_arena_publish_recording_in_frame(arena, recording_publish_callbacks(publish_storage));
@@ -928,7 +932,7 @@ static Compositor::PublishedDisplayList publish_rust_display_list_recording(Publ
             if (rust_painting_timing_enabled())
                 dbgln("PAINT_RECORD rust={} µs identical to the previous recording", rust_timer.elapsed_time().to_microseconds());
             stamp_async_scrolling_metadata_with_current_viewport_rect(*paint_command_cache_source);
-            return {
+            return Compositor::PublishedDisplayList {
                 .display_list = *paint_command_cache_source,
                 .command_resources = paint_command_cache_source_resources,
                 .is_paint_command_cache_source = true,
@@ -945,7 +949,7 @@ static Compositor::PublishedDisplayList publish_rust_display_list_recording(Publ
         display_list->set_surface_clear_color(*recording.surface_clear_color);
     stamp_async_scrolling_metadata_with_current_viewport_rect(*display_list);
     auto command_resources = recording.resource_storage.collect_referenced_resources(*display_list);
-    return {
+    return Compositor::PublishedDisplayList {
         .display_list = move(display_list),
         .command_resources = move(command_resources),
         .is_paint_command_cache_source = false,
@@ -955,10 +959,11 @@ static Compositor::PublishedDisplayList publish_rust_display_list_recording(Publ
 
 Compositor::PublishedDisplayList publish_rust_display_list_recording(PendingDisplayListRecording& recording, Compositing::DisplayList* paint_command_cache_source, Compositing::DisplayListResourceSet const& paint_command_cache_source_resources, Compositor::PresentationSource& source)
 {
-    return publish_rust_display_list_recording(PublicationSite::MainThread, recording, nullptr, paint_command_cache_source, paint_command_cache_source_resources, source);
+    // Only a ticket leaves nothing to publish.
+    return publish_rust_display_list_recording(PublicationSite::MainThread, recording, nullptr, paint_command_cache_source, paint_command_cache_source_resources, source).release_value();
 }
 
-Compositor::PublishedDisplayList publish_rust_display_list_recording_in_frame(PendingDisplayListRecording& recording, void const* recording_ticket, Compositing::DisplayList* paint_command_cache_source, Compositing::DisplayListResourceSet const& paint_command_cache_source_resources, Compositor::PresentationSource& source)
+Optional<Compositor::PublishedDisplayList> publish_rust_display_list_recording_in_frame(PendingDisplayListRecording& recording, void const* recording_ticket, Compositing::DisplayList* paint_command_cache_source, Compositing::DisplayListResourceSet const& paint_command_cache_source_resources, Compositor::PresentationSource& source)
 {
     return publish_rust_display_list_recording(PublicationSite::FrameInFlight, recording, recording_ticket, paint_command_cache_source, paint_command_cache_source_resources, source);
 }

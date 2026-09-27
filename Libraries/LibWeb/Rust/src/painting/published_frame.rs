@@ -133,7 +133,9 @@ impl PublishedPaintState {
     }
 
     pub(crate) fn scroll_own_offset(&self, slot: usize) -> CssPixelPoint {
-        self.scroll_own_offsets[slot]
+        let offset = self.scroll_own_offsets.get(slot).copied();
+        debug_assert!(offset.is_some(), "the tree's scroll node has a scroll state");
+        offset.unwrap_or_default()
     }
 }
 

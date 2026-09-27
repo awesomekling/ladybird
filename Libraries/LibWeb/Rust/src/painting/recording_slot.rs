@@ -18,7 +18,7 @@ use crate::painting::record::RecordingOutput;
 use crate::painting::record::recorder_state::RecorderState;
 use std::cell::RefMut;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 
 /// What a recording answers once it has run: the recorder state it was handed, and what it
 /// recorded.
@@ -91,9 +91,8 @@ impl RecordingTicket {
     }
 
     fn lock(&self) -> MutexGuard<'_, TicketState> {
-        self.state
-            .lock()
-            .expect("a recording ticket is not held across a panic")
+        // Nothing panics while holding the state, so a poisoned lock still holds a whole one.
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     fn set(&self, state: TicketState) {
@@ -114,10 +113,7 @@ impl RecordingTicket {
     fn wait_for_answer(&self) -> MutexGuard<'_, TicketState> {
         let mut state = self.lock();
         while matches!(*state, TicketState::Recording) {
-            state = self
-                .changed
-                .wait(state)
-                .expect("a recording ticket is not held across a panic");
+            state = self.changed.wait(state).unwrap_or_else(PoisonError::into_inner);
         }
         state
     }
@@ -165,7 +161,10 @@ impl RecordingTicket {
                 TicketState::Recording | TicketState::Presenting => false,
                 TicketState::Answered(_) => !self.presented_by_frame.load(Ordering::Relaxed),
                 TicketState::Abandoned | TicketState::Presented(_) => true,
-                TicketState::TakenIn => unreachable!("a document takes a recording in once"),
+                TicketState::TakenIn => {
+                    debug_assert!(false, "a document takes a recording in once");
+                    true
+                }
             };
             if is_final {
                 return Some(std::mem::replace(&mut *state, TicketState::TakenIn));
@@ -178,10 +177,7 @@ impl RecordingTicket {
                 crate::stage_thread::release_holds_on_recording();
                 released_holds = true;
             }
-            state = self
-                .changed
-                .wait(state)
-                .expect("a recording ticket is not held across a panic");
+            state = self.changed.wait(state).unwrap_or_else(PoisonError::into_inner);
         }
     }
 }
@@ -304,8 +300,8 @@ impl LayoutNodeArena {
                 );
             }
             // The recording unwound with the recorder state: the next one starts from none.
-            TicketState::Abandoned => {}
-            TicketState::Recording | TicketState::Presenting | TicketState::TakenIn => unreachable!(),
+            TicketState::Abandoned | TicketState::TakenIn => {}
+            TicketState::Recording | TicketState::Presenting => unreachable!("a ticket is taken in final"),
         }
     }
 }
