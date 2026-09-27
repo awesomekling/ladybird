@@ -13,7 +13,12 @@
 //! a generation follows the chunks written after it was published rather than the size of the
 //! column. Both are `Send` and `Sync` when the row type is: the column is written through `&mut`,
 //! and a snapshot never changes.
+//!
+//! A column is written only through [`CowColumn::set`] and [`RowMut`], and both compare the row
+//! they write with the row a snapshot shares before copying the chunk. So a write that leaves a row
+//! as it was never copies a chunk, whichever caller makes it.
 
+use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
 /// A chunk starts on a cache line of its own, so rows do not share a line with the reference
@@ -67,9 +72,9 @@ impl<T: Clone + Default, const CHUNK: usize> CowColumn<T, CHUNK> {
         Some(&self.chunks.get(index / CHUNK)?.0[index % CHUNK])
     }
 
-    /// The row at `index`, for writing. Copies its chunk first if a snapshot shares it.
-    #[inline]
-    pub(crate) fn get_mut(&mut self, index: usize) -> Option<&mut T> {
+    /// The row at `index` in a chunk made the column's own, copying the chunk if a snapshot
+    /// shares it.
+    fn owned_row(&mut self, index: usize) -> Option<&mut T> {
         let chunk_index = index / CHUNK;
         let chunk = self.chunks.get_mut(chunk_index)?;
         self.written_since_publish = true;
@@ -83,6 +88,20 @@ impl<T: Clone + Default, const CHUNK: usize> CowColumn<T, CHUNK> {
             Arc::make_mut(chunk)
         };
         Some(&mut rows.0[index % CHUNK])
+    }
+
+    /// Whether the row at `index` is in a chunk no snapshot shares, marking the chunk so if it is.
+    fn owns_chunk_of(&mut self, index: usize) -> bool {
+        let chunk_index = index / CHUNK;
+        if self.unshared[chunk_index] {
+            return true;
+        }
+        if Arc::get_mut(&mut self.chunks[chunk_index]).is_none() {
+            return false;
+        }
+        self.unshared[chunk_index] = true;
+        self.written_since_publish = true;
+        true
     }
 
     /// Grows the column to hold at least `len` rows, the new ones default. A column never
@@ -111,6 +130,98 @@ impl<T: Clone + Default, const CHUNK: usize> CowColumn<T, CHUNK> {
     }
 }
 
+impl<T: Clone + Default + PartialEq, const CHUNK: usize> CowColumn<T, CHUNK> {
+    /// Sets the row at `index`, copying its chunk only if a snapshot shares it and the row
+    /// changes. `None` if the column does not hold the row.
+    pub(crate) fn set(&mut self, index: usize, value: T) -> Option<()> {
+        if *self.get(index)? != value {
+            *self.owned_row(index)? = value;
+        }
+        Some(())
+    }
+
+    /// The row at `index`, for writing. See [`RowMut`].
+    pub(crate) fn row_mut(&mut self, index: usize) -> Option<RowMut<&mut Self, T, CHUNK>> {
+        RowMut::new(self, index)
+    }
+}
+
+/// A row of a [`CowColumn`], for writing. While a snapshot shares the row's chunk, the writes go
+/// to a copy of the row, and the row is set from it when the guard drops, copying the chunk only if
+/// the row changed. In a chunk the column owns, they go to the row in place. `C` is how the guard
+/// holds the column: `&mut` it, or a `RefMut` of it.
+pub(crate) struct RowMut<C, T, const CHUNK: usize>
+where
+    C: DerefMut<Target = CowColumn<T, CHUNK>>,
+    T: Clone + Default + PartialEq,
+{
+    column: C,
+    index: usize,
+    staged: Option<T>,
+}
+
+impl<C, T, const CHUNK: usize> RowMut<C, T, CHUNK>
+where
+    C: DerefMut<Target = CowColumn<T, CHUNK>>,
+    T: Clone + Default + PartialEq,
+{
+    /// The row at `index` of the column `column` holds. `None` if the column does not hold it.
+    pub(crate) fn new(mut column: C, index: usize) -> Option<Self> {
+        column.get(index)?;
+        let staged = if column.owns_chunk_of(index) {
+            None
+        } else {
+            column.get(index).cloned()
+        };
+        Some(Self { column, index, staged })
+    }
+}
+
+impl<C, T, const CHUNK: usize> Deref for RowMut<C, T, CHUNK>
+where
+    C: DerefMut<Target = CowColumn<T, CHUNK>>,
+    T: Clone + Default + PartialEq,
+{
+    type Target = T;
+
+    #[inline]
+    fn deref(&self) -> &T {
+        match &self.staged {
+            Some(row) => row,
+            None => &self.column.chunks[self.index / CHUNK].0[self.index % CHUNK],
+        }
+    }
+}
+
+impl<C, T, const CHUNK: usize> DerefMut for RowMut<C, T, CHUNK>
+where
+    C: DerefMut<Target = CowColumn<T, CHUNK>>,
+    T: Clone + Default + PartialEq,
+{
+    #[inline]
+    fn deref_mut(&mut self) -> &mut T {
+        match &mut self.staged {
+            Some(row) => row,
+            None => self
+                .column
+                .owned_row(self.index)
+                .expect("the guard's row is in the column"),
+        }
+    }
+}
+
+impl<C, T, const CHUNK: usize> Drop for RowMut<C, T, CHUNK>
+where
+    C: DerefMut<Target = CowColumn<T, CHUNK>>,
+    T: Clone + Default + PartialEq,
+{
+    fn drop(&mut self) {
+        if let Some(row) = self.staged.take() {
+            self.column.set(self.index, row);
+        }
+    }
+}
+
 impl<T, const CHUNK: usize> ColumnSnapshot<T, CHUNK> {
     /// How many rows the snapshot has room for: every row index below it may be read.
     pub(crate) fn slot_capacity(&self) -> usize {
@@ -120,6 +231,20 @@ impl<T, const CHUNK: usize> ColumnSnapshot<T, CHUNK> {
     #[inline]
     pub(crate) fn get(&self, index: usize) -> Option<&T> {
         Some(&self.chunks.get(index / CHUNK)?.0[index % CHUNK])
+    }
+}
+
+/// Whether two rows hold the same shared payload: the same allocation, or two that `same_value`
+/// says are equal.
+pub(crate) fn same_payload<T: ?Sized>(
+    a: Option<&Arc<T>>,
+    b: Option<&Arc<T>>,
+    same_value: impl FnOnce(&T, &T) -> bool,
+) -> bool {
+    match (a, b) {
+        (Some(a), Some(b)) => Arc::ptr_eq(a, b) || same_value(a, b),
+        (None, None) => true,
+        _ => false,
     }
 }
 
@@ -139,7 +264,7 @@ mod tests {
         let mut column = Column::default();
         column.grow_to(values.len());
         for (index, &value) in values.iter().enumerate() {
-            *column.get_mut(index).unwrap() = value;
+            column.set(index, value).unwrap();
         }
         column
     }
@@ -149,7 +274,7 @@ mod tests {
     }
 
     fn set(column: &mut Column, index: usize, value: u32) {
-        *column.get_mut(index).unwrap() = value;
+        column.set(index, value).unwrap();
     }
 
     #[test]
@@ -167,7 +292,8 @@ mod tests {
         let mut column = column_of(&[1, 2, 3]);
         assert_eq!(column.get(3), Some(&0));
         assert_eq!(column.get(4), None);
-        assert_eq!(column.get_mut(4), None);
+        assert_eq!(column.set(4, 1), None);
+        assert!(column.row_mut(4).is_none());
         assert_eq!(column.publish().get(4), None);
     }
 
@@ -207,6 +333,41 @@ mod tests {
         set(&mut column, 6, 70);
         assert_eq!(Arc::as_ptr(&column.chunks[1]), copied);
         assert_eq!(rows(&snapshot, 8), [1, 2, 3, 4, 5, 6, 7, 8]);
+    }
+
+    #[test]
+    fn a_write_that_changes_nothing_copies_no_chunk() {
+        let mut column = column_of(&[1, 2, 3, 4, 5, 6, 7, 8]);
+        let snapshot = column.publish();
+        set(&mut column, 5, 6);
+        *column.row_mut(6).unwrap() = 7;
+        {
+            let mut row = column.row_mut(4).unwrap();
+            *row = 50;
+            *row = 5;
+        }
+        assert!(Arc::ptr_eq(&column.chunks[1], &snapshot.chunks[1]));
+        assert!(!column.written_since_publish());
+        *column.row_mut(6).unwrap() += 1;
+        assert!(!Arc::ptr_eq(&column.chunks[1], &snapshot.chunks[1]));
+        assert_eq!(rows(&snapshot, 8), [1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(rows(&column.publish(), 8), [1, 2, 3, 4, 5, 6, 8, 8]);
+    }
+
+    #[test]
+    fn a_row_guard_writes_in_place_once_the_column_owns_the_chunk() {
+        let mut column = column_of(&[1, 2, 3, 4]);
+        let snapshot = column.publish();
+        set(&mut column, 0, 10);
+        let copied = Arc::as_ptr(&column.chunks[0]);
+        {
+            let mut row = column.row_mut(1).unwrap();
+            assert!(row.staged.is_none());
+            *row = 20;
+        }
+        assert_eq!(Arc::as_ptr(&column.chunks[0]), copied);
+        assert_eq!(rows(&snapshot, 4), [1, 2, 3, 4]);
+        assert_eq!(rows(&column.publish(), 4), [10, 20, 3, 4]);
     }
 
     #[test]

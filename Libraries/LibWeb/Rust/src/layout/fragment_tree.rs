@@ -138,7 +138,7 @@ impl Fragment {
 }
 
 impl FragmentLink {
-    fn places_same_fragment_identically_to(&self, previous: &FragmentLink) -> bool {
+    pub(crate) fn places_same_fragment_identically_to(&self, previous: &FragmentLink) -> bool {
         std::sync::Arc::ptr_eq(&self.fragment, &previous.fragment) && self.has_same_placement(previous)
     }
 

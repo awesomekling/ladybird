@@ -66,15 +66,13 @@ impl Default for PublishedTextSlot {
     }
 }
 
-impl PublishedTextSlot {
-    pub(super) fn is_same_as(&self, other: &Self) -> bool {
+/// A slot is the same as another when it publishes the same rendered text: rendered text is
+/// never written while a frame shares it.
+impl PartialEq for PublishedTextSlot {
+    fn eq(&self, other: &Self) -> bool {
         self.generation == other.generation
             && self.first_letter == other.first_letter
-            && match (&self.rendered, &other.rendered) {
-                (Some(a), Some(b)) => Arc::ptr_eq(a, b),
-                (None, None) => true,
-                _ => false,
-            }
+            && crate::cow_column::same_payload(self.rendered.as_ref(), other.rendered.as_ref(), |_, _| false)
     }
 }
 
