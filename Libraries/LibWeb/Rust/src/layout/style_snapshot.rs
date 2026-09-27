@@ -243,6 +243,10 @@ impl LayoutNodeArena {
         );
     }
 
+    pub(crate) fn publish_style_snapshot_scroll_states(&self, states: &[FfiLayoutStyleScrollState]) {
+        self.layout_style_snapshots.publish_scroll_states(states);
+    }
+
     pub(crate) fn finish_layout_style_snapshot_commit(&self) {
         self.layout_style_snapshots
             .finish_layout_commit(&mut self.layout_style_snapshot_commit.borrow_mut());
@@ -268,9 +272,12 @@ pub unsafe extern "C" fn layout_arena_publish_style_snapshot_scroll_states(
         assert!(!states.is_null(), "layout style scroll states are null");
         unsafe { std::slice::from_raw_parts(states, count) }
     };
-    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
-    arena.join_frame_for_main_side_write("style snapshot scroll states");
-    arena.layout_style_snapshots.publish_scroll_states(states);
+    // SAFETY: Guaranteed by the caller.
+    let document = unsafe { crate::layout::ArenaHandle::document_of(arena) };
+    crate::render_owner::send_arena_change(
+        document,
+        crate::render_owner::ArenaChange::StyleSnapshotScrollStates(states.to_vec()),
+    );
 }
 
 #[cfg(test)]

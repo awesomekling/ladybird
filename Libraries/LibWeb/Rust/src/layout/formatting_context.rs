@@ -989,7 +989,11 @@ pub unsafe extern "C" fn layout_arena_set_layout_host_callbacks(arena: *mut c_vo
 pub unsafe extern "C" fn layout_arena_set_document_is_decoded_svg(arena: *mut c_void, is_decoded_svg: bool) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: The caller keeps the arena alive for this synchronous call.
-    unsafe { LayoutNodeArena::from_handle(arena) }.set_document_is_decoded_svg(is_decoded_svg);
+    let document = unsafe { crate::layout::ArenaHandle::document_of(arena) };
+    crate::render_owner::send_arena_change(
+        document,
+        crate::render_owner::ArenaChange::DocumentIsDecodedSvg(is_decoded_svg),
+    );
 }
 
 /// # Safety

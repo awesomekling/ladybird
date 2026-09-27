@@ -73,24 +73,9 @@ unsafe extern "C" fn layout_arena_detach_and_free_subtree(arena: *mut c_void, no
 /// The arena must remain valid for the duration of the call.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn layout_arena_pre_order_label_violation_count(arena: *mut c_void, root: NodeSlotId) -> u64 {
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: The C++ wrapper keeps the arena alive for this call and
-    // serializes all access on the document thread.
-    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
-    if arena.shell_if_live(&main_thread, root).is_null() {
-        return 0;
-    }
-    let mut violation_count = 0u64;
-    let mut previous_label: Option<u64> = None;
-    arena.for_each_node_in_layout_subtree_in_pre_order(root, |node| {
-        let label = arena.node_pre_order_label(node);
-        if previous_label.is_some_and(|previous| label <= previous) {
-            violation_count += 1;
-        }
-        previous_label = Some(label);
-    });
-    violation_count
+    // SAFETY: Guaranteed by the caller.
+    unsafe { crate::render_owner::ask_about(arena, crate::render_owner::Query::PreOrderLabelViolations { root }) }
+        .count()
 }
 
 /// # Safety
@@ -149,15 +134,12 @@ unsafe extern "C" fn layout_arena_bound_shell(arena: *mut c_void, style_node: u3
 /// `style_node`, which is the host when the element's parent is a shadow root, or 0 for none.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn layout_arena_shadow_including_parent_element(arena: *mut c_void, style_node: u32) -> u32 {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    let _main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
-    let Some(style_node) = StyleNodeID::from_raw(style_node) else {
+    let Some(node) = StyleNodeID::from_raw(style_node) else {
         return 0;
     };
     // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
-    unsafe { LayoutNodeArena::from_handle(arena) }
-        .shadow_including_parent(style_node)
-        .element
+    unsafe { crate::render_owner::ask_about(arena, crate::render_owner::Query::ShadowIncludingParentElement { node }) }
+        .element()
 }
 
 /// The shell of the row the pseudo-element of kind `generated_for` on the element with

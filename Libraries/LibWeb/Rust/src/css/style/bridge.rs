@@ -4918,7 +4918,7 @@ pub(crate) fn host_answer_of_owner_read(answer: crate::render_owner::Answer) -> 
             ..FfiRecordDemandAnswer::absent()
         }),
         Answer::ComputedStyle(StyleReadAnswer::LeftToHost) => None,
-        Answer::Geometry(_) | Answer::LayoutCounts(_) => {
+        _ => {
             debug_assert!(false, "a style read is answered with a style record");
             None
         }
