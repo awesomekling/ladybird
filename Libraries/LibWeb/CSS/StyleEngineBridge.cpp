@@ -1334,14 +1334,27 @@ void StyleEngine::lend_style_transaction_inputs(RecordedInputGoesTo recorded_inp
     m_recorded_input_for_pass.clear();
 }
 
-StyleEngine::PublishedStyleTransaction StyleEngine::take_style_transaction(StyleNodeID root)
+StyleEngine::PublishedStyleTransaction StyleEngine::take_style_transaction(StyleNodeID root, Optional<OwnerRenderHalf> owner_render_half)
 {
     auto submission_started_at = MonotonicTime::now();
     StyleEngineFFI::FfiStyleTransactionView view {};
     MonotonicTime bridge_started_at = submission_started_at;
+    StyleEngineFFI::FfiOwnerRenderHalf render_half {
+        .applies = owner_render_half.has_value(),
+        .viewport_propagation_sources = owner_render_half.has_value() ? reinterpret_cast<u32 const*>(owner_render_half->viewport_propagation_sources.data()) : nullptr,
+        .viewport_propagation_source_count = owner_render_half.has_value() ? owner_render_half->viewport_propagation_sources.size() : 0,
+    };
     lend_style_transaction_inputs(RecordedInputGoesTo::Transaction, [&](auto const& computation_inputs, void* layout_arena, InputTransaction const* input) {
         bridge_started_at = MonotonicTime::now();
-        view = StyleEngineFFI::style_engine_take_style_transaction(m_impl, root.value(), computation_inputs, layout_arena, input, m_applied_style_reactions.data(), m_applied_style_reactions.size());
+        view = StyleEngineFFI::style_engine_take_style_transaction(m_impl, root.value(), computation_inputs, layout_arena, input, m_applied_style_reactions.data(), m_applied_style_reactions.size(), render_half);
+        // What applying the batch handed back is paid before the host installs the batch, which reads it.
+        if (view.render_half_applied) {
+            Layout::RustFFI::layout_arena_pay_owner_style_handbacks(layout_arena);
+            m_owner_applied_render_half = true;
+            // The owner marked the visual contexts the rows moved, which the document's paint preparation updates.
+            if (view.render_half_moved_visual_contexts && m_style_computer)
+                m_style_computer->document().set_needs_accumulated_visual_contexts_update(true);
+        }
     });
     auto bridge_microseconds = (MonotonicTime::now() - bridge_started_at).to_truncated_microseconds();
     return publish_style_transaction_view(view, (bridge_started_at - submission_started_at).to_truncated_microseconds(), bridge_microseconds);

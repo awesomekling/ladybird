@@ -427,7 +427,7 @@ fn handle_message(message: ToOwner) {
             // document's update the owner serves the transaction beside.
             let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(arena as u64);
             // SAFETY: The engine is the document's, and the document thread waits for the transaction.
-            Ok(unsafe { engine.reach_on_owner(|engine| transaction.run(engine)) })
+            Ok(unsafe { engine.reach_on_owner(|engine| transaction.run(engine, true)) })
         }),
         ToOwner::Layout { document, unit } => {
             // The state's borrow ends before the unit runs, which may reach another document's state. The unit finds
@@ -648,7 +648,7 @@ pub(crate) unsafe fn run_style_transaction(
     match ran.unwrap_or_else(|payload| std::panic::resume_unwind(payload)) {
         Ok(view) => view,
         // SAFETY: Guaranteed by the caller.
-        Err(transaction) => unsafe { transaction.run(engine.enter("style transaction the owner did not run")) },
+        Err(transaction) => unsafe { transaction.run(engine.enter("style transaction the owner did not run"), false) },
     }
 }
 

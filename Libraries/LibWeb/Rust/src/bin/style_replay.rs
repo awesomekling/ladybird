@@ -459,6 +459,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             std::ptr::null(),
                             std::ptr::null(),
                             0,
+                            bridge::FfiOwnerRenderHalf {
+                                applies: false,
+                                viewport_propagation_sources: std::ptr::null(),
+                                viewport_propagation_source_count: 0,
+                            },
                         )
                     };
                     let actual_reclaimed_atoms = if actual_view.reclaimed_style_atom_count == 0 {

@@ -143,8 +143,12 @@ void StyleEffectDrain::apply_layout_invalidation(DOM::Document& document, Viewpo
     auto* arena = document.layout_node_arena_if_created();
     if (!arena)
         return;
-    if (auto applied = marks_of_flight(*arena, style_node, true); applied.has_value() && flight_marks_cover(*applied, invalidation))
+    if (auto applied = marks_of_flight(*arena, style_node, true); applied.has_value() && flight_marks_cover(*applied, invalidation)) {
+        // The render owner applied the row as it took the transaction, and the layout it marked is still to run.
+        if (!s_installing_style_applied_by_flight && applied->needs_relayout())
+            document.note_style_change_needs_layout_update({});
         return;
+    }
     ++s_rows_the_flight_left_to_mark;
     // The rows the arena binds to the node's element and its synthetic pseudo-elements.
     auto row = arena->bound_row(style_node);
@@ -505,7 +509,15 @@ static StyleEngineTransaction take_style_engine_transaction(DOM::Document& docum
     auto root = begin_style_engine_transaction(document);
     if (!root.has_value())
         return {};
-    return accept_style_engine_transaction(document, document.style_computer().style_engine().take_style_transaction(*root));
+    auto& style_engine = document.style_computer().style_engine();
+    // The render owner applies what the batch moves of the layout tree it holds itself, unless the tree is to be built
+    // again, or the batch is one wave of a flight's install, whose render half the flight owns.
+    if (document.layout_node_arena_if_created() && !document.needs_layout_tree_update() && !document.child_needs_layout_tree_update()
+        && !s_installing_style_applied_by_flight) {
+        auto const viewport_propagation_sources = StyleEffectDrain::viewport_propagation_sources_of(document);
+        return accept_style_engine_transaction(document, style_engine.take_style_transaction(*root, StyleEngine::OwnerRenderHalf { viewport_propagation_sources.span() }));
+    }
+    return accept_style_engine_transaction(document, style_engine.take_style_transaction(*root));
 }
 
 enum class SampleInvalidation {
@@ -1247,6 +1259,11 @@ StyleUpdate::~StyleUpdate()
         StyleEffectDrain::install(document, [](StyleDrainScope const& scope) {
             scope.engine().discard_style_transaction_outputs(scope);
         });
+    }
+    // The rows the render owner applied as it took the update's transactions that the install left are put back.
+    if (document.style_computer().style_engine().take_owner_applied_render_half()) {
+        if (auto* arena = document.layout_node_arena_if_created())
+            Layout::RustFFI::layout_arena_finish_owner_style_host_half(arena->handle());
     }
     if (m_began_complete_style_update)
         finish_complete_style_update(document);

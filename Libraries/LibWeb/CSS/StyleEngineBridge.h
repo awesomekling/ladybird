@@ -393,7 +393,16 @@ public:
     // NB: The returned reactions borrow Rust storage until the next mutable engine call or an
     //     explicit discard. Consume them synchronously before asking the engine anything else.
     bool take_diagnostic_style_transaction(StyleNodeID root, Function<void(ReadonlySpan<StyleNodeID>)>&&);
-    PublishedStyleTransaction take_style_transaction(StyleNodeID root);
+    // Where the render owner applies the batch of a style transaction it takes to the layout nodes of the rows'
+    // elements itself, as a flight applies its pass's: the elements the viewport propagates its overflow, writing mode
+    // and direction from, which only a full layout pass propagates again.
+    struct OwnerRenderHalf {
+        ReadonlySpan<StyleNodeID> viewport_propagation_sources;
+    };
+    PublishedStyleTransaction take_style_transaction(StyleNodeID root, Optional<OwnerRenderHalf> = {});
+    // Whether the owner applied the batch of a transaction the host took since it asked last: the style update that
+    // installs the batch ends that render half once it has installed it.
+    [[nodiscard]] bool take_owner_applied_render_half() { return exchange(m_owner_applied_render_half, false); }
     // Takes pending inputs as take_style_transaction() does, and hands the transaction's pass to the render side
     // instead of waiting for it (LIBWEB_STAGE_OVERLAP=style). Until the frame in flight is taken back, the pass owns
     // the engine, and every engine entrance joins the frame first. The document's layout arena stays the main
@@ -522,6 +531,7 @@ private:
     // The reactions the host applied since the last transaction. They are no input the host recorded, which a pass in
     // flight holds back: they go with the next transaction, which is the next wave of the style update that applied them.
     Vector<StyleEngineFFI::FfiAppliedStyleReaction> m_applied_style_reactions;
+    bool m_owner_applied_render_half { false };
     // How many of the host fact writes are atom adoptions, which are no input to style.
     size_t m_pending_atom_adoption_count { 0 };
     // What each `TextData` write holds, by the index its `data` names until the writes cross.
