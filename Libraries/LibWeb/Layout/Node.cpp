@@ -415,10 +415,9 @@ NodeWithStyle::NodeWithStyle(DOM::Document& document, BindToPreparedArenaSlot bi
 {
     m_style_record_identity = CSS::StyleRecordID { RustFFI::layout_arena_node_style_record(arena_handle(), slot) };
     VERIFY(m_style_record_identity);
+    // The shell reads its style through the payloads of the record the row owns.
     m_style_payloads = RustFFI::layout_arena_node_style_payloads(arena_handle(), slot);
     VERIFY(m_style_payloads);
-    // The shell reads its style through the row's payloads, which only a live record keeps.
-    VERIFY(document.style_computer().style_record_payloads(m_style_record_identity));
 }
 
 NodeWithStyle::NodeWithStyle(DOM::Document& document, BindToPreparedArenaSlot bind, Compositing::RustFFI::NodeSlotId slot, RustFFI::NodeKind kind, CSS::LayoutStyle style)
@@ -458,7 +457,12 @@ NonnullRefPtr<CSS::ComputedValues const> NodeWithStyle::copy_computed_values() c
 CSS::ComputedStyleRecordView NodeWithStyle::computed_style_record_view() const
 {
     VERIFY(m_style_record_identity);
-    return document().style_computer().computed_style_record_view(m_style_record_identity);
+    return CSS::ComputedStyleRecordView { CSS::PublishedStyleRecord::adopt(RustFFI::layout_arena_node_published_style_record(arena_handle(), slot_id(this))) };
+}
+
+CSS::StyleRecordDependencyFlag NodeWithStyle::style_dependency_flags() const
+{
+    return static_cast<CSS::StyleRecordDependencyFlag>(RustFFI::layout_arena_node_style_dependency_flags(arena_handle(), slot_id(this)));
 }
 
 NodeWithStyle::ImageObserver::ImageObserver(NodeWithStyle& owner, NonnullRefPtr<CSS::ImageStyleValue const> image)
@@ -589,9 +593,20 @@ static void did_update_row_style_record(DOM::Document& document, DOM::Node const
         document.set_may_have_scroll_snap_areas();
 }
 
-static bool style_record_holds_image_values(CSS::StyleEngine const& style_engine, CSS::StyleRecordID style_record)
+static bool style_record_holds_image_values(CSS::StyleRecordDependencyFlag dependency_flags)
 {
-    return has_flag(style_engine.style_record_dependency_flags(style_record), CSS::StyleRecordDependencyFlag::HoldsImageValues);
+    return has_flag(dependency_flags, CSS::StyleRecordDependencyFlag::HoldsImageValues);
+}
+
+// Whether moving a row or its shell from one record to the other can change its layout, from the payloads each record
+// names: an overlay record borrows other payloads than its base, so carrying one is reason enough.
+static bool style_change_affects_layout(CSS::StyleRecordID old_style_record, void const* old_style_payloads, CSS::PublishedStyleRecord const& new_style_record)
+{
+    return !old_style_record
+        || !old_style_payloads
+        || CSS::PublishedStyleRecord::identity_is_animation_overlay(old_style_record)
+        || new_style_record.is_animation_overlay()
+        || CSS::ComputedValues::layout_affecting_group_payloads_differ(static_cast<void const* const*>(old_style_payloads), new_style_record.view().payloads);
 }
 
 // Whether a row taking the style can make its box a scroll snap container, which registers itself with the document
@@ -608,7 +623,7 @@ static bool style_can_make_row_a_scroll_snap_container(Row const& row, DOM::Node
 // Whether applying the style to the row needs its shell: for a style that holds images, whose resources the shell
 // loads and observes; for a box painted from facts its DOM node keeps; and for a box that can be a scroll snap
 // container.
-static bool applying_style_needs_shell(Row const& row, DOM::Node const* dom_node, CSS::StyleEngine const& style_engine, CSS::StyleRecordID style_record, void const* style_payloads)
+static bool applying_style_needs_shell(Row const& row, DOM::Node const* dom_node, CSS::PublishedStyleRecord const& style_record)
 {
     switch (row.kind()) {
     case RustFFI::NodeKind::CheckBox:
@@ -622,36 +637,31 @@ static bool applying_style_needs_shell(Row const& row, DOM::Node const* dom_node
     default:
         break;
     }
-    if (is<HTML::HTMLImageElement>(dom_node) || style_record_holds_image_values(style_engine, style_record))
+    if (is<HTML::HTMLImageElement>(dom_node) || style_record_holds_image_values(style_record.dependency_flags()))
         return true;
-    return style_can_make_row_a_scroll_snap_container(row, dom_node, style_payloads);
+    return style_can_make_row_a_scroll_snap_container(row, dom_node, style_record.payloads());
 }
 
-void NodeWithStyle::apply_style(Row const& row, CSS::StyleRecordID style_record_identity)
+void NodeWithStyle::apply_style(Row const& row, CSS::PublishedStyleRecord const& style_record)
 {
     auto& document = row.document();
-    auto const& style_engine = document.style_computer().style_engine();
     auto const* dom_node = row.dom_node_identity().resolve(document).ptr();
-    auto const* style_payloads = style_engine.held_style_record_payloads(style_record_identity);
-    // The style being installed is held by its record; if it is not, the row keeps the style it has.
-    ASSERT(style_payloads);
-    if (!style_payloads)
-        return;
-    if (row.shell_if_made() || applying_style_needs_shell(row, dom_node, style_engine, style_record_identity, style_payloads)) {
-        as<NodeWithStyle>(row.shell()).apply_style(style_record_identity);
+    if (row.shell_if_made() || applying_style_needs_shell(row, dom_node, style_record)) {
+        as<NodeWithStyle>(row.shell()).apply_style(style_record);
         return;
     }
 
     // What apply_style() does to the row, with no shell to keep a mirror of it. A shell made later is made from the row.
-    auto* old_image_observers = RustFFI::layout_arena_install_row_style(row.arena_handle(), row.slot(), style_record_identity.value());
-    did_update_row_style_record(document, dom_node, style_payloads);
+    auto* old_image_observers = RustFFI::layout_arena_install_row_style(row.arena_handle(), row.slot(), style_record.identity().value());
+    did_update_row_style_record(document, dom_node, style_record.payloads());
     // What attach_style_resources() does for a style that holds no images.
     delete static_cast<ImageObserverSlots*>(old_image_observers);
     Painting::push_paint_facts_after_style_attach(row, const_cast<DOM::Node*>(dom_node), Painting::StyleHoldsImageValues::No);
 }
 
-void NodeWithStyle::apply_style(CSS::StyleRecordID style_record_identity)
+void NodeWithStyle::apply_style(CSS::PublishedStyleRecord const& style_record)
 {
+    auto const style_record_identity = style_record.identity();
     // A flight installed the record over the row ahead of the host, with what a style change over the row leaves in the
     // arena: the host only takes it into its own mirror of the row. A shell first asked for since then was made with
     // the record already.
@@ -669,7 +679,7 @@ void NodeWithStyle::apply_style(CSS::StyleRecordID style_record_identity)
     m_list_style_image.clear();
     m_style_record_identity = style_record_identity;
     if (installed_ahead) {
-        m_style_payloads = document().style_computer().style_engine().held_style_record_payloads(m_style_record_identity);
+        m_style_payloads = RustFFI::layout_arena_node_style_payloads(arena_handle(), slot_id(this));
         VERIFY(m_style_payloads);
         did_update_style_record();
     } else {
@@ -692,7 +702,7 @@ void NodeWithStyle::attach_style_resources()
     // The style engine notes at publication whether a record holds an <image> anywhere this node would load and
     // observe one. Nearly every style holds none, and that answer is one flag read; the walk below stays for the
     // styles that do.
-    if (!style_record_holds_image_values(document().style_computer().style_engine(), m_style_record_identity)) {
+    if (!style_record_holds_image_values(style_dependency_flags())) {
         m_cursor_style_values.clear();
         clear_image_observers();
         // The row keeps nothing a later attach would have to take away, which is what lets the
@@ -833,31 +843,24 @@ void NodeWithStyle::set_computed_values(NonnullRefPtr<CSS::ComputedValues const>
     RustFFI::layout_arena_adopt_derived_node_style(arena_handle(), slot_id(this), record.value());
 }
 
-void NodeWithStyle::set_style_record_identity(CSS::StyleRecordID style_record_identity)
+void NodeWithStyle::set_style_record(CSS::PublishedStyleRecord const* style_record)
 {
     // A detached or layout-derived record is independent of its DOM target's record. A
     // rendering consequence replaces and re-derives it explicitly through apply_style().
     if (has_layout_derived_style())
         return;
+    // A box has style for as long as it lives: a record taken away from its DOM target leaves the box the one it has.
+    if (!style_record)
+        return;
+    auto const style_record_identity = style_record->identity();
     if (m_style_record_identity == style_record_identity) {
         publish_style_record_to_node_data();
         return;
     }
 
     bool should_repin_style_record = RustFFI::layout_arena_node_style_record_pinned_by_host(arena_handle(), slot_id(this)) != 0;
-    // Both answers come from the records themselves, so neither side needs a ComputedValues built
-    // for it. An overlay record borrows different payloads than its base, so carrying one is already
-    // reason enough to treat the style as layout-affecting.
-    auto const& style_engine = document().style_computer().style_engine();
-    auto const new_record_view = style_engine.style_record_view(style_record_identity);
-    VERIFY(new_record_view.present);
-    CSS::StyleEngine::StyleRecordView old_record_view {};
-    if (!!m_style_record_identity)
-        old_record_view = style_engine.style_record_view(m_style_record_identity);
-    bool changes_layout_affecting_style = !old_record_view.present
-        || old_record_view.animation_overlay_identity != 0
-        || new_record_view.animation_overlay_identity != 0
-        || CSS::ComputedValues::layout_affecting_group_payloads_differ(old_record_view.payloads, new_record_view.payloads);
+    // Both answers come from the records themselves, so neither side needs a ComputedValues built for it.
+    bool changes_layout_affecting_style = style_change_affects_layout(m_style_record_identity, m_style_payloads, *style_record);
 
     release_pinned_style_record();
     // An animation sample installed the record over the row ahead of the host, with the caches and marks a
@@ -871,7 +874,7 @@ void NodeWithStyle::set_style_record_identity(CSS::StyleRecordID style_record_id
     m_list_style_image.clear();
     m_style_record_identity = style_record_identity;
     if (installed_ahead) {
-        m_style_payloads = document().style_computer().style_engine().held_style_record_payloads(m_style_record_identity);
+        m_style_payloads = RustFFI::layout_arena_node_style_payloads(arena_handle(), slot_id(this));
         VERIFY(m_style_payloads);
         did_update_style_record();
     } else {
@@ -886,10 +889,13 @@ void NodeWithStyle::set_style_record_identity(CSS::StyleRecordID style_record_id
     }
 }
 
-void NodeWithStyle::set_style_record_identity(Row const& row, CSS::StyleRecordID style_record_identity)
+void NodeWithStyle::set_style_record(Row const& row, CSS::PublishedStyleRecord const* style_record)
 {
-    if (row.shell_if_made() || !style_record_identity) {
-        as<NodeWithStyle>(row.shell()).set_style_record_identity(style_record_identity);
+    // A box has style for as long as it lives (see set_style_record() above).
+    if (!style_record)
+        return;
+    if (row.shell_if_made()) {
+        as<NodeWithStyle>(row.shell()).set_style_record(style_record);
         return;
     }
     auto* arena = row.arena_handle();
@@ -898,38 +904,21 @@ void NodeWithStyle::set_style_record_identity(Row const& row, CSS::StyleRecordID
     if (row_style_record.derived)
         return;
     auto& document = row.document();
-    auto const& style_engine = document.style_computer().style_engine();
     auto const* dom_node = row.dom_node_identity().resolve(document).ptr();
-    auto const* style_payloads = style_engine.held_style_record_payloads(style_record_identity);
-    // The style being installed is held by its record; if it is not, the row keeps the style it has.
-    ASSERT(style_payloads);
-    if (!style_payloads)
-        return;
-    if (style_can_make_row_a_scroll_snap_container(row, dom_node, style_payloads)) {
-        as<NodeWithStyle>(row.shell()).set_style_record_identity(style_record_identity);
+    if (style_can_make_row_a_scroll_snap_container(row, dom_node, style_record->payloads())) {
+        as<NodeWithStyle>(row.shell()).set_style_record(style_record);
         return;
     }
 
-    // What set_style_record_identity() does to the row, with no shell to keep a mirror of it. A record installed ahead
-    // of the host is the row's already, where the shell's mirror still names the old one, so the row takes its
-    // adoption all the same.
+    // What set_style_record() does to the row, with no shell to keep a mirror of it. A record installed ahead of the
+    // host is the row's already, where the shell's mirror still names the old one, so the row takes its adoption all
+    // the same.
     auto const old_style_record_identity = CSS::StyleRecordID { row_style_record.record };
     bool changes_layout_affecting_style = false;
-    if (old_style_record_identity != style_record_identity) {
-        auto const new_record_view = style_engine.style_record_view(style_record_identity);
-        ASSERT(new_record_view.present);
-        if (!new_record_view.present)
-            return;
-        CSS::StyleEngine::StyleRecordView old_record_view {};
-        if (!!old_style_record_identity)
-            old_record_view = style_engine.style_record_view(old_style_record_identity);
-        changes_layout_affecting_style = !old_record_view.present
-            || old_record_view.animation_overlay_identity != 0
-            || new_record_view.animation_overlay_identity != 0
-            || CSS::ComputedValues::layout_affecting_group_payloads_differ(old_record_view.payloads, new_record_view.payloads);
-    }
-    RustFFI::layout_arena_replace_row_style_record(arena, slot, style_record_identity.value(), changes_layout_affecting_style);
-    did_update_row_style_record(document, dom_node, style_payloads);
+    if (old_style_record_identity != style_record->identity())
+        changes_layout_affecting_style = style_change_affects_layout(old_style_record_identity, RustFFI::layout_arena_node_style_payloads(arena, slot), *style_record);
+    RustFFI::layout_arena_replace_row_style_record(arena, slot, style_record->identity().value(), changes_layout_affecting_style);
+    did_update_row_style_record(document, dom_node, style_record->payloads());
 }
 
 void NodeWithStyle::pin_style_record_for_cxx_consumers()
@@ -943,14 +932,14 @@ void NodeWithStyle::release_pinned_style_record()
     RustFFI::layout_arena_release_node_style_record_pin_for_host(arena_handle(), slot_id(this));
 }
 
-void NodeWithStyle::bind_generated_style_record(CSS::StyleRecordID target_style_record_identity)
+void NodeWithStyle::bind_generated_style_record(CSS::PublishedStyleRecord const* target_style_record)
 {
     VERIFY(is_generated_for_pseudo_element());
     if (!has_layout_derived_style()) {
-        set_style_record_identity(target_style_record_identity);
+        set_style_record(target_style_record);
         return;
     }
-    if (m_style_record_identity != target_style_record_identity)
+    if (!target_style_record || m_style_record_identity != target_style_record->identity())
         return;
     publish_style_record_to_node_data();
 }
@@ -967,10 +956,10 @@ static Node const* scroll_snap_container_of(NodeWithStyle const& node)
 
 void NodeWithStyle::publish_style_record_to_node_data()
 {
-    auto const* payloads = document().style_computer().style_engine().held_style_record_payloads(m_style_record_identity);
-    VERIFY(payloads);
-    m_style_payloads = payloads;
     RustFFI::layout_arena_set_node_style(arena_handle(), slot_id(this), m_style_record_identity.value());
+    // The shell reads the payloads of the record the row now owns.
+    m_style_payloads = RustFFI::layout_arena_node_style_payloads(arena_handle(), slot_id(this));
+    VERIFY(m_style_payloads);
     did_update_style_record();
 }
 
@@ -1152,7 +1141,7 @@ void Node::set_generated_for(CSS::PseudoElement type, DOM::Element& element)
     RustFFI::layout_arena_set_node_generated_for(arena_handle(), slot_id(this), encode_generated_for(type), element.style_node_id().value());
     publish_unique_node_id();
     if (auto* node_with_style = as_if<NodeWithStyle>(*this))
-        node_with_style->bind_generated_style_record(element.style_record_identity(type));
+        node_with_style->bind_generated_style_record(element.published_style_record(type));
 }
 
 void Node::dom_node_style_node_changed(DOM::Node& dom_node, CSS::StyleNodeID old_style_node)

@@ -232,28 +232,6 @@ StyleComputer::DocumentEnvironmentSnapshot const& StyleComputer::ensure_document
     return *m_style_update_document_environment;
 }
 
-ComputedStyleRecordView StyleComputer::computed_style_record_view(StyleRecordID style_record_identity) const
-{
-    if (!style_record_identity)
-        return {};
-    auto view = m_style_engine.engine().style_record_view(style_record_identity);
-    if (!view.present)
-        return {};
-    bool owns_style_record_pin = m_style_record_view_epoch_depth == 0 || view.animation_overlay_identity != 0;
-    if (owns_style_record_pin) {
-        pin_style_record(style_record_identity);
-        ++m_computed_style_record_view_pin_count;
-    }
-    return ComputedStyleRecordView { view, *this, style_record_identity, owns_style_record_pin };
-}
-
-void const* StyleComputer::style_record_payloads(StyleRecordID style_record_identity) const
-{
-    if (!style_record_identity)
-        return nullptr;
-    return m_style_engine.engine().style_record_payloads(style_record_identity);
-}
-
 void StyleComputer::pin_style_record(StyleRecordID style_record_identity) const
 {
     VERIFY(style_record_identity);
@@ -838,7 +816,7 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_inst
 
     // A transition starts from the before-change style. The newly installed record may itself
     // have display: none; checking it would skip the discrete transition into that state.
-    auto before_change_style = computed_style_record_view(before_change_style_record);
+    ComputedStyleRecordView before_change_style { scope.engine().publish_style_record(scope, before_change_style_record) };
     if (!before_change_style || before_change_style->in_display_none_subtree())
         return {};
     if (auto parent = abstract_element.element_to_inherit_style_from(); parent.has_value()) {
@@ -849,7 +827,7 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_inst
         // it is hidden, as the pass that decided the step read it.
         if (!parent->computed_style()) {
             auto parent_record = StyleEngineFFI::style_engine_assigned_style_record(scope.engine().rust_handle(), parent->element().style_node_id().value(), pseudo_element_to_ffi(parent->pseudo_element()));
-            if (parent_record != 0 && has_flag(scope.engine().style_record_dependency_flags(StyleRecordID { parent_record }), StyleRecordDependencyFlag::InDisplayNoneSubtree))
+            if (auto parent_style_record = scope.engine().publish_style_record(scope, StyleRecordID { parent_record }); parent_style_record && has_flag(parent_style_record->dependency_flags(), StyleRecordDependencyFlag::InDisplayNoneSubtree))
                 return {};
         }
     }
@@ -869,11 +847,12 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_inst
 
     begin_style_update();
     ScopeGuard end_style_update = [&] { this->end_style_update(); };
-    auto new_style = reconstruct_computed_properties_for_animation(installed_style_record);
+    auto const& installed_published_style_record = *abstract_element.published_style_record();
+    auto new_style = reconstruct_computed_properties_for_animation(installed_published_style_record);
     // The installed record was sampled before the step, so its overlay holds the current values of
     // the element's running transitions and animations. A C++ computation collects the same effects
     // into its working set before the step, and a running transition's current value is read there.
-    auto const* installed_overlay = static_cast<ComputedValuesFFI::AnimatedOverlay const*>(scope.engine().style_record_view(installed_style_record).animated_overlay);
+    auto const* installed_overlay = static_cast<ComputedValuesFFI::AnimatedOverlay const*>(installed_published_style_record.view().animated_overlay);
     if (installed_overlay)
         new_style->install_animated_overlay_from_rust(Badge<StyleComputer> {}, ComputedValuesFFI::rust_animated_overlay_clone(installed_overlay));
     // The engine decides a step the pass did not, over the same two records, and publishes the
@@ -960,7 +939,7 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_inst
     // image resources need the C++ side effects on top.
     if (auto* layout_node = abstract_element.unsafe_layout_node()) {
         if (animated_property_invalidation.requires_layout_node_style_application)
-            layout_node->apply_style(abstract_element.style_record_identity());
+            layout_node->apply_style(*abstract_element.published_style_record());
         else if (animated_property_invalidation.requires_style_resource_update)
             layout_node->attach_style_resources();
     }
@@ -1940,10 +1919,9 @@ ComputationContext StyleComputer::make_computation_context_for_property(Property
         : document().style_scope().style_engine_tree_scope().value();
     auto subject_inline_axis_is_horizontal = [&]() {
         auto writing_mode = [&](DOM::AbstractElement const& candidate) -> Optional<WritingMode> {
-            auto record = m_style_engine.engine().style_record_view(candidate.style_record_identity());
-            if (!record.present)
+            auto const* inherited_box = candidate.style_group<ComputedValues::InheritedBoxValues>();
+            if (!inherited_box)
                 return {};
-            auto const* inherited_box = static_cast<ComputedValuesFFI::InheritedBoxValues const*>(record.payloads[to_underlying(StyleGroupIndex::InheritedBoxValues)]);
             return static_cast<WritingMode>(inherited_box->writing_mode);
         };
         if (!abstract_element.has_value())
@@ -2256,10 +2234,9 @@ void StyleComputer::apply_animated_properties_to_reconstruction(ComputedStyleWor
     }
 }
 
-NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::reconstruct_computed_properties_for_animation(StyleRecordID style_record) const
+NonnullRefPtr<ComputedStyleWorkingSet> StyleComputer::reconstruct_computed_properties_for_animation(PublishedStyleRecord const& style_record) const
 {
-    auto record = m_style_engine.engine().style_record_view(style_record);
-    VERIFY(record.present);
+    auto const& record = style_record.view();
     auto style = ComputedStyleWorkingSet::create_for_animation_update(
         static_cast<ComputedValuesFFI::ComputedLonghandTable const*>(record.longhand_table),
         static_cast<ComputedValuesFFI::AnimatedOverlay const*>(record.animated_overlay));

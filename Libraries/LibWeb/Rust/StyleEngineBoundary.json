@@ -348,7 +348,8 @@
     "style_engine_set_element_animation_effect_descriptions",
     "style_engine_set_animation_timeline_samples",
     "style_engine_prepare_root_font_resolution",
-    "style_engine_publish_font_face_snapshot"
+    "style_engine_publish_font_face_snapshot",
+        "style_engine_publish_style_record"
   ],
   "stage_scoped": [],
   "input_scoped": [

@@ -1083,7 +1083,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .get(index)
                         .and_then(Option::as_ref)
                         .ok_or_else(|| format!("style record {style_record} payload response was not defined"))?;
-                    let actual = unsafe { bridge::style_engine_style_record_payloads(engine, style_record) };
+                    let actual = unsafe { bridge::replay_style_record_payloads(engine, style_record) };
                     if actual.is_null() == expected.is_some() {
                         return Err(format!("style record {style_record} payload presence diverged").into());
                     }
@@ -1128,7 +1128,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .get(index)
                         .and_then(Option::as_ref)
                         .ok_or_else(|| format!("style record {style_record} view response was not defined"))?;
-                    let actual = unsafe { bridge::style_engine_style_record_view(engine, style_record) };
+                    let actual = unsafe { bridge::replay_style_record_view(engine, style_record) };
                     if actual.present != expected.is_some() {
                         return Err(format!("style record {style_record} view presence diverged").into());
                     }

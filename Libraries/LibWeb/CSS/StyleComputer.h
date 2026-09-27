@@ -121,13 +121,10 @@ public:
     // authoritative shared record rather than layout-owned complete computed values.
     [[nodiscard]] StyleRecordID intern_anonymous_layout_style(ComputedValues const&) const;
 
-    [[nodiscard]] ComputedStyleRecordView computed_style_record_view(StyleRecordID) const;
-    [[nodiscard]] void const* style_record_payloads(StyleRecordID) const;
     void pin_style_record(StyleRecordID) const;
     void unpin_style_record(StyleRecordID) const;
     void begin_style_record_view_epoch() const;
     void end_style_record_view_epoch() const;
-    [[nodiscard]] u64 computed_style_record_view_pin_count() const { return m_computed_style_record_view_pin_count; }
 
     void sweep_custom_property_environments() const;
     // The environment the style engine resolved under `identity`, materialized over the data the
@@ -158,7 +155,7 @@ public:
 
     [[nodiscard]] NonnullRefPtr<ComputedStyleWorkingSet> reconstruct_computed_properties(ComputedValues const&) const;
     void apply_animated_properties_to_reconstruction(ComputedStyleWorkingSet&, ComputedValues const&) const;
-    [[nodiscard]] NonnullRefPtr<ComputedStyleWorkingSet> reconstruct_computed_properties_for_animation(StyleRecordID) const;
+    [[nodiscard]] NonnullRefPtr<ComputedStyleWorkingSet> reconstruct_computed_properties_for_animation(PublishedStyleRecord const&) const;
 
     void begin_transition_stabilization_epoch();
     // Says whether a baseline was recorded, which is a main-side write.
@@ -301,7 +298,6 @@ private:
     };
     friend class DOM::RenderInputs;
     StyleEngineCell m_style_engine;
-    mutable u64 m_computed_style_record_view_pin_count { 0 };
     mutable u32 m_style_record_view_epoch_depth { 0 };
     // Indexed by each kind's dense index; see style_node_is_text().
     // An element or a shadow root; the root is not an element but it owns a child sequence, so it is

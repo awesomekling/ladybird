@@ -26,12 +26,24 @@ struct StyleReadDemand {
     StyleRecordID parent_highlight {};
 };
 
+// The engine's answer: the record, as a value the read reads it through, beside what the engine says of it.
+struct StyleReadDemandAnswer {
+    StyleEngineFFI::FfiRecordDemandAnswer ffi;
+    // Null where the answer is absent.
+    RefPtr<PublishedStyleRecord const> record;
+};
+
+inline StyleReadDemandAnswer adopt_style_read_demand_answer(StyleEngineFFI::FfiRecordDemandAnswer const& answer)
+{
+    return { answer, PublishedStyleRecord::adopt(answer.published_record) };
+}
+
 // The read holds the JoinScope it joined the frame in flight under, and the engine answers it in a
 // style stage run of its own: the host computes nothing, and only reads the published answer.
-inline StyleEngineFFI::FfiRecordDemandAnswer answer_style_read_demand(DOM::Document::JoinScope const&, StyleEngineQueries engine, StyleReadDemand const& demand)
+inline StyleReadDemandAnswer answer_style_read_demand(DOM::Document::JoinScope const&, StyleEngineQueries engine, StyleReadDemand const& demand)
 {
-    return engine.answer_read_demand(demand.node, demand.pseudo_kind.value_or(NumericLimits<u8>::max()), demand.exclude_inline_style, demand.targeted,
-        demand.read_only, demand.parent_highlight);
+    return adopt_style_read_demand_answer(engine.answer_read_demand(demand.node, demand.pseudo_kind.value_or(NumericLimits<u8>::max()), demand.exclude_inline_style, demand.targeted,
+        demand.read_only, demand.parent_highlight));
 }
 
 }

@@ -24,7 +24,6 @@ use super::used_values::SizeConstraint;
 use crate::css::style::bridge::ElementBoxKind;
 use crate::css::style::fast_hash::{FastMap as HashMap, FastSet as HashSet};
 use crate::css::style::host_pins::HostPinsHandle;
-use crate::css::style::record_payloads::StyleRecordPayloads;
 use crate::css::style::tree::{NaturalSize, ReplacedContentInput, StyleNodeID};
 use crate::css::style::{
     PublishedBoxFacts, PublishedTextSource, StyleEngine, TextStyleParentFacts,
@@ -731,7 +730,7 @@ enum ResolvedHostHandback {
     ShellStyleChanged {
         shell: ShellId,
         style_record: u64,
-        style: Option<Arc<StyleRecordPayloads>>,
+        style: Option<Arc<crate::css::style::published_record::PublishedStyleRecord>>,
         attach_resources: bool,
     },
 }
@@ -775,7 +774,9 @@ impl HostPayment {
                     main_thread,
                     shell,
                     style_record,
-                    style.as_deref().map_or(std::ptr::null(), StyleRecordPayloads::as_ptr),
+                    style
+                        .as_deref()
+                        .map_or(std::ptr::null(), |record| record.payloads.as_ptr()),
                     attach_resources,
                 ),
             }
@@ -2689,14 +2690,14 @@ impl LayoutNodeArena {
     pub(crate) fn set_node_style(&self, id: NodeSlotId, style_record: u64) -> bool {
         self.assert_owner_thread();
         // NB: A test may drive an arena that has no engine, whose rows have no style.
-        let payloads = (!self.style_engine.get().0.is_null())
-            .then(|| self.with_style_store(|engine| engine.style_record_payload_owner(style_record).cloned()))
+        let published = (!self.style_engine.get().0.is_null())
+            .then(|| self.with_style_store(|engine| engine.publish_style_record(style_record)))
             .flatten();
         debug_assert!(
-            payloads.is_some() || self.style_engine.get().0.is_null(),
+            published.is_some() || self.style_engine.get().0.is_null(),
             "a row is given the style of a live record"
         );
-        self.write_shape(id).set_style(payloads);
+        self.write_shape(id).set_style(published);
         self.set_node_flag(id, NodeFlag::FollowsPrincipalStyle, false);
         self.invalidate_overflow_after_style_change(id);
         let previous = self.style_records[id.slot_index() as usize].replace(style_record);
@@ -3500,9 +3501,9 @@ impl LayoutNodeArena {
     ) {
         let previous_payloads = self.data(slot).style.get();
         let derived_payloads = derived
-            .payloads
+            .published
             .as_ref()
-            .map_or(std::ptr::null(), |payloads| payloads.as_ptr());
+            .map_or(std::ptr::null(), |record| record.payloads.as_ptr());
         let changes_layout_affecting_style =
             !style_payloads_equal_in_layout_affecting_groups(previous_payloads.as_ptr(), derived_payloads);
         self.replace_arena_pinned_style_record(slot, derived);
@@ -3790,7 +3791,7 @@ impl LayoutNodeArena {
         ));
         self.style_records[slot.slot_index() as usize].set(derived.record);
         self.style_records_pinned_by_arena[slot.slot_index() as usize].set(true);
-        data.set_style(derived.payloads);
+        data.set_style(derived.published);
         self.enroll_node_for_replaced_content_facts_sync_if_eligible(slot);
     }
 
@@ -4375,7 +4376,7 @@ impl LayoutNodeArena {
         let previously_pinned = self.style_records_pinned_by_arena[slot.slot_index() as usize].replace(true);
         assert!(derived.record != 0);
         let previous_style_record = self.style_records[slot.slot_index() as usize].replace(derived.record);
-        self.write_shape(slot).set_style(derived.payloads);
+        self.write_shape(slot).set_style(derived.published);
         self.refresh_style_flags(slot);
         self.invalidate_overflow_after_style_change(slot);
         self.enroll_text_children_for_content_sync(slot);
@@ -7319,6 +7320,30 @@ pub unsafe extern "C" fn layout_arena_node_style_payloads(arena: *mut c_void, id
         .as_ptr()
 }
 
+/// The row's style record as the engine published it, which the caller owns one reference of; null
+/// for a row without style.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_node_published_style_record(arena: *mut c_void, id: NodeSlotId) -> *const c_void {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    // SAFETY: As above.
+    unsafe { LayoutNodeArena::from_handle(arena) }
+        .data(id)
+        .style
+        .owner()
+        .map_or(std::ptr::null(), crate::css::style::published_record::into_handle)
+}
+
+/// The dependency flags of the row's style record, or zero for a row without style.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_node_style_dependency_flags(arena: *mut c_void, id: NodeSlotId) -> u8 {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    // SAFETY: As above.
+    unsafe { LayoutNodeArena::from_handle(arena) }
+        .data(id)
+        .style
+        .dependency_flags()
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_shell_count(arena: *mut c_void) -> u32 {
     assert!(!arena.is_null(), "layout node arena handle is null");
@@ -8038,7 +8063,9 @@ mod tests {
             NodeKind::InlineNode,
             DerivedStyleRecord {
                 record: 7,
-                payloads: Some(payloads),
+                published: Some(crate::css::style::published_record::PublishedStyleRecord::of_payloads(
+                    7, payloads,
+                )),
             },
         );
         assert_eq!(arena.data(slot).kind.get(), NodeKind::InlineNode);

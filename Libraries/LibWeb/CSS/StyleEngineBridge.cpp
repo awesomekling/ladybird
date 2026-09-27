@@ -13,6 +13,7 @@
 #include <LibWeb/CSS/ComputedStyleWorkingSet.h>
 #include <LibWeb/CSS/CustomPropertyData.h>
 #include <LibWeb/CSS/FontResolution.h>
+#include <LibWeb/CSS/PublishedStyleRecord.h>
 #include <LibWeb/CSS/RustDeclarationBlock.h>
 #include <LibWeb/CSS/SharedCompiledStyleSheet.h>
 #include <LibWeb/CSS/StyleComputer.h>
@@ -339,45 +340,11 @@ StyleEngine::StyleRecordDelta StyleEngine::publish_computed_groups(StyleNodeID n
     return { StyleRecordID { delta.old_style_record }, StyleRecordID { delta.new_style_record } };
 }
 
-void const* StyleEngine::style_record_payloads(StyleRecordID style_record) const
+RefPtr<PublishedStyleRecord const> StyleEngine::publish_style_record(StyleDrainScope const& scope, StyleRecordID style_record) const
 {
-    return StyleEngineFFI::style_engine_style_record_payloads(rust_handle(), style_record.value());
-}
-
-void const* StyleEngine::held_style_record_payloads(StyleRecordID style_record) const
-{
-    // A held record is live, so its payloads are the ones its view borrows.
-    if (!epoch_style_record_facts(style_record))
-        return style_record_payloads(style_record);
-    auto view = style_record_view(style_record);
-    return view.present ? view.payloads : nullptr;
-}
-
-StyleRecordDependencyFlag StyleEngine::style_record_dependency_flags(StyleRecordID style_record) const
-{
-    if (auto* facts = epoch_style_record_facts(style_record)) {
-        if (facts->dependency_flags.has_value())
-            return static_cast<StyleRecordDependencyFlag>(*facts->dependency_flags);
-        if (facts->view.has_value() && facts->view->present)
-            return static_cast<StyleRecordDependencyFlag>(facts->view->dependency_flags);
-    }
-    // NB: Entering the engine can take a style pass in flight back, and finishing that pass ends the epoch, so the
-    //     facts are looked up again afterwards.
-    auto dependency_flags = StyleEngineFFI::style_engine_style_record_dependency_flags(rust_handle(), style_record.value());
-    if (auto* facts = epoch_style_record_facts(style_record))
-        facts->dependency_flags = dependency_flags;
-    return static_cast<StyleRecordDependencyFlag>(dependency_flags);
-}
-
-u64 StyleEngine::style_record_custom_property_environment(StyleRecordID style_record) const
-{
-    if (auto* facts = epoch_style_record_facts(style_record); facts && facts->custom_property_environment.has_value())
-        return *facts->custom_property_environment;
-    // NB: Entering the engine can end the epoch (see style_record_dependency_flags()).
-    auto environment = StyleEngineFFI::style_engine_style_record_custom_property_environment(rust_handle(), style_record.value());
-    if (auto* facts = epoch_style_record_facts(style_record))
-        facts->custom_property_environment = environment;
-    return environment;
+    if (!style_record)
+        return nullptr;
+    return PublishedStyleRecord::adopt(StyleEngineFFI::style_engine_publish_style_record_in_drain(scope, rust_handle(), style_record.value()));
 }
 
 StyleEngine::SettledAnimationDefinitions StyleEngine::take_settled_animation_definitions(StyleDrainScope const& scope, StyleNodeID node, u8 pseudo_kind)
@@ -388,27 +355,6 @@ StyleEngine::SettledAnimationDefinitions StyleEngine::take_settled_animation_def
         .owed = taken.owed,
         .in_display_none_subtree = taken.in_display_none_subtree,
     };
-}
-
-StyleEngine::StyleRecordView StyleEngine::style_record_view(StyleRecordID style_record) const
-{
-    if (auto* facts = epoch_style_record_facts(style_record); facts && facts->view.has_value())
-        return *facts->view;
-    // NB: Entering the engine can end the epoch (see style_record_dependency_flags()).
-    auto view = StyleEngineFFI::style_engine_style_record_view(rust_handle(), style_record.value());
-    if (auto* facts = epoch_style_record_facts(style_record))
-        facts->view = view;
-    return view;
-}
-
-StyleEngine::EpochStyleRecordFacts* StyleEngine::epoch_style_record_facts(StyleRecordID style_record) const
-{
-    // An animation overlay's slot can be replaced within an epoch; only a base record's identity
-    // is fixed.
-    constexpr u64 animation_overlay_tag = 1ull << 63;
-    if (m_style_record_view_epoch_depth == 0 || !style_record || (style_record.value() & animation_overlay_tag))
-        return nullptr;
-    return &m_epoch_style_record_facts.ensure(style_record.value());
 }
 
 void StyleEngine::pin_style_record(StyleRecordID style_record) const
@@ -433,16 +379,12 @@ void StyleEngine::end_pin_waiting_for_frame() const
 
 void StyleEngine::begin_style_record_view_epoch()
 {
-    ++m_style_record_view_epoch_depth;
     StyleEngineFFI::style_engine_begin_style_record_view_epoch(rust_handle());
 }
 
 void StyleEngine::end_style_record_view_epoch()
 {
-    VERIFY(m_style_record_view_epoch_depth > 0);
     StyleEngineFFI::style_engine_end_style_record_view_epoch(rust_handle());
-    if (--m_style_record_view_epoch_depth == 0)
-        m_epoch_style_record_facts.clear();
 }
 
 double StyleEngine::ensure_random_base_value(StyleNodeID node, Utf16View name, bool element_shared)

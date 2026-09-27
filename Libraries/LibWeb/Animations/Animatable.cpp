@@ -292,11 +292,11 @@ void Animatable::cancel_css_animations_and_transitions()
 Vector<CSS::PropertyID> Animatable::property_ids_with_matching_transition_property_entry(Optional<CSS::PseudoElement> pseudo_element) const
 {
     auto& element = const_cast<DOM::Element&>(static_cast<DOM::Element const&>(*this));
-    auto style_record = DOM::AbstractElement { element, pseudo_element }.style_record_identity();
+    auto const* style_record = DOM::AbstractElement { element, pseudo_element }.published_style_record();
     if (!style_record)
         return {};
-    auto style = element.document().style_computer().style_engine().style_record_view(style_record);
-    if (!style.present || !style.longhand_table)
+    auto const& style = style_record->view();
+    if (!style.longhand_table)
         return {};
     if (CSS::StyleValueFFI::rust_transition_delay_and_duration_are_single_zero(style.longhand_table)
         && property_ids_with_existing_transitions(pseudo_element).is_empty())

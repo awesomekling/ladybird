@@ -32,6 +32,7 @@
 #include <LibWeb/CSS/PercentageOr.h>
 #include <LibWeb/CSS/PropertyID.h>
 #include <LibWeb/CSS/PseudoElement.h>
+#include <LibWeb/CSS/PublishedStyleRecord.h>
 #include <LibWeb/CSS/Ratio.h>
 #include <LibWeb/CSS/ResolvedTransform.h>
 #include <LibWeb/CSS/Size.h>
@@ -691,7 +692,7 @@ AK_ENUM_BITWISE_OPERATORS(StyleRecordDependencyFlag);
 
 // Whether a style record publishes display:none, read straight out of its box group payload. This
 // is the same value ComputedValues::display() exposes, without materializing a style record view.
-[[nodiscard]] bool style_record_display_is_none(StyleEngine const&, StyleRecordID);
+[[nodiscard]] bool style_record_display_is_none(PublishedStyleRecord const*);
 
 // The box group payload stores display values in the Rust-defined explicit
 // form; these pins keep the tag discriminants aligned with Display::Type.
@@ -1731,16 +1732,16 @@ StyleGroup const* style_group_from_payloads(void const* payloads)
     return static_cast<StyleGroup const*>(payload);
 }
 
-// A synchronous, allocation-free compatibility surface over the payloads of
-// one authoritative StyleRecord. It owns no group or metadata payload.
+// ComputedValues over the payloads of one published style record, which the view holds: it borrows nothing it does not
+// keep alive, and reads no style engine.
 class WEB_API ComputedStyleRecordView {
     AK_MAKE_NONCOPYABLE(ComputedStyleRecordView);
     AK_MAKE_NONMOVABLE(ComputedStyleRecordView);
 
 public:
     ComputedStyleRecordView() = default;
-    ComputedStyleRecordView(StyleEngineFFI::FfiStyleRecordView const&, StyleComputer const&, StyleRecordID, bool owns_style_record_pin);
-    ~ComputedStyleRecordView();
+    // An empty view for a null record.
+    explicit ComputedStyleRecordView(RefPtr<PublishedStyleRecord const>);
 
     explicit operator bool() const { return m_present; }
     ComputedValues const* operator->() const
@@ -1756,11 +1757,9 @@ public:
     }
 
 private:
+    RefPtr<PublishedStyleRecord const> m_record;
     Optional<ComputedValues> m_base_values;
     ComputedValues m_values { ComputedValues::BorrowedStyleRecord::Yes };
-    GC::Ptr<StyleComputer const> m_style_computer;
-    StyleRecordID m_style_record_identity;
-    bool m_owns_style_record_pin { false };
     bool m_present { false };
 };
 

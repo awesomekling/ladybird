@@ -113,32 +113,31 @@ Node& SyntheticPseudoElement::root() const
 
 void SyntheticPseudoElement::update_animated_properties(Badge<Web::Animations::KeyframeEffect> const&, DOM::AbstractElement abstract_element, Web::Animations::KeyframeEffect& effect, Web::Animations::AnimationUpdateContext& context)
 {
-    if (!m_style_record_identity)
+    if (!m_style_record)
         return;
     effect.update_computed_properties_for_style(context, abstract_element);
 }
 
-void SyntheticPseudoElement::replace_style_record(CSS::StyleRecordID style_record_identity)
+void SyntheticPseudoElement::replace_style_record(RefPtr<CSS::PublishedStyleRecord const> style_record)
 {
     VERIFY(m_originating_element);
-    auto old_style_record_identity = m_style_record_identity;
-    if (old_style_record_identity == style_record_identity)
+    if (style_record_identity() == (style_record ? style_record->identity() : CSS::StyleRecordID {}))
         return;
-    m_style_record_identity = style_record_identity;
+    m_style_record = move(style_record);
     auto* arena = m_originating_element->document().layout_node_arena_if_created();
     if (!arena || m_originating_element->style_node_id() == 0)
         return;
     if (auto row = arena->bound_row(m_originating_element->style_node_id(), Layout::Node::encode_generated_for(m_type)))
-        Layout::NodeWithStyle::set_style_record_identity(row, style_record_identity);
+        Layout::NodeWithStyle::set_style_record(row, m_style_record);
 }
 
-void SyntheticPseudoElement::set_computed_style(CSS::StyleRecordID style_record_identity)
+void SyntheticPseudoElement::set_computed_style(RefPtr<CSS::PublishedStyleRecord const> style_record)
 {
-    if (!style_record_identity) {
+    if (!style_record) {
         clear_computed_style();
         return;
     }
-    replace_style_record(style_record_identity);
+    replace_style_record(move(style_record));
 }
 
 void SyntheticPseudoElement::clear_computed_style(RefPtr<CSS::ComputedValues const> style_to_preserve_for_detachment)
@@ -149,13 +148,12 @@ void SyntheticPseudoElement::clear_computed_style(RefPtr<CSS::ComputedValues con
         else
             layout_node->pin_style_record_for_detachment();
     }
-    m_style_record_identity = 0;
+    m_style_record = nullptr;
 }
 
-void SyntheticPseudoElement::refresh_computed_style(CSS::StyleRecordID style_record_identity)
+void SyntheticPseudoElement::refresh_computed_style(NonnullRefPtr<CSS::PublishedStyleRecord const> style_record)
 {
-    replace_style_record(style_record_identity);
-    VERIFY(m_style_record_identity);
+    replace_style_record(move(style_record));
 }
 
 SyntheticPseudoElementTreeNode::SyntheticPseudoElementTreeNode(CSS::PseudoElement type)
@@ -192,6 +190,11 @@ Node& ElementReferencePseudoElement::root() const
 CSS::StyleRecordID ElementReferencePseudoElement::style_record_identity() const
 {
     return m_referenced_element->style_record_identity({});
+}
+
+CSS::PublishedStyleRecord const* ElementReferencePseudoElement::published_style_record() const
+{
+    return m_referenced_element->published_style_record({});
 }
 
 void ElementReferencePseudoElement::update_animated_properties(Badge<Web::Animations::KeyframeEffect> const& badge, DOM::AbstractElement abstract_element, Web::Animations::KeyframeEffect& effect, Web::Animations::AnimationUpdateContext& context)

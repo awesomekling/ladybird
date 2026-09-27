@@ -140,6 +140,11 @@ CSS::StyleRecordID AbstractElement::style_record_identity() const
     return m_element->style_record_identity(m_pseudo_element);
 }
 
+CSS::PublishedStyleRecord const* AbstractElement::published_style_record() const
+{
+    return m_element->published_style_record(m_pseudo_element);
+}
+
 void const* AbstractElement::style_record_payloads() const
 {
     return m_element->style_record_payloads(m_pseudo_element);

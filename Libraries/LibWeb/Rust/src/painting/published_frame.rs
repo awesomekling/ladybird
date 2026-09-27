@@ -217,8 +217,8 @@ impl PublishedFrame {
     /// The style of the node in a slot the caller has found live.
     #[inline]
     fn style_at(&self, id: NodeSlotId) -> Option<ComputedValuesView<'_>> {
-        let payloads = self.styles.get(id.slot_index() as usize)?.0.as_deref()?;
-        Some(ComputedValuesView::new(&payloads.as_ffi().groups))
+        let record = self.styles.get(id.slot_index() as usize)?.0.as_deref()?;
+        Some(ComputedValuesView::new(&record.payloads.as_ffi().groups))
     }
 
     /// The node in a slot a read requires to be live.

@@ -71,9 +71,7 @@ void remove_redundant_styles_from_inserted_content(InsertedContent& inserted_con
         auto style_with_inline_declaration = style_computer.reconstruct_computed_properties(*computed_values);
         DOM::Document::JoinScope join { element->document(), DOM::UpdateLayoutReason::NavigableSelectedText };
         auto answer = CSS::answer_style_read_demand(join, style_computer.style_engine_queries(), { .node = element->style_node_id(), .exclude_inline_style = true, .targeted = true });
-        if (!answer.record.style_record)
-            continue;
-        auto view = style_computer.computed_style_record_view(CSS::StyleRecordID { answer.record.style_record });
+        CSS::ComputedStyleRecordView view { move(answer.record) };
         if (!view)
             continue;
         auto style_without_inline_declaration = style_computer.reconstruct_computed_properties(*CSS::ComputedValues::Builder { *view }.build());

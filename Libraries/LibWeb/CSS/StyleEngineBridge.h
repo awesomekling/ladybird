@@ -19,6 +19,7 @@
 #include <AK/Vector.h>
 #include <LibGC/Cell.h>
 #include <LibGC/Ptr.h>
+#include <LibWeb/CSS/PublishedStyleRecord.h>
 #include <LibWeb/CSS/StyleDrainScope.h>
 #include <LibWeb/CSS/StyleEngineIdentifiers.h>
 #include <LibWeb/CSS/StyleInputScope.h>
@@ -131,13 +132,9 @@ public:
     // return its previous and current StyleRecordID assignments. A zero node interns an unassigned
     // record for a style target which is not registered in the engine.
     [[nodiscard]] StyleRecordDelta publish_computed_groups(StyleNodeID node, u8 pseudo_kind, ReadonlySpan<void const*> payloads, size_t inherited_group_count, u64 custom_property_environment, bool inherited_group_swap_candidate, u64 counter_style_environment_identity, u64 animation_overlay_identity, void const* animated_overlay, ReadonlySpan<void const*> animation_overlay_payloads, void const* computed_longhand_table, void const* custom_property_store);
-    // The borrowed payload array is stable while a base record exists or an animation-overlay
-    // generation remains assigned or pinned.
-    [[nodiscard]] void const* style_record_payloads(StyleRecordID style_record) const;
-    // The payloads of a record an element or box holds, which keeps it alive.
-    [[nodiscard]] void const* held_style_record_payloads(StyleRecordID style_record) const;
-    [[nodiscard]] StyleRecordDependencyFlag style_record_dependency_flags(StyleRecordID style_record) const;
-    [[nodiscard]] u64 style_record_custom_property_environment(StyleRecordID style_record) const;
+    // The record as a value that owns everything a read of it reads, for the drain to install; null for a record the
+    // engine no longer holds. Nothing reads a record through its identity: every read is made through the value.
+    [[nodiscard]] RefPtr<PublishedStyleRecord const> publish_style_record(StyleDrainScope const&, StyleRecordID style_record) const;
     // The animation definitions an engine-settled row left for the host, taken so that exactly one
     // application drains them. Borrowed until the next row's are taken.
     struct SettledAnimationDefinitions {
@@ -146,7 +143,6 @@ public:
         bool in_display_none_subtree { false };
     };
     [[nodiscard]] SettledAnimationDefinitions take_settled_animation_definitions(StyleDrainScope const&, StyleNodeID node, u8 pseudo_kind);
-    [[nodiscard]] StyleRecordView style_record_view(StyleRecordID style_record) const;
     // The document thread's own pins, which keep a record from reclamation for its readers. They
     // live in a table beside the engine, so taking or releasing one never waits for a style pass.
     void pin_style_record(StyleRecordID style_record) const;
@@ -511,17 +507,6 @@ private:
     GC::Ptr<StyleComputer> m_style_computer;
     // The recording stream the engine records under, or zero.
     u64 m_recording_stream { 0 };
-
-    // No record is reclaimed within a style-record view epoch, so what a base record's identity
-    // names does not change during one: the engine answers each of these once per record.
-    struct EpochStyleRecordFacts {
-        Optional<StyleRecordView> view;
-        Optional<u64> custom_property_environment;
-        Optional<u8> dependency_flags;
-    };
-    [[nodiscard]] EpochStyleRecordFacts* epoch_style_record_facts(StyleRecordID) const;
-    u32 m_style_record_view_epoch_depth { 0 };
-    mutable HashMap<u64, EpochStyleRecordFacts> m_epoch_style_record_facts;
 
     HashMap<FlatPtr, StyleAtomID> m_atoms;
     HashTable<StyleAtomID> m_published_language_atoms;

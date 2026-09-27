@@ -901,17 +901,17 @@ static void apply_animation_overlay(CSS::StyleDrainScope const& scope, DOM::Abst
 
     // NB: refresh_computed_style() already publishes the new record to the layout node. Only
     // inherited values and image resources require the additional C++ style side effects.
-    auto apply_layout_node_style_side_effects = [&](Layout::NodeWithStyle& layout_node, CSS::StyleRecordID style_record) {
-        if (animated_property_invalidation.requires_layout_node_style_application)
-            layout_node.apply_style(style_record);
+    auto apply_layout_node_style_side_effects = [&](Layout::NodeWithStyle& layout_node, CSS::PublishedStyleRecord const* style_record) {
+        if (animated_property_invalidation.requires_layout_node_style_application && style_record)
+            layout_node.apply_style(*style_record);
         else if (animated_property_invalidation.requires_style_resource_update)
             layout_node.attach_style_resources();
     };
     if (!element.pseudo_element().has_value()) {
         if (auto* layout_node = target->unsafe_layout_node())
-            apply_layout_node_style_side_effects(*layout_node, target->style_record_identity());
+            apply_layout_node_style_side_effects(*layout_node, target->published_style_record());
     } else if (auto pseudo_element_node = target->pseudo_element_unsafe_layout_node(element.pseudo_element().value())) {
-        apply_layout_node_style_side_effects(*pseudo_element_node, target->style_record_identity(element.pseudo_element()));
+        apply_layout_node_style_side_effects(*pseudo_element_node, target->published_style_record(element.pseudo_element()));
     }
 
     if (caller_applies_invalidation)
