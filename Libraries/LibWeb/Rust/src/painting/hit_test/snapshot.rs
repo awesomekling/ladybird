@@ -56,7 +56,7 @@ impl LayoutNodeArena {
 }
 
 impl HitTestSnapshot {
-    fn list(&self) -> Option<&HitTestList> {
+    pub(super) fn list(&self) -> Option<&HitTestList> {
         self.frame.rows.hit_test_list.as_deref()
     }
 
@@ -67,7 +67,11 @@ impl HitTestSnapshot {
 
     /// Runs a query over the list, the visual context tree it converts points through and the rows it
     /// was recorded over, or answers `default` where the snapshot holds no list to query.
-    fn query<R>(&self, default: R, query: impl FnOnce(&HitTestList, &VisualContextTree, &PaintSource<'_>) -> R) -> R {
+    pub(super) fn query<R>(
+        &self,
+        default: R,
+        query: impl FnOnce(&HitTestList, &VisualContextTree, &PaintSource<'_>) -> R,
+    ) -> R {
         let (Some(list), Some(tree)) = (self.list(), self.frame.rows.visual_context_tree.as_deref()) else {
             return default;
         };
@@ -80,7 +84,7 @@ impl HitTestSnapshot {
     }
 
     /// Runs a query over the list and the rows it was recorded over.
-    fn read<R>(&self, default: R, read: impl FnOnce(&HitTestList, &PaintSource<'_>) -> R) -> R {
+    pub(super) fn read<R>(&self, default: R, read: impl FnOnce(&HitTestList, &PaintSource<'_>) -> R) -> R {
         let Some(list) = self.list() else {
             return default;
         };
@@ -104,14 +108,14 @@ pub struct FfiHitTestSnapshotItem {
 
 /// A DOM node, as the host names one (`DOM::NodeIdentity`): by its style node, or as the document.
 #[repr(C)]
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct FfiHitNodeIdentity {
     pub kind: FfiHitNodeIdentityKind,
     pub style_node: u32,
 }
 
 #[repr(u8)]
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum FfiHitNodeIdentityKind {
     #[default]
     None,
@@ -132,7 +136,7 @@ impl FfiHitNodeIdentity {
         })
     }
 
-    fn is_none(self) -> bool {
+    pub(super) fn is_none(self) -> bool {
         self.kind == FfiHitNodeIdentityKind::None
     }
 }
@@ -164,7 +168,7 @@ impl Default for FfiHitTestSnapshotHit {
 /// The DOM node a row an event is dispatched to stands for, as `Layout::Node::dom_node_identity()`
 /// names it; for a row generated for a pseudo-element, the element it was generated for where
 /// `allow_pseudo_fallback`.
-fn dispatch_identity(
+pub(super) fn dispatch_identity(
     rows: &impl PaintRead,
     row: Option<NodeSlotId>,
     allow_pseudo_fallback: bool,
@@ -212,7 +216,10 @@ impl HitTestSnapshot {
 
     fn resolve_hit(&self, index: usize, local_point: CssPixelPoint) -> FfiHitTestSnapshotHit {
         self.read(FfiHitTestSnapshotHit::default(), |list, rows| {
-            let item = &list.items[index];
+            let Some(item) = list.items.get(index) else {
+                debug_assert!(false, "an item the snapshot does not hold");
+                return FfiHitTestSnapshotHit::default();
+            };
             let mut hit_node = item.hit_node;
             // https://drafts.csswg.org/cssom-view/#dom-document-elementfrompoint
             // 2. If there is a box in the viewport that would be a target for hit testing at coordinates x,y, when
@@ -253,7 +260,7 @@ impl HitTestSnapshot {
 }
 
 /// SAFETY: `snapshot` must be a live handle from `layout_arena_publish_hit_test_snapshot`.
-unsafe fn snapshot_from_handle<'a>(snapshot: *const c_void) -> &'a HitTestSnapshot {
+pub(super) unsafe fn snapshot_from_handle<'a>(snapshot: *const c_void) -> &'a HitTestSnapshot {
     assert!(!snapshot.is_null(), "hit-test snapshot handle is null");
     unsafe { &*snapshot.cast::<HitTestSnapshot>() }
 }
@@ -356,8 +363,19 @@ pub unsafe extern "C" fn hit_test_snapshot_all(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hit_test_snapshot_item(snapshot: *const c_void, index: usize) -> FfiHitTestSnapshotItem {
     let snapshot = unsafe { snapshot_from_handle(snapshot) };
-    let list = snapshot.list().expect("an item of a snapshot with no list");
-    let item = &list.items[index];
+    // The host names items a query of the same snapshot answered with.
+    let Some(item) = snapshot.list().and_then(|list| list.items.get(index)) else {
+        debug_assert!(false, "an item the snapshot does not hold");
+        return FfiHitTestSnapshotItem {
+            can_produce_caret_position: false,
+            paintable: NodeSlotId::INVALID,
+            hit_node: NodeSlotId::INVALID,
+            chrome_widget_kind: crate::painting::hit_test::CHROME_WIDGET_NONE,
+            caret_node: NodeSlotId::INVALID,
+            caret_rect: Default::default(),
+            context: Default::default(),
+        };
+    };
     FfiHitTestSnapshotItem {
         can_produce_caret_position: item.can_produce_caret_position,
         paintable: item.paintable,

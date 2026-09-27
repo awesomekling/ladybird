@@ -10,7 +10,6 @@ use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::{NodeFlag, NodeSlotId};
 use crate::layout::{fragment_tree, used_values};
 use crate::painting::geometry_read::{GeometryRead, read_live_geometry};
-use crate::painting::hit_test::HitTestList;
 use crate::painting::image_map_areas::{ImageMapAreaColumn, ImageMapAreas};
 use crate::painting::node_painting;
 use crate::painting::paintable_data::*;
@@ -21,7 +20,7 @@ use crate::painting::visual_context::dirty::{
 };
 use crate::painting::visual_context::scroll_state::ScrollOffsetColumn;
 use crate::painting::visual_context::{
-    BoxVisualContextNodeHandles, EMPTY_BOX_VISUAL_CONTEXT_NODE_HANDLES, PaintableVisualContextRecord, VisualContextTree,
+    BoxVisualContextNodeHandles, EMPTY_BOX_VISUAL_CONTEXT_NODE_HANDLES, PaintableVisualContextRecord,
 };
 use smallvec::{SmallVec, smallvec};
 use std::cell::{Cell, Ref, RefCell, RefMut};
@@ -161,7 +160,7 @@ mod tests {
     #[test]
     fn hit_test_list_and_visual_context_tree_are_published_with_the_rows() {
         use crate::painting::hit_test::HitTestList;
-        use crate::painting::visual_context::{TransformData, TransformDataRole};
+        use crate::painting::visual_context::{TransformData, TransformDataRole, VisualContextTree};
         use std::sync::Arc;
 
         let list = |generation| {
@@ -193,15 +192,6 @@ mod tests {
         assert_eq!(published.hit_test_list.as_ref().map(|list| list.generation), Some(1));
         assert!(Arc::ptr_eq(
             published.visual_context_tree.as_ref().unwrap(),
-            published_tree.as_ref().unwrap()
-        ));
-        let committed = arena.committed_paintable_rows();
-        assert_eq!(
-            committed.with_hit_test_list(|list| list.map(|list| list.generation)),
-            Some(2)
-        );
-        assert!(!Arc::ptr_eq(
-            &committed.visual_context_tree().unwrap(),
             published_tree.as_ref().unwrap()
         ));
     }
@@ -547,10 +537,6 @@ pub(crate) trait PaintableRowsRead: PaintRead + Deref<Target = LayoutNodeArena> 
     fn unique_node_id(&self, id: NodeSlotId) -> i64;
     /// Reads the image map areas the document published.
     fn with_image_map_areas<R>(&self, read: impl FnOnce(&ImageMapAreas) -> R) -> R;
-    /// Reads the hit-test list of the last recording, as it was when the rows were published.
-    fn with_hit_test_list<R>(&self, read: impl FnOnce(Option<&HitTestList>) -> R) -> R;
-    /// The visual context tree, as it was when the rows were published.
-    fn visual_context_tree(&self) -> Option<std::sync::Arc<VisualContextTree>>;
 }
 
 /// A row's committed side data, as a published generation or the live column holds it.
@@ -831,14 +817,6 @@ impl PaintableRowsRead for CommittedPaintableRows<'_> {
     fn with_image_map_areas<R>(&self, read: impl FnOnce(&ImageMapAreas) -> R) -> R {
         read(&self.published().image_map_areas)
     }
-
-    fn with_hit_test_list<R>(&self, read: impl FnOnce(Option<&HitTestList>) -> R) -> R {
-        read(self.published().hit_test_list.as_deref())
-    }
-
-    fn visual_context_tree(&self) -> Option<std::sync::Arc<VisualContextTree>> {
-        self.published().visual_context_tree.clone()
-    }
 }
 
 /// The paintable rows as a main-side read sees them, from [`crate::painting::ffi`]'s one door
@@ -936,20 +914,6 @@ impl PaintableRowsRead for MainSidePaintableRows<'_> {
             Self::DuringStage(rows) => rows.with_image_map_areas(read),
         }
     }
-
-    fn with_hit_test_list<R>(&self, read: impl FnOnce(Option<&HitTestList>) -> R) -> R {
-        match self {
-            Self::Committed(rows) => rows.with_hit_test_list(read),
-            Self::DuringStage(rows) => rows.with_hit_test_list(read),
-        }
-    }
-
-    fn visual_context_tree(&self) -> Option<std::sync::Arc<VisualContextTree>> {
-        match self {
-            Self::Committed(rows) => rows.visual_context_tree(),
-            Self::DuringStage(rows) => rows.visual_context_tree(),
-        }
-    }
 }
 
 impl<Arena> GeometryRead for PaintableRows<Arena>
@@ -1008,14 +972,6 @@ where
 
     fn with_image_map_areas<R>(&self, read: impl FnOnce(&ImageMapAreas) -> R) -> R {
         self.arena.paintable_rows.image_map_areas.with_areas(read)
-    }
-
-    fn with_hit_test_list<R>(&self, read: impl FnOnce(Option<&HitTestList>) -> R) -> R {
-        read(self.arena.hit_test_list.borrow().as_deref())
-    }
-
-    fn visual_context_tree(&self) -> Option<std::sync::Arc<VisualContextTree>> {
-        self.arena.paint_state().borrow().visual_context.tree.clone()
     }
 }
 

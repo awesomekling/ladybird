@@ -4,12 +4,19 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+//! A document's hit-test list, and the queries made of it.
+//!
+//! A hit test, its caret lines and its resolution to the rows a hit names read the rows the list was
+//! recorded over as [`PaintRead`] answers them, and nothing else: whatever answers [`PaintRead`], a
+//! published frame included, answers a hit test. A hit names rows; which DOM node a row stands for,
+//! and whether that node lies in a scope, is the caller's to decide.
+
 pub mod caret;
 pub mod geometry;
 pub mod query;
-pub mod read;
 pub mod resolve;
 pub mod snapshot;
+pub mod snapshot_caret;
 
 use crate::css::css_pixels::CssPixels;
 use crate::css::css_pixels::{CssPixelPoint, CssPixelRect};

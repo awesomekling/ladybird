@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    p {
+        margin: 0;
+        font: 20px/1.5 monospace;
+    }
+</style>
+<div id="first" contenteditable="true"><p><span id="one">one</span></p><p><span id="two">two</span></p></div>
+<p><span id="outside">outside</span></p>
+<div id="second" contenteditable="true"><p><span id="three">three</span></p></div>
+<script>
+    // Moving the caret a line up or down only lands on lines of the editing host it is in: not on the line outside it,
+    // and not on the line of the other editing host below.
+    test(() => {
+        const describe = n => !n
+            ? "null"
+            : (n.nodeType === Node.TEXT_NODE ? `#text("${n.data}")` : n.nodeName.toLowerCase() + (n.id ? "#" + n.id : ""));
+        const report = label => {
+            const s = getSelection();
+            println(`${label}: ${describe(s.focusNode)} @ ${s.focusOffset}`);
+        };
+        const move = (editor, node, offset, key, label) => {
+            editor.focus();
+            getSelection().setBaseAndExtent(node, offset, node, offset);
+            internals.sendKey(editor, key);
+            report(label);
+        };
+        const text = id => document.getElementById(id).firstChild;
+
+        move(first, text("one"), 1, "Down", "ArrowDown from one,1");
+        internals.sendKey(first, "Down");
+        report("ArrowDown again");
+        move(second, text("three"), 1, "Up", "ArrowUp from three,1");
+        move(first, text("two"), 2, "Up", "ArrowUp from two,2");
+    });
+</script>

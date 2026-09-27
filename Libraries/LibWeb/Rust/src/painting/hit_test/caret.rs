@@ -5,7 +5,6 @@
  */
 
 use super::*;
-use crate::painting::hit_test::read::CaretRead;
 use crate::painting::host::{FfiCaretPositionQuery, FfiHitTestQueryCallbacks};
 use crate::painting::published_frame::PaintRead;
 use crate::painting::text_fragment::CaretMatch;
@@ -142,7 +141,7 @@ impl Default for ClosestLine {
 impl HitTestList {
     pub(crate) fn caret_line_for_position(
         &self,
-        arena: &impl CaretRead,
+        arena: &impl PaintRead,
         query: &FfiCaretPositionQuery,
         offset: usize,
         affinity_is_downstream: bool,
@@ -168,7 +167,7 @@ impl HitTestList {
 
     fn item_position_match(
         &self,
-        arena: &impl CaretRead,
+        arena: &impl PaintRead,
         query: &FfiCaretPositionQuery,
         item_index: usize,
         offset: usize,
@@ -429,23 +428,30 @@ impl HitTestList {
             || inline_axis_end(line.rect, writing_mode) <= inline_axis_start(item.rect, writing_mode)
     }
 
-    fn line_in_scope(&self, arena: &impl CaretRead, callbacks: &FfiHitTestQueryCallbacks, line_index: usize) -> bool {
+    /// Visits the DOM nodes the caret items of a line stand for, as [`resolve::row_dom_style_node`] names them,
+    /// which the host decides a scope from.
+    pub(crate) fn visit_caret_line_dom_style_nodes(
+        &self,
+        arena: &impl PaintRead,
+        line_index: usize,
+        mut visit: impl FnMut(u32),
+    ) {
         let line = &self.caret_lines[line_index];
         for caret_item_index in line.first_caret_item_index..=line.last_caret_item_index {
             let Some(slot) = self.item_target_slot(arena, self.caret_item_indices[caret_item_index]) else {
                 continue;
             };
-            if resolve::row_is_in_scope(arena, callbacks.scope, callbacks.document, slot) {
-                return true;
+            let style_node = resolve::row_dom_style_node(arena, slot);
+            if style_node != 0 {
+                visit(style_node);
             }
         }
-        false
     }
 
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn find_closest_line(
         &self,
-        arena: &impl CaretRead,
+        arena: &impl PaintRead,
         visual_context_tree: &VisualContextTree,
         callbacks: &FfiHitTestQueryCallbacks,
         point: CssPixelPoint,
@@ -476,7 +482,7 @@ impl HitTestList {
         };
 
         for line_index in 0..self.caret_lines.len() {
-            if scoped && !self.line_in_scope(arena, callbacks, line_index) {
+            if scoped && !callbacks.line_is_in_scope(line_index) {
                 continue;
             }
             let line = self.caret_lines[line_index].clone();
@@ -599,7 +605,6 @@ impl HitTestList {
 
     pub(crate) fn adjacent_line(
         &self,
-        arena: &impl CaretRead,
         callbacks: &FfiHitTestQueryCallbacks,
         current_line_index: usize,
         direction: CaretLineDirection,
@@ -628,7 +633,7 @@ impl HitTestList {
             let line = &self.caret_lines[line_index];
             // INTEROP: Keyboard navigation follows layout geometry across clips, effects, and transforms.
             //          Separate paint contexts inside one editing host must not isolate its editable lines.
-            if line_index == current_line_index || !self.line_in_scope(arena, callbacks, line_index) {
+            if line_index == current_line_index || !callbacks.line_is_in_scope(line_index) {
                 continue;
             }
             let candidate_block_coordinate = line_block_middle(line.rect, writing_mode);

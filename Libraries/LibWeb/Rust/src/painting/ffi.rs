@@ -3686,29 +3686,6 @@ pub unsafe extern "C" fn layout_arena_publish_compositor_animations(
 
 /// # Safety
 ///
-/// `arena` must be a live handle from `layout_arena_create`, used on the document thread;
-/// the callback context and function pointers must remain valid for this synchronous call.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_hit_test_caret_line_for_position(
-    arena: *mut c_void,
-    query: crate::painting::host::FfiCaretPositionQuery,
-    offset: usize,
-    affinity_is_downstream: bool,
-) -> crate::painting::host::FfiCaretLineForPosition {
-    with_hit_test_list_and_caret_lines(arena, Default::default(), |list, arena| {
-        let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::HitTest);
-        match list.caret_line_for_position(arena, &query, offset, affinity_is_downstream) {
-            Some(line_index) => crate::painting::host::FfiCaretLineForPosition {
-                has_line: true,
-                line_index,
-            },
-            None => Default::default(),
-        }
-    })
-}
-
-/// # Safety
-///
 /// `sink` must be the pointer handed to the callback, used synchronously; `bytes` must point at
 /// `length` readable bytes.
 #[unsafe(no_mangle)]
@@ -3824,96 +3801,12 @@ pub unsafe extern "C" fn layout_arena_retain_recorded_display_list(arena: *mut c
 
 /// # Safety
 ///
-/// `arena` must be a live handle from `layout_arena_create`; `line_index` in range.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_hit_test_caret_line(
-    arena: *mut c_void,
-    line_index: usize,
-) -> crate::painting::host::FfiCaretLineExport {
-    with_hit_test_list_and_caret_lines(arena, Default::default(), |list, _| {
-        let line = &list.caret_lines[line_index];
-        crate::painting::host::FfiCaretLineExport {
-            rect: line.rect.into(),
-            context: line.context,
-            first_caret_item_index: line.first_caret_item_index,
-            last_caret_item_index: line.last_caret_item_index,
-        }
-    })
-}
-
-/// # Safety
-///
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_hit_test_list_generation(arena: *mut c_void) -> u64 {
     let arena = unsafe { arena_from_handle(arena) };
     arena.try_take_in_recording();
     arena.hit_test_list.borrow().as_ref().map_or(0, |list| list.generation)
-}
-
-/// The rows a hit-test query reads, with the list and visual context tree published beside them.
-/// The structures the query derives from the list are built before the rows are published.
-///
-/// SAFETY: Same as [`main_side_paintable_rows`].
-unsafe fn hit_test_paintable_rows<'a>(
-    arena: *mut c_void,
-    needs_spatial_indexes: bool,
-    needs_caret_lines: bool,
-) -> MainSidePaintableRows<'a> {
-    if !unsafe { arena_from_handle(arena) }.a_stage_is_running() {
-        unsafe { arena_from_handle_mut(arena) }
-            .prepare_hit_test_list_for_query(needs_spatial_indexes, needs_caret_lines);
-    }
-    unsafe { main_side_paintable_rows(arena) }
-}
-
-fn with_hit_test_list_items_only<R>(
-    arena: *mut c_void,
-    default: R,
-    query: impl FnOnce(&crate::painting::hit_test::HitTestList, &MainSidePaintableRows<'_>) -> R,
-) -> R {
-    // SAFETY: The caller passes a live arena handle (documented on every entry point below).
-    let rows = unsafe { hit_test_paintable_rows(arena, false, false) };
-    rows.with_hit_test_list(|list| match list {
-        Some(list) => query(list, &rows),
-        None => default,
-    })
-}
-
-fn with_hit_test_list_and_caret_lines<R>(
-    arena: *mut c_void,
-    default: R,
-    query: impl FnOnce(&crate::painting::hit_test::HitTestList, &MainSidePaintableRows<'_>) -> R,
-) -> R {
-    // SAFETY: The caller passes a live arena handle (documented on every entry point below).
-    let rows = unsafe { hit_test_paintable_rows(arena, false, true) };
-    rows.with_hit_test_list(|list| match list {
-        Some(list) if list.caret_lines_built => query(list, &rows),
-        _ => default,
-    })
-}
-
-fn with_hit_test_list_spatial_indexes_and_visual_context_tree<R>(
-    arena: *mut c_void,
-    needs_caret_lines: bool,
-    default: R,
-    query: impl FnOnce(
-        &crate::painting::hit_test::HitTestList,
-        &crate::painting::visual_context::VisualContextTree,
-        &MainSidePaintableRows<'_>,
-    ) -> R,
-) -> R {
-    // SAFETY: The caller passes a live arena handle (documented on every entry point below).
-    let rows = unsafe { hit_test_paintable_rows(arena, true, needs_caret_lines) };
-    let Some(tree) = rows.visual_context_tree() else {
-        return default;
-    };
-    rows.with_hit_test_list(|list| match list {
-        Some(list) if list.spatial_indexes_built && (!needs_caret_lines || list.caret_lines_built) => {
-            query(list, &tree, &rows)
-        }
-        _ => default,
-    })
 }
 
 pub(crate) fn ffi_topmost(
@@ -3927,162 +3820,6 @@ pub(crate) fn ffi_topmost(
         },
         None => crate::painting::host::FfiTopmostItem::default(),
     }
-}
-
-/// # Safety
-///
-/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_hit_test_find_topmost_items_for_caret(
-    arena: *mut c_void,
-    callbacks: crate::painting::host::FfiHitTestQueryCallbacks,
-    point: FfiCssPixelPoint,
-) -> crate::painting::host::FfiTopmostItemsForCaret {
-    with_hit_test_list_spatial_indexes_and_visual_context_tree(arena, false, Default::default(), |list, tree, arena| {
-        let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::HitTest);
-        let (caret_item, hit_item) = list.find_topmost_items_for_caret(arena, tree, &callbacks, point.into());
-        crate::painting::host::FfiTopmostItemsForCaret {
-            caret_item: ffi_topmost(caret_item),
-            hit_item: ffi_topmost(hit_item),
-        }
-    })
-}
-
-/// # Safety
-///
-/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_hit_test_item_at_line_edge(
-    arena: *mut c_void,
-    line_index: usize,
-    position_type: u8,
-) -> usize {
-    let position_type = crate::painting::hit_test::caret::CaretPositionType::from_u8(position_type);
-    with_hit_test_list_and_caret_lines(arena, usize::MAX, |list, _| {
-        list.item_at_line_edge(line_index, position_type)
-    })
-}
-
-/// # Safety
-///
-/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_hit_test_caret_item_for_line(
-    arena: *mut c_void,
-    line_index: usize,
-    point: FfiCssPixelPoint,
-    mode: u8,
-) -> crate::painting::host::FfiCaretItemForLine {
-    with_hit_test_list_and_caret_lines(arena, Default::default(), |list, arena| {
-        match list.caret_item_for_line(
-            arena,
-            line_index,
-            point.into(),
-            crate::painting::hit_test::caret::CaretPositionMode::from_u8(mode),
-        ) {
-            Some((item_index, position_type)) => crate::painting::host::FfiCaretItemForLine {
-                has_item: true,
-                item_index,
-                position_type: position_type as u8,
-            },
-            None => Default::default(),
-        }
-    })
-}
-
-/// # Safety
-///
-/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_hit_test_line_block_coordinate(arena: *mut c_void, line_index: usize) -> i32 {
-    with_hit_test_list_and_caret_lines(arena, 0, |list, _| list.line_block_coordinate(line_index).raw_value())
-}
-
-/// # Safety
-///
-/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_hit_test_item_is_inline_adjacent_to_line(
-    arena: *mut c_void,
-    item_index: usize,
-    line_index: usize,
-) -> bool {
-    with_hit_test_list_and_caret_lines(arena, false, |list, _| {
-        list.item_is_inline_adjacent_to_line(item_index, line_index)
-    })
-}
-
-/// # Safety
-///
-/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_hit_test_find_closest_line(
-    arena: *mut c_void,
-    callbacks: crate::painting::host::FfiHitTestQueryCallbacks,
-    point: FfiCssPixelPoint,
-    mode: u8,
-    scoped: bool,
-    respect_clip: bool,
-) -> crate::painting::host::FfiClosestLine {
-    with_hit_test_list_spatial_indexes_and_visual_context_tree(arena, true, Default::default(), |list, tree, arena| {
-        let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::HitTest);
-        let closest = list.find_closest_line(
-            arena,
-            tree,
-            &callbacks,
-            point.into(),
-            crate::painting::hit_test::caret::CaretPositionMode::from_u8(mode),
-            scoped,
-            respect_clip,
-        );
-        crate::painting::host::FfiClosestLine {
-            has_index: closest.index.is_some(),
-            index: closest.index.unwrap_or(0),
-            local_x: closest.local_point.x.raw_value(),
-            local_y: closest.local_point.y.raw_value(),
-            block_distance: closest.block_distance.raw_value(),
-            block_start_distance: closest.block_start_distance.raw_value(),
-            inline_distance: closest.inline_distance.raw_value(),
-            is_before_point: closest.is_before_point,
-            contains_point_in_block_axis: closest.contains_point_in_block_axis,
-        }
-    })
-}
-
-/// # Safety
-///
-/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_hit_test_adjacent_line(
-    arena: *mut c_void,
-    callbacks: crate::painting::host::FfiHitTestQueryCallbacks,
-    current_line_index: usize,
-    direction: u8,
-    inline_coordinate_raw: i32,
-) -> crate::painting::host::FfiAdjacentLine {
-    let direction = if direction == 1 {
-        crate::painting::hit_test::caret::CaretLineDirection::Next
-    } else {
-        crate::painting::hit_test::caret::CaretLineDirection::Previous
-    };
-    with_hit_test_list_and_caret_lines(arena, Default::default(), |list, arena| {
-        let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::HitTest);
-        match list.adjacent_line(
-            arena,
-            &callbacks,
-            current_line_index,
-            direction,
-            CssPixels::from_raw(inline_coordinate_raw),
-        ) {
-            Some((line_index, point)) => crate::painting::host::FfiAdjacentLine {
-                has_line: true,
-                line_index,
-                point_x: point.x.raw_value(),
-                point_y: point.y.raw_value(),
-            },
-            None => Default::default(),
-        }
-    })
 }
 
 /// # Safety
@@ -4163,22 +3900,12 @@ mod tests {
             arena.note_publishing_paint_recording_started();
             arena.clear_paint_damage_consumed_by_published_recording();
 
-            let handle = std::ptr::from_mut(&mut arena).cast();
-            let query = |_: &HitTestList, rows: &MainSidePaintableRows<'_>| {
-                crate::painting::paintable_geometry::scrollable_overflow_rect(rows, viewport)
-            };
-            let rect = if spatial_indexes {
-                with_hit_test_list_spatial_indexes_and_visual_context_tree(
-                    handle,
-                    caret_lines,
-                    None,
-                    |list, _, arena| query(list, arena),
-                )
-            } else if caret_lines {
-                with_hit_test_list_and_caret_lines(handle, None, query)
-            } else {
-                with_hit_test_list_items_only(handle, None, query)
-            };
+            // A hit-test snapshot prepares the list for its query before it publishes the rows.
+            arena.prepare_hit_test_list_for_query(spatial_indexes, caret_lines);
+            let rect = crate::painting::paintable_geometry::scrollable_overflow_rect(
+                &arena.committed_paintable_rows(),
+                viewport,
+            );
             assert_eq!(rect, Some(CssPixelRect::default()));
             assert!(arena.scrollable_overflow.geometry_changed.get());
             assert!(arena.scrollable_overflow.scrollability_changed.get());
