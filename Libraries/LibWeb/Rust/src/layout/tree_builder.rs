@@ -3193,14 +3193,30 @@ impl TreeBuildHostHalf {
         );
     }
 
-    /// Pays what the walk let go of, as it would have while the walk ran: the boxes nodes gained or
-    /// lost, the host-owned objects of the rows it freed, and the style changes of the shells of
-    /// the boxes it kept. Then what the build found out goes to the document, in the order the
-    /// build found it out; nothing can clear a DOM update flag again once the walk is complete.
-    /// The new rows owe no shell: a reader that wants one makes it.
-    pub(crate) fn pay(self, main_thread: &crate::stage::MainThread, arena: &LayoutNodeArena) {
-        // A layout pass that ran since may have queued handbacks its commit pays; they stay queued.
-        arena.pay_handbacks_ahead_of_queued(main_thread, self.handbacks);
+    /// Resolves what the walk let go of from the arena `arena`, as the build left it, for the document thread to pay
+    /// without the arena.
+    pub(crate) fn resolve(self, arena: &LayoutNodeArena) -> TreeBuildPayment {
+        TreeBuildPayment {
+            payment: arena.resolve_host_handbacks(self.handbacks),
+            reports: self.reports,
+        }
+    }
+}
+
+/// What a tree build owes the host, resolved from the arena (see [`TreeBuildHostHalf::resolve`]).
+#[must_use]
+pub(crate) struct TreeBuildPayment {
+    payment: super::layout_node_arena::HostPayment,
+    reports: Vec<crate::layout::commit::FfiCommitMessage>,
+}
+
+impl TreeBuildPayment {
+    /// Pays what the walk let go of, as it would have while the walk ran: the boxes nodes gained or lost, the
+    /// host-owned objects of the rows it freed, and the style changes of the shells of the boxes it kept. Then what
+    /// the build found out goes to the document, in the order the build found it out; nothing can clear a DOM update
+    /// flag again once the walk is complete. The new rows owe no shell: a reader that wants one makes it.
+    pub(crate) fn pay(self, main_thread: &crate::stage::MainThread) {
+        self.payment.pay(main_thread);
         if !self.reports.is_empty() {
             super::tree_build_seal::note_host_call("deliver_commit_messages");
             // SAFETY: The document outlives the build, and no arena borrow is held here.

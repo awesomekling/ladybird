@@ -23,6 +23,7 @@ use super::used_values::SizeConstraint;
 use crate::css::style::bridge::ElementBoxKind;
 use crate::css::style::fast_hash::{FastMap as HashMap, FastSet as HashSet};
 use crate::css::style::host_pins::HostPinsHandle;
+use crate::css::style::record_payloads::StyleRecordPayloads;
 use crate::css::style::tree::{NaturalSize, ReplacedContentInput, StyleNodeID};
 use crate::css::style::{
     PublishedBoxFacts, PublishedTextSource, StyleEngine, TextStyleParentFacts,
@@ -706,6 +707,153 @@ impl HostHandbacks {
         }
         self.handbacks.push(handback);
     }
+}
+
+/// One thing the arena owed the host, resolved from the arena where the arena's owner let go of the work that owed it:
+/// what paying it hands the host, which reads nothing of the arena.
+enum ResolvedHostHandback {
+    /// The node, named the way the box presence host names it, and the boxes it has.
+    BoxPresence {
+        style_node: u32,
+        bits: u8,
+    },
+    Shell(ShellId),
+    OwnedImageProvider(NodeSlotId),
+    ImageObservers(NodeSlotId),
+    OwnedImageProviderDetach(NodeSlotId),
+    PaintableRowReset {
+        reset: crate::painting::paintable_rows::PaintableRowReset,
+        viewport_row: NodeSlotId,
+    },
+    /// A shell whose row's style changed, still its row's, and the style the row has.
+    ShellStyleChanged {
+        shell: ShellId,
+        style_record: u64,
+        style: Option<Arc<StyleRecordPayloads>>,
+        attach_resources: bool,
+    },
+}
+
+/// What the arena owed the host, resolved in the order the arena let go of it (see
+/// [`LayoutNodeArena::resolve_host_handbacks`]). The main thread pays it without the arena.
+#[must_use]
+pub(crate) struct HostPayment(Vec<ResolvedHostHandback>);
+
+impl HostPayment {
+    /// Pays the host, in order.
+    pub(crate) fn pay(self, main_thread: &crate::stage::MainThread) {
+        use crate::layout::tree_mutation::{
+            destroy_image_observers, destroy_owned_image_provider, destroy_shell, notify_owned_image_provider_of_detach,
+        };
+        // Every host object is looked up before any is paid for. No host code ran between the arena letting go of
+        // them and here, so the tables still hold each as it was then, and the host code paying runs cannot change
+        // what the rest of the payment pays with.
+        let objects = take_host_objects_owed(main_thread, &self.0);
+        for (handback, object) in self.0.into_iter().zip(objects) {
+            match handback {
+                ResolvedHostHandback::BoxPresence { style_node, bits } => {
+                    tell_host_box_presence(main_thread, style_node, bits);
+                }
+                ResolvedHostHandback::Shell(shell) => destroy_shell(main_thread, shell.host_object(main_thread)),
+                ResolvedHostHandback::OwnedImageProvider(_) => destroy_owned_image_provider(main_thread, object),
+                ResolvedHostHandback::ImageObservers(_) => destroy_image_observers(main_thread, object),
+                ResolvedHostHandback::OwnedImageProviderDetach(_) => {
+                    notify_owned_image_provider_of_detach(main_thread, object);
+                }
+                ResolvedHostHandback::PaintableRowReset { reset, viewport_row } => {
+                    super::tree_build_seal::note_host_call("paintable_row_reset");
+                    reset.invoke_callback_on_main_thread(main_thread, viewport_row);
+                }
+                ResolvedHostHandback::ShellStyleChanged {
+                    shell,
+                    style_record,
+                    style,
+                    attach_resources,
+                } => tell_shell_of_style(
+                    main_thread,
+                    shell,
+                    style_record,
+                    style.as_deref().map_or(std::ptr::null(), StyleRecordPayloads::as_ptr),
+                    attach_resources,
+                ),
+            }
+        }
+    }
+}
+
+/// The host object each handback names, or null for one that names none, in the order of the handbacks. A provider or
+/// observer set leaves the host tables here; a detach notice leaves the provider where it is.
+fn take_host_objects_owed(
+    main_thread: &crate::stage::MainThread,
+    handbacks: &[ResolvedHostHandback],
+) -> Vec<*mut c_void> {
+    let Some(host_tables) = main_thread.host_tables() else {
+        return vec![std::ptr::null_mut(); handbacks.len()];
+    };
+    handbacks
+        .iter()
+        .map(|handback| {
+            let object = match handback {
+                ResolvedHostHandback::OwnedImageProvider(row) => {
+                    host_tables.owned_image_providers.borrow_mut().remove(row)
+                }
+                ResolvedHostHandback::OwnedImageProviderDetach(row) => {
+                    host_tables.owned_image_providers.borrow().get(row).copied()
+                }
+                ResolvedHostHandback::ImageObservers(row) => {
+                    let mut owed = host_tables.image_observer_sets_owed.borrow_mut();
+                    match owed.iter().position(|(owed_row, _)| owed_row == row) {
+                        Some(index) => Some(owed.remove(index).1),
+                        None => host_tables.image_observer_sets.borrow_mut().remove(row),
+                    }
+                }
+                ResolvedHostHandback::BoxPresence { .. }
+                | ResolvedHostHandback::Shell(_)
+                | ResolvedHostHandback::PaintableRowReset { .. }
+                | ResolvedHostHandback::ShellStyleChanged { .. } => None,
+            };
+            object.unwrap_or(std::ptr::null_mut())
+        })
+        .collect()
+}
+
+/// Tells the host that the node `style_node` names has the boxes `bits` says.
+fn tell_host_box_presence(main_thread: &crate::stage::MainThread, style_node: u32, bits: u8) {
+    let Some((context, callback)) = main_thread
+        .host_tables()
+        .and_then(|host_tables| host_tables.box_presence_host.get())
+    else {
+        return;
+    };
+    super::tree_build_seal::note_host_call("notify_box_presence");
+    // SAFETY: Registration and unregistration keep the host context live, and the host does not reenter the arena.
+    unsafe { callback(context, style_node, bits) };
+}
+
+/// Tells `shell` that its row's style is now the record `style_record`, whose payloads are `style`.
+fn tell_shell_of_style(
+    main_thread: &crate::stage::MainThread,
+    shell: ShellId,
+    style_record: u64,
+    style: *const c_void,
+    attach_resources: bool,
+) {
+    let (context, shell_style_changed) = main_thread
+        .host_tables()
+        .and_then(|host_tables| host_tables.shell_style_changed_host.get())
+        .expect("layout node arena has no style record host");
+    super::tree_build_seal::note_host_call("shell_style_changed");
+    // SAFETY: The engine and shell remain live. Native style-store mutation has finished before the host can reenter
+    // Rust through its resource consumers.
+    unsafe {
+        shell_style_changed(
+            context,
+            shell.host_object(main_thread),
+            style_record,
+            style,
+            attach_resources,
+        );
+    };
 }
 
 /// The node a layout row can be bound to: an element or text node, named by its identity, a
@@ -3307,22 +3455,13 @@ impl LayoutNodeArena {
         shell: ShellId,
         attach_resources: bool,
     ) {
-        let (context, shell_style_changed) = main_thread
-            .host_tables()
-            .and_then(|host_tables| host_tables.shell_style_changed_host.get())
-            .expect("layout node arena has no style record host");
-        super::tree_build_seal::note_host_call("shell_style_changed");
-        // SAFETY: The engine and shell remain live. Native style-store mutation has finished before
-        // the host can reenter Rust through its resource consumers.
-        unsafe {
-            shell_style_changed(
-                context,
-                shell.host_object(main_thread),
-                self.node_style_record(slot),
-                self.data(slot).style.get().as_ptr(),
-                attach_resources,
-            );
-        };
+        tell_shell_of_style(
+            main_thread,
+            shell,
+            self.node_style_record(slot),
+            self.data(slot).style.get().as_ptr(),
+            attach_resources,
+        );
     }
 
     pub(crate) fn continue_containing_block_search(
@@ -3890,25 +4029,6 @@ impl LayoutNodeArena {
         self.hand_back(HostHandback::BoxPresence(style_node));
     }
 
-    /// Tells the host what boxes the node `style_node` names has now. No row list may be borrowed
-    /// here.
-    fn tell_host_box_presence(&self, main_thread: &crate::stage::MainThread, style_node: u32) {
-        let Some((context, callback)) = main_thread
-            .host_tables()
-            .and_then(|host_tables| host_tables.box_presence_host.get())
-        else {
-            return;
-        };
-        let row = match StyleNodeID::from_raw(style_node) {
-            Some(style_node) => self.bound_row(style_node),
-            None => self.bound_viewport_row(),
-        };
-        super::tree_build_seal::note_host_call("notify_box_presence");
-        // SAFETY: Registration and unregistration keep the host context live, and the host does
-        // not reenter the arena.
-        unsafe { callback(context, style_node, self.box_presence_bits(row)) };
-    }
-
     /// Opens a span of work whose handbacks the main thread pays once the span is over. Every
     /// handback is made inside one, so none waits for a payer that is not coming.
     pub(crate) fn begin_paying_host_handbacks(&self, _: &crate::stage::MainThread) {
@@ -3954,6 +4074,12 @@ impl LayoutNodeArena {
     /// commit's host half closes it with [`Self::finish_paying_host_handbacks`].
     pub(crate) fn begin_layout_commit_handbacks(&self) {
         self.open_host_handback_span();
+    }
+
+    /// Closes the span [`Self::begin_layout_commit_handbacks`] opened, once the commit's host half has been resolved
+    /// (see [`Self::resolve_host_handbacks`]).
+    pub(crate) fn end_layout_commit_handbacks(&self) {
+        self.close_host_handback_span();
     }
 
     /// Opens the span of a layout pass's preparation off the document thread. What it owes is paid
@@ -4012,49 +4138,59 @@ impl LayoutNodeArena {
 
     /// Pays what a finished tree build owes the host, in the order the build let go of it.
     pub(crate) fn pay_tree_build_handbacks(&self, main_thread: &crate::stage::MainThread, handbacks: HostHandbacks) {
-        // Every host object is looked up before any is paid for. No host code ran between the
-        // arena letting go of them and here, so the tables still hold each as it was then, and the
-        // host code paying runs cannot change what the rest of the batch pays with.
-        let objects = self.take_host_objects_owed(main_thread, &handbacks.handbacks);
-        for (handback, object) in handbacks.handbacks.into_iter().zip(objects) {
-            self.pay_host_handback(main_thread, handback, object);
-        }
+        self.resolve_host_handbacks(handbacks).pay(main_thread);
     }
 
-    /// The host object each handback names, or null for one that names none, in the order of the
-    /// handbacks. A provider or observer set leaves the host tables here; a detach notice leaves
-    /// the provider where it is.
-    fn take_host_objects_owed(
-        &self,
-        main_thread: &crate::stage::MainThread,
-        handbacks: &[HostHandback],
-    ) -> Vec<*mut c_void> {
-        let Some(host_tables) = main_thread.host_tables() else {
-            return vec![std::ptr::null_mut(); handbacks.len()];
-        };
-        handbacks
-            .iter()
-            .map(|handback| {
-                let object = match handback {
-                    HostHandback::OwnedImageProvider(row) => host_tables.owned_image_providers.borrow_mut().remove(row),
-                    HostHandback::OwnedImageProviderDetach(row) => {
-                        host_tables.owned_image_providers.borrow().get(row).copied()
-                    }
-                    HostHandback::ImageObservers(row) => {
-                        let mut owed = host_tables.image_observer_sets_owed.borrow_mut();
-                        match owed.iter().position(|(owed_row, _)| owed_row == row) {
-                            Some(index) => Some(owed.remove(index).1),
-                            None => host_tables.image_observer_sets.borrow_mut().remove(row),
+    /// Resolves what the arena let go of in `handbacks` into what paying it hands the host, as the arena stands now,
+    /// for the main thread to pay without reading the arena: the boxes each node has, the style of each shell whose
+    /// row's style changed and that is still its row's, and the viewport a row reset is told of.
+    pub(crate) fn resolve_host_handbacks(&self, handbacks: HostHandbacks) -> HostPayment {
+        let viewport_row = self.bound_viewport_row();
+        HostPayment(
+            handbacks
+                .handbacks
+                .into_iter()
+                .filter_map(|handback| {
+                    Some(match handback {
+                        HostHandback::BoxPresence(style_node) => {
+                            let row = match StyleNodeID::from_raw(style_node) {
+                                Some(style_node) => self.bound_row(style_node),
+                                None => viewport_row,
+                            };
+                            ResolvedHostHandback::BoxPresence {
+                                style_node,
+                                bits: self.box_presence_bits(row),
+                            }
                         }
-                    }
-                    HostHandback::BoxPresence(_)
-                    | HostHandback::Shell(_)
-                    | HostHandback::PaintableRowReset(_)
-                    | HostHandback::ShellStyleChanged { .. } => None,
-                };
-                object.unwrap_or(std::ptr::null_mut())
-            })
-            .collect()
+                        HostHandback::Shell(shell) => ResolvedHostHandback::Shell(shell),
+                        HostHandback::OwnedImageProvider(row) => ResolvedHostHandback::OwnedImageProvider(row),
+                        HostHandback::ImageObservers(row) => ResolvedHostHandback::ImageObservers(row),
+                        HostHandback::OwnedImageProviderDetach(row) => {
+                            ResolvedHostHandback::OwnedImageProviderDetach(row)
+                        }
+                        HostHandback::PaintableRowReset(reset) => {
+                            ResolvedHostHandback::PaintableRowReset { reset, viewport_row }
+                        }
+                        HostHandback::ShellStyleChanged {
+                            slot,
+                            shell,
+                            attach_resources,
+                        } => {
+                            // A row that has gone, or has another shell by now, tells its shell nothing.
+                            if !self.slot_is_live(slot) || self.data(slot).shell.get() != Some(shell) {
+                                return None;
+                            }
+                            ResolvedHostHandback::ShellStyleChanged {
+                                shell,
+                                style_record: self.node_style_record(slot),
+                                style: self.data(slot).style.owner(),
+                                attach_resources,
+                            }
+                        }
+                    })
+                })
+                .collect(),
+        )
     }
 
     /// Hands back the reset of a row whose paint state is being cleared.
@@ -4070,34 +4206,6 @@ impl LayoutNodeArena {
             "the arena owes the host something outside any span that pays it"
         );
         self.host_handbacks.borrow_mut().push(handback);
-    }
-
-    fn pay_host_handback(&self, main_thread: &crate::stage::MainThread, handback: HostHandback, object: *mut c_void) {
-        use crate::layout::tree_mutation::{
-            destroy_image_observers, destroy_owned_image_provider, destroy_shell, notify_owned_image_provider_of_detach,
-        };
-        match handback {
-            HostHandback::BoxPresence(style_node) => self.tell_host_box_presence(main_thread, style_node),
-            HostHandback::Shell(shell) => destroy_shell(main_thread, shell.host_object(main_thread)),
-            HostHandback::OwnedImageProvider(_) => destroy_owned_image_provider(main_thread, object),
-            HostHandback::ImageObservers(_) => destroy_image_observers(main_thread, object),
-            HostHandback::OwnedImageProviderDetach(_) => {
-                notify_owned_image_provider_of_detach(main_thread, object);
-            }
-            HostHandback::PaintableRowReset(reset) => {
-                super::tree_build_seal::note_host_call("paintable_row_reset");
-                reset.invoke_callback_on_main_thread(main_thread, self.bound_viewport_row());
-            }
-            HostHandback::ShellStyleChanged {
-                slot,
-                shell,
-                attach_resources,
-            } => {
-                if self.slot_is_live(slot) && self.data(slot).shell.get() == Some(shell) {
-                    self.tell_shell_of_style_change(main_thread, slot, shell, attach_resources);
-                }
-            }
-        }
     }
 
     /// Hands back the objects a freed subtree's rows held. The style records the arena pinned for
@@ -7728,7 +7836,7 @@ mod tests {
         // The handback still pays with the set the row let go of.
         let handbacks = std::mem::take(&mut *arena.host_handbacks.borrow_mut());
         assert_eq!(
-            arena.take_host_objects_owed(&main_thread, &handbacks.handbacks),
+            super::take_host_objects_owed(&main_thread, &arena.resolve_host_handbacks(handbacks).0),
             vec![first]
         );
         assert_eq!(arena.image_observers(&host_tables, row), second);
