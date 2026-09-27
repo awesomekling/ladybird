@@ -11607,7 +11607,7 @@ fn replay_ffi_reclaims_the_non_empty_recorded_atom_set() {
     let recorded = [reclaimable.0];
     let engine_pointer = crate::css::style::StyleEngineInputHandle::for_test_engine(&raw mut engine);
     unsafe {
-        bridge::style_engine_set_replay_reclaimed_style_atoms(engine_pointer, recorded.as_ptr(), recorded.len());
+        bridge::replay_set_reclaimed_style_atoms(engine_pointer.home(), recorded.as_ptr(), recorded.len());
     }
 
     let computation_inputs = bridge::FfiDocumentStyleComputationInputs {

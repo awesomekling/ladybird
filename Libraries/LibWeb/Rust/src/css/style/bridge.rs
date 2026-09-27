@@ -2169,12 +2169,8 @@ pub unsafe extern "C" fn style_engine_destroy(engine: StyleEngineHandle) {
 /// # Safety
 /// `engine` must be live. The returned node slice remains valid until the next mutable
 /// `style_engine_*` entry point or an explicit discard of the flat-tree descendants.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_flat_tree_descendants(
-    engine: StyleEngineInputHandle,
-    root: u32,
-) -> FfiStyleNodeSlice {
-    let engine = unsafe { engine_entrance(engine, "style_engine_flat_tree_descendants") };
+pub unsafe fn replay_flat_tree_descendants(engine: StyleEngineHandle, root: u32) -> FfiStyleNodeSlice {
+    let engine = unsafe { engine.for_replay() };
     engine.clear_ffi_style_node_query();
     let Some(root) = StyleNodeID::from_raw(root) else {
         return FfiStyleNodeSlice::default();
@@ -2194,9 +2190,8 @@ pub unsafe extern "C" fn style_engine_flat_tree_descendants(
 ///
 /// # Safety
 /// `engine` must be live.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_discard_flat_tree_descendants(engine: StyleEngineInputHandle) {
-    let engine = unsafe { engine_entrance(engine, "style_engine_discard_flat_tree_descendants") };
+pub unsafe fn replay_discard_flat_tree_descendants(engine: StyleEngineHandle) {
+    let engine = unsafe { engine.for_replay() };
     engine.clear_ffi_style_node_query();
 }
 
@@ -5549,9 +5544,8 @@ pub unsafe extern "C" fn style_engine_publish_anchor_names(engine: StyleEngineIn
 ///
 /// # Safety
 /// `engine` must be live.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_intern_atom(engine: StyleEngineInputHandle, raw: usize) -> u32 {
-    let engine = unsafe { engine_entrance(engine, "style_engine_intern_atom") };
+pub unsafe fn replay_intern_atom(engine: StyleEngineHandle, raw: usize) -> u32 {
+    let engine = unsafe { engine.for_replay() };
     let result = engine.intern_atom(raw);
     record_interned_atom(engine, raw, result);
     result.0
@@ -6789,13 +6783,8 @@ pub unsafe extern "C" fn style_engine_pseudo_elements_with_custom_property_data(
 ///
 /// # Safety
 /// `engine` must be live and `atoms` must name `count` readable atom identities.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_set_replay_reclaimed_style_atoms(
-    engine: StyleEngineInputHandle,
-    atoms: *const u32,
-    count: usize,
-) {
-    let engine = unsafe { engine_entrance(engine, "style_engine_set_replay_reclaimed_style_atoms") };
+pub unsafe fn replay_set_reclaimed_style_atoms(engine: StyleEngineHandle, atoms: *const u32, count: usize) {
+    let engine = unsafe { engine.for_replay() };
     assert!(engine.host.replay_reclaimed_style_atoms.is_none());
     let atoms = if count == 0 {
         &[]

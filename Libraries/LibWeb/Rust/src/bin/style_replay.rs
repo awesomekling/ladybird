@@ -345,7 +345,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let engine = read_engine(&mut event.payload, &live_engines)?;
                     let token = usize::try_from(event.payload.read_u64()?)?;
                     let expected = event.payload.read_u32()?;
-                    let actual = unsafe { bridge::style_engine_intern_atom(engine, token) };
+                    let actual = unsafe { bridge::replay_intern_atom(engine, token) };
                     assert_identity("atom", expected, actual)?;
                 }
                 EventKind::SelectorQueryAtomMappings => {
@@ -442,7 +442,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     });
                     if expected.style_atoms_swept {
                         unsafe {
-                            bridge::style_engine_set_replay_reclaimed_style_atoms(
+                            bridge::replay_set_reclaimed_style_atoms(
                                 engine,
                                 expected.reclaimed_atoms.as_ptr(),
                                 expected.reclaimed_atoms.len(),
@@ -703,13 +703,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let engine = read_engine(&mut event.payload, &live_engines)?;
                     let root = event.payload.read_u32()?;
                     let expected = event.payload.read_u32_vec()?;
-                    let view = unsafe { bridge::style_engine_flat_tree_descendants(engine, root) };
+                    let view = unsafe { bridge::replay_flat_tree_descendants(engine, root) };
                     let actual = if view.count == 0 {
                         Vec::new()
                     } else {
                         unsafe { std::slice::from_raw_parts(view.nodes, view.count) }.to_vec()
                     };
-                    unsafe { bridge::style_engine_discard_flat_tree_descendants(engine) };
+                    unsafe { bridge::replay_discard_flat_tree_descendants(engine) };
                     if actual != expected {
                         return Err(format!(
                             "flat-tree descendants diverged for node {root}: expected {expected:?}, got {actual:?}"
@@ -2294,7 +2294,7 @@ fn replay_atom_mappings(
             0 => {
                 let token = usize::try_from(payload.read_u64()?)?;
                 let expected = payload.read_u32()?;
-                let actual = unsafe { bridge::style_engine_intern_atom(engine, token) };
+                let actual = unsafe { bridge::replay_intern_atom(engine, token) };
                 assert_identity("selector atom", expected, actual)?;
             }
             1 => {
