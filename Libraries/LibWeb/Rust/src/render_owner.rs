@@ -89,6 +89,9 @@ pub(crate) enum ArenaChange {
     StyleSnapshotScrollStates(Vec<crate::layout::style_snapshot::FfiLayoutStyleScrollState>),
     /// The document handed an image box the provider a finished layout frame owed it.
     OwnedProviderHandedOver(NodeSlotId),
+    /// The host adopted what the clock's ticks installed in the arena ahead of it: what it did not adopt leaves the
+    /// arena's log, with its pins.
+    DropUnadoptedAnimationSamples,
 }
 
 impl ArenaChange {
@@ -101,6 +104,7 @@ impl ArenaChange {
                     arena.note_owned_provider_handed_over(row);
                 }
             }
+            ArenaChange::DropUnadoptedAnimationSamples => arena.drop_animation_adoptions(),
         }
     }
 }
@@ -841,14 +845,27 @@ pub(crate) fn apply_changes_through(document: DocumentId, through: ChangeSeq, ta
     }
 }
 
-/// On the owner thread: runs `operation` on the clock slot of `document`'s render state, with the handle of the arena
-/// it ticks.
+/// On the owner thread: the style engine the arena of `document`'s render state links.
+pub(crate) fn style_engine_of(document: DocumentId) -> Option<crate::css::style::StyleEngineHandle> {
+    with_state(document, |state| state.style_engine())
+}
+
+/// On the owner thread: runs `operation` on the clock slot of `document`'s render state, leaving its arena alone.
+pub(crate) fn with_clock_slot<R>(
+    document: DocumentId,
+    operation: impl FnOnce(&mut Option<crate::clock_frames::DocumentClock>) -> R,
+) -> Option<R> {
+    with_state(document, |state| operation(&mut state.clock))
+}
+
+/// On the owner thread: runs `operation` on the clock slot of `document`'s render state, with the arena it ticks, which
+/// the render state keeps alive.
 pub(crate) fn with_clock<R>(
     document: DocumentId,
-    operation: impl FnOnce(&mut Option<crate::clock_frames::DocumentClock>, *mut c_void) -> R,
+    operation: impl FnOnce(&mut Option<crate::clock_frames::DocumentClock>, *mut ArenaHandle) -> R,
 ) -> Option<R> {
     with_state(document, |state| {
-        let arena = state.arena_handle();
+        let arena = state.state();
         operation(&mut state.clock, arena)
     })
 }
