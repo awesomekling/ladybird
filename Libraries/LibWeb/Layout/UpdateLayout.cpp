@@ -38,7 +38,6 @@ Layout::RustFFI::FfiLayoutUpdateHostCallbacks Document::layout_update_host_callb
 {
     return {
         .context = this,
-        .update_style = [](void* context) { static_cast<Document*>(context)->update_style(); },
         .process_pending_list_item_renumbers = [](void* context) { static_cast<Document*>(context)->process_pending_list_item_renumbers(); },
         .process_pending_top_layer_layout_changes = [](void* context) { static_cast<Document*>(context)->process_pending_top_layer_layout_changes(); },
         .document_facts = [](void* context) -> Layout::RustFFI::FfiLayoutUpdateDocumentFacts {
@@ -244,12 +243,12 @@ bool Document::update_style_and_layout_once(UpdateLayoutReason reason, Throttled
     style_computer().begin_style_record_view_epoch();
 
     // NB: The update, and the epochs begun above, end as the frame's end is taken in (take_in_layout_frame_effects):
-    //     before layout_arena_update_layout returns, or once a submitted pass's frame is taken back.
+    //     before layout_arena_update_layout (or its resume) returns, or once a submitted pass's frame is taken back.
 
     bool const may_submit_pass = pass_submission != LayoutPassSubmission::Wait;
     // The update's first round's style runs here, ahead of the update. One that runs in the flight begins here: its pass
     // is submitted for the update to collect, and the rest of the style update is installed as the flight is taken back.
-    // The style of the rounds after the first runs as each of them starts.
+    // The style of a round after the first runs here too, as the round starts: the update returns for it, and resumes.
     bool const style_in_flight = pass_submission == LayoutPassSubmission::MaySubmitWithStyle
         && Layout::RustFFI::layout_arena_collect_style_pass_for_flight(arena.handle(), may_submit_pass);
     if (style_in_flight)
@@ -271,6 +270,10 @@ bool Document::update_style_and_layout_once(UpdateLayoutReason reason, Throttled
             inputs.viewport_propagation_sources[index] = sources[index].value();
     }
     auto outcome = Layout::RustFFI::layout_arena_update_layout(arena.handle(), &inputs);
+    while (outcome == Layout::RustFFI::FfiLayoutUpdateOutcome::NeedsStyle) {
+        update_style();
+        outcome = Layout::RustFFI::layout_arena_resume_update_layout(arena.handle());
+    }
     if (outcome == Layout::RustFFI::FfiLayoutUpdateOutcome::FlightReady || outcome == Layout::RustFFI::FfiLayoutUpdateOutcome::FlightWithStyleReady) {
         // The flight records the document after its layout only if the document seals what that reads before it submits
         // the flight. A document that is to update its style after the layout lays out again before it shows anything.
