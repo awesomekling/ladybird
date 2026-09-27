@@ -710,7 +710,9 @@ static Optional<ClockLeasePlan> clock_lease_plan(DOM::Document& document)
         return {};
     if (auto blocker = document.layout_overlap_blocker(); blocker.has_value() && *blocker != DOM::LayoutOverlapBlocker::ScrollTimeline)
         return {};
-    if (!document.window())
+    // A document with animation frame callbacks has a rendering update at every display frame, which samples its
+    // effects itself: a clock would only start and stop at each of them.
+    if (!document.window() || has_animation_frame_callbacks(document))
         return {};
     auto timeline = document.timeline();
     auto timeline_time = timeline->current_time();
@@ -1005,9 +1007,7 @@ void FrameScheduler::main_thread_will_idle()
             Layout::RustFFI::rust_document_clock_set_paused(arena->handle(), true);
             continue;
         }
-        // A document with animation frame callbacks has a rendering update at the next display frame, which ends the
-        // lease (see prepare_clock_ticks()).
-        auto plan = has_animation_frame_callbacks(*hold.document) ? Optional<ClockLeasePlan> {} : clock_lease_plan(*hold.document);
+        auto plan = clock_lease_plan(*hold.document);
         bool ticks = plan.has_value() && plan->effects == hold.effects && publish_clock_lease_targets(hold);
         Layout::RustFFI::rust_document_clock_set_paused(arena->handle(), !ticks);
         // The ticks lay out with the document as it stands now: a resize or a selection change since the last frame
@@ -1141,10 +1141,7 @@ void FrameScheduler::prepare_clock_ticks(ReadonlySpan<GC::Root<DOM::Document>> d
         auto* arena = document->layout_node_arena_if_created();
         // Anything the main thread did since the grant that its own rendering update has to see ends the lease: the
         // plan finds it, or finds other effects to tick.
-        // So does a document with animation frame callbacks, whose rendering updates sample its effects themselves: the
-        // render clock ticks its lease only beside the tasks between them.
-        bool const frame_callbacks = has_animation_frame_callbacks(*document);
-        auto plan = renders && arena && Layout::RustFFI::rust_document_clock_is_running(arena->handle()) && !frame_callbacks ? clock_lease_plan(*document) : Optional<ClockLeasePlan> {};
+        auto plan = renders && arena && Layout::RustFFI::rust_document_clock_is_running(arena->handle()) ? clock_lease_plan(*document) : Optional<ClockLeasePlan> {};
         if (!plan.has_value() || plan->effects != m_clock_leases[index].effects) {
             revoke_clock_lease(index);
             continue;
