@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<script src="include.js"></script>
+<div id="main" style="display: block"><span>main</span></div>
+<div id="footer" style="display: block; color: green"><span>footer</span></div>
+<script>
+    test(() => {
+        internals.updateStyle();
+
+        // A list that shows its main part and footer again for every item it adds edits the same two style attributes
+        // over and over before the next style update. Only what each attribute holds at the update is an input to style.
+        const before = internals.styleEngineCounters();
+        for (let i = 0; i < 50; i++) {
+            main.style.display = i % 2 ? "block" : "flex";
+            footer.style.display = "none";
+            footer.style.display = "flex";
+            footer.style.color = i % 2 ? "green" : "blue";
+        }
+        internals.updateStyle();
+        const after = internals.styleEngineCounters();
+
+        println(`main display: ${getComputedStyle(main).display}`);
+        println(`footer display: ${getComputedStyle(footer).display}`);
+        println(`footer color: ${getComputedStyle(footer).color}`);
+        println(`elementDeclarationRepairMatches: ${after.elementDeclarationRepairMatches - before.elementDeclarationRepairMatches}`);
+    });
+</script>
