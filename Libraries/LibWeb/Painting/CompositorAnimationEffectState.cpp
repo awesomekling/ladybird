@@ -15,7 +15,6 @@
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/Painting/CompositorAnimationEffectState.h>
@@ -180,19 +179,35 @@ static Layout::RustFFI::FfiCompositorAnimationHost compositor_animation_host(Com
     };
 }
 
-static Layout::RustFFI::FfiCompositorAnimationRequest compositor_animation_request(CompositorAnimationKeyframes::Data const& data, Layout::Node const& layout_node, Compositing::RustFFI::FfiVisualAnimationTargetKind target_kind)
+struct CompositorAnimationTargetBox {
+    Compositing::RustFFI::NodeSlotId slot;
+    Function<CSSPixelRect()> transform_reference_box;
+};
+
+static CompositorAnimationTargetBox target_box(CompositorAnimationKeyframes::Data const& data, DOM::NodeIdentity target_node)
+{
+    auto const& document = data.target.document();
+    return { committed_row_slot(document, target_node), [&document, target_node] { return transform_reference_box(document, target_node); } };
+}
+
+static CompositorAnimationTargetBox target_box(CompositorAnimationKeyframes::Data const&, Layout::Node const& layout_node)
+{
+    return { committed_row_slot(layout_node), [&layout_node] { return transform_reference_box(layout_node); } };
+}
+
+static Layout::RustFFI::FfiCompositorAnimationRequest compositor_animation_request(CompositorAnimationKeyframes::Data const& data, CompositorAnimationTargetBox const& target, Compositing::RustFFI::FfiVisualAnimationTargetKind target_kind)
 {
     auto const& effect = *data.effect;
     Layout::RustFFI::FfiCompositorAnimationRequest request {};
     request.target_kind = target_kind;
-    request.layout_node = Layout::Node::slot_id(&layout_node);
+    request.layout_node = target.slot;
     request.keyframes = data.keyframes.data();
     request.keyframe_count = data.keyframes.size();
     request.key_frame_set_identity = reinterpret_cast<uintptr_t>(effect.key_frame_set());
     request.target_style_generation = data.target.element().animation_style_generation();
     request.style_environment_version = data.target.document().style_computer().style_environment_version_for_sharing();
     if (target_kind == Compositing::RustFFI::FfiVisualAnimationTargetKind::Transform) {
-        auto reference_box_size = transform_reference_box(layout_node).size();
+        auto reference_box_size = target.transform_reference_box().size();
         request.reference_box_width = reference_box_size.width().to_float();
         request.reference_box_height = reference_box_size.height().to_float();
     }
@@ -222,14 +237,34 @@ static Layout::RustFFI::FfiCompositorAnimationRequest compositor_animation_reque
 
 bool CompositorAnimationKeyframes::transform_preserves_axes(Layout::Node const& layout_node) const
 {
-    auto request = compositor_animation_request(*m_data, layout_node, Compositing::RustFFI::FfiVisualAnimationTargetKind::Transform);
+    return transform_preserves_axes(target_box(*m_data, layout_node));
+}
+
+bool CompositorAnimationKeyframes::transform_preserves_axes(DOM::NodeIdentity target_node) const
+{
+    return transform_preserves_axes(target_box(*m_data, target_node));
+}
+
+bool CompositorAnimationKeyframes::transform_preserves_axes(CompositorAnimationTargetBox const& target) const
+{
+    auto request = compositor_animation_request(*m_data, target, Compositing::RustFFI::FfiVisualAnimationTargetKind::Transform);
     auto host = compositor_animation_host(*m_data);
     return Layout::RustFFI::compositor_animation_effect_transform_preserves_axes(&request, &host);
 }
 
 bool CompositorAnimationKeyframes::only_translates_horizontally(Layout::Node const& layout_node) const
 {
-    auto request = compositor_animation_request(*m_data, layout_node, Compositing::RustFFI::FfiVisualAnimationTargetKind::Transform);
+    return only_translates_horizontally(target_box(*m_data, layout_node));
+}
+
+bool CompositorAnimationKeyframes::only_translates_horizontally(DOM::NodeIdentity target_node) const
+{
+    return only_translates_horizontally(target_box(*m_data, target_node));
+}
+
+bool CompositorAnimationKeyframes::only_translates_horizontally(CompositorAnimationTargetBox const& target) const
+{
+    auto request = compositor_animation_request(*m_data, target, Compositing::RustFFI::FfiVisualAnimationTargetKind::Transform);
     auto host = compositor_animation_host(*m_data);
     return Layout::RustFFI::compositor_animation_effect_only_translates_horizontally(&request, &host);
 }
@@ -251,9 +286,19 @@ CompositorAnimationEffectState::~CompositorAnimationEffectState()
 
 CompositorAnimationEffectState::BuildOutcome CompositorAnimationEffectState::build(CompositorAnimationKeyframes const& keyframes, Layout::Node const& layout_node, Compositing::RustFFI::FfiVisualAnimationTargetKind target_kind, TimingAnchor timing_anchor)
 {
+    return build(keyframes, target_box(*keyframes.m_data, layout_node), target_kind, timing_anchor);
+}
+
+CompositorAnimationEffectState::BuildOutcome CompositorAnimationEffectState::build(CompositorAnimationKeyframes const& keyframes, DOM::NodeIdentity target_node, Compositing::RustFFI::FfiVisualAnimationTargetKind target_kind, TimingAnchor timing_anchor)
+{
+    return build(keyframes, target_box(*keyframes.m_data, target_node), target_kind, timing_anchor);
+}
+
+CompositorAnimationEffectState::BuildOutcome CompositorAnimationEffectState::build(CompositorAnimationKeyframes const& keyframes, CompositorAnimationTargetBox const& target, Compositing::RustFFI::FfiVisualAnimationTargetKind target_kind, TimingAnchor timing_anchor)
+{
     auto& data = *keyframes.m_data;
     auto const& effect = *data.effect;
-    auto request = compositor_animation_request(data, layout_node, target_kind);
+    auto request = compositor_animation_request(data, target, target_kind);
     Vector<Compositing::RustFFI::FfiLinearEasingPoint> effect_easing_points;
     request.timing.monotonic_time_at_anchor_ns = static_cast<i64>(timing_anchor.monotonic_time_ms * 1'000'000.0);
     request.timing.local_time_at_anchor_ms = timing_anchor.local_time_ms;

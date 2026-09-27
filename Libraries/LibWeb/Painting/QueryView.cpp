@@ -14,8 +14,11 @@
 
 namespace Web::Painting {
 
-RefPtr<QuerySnapshot const> QuerySnapshot::publish(DOM::Document const& document, Layout::NodeArena& arena, QueryVisualContexts visual_contexts)
+RefPtr<QuerySnapshot const> QuerySnapshot::publish(DOM::Document const& document, QueryVisualContexts visual_contexts)
 {
+    auto const* arena = document.layout_node_arena_if_created();
+    if (!arena)
+        return nullptr;
     auto navigable = document.navigable();
     auto const& device_scroll_offsets = document.paint_state().scroll_state_snapshot().device_offsets();
     Layout::RustFFI::FfiQuerySnapshotViewport viewport {
@@ -26,7 +29,7 @@ RefPtr<QuerySnapshot const> QuerySnapshot::publish(DOM::Document const& document
         .device_scroll_offsets_len = device_scroll_offsets.size(),
         .device_pixels_per_css_pixel = static_cast<float>(document.page().client().device_pixels_per_css_pixel()),
     };
-    auto const* handle = Layout::RustFFI::layout_arena_publish_query_snapshot(arena.handle(), viewport);
+    auto const* handle = Layout::RustFFI::layout_arena_publish_query_snapshot(arena->handle(), viewport);
     if (!handle)
         return nullptr;
     return adopt_ref(*new QuerySnapshot(handle, visual_contexts));

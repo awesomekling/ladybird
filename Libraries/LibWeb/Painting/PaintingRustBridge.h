@@ -30,10 +30,12 @@ WEB_API void dump_stacking_context_tree(StringBuilder&, DOM::Document const&);
 WEB_API void dump_layout_tree(StringBuilder&, Layout::Node const&, bool interactive);
 
 WEB_API Layout::RustFFI::FfiVisualContextUpdateOutcome rust_update_accumulated_visual_contexts(DOM::Document&);
-WEB_API Vector<u32> rust_owned_visual_context_node_indices(Layout::Node const&, Layout::RustFFI::FfiVisualContextBoxNodeList);
+WEB_API Vector<u32> rust_owned_visual_context_node_indices(DOM::Document const&, DOM::NodeIdentity, Layout::RustFFI::FfiVisualContextBoxNodeList);
 WEB_API bool rust_background_color_can_be_compositor_animated(Layout::Node const&);
+WEB_API bool rust_background_color_can_be_compositor_animated(DOM::Document const&, DOM::NodeIdentity);
 WEB_API void const* retain_rust_main_visual_context_tree(DOM::Document const&);
 WEB_API Layout::RustFFI::FfiPhysicalOverflowDirections rust_physical_overflow_directions(Layout::Node const&);
+WEB_API Layout::RustFFI::FfiPhysicalOverflowDirections rust_physical_overflow_directions(DOM::Document const&, DOM::NodeIdentity);
 WEB_API void register_geometry_host(Layout::NodeArena&);
 WEB_API Layout::RustFFI::FfiRenderingPreparationOutcome rust_prepare_for_rendering(DOM::Document&, bool visual_context_update_pending);
 WEB_API void rust_update_visual_viewport_transform(DOM::Document&);
@@ -118,6 +120,7 @@ WEB_API bool last_recording_missed_vector_images(DOM::Document const&);
 WEB_API Utf16String serialize_painting_dump(DOM::Document const&, Compositing::AccumulatedVisualContextTree const&, Compositing::DisplayList const&, Compositing::DisplayListResourceStorage const&);
 
 WEB_API CSS::ColorResolutionContext gradient_stop_color_resolution_context(Layout::NodeWithStyle const&);
+WEB_API CSS::ColorResolutionContext gradient_stop_color_resolution_context(DOM::Element const&);
 // The graph applying a list of filter functions in order, or nothing for an empty list.
 WEB_API Optional<Gfx::Filter> filter_from_functions(ReadonlySpan<Compositing::RustFFI::FfiFilterFunction>);
 
