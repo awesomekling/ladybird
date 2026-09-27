@@ -1938,6 +1938,21 @@ bool Internals::held_frame_awaits_submission() const
     return Layout::RustFFI::rust_stage_thread_armed_hold_awaits_submission();
 }
 
+void Internals::wait_for_stage_threads_beside_held_frame()
+{
+    Layout::RustFFI::rust_stage_thread_wait_for_threads_beside_held_run();
+}
+
+void Internals::take_in_next_recording_before_its_presentation(bool take)
+{
+    HTML::main_thread_event_loop().frame_scheduler().take_in_next_recording_before_its_presentation(take);
+}
+
+u64 Internals::recordings_taken_in_before_their_presentation() const
+{
+    return HTML::main_thread_event_loop().frame_scheduler().recordings_taken_in_before_their_presentation();
+}
+
 bool Internals::submits_layout_pass() const
 {
     return Layout::RustFFI::rust_stage_thread_submits_layout();

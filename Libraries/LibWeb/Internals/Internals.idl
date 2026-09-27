@@ -270,6 +270,15 @@ interface Internals {
     // Whether a hold is armed for a stage the rendering update has not submitted yet while an earlier stage of its
     // frame is in flight (the layout pass it submits once it has taken its style pass back between tasks).
     boolean heldFrameAwaitsSubmission();
+    // Waits for every thread that runs the frame in flight's stages, but the one holding a run for a hold, to run what
+    // it was handed before: a stage that is not queued behind the held run has run by then.
+    undefined waitForStageThreadsBesideHeldFrame();
+    // Has the next frame the rendering update records in flight take its recording in before the frame's presentation
+    // is submitted, as a forced join during the main half would: the frame in flight then does not present it, and
+    // consume-commit does. recordingsTakenInBeforeTheirPresentation() counts the recordings taken in so. A test that
+    // sets it resets it with false.
+    undefined takeInNextRecordingBeforeItsPresentation(optional boolean take = true);
+    unsigned long long recordingsTakenInBeforeTheirPresentation();
     // Whether rendering updates submit their layout pass (under LIBWEB_STAGE_THREAD=overlap with LIBWEB_STAGE_OVERLAP
     // naming "layout"), which holdNextLayoutFrame() can hold.
     boolean submitsLayoutPass();

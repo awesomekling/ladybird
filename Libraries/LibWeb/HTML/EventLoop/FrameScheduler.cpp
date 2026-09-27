@@ -282,6 +282,12 @@ void FrameScheduler::add_to_ticket(LocalNavigable& navigable, LocalNavigable::Pe
     bool const earlier_frame_is_presented_by_commit = any_of(m_ticket->navigables, [](auto const& entry) {
         return !entry.frame.presentation || !entry.frame.presentation->is_presented_by_frame_in_flight;
     });
+    auto const* recording = frame.recording.ptr();
+    if (m_takes_in_next_recording_before_its_presentation && recording && recording->run == Painting::RecordingRun::InSubmittedFrame && Layout::RustFFI::layout_arena_has_recording_in_flight(recording->arena)) {
+        m_takes_in_next_recording_before_its_presentation = false;
+        ++m_recordings_taken_in_before_their_presentation;
+        Layout::RustFFI::layout_arena_take_in_recording(recording->arena);
+    }
     m_ticket->navigables.append({ navigable, move(frame), held_compositor_context });
     if (!earlier_frame_is_presented_by_commit)
         navigable.submit_presentation(m_ticket->navigables.last().frame);
