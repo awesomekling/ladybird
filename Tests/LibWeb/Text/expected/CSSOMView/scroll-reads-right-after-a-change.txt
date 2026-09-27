@@ -1,0 +1,8 @@
+initial: scroll 100x200 at 0,0 client 100x50
+taller content: scroll 100x300 at 0,0 client 100x50
+wider content: scroll 250x300 at 0,0 client 100x50
+scrolled down: scroll 250x300 at 0,40 client 100x50
+scrolled right: scroll 250x300 at 30,40 client 100x50
+shorter content clamps the offset: scroll 250x60 at 30,10 client 100x50
+wider scroller: scroll 250x60 at 30,10 client 150x50
+thicker border: scroll 250x60 at 30,10 client 150x50

@@ -3005,6 +3005,13 @@ bool Element::serializes_as_void() const
     return is_void_element() || local_name().is_one_of(HTML::TagNames::basefont, HTML::TagNames::bgsound, HTML::TagNames::frame, HTML::TagNames::keygen);
 }
 
+// A read that brought style and layout up to date leaves them published for the reads after it, which are clean until
+// something is written.
+static void publish_layout_after_read(Document const& document)
+{
+    const_cast<Document&>(document).publish_query_snapshot_after_read(Painting::QueryVisualContexts::Stale);
+}
+
 template<typename QueryResult>
 static QueryResult query_client_rects_after_layout_update(Element const& element, auto&& query)
 {
@@ -3177,6 +3184,7 @@ int Element::client_width() const
 
     // NOTE: Ensure that layout is up-to-date before looking at metrics.
     const_cast<Document&>(document()).update_layout_if_needed_for_node(*this, UpdateLayoutReason::ElementClientWidth);
+    publish_layout_after_read(document());
 
     // 1. If the element has no associated CSS layout box or if the CSS layout box is inline, return zero.
     auto const* layout_node = this->layout_node();
@@ -3203,6 +3211,7 @@ int Element::client_height() const
 
     // NOTE: Ensure that layout is up-to-date before looking at metrics.
     const_cast<Document&>(document()).update_layout_if_needed_for_node(*this, UpdateLayoutReason::ElementClientHeight);
+    publish_layout_after_read(document());
 
     // 1. If the element has no associated CSS layout box or if the CSS layout box is inline, return zero.
     auto const* layout_node = this->layout_node();
@@ -3697,6 +3706,7 @@ double Element::scroll_top() const
 
     // NOTE: Ensure that layout is up-to-date before looking at metrics.
     const_cast<Document&>(document).update_layout(UpdateLayoutReason::ElementScrollTop);
+    publish_layout_after_read(document);
 
     // 6. If the element is the root element return the value of scrollY on window.
     if (document.document_element() == this)
@@ -3742,6 +3752,7 @@ double Element::scroll_left() const
 
     // NOTE: Ensure that layout is up-to-date before looking at metrics.
     const_cast<Document&>(document).update_layout(UpdateLayoutReason::ElementScrollLeft);
+    publish_layout_after_read(document);
 
     // 6. If the element is the root element return the value of scrollX on window.
     if (document.document_element() == this)
@@ -3892,6 +3903,7 @@ int Element::scroll_width()
 
     // NOTE: Ensure that layout is up-to-date before looking at metrics.
     document.update_layout(UpdateLayoutReason::ElementScrollWidth);
+    publish_layout_after_read(document);
     auto const* viewport_layout_node = document.layout_node();
     VERIFY(viewport_layout_node && Painting::has_committed_box(*viewport_layout_node));
     auto viewport_scrollable_overflow_rect = Painting::scrollable_overflow_rect(*viewport_layout_node);
@@ -3936,6 +3948,7 @@ int Element::scroll_height()
 
     // NOTE: Ensure that layout is up-to-date before looking at metrics.
     document.update_layout(UpdateLayoutReason::ElementScrollHeight);
+    publish_layout_after_read(document);
     auto const* viewport_layout_node = document.layout_node();
     VERIFY(viewport_layout_node && Painting::has_committed_box(*viewport_layout_node));
     auto viewport_scrollable_overflow_rect = Painting::scrollable_overflow_rect(*viewport_layout_node);
