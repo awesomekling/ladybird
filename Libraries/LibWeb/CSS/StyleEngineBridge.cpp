@@ -1366,7 +1366,9 @@ StyleEngine::PublishedStyleTransaction StyleEngine::finish_submitted_style_trans
     auto bridge_started_at = MonotonicTime::now();
     // What was recorded beside the pass is held (see begin_holding_input_recorded_beside_pass()), and it may name an
     // atom the pass found unused.
-    auto view = StyleEngineFFI::style_engine_finish_submitted_style_transaction(m_impl, m_holds_input_recorded_beside_pass);
+    // The render owner finishes it with the document's render state, which the arena the pass was submitted for is.
+    auto* layout_node_arena = m_style_computer ? m_style_computer->document().layout_node_arena_if_created() : nullptr;
+    auto view = StyleEngineFFI::style_engine_finish_submitted_style_transaction(m_impl, m_holds_input_recorded_beside_pass, layout_node_arena ? layout_node_arena->handle() : nullptr);
     auto bridge_microseconds = (MonotonicTime::now() - bridge_started_at).to_truncated_microseconds();
     return publish_style_transaction_view(view, exchange(m_submitted_style_transaction_microseconds, 0), bridge_microseconds);
 }

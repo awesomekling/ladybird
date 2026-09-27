@@ -5312,7 +5312,7 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
                 StyleNodeGrant::of(input),
             )
         });
-        let transaction = OwnerStyleTransaction {
+        let transaction = OwnerStyleTransaction::Whole {
             root,
             computation_inputs,
             layout_arena,
@@ -5353,19 +5353,27 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
     finish_style_transaction(engine, root, output).0
 }
 
-/// A style transaction the document thread takes, which the render owner begins, runs the pass of and finishes with
-/// the style engine of the document's render state while the thread waits for it.
-pub(crate) struct OwnerStyleTransaction {
-    root: StyleNodeID,
-    /// What the host froze for the transaction. What it points to is the document thread's, which keeps it as it is
-    /// while it waits.
-    computation_inputs: FfiDocumentStyleComputationInputs,
-    /// The document's layout arena, which the owner holds: the pass samples its committed boxes.
-    layout_arena: *mut c_void,
-    /// The style input the host recorded since the last transaction, which the transaction applies first.
-    input: PassInput,
-    /// Where the engine writes the identities it grants the host with the input.
-    grant: StyleNodeGrant,
+/// A style transaction the render owner runs with the style engine of the document's render state while the document
+/// thread waits for it.
+#[expect(clippy::large_enum_variant, reason = "the transaction travels to the owner boxed")]
+pub(crate) enum OwnerStyleTransaction {
+    /// A transaction the document thread takes, which the owner begins, runs the pass of and finishes.
+    Whole {
+        root: StyleNodeID,
+        /// What the host froze for the transaction. What it points to is the document thread's, which keeps it as it
+        /// is while it waits.
+        computation_inputs: FfiDocumentStyleComputationInputs,
+        /// The document's layout arena, which the owner holds: the pass samples its committed boxes.
+        layout_arena: *mut c_void,
+        /// The style input the host recorded since the last transaction, which the transaction applies first.
+        input: PassInput,
+        /// Where the engine writes the identities it grants the host with the input.
+        grant: StyleNodeGrant,
+    },
+    /// The transaction whose pass a rendering update of the document ran, which the owner finishes once the document
+    /// thread has taken the update's frame back. An atom the host named beside the pass may be one the pass found
+    /// unused, where `host_named_atoms_beside_pass`.
+    FinishSubmitted { host_named_atoms_beside_pass: bool },
 }
 
 // SAFETY: The document thread waits for the transaction, keeping what its inputs and its grant point to live and
@@ -5374,7 +5382,7 @@ unsafe impl Send for OwnerStyleTransaction {}
 
 /// Where the engine writes the style node identities it grants the host with a style input transaction, and how many
 /// the host asks for, in the host's arrays.
-struct StyleNodeGrant {
+pub(crate) struct StyleNodeGrant {
     elements: *mut u32,
     element_count: usize,
     texts: *mut u32,
@@ -5431,7 +5439,9 @@ impl OwnerStyleTransaction {
     /// Sends the transaction's input to the owner as a change of `document`, which the transaction applies as its
     /// first step on the owner.
     pub(crate) fn send_input_to_owner(&mut self, document: crate::render_owner::DocumentId) {
-        self.input.send_to_owner(document);
+        if let Self::Whole { input, .. } = self {
+            input.send_to_owner(document);
+        }
     }
 
     /// Runs the transaction with the document's engine `engine`.
@@ -5440,24 +5450,31 @@ impl OwnerStyleTransaction {
     ///
     /// The document thread waits for it, as the type requires.
     pub(crate) unsafe fn run(self, engine: &mut StyleEngine) -> OwnerStyleTransactionView {
-        let Self {
-            root,
-            computation_inputs,
-            layout_arena,
-            input,
-            grant,
-        } = self;
-        // SAFETY: Guaranteed by the caller.
-        unsafe { grant.grant(engine) };
-        input.apply(engine);
-        // SAFETY: Guaranteed by the caller.
-        unsafe { begin_style_transaction(engine, computation_inputs) };
-        // SAFETY: As above.
-        let committed_boxes = unsafe { super::animations::CommittedTransformReferenceBoxes::lend(layout_arena) };
-        // The pass samples at the times the host published for this update.
-        let timeline_samples = engine.animation_timeline_samples().clone();
-        let output = run_style_pass(engine, root, committed_boxes, &timeline_samples);
-        let (view, retired) = finish_style_transaction(engine, root, output);
+        let (view, retired) = match self {
+            Self::Whole {
+                root,
+                computation_inputs,
+                layout_arena,
+                input,
+                grant,
+            } => {
+                // SAFETY: Guaranteed by the caller.
+                unsafe { grant.grant(engine) };
+                input.apply(engine);
+                // SAFETY: Guaranteed by the caller.
+                unsafe { begin_style_transaction(engine, computation_inputs) };
+                // SAFETY: As above.
+                let committed_boxes =
+                    unsafe { super::animations::CommittedTransformReferenceBoxes::lend(layout_arena) };
+                // The pass samples at the times the host published for this update.
+                let timeline_samples = engine.animation_timeline_samples().clone();
+                let output = run_style_pass(engine, root, committed_boxes, &timeline_samples);
+                finish_style_transaction(engine, root, output)
+            }
+            Self::FinishSubmitted {
+                host_named_atoms_beside_pass,
+            } => finish_submitted_style_transaction(engine, host_named_atoms_beside_pass),
+        };
         OwnerStyleTransactionView(view, retired)
     }
 }
@@ -5553,7 +5570,7 @@ pub(crate) struct StylePassJob {
 }
 
 /// Where the input a style pass applies first is.
-enum PassInput {
+pub(crate) enum PassInput {
     None,
     /// With the pass, until it is sent to the owner or applied on the document thread.
     Here(InputForPass),
@@ -5715,15 +5732,51 @@ pub(crate) unsafe fn prepare_style_pass(
 /// unless `host_named_atoms_beside_pass`: an atom the host named beside the pass may be one the
 /// pass found unused.
 ///
+/// The render owner finishes the transaction with the engine of the document whose layout arena is
+/// `layout_arena`, as it runs the transactions the main thread takes.
+///
 /// # Safety
-/// `engine` must be live, with no frame in flight that owns it. The answer slice stays valid as
-/// for [`style_engine_take_style_transaction`].
+/// `engine` must be live, with no frame in flight that owns it, and `layout_arena` its document's
+/// live layout arena. The answer slice stays valid as for [`style_engine_take_style_transaction`].
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_finish_submitted_style_transaction(
     engine: StyleEngineHandle,
     host_named_atoms_beside_pass: bool,
+    layout_arena: *mut c_void,
 ) -> FfiStyleTransactionView {
-    let engine = unsafe { engine_entrance(engine, "style_engine_finish_submitted_style_transaction") };
+    debug_assert!(
+        !layout_arena.is_null(),
+        "a submitted style pass is submitted for its document's layout arena"
+    );
+    // SAFETY: Guaranteed by the caller.
+    let document = (!layout_arena.is_null())
+        .then(|| unsafe { crate::layout::ArenaHandle::document_of(layout_arena) })
+        .filter(|document| crate::render_owner::runs_style_of(*document));
+    let Some(document) = document else {
+        let engine = unsafe { engine_entrance(engine, "style_engine_finish_submitted_style_transaction") };
+        return finish_submitted_style_transaction(engine, host_named_atoms_beside_pass).0;
+    };
+    engine.bring_home("style_engine_finish_submitted_style_transaction");
+    super::seal::note_engine_call("style_engine_finish_submitted_style_transaction");
+    let transaction = OwnerStyleTransaction::FinishSubmitted {
+        host_named_atoms_beside_pass,
+    };
+    // SAFETY: The engine is the document's, and this thread reaches it again only once the owner has finished the
+    // transaction.
+    let OwnerStyleTransactionView(view, retired) =
+        unsafe { crate::render_owner::run_style_transaction(document, engine, transaction) };
+    // Font cascade lists and custom-property data are the document thread's to give up.
+    crate::css::ffi_stats::release_deferred_font_cascade_lists();
+    drop(retired);
+    view
+}
+
+/// Finishes the transaction whose pass a rendering update ran, as
+/// [`style_engine_finish_submitted_style_transaction`] describes.
+fn finish_submitted_style_transaction(
+    engine: &mut StyleEngine,
+    host_named_atoms_beside_pass: bool,
+) -> (FfiStyleTransactionView, RetiredCustomPropertyData) {
     engine.settle_atom_sweep_of_submitted_pass(host_named_atoms_beside_pass);
     let (root, output) = engine
         .host
@@ -5731,7 +5784,7 @@ pub unsafe extern "C" fn style_engine_finish_submitted_style_transaction(
         .take()
         .expect("the submitted style pass has run");
     engine.computed_group_sets.finish_pass_beside_host_pins();
-    finish_style_transaction(engine, root, *output).0
+    finish_style_transaction(engine, root, *output)
 }
 
 /// Freezes a style transaction's inputs in the engine before its pass runs.
@@ -6083,20 +6136,19 @@ fn close_style_deltas_over_inheritance(engine: &mut StyleEngine, deltas: &mut Ve
     // Each joined element settles before the host installs the batch, as a row the engine computed,
     // over the ones it inherits from before it.
     closure.sort_unstable_by(|first, second| engine.tree.compare_style_reaction_order(*first, *second));
-    let engine_on_stage = &mut *engine;
-    let settled = crate::stage_thread::run_stage(move || {
-        closure
-            .into_iter()
-            .map(|node| {
-                let super::publication::RecordDemandAnswer::Record(answer) =
-                    engine_on_stage.answer_record_demand(node, None, false, true, false, 0)
-                else {
-                    unreachable!("an element's record demand is always answered");
-                };
-                (node, answer)
-            })
-            .collect::<Vec<_>>()
-    });
+    let settled = closure
+        .into_iter()
+        .filter_map(|node| {
+            let super::publication::RecordDemandAnswer::Record(answer) =
+                engine.answer_record_demand(node, None, false, true, false, 0)
+            else {
+                debug_assert!(false, "an element's record demand is always answered");
+                // The batch goes without the row, as it would had the host held its style.
+                return None;
+            };
+            Some((node, answer))
+        })
+        .collect::<Vec<_>>();
     for (node, answer) in settled {
         deltas.push(inheritance_prerequisite_delta(
             engine,
