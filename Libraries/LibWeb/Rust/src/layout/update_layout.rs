@@ -469,14 +469,6 @@ struct WalkedLayoutTreeBuild {
     document_style_node: StyleNodeID,
 }
 
-/// What the style round readied for the rest of its round.
-#[derive(Default)]
-struct RoundAfterStyle {
-    pass_sources: Option<LayoutPassSources>,
-    tree_build_document_style_node: Option<u32>,
-    selection: Option<SelectionSnapshot>,
-}
-
 /// What a finished layout frame leaves for the document thread, which takes it in as one once the
 /// frame is over (see [`FfiLayoutFrameEffects`]).
 #[must_use]
@@ -655,6 +647,8 @@ struct LayoutFrame {
     pass_sources: Option<LayoutPassSources>,
     /// The document style node of the tree build the style round readied.
     tree_build_document_style_node: Option<u32>,
+    /// The document's style node, as the document thread readied the document for a tree build of the round with.
+    document_style_node: u32,
     /// The document's selection as the style round of the round read it, if it has one.
     selection: Option<SelectionSnapshot>,
     /// What the frame's tree builds and commits owe the document thread, in the order the frame
@@ -804,17 +798,37 @@ impl OwnerLayoutUnit {
         });
     }
 
+    /// Readies the rest of the round whose style ran, and runs it.
+    ///
     /// # Safety
     ///
     /// Nothing but the owner reaches the frame and its arena until this returns.
-    unsafe fn run_round_through_pass(frame: *mut LayoutFrame, facts: FfiLayoutUpdateDocumentFacts) -> FrameStep {
+    unsafe fn ready_and_run_round(frame: *mut LayoutFrame, facts: FfiLayoutUpdateDocumentFacts) -> FrameStep {
         // SAFETY: Guaranteed by the caller.
-        unsafe { (*frame).run_round_through_pass(facts) }
+        unsafe {
+            (*frame).ready_round(&facts);
+            (*frame).run_round_through_pass(facts)
+        }
+    }
+
+    /// Readies the round to go in flight, where it lays out; a round that does not ends the frame at once.
+    ///
+    /// # Safety
+    ///
+    /// As for [`Self::ready_and_run_round`].
+    unsafe fn ready_round_for_flight(frame: *mut LayoutFrame, facts: FfiLayoutUpdateDocumentFacts) -> FrameStep {
+        // SAFETY: Guaranteed by the caller.
+        unsafe {
+            match (*frame).ready_round(&facts) {
+                (true, builds) => FrameStep::RoundReady { facts, builds },
+                (false, _) => (*frame).run_round_through_pass(facts),
+            }
+        }
     }
 
     /// # Safety
     ///
-    /// As for [`Self::run_round_through_pass`].
+    /// As for [`Self::ready_and_run_round`].
     unsafe fn end_unless_host_left_work(frame: *mut LayoutFrame, facts: FfiLayoutUpdateDocumentFacts) -> FrameStep {
         // SAFETY: Guaranteed by the caller.
         unsafe { (*frame).go_on_after_host_halves(facts, true) }
@@ -822,7 +836,7 @@ impl OwnerLayoutUnit {
 
     /// # Safety
     ///
-    /// As for [`Self::run_round_through_pass`].
+    /// As for [`Self::ready_and_run_round`].
     unsafe fn start_round(frame: *mut LayoutFrame, facts: FfiLayoutUpdateDocumentFacts) -> FrameStep {
         // SAFETY: Guaranteed by the caller.
         unsafe { (*frame).go_on_after_host_halves(facts, false) }
@@ -840,6 +854,12 @@ enum FrameStep {
     /// Another round has started, which goes on once the document thread has read its facts, running its style
     /// first where `document_style`.
     RoundStarted { document_style: bool },
+    /// The round whose style ran has readied the rest of it to go in flight with `facts`, and `builds` a tree
+    /// first.
+    RoundReady {
+        facts: FfiLayoutUpdateDocumentFacts,
+        builds: bool,
+    },
 }
 
 impl LayoutFrame {
@@ -851,6 +871,7 @@ impl LayoutFrame {
             connected_element_count: 0,
             pass_sources: None,
             tree_build_document_style_node: None,
+            document_style_node: 0,
             selection: None,
             owed_host_halves: Cell::default(),
             host_payments: Vec::new(),
@@ -909,39 +930,30 @@ impl LayoutFrame {
             || self.arena().needs_full_layout_tree_update()
     }
 
-    /// Readies what follows the style round on the document thread when the round lays out: the
-    /// tree build when one comes first, and otherwise the sources of the layout pass.
-    fn ready_round_after_style(
-        &self,
-        main_thread: &crate::stage::MainThread,
-        host: &LayoutUpdateHost,
-        facts: &FfiLayoutUpdateDocumentFacts,
-        selection: Option<SelectionSnapshot>,
-    ) -> RoundAfterStyle {
-        // The style the flight runs decides whether the round lays out, and the flight reads the
-        // sources of its pass once it has applied that style.
+    /// Readies the rest of the round the document thread has run the style of, with the facts `facts` it read after
+    /// it, on the owner: the tree build when one comes first, with the document's style node the document thread
+    /// prepared it with, and otherwise the sources of the layout pass. Answers whether the round lays out, and
+    /// whether it builds. The style a flight runs decides whether the round lays out, and the flight reads the
+    /// sources of its pass once it has applied that style.
+    fn ready_round(&mut self, facts: &FfiLayoutUpdateDocumentFacts) -> (bool, bool) {
+        self.pass_sources = None;
+        self.tree_build_document_style_node = None;
+        self.connected_element_count = self
+            .arena()
+            .with_style_store(|engine| engine.tree().connected_element_count());
         if self.style_pass.is_some() {
-            return RoundAfterStyle {
-                selection,
-                ..RoundAfterStyle::default()
-            };
+            return (true, false);
         }
-        if !self.round_lays_out(facts) || self.inputs.is_template_contents_document {
-            return RoundAfterStyle::default();
+        if !self.round_lays_out_in_frame(facts) {
+            return (false, false);
         }
         if self.needs_layout_tree_rebuild(facts) {
-            return RoundAfterStyle {
-                tree_build_document_style_node: Some(host.prepare_layout_tree_build(main_thread)),
-                selection,
-                ..RoundAfterStyle::default()
-            };
+            self.tree_build_document_style_node = Some(self.document_style_node);
+            return (true, true);
         }
-        RoundAfterStyle {
-            // SAFETY: The frame runs for the update the arena is in.
-            pass_sources: Some(unsafe { LayoutPassSources::read(self.inputs.arena_handle) }),
-            selection,
-            ..RoundAfterStyle::default()
-        }
+        // SAFETY: The frame runs for the update the arena is in, on the thread that owns it.
+        self.pass_sources = Some(unsafe { LayoutPassSources::read(self.inputs.arena_handle) });
+        (true, false)
     }
 
     /// Walks the tree build the style round readied, in the frame. Its host half (the shells of the
@@ -1184,11 +1196,15 @@ impl LayoutFrame {
                 }
                 FrameStep::NeedsStyle => match resumed_with.take() {
                     Some(round) => {
-                        let facts = unsafe { self.finish_style_round(main_thread, round) };
-                        if stop_at_round && (self.style_pass.is_some() || self.round_lays_out_in_frame(&facts)) {
-                            return DriveStop::AtRound(facts);
+                        let facts = self.finish_style_round(main_thread, round);
+                        if stop_at_round {
+                            self.run_unit_on_owner(document, facts, OwnerLayoutUnit::ready_round_for_flight)
+                        } else {
+                            // The unit may build, which reads the marks: they are its until this thread pays what
+                            // the unit owes it.
+                            unsafe { super::tree_update_marks::lend_to_frame(self.inputs.arena_handle) };
+                            self.run_unit_on_owner(document, facts, OwnerLayoutUnit::ready_and_run_round)
                         }
-                        self.run_unit_on_owner(document, facts, OwnerLayoutUnit::run_round_through_pass)
                     }
                     None if !matches!(self.round_style, RoundStyle::OnDocumentThread) => {
                         resumed_with = Some(unsafe { self.start_first_round(main_thread) });
@@ -1199,6 +1215,13 @@ impl LayoutFrame {
                         self.run_unit_on_owner(document, facts, OwnerLayoutUnit::start_round)
                     }
                 },
+                FrameStep::RoundReady { facts, builds } => {
+                    // The flight's build reads the marks until the document thread takes the frame back.
+                    if builds {
+                        unsafe { super::tree_update_marks::lend_to_frame(self.inputs.arena_handle) };
+                    }
+                    return DriveStop::AtRound(facts);
+                }
                 FrameStep::RoundStarted { document_style } => {
                     return DriveStop::ForDocument {
                         runs_style: document_style,
@@ -1346,34 +1369,24 @@ impl LayoutFrame {
         FrameStep::RoundStarted { document_style }
     }
 
-    /// Goes on with the round the loop started, once its style has run, with the
-    /// facts the document read after the list item renumbers and top layer changes the style left.
-    /// When the round lays out, it readies what comes next: the tree build, or the sources of the
-    /// layout pass when no tree build comes first. Style is the document's own loop over its
-    /// elements, and a tree update mark is set on the DOM node, which widens it to what the node's
-    /// layout node and its document ask for.
-    ///
-    /// # Safety
-    ///
-    /// The frame must run for the update the arena is in, and no stage may reach it until this returns.
-    unsafe fn finish_style_round(
+    /// Goes on with the round the loop started, once its style has run, with the facts the document read after the
+    /// list item renumbers and top layer changes the style left, and its selection, and readies the document for a
+    /// tree build the round may run. Style is the document's own loop over its elements, and a tree update mark is set
+    /// on the DOM node, which widens it to what the node's layout node and its document ask for. The commits of the
+    /// round stamp the selection states of the boxes they build from the selection as it is now, as nothing on the
+    /// document thread changes the tree until the frame is over.
+    fn finish_style_round(
         &mut self,
         main_thread: &crate::stage::MainThread,
         round: LayoutRoundFacts,
     ) -> FfiLayoutUpdateDocumentFacts {
-        let host = self.inputs.host;
         let LayoutRoundFacts { facts, selection } = round;
-        self.connected_element_count = self
-            .arena()
-            .with_style_store(|engine| engine.tree().connected_element_count());
-        let round_after_style = self.ready_round_after_style(main_thread, &host, &facts, selection);
-        if round_after_style.tree_build_document_style_node.is_some() {
-            // SAFETY: Guaranteed by the caller.
-            unsafe { super::tree_update_marks::lend_to_frame(self.inputs.arena_handle) };
+        self.selection = selection;
+        // A round whose style runs in the flight lays out the tree it has, and a document hosting template contents
+        // lays out nothing.
+        if self.style_pass.is_none() && !self.inputs.is_template_contents_document {
+            self.document_style_node = self.inputs.host.prepare_layout_tree_build(main_thread);
         }
-        self.pass_sources = round_after_style.pass_sources;
-        self.tree_build_document_style_node = round_after_style.tree_build_document_style_node;
-        self.selection = round_after_style.selection;
         facts
     }
 
@@ -1648,7 +1661,10 @@ impl ClockLayoutFrame {
         unsafe { self.frame.resolve_owed_host_halves() };
         match step {
             FrameStep::Ended(_) => !self.frame.commit_left_layout_work(&self.facts),
-            FrameStep::NeedsStyle | FrameStep::RoundStarted { .. } | FrameStep::PassReady(_) => false,
+            FrameStep::NeedsStyle
+            | FrameStep::RoundStarted { .. }
+            | FrameStep::RoundReady { .. }
+            | FrameStep::PassReady(_) => false,
         }
     }
 
@@ -1716,6 +1732,7 @@ unsafe fn make_clock_layout_frame(
             connected_element_count: 0,
             pass_sources: None,
             tree_build_document_style_node: None,
+            document_style_node: 0,
             selection,
             owed_host_halves: Cell::default(),
             host_payments: Vec::new(),
