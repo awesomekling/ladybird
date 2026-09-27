@@ -422,14 +422,10 @@ impl StyleEngine {
         self.computed_group_sets.begin_pass_beside_host_pins();
     }
 
-    /// Lends the host's pins again once the main thread has taken the engine back from the ticks.
-    pub(crate) fn finish_clock_lend_beside_host_pins(&mut self) {
-        self.computed_group_sets.finish_pass_beside_host_pins();
-    }
-
-    /// Whether the engine reads the host's pin table, as it may only while the host waits on it.
-    pub(crate) fn reads_host_style_record_pins(&self) -> bool {
-        self.computed_group_sets.reads_host_pins()
+    /// Lends the host's pins again at the end of a clock tick on the owner, which reads them only in a later unit the
+    /// host waits for. What the tick retired the next pass taken back reclaims.
+    pub(crate) fn end_clock_tick_beside_host_pins(&mut self) {
+        self.computed_group_sets.end_clock_tick_beside_host_pins();
     }
 
     pub(crate) fn pin_layout_style_record(&mut self, record: u64) {

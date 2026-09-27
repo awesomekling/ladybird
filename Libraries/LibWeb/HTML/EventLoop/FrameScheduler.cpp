@@ -1235,7 +1235,7 @@ bool FrameScheduler::submit_clock_tick(Vector<GC::Ref<DOM::Document>> const& doc
             continue;
         }
         publish_clock_lease_targets(m_clock_leases[*held]);
-        if (!Layout::RustFFI::rust_document_clock_submit_tick(arena->handle(), time->value)) {
+        if (!Layout::RustFFI::rust_document_clock_submit_tick(document->render_inputs_for_write().style_engine().rust_handle(), arena->handle(), time->value)) {
             revoke_clock_lease(*held);
             continue;
         }

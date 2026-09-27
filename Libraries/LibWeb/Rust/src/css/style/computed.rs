@@ -2140,11 +2140,6 @@ impl ComputedGroupSets {
         self.host_pins.handle()
     }
 
-    /// Whether the engine reads the document thread's pin table where it would reclaim a record.
-    pub(crate) fn reads_host_pins(&self) -> bool {
-        self.host_pins.table().is_some()
-    }
-
     /// Stops lending the host's pins while a pass runs beside the document thread.
     pub(crate) fn begin_pass_beside_host_pins(&mut self) {
         self.host_pins = self.host_pins.beside_flight();
@@ -2155,6 +2150,12 @@ impl ComputedGroupSets {
     pub(crate) fn finish_pass_beside_host_pins(&mut self) {
         self.host_pins = self.host_pins.taken_back();
         self.reclaim_retired_animation_overlays();
+    }
+
+    /// Lends the host's pins again at the end of a clock tick, without reclaiming what it retired: the host may pin
+    /// records while the tick ends.
+    pub(crate) fn end_clock_tick_beside_host_pins(&mut self) {
+        self.host_pins = self.host_pins.taken_back();
     }
 
     fn update_animation_overlay(

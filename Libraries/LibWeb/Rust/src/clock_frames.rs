@@ -33,14 +33,15 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread::ThreadId;
 
 use crate::css::style::StyleEngine;
+use crate::css::style::StyleEngineInputHandle;
 use crate::css::style::bridge::{
     FfiRowSampledInPass, FfiStyleInvalidationField, sample_installed_record_for_clock_tick,
 };
 use crate::css::style::engine_home::{Holder, Owed, StyleEngineLoan};
 use crate::css::style::tree::StyleNodeID;
-use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::NodeSlotId;
 use crate::layout::update_layout::ClockLayoutFrame;
+use crate::layout::{ArenaHandle, LayoutNodeArena};
 use crate::render_owner::DocumentId;
 
 /// Whether clock frames are on: unless `LIBWEB_RENDER_CLOCK_FRAMES=0`.
@@ -237,14 +238,25 @@ impl DocumentClock {
     ///
     /// # Safety
     ///
-    /// On the owner, which holds the arena of the clock's document and its style engine: inside the
-    /// `clock` run the host submitted, or with the main thread idle.
-    unsafe fn run_tick(&mut self, arena_handle: *mut c_void, time: f64) -> FfiClockTickOutcome {
+    /// On the owner, which holds `state`, the arena of the clock's document, and `engine`, its style engine: inside
+    /// the `clock` run the host submitted, or with the main thread idle.
+    unsafe fn run_tick(
+        &mut self,
+        state: *mut ArenaHandle,
+        engine: Option<&mut StyleEngine>,
+        time: f64,
+    ) -> FfiClockTickOutcome {
         let outcome = if time >= self.deadline {
             FfiClockTickOutcome::PastDeadline
-        } else {
+        } else if let Some(engine) = engine {
+            // The main thread pins and unpins its host's records beside the tick, which reads none of them.
+            engine.begin_clock_lend_beside_host_pins();
             // SAFETY: Guaranteed by the caller.
-            unsafe { self.sample_and_install(arena_handle, time) }
+            let outcome = unsafe { self.sample_and_install(state, engine, time) };
+            engine.end_clock_tick_beside_host_pins();
+            outcome
+        } else {
+            FfiClockTickOutcome::NeedsMain
         };
         if outcome == FfiClockTickOutcome::Presented {
             let previous = self.published.time();
@@ -259,16 +271,17 @@ impl DocumentClock {
     /// # Safety
     ///
     /// As for [`Self::run_tick`].
-    unsafe fn sample_and_install(&mut self, arena_handle: *mut c_void, time: f64) -> FfiClockTickOutcome {
+    unsafe fn sample_and_install(
+        &mut self,
+        state: *mut ArenaHandle,
+        engine: &mut StyleEngine,
+        time: f64,
+    ) -> FfiClockTickOutcome {
+        let arena_handle = state.cast::<c_void>();
         // SAFETY: The caller holds the arena, which the document's render state keeps alive.
-        let arena = unsafe { &*arena_handle.cast::<LayoutNodeArena>() };
-        let engine = arena.style_engine_handle();
-        if engine.is_null() {
-            return FfiClockTickOutcome::NeedsMain;
-        }
-        // SAFETY: The caller holds the engine; no other borrow of it is live here.
-        let engine: *mut StyleEngine = unsafe { engine.enter("clock tick") };
-        // SAFETY: The caller holds the engine; no other borrow of it is live here.
+        let arena = unsafe { &*state }.arena();
+        let engine: *mut StyleEngine = engine;
+        // SAFETY: The caller lent the engine; no other borrow of it is live here.
         let mut samples = unsafe { &*engine }
             .animation_timeline_samples()
             .with_time(self.timeline_identity, time);
@@ -372,7 +385,7 @@ impl DocumentClock {
     /// # Safety
     ///
     /// As for [`Self::run_tick`], with the main thread idle.
-    unsafe fn lay_out(&self, arena_handle: *mut c_void) -> Option<bool> {
+    unsafe fn lay_out(&self, state: *mut ArenaHandle) -> Option<bool> {
         let mut frame = self
             .published
             .layout_frame
@@ -380,7 +393,7 @@ impl DocumentClock {
             .expect("clock publication layout frame");
         let Some(frame) = frame.as_mut() else {
             // SAFETY: The caller holds the arena.
-            let arena = unsafe { &*arena_handle.cast::<LayoutNodeArena>() };
+            let arena = unsafe { &*state }.arena();
             return arena.layout_is_up_to_date(false).then_some(false);
         };
         // SAFETY: Guaranteed by the caller.
@@ -397,15 +410,16 @@ impl DocumentClock {
     /// # Safety
     ///
     /// As for [`Self::lay_out`].
-    unsafe fn present(&self, arena_handle: *mut c_void) -> bool {
+    unsafe fn present(&self, state: *mut ArenaHandle) -> bool {
         if !self.presentable {
             return false;
         }
         let Some(present) = PRESENT.get() else {
             return false;
         };
+        let arena_handle = state.cast::<c_void>();
         // SAFETY: The caller holds the arena.
-        let arena = unsafe { &*arena_handle.cast::<LayoutNodeArena>() };
+        let arena = unsafe { &*state }.arena();
         {
             use crate::painting::record::damage::PaintDamage;
             for &(row, affects_hit_testing) in &self.repaints {
@@ -785,16 +799,20 @@ pub extern "C" fn rust_document_clock_time(arena: *mut c_void) -> f64 {
 }
 
 /// Submits a tick of the clock of the document whose layout arena is `arena` at timeline time
-/// `time`, which the owner runs as the stage `clock`, which owns the arena and its style engine
-/// until the host takes it back. Returns false, having done nothing, where the document has no
-/// clock or the stage thread takes no `clock` stage.
+/// `time`, which the owner runs as the stage `clock`, which owns the arena and holds the document's
+/// style engine `engine`, lent to it, until the host takes it back. Returns false, having done
+/// nothing, where the document has no clock or the stage thread takes no `clock` stage.
 ///
 /// # Safety
 ///
 /// `arena` is the live layout arena of a document on the main thread, with nothing in flight
-/// that owns it.
+/// that owns it, and `engine` is its style engine, or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_document_clock_submit_tick(arena: *mut c_void, time: f64) -> bool {
+pub unsafe extern "C" fn rust_document_clock_submit_tick(
+    engine: StyleEngineInputHandle,
+    arena: *mut c_void,
+    time: f64,
+) -> bool {
     if !rust_stage_thread_submits_clock() {
         return false;
     }
@@ -806,15 +824,8 @@ pub unsafe extern "C" fn rust_document_clock_submit_tick(arena: *mut c_void, tim
     *published.outcome.lock().expect("clock publication outcome") = None;
     // The host shows what this tick installs itself.
     published.presented_since_adoption.store(false, Ordering::Release);
-    // The main thread's pin table is its own until it has taken the tick back, as it is beside a style
-    // pass in flight.
-    // SAFETY: Guaranteed by the caller: the main thread owns the engine until the submit below.
-    let engine = unsafe { LayoutNodeArena::from_handle(arena) }.style_engine_handle();
-    if !engine.is_null() {
-        // SAFETY: As above.
-        unsafe { engine.enter("clock tick submission") }.begin_clock_lend_beside_host_pins();
-    }
     // The tick samples the engine, and takes its token along.
+    let engine = engine.home();
     let (loan, settlement) = (!engine.is_null())
         .then(|| engine.lend(Holder::LayoutPass, Owed::TakeBack))
         .unzip();
@@ -827,8 +838,6 @@ pub unsafe extern "C" fn rust_document_clock_submit_tick(arena: *mut c_void, tim
     let taken_back = move || {
         if let Some(settlement) = settlement {
             settlement.settle();
-            // SAFETY: The main thread owns the engine again, which outlives the tick of its arena.
-            unsafe { engine.enter("clock tick take-back") }.finish_clock_lend_beside_host_pins();
         }
     };
     // SAFETY: The run reaches the arena and its engine only, which the `clock` stage owns until the
@@ -886,14 +895,20 @@ pub(crate) fn take_clock_tick_entry(arena: *mut c_void) -> Option<ClockTickEntry
 /// layout arena is `arena` installed in the arena ahead of it, with their pins: the rows of elements
 /// that left the document before the host could adopt their samples.
 ///
+/// The owner drops them as an arena change
+/// ([`crate::render_owner::ArenaChange::DropUnadoptedAnimationSamples`]).
+///
 /// # Safety
 ///
-/// `arena` is the live layout arena of a document on the main thread, with the tick taken back.
+/// `arena` is the live layout arena of a document on the main thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_document_clock_drop_unadopted(arena: *mut c_void) {
-    assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: Guaranteed by the caller.
-    unsafe { LayoutNodeArena::from_handle(arena) }.drop_animation_adoptions();
+    let document = unsafe { document_of(arena) };
+    crate::render_owner::send_arena_change(
+        document,
+        crate::render_owner::ArenaChange::DropUnadoptedAnimationSamples,
+    );
 }
 
 /// Whether the render clock missed so many display ticks of the clock of the document whose layout
@@ -987,31 +1002,31 @@ pub(crate) struct SubmittedTick {
 pub(crate) fn handle_on_owner(message: ClockMessage) {
     match message {
         ClockMessage::Start { document, clock } => {
-            crate::render_owner::with_clock(document, |slot, _| *slot = Some(*clock));
+            crate::render_owner::with_clock_slot(document, |slot| *slot = Some(*clock));
         }
         ClockMessage::Targets { document, targets } => {
-            crate::render_owner::with_clock(document, |slot, _| {
+            crate::render_owner::with_clock_slot(document, |slot| {
                 if let Some(clock) = slot {
                     clock.targets = targets;
                 }
             });
         }
         ClockMessage::ScrollTimelines { document, timelines } => {
-            crate::render_owner::with_clock(document, |slot, _| {
+            crate::render_owner::with_clock_slot(document, |slot| {
                 if let Some(clock) = slot {
                     clock.scroll_timelines = timelines;
                 }
             });
         }
         ClockMessage::Paused { document, paused } => {
-            crate::render_owner::with_clock(document, |slot, _| {
+            crate::render_owner::with_clock_slot(document, |slot| {
                 if let Some(clock) = slot {
                     clock.paused = paused;
                 }
             });
         }
         ClockMessage::Stop { document } => {
-            crate::render_owner::with_clock(document, |slot, _| *slot = None);
+            crate::render_owner::with_clock_slot(document, |slot| *slot = None);
         }
         ClockMessage::MainIdle {
             generation,
@@ -1044,12 +1059,12 @@ pub(crate) fn handle_on_owner(message: ClockMessage) {
 
 /// Takes the clock of `document` out of its render state, with the arena it ticks, for a tick that
 /// may reach other documents' state while it runs. [`put_clock_back`] puts it back.
-fn take_clock(document: DocumentId) -> Option<(DocumentClock, *mut c_void)> {
+fn take_clock(document: DocumentId) -> Option<(DocumentClock, *mut ArenaHandle)> {
     crate::render_owner::with_clock(document, |slot, arena| slot.take().map(|clock| (clock, arena))).flatten()
 }
 
 fn put_clock_back(document: DocumentId, clock: DocumentClock) {
-    crate::render_owner::with_clock(document, |slot, _| {
+    crate::render_owner::with_clock_slot(document, |slot| {
         debug_assert!(slot.is_none(), "nothing starts a clock while its tick runs");
         slot.get_or_insert(clock);
     });
@@ -1063,33 +1078,24 @@ fn run_submitted_tick(document: DocumentId, tick: SubmittedTick) {
         published,
         run: _,
     } = tick;
-    let Some((mut clock, arena)) = take_clock(document) else {
-        published.set_outcome(FfiClockTickOutcome::Stopped);
-        return;
+    // Taking the clock applies the arena's pending changes, which may reach the engine: inside the loan.
+    let run = |engine: Option<&mut StyleEngine>| {
+        let Some((mut clock, arena)) = take_clock(document) else {
+            published.set_outcome(FfiClockTickOutcome::Stopped);
+            return;
+        };
+        debug_assert!(
+            Arc::ptr_eq(&clock.published, &published),
+            "a submitted tick publishes to the clock it was submitted for"
+        );
+        // SAFETY: The run owns the arena and its engine until the main thread takes it back.
+        unsafe { clock.run_tick(arena, engine, time) };
+        put_clock_back(document, clock);
     };
-    debug_assert!(
-        Arc::ptr_eq(&clock.published, &published),
-        "a submitted tick publishes to the clock it was submitted for"
-    );
-    // SAFETY: The run owns the arena and its engine until the main thread takes it back.
-    let mut run_tick = || unsafe { clock.run_tick(arena, time) };
     match style_engine {
-        Some(mut loan) => {
-            loan.lend_to_this_thread(|engine| {
-                // The main thread pins and unpins its host's records beside the tick, which may read
-                // none of them.
-                debug_assert!(
-                    !engine.reads_host_style_record_pins(),
-                    "a clock tick beside the main thread reads the host's style-record pins"
-                );
-                run_tick()
-            });
-        }
-        None => {
-            run_tick();
-        }
+        Some(mut loan) => loan.lend_to_this_thread(|engine| run(Some(engine))),
+        None => run(None),
     }
-    put_clock_back(document, clock);
 }
 
 /// Runs the display tick at `frame_time_nanoseconds` for the clock that ticks at the compositor
@@ -1105,7 +1111,7 @@ fn run_display_tick(context: u64, frame_time_nanoseconds: i64) {
         Err(main_holds_arena) => {
             count(&COUNTERS.ticks_dropped_main_busy);
             if main_holds_arena {
-                let published = crate::render_owner::with_clock(document, |slot, _| {
+                let published = crate::render_owner::with_clock_slot(document, |slot| {
                     slot.as_ref().map(|clock| Arc::clone(&clock.published))
                 })
                 .flatten();
@@ -1116,7 +1122,13 @@ fn run_display_tick(context: u64, frame_time_nanoseconds: i64) {
             return;
         }
     };
-    let Some((mut clock, arena)) = take_clock(document) else {
+    // Taking the clock applies the arena's pending changes, which may reach the engine the idle main thread left home.
+    let taken = match crate::render_owner::style_engine_of(document) {
+        // SAFETY: The main thread is idle with nothing in flight, and waits for this tick when it wakes.
+        Some(engine) if !engine.is_null() => unsafe { engine.reach_on_owner(|_| take_clock(document)) },
+        _ => take_clock(document),
+    };
+    let Some((mut clock, arena)) = taken else {
         count(&COUNTERS.ticks_dropped_without_clock);
         return;
     };
@@ -1128,7 +1140,7 @@ fn run_display_tick(context: u64, frame_time_nanoseconds: i64) {
 /// arenas.
 fn run_display_tick_on(
     clock: &mut DocumentClock,
-    arena: *mut c_void,
+    arena: *mut ArenaHandle,
     idle_tick: IdleTick,
     context: u64,
     frame_time_nanoseconds: i64,
@@ -1155,7 +1167,13 @@ fn run_display_tick_on(
         let run_tick = || {
             // SAFETY: The main thread is idle with nothing in flight, and waits for this tick when
             // it wakes: the owner holds the arena and its engine until `idle_tick` is dropped.
-            let outcome = unsafe { clock.run_tick(arena, time) };
+            let engine = unsafe { &*arena }.arena().style_engine_handle();
+            // SAFETY: As above.
+            let outcome = if engine.is_null() {
+                unsafe { clock.run_tick(arena, None, time) }
+            } else {
+                unsafe { engine.reach_on_owner(|engine| clock.run_tick(arena, Some(engine), time)) }
+            };
             if outcome != FfiClockTickOutcome::Presented {
                 return (outcome, false, false);
             }
@@ -1177,7 +1195,7 @@ fn run_display_tick_on(
             // A round that moved a box that owns a clip, a transform or a scroll frame moved the
             // visual contexts, which the compositor has from the main thread's frames.
             // SAFETY: As above.
-            if laid_out && !unsafe { crate::painting::ffi::settle_visual_contexts_for_clock_tick(arena) } {
+            if laid_out && !unsafe { crate::painting::ffi::settle_visual_contexts_for_clock_tick(arena.cast()) } {
                 count(&COUNTERS.ticks_moving_visual_contexts);
                 return (FfiClockTickOutcome::NeedsMain, laid_out, false);
             }
