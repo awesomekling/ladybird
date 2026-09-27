@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<style>
+    #box {
+        width: 100px;
+        height: 20px;
+        animation: grow 20s linear;
+    }
+    @keyframes grow {
+        from {
+            width: 100px;
+        }
+        to {
+            width: 2100px;
+        }
+    }
+</style>
+<div id="box"></div>
+<script src="../../include.js"></script>
+<script>
+    // Under LIBWEB_RENDER_CLOCK_FRAMES, a garbage collection in a long task finalizes shadow roots, whose
+    // unregistration enters the document's style engine while the ticks beside the task hold its token. The entrance
+    // takes the lend back rather than waiting for the token forever.
+    asyncTest(async done => {
+        const enabled = internals.clockFramesEnabled();
+        let hosts = [];
+        for (let i = 0; i < 20; ++i) {
+            const host = document.createElement("div");
+            host.attachShadow({ mode: "open" }).innerHTML = "<style>p { color: green; }</style><p>shadow</p>";
+            hosts.push(host);
+        }
+
+        // Not a timing test: the task begins once the main thread lends the arena to the ticks beside it.
+        const waitStart = performance.now();
+        do
+            await new Promise(resolve => setTimeout(resolve, 10));
+        while (enabled && !internals.clockLendActive() && performance.now() - waitStart < 10000);
+
+        const lentAtCollection = !enabled || internals.clockLendActive();
+        hosts = null;
+        internals.gc();
+        println(`the arena was lent when the garbage collection began: ${lentAtCollection}`);
+        println(`the task goes on after the collection: true`);
+        println(`box width is read: ${document.getElementById("box").getBoundingClientRect().width >= 100}`);
+        done();
+    });
+</script>

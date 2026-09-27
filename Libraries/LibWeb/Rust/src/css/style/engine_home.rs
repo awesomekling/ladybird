@@ -245,7 +245,7 @@ impl StyleEngineHome {
                 return;
             }
             if !arrived && (only_wait || access.goes_on_owing(owed)) {
-                self.take_in_arrival(true);
+                self.wait_for_arrival();
                 continue;
             }
             if !joined {
@@ -256,10 +256,19 @@ impl StyleEngineHome {
             // Nothing could take the frame in, as work a stage joined the main thread for, or a
             // garbage collection, cannot: the entrance only waits for the stage to be done.
             if !arrived {
-                self.take_in_arrival(true);
+                self.wait_for_arrival();
             }
             return;
         }
+    }
+
+    /// Waits for the stage that holds the token to send it home, and takes it in. A lend to the
+    /// render clock's ticks sends it home only when it is recalled, so it is recalled first.
+    fn wait_for_arrival(&self) {
+        if self.holder.get() == Some(Holder::ClockLend) {
+            crate::stage_thread::recall_lends_holding_style_engine(self.arena.get());
+        }
+        self.take_in_arrival(true);
     }
 
     /// Takes the token back from the stage it was lent to, whose frame the main thread has taken
@@ -519,6 +528,44 @@ mod tests {
         assert!(Access::RecordRead.goes_on_owing(handle.home().state().1));
         assert!(!Access::Any.goes_on_owing(handle.home().state().1));
         handle.settle();
+    }
+
+    #[test]
+    fn an_entrance_that_only_waits_recalls_a_clock_lend_that_holds_the_token() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let (_engine, handle) = test_engine();
+        let arena = std::ptr::NonNull::<c_void>::dangling().as_ptr();
+        handle.link_arena(arena as usize);
+        let loan = Rc::new(RefCell::new(Some(handle.lend(Holder::ClockLend, Owed::TakeBack))));
+        let taken_back = Rc::new(Cell::new(false));
+        // SAFETY: Nothing reaches the arena, which the lend only names.
+        unsafe {
+            crate::stage_thread::lend_arena(
+                arena,
+                move || {
+                    drop(loan.borrow_mut().take());
+                    handle.settle();
+                },
+                {
+                    let taken_back = taken_back.clone();
+                    move || taken_back.set(true)
+                },
+            );
+        }
+        // A garbage collection's finalizer enters the engine, which only waits for the token.
+        crate::stage_thread::rust_stage_thread_begin_style_engine_entrances_that_only_wait();
+        // SAFETY: The engine is live and nothing else borrows it.
+        let _ = unsafe { handle.enter("finalizer") };
+        crate::stage_thread::rust_stage_thread_end_style_engine_entrances_that_only_wait();
+        assert!(handle.is_home());
+        assert_eq!(handle.holder(), None);
+        // What follows the take-back waits for whatever takes the lend back.
+        assert!(!taken_back.get());
+        assert!(crate::stage_thread::has_lent_arena());
+        crate::stage_thread::take_lent_arenas();
+        assert!(!crate::stage_thread::has_lent_arena());
     }
 
     #[test]

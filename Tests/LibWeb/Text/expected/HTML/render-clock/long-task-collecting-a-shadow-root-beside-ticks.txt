@@ -1,0 +1,3 @@
+the arena was lent when the garbage collection began: true
+the task goes on after the collection: true
+box width is read: true
