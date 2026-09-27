@@ -1039,8 +1039,11 @@ impl RetainedState {
             return false;
         };
         counters.add(Counter::CascadeMatchesBeforeCompaction, all.len() as u64);
+        // A gated match is kept whatever its conditions say now, as exact compaction keeps it: they
+        // are decided again when the containers move.
         all.retain(|entry| {
             self.program.sheet_origin(self.program.rule_sheet(entry.rule)) != CascadeOrigin::Author
+                || self.program.rule_is_gated_by_container_query(entry.rule)
                 || rules.binary_search(&entry.rule).is_ok()
         });
         verify_style_answer_patch(self, counters, |verifier| {
@@ -1115,6 +1118,7 @@ impl RetainedState {
         let mut index = 0;
         all.retain(|entry| {
             let retained = self.program.sheet_origin(self.program.rule_sheet(entry.rule)) != CascadeOrigin::Author
+                || self.program.rule_is_gated_by_container_query(entry.rule)
                 || match entry.pseudo_element {
                     None => element_rules.binary_search(&entry.rule).is_ok(),
                     Some(pseudo) => {

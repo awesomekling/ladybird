@@ -7295,6 +7295,27 @@ fn gated_and_ungated_target_rules(engine: &mut StyleEngine, nodes: &[StyleNodeID
 }
 
 #[test]
+fn compaction_from_updated_winners_keeps_a_gated_match() {
+    let (mut engine, nodes) = nested_document();
+    let (ungated, gated) = gated_and_ungated_target_rules(&mut engine, &nodes);
+    let matches = vec![
+        concrete_rule_match(&engine, nodes[2], ungated, 0, None),
+        concrete_rule_match(&engine, nodes[2], gated, 1, None),
+    ];
+    // No container holds the gated rule's conditions, so the ungated rule wins; exact compaction
+    // keeps the gated match all the same, for when the containers move.
+    let exact = engine.matches_for_cascade(matches.clone(), false, Some(nodes[2]));
+    assert_eq!(
+        exact.iter().map(|entry| entry.rule).collect::<Vec<_>>(),
+        [ungated, gated]
+    );
+
+    let mut from_winners = matches;
+    assert!(engine.compact_matches_from_updated_winners(nodes[2], &mut from_winners));
+    assert_eq!(from_winners, exact);
+}
+
+#[test]
 fn a_moving_ancestor_leaves_a_gated_inventory_incomplete() {
     let (mut engine, nodes) = nested_document();
     let (ungated, gated) = gated_and_ungated_target_rules(&mut engine, &nodes);

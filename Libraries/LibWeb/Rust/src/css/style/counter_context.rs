@@ -1003,6 +1003,15 @@ impl StyleEngine {
             .answer_transition_cannot_change_cascade(node, previous_input, current_input, &mut self.counters)
     }
 
+    #[inline]
+    #[cfg(test)]
+    pub(super) fn compact_matches_from_updated_winners(&mut self, node: StyleNodeID, all: &mut Vec<RuleMatch>) -> bool {
+        let mut effects = AnswerEffects::default();
+        self.state
+            .retained
+            .compact_matches_from_updated_winners(&mut effects, node, all, &mut self.counters)
+    }
+
     /// Whether `node`'s winner inventory over `matches` is complete in a transaction that moves
     /// the answers of `moving` and nothing else.
     #[cfg(test)]
