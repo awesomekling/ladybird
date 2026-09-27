@@ -135,7 +135,8 @@ private:
 
 // A document's render inputs, and the query snapshot it published over them. A snapshot is present only while nothing
 // was written to the inputs since it was published, which is what makes a geometry read of it clean: nothing reaches
-// the inputs to write them but for_write(), and it drops the snapshot first.
+// the inputs to write them but for_write(), and it drops the snapshot first. The same goes for the paint and hit testing
+// properties the document prepared from the inputs, which a mark in the invalidation journal makes stale as well.
 class RenderInputsEntrance {
     AK_MAKE_NONCOPYABLE(RenderInputsEntrance);
     AK_MAKE_NONMOVABLE(RenderInputsEntrance);
@@ -151,8 +152,15 @@ public:
     {
         if (m_query_snapshot)
             drop_query_snapshot();
+        m_paint_preparation_is_current = false;
         return m_inputs;
     }
+
+    // Whether the paint and hit testing properties the document prepared last were prepared from the inputs as they
+    // are, with nothing marked in its invalidation journal since: preparing them again would find nothing to do.
+    [[nodiscard]] bool paint_preparation_is_current() const { return m_paint_preparation_is_current; }
+    void note_paint_preparation_is_current() { m_paint_preparation_is_current = true; }
+    void note_invalidation_journal_mark() { m_paint_preparation_is_current = false; }
 
     void visit_edges(GC::Cell::Visitor& visitor) { m_inputs.visit_edges(visitor); }
 
@@ -165,6 +173,7 @@ private:
 
     RenderInputs m_inputs;
     RefPtr<Painting::QuerySnapshot const> m_query_snapshot;
+    bool m_paint_preparation_is_current { false };
 };
 
 }

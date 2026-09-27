@@ -2405,6 +2405,8 @@ void Document::clear_devtools_layout_inspection_data()
 
 InvalidationJournal& Document::invalidation_journal()
 {
+    // What is marked here is prepared for painting again.
+    m_render_inputs.note_invalidation_journal_mark();
     // NB: A drain inside the frame would hand the frame what changed beside it halfway through, so what
     //     is marked beside the frame waits in a journal of its own for the frame to be over.
     if (m_layout_node_arena && Layout::RustFFI::layout_arena_frame_state(m_layout_node_arena->handle()) == Layout::RustFFI::FfiLayoutFrameState::InFlight)
@@ -2938,10 +2940,23 @@ void Document::take_in_flight_paint(bool handed_accumulated_visual_contexts_upda
 
 void Document::update_paint_and_hit_testing_properties_if_needed()
 {
+    // Nothing was written to the render inputs or marked since the properties were prepared: every pass below would
+    // find nothing to do, so none is sent to the render owner.
+    if (m_render_inputs.paint_preparation_is_current() && !m_needs_accumulated_visual_contexts_update)
+        return;
+
     // NB: Called during paint property resolution.
     // Everything that reads paint state comes through here, so the marks that describe it go
     // through first.
     drain_invalidation_journal();
+
+    // What the passes prepare stays current until something is written or marked, from here on as well, with the
+    // layout they prepare from committed. Beside a frame in flight or a render clock, the render side goes on changing
+    // what they read on its own.
+    if (layout_is_up_to_date()
+        && !HTML::FrameScheduler::arena_changes_wait_for_frame(*this)
+        && !HTML::main_thread_event_loop().frame_scheduler().holds_clock_lease(*this))
+        m_render_inputs.note_paint_preparation_is_current();
 
     prepare_for_rendering();
     if (m_needs_accumulated_visual_contexts_update) {
