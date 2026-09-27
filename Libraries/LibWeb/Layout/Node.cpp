@@ -823,7 +823,6 @@ Gfx::AffineTransform NodeWithStyle::used_svg_element_transform() const
 
 void NodeWithStyle::set_computed_values(NonnullRefPtr<CSS::ComputedValues const> computed_values)
 {
-    VERIFY(!RustFFI::layout_arena_layout_pass_is_running(arena_handle()));
     CSS::StyleRecordID record;
     if (is_generated_for_pseudo_element())
         record = document().style_computer().intern_computed_style_inputs({ *pseudo_element_generator(), generated_for_pseudo_element() }, *computed_values);
@@ -1067,7 +1066,6 @@ void record_table_spans_at_arrival(DOM::Element const& element)
 
 void NodeWithStyle::set_display(CSS::Display display)
 {
-    VERIFY(!RustFFI::layout_arena_layout_pass_is_running(arena_handle()));
     RustFFI::layout_arena_set_layout_display(arena_handle(), slot_id(this), bit_cast<u32>(display));
 }
 
