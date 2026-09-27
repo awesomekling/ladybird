@@ -2322,6 +2322,16 @@ impl Drop for InputForPass {
 /// write null or an Arc-owned `DeclarationBlockData`, whose reference it transfers, and every
 /// `ElementReplacedContentInput` write a pointer to an `FfiReplacedContentInput` live for the call.
 unsafe fn apply_host_fact_writes(engine: &mut StyleEngine, writes: &[FfiHostFactWrite]) {
+    // Only what a style attribute holds when the writes cross is an input to style, and no other write reads what a
+    // node's inline style write leaves. A script that edits one style attribute over and over before a style update (a
+    // list that shows its footer again for every item it adds) would otherwise have the engine repair the node's
+    // cascade winners for every edit, so a node's last write stands for all of them.
+    let mut last_inline_style_write = super::HashMap::default();
+    for (index, write) in writes.iter().enumerate() {
+        if write.kind == FfiHostFactKind::ElementInlineStyleProperties {
+            last_inline_style_write.insert(write.node, index);
+        }
+    }
     let mut index = 0;
     while index < writes.len() {
         let write = &writes[index];
@@ -2417,7 +2427,9 @@ unsafe fn apply_host_fact_writes(engine: &mut StyleEngine, writes: &[FfiHostFact
                 let data = (write.data != 0).then(|| unsafe {
                     std::sync::Arc::from_raw(write.data as *const crate::css::declaration_block::DeclarationBlockData)
                 });
-                if let Some(node) = StyleNodeID::from_raw(write.node) {
+                if last_inline_style_write.get(&write.node) == Some(&index)
+                    && let Some(node) = StyleNodeID::from_raw(write.node)
+                {
                     register_element_declared_properties(
                         engine,
                         node,
