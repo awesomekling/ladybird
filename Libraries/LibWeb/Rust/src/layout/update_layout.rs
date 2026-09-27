@@ -82,9 +82,6 @@ pub struct FfiLayoutUpdateHostCallbacks {
     /// Ends the layout update on the document side. The document thread calls it as it takes in
     /// the frame's end, so the frame is over for the document once the update returns.
     pub finish_update_layout: unsafe extern "C" fn(*mut c_void, FfiLayoutUpdateEnd),
-    /// Begins the document's style update and submits its first pass, which the frame's first
-    /// round collects to run in the flight it submits (see `LayoutFrame::collects_style_pass`).
-    pub submit_style_for_flight: unsafe extern "C" fn(*mut c_void),
     /// Installs what the style pass a flight ran published, and runs the rest of the style update.
     pub finish_submitted_style_update: unsafe extern "C" fn(*mut c_void),
     /// Settles the repaint the install of a style batch a flight applied owes, as the flight's frame
@@ -178,11 +175,12 @@ pub struct FfiLayoutUpdateInputs {
     /// Whether the update may submit its first full layout pass to run beside the document thread
     /// (under `LIBWEB_STAGE_OVERLAP=layout`), rather than waiting for it.
     pub may_submit_pass: bool,
-    /// Whether the update's first round may run its style pass in the flight that runs its layout,
-    /// rather than on the document thread ahead of it.
+    /// Whether the update's first round runs its style pass in the flight that runs its layout,
+    /// rather than on the document thread ahead of it: the document thread submitted the pass
+    /// ahead of the update (see `layout_arena_collect_style_pass_for_flight`).
     pub style_in_flight: bool,
-    /// The style nodes of the elements the viewport propagates from, or zero, whose style changes
-    /// a flight leaves to the document thread.
+    /// The style nodes of the elements the viewport propagates from, or zero, a relayout of which
+    /// the flight does not finish as a partial relayout.
     pub viewport_propagation_sources: [u32; 2],
 }
 
@@ -227,7 +225,6 @@ pub(crate) struct LayoutUpdateHost {
     attach_generated_image:
         unsafe extern "C" fn(*mut c_void, NodeSlotId, u32, FfiPseudoElement, FfiGeneratedContentItem, NodeSlotId),
     finish_update_layout: unsafe extern "C" fn(*mut c_void, FfiLayoutUpdateEnd),
-    submit_style_for_flight: unsafe extern "C" fn(*mut c_void),
     finish_submitted_style_update: unsafe extern "C" fn(*mut c_void),
     settle_flight_style_repaint: unsafe extern "C" fn(*mut c_void, bool),
 }
@@ -251,7 +248,6 @@ impl From<FfiLayoutUpdateHostCallbacks> for LayoutUpdateHost {
             attach_style_resources: host.attach_style_resources,
             attach_generated_image: host.attach_generated_image,
             finish_update_layout: host.finish_update_layout,
-            submit_style_for_flight: host.submit_style_for_flight,
             finish_submitted_style_update: host.finish_submitted_style_update,
             settle_flight_style_repaint: host.settle_flight_style_repaint,
         }
@@ -262,10 +258,6 @@ impl LayoutUpdateHost {
     // SAFETY (for every call below): The C++ host answers synchronously from its live document.
     fn update_style(&self, _: &crate::stage::MainThread) {
         unsafe { (self.update_style)(self.context) }
-    }
-
-    fn submit_style_for_flight(&self, _: &crate::stage::MainThread) {
-        unsafe { (self.submit_style_for_flight)(self.context) }
     }
 
     fn finish_submitted_style_update(&self, _: &crate::stage::MainThread) {
@@ -654,8 +646,8 @@ struct LayoutFrame {
     /// What the frame's tree builds and commits owe the document thread beyond their own joins, in
     /// the order the frame made them, which the next join pays before its work.
     owed_host_halves: Cell<Vec<OwedHostHalf>>,
-    /// Whether the next style round submits its style pass for the flight to run rather than
-    /// running style on the document thread.
+    /// Whether the next style round takes the style pass the document thread submitted for the
+    /// flight to run, rather than running style on the document thread.
     collects_style_pass: bool,
     /// The style pass the first round collected, which the flight runs as the round's style.
     style_pass: Option<crate::css::style::bridge::StylePassJob>,
@@ -1126,18 +1118,15 @@ impl LayoutFrame {
         }
         let list_owners_to_rebuild = std::mem::take(&mut self.list_owners_to_rebuild);
         host.rebuild_list_owners_with_stale_item_counters(main_thread, &list_owners_to_rebuild);
-        // The first round's style runs in the flight if the round lays out the tree it has, which
-        // the flight then styles: the round readies no tree build.
-        if std::mem::take(&mut self.collects_style_pass)
-            && !self.arena().layout_root().is_invalid()
-            && !self.arena().needs_full_layout_tree_update()
-            && {
-                let facts = host.document_facts(main_thread);
-                !facts.document_needs_layout_tree_build && !facts.top_layer_work_pending
-            }
-        {
-            self.style_pass =
-                crate::css::style::bridge::collect_style_pass_for_flight(|| host.submit_style_for_flight(main_thread));
+        // The first round's style runs in the flight, as the pass the document thread submitted
+        // ahead of the update. The document only asks for that when the round lays out the tree it
+        // has, which the flight then styles: the round readies no tree build.
+        if std::mem::take(&mut self.collects_style_pass) {
+            debug_assert!(
+                !self.arena().layout_root().is_invalid() && !self.arena().needs_full_layout_tree_update(),
+                "a round whose style runs in the flight lays out the tree it has"
+            );
+            self.style_pass = crate::css::style::bridge::take_style_pass_collected_for_flight();
         } else {
             host.update_style(main_thread);
         }
@@ -1600,7 +1589,10 @@ unsafe fn update_layout(
         trace: unsafe { UpdateLayoutTrace::new(inputs.reason_name) },
     };
     let submits_pass = may_submit_pass && crate::stage_thread::submits("layout");
-    let style_in_flight = style_in_flight && submits_pass && crate::stage_thread::submits_flight();
+    debug_assert!(
+        !style_in_flight || runs_style_in_flight(may_submit_pass),
+        "the document submits the style of a layout update that runs it in the flight"
+    );
     // SAFETY: Guaranteed by the caller.
     let Some(mut pass) = (unsafe { LayoutPassJob::prepare(main_thread, inputs, submits_pass, style_in_flight) }) else {
         return FfiLayoutUpdateOutcome::Finished;
@@ -1660,6 +1652,12 @@ unsafe fn update_layout(
         );
     }
     FfiLayoutUpdateOutcome::PassSubmitted
+}
+
+/// Whether a layout update that may submit its full layout pass runs its first round's style in the
+/// flight it submits, if the document asks for that.
+fn runs_style_in_flight(may_submit_pass: bool) -> bool {
+    may_submit_pass && crate::stage_thread::submits("layout") && crate::stage_thread::submits_flight()
 }
 
 /// A layout frame the document thread has driven up to its full layout pass, which it hands to a

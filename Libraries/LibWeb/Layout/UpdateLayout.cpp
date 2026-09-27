@@ -116,7 +116,6 @@ Layout::RustFFI::FfiLayoutUpdateHostCallbacks Document::layout_update_host_callb
             }
 
             document.page().client().flush_pending_dom_mutations(); },
-        .submit_style_for_flight = [](void* context) { static_cast<Document*>(context)->submit_style_for_flight(); },
         .finish_submitted_style_update = [](void* context) { static_cast<Document*>(context)->finish_style_update_submitted_in_flight(); },
         .settle_flight_style_repaint = [](void* context, bool recorded_in_flight) { static_cast<Document*>(context)->settle_style_repaint_owed_to_flight(recorded_in_flight); },
     };
@@ -229,15 +228,23 @@ bool Document::update_style_and_layout_once(UpdateLayoutReason reason, Throttled
     // NB: The update, and the epochs begun above, end as the frame's end is taken in (finish_update_layout in the host
     //     callbacks): before layout_arena_update_layout returns, or once a submitted pass's frame is taken back.
 
+    bool const may_submit_pass = pass_submission != LayoutPassSubmission::Wait;
+    // The first round's style that runs in the flight begins here, ahead of the update: its pass is submitted for the
+    // update to collect, and the rest of the style update is installed as the flight is taken back.
+    bool const style_in_flight = pass_submission == LayoutPassSubmission::MaySubmitWithStyle
+        && Layout::RustFFI::layout_arena_collect_style_pass_for_flight(arena.handle(), may_submit_pass);
+    if (style_in_flight)
+        submit_style_for_flight();
+
     Layout::RustFFI::FfiLayoutUpdateInputs inputs {
         .reason_is_inspect_devtools_layout_data = reason == UpdateLayoutReason::InspectDevToolsLayoutData,
         .is_template_contents_document = m_created_for_appropriate_template_contents,
         .reason_name = ffi_utf16_view(to_string(reason)),
-        .may_submit_pass = pass_submission != LayoutPassSubmission::Wait,
-        .style_in_flight = pass_submission == LayoutPassSubmission::MaySubmitWithStyle,
+        .may_submit_pass = may_submit_pass,
+        .style_in_flight = style_in_flight,
         .viewport_propagation_sources = {},
     };
-    if (pass_submission == LayoutPassSubmission::MaySubmitWithStyle) {
+    if (style_in_flight) {
         auto sources = CSS::StyleEffectDrain::viewport_propagation_sources_of(*this);
         for (size_t index = 0; index < sources.size() && index < 2; ++index)
             inputs.viewport_propagation_sources[index] = sources[index].value();

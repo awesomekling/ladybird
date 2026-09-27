@@ -5336,20 +5336,23 @@ pub unsafe extern "C" fn style_engine_submit_style_transaction(
 }
 
 thread_local! {
-    // On the main thread, while a layout frame's style round submits the style pass its flight is to
-    // run: the pass, once submitted.
+    // On the main thread, from the point the style pass a layout frame's flight is to run is
+    // submitted for it until the frame's first round takes it: the pass, once submitted.
     static STYLE_PASS_FOR_FLIGHT: std::cell::RefCell<Option<Option<StylePassJob>>> =
         const { std::cell::RefCell::new(None) };
 }
 
-/// Runs `submit`, which submits a style pass unless the document has no style to update, and takes
-/// the pass it submitted, for a flight to run.
-pub(crate) fn collect_style_pass_for_flight(submit: impl FnOnce()) -> Option<StylePassJob> {
+/// Collects the style pass the main thread submits next, unless the document has no style to
+/// update, for a layout frame's flight to run.
+pub(crate) fn collect_next_style_pass_for_flight() {
     STYLE_PASS_FOR_FLIGHT.with(|collected| {
         let previous = collected.borrow_mut().replace(None);
         debug_assert!(previous.is_none(), "one style pass is collected at a time");
     });
-    submit();
+}
+
+/// The style pass collected for a layout frame's flight, if the main thread submitted one.
+pub(crate) fn take_style_pass_collected_for_flight() -> Option<StylePassJob> {
     STYLE_PASS_FOR_FLIGHT.with(|collected| collected.borrow_mut().take().flatten())
 }
 
