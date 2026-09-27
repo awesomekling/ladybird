@@ -12,6 +12,7 @@
 #include <AK/NumericLimits.h>
 #include <AK/Variant.h>
 #include <LibGfx/Point.h>
+#include <LibGfx/TextLayout.h>
 #include <LibUnicode/CharacterTypes.h>
 #include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/Display.h>
@@ -29,13 +30,10 @@
 #include <LibWeb/HTML/AttributeNames.h>
 #include <LibWeb/HTML/EventLoop/FrameScheduler.h>
 #include <LibWeb/HTML/HTMLElement.h>
-#include <LibWeb/Layout/Box.h>
 #include <LibWeb/Layout/ImageProvider.h>
 #include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/Layout/NodeArena.h>
-#include <LibWeb/Layout/TextNode.h>
-#include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Painting/PaintableTypes.h>
 #include <LibWeb/SVG/FragmentIdentifier.h>
 #include <LibWeb/SVG/SVGCircleElement.h>
@@ -329,7 +327,7 @@ void publish_svg_attribute_facts(DOM::Element& element)
         points = polyline->points();
     static_assert(sizeof(Gfx::FloatPoint) == sizeof(RustFFI::FfiFloatPoint));
     RustFFI::layout_arena_set_style_node_svg_attribute_facts(
-        element.document().layout_node_arena().handle(),
+        document_layout_arena(element.document()),
         element.style_node_id().value(),
         build_svg_attribute_facts(element),
         reinterpret_cast<RustFFI::FfiFloatPoint const*>(points.data()),
@@ -344,7 +342,7 @@ void publish_svg_style_references(DOM::Element& element)
     VERIFY(element.style_node_id() != 0);
     auto references = svg_style_reference_atoms(element);
     RustFFI::layout_arena_set_style_node_svg_style_references(
-        element.document().layout_node_arena().handle(),
+        document_layout_arena(element.document()),
         element.style_node_id().value(),
         references[0].value(),
         references[1].value(),
@@ -355,9 +353,23 @@ void publish_svg_style_references(DOM::Element& element)
 void clear_svg_attribute_facts(DOM::Document& document, CSS::StyleNodeID style_node)
 {
     // Beside a frame that owns the arena, the facts leave with the rest of the removal's arena changes.
-    HTML::FrameScheduler::change_arena(document, [style_node](NodeArena& arena) {
+    HTML::FrameScheduler::change_arena(document, [style_node](auto& arena) {
         RustFFI::layout_arena_clear_style_node_svg_attribute_facts(arena.handle(), style_node.value());
     });
+}
+
+// Defined beside the text shaping it classifies code points for.
+Gfx::GlyphRun::TextType text_type_for_code_point(u32 code_point);
+
+void* document_layout_arena(DOM::Document& document)
+{
+    return document.layout_node_arena().handle();
+}
+
+void* document_layout_arena_if_created(DOM::Document const& document)
+{
+    auto const* arena = document.layout_node_arena_if_created();
+    return arena ? arena->handle() : nullptr;
 }
 
 void register_layout_host(NodeArena& arena, DOM::Document& document)
