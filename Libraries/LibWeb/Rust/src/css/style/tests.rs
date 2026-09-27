@@ -11569,6 +11569,7 @@ fn replay_ffi_reclaims_the_non_empty_recorded_atom_set() {
             nodes[0].raw(),
             computation_inputs,
             std::ptr::null_mut(),
+            std::ptr::null(),
         )
     };
 
