@@ -308,6 +308,18 @@ StyleCache& StyleScope::ensure_style_cache()
                 sheets.append(style_sheet);
         });
 
+        // OPTIMIZATION: A scope with no stylesheets of its own, such as the user-agent shadow tree of every form
+        //               control, holds only what the user-agent origin puts in its cache. That is the same for every
+        //               such scope in the document, so they share one cache, which the document's scope drops along
+        //               with its own.
+        if (all_sheets_are_constructed && sheets.is_empty()) {
+            auto& document_scope = document().style_scope();
+            if (!document_scope.m_sheetless_shadow_root_style_cache)
+                document_scope.m_sheetless_shadow_root_style_cache = StyleCache::create();
+            m_style_cache = document_scope.m_sheetless_shadow_root_style_cache;
+            return *m_style_cache;
+        }
+
         if (all_sheets_are_constructed && !sheets.is_empty()) {
             if (sheets.size() == 1) {
                 m_style_cache = sheets.first()->shared_single_constructed_sheet_style_cache();
@@ -378,6 +390,7 @@ void StyleScope::invalidate_style_cache()
 {
     invalidate_counter_style_cache();
     m_style_cache = nullptr;
+    m_sheetless_shadow_root_style_cache = nullptr;
     m_published_layer_order_generation = 0;
     // The registered custom properties cache is built from the document's active stylesheets, so it only needs a
     // rebuild when the document scope's rule set changes.

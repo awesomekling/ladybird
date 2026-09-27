@@ -165,6 +165,8 @@ public:
     StyleCache& ensure_style_cache() const;
 
     RefPtr<StyleCache> m_style_cache;
+    // In the document's scope: the cache its shadow-root scopes with no stylesheets of their own share.
+    RefPtr<StyleCache> m_sheetless_shadow_root_style_cache;
 
     // The keyframe sets this scope last published. The style computation reads them by pointer, so
     // the publication holds them alive even after the rule cache they came from has been
