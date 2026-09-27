@@ -187,6 +187,11 @@ public:
     // For tests: hands the leases a render clock ticks a display tick at `frame_time` (unsafe shared current time, ms)
     // once the main thread goes idle, and calls `on_end` once it has run, with whether a lease took it.
     void inject_render_clock_tick(double frame_time, Function<void(bool)> on_end);
+    // For tests: has the next frame added to the ticket whose recording is in flight take that recording in before its
+    // presentation would be submitted, as a forced join during the main half would.
+    void take_in_next_recording_before_its_presentation(bool take) { m_takes_in_next_recording_before_its_presentation = take; }
+    // For tests: how many recordings the frame scheduler took in for take_in_next_recording_before_its_presentation().
+    u64 recordings_taken_in_before_their_presentation() const { return m_recordings_taken_in_before_their_presentation; }
 
     // Whether the frame in flight runs the style or layout pass of `document`. The ticket keeps its documents alive.
     bool pass_in_flight_holds(DOM::Document const&) const;
@@ -306,6 +311,8 @@ private:
     EventLoop& m_event_loop;
     State m_state { State::Idle };
     bool m_synchronous_update { false };
+    bool m_takes_in_next_recording_before_its_presentation { false };
+    u64 m_recordings_taken_in_before_their_presentation { 0 };
     OwnPtr<FrameTicket> m_ticket;
 
     Vector<ClockLeaseHold> m_clock_leases;

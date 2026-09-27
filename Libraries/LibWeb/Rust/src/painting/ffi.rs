@@ -2024,9 +2024,9 @@ pub(crate) unsafe fn present_in_flight(arena_handle: *mut c_void, products: &Fli
 ///
 /// # Safety
 ///
-/// `arena` must be a live handle from `layout_arena_create`, owned by the frame in flight whose
-/// presentation stage calls this; the callbacks in `publish` are called synchronously with their
-/// context, which the host lent that stage.
+/// `arena` must be a live handle from `layout_arena_create`, owned by the flight whose present stage
+/// calls this; the callbacks in `publish` are called synchronously with their context, which the
+/// host lent that stage.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_publish_recording_in_frame(
     arena: *mut c_void,
@@ -2037,10 +2037,8 @@ pub unsafe extern "C" fn layout_arena_publish_recording_in_frame(
         return 0;
     };
     let publish = crate::painting::host::RecordingPublishHost::from(publish);
-    // SAFETY: Guaranteed by the caller: this is the frame's presentation stage.
+    // SAFETY: Guaranteed by the caller: this is a flight's present stage.
     let presentation = unsafe { crate::painting::host::FramePresentation::new() };
-    // NB: The published-rows verifier keeps its baseline per thread, on the main thread; it sees this
-    //     publication as the rows the next main-side publication finds.
     crate::painting::record::publish::publish_recording(arena, pending, &presentation, &publish)
 }
 

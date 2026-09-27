@@ -1040,6 +1040,8 @@ struct StageHold {
     first_holdable_run: u64,
     // The hold the stage thread is holding a run for.
     holding: Option<ArmedHold>,
+    // The thread that holds it: the stage thread or the paint lane.
+    holding_thread: Option<ThreadId>,
 }
 
 fn stage_hold() -> &'static (Mutex<StageHold>, Condvar) {
@@ -1134,6 +1136,32 @@ pub extern "C" fn rust_stage_thread_wait_for_held_stage(timeout_ms: u32, held_at
             .wait_timeout(hold, (deadline - now).min(std::time::Duration::from_millis(1)))
             .expect("the stage hold is never poisoned")
             .0;
+    }
+}
+
+/// Test only: waits for every thread that runs submitted stages, but the one holding a run for a
+/// test's hold, to run what it was handed before. A stage the calling thread submitted to one of
+/// them has run by then, so a test can tell a stage queued behind the held run from one that runs
+/// beside it without waiting for a while. None of those threads may be waiting for the calling
+/// thread.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_stage_thread_wait_for_threads_beside_held_run() {
+    let holding_thread = {
+        let (hold, _) = lock_stage_hold();
+        hold.holding.as_ref().and(hold.holding_thread)
+    };
+    let threads = [stage_thread(), PAINT_LANE.get().and_then(Option::as_ref)];
+    for thread in threads.into_iter().flatten() {
+        if Some(thread.id) == holding_thread || std::thread::current().id() == thread.id {
+            continue;
+        }
+        let (ran, has_run) = channel::<()>();
+        let job: Job = Box::new(move || {
+            let _ = ran.send(());
+        });
+        if thread.jobs.send(StageMessage::Run(job)).is_ok() {
+            let _ = has_run.recv();
+        }
     }
 }
 
@@ -1269,6 +1297,7 @@ fn hold_at(point: FfiStageHoldPoint, flight_stage: Option<&'static str>) {
         return;
     }
     hold.holding = hold.armed.take();
+    hold.holding_thread = Some(std::thread::current().id());
     changed.notify_all();
     while hold.holding.is_some() {
         hold = changed.wait(hold).expect("the stage hold is never poisoned");

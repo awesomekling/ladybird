@@ -18,15 +18,13 @@
             before = internals.presentedSceneEpoch();
             inner.style.backgroundColor = "green";
             mover.style.transform = "translateX(5px)";
-        }, async frame => {
+        }, frame => {
             if (!frame.armed)
                 return frame;
-            // Nothing below takes the frame back: no layout, style or hit-test reads.
-            const deadline = performance.now() + 300;
-            let whileHeld = before;
-            while (whileHeld === before && performance.now() < deadline)
-                whileHeld = internals.presentedSceneEpoch();
-            return { ...frame, whileHeld };
+            // Nothing below takes the frame back: no layout, style or hit-test reads. A presentation that is not queued
+            // behind the held recording has run once every other thread that runs the frame's stages has.
+            internals.waitForStageThreadsBesideHeldFrame();
+            return { ...frame, whileHeld: internals.presentedSceneEpoch() };
         }, frame.contentDocument);
         internals.resetRenderPresents();
         println(`held as armed: ${heldAsArmed(facts, "before-run")}`);

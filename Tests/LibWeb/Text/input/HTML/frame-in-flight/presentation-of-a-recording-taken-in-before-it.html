@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<div id="box" style="width: 20px; height: 20px; background: red"></div>
+<script>
+    // A recording the main thread takes in before the frame's presentation is submitted (as a forced join during the
+    // main half would) has no ticket left to present from. The frame in flight does not present that frame, and
+    // consume-commit does once it takes the frame in.
+    asyncTest(async done => {
+        await new Promise(resolve => window.addEventListener("load", resolve));
+        await twoFrames();
+        internals.setRenderPresents(true);
+        const before = internals.presentedSceneEpoch();
+        const takenInBefore = internals.recordingsTakenInBeforeTheirPresentation();
+        internals.takeInNextRecordingBeforeItsPresentation();
+        await new Promise(resolve => requestAnimationFrame(() => {
+            box.style.backgroundColor = "green";
+            resolve();
+        }));
+        await twoFrames();
+        internals.takeInNextRecordingBeforeItsPresentation(false);
+        internals.resetRenderPresents();
+        const takenIn = internals.recordingsTakenInBeforeTheirPresentation() - takenInBefore;
+        println(`taken in before its presentation: ${takenIn}`);
+        println(`presented: ${internals.presentedSceneEpoch() > before}`);
+        println(`box: ${getComputedStyle(box).backgroundColor}`);
+        done();
+    });
+</script>
