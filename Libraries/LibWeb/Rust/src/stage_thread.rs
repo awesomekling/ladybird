@@ -1528,6 +1528,24 @@ pub(crate) fn release_holds_for_style_engine_wait(arena: usize) {
     });
 }
 
+/// Recalls the arenas the calling thread lent that belong to the document whose arena is `arena` (or
+/// every one, for 0), whose recall sends home the style engine token the lend holds, for an entrance
+/// that waits for the token (see `crate::css::style::engine_home`). Nothing else would: a lend holds
+/// it until it is recalled. What follows each take-back stays for the join or the end of the task
+/// that takes the lend back, as an entrance that only waits must not run it.
+pub(crate) fn recall_lends_holding_style_engine(arena: usize) {
+    let recalls: Vec<_> = SUBMITTED.with_borrow_mut(|submitted| {
+        submitted
+            .iter_mut()
+            .filter(|stage| stage.is_lend() && (arena == 0 || stage.arena == arena))
+            .filter_map(|stage| stage.recall.take())
+            .collect()
+    });
+    for recall in recalls {
+        recall();
+    }
+}
+
 /// The main thread takes in the frame that holds the style engine of the document whose arena is
 /// `arena` (or any frame, for an engine no arena links), for an entrance that `file`, `line` and
 /// `column` name (see `crate::css::style::engine_home`).
