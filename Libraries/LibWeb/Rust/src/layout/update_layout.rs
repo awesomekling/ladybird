@@ -1657,12 +1657,14 @@ unsafe fn update_layout(
     // The pass reads the style engine through the arena, and takes the engine's token along.
     // SAFETY: Guaranteed by the caller.
     let style_engine = unsafe { arena(arena_handle) }.style_engine_handle();
-    let loan = (!style_engine.is_null()).then(|| {
-        style_engine.lend(
-            crate::css::style::engine_home::Holder::LayoutPass,
-            crate::css::style::engine_home::Owed::TakeBack,
-        )
-    });
+    let (loan, settlement) = (!style_engine.is_null())
+        .then(|| {
+            style_engine.lend(
+                crate::css::style::engine_home::Holder::LayoutPass,
+                crate::css::style::engine_home::Owed::TakeBack,
+            )
+        })
+        .unzip();
     // SAFETY: The frame reaches only the arena and its style engine, which the frame in flight owns
     // until the document thread takes it back: every document-thread path to the arena and the tree
     // update marks it holds joins the frame first, and the engine's token goes with the pass.
@@ -1678,8 +1680,8 @@ unsafe fn update_layout(
                 };
             },
             move || {
-                if !style_engine.is_null() {
-                    style_engine.settle();
+                if let Some(settlement) = settlement {
+                    settlement.settle();
                 }
                 take_back.finish();
             },

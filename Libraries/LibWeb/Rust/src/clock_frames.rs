@@ -885,7 +885,9 @@ pub unsafe extern "C" fn rust_clock_lease_submit_tick(arena: *mut c_void, time: 
         unsafe { engine.enter("clock tick submission") }.begin_clock_lend_beside_host_pins();
     }
     // The tick samples the engine, and takes its token along.
-    let loan = (!engine.is_null()).then(|| engine.lend(Holder::LayoutPass, Owed::TakeBack));
+    let (loan, settlement) = (!engine.is_null())
+        .then(|| engine.lend(Holder::LayoutPass, Owed::TakeBack))
+        .unzip();
     let tick = move || {
         // SAFETY: The stage owns the arena, as below.
         let run_tick = || unsafe { lease.run_tick(time, lease.deadline(), &[]) };
@@ -904,8 +906,8 @@ pub unsafe extern "C" fn rust_clock_lease_submit_tick(arena: *mut c_void, time: 
         };
     };
     let taken_back = move || {
-        if !engine.is_null() {
-            engine.settle();
+        if let Some(settlement) = settlement {
+            settlement.settle();
             // SAFETY: The main thread owns the engine again, which outlives the tick of its arena.
             unsafe { engine.enter("clock tick take-back") }.finish_clock_lend_beside_host_pins();
         }
@@ -1103,16 +1105,17 @@ pub unsafe extern "C" fn rust_clock_lend_to_busy_main(arena: *mut c_void, relend
     // no more until it has taken the engine back.
     // SAFETY: Guaranteed by the caller.
     let engine = unsafe { LayoutNodeArena::from_handle(arena) }.style_engine_handle();
-    if !engine.is_null() {
+    let settlement = (!engine.is_null()).then(|| {
         // SAFETY: The main thread owns the engine until the lend below.
         unsafe { engine.enter("clock lend") }.begin_clock_lend_beside_host_pins();
         // The ticks sample the engine, and hold its token until the main thread takes the arena back.
-        *lease.style_engine_loan.lock().expect("clock lease style engine loan") =
-            Some(engine.lend(Holder::ClockLend, Owed::TakeBack));
-    }
+        let (loan, settlement) = engine.lend(Holder::ClockLend, Owed::TakeBack);
+        *lease.style_engine_loan.lock().expect("clock lease style engine loan") = Some(loan);
+        settlement
+    });
     let recall = move || {
         take_arena_back(arena as usize);
-        if !engine.is_null() {
+        if let Some(settlement) = settlement {
             drop(
                 lease
                     .style_engine_loan
@@ -1120,7 +1123,7 @@ pub unsafe extern "C" fn rust_clock_lend_to_busy_main(arena: *mut c_void, relend
                     .expect("clock lease style engine loan")
                     .take(),
             );
-            engine.settle();
+            settlement.settle();
             // SAFETY: The main thread owns the engine again, which outlives the lend of its arena.
             unsafe { engine.enter("clock lend recall") }.finish_clock_lend_beside_host_pins();
         }

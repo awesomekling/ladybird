@@ -14,7 +14,7 @@
 
 use crate::css::style::StyleEngineHandle;
 use crate::css::style::bridge::StylePassJob;
-use crate::css::style::engine_home::{Holder, Owed, StyleEngineLoan};
+use crate::css::style::engine_home::{Holder, Owed, StyleEngineLoan, StyleEngineSettlement};
 use crate::css::style::flight_style_rows::{FLIGHT_STYLE_DECLINE_COUNT, FfiFlightStyleDecline};
 use crate::layout::update_layout::{LayoutPassJob, LayoutPassTakeBack};
 use std::cell::Cell;
@@ -209,7 +209,7 @@ impl Flight {
     /// Lends the flight the token of its document's style engine `style_engine`: as to a layout
     /// pass, which may send it home as soon as its rounds have run, or to a style pass alone. On the
     /// document thread.
-    fn lend_style_engine(&self, style_engine: StyleEngineHandle) -> Option<StyleEngineLoan> {
+    fn lend_style_engine(&self, style_engine: StyleEngineHandle) -> Option<(StyleEngineLoan, StyleEngineSettlement)> {
         if style_engine.is_null() {
             return None;
         }
@@ -483,7 +483,7 @@ pub(crate) unsafe fn submit(arena: *mut c_void, flight: Flight) {
     let stage_holds = flight.stage_holds();
     // SAFETY: Guaranteed by the caller: the document thread still owns the arena.
     let style_engine = unsafe { &*arena.cast::<crate::layout::LayoutNodeArena>() }.style_engine_handle();
-    let loan = flight.lend_style_engine(style_engine);
+    let (loan, settlement) = flight.lend_style_engine(style_engine).unzip();
     let take_back = flight.take_back();
     FLIGHT_STYLE_DECISION.store(STYLE_UNDECIDED, std::sync::atomic::Ordering::Release);
     // SAFETY: Guaranteed by the caller.
@@ -498,8 +498,8 @@ pub(crate) unsafe fn submit(arena: *mut c_void, flight: Flight) {
                     Some(crate::stage_thread::FrameOwns::new(ran));
             },
             move || {
-                if !style_engine.is_null() {
-                    style_engine.settle();
+                if let Some(settlement) = settlement {
+                    settlement.settle();
                 }
                 let (mut outcome, ran) = outcome
                     .lock()

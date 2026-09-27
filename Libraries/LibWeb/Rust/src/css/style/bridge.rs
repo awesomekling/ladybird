@@ -5320,7 +5320,7 @@ pub unsafe extern "C" fn style_engine_submit_style_transaction(
         return;
     }
     // The pass takes the engine's token along, and sends it home once it has run.
-    let loan = engine.lend(Holder::StylePass, Owed::TakeBack);
+    let (loan, settlement) = engine.lend(Holder::StylePass, Owed::TakeBack);
     // SAFETY: As above.
     unsafe {
         crate::stage_thread::submit_stage_with_take_back(
@@ -5330,7 +5330,7 @@ pub unsafe extern "C" fn style_engine_submit_style_transaction(
                 let mut loan = loan;
                 pass.run(&mut loan);
             },
-            move || engine.settle(),
+            move || settlement.settle(),
         );
     }
 }
