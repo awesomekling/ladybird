@@ -1257,7 +1257,9 @@ impl LayoutFrame {
     /// Ends a loop that has run out of rounds, noting whether style or layout work is still
     /// pending.
     fn run_out_of_rounds(&mut self, joins: &crate::stage_thread::MainJoins<'_>) -> FrameEnd {
-        let facts = self.join(joins, FrameJoin::FinalFacts, |main_thread, host| host.document_facts(main_thread));
+        let facts = self.join(joins, FrameJoin::FinalFacts, |main_thread, host| {
+            host.document_facts(main_thread)
+        });
         if style_update_follows_layout(self.arena(), &facts) || !layout_is_up_to_date(self.arena(), &facts) {
             self.messages.stabilization_bound_failed = true;
         }
