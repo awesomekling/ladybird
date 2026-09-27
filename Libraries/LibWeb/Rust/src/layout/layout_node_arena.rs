@@ -6402,7 +6402,6 @@ impl LayoutNodeArena {
         crate::stage_thread::join_frame_in_flight(arena);
         // SAFETY: Layout passes borrow the document's arena synchronously,
         // and the document keeps it alive for the duration of the pass.
-        super::main_side_census::note_arena_access(std::panic::Location::caller(), arena);
         unsafe { &*arena.cast::<Self>() }
     }
 
@@ -6410,7 +6409,6 @@ impl LayoutNodeArena {
     pub(crate) unsafe fn from_handle_mut<'a>(arena: *mut c_void) -> &'a mut Self {
         assert!(!arena.is_null(), "layout node arena handle is null");
         crate::stage_thread::join_frame_in_flight(arena);
-        super::main_side_census::note_arena_access(std::panic::Location::caller(), arena);
         // SAFETY: The caller guarantees exclusive access to the arena for the
         // duration of the returned borrow.
         unsafe { &mut *arena.cast::<Self>() }
@@ -6495,10 +6493,8 @@ pub(crate) unsafe fn paying_host_handbacks<R>(
 ) -> R {
     // SAFETY: Guaranteed by the caller; each borrow here ends before `operation` runs or after it
     // has returned.
-    super::main_side_census::note_arena_access(std::panic::Location::caller(), arena);
     unsafe { &*arena.cast::<LayoutNodeArena>() }.begin_paying_host_handbacks(main_thread);
-    // The operation is the passage just counted, however many times it turns the handle around.
-    let result = super::main_side_census::within_counted_passage(operation);
+    let result = operation();
     // SAFETY: As above.
     unsafe { &*arena.cast::<LayoutNodeArena>() }.finish_paying_host_handbacks(main_thread);
     result
@@ -6878,7 +6874,6 @@ pub unsafe extern "C" fn layout_arena_join_frame_for_dom_tree_mutation(arena: *m
         return;
     }
     // NB: No stage of the frame in flight owns the arena, so there is nothing for LayoutNodeArena::from_handle() to join.
-    super::main_side_census::note_arena_access(location, arena);
     // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on the document thread.
     let arena = unsafe { &*arena.cast::<LayoutNodeArena>() };
     arena.pass_main_side_door(LayoutNodeArena::DOM_TREE_MUTATION_WRITER);
