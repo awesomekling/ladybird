@@ -62,6 +62,9 @@ pub(crate) struct HostTables {
         RefCell<Vec<super::tree_update_marks::MarkWriteWaitingForFrame>>,
     /// Whether the document runs a layout update, between `layout_arena_begin_update_layout` and its end.
     layout_update_is_running: Cell<bool>,
+    /// What each row of the style batch a flight applied marked of its element's layout nodes, by style node, packed
+    /// as an `FfiStyleInvalidationField` word, with the record it installed, while the host installs the batch.
+    flight_style_damages: RefCell<HashMap<crate::css::style::tree::StyleNodeID, (u32, u64)>>,
 }
 
 impl HostTables {
@@ -80,6 +83,35 @@ impl HostTables {
     /// Whether the document runs a layout update.
     pub(crate) fn layout_update_is_running(&self) -> bool {
         self.layout_update_is_running.get()
+    }
+
+    /// Holds what the rows of the style batch a flight applied marked, for the host to read as it installs the
+    /// batch; what the host does not take goes with the next.
+    pub(crate) fn hold_flight_style_damages(&self, damages: HashMap<crate::css::style::tree::StyleNodeID, (u32, u64)>) {
+        *self.flight_style_damages.borrow_mut() = damages;
+    }
+
+    /// Takes what the flight marked of the layout nodes of `style_node`'s element as it applied the style row the
+    /// host installs now, or `None` if it applied none for it.
+    pub(crate) fn take_flight_style_damage(&self, style_node: crate::css::style::tree::StyleNodeID) -> Option<u32> {
+        self.flight_style_damages
+            .borrow_mut()
+            .remove(&style_node)
+            .map(|(damage, _)| damage)
+    }
+
+    /// What the flight marked of the layout nodes of `style_node`'s element, which the host reads before it takes it,
+    /// if the flight installed `style_record` there.
+    pub(crate) fn flight_style_damage(
+        &self,
+        style_node: crate::css::style::tree::StyleNodeID,
+        style_record: u64,
+    ) -> Option<u32> {
+        self.flight_style_damages
+            .borrow()
+            .get(&style_node)
+            .filter(|(_, installed)| *installed == style_record)
+            .map(|(damage, _)| *damage)
     }
 
     /// Whether the document traces its layout, and has the owners of the trace lines named once a frame is over.

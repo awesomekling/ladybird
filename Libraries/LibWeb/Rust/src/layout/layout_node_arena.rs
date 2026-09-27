@@ -2482,32 +2482,17 @@ impl LayoutNodeArena {
         self.flight_style_applied.replace(false)
     }
 
-    /// Takes what the flight marked of the layout nodes of `style_node`'s element as it applied the
-    /// style row the host installs now, or `None` if it applied none for it.
-    pub(crate) fn take_flight_style_damage(&self, style_node: StyleNodeID) -> Option<u32> {
-        self.flight_style_damages
-            .borrow_mut()
-            .remove(&style_node)
-            .map(|(damage, _)| damage)
+    /// Takes what each row of the style batch a flight applied marked of its element's layout nodes,
+    /// with the record it installed, for the host to read as it installs the batch.
+    pub(crate) fn take_flight_style_damages(&self) -> HashMap<StyleNodeID, (u32, u64)> {
+        std::mem::take(&mut *self.flight_style_damages.borrow_mut())
     }
 
-    /// What the flight marked of the layout nodes of `style_node`'s element, which the host reads
-    /// before it takes it, if the flight installed `style_record` there.
-    pub(crate) fn flight_style_damage(&self, style_node: StyleNodeID, style_record: u64) -> Option<u32> {
-        self.flight_style_damages
-            .borrow()
-            .get(&style_node)
-            .filter(|(_, installed)| *installed == style_record)
-            .map(|(damage, _)| *damage)
-    }
-
-    /// Ends the host half of a flight's style, once the host has installed the batch: what the rows
-    /// of the batch left to the host's install that it did not take is dropped, and a record it did
+    /// Ends the host half of a flight's style, once the host has installed the batch: a record it did
     /// not adopt, and did not install another one over, is put back over its row with the host's,
     /// which lays the row out again. Answers whether one was, and what putting them back owes the
     /// host's shells, for the document thread to pay.
     pub(crate) fn finish_flight_style_host_half(&self) -> (bool, HostPayment) {
-        self.flight_style_damages.borrow_mut().clear();
         let unadopted = std::mem::take(&mut *self.flight_style_adoptions.borrow_mut());
         let restored = !unadopted.is_empty();
         // What the arena owed the host before stays owed, after what this owes.
@@ -7111,11 +7096,11 @@ pub unsafe extern "C" fn layout_arena_flight_style_damage(
         return 0;
     };
     // SAFETY: As above.
-    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
+    let host_tables = unsafe { super::HostTables::from_handle(arena) };
     let damage = if take {
-        arena.take_flight_style_damage(style_node)
+        host_tables.take_flight_style_damage(style_node)
     } else {
-        arena.flight_style_damage(style_node, style_record)
+        host_tables.flight_style_damage(style_node, style_record)
     };
     damage.map_or(0, |damage| (1 << 32) | u64::from(damage))
 }
