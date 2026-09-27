@@ -39,6 +39,7 @@ use crate::css::style::StyleEngine;
 use crate::css::style::bridge::{
     FfiRowSampledInPass, FfiStyleInvalidationField, sample_installed_record_for_clock_tick,
 };
+use crate::css::style::engine_home::{Holder, Owed, StyleEngineLoan};
 use crate::css::style::tree::StyleNodeID;
 use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::NodeSlotId;
@@ -142,11 +143,6 @@ pub enum FfiClockTickOutcome {
     Revoked,
 }
 
-/// The layout arena of the lease's document, whose registration keeps it alive.
-fn arena_of(lease: &ClockLease) -> *const LayoutNodeArena {
-    lease.arena as *const LayoutNodeArena
-}
-
 /// A document's clock lease.
 pub struct ClockLease {
     arena: usize,
@@ -206,6 +202,8 @@ pub struct ClockLease {
     host_pins: Mutex<Vec<u64>>,
     /// The records of samples a take-back took out of the arena, pinned until the host adopts them.
     restored_pins: Mutex<Vec<u64>>,
+    /// The token of the style engine, while the main thread lends the arena to the ticks mid-task.
+    style_engine_loan: Mutex<Option<StyleEngineLoan>>,
 }
 
 // SAFETY: `ClockTickEntry` carries a borrowed custom-property store pointer, which only the thread
@@ -700,6 +698,7 @@ pub extern "C" fn rust_clock_lease_grant(
         outcome: Mutex::default(),
         host_pins: Mutex::default(),
         restored_pins: Mutex::default(),
+        style_engine_loan: Mutex::default(),
     });
     if let Some(previous) = registry()
         .lock()
@@ -877,18 +876,6 @@ pub unsafe extern "C" fn rust_clock_lease_submit_tick(arena: *mut c_void, time: 
     *lease.outcome.lock().expect("clock lease outcome") = None;
     // The host shows what this tick installs itself.
     lease.presented_since_adoption.store(false, Ordering::Release);
-    let tick = move || {
-        // The main thread pins and unpins its host's records beside the tick, which may read none of them.
-        // SAFETY: The stage owns the arena and its engine, as below.
-        let engine = unsafe { &*arena_of(&lease) }.style_engine_handle();
-        // SAFETY: As above.
-        debug_assert!(
-            engine.is_null() || !unsafe { engine.enter("clock tick") }.reads_host_style_record_pins(),
-            "a clock tick beside the main thread reads the host's style-record pins"
-        );
-        // SAFETY: The stage owns the arena, as below.
-        unsafe { lease.run_tick(time, lease.deadline(), &[]) };
-    };
     // The main thread's pin table is its own until it has taken the tick back, as it is beside a style
     // pass in flight.
     // SAFETY: Guaranteed by the caller: the main thread owns the engine until the submit below.
@@ -897,8 +884,28 @@ pub unsafe extern "C" fn rust_clock_lease_submit_tick(arena: *mut c_void, time: 
         // SAFETY: As above.
         unsafe { engine.enter("clock tick submission") }.begin_clock_lend_beside_host_pins();
     }
+    // The tick samples the engine, and takes its token along.
+    let loan = (!engine.is_null()).then(|| engine.lend(Holder::LayoutPass, Owed::TakeBack));
+    let tick = move || {
+        // SAFETY: The stage owns the arena, as below.
+        let run_tick = || unsafe { lease.run_tick(time, lease.deadline(), &[]) };
+        let mut loan = loan;
+        match loan.as_mut() {
+            Some(loan) => loan.lend_to_this_thread(|engine| {
+                // The main thread pins and unpins its host's records beside the tick, which may read
+                // none of them.
+                debug_assert!(
+                    !engine.reads_host_style_record_pins(),
+                    "a clock tick beside the main thread reads the host's style-record pins"
+                );
+                run_tick()
+            }),
+            None => run_tick(),
+        };
+    };
     let taken_back = move || {
         if !engine.is_null() {
+            engine.settle();
             // SAFETY: The main thread owns the engine again, which outlives the tick of its arena.
             unsafe { engine.enter("clock tick take-back") }.finish_clock_lend_beside_host_pins();
         }
@@ -1099,10 +1106,21 @@ pub unsafe extern "C" fn rust_clock_lend_to_busy_main(arena: *mut c_void, relend
     if !engine.is_null() {
         // SAFETY: The main thread owns the engine until the lend below.
         unsafe { engine.enter("clock lend") }.begin_clock_lend_beside_host_pins();
+        // The ticks sample the engine, and hold its token until the main thread takes the arena back.
+        *lease.style_engine_loan.lock().expect("clock lease style engine loan") =
+            Some(engine.lend(Holder::ClockLend, Owed::TakeBack));
     }
     let recall = move || {
         take_arena_back(arena as usize);
         if !engine.is_null() {
+            drop(
+                lease
+                    .style_engine_loan
+                    .lock()
+                    .expect("clock lease style engine loan")
+                    .take(),
+            );
+            engine.settle();
             // SAFETY: The main thread owns the engine again, which outlives the lend of its arena.
             unsafe { engine.enter("clock lend recall") }.finish_clock_lend_beside_host_pins();
         }
@@ -1695,8 +1713,11 @@ fn run_render_clock_tick_at(context: u64, frame_time_nanoseconds: i64, scroll_of
         return;
     }
     let mut tick = None;
+    // A tick beside a task reaches the engine through the token the main thread lent the ticks.
+    let mut style_engine_loan =
+        beside_task.then(|| lease.style_engine_loan.lock().expect("clock lease style engine loan"));
     crate::stage_thread::run_detached_for(idle_tick.caller(), lease.arena, || {
-        tick = Some(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let run_tick = || {
             // A task pins and unpins its host's records beside the tick, which may read none of them.
             if beside_task {
                 // SAFETY: As below.
@@ -1748,8 +1769,14 @@ fn run_render_clock_tick_at(context: u64, frame_time_nanoseconds: i64, scroll_of
                 return (FfiClockTickOutcome::NeedsMain, laid_out, false);
             }
             (outcome, laid_out, !moved_nothing)
-        })));
+        };
+        let run_tick = || match style_engine_loan.as_mut().and_then(|loan| loan.as_mut()) {
+            Some(loan) => loan.lend_to_this_thread(|_| run_tick()),
+            None => run_tick(),
+        };
+        tick = Some(std::panic::catch_unwind(std::panic::AssertUnwindSafe(run_tick)));
     });
+    drop(style_engine_loan);
     let Some(Ok((outcome, laid_out, presented_frame))) = tick else {
         // A tick has nobody to hand a panic to.
         std::process::abort();

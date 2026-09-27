@@ -1379,7 +1379,7 @@ void Element::run_attribute_change_steps(Utf16FlyString const& local_name, Optio
     // An attribute change writes the facts the style mirror keeps of the element as it goes. The
     // mirror keeps none of an element with no style node, such as one outside the document, and
     // the change reaches nothing a frame in flight reads.
-    if (style_node_id() != 0 && !Layout::RustFFI::rust_stage_thread_only_style_pass_in_flight_for(document().style_computer().style_engine().rust_handle()))
+    if (style_node_id() != 0 && !Layout::RustFFI::rust_stage_thread_style_pass_holds_style_engine(document().style_computer().style_engine().rust_handle()))
         document().join_frame_for_dom_tree_mutation();
 
     attribute_changed(local_name, old_value, value, namespace_);

@@ -41,6 +41,7 @@ use super::cascade::CascadeOperator;
 use super::compiler::ImplicitScopeRoot;
 use super::compiler::NamespaceScope;
 use super::compiler::ScopeChain;
+use super::engine_home::{Holder, Owed, StyleEngineLoan};
 use super::index::FeatureValue;
 use super::index::LocalFeatureKey;
 use super::index::StyleAtomID;
@@ -5280,8 +5281,8 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
 
 /// Takes the pending style transaction as [`style_engine_take_style_transaction`] does, and hands
 /// its pass to the stage thread instead of waiting for it: the pass runs beside the main thread
-/// and owns the engine until the main thread takes the frame back. It does not own the layout
-/// arena `layout_arena`, which it never reaches.
+/// with the engine's token, which it sends home once it has run. It does not own the layout arena
+/// `layout_arena`, which it never reaches.
 /// [`style_engine_finish_submitted_style_transaction`] then returns its answers. The host hands
 /// over the input it recorded since the last transaction as `input` (or null for none), which the
 /// pass applies as its first step; the grant `input` asks for answers the host at once.
@@ -5289,9 +5290,7 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
 /// # Safety
 /// `engine` must be live and `root` a styled node's raw ID; `layout_arena` must be the document's
 /// live layout arena. `input` must be null or a transaction as for
-/// [`style_engine_apply_transaction`], applied to no engine yet. Until the frame is taken back,
-/// every main-thread path to the engine must join the frame first, as the engine's entrances and
-/// the arena's style engine accesses do.
+/// [`style_engine_apply_transaction`], applied to no engine yet.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_submit_style_transaction(
     engine: StyleEngineHandle,
@@ -5307,7 +5306,7 @@ pub unsafe extern "C" fn style_engine_submit_style_transaction(
         Some(slot) => {
             // The frame goes on to read the engine on the document thread before its flight runs the
             // pass, so the input goes in now.
-            pass.apply_input_on_document_thread();
+            pass.apply_input_on_document_thread(engine);
             *slot = Some(pass);
             None
         }
@@ -5320,8 +5319,20 @@ pub unsafe extern "C" fn style_engine_submit_style_transaction(
         unsafe { crate::flight::submit(layout_arena, crate::flight::Flight::from_style_pass(layout_arena, pass)) };
         return;
     }
+    // The pass takes the engine's token along, and sends it home once it has run.
+    let loan = engine.lend(Holder::StylePass, Owed::TakeBack);
     // SAFETY: As above.
-    unsafe { crate::stage_thread::submit_stage("style", layout_arena, move || pass.run()) };
+    unsafe {
+        crate::stage_thread::submit_stage_with_take_back(
+            "style",
+            layout_arena,
+            move || {
+                let mut loan = loan;
+                pass.run(&mut loan);
+            },
+            move || engine.settle(),
+        );
+    }
 }
 
 thread_local! {
@@ -5342,13 +5353,10 @@ pub(crate) fn collect_style_pass_for_flight(submit: impl FnOnce()) -> Option<Sty
     STYLE_PASS_FOR_FLIGHT.with(|collected| collected.borrow_mut().take().flatten())
 }
 
-/// A style pass the main thread has prepared to run beside it: the engine it owns while it runs,
-/// and what it takes along from the main thread. Running it leaves its output in the engine, for
-/// [`style_engine_finish_submitted_style_transaction`].
+/// A style pass the main thread has prepared to run beside it, with what it takes along from the
+/// main thread. The stage that runs it holds its engine's token. Running it leaves its output in
+/// the engine, for [`style_engine_finish_submitted_style_transaction`].
 pub(crate) struct StylePassJob {
-    engine: crate::stage_thread::FrameOwns<*mut StyleEngine>,
-    /// The engine, which the flight that runs the pass reads the pass's output from after it.
-    engine_address: usize,
     root: StyleNodeID,
     snapshot: super::animations::CommittedTransformReferenceBoxSnapshot,
     timeline_samples: super::animations::AnimationTimelineSamples,
@@ -5357,42 +5365,44 @@ pub(crate) struct StylePassJob {
 }
 
 impl StylePassJob {
-    /// The engine the pass runs in.
-    pub(crate) fn engine_address(&self) -> usize {
-        self.engine_address
-    }
-
-    /// Applies the pass's input on the document thread, before the pass is submitted.
-    fn apply_input_on_document_thread(&mut self) {
+    /// Applies the pass's input to its engine `engine` on the document thread, before the pass is
+    /// submitted.
+    fn apply_input_on_document_thread(&mut self, engine: StyleEngineHandle) {
         let Some(input) = self.input.take() else {
             return;
         };
-        // SAFETY: The pass has not been submitted, so the document thread still owns the engine.
-        let engine = unsafe { &mut *(self.engine_address as *mut StyleEngine) };
+        // SAFETY: The pass has not been submitted, so the engine's token is home.
+        let engine = unsafe { engine.enter("style pass input on the document thread") };
         engine
             .counters
             .bump(super::instrumentation::Counter::InputTransactionsAppliedOnDocumentThread);
         input.apply(engine);
     }
 
-    /// Runs the pass, on the stage that owns the engine.
-    pub(crate) fn run(self) {
+    /// Runs the pass, on the stage the engine's token is lent to as `loan`.
+    pub(crate) fn run(self, loan: &mut StyleEngineLoan) {
         let Self {
-            engine,
             root,
             snapshot,
             timeline_samples,
             input,
-            ..
         } = self;
-        // SAFETY: The frame in flight owns the engine until the main thread takes it back.
-        let engine = unsafe { &mut *engine.into_inner() };
+        loan.lend_to_this_thread(|engine| Self::run_in(engine, root, &snapshot, &timeline_samples, input));
+    }
+
+    fn run_in(
+        engine: &mut StyleEngine,
+        root: StyleNodeID,
+        snapshot: &super::animations::CommittedTransformReferenceBoxSnapshot,
+        timeline_samples: &super::animations::AnimationTimelineSamples,
+        input: Option<InputForPass>,
+    ) {
         if let Some(input) = input {
             input.apply(engine);
         }
         // SAFETY: The pass owns the snapshot for as long as it runs.
-        let committed_boxes = unsafe { super::animations::CommittedTransformReferenceBoxes::taken_along(&snapshot) };
-        let mut output = run_style_pass(engine, root, committed_boxes, &timeline_samples);
+        let committed_boxes = unsafe { super::animations::CommittedTransformReferenceBoxes::taken_along(snapshot) };
+        let mut output = run_style_pass(engine, root, committed_boxes, timeline_samples);
         // What the finish reads of the engine alone, it reads here, off the main thread: nothing
         // reaches the engine between the pass and the finish but the pass's own atom sweep, which
         // an active cold matching batch would put off, so that batch waits for the finish.
@@ -5408,8 +5418,8 @@ impl StylePassJob {
 /// point where its pass would be submitted, and returns that pass.
 ///
 /// # Safety
-/// As for [`style_engine_submit_style_transaction`]: the pass returned has to run in a frame in
-/// flight that owns the engine.
+/// As for [`style_engine_submit_style_transaction`]: the pass returned has to run on a stage that
+/// holds the engine's token.
 pub(crate) unsafe fn prepare_style_pass(
     engine: StyleEngineHandle,
     root: u32,
@@ -5455,11 +5465,7 @@ pub(crate) unsafe fn prepare_style_pass(
     };
     // It takes along the times the host published for this update as well, which it samples at.
     let timeline_samples = engine.animation_timeline_samples().clone();
-    let engine: *mut StyleEngine = engine;
     StylePassJob {
-        // SAFETY: Guaranteed by the caller: the frame in flight owns the engine.
-        engine: unsafe { crate::stage_thread::FrameOwns::new(engine) },
-        engine_address: engine as usize,
         root,
         snapshot,
         timeline_samples,

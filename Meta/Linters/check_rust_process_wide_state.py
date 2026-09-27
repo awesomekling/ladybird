@@ -58,6 +58,7 @@ TEST_ONLY = "test only"
 MAIN_SIDE_COUNTER = "counter kept by the main side's doors, which a render stage never passes"
 GROW_ONLY = "process-wide behind a lock or atomic, and only grows; growing asks readers to keep more, never less"
 SUBMITTED_COUNT = "process-wide atomic count of live submitted stages for a document's arena or style engine; a thread counts its own before it asks, so zero means none of its own is in flight"
+STYLE_ENGINE_TOKEN = "the style engine token's handoff: a stage's lend of the token it holds to its own thread, and the main thread's wait for one to come home"
 
 
 def render_stage_entries(reason, entries):
@@ -81,6 +82,10 @@ RENDER_STAGE_ALLOWED = {
     **render_stage_entries(PRESENTED_COUNTER, ["clock_frames.rs:CLOCK_TICKS_PRESENTED"]),
     **render_stage_entries(STAGE_THREAD, ["flight.rs:FLIGHT_STYLE_DECISION"]),
     **render_stage_entries(SUBMITTED_COUNT, ["stage_thread.rs:SUBMITTED_STAGES"]),
+    **render_stage_entries(
+        STYLE_ENGINE_TOKEN,
+        ["css/style/engine_home.rs:LENT_TO_THIS_THREAD", "css/style/engine_home.rs:MAIN_WAITS_FOR_ARRIVAL"],
+    ),
     **render_stage_entries(
         CLOCK_HANDOFF,
         [

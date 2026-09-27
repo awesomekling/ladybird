@@ -527,7 +527,7 @@ static void record_font_input_change(DOM::Element& element)
 static bool leave_font_change_beside_pass(DOM::Document& document, Function<void()> change)
 {
     auto& style_engine = document.style_computer().style_engine();
-    if (!Layout::RustFFI::rust_stage_thread_only_style_pass_in_flight_for(style_engine.rust_handle()) && !style_engine.layout_pass_is_in_flight())
+    if (!Layout::RustFFI::rust_stage_thread_style_pass_holds_style_engine(style_engine.rust_handle()) && !style_engine.layout_pass_is_in_flight())
         return false;
     style_engine.publish_input([change = move(change)](StyleInputScope const&) { change(); });
     return true;

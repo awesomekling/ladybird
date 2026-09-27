@@ -1654,17 +1654,35 @@ unsafe fn update_layout(
         return FfiLayoutUpdateOutcome::PassSubmitted;
     }
     let take_back = pass.take_back();
-    // SAFETY: The frame reaches only the arena, which the frame in flight owns until the document
-    // thread takes it back, and every document-thread path to the arena, the style mirror its tree
-    // build walks and the tree update marks it holds joins the frame first.
+    // The pass reads the style engine through the arena, and takes the engine's token along.
+    // SAFETY: Guaranteed by the caller.
+    let style_engine = unsafe { arena(arena_handle) }.style_engine_handle();
+    let loan = (!style_engine.is_null()).then(|| {
+        style_engine.lend(
+            crate::css::style::engine_home::Holder::LayoutPass,
+            crate::css::style::engine_home::Owed::TakeBack,
+        )
+    });
+    // SAFETY: The frame reaches only the arena and its style engine, which the frame in flight owns
+    // until the document thread takes it back: every document-thread path to the arena and the tree
+    // update marks it holds joins the frame first, and the engine's token goes with the pass.
     unsafe {
         crate::stage_thread::submit_stage_with_take_back(
             "layout",
             arena_handle,
             move || {
-                let _ = pass.run();
+                let mut loan = loan;
+                let _ = match loan.as_mut() {
+                    Some(loan) => loan.lend_to_this_thread(|_| pass.run()),
+                    None => pass.run(),
+                };
             },
-            move || take_back.finish(),
+            move || {
+                if !style_engine.is_null() {
+                    style_engine.settle();
+                }
+                take_back.finish();
+            },
         );
     }
     FfiLayoutUpdateOutcome::PassSubmitted
@@ -1958,9 +1976,9 @@ pub unsafe extern "C" fn layout_arena_join_frame_in_flight(
     crate::stage_thread::join_document_frame_in_flight_at(arena, file, line, 0);
 }
 
-/// Waits for the document's frame in flight only if one of its stages reaches the document's style
-/// engine (see [`crate::stage_thread::join_frame_reaching_style_engine_at`]). `file` and `line`
-/// name the C++ call site for the forced-join log.
+/// Brings the document's style engine token home, as an entrance of the engine does (see
+/// `crate::css::style::engine_home`), for a main-side write to the engine. `file` and `line` name
+/// the C++ call site for the forced-join log.
 ///
 /// # Safety
 ///
@@ -1976,7 +1994,10 @@ pub unsafe extern "C" fn layout_arena_join_frame_reaching_style_engine(
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: The caller passes a string that lives for the rest of the process.
     let file = unsafe { crate::stage_thread::call_site_file(file, file_length) };
-    crate::stage_thread::join_frame_reaching_style_engine_at(arena, file, line, 0);
+    // SAFETY: Guaranteed by the caller. No stage writes the arena's link to its style engine.
+    unsafe { &*arena.cast::<crate::layout::LayoutNodeArena>() }
+        .style_engine_handle()
+        .bring_home_at(file, line, 0);
 }
 
 /// Waits for the document's frame in flight only if one of its stages owns the arena (a layout pass

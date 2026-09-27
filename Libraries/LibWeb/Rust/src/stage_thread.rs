@@ -26,13 +26,13 @@
 //!
 //! `LIBWEB_STAGE_THREAD=overlap` runs every stage on the stage thread as lockstep does, and lets
 //! the rendering update submit the stages [`LIBWEB_STAGE_OVERLAP`](overlapping_stages) names
-//! instead of waiting for them: [`submit_stage`] hands the stage to the stage thread and returns,
-//! and the main thread goes back to its event loop while the stage runs. A submitted stage has no
-//! joins; it owns the arena of the document it runs for until the main thread takes it back. The
-//! frame scheduler takes it back at the top of the event loop once the stage has finished, or a
-//! main-thread access to that arena takes it back first (a forced join, logged once per call
-//! site). Either way the main thread blocks on the stage's reply and never spins its event loop
-//! inside a stage run, and the scheduler's consume-commit runs before the access goes on.
+//! instead of waiting for them: [`submit_stage_with_take_back`] hands the stage to the stage thread
+//! and returns, and the main thread goes back to its event loop while the stage runs. A submitted
+//! stage has no joins; it owns the arena of the document it runs for until the main thread takes it
+//! back. The frame scheduler takes it back at the top of the event loop once the stage has
+//! finished, or a main-thread access to that arena takes it back first (a forced join, logged once
+//! per call site). Either way the main thread blocks on the stage's reply and never spins its event
+//! loop inside a stage run, and the scheduler's consume-commit runs before the access goes on.
 
 use crate::css::ffi_stats::{StyleUpdateScope, install_style_update_scope, take_style_update_scope};
 use crate::stage::MainThread;
@@ -345,12 +345,6 @@ struct SubmittedStage {
     // stage owns it while it runs, unless it is a style pass ([`SubmittedStage::owns_arena`]). A
     // test's hold names a stage by it.
     arena: usize,
-    // The style engine the stage reads and writes while it runs, as the handle the main thread
-    // knows it by.
-    style_engine: usize,
-    // For a flight, set once it is done with the style engine: the stages after its layout reach
-    // none (see [`FlightReleasesStyleEngine`]).
-    style_engine_released: Option<std::sync::Arc<std::sync::atomic::AtomicU8>>,
     reply: StageReply,
     // What the main thread runs once it has taken the stage back, before anything else reaches
     // what the stage owned.
@@ -388,7 +382,7 @@ impl Drop for SubmittedStageCount {
 /// Whether no thread has a stage in flight for a document's arena or style engine: every check of
 /// [`SUBMITTED`] on the calling thread finds none.
 #[inline]
-fn no_stage_is_submitted() -> bool {
+pub(crate) fn no_stage_is_submitted() -> bool {
     SUBMITTED_STAGES.load(Ordering::Relaxed) == 0
 }
 
@@ -410,32 +404,6 @@ impl SubmittedStage {
         if let Some(recall) = self.recall.take() {
             recall();
         }
-    }
-
-    /// Whether the stage reaches the style engine `engine` now: a flight stops reaching it once it
-    /// is done with it. What the stage wrote of the engine is then the calling thread's to see.
-    fn reaches_style_engine(&self, engine: usize) -> bool {
-        self.style_engine == engine && self.style_engine != 0 && !self.has_released_style_engine(STYLE_ENGINE_RELEASED)
-    }
-
-    /// Whether the stage reaches the style engine `engine` now for an entrance that only reads a
-    /// record: a flight that still owes the document thread the install of the style batch it
-    /// published stops reaching it for those once it is done with it.
-    fn reaches_style_engine_for_record_read(&self, engine: usize) -> bool {
-        self.style_engine == engine
-            && self.style_engine != 0
-            && !self.has_released_style_engine(STYLE_ENGINE_RELEASED_FOR_RECORD_READS)
-    }
-
-    fn has_released_style_engine(&self, at_least: u8) -> bool {
-        let released = self
-            .style_engine_released
-            .as_ref()
-            .is_some_and(|released| released.load(Ordering::Acquire) >= at_least);
-        if let Some(thread) = stage_thread().filter(|_| released) {
-            tsan::acquire(thread);
-        }
-        released
     }
 
     fn poll(&mut self) -> bool {
@@ -505,35 +473,19 @@ fn stage_overlaps(label: &str) -> bool {
     overlaps(label) || (label == "clock" && crate::clock_frames::enabled() && overlaps("layout"))
 }
 
-/// Whether what the main thread publishes to the style engine beside a submitted stage `label`
-/// waits for the stage to be taken back, and a change to its arena waits for the frame: a layout
-/// pass, which reads the engine, and a clock tick, which samples it.
-fn inputs_wait_for_take_back(label: &str) -> bool {
-    label == "layout" || label == "clock"
-}
-
-/// Hands `stage` to the stage thread and returns at once. The stage owns the arena `arena` until
-/// the main thread takes the frame back: the frame scheduler does at the top of its event loop
-/// once the stage has finished, and a main-thread access to the arena does before it goes on
-/// ([`join_frame_in_flight`]). A style pass owns its document's style engine instead, which its
-/// entrances join for ([`join_frame_for_style_engine_entrance`]).
+/// Hands `stage` to the stage thread and returns at once, and has the main thread run
+/// `on_taken_back` once it has taken the stage back: at the top of the event loop, or in the forced
+/// join that takes it back first. It runs ahead of the frame scheduler's consume-commit, in
+/// submission order. The stage owns the arena `arena` until the main thread takes the frame back:
+/// the frame scheduler does at the top of its event loop once the stage has finished, and a
+/// main-thread access to the arena does before it goes on ([`join_frame_in_flight`]). A style pass
+/// reaches only its document's style engine, whose token it takes along
+/// (`crate::css::style::engine_home`).
 ///
 /// # Safety
 ///
 /// Until the frame is taken back, nothing but `stage` may reach what `stage` holds: every
-/// main-thread path to it has to go through [`join_frame_in_flight`] first.
-pub(crate) unsafe fn submit_stage(label: &'static str, arena: *mut c_void, stage: impl FnOnce() + Send + 'static) {
-    // SAFETY: Guaranteed by the caller.
-    unsafe { submit(label, label, vec![label], None, arena, stage, None) }
-}
-
-/// Like [`submit_stage`], and has the main thread run `on_taken_back` once it has taken the stage
-/// back: at the top of the event loop, or in the forced join that takes it back first. It runs
-/// ahead of the frame scheduler's consume-commit, in submission order.
-///
-/// # Safety
-///
-/// As for [`submit_stage`].
+/// main-thread path to the arena has to go through [`join_frame_in_flight`] first.
 pub(crate) unsafe fn submit_stage_with_take_back(
     label: &'static str,
     arena: *mut c_void,
@@ -542,15 +494,7 @@ pub(crate) unsafe fn submit_stage_with_take_back(
 ) {
     // SAFETY: Guaranteed by the caller.
     unsafe {
-        submit(
-            label,
-            label,
-            vec![label],
-            None,
-            arena,
-            stage,
-            Some(Box::new(on_taken_back)),
-        );
+        submit(label, label, vec![label], arena, stage, Some(Box::new(on_taken_back)));
     }
 }
 
@@ -561,39 +505,6 @@ pub(crate) unsafe fn submit_stage_with_take_back(
 /// names the recording by.
 pub(crate) fn submit_recording(arena: *mut c_void, stage: impl FnOnce() + Send + 'static) {
     submit_paint_stage("recording", arena as usize, stage);
-}
-
-/// How a flight tells the calling thread it is done with the style engine: once its layout has run,
-/// its stages reach the arena alone, as a recording does, and the calling thread's style engine
-/// entrances and writes go on beside it. What it hands the style engine meanwhile still waits for
-/// the flight to be taken back, as beside a layout pass.
-#[derive(Clone, Default)]
-pub(crate) struct FlightReleasesStyleEngine(std::sync::Arc<std::sync::atomic::AtomicU8>);
-
-/// How far a flight has released its style engine: for entrances that only read a record, or
-/// for all of them.
-const STYLE_ENGINE_RELEASED_FOR_RECORD_READS: u8 = 1;
-const STYLE_ENGINE_RELEASED: u8 = 2;
-
-impl FlightReleasesStyleEngine {
-    /// On the stage thread, once the flight is done with the style engine.
-    pub(crate) fn release(&self) {
-        self.release_to(STYLE_ENGINE_RELEASED);
-    }
-
-    /// On the stage thread, once the flight is done with the style engine but still owes the
-    /// document thread the install of the style batch it published: the calling thread may read
-    /// records beside it, which the install does not change, but writes and asks nothing else.
-    pub(crate) fn release_for_record_reads(&self) {
-        self.release_to(STYLE_ENGINE_RELEASED_FOR_RECORD_READS);
-    }
-
-    fn release_to(&self, released: u8) {
-        if let Some(thread) = stage_thread() {
-            tsan::release(thread);
-        }
-        self.0.store(released, Ordering::Release);
-    }
 }
 
 /// Set by a forced join of a flight: the flight runs no further stage than the one it is in, so the
@@ -622,11 +533,10 @@ pub(crate) fn submits_flight() -> bool {
 ///
 /// # Safety
 ///
-/// As for [`submit_stage`].
+/// As for [`submit_stage_with_take_back`].
 pub(crate) unsafe fn submit_flight(
     reach: &'static str,
     stage_holds: &[&'static str],
-    releases_style_engine: &FlightReleasesStyleEngine,
     arena: *mut c_void,
     stage: impl FnOnce() + Send + 'static,
     on_taken_back: impl FnOnce() + 'static,
@@ -641,7 +551,6 @@ pub(crate) unsafe fn submit_flight(
             FLIGHT_STAGE,
             reach,
             hold_labels,
-            Some(releases_style_engine.0.clone()),
             arena,
             stage,
             Some(Box::new(on_taken_back)),
@@ -651,13 +560,11 @@ pub(crate) unsafe fn submit_flight(
 
 /// # Safety
 ///
-/// As for [`submit_stage`].
-#[allow(clippy::too_many_arguments)]
+/// As for [`submit_stage_with_take_back`].
 unsafe fn submit(
     label: &'static str,
     role: &'static str,
     hold_labels: Vec<&'static str>,
-    style_engine_released: Option<std::sync::Arc<std::sync::atomic::AtomicU8>>,
     arena: *mut c_void,
     stage: impl FnOnce() + Send + 'static,
     on_taken_back: Option<Box<dyn FnOnce()>>,
@@ -685,8 +592,6 @@ unsafe fn submit(
             role,
             hold_labels,
             arena: arena as usize,
-            style_engine: style_engine_of_stage(arena),
-            style_engine_released,
             reply,
             on_taken_back,
             recall: None,
@@ -810,6 +715,11 @@ pub(crate) fn running_inside_stage() -> bool {
     RUNNING_SUBMITTED_RUN.with(Cell::get).is_some() || WAITING_CALLER.with(Cell::get).is_some()
 }
 
+/// Whether the stage thread runs a stage the main thread submitted, rather than one it waits for.
+pub(crate) fn running_submitted_stage() -> bool {
+    RUNNING_SUBMITTED_RUN.with(Cell::get).is_some()
+}
+
 /// The label of the stage that presents a navigable's frame at the end of the frame in flight.
 const PRESENTATION_STAGE: &str = "present";
 
@@ -848,8 +758,6 @@ pub(crate) unsafe fn lend_arena(
             role: LEND_STAGE,
             hold_labels: vec![LEND_STAGE],
             arena: arena as usize,
-            style_engine: style_engine_of_stage(arena),
-            style_engine_released: None,
             reply: StageReply {
                 from_stage,
                 outcome: None,
@@ -1002,16 +910,6 @@ pub extern "C" fn rust_stage_thread_presentation_counters() -> FfiPresentationCo
         presentations_submitted: PRESENTATIONS_SUBMITTED.with(Cell::get),
         take_backs_that_waited_for_presentation: TAKE_BACKS_THAT_WAITED_FOR_PRESENTATION.with(Cell::get),
     }
-}
-
-/// The style engine a submitted stage reaches: its arena's, for a layout pass (it pins style
-/// records, reads the style mirror and evaluates size containers), a style stage, a clock tick (it
-/// samples the document's animations), a flight, which runs the first two, and a lend.
-fn style_engine_of_stage(arena: *mut c_void) -> usize {
-    // SAFETY: The stage has not been sent yet, so the main thread still owns the arena.
-    unsafe { &*arena.cast::<crate::layout::LayoutNodeArena>() }
-        .style_engine_handle()
-        .address()
 }
 
 /// Where in a submitted run of a stage a test's hold makes the stage thread wait.
@@ -1600,52 +1498,41 @@ pub extern "C" fn rust_stage_thread_style_pass_forced_joins() -> u64 {
     STYLE_PASS_FORCED_JOINS.with(Cell::get)
 }
 
-/// Whether the frame in flight is a style pass that owns the style engine `engine`, and nothing else:
-/// the one frame beside which a main-side write to that engine's document can queue its style inputs
-/// for the pass's drain instead of joining it.
+/// Whether the style engine `engine` is lent to a style pass alone: the one stage beside which a
+/// main-side write to that engine's document can queue its style inputs for the pass's drain
+/// instead of joining it.
 #[unsafe(no_mangle)]
-pub extern "C" fn rust_stage_thread_only_style_pass_in_flight_for(
+pub extern "C" fn rust_stage_thread_style_pass_holds_style_engine(
     engine: crate::css::style::StyleEngineHandle,
 ) -> bool {
-    let engine = engine.address();
-    SUBMITTED.with(|submitted| {
-        let submitted = submitted.borrow();
-        !submitted.is_empty()
-            && submitted
-                .iter()
-                .all(|stage| stage.role == "style" && stage.style_engine == engine)
-    })
+    engine.holder() == Some(crate::css::style::engine_home::Holder::StylePass)
 }
 
-/// Whether a layout pass that reads the style engine `engine` is in flight, or a clock tick that
+/// Whether the style engine `engine` is lent to a layout pass that reads it, or a clock tick that
 /// samples it: what the host publishes to that engine beside it waits for the stage to be taken
 /// back (see `StyleEngine::publish_input`).
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_stage_thread_layout_pass_in_flight_for(engine: crate::css::style::StyleEngineHandle) -> bool {
-    let engine = engine.address();
-    !no_stage_is_submitted()
-        && SUBMITTED.with_borrow(|submitted| {
-            submitted
-                .iter()
-                .any(|stage| inputs_wait_for_take_back(stage.role) && stage.style_engine == engine)
-        })
+    engine.holder() == Some(crate::css::style::engine_home::Holder::LayoutPass)
 }
 
-/// Like [`join_frame_in_flight_at`], for a main-side write to the style engine of the document the
-/// arena `arena` belongs to: joins the frame in flight only if one of its stages for that arena
-/// reaches the style engine (a style or layout pass). A recording reads nothing of the style
-/// engine, so the write goes on beside it, and whatever else the writer reaches of the arena waits
-/// at the arena's own doors.
-pub(crate) fn join_frame_reaching_style_engine_at(arena: *mut c_void, file: &'static str, line: u32, column: u32) {
-    let reaches_style_engine = !no_stage_is_submitted()
-        && SUBMITTED.with_borrow(|submitted| {
-            submitted
-                .iter()
-                .any(|stage| stage.arena == arena as usize && stage.reaches_style_engine(stage.style_engine))
-        });
-    if reaches_style_engine {
-        join_document_frame_in_flight_at(arena, file, line, column);
-    }
+/// The main thread is about to wait for a stage of the frame that runs for the arena `arena` (or of
+/// any frame, for 0) to send a style engine's token home. A held stage would never send it, so the
+/// wait releases a test's hold on the stages it may wait for, as a join does.
+pub(crate) fn release_holds_for_style_engine_wait(arena: usize) {
+    SUBMITTED.with_borrow_mut(|submitted| {
+        submitted
+            .iter_mut()
+            .filter(|stage| arena == 0 || stage.arena == arena)
+            .for_each(SubmittedStage::release_hold_unless_finished);
+    });
+}
+
+/// The main thread takes in the frame that holds the style engine of the document whose arena is
+/// `arena` (or any frame, for an engine no arena links), for an entrance that `file`, `line` and
+/// `column` name (see `crate::css::style::engine_home`).
+pub(crate) fn join_frame_holding_style_engine(arena: usize, file: &'static str, line: u32, column: u32) {
+    join_frame_in_flight_for_stage(|stage| arena == 0 || stage.arena == arena, file, line, column);
 }
 
 /// Whether the frame in flight owns the arena `arena` with its layout pass or clock tick only,
@@ -1660,7 +1547,8 @@ pub extern "C" fn rust_stage_thread_arena_changes_wait_for_frame(arena: *mut c_v
                 .iter()
                 .filter(|stage| stage.arena == arena as usize)
                 .peekable();
-            owners.peek().is_some() && owners.all(|stage| inputs_wait_for_take_back(stage.role))
+            // A style pass and a lend reach the style engine beside what the document publishes to it.
+            owners.peek().is_some() && owners.all(|stage| stage.role != "style" && !stage.is_lend())
         })
 }
 
@@ -1673,33 +1561,29 @@ pub(crate) enum FrameForDomTreeMutation {
     GoesOnBeside { owns_arena: bool },
 }
 
-/// Answers, in one look at the frame in flight, whether a DOM tree mutation's door joins it (as
-/// [`join_frame_reaching_style_engine_at`] does) and otherwise whether it owns the arena (as
-/// [`frame_in_flight_owns`] answers). A style pass alone in flight, or a layout pass (see
+/// Answers, in one look at the frame in flight and the document's style engine, whether a DOM
+/// tree mutation's door joins it (as the engine's entrances would) and otherwise whether it owns the
+/// arena (as [`frame_in_flight_owns`] answers). A style pass alone in flight, or a layout pass (see
 /// [`rust_stage_thread_layout_pass_in_flight_for`]), lets the mutation go on beside it. A lent
 /// arena is taken back whether or not the lend reaches a style engine, as the arena's own door
 /// ([`join_frame_in_flight`]) would. Every DOM tree mutation passes the door, a parser for each
 /// node it inserts, so no frame in flight is answered first.
 pub(crate) fn frame_in_flight_for_dom_tree_mutation(arena: *mut c_void) -> FrameForDomTreeMutation {
+    use crate::css::style::engine_home::Holder;
     if no_stage_is_submitted() {
         return FrameForDomTreeMutation::GoesOnBeside { owns_arena: false };
     }
+    // SAFETY: The caller passes a live arena. No stage writes its link to the style engine.
+    let engine = unsafe { &*arena.cast::<crate::layout::LayoutNodeArena>() }.style_engine_handle();
+    let holder = engine.holder();
+    let reaches_style_engine = !engine.is_home();
     SUBMITTED.with_borrow(|submitted| {
         if submitted.is_empty() {
             return FrameForDomTreeMutation::GoesOnBeside { owns_arena: false };
         }
         let arena = arena as usize;
-        let only_style_pass = submitted
-            .iter()
-            .all(|stage| stage.role == "style" && stage.arena == arena);
-        let layout_pass = submitted
-            .iter()
-            .any(|stage| inputs_wait_for_take_back(stage.role) && stage.arena == arena);
-        let reaches_style_engine = submitted
-            .iter()
-            .any(|stage| stage.arena == arena && stage.reaches_style_engine(stage.style_engine));
         let lent = submitted.iter().any(|stage| stage.is_lend() && stage.arena == arena);
-        if lent || (!only_style_pass && !layout_pass && reaches_style_engine) {
+        if lent || (!matches!(holder, Some(Holder::StylePass | Holder::LayoutPass)) && reaches_style_engine) {
             return FrameForDomTreeMutation::Joins;
         }
         FrameForDomTreeMutation::GoesOnBeside {
@@ -1746,64 +1630,29 @@ pub unsafe extern "C" fn rust_stage_thread_forced_joins(label: *const u8, label_
     })
 }
 
-/// Called where the main thread enters the style engine `engine` (`entry` names the entrance): if a
-/// stage of the frame in flight reaches that engine, waits for the frame and takes it in first, as
-/// [`join_frame_in_flight`] does for an access to an arena. The style engine has no other guard: a
-/// frame's layout pass reads the style mirror and records and writes size container state, and
-/// nothing on the main thread may read or write the engine beside it. A join here is a main-side
-/// operation that entered the engine with no door of its own, and the forced-join log names it by
-/// its entrance.
-pub(crate) fn join_frame_for_style_engine_entrance(engine: crate::css::style::StyleEngineHandle, entry: &'static str) {
-    join_frame_reaching_style_engine(engine, entry, |stage, engine| stage.reaches_style_engine(engine));
+/// Whether the calling thread's style engine entrances only wait for the stage that holds their
+/// engine's token (see [`rust_stage_thread_begin_style_engine_entrances_that_only_wait`]).
+pub(crate) fn style_engine_entrances_only_wait() -> bool {
+    STYLE_ENGINE_ENTRANCES_ONLY_WAIT.with(Cell::get) != 0
 }
 
-/// Like [`join_frame_for_style_engine_entrance`], for an entrance that only reads what a record
-/// holds, which a published record keeps as it is whatever else the engine does.
-pub(crate) fn join_frame_for_style_engine_entrance_to_read_records(
-    engine: crate::css::style::StyleEngineHandle,
-    entry: &'static str,
-) {
-    join_frame_reaching_style_engine(engine, entry, |stage, engine| {
-        stage.reaches_style_engine_for_record_read(engine)
-    });
-}
-
-fn join_frame_reaching_style_engine(
-    engine: crate::css::style::StyleEngineHandle,
-    entry: &'static str,
-    reaches: impl Fn(&SubmittedStage, usize) -> bool,
-) {
-    if engine.is_null() || no_stage_is_submitted() || RUNNING_JOIN_WORK.with(Cell::get) != 0 {
-        return;
-    }
-    let engine = engine.address();
-    if STYLE_ENGINE_ENTRANCES_ONLY_WAIT.with(Cell::get) != 0 {
-        wait_for_submitted_stages_reaching(engine);
-        return;
-    }
-    join_frame_in_flight_for_stage(|stage| reaches(stage, engine), entry, 0, 0);
-}
-
-/// Waits for every stage of the calling thread's frame in flight that reaches the style engine
-/// `engine` to finish, and leaves the frame in flight for its consume.
-fn wait_for_submitted_stages_reaching(engine: usize) {
-    let waited = SUBMITTED.with(|submitted| {
-        let mut waited = false;
-        for stage in submitted.borrow_mut().iter_mut() {
-            if stage.reaches_style_engine(engine) {
-                stage.wait_until_finished();
-                waited = true;
-            }
-        }
-        waited
-    });
-    if waited {
-        acquire_stage_threads();
+/// Orders what the calling thread wrote before it hands a token over (the main thread to a stage,
+/// or a stage back home) before what the thread that takes it reads after [`acquire_handoff`].
+pub(crate) fn release_handoff() {
+    if let Some(thread) = stage_thread() {
+        tsan::release(thread);
     }
 }
 
-/// Makes the calling thread's style engine entrances only wait for a stage of the frame in flight
-/// that reaches their engine, until the matching [`rust_stage_thread_end_style_engine_entrances_that_only_wait`].
+/// The taking thread's side of [`release_handoff`].
+pub(crate) fn acquire_handoff() {
+    if let Some(thread) = stage_thread() {
+        tsan::acquire(thread);
+    }
+}
+
+/// Makes the calling thread's style engine entrances only wait for the stage that holds their
+/// engine's token, until the matching [`rust_stage_thread_end_style_engine_entrances_that_only_wait`].
 /// For code that must not take in a frame: its consume runs script and allocates, which a garbage
 /// collector's finalizer must not do. The stage has finished once such an entrance returns, so the
 /// entrance does not race it, and the frame waits for its consume at the top of the event loop.
@@ -1815,18 +1664,6 @@ pub extern "C" fn rust_stage_thread_begin_style_engine_entrances_that_only_wait(
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_stage_thread_end_style_engine_entrances_that_only_wait() {
     STYLE_ENGINE_ENTRANCES_ONLY_WAIT.with(|depth| depth.set(depth.get() - 1));
-}
-
-/// The label of the calling thread's submitted stage that reaches the style engine `engine`.
-#[cfg(test)]
-fn label_of_submitted_stage_reaching(engine: crate::css::style::StyleEngineHandle) -> Option<&'static str> {
-    SUBMITTED.with(|submitted| {
-        submitted
-            .borrow()
-            .iter()
-            .find(|stage| stage.style_engine == engine.address())
-            .map(|stage| stage.label)
-    })
 }
 
 /// Test only: waits up to `timeout_ms` for every stage of the main thread's frame in flight to
@@ -2282,58 +2119,6 @@ mod tests {
             static THREAD: &'static StageThread = Box::leak(Box::new(StageThread::spawn("Rendering")));
         }
         THREAD.with(|thread| *thread)
-    }
-
-    #[test]
-    fn a_style_engine_entrance_finds_only_the_stage_that_reaches_its_engine() {
-        let engine = 0x1000usize;
-        let submit = |label: &'static str, arena: usize, style_engine: usize| {
-            let (to_caller, from_stage) = channel::<StageOutcome>();
-            // The stage has finished.
-            let _ = to_caller.send(Ok(()));
-            SUBMITTED.with(|submitted| {
-                submitted.borrow_mut().push(SubmittedStage {
-                    label,
-                    role: label,
-                    hold_labels: vec![label],
-                    style_engine_released: None,
-                    arena,
-                    style_engine,
-                    reply: StageReply {
-                        from_stage,
-                        outcome: None,
-                    },
-                    on_taken_back: None,
-                    recall: None,
-                    _count: SubmittedStageCount::new(),
-                })
-            });
-        };
-        submit("clock", 0x10, 0x3000);
-        assert_eq!(
-            label_of_submitted_stage_reaching(crate::css::style::StyleEngineHandle::for_test(engine)),
-            None
-        );
-        submit("layout", 0x20, engine);
-        assert_eq!(
-            label_of_submitted_stage_reaching(crate::css::style::StyleEngineHandle::for_test(engine)),
-            Some("layout")
-        );
-        assert_eq!(
-            label_of_submitted_stage_reaching(crate::css::style::StyleEngineHandle::for_test(0x2000)),
-            None
-        );
-
-        // An entrance that only waits leaves the finished stage in flight, with its outcome, for
-        // the frame's consume.
-        rust_stage_thread_begin_style_engine_entrances_that_only_wait();
-        join_frame_for_style_engine_entrance(crate::css::style::StyleEngineHandle::for_test(engine), "test entrance");
-        rust_stage_thread_end_style_engine_entrances_that_only_wait();
-        assert!(SUBMITTED.with(|submitted| {
-            let submitted = submitted.borrow();
-            submitted.len() == 2 && submitted[0].reply.outcome.is_none() && submitted[1].reply.outcome.is_some()
-        }));
-        SUBMITTED.with(|submitted| submitted.borrow_mut().clear());
     }
 
     #[test]
