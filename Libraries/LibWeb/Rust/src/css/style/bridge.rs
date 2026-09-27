@@ -992,6 +992,12 @@ pub enum FfiHostFactKind {
     /// `data` is the unique id the document knows the node `node` by, which a box built for one of
     /// the node's pseudo-elements answers by.
     ElementUniqueNodeId = 16,
+    /// `value` is how a row built for the node `node` is painted and hit-tested, published as the
+    /// node arrives. See `style_engine_set_node_dom_paint_facts`.
+    NodeDomPaintFacts = 17,
+    /// `facts` holds the column span of the arriving table cell or column `node` in its low half
+    /// and its row span in its high half, and `parent` its raw column span.
+    ElementTableSpans = 18,
 }
 
 /// Which element an `FfiReplacedContentInput` holds the values of.
@@ -2563,6 +2569,18 @@ unsafe fn apply_host_fact_writes(engine: &mut StyleEngine, writes: &[FfiHostFact
             }
             FfiHostFactKind::ElementUniqueNodeId => {
                 operations::set_element_unique_node_id(engine, write.node, write.data as u64);
+            }
+            FfiHostFactKind::NodeDomPaintFacts => {
+                operations::set_node_dom_paint_facts(engine, write.node, write.value);
+            }
+            FfiHostFactKind::ElementTableSpans => {
+                operations::set_element_table_spans(
+                    engine,
+                    write.node,
+                    write.facts & 0xffff,
+                    write.facts >> 16,
+                    write.parent,
+                );
             }
             FfiHostFactKind::ElementAssociatedPseudoKind => {
                 operations::set_element_associated_pseudo_kind(engine, write.node, write.value);
