@@ -1283,9 +1283,10 @@ void StyleEngine::lend_style_transaction_inputs(RecordedInputGoesTo recorded_inp
             }
         }
     }
-    // A sample the pass takes resolves a percentage translation against the boxes the last layout
-    // committed.
-    auto* layout_node_arena = m_style_computer ? m_style_computer->document().layout_node_arena_if_created() : nullptr;
+    // The render owner runs the transaction with the document's render state, which the arena is
+    // created with. A sample the pass takes resolves a percentage translation against the boxes
+    // the last layout committed.
+    auto* layout_node_arena = m_style_computer ? &m_style_computer->document().layout_node_arena() : nullptr;
     auto* layout_arena = layout_node_arena ? layout_node_arena->handle() : nullptr;
     if (!m_recorded_input_for_pass.has_value()) {
         take(computation_inputs, layout_arena, nullptr);

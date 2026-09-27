@@ -5305,21 +5305,23 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
         drop(retired);
         return view;
     }
+    // An engine of no document's render state (one a document never made, as a unit test's) runs its transaction
+    // right here: no owner holds it. A document's engine has render state from its first style transaction on.
+    debug_assert!(
+        layout_arena.is_null(),
+        "a document's style transaction runs on the render owner"
+    );
     let engine = unsafe { engine_entrance(engine, "style_engine_take_style_transaction") };
     let Some(root) = StyleNodeID::from_raw(root) else {
         return FfiStyleTransactionView::default();
     };
     // SAFETY: Guaranteed by the caller.
     unsafe { begin_style_transaction(engine, computation_inputs) };
-    // The transaction's inputs were frozen above.
-    let engine_on_stage = &mut *engine;
-    // SAFETY: The host passes its document's live layout arena, or null, and blocks on the stage.
+    // SAFETY: The host passes its document's live layout arena, or null.
     let committed_boxes = unsafe { super::animations::CommittedTransformReferenceBoxes::lend(layout_arena) };
     // The pass samples at the times the host published for this update.
-    let timeline_samples = engine_on_stage.animation_timeline_samples().clone();
-    let output = crate::stage_thread::run_stage(move || {
-        run_style_pass(engine_on_stage, root, committed_boxes, &timeline_samples)
-    });
+    let timeline_samples = engine.animation_timeline_samples().clone();
+    let output = run_style_pass(engine, root, committed_boxes, &timeline_samples);
     finish_style_transaction(engine, root, output).0
 }
 
