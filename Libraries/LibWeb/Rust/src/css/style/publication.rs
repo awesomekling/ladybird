@@ -394,9 +394,12 @@ impl RetainedState {
         // A row omitted from winner publication can still carry a retained selector answer.
         // Rebuild its winners before comparing them with the record's cascade state: otherwise
         // an empty delta can describe yesterday's answer after this flush flipped a rule. So does
-        // a row that holds no winners for the current program at all.
+        // a row that holds no winners for the current program at all. Exact flips of pseudo-element
+        // rules alone leave the element row as it was: the pseudo rows are refreshed where the
+        // pseudo-elements settle.
         let winner_key = WinnerGroupKey::current(node, self.program.version());
         let stale_element_winners = (scratch.answer_or_declarations_moved
+            && exact_flipped_rules.is_none_or(|flipped| flipped.element)
             && !self.published_container_verdicts.contains_key(&node)
             && !self.container_gates_unheld.contains(&node)
             && self.current_winner_groups().row_stamp(node) != Some(self.flush_stamp))
