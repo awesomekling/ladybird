@@ -906,8 +906,18 @@ void NodeWithStyle::set_style_record_identity(Row const& row, CSS::StyleRecordID
     // What set_style_record_identity() does to the row, with no shell to keep a mirror of it.
     auto const old_style_record_identity = CSS::StyleRecordID { RustFFI::layout_arena_node_style_record(arena, slot) };
     if (old_style_record_identity == style_record_identity) {
-        RustFFI::layout_arena_set_node_style(arena, slot, style_record_identity.value(), style_payloads);
+        // A record installed ahead of the host is the row's already, where the shell's mirror still names the old
+        // one, so the row takes its adoption here. The host's pin on the old record goes first, as for the shell;
+        // it follows the record the row now holds.
+        auto const pinned_style_record = RustFFI::layout_arena_node_style_record_pinned_by_host(arena, slot);
+        if (pinned_style_record != 0 && pinned_style_record != style_record_identity.value())
+            RustFFI::layout_arena_release_node_style_record_pin_for_host(arena, slot);
+        bool const installed_ahead = RustFFI::layout_arena_take_animation_adoption(arena, slot, style_record_identity.value());
+        if (!installed_ahead)
+            RustFFI::layout_arena_set_node_style(arena, slot, style_record_identity.value(), style_payloads);
         did_update_row_style_record(document, dom_node, style_payloads);
+        if (pinned_style_record != 0)
+            RustFFI::layout_arena_pin_node_style_record_for_host(arena, slot, style_record_identity.value());
         return;
     }
     auto const new_record_view = style_engine.style_record_view(style_record_identity);
