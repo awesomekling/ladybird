@@ -305,8 +305,7 @@ public:
         RefPtr<Compositor::Presentation> presentation;
     };
     Optional<PendingCompositorFrame> begin_painting_next_frame(Painting::RecordingRun);
-    // Returns false if a read cancelled the frame's recording, and the frame showed nothing.
-    bool finish_painting_next_frame(PendingCompositorFrame&);
+    void finish_painting_next_frame(PendingCompositorFrame&);
     // Hands the frame's presentation to the frame in flight, which presents it once it has recorded it
     // (unless LIBWEB_RENDER_PRESENTS=0). Returns false if the frame is finished and presented here instead.
     bool submit_presentation(PendingCompositorFrame&);

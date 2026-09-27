@@ -21,11 +21,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
 /// What a recording answers once it has run: the recorder state it was handed, and what it
-/// recorded, unless a read cancelled it.
+/// recorded.
 pub(crate) struct RecordingAnswer {
     pub(crate) recorder: RecorderState,
-    pub(crate) publishes_recording: bool,
-    pub(crate) recorded: Option<(PendingRecording, Option<PendingRecordingTrace>)>,
+    pub(crate) pending: PendingRecording,
+    pub(crate) trace: Option<PendingRecordingTrace>,
 }
 
 /// What a frame's presentation made of a recording's answer: the output it handed the host, for the
@@ -95,16 +95,6 @@ impl RecordingTicket {
         state
     }
 
-    /// On the presentation stage: whether the recording answered with nothing to present, because a
-    /// read cancelled it.
-    pub(crate) fn was_cancelled(&self) -> bool {
-        match &*self.wait_for_answer() {
-            TicketState::Answered(answer) => answer.recorded.is_none(),
-            TicketState::TakenIn => true,
-            TicketState::Recording | TicketState::Presenting | TicketState::Presented(_) => false,
-        }
-    }
-
     /// On the presentation stage: presents the recording's answer with `present`, which makes its
     /// output from what it recorded and the recorder state it recorded with, and leaves that for the
     /// document to take in. Returns nothing if the recording has nothing to present.
@@ -114,7 +104,7 @@ impl RecordingTicket {
     ) -> Option<R> {
         let answer = {
             let mut state = self.wait_for_answer();
-            if !matches!(&*state, TicketState::Answered(answer) if answer.recorded.is_some()) {
+            if !matches!(&*state, TicketState::Answered(_)) {
                 return None;
             }
             let TicketState::Answered(answer) = std::mem::replace(&mut *state, TicketState::Presenting) else {
@@ -124,10 +114,10 @@ impl RecordingTicket {
         };
         let RecordingAnswer {
             recorder,
-            publishes_recording,
-            recorded,
+            pending,
+            trace,
         } = *answer;
-        let (pending, trace) = recorded.expect("only a recorded answer is presented");
+        let publishes_recording = pending.publishes_recording;
         let (output, result) = present(pending, &recorder);
         self.set(TicketState::Presented(Box::new(PresentedRecording {
             recorder,
@@ -145,9 +135,7 @@ impl RecordingTicket {
         loop {
             let is_final = match &*state {
                 TicketState::Recording | TicketState::Presenting => false,
-                TicketState::Answered(answer) => {
-                    answer.recorded.is_none() || !self.presented_by_frame.load(Ordering::Relaxed)
-                }
+                TicketState::Answered(_) => !self.presented_by_frame.load(Ordering::Relaxed),
                 TicketState::Presented(_) => true,
                 TicketState::TakenIn => unreachable!("a document takes a recording in once"),
             };
@@ -172,9 +160,6 @@ impl RecordingTicket {
 pub(crate) struct RecordingSlot {
     pending_recording: Option<PendingRecording>,
     pending_recording_trace: Option<PendingRecordingTrace>,
-    // Set by a recording in flight that a read cancelled, which left nothing pending: its frame's
-    // presentation shows nothing, and the frame's consume has the document record again.
-    recording_was_cancelled: bool,
     recorder: RecorderState,
     in_flight: Option<Arc<RecordingTicket>>,
 }
@@ -189,10 +174,6 @@ impl TakenIn<'_> {
 
     pub(crate) fn pending_recording_trace(&mut self) -> &mut Option<PendingRecordingTrace> {
         &mut self.0.pending_recording_trace
-    }
-
-    pub(crate) fn recording_was_cancelled(&mut self) -> &mut bool {
-        &mut self.0.recording_was_cancelled
     }
 
     pub(crate) fn recorder(&mut self) -> &mut RecorderState {
@@ -218,18 +199,8 @@ impl TakenIn<'_> {
     pub(crate) fn accept_recording_answer(&mut self, answer: RecordingAnswer) {
         let slot = &mut *self.0;
         slot.recorder = answer.recorder;
-        match answer.recorded {
-            Some((pending, trace)) => {
-                slot.pending_recording_trace = trace;
-                slot.pending_recording = Some(pending);
-            }
-            None => {
-                if answer.publishes_recording {
-                    slot.recorder.forget_published_recording();
-                }
-                slot.recording_was_cancelled = true;
-            }
-        }
+        slot.pending_recording_trace = answer.trace;
+        slot.pending_recording = Some(answer.pending);
     }
 
     pub(crate) fn forget_published_frame(&mut self) {

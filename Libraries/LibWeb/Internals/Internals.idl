@@ -278,11 +278,6 @@ interface Internals {
     // garbage collection, only waited for it) reached a frame with a stage `stage` names ("recording", "layout" or
     // "style") on this thread so far.
     unsigned long long forcedJoinCount(DOMString stage);
-    // How many recordings in flight a read of render state outside the rendering update cancelled on this thread so far,
-    // instead of waiting for them.
-    unsigned long long recordingsCancelledByReads();
-    // How the recordings reads cancelled were made again: "submitted", "flight" or "main-waits".
-    unsigned long long cancelledRecordingsRedone(DOMString how);
     // Whether a frame is in flight and holds this document.
     boolean frameInFlightHoldsDocument();
     // Whether each document a frame in flight holds, and its navigable, page and window, are alive

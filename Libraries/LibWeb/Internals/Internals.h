@@ -241,8 +241,6 @@ public:
     bool submits_layout_pass() const;
     void release_held_frame();
     u64 forced_join_count(Utf16String const& stage) const;
-    u64 recordings_cancelled_by_reads() const;
-    u64 cancelled_recordings_redone(Utf16String const& how) const;
     bool frame_in_flight_holds_document() const;
     bool frame_in_flight_references_are_alive() const;
     void set_manual_rendering_opportunities(bool enabled, bool with_clock_ticks);

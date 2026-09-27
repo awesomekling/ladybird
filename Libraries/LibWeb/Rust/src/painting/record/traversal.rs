@@ -40,7 +40,6 @@ pub(crate) fn record_display_list(
     source_items: Option<Arc<PublishedHitTestItems>>,
     plan_from_prepared_inputs: bool,
     trace: bool,
-    cancel: Option<&crate::stage_thread::RecordingCancel>,
 ) -> RecordingResult {
     scratch.begin_recording(frame.paintable_row_capacity());
     macro_rules! record {
@@ -54,7 +53,6 @@ pub(crate) fn record_display_list(
                 source_frame,
                 source_items,
                 plan_from_prepared_inputs,
-                cancel,
             )
         };
     }
@@ -77,7 +75,6 @@ fn record_display_list_impl<O: Observer>(
     source_frame: Option<Arc<RecordingOutput>>,
     source_items: Option<Arc<PublishedHitTestItems>>,
     plan_from_prepared_inputs: bool,
-    cancel: Option<&crate::stage_thread::RecordingCancel>,
 ) -> RecordingResult {
     debug_assert!(
         inputs.publishes_recording || source_frame.is_none(),
@@ -127,7 +124,6 @@ fn record_display_list_impl<O: Observer>(
         },
         scratch,
         resources: RecordingResourceManifest::default(),
-        cancel,
     };
     recorder
         .observer
