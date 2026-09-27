@@ -7,6 +7,7 @@
 #include <LibWeb/CSS/StyleComputer.h>
 #include <LibWeb/CSS/StyleEffectDrain.h>
 #include <LibWeb/CSS/StyleEngineBridge.h>
+#include <LibWeb/DOM/CommitMessages.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/Range.h>
@@ -239,6 +240,11 @@ void Document::update_layout(UpdateLayoutReason reason)
 
 void Document::update_layout(UpdateLayoutReason reason, ThrottledAnimationSamplingScope animation_sampling_scope)
 {
+    // Nothing was written to the render inputs of the document or of any document embedding it since they published
+    // their query snapshots: style and layout are what the snapshots say, and the update would find nothing to do.
+    if (query_view_for_clean_read().has_value() && !m_commit_messages->has_queued_navigable_container_viewport())
+        return;
+
     HTML::MainThreadPhases::Scope phase { HTML::MainThreadPhases::layout_phase(*this) };
     JoinScope join_scope { *this, reason };
 
