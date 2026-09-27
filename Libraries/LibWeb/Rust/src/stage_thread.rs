@@ -341,9 +341,6 @@ struct SubmittedStage {
     // What the main thread runs once it has taken the stage back, before anything else reaches
     // what the stage owned.
     on_taken_back: Option<Box<dyn FnOnce()>>,
-    // For a lend (see [`lend_arena`]), what takes the arena back: the main thread runs it where it
-    // would wait for a stage to finish.
-    recall: Option<Box<dyn FnOnce()>>,
     _count: SubmittedStageCount,
 }
 
@@ -379,35 +376,21 @@ pub(crate) fn no_stage_is_submitted() -> bool {
 }
 
 impl SubmittedStage {
-    /// Whether this is a lend of the arena rather than a stage the main thread submitted.
-    fn is_lend(&self) -> bool {
-        self.label == LEND_STAGE
-    }
-
     /// Whether the stage owns its arena while it runs. A style pass does not: it reaches only its
     /// style engine, and the main thread goes on writing the arena beside it.
     fn owns_arena(&self) -> bool {
         self.role != "style"
     }
 
-    /// Takes a lent arena back: the recall ends the lend at once, or once the tick that holds the
-    /// arena now ends.
-    fn recall(&mut self) {
-        if let Some(recall) = self.recall.take() {
-            recall();
-        }
-    }
-
     fn poll(&mut self) -> bool {
-        // A lend is taken back without waiting for anything but a running tick.
-        self.recall.is_some() || self.reply.poll()
+        self.reply.poll()
     }
 
     /// A held stage would never finish while the main thread waits for it, so waiting releases a
     /// hold on it. A run that finished without reaching the hold, as a flight that ended before the
     /// stage the hold names, leaves the hold armed for the run that reaches it.
     fn release_hold_unless_finished(&mut self) {
-        if self.recall.is_some() || !self.poll() {
+        if !self.poll() {
             release_hold_on(&self.hold_labels);
         }
     }
@@ -416,13 +399,11 @@ impl SubmittedStage {
     /// consume.
     fn wait_until_finished(&mut self) {
         self.release_hold_unless_finished();
-        self.recall();
         self.reply.wait_until_finished();
     }
 
     fn wait(&mut self) -> StageOutcome {
         self.release_hold_unless_finished();
-        self.recall();
         self.reply.wait()
     }
 }
@@ -571,19 +552,13 @@ fn note_submitted(
     on_taken_back: Option<Box<dyn FnOnce()>>,
 ) {
     SUBMITTED.with(|submitted| {
-        let mut submitted = submitted.borrow_mut();
-        debug_assert!(
-            !submitted.iter().any(SubmittedStage::is_lend),
-            "a stage is submitted beside a lent arena"
-        );
-        submitted.push(SubmittedStage {
+        submitted.borrow_mut().push(SubmittedStage {
             label,
             role,
             hold_labels,
             arena: arena as usize,
             reply,
             on_taken_back,
-            recall: None,
             _count: SubmittedStageCount::new(),
         });
     });
@@ -599,7 +574,6 @@ fn submit_paint_stage(label: &'static str, document: usize, stage: impl FnOnce()
         .or_else(stage_thread)
         .expect("only a stage thread runs submitted stages");
     debug_assert!(submits_presentation(), "the stage {label} is not submitted");
-    debug_assert!(!has_lent_arena(), "a stage is submitted beside a lent arena");
     let run = SubmittedRun {
         label,
         arena: 0,
@@ -744,112 +718,6 @@ pub(crate) fn running_submitted_stage() -> bool {
 
 /// The label of the stage that presents a navigable's frame at the end of the frame in flight.
 const PRESENTATION_STAGE: &str = "present";
-
-/// The label under which a lent arena stands in the frame in flight (see [`lend_arena`]).
-const LEND_STAGE: &str = "clock-lend";
-
-/// Lends the arena `arena` of a document, and its style engine, to work the stage thread runs
-/// beside the main thread's own (`crate::clock_frames`'s render clock ticks), while the main thread
-/// runs a task. The lend stands in the calling thread's frame in flight as a stage that owns the
-/// arena and reaches its style engine, so every main-thread path to either takes it back first, as
-/// it takes back a submitted stage: `recall` takes the arena back, and `on_taken_back` runs once it
-/// has. Only the joins see a lend: nothing waits for it to finish, and nothing defers to it what
-/// it would defer to a frame in flight, so no consume-commit follows its take-back.
-///
-/// # Safety
-///
-/// No stage may be in flight, and until `recall` returns nothing but work that `recall` waits for
-/// may reach what the lend holds.
-pub(crate) unsafe fn lend_arena(
-    arena: *mut c_void,
-    recall: impl FnOnce() + 'static,
-    on_taken_back: impl FnOnce() + 'static,
-) {
-    let (to_caller, from_stage) = channel::<StageOutcome>();
-    debug_assert!(
-        PAINTING.with_borrow(Vec::is_empty),
-        "an arena is lent beside a frame in flight"
-    );
-    SUBMITTED.with_borrow_mut(|submitted| {
-        debug_assert!(
-            submitted.iter().all(SubmittedStage::is_lend),
-            "an arena is lent beside a frame in flight"
-        );
-        submitted.push(SubmittedStage {
-            label: LEND_STAGE,
-            role: LEND_STAGE,
-            hold_labels: vec![LEND_STAGE],
-            arena: arena as usize,
-            reply: StageReply {
-                from_stage,
-                outcome: None,
-            },
-            on_taken_back: Some(Box::new(on_taken_back)),
-            recall: Some(Box::new(move || {
-                recall();
-                let _ = to_caller.send(Ok(()));
-            })),
-            _count: SubmittedStageCount::new(),
-        });
-    });
-}
-
-/// Whether the calling thread has lent an arena it has not taken back yet.
-pub(crate) fn has_lent_arena() -> bool {
-    SUBMITTED.with_borrow(|submitted| submitted.iter().any(SubmittedStage::is_lend))
-}
-
-/// Takes back every arena the calling thread lent, without what would follow a join's take-back.
-/// Returns whether any was lent.
-pub(crate) fn take_lent_arenas() -> bool {
-    let lends = SUBMITTED.with_borrow_mut(|submitted| {
-        let (lends, stages) = std::mem::take(submitted)
-            .into_iter()
-            .partition::<Vec<_>, _>(SubmittedStage::is_lend);
-        *submitted = stages;
-        lends
-    });
-    if lends.is_empty() {
-        return false;
-    }
-    for mut lend in lends {
-        lend.recall();
-    }
-    true
-}
-
-/// Takes back the arenas the calling thread lent that `reached` names, and runs what follows each
-/// take-back, as a join does. The others stay lent.
-fn take_lent_arenas_reached(reached: impl Fn(&SubmittedStage) -> bool) {
-    let lends = SUBMITTED.with_borrow_mut(|submitted| {
-        let (lends, others) = std::mem::take(submitted)
-            .into_iter()
-            .partition::<Vec<_>, _>(|stage| stage.is_lend() && reached(stage));
-        *submitted = others;
-        lends
-    });
-    let mut on_taken_back = Vec::new();
-    for mut lend in lends {
-        // A lend's outcome is the recall's own, which cannot fail.
-        let _ = lend.wait();
-        on_taken_back.extend(lend.on_taken_back.take());
-    }
-    if let Some(thread) = stage_thread().filter(|_| !on_taken_back.is_empty()) {
-        tsan::acquire(thread);
-    }
-    for take_back in on_taken_back {
-        take_back();
-    }
-}
-
-/// Whether the calling thread has lent the arena `arena` and not taken it back yet.
-pub(crate) fn has_lent(arena: *mut c_void) -> bool {
-    SUBMITTED.with_borrow(|submitted| {
-        submitted
-            .iter()
-            .any(|stage| stage.is_lend() && stage.arena == arena as usize && stage.reply.outcome.is_none())
-    })
-}
 
 /// Whether the rendering update presents its frames from the frame in flight: when it submits its
 /// recordings, and presenting from the Rendering thread is on, unless LIBWEB_RENDER_PRESENTS=0 (which the host checks).
@@ -1260,8 +1128,7 @@ fn frame_completion_notify() {
 
 /// Whether the calling thread has submitted stages it has not taken back yet.
 pub(crate) fn has_frame_in_flight() -> bool {
-    SUBMITTED.with_borrow(|submitted| submitted.iter().any(|stage| !stage.is_lend()))
-        || PAINTING.with_borrow(|painting| !painting.is_empty())
+    SUBMITTED.with_borrow(|submitted| !submitted.is_empty()) || PAINTING.with_borrow(|painting| !painting.is_empty())
 }
 
 /// Whether the frame in flight owns the arena `arena`.
@@ -1270,7 +1137,7 @@ pub(crate) fn frame_in_flight_owns(arena: *mut c_void) -> bool {
         && SUBMITTED.with_borrow(|submitted| {
             submitted
                 .iter()
-                .any(|stage| stage.owns_arena() && stage.arena == arena as usize && !stage.is_lend())
+                .any(|stage| stage.owns_arena() && stage.arena == arena as usize)
         })
 }
 
@@ -1278,11 +1145,7 @@ pub(crate) fn frame_in_flight_owns(arena: *mut c_void) -> bool {
 /// arena or reaches its style engine.
 pub(crate) fn document_frame_in_flight(arena: *mut c_void) -> bool {
     !no_stage_is_submitted()
-        && SUBMITTED.with_borrow(|submitted| {
-            submitted
-                .iter()
-                .any(|stage| stage.arena == arena as usize && !stage.is_lend())
-        })
+        && SUBMITTED.with_borrow(|submitted| submitted.iter().any(|stage| stage.arena == arena as usize))
 }
 
 /// Whether every stage of the frame in flight has finished. Does not wait.
@@ -1354,7 +1217,7 @@ pub(crate) fn join_frame_in_flight_at(arena: *mut c_void, file: &'static str, li
         .with_borrow(|submitted| submitted.first().map(|stage| (stage.label, stage.role)))
         .or_else(|| PAINTING.with_borrow(|painting| painting.first().map(|stage| (stage.label, stage.label))));
     if let Some((label, role)) = first_stage {
-        join_reached_stage(label, role, |_| true, file, line, column);
+        join_reached_stage(label, role, file, line, column);
     }
 }
 
@@ -1379,7 +1242,6 @@ pub(crate) fn join_recording_in_flight_of(arena: *mut c_void) {
         join_reached_stage(
             "recording",
             "recording",
-            |_| false,
             location.file(),
             location.line(),
             location.column(),
@@ -1406,38 +1268,13 @@ fn join_frame_in_flight_for_stage(
             .map(|stage| (stage.label, stage.role))
     });
     if let Some((label, role)) = reached_stage {
-        join_reached_stage(label, role, reached, file, line, column);
+        join_reached_stage(label, role, file, line, column);
     }
 }
 
 /// Joins the frame in flight for a reached stage labelled `label` with the role `role`: waits for
-/// the frame, takes it back and runs the frame scheduler's consume-commit. Where the frame is only
-/// lent arenas, takes back those `lend_reached` names instead.
-fn join_reached_stage(
-    label: &'static str,
-    role: &'static str,
-    lend_reached: impl Fn(&SubmittedStage) -> bool,
-    file: &'static str,
-    line: u32,
-    column: u32,
-) {
-    // A lent arena comes back with nothing to consume.
-    if PAINTING.with_borrow(Vec::is_empty)
-        && SUBMITTED.with_borrow(|submitted| submitted.iter().all(SubmittedStage::is_lend))
-    {
-        // SAFETY: Called on the main thread.
-        if FRAME_SCHEDULER_HOST
-            .get()
-            .is_some_and(|host| unsafe { (host.tearing_down_cells)() })
-        {
-            // A garbage collection only takes the arena back; what follows the take-back runs later.
-            wait_for_submitted_stages();
-            return;
-        }
-        // The others stay lent: what reached this one reaches nothing of theirs.
-        take_lent_arenas_reached(lend_reached);
-        return;
-    }
+/// the frame, takes it back and runs the frame scheduler's consume-commit.
+fn join_reached_stage(label: &'static str, role: &'static str, file: &'static str, line: u32, column: u32) {
     if role == "style" {
         STYLE_PASS_FORCED_JOINS.with(|joins| joins.set(joins.get() + 1));
     }
@@ -1550,24 +1387,6 @@ pub(crate) fn release_holds_for_style_engine_wait(arena: usize) {
     });
 }
 
-/// Recalls the arenas the calling thread lent that belong to the document whose arena is `arena` (or
-/// every one, for 0), whose recall sends home the style engine token the lend holds, for an entrance
-/// that waits for the token (see `crate::css::style::engine_home`). Nothing else would: a lend holds
-/// it until it is recalled. What follows each take-back stays for the join or the end of the task
-/// that takes the lend back, as an entrance that only waits must not run it.
-pub(crate) fn recall_lends_holding_style_engine(arena: usize) {
-    let recalls: Vec<_> = SUBMITTED.with_borrow_mut(|submitted| {
-        submitted
-            .iter_mut()
-            .filter(|stage| stage.is_lend() && (arena == 0 || stage.arena == arena))
-            .filter_map(|stage| stage.recall.take())
-            .collect()
-    });
-    for recall in recalls {
-        recall();
-    }
-}
-
 /// The main thread takes in the frame that holds the style engine of the document whose arena is
 /// `arena` (or any frame, for an engine no arena links), for an entrance that `file`, `line` and
 /// `column` name (see `crate::css::style::engine_home`).
@@ -1587,15 +1406,14 @@ pub extern "C" fn rust_stage_thread_arena_changes_wait_for_frame(arena: *mut c_v
                 .iter()
                 .filter(|stage| stage.arena == arena as usize)
                 .peekable();
-            // A style pass and a lend reach the style engine beside what the document publishes to it.
-            owners.peek().is_some() && owners.all(|stage| stage.role != "style" && !stage.is_lend())
+            // A style pass reaches the style engine beside what the document publishes to it.
+            owners.peek().is_some() && owners.all(|stage| stage.role != "style")
         })
 }
 
 /// What a DOM tree mutation of the document the arena `arena` belongs to does about the frame in flight.
 pub(crate) enum FrameForDomTreeMutation {
-    /// A stage of the frame reaches the style engine, and nothing lets the mutation go on beside it,
-    /// or the arena is lent.
+    /// A stage of the frame reaches the style engine, and nothing lets the mutation go on beside it.
     Joins,
     /// The mutation goes on beside the frame, which may own the arena.
     GoesOnBeside { owns_arena: bool },
@@ -1604,10 +1422,9 @@ pub(crate) enum FrameForDomTreeMutation {
 /// Answers, in one look at the frame in flight and the document's style engine, whether a DOM
 /// tree mutation's door joins it (as the engine's entrances would) and otherwise whether it owns the
 /// arena (as [`frame_in_flight_owns`] answers). A style pass alone in flight, or a layout pass (see
-/// [`rust_stage_thread_layout_pass_in_flight_for`]), lets the mutation go on beside it. A lent
-/// arena is taken back whether or not the lend reaches a style engine, as the arena's own door
-/// ([`join_frame_in_flight`]) would. Every DOM tree mutation passes the door, a parser for each
-/// node it inserts, so no frame in flight is answered first.
+/// [`rust_stage_thread_layout_pass_in_flight_for`]), lets the mutation go on beside it. Every DOM
+/// tree mutation passes the door, a parser for each node it inserts, so no frame in flight is
+/// answered first.
 pub(crate) fn frame_in_flight_for_dom_tree_mutation(arena: *mut c_void) -> FrameForDomTreeMutation {
     use crate::css::style::engine_home::Holder;
     if no_stage_is_submitted() {
@@ -1622,14 +1439,11 @@ pub(crate) fn frame_in_flight_for_dom_tree_mutation(arena: *mut c_void) -> Frame
             return FrameForDomTreeMutation::GoesOnBeside { owns_arena: false };
         }
         let arena = arena as usize;
-        let lent = submitted.iter().any(|stage| stage.is_lend() && stage.arena == arena);
-        if lent || (!matches!(holder, Some(Holder::StylePass | Holder::LayoutPass)) && reaches_style_engine) {
+        if !matches!(holder, Some(Holder::StylePass | Holder::LayoutPass)) && reaches_style_engine {
             return FrameForDomTreeMutation::Joins;
         }
         FrameForDomTreeMutation::GoesOnBeside {
-            owns_arena: submitted
-                .iter()
-                .any(|stage| stage.owns_arena() && stage.arena == arena && !stage.is_lend()),
+            owns_arena: submitted.iter().any(|stage| stage.owns_arena() && stage.arena == arena),
         }
     })
 }
@@ -2108,6 +1922,33 @@ pub(crate) fn owner_reply_for_test<R>() -> (OwnerReplyTo<R>, impl FnOnce() -> st
 pub(crate) fn run_stage_for_test<R: Send>(stage: impl FnOnce() -> R + Send) -> R {
     // SAFETY: The stage is `Send`.
     unsafe { run_stage_on(tests::test_thread(), stage) }
+}
+
+/// Has the calling thread hold a stage of the document whose arena is `arena` in flight, which has finished, for a
+/// unit test that stands in for a submitted stage, until [`take_stand_in_stages_for_test`].
+#[cfg(test)]
+pub(crate) fn stand_in_submitted_stage_for_test(arena: *mut c_void) {
+    let (to_caller, from_stage) = channel::<StageOutcome>();
+    let _ = to_caller.send(Ok(()));
+    SUBMITTED.with_borrow_mut(|submitted| {
+        submitted.push(SubmittedStage {
+            label: "test",
+            role: "test",
+            hold_labels: Vec::new(),
+            arena: arena as usize,
+            reply: StageReply {
+                from_stage,
+                outcome: None,
+            },
+            on_taken_back: None,
+            _count: SubmittedStageCount::new(),
+        });
+    });
+}
+
+#[cfg(test)]
+pub(crate) fn take_stand_in_stages_for_test() {
+    SUBMITTED.with_borrow_mut(Vec::clear);
 }
 
 #[cfg(test)]

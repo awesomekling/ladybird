@@ -219,7 +219,6 @@ public:
     bool clock_frames_enabled() const;
     u64 clock_ticks_received() const;
     bool render_clock_ticks(DOM::Document const&) const;
-    bool clock_lend_active() const;
     GC::Ref<JS::Object> get_render_clock_counters() const;
     GC::Ref<JS::Object> get_animation_timing_row_counters() const;
     GC::Ref<WebIDL::Promise> inject_clock_tick(double frame_time_ms);

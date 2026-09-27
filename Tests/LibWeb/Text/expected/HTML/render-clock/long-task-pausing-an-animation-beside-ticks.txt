@@ -1,3 +1,0 @@
-frames presented during the task: true
-ready resolved: true
-play state: paused

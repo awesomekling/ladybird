@@ -72,8 +72,6 @@ pub(crate) enum Holder {
     /// A layout pass, on its own or in a flight, or a clock tick, which what the host publishes to
     /// the engine waits for the take-back of.
     LayoutPass,
-    /// The render clock's ticks, while the main thread runs a task.
-    ClockLend,
 }
 
 /// A token a stage sends home.
@@ -310,12 +308,8 @@ impl StyleEngineHome {
         }
     }
 
-    /// Waits for the stage that holds the token to send it home, and takes it in. A lend to the
-    /// render clock's ticks sends it home only when it is recalled, so it is recalled first.
+    /// Waits for the stage that holds the token to send it home, and takes it in.
     fn wait_for_arrival(&self) {
-        if self.holder.get() == Some(Holder::ClockLend) {
-            crate::stage_thread::recall_lends_holding_style_engine(self.arena.get());
-        }
         self.take_in_arrival(true);
     }
 
@@ -664,8 +658,7 @@ mod tests {
         handle.link_arena(arena as usize);
         let (loan, settlement) = handle.lend(Holder::StylePass, Owed::TakeBack);
         // Stands in for the pass's stage, which the main thread has not taken back.
-        // SAFETY: Nothing reaches the arena, which the lend only names.
-        unsafe { crate::stage_thread::lend_arena(arena, || {}, || {}) };
+        crate::stage_thread::stand_in_submitted_stage_for_test(arena);
         let wrote = Rc::new(Cell::new(0));
         // The finalizer goes on at once: the pass holds the token.
         write_as_a_finalizer(handle, &wrote);
@@ -681,37 +674,7 @@ mod tests {
         // With the token home, a finalizer's write goes in at once.
         write_as_a_finalizer(handle, &wrote);
         assert_eq!(wrote.get(), 3);
-        crate::stage_thread::take_lent_arenas();
-    }
-
-    #[test]
-    fn a_finalizer_leaves_its_write_for_a_clock_lend_it_does_not_recall() {
-        use std::cell::RefCell;
-
-        let (_engine, handle) = test_engine();
-        let arena = std::ptr::NonNull::<c_void>::dangling().as_ptr();
-        handle.link_arena(arena as usize);
-        let (loan, settlement) = handle.lend(Holder::ClockLend, Owed::TakeBack);
-        let loan = Rc::new(RefCell::new(Some(loan)));
-        // SAFETY: Nothing reaches the arena, which the lend only names.
-        unsafe {
-            crate::stage_thread::lend_arena(
-                arena,
-                move || {
-                    drop(loan.borrow_mut().take());
-                    settlement.settle();
-                },
-                || {},
-            );
-        }
-        let wrote = Rc::new(Cell::new(0));
-        write_as_a_finalizer(handle, &wrote);
-        assert_eq!(wrote.get(), 0);
-        assert!(crate::stage_thread::has_lent_arena());
-        // The task that lent the arena takes it back, and the token home with it.
-        crate::stage_thread::take_lent_arenas();
-        assert_eq!(wrote.get(), 1);
-        assert!(handle.is_home());
+        crate::stage_thread::take_stand_in_stages_for_test();
     }
 
     #[test]

@@ -1,3 +1,0 @@
-frames presented past an iteration: true
-iteration events during the task: 0
-iteration events after the task: true

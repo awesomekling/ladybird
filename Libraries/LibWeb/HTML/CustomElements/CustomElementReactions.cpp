@@ -68,12 +68,6 @@ static void invoke_custom_element_reactions_impl(ElementQueue& element_queue)
 void invoke_custom_element_reactions(Vector<GC::Root<DOM::Element>>& element_queue)
 {
     invoke_custom_element_reactions_impl(element_queue);
-
-    // LIBWEB_RENDER_CLOCK_FRAMES: The reactions of a [CEReactions] construct run once its steps, a DOM mutation, are
-    //                             over. Once the outermost one is, the render clock may go on ticking what the mutation
-    //                             took back from it.
-    if (Bindings::main_thread_similar_origin_window_agent().custom_element_reactions_stack.element_queue_stack.is_empty())
-        main_thread_event_loop().frame_scheduler().relend_clock_leases_after_mutation();
 }
 
 // https://html.spec.whatwg.org/multipage/custom-elements.html#invoke-custom-element-reactions

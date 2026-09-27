@@ -100,7 +100,6 @@ RENDER_STAGE_ALLOWED = {
         [
             "clock_frames.rs:NEEDS_MAIN",
             "clock_frames.rs:PRESENT",
-            "clock_frames.rs:LEND_TAKEN_BACK",
             "clock_frames.rs:WAKE_MAIN",
         ],
     ),

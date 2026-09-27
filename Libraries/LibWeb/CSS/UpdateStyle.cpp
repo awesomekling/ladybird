@@ -32,7 +32,6 @@
 #include <LibWeb/DOM/Range.h>
 #include <LibWeb/DOM/ShadowRoot.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
-#include <LibWeb/HTML/EventLoop/FrameScheduler.h>
 #include <LibWeb/HTML/EventLoop/MainThreadPhases.h>
 #include <LibWeb/HTML/FormAssociatedElement.h>
 #include <LibWeb/HTML/HTMLBodyElement.h>
@@ -2100,7 +2099,6 @@ void Document::settle_style_repaint_owed_to_flight(bool recorded_in_flight)
 
 bool Document::update_style_for_element(AbstractElement const& abstract_element)
 {
-    HTML::ClockLendReadScope clock_lend_read_scope;
     join_frame_in_flight();
     update_selection_style_observability();
     flush_throttled_animation_style_update_for_node(abstract_element.element());
@@ -2109,7 +2107,6 @@ bool Document::update_style_for_element(AbstractElement const& abstract_element)
 
 bool Document::update_style_for_element(AbstractElement const& abstract_element, StyleUpdateMode mode)
 {
-    HTML::ClockLendReadScope clock_lend_read_scope;
     join_frame_in_flight();
     update_selection_style_observability();
     flush_throttled_animation_style_update_for_node(abstract_element.element());
