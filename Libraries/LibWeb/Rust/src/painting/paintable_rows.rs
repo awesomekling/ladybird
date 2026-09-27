@@ -1708,6 +1708,8 @@ impl LayoutNodeArena {
     /// published, so that the query only reads. A published generation that still pins the list
     /// lets go of it first, so building does not copy it.
     pub(crate) fn prepare_hit_test_list_for_query(&mut self, needs_spatial_indexes: bool, needs_caret_lines: bool) {
+        // A recording the frame presented has a newer list for the document to take in.
+        self.try_take_in_recording();
         if let Some(published) = &mut self.paintable_rows.published {
             published.hit_test_list = None;
         }

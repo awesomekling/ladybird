@@ -876,19 +876,29 @@ enum class PublicationSite : u8 {
     FrameInFlight,
 };
 
-static Compositor::PublishedDisplayList publish_rust_display_list_recording(PublicationSite site, PendingDisplayListRecording& recording, Compositing::DisplayList* paint_command_cache_source, Compositing::DisplayListResourceSet const& paint_command_cache_source_resources, Compositor::PresentationSource& source)
+static Compositor::PublishedDisplayList publish_rust_display_list_recording(PublicationSite site, PendingDisplayListRecording& recording, void const* recording_ticket, Compositing::DisplayList* paint_command_cache_source, Compositing::DisplayListResourceSet const& paint_command_cache_source_resources, Compositor::PresentationSource& source)
 {
     auto* arena = recording.arena;
     RecordingPublishStorage publish_storage { recording.resource_storage };
     auto const& device_viewport_rect = recording.device_viewport_rect;
     auto& wheel_event_region_state = recording.wheel_event_region_state;
     auto const& rust_timer = recording.timer;
-    if (site == PublicationSite::FrameInFlight)
-        Layout::RustFFI::layout_arena_publish_recording_in_frame(arena, recording_publish_callbacks(publish_storage));
-    else
-        Layout::RustFFI::layout_arena_publish_recording(arena, recording_publish_callbacks(publish_storage));
+    // A recording submitted with a ticket is published from the ticket, and the document takes it in later; any other
+    // is published in and read back from its arena.
+    Layout::RustFFI::FfiPresentedRecording presented {};
+    if (recording_ticket) {
+        VERIFY(site == PublicationSite::FrameInFlight);
+        VERIFY(Layout::RustFFI::layout_recording_ticket_publish_in_frame(recording_ticket, recording_publish_callbacks(publish_storage), &presented));
+    } else {
+        if (site == PublicationSite::FrameInFlight)
+            Layout::RustFFI::layout_arena_publish_recording_in_frame(arena, recording_publish_callbacks(publish_storage));
+        else
+            Layout::RustFFI::layout_arena_publish_recording(arena, recording_publish_callbacks(publish_storage));
+        presented.is_identical_to_published_frame = Layout::RustFFI::layout_arena_last_recording_is_identical_to_published_frame(arena);
+        presented.has_blocking_wheel_event_listeners = Layout::RustFFI::layout_arena_last_recording_has_blocking_wheel_event_listeners(arena);
+    }
     source.did_publish_recording();
-    if (Layout::RustFFI::layout_arena_last_recording_has_blocking_wheel_event_listeners(arena))
+    if (presented.has_blocking_wheel_event_listeners)
         wheel_event_region_state.has_blocking_wheel_event_listeners = true;
     auto stamp_async_scrolling_metadata_with_current_viewport_rect = [&](Compositing::DisplayList& display_list) {
         if (auto stamp = source.async_scrolling_stamp(); stamp.has_value()) {
@@ -902,8 +912,10 @@ static Compositor::PublishedDisplayList publish_rust_display_list_recording(Publ
         }
     };
 
-    if (Layout::RustFFI::layout_arena_last_recording_is_identical_to_published_frame(arena)) {
+    if (presented.is_identical_to_published_frame) {
         if (paint_command_cache_source) {
+            if (presented.display_list)
+                Compositing::RustFFI::display_list_release_command_storage(presented.display_list);
             if (rust_painting_timing_enabled())
                 dbgln("PAINT_RECORD rust={} µs identical to the previous recording", rust_timer.elapsed_time().to_microseconds());
             stamp_async_scrolling_metadata_with_current_viewport_rect(*paint_command_cache_source);
@@ -916,7 +928,7 @@ static Compositor::PublishedDisplayList publish_rust_display_list_recording(Publ
         }
     }
 
-    auto display_list = Compositing::DisplayList::adopt_rust_command_storage(source.published_display_list_visual_context_tree(), Layout::RustFFI::layout_arena_retain_recorded_display_list(arena));
+    auto display_list = Compositing::DisplayList::adopt_rust_command_storage(source.published_display_list_visual_context_tree(), recording_ticket ? presented.display_list : Layout::RustFFI::layout_arena_retain_recorded_display_list(arena));
     if (rust_painting_timing_enabled())
         dbgln("PAINT_RECORD rust={} µs commands={} bytes", rust_timer.elapsed_time().to_microseconds(), display_list->command_bytes().size());
 
@@ -934,12 +946,12 @@ static Compositor::PublishedDisplayList publish_rust_display_list_recording(Publ
 
 Compositor::PublishedDisplayList publish_rust_display_list_recording(PendingDisplayListRecording& recording, Compositing::DisplayList* paint_command_cache_source, Compositing::DisplayListResourceSet const& paint_command_cache_source_resources, Compositor::PresentationSource& source)
 {
-    return publish_rust_display_list_recording(PublicationSite::MainThread, recording, paint_command_cache_source, paint_command_cache_source_resources, source);
+    return publish_rust_display_list_recording(PublicationSite::MainThread, recording, nullptr, paint_command_cache_source, paint_command_cache_source_resources, source);
 }
 
-Compositor::PublishedDisplayList publish_rust_display_list_recording_in_frame(PendingDisplayListRecording& recording, Compositing::DisplayList* paint_command_cache_source, Compositing::DisplayListResourceSet const& paint_command_cache_source_resources, Compositor::PresentationSource& source)
+Compositor::PublishedDisplayList publish_rust_display_list_recording_in_frame(PendingDisplayListRecording& recording, void const* recording_ticket, Compositing::DisplayList* paint_command_cache_source, Compositing::DisplayListResourceSet const& paint_command_cache_source_resources, Compositor::PresentationSource& source)
 {
-    return publish_rust_display_list_recording(PublicationSite::FrameInFlight, recording, paint_command_cache_source, paint_command_cache_source_resources, source);
+    return publish_rust_display_list_recording(PublicationSite::FrameInFlight, recording, recording_ticket, paint_command_cache_source, paint_command_cache_source_resources, source);
 }
 
 Compositing::DisplayListResource record_image_paint_display_list(ImagePaint const& paint, ImagePaintRequest const& request, double device_pixels_per_css_pixel)

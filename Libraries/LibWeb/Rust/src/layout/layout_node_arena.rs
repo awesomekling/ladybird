@@ -1092,6 +1092,7 @@ pub(crate) struct LayoutNodeArena {
     pub(super) innermost_run: Cell<(NodeSlotId, NodeSlotId)>,
     pub(crate) paintable_rows: crate::painting::paintable_rows::PaintableRowStore,
     paint_state: RefCell<crate::painting::paint_state::PaintState>,
+    recording_slot: RefCell<crate::painting::recording_slot::RecordingSlot>,
     // The list the last recording produced. Each published generation of the rows pins the list
     // and the visual context tree as they were when it was published.
     pub(crate) hit_test_list: RefCell<Option<std::sync::Arc<crate::painting::hit_test::HitTestList>>>,
@@ -1230,6 +1231,7 @@ impl LayoutNodeArena {
             innermost_run: Cell::new((NodeSlotId::INVALID, NodeSlotId::INVALID)),
             paintable_rows: crate::painting::paintable_rows::PaintableRowStore::default(),
             paint_state: RefCell::new(crate::painting::paint_state::PaintState::default()),
+            recording_slot: RefCell::default(),
             hit_test_list: RefCell::new(None),
             scrollable_overflow: Default::default(),
             partial_relayout_boundary_roots: RefCell::new(Vec::new()),
@@ -5781,6 +5783,11 @@ impl LayoutNodeArena {
 
     pub(crate) fn paint_state(&self) -> &RefCell<crate::painting::paint_state::PaintState> {
         &self.paint_state
+    }
+
+    /// The document's recording slot, which only [`LayoutNodeArena::recording`] reads.
+    pub(crate) fn recording_slot(&self) -> &RefCell<crate::painting::recording_slot::RecordingSlot> {
+        &self.recording_slot
     }
 
     pub(crate) fn node_flags_if_live(&self, id: NodeSlotId) -> u32 {

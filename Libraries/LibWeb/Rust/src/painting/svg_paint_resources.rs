@@ -144,6 +144,28 @@ pub(crate) fn published_filter_in(
     rows.get(&slot)?.published_filter(kind)
 }
 
+/// The image frames of the published SVG filters in `rows`, once each.
+pub(crate) fn published_filter_image_frames_in(
+    rows: &SvgPaintResourceRows,
+) -> Vec<libgfx_rust::image_frame::ImageFrameHandle> {
+    let mut frames: Vec<libgfx_rust::image_frame::ImageFrameHandle> = Vec::new();
+    let mut known_ids = std::collections::HashSet::new();
+    for row in rows.values() {
+        for filter in [&row.filter, &row.backdrop_filter].into_iter().flatten() {
+            for frame in filter
+                .primitives
+                .iter()
+                .filter_map(|primitive| primitive.image_frame.as_ref())
+            {
+                if known_ids.insert(frame.id()) {
+                    frames.push(frame.clone());
+                }
+            }
+        }
+    }
+    frames
+}
+
 /// The published paint server of a kind in a slot's row of `rows`.
 pub(crate) fn published_paint_server_in(
     rows: &SvgPaintResourceRows,
@@ -246,22 +268,7 @@ impl SvgPaintResources {
     }
 
     pub(crate) fn published_filter_image_frames(&self) -> Vec<libgfx_rust::image_frame::ImageFrameHandle> {
-        let mut frames: Vec<libgfx_rust::image_frame::ImageFrameHandle> = Vec::new();
-        let mut known_ids = std::collections::HashSet::new();
-        for row in self.rows.borrow().values() {
-            for filter in [&row.filter, &row.backdrop_filter].into_iter().flatten() {
-                for frame in filter
-                    .primitives
-                    .iter()
-                    .filter_map(|primitive| primitive.image_frame.as_ref())
-                {
-                    if known_ids.insert(frame.id()) {
-                        frames.push(frame.clone());
-                    }
-                }
-            }
-        }
-        frames
+        published_filter_image_frames_in(&self.rows.borrow())
     }
 
     pub(crate) fn published_paint_server(

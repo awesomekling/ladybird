@@ -86,8 +86,9 @@ WEB_API FlightRecordingSeal seal_rust_display_list_recording_for_flight(DOM::Doc
 // recording is identical to it. Reaches the document only through `source`.
 WEB_API Compositor::PublishedDisplayList publish_rust_display_list_recording(PendingDisplayListRecording&, Compositing::DisplayList* paint_command_cache_source, Compositing::DisplayListResourceSet const& paint_command_cache_source_resources, Compositor::PresentationSource&);
 
-// Like publish_rust_display_list_recording(), from the presentation stage of the frame in flight that owns the arena.
-WEB_API Compositor::PublishedDisplayList publish_rust_display_list_recording_in_frame(PendingDisplayListRecording&, Compositing::DisplayList* paint_command_cache_source, Compositing::DisplayListResourceSet const& paint_command_cache_source_resources, Compositor::PresentationSource&);
+// Like publish_rust_display_list_recording(), from the presentation stage of the frame in flight: from the recording's
+// ticket, without reaching the arena, if the recording was submitted with one, or else from the arena the frame owns.
+WEB_API Compositor::PublishedDisplayList publish_rust_display_list_recording_in_frame(PendingDisplayListRecording&, void const* recording_ticket, Compositing::DisplayList* paint_command_cache_source, Compositing::DisplayListResourceSet const& paint_command_cache_source_resources, Compositor::PresentationSource&);
 // Takes the trace of the document's last recording, if one was asked for.
 WEB_API void take_recording_trace_if_pending(DOM::Document&);
 

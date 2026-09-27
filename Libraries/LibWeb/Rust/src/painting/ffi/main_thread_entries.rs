@@ -281,8 +281,8 @@ unsafe extern "C" fn layout_arena_discard_retired_recording(arena: *mut c_void) 
     let arena_handle = arena;
     let arena = unsafe { arena_from_handle(arena) };
     let _write = arena.join_frame_for_main_side_write("retired recording discard");
-    let mut paint_state = arena.paint_state().borrow_mut();
-    let Some(generation) = paint_state
+    let mut recording = arena.recording();
+    let Some(generation) = recording
         .pending_recording()
         .as_ref()
         .map(|pending| pending.frame_generation)
@@ -293,7 +293,7 @@ unsafe extern "C" fn layout_arena_discard_retired_recording(arena: *mut c_void) 
     if !unsafe { crate::layout::frame_retirement::frame_was_retired(arena_handle, generation) } {
         return false;
     }
-    paint_state.discard_pending_recording();
+    recording.discard_pending_recording();
     true
 }
 
@@ -309,7 +309,7 @@ unsafe extern "C" fn layout_arena_publish_recording(
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let arena = unsafe { arena_from_handle(arena) };
     let _write = arena.join_frame_for_main_side_write("recording publication");
-    let Some(pending) = arena.paint_state().borrow_mut().pending_recording().take() else {
+    let Some(pending) = arena.recording().pending_recording().take() else {
         return 0;
     };
     let publish = crate::painting::host::RecordingPublishHost::from(publish);
@@ -356,11 +356,10 @@ unsafe extern "C" fn layout_arena_take_recording_trace(
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let arena = unsafe { arena_from_handle(arena) };
     let (pending, recording) = {
-        let mut paint_state = arena.paint_state().borrow_mut();
-        let Some(pending) = paint_state.pending_recording_trace().take() else {
+        let Some(pending) = arena.recording().pending_recording_trace().take() else {
             return false;
         };
-        let Some(recording) = paint_state.last_recording.clone() else {
+        let Some(recording) = arena.paint_state().borrow().last_recording.clone() else {
             return false;
         };
         (pending, recording)

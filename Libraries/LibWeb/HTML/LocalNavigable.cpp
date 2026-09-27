@@ -6935,11 +6935,16 @@ static void present_from_frame_in_flight(void* context)
 {
     auto& presentation = *static_cast<Compositor::Presentation*>(context);
     // A read cancelled the recording: the frame shows nothing, and the rendering update records again.
-    if (presentation.recording && Layout::RustFFI::layout_arena_recording_in_frame_was_cancelled(presentation.recording->arena))
-        return;
+    if (presentation.recording) {
+        bool const cancelled = presentation.recording_ticket
+            ? Layout::RustFFI::layout_recording_ticket_was_cancelled(presentation.recording_ticket)
+            : Layout::RustFFI::layout_arena_recording_in_frame_was_cancelled(presentation.recording->arena);
+        if (cancelled)
+            return;
+    }
     Optional<Compositor::PublishedDisplayList> published;
     if (presentation.recording) {
-        published = Painting::publish_rust_display_list_recording_in_frame(*presentation.recording, presentation.paint_command_cache_source.ptr(), presentation.inputs.paint_command_cache_source_resources, presentation.source);
+        published = Painting::publish_rust_display_list_recording_in_frame(*presentation.recording, presentation.recording_ticket, presentation.paint_command_cache_source.ptr(), presentation.inputs.paint_command_cache_source_resources, presentation.source);
         if (published->becomes_paint_command_cache_source)
             presentation.inputs.paint_command_cache_source_resources = published->command_resources;
         presentation.published = published;
@@ -6965,8 +6970,10 @@ bool LocalNavigable::submit_presentation(PendingCompositorFrame& pending_frame)
         return false;
     presentation->presenter = presenter();
     presentation->recording = recording;
-    if (recording)
+    if (recording) {
         presentation->render_state_generation = Layout::RustFFI::layout_arena_render_state_generation(recording->arena);
+        presentation->recording_ticket = Layout::RustFFI::layout_arena_recording_ticket_for_presentation(recording->arena);
+    }
     presentation->frame_sink = move(frame_sink);
     presentation->is_presented_by_frame_in_flight = true;
     m_presenter->lend_to_frame_in_flight();
@@ -6986,6 +6993,9 @@ void LocalNavigable::adopt_presented_frame(PendingCompositorFrame& pending_frame
         return;
     auto document = pending_frame.document;
     auto& recording = *pending_frame.recording;
+    // The presentation published the recording from its ticket; the document takes it in.
+    if (presentation.recording_ticket)
+        Layout::RustFFI::layout_arena_take_in_recording(recording.arena);
     // A task beside the frame in flight retired the render state the recording was made for. The compositor has the
     // frame already; the document takes nothing of it in, and what was marked beside it is what the next drain writes.
     if (Layout::RustFFI::layout_arena_presented_frame_was_retired(recording.arena, presentation.render_state_generation) || !document->has_paint_state()) {
