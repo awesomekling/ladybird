@@ -269,7 +269,7 @@ pub unsafe extern "C" fn layout_arena_publish_style_snapshot_scroll_states(
         unsafe { std::slice::from_raw_parts(states, count) }
     };
     let arena = unsafe { LayoutNodeArena::from_handle(arena) };
-    let _write = arena.join_frame_for_main_side_write("style snapshot scroll states");
+    arena.join_frame_for_main_side_write("style snapshot scroll states");
     arena.layout_style_snapshots.publish_scroll_states(states);
 }
 

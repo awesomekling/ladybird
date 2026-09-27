@@ -242,7 +242,6 @@ impl LayoutNodeArena {
 
     #[track_caller]
     pub(crate) fn push_paint_damage(&self, row: NodeSlotId, damage: PaintDamage) {
-        crate::painting::published_immutable::note_row_mutation(self, row, "M12 LayoutNodeArena::push_paint_damage");
         if damage.is_empty() || !self.paintable_row_is_populated(row) {
             return;
         }
@@ -273,11 +272,6 @@ impl LayoutNodeArena {
             if state.damage().contains(PaintDamage::DESCENDANT_READERS) {
                 break;
             }
-            crate::painting::published_immutable::note_row_mutation(
-                self,
-                ancestor,
-                "M12 LayoutNodeArena::hint_descendant_readers_above",
-            );
             if state.add(PaintDamage::DESCENDANT_READERS, stamp) {
                 set.rows.borrow_mut().push(ancestor);
             }
@@ -319,7 +313,6 @@ impl LayoutNodeArena {
     /// inline the ancestors up to the line root that paints its pieces.
     #[track_caller]
     pub(crate) fn push_paint_damage_for_repaint(&self, row: NodeSlotId, damage: PaintDamage) {
-        let _writer = crate::painting::published_immutable::enter_writer_if_unattributed("layout repaint propagation");
         self.paintable_rows()
             .for_each_row_repainted_with(row, |repainted| self.push_paint_damage(repainted, damage));
     }
@@ -328,7 +321,6 @@ impl LayoutNodeArena {
     /// resolved now, while the links are intact, for rows about to appear, disappear or move.
     /// The ancestor's content changed below it as well.
     pub(crate) fn push_enclosing_paint_order_damage(&self, node: NodeSlotId) {
-        let _writer = crate::painting::published_immutable::enter_writer_if_unattributed("paint-order maintenance");
         if let Some(owner) = self.enclosing_paint_order_owner(node) {
             self.push_paint_damage(owner, PaintDamage::ORDER | PaintDamage::DESCENDANT_READERS);
             // A line's plan also places content nested inside ordinary inline boxes.

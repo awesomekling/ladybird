@@ -38,7 +38,6 @@ fn invalidate_text_node(layout_arena: &PaintableRowsMut<'_>, node: NodeSlotId) {
 }
 
 pub(crate) fn clear(layout_arena: &mut PaintableRowsMut<'_>, viewport: NodeSlotId) {
-    let _writer = crate::painting::published_immutable::enter_writer_if_unattributed("selection update");
     let previous = layout_arena.paint_state().borrow_mut().selection.take();
     if let Some(previous) = previous {
         for node in previous.text_states.keys() {
@@ -62,7 +61,6 @@ pub(crate) fn apply(
     viewport: NodeSlotId,
     entries: &[FfiSelectionEntry],
 ) -> std::collections::HashMap<NodeSlotId, u8> {
-    let _writer = crate::painting::published_immutable::enter_writer_if_unattributed("selection update");
     clear(layout_arena, viewport);
     let mut text_states = std::collections::HashMap::new();
     for entry in entries {

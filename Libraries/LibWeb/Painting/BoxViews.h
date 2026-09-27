@@ -94,24 +94,12 @@ enum class PaintCacheInvalidation : u8 {
     PropagatedTextDecorations,
 };
 
-enum class PaintCacheInvalidationStage : u8 {
-    JournalDrain,
-    AnonymousRow,
-    DetachCleanup,
-    PaintFactReconciliation,
-};
-
-enum class RepaintDamageStage : u8 {
-    JournalDrain,
-    AnonymousRow,
-};
-
 WEB_API void invalidate_paint_cache(Layout::Node const&);
 WEB_API void invalidate_propagated_text_decoration_caches(Layout::Row const&);
-WEB_API void apply_paint_cache_invalidation(Layout::Row const&, PaintCacheInvalidation, PaintCacheInvalidationStage);
-WEB_API void apply_repaint_damage(Layout::Row const&, InvalidateDisplayList, RepaintDamageStage);
-WEB_API void apply_repaint_damage(Layout::TextNode const&, InvalidateDisplayList, RepaintDamageStage);
-WEB_API void apply_subtree_repaint_damage(Layout::Row const&, RepaintDamageStage);
+WEB_API void apply_paint_cache_invalidation(Layout::Row const&, PaintCacheInvalidation);
+WEB_API void apply_repaint_damage(Layout::Row const&, InvalidateDisplayList);
+WEB_API void apply_repaint_damage(Layout::TextNode const&, InvalidateDisplayList);
+WEB_API void apply_subtree_repaint_damage(Layout::Row const&);
 WEB_API void repaint_after_style_change(Layout::Row const&, CSS::RequiredInvalidationAfterStyleChange const&);
 
 WEB_API Layout::RustFFI::FfiRectToViewportTransform identity_rect_to_viewport_transform();

@@ -229,7 +229,6 @@ pub(crate) fn commit_replacing(
 ) -> CommitNotifications {
     let links_by_slot = pass_fragments.links_by_slot();
     arena.release_published_paintable_rows();
-    crate::painting::published_immutable::before_publication(arena);
     arena.note_layout_commit();
     arena.begin_layout_style_snapshot_commit();
     let mut paintables = crate::painting::paintable_build::PaintableCommit::new(arena, root);
@@ -256,7 +255,6 @@ pub(crate) fn commit_replacing(
         }
     }
     let resized_a_hosted_navigable = paintables.resized_a_navigable_container_viewport();
-    crate::painting::published_immutable::published(paintables.arena());
     // The rows are published when the main side next reads them, or when a recording is submitted:
     // what derives from the commit before either writes them in place.
     paintables.arena().finish_layout_style_snapshot_commit();
