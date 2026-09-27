@@ -205,7 +205,6 @@ impl LayoutNodeArena {
     pub(crate) fn publish_layout_style_snapshot_geometry(
         &self,
         node: NodeSlotId,
-        writing_mode: u8,
         laid_out_content_size: Option<FfiCssPixelSize>,
     ) {
         // Style asks layout only about elements.
@@ -218,6 +217,10 @@ impl LayoutNodeArena {
         if self.bound_row(style_node) != node {
             return;
         }
+        let writing_mode = crate::layout::node_facts::node_style_view(self.data(node))
+            .map_or(crate::css::css_enums::writing_mode::HORIZONTAL_TB, |style| {
+                style.writing_mode()
+            });
         let rows = self.paintable_rows();
         let has_committed_box = rows.paintable_row_is_populated(node);
         let size = if has_committed_box {
