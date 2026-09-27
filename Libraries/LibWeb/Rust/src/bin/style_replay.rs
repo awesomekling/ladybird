@@ -457,6 +457,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                             computation_inputs,
                             std::ptr::null_mut(),
                             std::ptr::null(),
+                            std::ptr::null(),
+                            0,
                         )
                     };
                     let actual_reclaimed_atoms = if actual_view.reclaimed_style_atom_count == 0 {

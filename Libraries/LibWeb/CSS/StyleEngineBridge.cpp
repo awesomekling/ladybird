@@ -5,6 +5,7 @@
  */
 
 #include <AK/HashTable.h>
+#include <AK/ScopeGuard.h>
 #include <AK/StdLibExtras.h>
 #include <AK/TemporaryChange.h>
 #include <AK/Time.h>
@@ -975,7 +976,7 @@ void StyleEngine::submit_recorded_input(RecordedInputGoesTo goes_to)
 
     // A selector that came to read attribute value texts has the texts published after the input goes in, before
     // matching reads them, which a pass that applies the input itself would not wait for.
-    if (goes_to == RecordedInputGoesTo::SubmittedPass && StyleEngineFFI::style_engine_attribute_value_text_requirements_version(m_impl) != m_attribute_value_text_requirements_version)
+    if (goes_to == RecordedInputGoesTo::Transaction && StyleEngineFFI::style_engine_attribute_value_text_requirements_version(m_impl) != m_attribute_value_text_requirements_version)
         goes_to = RecordedInputGoesTo::Engine;
 
     // What the engine calls back into while it applies these records the next transaction's.
@@ -998,7 +999,7 @@ void StyleEngine::submit_recorded_input(RecordedInputGoesTo goes_to)
     style_node_grant.resize(exchange(m_style_node_grant_request, 0));
     text_style_node_grant.resize(exchange(m_text_style_node_grant_request, 0));
 
-    if (goes_to == RecordedInputGoesTo::SubmittedPass) {
+    if (goes_to == RecordedInputGoesTo::Transaction) {
         // The transaction copies the input as it is handed over, and applies it where its pass runs.
         m_recorded_input_for_pass = RecordedInputForPass {
             .tree_deltas = move(m_tree_deltas),
@@ -1288,6 +1289,8 @@ void StyleEngine::lend_style_transaction_inputs(RecordedInputGoesTo recorded_inp
     // the last layout committed.
     auto* layout_node_arena = m_style_computer ? &m_style_computer->document().layout_node_arena() : nullptr;
     auto* layout_arena = layout_node_arena ? layout_node_arena->handle() : nullptr;
+    // The transaction takes the reactions the host applied along, whatever else it takes.
+    ScopeGuard applied_style_reactions_went = [&] { m_applied_style_reactions.clear_with_capacity(); };
     if (!m_recorded_input_for_pass.has_value()) {
         take(computation_inputs, layout_arena, nullptr);
         return;
@@ -1336,9 +1339,9 @@ StyleEngine::PublishedStyleTransaction StyleEngine::take_style_transaction(Style
     auto submission_started_at = MonotonicTime::now();
     StyleEngineFFI::FfiStyleTransactionView view {};
     MonotonicTime bridge_started_at = submission_started_at;
-    lend_style_transaction_inputs(RecordedInputGoesTo::SubmittedPass, [&](auto const& computation_inputs, void* layout_arena, InputTransaction const* input) {
+    lend_style_transaction_inputs(RecordedInputGoesTo::Transaction, [&](auto const& computation_inputs, void* layout_arena, InputTransaction const* input) {
         bridge_started_at = MonotonicTime::now();
-        view = StyleEngineFFI::style_engine_take_style_transaction(m_impl, root.value(), computation_inputs, layout_arena, input);
+        view = StyleEngineFFI::style_engine_take_style_transaction(m_impl, root.value(), computation_inputs, layout_arena, input, m_applied_style_reactions.data(), m_applied_style_reactions.size());
     });
     auto bridge_microseconds = (MonotonicTime::now() - bridge_started_at).to_truncated_microseconds();
     return publish_style_transaction_view(view, (bridge_started_at - submission_started_at).to_truncated_microseconds(), bridge_microseconds);
@@ -1347,8 +1350,8 @@ StyleEngine::PublishedStyleTransaction StyleEngine::take_style_transaction(Style
 void StyleEngine::submit_style_transaction(StyleNodeID root)
 {
     auto submission_started_at = MonotonicTime::now();
-    lend_style_transaction_inputs(RecordedInputGoesTo::SubmittedPass, [&](auto const& computation_inputs, void* layout_arena, InputTransaction const* input) {
-        StyleEngineFFI::style_engine_submit_style_transaction(m_impl, root.value(), computation_inputs, layout_arena, input);
+    lend_style_transaction_inputs(RecordedInputGoesTo::Transaction, [&](auto const& computation_inputs, void* layout_arena, InputTransaction const* input) {
+        StyleEngineFFI::style_engine_submit_style_transaction(m_impl, root.value(), computation_inputs, layout_arena, input, m_applied_style_reactions.data(), m_applied_style_reactions.size());
     });
     m_submitted_style_transaction_microseconds = (MonotonicTime::now() - submission_started_at).to_truncated_microseconds();
     m_submitted_pass_in_flight = true;
@@ -1419,7 +1422,17 @@ bool StyleEngine::may_have_child_dependent_selectors() const
 
 bool StyleEngine::has_pending_transaction() const
 {
-    return has_recorded_input() || StyleEngineFFI::style_engine_has_pending_transaction(m_impl);
+    return has_recorded_input() || has_applied_style_reactions() || StyleEngineFFI::style_engine_has_pending_transaction(m_impl);
+}
+
+void StyleEngine::record_applied_style_reaction(StyleNodeID style_node, u8 reaction, u8 inherited_style_groups_changed, u32 facts)
+{
+    m_applied_style_reactions.append({
+        .node = style_node.value(),
+        .reaction = reaction,
+        .inherited_style_groups_changed = inherited_style_groups_changed,
+        .facts = facts,
+    });
 }
 
 bool StyleEngine::pending_transaction_may_affect_layout_geometry()

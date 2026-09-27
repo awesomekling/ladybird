@@ -287,6 +287,12 @@ public:
     // How many inputs are recorded for the next submission, which is what settling for a selector query costs.
     [[nodiscard]] size_t recorded_input_count() const;
     [[nodiscard]] bool has_pending_transaction() const;
+    // Keep a style reaction the host applied to an element as it installed a batch, which the next transaction derives
+    // the element's children's reactions from: `reaction` is what the element reacted to, `inherited_style_groups_changed`
+    // names the inherited groups its style moved, and `facts` says what else the application found. It goes to the
+    // engine with that transaction.
+    void record_applied_style_reaction(StyleNodeID, u8 reaction, u8 inherited_style_groups_changed, u32 facts);
+    [[nodiscard]] bool has_applied_style_reactions() const { return !m_applied_style_reactions.is_empty(); }
     // Whether a `:has()` or `:empty` selector may take part in the next transaction, letting a node anywhere decide an
     // element's style.
     [[nodiscard]] bool may_have_child_dependent_selectors() const;
@@ -445,11 +451,11 @@ private:
 
     bool read_matches(StyleNodeID, Vector<RuleMatch>&, Optional<MatchPurpose>);
     void apply_transaction(StyleInputScope const&, InputTransaction const&);
-    // Where the input submit_recorded_input() takes goes: to the engine at once, or to the style pass
-    // submit_style_transaction() submits, which applies it as its first step.
+    // Where the input submit_recorded_input() takes goes: to the engine at once, or to the style transaction
+    // lend_style_transaction_inputs() hands it over with, which applies it as its first step.
     enum class RecordedInputGoesTo : u8 {
         Engine,
-        SubmittedPass,
+        Transaction,
     };
     void submit_recorded_input(RecordedInputGoesTo = RecordedInputGoesTo::Engine);
     [[nodiscard]] bool has_journaled_input() const;
@@ -513,6 +519,9 @@ private:
     Vector<StyleEngineFFI::FfiStateDelta> m_state_deltas;
     Vector<StyleEngineFFI::FfiElementDeclarationDelta> m_element_declaration_deltas;
     Vector<StyleEngineFFI::FfiHostFactWrite> m_host_fact_writes;
+    // The reactions the host applied since the last transaction. They are no input the host recorded, which a pass in
+    // flight holds back: they go with the next transaction, which is the next wave of the style update that applied them.
+    Vector<StyleEngineFFI::FfiAppliedStyleReaction> m_applied_style_reactions;
     // How many of the host fact writes are atom adoptions, which are no input to style.
     size_t m_pending_atom_adoption_count { 0 };
     // What each `TextData` write holds, by the index its `data` names until the writes cross.

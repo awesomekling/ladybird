@@ -69,6 +69,7 @@ Layout::RustFFI::FfiLayoutUpdateDocumentFacts Document::layout_update_document_f
         .container_query_evaluation_is_pending = has_size_containers_needing_evaluation_after_layout(),
         .style_input_waits_on_document = m_needs_animated_style_update
             || style_computer().style_engine().has_recorded_input()
+            || style_computer().style_engine().has_applied_style_reactions()
             || m_needs_media_rule_evaluation
             || !m_elements_with_dirty_style_attributes.is_empty(),
         .top_layer_work_pending = m_top_layer_needs_layout_zone_rebuild || !m_elements_with_pending_top_layer_membership_change.is_empty(),

@@ -1042,6 +1042,18 @@ pub struct FfiHostFactWrite {
     pub data: usize,
 }
 
+/// A style reaction the host applied to an element as it installed a batch, which the next
+/// transaction derives the element's children's reactions from. See
+/// `StyleEngineState::record_applied_style_reaction`.
+#[derive(Clone, Copy, Debug)]
+#[repr(C)]
+pub struct FfiAppliedStyleReaction {
+    pub node: u32,
+    pub reaction: u8,
+    pub inherited_style_groups_changed: u8,
+    pub facts: u32,
+}
+
 /// One flat style input transaction. Every array is borrowed for the duration of the call.
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -2223,6 +2235,9 @@ pub(crate) struct InputForPass {
     /// What the `ElementReplacedContentInput` writes point at, which the host lends only for the
     /// call that hands the transaction over. Each such write names its input here by index.
     replaced_content_inputs: Vec<FfiReplacedContentInput>,
+    /// The reactions the host applied as it installed the batches before, which the transaction
+    /// derives the children's reactions from.
+    applied_style_reactions: Vec<FfiAppliedStyleReaction>,
 }
 
 impl InputForPass {
@@ -2239,7 +2254,39 @@ impl InputForPass {
             element_style_inputs: Vec::new(),
             host_fact_writes: Vec::new(),
             replaced_content_inputs: Vec::new(),
+            applied_style_reactions: Vec::new(),
         }
+    }
+
+    /// What the host hands over with a transaction it takes or submits: the input it recorded, if
+    /// it recorded any, and the reactions it applied as it installed the batches before.
+    ///
+    /// # Safety
+    /// `input` is null or as for [`Self::take_from`].
+    unsafe fn handed_over(
+        input: *const FfiStyleInputTransaction,
+        applied_style_reactions: &[FfiAppliedStyleReaction],
+    ) -> Option<Self> {
+        // SAFETY: Guaranteed by the caller.
+        let mut handed_over = match unsafe { input.as_ref() } {
+            // SAFETY: Guaranteed by the caller.
+            Some(input) => unsafe { Self::take_from(input) },
+            None if applied_style_reactions.is_empty() => return None,
+            None => Self {
+                tree: Vec::new(),
+                arrivals: Vec::new(),
+                arrival_custom_state_atoms: Vec::new(),
+                features: Vec::new(),
+                states: Vec::new(),
+                declarations: Vec::new(),
+                element_style_inputs: Vec::new(),
+                host_fact_writes: Vec::new(),
+                replaced_content_inputs: Vec::new(),
+                applied_style_reactions: Vec::new(),
+            },
+        };
+        handed_over.applied_style_reactions = applied_style_reactions.to_vec();
+        Some(handed_over)
     }
 
     /// # Safety
@@ -2272,6 +2319,7 @@ impl InputForPass {
             element_style_inputs: rows.element_style_inputs.to_vec(),
             host_fact_writes,
             replaced_content_inputs,
+            applied_style_reactions: Vec::new(),
         }
     }
 
@@ -2299,6 +2347,21 @@ impl InputForPass {
                 element_style_inputs: &self.element_style_inputs,
                 host_fact_writes: &[],
             },
+        );
+        record_applied_style_reactions(engine, &self.applied_style_reactions);
+    }
+}
+
+/// Keeps the reactions the host applied, for the next transaction's pass to derive the children's
+/// reactions from.
+fn record_applied_style_reactions(engine: &mut StyleEngine, reactions: &[FfiAppliedStyleReaction]) {
+    for reaction in reactions {
+        operations::record_applied_style_reaction(
+            engine,
+            reaction.node,
+            reaction.reaction,
+            reaction.inherited_style_groups_changed,
+            reaction.facts,
         );
     }
 }
@@ -5276,13 +5339,15 @@ fn record_interned_atom(engine: &mut StyleEngine, raw: usize, atom: StyleAtomID)
 }
 
 /// Takes the pending style transaction and returns its versioned semantic match answers. The
-/// transaction applies `input`, the style input the host recorded since the last one, first.
+/// transaction applies `input`, the style input the host recorded since the last one, first, and
+/// keeps the `applied_style_reactions` the host applied as it installed the batches before.
 ///
 /// # Safety
 /// `engine` must be live, and `layout_arena` the document's live layout arena or null. `input` is
 /// null or as for [`style_engine_apply_transaction`]'s `transaction`, its grant arrays kept live
-/// until the call returns. The returned answer slice remains valid until the next mutable
-/// `style_engine_*` entry point or an explicit discard of the transaction outputs.
+/// until the call returns, and `applied_style_reactions` points at `applied_style_reaction_count`
+/// reactions. The returned answer slice remains valid until the next mutable `style_engine_*` entry
+/// point or an explicit discard of the transaction outputs.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_take_style_transaction(
     engine: StyleEngineHandle,
@@ -5290,7 +5355,11 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
     computation_inputs: FfiDocumentStyleComputationInputs,
     layout_arena: *mut c_void,
     input: *const FfiStyleInputTransaction,
+    applied_style_reactions: *const FfiAppliedStyleReaction,
+    applied_style_reaction_count: usize,
 ) -> FfiStyleTransactionView {
+    // SAFETY: Guaranteed by the caller.
+    let applied_style_reactions = unsafe { borrow(applied_style_reactions, applied_style_reaction_count) };
     // SAFETY: The host passes its document's live layout arena, or null.
     let document = (!layout_arena.is_null())
         .then(|| unsafe { crate::layout::ArenaHandle::document_of(layout_arena) })
@@ -5305,13 +5374,10 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
             return FfiStyleTransactionView::default();
         };
         // SAFETY: Guaranteed by the caller.
-        let (input, grant) = unsafe { input.as_ref() }.map_or((PassInput::None, StyleNodeGrant::default()), |input| {
-            // SAFETY: Guaranteed by the caller.
-            (
-                PassInput::Here(unsafe { InputForPass::take_from(input) }),
-                StyleNodeGrant::of(input),
-            )
-        });
+        let grant = unsafe { input.as_ref() }.map_or_else(StyleNodeGrant::default, StyleNodeGrant::of);
+        // SAFETY: As above.
+        let input = unsafe { InputForPass::handed_over(input, applied_style_reactions) }
+            .map_or(PassInput::None, |input| PassInput::Here(Box::new(input)));
         let transaction = OwnerStyleTransaction::Whole {
             root,
             computation_inputs,
@@ -5340,6 +5406,7 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
         // SAFETY: As above.
         unsafe { apply_input_transaction_on_document_thread(engine, input) };
     }
+    record_applied_style_reactions(engine, applied_style_reactions);
     let Some(root) = StyleNodeID::from_raw(root) else {
         return FfiStyleTransactionView::default();
     };
@@ -5498,9 +5565,22 @@ pub unsafe extern "C" fn style_engine_submit_style_transaction(
     computation_inputs: FfiDocumentStyleComputationInputs,
     layout_arena: *mut c_void,
     input: *const FfiStyleInputTransaction,
+    applied_style_reactions: *const FfiAppliedStyleReaction,
+    applied_style_reaction_count: usize,
 ) {
     // SAFETY: Guaranteed by the caller.
-    let mut pass = unsafe { prepare_style_pass(engine, root, computation_inputs, layout_arena, input) };
+    let applied_style_reactions = unsafe { borrow(applied_style_reactions, applied_style_reaction_count) };
+    // SAFETY: Guaranteed by the caller.
+    let mut pass = unsafe {
+        prepare_style_pass(
+            engine,
+            root,
+            computation_inputs,
+            layout_arena,
+            input,
+            applied_style_reactions,
+        )
+    };
     // A layout frame that runs its first round's style in its flight takes the pass along instead.
     let Some(mut pass) = STYLE_PASS_FOR_FLIGHT.with(|collected| match collected.borrow_mut().as_mut() {
         Some(slot) => {
@@ -5573,7 +5653,7 @@ pub(crate) struct StylePassJob {
 pub(crate) enum PassInput {
     None,
     /// With the pass, until it is sent to the owner or applied on the document thread.
-    Here(InputForPass),
+    Here(Box<InputForPass>),
     /// Sent to the owner as a change of `document`: the pass applies that document's changes through `through`.
     Sent {
         document: crate::render_owner::DocumentId,
@@ -5590,7 +5670,7 @@ impl PassInput {
         let Self::Here(input) = std::mem::replace(self, Self::None) else {
             return;
         };
-        let through = crate::render_owner::send_change(document, crate::render_owner::Change::StyleInputs(input));
+        let through = crate::render_owner::send_change(document, crate::render_owner::Change::StyleInputs(*input));
         *self = Self::Sent { document, through };
     }
 
@@ -5680,6 +5760,7 @@ pub(crate) unsafe fn prepare_style_pass(
     computation_inputs: FfiDocumentStyleComputationInputs,
     layout_arena: *mut c_void,
     input: *const FfiStyleInputTransaction,
+    applied_style_reactions: &[FfiAppliedStyleReaction],
 ) -> StylePassJob {
     let engine = unsafe { engine_entrance(engine, "style_engine_take_style_transaction") };
     assert!(
@@ -5692,21 +5773,12 @@ pub(crate) unsafe fn prepare_style_pass(
         "one style pass is in flight at a time"
     );
     // SAFETY: Guaranteed by the caller.
-    let input = unsafe { input.as_ref() }.map(|transaction| {
+    if let Some(transaction) = unsafe { input.as_ref() } {
         // SAFETY: Guaranteed by the caller.
-        let (elements, texts) = unsafe {
-            (
-                borrow_mut(
-                    transaction.element_identity_grant,
-                    transaction.element_identity_grant_count,
-                ),
-                borrow_mut(transaction.text_identity_grant, transaction.text_identity_grant_count),
-            )
-        };
-        grant_style_nodes(engine, elements, texts);
-        // SAFETY: Guaranteed by the caller.
-        unsafe { InputForPass::take_from(transaction) }
-    });
+        unsafe { StyleNodeGrant::of(transaction).grant(engine) };
+    }
+    // SAFETY: Guaranteed by the caller.
+    let input = unsafe { InputForPass::handed_over(input, applied_style_reactions) };
     engine.computed_group_sets.begin_pass_beside_host_pins();
     // SAFETY: Guaranteed by the caller.
     unsafe { begin_style_transaction(engine, computation_inputs) };
@@ -5723,7 +5795,7 @@ pub(crate) unsafe fn prepare_style_pass(
         root,
         snapshot,
         timeline_samples,
-        input: input.map_or(PassInput::None, PassInput::Here),
+        input: input.map_or(PassInput::None, |input| PassInput::Here(Box::new(input))),
     }
 }
 
