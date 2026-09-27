@@ -227,7 +227,12 @@ public:
     void record_shadow_root(StyleNodeID host, StyleNodeID shadow_root);
     void record_tree_scope_root(TreeScopeID, StyleNodeID root);
     void record_tree_scope_uses_document_sheets(TreeScopeID);
-    // The nodes assigned to a slot, and the document's top layer, each a whole list at a time.
+    // The nodes assigned to a slot, and the document's top layer, each a whole list at a time. A change to one only
+    // notes it: record_changed_node_lists() records each list that changed once, as the recorded input is submitted.
+    void note_slot_assignment_changed(StyleNodeID slot);
+    void note_top_layer_changed();
+    [[nodiscard]] OrderedHashTable<StyleNodeID> take_slots_whose_assignment_changed() { return move(m_slots_whose_assignment_changed); }
+    [[nodiscard]] bool take_top_layer_changed() { return exchange(m_top_layer_changed, false); }
     void record_slot_assigned_nodes(StyleNodeID slot, ReadonlySpan<StyleNodeID> assigned);
     void record_top_layer_elements(ReadonlySpan<StyleNodeID> elements);
     // What an element's style asked of size query containers, which finds the dependents a container's new box moves,
@@ -572,6 +577,11 @@ private:
         HashMap<u32, size_t> table_spans;
     };
     ArrivalFactWrites m_arrival_fact_writes;
+    // The slots whose assigned nodes changed, and whether the top layer did, since the recorded input was last
+    // submitted.
+    OrderedHashTable<StyleNodeID> m_slots_whose_assignment_changed;
+    bool m_top_layer_changed { false };
+    [[nodiscard]] bool has_changed_node_lists() const { return !m_slots_whose_assignment_changed.is_empty() || m_top_layer_changed; }
     bool change_arrival_fact_write(HashMap<u32, size_t> ArrivalFactWrites::* kind, StyleEngineFFI::FfiHostFactWrite);
     // The recorded input submit_recorded_input() took for the style pass submit_style_transaction() submits, until
     // the pass takes it.

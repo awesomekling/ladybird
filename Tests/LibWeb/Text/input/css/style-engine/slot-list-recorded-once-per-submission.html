@@ -1,0 +1,54 @@
+<!doctype html>
+<script src="../../include.js"></script>
+<div id="host"></div>
+<div id="namedHost"></div>
+<div id="otherHost"></div>
+<dialog id="dialog">dialog</dialog>
+<script>
+    promiseTest(async () => {
+        const nextFrame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+        const style = `<style>slot { display: block; color: rgb(0, 0, 255); } ::slotted(.last) { color: rgb(0, 128, 0); }</style>`;
+        const shadow = host.attachShadow({ mode: "open", slotAssignment: "manual" });
+        shadow.innerHTML = `${style}<slot></slot>`;
+        const namedShadow = namedHost.attachShadow({ mode: "open" });
+        namedShadow.innerHTML = `${style}<slot></slot>`;
+        const otherShadow = otherHost.attachShadow({ mode: "open" });
+        otherShadow.innerHTML = `<style>::slotted(*) { color: rgb(255, 0, 0); }</style><slot id="doomed"></slot>`;
+        await nextFrame();
+        await nextFrame();
+
+        // Every slottable that arrives changes its slot's list. Each list goes in once, as the recorded input is
+        // submitted: ten thousand arrivals that each recorded the whole list again recorded a hundred million entries.
+        const count = 10000;
+        const spans = [];
+        for (let i = 0; i < count; ++i)
+            spans.push(host.appendChild(document.createElement("span")));
+        spans[count - 1].className = "last";
+        shadow.querySelector("slot").assign(...spans);
+        println(`last of a manual slot: ${getComputedStyle(spans[count - 1]).color}`);
+        println(`first of a manual slot: ${getComputedStyle(spans[0]).color}`);
+
+        const fragment = document.createDocumentFragment();
+        for (let i = 0; i < 500; ++i)
+            fragment.appendChild(document.createElement("span"));
+        fragment.lastChild.className = "last";
+        namedHost.appendChild(fragment);
+        println(`last of a named slot: ${getComputedStyle(namedHost.lastChild).color}`);
+        println(`first of a named slot: ${getComputedStyle(namedHost.firstChild).color}`);
+
+        // A slot whose list changed and that departs before the input is submitted has no list to record.
+        otherHost.appendChild(document.createElement("b"));
+        otherShadow.getElementById("doomed").remove();
+        println(`slottable of a removed slot: ${getComputedStyle(otherHost.firstChild).color}`);
+
+        // The top layer is recorded as it is when the input is submitted.
+        dialog.showModal();
+        dialog.close();
+        dialog.showModal();
+        await nextFrame();
+        println(`dialog: ${getComputedStyle(dialog).position} ${dialog.matches(":modal")}`);
+        dialog.close();
+        await nextFrame();
+        println(`closed dialog: ${getComputedStyle(dialog).display}`);
+    });
+</script>

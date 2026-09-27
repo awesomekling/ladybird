@@ -64,7 +64,7 @@ void StyleEngine::begin_holding_input_recorded_beside_pass()
 {
     VERIFY(!m_holds_input_recorded_beside_pass);
     // With nothing recorded beside the pass, what the drain records goes on with its waves as it does in place.
-    m_holds_input_recorded_beside_pass = has_recorded_input() || !m_host_fact_writes.is_empty() || m_style_node_grant_request || m_text_style_node_grant_request || !m_inputs_queued_during_pass.is_empty();
+    m_holds_input_recorded_beside_pass = has_recorded_input() || !m_host_fact_writes.is_empty() || has_changed_node_lists() || m_style_node_grant_request || m_text_style_node_grant_request || !m_inputs_queued_during_pass.is_empty();
 }
 
 void StyleEngine::end_holding_input_recorded_beside_pass()
@@ -748,6 +748,20 @@ void StyleEngine::record_tree_scope_uses_document_sheets(TreeScopeID tree_scope)
     record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::TreeScopeUsesDocumentSheets, .value = 0, .node = 0, .parent = 0, .previous_sibling = 0, .facts = tree_scope.value(), .data = 0 });
 }
 
+void StyleEngine::note_slot_assignment_changed(StyleNodeID slot)
+{
+    if (!has_changed_node_lists())
+        note_recorded_input(*this, m_style_computer);
+    m_slots_whose_assignment_changed.set(slot);
+}
+
+void StyleEngine::note_top_layer_changed()
+{
+    if (!has_changed_node_lists())
+        note_recorded_input(*this, m_style_computer);
+    m_top_layer_changed = true;
+}
+
 void StyleEngine::record_slot_assigned_nodes(StyleNodeID slot, ReadonlySpan<StyleNodeID> assigned)
 {
     if (assigned.is_empty()) {
@@ -977,6 +991,7 @@ bool StyleEngine::has_journaled_input() const
         || !m_local_feature_deltas.is_empty()
         || !m_state_deltas.is_empty()
         || !m_element_declaration_deltas.is_empty()
+        || has_changed_node_lists()
         // An atom's adoption is no input to style.
         || m_host_fact_writes.size() > m_pending_atom_adoption_count;
 }
@@ -989,6 +1004,7 @@ size_t StyleEngine::recorded_input_count() const
         + m_local_feature_deltas.size()
         + m_state_deltas.size()
         + m_element_declaration_deltas.size()
+        + m_slots_whose_assignment_changed.size() + m_top_layer_changed
         + (m_host_fact_writes.size() - m_pending_atom_adoption_count);
 }
 
@@ -1018,8 +1034,10 @@ void StyleEngine::submit_recorded_input(RecordedInputGoesTo goes_to)
     // after what was published beside the pass.
     if (m_style_computer && layout_pass_is_in_flight())
         m_style_computer->document().join_frame_reaching_style_engine();
-    if (m_style_computer)
+    if (m_style_computer) {
         take_in_pending_style_arrivals(m_style_computer->document());
+        record_changed_node_lists(m_style_computer->document(), *this);
+    }
     StyleInputScope const input { *this };
     if (m_style_computer)
         publish_pending_element_features(*this, *m_style_computer);
