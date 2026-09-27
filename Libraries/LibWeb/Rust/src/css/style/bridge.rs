@@ -1079,6 +1079,9 @@ pub enum FfiHostFactKind {
     /// `data` is a snapshot of the presentational hints of the element `node`, as for
     /// `ElementInlineStyleProperties`, and `value` their `FfiElementDeclarationKind`.
     ElementPresentationalHints = 32,
+    /// The viewport moved: every element or pseudo row whose style depends on viewport metrics
+    /// takes the derived reaction `value`.
+    ViewportDependentStyleInputs = 33,
 }
 
 /// Which element an `FfiReplacedContentInput` holds the values of.
@@ -2198,29 +2201,6 @@ pub unsafe fn replay_discard_flat_tree_descendants(engine: StyleEngineHandle) {
     engine.clear_ffi_style_node_query();
 }
 
-/// Returns the owner nodes whose element or pseudo style depends on viewport metrics.
-///
-/// # Safety
-/// `engine` must be live. The returned slice remains valid until the next mutable engine call or an
-/// explicit discard.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_viewport_dependent_nodes(engine: StyleEngineInputHandle) -> FfiStyleNodeSlice {
-    let engine = unsafe { engine_entrance(engine, "style_engine_viewport_dependent_nodes") };
-    engine.clear_ffi_style_node_query();
-    let nodes = engine.computed_group_sets.viewport_dependent_nodes();
-    engine.install_ffi_style_node_query(nodes)
-}
-
-/// Discards the borrowed viewport-dependent node slice.
-///
-/// # Safety
-/// `engine` must be live.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_discard_viewport_dependent_nodes(engine: StyleEngineInputHandle) {
-    let engine = unsafe { engine_entrance(engine, "style_engine_discard_viewport_dependent_nodes") };
-    engine.clear_ffi_style_node_query();
-}
-
 /// Grants the host identities to mint on its own, beside the ones a transaction's answer carries:
 /// fills `elements` and `texts` with element and text identities whose slots the engine has
 /// readied. A grant makes no identity live, and no node the engine knows names one, so it changes no
@@ -2770,6 +2750,13 @@ unsafe fn apply_host_fact_writes(engine: &mut StyleEngine, writes: &[FfiHostFact
             FfiHostFactKind::ChildrenExplicitlyInherit => {
                 if let Some(node) = StyleNodeID::from_raw(write.node) {
                     engine.note_children_explicitly_inherit(node);
+                }
+            }
+            FfiHostFactKind::ViewportDependentStyleInputs => {
+                for node in engine.computed_group_sets.viewport_dependent_nodes() {
+                    if let Some(node) = StyleNodeID::from_raw(node) {
+                        engine.record_derived_element_style_input(node, write.value, 0);
+                    }
                 }
             }
             FfiHostFactKind::ElementAssociatedPseudoKind => {
