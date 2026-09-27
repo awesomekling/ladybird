@@ -497,6 +497,32 @@ pub unsafe extern "C" fn rust_declaration_data_retain(
     data
 }
 
+/// Take an immutable snapshot of the borrowed declarations, as a presentational hint write carries
+/// them to the style engine. The caller owns one reference to it.
+///
+/// # Safety
+/// `properties` must borrow `count` `FfiDeclaredProperty` entries whose values point at live,
+/// Arc-backed `StyleValueData` roots.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_declaration_data_from_views(
+    properties: *const FfiDeclaredProperty,
+    count: usize,
+) -> *const DeclarationBlockData {
+    let properties = if count == 0 {
+        &[]
+    } else {
+        unsafe { std::slice::from_raw_parts(properties, count) }
+    };
+    Arc::into_raw(Arc::new(DeclarationBlockData {
+        properties: properties
+            .iter()
+            .map(|property| unsafe { declaration_from_view(property) })
+            .collect(),
+        custom_properties: Vec::new(),
+        custom_property_references: std::sync::OnceLock::new(),
+    }))
+}
+
 /// Take an immutable snapshot of what the block holds now, which later edits to the block leave as
 /// it is. The caller owns one reference to it.
 #[unsafe(no_mangle)]

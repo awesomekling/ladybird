@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/AnyOf.h>
 #include <AK/HashTable.h>
 #include <AK/ScopeGuard.h>
 #include <AK/StdLibExtras.h>
@@ -201,7 +202,7 @@ StyleEngine::~StyleEngine()
 {
     // What a write took that never crossed is still the write's to give up.
     for (auto const& write : m_host_fact_writes) {
-        if (write.kind == StyleEngineFFI::FfiHostFactKind::ElementInlineStyleProperties)
+        if (write.kind == StyleEngineFFI::FfiHostFactKind::ElementInlineStyleProperties || write.kind == StyleEngineFFI::FfiHostFactKind::ElementPresentationalHints)
             Parser::ValueParserFFI::rust_declaration_data_release(bit_cast<Parser::ValueParserFFI::DeclarationBlockData const*>(write.data));
         else if (write.kind == StyleEngineFFI::FfiHostFactKind::AdoptAtom)
             StyleEngineFFI::style_engine_release_host_atom(write.data, write.facts);
@@ -318,6 +319,21 @@ void StyleEngine::finish_sheet_rules_replacement(SheetID sheet)
     });
 }
 
+static bool property_defines_a_css_transition(PropertyID property_id)
+{
+    switch (property_id) {
+    case PropertyID::Transition:
+    case PropertyID::TransitionBehavior:
+    case PropertyID::TransitionDelay:
+    case PropertyID::TransitionDuration:
+    case PropertyID::TransitionProperty:
+    case PropertyID::TransitionTimingFunction:
+        return true;
+    default:
+        return false;
+    }
+}
+
 void StyleEngine::set_element_presentational_hint_properties(StyleNodeID node, StyleEngineFFI::FfiElementDeclarationKind kind, ReadonlySpan<StyleProperty> properties)
 {
     Vector<Parser::ValueParserFFI::FfiDeclaredProperty> declarations;
@@ -330,7 +346,9 @@ void StyleEngine::set_element_presentational_hint_properties(StyleNodeID node, S
             .name = {},
         });
     }
-    if (StyleEngineFFI::style_engine_set_element_presentational_hint_properties(rust_handle(), node.value(), kind, declarations.data(), declarations.size()))
+    // The write carries a snapshot of the hints, whose one reference goes to the engine.
+    record_host_fact_write({ .kind = StyleEngineFFI::FfiHostFactKind::ElementPresentationalHints, .value = to_underlying(kind), .node = node.value(), .parent = 0, .previous_sibling = 0, .facts = 0, .data = bit_cast<FlatPtr>(Parser::ValueParserFFI::rust_declaration_data_from_views(declarations.data(), declarations.size())) });
+    if (any_of(properties, [](auto const& property) { return property_defines_a_css_transition(property.property_id); }))
         note_css_transitions_may_observe_style_changes();
 }
 

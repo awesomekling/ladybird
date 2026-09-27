@@ -1076,6 +1076,9 @@ pub enum FfiHostFactKind {
     /// The element `node` exposes the part named by the atom `facts` for the host `parent`, a
     /// list at a time as for `SlotAssignedNode`. An empty list is one write with no `parent`.
     ElementParts = 31,
+    /// `data` is a snapshot of the presentational hints of the element `node`, as for
+    /// `ElementInlineStyleProperties`, and `value` their `FfiElementDeclarationKind`.
+    ElementPresentationalHints = 32,
 }
 
 /// Which element an `FfiReplacedContentInput` holds the values of.
@@ -2565,7 +2568,9 @@ impl Drop for InputForPass {
                 FfiHostFactKind::TextData | FfiHostFactKind::ElementLanguage => {
                     drop(unsafe { ak::Utf16String::from_raw_owned(write.data) });
                 }
-                FfiHostFactKind::ElementInlineStyleProperties if write.data != 0 => {
+                FfiHostFactKind::ElementInlineStyleProperties | FfiHostFactKind::ElementPresentationalHints
+                    if write.data != 0 =>
+                {
                     // SAFETY: The write transfers one reference to the snapshot.
                     drop(unsafe {
                         std::sync::Arc::from_raw(
@@ -2793,6 +2798,20 @@ unsafe fn apply_host_fact_writes(engine: &mut StyleEngine, writes: &[FfiHostFact
                 StyleAtomID(write.parent),
                 StyleAtomID(write.facts),
             ),
+            FfiHostFactKind::ElementPresentationalHints => {
+                // SAFETY: The write transfers one reference to the snapshot.
+                let data = unsafe {
+                    std::sync::Arc::from_raw(write.data as *const crate::css::declaration_block::DeclarationBlockData)
+                };
+                if let Some(node) = StyleNodeID::from_raw(write.node) {
+                    let kind = match write.value {
+                        0 => FfiElementDeclarationKind::InlineStyle,
+                        1 => FfiElementDeclarationKind::PresentationalHint,
+                        _ => FfiElementDeclarationKind::SvgPresentationAttribute,
+                    };
+                    register_element_declared_properties(engine, node, kind, &data.properties, &[]);
+                }
+            }
             FfiHostFactKind::ElementInlineStyleProperties => {
                 // SAFETY: The caller vouches that the write transfers one reference to the snapshot.
                 let data = (write.data != 0).then(|| unsafe {
@@ -3578,36 +3597,6 @@ fn register_element_declared_properties(
         write_custom_declarations(&custom_declarations, payload);
     });
     has_transitions
-}
-
-/// Registers borrowed presentation hints and returns whether they can define transitions.
-///
-/// # Safety
-/// `engine` must be live. `properties` must borrow `count` `FfiDeclaredProperty` entries
-/// whose values point at live, Arc-backed `StyleValueData` roots.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_set_element_presentational_hint_properties(
-    engine: StyleEngineInputHandle,
-    node: u32,
-    kind: FfiElementDeclarationKind,
-    properties: *const c_void,
-    count: usize,
-) -> bool {
-    let engine = unsafe { engine_entrance(engine, "style_engine_set_element_presentational_hint_properties") };
-    use crate::css::declaration_block::{FfiDeclaredProperty, declaration_from_view};
-    let Some(node) = StyleNodeID::from_raw(node) else {
-        return false;
-    };
-    let properties = if count == 0 {
-        &[]
-    } else {
-        unsafe { std::slice::from_raw_parts(properties.cast::<FfiDeclaredProperty>(), count) }
-    };
-    let declarations = properties
-        .iter()
-        .map(|property| unsafe { declaration_from_view(property) })
-        .collect::<Vec<_>>();
-    register_element_declared_properties(engine, node, kind, &declarations, &[])
 }
 
 #[cfg(feature = "style-recording")]
