@@ -1323,7 +1323,7 @@ void StyleComputer::record_container_query_effects(StyleDrainScope const& scope,
             abstract_element.document().commit_messages().note_scroll_state_query_container_usage(identity);
             break;
         case StyleEngineFFI::FfiContainerEffectKind::NeedsEvaluationAfterLayout:
-            abstract_element.document().commit_messages().note_style_query_needs_evaluation_after_layout(identity);
+            // The engine recorded the container as it handed the effects over.
             break;
         case StyleEngineFFI::FfiContainerEffectKind::SubjectViewportDependency:
             abstract_element.document().commit_messages().note_style_viewport_dependency(identity);
