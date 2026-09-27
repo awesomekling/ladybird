@@ -11570,6 +11570,8 @@ fn replay_ffi_reclaims_the_non_empty_recorded_atom_set() {
             computation_inputs,
             std::ptr::null_mut(),
             std::ptr::null(),
+            std::ptr::null(),
+            0,
         )
     };
 
