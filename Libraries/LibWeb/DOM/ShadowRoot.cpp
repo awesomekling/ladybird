@@ -50,8 +50,9 @@ void ShadowRoot::finalize()
 {
     Base::finalize();
     // The unregistration writes the style engine, which a frame in flight may be reading. A finalizer runs inside the
-    // garbage collector, where the frame's consume (which runs script and allocates) must not run, so it only waits
-    // for the frame's stages to finish and leaves the consume to the event loop.
+    // garbage collector, where the frame's consume (which runs script and allocates) must not run, and where it must
+    // not wait for a stage that only the main thread can send the engine home from, so the write goes in once the
+    // engine is home, and the consume is left to the event loop.
     Layout::RustFFI::rust_stage_thread_begin_style_engine_entrances_that_only_wait();
     document().unregister_shadow_root({}, *this);
     Layout::RustFFI::rust_stage_thread_end_style_engine_entrances_that_only_wait();

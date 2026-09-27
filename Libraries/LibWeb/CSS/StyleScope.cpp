@@ -34,6 +34,8 @@
 
 namespace Web::CSS {
 
+extern "C" void style_engine_unpublish_tree_scope_animation_keyframes(void*, u32, FlatPtr, void*, void (*)(void*));
+
 // https://www.w3.org/TR/cssom/#remove-a-css-style-sheet
 void StyleScope::remove_a_css_style_sheet(CSS::StyleSheetState& sheet, StyleEngineUpdate style_engine_update)
 {
@@ -743,9 +745,13 @@ void StyleScope::unpublish_animation_keyframes()
         return;
     if (!document().style_engine_tracks_tree())
         return;
-    record_tree_scope_animation_keyframes(
-        document(), shadow_root->style_engine_tree_scope(), bit_cast<FlatPtr>(shadow_root), {}, {}, {});
-    m_published_keyframe_sets.clear();
+    // A garbage collection's finalizer gets here, which must not wait for a stage that holds the engine: the engine
+    // gives the row up once it can, and the sets the row names stay alive until it has.
+    using KeyframeSets = Vector<NonnullRefPtr<Animations::KeyframeEffect::KeyFrameSet const>>;
+    auto* sets = new KeyframeSets(move(m_published_keyframe_sets));
+    style_engine_unpublish_tree_scope_animation_keyframes(
+        document().style_computer().style_engine().rust_handle(), shadow_root->style_engine_tree_scope().value(),
+        bit_cast<FlatPtr>(shadow_root), sets, [](void* sets) { delete static_cast<KeyframeSets*>(sets); });
 }
 
 TreeScopeID StyleScope::style_engine_tree_scope() const
