@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<script src="frame-in-flight.js"></script>
+<style>
+    body { margin: 0; }
+    #box { width: 100px; height: 10px; background-color: green; }
+    iframe { width: 200px; height: 100px; }
+</style>
+<div id="box"></div>
+<script>
+    // A container's own style and layout update beside its iframe's recording in flight runs where it is forced,
+    // not behind that recording on the stage thread: the recording reaches no document's arena or style engine, so
+    // it stays held in flight while the container updates.
+    async function updateBesideChildRecording(inner, update) {
+        return whileFrameInFlight("mid-recording", () => {
+            inner.style.backgroundColor = inner.style.backgroundColor === "blue" ? "green" : "blue";
+        }, frameInFlight => {
+            const value = update();
+            return {
+                ...frameInFlight,
+                value,
+                stillHeld: internals.waitForHeldFrame() === "mid-recording",
+            };
+        }, inner.ownerDocument);
+    }
+
+    function report(result) {
+        println(`held as armed: ${heldAsArmed(result, "mid-recording")}`);
+        println(`read: ${result.value}`);
+        println(`child recording still held: ${result.armed ? result.stillHeld : true}`);
+    }
+
+    asyncTest(async done => {
+        const frame = document.createElement("iframe");
+        frame.srcdoc = "<body style='margin: 0'><div id=inner style='width: 20px; height: 10px; background: blue'></div>";
+        const loaded = new Promise(resolve => frame.addEventListener("load", resolve, { once: true }));
+        document.body.appendChild(frame);
+        await loaded;
+        await twoFrames();
+        const inner = frame.contentDocument.getElementById("inner");
+
+        report(await updateBesideChildRecording(inner, () => {
+            box.style.color = "red";
+            return getComputedStyle(box).color;
+        }));
+        await twoFrames();
+
+        report(await updateBesideChildRecording(inner, () => {
+            box.style.width = "150px";
+            return box.offsetWidth;
+        }));
+        await twoFrames();
+
+        println(`after: ${getComputedStyle(box).color} ${box.offsetWidth} ${inner.offsetWidth}`);
+        done();
+    });
+</script>

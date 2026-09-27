@@ -1833,7 +1833,14 @@ pub(crate) fn run_document_stage<R: Send>(arena: *const c_void, stage: impl FnOn
         let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(owner);
         stage()
     };
-    if runs_waited_for_document_stage_in_place(arena) {
+    run_stage_reaching(arena, stage)
+}
+
+/// Runs `stage`, which reaches the document whose arena is `arena` and no other, as [`run_stage`] does, or right here
+/// when no stage of the frame in flight is that document's: queued behind another document's stages on the stage
+/// thread, it would only wait for them. A null `arena` names no document, and the stage runs as [`run_stage`] runs it.
+pub(crate) fn run_stage_reaching<R: Send>(arena: *const c_void, stage: impl FnOnce() -> R + Send) -> R {
+    if !arena.is_null() && runs_waited_for_document_stage_in_place(arena) {
         return run_in_place(stage);
     }
     run_stage(stage)
