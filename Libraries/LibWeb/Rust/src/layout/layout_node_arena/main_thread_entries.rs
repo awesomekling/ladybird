@@ -380,7 +380,11 @@ unsafe extern "C" fn layout_arena_prepare_node_for_detach(arena: *mut c_void, ro
     // SAFETY: The handle came from layout_arena_create and outlives this call.
     unsafe { LayoutNodeArena::from_handle(arena) }.assert_owner_thread();
     // SAFETY: As above.
-    unsafe { paying_host_handbacks(&main_thread, arena, || prepare_row_for_detach(arena, row)) }
+    unsafe {
+        paying_host_handbacks(&main_thread, arena, || {
+            prepare_row_for_detach(LayoutNodeArena::from_handle(arena), row);
+        });
+    }
 }
 
 /// Prepares every row in the layout subtree `root` heads for leaving the tree.
@@ -389,7 +393,11 @@ unsafe extern "C" fn layout_arena_prepare_subtree_for_detach(arena: *mut c_void,
     assert!(!arena.is_null(), "layout node arena handle is null");
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     // SAFETY: The handle came from layout_arena_create and outlives this call.
-    unsafe { paying_host_handbacks(&main_thread, arena, || prepare_subtree_for_detach(arena, root)) }
+    unsafe {
+        paying_host_handbacks(&main_thread, arena, || {
+            prepare_subtree_for_detach(LayoutNodeArena::from_handle(arena), root);
+        });
+    }
 }
 
 #[unsafe(no_mangle)]

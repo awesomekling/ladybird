@@ -499,8 +499,8 @@ fn clear_stale_layout_node(arena: *mut LayoutNodeArena, node: StyleNodeID, clear
         }
         // SAFETY: The arena handle is the one this walk was given, and each of these borrows the
         // arena for itself.
-        unsafe { crate::painting::ffi::clear_paintable_row_of_node(arena.cast(), row) };
-        super::layout_node_arena::prepare_row_for_detach(arena.cast(), row);
+        unsafe { crate::painting::ffi::clear_paintable_row_of_node(arena, row) };
+        super::layout_node_arena::prepare_row_for_detach(unsafe { &*arena }, row);
         arena_ref.unbind_row(row);
         let parent = arena_ref.data(row).parent.get();
         if !parent.is_invalid() {
@@ -545,9 +545,9 @@ fn free_pseudo_element_box(arena: *mut LayoutNodeArena, node: StyleNodeID, gener
     // SAFETY: The arena handle is the one this walk was given, and each of these borrows the arena
     // for itself.
     for row in rows {
-        unsafe { crate::painting::ffi::clear_paintable_row_of_node(arena.cast(), row) };
+        unsafe { crate::painting::ffi::clear_paintable_row_of_node(arena, row) };
     }
-    super::layout_node_arena::prepare_subtree_for_detach(arena.cast(), row);
+    super::layout_node_arena::prepare_subtree_for_detach(unsafe { &*arena }, row);
     let was_attached = super::layout_node_arena::detach_and_free_subtree(arena, row);
     arena_ref.clear_pseudo_element_box(node, generated_for);
     was_attached
@@ -595,7 +595,7 @@ fn detach_top_layer_element_layout_subtree(arena: *mut LayoutNodeArena, style_no
         };
         // The preparation walks the still-linked subtree and the borrow it takes ends before the
         // subtree is freed.
-        prepare_subtree_for_detach(arena.cast::<c_void>(), layout_node_to_detach);
+        prepare_subtree_for_detach(unsafe { &*arena }, layout_node_to_detach);
         // SAFETY: The arena outlives this call.
         if unsafe { &*arena }.detach_from_parent(layout_node_to_detach) {
             free_subtree_and_hand_back(arena, layout_node_to_detach);
@@ -619,10 +619,10 @@ fn detach_remaining_layout_rows_for_removal(arena: *mut LayoutNodeArena, style_n
         return;
     }
     // SAFETY: As above; the clear borrows the arena for itself.
-    unsafe { crate::painting::ffi::clear_paintable_row_of_node(arena.cast(), row) };
+    unsafe { crate::painting::ffi::clear_paintable_row_of_node(arena, row) };
     let top_layer_placement = topmost_layout_node_of_top_layer_placement(arena, row);
     if !top_layer_placement.is_invalid() {
-        prepare_subtree_for_detach(arena.cast(), top_layer_placement);
+        prepare_subtree_for_detach(unsafe { &*arena }, top_layer_placement);
         let was_attached = super::layout_node_arena::detach_and_free_subtree(arena, top_layer_placement);
         assert!(was_attached, "a top layer placement is a viewport child");
     }
@@ -832,9 +832,9 @@ pub(crate) unsafe fn detach_removed_box_in_place(
     unsafe { &*arena }.for_each_node_in_layout_subtree_in_pre_order(layout_node, |node| subtree.push(node));
     for node in subtree {
         // SAFETY: Guaranteed by the caller; the clear borrows the arena for itself.
-        unsafe { crate::painting::ffi::clear_paintable_row_of_node(arena.cast(), node) };
+        unsafe { crate::painting::ffi::clear_paintable_row_of_node(arena, node) };
     }
-    prepare_subtree_for_detach(arena.cast(), layout_node);
+    prepare_subtree_for_detach(unsafe { &*arena }, layout_node);
     let was_attached = super::layout_node_arena::detach_and_free_subtree(arena, layout_node);
     debug_assert!(
         was_attached,
@@ -2966,10 +2966,7 @@ fn update_principal_node_after_entry(
                 transfer_fragments_to_replacement_box(arena, old_layout_node, layout_node);
                 // The old layout node is still attached, and the preparation borrows the arena for
                 // itself.
-                prepare_subtree_for_detach(
-                    (arena as *const LayoutNodeArena).cast_mut().cast::<c_void>(),
-                    old_layout_node,
-                );
+                prepare_subtree_for_detach(arena, old_layout_node);
                 let old_parent = layout_host.parent(old_layout_node);
                 assert!(!old_parent.is_invalid());
                 let replaced_old_box = arena.replace_child(
@@ -3388,7 +3385,7 @@ fn run_tree_build_stage(host: &DomTreeBuilderHost, document_style_node: u32) -> 
     // build found out before.
     let replaced_layout_tree = replaced_layout_root.index != viewport.index;
     if replaced_layout_tree && arena.slot_is_live(replaced_layout_root) {
-        prepare_subtree_for_detach(host.arena.cast(), replaced_layout_root);
+        prepare_subtree_for_detach(unsafe { &*host.arena }, replaced_layout_root);
         free_subtree_and_hand_back(host.arena, replaced_layout_root);
     }
     let mut reports = state.reports;

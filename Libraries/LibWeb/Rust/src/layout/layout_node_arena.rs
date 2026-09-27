@@ -6943,9 +6943,7 @@ pub unsafe extern "C" fn layout_arena_node_style_record_pinned_by_host(arena: *m
 /// its style record is pinned for the host and its paint cache is cleaned here rather than through
 /// the journal, which would resolve the identity after a replacement row had been bound. The image
 /// resources the row holds go with it.
-pub(crate) fn prepare_row_for_detach(arena: *mut c_void, row: NodeSlotId) {
-    // SAFETY: The handle came from layout_arena_create and outlives this call.
-    let arena_ref = unsafe { &*arena.cast::<LayoutNodeArena>() };
+pub(crate) fn prepare_row_for_detach(arena_ref: &LayoutNodeArena, row: NodeSlotId) {
     let kind = arena_ref.data(row).kind.get();
     let is_node_with_style = super::tree_builder::node_kind_is_node_with_style(kind);
     if is_node_with_style {
@@ -6954,11 +6952,10 @@ pub(crate) fn prepare_row_for_detach(arena: *mut c_void, row: NodeSlotId) {
             arena_ref.pin_node_style_record_for_host(row, style_record);
         }
     }
-    // SAFETY: The handle is the one this call was given, and the invalidation borrows the arena
-    // for itself.
-    unsafe {
-        crate::painting::ffi::layout_arena_paintable_invalidate_paint_cache(arena, row, false);
-    }
+    arena_ref.push_paint_damage(
+        row,
+        crate::painting::record::damage::PaintDamage::ALL_DRAW | crate::painting::record::damage::PaintDamage::ALL_HIT,
+    );
     if is_node_with_style && arena_ref.rows_with_image_observers.borrow_mut().remove(&row) {
         arena_ref.hand_back(HostHandback::ImageObservers(row));
     }
@@ -6969,12 +6966,10 @@ pub(crate) fn prepare_row_for_detach(arena: *mut c_void, row: NodeSlotId) {
 
 /// Prepares every row in the layout subtree `root` heads for leaving the tree, handing back the
 /// image resources the rows hold.
-pub(crate) fn prepare_subtree_for_detach(arena: *mut c_void, root: NodeSlotId) {
-    // SAFETY: The caller keeps the arena alive for this call.
-    let arena_ref = unsafe { &*arena.cast::<LayoutNodeArena>() };
-    arena_ref.assert_owner_thread();
+pub(crate) fn prepare_subtree_for_detach(arena: &LayoutNodeArena, root: NodeSlotId) {
+    arena.assert_owner_thread();
     let mut rows = Vec::new();
-    arena_ref.for_each_node_in_layout_subtree_in_pre_order(root, |row| rows.push(row));
+    arena.for_each_node_in_layout_subtree_in_pre_order(root, |row| rows.push(row));
     for row in rows {
         prepare_row_for_detach(arena, row);
     }
@@ -8419,7 +8414,7 @@ mod tests {
         unsafe {
             let handle = std::ptr::from_mut(&mut arena).cast();
             crate::layout::paying_host_handbacks(&crate::stage::MainThread::for_test(), handle, || {
-                crate::painting::ffi::clear_paintable_row_of_node(handle, allocation.slot);
+                crate::painting::ffi::clear_paintable_row_of_node(handle.cast(), allocation.slot);
             });
         }
 
