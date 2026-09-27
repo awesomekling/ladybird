@@ -5300,7 +5300,7 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
     let committed_boxes = unsafe { super::animations::CommittedTransformReferenceBoxes::lend(layout_arena) };
     // The pass samples at the times the host published for this update.
     let timeline_samples = engine_on_stage.animation_timeline_samples().clone();
-    let output = crate::stage_thread::run_stage(move || {
+    let output = crate::stage_thread::run_stage_reaching(layout_arena, move || {
         run_style_pass(engine_on_stage, root, committed_boxes, &timeline_samples)
     });
     finish_style_transaction(engine, root, output)

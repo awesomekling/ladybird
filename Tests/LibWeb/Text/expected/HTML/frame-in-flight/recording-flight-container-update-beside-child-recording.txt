@@ -1,0 +1,7 @@
+held as armed: true
+read: rgb(255, 0, 0)
+child recording still held: true
+held as armed: true
+read: 150
+child recording still held: true
+after: rgb(255, 0, 0) 150 20

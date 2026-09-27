@@ -2513,7 +2513,7 @@ pub(crate) unsafe fn compute_root_layout(
         document_in_quirks_mode,
         should_collect_devtools_layout_data,
     };
-    crate::stage_thread::run_stage(move || run_root_layout_stage(input, scratch))
+    crate::stage_thread::run_document_stage(arena_handle, move || run_root_layout_stage(input, scratch))
 }
 
 /// Commits a computed root layout to the arena without the host. The arena half is settled by
@@ -2791,7 +2791,7 @@ pub(crate) unsafe fn compute_subtree_layout_fragments(
         document_in_quirks_mode,
         should_collect_devtools_layout_data: false,
     };
-    crate::stage_thread::run_stage(move || compute_subtree_layout_stage(input, scratch))
+    crate::stage_thread::run_document_stage(arena_handle, move || compute_subtree_layout_stage(input, scratch))
 }
 
 /// Commits a computed partial relayout boundary to the arena without the host, leaving the host
