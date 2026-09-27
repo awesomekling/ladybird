@@ -12,7 +12,7 @@
 //! and every read a hit test makes of the rows, their layout nodes and their styles is one the frame
 //! answers (see [`super::read`]). It is immutable and owns all of it, so the main thread hit tests
 //! it while the arena goes on changing, and it holds no arena and names no layout node: a hit names
-//! rows, which the caller finds what they stand for.
+//! the DOM node it is on as the host names one, and the rows it went through.
 //!
 //! A list outlives the rows it was recorded over: a scroll, a clip or a transform moves what a point
 //! hits through the visual context tree and the committed rows, not through the list. So the
@@ -20,12 +20,14 @@
 //! last one is shared with it.
 
 use crate::css::css_pixels::CssPixelPoint;
+use crate::css::style::tree::StyleNodeID;
 use crate::layout::FfiCssPixelPoint;
 use crate::layout::LayoutNodeArena;
-use crate::layout::node_data::NodeSlotId;
+use crate::layout::node_data::{NodeFlag, NodeKind, NodeSlotId};
 use crate::painting::display_list::commands::ContextRef;
+use crate::painting::geometry_read::GeometryRead;
 use crate::painting::hit_test::HitTestList;
-use crate::painting::published_frame::{PaintSource, PublishedFrame};
+use crate::painting::published_frame::{PaintRead, PaintSource, PublishedFrame};
 use crate::painting::visual_context::VisualContextTree;
 use std::cell::RefCell;
 use std::ffi::c_void;
@@ -100,14 +102,48 @@ pub struct FfiHitTestSnapshotItem {
     pub context: ContextRef,
 }
 
-/// What a hit on a snapshot's item resolves to: the rows an event is dispatched to, and where in its
-/// node it landed.
+/// A DOM node, as the host names one (`DOM::NodeIdentity`): by its style node, or as the document.
+#[repr(C)]
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub struct FfiHitNodeIdentity {
+    pub kind: FfiHitNodeIdentityKind,
+    pub style_node: u32,
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub enum FfiHitNodeIdentityKind {
+    #[default]
+    None,
+    StyleNode,
+    Document,
+}
+
+impl FfiHitNodeIdentity {
+    const DOCUMENT: Self = Self {
+        kind: FfiHitNodeIdentityKind::Document,
+        style_node: 0,
+    };
+
+    fn of_style_node(style_node: Option<StyleNodeID>) -> Self {
+        style_node.map_or_else(Self::default, |style_node| Self {
+            kind: FfiHitNodeIdentityKind::StyleNode,
+            style_node: style_node.raw(),
+        })
+    }
+
+    fn is_none(self) -> bool {
+        self.kind == FfiHitNodeIdentityKind::None
+    }
+}
+
+/// What a hit on a snapshot's item resolves to: the DOM node an event there is dispatched to, the
+/// row whose style admitted the hit, and where in its node the hit landed.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct FfiHitTestSnapshotHit {
-    pub dispatch: NodeSlotId,
-    pub allow_pseudo_fallback: bool,
-    pub fallback_dispatch: NodeSlotId,
+    pub node: FfiHitNodeIdentity,
+    pub hit_node: NodeSlotId,
     pub has_index_in_node: bool,
     pub index_in_node: usize,
     pub is_text_fragment: bool,
@@ -116,13 +152,103 @@ pub struct FfiHitTestSnapshotHit {
 impl Default for FfiHitTestSnapshotHit {
     fn default() -> Self {
         Self {
-            dispatch: NodeSlotId::INVALID,
-            allow_pseudo_fallback: false,
-            fallback_dispatch: NodeSlotId::INVALID,
+            node: FfiHitNodeIdentity::default(),
+            hit_node: NodeSlotId::INVALID,
             has_index_in_node: false,
             index_in_node: 0,
             is_text_fragment: false,
         }
+    }
+}
+
+/// The DOM node a row an event is dispatched to stands for, as `Layout::Node::dom_node_identity()`
+/// names it; for a row generated for a pseudo-element, the element it was generated for where
+/// `allow_pseudo_fallback`.
+fn dispatch_identity(
+    rows: &impl PaintRead,
+    row: Option<NodeSlotId>,
+    allow_pseudo_fallback: bool,
+) -> FfiHitNodeIdentity {
+    let Some(row) = row.filter(|row| rows.slot_is_live(*row)) else {
+        return FfiHitNodeIdentity::default();
+    };
+    if rows.node_flags_if_live(row) & NodeFlag::Anonymous as u32 == 0 {
+        // The document's row is the viewport.
+        if rows.node_kind_if_live(row) == Some(NodeKind::Viewport) {
+            return FfiHitNodeIdentity::DOCUMENT;
+        }
+        return FfiHitNodeIdentity::of_style_node(rows.node_style_node(row));
+    }
+    if allow_pseudo_fallback && rows.node_is_generated_for_pseudo_element(row) {
+        return FfiHitNodeIdentity::of_style_node(rows.node_style_node(row));
+    }
+    FfiHitNodeIdentity::default()
+}
+
+impl HitTestSnapshot {
+    /// https://html.spec.whatwg.org/multipage/image-maps.html#image-map-processing-model
+    /// The `<area>` of the map an image is associated with that the point hits, which the image published
+    /// onto its row.
+    fn image_map_area_for_point(
+        &self,
+        rows: &impl PaintRead,
+        image: NodeSlotId,
+        local_point: CssPixelPoint,
+    ) -> FfiHitNodeIdentity {
+        // For historical reasons, the coordinates must be interpreted relative to the displayed image after any
+        // stretching caused by the CSS 'width' and 'height' properties.
+        let image_rect = crate::painting::paintable_geometry::absolute_rect_or_default(rows, image);
+        let x = (local_point.x - image_rect.x).to_float();
+        let y = (local_point.y - image_rect.y).to_float();
+        let area = self.frame.rows.image_map_areas.area_for_point(
+            image,
+            x,
+            y,
+            image_rect.width.to_double() as f32,
+            image_rect.height.to_double() as f32,
+        );
+        FfiHitNodeIdentity::of_style_node(StyleNodeID::from_raw(area))
+    }
+
+    fn resolve_hit(&self, index: usize, local_point: CssPixelPoint) -> FfiHitTestSnapshotHit {
+        self.read(FfiHitTestSnapshotHit::default(), |list, rows| {
+            let item = &list.items[index];
+            let mut hit_node = item.hit_node;
+            // https://drafts.csswg.org/cssom-view/#dom-document-elementfrompoint
+            // 2. If there is a box in the viewport that would be a target for hit testing at coordinates x,y, when
+            //    applying the transforms that apply to the descendants of the viewport, return the associated element
+            //    and terminate these steps.
+            // 3. If the document has a root element, return the root element and terminate these steps.
+            // AD-HOC: Our viewport refers to the document instead of the root element. The steps above imply that we
+            //         should not hit test the viewport as a box, and report the root element as hit when we otherwise
+            //         miss, so we correct those hits here. This is where both pointer event hit testing and
+            //         elementFromPoint() converge.
+            let mut node = FfiHitNodeIdentity::default();
+            if rows.node_kind_if_live(item.paintable) == Some(NodeKind::Viewport) {
+                let root = self.frame.paint_state().root_element_row;
+                if rows.paintable_row_is_populated(root) {
+                    node = dispatch_identity(rows, Some(root), false);
+                    hit_node = root;
+                }
+            }
+            let resolved = list.resolve_hit(rows, index, local_point);
+            if node.is_none() && rows.paintable_row_is_populated(item.paintable) {
+                node = self.image_map_area_for_point(rows, item.paintable, local_point);
+            }
+            if node.is_none() {
+                node = dispatch_identity(rows, resolved.dispatch, resolved.allow_pseudo_fallback);
+            }
+            if node.is_none() {
+                node = dispatch_identity(rows, resolved.fallback_dispatch, false);
+            }
+            FfiHitTestSnapshotHit {
+                node,
+                hit_node,
+                has_index_in_node: resolved.has_index_in_node,
+                index_in_node: resolved.index_in_node,
+                is_text_fragment: resolved.is_text_fragment,
+            }
+        })
     }
 }
 
@@ -243,6 +369,8 @@ pub unsafe extern "C" fn hit_test_snapshot_item(snapshot: *const c_void, index: 
     }
 }
 
+/// Resolves a hit on the item at `local_point` to the DOM node it names.
+///
 /// # Safety
 ///
 /// `snapshot` must be a live handle from `layout_arena_publish_hit_test_snapshot`, and `index` an
@@ -253,18 +381,7 @@ pub unsafe extern "C" fn hit_test_snapshot_resolve_hit(
     index: usize,
     local_point: FfiCssPixelPoint,
 ) -> FfiHitTestSnapshotHit {
-    unsafe { snapshot_from_handle(snapshot) }.read(Default::default(), |list, rows| {
-        let local_point: CssPixelPoint = local_point.into();
-        let resolved = list.resolve_hit(rows, index, local_point);
-        FfiHitTestSnapshotHit {
-            dispatch: resolved.dispatch.unwrap_or(NodeSlotId::INVALID),
-            allow_pseudo_fallback: resolved.allow_pseudo_fallback,
-            fallback_dispatch: resolved.fallback_dispatch.unwrap_or(NodeSlotId::INVALID),
-            has_index_in_node: resolved.has_index_in_node,
-            index_in_node: resolved.index_in_node,
-            is_text_fragment: resolved.is_text_fragment,
-        }
-    })
+    unsafe { snapshot_from_handle(snapshot) }.resolve_hit(index, local_point.into())
 }
 
 #[cfg(test)]
@@ -312,5 +429,49 @@ mod tests {
             published_tree.as_deref().unwrap()
         )));
         assert_eq!(arena.publish_hit_test_snapshot().generation(), 2);
+    }
+
+    /// A snapshot names the DOM node a row stands for as the host names it, from the style node its
+    /// frame published for the row, whatever the arena's rows name after the snapshot: the document
+    /// for the viewport, which stands for the root element in a hit, and nothing for an anonymous
+    /// row but where it was generated for a pseudo-element and may stand for its element.
+    #[test]
+    fn a_snapshot_names_the_dom_node_its_frame_published_for_a_row() {
+        let mut arena = LayoutNodeArena::new();
+        let viewport = arena.allocate_for_test().slot;
+        arena.write_shape(viewport).set_kind(NodeKind::Viewport);
+        arena.populate_paintable_row(viewport);
+        let root = arena.allocate_for_test().slot;
+        arena.write_shape(root).set_kind(NodeKind::BlockContainer);
+        arena.populate_paintable_row(root);
+        arena.set_style_node_for_test(root, StyleNodeID::from_raw(5));
+        let pseudo = arena.allocate_for_test().slot;
+        arena.write_shape(pseudo).set_kind(NodeKind::BlockContainer);
+        arena.write_shape(pseudo).set_flags(NodeFlag::Anonymous as u32);
+        arena
+            .write_shape(pseudo)
+            .set_generated_for(crate::layout::node_data::GENERATED_FOR_BEFORE);
+        arena.set_style_node_for_test(pseudo, StyleNodeID::from_raw(5));
+        arena.paint_state().borrow_mut().root_background_source =
+            Some(crate::painting::host::FfiRootBackgroundSource {
+                root_layout_node: root,
+                ..Default::default()
+            });
+        let snapshot = arena.publish_hit_test_snapshot();
+        arena.set_style_node_for_test(root, StyleNodeID::from_raw(6));
+        arena.publish_paint_tree();
+
+        let element = FfiHitNodeIdentity {
+            kind: FfiHitNodeIdentityKind::StyleNode,
+            style_node: 5,
+        };
+        let absolute_rects = RefCell::default();
+        let rows = PaintSource::new(&snapshot.frame, &absolute_rects);
+        assert_eq!(snapshot.frame.paint_state().root_element_row, root);
+        assert!(dispatch_identity(&rows, Some(root), false) == element);
+        assert!(dispatch_identity(&rows, Some(viewport), false) == FfiHitNodeIdentity::DOCUMENT);
+        assert!(dispatch_identity(&rows, Some(pseudo), false).is_none());
+        assert!(dispatch_identity(&rows, Some(pseudo), true) == element);
+        assert!(dispatch_identity(&rows, None, true).is_none());
     }
 }

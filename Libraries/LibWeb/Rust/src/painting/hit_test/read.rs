@@ -19,8 +19,6 @@ use crate::layout::node_data::NodeSlotId;
 use crate::painting::published_frame::PaintRead;
 
 pub(crate) trait CaretRead: PaintRead {
-    /// The style node of what a row was built for, which is how the host names that DOM node.
-    fn node_style_node(&self, id: NodeSlotId) -> Option<StyleNodeID>;
     /// Whether `node` is `scope` or lies below it in the DOM tree of `document`.
     fn node_is_in_dom_subtree_of(&self, node: StyleNodeID, scope: StyleNodeID, document: StyleNodeID) -> bool;
     /// The length, in code units, of the DOM text a text row was built for.
@@ -28,10 +26,6 @@ pub(crate) trait CaretRead: PaintRead {
 }
 
 impl<T: crate::painting::paintable_rows::PaintableRowsRead> CaretRead for T {
-    fn node_style_node(&self, id: NodeSlotId) -> Option<StyleNodeID> {
-        crate::layout::LayoutNodeArena::node_style_node(self, id)
-    }
-
     fn node_is_in_dom_subtree_of(&self, node: StyleNodeID, scope: StyleNodeID, document: StyleNodeID) -> bool {
         self.with_style_store(|engine| engine.tree().is_in_dom_subtree_of(node, scope, document))
     }

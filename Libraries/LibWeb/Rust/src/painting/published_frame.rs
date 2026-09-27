@@ -105,6 +105,8 @@ pub(crate) struct PublishedPaintState {
     pub(crate) hit_test_list_generation: u64,
     /// How many items the document's hit-test list held, which the recording's list reserves.
     pub(crate) hit_test_item_capacity_hint: usize,
+    /// The row of the document's root element, whose background the canvas paints, or none.
+    pub(crate) root_element_row: NodeSlotId,
 }
 
 impl PublishedPaintState {
@@ -125,6 +127,9 @@ impl PublishedPaintState {
             selection_pseudo_styles: paint_state.selection_pseudo_styles.clone(),
             hit_test_list_generation: paint_state.hit_test_list_generation,
             hit_test_item_capacity_hint,
+            root_element_row: paint_state
+                .root_background_source
+                .map_or(NodeSlotId::INVALID, |source| source.root_layout_node),
         }
     }
 
@@ -349,6 +354,8 @@ pub(crate) trait PaintRead: GeometryRead {
     fn node_generated_for(&self, id: NodeSlotId) -> u8;
     fn node_is_generated_for_pseudo_element(&self, id: NodeSlotId) -> bool;
     fn node_is_dom_backed(&self, id: NodeSlotId) -> bool;
+    /// The style node of what a node was built for, which is how the host names that DOM node.
+    fn node_style_node(&self, id: NodeSlotId) -> Option<crate::css::style::tree::StyleNodeID>;
     fn node_is_element_backed(&self, id: NodeSlotId) -> bool;
     fn node_is_out_of_flow_if_live(&self, id: NodeSlotId) -> bool;
     fn node_is_atomic_inline(&self, id: NodeSlotId) -> bool;
@@ -488,6 +495,13 @@ macro_rules! read_live_layout_tree {
 
         fn slot_is_live(&self, id: crate::layout::node_data::NodeSlotId) -> bool {
             crate::layout::LayoutNodeArena::slot_is_live($arena(self), id)
+        }
+
+        fn node_style_node(
+            &self,
+            id: crate::layout::node_data::NodeSlotId,
+        ) -> Option<crate::css::style::tree::StyleNodeID> {
+            crate::layout::LayoutNodeArena::node_style_node($arena(self), id)
         }
 
         fn node_first_child_if_live(
@@ -794,6 +808,10 @@ impl PaintRead for PaintSource<'_> {
 
     fn node_generated_for(&self, id: NodeSlotId) -> u8 {
         self.frame.live_node(id).generated_for
+    }
+
+    fn node_style_node(&self, id: NodeSlotId) -> Option<crate::css::style::tree::StyleNodeID> {
+        self.frame.node(id)?.style_node
     }
 
     fn node_is_generated_for_pseudo_element(&self, id: NodeSlotId) -> bool {

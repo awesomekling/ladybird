@@ -33,6 +33,7 @@ use super::layout_node_arena::SLOTS_PER_CHUNK;
 use super::node_data::{NodeData, NodeKind, NodeSlotId, PaintNode, StylePayloadsRef};
 use crate::cow_column::{ColumnSnapshot, CowColumn};
 use crate::css::style::published_record::PublishedStyleRecord;
+use crate::css::style::tree::StyleNodeID;
 use std::cell::Cell;
 use std::ops::Deref;
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -126,6 +127,12 @@ impl Deref for ShapeWriter<'_> {
 impl ShapeWriter<'_> {
     /// Writes a field, marking the chunk only for a value the field does not already hold.
     #[inline]
+    /// Marks the node's row for the next publication, for a write to what the row copies from outside
+    /// its [`NodeData`]: its style node.
+    pub(crate) fn mark_written(&self) {
+        self.written_rows.set(self.written_rows.get() | self.row_bit);
+    }
+
     fn write<T: Copy + PartialEq>(&self, field: &ShapeCell<T>, value: T) {
         if field.get() != value {
             self.written_rows.set(self.written_rows.get() | self.row_bit);
@@ -274,8 +281,12 @@ impl TreeShape {
     /// Brings the rows of every node written since the last publication up to date and publishes
     /// the column. Slots freed from now on are retired until the returned [`RetiredSlots`] is
     /// dropped.
-    pub(crate) fn publish(&mut self, chunks: &[Box<Chunk>]) -> PublishedShape {
-        self.update(chunks);
+    pub(crate) fn publish(
+        &mut self,
+        chunks: &[Box<Chunk>],
+        style_nodes: &[Cell<Option<StyleNodeID>>],
+    ) -> PublishedShape {
+        self.update(chunks, style_nodes);
         let epoch = Arc::new(RetireEpoch {
             slots: Mutex::default(),
             later: OnceLock::new(),
@@ -313,7 +324,7 @@ impl TreeShape {
     /// Brings the rows of every node written since the last call up to date. A row whose node did
     /// not change is not written, so a chunk an earlier publication shares is copied only for a
     /// change.
-    fn update(&mut self, chunks: &[Box<Chunk>]) {
+    fn update(&mut self, chunks: &[Box<Chunk>], style_nodes: &[Cell<Option<StyleNodeID>>]) {
         self.nodes.grow_to(chunks.len() * SLOTS_PER_CHUNK);
         self.styles.grow_to(chunks.len() * SLOTS_PER_CHUNK);
         for (chunk_index, chunk) in chunks.iter().enumerate() {
@@ -324,8 +335,9 @@ impl TreeShape {
                     written &= written - 1;
                     let index = chunk_index * SLOTS_PER_CHUNK + offset;
                     let data = &chunk.slots[offset];
+                    let style_node = style_nodes.get(index).and_then(Cell::get);
                     self.nodes
-                        .set(index, PaintNode::of(data))
+                        .set(index, PaintNode::of(data, style_node))
                         .expect("the column holds every chunk");
                     // Clone the owner only for a row whose owner changed.
                     let published_style = self.styles.get(index).and_then(PublishedStyle::address);
@@ -390,8 +402,12 @@ impl Drop for RetireEpoch {
 #[cfg(test)]
 impl TreeShape {
     /// Whether the column changed since it was last published, once it is brought up to date.
-    pub(crate) fn changed_since_publish(&mut self, chunks: &[Box<Chunk>]) -> bool {
-        self.update(chunks);
+    pub(crate) fn changed_since_publish(
+        &mut self,
+        chunks: &[Box<Chunk>],
+        style_nodes: &[Cell<Option<StyleNodeID>>],
+    ) -> bool {
+        self.update(chunks, style_nodes);
         self.nodes.written_since_publish() || self.styles.written_since_publish()
     }
 }
@@ -433,7 +449,7 @@ mod tests {
             ..
         } = arena.publish_paint_tree();
         for id in [root, first, second] {
-            assert!(node(&nodes, id) == Some(&PaintNode::of(arena.data(id))));
+            assert!(node(&nodes, id) == Some(&PaintNode::of(arena.data(id), arena.node_style_node(id))));
         }
         arena.free_subtree(root).destroy_shells_and_invoke_callbacks();
     }

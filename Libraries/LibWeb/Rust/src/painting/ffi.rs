@@ -351,26 +351,6 @@ pub unsafe extern "C" fn layout_arena_invalidate_nearest_self_painting_inline_pa
     }
 }
 
-/// The committed row of the document element, as the last rendering preparation published it, or
-/// an invalid slot when the document has no root element or the root holds no row.
-///
-/// # Safety
-///
-/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_published_root_element_row(arena: *mut c_void) -> NodeSlotId {
-    let arena = unsafe { arena_from_handle(arena) };
-    let slot = arena
-        .paint_state()
-        .borrow()
-        .root_background_source
-        .map_or(NodeSlotId::INVALID, |source| source.root_layout_node);
-    if !arena.paintable_rows().paintable_row_is_populated(slot) {
-        return NodeSlotId::INVALID;
-    }
-    slot
-}
-
 /// The fields of a committed paintable row that C++ reads, copied out through
 /// [`main_side_paintable_rows`]. `is_populated` is false, and the rest default, when the slot has
 /// no committed box.
@@ -3425,25 +3405,6 @@ pub unsafe extern "C" fn layout_arena_publish_image_map_areas(
         .into_boxed_slice();
     arena.join_frame_for_main_side_write("image map areas");
     arena.image_map_areas().publish(slot, published);
-}
-
-/// The style-tree identity of the first `<area>` of the image's map, in tree order, whose shape
-/// covers the point. Zero when the image has no map, or when no shape covers the point.
-///
-/// # Safety
-///
-/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_image_map_area_for_point(
-    arena: *mut c_void,
-    slot: NodeSlotId,
-    x: f32,
-    y: f32,
-    image_width: f32,
-    image_height: f32,
-) -> u32 {
-    unsafe { main_side_paintable_rows(arena) }
-        .with_image_map_areas(|areas| areas.area_for_point(slot, x, y, image_width, image_height))
 }
 
 /// Whether the `<area>` of this image named by `style_node` is editable or an editing host: 1 or
