@@ -547,11 +547,19 @@ enum OwedHostHalf {
 /// What the frame owes the document thread, as typed effects it applies without the arena.
 enum HostHalfPayment {
     /// The install of the style pass the frame's first round ran in its flight, and the rest of
-    /// the style update, which come before what the round's layout owes, with what applying the
-    /// batch in flight handed back, if the flight applied it.
-    StyleInstall(Option<HostPayment>),
+    /// the style update, which come before what the round's layout owes, with what the flight left
+    /// of applying the batch, if it applied it.
+    StyleInstall(Option<AppliedFlightStyle>),
     TreeBuild(TreeBuildPayment),
     Commit(CommitPayment),
+}
+
+/// What a flight left of applying the style batch its style pass published, for the install of the batch.
+struct AppliedFlightStyle {
+    /// What applying the batch handed back, which the install pays first.
+    handed_back: HostPayment,
+    /// What each row of the batch marked of its element's layout nodes, with the record it installed.
+    damages: crate::css::style::fast_hash::FastMap<StyleNodeID, (u32, u64)>,
 }
 
 /// How a layout frame ends.
@@ -896,11 +904,19 @@ impl LayoutFrame {
                 // at the join that takes the flight back, forced or not: a forced join in the middle of
                 // a DOM mutation runs it there as it does for the style flight.
                 // What applying the batch in flight handed back, the install reads: it is paid first.
-                HostHalfPayment::StyleInstall(handed_back) => {
-                    if let Some(handed_back) = handed_back {
+                HostHalfPayment::StyleInstall(applied) => {
+                    let host_tables = main_thread.host_tables();
+                    if let Some(AppliedFlightStyle { handed_back, damages }) = applied {
                         handed_back.pay(main_thread);
+                        if let Some(host_tables) = host_tables {
+                            host_tables.hold_flight_style_damages(damages);
+                        }
                     }
                     host.finish_submitted_style_update(main_thread);
+                    // What the rows of the batch left to the host's install that it did not take is dropped.
+                    if let Some(host_tables) = host_tables {
+                        host_tables.hold_flight_style_damages(Default::default());
+                    }
                     restored_style |= self.finish_flight_style_host_half(main_thread);
                 }
                 HostHalfPayment::TreeBuild(payment) => payment.pay(main_thread),
@@ -965,17 +981,16 @@ impl LayoutFrame {
             return;
         }
         let handed_back = self.arena().resolve_flight_style_handbacks();
+        let damages = self.arena().take_flight_style_damages();
         self.flight_style_applied = self.arena().take_flight_style_applied();
+        let applied = handed_back.map(|handed_back| AppliedFlightStyle { handed_back, damages });
         let install = self
             .host_payments
             .iter_mut()
             .find(|payment| matches!(payment, HostHalfPayment::StyleInstall(_)));
         match install {
-            Some(HostHalfPayment::StyleInstall(slot)) => *slot = handed_back,
-            _ => debug_assert!(
-                handed_back.is_none(),
-                "a flight that applies its style owes the install"
-            ),
+            Some(HostHalfPayment::StyleInstall(slot)) => *slot = applied,
+            _ => debug_assert!(applied.is_none(), "a flight that applies its style owes the install"),
         }
     }
 
