@@ -147,9 +147,14 @@ impl RenderState {
         self.arena.arena().style_engine_handle()
     }
 
-    /// The handle of the state's arena, which the units the owner runs for the document reach it through.
+    /// The handle of the state's arena, which names the document to what files work under it.
     fn arena_handle(&mut self) -> *mut c_void {
         std::ptr::from_mut::<ArenaHandle>(&mut self.arena).cast::<c_void>()
+    }
+
+    /// The state's arena and what lives beside it, which the owner hands the units it runs for the document.
+    fn state(&mut self) -> *mut ArenaHandle {
+        std::ptr::from_mut::<ArenaHandle>(&mut self.arena)
     }
 
     /// Drops the state. Changes no unit applied, as those sent for a pass that never ran, give up what they hold with
@@ -210,9 +215,10 @@ pub(crate) struct RenderingUpdate {
     style_engine: Option<crate::css::style::engine_home::StyleEngineLoan>,
     /// Where the owner sends the update's effects.
     effects: Sender<crate::stage_thread::FrameOwns<FrameEffects>>,
-    /// How the owner runs it. The owner reaches the pipeline only through the updates it is sent, so what reaches
-    /// the owner without reaching the pipeline (the unit tests' stage threads) links without it.
-    run: fn(Self),
+    /// How the owner runs it, with the render state of its document, where the owner holds one. The owner reaches
+    /// the pipeline only through the updates it is sent, so what reaches the owner without reaching the pipeline (the
+    /// unit tests' stage threads) links without it.
+    run: fn(Self, Option<*mut ArenaHandle>),
 }
 
 impl RenderingUpdate {
@@ -229,12 +235,12 @@ impl RenderingUpdate {
         }
     }
 
-    fn run(self: Box<Self>) {
-        (self.run)(*self);
+    fn run(self: Box<Self>, state: Option<*mut ArenaHandle>) {
+        (self.run)(*self, state);
     }
 
-    fn run_flight(self) {
-        let (outcome, ran) = self.flight.run(self.style_engine);
+    fn run_flight(self, state: Option<*mut ArenaHandle>) {
+        let (outcome, ran) = self.flight.run(self.style_engine, state);
         // SAFETY: What the update's stages left is the frame's, which the main thread reaches only once it has taken
         // the frame back.
         let effects = unsafe { crate::stage_thread::FrameOwns::new(FrameEffects { outcome, ran }) };
@@ -413,7 +419,9 @@ fn handle_message(message: ToOwner) {
                 !document.is_valid() || STATES.with_borrow(|states| states.contains_key(&document)),
                 "a rendering update of a document with no render state"
             );
-            ticket.run(|| update.run());
+            // A test's update of no document runs with the arena its flight names.
+            let state = STATES.with_borrow_mut(|states| states.get_mut(&document).map(RenderState::state));
+            ticket.run(|| update.run(state));
         }
         ToOwner::Style {
             document,
@@ -438,7 +446,7 @@ fn handle_message(message: ToOwner) {
         ToOwner::Layout { document, unit } => {
             // The state's borrow ends before the unit runs, which may reach another document's state. The unit finds
             // the arena inside its answer, so that a panic there answers the waiting document thread.
-            (*unit).run(|| with_state(document, RenderState::arena_handle));
+            (*unit).run(|| with_state(document, RenderState::state));
         }
         ToOwner::Paint { document, pass } => {
             // As for a layout unit, the pass finds the arena inside its answer.

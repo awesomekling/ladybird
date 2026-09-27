@@ -7524,11 +7524,10 @@ pub(crate) struct EnrolledContentSources {
 ///
 /// # Safety
 ///
-/// `arena` must be a live handle whose owner waits for this call or makes it itself.
-pub(crate) unsafe fn read_enrolled_content_sources(arena: *mut c_void) -> EnrolledContentSources {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: The caller keeps the arena alive for this call and serializes all access to it.
-    let arena = unsafe { &*arena.cast::<LayoutNodeArena>() };
+/// `state` must be the live render state of the document, which nothing else reaches meanwhile.
+pub(crate) unsafe fn read_enrolled_content_sources(state: *mut super::ArenaHandle) -> EnrolledContentSources {
+    // SAFETY: Guaranteed by the caller.
+    let arena = unsafe { &*state }.arena();
     if arena.layout_pass_is_running() {
         return EnrolledContentSources {
             pass_was_running: true,
@@ -7569,45 +7568,42 @@ pub(crate) unsafe fn read_enrolled_content_sources(arena: *mut c_void) -> Enroll
 ///
 /// # Safety
 ///
-/// `arena` must be a live handle whose owner waits for this call or makes it itself, and nothing
-/// may have freed a row since `sources` was read from it.
-pub(crate) unsafe fn apply_enrolled_content_sources(arena: *mut c_void, sources: EnrolledContentSources) {
-    assert!(!arena.is_null(), "layout node arena handle is null");
+/// `state` must be the live render state of the document, which nothing else reaches meanwhile,
+/// and nothing may have freed a row since `sources` was read from it.
+pub(crate) unsafe fn apply_enrolled_content_sources(state: *mut super::ArenaHandle, sources: EnrolledContentSources) {
     if sources.pass_was_running {
         return;
     }
-    // SAFETY (for every derive below): the caller keeps the arena alive for this call and
+    // SAFETY (for every derive below): the caller keeps the state alive for this call and
     // serializes all access to it; no shared borrow outlives the text sync.
-    let enrolled_text_nodes = unsafe { &*arena.cast::<LayoutNodeArena>() }.pending_text_nodes_for_content_sync();
+    let arena: *mut LayoutNodeArena = unsafe { (*state).arena_mut() };
+    let enrolled_text_nodes = unsafe { &*arena }.pending_text_nodes_for_content_sync();
     for node in enrolled_text_nodes {
-        if !unsafe { &*arena.cast::<LayoutNodeArena>() }.slot_is_live(node) {
+        if !unsafe { &*arena }.slot_is_live(node) {
             continue;
         }
-        let parent = unsafe { &*arena.cast::<LayoutNodeArena>() }.data(node).parent.get();
+        let parent = unsafe { &*arena }.data(node).parent.get();
         // Detached nodes retain enrollment until a parent supplies their style.
         if parent.is_invalid() {
             continue;
         }
         // SAFETY: The slot is live, and no arena borrow survives the sync.
-        unsafe { super::rendered_text::ensure_text_content(arena.cast(), node) };
+        unsafe { super::rendered_text::ensure_text_content(arena, node) };
     }
 
     let mut live_replaced_nodes = Vec::with_capacity(sources.replaced_content_inputs.len());
     for (node, input) in sources.replaced_content_inputs {
         // SAFETY: As above.
-        let facts = super::node_facts::derived_replaced_content_facts(
-            unsafe { (*arena.cast::<LayoutNodeArena>()).data(node) },
-            input,
-        );
+        let facts = super::node_facts::derived_replaced_content_facts(unsafe { (*arena).data(node) }, input);
         live_replaced_nodes.push(node);
         // Changed facts invalidate cached formatting-context runs regardless of which
         // channel produced the change, including sources with no invalidation of their own.
         // SAFETY: As above; the shared borrows ended with their statements.
-        if unsafe { &mut *arena.cast::<LayoutNodeArena>() }.set_replaced_content_facts(node, facts) {
-            unsafe { &*arena.cast::<LayoutNodeArena>() }.bump_fragment_cache_epoch_of_self_and_ancestors(node);
+        if unsafe { &mut *arena }.set_replaced_content_facts(node, facts) {
+            unsafe { &*arena }.bump_fragment_cache_epoch_of_self_and_ancestors(node);
         }
     }
-    let arena = unsafe { &*arena.cast::<LayoutNodeArena>() };
+    let arena = unsafe { &*arena };
     let mut enrolled_replaced_nodes = arena.nodes_enrolled_for_replaced_content_facts_sync.borrow_mut();
     let enrolled_since_read = enrolled_replaced_nodes.split_off(sources.enrolled_replaced_node_count);
     *enrolled_replaced_nodes = live_replaced_nodes;

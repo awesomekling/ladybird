@@ -410,7 +410,14 @@ fn find_text(text: &[u16], query: &[u16], offset: usize, case_sensitive: bool) -
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_invalidate_searchable_text(arena: *mut c_void) {
     // SAFETY: Layout invalidates the cache before exposing the updated tree.
-    unsafe { LayoutNodeArena::from_handle_mut(arena) }.searchable_text = None;
+    unsafe { LayoutNodeArena::from_handle_mut(arena) }.invalidate_searchable_text();
+}
+
+impl LayoutNodeArena {
+    /// Drops the searchable text, which a commit that changed the tree left stale.
+    pub(crate) fn invalidate_searchable_text(&mut self) {
+        self.searchable_text = None;
+    }
 }
 
 #[cfg(test)]

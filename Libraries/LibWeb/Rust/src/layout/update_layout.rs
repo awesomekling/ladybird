@@ -9,7 +9,6 @@
 //! answer through a callback table registered once per arena. The document thread drives the
 //! loop and runs those steps itself; the rest of each round runs on the render owner.
 
-use super::LayoutNodeArena;
 use super::formatting_context::{
     CommitPayment, DeferredLayoutCommitHostHalf, PendingLayoutCommit, commit_root_layout_to_arena,
     commit_subtree_layout_to_arena, compute_root_layout, compute_subtree_layout_fragments,
@@ -26,6 +25,7 @@ use super::tree_builder::{
     FfiGeneratedContentItem, FfiLayoutTreeBuildOutcome, FfiPseudoElement, TreeBuildHostHalf, TreeBuildPayment,
     walk_layout_tree_build,
 };
+use super::{ArenaHandle, LayoutNodeArena};
 use crate::abort_on_panic;
 use crate::css::ffi_support::FfiUtf16View;
 use crate::css::style::tree::StyleNodeID;
@@ -417,16 +417,6 @@ enum PartialRelayout {
 
 const ORDINARY_STABILIZATION_ROUND_LIMIT: u64 = 8;
 
-/// # Safety
-///
-/// `arena_handle` must be a live handle with registered layout and layout update hosts, used on
-/// the document thread or by a stage it waits for, between `layout_arena_begin_update_layout` and
-/// its end.
-unsafe fn arena<'a>(arena_handle: *mut c_void) -> &'a LayoutNodeArena {
-    // SAFETY: Guaranteed by the caller.
-    unsafe { LayoutNodeArena::from_handle(arena_handle) }
-}
-
 /// What a layout frame is started with. The document drains its invalidation journal into the
 /// arena before the frame starts; the document facts the frame reads are snapshots the document
 /// thread hands it at each step it runs.
@@ -447,12 +437,12 @@ struct LayoutPassSources {
 impl LayoutPassSources {
     /// # Safety
     ///
-    /// As for [`arena`].
-    unsafe fn read(arena_handle: *mut c_void) -> Self {
+    /// `state` must be the live render state of the frame's document, which nothing else reaches meanwhile.
+    unsafe fn read(state: *mut ArenaHandle) -> Self {
         // SAFETY: Guaranteed by the caller.
         unsafe {
             Self {
-                content: read_enrolled_content_sources(arena_handle),
+                content: read_enrolled_content_sources(state),
             }
         }
     }
@@ -592,6 +582,9 @@ enum RoundStyle {
 /// has run.
 struct LayoutFrame {
     inputs: FrameInputs,
+    /// The render state of the frame's document, which the owner hands a unit of the frame, or a stage of it, for as
+    /// long as it runs; null between them.
+    state: *mut ArenaHandle,
     messages: FrameMessages,
     /// The rounds the loop has started, and the connected element count the last style round
     /// answered, which bound them.
@@ -624,7 +617,7 @@ struct LayoutFrame {
 /// A full layout pass a round has readied. Everything it reads is in hand, so it runs without the
 /// document thread, and what follows its commit is left to [`LayoutFrame::finish_round`].
 struct PendingLayoutPass {
-    arena_handle: *mut c_void,
+    state: *mut ArenaHandle,
     layout_root: NodeSlotId,
     sources: LayoutPassSources,
     facts: FfiLayoutUpdateDocumentFacts,
@@ -638,7 +631,7 @@ impl PendingLayoutPass {
     /// arena until it returns.
     unsafe fn run(self) -> LaidOutPass {
         let Self {
-            arena_handle,
+            state,
             layout_root,
             sources: LayoutPassSources { content },
             facts,
@@ -646,10 +639,10 @@ impl PendingLayoutPass {
         } = self;
         // SAFETY (for the three steps below): Guaranteed by the caller; the viewport box stays live
         // between them, and no row was freed since the sources were read.
-        unsafe { prepare_root_layout_from_sources(arena_handle, layout_root, content) };
+        unsafe { prepare_root_layout_from_sources(state, layout_root, content) };
         let output = unsafe {
             compute_root_layout(
-                arena_handle,
+                state,
                 layout_root,
                 facts.viewport_inline_size_raw,
                 facts.viewport_block_size_raw,
@@ -657,10 +650,10 @@ impl PendingLayoutPass {
                 facts.should_collect_devtools_layout_data,
             )
         };
-        let pending_commit = unsafe { commit_root_layout_to_arena(arena_handle, layout_root, &output) };
+        let pending_commit = unsafe { commit_root_layout_to_arena(state, layout_root, &output) };
         drop(output);
         // SAFETY: Guaranteed by the caller.
-        let arena = unsafe { arena(arena_handle) };
+        let arena = unsafe { &*state }.arena();
         arena.evaluate_size_containers_needing_evaluation_after_layout();
         // SAFETY: Guaranteed by the caller, and the frame delivers the host half at its next join,
         // in commit order.
@@ -706,8 +699,9 @@ pub(crate) struct OwnerLayoutUnit {
     run: unsafe fn(*mut LayoutFrame, FfiLayoutUpdateDocumentFacts) -> FrameStep,
 }
 
-/// Runs `run`, a unit of the frame `frame`, with `facts`, and resolves what the unit left the frame owing the document
-/// thread, which the thread pays once it has the unit's answer.
+/// Runs `run`, a unit of the frame `frame`, with `facts` and the render state `state` of the frame's document, and
+/// resolves what the unit left the frame owing the document thread, which the thread pays once it has the unit's
+/// answer.
 ///
 /// # Safety
 ///
@@ -716,11 +710,14 @@ unsafe fn run_unit(
     run: unsafe fn(*mut LayoutFrame, FfiLayoutUpdateDocumentFacts) -> FrameStep,
     frame: *mut LayoutFrame,
     facts: FfiLayoutUpdateDocumentFacts,
+    state: *mut ArenaHandle,
 ) -> FrameStep {
     // SAFETY: Guaranteed by the caller.
     unsafe {
+        (*frame).state = state;
         let step = run(frame, facts);
         (*frame).resolve_owed_host_halves();
+        (*frame).state = std::ptr::null_mut();
         step
     }
 }
@@ -732,7 +729,7 @@ impl OwnerLayoutUnit {
     /// Runs the unit on the owner, with the arena of the render state it holds for the unit's document, and answers
     /// the waiting document thread. Where the owner holds none (a bug of the sender's), the unit runs with the arena
     /// its frame names.
-    pub(crate) fn run(self, arena: impl FnOnce() -> Option<*mut c_void>) {
+    pub(crate) fn run(self, arena: impl FnOnce() -> Option<*mut ArenaHandle>) {
         let Self {
             frame,
             facts,
@@ -743,13 +740,18 @@ impl OwnerLayoutUnit {
         reply.answer(|| {
             // SAFETY: The document thread waits for the unit, and reaches neither the frame nor the arena meanwhile.
             let frame_arena = unsafe { (*frame).inputs.arena_handle };
-            let arena = arena();
-            debug_assert_eq!(Some(frame_arena), arena, "a unit runs with its document's arena");
-            let arena = arena.unwrap_or(frame_arena);
-            // The faces the round wants are its document's, for that document's layout end to request.
-            let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(arena as u64);
+            let state = arena();
+            debug_assert_eq!(
+                Some(frame_arena),
+                state.map(<*mut ArenaHandle>::cast::<c_void>),
+                "a unit runs with its document's arena"
+            );
             // SAFETY: As above.
-            let step = unsafe { run_unit(run, frame, facts) };
+            let state = state.unwrap_or_else(|| unsafe { ArenaHandle::held_by_waiting_thread(frame_arena) });
+            // The faces the round wants are its document's, for that document's layout end to request.
+            let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(state as u64);
+            // SAFETY: As above.
+            let step = unsafe { run_unit(run, frame, facts, state) };
             // SAFETY: The step goes back to the document thread, which waits for it.
             OwnerLayoutStep(unsafe { crate::stage_thread::CallerWaits::new(step) })
         });
@@ -853,6 +855,7 @@ impl LayoutFrame {
     fn new(inputs: FrameInputs, round_style: RoundStyle) -> Self {
         Self {
             inputs,
+            state: std::ptr::null_mut(),
             messages: FrameMessages::default(),
             layout_pass: 0,
             connected_element_count: 0,
@@ -930,7 +933,7 @@ impl LayoutFrame {
         // A document that traces its layout names the owners of the lines the passes left.
         if committed && main_thread.host_tables().is_some_and(super::HostTables::traces_layout) {
             // SAFETY: Guaranteed by the caller. Host callbacks have returned.
-            unsafe { arena(arena_handle) }.name_layout_trace_owners(main_thread);
+            unsafe { LayoutNodeArena::from_handle(arena_handle) }.name_layout_trace_owners(main_thread);
         }
         // What the document thread wrote to the marks beside the frame, it wrote after all of that.
         // SAFETY: Guaranteed by the caller. The marks are handed back.
@@ -994,9 +997,22 @@ impl LayoutFrame {
         }
     }
 
+    /// The render state the unit or stage of the frame that runs now was handed.
+    fn state(&self) -> *mut ArenaHandle {
+        debug_assert!(
+            !self.state.is_null(),
+            "a unit of a layout frame runs with its document's render state"
+        );
+        if self.state.is_null() {
+            // SAFETY: The frame runs for the update the arena is in, and the unit that reaches it alone runs.
+            return unsafe { ArenaHandle::held_by_waiting_thread(self.inputs.arena_handle) };
+        }
+        self.state
+    }
+
     fn arena(&self) -> &LayoutNodeArena {
-        // SAFETY: The frame runs for the update the arena is in, and no borrow spans a join.
-        unsafe { arena(self.inputs.arena_handle) }
+        // SAFETY: The state is the frame's document's, which only the unit or stage that runs reaches.
+        unsafe { &*self.state() }.arena()
     }
 
     /// Whether a round with these facts lays out at all.
@@ -1036,8 +1052,8 @@ impl LayoutFrame {
             return (true, true);
         }
         self.arena().release_published_document_style();
-        // SAFETY: The frame runs for the update the arena is in, on the thread that owns it.
-        self.pass_sources = Some(unsafe { LayoutPassSources::read(self.inputs.arena_handle) });
+        // SAFETY: The frame runs for the update the arena is in, with the state the owner handed it.
+        self.pass_sources = Some(unsafe { LayoutPassSources::read(self.state()) });
         (true, false)
     }
 
@@ -1052,7 +1068,7 @@ impl LayoutFrame {
             .expect("the style round readies the tree build");
         // SAFETY: The frame runs for the update the arena is in, and the style round published the
         // document's style for the build.
-        let (outcome, host_half) = unsafe { walk_layout_tree_build(self.inputs.arena_handle, document_style_node) };
+        let (outcome, host_half) = unsafe { walk_layout_tree_build(self.state(), document_style_node) };
         let walked = WalkedLayoutTreeBuild {
             outcome,
             document_style_node: StyleNodeID::from_raw(document_style_node)
@@ -1136,10 +1152,10 @@ impl LayoutFrame {
         self.prepare_for_rendering_after_commit();
         if let Some(selection) = &self.selection {
             // SAFETY: The frame runs for the update the arena is in, and no borrow of it is held here.
-            selection.apply(unsafe { LayoutNodeArena::from_handle_mut(self.inputs.arena_handle) });
+            selection.apply(unsafe { &mut *self.state() }.arena_mut());
         }
-        // SAFETY: The frame runs for the update the arena is in, and no borrow of it is held here.
-        unsafe { super::text_queries::layout_arena_invalidate_searchable_text(self.inputs.arena_handle) };
+        // SAFETY: As above.
+        unsafe { &mut *self.state() }.arena_mut().invalidate_searchable_text();
         self.messages.layout_committed = true;
         self.messages.layout_tree_changed |= layout_tree_changed;
         if layout_tree_changed && self.arena().may_have_auto_content_visibility() {
@@ -1300,9 +1316,11 @@ impl LayoutFrame {
                     // A unit ends at a step that needs the document thread, which a ready pass does not.
                     debug_assert!(false, "a unit on the owner runs the pass it readies");
                     // With the pass in hand, the frame goes on as the unit would have.
+                    self.state = unsafe { ArenaHandle::held_by_waiting_thread(self.inputs.arena_handle) };
                     let laid_out = unsafe { pass.run() };
                     let step = self.finish_round(laid_out);
                     unsafe { self.resolve_owed_host_halves() };
+                    self.state = std::ptr::null_mut();
                     step
                 }
             };
@@ -1357,7 +1375,11 @@ impl LayoutFrame {
                 }),
             },
             // SAFETY: The frame runs for the update the arena is in, on the document thread, which waits for nothing.
-            || OwnerLayoutStep(unsafe { crate::stage_thread::CallerWaits::new(run_unit(run, frame, facts)) }),
+            || {
+                // SAFETY: As above.
+                let state = unsafe { ArenaHandle::held_by_waiting_thread((*frame).inputs.arena_handle) };
+                OwnerLayoutStep(unsafe { crate::stage_thread::CallerWaits::new(run_unit(run, frame, facts, state)) })
+            },
         );
         match outcome {
             Ok(OwnerLayoutStep(step)) => step.into_inner(),
@@ -1495,14 +1517,14 @@ impl LayoutFrame {
         let layout_started = self.inputs.trace.now();
 
         if needs_layout_tree_rebuild {
-            let arena_handle = self.inputs.arena_handle;
+            let state = self.state();
             let (walked, mut host_half) = self.walk_layout_tree_build();
             let needs_another_build_pass = walked.outcome.needs_another_build_pass;
             let counters_were_stale =
                 !needs_another_build_pass && self.reconcile_stale_list_item_counters(&walked, &mut host_half);
             let pass_follows = !needs_another_build_pass && !counters_were_stale;
             // SAFETY: The frame runs for the update the arena is in.
-            let pass_sources = pass_follows.then(|| unsafe { LayoutPassSources::read(arena_handle) });
+            let pass_sources = pass_follows.then(|| unsafe { LayoutPassSources::read(state) });
             self.owe_tree_build_host_half(host_half);
             self.note_layout_tree_build(&walked.outcome);
             if needs_another_build_pass {
@@ -1527,7 +1549,7 @@ impl LayoutFrame {
         let layout_root = self.arena().layout_root();
         assert!(!layout_root.is_invalid(), "a full layout pass needs a layout root");
         FrameStep::PassReady(PendingLayoutPass {
-            arena_handle: self.inputs.arena_handle,
+            state: self.state(),
             layout_root,
             sources: self.take_pass_sources(),
             facts,
@@ -1599,7 +1621,7 @@ impl LayoutFrame {
         let mut layout_tree_was_built_in_partial_branch = false;
         if *needs_layout_tree_rebuild {
             let tree_build_started = self.inputs.trace.now();
-            let arena_handle = self.inputs.arena_handle;
+            let state = self.state();
             let (walked, mut host_half) = self.walk_layout_tree_build();
             let needs_another_build_pass = walked.outcome.needs_another_build_pass;
             let counters_were_stale = self.reconcile_stale_list_item_counters(&walked, &mut host_half);
@@ -1608,7 +1630,7 @@ impl LayoutFrame {
             // what paying it changes (it can resize this document's viewport through its embedding
             // document).
             // SAFETY: The frame runs for the update the arena is in.
-            let pass_sources = pass_follows.then(|| unsafe { LayoutPassSources::read(arena_handle) });
+            let pass_sources = pass_follows.then(|| unsafe { LayoutPassSources::read(state) });
             self.owe_tree_build_host_half(host_half);
             self.note_layout_tree_build(&walked.outcome);
             *needs_layout_tree_rebuild = false;
@@ -1636,25 +1658,25 @@ impl LayoutFrame {
             debug_assert!(node_facts::kind_is_box(self.arena().data(root).kind.get()));
         }
 
-        let arena_handle = self.inputs.arena_handle;
+        let state = self.state();
         let LayoutPassSources { content } = self.take_pass_sources();
         // SAFETY (for the steps below): The frame runs for the update the arena is in, the
         // planned boundaries and the viewport box stay live across them, and no row was freed
         // since the sources were read.
-        unsafe { apply_enrolled_content_sources(arena_handle, content) };
+        unsafe { apply_enrolled_content_sources(state, content) };
         for &root in &partial_relayout_roots {
             // The next boundary's pass starts from the arena the previous commit settled; the
             // commit's host half waits for the next join.
             let output = unsafe {
                 compute_subtree_layout_fragments(
-                    arena_handle,
+                    state,
                     root,
                     facts.viewport_inline_size_raw,
                     facts.viewport_block_size_raw,
                     facts.document_in_quirks_mode,
                 )
             };
-            let pending_commit = unsafe { commit_subtree_layout_to_arena(arena_handle, root, &output) };
+            let pending_commit = unsafe { commit_subtree_layout_to_arena(state, root, &output) };
             self.settle_commit_ahead_of_host(pending_commit);
         }
 
@@ -1695,17 +1717,28 @@ impl ClockLayoutFrame {
     ///
     /// On the thread that owns the arena, with the main thread idle.
     pub(crate) unsafe fn run_round(&mut self) -> bool {
+        // A tick runs beside the document thread rather than as a job of the owner, and reaches the state the
+        // document named.
+        // SAFETY: Guaranteed by the caller.
+        self.frame.state = unsafe { ArenaHandle::held_by_waiting_thread(self.frame.inputs.arena_handle) };
+        let laid_out_whole = self.run_round_in_state();
+        self.frame.state = std::ptr::null_mut();
+        laid_out_whole
+    }
+
+    /// As for [`Self::run_round`], with the frame's state handed to it.
+    fn run_round_in_state(&mut self) -> bool {
         if !self.frame.round_lays_out(&self.facts) {
             return true;
         }
         if self.frame.needs_layout_tree_rebuild(&self.facts) || self.frame.inputs.is_template_contents_document {
             return false;
         }
-        // SAFETY: Guaranteed by the caller.
-        self.frame.pass_sources = Some(unsafe { LayoutPassSources::read(self.frame.inputs.arena_handle) });
+        // SAFETY: The frame holds its document's state.
+        self.frame.pass_sources = Some(unsafe { LayoutPassSources::read(self.frame.state()) });
         self.laid_out = true;
         self.rounds += 1;
-        // SAFETY: Guaranteed by the caller.
+        // SAFETY: As above.
         let step = unsafe { self.frame.run_round_through_pass(self.facts) };
         // SAFETY: As above.
         unsafe { self.frame.resolve_owed_host_halves() };
@@ -1760,6 +1793,7 @@ unsafe fn make_clock_layout_frame(
     let LayoutRoundFacts { facts, selection } = round;
     ClockLayoutFrame {
         frame: LayoutFrame {
+            state: std::ptr::null_mut(),
             inputs: FrameInputs {
                 host,
                 arena_handle,
@@ -2093,7 +2127,7 @@ unsafe fn go_on_from_driven_frame(
     let take_back = pass.take_back();
     // The pass reads the style engine through the arena, and takes the engine's token along.
     // SAFETY: Guaranteed by the caller.
-    let style_engine = unsafe { arena(arena_handle) }.style_engine_handle();
+    let style_engine = unsafe { LayoutNodeArena::from_handle(arena_handle) }.style_engine_handle();
     let (loan, settlement) = (!style_engine.is_null())
         .then(|| {
             style_engine.lend(
@@ -2111,6 +2145,9 @@ unsafe fn go_on_from_driven_frame(
             arena_handle,
             move || {
                 let mut loan = loan;
+                // A stage the document thread submitted outside a rendering update reaches the state it named,
+                // which the frame in flight owns until the document thread takes it back (as above).
+                pass.hand_state(ArenaHandle::held_by_waiting_thread(pass.arena_handle as *mut c_void));
                 let _ = match loan.as_mut() {
                     Some(loan) => loan.lend_to_this_thread(|_| pass.run()),
                     None => pass.run(),
@@ -2300,6 +2337,11 @@ impl LayoutPassJob {
     /// Whether the rest of the round lays out the layout tree the arena has, which a flight that ran
     /// the round's style may then style itself: the round has no tree build to ready, which only the
     /// document thread readies once the style is installed.
+    /// Hands the frame the render state of its document, which the flight that runs it holds.
+    pub(crate) fn hand_state(&mut self, state: *mut ArenaHandle) {
+        self.frame.get_mut().state = state;
+    }
+
     pub(crate) fn lays_out_the_tree_it_has(&self) -> bool {
         let frame = self.frame.get();
         frame.tree_build_document_style_node.is_none() && !frame.needs_layout_tree_rebuild(&self.facts)
@@ -2316,14 +2358,15 @@ impl LayoutPassJob {
         let frame = self.frame.get_mut();
         if frame.pass_sources.is_none() && frame.tree_build_document_style_node.is_none() {
             // SAFETY: Guaranteed by the caller.
-            frame.pass_sources = Some(unsafe { LayoutPassSources::read(frame.inputs.arena_handle) });
+            frame.pass_sources = Some(unsafe { LayoutPassSources::read(frame.state()) });
         }
     }
 
     /// Leaves the frame unrun for the document thread, which ends it as it takes it back: the flight
     /// left the style of its first round to the document thread, which lays out after it.
     pub(crate) fn park(self) {
-        let Self { frame, ran, .. } = self;
+        let Self { mut frame, ran, .. } = self;
+        frame.get_mut().state = std::ptr::null_mut();
         *ran.lock().expect("a frame that ran left itself") = Some(frame);
     }
 
@@ -2342,6 +2385,7 @@ impl LayoutPassJob {
         // SAFETY: As above.
         unsafe { frame.resolve_owed_host_halves() };
         frame.resolve_flight_style();
+        frame.state = std::ptr::null_mut();
         // SAFETY: As above.
         *ran.lock().expect("a frame that ran left itself") =
             Some(unsafe { crate::stage_thread::FrameOwns::new(frame) });

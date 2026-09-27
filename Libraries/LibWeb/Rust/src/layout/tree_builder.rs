@@ -3233,15 +3233,15 @@ impl TreeBuildPayment {
 ///
 /// # Safety
 ///
-/// `arena_handle` must be a live handle whose owner waits for this call or makes it itself, with
-/// the document's style published for a build that may create the viewport, and the document's
-/// layout tree update marks lent to the arena, which the walk reads and retires.
+/// `state` must be the live render state of the document, which nothing else reaches while the
+/// walk runs, with the document's style published for a build that may create the viewport, and
+/// the document's layout tree update marks lent to the build, which the walk reads and retires.
 pub(crate) unsafe fn walk_layout_tree_build(
-    arena_handle: *mut c_void,
+    state: *mut crate::layout::ArenaHandle,
     document_style_node: u32,
 ) -> (FfiLayoutTreeBuildOutcome, TreeBuildHostHalf) {
     // SAFETY: Guaranteed by the caller.
-    let arena = unsafe { LayoutNodeArena::from_handle_mut(arena_handle) };
+    let arena = unsafe { &mut *state }.arena_mut();
     // The build writes the rows of the boxes it changes, and nothing reads the rows as last
     // published while it runs.
     arena.release_published_paintable_rows();
