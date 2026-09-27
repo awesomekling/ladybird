@@ -9574,9 +9574,9 @@ void Document::unregister_shadow_root(Badge<DOM::ShadowRoot>, DOM::ShadowRoot& s
     m_shadow_roots.remove(shadow_root);
     note_style_sheet_set_change();
     // The style computation resolves an animation's keyframes from what each scope published, by
-    // pointer. This scope is leaving the document, so it gives up what it published before the
+    // pointer. This scope is leaving the document, so it gives up what it published here before the
     // keyframe sets it named can go away with it.
-    shadow_root.style_scope().unpublish_animation_keyframes();
+    shadow_root.style_scope().unpublish_animation_keyframes(*this);
 }
 
 // https://drafts.csswg.org/css-position-4/#add-an-element-to-the-top-layer

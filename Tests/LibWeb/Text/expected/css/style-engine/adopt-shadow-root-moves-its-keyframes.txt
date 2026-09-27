@@ -1,0 +1,4 @@
+old document scopes: 2 -> 1
+new document scopes: 2 -> 3
+staying root's animation: 0.5
+adopted root's animation: 0.25

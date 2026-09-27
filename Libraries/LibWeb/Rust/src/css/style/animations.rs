@@ -2259,6 +2259,12 @@ impl AnimationKeyframes {
         self.generation
     }
 
+    /// How many scopes hold a row.
+    #[must_use]
+    pub(crate) fn scope_count(&self) -> usize {
+        self.scopes.len()
+    }
+
     pub(crate) unsafe fn set(
         &mut self,
         tree_scope: TreeScopeID,
@@ -2402,10 +2408,20 @@ pub unsafe extern "C" fn style_engine_unpublish_tree_scope_animation_keyframes(
                 PublishedEffectBuffers::default(),
             );
         }
+        engine.count_animation_keyframe_scopes();
         drop(sets);
     };
     // SAFETY: Guaranteed by the caller.
     unsafe { engine.write_or_defer(entry, unpublish) };
+}
+
+impl super::StyleEngine {
+    /// Counts the scopes that hold a `@keyframes` row, after one was replaced.
+    pub(crate) fn count_animation_keyframe_scopes(&mut self) {
+        let scopes = self.state.animation_keyframes().scope_count() as u64;
+        self.counters
+            .set(super::instrumentation::Counter::AnimationKeyframeScopes, scopes);
+    }
 }
 
 /// The animation definitions a record the engine settled leaves for the host to apply, in the shape
