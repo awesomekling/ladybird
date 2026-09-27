@@ -1677,14 +1677,13 @@ pub fn style_engine_create_for_replay(device_class: FfiDeviceClass) -> StyleEngi
     abort_on_panic(|| StyleEngineHandle::create(Box::new(StyleEngine::new_for_replay(device_class.decode()))))
 }
 
-/// Applies the memory policy used while producing a replay recording.
+/// Applies the memory policy used while producing a replay recording to an engine that runs only for a replay.
 ///
 /// # Safety
-/// `engine` must be live.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_use_recording_memory_policy(engine: StyleEngineHandle) {
-    let engine = unsafe { engine_entrance(engine, "style_engine_use_recording_memory_policy") };
-    engine.memory.enable_recording_policy();
+/// `engine` must be a live engine made by `style_engine_create_for_replay`, which nothing else borrows meanwhile.
+pub unsafe fn use_recording_memory_policy_for_replay(engine: StyleEngineHandle) {
+    // SAFETY: Guaranteed by the caller.
+    unsafe { engine.for_replay() }.memory.enable_recording_policy();
 }
 
 #[unsafe(no_mangle)]

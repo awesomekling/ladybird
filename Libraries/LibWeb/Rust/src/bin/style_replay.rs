@@ -181,7 +181,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         return Err(format!("engine {engine_id} was created more than once").into());
                     }
                     let engine = bridge::style_engine_create_for_replay(bridge::FfiDeviceClass::ForegroundDesktop);
-                    unsafe { bridge::style_engine_use_recording_memory_policy(engine) };
+                    unsafe { bridge::use_recording_memory_policy_for_replay(engine) };
                     if live_engines.len() <= index {
                         live_engines.resize(index + 1, None);
                         selector_program_sharing.resize_engines(index + 1);
