@@ -488,7 +488,6 @@ pub(crate) struct PaintableRowStore {
     /// Whether the chrome listens for paintable row resets. The callback itself is in the host
     /// tables, which only the main thread reaches.
     chrome_state_listens: Cell<bool>,
-    paint_recording_in_progress: Cell<bool>,
     layout_commit_generation: Cell<u64>,
     scroll_offsets: ScrollOffsetColumn,
     image_map_areas: ImageMapAreaColumn,
@@ -1311,17 +1310,6 @@ impl LayoutNodeArena {
     pub(crate) fn note_layout_commit(&self) {
         let generation = &self.paintable_rows.layout_commit_generation;
         generation.set(generation.get().wrapping_add(1));
-    }
-
-    pub(crate) fn set_paint_recording_in_progress(&self, in_progress: bool) {
-        self.paintable_rows.paint_recording_in_progress.set(in_progress);
-    }
-
-    pub(crate) fn debug_assert_not_recording(&self) {
-        debug_assert!(
-            !self.paintable_rows.paint_recording_in_progress.get(),
-            "paint damage pushed during display list recording would be missed by it"
-        );
     }
 
     pub(crate) fn inline_pieces_root(&self, inline_paintable: NodeSlotId) -> Option<NodeSlotId> {

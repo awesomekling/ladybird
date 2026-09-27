@@ -1270,16 +1270,15 @@ pub unsafe extern "C" fn layout_arena_refresh_scroll_state(
     true
 }
 
-/// What a recording stage runs on. The stage holds the arena exclusively while the owning thread
-/// waits for it, so the input is sendable because the arena is, not because it is shared. The
-/// frame it records is frozen before the stage is handed the input, and moved into it: the stage
-/// publishes nothing, so a main-side read beside a submitted recording reads a publication the
-/// recording never writes.
+/// What a recording stage runs on: the frame it records, frozen before the stage is handed the
+/// input and moved into it, and the recorder state it records with, which the document hands it
+/// for the run. It holds no arena, so the stage reaches nothing the document goes on writing.
 struct RecordingStageInput<'a> {
-    arena: &'a mut LayoutNodeArena,
     frame: std::sync::Arc<crate::painting::published_frame::PublishedFrame>,
+    recorder: crate::painting::record::recorder_state::RecorderState,
     viewport: NodeSlotId,
     inputs: crate::painting::record::RecordingInputs<'a>,
+    trace_recordings: bool,
     // For a recording in flight that a read may cancel: what it records once cancelled is dropped.
     cancel: Option<&'a crate::stage_thread::RecordingCancel>,
 }
@@ -1287,6 +1286,7 @@ struct RecordingStageInput<'a> {
 struct RecordingStageOutput {
     recording: crate::painting::record::RecordingResult,
     recording_from_scratch: Option<crate::painting::record::RecordingResult>,
+    recorder: crate::painting::record::recorder_state::RecorderState,
 }
 
 const _: () = {
@@ -1295,6 +1295,25 @@ const _: () = {
     assert_send::<RecordingStageOutput>();
 };
 
+/// Prepares a recording on the thread that owns the arena: freezes the frame it records and takes
+/// the recorder state it records with.
+fn recording_stage_input<'a>(
+    arena: &mut LayoutNodeArena,
+    viewport: NodeSlotId,
+    inputs: crate::painting::record::RecordingInputs<'a>,
+) -> RecordingStageInput<'a> {
+    let frame = freeze_recording_frame(arena, &inputs);
+    let mut paint_state = arena.paint_state().borrow_mut();
+    RecordingStageInput {
+        frame,
+        recorder: paint_state.take_recorder(),
+        viewport,
+        inputs,
+        trace_recordings: paint_state.trace_recordings,
+        cancel: None,
+    }
+}
+
 /// Freezes the frame a recording with `inputs` reads, on the thread that owns the arena, before the
 /// recording is handed to the stage that runs it.
 fn freeze_recording_frame(
@@ -1302,11 +1321,11 @@ fn freeze_recording_frame(
     inputs: &crate::painting::record::RecordingInputs<'_>,
 ) -> std::sync::Arc<crate::painting::published_frame::PublishedFrame> {
     {
-        let paint_state = arena.paint_state().borrow();
+        let mut paint_state = arena.paint_state().borrow_mut();
         // The root background paints the union of the viewport and the root's overflow, so it
         // is the one output a viewport move can change. Drop its caches before recording
         // starts instead of treating the viewport position as a frame-wide input.
-        if let Some(source) = &paint_state.recorder.published_recording {
+        if let Some(source) = &paint_state.recorder().published_recording {
             let root = inputs.uncaptured.root_background_source.root_layout_node;
             let rows = arena.paintable_rows();
             let canvas_rect = crate::painting::record::paint::background_resolution::root_background_canvas_rect(
@@ -1328,35 +1347,36 @@ fn freeze_recording_frame(
 }
 
 /// The host-free display-list recording stage. Host callbacks require a `MainThread` capability,
-/// which this function neither receives nor stores in its input.
+/// which this function neither receives nor stores in its input, and it names no arena.
 fn record_display_list_stage(stage: RecordingStageInput<'_>) -> RecordingStageOutput {
     let RecordingStageInput {
-        arena,
         frame,
+        mut recorder,
         viewport,
         mut inputs,
+        trace_recordings,
         cancel,
     } = stage;
-    let arena: &LayoutNodeArena = arena;
-    let mut scratch = arena.recording_scratch().take_for_run();
-    let scratch = &mut *scratch;
-    let paint_state = arena.paint_state().borrow();
+    let crate::painting::record::recorder_state::RecorderState {
+        published_recording,
+        published_hit_test_items,
+        paint_order_tree,
+        scratch,
+    } = &mut recorder;
     // The retained tree describes the published tape and is written in place while a frame
     // is assembled, so only a recording that publishes may copy from that frame or touch
     // the tree; any other recording records from scratch into a tree of its own.
-    let mut retained_tree = paint_state.recorder.paint_order_tree.borrow_mut();
     let mut throwaway_tree = crate::painting::record::order_tree::PaintOrderTree::default();
     let (tree, source_frame, source_items) = if inputs.publishes_recording {
         (
-            &mut *retained_tree,
-            paint_state.recorder.published_recording.clone(),
-            paint_state.recorder.published_hit_test_items.clone(),
+            paint_order_tree,
+            published_recording.clone(),
+            published_hit_test_items.clone(),
         )
     } else {
         (&mut throwaway_tree, None, None)
     };
     let copies_from_published_frame = source_frame.is_some();
-    arena.set_paint_recording_in_progress(true);
     let pass = crate::painting::seal::enter(crate::painting::seal::Pass::Recording);
     crate::stage_thread::hold_here(crate::stage_thread::FfiStageHoldPoint::MidRecording);
     let recording = crate::painting::record::traversal::record_display_list(
@@ -1368,7 +1388,7 @@ fn record_display_list_stage(stage: RecordingStageInput<'_>) -> RecordingStageOu
         source_frame,
         source_items,
         true,
-        paint_state.trace_recordings || crate::painting::record::verify::enabled_by_environment(),
+        trace_recordings || crate::painting::record::verify::enabled_by_environment(),
         cancel,
     );
     let cancelled = cancel.is_some_and(crate::stage_thread::RecordingCancel::was_cancelled);
@@ -1394,10 +1414,10 @@ fn record_display_list_stage(stage: RecordingStageInput<'_>) -> RecordingStageOu
             )
         });
     drop(pass);
-    arena.set_paint_recording_in_progress(false);
     RecordingStageOutput {
         recording,
         recording_from_scratch,
+        recorder,
     }
 }
 
@@ -1412,6 +1432,41 @@ pub enum FfiRecordingRun {
     InSubmittedFrame,
 }
 
+/// What a recording answers when it ran to its end.
+fn recorded_answer(
+    output: RecordingStageOutput,
+    viewport: NodeSlotId,
+    should_paint_overlay: bool,
+    publishes_recording: bool,
+    frame_generation: u64,
+    trace_recordings: bool,
+) -> crate::painting::paint_state::RecordingAnswer {
+    let RecordingStageOutput {
+        recording,
+        recording_from_scratch,
+        recorder,
+    } = output;
+    let trace = (trace_recordings && recording.output.capture_log_for_verification.is_some()).then_some(
+        crate::painting::paint_state::PendingRecordingTrace {
+            viewport,
+            should_paint_overlay,
+        },
+    );
+    crate::painting::paint_state::RecordingAnswer {
+        recorder,
+        publishes_recording,
+        recorded: Some((
+            crate::painting::paint_state::PendingRecording {
+                recording,
+                recording_from_scratch,
+                publishes_recording,
+                frame_generation,
+            },
+            trace,
+        )),
+    }
+}
+
 /// Leaves a finished recording in the arena's paint state, for the host to publish.
 fn leave_pending_recording(
     arena: &LayoutNodeArena,
@@ -1421,67 +1476,50 @@ fn leave_pending_recording(
     frame_generation: u64,
     output: RecordingStageOutput,
 ) {
-    let RecordingStageOutput {
-        recording,
-        recording_from_scratch,
-    } = output;
     let mut paint_state = arena.paint_state().borrow_mut();
-    if paint_state.trace_recordings && recording.output.capture_log_for_verification.is_some() {
-        paint_state.pending_recording_trace = Some(crate::painting::paint_state::PendingRecordingTrace {
-            viewport,
-            should_paint_overlay,
-        });
-    }
-    paint_state.pending_recording = Some(crate::painting::paint_state::PendingRecording {
-        recording,
-        recording_from_scratch,
+    let answer = recorded_answer(
+        output,
+        viewport,
+        should_paint_overlay,
         publishes_recording,
         frame_generation,
-    });
+        paint_state.trace_recordings,
+    );
+    paint_state.accept_recording_answer(answer);
 }
 
-/// A recording the main thread has prepared to run in the frame in flight, which owns the arena
-/// while it runs. Running it leaves the recording pending in the arena.
+/// A recording the main thread has prepared to run in the frame in flight. It owns what it
+/// records from and with, and answers on the ticket [`RecordingJob::new`] returns.
 pub(crate) struct RecordingJob {
     input: RecordingStageInput<'static>,
-    arena_address: usize,
-    viewport: NodeSlotId,
     should_paint_overlay: bool,
     publishes_recording: bool,
     frame_generation: u64,
     cancel: std::sync::Arc<crate::stage_thread::RecordingCancel>,
+    answer: std::sync::mpsc::Sender<crate::painting::paint_state::RecordingAnswer>,
 }
 
+const _: () = {
+    const fn assert_send<T: Send + 'static>() {}
+    assert_send::<RecordingJob>();
+};
+
 impl RecordingJob {
-    /// # Safety
-    ///
-    /// `arena_handle` must be a live arena that the frame in flight the job runs in owns until
-    /// the host takes it back, with no borrow of it live here.
-    pub(crate) unsafe fn in_flight(
-        arena_handle: *mut c_void,
-        viewport: NodeSlotId,
-        frame: std::sync::Arc<crate::painting::published_frame::PublishedFrame>,
-        inputs: crate::painting::record::RecordingInputs<'static>,
+    fn new(
+        input: RecordingStageInput<'static>,
         should_paint_overlay: bool,
-        publishes_recording: bool,
         frame_generation: u64,
-    ) -> Self {
-        Self {
-            input: RecordingStageInput {
-                // SAFETY: Guaranteed by the caller.
-                arena: unsafe { &mut *arena_handle.cast::<LayoutNodeArena>() },
-                frame,
-                viewport,
-                inputs,
-                cancel: None,
-            },
-            arena_address: arena_handle as usize,
-            viewport,
+    ) -> (Self, crate::painting::paint_state::RecordingTicket) {
+        let (answer, ticket) = std::sync::mpsc::channel();
+        let job = Self {
             should_paint_overlay,
-            publishes_recording,
+            publishes_recording: input.inputs.publishes_recording,
             frame_generation,
+            input,
             cancel: Default::default(),
-        }
+            answer,
+        };
+        (job, ticket)
     }
 
     /// How a read that would wait for the job asks it to stop.
@@ -1489,39 +1527,41 @@ impl RecordingJob {
         self.cancel.clone()
     }
 
-    /// Records, on the stage that owns the arena. A recording cancelled before it starts records
-    /// nothing; one cancelled on the way drops what it recorded, and the retained paint-order tree
-    /// it assembled that into with it. Either way nothing is left pending, and the arena notes
-    /// the cancellation for the frame's presentation and consume.
+    /// Records, and answers. A recording cancelled before it starts records nothing; one cancelled
+    /// on the way drops what it recorded, and the retained paint-order tree it assembled that into
+    /// with it. Either way it answers with nothing recorded, which the document notes as the
+    /// cancellation for the frame's presentation and consume.
     pub(crate) fn run(self) {
         let cancel = self.cancel;
-        let output = if cancel.is_requested() {
+        let mut input = self.input;
+        let viewport = input.viewport;
+        let trace_recordings = input.trace_recordings;
+        let cancelled_answer = |recorder| crate::painting::paint_state::RecordingAnswer {
+            recorder,
+            publishes_recording: self.publishes_recording,
+            recorded: None,
+        };
+        let answer = if cancel.is_requested() {
             cancel.note_cancelled();
-            None
+            cancelled_answer(input.recorder)
         } else {
-            let mut input = self.input;
             input.cancel = Some(&cancel);
             let output = record_display_list_stage(input);
-            (!cancel.was_cancelled()).then_some(output)
-        };
-        // SAFETY: The stage has returned its borrow, and the frame still owns the arena.
-        let arena = unsafe { &*(self.arena_address as *const LayoutNodeArena) };
-        let Some(output) = output else {
-            let mut paint_state = arena.paint_state().borrow_mut();
-            if self.publishes_recording {
-                paint_state.forget_published_frame();
+            if cancel.was_cancelled() {
+                cancelled_answer(output.recorder)
+            } else {
+                recorded_answer(
+                    output,
+                    viewport,
+                    self.should_paint_overlay,
+                    self.publishes_recording,
+                    self.frame_generation,
+                    trace_recordings,
+                )
             }
-            paint_state.recording_was_cancelled = true;
-            return;
         };
-        leave_pending_recording(
-            arena,
-            self.viewport,
-            self.should_paint_overlay,
-            self.publishes_recording,
-            self.frame_generation,
-            output,
-        );
+        // The document keeps the ticket until it has taken the answer in, or is gone.
+        let _ = self.answer.send(answer);
     }
 }
 
@@ -1551,17 +1591,17 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
         // does, so that is checked in every build.
         if crate::stage_thread::submits("recording") {
             assert!(
-                paint_state.pending_recording.is_none(),
+                paint_state.pending_recording().is_none(),
                 "a frame was dropped: its recording was not published before the next one started"
             );
         }
         debug_assert!(
-            paint_state.pending_recording.is_none(),
+            paint_state.pending_recording().is_none(),
             "a recording must be published before the next one starts"
         );
-        paint_state.pending_recording_trace = None;
-        paint_state.pending_recording = None;
-        paint_state.recording_was_cancelled = false;
+        *paint_state.pending_recording_trace() = None;
+        *paint_state.pending_recording() = None;
+        *paint_state.recording_was_cancelled() = false;
     }
     let recording_inputs = {
         let paint_state = arena.paint_state().borrow();
@@ -1603,20 +1643,10 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
             let _ = unsafe { arena_from_handle_mut(arena_handle) }.committed_paintable_rows();
         }
         // SAFETY: No borrow of the arena is live here.
-        let frame = freeze_recording_frame(unsafe { arena_from_handle_mut(arena_handle) }, &recording_inputs);
-        // SAFETY: No borrow of the arena outlives this point. The submitted frame owns the arena
-        // until the host takes it back: every main-side access to it joins the frame first.
-        let job = unsafe {
-            RecordingJob::in_flight(
-                arena_handle,
-                viewport,
-                frame,
-                recording_inputs.into_owned(),
-                should_paint_overlay,
-                publishes_recording,
-                frame_generation,
-            )
-        };
+        let arena = unsafe { arena_from_handle_mut(arena_handle) };
+        let input = recording_stage_input(arena, viewport, recording_inputs.into_owned());
+        let (job, ticket) = RecordingJob::new(input, should_paint_overlay, frame_generation);
+        arena.paint_state().borrow_mut().await_recording(ticket);
         let cancel = job.cancel();
         crate::stage_thread::note_recording_made(arena_handle as usize, crate::stage_thread::RecordingRedo::Submitted);
         // SAFETY: As above.
@@ -1628,16 +1658,12 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
         crate::stage_thread::RecordingRedo::WhileMainWaits,
     );
     let output = {
-        // SAFETY: No borrow of the arena outlives this point, so the stage holds it alone.
-        let arena = unsafe { arena_from_handle_mut(arena_handle) };
-        let frame = freeze_recording_frame(arena, &recording_inputs);
-        let input = RecordingStageInput {
-            arena,
-            frame,
+        // SAFETY: No borrow of the arena is live here.
+        let input = recording_stage_input(
+            unsafe { arena_from_handle_mut(arena_handle) },
             viewport,
-            inputs: recording_inputs,
-            cancel: None,
-        };
+            recording_inputs,
+        );
         crate::stage_thread::run_stage_on_stage_thread(|| record_display_list_stage(input))
     };
     // SAFETY: The stage has returned the arena.
@@ -1666,11 +1692,11 @@ pub(crate) unsafe fn record_for_clock_tick(arena_handle: *mut c_void) -> bool {
     // SAFETY: Guaranteed by the caller.
     let arena = unsafe { arena_from_handle(arena_handle) };
     let (viewport, inputs) = {
-        let paint_state = arena.paint_state().borrow();
+        let mut paint_state = arena.paint_state().borrow_mut();
         let Some(clock) = paint_state.clock_recording.clone() else {
             return false;
         };
-        if paint_state.pending_recording.is_some() {
+        if paint_state.pending_recording().is_some() {
             return false;
         }
         let mut inputs = clock.inputs;
@@ -1688,21 +1714,19 @@ pub(crate) unsafe fn record_for_clock_tick(arena_handle: *mut c_void) -> bool {
     // SAFETY: Guaranteed by the caller.
     let frame_generation = unsafe { crate::layout::frame_retirement::frame_generation(arena_handle) };
     // SAFETY: Guaranteed by the caller; no borrow of the arena is live here.
-    let arena = unsafe { arena_from_handle_mut(arena_handle) };
-    let frame = freeze_recording_frame(arena, &inputs);
-    let output = record_display_list_stage(RecordingStageInput {
-        arena,
-        frame,
+    let output = record_display_list_stage(recording_stage_input(
+        unsafe { arena_from_handle_mut(arena_handle) },
         viewport,
         inputs,
-        cancel: None,
-    });
+    ));
     // SAFETY: The recording has returned its borrow.
     let arena = unsafe { arena_from_handle(arena_handle) };
     // An SVG-as-image the tick paints at a size the main thread has not rendered it at would show as
     // an empty image: the main thread renders the image, and the frame, itself.
     if !output.recording.resources.missed_vector_images.is_empty() {
-        arena.paint_state().borrow_mut().forget_published_frame();
+        let mut paint_state = arena.paint_state().borrow_mut();
+        paint_state.give_back_recorder(output.recorder);
+        paint_state.forget_published_frame();
         return false;
     }
     leave_pending_recording(arena, viewport, should_paint_overlay, true, frame_generation, output);
@@ -2017,23 +2041,19 @@ pub(crate) unsafe fn paint_in_flight(
     {
         let mut paint_state = arena.paint_state().borrow_mut();
         assert!(
-            paint_state.pending_recording.is_none(),
+            paint_state.pending_recording().is_none(),
             "a frame was dropped: its recording was not published before the next one started"
         );
-        paint_state.pending_recording_trace = None;
+        *paint_state.pending_recording_trace() = None;
     }
     let should_paint_overlay = inputs.should_paint_overlay;
     let publishes_recording = inputs.publishes_recording;
     // SAFETY: The frame in flight owns the arena, and no borrow of it is held here.
-    let arena = unsafe { &mut *arena_handle.cast::<LayoutNodeArena>() };
-    let frame = freeze_recording_frame(arena, &inputs);
-    let output = record_display_list_stage(RecordingStageInput {
-        arena,
-        frame,
+    let output = record_display_list_stage(recording_stage_input(
+        unsafe { &mut *arena_handle.cast::<LayoutNodeArena>() },
         viewport,
         inputs,
-        cancel: None,
-    });
+    ));
     // SAFETY: The stage has returned its borrow.
     let arena = unsafe { &*arena_handle.cast::<LayoutNodeArena>() };
     leave_pending_recording(
@@ -2101,7 +2121,7 @@ pub unsafe extern "C" fn layout_arena_publish_recording_in_frame(
     publish: crate::painting::host::FfiRecordingPublishCallbacks,
 ) -> u64 {
     let arena = unsafe { arena_from_handle(arena) };
-    let Some(pending) = arena.paint_state().borrow_mut().pending_recording.take() else {
+    let Some(pending) = arena.paint_state().borrow_mut().pending_recording().take() else {
         return 0;
     };
     let publish = crate::painting::host::RecordingPublishHost::from(publish);
@@ -2122,7 +2142,7 @@ pub unsafe extern "C" fn layout_arena_publish_recording_in_frame(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_recording_in_frame_was_cancelled(arena: *mut c_void) -> bool {
     let arena = unsafe { arena_from_handle(arena) };
-    arena.paint_state().borrow().recording_was_cancelled
+    *arena.paint_state().borrow_mut().recording_was_cancelled()
 }
 
 /// Whether a read cancelled the recording of the frame the main thread took back, which it then
@@ -2135,7 +2155,7 @@ pub unsafe extern "C" fn layout_arena_recording_in_frame_was_cancelled(arena: *m
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_take_recording_cancellation(arena: *mut c_void) -> bool {
     let arena = unsafe { arena_from_handle(arena) };
-    std::mem::take(&mut arena.paint_state().borrow_mut().recording_was_cancelled)
+    std::mem::take(arena.paint_state().borrow_mut().recording_was_cancelled())
 }
 
 /// Runs `handoff(context)`, which hands a navigable's finished frame to its compositor frame sink,
