@@ -149,7 +149,7 @@ private:
     void update_layout_after_image_data_change(DOM::SetNeedsLayoutReason);
 
     virtual void decoded_image_data_did_update() override { image_provider_contents_changed(); }
-    virtual Layout::Node const* image_provider_layout_node() const override;
+    virtual Painting::BoxSlot image_provider_box() const override;
 
     Optional<DOM::DocumentLoadEventDelayer> m_load_event_delayer;
 

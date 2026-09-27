@@ -164,9 +164,9 @@ void HTMLImageElement::update_layout_after_image_data_change(DOM::SetNeedsLayout
 
 GC_DEFINE_ALLOCATOR(HTMLImageElement);
 
-Layout::Node const* HTMLImageElement::image_provider_layout_node() const
+Painting::BoxSlot HTMLImageElement::image_provider_box() const
 {
-    return unsafe_layout_node();
+    return Painting::BoxSlot::bound_to(*this);
 }
 
 static GC::Ref<DOM::Event> create_event_for_element(HTMLElement& element, Utf16FlyString const& event_name)

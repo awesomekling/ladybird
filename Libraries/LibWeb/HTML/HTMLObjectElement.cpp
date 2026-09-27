@@ -44,9 +44,9 @@ namespace Web::HTML {
 
 GC_DEFINE_ALLOCATOR(HTMLObjectElement);
 
-Layout::Node const* HTMLObjectElement::image_provider_layout_node() const
+Painting::BoxSlot HTMLObjectElement::image_provider_box() const
 {
-    return unsafe_layout_node();
+    return Painting::BoxSlot::bound_to(*this);
 }
 
 static GC::Ref<DOM::Event> create_event_for_element(HTMLElement& element, Utf16FlyString const& event_name)

@@ -37,6 +37,7 @@
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/Painting/PaintFacts.h>
 #include <LibWeb/Painting/ScrollSnap.h>
+#include <LibWeb/Painting/StyleImageObservers.h>
 #include <LibWeb/SVG/SVGClipPathElement.h>
 #include <LibWeb/SVG/SVGElement.h>
 #include <LibWeb/SVG/SVGFilterElement.h>
@@ -438,41 +439,6 @@ CSS::StyleRecordDependencyFlag NodeWithStyle::style_dependency_flags() const
     return static_cast<CSS::StyleRecordDependencyFlag>(RustFFI::layout_arena_node_style_dependency_flags(arena_handle(), slot_id(this)));
 }
 
-NodeWithStyle::ImageObserver::ImageObserver(NodeWithStyle& owner, NonnullRefPtr<CSS::ImageStyleValue const> image)
-    : CSS::ImageStyleValue::Client(owner.document(), *image)
-    , m_owner(owner)
-    , m_image(move(image))
-{
-}
-
-NodeWithStyle::ImageObserver::~ImageObserver()
-{
-    image_style_value_finalize();
-}
-
-static void push_layer_image_paint_facts_and_repaint(NodeWithStyle& owner)
-{
-    Painting::push_layer_image_paint_facts(owner);
-    if (Painting::has_committed_box(owner))
-        Painting::set_needs_repaint(owner, InvalidateDisplayList::PaintCommands);
-}
-
-void NodeWithStyle::ImageObserver::image_style_value_did_update(CSS::ImageStyleValue&)
-{
-    VERIFY(m_owner);
-
-    // Beside a frame that owns the arena, the owner's facts are pushed once the frame has been taken in. By then
-    // its row may be gone, and its slot may hold another shell: only a shell still alive in its own slot is pushed.
-    if (HTML::FrameScheduler::arena_changes_wait_for_frame(m_owner->document())) {
-        HTML::main_thread_event_loop().frame_scheduler().defer_arena_change(GC::create_function(m_owner->document().heap(), [owner = m_owner, slot = slot_id(m_owner.ptr())] {
-            if (owner && owner->node_arena().node_if_live(slot) == owner.ptr())
-                push_layer_image_paint_facts_and_repaint(*owner);
-        }));
-        return;
-    }
-    push_layer_image_paint_facts_and_repaint(*m_owner);
-}
-
 NodeWithStyle::~NodeWithStyle()
 {
     // NB: The arena destroys a shell only after it has freed the shell's row, and freeing the row
@@ -482,74 +448,36 @@ NodeWithStyle::~NodeWithStyle()
 
 void NodeWithStyle::clear_image_observers()
 {
-    delete static_cast<ImageObserverSlots*>(RustFFI::layout_arena_replace_image_observers(arena_handle(), slot_id(this), nullptr));
+    Painting::replace_style_image_observers(document(), slot_id(this), nullptr);
 }
 
-void NodeWithStyle::rebuild_image_observers()
+void NodeWithStyle::rebuild_image_observers(Vector<RefPtr<CSS::CursorStyleValue const>> cursor_style_values)
 {
-    auto observer_for = [&](CSS::AbstractImageStyleValue const* abstract_image) -> OwnPtr<ImageObserver> {
+    auto observer_for = [&](CSS::AbstractImageStyleValue const* abstract_image) -> OwnPtr<Painting::StyleImageObserver> {
         if (!abstract_image)
             return nullptr;
         auto const* image_to_observe = abstract_image->selected_image_style_value();
         if (!image_to_observe)
             return nullptr;
-        return make<ImageObserver>(*this, *image_to_observe);
+        return make<Painting::StyleImageObserver>(document(), slot_id(this), *image_to_observe);
     };
 
-    auto new_observers = make<ImageObserverSlots>();
+    auto new_observers = make<Painting::StyleImageObserverSet>();
     for (auto const& layer : background_layers())
         new_observers->background_layers.append(observer_for(layer.background_image.ptr()));
     for (auto const& layer : mask_layers())
         new_observers->mask_layers.append(observer_for(layer.background_image.ptr()));
-    for (auto const& cursor_style_value : m_cursor_style_values)
+    for (auto const& cursor_style_value : cursor_style_values)
         new_observers->cursors.append(cursor_style_value ? observer_for(&cursor_style_value->image()) : nullptr);
     new_observers->border_image_source = observer_for(border_image().source.ptr());
     new_observers->list_style_image = observer_for(list_style_image());
+    new_observers->cursor_style_values = move(cursor_style_values);
+    new_observers->background_layer_data = background_layers();
+    new_observers->mask_layer_data = mask_layers();
+    new_observers->border_image = border_image();
     // TODO: Observe other <image> accepting properties once we support them.
 
-    // Register the new observers before the old ones unregister so a shared resource is never dropped and refetched.
-    delete static_cast<ImageObserverSlots*>(RustFFI::layout_arena_replace_image_observers(arena_handle(), slot_id(this), new_observers.leak_ptr()));
-}
-
-static NodeWithStyle::ImageObserver const* image_observer_at(Vector<OwnPtr<NodeWithStyle::ImageObserver>> const& observers, size_t index)
-{
-    if (index >= observers.size())
-        return nullptr;
-    return observers[index].ptr();
-}
-
-NodeWithStyle::ImageObserverSlots* NodeWithStyle::image_observers() const
-{
-    return static_cast<ImageObserverSlots*>(RustFFI::layout_arena_image_observers(arena_handle(), slot_id(this)));
-}
-
-void NodeWithStyle::delete_arena_owned_image_observers(ImageObserverSlots& observers)
-{
-    delete &observers;
-}
-
-NodeWithStyle::ImageObserver const* NodeWithStyle::background_image_observer(size_t layer_index) const
-{
-    auto* observers = image_observers();
-    return observers ? image_observer_at(observers->background_layers, layer_index) : nullptr;
-}
-
-NodeWithStyle::ImageObserver const* NodeWithStyle::mask_image_observer(size_t layer_index) const
-{
-    auto* observers = image_observers();
-    return observers ? image_observer_at(observers->mask_layers, layer_index) : nullptr;
-}
-
-NodeWithStyle::ImageObserver const* NodeWithStyle::cursor_image_observer(size_t cursor_index) const
-{
-    auto* observers = image_observers();
-    return observers ? image_observer_at(observers->cursors, cursor_index) : nullptr;
-}
-
-NodeWithStyle::ImageObserver const* NodeWithStyle::border_image_source_observer() const
-{
-    auto* observers = image_observers();
-    return observers ? observers->border_image_source.ptr() : nullptr;
+    Painting::replace_style_image_observers(document(), slot_id(this), move(new_observers));
 }
 
 }
@@ -628,8 +556,8 @@ void NodeWithStyle::apply_style(Row const& row, CSS::PublishedStyleRecord const&
     auto* old_image_observers = RustFFI::layout_arena_install_row_style(row.arena_handle(), row.slot(), style_record.identity().value());
     did_update_row_style_record(document, dom_node, style_record.payloads());
     // What attach_style_resources() does for a style that holds no images.
-    delete static_cast<ImageObserverSlots*>(old_image_observers);
-    Painting::push_paint_facts_after_style_attach(row, const_cast<DOM::Node*>(dom_node), Painting::StyleHoldsImageValues::No);
+    delete static_cast<Painting::StyleImageObserverSet*>(old_image_observers);
+    Painting::push_paint_facts_after_style_attach(Painting::BoxSlot::of(document, row.slot()), const_cast<DOM::Node*>(dom_node), Painting::StyleHoldsImageValues::No);
 }
 
 void NodeWithStyle::apply_style(CSS::PublishedStyleRecord const& style_record)
@@ -676,12 +604,11 @@ void NodeWithStyle::attach_style_resources()
     // observe one. Nearly every style holds none, and that answer is one flag read; the walk below stays for the
     // styles that do.
     if (!style_record_holds_image_values(style_dependency_flags())) {
-        m_cursor_style_values.clear();
         clear_image_observers();
         // The row keeps nothing a later attach would have to take away, which is what lets the
         // tree build skip asking for one at all.
         RustFFI::layout_arena_note_style_image_resources_attached(arena_handle(), slot_id(this), false);
-        Painting::push_paint_facts_after_style_attach(*this, dom_node(), Painting::StyleHoldsImageValues::No);
+        Painting::push_paint_facts_after_style_attach(Painting::BoxSlot::of(document(), slot_id(this)), dom_node(), Painting::StyleHoldsImageValues::No);
         return;
     }
 
@@ -695,19 +622,19 @@ void NodeWithStyle::attach_style_resources()
     for (auto const& layer : mask_layers())
         load_image(layer.background_image.ptr());
     load_image(border_image().source.ptr());
-    m_cursor_style_values.clear();
-    m_cursor_style_values.ensure_capacity(cursor().size());
+    Vector<RefPtr<CSS::CursorStyleValue const>> cursor_style_values;
+    cursor_style_values.ensure_capacity(cursor().size());
     for (auto const& cursor_data : cursor()) {
         auto cursor_style_value = CSS::ComputedValues::InheritedUIValues::cursor_style_value(cursor_data);
         if (cursor_style_value)
             load_image(&cursor_style_value->image());
-        m_cursor_style_values.unchecked_append(move(cursor_style_value));
+        cursor_style_values.unchecked_append(move(cursor_style_value));
     }
     load_image(list_style_image());
 
-    rebuild_image_observers();
+    rebuild_image_observers(move(cursor_style_values));
     RustFFI::layout_arena_note_style_image_resources_attached(arena_handle(), slot_id(this), true);
-    Painting::push_paint_facts_after_style_attach(*this, dom_node(), Painting::StyleHoldsImageValues::Yes);
+    Painting::push_paint_facts_after_style_attach(Painting::BoxSlot::of(document(), slot_id(this)), dom_node(), Painting::StyleHoldsImageValues::Yes);
 }
 
 CSS::StyleScope const& NodeWithStyle::style_scope() const
@@ -950,13 +877,13 @@ void NodeWithStyle::did_update_style_record()
     // A style change can make a box a snap container without the paint tree being built again, so the box registers
     // itself here as well as when it is built.
     if (Painting::is_scroll_snap_container(*snap_container)) {
-        document().register_scroll_snap_container(*snap_container);
+        document().register_scroll_snap_container(Painting::BoxSlot::of(document(), slot_id(snap_container)));
         return;
     }
 
     // A box that does not snap is snapped to no snap areas, so that a scroll it is given while it does not snap is not
     // undone by a re-snap once it snaps again.
-    document().forget_snapped_areas_of_scroll_container(*snap_container);
+    document().forget_snapped_areas_of_scroll_container(Painting::BoxSlot::of(document(), slot_id(snap_container)));
 }
 
 namespace {
@@ -1325,4 +1252,9 @@ bool NodeWithStyle::has_size_containment() const
     return false;
 }
 
+}
+
+extern "C" WEB_API void ladybird_layout_node_shell_destroy(void* shell)
+{
+    Web::Layout::Node::delete_arena_owned_shell(*static_cast<Web::Layout::Node*>(shell));
 }

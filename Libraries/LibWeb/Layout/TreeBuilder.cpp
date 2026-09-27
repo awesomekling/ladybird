@@ -85,7 +85,12 @@ public:
     virtual Optional<CSSPixels> intrinsic_width() const override { return natural_size().width; }
     virtual Optional<CSSPixels> intrinsic_height() const override { return natural_size().height; }
     virtual Optional<CSSPixelFraction> intrinsic_aspect_ratio() const override { return natural_size().aspect_ratio; }
-    virtual Layout::Node const* image_provider_layout_node() const override { return m_layout_node.ptr(); }
+    virtual Painting::BoxSlot image_provider_box() const override
+    {
+        if (!m_layout_node)
+            return {};
+        return Painting::BoxSlot::of(m_layout_node->document(), Node::slot_id(m_layout_node.ptr()));
+    }
 
 private:
     class ImageClient final : public CSS::ImageStyleValue::Client {

@@ -87,7 +87,7 @@ private:
 
     // ^Layout::ImageProvider
     virtual GC::Ptr<DecodedImageData> decoded_image_data() const override { return image_data(); }
-    virtual Layout::Node const* image_provider_layout_node() const override;
+    virtual Painting::BoxSlot image_provider_box() const override;
 
     GC::Ptr<DecodedImageData> image_data() const;
 

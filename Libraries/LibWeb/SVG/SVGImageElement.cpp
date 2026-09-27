@@ -25,9 +25,9 @@ namespace Web::SVG {
 
 GC_DEFINE_ALLOCATOR(SVGImageElement);
 
-Layout::Node const* SVGImageElement::image_provider_layout_node() const
+Painting::BoxSlot SVGImageElement::image_provider_box() const
 {
-    return unsafe_layout_node();
+    return Painting::BoxSlot::bound_to(*this);
 }
 
 SVGImageElement::SVGImageElement(DOM::Document& document, DOM::QualifiedName qualified_name)

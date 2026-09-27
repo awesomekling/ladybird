@@ -210,8 +210,8 @@ void InvalidationJournal::publish_unanchored_paint_facts()
     if (!arena)
         return;
     for (auto const& [slot, update] : updates) {
-        if (auto row = arena->row_if_live(slot))
-            update(row);
+        if (auto box = Painting::BoxSlot::of(m_document, slot))
+            update(box);
     }
 }
 
@@ -603,13 +603,13 @@ void InvalidationJournal::drain()
             if (entry.clears_layer_image_paint_facts)
                 Layout::RustFFI::layout_arena_set_layer_image_paint_facts(row.arena_handle(), row.slot(), nullptr, 0);
             if (rare && rare->layer_image_paint_facts_update)
-                rare->layer_image_paint_facts_update(row);
+                rare->layer_image_paint_facts_update(Painting::BoxSlot::of(m_document, row.slot()));
             if (rare && rare->replaced_image_paint_facts_update)
-                rare->replaced_image_paint_facts_update(row);
+                rare->replaced_image_paint_facts_update(Painting::BoxSlot::of(m_document, row.slot()));
             if (rare && rare->video_paint_facts_update)
-                rare->video_paint_facts_update(row);
+                rare->video_paint_facts_update(Painting::BoxSlot::of(m_document, row.slot()));
             if (rare && rare->navigable_container_paint_facts_update)
-                rare->navigable_container_paint_facts_update(row);
+                rare->navigable_container_paint_facts_update(Painting::BoxSlot::of(m_document, row.slot()));
             if (entry.invalidate_paint_and_hit_test_cache)
                 Painting::apply_paint_cache_invalidation(row, Painting::PaintCacheInvalidation::PaintAndHitTest);
             if (entry.invalidate_propagated_text_decoration_caches)

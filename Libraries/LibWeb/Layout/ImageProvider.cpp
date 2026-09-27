@@ -6,8 +6,11 @@
 
 #include <LibGfx/DecodedImageFrame.h>
 #include <LibWeb/HTML/DecodedImageData.h>
-#include <LibWeb/Layout/Box.h>
+#include <LibWeb/HTML/HTMLImageElement.h>
+#include <LibWeb/HTML/HTMLInputElement.h>
+#include <LibWeb/HTML/HTMLObjectElement.h>
 #include <LibWeb/Layout/ImageProvider.h>
+#include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/Painting/PaintFacts.h>
 
@@ -60,16 +63,31 @@ Optional<Gfx::DecodedImageFrame> ImageProvider::default_image_frame(Optional<Gfx
 
 void ImageProvider::image_provider_contents_changed() const
 {
-    auto const* layout_node = image_provider_layout_node();
-    if (!layout_node)
+    auto box = image_provider_box();
+    if (!box)
         return;
-    if (layout_node->kind() == RustFFI::NodeKind::ImageBox) {
-        auto const& image_box = static_cast<Box const&>(*layout_node);
+    if (box.kind() == RustFFI::NodeKind::ImageBox) {
         // A box that owns its provider is handed it once the frame that built the box is over.
-        if (RustFFI::layout_arena_image_box_awaits_owned_provider(image_box.arena_handle(), Node::slot_id(&image_box)) || &image_box.image_provider() != this)
+        if (RustFFI::layout_arena_image_box_awaits_owned_provider(box.arena(), box.slot()) || image_provider_of_image_box(box) != this)
             return;
     }
-    Painting::push_replaced_image_paint_facts(*this, *layout_node);
+    Painting::push_replaced_image_paint_facts(*this, box);
+}
+
+ImageProvider const* image_provider_of_image_box(Painting::BoxSlot const& box)
+{
+    if (!box || box.kind() != RustFFI::NodeKind::ImageBox)
+        return nullptr;
+    if (auto const* owned = static_cast<ImageProvider const*>(RustFFI::layout_arena_owned_image_provider(box.arena(), box.slot())))
+        return owned;
+    auto element = box.dom_node();
+    if (auto const* image = as_if<HTML::HTMLImageElement>(element.ptr()))
+        return image;
+    if (auto const* input = as_if<HTML::HTMLInputElement>(element.ptr()))
+        return input;
+    if (auto const* object = as_if<HTML::HTMLObjectElement>(element.ptr()))
+        return object;
+    return nullptr;
 }
 
 }
