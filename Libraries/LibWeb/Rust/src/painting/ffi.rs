@@ -1335,6 +1335,7 @@ fn record_display_list_stage(stage: RecordingStageInput<'_>) -> RecordingStageOu
         published_hit_test_items,
         paint_order_tree,
         scratch,
+        absolute_rects,
     } = &mut recorder;
     // The retained tree describes the published tape and is written in place while a frame
     // is assembled, so only a recording that publishes may copy from that frame or touch
@@ -1354,6 +1355,7 @@ fn record_display_list_stage(stage: RecordingStageInput<'_>) -> RecordingStageOu
     crate::stage_thread::hold_here(crate::stage_thread::FfiStageHoldPoint::MidRecording);
     let recording = crate::painting::record::traversal::record_display_list(
         &frame,
+        absolute_rects,
         scratch,
         tree,
         viewport,
@@ -1371,6 +1373,7 @@ fn record_display_list_stage(stage: RecordingStageInput<'_>) -> RecordingStageOu
             let mut tree_for_recording_from_scratch = crate::painting::record::order_tree::PaintOrderTree::default();
             crate::painting::record::traversal::record_display_list(
                 &frame,
+                absolute_rects,
                 scratch,
                 &mut tree_for_recording_from_scratch,
                 viewport,

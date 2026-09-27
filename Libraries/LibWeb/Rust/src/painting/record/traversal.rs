@@ -32,6 +32,7 @@ use std::sync::Arc;
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn record_display_list(
     frame: &crate::painting::published_frame::PublishedFrame,
+    absolute_rects: &std::cell::RefCell<crate::painting::record::recorder_state::AbsoluteRectMemo>,
     scratch: &mut RecordingScratch,
     tree: &mut PaintOrderTree,
     viewport: NodeSlotId,
@@ -46,6 +47,7 @@ pub(crate) fn record_display_list(
         ($observer:ty) => {
             record_display_list_impl::<$observer>(
                 frame,
+                absolute_rects,
                 scratch,
                 tree,
                 viewport,
@@ -68,6 +70,7 @@ pub(crate) fn record_display_list(
 #[allow(clippy::too_many_arguments)]
 fn record_display_list_impl<O: Observer>(
     frame: &crate::painting::published_frame::PublishedFrame,
+    absolute_rects: &std::cell::RefCell<crate::painting::record::recorder_state::AbsoluteRectMemo>,
     scratch: &mut RecordingScratch,
     tree: &mut PaintOrderTree,
     viewport: NodeSlotId,
@@ -82,7 +85,7 @@ fn record_display_list_impl<O: Observer>(
     );
     let paint_state = frame.paint_state();
     let structural_epoch = paint_state.structural_epoch();
-    let paintable_rows = crate::painting::published_frame::PaintSource::new(frame);
+    let paintable_rows = crate::painting::published_frame::PaintSource::new(frame, absolute_rects);
     let frame_inputs = FrameInputs::from_recording_inputs(inputs, paint_state);
     let root_background_canvas_rect = root_background_canvas_rect(
         &paintable_rows,
