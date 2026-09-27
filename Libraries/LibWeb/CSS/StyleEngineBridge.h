@@ -226,6 +226,11 @@ public:
     // column, which arrive with the node's identity.
     void record_dom_paint_facts(StyleNodeID, u8 facts);
     void record_table_spans(StyleNodeID, u16 column_span, u16 row_span, u32 raw_column_span);
+    // A change to either for a node whose arrival has yet to go in goes in with the arrival, as the write recorded for
+    // it: published beside it, the change would reach the engine first and the arrival would write over it. Answers
+    // whether the node's arrival had yet to go in.
+    [[nodiscard]] bool change_arriving_dom_paint_facts(StyleNodeID, u8 facts);
+    [[nodiscard]] bool change_arriving_table_spans(StyleNodeID, u16 column_span, u16 row_span, u32 raw_column_span);
     void record_text_is_in_user_agent_shadow_tree(StyleNodeID, bool);
     void record_text_is_password_input(StyleNodeID, bool);
     void record_text_data(StyleNodeID, Utf16String const&);
@@ -552,6 +557,14 @@ private:
     // What each `TextData` write holds, by the index its `data` names until the writes cross.
     Vector<Utf16String> m_host_fact_text_data;
     Vector<StyleEngineFFI::FfiReplacedContentInput> m_host_fact_replaced_content_inputs;
+    // Where the writes recorded for arriving nodes' paint facts and table spans are among a journal's host fact
+    // writes, by node, for a change that comes before they go in.
+    struct ArrivalFactWrites {
+        HashMap<u32, size_t> dom_paint_facts;
+        HashMap<u32, size_t> table_spans;
+    };
+    ArrivalFactWrites m_arrival_fact_writes;
+    bool change_arrival_fact_write(HashMap<u32, size_t> ArrivalFactWrites::* kind, StyleEngineFFI::FfiHostFactWrite);
     // The recorded input submit_recorded_input() took for the style pass submit_style_transaction() submits, until
     // the pass takes it.
     struct RecordedInputForPass {
@@ -562,6 +575,7 @@ private:
         Vector<StyleEngineFFI::FfiStateDelta> state_deltas;
         Vector<StyleEngineFFI::FfiElementDeclarationDelta> element_declaration_deltas;
         Vector<StyleEngineFFI::FfiHostFactWrite> host_fact_writes;
+        ArrivalFactWrites arrival_fact_writes;
         Vector<Utf16String> host_fact_text_data;
         Vector<StyleEngineFFI::FfiReplacedContentInput> host_fact_replaced_content_inputs;
         Vector<StyleNodeID> style_node_grant;

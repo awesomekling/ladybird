@@ -1,0 +1,2 @@
+inert target is hit: false
+cell spanning two columns: 100px
