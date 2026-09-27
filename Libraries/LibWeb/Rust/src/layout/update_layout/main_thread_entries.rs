@@ -73,20 +73,27 @@ unsafe extern "C" fn layout_arena_update_layout(
     })
 }
 
-/// Resumes the layout update that answered `NeedsStyle`, once the document thread has run its style
-/// update, and goes on with it as `layout_arena_update_layout` does.
+/// Resumes the layout update that answered `NeedsStyle` or `NeedsRoundFacts`, once the document
+/// thread has run its style update if asked to and read the round's facts into `round`, and goes on
+/// with it as `layout_arena_update_layout` does.
 ///
 /// # Safety
 ///
-/// As for `layout_arena_update_layout`, right after the document ran the style update the update
-/// returned for.
+/// As for `layout_arena_update_layout`, right after the document did what the update returned for.
+/// `round` must be valid for the call, and so must the selection it points to, if any.
 #[unsafe(no_mangle)]
-unsafe extern "C" fn layout_arena_resume_update_layout(arena: *mut c_void) -> FfiLayoutUpdateOutcome {
+unsafe extern "C" fn layout_arena_resume_update_layout(
+    arena: *mut c_void,
+    round: *const FfiLayoutRoundFacts,
+) -> FfiLayoutUpdateOutcome {
     assert!(!arena.is_null(), "layout node arena handle is null");
+    assert!(!round.is_null());
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     abort_on_panic(|| {
         // SAFETY: Guaranteed by the entry point's contract.
-        unsafe { resume_update_layout(&main_thread, arena) }
+        let round = unsafe { LayoutRoundFacts::from_ffi(&*round) };
+        // SAFETY: As above.
+        unsafe { resume_update_layout(&main_thread, arena, round) }
     })
 }
 
@@ -142,25 +149,29 @@ pub(super) fn finish_layout_frame_taken_back(arena: *mut c_void, frame: LayoutFr
 }
 
 /// Hands the clock lease of the document a fresh layout frame for its ticks to lay out in on the
-/// render side while the document thread idles (see `ClockLayoutFrame`).
+/// render side while the document thread idles (see `ClockLayoutFrame`), with the document as it
+/// read itself into `round`.
 ///
 /// # Safety
 ///
 /// `arena` must be a live handle with a registered layout update host, used on the document thread
-/// with no layout update running and no frame in flight.
+/// with no layout update running and no frame in flight. `round` must be valid, and so must the
+/// selection it points to, if any.
 #[unsafe(no_mangle)]
-unsafe extern "C" fn layout_arena_renew_clock_layout_frame(arena: *mut c_void) {
+unsafe extern "C" fn layout_arena_renew_clock_layout_frame(arena: *mut c_void, round: *const FfiLayoutRoundFacts) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     // SAFETY: As above.
-    let frame = unsafe { make_clock_layout_frame(&main_thread, arena) };
+    let round = unsafe { LayoutRoundFacts::from_ffi(&*round) };
+    // SAFETY: As above.
+    let frame = unsafe { make_clock_layout_frame(&main_thread, arena, round) };
     crate::clock_frames::set_clock_layout_frame(arena, frame);
 }
 
 /// Takes in the layout frame the clock lease's ticks laid out in, if they did, and ends the layout
 /// update the document began for it: pays what the rounds owe the document and applies their
-/// messages, as a submitted pass's frame is taken in. Returns whether there was one; the lease then
-/// holds a fresh frame.
+/// messages, as a submitted pass's frame is taken in. Returns whether there was one; the document
+/// then renews the lease's frame (`layout_arena_renew_clock_layout_frame`).
 ///
 /// # Safety
 ///
@@ -178,9 +189,6 @@ unsafe extern "C" fn layout_arena_take_in_clock_layout_frame(arena: *mut c_void)
         // SAFETY: As above.
         unsafe { take_in_clock_layout_frame(&main_thread, frame, shown_on_render_side) }
     });
-    // SAFETY: As above; the update has ended.
-    let frame = unsafe { make_clock_layout_frame(&main_thread, arena) };
-    crate::clock_frames::set_clock_layout_frame(arena, frame);
     true
 }
 

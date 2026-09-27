@@ -546,6 +546,8 @@ public:
     // The rendering update's layout update, whose full layout pass runs beside the main thread under
     // LIBWEB_STAGE_OVERLAP=layout. Returns true if it does; the rendering update goes on once the frame is taken back.
     [[nodiscard]] bool submit_layout_for_rendering_update();
+    // Hands the clock lease's ticks a fresh layout frame to lay out in, with the document as it stands now.
+    void renew_clock_layout_frame();
     // The rendering update's style update, whose first pass runs beside the main thread under
     // LIBWEB_STAGE_OVERLAP=style. Returns true if it does; the rendering update goes on once the frame is taken back.
     [[nodiscard]] bool submit_style_for_rendering_update();
@@ -1740,6 +1742,7 @@ private:
     void update_active_element();
     bool needs_style_update_after_layout(bool style_runs_in_flight = false);
     Layout::RustFFI::FfiLayoutUpdateHostCallbacks layout_update_host_callbacks();
+    Layout::RustFFI::FfiLayoutUpdateDocumentFacts layout_update_document_facts();
 
     void process_pending_list_item_renumbers();
     void apply_layout_commit_effects(Layout::RustFFI::FfiLayoutCommitEffects const&);

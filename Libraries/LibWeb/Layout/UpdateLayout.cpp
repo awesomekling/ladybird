@@ -33,45 +33,64 @@ static Layout::RustFFI::FfiUtf16View ffi_utf16_view(Utf16View view)
     };
 }
 
+// Reads the document's selection range, when it has one, into `snapshot`, whose nodes `nodes` holds. Answers the
+// snapshot, or null when the document has no selection range.
+static Layout::RustFFI::FfiSelectionSnapshot const* read_selection(Document& document, Layout::RustFFI::FfiSelectionSnapshot& snapshot, Vector<Layout::RustFFI::FfiSelectionSnapshotNode>& nodes)
+{
+    auto selection = document.get_selection();
+    auto range = selection ? selection->range() : nullptr;
+    if (!range)
+        return nullptr;
+    snapshot = Painting::read_selection_snapshot(*range, nodes);
+    return &snapshot;
+}
+
 // The document-side steps of the layout update, which the Rust loop drives through this table.
 Layout::RustFFI::FfiLayoutUpdateHostCallbacks Document::layout_update_host_callbacks()
 {
     return {
         .context = this,
-        .process_pending_list_item_renumbers = [](void* context) { static_cast<Document*>(context)->process_pending_list_item_renumbers(); },
-        .process_pending_top_layer_layout_changes = [](void* context) { static_cast<Document*>(context)->process_pending_top_layer_layout_changes(); },
-        .document_facts = [](void* context) -> Layout::RustFFI::FfiLayoutUpdateDocumentFacts {
-            auto& document = *static_cast<Document*>(context);
-            auto navigable = document.navigable();
-            bool document_is_active = navigable && navigable->active_document().ptr() == &document;
-            auto viewport_rect = document_is_active ? navigable->viewport_rect() : CSSPixelRect {};
-            return {
-                .document_is_active = document_is_active,
-                .document_needs_layout_tree_build = document.needs_layout_tree_update() || document.child_needs_layout_tree_update(),
-                .container_query_evaluation_is_pending = document.has_size_containers_needing_evaluation_after_layout(),
-                .style_input_waits_on_document = document.m_needs_animated_style_update
-                    || document.style_computer().style_engine().has_recorded_input()
-                    || document.m_needs_media_rule_evaluation
-                    || !document.m_elements_with_dirty_style_attributes.is_empty(),
-                .top_layer_work_pending = document.m_top_layer_needs_layout_zone_rebuild || !document.m_elements_with_pending_top_layer_membership_change.is_empty(),
-                .should_collect_devtools_layout_data = document.page().client().has_active_devtools_client(),
-                .document_in_quirks_mode = document.in_quirks_mode(),
-                .viewport_inline_size_raw = viewport_rect.width().raw_value(),
-                .viewport_block_size_raw = viewport_rect.height().raw_value(),
-            }; },
+        .document_facts = [](void* context) { return static_cast<Document*>(context)->layout_update_document_facts(); },
         .prepare_layout_tree_build = [](void* context) -> u32 { return static_cast<Document*>(context)->prepare_layout_tree_build(); },
-        .read_selection = [](void* context, void* sink, void (*receive)(void*, Layout::RustFFI::FfiSelectionSnapshot const*)) {
-            auto& document = *static_cast<Document*>(context);
-            auto selection = document.get_selection();
-            auto range = selection ? selection->range() : nullptr;
-            if (!range)
-                return;
-            Vector<Layout::RustFFI::FfiSelectionSnapshotNode> nodes;
-            auto snapshot = Painting::read_selection_snapshot(*range, nodes);
-            receive(sink, &snapshot); },
         .take_in_frame_effects = [](void* context, Layout::RustFFI::FfiLayoutFrameEffects const* effects) { static_cast<Document*>(context)->take_in_layout_frame_effects(*effects); },
         .finish_submitted_style_update = [](void* context) { static_cast<Document*>(context)->finish_style_update_submitted_in_flight(); },
     };
+}
+
+// What a layout round reads from the document once the round's style has run.
+Layout::RustFFI::FfiLayoutUpdateDocumentFacts Document::layout_update_document_facts()
+{
+    auto navigable = this->navigable();
+    bool document_is_active = navigable && navigable->active_document().ptr() == this;
+    auto viewport_rect = document_is_active ? navigable->viewport_rect() : CSSPixelRect {};
+    return {
+        .document_is_active = document_is_active,
+        .document_needs_layout_tree_build = needs_layout_tree_update() || child_needs_layout_tree_update(),
+        .container_query_evaluation_is_pending = has_size_containers_needing_evaluation_after_layout(),
+        .style_input_waits_on_document = m_needs_animated_style_update
+            || style_computer().style_engine().has_recorded_input()
+            || m_needs_media_rule_evaluation
+            || !m_elements_with_dirty_style_attributes.is_empty(),
+        .top_layer_work_pending = m_top_layer_needs_layout_zone_rebuild || !m_elements_with_pending_top_layer_membership_change.is_empty(),
+        .should_collect_devtools_layout_data = page().client().has_active_devtools_client(),
+        .document_in_quirks_mode = in_quirks_mode(),
+        .viewport_inline_size_raw = viewport_rect.width().raw_value(),
+        .viewport_block_size_raw = viewport_rect.height().raw_value(),
+    };
+}
+
+void Document::renew_clock_layout_frame()
+{
+    auto* arena = layout_node_arena_if_created();
+    if (!arena)
+        return;
+    Layout::RustFFI::FfiSelectionSnapshot selection {};
+    Vector<Layout::RustFFI::FfiSelectionSnapshotNode> selection_nodes;
+    Layout::RustFFI::FfiLayoutRoundFacts round {
+        .facts = layout_update_document_facts(),
+        .selection = read_selection(*this, selection, selection_nodes),
+    };
+    Layout::RustFFI::layout_arena_renew_clock_layout_frame(arena->handle(), &round);
 }
 
 // Takes in what a layout frame left for the document once it is over, in the order the frame leaves it, and ends the
@@ -256,6 +275,20 @@ bool Document::update_style_and_layout_once(UpdateLayoutReason reason, Throttled
     else
         update_style();
 
+    // A round goes on from the facts and the selection the document reads once the list item renumbers and top layer
+    // changes its style leaves have gone through.
+    Layout::RustFFI::FfiSelectionSnapshot selection {};
+    Vector<Layout::RustFFI::FfiSelectionSnapshotNode> selection_nodes;
+    auto read_round_facts = [&] {
+        process_pending_list_item_renumbers();
+        process_pending_top_layer_layout_changes();
+        selection_nodes.clear();
+        return Layout::RustFFI::FfiLayoutRoundFacts {
+            .facts = layout_update_document_facts(),
+            .selection = read_selection(*this, selection, selection_nodes),
+        };
+    };
+
     Layout::RustFFI::FfiLayoutUpdateInputs inputs {
         .reason_is_inspect_devtools_layout_data = reason == UpdateLayoutReason::InspectDevToolsLayoutData,
         .is_template_contents_document = m_created_for_appropriate_template_contents,
@@ -263,6 +296,7 @@ bool Document::update_style_and_layout_once(UpdateLayoutReason reason, Throttled
         .may_submit_pass = may_submit_pass,
         .style_in_flight = style_in_flight,
         .viewport_propagation_sources = {},
+        .first_round = read_round_facts(),
     };
     if (style_in_flight) {
         auto sources = CSS::StyleEffectDrain::viewport_propagation_sources_of(*this);
@@ -270,9 +304,11 @@ bool Document::update_style_and_layout_once(UpdateLayoutReason reason, Throttled
             inputs.viewport_propagation_sources[index] = sources[index].value();
     }
     auto outcome = Layout::RustFFI::layout_arena_update_layout(arena.handle(), &inputs);
-    while (outcome == Layout::RustFFI::FfiLayoutUpdateOutcome::NeedsStyle) {
-        update_style();
-        outcome = Layout::RustFFI::layout_arena_resume_update_layout(arena.handle());
+    while (outcome == Layout::RustFFI::FfiLayoutUpdateOutcome::NeedsStyle || outcome == Layout::RustFFI::FfiLayoutUpdateOutcome::NeedsRoundFacts) {
+        if (outcome == Layout::RustFFI::FfiLayoutUpdateOutcome::NeedsStyle)
+            update_style();
+        auto round = read_round_facts();
+        outcome = Layout::RustFFI::layout_arena_resume_update_layout(arena.handle(), &round);
     }
     if (outcome == Layout::RustFFI::FfiLayoutUpdateOutcome::FlightReady || outcome == Layout::RustFFI::FfiLayoutUpdateOutcome::FlightWithStyleReady) {
         // The flight records the document after its layout only if the document seals what that reads before it submits
