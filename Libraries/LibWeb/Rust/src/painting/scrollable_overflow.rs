@@ -837,7 +837,12 @@ impl LayoutNodeArena {
             || !overflow.rows_to_measure.borrow().is_empty()
             || self.has_scheduled_scrollable_overflow_recalculation();
         if has_work {
-            self.run_stage(|arena| arena.measure_scrollable_overflow_before_publication());
+            crate::painting::owner_pass::run_paint_pass(
+                self,
+                crate::painting::owner_pass::PaintPass::ScrollableOverflow,
+                |arena, ()| arena.measure_scrollable_overflow_before_publication(),
+                (),
+            );
         }
     }
 

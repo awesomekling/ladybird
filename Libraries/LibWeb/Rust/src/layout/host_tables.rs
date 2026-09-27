@@ -96,8 +96,6 @@ pub(crate) struct ArenaHandle {
     arena: LayoutNodeArena,
     host_tables: HostTables,
     layout_scratch: super::LayoutScratch,
-    /// The document whose render state holds the arena.
-    document: crate::render_owner::DocumentId,
 }
 
 // A handle is also a pointer to its arena.
@@ -112,11 +110,12 @@ impl ArenaHandle {
 
     /// The arena of the render state of `document`, which the document thread `document_thread` acts for.
     pub(crate) fn new_for(document: crate::render_owner::DocumentId, document_thread: std::thread::ThreadId) -> Self {
+        let mut arena = LayoutNodeArena::new_for(document_thread);
+        arena.adopt(document, document_thread);
         Self {
-            arena: LayoutNodeArena::new_for(document_thread),
+            arena,
             host_tables: HostTables::default(),
             layout_scratch: super::LayoutScratch::default(),
-            document,
         }
     }
 
@@ -128,13 +127,12 @@ impl ArenaHandle {
     pub(crate) unsafe fn document_of(handle: *const c_void) -> crate::render_owner::DocumentId {
         assert!(!handle.is_null(), "layout node arena handle is null");
         // SAFETY: Guaranteed by the caller. The projection does not borrow the arena beside it.
-        unsafe { *std::ptr::addr_of!((*handle.cast::<ArenaHandle>()).document) }
+        unsafe { *std::ptr::addr_of!((*handle.cast::<ArenaHandle>()).arena.document) }
     }
 
     /// Makes the arena the render state of `document`'s, which the document thread `document_thread` acts for.
     pub(crate) fn adopt(&mut self, document: crate::render_owner::DocumentId, document_thread: std::thread::ThreadId) {
-        self.document = document;
-        self.arena.set_owner_thread(document_thread);
+        self.arena.adopt(document, document_thread);
     }
 
     pub(crate) fn arena_mut(&mut self) -> &mut LayoutNodeArena {

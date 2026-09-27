@@ -1921,16 +1921,6 @@ pub(crate) fn run_stage<R: Send>(stage: impl FnOnce() -> R + Send) -> R {
     }
 }
 
-/// Runs `stage`, a stage for the document whose arena is `arena`, as [`run_stage`] does, with the faces it wants
-/// filed under that document.
-pub(crate) fn run_document_stage<R: Send>(arena: *const c_void, stage: impl FnOnce() -> R + Send) -> R {
-    let owner = arena as u64;
-    run_stage(move || {
-        let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(owner);
-        stage()
-    })
-}
-
 /// A value a submitted stage owns although the compiler cannot check that it may cross threads.
 pub(crate) struct FrameOwns<F>(F);
 // SAFETY: Whoever wraps a value vouches that nothing it holds is reachable from a third thread,
@@ -2094,6 +2084,23 @@ pub(crate) fn wait_for_owner<R>(
     tsan::acquire(thread);
     install_style_update_scope(*style_update);
     outcome
+}
+
+/// Where a unit test's owner answers a unit, with how the test waits for the answer.
+#[cfg(test)]
+pub(crate) fn owner_reply_for_test<R>() -> (OwnerReplyTo<R>, impl FnOnce() -> std::thread::Result<R>) {
+    let (reply, answered) = channel();
+    let reply = OwnerReplyTo {
+        thread: tests::test_thread(),
+        caller: std::thread::current().id(),
+        style_update: Box::new(take_style_update_scope()),
+        reply,
+    };
+    (reply, move || {
+        let (outcome, style_update) = answered.recv().expect("the owner answers");
+        install_style_update_scope(*style_update);
+        outcome
+    })
 }
 
 /// Runs `stage` on a stage thread of the unit tests' own, whatever the environment says.

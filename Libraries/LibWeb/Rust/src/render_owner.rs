@@ -264,6 +264,11 @@ pub(crate) enum ToOwner {
         document: DocumentId,
         unit: Box<crate::layout::update_layout::OwnerLayoutUnit>,
     },
+    /// Runs a paint preparation pass over the render state of `document` for the document thread, which waits for it.
+    Paint {
+        document: DocumentId,
+        pass: Box<crate::painting::owner_pass::OwnerPaintPass>,
+    },
     /// Runs the style transaction `transaction` of `document`, which the document thread takes and waits for: begins
     /// it, runs its pass and finishes it. Answers with the transaction where the owner could not run it.
     Style {
@@ -293,6 +298,7 @@ impl ToOwner {
             | Self::Changes { document, .. }
             | Self::RenderingUpdate { document, .. }
             | Self::Layout { document, .. }
+            | Self::Paint { document, .. }
             | Self::Style { document, .. }
             | Self::Ask { document, .. }
             | Self::Recall { document }
@@ -305,7 +311,12 @@ impl ToOwner {
     pub(crate) fn may_be_served_inside_a_stage(&self) -> bool {
         matches!(
             self,
-            Self::Create { .. } | Self::Changes { .. } | Self::Style { .. } | Self::Layout { .. } | Self::Ask { .. }
+            Self::Create { .. }
+                | Self::Changes { .. }
+                | Self::Style { .. }
+                | Self::Layout { .. }
+                | Self::Paint { .. }
+                | Self::Ask { .. }
         )
     }
 }
@@ -337,6 +348,8 @@ pub(crate) fn between_units(message: ToOwner, running: DocumentId, deferred: &[O
             BetweenUnits::Defer(message)
         }
         ToOwner::Destroy { .. } if document != running => BetweenUnits::Serve(message),
+        // A paint pass reaches the arena the update runs in; it goes after the update.
+        ToOwner::Paint { .. } if document == running => BetweenUnits::Defer(message),
         message if message.may_be_served_inside_a_stage() => BetweenUnits::Serve(message),
         message => BetweenUnits::Defer(message),
     }
@@ -420,6 +433,10 @@ fn handle_message(message: ToOwner) {
             // The state's borrow ends before the unit runs, which may reach another document's state. The unit finds
             // the arena inside its answer, so that a panic there answers the waiting document thread.
             (*unit).run(|| with_state(document, RenderState::arena_handle));
+        }
+        ToOwner::Paint { document, pass } => {
+            // As for a layout unit, the pass finds the arena inside its answer.
+            (*pass).run(|| with_state(document, RenderState::arena_handle));
         }
         ToOwner::Ask {
             document,
@@ -835,6 +852,20 @@ mod tests {
         };
         assert_eq!(sorted(changes(running)), "serve");
         assert_eq!(sorted(changes(other)), "serve");
+        // A paint pass reaches the arena of its document: the running update's goes after the update.
+        let paint = |document| {
+            let (reply, _) = crate::stage_thread::owner_reply_for_test();
+            ToOwner::Paint {
+                document,
+                pass: Box::new(crate::painting::owner_pass::OwnerPaintPass::new_for_test(
+                    std::ptr::null_mut(),
+                    |_, ()| {},
+                    reply,
+                )),
+            }
+        };
+        assert_eq!(sorted(paint(running)), "defer");
+        assert_eq!(sorted(paint(other)), "serve");
     }
 
     #[test]
@@ -918,6 +949,33 @@ mod tests {
             });
             let applied = with_state(document, |state| state.changes.take_through(seq).len()).unwrap();
             assert_eq!(applied, 1);
+            handle(ToOwner::Destroy { document });
+            STATES.with_borrow(|states| states.is_empty())
+        });
+        assert!(owner.join().unwrap());
+    }
+
+    #[test]
+    fn the_owner_runs_a_paint_pass_with_the_arena_of_the_render_state_and_answers() {
+        let owner = std::thread::spawn(|| {
+            let document = DocumentId::mint();
+            let mut arena = Box::new(ArenaHandle::new_for(document, std::thread::current().id()));
+            let sent = std::ptr::from_mut::<ArenaHandle>(&mut arena).cast::<c_void>();
+            handle(ToOwner::Create {
+                document,
+                arena: SpareArena(arena),
+            });
+            // The owner finds the arena of the document's render state, the arena the document thread sent.
+            let (reply, answered) = crate::stage_thread::owner_reply_for_test();
+            handle(ToOwner::Paint {
+                document,
+                pass: Box::new(crate::painting::owner_pass::OwnerPaintPass::new_for_test(
+                    sent,
+                    |arena, ()| assert!(arena.document().is_valid(), "the pass runs with a document's arena"),
+                    reply,
+                )),
+            });
+            assert!(answered().is_ok(), "the pass answers");
             handle(ToOwner::Destroy { document });
             STATES.with_borrow(|states| states.is_empty())
         });

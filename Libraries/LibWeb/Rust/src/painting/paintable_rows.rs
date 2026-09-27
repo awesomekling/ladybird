@@ -1706,20 +1706,33 @@ impl LayoutNodeArena {
         if let Some(published) = &mut self.paintable_rows.published {
             published.hit_test_list = None;
         }
+        let needs_building = self.hit_test_list.get_mut().as_ref().is_some_and(|list| {
+            (needs_spatial_indexes && !list.spatial_indexes_built) || (needs_caret_lines && !list.caret_lines_built)
+        });
+        if needs_building {
+            crate::painting::owner_pass::run_paint_pass(
+                self,
+                crate::painting::owner_pass::PaintPass::HitTestList,
+                |arena, (needs_spatial_indexes, needs_caret_lines)| {
+                    arena.build_hit_test_list_for_query(needs_spatial_indexes, needs_caret_lines);
+                },
+                (needs_spatial_indexes, needs_caret_lines),
+            );
+        }
+    }
+
+    /// Builds the structures a hit-test query derives from the list that [`Self::prepare_hit_test_list_for_query`]
+    /// finds missing.
+    pub(crate) fn build_hit_test_list_for_query(&mut self, needs_spatial_indexes: bool, needs_caret_lines: bool) {
         let mut list = std::mem::take(self.hit_test_list.get_mut());
-        if let Some(list) = list.as_mut()
-            && ((needs_spatial_indexes && !list.spatial_indexes_built)
-                || (needs_caret_lines && !list.caret_lines_built))
-        {
-            self.run_stage(|arena| {
-                let list = std::sync::Arc::make_mut(list);
-                if needs_spatial_indexes {
-                    list.build_spatial_indexes_if_needed();
-                }
-                if needs_caret_lines {
-                    list.build_caret_lines_if_needed(&arena.paintable_rows());
-                }
-            });
+        if let Some(list) = list.as_mut() {
+            let list = std::sync::Arc::make_mut(list);
+            if needs_spatial_indexes {
+                list.build_spatial_indexes_if_needed();
+            }
+            if needs_caret_lines {
+                list.build_caret_lines_if_needed(&self.paintable_rows());
+            }
         }
         *self.hit_test_list.get_mut() = list;
     }

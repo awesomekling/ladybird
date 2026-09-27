@@ -549,6 +549,12 @@ pub(crate) fn prepare_root_background_and_overflow(
     (background_source_changed, clamped)
 }
 
+/// [`prepare_root_background_and_overflow`] with the root background source the arena's tree derives.
+pub(crate) fn root_background_and_overflow(arena: &mut LayoutNodeArena) -> (bool, Vec<(NodeSlotId, CssPixelPoint)>) {
+    let root_background_source = crate::layout::root_background_source(arena);
+    prepare_root_background_and_overflow(arena, root_background_source)
+}
+
 /// The render half of preparing for rendering after the scroll offset handover: takes what the
 /// overflow measurement changed, and refreshes the sticky constraints the changed geometry moves
 /// unless a visual context update is pending anyway. It is a visual context update of its own, which
@@ -1008,7 +1014,12 @@ pub unsafe extern "C" fn layout_arena_update_accumulated_visual_contexts(
     if !arena.paintable_row_is_populated(viewport) {
         return crate::painting::host::FfiVisualContextUpdateOutcome::default();
     }
-    arena.run_stage(|arena| update_accumulated_visual_contexts_stage(arena, viewport))
+    crate::painting::owner_pass::run_paint_pass(
+        arena,
+        crate::painting::owner_pass::PaintPass::AccumulatedVisualContexts,
+        update_accumulated_visual_contexts_stage,
+        viewport,
+    )
 }
 
 /// The visual context update, run on the render stage right before the rows it leaves are
@@ -1143,18 +1154,26 @@ pub unsafe extern "C" fn layout_arena_scroll_snapport_rect(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_update_visual_viewport_transform(arena: *mut c_void) -> bool {
     let arena = unsafe { arena_from_handle_mut(arena) };
-    arena.run_stage(|arena| {
-        let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::VisualContextUpdate);
-        let mut paint_state = arena.paint_state().borrow_mut();
-        let Some(tree) = &mut paint_state.visual_context.tree else {
-            return false;
-        };
-        let inputs = arena.visual_context_tree_inputs();
-        std::sync::Arc::make_mut(tree).set_visual_viewport_transform(
-            crate::painting::visual_context::node_values::visual_viewport_transform_data(&inputs),
-        );
-        true
-    })
+    crate::painting::owner_pass::run_paint_pass(
+        arena,
+        crate::painting::owner_pass::PaintPass::VisualViewportTransform,
+        |arena, ()| update_visual_viewport_transform_stage(arena),
+        (),
+    )
+}
+
+/// Updates the visual viewport transform of the arena's visual context tree, and answers whether it has a tree.
+fn update_visual_viewport_transform_stage(arena: &mut LayoutNodeArena) -> bool {
+    let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::VisualContextUpdate);
+    let mut paint_state = arena.paint_state().borrow_mut();
+    let Some(tree) = &mut paint_state.visual_context.tree else {
+        return false;
+    };
+    let inputs = arena.visual_context_tree_inputs();
+    std::sync::Arc::make_mut(tree).set_visual_viewport_transform(
+        crate::painting::visual_context::node_values::visual_viewport_transform_data(&inputs),
+    );
+    true
 }
 
 /// # Safety
@@ -1209,31 +1228,40 @@ pub unsafe extern "C" fn layout_arena_refresh_scroll_state(
     publish: unsafe extern "C" fn(*mut c_void, *const libgfx_rust::FloatPoint, usize),
 ) -> bool {
     let arena = unsafe { arena_from_handle_mut(arena) };
-    let refresh = arena.run_stage(|arena| {
-        let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::ScrollStateRefresh);
-        let paintable_rows = arena.paintable_rows();
-        let mut paint_state = arena.paint_state().borrow_mut();
-        let state = &mut paint_state.visual_context;
-        if !force && !state.needs_to_refresh_scroll_state {
-            return None;
-        }
-        state.needs_to_refresh_scroll_state = false;
-        crate::painting::visual_context::refresh::refresh_scroll_state(&paintable_rows, &mut state.scroll_state);
-        let mut snapshot = state
-            .scroll_state
-            .snapshot(arena.visual_context_tree_inputs().device_pixels_per_css_pixel);
-        // https://drafts.csswg.org/css-position/#sticky-pos
-        if let Some(tree) = state.tree.as_deref() {
-            tree.resolve_sticky_offsets_in_place(&mut snapshot);
-        }
-        Some(snapshot)
-    });
+    let refresh = crate::painting::owner_pass::run_paint_pass(
+        arena,
+        crate::painting::owner_pass::PaintPass::ScrollState,
+        refresh_scroll_state_stage,
+        force,
+    );
     let Some(snapshot) = refresh else {
         return false;
     };
     // SAFETY: The C++ sink copies the offsets synchronously.
     unsafe { publish(sink, snapshot.as_ptr(), snapshot.len()) };
     true
+}
+
+/// Refreshes the arena's scroll state where something invalidated it or `force` asks, and answers with its dense
+/// device-pixel snapshot, the sticky nodes' offsets resolved.
+fn refresh_scroll_state_stage(arena: &mut LayoutNodeArena, force: bool) -> Option<Vec<libgfx_rust::FloatPoint>> {
+    let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::ScrollStateRefresh);
+    let paintable_rows = arena.paintable_rows();
+    let mut paint_state = arena.paint_state().borrow_mut();
+    let state = &mut paint_state.visual_context;
+    if !force && !state.needs_to_refresh_scroll_state {
+        return None;
+    }
+    state.needs_to_refresh_scroll_state = false;
+    crate::painting::visual_context::refresh::refresh_scroll_state(&paintable_rows, &mut state.scroll_state);
+    let mut snapshot = state
+        .scroll_state
+        .snapshot(arena.visual_context_tree_inputs().device_pixels_per_css_pixel);
+    // https://drafts.csswg.org/css-position/#sticky-pos
+    if let Some(tree) = state.tree.as_deref() {
+        tree.resolve_sticky_offsets_in_place(&mut snapshot);
+    }
+    Some(snapshot)
 }
 
 /// What a recording stage runs on: the frame it records, frozen before the stage is handed the
@@ -1310,6 +1338,26 @@ fn freeze_recording_frame(
 
 /// The host-free display-list recording stage. Host callbacks require a `MainThread` capability,
 /// which this function neither receives nor stores in its input, and it names no arena.
+/// A recording a document thread waits for, on its stack: the input it froze, and the output the recording leaves.
+struct RecordingSlot<'a> {
+    input: Option<RecordingStageInput<'a>>,
+    output: Option<RecordingStageOutput>,
+}
+
+/// Records the display list of the frame the recording slot at `slot` holds, and leaves the recording in the slot.
+///
+/// # Safety
+///
+/// `slot` must be the address of a live [`RecordingSlot`] that nothing else reaches until this returns.
+unsafe fn record_in_slot(slot: *mut c_void) {
+    // SAFETY: Guaranteed by the caller.
+    let slot = unsafe { &mut *slot.cast::<RecordingSlot<'_>>() };
+    debug_assert!(slot.input.is_some(), "a recording runs once");
+    if let Some(input) = slot.input.take() {
+        slot.output = Some(record_display_list_stage(input));
+    }
+}
+
 fn record_display_list_stage(stage: RecordingStageInput<'_>) -> RecordingStageOutput {
     let RecordingStageInput {
         frame,
@@ -1571,12 +1619,26 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
     }
     let output = {
         // SAFETY: No borrow of the arena is live here.
-        let input = recording_stage_input(
-            unsafe { arena_from_handle_mut(arena_handle) },
-            viewport,
-            recording_inputs,
+        let arena = unsafe { arena_from_handle_mut(arena_handle) };
+        let mut slot = RecordingSlot {
+            input: Some(recording_stage_input(arena, viewport, recording_inputs)),
+            output: None,
+        };
+        let slot_address = std::ptr::from_mut(&mut slot).cast::<c_void>();
+        crate::painting::owner_pass::run_paint_pass(
+            arena,
+            crate::painting::owner_pass::PaintPass::Recording,
+            // The recording reads the frame the slot froze, not the arena.
+            // SAFETY: The slot stays on this thread's stack, which reaches it only once the pass is over.
+            |_, slot| unsafe { record_in_slot(slot.into_inner()) },
+            // SAFETY: This thread waits for the pass.
+            unsafe { crate::stage_thread::CallerWaits::new(slot_address) },
         );
-        crate::stage_thread::run_stage(|| record_display_list_stage(input))
+        slot.output
+    };
+    let Some(output) = output else {
+        debug_assert!(false, "a recording that ran leaves its output");
+        return false;
     };
     // SAFETY: The stage has returned the arena.
     let arena = unsafe { arena_from_handle(arena_handle) };

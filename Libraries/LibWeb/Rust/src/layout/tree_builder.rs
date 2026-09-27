@@ -3211,8 +3211,9 @@ impl TreeBuildHostHalf {
     }
 }
 
-/// Runs the layout tree build walk of the document `document_style_node` names, as a stage, and
-/// answers with its outcome and the host half it leaves the caller to pay.
+/// Runs the layout tree build walk of the document `document_style_node` names, in the unit or the
+/// rendering update the render owner runs it in, and answers with its outcome and the host half it
+/// leaves the caller to pay.
 ///
 /// # Safety
 ///
@@ -3225,19 +3226,17 @@ pub(crate) unsafe fn walk_layout_tree_build(
 ) -> (FfiLayoutTreeBuildOutcome, TreeBuildHostHalf) {
     // SAFETY: Guaranteed by the caller.
     let arena = unsafe { LayoutNodeArena::from_handle_mut(arena_handle) };
-    arena.run_stage(|arena| {
-        // The build writes the rows of the boxes it changes, and nothing reads the rows as last
-        // published while it runs.
-        arena.release_published_paintable_rows();
-        // The host is made on the stage's side from the arena the stage holds alone.
-        let host = dom_tree_builder_host(std::ptr::from_mut(arena).cast());
-        let TreeBuildStageOutput {
-            outcome,
-            reports,
-            handbacks,
-        } = run_tree_build_stage(&host, document_style_node);
-        (outcome, TreeBuildHostHalf { reports, handbacks })
-    })
+    // The build writes the rows of the boxes it changes, and nothing reads the rows as last
+    // published while it runs.
+    arena.release_published_paintable_rows();
+    // The host is made on the stage's side from the arena the stage holds alone.
+    let host = dom_tree_builder_host(std::ptr::from_mut(arena).cast());
+    let TreeBuildStageOutput {
+        outcome,
+        reports,
+        handbacks,
+    } = run_tree_build_stage(&host, document_style_node);
+    (outcome, TreeBuildHostHalf { reports, handbacks })
 }
 
 /// The layout tree build stage: the walk that turns the style mirror's flat tree into layout
