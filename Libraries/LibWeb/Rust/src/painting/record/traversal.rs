@@ -9,7 +9,6 @@ use crate::painting::record::trace::Observer;
 
 use super::{PaintPhase, PaintRecorder};
 use crate::css::style::fast_hash::FastSet;
-use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::{NodeKind, NodeSlotId};
 use crate::layout::node_facts;
 use crate::painting::display_list::commands::ContextRef;
@@ -32,32 +31,26 @@ use std::sync::Arc;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn record_display_list(
-    layout_arena: &LayoutNodeArena,
     frame: &crate::painting::published_frame::PublishedFrame,
-    paint_state: &crate::painting::paint_state::PaintState,
     scratch: &mut RecordingScratch,
     tree: &mut PaintOrderTree,
     viewport: NodeSlotId,
     inputs: &RecordingInputs<'_>,
-    hit_test_list_generation: u64,
     source_frame: Option<Arc<RecordingOutput>>,
     source_items: Option<Arc<PublishedHitTestItems>>,
     plan_from_prepared_inputs: bool,
     trace: bool,
     cancel: Option<&crate::stage_thread::RecordingCancel>,
 ) -> RecordingResult {
-    scratch.begin_recording(layout_arena.paintable_row_count());
+    scratch.begin_recording(frame.paintable_row_capacity());
     macro_rules! record {
         ($observer:ty) => {
             record_display_list_impl::<$observer>(
-                layout_arena,
                 frame,
-                paint_state,
                 scratch,
                 tree,
                 viewport,
                 inputs,
-                hit_test_list_generation,
                 source_frame,
                 source_items,
                 plan_from_prepared_inputs,
@@ -76,14 +69,11 @@ pub(crate) fn record_display_list(
 
 #[allow(clippy::too_many_arguments)]
 fn record_display_list_impl<O: Observer>(
-    layout_arena: &LayoutNodeArena,
     frame: &crate::painting::published_frame::PublishedFrame,
-    paint_state: &crate::painting::paint_state::PaintState,
     scratch: &mut RecordingScratch,
     tree: &mut PaintOrderTree,
     viewport: NodeSlotId,
     inputs: &RecordingInputs<'_>,
-    hit_test_list_generation: u64,
     source_frame: Option<Arc<RecordingOutput>>,
     source_items: Option<Arc<PublishedHitTestItems>>,
     plan_from_prepared_inputs: bool,
@@ -93,8 +83,9 @@ fn record_display_list_impl<O: Observer>(
         inputs.publishes_recording || source_frame.is_none(),
         "a recording that publishes nothing has no published frame to copy from"
     );
-    let structural_epoch = paint_state.visual_context.structural_epoch();
-    let paintable_rows = crate::painting::published_frame::PaintSource::new(layout_arena, frame);
+    let paint_state = frame.paint_state();
+    let structural_epoch = paint_state.structural_epoch();
+    let paintable_rows = crate::painting::published_frame::PaintSource::new(frame);
     let frame_inputs = FrameInputs::from_recording_inputs(inputs, paint_state);
     let root_background_canvas_rect = root_background_canvas_rect(
         &paintable_rows,
@@ -131,11 +122,7 @@ fn record_display_list_impl<O: Observer>(
         blocking_wheel_event_region_count: 0,
         observer: O::default(),
         list: HitTestList {
-            item_capacity_hint_from_previous_list: layout_arena
-                .hit_test_list
-                .borrow()
-                .as_ref()
-                .map_or(0, |list| list.items.len()),
+            item_capacity_hint_from_previous_list: paint_state.hit_test_item_capacity_hint,
             ..HitTestList::default()
         },
         scratch,
@@ -192,7 +179,7 @@ fn record_display_list_impl<O: Observer>(
         }
     };
     let mut hit_test_list = recorder.list;
-    hit_test_list.generation = hit_test_list_generation;
+    hit_test_list.generation = paint_state.hit_test_list_generation + 1;
     let output = RecordingOutput {
         recorded_structural_epoch: structural_epoch,
         frame_inputs,

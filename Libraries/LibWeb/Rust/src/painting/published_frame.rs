@@ -15,31 +15,40 @@
 
 use crate::cow_column::ColumnSnapshot;
 use crate::css::computed_value_views::ComputedValuesView;
-use crate::css::css_pixels::CssPixelRect;
+use crate::css::css_pixels::{CssPixelPoint, CssPixelRect};
+use crate::css::style::fast_hash::FastMap;
 use crate::layout::LayoutNodeArena;
+use crate::layout::PublishedTextSlot;
 use crate::layout::SLOTS_PER_CHUNK;
 use crate::layout::fragment_tree::FragmentLink;
 use crate::layout::node_data::{
     CompositorAnimationFrameKind, DomPaintFact, FfiStylePayloads, NodeFlag, NodeKind, NodeSlotId, PaintNode,
 };
 use crate::layout::node_facts;
+use crate::layout::text_chunker::GraphemeSegmenter;
 use crate::layout::tree_shape::RetiredSlots;
 use crate::layout::used_values::FfiCssPixelRect;
-use crate::layout::{RenderedTextBoundary, TextContent, TextFragments};
+use crate::layout::{RenderedText, RenderedTextBoundary, TextFragments};
 use crate::painting::fragment_ownership::FragmentOwnershipFilter;
 use crate::painting::hit_test::HitTestList;
 use crate::painting::host::FfiLayerImageList;
 use crate::painting::image_map_areas::ImageMapAreas;
-use crate::painting::layer_image_paint_facts::LayerImagePaintFacts;
+use crate::painting::layer_image_paint_facts::{LayerImagePaintFacts, LayerImagePaintFactsTable};
 use crate::painting::paint_order_plan::PaintOrderInputs;
+use crate::painting::paint_state::{PaintState, SelectionPseudoStyles};
 use crate::painting::paintable_data::{CommittedSideData, PaintableData};
 use crate::painting::paintable_rows::{CommittedFragmentLinkSlot, CommittedSideDataRef, PAINTABLE_SLOTS_PER_CHUNK};
 use crate::painting::record::damage::{FrameDamage, PaintDamage};
-use crate::painting::replaced_paint_facts::ReplacedPaintFacts;
+use crate::painting::replaced_paint_facts::{ReplacedPaintFacts, ReplacedPaintFactsTable};
+use crate::painting::selection::SelectionRange;
 use crate::painting::stacking_context::entries::StackingContextEntries;
-use crate::painting::svg_paint_resources::SvgPaintResources;
+use crate::painting::svg_paint_resources::{
+    PublishedSvgFilter, PublishedSvgPaintServer, SvgPaintResourceKind, SvgPaintResourceRows, published_filter_in,
+    published_paint_server_in,
+};
 use crate::painting::visual_context::scroll_state::ScrollOffsets;
 use crate::painting::visual_context::{BoxVisualContextNodeHandles, VisualContextTree};
+use std::cell::RefCell;
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -67,6 +76,62 @@ pub(crate) struct PublishedFrame {
     /// Keeps the arena from reusing a slot this frame may name until the frame is dropped.
     _retired_slots: RetiredSlots,
     damage: FrameDamage,
+    paint_state: PublishedPaintState,
+    facts: PublishedPaintFacts,
+}
+
+/// The document's text rows and its replaced, layer image and SVG paint resource tables, as they
+/// were when the frame was published.
+pub(crate) struct PublishedPaintFacts {
+    pub(crate) text: ColumnSnapshot<PublishedTextSlot, SLOTS_PER_CHUNK>,
+    pub(crate) replaced: Arc<ReplacedPaintFactsTable>,
+    pub(crate) layer_images: Arc<LayerImagePaintFactsTable>,
+    pub(crate) svg_paint_resources: Arc<SvgPaintResourceRows>,
+}
+
+/// What a recording reads of the document's paint state, as it was when the frame was published.
+pub(crate) struct PublishedPaintState {
+    pub(crate) visual_context_tree: Option<Arc<VisualContextTree>>,
+    /// Each scroll state slot's own scroll offset.
+    scroll_own_offsets: Vec<CssPixelPoint>,
+    pub(crate) has_non_viewport_wheel_scroll_target_candidate: bool,
+    pub(crate) selection: Option<Arc<SelectionRange>>,
+    pub(crate) selection_pseudo_styles: Arc<SelectionPseudoStyles>,
+    pub(crate) hit_test_list_generation: u64,
+    /// How many items the document's hit-test list held, which the recording's list reserves.
+    pub(crate) hit_test_item_capacity_hint: usize,
+}
+
+impl PublishedPaintState {
+    pub(crate) fn new(paint_state: &PaintState, hit_test_item_capacity_hint: usize) -> Self {
+        let visual_context = &paint_state.visual_context;
+        Self {
+            visual_context_tree: visual_context.tree.clone(),
+            scroll_own_offsets: visual_context
+                .scroll_state
+                .states
+                .iter()
+                .map(|state| state.own_offset)
+                .collect(),
+            has_non_viewport_wheel_scroll_target_candidate: visual_context
+                .scroll_state
+                .has_non_viewport_wheel_scroll_target_candidate,
+            selection: paint_state.selection.clone(),
+            selection_pseudo_styles: paint_state.selection_pseudo_styles.clone(),
+            hit_test_list_generation: paint_state.hit_test_list_generation,
+            hit_test_item_capacity_hint,
+        }
+    }
+
+    pub(crate) fn structural_epoch(&self) -> u64 {
+        self.visual_context_tree
+            .as_ref()
+            .map_or(0, |tree| tree.structural_epoch)
+    }
+
+    pub(crate) fn scroll_own_offset(&self, slot: usize) -> CssPixelPoint {
+        self.scroll_own_offsets[slot]
+    }
 }
 
 // A frame is read on whichever thread paints it while the document writes its live columns: it
@@ -82,13 +147,36 @@ impl PublishedFrame {
         nodes: ColumnSnapshot<PaintNode, SLOTS_PER_CHUNK>,
         retired_slots: RetiredSlots,
         damage: FrameDamage,
+        paint_state: PublishedPaintState,
+        facts: PublishedPaintFacts,
     ) -> Self {
         Self {
             rows,
             nodes,
             _retired_slots: retired_slots,
             damage,
+            paint_state,
+            facts,
         }
+    }
+
+    /// What the frame published of a live text row.
+    fn text(&self, id: NodeSlotId) -> Option<&PublishedTextSlot> {
+        self.node(id)?;
+        self.facts
+            .text
+            .get(id.slot_index() as usize)
+            .filter(|text| text.generation == id.generation())
+    }
+
+    /// How many paintable rows the frame has room for.
+    pub(crate) fn paintable_row_capacity(&self) -> usize {
+        self.rows.rows.slot_capacity()
+    }
+
+    /// What the frame's recording reads of the document's paint state.
+    pub(crate) fn paint_state(&self) -> &PublishedPaintState {
+        &self.paint_state
     }
 
     /// The paint damage the frame was published with.
@@ -270,10 +358,17 @@ pub(crate) trait PaintRead: Sized {
     fn node_has_compositor_animation_frame(&self, id: NodeSlotId, kind: CompositorAnimationFrameKind) -> bool;
     fn node_style_if_live(&self, id: NodeSlotId) -> Option<ComputedValuesView<'_>>;
     /// The rendered text of a text row.
-    fn text_content(&self, id: NodeSlotId) -> Option<&TextContent>;
+    fn rendered_text(&self, id: NodeSlotId) -> Option<&RenderedText>;
+    /// Reads a text row's grapheme boundaries, for a text row with rendered text.
+    fn with_grapheme_segmenter<R>(&self, id: NodeSlotId, read: impl FnOnce(&GraphemeSegmenter) -> R) -> Option<R>;
     /// The rows a text node is painted in: its first-letter row, if any, then its own.
     fn text_fragments(&self, primary: NodeSlotId) -> TextFragments;
-    fn svg_paint_resources(&self) -> &SvgPaintResources;
+    fn published_svg_filter(&self, slot: NodeSlotId, kind: SvgPaintResourceKind) -> Option<Arc<PublishedSvgFilter>>;
+    fn published_svg_paint_server(
+        &self,
+        slot: NodeSlotId,
+        kind: SvgPaintResourceKind,
+    ) -> Option<Arc<PublishedSvgPaintServer>>;
     fn replaced_paint_facts(&self, id: NodeSlotId) -> Option<ReplacedPaintFacts>;
     fn layer_image_paint_facts(
         &self,
@@ -306,7 +401,7 @@ pub(crate) trait PaintRead: Sized {
         if !self.node_kind_if_live(id).is_some_and(node_facts::kind_is_text) {
             return offset;
         }
-        self.text_content(id)
+        self.rendered_text(id)
             .expect("text must be published before mapping rendered offsets")
             .dom_offset_for_rendered_text_offset(offset, boundary)
     }
@@ -320,7 +415,7 @@ pub(crate) trait PaintRead: Sized {
         if !self.node_kind_if_live(id).is_some_and(node_facts::kind_is_text) {
             return offset;
         }
-        self.text_content(id)
+        self.rendered_text(id)
             .expect("text must be published before mapping DOM offsets")
             .rendered_text_offset_for_dom_offset(offset, boundary)
     }
@@ -508,16 +603,45 @@ pub(crate) use read_live_layout_tree;
 /// `$arena` maps the implementing type to.
 macro_rules! read_live_paint_facts {
     ($arena:path) => {
-        fn text_content(&self, id: crate::layout::node_data::NodeSlotId) -> Option<&crate::layout::TextContent> {
+        fn rendered_text(&self, id: crate::layout::node_data::NodeSlotId) -> Option<&crate::layout::RenderedText> {
+            crate::layout::LayoutNodeArena::text_content($arena(self), id).map(|content| &**content)
+        }
+
+        fn with_grapheme_segmenter<R>(
+            &self,
+            id: crate::layout::node_data::NodeSlotId,
+            read: impl FnOnce(&crate::layout::text_chunker::GraphemeSegmenter) -> R,
+        ) -> Option<R> {
             crate::layout::LayoutNodeArena::text_content($arena(self), id)
+                .map(|content| read(content.grapheme_segmenter()))
         }
 
         fn text_fragments(&self, primary: crate::layout::node_data::NodeSlotId) -> crate::layout::TextFragments {
             crate::layout::LayoutNodeArena::text_fragments($arena(self), primary)
         }
+    };
+}
 
-        fn svg_paint_resources(&self) -> &crate::painting::svg_paint_resources::SvgPaintResources {
-            crate::layout::LayoutNodeArena::svg_paint_resources($arena(self))
+pub(crate) use read_live_paint_facts;
+
+/// Answers [`PaintRead`]'s reads of the replaced, layer image and SVG paint resource tables from
+/// the live arena that `$arena` maps the implementing type to.
+macro_rules! read_live_paint_fact_tables {
+    ($arena:path) => {
+        fn published_svg_filter(
+            &self,
+            slot: crate::layout::node_data::NodeSlotId,
+            kind: crate::painting::svg_paint_resources::SvgPaintResourceKind,
+        ) -> Option<std::sync::Arc<crate::painting::svg_paint_resources::PublishedSvgFilter>> {
+            crate::layout::LayoutNodeArena::svg_paint_resources($arena(self)).published_filter(slot, kind)
+        }
+
+        fn published_svg_paint_server(
+            &self,
+            slot: crate::layout::node_data::NodeSlotId,
+            kind: crate::painting::svg_paint_resources::SvgPaintResourceKind,
+        ) -> Option<std::sync::Arc<crate::painting::svg_paint_resources::PublishedSvgPaintServer>> {
+            crate::layout::LayoutNodeArena::svg_paint_resources($arena(self)).published_paint_server(slot, kind)
         }
 
         fn replaced_paint_facts(
@@ -538,7 +662,7 @@ macro_rules! read_live_paint_facts {
     };
 }
 
-pub(crate) use read_live_paint_facts;
+pub(crate) use read_live_paint_fact_tables;
 
 /// Answers [`PaintRead`]'s reads of paint damage from the live arena that `$arena` maps the
 /// implementing type to.
@@ -590,6 +714,7 @@ macro_rules! read_live_arena {
     ($arena:path) => {
         $crate::painting::published_frame::read_live_layout_tree!($arena);
         $crate::painting::published_frame::read_live_paint_facts!($arena);
+        $crate::painting::published_frame::read_live_paint_fact_tables!($arena);
         $crate::painting::published_frame::read_live_paint_damage!($arena);
         $crate::painting::published_frame::read_live_stacking_context_entries!($arena);
     };
@@ -625,20 +750,21 @@ impl PaintRead for LayoutNodeArena {
     read_live_arena!(std::convert::identity);
 }
 
-/// What a display list recording reads its document through: [`PaintRead`] and nothing else. It
-/// does not dereference to the arena, so the recording names no read the trait does not.
+/// What a display list recording reads its document through: [`PaintRead`] over the frame it
+/// records, and nothing else. It holds no arena, so the recording names no read the frame does not
+/// answer.
 pub(crate) struct PaintSource<'a> {
-    arena: &'a LayoutNodeArena,
     frame: &'a PublishedFrame,
+    // The absolute rects this recording computed, which are the frame's for as long as it lives.
+    absolute_rect_memo: RefCell<FastMap<NodeSlotId, CssPixelRect>>,
 }
 
 impl<'a> PaintSource<'a> {
-    pub(crate) fn new(arena: &'a LayoutNodeArena, frame: &'a PublishedFrame) -> Self {
-        Self { arena, frame }
-    }
-
-    fn arena(&self) -> &'a LayoutNodeArena {
-        self.arena
+    pub(crate) fn new(frame: &'a PublishedFrame) -> Self {
+        Self {
+            frame,
+            absolute_rect_memo: RefCell::default(),
+        }
     }
 }
 
@@ -660,11 +786,11 @@ impl PaintRead for PaintSource<'_> {
     }
 
     fn memoized_absolute_rect(&self, id: NodeSlotId) -> Option<CssPixelRect> {
-        self.arena.memoized_absolute_rect(id)
+        self.absolute_rect_memo.borrow().get(&id).copied()
     }
 
     fn memoize_absolute_rect(&self, id: NodeSlotId, rect: CssPixelRect) {
-        self.arena.memoize_absolute_rect(id, rect);
+        self.absolute_rect_memo.borrow_mut().insert(id, rect);
     }
 
     fn slot_is_live(&self, id: NodeSlotId) -> bool {
@@ -794,5 +920,62 @@ impl PaintRead for PaintSource<'_> {
         read(self.frame.rows.visual_context_node_handles(id))
     }
 
-    read_live_paint_facts!(PaintSource::arena);
+    fn published_svg_filter(&self, slot: NodeSlotId, kind: SvgPaintResourceKind) -> Option<Arc<PublishedSvgFilter>> {
+        published_filter_in(&self.frame.facts.svg_paint_resources, slot, kind)
+    }
+
+    fn published_svg_paint_server(
+        &self,
+        slot: NodeSlotId,
+        kind: SvgPaintResourceKind,
+    ) -> Option<Arc<PublishedSvgPaintServer>> {
+        published_paint_server_in(&self.frame.facts.svg_paint_resources, slot, kind)
+    }
+
+    fn replaced_paint_facts(&self, id: NodeSlotId) -> Option<ReplacedPaintFacts> {
+        self.frame.facts.replaced.get(&id).cloned()
+    }
+
+    fn layer_image_paint_facts(
+        &self,
+        id: NodeSlotId,
+        list: FfiLayerImageList,
+        computed_index: u32,
+    ) -> Option<LayerImagePaintFacts> {
+        self.frame
+            .facts
+            .layer_images
+            .get(&id)?
+            .iter()
+            .find(|entry| entry.list == list && entry.computed_index == computed_index)
+            .map(|entry| entry.facts.clone())
+    }
+
+    fn rendered_text(&self, id: NodeSlotId) -> Option<&RenderedText> {
+        self.frame.text(id)?.rendered.as_deref()
+    }
+
+    fn with_grapheme_segmenter<R>(&self, id: NodeSlotId, read: impl FnOnce(&GraphemeSegmenter) -> R) -> Option<R> {
+        self.rendered_text(id)
+            .map(|rendered| read(&GraphemeSegmenter::new(&rendered.text)))
+    }
+
+    fn text_fragments(&self, primary: NodeSlotId) -> TextFragments {
+        let mut fragments = TextFragments {
+            nodes: [NodeSlotId::INVALID; 2],
+            length: 0,
+        };
+        if !self.node_kind_if_live(primary).is_some_and(node_facts::kind_is_text) {
+            return fragments;
+        }
+        if let Some(text) = self.frame.text(primary)
+            && self.slot_is_live(text.first_letter)
+        {
+            fragments.nodes[0] = text.first_letter;
+            fragments.length = 1;
+        }
+        fragments.nodes[fragments.length] = primary;
+        fragments.length += 1;
+        fragments
+    }
 }

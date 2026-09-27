@@ -572,7 +572,7 @@ fn published_svg_filter(
     style: ComputedValuesView<'_>,
     device_pixels_per_css_pixel: f64,
 ) -> crate::painting::host::visual_context::ResolvedSvgFilter {
-    let Some(published) = layout_arena.svg_paint_resources().published_filter(slot, kind) else {
+    let Some(published) = layout_arena.published_svg_filter(slot, kind) else {
         return crate::painting::host::visual_context::ResolvedSvgFilter {
             failed: true,
             ..Default::default()

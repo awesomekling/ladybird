@@ -35,6 +35,10 @@ impl LayerImagePaintFacts {
     }
 }
 
+/// Each row's layer image paint facts.
+pub(crate) type LayerImagePaintFactsTable =
+    crate::css::style::fast_hash::FastMap<crate::layout::node_data::NodeSlotId, Vec<LayerImagePaintFactsEntry>>;
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct LayerImagePaintFactsEntry {
     pub list: FfiLayerImageList,

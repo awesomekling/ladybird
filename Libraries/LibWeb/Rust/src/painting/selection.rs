@@ -210,11 +210,11 @@ impl SelectionSnapshot {
         }
         let entries = self.entries(arena);
         let text_states = apply(&mut arena.paintable_rows_mut(), viewport, &entries);
-        arena.paint_state().borrow_mut().selection = Some(SelectionRange {
+        arena.paint_state().borrow_mut().selection = Some(std::sync::Arc::new(SelectionRange {
             start_offset: self.start_offset,
             end_offset: self.end_offset,
             text_states,
-        });
+        }));
     }
 }
 
@@ -370,10 +370,12 @@ fn set_selection_pseudo_style_of_rows(
     answer: Option<&std::sync::Arc<SelectionStyleAnswer>>,
 ) {
     let mut paint_state = arena.paint_state().borrow_mut();
+    let styles = &mut paint_state.selection_pseudo_styles;
     for row in rows {
         match answer {
-            Some(answer) => paint_state.selection_pseudo_styles.insert(row, answer.clone()),
-            None => paint_state.selection_pseudo_styles.remove(&row),
+            Some(answer) => std::sync::Arc::make_mut(styles).insert(row, answer.clone()),
+            None if styles.contains_key(&row) => std::sync::Arc::make_mut(styles).remove(&row),
+            None => None,
         };
     }
 }

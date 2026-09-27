@@ -1360,14 +1360,11 @@ fn record_display_list_stage(stage: RecordingStageInput<'_>) -> RecordingStageOu
     let pass = crate::painting::seal::enter(crate::painting::seal::Pass::Recording);
     crate::stage_thread::hold_here(crate::stage_thread::FfiStageHoldPoint::MidRecording);
     let recording = crate::painting::record::traversal::record_display_list(
-        arena,
         &frame,
-        &paint_state,
         scratch,
         tree,
         viewport,
         &inputs,
-        paint_state.hit_test_list_generation + 1,
         source_frame,
         source_items,
         true,
@@ -1384,14 +1381,11 @@ fn record_display_list_stage(stage: RecordingStageInput<'_>) -> RecordingStageOu
             inputs.publishes_recording = false;
             let mut tree_for_recording_from_scratch = crate::painting::record::order_tree::PaintOrderTree::default();
             crate::painting::record::traversal::record_display_list(
-                arena,
                 &frame,
-                &paint_state,
                 scratch,
                 &mut tree_for_recording_from_scratch,
                 viewport,
                 &inputs,
-                paint_state.hit_test_list_generation + 1,
                 None,
                 None,
                 false,

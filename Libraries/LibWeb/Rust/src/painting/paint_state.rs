@@ -43,15 +43,16 @@ pub struct PaintState {
     pub(crate) hit_test_list_generation: u64,
     pub(crate) last_recording: Option<Arc<crate::painting::record::RecordingOutput>>,
     pub(crate) recorder: crate::painting::record::recorder_state::RecorderState,
-    pub(crate) selection: Option<crate::painting::selection::SelectionRange>,
+    pub(crate) selection: Option<Arc<crate::painting::selection::SelectionRange>>,
     // LIBWEB_RENDER_CLOCK_FRAMES: the inputs of the last recording the main thread published, which
     // a clock lease's ticks record again with while the main thread idles.
     pub(crate) clock_recording: Option<ClockRecording>,
-    pub(crate) selection_pseudo_styles: std::collections::HashMap<
-        NodeSlotId,
-        std::sync::Arc<crate::painting::record::paint::text::SelectionStyleAnswer>,
-    >,
+    // Shared with the frames published since it last changed.
+    pub(crate) selection_pseudo_styles: Arc<SelectionPseudoStyles>,
 }
+
+pub(crate) type SelectionPseudoStyles =
+    std::collections::HashMap<NodeSlotId, Arc<crate::painting::record::paint::text::SelectionStyleAnswer>>;
 
 impl PaintState {
     /// Drops the pending recording unpublished.
