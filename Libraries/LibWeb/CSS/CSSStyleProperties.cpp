@@ -673,7 +673,7 @@ static RefPtr<ComputedValues const> compute_pseudo_element_style_for_cssom(DOM::
         // before the demand slot is reused by another style read.
         auto kind = *target.pseudo_element();
         if (kind < PseudoElement::KnownPseudoElementCount) {
-            auto demand = answer_style_read_demand(join, style_computer.style_engine(),
+            auto demand = answer_style_read_demand(join, style_computer.style_engine_queries(),
                 {
                     .node = target.element().style_node_id(),
                     .pseudo_kind = to_underlying(kind),
@@ -683,7 +683,7 @@ static RefPtr<ComputedValues const> compute_pseudo_element_style_for_cssom(DOM::
                 && !target.element().style_depends_on_size_container_query()) {
                 // A private absence does not replace the published match answer. Settle that
                 // answer before leaving C++'s negative pseudo computation out of this read.
-                auto published = answer_style_read_demand(join, style_computer.style_engine(),
+                auto published = answer_style_read_demand(join, style_computer.style_engine_queries(),
                     { .node = target.element().style_node_id(), .pseudo_kind = to_underlying(kind), .read_only = false });
                 if (published.is_absent) {
                     environment_installations.append({ target, nullptr });
@@ -876,7 +876,7 @@ Optional<StyleProperty> CSSStyleProperties::get_direct_property(PropertyNameAndI
                 auto& style_computer = abstract_element.document().style_computer();
                 auto& engine = style_computer.style_engine();
                 DOM::Document::JoinScope join { abstract_element.document(), DOM::UpdateLayoutReason::ResolvedCSSStyleDeclarationProperty };
-                auto demand = answer_style_read_demand(join, engine, { .node = abstract_element.element().style_node_id(), .pseudo_kind = to_underlying(*pseudo) });
+                auto demand = answer_style_read_demand(join, style_computer.style_engine_queries(), { .node = abstract_element.element().style_node_id(), .pseudo_kind = to_underlying(*pseudo) });
                 if (demand.record.style_record) {
                     auto identity = engine.style_record_custom_property_environment(StyleRecordID { demand.record.style_record });
                     RefPtr<CustomPropertyData const> data;

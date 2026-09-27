@@ -41,7 +41,7 @@ extern "C" void style_engine_publish_custom_function(void*, void const*, FlatPtr
 
 bool StyleEngine::layout_pass_is_in_flight() const
 {
-    return Layout::RustFFI::rust_stage_thread_layout_pass_in_flight_for(m_impl);
+    return Layout::RustFFI::rust_stage_thread_layout_pass_in_flight_for(rust_handle());
 }
 
 void StyleEngine::publish_input(Function<void(StyleInputScope const&)>&& input)
@@ -166,12 +166,12 @@ StyleEngine::StyleEngine(DeviceClass device_class, StyleComputer* style_computer
     : m_impl(StyleEngineFFI::style_engine_create(device_class))
     , m_host_style_record_pins(StyleEngineFFI::style_record_host_pins_create())
     , m_style_computer(style_computer)
-    , m_recording_stream(StyleEngineFFI::style_engine_recording_stream(m_impl))
+    , m_recording_stream(StyleEngineFFI::style_engine_recording_stream(rust_handle()))
 {
-    StyleEngineFFI::style_engine_lend_host_style_record_pins(m_impl, m_host_style_record_pins);
+    StyleEngineFFI::style_engine_lend_host_style_record_pins(rust_handle(), m_host_style_record_pins);
     if (m_style_computer) {
         set_pseudo_element_style_deferred(to_underlying(PseudoElement::Selection), true);
-        StyleEngineFFI::style_engine_install_font_resolver(m_impl, resolve_fonts);
+        StyleEngineFFI::style_engine_install_font_resolver(rust_handle(), resolve_fonts);
     }
 }
 
@@ -179,7 +179,7 @@ void StyleEngine::prepare_root_font_resolution(u64 font_environment_generation)
 {
     publish_font_faces();
     publish_input_or_apply_in_drain([this, font_environment_generation](auto const& scope) {
-        StyleEngineFFI::style_engine_prepare_root_font_resolution(scope, m_impl, font_environment_generation);
+        StyleEngineFFI::style_engine_prepare_root_font_resolution(scope, rust_handle(), font_environment_generation);
     });
 }
 
@@ -196,7 +196,7 @@ void StyleEngine::publish_font_faces()
     publish_input_or_apply_in_drain([this](auto const& scope) {
         auto& font_computer = m_style_computer->document().font_computer();
         font_computer.font_cascade_memo().publish_font_feature_values(font_computer.published_font_feature_values());
-        StyleEngineFFI::style_engine_publish_font_face_snapshot(scope, m_impl, font_computer.published_font_faces(), reinterpret_cast<size_t>(&font_computer.font_cascade_memo()));
+        StyleEngineFFI::style_engine_publish_font_face_snapshot(scope, rust_handle(), font_computer.published_font_faces(), reinterpret_cast<size_t>(&font_computer.font_cascade_memo()));
     });
 }
 
@@ -211,8 +211,8 @@ StyleEngine::~StyleEngine()
         else if (write.kind == StyleEngineFFI::FfiHostFactKind::AdoptQualifiedAtom)
             StyleEngineFFI::style_engine_release_host_qualified_atom(write.node, write.parent, write.facts);
     }
-    if (m_impl)
-        StyleEngineFFI::style_engine_destroy(m_impl);
+    if (rust_handle())
+        StyleEngineFFI::style_engine_destroy(rust_handle());
     StyleEngineFFI::style_record_host_pins_destroy(m_host_style_record_pins);
     for (auto const& atom : m_atoms)
         Utf16FlyString::unref_raw(atom.key);
@@ -288,7 +288,7 @@ void StyleEngine::ensure_granted_style_nodes(size_t element_count, size_t text_c
         style_node_grant.resize(element_count - m_granted_style_nodes.size() + STYLE_NODE_GRANT_SIZE);
     if (m_granted_text_style_nodes.size() < text_count)
         text_style_node_grant.resize(text_count - m_granted_text_style_nodes.size() + STYLE_NODE_GRANT_SIZE);
-    StyleEngineFFI::style_engine_grant_style_nodes(m_impl, reinterpret_cast<u32*>(style_node_grant.data()), style_node_grant.size(), reinterpret_cast<u32*>(text_style_node_grant.data()), text_style_node_grant.size());
+    StyleEngineFFI::style_engine_grant_style_nodes(rust_handle(), reinterpret_cast<u32*>(style_node_grant.data()), style_node_grant.size(), reinterpret_cast<u32*>(text_style_node_grant.data()), text_style_node_grant.size());
     adopt_identity_grant(m_granted_style_nodes, style_node_grant);
     adopt_identity_grant(m_granted_text_style_nodes, text_style_node_grant);
 }
@@ -306,13 +306,13 @@ HashTable<StyleNodeID> StyleEngine::take_elements_awaiting_first_style_computati
 void StyleEngine::set_element_parts(StyleNodeID node, ReadonlySpan<StyleAtomID> names, ReadonlySpan<StyleNodeID> hosts)
 {
     VERIFY(names.size() == hosts.size());
-    StyleEngineFFI::style_engine_set_element_parts(m_impl, node.value(), reinterpret_cast<u32 const*>(names.data()), reinterpret_cast<u32 const*>(hosts.data()), names.size());
+    StyleEngineFFI::style_engine_set_element_parts(rust_handle(), node.value(), reinterpret_cast<u32 const*>(names.data()), reinterpret_cast<u32 const*>(hosts.data()), names.size());
 }
 
 void StyleEngine::finish_sheet_rules_replacement(SheetID sheet)
 {
     publish_input([sheet](StyleInputScope const& input) {
-        StyleEngineFFI::style_engine_finish_sheet_rules_replacement(input.engine().m_impl, sheet.value());
+        StyleEngineFFI::style_engine_finish_sheet_rules_replacement(input.engine().rust_handle(), sheet.value());
     });
 }
 
@@ -328,20 +328,20 @@ void StyleEngine::set_element_presentational_hint_properties(StyleNodeID node, S
             .name = {},
         });
     }
-    if (StyleEngineFFI::style_engine_set_element_presentational_hint_properties(m_impl, node.value(), kind, declarations.data(), declarations.size()))
+    if (StyleEngineFFI::style_engine_set_element_presentational_hint_properties(rust_handle(), node.value(), kind, declarations.data(), declarations.size()))
         note_css_transitions_may_observe_style_changes();
 }
 
 StyleEngine::StyleRecordDelta StyleEngine::publish_computed_groups(StyleNodeID node, u8 pseudo_kind, ReadonlySpan<void const*> payloads, size_t inherited_group_count, u64 custom_property_environment, bool inherited_group_swap_candidate, u64 counter_style_environment_identity, u64 animation_overlay_identity, void const* animated_overlay, ReadonlySpan<void const*> animation_overlay_payloads, void const* computed_longhand_table, void const* custom_property_store)
 {
     VERIFY(inherited_group_count <= payloads.size());
-    auto delta = StyleEngineFFI::style_engine_publish_computed_groups(m_impl, node.value(), pseudo_kind, payloads.data(), payloads.size(), inherited_group_count, custom_property_environment, inherited_group_swap_candidate, counter_style_environment_identity, animation_overlay_identity, animated_overlay, animation_overlay_payloads.data(), animation_overlay_payloads.size(), computed_longhand_table, custom_property_store);
+    auto delta = StyleEngineFFI::style_engine_publish_computed_groups(rust_handle(), node.value(), pseudo_kind, payloads.data(), payloads.size(), inherited_group_count, custom_property_environment, inherited_group_swap_candidate, counter_style_environment_identity, animation_overlay_identity, animated_overlay, animation_overlay_payloads.data(), animation_overlay_payloads.size(), computed_longhand_table, custom_property_store);
     return { StyleRecordID { delta.old_style_record }, StyleRecordID { delta.new_style_record } };
 }
 
 void const* StyleEngine::style_record_payloads(StyleRecordID style_record) const
 {
-    return StyleEngineFFI::style_engine_style_record_payloads(m_impl, style_record.value());
+    return StyleEngineFFI::style_engine_style_record_payloads(rust_handle(), style_record.value());
 }
 
 void const* StyleEngine::held_style_record_payloads(StyleRecordID style_record) const
@@ -363,7 +363,7 @@ StyleRecordDependencyFlag StyleEngine::style_record_dependency_flags(StyleRecord
     }
     // NB: Entering the engine can take a style pass in flight back, and finishing that pass ends the epoch, so the
     //     facts are looked up again afterwards.
-    auto dependency_flags = StyleEngineFFI::style_engine_style_record_dependency_flags(m_impl, style_record.value());
+    auto dependency_flags = StyleEngineFFI::style_engine_style_record_dependency_flags(rust_handle(), style_record.value());
     if (auto* facts = epoch_style_record_facts(style_record))
         facts->dependency_flags = dependency_flags;
     return static_cast<StyleRecordDependencyFlag>(dependency_flags);
@@ -374,7 +374,7 @@ u64 StyleEngine::style_record_custom_property_environment(StyleRecordID style_re
     if (auto* facts = epoch_style_record_facts(style_record); facts && facts->custom_property_environment.has_value())
         return *facts->custom_property_environment;
     // NB: Entering the engine can end the epoch (see style_record_dependency_flags()).
-    auto environment = StyleEngineFFI::style_engine_style_record_custom_property_environment(m_impl, style_record.value());
+    auto environment = StyleEngineFFI::style_engine_style_record_custom_property_environment(rust_handle(), style_record.value());
     if (auto* facts = epoch_style_record_facts(style_record))
         facts->custom_property_environment = environment;
     return environment;
@@ -382,7 +382,7 @@ u64 StyleEngine::style_record_custom_property_environment(StyleRecordID style_re
 
 StyleEngine::SettledAnimationDefinitions StyleEngine::take_settled_animation_definitions(StyleDrainScope const& scope, StyleNodeID node, u8 pseudo_kind)
 {
-    auto taken = StyleEngineFFI::style_engine_take_settled_animation_definitions(scope, m_impl, node.value(), pseudo_kind);
+    auto taken = StyleEngineFFI::style_engine_take_settled_animation_definitions(scope, rust_handle(), node.value(), pseudo_kind);
     return {
         .definitions = { static_cast<ComputedValuesFFI::FfiComputedAnimation const*>(taken.definitions), taken.count },
         .owed = taken.owed,
@@ -395,7 +395,7 @@ StyleEngine::StyleRecordView StyleEngine::style_record_view(StyleRecordID style_
     if (auto* facts = epoch_style_record_facts(style_record); facts && facts->view.has_value())
         return *facts->view;
     // NB: Entering the engine can end the epoch (see style_record_dependency_flags()).
-    auto view = StyleEngineFFI::style_engine_style_record_view(m_impl, style_record.value());
+    auto view = StyleEngineFFI::style_engine_style_record_view(rust_handle(), style_record.value());
     if (auto* facts = epoch_style_record_facts(style_record))
         facts->view = view;
     return view;
@@ -434,13 +434,13 @@ void StyleEngine::end_pin_waiting_for_frame() const
 void StyleEngine::begin_style_record_view_epoch()
 {
     ++m_style_record_view_epoch_depth;
-    StyleEngineFFI::style_engine_begin_style_record_view_epoch(m_impl);
+    StyleEngineFFI::style_engine_begin_style_record_view_epoch(rust_handle());
 }
 
 void StyleEngine::end_style_record_view_epoch()
 {
     VERIFY(m_style_record_view_epoch_depth > 0);
-    StyleEngineFFI::style_engine_end_style_record_view_epoch(m_impl);
+    StyleEngineFFI::style_engine_end_style_record_view_epoch(rust_handle());
     if (--m_style_record_view_epoch_depth == 0)
         m_epoch_style_record_facts.clear();
 }
@@ -457,17 +457,17 @@ double StyleEngine::ensure_random_base_value(StyleNodeID node, Utf16View name, b
 void StyleEngine::set_element_custom_property_data(StyleDrainScope const& scope, StyleNodeID node, CustomPropertyData const* data, bool is_animation_overlay, bool declares)
 {
     StyleEngineFFI::style_engine_set_element_custom_property_data(scope,
-        m_impl, node.value(), data, data ? data->rust_store() : nullptr, data ? data->identity() : 0, is_animation_overlay, declares, nullptr, nullptr, 0);
+        rust_handle(), node.value(), data, data ? data->rust_store() : nullptr, data ? data->identity() : 0, is_animation_overlay, declares, nullptr, nullptr, 0);
 }
 
 void StyleEngine::decide_transitions(StyleRecordID before_style_record, void const* after_longhand_table, void const* after_animated_overlay, StyleValueFFI::FfiTransitionInput& input, StyleValueFFI::FfiTransitionAction* actions) const
 {
-    StyleValueFFI::rust_decide_transitions(m_impl, before_style_record.value(), after_longhand_table, after_animated_overlay, &input, actions);
+    StyleValueFFI::rust_decide_transitions(rust_handle(), before_style_record.value(), after_longhand_table, after_animated_overlay, &input, actions);
 }
 
 StyleEngine::StyleRecordDelta StyleEngine::remove_computed_pseudo(StyleNodeID node, u8 pseudo_kind)
 {
-    auto delta = StyleEngineFFI::style_engine_remove_computed_pseudo(m_impl, node.value(), pseudo_kind);
+    auto delta = StyleEngineFFI::style_engine_remove_computed_pseudo(rust_handle(), node.value(), pseudo_kind);
     return { StyleRecordID { delta.old_style_record }, StyleRecordID { delta.new_style_record } };
 }
 
@@ -515,13 +515,13 @@ void StyleEngine::note_custom_property_name(StyleAtomID atom, Utf16FlyString con
         code_units.unchecked_append(view.code_unit_at(i));
     // The engine retains the fly string itself; this reference only carries it across.
     auto raw = name.to_raw_leaked();
-    StyleEngineFFI::style_engine_note_custom_property_name(m_impl, atom.value(), raw, code_units.data(), code_units.size());
+    StyleEngineFFI::style_engine_note_custom_property_name(rust_handle(), atom.value(), raw, code_units.data(), code_units.size());
     Utf16FlyString::unref_raw(raw);
 }
 
 void const* StyleEngine::borrow_engine_custom_property_environment(u64 identity, u64& parent_identity) const
 {
-    return StyleEngineFFI::style_engine_borrow_engine_custom_property_environment(m_impl, identity, &parent_identity);
+    return StyleEngineFFI::style_engine_borrow_engine_custom_property_environment(rust_handle(), identity, &parent_identity);
 }
 
 StyleAtomID StyleEngine::intern_text_atom(Utf16View text)
@@ -539,7 +539,7 @@ StyleAtomID StyleEngine::intern_language_atom(Utf16View text)
     code_units.ensure_capacity(text.length_in_code_units());
     for (size_t i = 0; i < text.length_in_code_units(); ++i)
         code_units.unchecked_append(text.code_unit_at(i));
-    StyleEngineFFI::style_engine_set_element_language(m_impl, 0, atom.value(), code_units.data(), code_units.size());
+    StyleEngineFFI::style_engine_set_element_language(rust_handle(), 0, atom.value(), code_units.data(), code_units.size());
     return atom;
 }
 
@@ -606,7 +606,7 @@ StyleAtomID StyleEngine::intern_attribute_value(StyleAtomID name, Utf16String co
     // Beside a style pass the engine is the pass's: the text, and whether the name asks for it, wait for its drain
     // with the attribute change that names the value. Beside a layout pass, which reads what the engine holds, they
     // wait for the pass to be taken back.
-    if (Layout::RustFFI::rust_stage_thread_style_pass_holds_style_engine(m_impl) || layout_pass_is_in_flight()) {
+    if (Layout::RustFFI::rust_stage_thread_style_pass_holds_style_engine(rust_handle()) || layout_pass_is_in_flight()) {
         publish_input([name, atom, value](StyleInputScope const& input) {
             auto& engine = input.engine();
             if (auto readers = engine.attribute_value_text_readers(name))
@@ -634,10 +634,10 @@ void StyleEngine::publish_attribute_value_text(StyleAtomID atom, Utf16View value
     // The engine holds one copy of the text per currently used value. Ask whether it survived
     // reclamation before copying it out of the attribute's representation again. Text an attr()
     // asked for is still news to the selectors once one of their names spells the same value.
-    if (StyleEngineFFI::style_engine_has_attribute_value_text(m_impl, atom.value())) {
+    if (StyleEngineFFI::style_engine_has_attribute_value_text(rust_handle(), atom.value())) {
         if (read_by_selectors) {
             u16 const no_text = 0;
-            StyleEngineFFI::style_engine_set_attribute_value_text(m_impl, atom.value(), &no_text, 0, true);
+            StyleEngineFFI::style_engine_set_attribute_value_text(rust_handle(), atom.value(), &no_text, 0, true);
         }
         return;
     }
@@ -646,12 +646,12 @@ void StyleEngine::publish_attribute_value_text(StyleAtomID atom, Utf16View value
     code_units.ensure_capacity(value.length_in_code_units());
     for (size_t i = 0; i < value.length_in_code_units(); ++i)
         code_units.unchecked_append(value.code_unit_at(i));
-    StyleEngineFFI::style_engine_set_attribute_value_text(m_impl, atom.value(), code_units.data(), code_units.size(), read_by_selectors);
+    StyleEngineFFI::style_engine_set_attribute_value_text(rust_handle(), atom.value(), code_units.data(), code_units.size(), read_by_selectors);
 }
 
 bool StyleEngine::refresh_attribute_value_text_requirements()
 {
-    auto version = StyleEngineFFI::style_engine_attribute_value_text_requirements_version(m_impl);
+    auto version = StyleEngineFFI::style_engine_attribute_value_text_requirements_version(rust_handle());
     if (version == m_attribute_value_text_requirements_version)
         return false;
     m_attribute_value_text_requirements_version = version;
@@ -662,7 +662,7 @@ bool StyleEngine::refresh_attribute_value_text_requirements()
 u32 StyleEngine::attribute_value_text_readers(StyleAtomID name)
 {
     return m_attribute_value_text_readers.ensure(name, [&] {
-        return StyleEngineFFI::style_engine_attribute_value_text_readers(m_impl, name.value());
+        return StyleEngineFFI::style_engine_attribute_value_text_readers(rust_handle(), name.value());
     });
 }
 
@@ -676,7 +676,7 @@ void StyleEngine::set_element_language(StyleNodeID node, StyleAtomID language, U
         for (size_t i = 0; i < tag.length_in_code_units(); ++i)
             code_units.unchecked_append(tag.code_unit_at(i));
     }
-    StyleEngineFFI::style_engine_set_element_language(m_impl, node.value(), language.value(), code_units.data(), code_units.size());
+    StyleEngineFFI::style_engine_set_element_language(rust_handle(), node.value(), language.value(), code_units.data(), code_units.size());
 }
 
 // Recording input gives the next rendering update style work to do, but touches no layout tree
@@ -688,9 +688,6 @@ static void note_recorded_input(StyleEngine const& style_engine, GC::Ptr<StyleCo
 {
     if (!style_computer)
         return;
-    // Every style input the page writes passes here, so this is also where a join learns how long
-    // ago the render state it has to wait for was dirtied.
-    style_computer->document().note_render_state_mutation();
     if (style_engine.has_recorded_input())
         return;
     style_computer->document().page().client().request_frame();
@@ -905,7 +902,7 @@ void StyleEngine::record_size_container_query_dependents(StyleNodeID container)
         return;
     flush_deferred_geometry_transaction_before_non_replayable_input(*this, m_style_computer);
     note_recorded_input(*this, m_style_computer);
-    StyleEngineFFI::style_engine_record_size_container_query_dependents(m_impl, container.value());
+    StyleEngineFFI::style_engine_record_size_container_query_dependents(rust_handle(), container.value());
 }
 
 void StyleEngine::record_element_style_input_change(StyleNodeID style_node, u8 reaction, u8 inherited_style_groups)
@@ -949,12 +946,12 @@ void StyleEngine::record_flat_tree_descendant_style_input_changes(StyleNodeID st
 
 Vector<StyleNodeID> StyleEngine::viewport_dependent_style_nodes()
 {
-    auto view = StyleEngineFFI::style_engine_viewport_dependent_nodes(m_impl);
+    auto view = StyleEngineFFI::style_engine_viewport_dependent_nodes(rust_handle());
     Vector<StyleNodeID> nodes;
     nodes.ensure_capacity(view.count);
     for (auto node : ReadonlySpan<u32> { view.nodes, view.count })
         nodes.unchecked_append(StyleNodeID { node });
-    StyleEngineFFI::style_engine_discard_viewport_dependent_nodes(m_impl);
+    StyleEngineFFI::style_engine_discard_viewport_dependent_nodes(rust_handle());
     return nodes;
 }
 
@@ -967,7 +964,7 @@ void StyleEngine::record_benchmark_marker(Utf16View name)
     auto const* data = name.has_ascii_storage()
         ? static_cast<void const*>(name.bytes().data())
         : static_cast<void const*>(name.utf16_span().data());
-    StyleEngineFFI::style_engine_record_benchmark_marker(m_impl, data, name.length_in_code_units(), name.has_ascii_storage());
+    StyleEngineFFI::style_engine_record_benchmark_marker(rust_handle(), data, name.length_in_code_units(), name.has_ascii_storage());
 }
 
 bool StyleEngine::has_recorded_input() const
@@ -1037,7 +1034,7 @@ void StyleEngine::submit_recorded_input(RecordedInputGoesTo goes_to)
 
     // A selector that came to read attribute value texts has the texts published after the input goes in, before
     // matching reads them, which a pass that applies the input itself would not wait for.
-    if (goes_to == RecordedInputGoesTo::Transaction && StyleEngineFFI::style_engine_attribute_value_text_requirements_version(m_impl) != m_attribute_value_text_requirements_version)
+    if (goes_to == RecordedInputGoesTo::Transaction && StyleEngineFFI::style_engine_attribute_value_text_requirements_version(rust_handle()) != m_attribute_value_text_requirements_version)
         goes_to = RecordedInputGoesTo::Engine;
 
     // What the engine calls back into while it applies these records the next transaction's.
@@ -1124,13 +1121,13 @@ void StyleEngine::submit_recorded_input(RecordedInputGoesTo goes_to)
 
 void StyleEngine::apply_transaction(StyleInputScope const& input, InputTransaction const& transaction)
 {
-    StyleEngineFFI::style_engine_apply_transaction(input, m_impl, &transaction);
+    StyleEngineFFI::style_engine_apply_transaction(input, rust_handle(), &transaction);
 }
 
 void StyleEngine::flush()
 {
     submit_recorded_input();
-    StyleEngineFFI::style_engine_flush(m_impl);
+    StyleEngineFFI::style_engine_flush(rust_handle());
 }
 
 void StyleEngine::flush_without_document_root()
@@ -1162,7 +1159,7 @@ bool StyleEngine::take_diagnostic_style_transaction(StyleNodeID root, Function<v
     take_reaction_nodes(transaction.reactions);
     // A pass the host would install in waves reports every wave. The reactions its rows derived
     // for children outside it wait for the next transaction, which is no part of this one.
-    while (StyleEngineFFI::style_engine_has_suspended_style_pass(m_impl)) {
+    while (StyleEngineFFI::style_engine_has_suspended_style_pass(rust_handle())) {
         auto wave = take_style_transaction(root);
         if (wave.reactions.is_empty())
             break;
@@ -1180,7 +1177,7 @@ bool StyleEngine::take_diagnostic_style_transaction(StyleNodeID root, Function<v
 
 void StyleEngine::discard_style_transaction_outputs(StyleDrainScope const& scope)
 {
-    StyleEngineFFI::style_engine_discard_style_transaction_outputs(scope, m_impl);
+    StyleEngineFFI::style_engine_discard_style_transaction_outputs(scope, rust_handle());
 }
 
 namespace {
@@ -1246,7 +1243,7 @@ void StyleEngine::lend_style_transaction_inputs(RecordedInputGoesTo recorded_inp
 {
     submit_recorded_input(recorded_input_goes_to);
     publish_font_faces();
-    style_engine_reset_custom_functions(m_impl);
+    style_engine_reset_custom_functions(rust_handle());
     StyleEngineFFI::FfiDocumentStyleComputationInputs computation_inputs {};
     // Lent to the engine for the call below, which copies them.
     String document_base_url;
@@ -1276,7 +1273,7 @@ void StyleEngine::lend_style_transaction_inputs(RecordedInputGoesTo recorded_inp
             auto const& scope = *scopes[index].scope;
             auto tree_scope = scopes[index].tree_scope;
             scope.for_each_visible_function_definition([&](StyleScope::FunctionDefinitionAndScope const& definition) {
-                style_engine_publish_custom_function(m_impl, definition.function.handle(),
+                style_engine_publish_custom_function(rust_handle(), definition.function.handle(),
                     bit_cast<FlatPtr>(&scope), bit_cast<FlatPtr>(&definition.scope), tree_scope);
                 append_scope(definition.scope, NumericLimits<u32>::max());
             });
@@ -1420,7 +1417,7 @@ StyleEngine::PublishedStyleTransaction StyleEngine::take_style_transaction(Style
     };
     lend_style_transaction_inputs(RecordedInputGoesTo::Transaction, [&](auto const& computation_inputs, void* layout_arena, InputTransaction const* input) {
         bridge_started_at = MonotonicTime::now();
-        view = StyleEngineFFI::style_engine_take_style_transaction(m_impl, root.value(), computation_inputs, layout_arena, input, install_feedback(), render_half);
+        view = StyleEngineFFI::style_engine_take_style_transaction(rust_handle(), root.value(), computation_inputs, layout_arena, input, install_feedback(), render_half);
         // What applying the batch handed back was paid, and what its rows marked held for the install, as the
         // transaction came back.
         if (view.render_half_applied) {
@@ -1441,7 +1438,7 @@ void StyleEngine::submit_style_transaction(StyleNodeID root)
 {
     auto submission_started_at = MonotonicTime::now();
     lend_style_transaction_inputs(RecordedInputGoesTo::Transaction, [&](auto const& computation_inputs, void* layout_arena, InputTransaction const* input) {
-        StyleEngineFFI::style_engine_submit_style_transaction(m_impl, root.value(), computation_inputs, layout_arena, input, install_feedback());
+        StyleEngineFFI::style_engine_submit_style_transaction(rust_handle(), root.value(), computation_inputs, layout_arena, input, install_feedback());
     });
     m_submitted_style_transaction_microseconds = (MonotonicTime::now() - submission_started_at).to_truncated_microseconds();
     m_submitted_pass_in_flight = true;
@@ -1461,7 +1458,7 @@ StyleEngine::PublishedStyleTransaction StyleEngine::finish_submitted_style_trans
     // atom the pass found unused.
     // The render owner finishes it with the document's render state, which the arena the pass was submitted for is.
     auto* layout_node_arena = m_style_computer ? m_style_computer->document().layout_node_arena_if_created() : nullptr;
-    auto view = StyleEngineFFI::style_engine_finish_submitted_style_transaction(m_impl, m_holds_input_recorded_beside_pass, layout_node_arena ? layout_node_arena->handle() : nullptr);
+    auto view = StyleEngineFFI::style_engine_finish_submitted_style_transaction(rust_handle(), m_holds_input_recorded_beside_pass, layout_node_arena ? layout_node_arena->handle() : nullptr);
     auto bridge_microseconds = (MonotonicTime::now() - bridge_started_at).to_truncated_microseconds();
     return publish_style_transaction_view(view, exchange(m_submitted_style_transaction_microseconds, 0), bridge_microseconds);
 }
@@ -1507,12 +1504,12 @@ StyleEngine::PublishedStyleTransaction StyleEngine::publish_style_transaction_vi
 
 bool StyleEngine::may_have_child_dependent_selectors() const
 {
-    return StyleEngineFFI::style_engine_may_have_child_dependent_selectors(m_impl);
+    return StyleEngineFFI::style_engine_may_have_child_dependent_selectors(rust_handle());
 }
 
 bool StyleEngine::has_pending_transaction() const
 {
-    return has_recorded_input() || has_install_feedback() || StyleEngineFFI::style_engine_has_pending_transaction(m_impl);
+    return has_recorded_input() || has_install_feedback() || StyleEngineFFI::style_engine_has_pending_transaction(rust_handle());
 }
 
 void StyleEngine::settle_pseudo_elements_in_next_pass(StyleDrainScope const&, StyleNodeID style_node, bool old_is_list_item, ReadonlySpan<u64> held_pseudo_records)
@@ -1553,7 +1550,7 @@ void StyleEngine::record_applied_style_reaction(StyleNodeID style_node, u8 react
 bool StyleEngine::pending_transaction_may_affect_layout_geometry()
 {
     submit_recorded_input();
-    return StyleEngineFFI::style_engine_pending_transaction_may_affect_layout_geometry(m_impl);
+    return StyleEngineFFI::style_engine_pending_transaction_may_affect_layout_geometry(rust_handle());
 }
 
 bool StyleEngine::has_deferred_geometry_transaction() const
@@ -1561,36 +1558,36 @@ bool StyleEngine::has_deferred_geometry_transaction() const
     // The submitted pass took the transaction a geometry read deferred with the rest of its inputs, and only a
     // geometry read, which takes the pass back first, defers another one. A layout pass is submitted once the
     // frame's style rounds have applied every transaction, a deferred one included.
-    if (Layout::RustFFI::rust_stage_thread_style_pass_holds_style_engine(m_impl) || layout_pass_is_in_flight())
+    if (Layout::RustFFI::rust_stage_thread_style_pass_holds_style_engine(rust_handle()) || layout_pass_is_in_flight())
         return false;
-    return StyleEngineFFI::style_engine_has_deferred_geometry_transaction(m_impl);
+    return StyleEngineFFI::style_engine_has_deferred_geometry_transaction(rust_handle());
 }
 
 bool StyleEngine::has_deferred_element_style_inputs() const
 {
-    return StyleEngineFFI::style_engine_has_deferred_element_style_inputs(m_impl);
+    return StyleEngineFFI::style_engine_has_deferred_element_style_inputs(rust_handle());
 }
 
 bool StyleEngine::has_deferred_element_style_input(StyleNodeID style_node) const
 {
-    return StyleEngineFFI::style_engine_has_deferred_element_style_input(m_impl, style_node.value());
+    return StyleEngineFFI::style_engine_has_deferred_element_style_input(rust_handle(), style_node.value());
 }
 
 bool StyleEngine::defer_pending_transaction_for_geometry_read()
 {
     submit_recorded_input();
-    return StyleEngineFFI::style_engine_defer_pending_transaction_for_geometry_read(m_impl);
+    return StyleEngineFFI::style_engine_defer_pending_transaction_for_geometry_read(rust_handle());
 }
 
 bool StyleEngine::begin_deferred_geometry_transaction_flush()
 {
     submit_recorded_input();
-    return StyleEngineFFI::style_engine_begin_deferred_geometry_transaction_flush(m_impl);
+    return StyleEngineFFI::style_engine_begin_deferred_geometry_transaction_flush(rust_handle());
 }
 
 void StyleEngine::end_deferred_geometry_transaction_flush()
 {
-    StyleEngineFFI::style_engine_end_deferred_geometry_transaction_flush(m_impl);
+    StyleEngineFFI::style_engine_end_deferred_geometry_transaction_flush(rust_handle());
 }
 
 bool StyleEngine::read_matches(StyleNodeID node, Vector<RuleMatch>& matches, Optional<MatchPurpose> purpose)
@@ -1598,8 +1595,8 @@ bool StyleEngine::read_matches(StyleNodeID node, Vector<RuleMatch>& matches, Opt
     matches.resize(max(m_element_match_capacity, 16u));
     auto read = [&] {
         if (!purpose.has_value())
-            return StyleEngineFFI::style_engine_consume_published_match_answer(m_impl, node.value(), matches.data(), matches.size());
-        return StyleEngineFFI::style_engine_match_element(m_impl, node.value(), matches.data(), matches.size(), *purpose == MatchPurpose::Cascade);
+            return StyleEngineFFI::style_engine_consume_published_match_answer(rust_handle(), node.value(), matches.data(), matches.size());
+        return StyleEngineFFI::style_engine_match_element(rust_handle(), node.value(), matches.data(), matches.size(), *purpose == MatchPurpose::Cascade);
     };
     auto count = read();
     if (count == NumericLimits<size_t>::max())
@@ -1633,7 +1630,7 @@ void* StyleEngine::compile_selector_query(ReadonlySpan<void const*> selectors)
 
 void* StyleEngine::compile_selector_query(ReadonlySpan<void const*> selectors, Function<void()> const& backfill_attribute_value_texts)
 {
-    auto* query = StyleEngineFFI::style_engine_compile_selector_query(m_impl, selectors.data(), selectors.size());
+    auto* query = StyleEngineFFI::style_engine_compile_selector_query(rust_handle(), selectors.data(), selectors.size());
     if (refresh_attribute_value_text_requirements()) {
         if (m_style_computer)
             publish_required_attribute_value_texts(*this, *m_style_computer);
@@ -1653,12 +1650,12 @@ void StyleEngine::prepare_selector_query()
     // Exact selector queries read current tree and fact columns. Make those inputs visible while
     // retaining their old rows and the transaction journal for the normal style update to consume.
     submit_recorded_input();
-    StyleEngineFFI::style_engine_prepare_selector_query(m_impl);
+    StyleEngineFFI::style_engine_prepare_selector_query(rust_handle());
 }
 
 Optional<bool> StyleEngine::selector_query_matches(void const* query, StyleNodeID node, StyleNodeID scope_root, StyleNodeID shadow_root)
 {
-    auto result = StyleEngineFFI::style_engine_selector_query_matches(m_impl, query, node.value(), scope_root.value(), shadow_root.value());
+    auto result = StyleEngineFFI::style_engine_selector_query_matches(rust_handle(), query, node.value(), scope_root.value(), shadow_root.value());
     if (result == NumericLimits<u8>::max())
         return {};
     return result != 0;
@@ -1666,7 +1663,7 @@ Optional<bool> StyleEngine::selector_query_matches(void const* query, StyleNodeI
 
 Optional<bool> StyleEngine::selector_query_matches_without_document_root(void const* query, StyleNodeID node, StyleNodeID scope_root, StyleNodeID shadow_root)
 {
-    auto result = StyleEngineFFI::style_engine_selector_query_matches_without_document_root(m_impl, query, node.value(), scope_root.value(), shadow_root.value());
+    auto result = StyleEngineFFI::style_engine_selector_query_matches_without_document_root(rust_handle(), query, node.value(), scope_root.value(), shadow_root.value());
     if (result == NumericLimits<u8>::max())
         return {};
     return result != 0;
@@ -1677,7 +1674,7 @@ bool StyleEngine::selector_query_all(void* query, StyleNodeID root, bool include
     matches.resize(16);
     auto read = [&] {
         return StyleEngineFFI::style_engine_selector_query_all(
-            m_impl,
+            rust_handle(),
             query,
             root.value(),
             include_root,
@@ -1704,7 +1701,7 @@ bool StyleEngine::selector_query_first(void* query, StyleNodeID root, bool inclu
 {
     u32 raw_matched = 0;
     if (!StyleEngineFFI::style_engine_selector_query_first(
-            m_impl,
+            rust_handle(),
             query,
             root.value(),
             include_root,
@@ -1720,7 +1717,7 @@ bool StyleEngine::selector_query_first(void* query, StyleNodeID root, bool inclu
 bool StyleEngine::counter(size_t index, StringView& out_name, u64& out_value) const
 {
     size_t name_length = 0;
-    auto const* name = StyleEngineFFI::style_engine_counter(m_impl, index, &out_value, &name_length);
+    auto const* name = StyleEngineFFI::style_engine_counter(rust_handle(), index, &out_value, &name_length);
     if (!name)
         return false;
     out_name = StringView { name, name_length };

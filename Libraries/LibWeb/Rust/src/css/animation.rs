@@ -6936,8 +6936,9 @@ pub unsafe extern "C" fn rust_published_animation_current_key(
     is_resolved_out: *mut bool,
     key_out: *mut f64,
 ) -> bool {
-    let engine: &crate::css::style::StyleEngine =
-        unsafe { crate::css::style::bridge::engine_entrance(style_engine, "rust_published_animation_current_key") };
+    let engine: &crate::css::style::StyleEngine = unsafe {
+        crate::css::style::bridge::engine_read_entrance(style_engine, "rust_published_animation_current_key")
+    };
     use crate::css::style::animations;
 
     let Some(node) = crate::css::style::tree::StyleNodeID::from_raw(style_node) else {

@@ -65,12 +65,12 @@ Layout::RustFFI::FfiLayoutUpdateDocumentFacts Document::layout_update_document_f
     return {
         .document_is_active = document_is_active,
         .document_needs_layout_tree_build = needs_layout_tree_update() || child_needs_layout_tree_update(),
-        .style_input_waits_on_document = m_needs_animated_style_update
+        .style_input_waits_on_document = render_inputs().needs_animated_style_update()
             || style_computer().style_engine().has_recorded_input()
             || style_computer().style_engine().has_install_feedback()
-            || m_needs_media_rule_evaluation
-            || !m_elements_with_dirty_style_attributes.is_empty(),
-        .top_layer_work_pending = m_top_layer_needs_layout_zone_rebuild || !m_elements_with_pending_top_layer_membership_change.is_empty(),
+            || render_inputs().needs_media_rule_evaluation()
+            || render_inputs().has_elements_with_dirty_style_attributes(),
+        .top_layer_work_pending = render_inputs().has_pending_top_layer_change(),
         .should_collect_devtools_layout_data = page().client().has_active_devtools_client(),
         .document_in_quirks_mode = in_quirks_mode(),
         .viewport_inline_size_raw = viewport_rect.width().raw_value(),
@@ -84,6 +84,9 @@ void Document::renew_clock_layout_frame()
     auto* arena = layout_node_arena_if_created();
     if (!arena)
         return;
+    // The clock's ticks lay the document out from these facts beside the main thread, so its geometry moves with no
+    // write of the main thread's to show for it.
+    (void)render_inputs_for_write();
     Layout::RustFFI::FfiSelectionSnapshot selection {};
     Vector<Layout::RustFFI::FfiSelectionSnapshotNode> selection_nodes;
     Layout::RustFFI::FfiLayoutRoundFacts round {
@@ -138,7 +141,7 @@ void Document::take_in_layout_frame_effects(Layout::RustFFI::FfiLayoutFrameEffec
     end_style_stabilization_epoch();
     Layout::RustFFI::layout_arena_end_update_layout(arena);
     release_held_invalidation_marks();
-    style_computer().style_engine().publish_inputs_waiting_for_layout_pass();
+    render_inputs_for_write().style_engine().publish_inputs_waiting_for_layout_pass();
 
     // A frame taken back in the middle of main-thread code tells the document nothing that can run script there: its
     // messages and the resnap wait for the next layout update to end, which runs before anything reads them.
@@ -247,8 +250,8 @@ bool Document::update_style_and_layout_once(UpdateLayoutReason reason, Throttled
     // has no host step between its style and its layout that reads style: otherwise the style runs in a flight of its
     // own, and the layout on the main thread after it.
     if (pass_submission == LayoutPassSubmission::MaySubmitWithStyle
-        && (needs_layout_tree_update() || child_needs_layout_tree_update() || m_top_layer_needs_layout_zone_rebuild
-            || !m_elements_with_pending_top_layer_membership_change.is_empty() || !m_list_owners_pending_item_renumber.is_empty()
+        && (needs_layout_tree_update() || child_needs_layout_tree_update() || render_inputs().has_pending_top_layer_change()
+            || !m_list_owners_pending_item_renumber.is_empty()
             || Layout::RustFFI::layout_arena_needs_full_layout_tree_update(layout_node_arena().handle())))
         return false;
 

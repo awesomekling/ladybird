@@ -557,6 +557,8 @@ class IsolatedSelectorQueryEngineCache;
 class QuerySelectorResultCache;
 class Range;
 class RegisteredObserver;
+class RenderInputs;
+class RenderInputsEntrance;
 class SelectorQuery;
 class ShadowRoot;
 class SlotRegistry;

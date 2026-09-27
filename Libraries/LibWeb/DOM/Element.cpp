@@ -16,6 +16,7 @@
 #include <AK/NumericLimits.h>
 #include <AK/QuickSort.h>
 #include <AK/SaturatingMath.h>
+#include <AK/ScopeGuard.h>
 #include <AK/Utf16StringBuilder.h>
 #include <LibCompositing/DisplayList/AccumulatedVisualContext.h>
 #include <LibGC/Heap.h>
@@ -146,6 +147,7 @@
 #include <LibWeb/Namespace.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/BoxViews.h>
+#include <LibWeb/Painting/QueryView.h>
 #include <LibWeb/Platform/EventLoopPlugin.h>
 #include <LibWeb/SVG/SVGAElement.h>
 #include <LibWeb/SVG/SVGElement.h>
@@ -1398,7 +1400,7 @@ void Element::run_attribute_change_steps(Utf16FlyString const& local_name, Optio
             svg_element->publish_svg_attribute_facts();
         if (local_name.is_one_of(HTML::AttributeNames::colspan, HTML::AttributeNames::rowspan, HTML::AttributeNames::span)) {
             if (auto identity = NodeIdentity::of(*this))
-                document().invalidation_journal().note_table_spans(identity);
+                document().render_inputs_for_write().note_table_spans(identity);
         }
         if (!document().suppresses_attribute_style_invalidation()) {
             CSS::Invalidation::invalidate_style_after_attribute_change(
@@ -1622,7 +1624,7 @@ static void record_element_reference_pseudo_element_inputs(Element& element)
 {
     // The backing element consumes host rule changes through its own row. Computing it beside
     // the host would merge its invalidation into the host and schedule unrelated descendants.
-    auto& style_engine = element.document().style_computer().style_engine();
+    auto& style_engine = element.document().render_inputs_for_write().style_engine();
     for (auto i = to_underlying(CSS::first_element_reference_pseudo_element); i <= to_underlying(CSS::last_element_reference_pseudo_element); ++i) {
         if (auto pseudo_element = element.get_pseudo_element(static_cast<CSS::PseudoElement>(i)); pseudo_element.has_value()) {
             auto& referenced_element = as<ElementReferencePseudoElement>(*pseudo_element).referenced_element();
@@ -2307,7 +2309,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
         //     for siblings that changed beside the pass, so it is recomputed once the drain is over.
         auto parent = parent_element();
         if (!style_uses_tree_counting_function() && parent && style_computer.style_engine().children_changed_beside_pass(parent->style_node_id())) {
-            style_computer.style_engine().publish_input([element = GC::Root<Element> { *this }, style_node = style_node_id()](CSS::StyleInputScope const& input) {
+            document().render_inputs_for_write().style_engine().publish_input([element = GC::Root<Element> { *this }, style_node = style_node_id()](CSS::StyleInputScope const& input) {
                 if (element->style_node_id() == style_node)
                     input.engine().record_tree_counting_style_input_change(style_node);
             });
@@ -2530,7 +2532,7 @@ void Element::invalidate_descendant_styles_depending_on_style_container_query()
         auto* element = as_if<Element>(node);
         if (!element || !element->style_depends_on_style_container_query())
             return TraversalDecision::Continue;
-        element->document().style_computer().style_engine().record_container_query_input_change(element->style_node_id());
+        element->document().render_inputs_for_write().style_engine().record_container_query_input_change(element->style_node_id());
         return TraversalDecision::Continue;
     });
 }
@@ -3004,18 +3006,21 @@ bool Element::serializes_as_void() const
 template<typename QueryResult>
 static QueryResult query_client_rects_after_layout_update(Element const& element, auto&& query)
 {
-    auto& document = element.document();
-    if (!document.navigable())
-        return QueryResult {};
+    auto& document = const_cast<Document&>(element.document());
+    // The read leaves style and layout up to date for the reads after it, and they read what they describe then.
+    auto visual_contexts = Painting::QueryVisualContexts::Stale;
+    ScopeGuard publish_query_snapshot = [&] {
+        document.publish_query_snapshot_after_read(visual_contexts);
+    };
 
     // NOTE: Ensure that layout is up-to-date before looking at metrics.
     if constexpr (IsSame<QueryResult, CSSPixelRect>) {
         // The update that ran for the read answers it where it ran.
-        auto answer = const_cast<Document&>(document).update_layout_answering_geometry_read(element, UpdateLayoutReason::ElementGetClientRects, Layout::RustFFI::FfiGeometryReadKind::BoundingClientRect);
+        auto answer = document.update_layout_answering_geometry_read(element, UpdateLayoutReason::ElementGetClientRects, Layout::RustFFI::FfiGeometryReadKind::BoundingClientRect);
         if (answer.has_value() && (!answer->has_box || document.client_rects_need_no_accumulated_visual_contexts_update()))
             return answer->rect;
     } else {
-        const_cast<Document&>(document).update_layout_if_needed_for_node(element, UpdateLayoutReason::ElementGetClientRects);
+        document.update_layout_if_needed_for_node(element, UpdateLayoutReason::ElementGetClientRects);
     }
 
     // 1. If the element on which it was invoked does not have an associated layout box return an empty DOMRectList
@@ -3030,27 +3035,65 @@ static QueryResult query_client_rects_after_layout_update(Element const& element
         return query(*layout_node, Painting::identity_rect_to_viewport_transform());
 
     // NOTE: Make sure CSS transforms are resolved before they are used to calculate the rect position.
-    const_cast<Document&>(document).update_paint_and_hit_testing_properties_if_needed();
+    document.update_paint_and_hit_testing_properties_if_needed();
+    visual_contexts = Painting::QueryVisualContexts::UpToDate;
 
     auto visual_context_tree = document.visual_context_tree();
     return query(*layout_node, Painting::rect_to_viewport_transform(document, visual_context_tree));
+}
+
+// A read with nothing sent since the document published its query snapshot is answered from it. Empty if the snapshot
+// cannot answer it: the read then brings style and layout up to date first.
+template<typename QueryResult>
+static Optional<QueryResult> query_client_rects_in_query_view(Element const& element, auto&& query)
+{
+    auto view = element.document().query_view_for_clean_read();
+    if (!view.has_value())
+        return {};
+    // 1. If the element on which it was invoked does not have an associated layout box return an empty DOMRectList
+    //    object and stop this algorithm.
+    auto box = view->principal_box_of(element);
+    if (!box.has_value())
+        return QueryResult {};
+    return query(*view, *box);
+}
+
+template<typename QueryResult>
+static QueryResult query_client_rects(Element const& element, auto&& query_in_view, auto&& query)
+{
+    if (!element.document().navigable())
+        return QueryResult {};
+    auto answer = query_client_rects_in_query_view<QueryResult>(element, query_in_view);
+    if (!answer.has_value())
+        return query_client_rects_after_layout_update<QueryResult>(element, query);
+    return answer.release_value();
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-element-getboundingclientrect
 CSSPixelRect Element::get_bounding_client_rect() const
 {
     // 1. Let list be the result of invoking getClientRects() on element.
-    return query_client_rects_after_layout_update<CSSPixelRect>(*this, [](Layout::Node const& layout_node, auto const& rect_to_viewport_transform) {
-        return Painting::bounding_client_rect(layout_node, rect_to_viewport_transform);
-    });
+    return query_client_rects<CSSPixelRect>(
+        *this,
+        [](Painting::QueryView const& view, Painting::QueryBox box) {
+            return view.bounding_client_rect(box);
+        },
+        [](Layout::Node const& layout_node, auto const& rect_to_viewport_transform) {
+            return Painting::bounding_client_rect(layout_node, rect_to_viewport_transform);
+        });
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-element-getclientrects
 Vector<CSSPixelRect> Element::get_client_rects() const
 {
-    return query_client_rects_after_layout_update<Vector<CSSPixelRect>>(*this, [](Layout::Node const& layout_node, auto const& rect_to_viewport_transform) {
-        return Painting::client_rects(layout_node, rect_to_viewport_transform);
-    });
+    return query_client_rects<Vector<CSSPixelRect>>(
+        *this,
+        [](Painting::QueryView const& view, Painting::QueryBox box) {
+            return view.client_rects(box);
+        },
+        [](Layout::Node const& layout_node, auto const& rect_to_viewport_transform) {
+            return Painting::client_rects(layout_node, rect_to_viewport_transform);
+        });
 }
 
 CSSPixelRect Element::bounding_client_rect_assuming_layout_clean() const
@@ -3244,13 +3287,13 @@ void Element::children_changed(ChildrenChangedMetadata const& metadata)
 {
     Node::children_changed(metadata);
 
-    document().style_computer().style_engine().note_children_changed(style_node_id());
+    document().render_inputs_for_write().style_engine().note_children_changed(style_node_id());
     if (child_style_uses_tree_counting_function()) {
         for_each_child_of_type<Element>([&](Element& element) {
             if (!element.style_uses_tree_counting_function())
                 return IterationDecision::Continue;
 
-            document().style_computer().style_engine().record_tree_counting_style_input_change(element.style_node_id());
+            document().render_inputs_for_write().style_engine().record_tree_counting_style_input_change(element.style_node_id());
 
             return IterationDecision::Continue;
         });
@@ -5191,7 +5234,7 @@ void Element::clear_style_record_on_removal()
     m_installed_display_is_contents = false;
     m_installed_display_is_list_item = false;
     if (auto style_node = style_node_id(); style_node != 0) {
-        document().style_computer().style_engine().publish_input([element = GC::Root<Element> { *this }, style_node](CSS::StyleInputScope const& input) {
+        document().render_inputs_for_write().style_engine().publish_input([element = GC::Root<Element> { *this }, style_node](CSS::StyleInputScope const& input) {
             if (element->style_node_id() == style_node)
                 input.engine().set_element_container_query_inputs(input, style_node, {});
         });
@@ -5931,7 +5974,7 @@ void Element::set_scroll_offset(Optional<CSS::PseudoElement> pseudo_element_type
         if (!pseudo_element.has_value())
             return;
         auto offset_changed = pseudo_element->scroll_offset() != offset;
-        document().invalidation_journal().note_pseudo_element_scroll_offset(NodeIdentity::of(*this), *pseudo_element_type, offset, offset_changed);
+        document().render_inputs_for_write().note_pseudo_element_scroll_offset(NodeIdentity::of(*this), *pseudo_element_type, offset, offset_changed);
         return;
     }
 
@@ -5940,7 +5983,7 @@ void Element::set_scroll_offset(Optional<CSS::PseudoElement> pseudo_element_type
         ensure_element_rare_data().scroll_offset = offset;
     else if (auto* rare_data = element_rare_data())
         rare_data->scroll_offset = {};
-    document().invalidation_journal().note_scroll_offset(NodeIdentity::of(*this), offset_changed);
+    document().render_inputs_for_write().note_scroll_offset(NodeIdentity::of(*this), offset_changed);
 }
 
 Optional<Element::Dir> Element::dir() const

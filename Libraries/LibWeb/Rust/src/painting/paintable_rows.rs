@@ -9,6 +9,7 @@ use crate::css::css_pixels::{CssPixelPoint, CssPixelRect};
 use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::{NodeFlag, NodeSlotId};
 use crate::layout::{fragment_tree, used_values};
+use crate::painting::geometry_read::{GeometryRead, read_live_geometry};
 use crate::painting::hit_test::HitTestList;
 use crate::painting::image_map_areas::{ImageMapAreaColumn, ImageMapAreas};
 use crate::painting::node_painting;
@@ -782,7 +783,7 @@ impl CommittedPaintableRows<'_> {
     }
 }
 
-impl PaintRead for CommittedPaintableRows<'_> {
+impl GeometryRead for CommittedPaintableRows<'_> {
     fn paintable_data(&self, id: NodeSlotId) -> &PaintableData {
         self.published().paintable_data(id)
     }
@@ -803,7 +804,7 @@ impl PaintRead for CommittedPaintableRows<'_> {
         CommittedSideDataRef::Published(self.published().committed_side_data(id))
     }
 
-    read_live_arena!(std::ops::Deref::deref);
+    read_live_geometry!(std::ops::Deref::deref);
 
     fn memoized_absolute_rect(&self, id: NodeSlotId) -> Option<crate::css::css_pixels::CssPixelRect> {
         self.arena.memoized_absolute_rect(id)
@@ -812,6 +813,10 @@ impl PaintRead for CommittedPaintableRows<'_> {
     fn memoize_absolute_rect(&self, id: NodeSlotId, rect: crate::css::css_pixels::CssPixelRect) {
         self.arena.memoize_absolute_rect(id, rect);
     }
+}
+
+impl PaintRead for CommittedPaintableRows<'_> {
+    read_live_arena!(std::ops::Deref::deref);
 }
 
 impl PaintableRowsRead for CommittedPaintableRows<'_> {
@@ -856,7 +861,7 @@ impl Deref for MainSidePaintableRows<'_> {
     }
 }
 
-impl PaintRead for MainSidePaintableRows<'_> {
+impl GeometryRead for MainSidePaintableRows<'_> {
     fn paintable_data(&self, id: NodeSlotId) -> &PaintableData {
         match self {
             Self::Committed(rows) => rows.paintable_data(id),
@@ -889,21 +894,25 @@ impl PaintRead for MainSidePaintableRows<'_> {
         }
     }
 
-    read_live_arena!(std::ops::Deref::deref);
+    read_live_geometry!(std::ops::Deref::deref);
 
     fn memoized_absolute_rect(&self, id: NodeSlotId) -> Option<crate::css::css_pixels::CssPixelRect> {
         match self {
-            Self::Committed(rows) => PaintRead::memoized_absolute_rect(rows, id),
-            Self::DuringStage(rows) => PaintRead::memoized_absolute_rect(rows, id),
+            Self::Committed(rows) => GeometryRead::memoized_absolute_rect(rows, id),
+            Self::DuringStage(rows) => GeometryRead::memoized_absolute_rect(rows, id),
         }
     }
 
     fn memoize_absolute_rect(&self, id: NodeSlotId, rect: crate::css::css_pixels::CssPixelRect) {
         match self {
-            Self::Committed(rows) => PaintRead::memoize_absolute_rect(rows, id, rect),
-            Self::DuringStage(rows) => PaintRead::memoize_absolute_rect(rows, id, rect),
+            Self::Committed(rows) => GeometryRead::memoize_absolute_rect(rows, id, rect),
+            Self::DuringStage(rows) => GeometryRead::memoize_absolute_rect(rows, id, rect),
         }
     }
+}
+
+impl PaintRead for MainSidePaintableRows<'_> {
+    read_live_arena!(std::ops::Deref::deref);
 }
 
 impl PaintableRowsRead for MainSidePaintableRows<'_> {
@@ -943,7 +952,7 @@ impl PaintableRowsRead for MainSidePaintableRows<'_> {
     }
 }
 
-impl<Arena> PaintRead for PaintableRows<Arena>
+impl<Arena> GeometryRead for PaintableRows<Arena>
 where
     Arena: Deref<Target = LayoutNodeArena>,
 {
@@ -967,7 +976,7 @@ where
         PaintableRows::committed_side_data(self, id)
     }
 
-    read_live_arena!(std::ops::Deref::deref);
+    read_live_geometry!(std::ops::Deref::deref);
 
     fn memoized_absolute_rect(&self, id: NodeSlotId) -> Option<CssPixelRect> {
         LayoutNodeArena::memoized_absolute_rect(self, id)
@@ -976,6 +985,13 @@ where
     fn memoize_absolute_rect(&self, id: NodeSlotId, rect: CssPixelRect) {
         LayoutNodeArena::memoize_absolute_rect(self, id, rect);
     }
+}
+
+impl<Arena> PaintRead for PaintableRows<Arena>
+where
+    Arena: Deref<Target = LayoutNodeArena>,
+{
+    read_live_arena!(std::ops::Deref::deref);
 }
 
 impl<Arena> PaintableRowsRead for PaintableRows<Arena>
@@ -1664,6 +1680,15 @@ impl LayoutNodeArena {
         published.visual_context_tree = visual_context_tree;
     }
 
+    /// Publishes the rows as they are now, for a query snapshot to read while the arena goes on
+    /// changing.
+    pub(crate) fn publish_paintable_rows_for_query(&mut self) -> Option<PublishedRows> {
+        self.publish_paintable_rows();
+        let rows = self.paintable_rows.published.clone();
+        debug_assert!(rows.is_some(), "the rows were just published");
+        rows
+    }
+
     /// Publishes the rows as they are now, for a recording to read while the arena goes on
     /// changing.
     pub(crate) fn freeze_paint_frame(&mut self) -> PublishedFrame {
@@ -1864,7 +1889,7 @@ impl LayoutNodeArena {
 }
 
 pub(crate) fn with_inline_pieces(
-    arena: &impl PaintableRowsRead,
+    arena: &impl GeometryRead,
     inline_paintable: NodeSlotId,
     mut callback: impl FnMut(&InlineBoxPieceRecord, &PaintableData) -> bool,
 ) {

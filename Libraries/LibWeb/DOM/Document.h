@@ -41,6 +41,7 @@
 #include <LibWeb/DOM/LayoutOverlapBlocker.h>
 #include <LibWeb/DOM/ParentNode.h>
 #include <LibWeb/DOM/Range.h>
+#include <LibWeb/DOM/RenderInputs.h>
 #include <LibWeb/DOM/ShadowRoot.h>
 #include <LibWeb/DOM/ViewportClient.h>
 #include <LibWeb/Export.h>
@@ -504,7 +505,7 @@ public:
     void obtain_theme_color();
 
     void update_style();
-    void note_throttled_animation_style_update() { m_has_throttled_animation_style_update = true; }
+    void note_throttled_animation_style_update() { render_inputs_for_write().set_has_throttled_animation_style_update(true); }
     void flush_throttled_animation_style_update();
     void flush_throttled_animation_style_update_for_node(Node const&);
     void schedule_compositor_animation_wakeup(double delay_ms);
@@ -599,13 +600,8 @@ public:
     void update_paint_and_hit_testing_properties_if_needed();
     void sample_animation_effects_needing_style_update();
     void update_style_computer_viewport_rect();
-    bool needs_animated_style_update() const { return m_needs_animated_style_update; }
-    void clear_needs_animated_style_update()
-    {
-        m_needs_animated_style_update = false;
-        m_effects_needing_animated_style_update.clear();
-        m_effects_needing_animated_style_update_after_current_update.clear();
-    }
+    bool needs_animated_style_update() const { return render_inputs().needs_animated_style_update(); }
+    void clear_needs_animated_style_update();
     // Whether the document thread runs as part of this document's layout frame, in one of its joins
     // or running the frame itself. Beside a frame in flight, it does not.
     [[nodiscard]] bool is_running_update_layout() const;
@@ -878,12 +874,12 @@ public:
     void run_the_scroll_steps();
 
     void evaluate_media_queries_and_report_changes();
-    bool needs_media_rule_evaluation() const { return m_needs_media_rule_evaluation; }
+    bool needs_media_rule_evaluation() const { return render_inputs().needs_media_rule_evaluation(); }
     void evaluate_media_rules_for_style_update() { evaluate_media_rules(); }
     void set_needs_media_query_evaluation()
     {
         m_needs_media_query_list_evaluation = true;
-        m_needs_media_rule_evaluation = true;
+        render_inputs_for_write().set_needs_media_rule_evaluation(true);
     }
     void add_media_query_list(GC::Ref<CSS::MediaQueryList>);
 
@@ -1294,11 +1290,6 @@ public:
         // the published state instead, so this is time the design gives back outright.
         u64 clean_read_nanoseconds { 0 };
         u64 max_nanoseconds { 0 };
-        // Summed over the joins, how long before each one the page last dirtied render state. A
-        // join that follows its own mutation could never have overlapped with anything; one that
-        // follows a quiet stretch could have been answered from work done during it. Only a process
-        // that exposes internals times the mutations.
-        u64 nanoseconds_since_mutation { 0 };
         // Joins that published nothing: the read found render state dirty, ran the pipeline, and
         // came out with the same style program and the same committed layout it went in with. The
         // dirty bits said work was owed and the versions say none of it changed anything, so this
@@ -1318,19 +1309,25 @@ public:
     void reset_join_counters();
     void dump_join_counters() const;
 
-    // Notes that the page dirtied render state, for the joins that will have to wait for it. Every style input the page
-    // writes passes here, hundreds of thousands of times a second in a busy page, so the clock is read only in a
-    // process that measures its joins.
-    void note_render_state_mutation()
-    {
-        if (s_join_counters_time_render_state_mutations)
-            m_last_render_state_mutation_nanoseconds = MonotonicTime::now().nanoseconds();
-    }
-    static void time_render_state_mutations_for_join_counters() { s_join_counters_time_render_state_mutations = true; }
+    // What the main thread writes for the render side to restyle and lay the document out from. Reading it is free;
+    // writing it goes through render_inputs_for_write() only, which takes the query snapshot away first.
+    [[nodiscard]] RenderInputs const& render_inputs() const { return m_render_inputs.inputs(); }
+    [[nodiscard]] RenderInputs& render_inputs_for_write() { return m_render_inputs.for_write(); }
+
+    // A geometry read of a document that has its query snapshot, as has every document that embeds it, reads that
+    // snapshot: no join, no journal drain, no style engine call and nothing asked of the render side. Empty if one of
+    // them has none: something was written to its render inputs since it published one, and the read brings style and
+    // layout up to date first.
+    [[nodiscard]] Optional<Painting::QueryView> query_view_for_clean_read() const;
+    // After a read brought style and layout up to date, publishes what they describe for the reads after it, here and
+    // in every document that embeds this one. UpToDate says the read just updated the accumulated visual contexts as
+    // well.
+    void publish_query_snapshot_after_read(Painting::QueryVisualContexts);
+    [[nodiscard]] bool may_publish_query_snapshot() const;
     // A style change marked a layout node for a layout update, as a node's own mark does.
     void note_style_change_needs_layout_update(Badge<CSS::StyleEffectDrain>)
     {
-        note_render_state_mutation();
+        (void)render_inputs_for_write();
         set_needs_repaint(InvalidateDisplayList::No);
     }
 
@@ -1456,7 +1453,7 @@ public:
     void remove_an_element_from_the_top_layer_immediately(GC::Ref<Element>);
     void process_top_layer_removals();
 
-    void set_top_layer_needs_layout_zone_rebuild() { m_top_layer_needs_layout_zone_rebuild = true; }
+    void set_top_layer_needs_layout_zone_rebuild() { render_inputs_for_write().set_top_layer_needs_layout_zone_rebuild(); }
 
     OrderedHashTable<GC::Ref<Element>> const& top_layer_elements() const { return m_top_layer_elements; }
     bool top_layer_pending_removals_contains(GC::Ref<Element> element) const { return m_top_layer_pending_removals.contains(element); }
@@ -1956,25 +1953,18 @@ private:
 
     // Used by evaluate_media_queries_and_report_changes().
     bool m_needs_media_query_list_evaluation { false };
-    bool m_needs_media_rule_evaluation { false };
     Vector<GC::Weak<CSS::MediaQueryList>> m_media_query_lists;
 
     bool m_has_completed_style_update { false };
     bool m_style_engine_tracks_tree { false };
     CSS::StyleNodeID m_style_node_id;
-    GC::WeakHashSet<Element> m_elements_with_dirty_style_attributes;
     GC::WeakHashSet<Element> m_elements_with_viewport_dependent_style;
     bool m_suppresses_attribute_style_invalidation { false };
     CSS::ScrollStateQueryContainers m_scroll_state_query_containers;
 
     bool m_is_decoded_svg { false };
 
-    bool m_needs_animated_style_update { false };
-    GC::WeakHashSet<Animations::KeyframeEffect> m_effects_needing_animated_style_update;
-    GC::WeakHashSet<Animations::KeyframeEffect> m_effects_needing_animated_style_update_after_current_update;
     bool m_is_updating_animated_style { false };
-    bool m_has_throttled_animation_style_update { false };
-    bool m_force_throttled_animation_style_update { false };
     Optional<u64> m_last_forced_throttled_animation_style_update_task_generation;
 
     HashTable<GC::Ptr<NodeIterator>> m_node_iterators;
@@ -2174,8 +2164,8 @@ private:
 
     mutable StyleInvalidationCounters m_style_invalidation_counters;
     JoinCountersByReason m_join_counters;
-    u64 m_last_render_state_mutation_nanoseconds { 0 };
-    static inline bool s_join_counters_time_render_state_mutations { false };
+    // The render inputs, and the query snapshot the document published over them.
+    RenderInputsEntrance m_render_inputs;
     size_t m_join_depth { 0 };
 
     mutable GC::Ptr<WebIDL::ObservableArray> m_adopted_style_sheets;
@@ -2212,8 +2202,6 @@ private:
     // instead they generate boxes as if they were siblings of the root element.
     OrderedHashTable<GC::Ref<Element>> m_top_layer_elements;
     OrderedHashTable<GC::Ref<Element>> m_top_layer_pending_removals;
-    Vector<GC::Ref<Element>> m_elements_with_pending_top_layer_membership_change;
-    bool m_top_layer_needs_layout_zone_rebuild { false };
 
     Vector<GC::Ref<HTML::HTMLElement>> m_showing_auto_popover_list;
     Vector<GC::Ref<HTML::HTMLElement>> m_showing_hint_popover_list;

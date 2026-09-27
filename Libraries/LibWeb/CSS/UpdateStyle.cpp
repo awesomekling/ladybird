@@ -204,7 +204,7 @@ void StyleEffectDrain::apply_layout_invalidation(DOM::Document& document, Viewpo
             propagation = Layout::LayoutUpdatePropagation::BoundarySelfOnly;
         }
     }
-    document.invalidation_journal().note_needs_layout_update(DOM::NodeIdentity::of_style_node(style_node), DOM::SetNeedsLayoutReason::StyleChange, propagation);
+    document.render_inputs_for_write().note_needs_layout_update(DOM::NodeIdentity::of_style_node(style_node), DOM::SetNeedsLayoutReason::StyleChange, propagation);
     document.note_style_change_needs_layout_update({});
 }
 
@@ -221,7 +221,7 @@ void StyleEffectDrain::install(DOM::Document& document, Function<void(StyleDrain
     // What the drain asks of the engine is the pass's output being installed and applied, which the
     // style seal counts apart from the pass's round trips.
     rust_style_seal_set_in_effect_drain(true);
-    auto& style_engine = document.style_computer().style_engine();
+    auto& style_engine = document.render_inputs_for_write().style_engine();
     // Declared first, so the install's marks are written through once the rest of the drain has ended.
     DOM::InvalidationJournal::WriteThroughDeferral const write_through_deferral { document.invalidation_journal() };
     StyleDrainScope const scope { style_engine };
@@ -470,7 +470,7 @@ static Optional<StyleNodeID> begin_style_engine_transaction(DOM::Document& docum
     document.style_invalidation_counters().style_update_submission_microseconds += setup_microseconds;
     auto* root = document.document_element();
     if (!root || root->style_node_id() == 0) {
-        style_computer.style_engine().flush_without_document_root();
+        document.render_inputs_for_write().style_engine().flush_without_document_root();
         return {};
     }
     return root->style_node_id();
@@ -483,10 +483,10 @@ static StyleEngineTransaction accept_style_engine_transaction(DOM::Document& doc
     document.style_invalidation_counters().style_update_submission_microseconds += published_transaction.submission_microseconds;
     document.style_invalidation_counters().style_update_bridge_microseconds += published_transaction.bridge_microseconds;
     if (!published_transaction.reactions.is_empty()) {
-        style_computer.style_engine().note_published_transaction_version(published_transaction.version);
-        style_computer.style_engine().set_published_batch_waits(true);
+        document.render_inputs_for_write().style_engine().note_published_transaction_version(published_transaction.version);
+        document.render_inputs_for_write().style_engine().set_published_batch_waits(true);
     }
-    auto& style_engine = style_computer.style_engine();
+    auto const& style_engine = style_computer.style_engine();
     for (auto const& answer : published_transaction.reactions) {
         // The complete answer remains in Rust transaction scratch under this node. The identity
         // names both the semantic reaction and the payload that consumes it.
@@ -509,7 +509,7 @@ static StyleEngineTransaction take_style_engine_transaction(DOM::Document& docum
     auto root = begin_style_engine_transaction(document);
     if (!root.has_value())
         return {};
-    auto& style_engine = document.style_computer().style_engine();
+    auto& style_engine = document.render_inputs_for_write().style_engine();
     // The render owner applies what the batch moves of the layout tree it holds itself, unless the tree is to be built
     // again, or the batch is one wave of a flight's install, whose render half the flight owns.
     if (document.layout_node_arena_if_created() && !document.needs_layout_tree_update() && !document.child_needs_layout_tree_update()
@@ -923,7 +923,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
             // C++ installs them.
             auto engine_record_comparison = DOM::Element::EngineRecordComparison::AtInstallation;
             auto apply_engine_computed_records = [&](DOM::Element::EnginePseudoElementRecords const& pseudo_element_records, DOM::Element::EnginePseudoElementDamages const* pseudo_element_damages = nullptr) {
-                auto& style_engine = document.style_computer().style_engine();
+                auto& style_engine = scope.engine();
                 document.style_computer().pin_transition_stabilization_baseline_if_a_later_pass_may_need_it(scope, DOM::AbstractElement { *element });
                 // A first record answers the element's recorded arrival; nothing is left for a
                 // later transaction to plan. Neither is anything for a record retried after the
@@ -983,7 +983,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                 auto const explicit_inheritance_debt = row_debts.explicit_inheritance;
                 auto const row_effect_debt = row_debts.row_effect;
                 row_debts = {};
-                auto const row_sampled_in_pass = StyleEngineFFI::style_engine_take_row_sampled_in_pass(document.style_computer().style_engine().rust_handle(), reaction.style_node);
+                auto const row_sampled_in_pass = StyleEngineFFI::style_engine_take_row_sampled_in_pass(scope.engine().rust_handle(), reaction.style_node);
                 auto const transition_debt = row_effect_debt & StyleEngine::SettledRowTransitionDebt;
                 if (row_effect_debt & StyleEngine::SettledRowOwesAnAnimationPlan)
                     animation_plan = document.style_computer().take_settled_animation_plan(scope, StyleNodeID { reaction.style_node }, NumericLimits<u8>::max());
@@ -1006,7 +1006,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                         if (pseudo_element_records[kind].has_value())
                             (void)document.style_computer().take_settled_animation_plan(scope, StyleNodeID { reaction.style_node }, static_cast<u8>(kind));
                     }
-                    document.style_computer().style_engine().record_derived_element_style_input_change(StyleNodeID { reaction.style_node }, StyleEngine::RecomputeStyle);
+                    document.render_inputs_for_write().style_engine().record_derived_element_style_input_change(StyleNodeID { reaction.style_node }, StyleEngine::RecomputeStyle);
                 } else {
                     bool const defer_pseudos = has_animations_or_plan
                         || row_effect_debt & (StyleEngine::SettledRowTransitionDebt | StyleEngine::SettledRowOwesAnAnimationSample);
@@ -1109,7 +1109,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                     // A descendant may read this row only after its effect decisions have
                     // published their final composition. Keep the old composition pinned until
                     // that point so transition selection can still read its before-change style.
-                    document.style_computer().style_engine().set_sampled_composition_identity(scope,
+                    scope.engine().set_sampled_composition_identity(scope,
                         StyleNodeID { reaction.style_node }, element->style_record_identity());
                     if (defer_pseudos) {
                         if (old_originating_style) {
@@ -1168,7 +1168,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                 facts |= StyleEngine::ChildrenExplicitlyInherit;
             if (auto shadow_root = element->shadow_root(); shadow_root && shadow_root->children_explicitly_inherited_non_inherited_style_groups() != 0)
                 facts |= StyleEngine::ShadowChildrenExplicitlyInherit;
-            document.style_computer().style_engine().record_applied_style_reaction(reaction.style_node, reaction.reaction, invalidation.inherited_style_groups_changed(), facts);
+            document.render_inputs_for_write().style_engine().record_applied_style_reaction(reaction.style_node, reaction.reaction, invalidation.inherited_style_groups_changed(), facts);
         }
     }
 
@@ -1255,13 +1255,13 @@ StyleUpdate::~StyleUpdate()
 {
     auto& document = m_document;
     if (m_took_transaction) {
-        document.style_computer().style_engine().set_published_batch_waits(false);
+        document.render_inputs_for_write().style_engine().set_published_batch_waits(false);
         StyleEffectDrain::install(document, [](StyleDrainScope const& scope) {
             scope.engine().discard_style_transaction_outputs(scope);
         });
     }
     // The rows the render owner applied as it took the update's transactions that the install left are put back.
-    if (document.style_computer().style_engine().take_owner_applied_render_half()) {
+    if (document.render_inputs_for_write().style_engine().take_owner_applied_render_half()) {
         if (auto* arena = document.layout_node_arena_if_created())
             Layout::RustFFI::layout_arena_finish_owner_style_host_half(arena->handle());
     }
@@ -1333,7 +1333,7 @@ bool StyleUpdate::begin(DocumentWithoutBrowsingContext document_without_browsing
     (void)document.style_computer().ensure_media_environment_for_style_update();
     (void)document.style_computer().ensure_document_environment_for_style_update();
     document.publish_animation_environment_for_style_update();
-    document.style_computer().style_engine().prepare_root_font_resolution(
+    document.render_inputs_for_write().style_engine().prepare_root_font_resolution(
         document.font_computer().environment_generation());
     StyleValueFFI::rust_style_ffi_complete_style_update_begin();
     m_began_complete_style_update = true;
@@ -1382,7 +1382,7 @@ bool StyleUpdate::submit()
         finish({});
         return false;
     }
-    auto& style_engine = m_document.style_computer().style_engine();
+    auto& style_engine = m_document.render_inputs_for_write().style_engine();
     style_engine.submit_style_transaction(*root);
     // Inputs published beside the pass are ones it does not see: they wait for its drain.
     style_engine.set_published_batch_waits(true);
@@ -1392,7 +1392,7 @@ bool StyleUpdate::submit()
 void StyleUpdate::finish_submitted()
 {
     VERIFY(m_took_transaction);
-    auto& style_engine = m_document.style_computer().style_engine();
+    auto& style_engine = m_document.render_inputs_for_write().style_engine();
     auto style_engine_transaction = accept_style_engine_transaction(m_document, style_engine.finish_submitted_style_transaction());
     // An empty batch leaves nothing waiting for the host: the inputs published beside the pass go through now, as
     // they would have before a transaction taken in place.
@@ -1547,7 +1547,7 @@ static void finish_submitted_style_update(DOM::Document& document, HeldInvalidat
     VERIFY(s_submitted_style_update);
     // What was recorded beside the pass is the next transaction's, however the pass was taken back: held until the
     // update below has ended.
-    auto& style_engine = document.style_computer().style_engine();
+    auto& style_engine = document.render_inputs_for_write().style_engine();
     style_engine.begin_holding_input_recorded_beside_pass();
     ScopeGuard release_input = [&] { style_engine.end_holding_input_recorded_beside_pass(); };
     auto update = adopt_own(*exchange(s_submitted_style_update, nullptr));
@@ -1603,9 +1603,8 @@ static void apply_targeted_style_invalidation(StyleDrainScope const& scope, DOM:
 // pseudo-elements', in a style stage run of its own, before the host installs the answer.
 static StyleEngineFFI::FfiRecordDemandAnswer answer_targeted_record_demand(DOM::Element& element, Optional<PseudoElement> pseudo_element = {})
 {
-    auto& engine = element.document().style_computer().style_engine();
-    return StyleEngineFFI::style_engine_answer_read_demand(engine.rust_handle(), element.style_node_id().value(),
-        pseudo_element.has_value() ? to_underlying(*pseudo_element) : NumericLimits<u8>::max(), false, true, pseudo_element.has_value(), 0);
+    return element.document().style_computer().style_engine_queries().answer_read_demand(element.style_node_id(),
+        pseudo_element.has_value() ? to_underlying(*pseudo_element) : NumericLimits<u8>::max(), false, true, pseudo_element.has_value(), {});
 }
 
 // Install the engine's answer for a targeted demand of one element.
@@ -1884,7 +1883,7 @@ static bool update_style_for_element(DOM::Document& document, DOM::AbstractEleme
         (void)document.style_computer().ensure_media_environment_for_style_update();
         (void)document.style_computer().ensure_document_environment_for_style_update();
         document.publish_animation_environment_for_style_update();
-        document.style_computer().style_engine().prepare_root_font_resolution(
+        document.render_inputs_for_write().style_engine().prepare_root_font_resolution(
             document.font_computer().environment_generation());
         StyleValueFFI::rust_style_ffi_complete_style_update_begin();
         complete_style_update_started = true;
@@ -1909,7 +1908,7 @@ static bool update_style_for_element(DOM::Document& document, DOM::AbstractEleme
         (void)document.style_computer().ensure_media_environment_for_style_update();
         (void)document.style_computer().ensure_document_environment_for_style_update();
         document.publish_animation_environment_for_style_update();
-        document.style_computer().style_engine().prepare_root_font_resolution(
+        document.render_inputs_for_write().style_engine().prepare_root_font_resolution(
             document.font_computer().environment_generation());
         StyleValueFFI::rust_style_ffi_complete_style_update_begin();
         complete_style_update_started = true;
@@ -2017,14 +2016,14 @@ void Document::update_selection_style_observability()
         return;
     m_needs_selection_style_update = false;
     m_selection_styles_are_observable = observable;
-    style_computer().style_engine().set_pseudo_element_style_deferred(to_underlying(CSS::PseudoElement::Selection), !observable);
+    render_inputs_for_write().style_engine().set_pseudo_element_style_deferred(to_underlying(CSS::PseudoElement::Selection), !observable);
     if (!observable)
         return;
 
     auto record_element = [&](Node& node) {
         if (auto* element = as_if<Element>(node); element && element->has_style()) {
-            style_computer().style_engine().make_deferred_pseudo_element_style_observable(element->style_node_id());
-            style_computer().style_engine().record_derived_element_style_input_change(element->style_node_id(),
+            render_inputs_for_write().style_engine().make_deferred_pseudo_element_style_observable(element->style_node_id());
+            render_inputs_for_write().style_engine().record_derived_element_style_input_change(element->style_node_id(),
                 CSS::StyleEngine::PseudoInputsMayHaveChanged);
         }
     };

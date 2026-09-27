@@ -338,6 +338,7 @@ set(SOURCES
     DOM/PseudoElement.cpp
     DOM/QualifiedName.cpp
     DOM/Range.cpp
+    DOM/RenderInputs.cpp
     DOM/SelectorQuery.cpp
     DOM/ShadowRoot.cpp
     DOM/Slot.cpp
@@ -822,6 +823,7 @@ set(SOURCES
     Painting/CompositorAnimationEffectState.cpp
     Painting/HitTestResult.cpp
     Painting/PaintingRustBridge.cpp
+    Painting/QueryView.cpp
     Painting/ResizeHandle.cpp
     Painting/Scrollbar.cpp
     Painting/Scrolling.cpp

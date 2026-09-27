@@ -612,8 +612,13 @@ pub(crate) fn destroy_document(document: DocumentId) {
 }
 
 /// Sends `change` for `document`, and answers with its number: a unit that applies the changes through it applies
-/// this one.
-pub(crate) fn send_change(document: DocumentId, change: Change) -> ChangeSeq {
+/// this one. Only the document thread that came through the document's render inputs sends one, having dropped the
+/// query snapshot the document published.
+pub(crate) fn send_change(
+    _through: crate::css::style::ThroughRenderInputs,
+    document: DocumentId,
+    change: Change,
+) -> ChangeSeq {
     let seq = SENT_THROUGH.with_borrow_mut(|sent| {
         let seq = sent.entry(document).or_default();
         seq.0 += 1;

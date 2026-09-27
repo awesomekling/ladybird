@@ -15,6 +15,7 @@ use crate::painting::display_list::recorder::{
     ColorStops, FillPathParams, PaintStyle, PaintStyleOrColor, StrokePathParams,
 };
 use crate::painting::force_dark::ForceDarkRole;
+use crate::painting::geometry_read::GeometryRead;
 use crate::painting::host::{FfiSvgGradientKind, FfiSvgGradientSpreadMethod};
 use crate::painting::node_painting;
 use crate::painting::paintable_geometry::absolute_rect;

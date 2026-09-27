@@ -13,6 +13,7 @@ use super::host_tables::HostTables;
 use super::rendered_text::{FfiTextSourceRange, RenderedTextBoundary, TextContent, TextFragments};
 use super::svg_formatting_context::FfiSvgAttributeFacts;
 use super::tree_shape::{Chunk, ShapeWriter, TreeShape};
+use crate::cow_column::{ColumnSnapshot, CowColumn};
 
 /// How many interned names one SVG element's publication can name.
 const PUBLISHED_REFERENCE_ATOM_COUNT: usize = 5;
@@ -1008,6 +1009,47 @@ impl RowsByStyleNode {
     }
 }
 
+/// How many element identities a chunk of [`BoundRowsByStyleNode`]'s element column holds.
+pub(crate) const BOUND_ELEMENT_ROWS_PER_CHUNK: usize = 256;
+
+/// The row each element and text node is bound to, indexed as [`RowsByStyleNode`] is. The element
+/// column is copy-on-write, so a query snapshot finds an element's box through the generation it
+/// was published with while the arena rebinds rows.
+#[derive(Default)]
+struct BoundRowsByStyleNode {
+    elements: CowColumn<NodeSlotId, BOUND_ELEMENT_ROWS_PER_CHUNK>,
+    texts: Vec<NodeSlotId>,
+}
+
+impl BoundRowsByStyleNode {
+    fn head(&self, style_node: StyleNodeID) -> NodeSlotId {
+        let row = match style_node.element_index() {
+            Some(index) => self.elements.get(index as usize),
+            None => self.texts.get(style_node.text_index().unwrap() as usize),
+        };
+        row.copied().unwrap_or(NodeSlotId::INVALID)
+    }
+
+    fn with_head_mut<R>(&mut self, style_node: StyleNodeID, callback: impl FnOnce(&mut NodeSlotId) -> R) -> R {
+        let Some(index) = style_node.element_index() else {
+            let index = style_node.text_index().unwrap() as usize;
+            if self.texts.len() <= index {
+                self.texts.resize(index + 1, NodeSlotId::INVALID);
+            }
+            return callback(&mut self.texts[index]);
+        };
+        let index = index as usize;
+        self.elements.grow_to(index + 1);
+        let Some(mut row) = self.elements.row_mut(index) else {
+            debug_assert!(false, "the column holds the row it grew to");
+            // The write goes to a head no row holds.
+            let mut head = NodeSlotId::INVALID;
+            return callback(&mut head);
+        };
+        callback(&mut row)
+    }
+}
+
 /// Where an element sits in the shadow-including tree, as the tree build last saw it: the identity
 /// of its shadow-including parent element, or 0, and whether the step to that parent crossed a
 /// shadow root, which makes the parent the host of the tree scope the element is in.
@@ -1109,7 +1151,7 @@ pub(crate) struct LayoutNodeArena {
     /// The row each element or text node is bound to: the row its layout node is. Carrying the
     /// identity does not make a row bound, since rows for other referencers, first-letter slices
     /// and rows awaiting a rebuild carry it too.
-    bound_rows_by_style_node: RefCell<RowsByStyleNode>,
+    bound_rows_by_style_node: RefCell<BoundRowsByStyleNode>,
     /// The principal box each pseudo-element is bound to, keyed by its generator's identity and its
     /// kind. The generated content inside the box carries the same pair but is never bound.
     bound_pseudo_element_rows: RefCell<HashMap<(StyleNodeID, u8), NodeSlotId>>,
@@ -1337,7 +1379,7 @@ impl LayoutNodeArena {
             style_nodes: Vec::new(),
             next_rows_with_same_style_node: Vec::new(),
             first_rows_by_style_node: RefCell::new(RowsByStyleNode::default()),
-            bound_rows_by_style_node: RefCell::new(RowsByStyleNode::default()),
+            bound_rows_by_style_node: RefCell::new(BoundRowsByStyleNode::default()),
             bound_pseudo_element_rows: RefCell::new(HashMap::default()),
             pseudo_element_scroll_offsets: HashMap::default(),
             element_scroll_offsets: HashMap::default(),
@@ -1941,6 +1983,12 @@ impl LayoutNodeArena {
         self.bound_rows_by_style_node.borrow().head(style_node)
     }
 
+    /// The row each element is bound to, as it is now, for a query snapshot to read while the
+    /// arena rebinds rows.
+    pub(crate) fn publish_bound_element_rows(&self) -> ColumnSnapshot<NodeSlotId, BOUND_ELEMENT_ROWS_PER_CHUNK> {
+        self.bound_rows_by_style_node.borrow_mut().elements.publish()
+    }
+
     pub(crate) fn bound_viewport_row(&self) -> NodeSlotId {
         self.bound_viewport_row.get()
     }
@@ -2147,7 +2195,9 @@ impl LayoutNodeArena {
                 return result;
             }
         };
-        callback(self.bound_rows_by_style_node.borrow_mut().head_mut(style_node))
+        self.bound_rows_by_style_node
+            .borrow_mut()
+            .with_head_mut(style_node, callback)
     }
 
     /// Binds the node `id` belongs to to `id`, replacing any row bound to it before.
@@ -7396,7 +7446,11 @@ pub unsafe extern "C" fn layout_arena_needs_full_layout_tree_update(arena: *mut 
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_set_needs_full_layout_tree_update(arena: *mut c_void, value: bool) {
+pub unsafe extern "C" fn layout_arena_set_needs_full_layout_tree_update(
+    marks: LayoutTreeUpdateMarksHandle,
+    value: bool,
+) {
+    let arena = marks.arena;
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
     unsafe { LayoutNodeArena::from_handle(arena) }.set_needs_full_layout_tree_update(value);
@@ -7433,6 +7487,15 @@ pub unsafe extern "C" fn layout_arena_layout_tree_update_reuse_reasons(arena: *m
     unsafe { with_document_marks(arena, |marks| marks.reuse_reasons(style_node)) }
 }
 
+/// What C++ holds to set the layout tree update marks of one document's arena: the arena, as only
+/// the document's render inputs hand it out (DOM::RenderInputs), which drop the query snapshot the
+/// document published first. A mark is an input the next layout tree update reads, so only this
+/// reaches the marks' writers; the arena's own handle does not convert to it.
+#[repr(C)]
+pub struct LayoutTreeUpdateMarksHandle {
+    arena: *mut c_void,
+}
+
 /// Fold a layout tree update mark into the one the node `style_node` names holds, answering
 /// whether its own bit changed: the transition the mark site widens the rebuild from.
 ///
@@ -7441,11 +7504,12 @@ pub unsafe extern "C" fn layout_arena_layout_tree_update_reuse_reasons(arena: *m
 /// The arena must remain valid for the duration of the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_merge_layout_tree_update_mark(
-    arena: *mut c_void,
+    marks: LayoutTreeUpdateMarksHandle,
     style_node: u32,
     value: bool,
     reuse_reason: u8,
 ) -> bool {
+    let arena = marks.arena;
     assert!(!arena.is_null(), "layout node arena handle is null");
     let Some(style_node) = StyleNodeID::from_raw(style_node) else {
         return false;
@@ -7495,10 +7559,11 @@ pub unsafe extern "C" fn layout_arena_child_needs_layout_tree_update(arena: *mut
 /// The arena must remain valid for the duration of the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_set_child_needs_layout_tree_update(
-    arena: *mut c_void,
+    marks: LayoutTreeUpdateMarksHandle,
     style_node: u32,
     value: bool,
 ) -> bool {
+    let arena = marks.arena;
     assert!(!arena.is_null(), "layout node arena handle is null");
     let Some(style_node) = StyleNodeID::from_raw(style_node) else {
         return false;
@@ -8494,7 +8559,7 @@ mod tests {
 
     #[test]
     fn committed_fragment_links_are_read_at_the_generation_published_with_the_rows() {
-        use crate::painting::published_frame::PaintRead;
+        use crate::painting::geometry_read::GeometryRead;
 
         let mut arena = LayoutNodeArena::new();
         let node = arena.allocate_for_test().slot;

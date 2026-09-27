@@ -19,6 +19,7 @@ use crate::layout::node_data::{NodeFlag, NodeSlotId};
 use crate::painting::display_list::builder::CommandRange;
 use crate::painting::display_list::commands::ContextRef;
 use crate::painting::force_dark::ForceDarkRole;
+use crate::painting::geometry_read::GeometryRead;
 use crate::painting::paint_order_plan::{PaintScope, PaintScopePlan};
 use crate::painting::paintable_data::PaintableFlag;
 use crate::painting::published_frame::PaintRead;

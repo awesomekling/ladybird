@@ -234,6 +234,7 @@
 #include <LibWeb/Painting/HitTestDisplayList.h>
 #include <LibWeb/Painting/PaintableTypes.h>
 #include <LibWeb/Painting/PaintingRustBridge.h>
+#include <LibWeb/Painting/QueryView.h>
 #include <LibWeb/Painting/ScrollSnap.h>
 #include <LibWeb/Painting/Scrolling.h>
 #include <LibWeb/Platform/EventLoopPlugin.h>
@@ -636,6 +637,7 @@ Document::Document(Page& page, GC::Ref<EventTarget> relevant_global_event_target
     , m_commit_messages(make<CommitMessages>(*this))
     , m_fonts(CSS::FontFaceSet::create(relevant_settings_object()))
     , m_temporary_document_for_fragment_parsing(temporary_document_for_fragment_parsing == TemporaryDocumentForFragmentParsing::Yes)
+    , m_render_inputs(*this)
     , m_editing_host_manager(EditingHostManager::create(*this))
     , m_dynamic_view_transition_style_sheet(parse_css_stylesheet(CSS::Parser::ParsingParams {}, ""sv, {}))
     , m_style_scope(*this)
@@ -652,13 +654,16 @@ Document::~Document() = default;
 
 void Document::mark_style_attribute_dirty(Element& element)
 {
-    if (element.is_connected())
-        m_elements_with_dirty_style_attributes.set(element);
+    if (!element.is_connected())
+        return;
+    render_inputs_for_write().mark_style_attribute_dirty(element);
 }
 
 void Document::synchronize_dirty_style_attributes()
 {
-    auto elements = move(m_elements_with_dirty_style_attributes);
+    if (!render_inputs().has_elements_with_dirty_style_attributes())
+        return;
+    auto elements = render_inputs_for_write().take_elements_with_dirty_style_attributes();
     for (auto& element : elements) {
         if (element.is_connected() && &element.document() == this)
             element.synchronize_all_attributes();
@@ -791,13 +796,86 @@ bool Document::is_clean_for_layout_geometry_read() const
 {
     return m_has_completed_style_update
         && layout_is_up_to_date()
-        && m_elements_with_dirty_style_attributes.is_empty()
+        && !render_inputs().has_elements_with_dirty_style_attributes()
         && !style_computer().style_engine().has_pending_transaction()
-        && !m_needs_media_rule_evaluation
-        && !m_needs_animated_style_update
+        && !render_inputs().needs_media_rule_evaluation()
+        && !render_inputs().needs_animated_style_update()
         && !has_size_containers_needing_evaluation_after_layout()
-        && m_elements_with_pending_top_layer_membership_change.is_empty()
-        && !m_top_layer_needs_layout_zone_rebuild;
+        && !render_inputs().has_pending_top_layer_change();
+}
+
+// A document embedded in another one is laid out in the viewport its container's layout gives it, so a write to the
+// render inputs of a document that embeds it can move its boxes as well.
+template<typename Callback>
+static bool for_each_embedding_document(Document const& document, Callback callback)
+{
+    auto const* embedded_document = &document;
+    while (auto navigable = embedded_document->navigable()) {
+        auto embedding_document = navigable->container_document();
+        if (!embedding_document || embedding_document.ptr() == embedded_document)
+            return true;
+        if (!callback(*embedding_document))
+            return false;
+        embedded_document = embedding_document.ptr();
+    }
+    return true;
+}
+
+Optional<Painting::QueryView> Document::query_view_for_clean_read() const
+{
+    auto snapshot = m_render_inputs.query_snapshot();
+    if (!snapshot)
+        return {};
+    auto const embedding_documents_have_snapshots = for_each_embedding_document(*this, [](Document& embedding_document) {
+        return embedding_document.m_render_inputs.has_query_snapshot();
+    });
+    if (!embedding_documents_have_snapshots)
+        return {};
+    return Painting::QueryView { snapshot.release_nonnull() };
+}
+
+// Whether what style and layout describe of the document now is what a query snapshot published now would say.
+bool Document::may_publish_query_snapshot() const
+{
+    auto navigable = this->navigable();
+    if (!m_layout_node_arena || !navigable || navigable->active_document().ptr() != this)
+        return false;
+    // An animation that skipped a per-frame style update catches up on the next read of its target.
+    if (render_inputs().has_throttled_animation_style_update())
+        return false;
+    // LIBWEB_RENDER_CLOCK_FRAMES: The render clock lays out a leased document's animations beside the main thread.
+    if (HTML::main_thread_event_loop().frame_scheduler().holds_clock_lease(*this))
+        return false;
+    // A container's committed viewport that waits in the queue has yet to reach the documents it embeds.
+    if (m_commit_messages->has_queued_navigable_container_viewport())
+        return false;
+    return is_clean_for_layout_geometry_read();
+}
+
+void Document::publish_query_snapshot_after_read(Painting::QueryVisualContexts visual_contexts)
+{
+    using VisualContexts = Painting::QueryVisualContexts;
+    if (m_needs_accumulated_visual_contexts_update)
+        visual_contexts = VisualContexts::Stale;
+    auto const publish = [](Document& document, VisualContexts visual_contexts) {
+        auto snapshot = document.m_render_inputs.query_snapshot();
+        if (snapshot && (visual_contexts == VisualContexts::Stale || snapshot->visual_contexts() == VisualContexts::UpToDate))
+            return true;
+        if (!document.may_publish_query_snapshot())
+            return false;
+        auto published = Painting::QuerySnapshot::publish(document, *document.m_layout_node_arena, visual_contexts);
+        if (!published)
+            return false;
+        document.m_render_inputs.publish_query_snapshot(published.release_nonnull());
+        return true;
+    };
+    if (!publish(*this, visual_contexts))
+        return;
+    // The read brought the documents that embed this one up to date as well, and a read here is clean only while each
+    // of them has a snapshot too. Only this document's read updated its accumulated visual contexts.
+    for_each_embedding_document(*this, [&](Document& embedding_document) {
+        return publish(embedding_document, VisualContexts::Stale);
+    });
 }
 
 u64 Document::layout_commit_generation() const
@@ -837,9 +915,6 @@ Document::JoinScope::JoinScope(Document& document, UpdateLayoutReason reason)
         event_loop.did_run_frame_in_lockstep(HTML::EventLoop::FrameLockstepReason::SynchronousCaller);
     m_layout_commit_generation = m_document.layout_commit_generation();
     m_style_transaction_version = m_document.style_computer().style_engine().published_transaction_version().transaction;
-    // A document that has not been dirtied yet has no mutation to measure against.
-    if (m_document.m_last_render_state_mutation_nanoseconds != 0)
-        counters.nanoseconds_since_mutation += m_started_at_nanoseconds - m_document.m_last_render_state_mutation_nanoseconds;
 }
 
 Document::JoinScope::~JoinScope()
@@ -890,7 +965,6 @@ void Document::dump_join_counters() const
         totals.total_nanoseconds += counters.total_nanoseconds;
         totals.clean_read_nanoseconds += counters.clean_read_nanoseconds;
         totals.max_nanoseconds = max(totals.max_nanoseconds, counters.max_nanoseconds);
-        totals.nanoseconds_since_mutation += counters.nanoseconds_since_mutation;
         totals.joins_that_published_nothing += counters.joins_that_published_nothing;
         totals.frame_waits += counters.frame_waits;
         totals.frame_wait_nanoseconds += counters.frame_wait_nanoseconds;
@@ -902,7 +976,7 @@ void Document::dump_join_counters() const
         totals.frame_wait_nanoseconds / 1'000'000.0, totals.frame_waits);
     for (auto reason : reasons) {
         auto const& counters = m_join_counters[reason];
-        dbgln("  {:>9.3f}ms ({:>8.3f}ms clean) {:>7} joins ({:>7} idle) {:>7} clean {:>7} nested  max {:>8.3f}ms  since mutation {:>9.3f}ms  {}",
+        dbgln("  {:>9.3f}ms ({:>8.3f}ms clean) {:>7} joins ({:>7} idle) {:>7} clean {:>7} nested  max {:>8.3f}ms  {}",
             counters.total_nanoseconds / 1'000'000.0,
             counters.clean_read_nanoseconds / 1'000'000.0,
             counters.joins,
@@ -910,7 +984,6 @@ void Document::dump_join_counters() const
             counters.clean_reads,
             counters.nested,
             counters.max_nanoseconds / 1'000'000.0,
-            counters.joins == 0 ? 0.0 : counters.nanoseconds_since_mutation / 1'000'000.0 / counters.joins,
             to_string(static_cast<UpdateLayoutReason>(reason)));
     }
 }
@@ -920,11 +993,9 @@ bool Document::needs_full_layout_tree_update() const
     return m_layout_node_arena && Layout::RustFFI::layout_arena_needs_full_layout_tree_update(m_layout_node_arena->handle());
 }
 
-// A document without an arena has no layout nodes, so its next build creates every box anyway.
 void Document::set_needs_full_layout_tree_update(bool value)
 {
-    if (m_layout_node_arena)
-        Layout::RustFFI::layout_arena_set_needs_full_layout_tree_update(m_layout_node_arena->handle(), value);
+    render_inputs_for_write().set_needs_full_layout_tree_update(value);
 }
 
 bool Document::is_running_update_layout() const
@@ -1121,7 +1192,7 @@ void Document::visit_edges(Cell::Visitor& visitor)
 
     visitor.visit(m_top_layer_elements);
     visitor.visit(m_top_layer_pending_removals);
-    visitor.visit(m_elements_with_pending_top_layer_membership_change);
+    m_render_inputs.visit_edges(visitor);
     visitor.visit(m_showing_auto_popover_list);
     visitor.visit(m_showing_hint_popover_list);
     visitor.visit(m_popover_pointerdown_target);
@@ -2081,7 +2152,7 @@ void Document::record_partial_relayout_escape(PartialRelayoutEscapeReason reason
 // committed their boxes.
 void Document::set_needs_container_query_evaluation_after_layout(Element const& query_container)
 {
-    style_computer().style_engine().publish_input([query_container = GC::Root<Element> { const_cast<Element&>(query_container) }](CSS::StyleInputScope const& input) {
+    render_inputs_for_write().style_engine().publish_input([query_container = GC::Root<Element> { const_cast<Element&>(query_container) }](CSS::StyleInputScope const& input) {
         if (query_container->style_node_id() != 0)
             CSS::StyleEngineFFI::style_engine_note_size_container_needs_evaluation_after_layout(input, input.engine().rust_handle(), query_container->style_node_id().value());
     });
@@ -2248,20 +2319,20 @@ void Document::update_layout_if_needed_for_node(Node const& node, UpdateLayoutRe
     if (reads_layout_geometry
         && m_has_completed_style_update
         && layout_is_up_to_date()
-        && !m_needs_media_rule_evaluation
-        && !m_needs_animated_style_update
+        && !render_inputs().needs_media_rule_evaluation()
+        && !render_inputs().needs_animated_style_update()
         && !has_size_containers_needing_evaluation_after_layout()
-        && m_elements_with_pending_top_layer_membership_change.is_empty()
-        && !m_top_layer_needs_layout_zone_rebuild
+        && !render_inputs().has_pending_top_layer_change()
         && !style_computer().style_engine().css_transitions_may_observe_style_changes()
         && !may_have_style_query_dependencies) {
         if (embedding_document_chain_is_clean()) {
             synchronize_dirty_style_attributes();
-            if (!style_computer().style_engine().pending_transaction_may_affect_layout_geometry()) {
+            auto& style_engine = render_inputs_for_write().style_engine();
+            if (!style_engine.pending_transaction_may_affect_layout_geometry()) {
                 // A later inline transition declaration still needs the pending style as its
                 // before-change style, even though this geometry read can reuse the current layout.
-                if (!style_computer().style_engine().has_pending_transaction()
-                    || style_computer().style_engine().defer_pending_transaction_for_geometry_read()) {
+                if (!style_engine.has_pending_transaction()
+                    || style_engine.defer_pending_transaction_for_geometry_read()) {
                     return;
                 }
             }
@@ -2280,12 +2351,13 @@ void Document::flush_deferred_style_change_event()
     // a layout pass: its frame applied every transaction before submitting it, and what the mutation
     // publishes waits for it to be taken back. What the mutation writes to the arena waits at the
     // arena's doors.
-    auto& style_engine = style_computer().style_engine();
-    if (!Layout::RustFFI::rust_stage_thread_style_pass_holds_style_engine(style_engine.rust_handle()) && !style_engine.layout_pass_is_in_flight())
+    auto const& engine = style_computer().style_engine();
+    if (!Layout::RustFFI::rust_stage_thread_style_pass_holds_style_engine(engine.rust_handle()) && !engine.layout_pass_is_in_flight())
         join_frame_reaching_style_engine();
-    if (!style_engine.has_deferred_geometry_transaction())
+    if (!engine.has_deferred_geometry_transaction())
         return;
 
+    auto& style_engine = render_inputs_for_write().style_engine();
     if (!style_engine.begin_deferred_geometry_transaction_flush()) {
         // All non-replayable style inputs consume the boundary before changing their authoritative
         // state. Reaching this fallback means exact local-fact journalling coarsened, so preserve
@@ -2325,7 +2397,7 @@ void Document::process_pending_list_item_renumbers()
 bool Document::needs_style_update_after_layout(bool style_runs_in_flight)
 {
     return has_size_containers_needing_evaluation_after_layout()
-        || m_needs_animated_style_update
+        || render_inputs().needs_animated_style_update()
         || (!style_runs_in_flight && style_computer().style_engine().has_pending_transaction());
 }
 
@@ -2436,7 +2508,7 @@ void Document::set_quirks_mode(QuirksMode mode)
 
     // It also changes which case a rule cache buckets id and class selectors under, and brings a user
     // agent stylesheet with it, so no scope's rule cache and no element's style survives it either.
-    style_computer().style_engine().set_fold_id_and_class_name_case(in_quirks_mode());
+    render_inputs_for_write().style_engine().set_fold_id_and_class_name_case(in_quirks_mode());
     style_scope().invalidate_style_cache();
     for_each_shadow_root([](auto& shadow_root) {
         shadow_root.style_scope().invalidate_style_cache();
@@ -2486,7 +2558,7 @@ void Document::invalidate_style_for_viewport_change()
 
     // Beside a style pass the engine is the pass's, so what follows waits for its drain, and then names the rows the
     // pass left.
-    style_computer().style_engine().publish_input([document = GC::Root<Document> { *this }](CSS::StyleInputScope const& input) {
+    render_inputs_for_write().style_engine().publish_input([document = GC::Root<Document> { *this }](CSS::StyleInputScope const& input) {
         auto& style_engine = input.engine();
         // The viewport is a published document input, and the engine unseats any record that reads it
         // when it moves, so these rows are ones the engine settles by driving them again against the
@@ -2514,8 +2586,9 @@ void Document::invalidate_style_for_viewport_change()
 
 void Document::sample_animation_effects_needing_style_update()
 {
-    if (!m_needs_animated_style_update)
+    if (!render_inputs().needs_animated_style_update())
         return;
+    auto& inputs = render_inputs_for_write();
 
     VERIFY(!m_is_updating_animated_style);
     m_is_updating_animated_style = true;
@@ -2524,14 +2597,14 @@ void Document::sample_animation_effects_needing_style_update()
     };
 
     GC::RootVector<GC::Ref<Animations::Animation>> animations;
-    if (m_force_throttled_animation_style_update) {
+    if (inputs.force_throttled_animation_style_update()) {
         for (auto& animation : m_associated_animations) {
             if (animation.is_idle() || !animation.effect() || !is<Animations::KeyframeEffect>(*animation.effect()))
                 continue;
             animations.append(animation);
         }
     } else {
-        for (auto& effect : m_effects_needing_animated_style_update) {
+        for (auto& effect : inputs.effects_needing_animated_style_update()) {
             auto animation = effect.associated_animation();
             // NB: A cancelled animation is idle, but its dirty effect must clear the old overlay.
             if (!animation)
@@ -2539,11 +2612,11 @@ void Document::sample_animation_effects_needing_style_update()
             animations.append(*animation);
         }
     }
-    m_effects_needing_animated_style_update.clear();
-    m_needs_animated_style_update = false;
+    inputs.effects_needing_animated_style_update().clear();
+    inputs.set_needs_animated_style_update(false);
 
     if (animations.is_empty()) {
-        m_force_throttled_animation_style_update = false;
+        inputs.set_force_throttled_animation_style_update(false);
         // A compositor-driven effect can remain throttled when every dirty effect was cancelled before this sample.
         // Preserve the flag so a later style or geometry read can still request a current main-thread sample.
         return;
@@ -2554,7 +2627,7 @@ void Document::sample_animation_effects_needing_style_update()
     });
 
     GC::RootVector<GC::Ref<Animations::AnimationTimeline>> timelines_with_current_time_override;
-    if (m_force_throttled_animation_style_update || has_requested_observation_sample) {
+    if (inputs.force_throttled_animation_style_update() || has_requested_observation_sample) {
         for (auto& timeline : m_associated_animation_timelines)
             timelines_with_current_time_override.append(timeline);
         for (auto& timeline : timelines_with_current_time_override)
@@ -2578,35 +2651,39 @@ void Document::sample_animation_effects_needing_style_update()
         return Animations::KeyframeEffect::composite_order(a_effect, b_effect) < 0;
     });
 
-    bool has_throttled_animation_style_update = m_force_throttled_animation_style_update ? false : m_has_throttled_animation_style_update;
+    bool has_throttled_animation_style_update = inputs.force_throttled_animation_style_update() ? false : inputs.has_throttled_animation_style_update();
     for (auto& animation : animations) {
         auto& effect = static_cast<Animations::KeyframeEffect&>(*animation->effect());
         bool observation_sample_requested = effect.consume_observation_sample_request();
         if (effect.can_skip_per_frame_style_update()) {
             has_throttled_animation_style_update = true;
-            if (!m_force_throttled_animation_style_update && !observation_sample_requested)
+            if (!inputs.force_throttled_animation_style_update() && !observation_sample_requested)
                 continue;
         }
         animation->effect()->update_computed_properties(context);
     }
 
-    m_has_throttled_animation_style_update = has_throttled_animation_style_update;
-    if (m_force_throttled_animation_style_update)
+    // Written after the samples through the entrance again: a reference to the inputs taken before them does not say
+    // that nothing published a query snapshot since.
+    auto& inputs_after_sampling = render_inputs_for_write();
+    inputs_after_sampling.set_has_throttled_animation_style_update(has_throttled_animation_style_update);
+    if (inputs_after_sampling.force_throttled_animation_style_update())
         m_last_forced_throttled_animation_style_update_task_generation = relevant_settings_object().responsible_event_loop().task_generation();
-    m_force_throttled_animation_style_update = false;
+    inputs_after_sampling.set_force_throttled_animation_style_update(false);
 }
 
 void Document::flush_throttled_animation_style_update()
 {
-    if (!m_has_throttled_animation_style_update)
+    if (!render_inputs().has_throttled_animation_style_update())
         return;
     auto task_generation = relevant_settings_object().responsible_event_loop().task_generation();
-    if (!m_needs_animated_style_update
+    if (!render_inputs().needs_animated_style_update()
         && m_last_forced_throttled_animation_style_update_task_generation == task_generation)
         return;
-    m_has_throttled_animation_style_update = false;
-    m_force_throttled_animation_style_update = true;
-    m_needs_animated_style_update = true;
+    auto& inputs = render_inputs_for_write();
+    inputs.set_has_throttled_animation_style_update(false);
+    inputs.set_force_throttled_animation_style_update(true);
+    inputs.set_needs_animated_style_update(true);
 }
 
 void Document::flush_throttled_animation_style_update_for_node(Node const& node)
@@ -2615,7 +2692,7 @@ void Document::flush_throttled_animation_style_update_for_node(Node const& node)
     // up on. The last sampling pass recorded whether any did, and the document-wide flush above
     // already trusts that record, so walking every associated animation to find none is wasted on
     // every synchronous geometry read of a page that animates.
-    if (!m_has_throttled_animation_style_update)
+    if (!render_inputs().has_throttled_animation_style_update())
         return;
 
     auto task_generation = relevant_settings_object().responsible_event_loop().task_generation();
@@ -2630,7 +2707,7 @@ void Document::flush_throttled_animation_style_update_for_node(Node const& node)
             if (!effect.can_skip_per_frame_style_update())
                 continue;
             if (m_is_updating_animated_style) {
-                m_effects_needing_animated_style_update_after_current_update.set(effect);
+                render_inputs_for_write().effects_needing_animated_style_update_after_current_update().set(effect);
             } else {
                 effect.request_element_scoped_observation_sample(task_generation);
             }
@@ -2669,10 +2746,11 @@ void Document::request_reentrant_animation_style_flush_for_testing(Badge<Interna
 bool Document::run_empty_animation_style_update_for_testing(Badge<Internals::Internals>)
 {
     VERIFY(!m_is_updating_animated_style);
-    m_needs_animated_style_update = true;
-    m_effects_needing_animated_style_update.clear();
+    auto& inputs = render_inputs_for_write();
+    inputs.set_needs_animated_style_update(true);
+    inputs.effects_needing_animated_style_update().clear();
     sample_animation_effects_needing_style_update();
-    return m_has_throttled_animation_style_update;
+    return render_inputs().has_throttled_animation_style_update();
 }
 
 void Document::stop_compositor_animation_timers()
@@ -2705,7 +2783,7 @@ bool Document::compositor_animation_observation_timer_is_active() const
 
 void Document::throttled_animation_visibility_changed()
 {
-    if (!m_has_throttled_animation_style_update)
+    if (!render_inputs().has_throttled_animation_style_update())
         return;
     flush_throttled_animation_style_update();
     page().client().request_frame();
@@ -2713,11 +2791,12 @@ void Document::throttled_animation_visibility_changed()
 
 void Document::set_needs_animated_style_update(Animations::KeyframeEffect& effect)
 {
-    m_effects_needing_animated_style_update.set(effect);
-    if (m_needs_animated_style_update)
+    auto& inputs = render_inputs_for_write();
+    inputs.effects_needing_animated_style_update().set(effect);
+    if (inputs.needs_animated_style_update())
         return;
 
-    m_needs_animated_style_update = true;
+    inputs.set_needs_animated_style_update(true);
 
     auto navigable = this->navigable();
     if (navigable && navigable->has_inclusive_ancestor_with_visibility_hidden())
@@ -2726,15 +2805,24 @@ void Document::set_needs_animated_style_update(Animations::KeyframeEffect& effec
     page().client().request_frame();
 }
 
+void Document::clear_needs_animated_style_update()
+{
+    auto& inputs = render_inputs_for_write();
+    inputs.set_needs_animated_style_update(false);
+    inputs.effects_needing_animated_style_update().clear();
+    inputs.effects_needing_animated_style_update_after_current_update().clear();
+}
+
 void Document::finish_animated_style_update()
 {
     VERIFY(m_is_updating_animated_style);
     m_is_updating_animated_style = false;
 
     GC::RootVector<GC::Ref<Animations::KeyframeEffect>> effects;
-    for (auto& effect : m_effects_needing_animated_style_update_after_current_update)
+    auto& effects_after_current_update = render_inputs_for_write().effects_needing_animated_style_update_after_current_update();
+    for (auto& effect : effects_after_current_update)
         effects.append(effect);
-    m_effects_needing_animated_style_update_after_current_update.clear();
+    effects_after_current_update.clear();
 
     for (auto& effect : effects)
         effect->request_observation_sample();
@@ -4040,7 +4128,7 @@ static void publish_focused_text_control_rows(GC::Ptr<Node> area)
     if (!shadow_root || !shadow_root->is_user_agent_internal())
         return;
     shadow_root->for_each_in_inclusive_subtree([](Node& node) {
-        node.document().invalidation_journal().note_is_in_focused_text_control(NodeIdentity::of(node));
+        node.document().render_inputs_for_write().note_is_in_focused_text_control(NodeIdentity::of(node));
         return TraversalDecision::Continue;
     });
 }
@@ -5158,7 +5246,7 @@ void Document::add_media_query_list(GC::Ref<CSS::MediaQueryList> media_query_lis
 // https://drafts.csswg.org/cssom-view/#evaluate-media-queries-and-report-changes
 void Document::evaluate_media_queries_and_report_changes()
 {
-    if (!m_needs_media_query_list_evaluation && !m_needs_media_rule_evaluation)
+    if (!m_needs_media_query_list_evaluation && !render_inputs().needs_media_rule_evaluation())
         return;
 
     bool evaluate_media_query_lists = m_needs_media_query_list_evaluation;
@@ -5199,13 +5287,13 @@ void Document::evaluate_media_queries_and_report_changes()
     }
 
     // Also not in the spec, but this is as good a place as any to evaluate @media rules!
-    if (m_needs_media_rule_evaluation)
+    if (render_inputs().needs_media_rule_evaluation())
         evaluate_media_rules();
 }
 
 void Document::evaluate_media_rules()
 {
-    m_needs_media_rule_evaluation = false;
+    render_inputs_for_write().set_needs_media_rule_evaluation(false);
     CSS::Invalidation::evaluate_media_rules_and_publish_conditions(*this);
 }
 
@@ -7537,8 +7625,9 @@ void Document::disassociate_with_animation(GC::Ref<Animations::Animation> animat
 {
     if (animation->effect() && is<Animations::KeyframeEffect>(*animation->effect())) {
         auto& effect = static_cast<Animations::KeyframeEffect&>(*animation->effect());
-        m_effects_needing_animated_style_update.remove(effect);
-        m_effects_needing_animated_style_update_after_current_update.remove(effect);
+        auto& inputs = render_inputs_for_write();
+        inputs.effects_needing_animated_style_update().remove(effect);
+        inputs.effects_needing_animated_style_update_after_current_update().remove(effect);
     }
     m_associated_animations.remove(animation);
 }
@@ -9603,7 +9692,7 @@ void Document::add_an_element_to_the_top_layer(GC::Ref<Element> element)
 
     // FIXME: 4. At the UA !important cascade origin, add a rule targeting el containing an overlay: auto declaration.
     element->set_rendered_in_top_layer(true);
-    m_elements_with_pending_top_layer_membership_change.append(element);
+    render_inputs_for_write().note_top_layer_membership_change(element);
     CSS::record_top_layer_elements_changed(*this);
 }
 
@@ -9621,7 +9710,7 @@ void Document::request_an_element_to_be_remove_from_the_top_layer(GC::Ref<Elemen
 
     // FIXME: 3. Remove the UA !important overlay: auto rule targeting el.
     element->set_rendered_in_top_layer(false);
-    m_elements_with_pending_top_layer_membership_change.append(element);
+    render_inputs_for_write().note_top_layer_membership_change(element);
 
     // 4. Append el to doc’s pending top layer removals.
     m_top_layer_pending_removals.set(element);
@@ -9643,7 +9732,7 @@ void Document::remove_an_element_from_the_top_layer_immediately(GC::Ref<Element>
     // FIXME: 3. Remove the UA !important overlay: auto rule targeting el, if it exists.
     element->set_rendered_in_top_layer(false);
 
-    m_elements_with_pending_top_layer_membership_change.append(element);
+    render_inputs_for_write().note_top_layer_membership_change(element);
     CSS::record_top_layer_elements_changed(*this);
 }
 
@@ -9681,11 +9770,10 @@ void Document::process_top_layer_removals()
 // that elements that left the top layer are classified by their up-to-date computed display.
 void Document::process_pending_top_layer_layout_changes()
 {
-    if (m_elements_with_pending_top_layer_membership_change.is_empty() && !m_top_layer_needs_layout_zone_rebuild)
+    if (!render_inputs().has_pending_top_layer_change())
         return;
 
-    auto elements_with_membership_change = move(m_elements_with_pending_top_layer_membership_change);
-    m_top_layer_needs_layout_zone_rebuild = false;
+    auto elements_with_membership_change = render_inputs_for_write().take_top_layer_changes();
 
     // An already pending full build recreates every box anyway.
     if (!has_layout_root() || needs_full_layout_tree_update())
@@ -10397,7 +10485,7 @@ void Document::republish_inheriting_svg_pattern_attribute_facts()
 void Document::note_svg_paint_resources_changed()
 {
     if (m_layout_node_arena)
-        invalidation_journal().note_svg_paint_resources_changed();
+        render_inputs_for_write().note_svg_paint_resources_changed();
 }
 
 bool Document::has_enrolled_svg_paint_resources() const
@@ -10407,7 +10495,7 @@ bool Document::has_enrolled_svg_paint_resources() const
 
 void Document::schedule_full_accumulated_visual_context_rebuild(Layout::RustFFI::FfiVisualContextGlobalRebuildReason reason)
 {
-    invalidation_journal().note_visual_context_full_rebuild(reason);
+    render_inputs_for_write().note_visual_context_full_rebuild(reason);
     set_needs_accumulated_visual_contexts_update(true);
 }
 
@@ -10415,7 +10503,7 @@ void Document::schedule_accumulated_visual_context_update(Layout::Row const& row
 {
     if (!Painting::has_committed_box(row))
         return;
-    invalidation_journal().note_visual_context_box_dirty(
+    render_inputs_for_write().note_visual_context_box_dirty(
         row.slot(),
         scope == AccumulatedVisualContextUpdateScope::Values
             ? Layout::RustFFI::FfiVisualContextBoxDirtyKind::StyleValueChange
@@ -11146,7 +11234,7 @@ void Document::did_change_custom_property_registrations(Optional<Utf16FlyString>
     // An @property rule's program input already reaches the elements declaring or referencing its
     // name. CSS.registerProperty() has no rule, so publish the equivalent named input explicitly.
     if (registered_property_set_change.has_value()) {
-        auto& style_engine = style_computer().style_engine();
+        auto& style_engine = render_inputs_for_write().style_engine();
         style_engine.publish_input([name = style_engine.intern_atom(*registered_property_set_change)](CSS::StyleInputScope const& input) {
             input.engine().record_custom_property_registration_change(name);
         });
@@ -11156,7 +11244,7 @@ void Document::did_change_custom_property_registrations(Optional<Utf16FlyString>
 void Document::sync_custom_property_registrations_to_rust()
 {
     // A style pass in flight reads the registry, so a registration change beside it waits for the pass's drain.
-    auto& style_engine = style_computer().style_engine();
+    auto& style_engine = render_inputs_for_write().style_engine();
     if (style_engine.pass_is_in_flight()) {
         if (!m_rust_custom_property_registry_sync_queued) {
             m_rust_custom_property_registry_sync_queued = true;

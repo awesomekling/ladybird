@@ -1,0 +1,15 @@
+initial box: 15,15 104x54 offset 5,5 104x54
+inline style width: 124 124
+class: 74 74
+attribute selector: 164 164
+text data grew the inline: true 1 rect(s)
+insertion before: 18 28
+removal: 5 15
+transform: 22,92 20x10 offset 5,79
+positioned: 67,13 20x10 offset 50,0 parent #container
+scrolled before: 157
+scroll offset: 132
+table: true
+body margin: 25 5
+display none: 0,0 0x0 0 rect(s) 0 null
+display back: 164 1 rect(s)

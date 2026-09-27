@@ -565,6 +565,8 @@ static bool take_in_clock_layout_frame(DOM::Document& document)
     auto* arena = document.layout_node_arena_if_created();
     if (!arena || !Layout::RustFFI::layout_arena_clock_layout_frame_laid_out(arena->handle()))
         return false;
+    // What the ticks laid out moved boxes that no input of the main thread's did.
+    (void)document.render_inputs_for_write();
     // The ticks' rounds ran as the rest of a layout update, which begins and ends here, around their frame: its end is
     // taken in as a submitted pass's frame is taken back (Document::take_in_layout_frame_effects).
     Layout::RustFFI::layout_arena_begin_update_layout(arena->handle());
@@ -870,6 +872,9 @@ void FrameScheduler::grant_clock_leases()
                 effect->set_is_clock_driven(false);
             m_clock_leases[*held].effects = plan->effects;
         } else {
+            // The render clock samples the lease's animations and lays the document out beside the main thread from
+            // here on, so its geometry moves with no write of the main thread's to show for it.
+            (void)document->render_inputs_for_write();
             m_clock_leases.append({ *document, plan->effects });
         }
         for (auto effect : plan->effects)
@@ -965,6 +970,11 @@ bool FrameScheduler::render_clock_ticks(DOM::Document const& document) const
 {
     auto held = m_clock_leases.find_first_index_if([&](auto const& hold) { return hold.document.ptr() == &document; });
     return held.has_value() && m_clock_leases[*held].render_clock_context.has_value();
+}
+
+bool FrameScheduler::holds_clock_lease(DOM::Document const& document) const
+{
+    return m_clock_leases.find_first_index_if([&](auto const& hold) { return hold.document.ptr() == &document; }).has_value();
 }
 
 void FrameScheduler::revoke_all_clock_leases()
@@ -1241,6 +1251,8 @@ void FrameScheduler::adopt_clock_tick(DOM::Document& document)
     auto* arena = document.layout_node_arena_if_created();
     if (!arena)
         return;
+    // What the tick sampled is the document's style now, which no input of the main thread's installed.
+    (void)document.render_inputs_for_write();
     bool installed_any = false;
     // What the render side presented already, adopting repaints nothing of.
     bool const presented_on_render_side = Layout::RustFFI::rust_document_clock_presented_since_adoption(arena->handle());

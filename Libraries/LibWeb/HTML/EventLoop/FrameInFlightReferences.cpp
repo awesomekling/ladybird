@@ -34,13 +34,13 @@ public:
         m_documents.append(document);
         // NB: This is the style engine's epoch, not StyleComputer's: the frame only holds off reclamation, and views
         //     made on the main thread meanwhile still pin their records as they would outside a frame.
-        document.style_computer().style_engine().begin_style_record_view_epoch();
+        document.style_computer().style_engine_queries().begin_style_record_view_epoch();
     }
 
     void release()
     {
         for (auto const& document : m_documents)
-            document->style_computer().style_engine().end_style_record_view_epoch();
+            document->style_computer().style_engine_queries().end_style_record_view_epoch();
         m_documents.clear();
     }
 

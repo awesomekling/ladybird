@@ -674,7 +674,7 @@ void Node::record_style_environment_change()
     document().bump_style_environment_version();
 
     if (is_document()) {
-        document().style_computer().style_engine().publish_input([](CSS::StyleInputScope const& input) {
+        document().render_inputs_for_write().style_engine().publish_input([](CSS::StyleInputScope const& input) {
             input.engine().record_environment_change();
         });
         return;
@@ -688,7 +688,7 @@ void Node::record_style_environment_change()
     // the engine does not is only WHICH nodes to drive, and that is what the reaction carries.
     if (is_element()) {
         auto& element = static_cast<Element&>(*this);
-        document().style_computer().style_engine().record_derived_element_style_input_change(element.style_node_id(), CSS::StyleEngine::PublishedStyle | CSS::StyleEngine::RecomputeStyle);
+        document().render_inputs_for_write().style_engine().record_derived_element_style_input_change(element.style_node_id(), CSS::StyleEngine::PublishedStyle | CSS::StyleEngine::RecomputeStyle);
         return;
     }
 
@@ -696,7 +696,7 @@ void Node::record_style_environment_change()
         auto* element = as_if<Element>(descendant);
         if (!element)
             return TraversalDecision::Continue;
-        element->document().style_computer().style_engine().record_derived_element_style_input_change(element->style_node_id(), CSS::StyleEngine::PublishedStyle | CSS::StyleEngine::RecomputeStyle);
+        element->document().render_inputs_for_write().style_engine().record_derived_element_style_input_change(element->style_node_id(), CSS::StyleEngine::PublishedStyle | CSS::StyleEngine::RecomputeStyle);
         return TraversalDecision::Continue;
     });
 }
@@ -2447,7 +2447,7 @@ void Node::recompute_editable_subtree_flags_and_repaint()
         // A node's stamps can flip even when its own editable-subtree flag did not, hence
         // unconditionally for every node.
         Layout::publish_dom_paint_facts(node);
-        document().invalidation_journal().note_editability_stamps(NodeIdentity::of(node));
+        document().render_inputs_for_write().note_editability_stamps(NodeIdentity::of(node));
         return TraversalDecision::Continue;
     });
     if (reached_an_image_map_area)
@@ -2646,10 +2646,8 @@ void Node::set_needs_layout_tree_update(bool value, SetNeedsLayoutTreeUpdateReas
     // NB: Every pending reason must permit reuse. Once a full rebuild is requested, later
     //     incremental changes cannot narrow it again. The arena folds both, and answers whether
     //     this mark was a transition -- which is what the widenings below hang off.
-    if (!Layout::RustFFI::layout_arena_merge_layout_tree_update_mark(document().layout_node_arena().handle(), style_node.value(), value, reuse_reason))
+    if (!document().render_inputs_for_write().merge_layout_tree_update_mark(style_node, value, reuse_reason))
         return;
-    if (value)
-        document().note_render_state_mutation();
 
     if constexpr (UPDATE_LAYOUT_DEBUG) {
         if (value) {
@@ -2697,7 +2695,7 @@ void Node::set_needs_layout_tree_update(bool value, SetNeedsLayoutTreeUpdateReas
         if (document().is_running_update_layout())
             apply_layout_tree_update_mark(reason);
         else
-            document().invalidation_journal().note_needs_layout_tree_update(NodeIdentity::of(*this), reason);
+            document().render_inputs_for_write().note_needs_layout_tree_update(NodeIdentity::of(*this), reason);
     }
 }
 
@@ -2715,7 +2713,7 @@ void Node::set_child_needs_layout_tree_update(bool value)
     auto style_node = style_node_id_of(*this);
     if (!style_node)
         return;
-    (void)Layout::RustFFI::layout_arena_set_child_needs_layout_tree_update(document().layout_node_arena().handle(), style_node.value(), value);
+    (void)document().render_inputs_for_write().set_child_needs_layout_tree_update(style_node, value);
 }
 
 void Node::apply_layout_tree_update_mark(SetNeedsLayoutTreeUpdateReason reason)
@@ -2728,7 +2726,7 @@ void Node::apply_layout_tree_update_mark(SetNeedsLayoutTreeUpdateReason reason)
         return element && element->rendered_in_top_layer();
     };
     bool update_is_inside_top_layer_member = is_rendered_top_layer_element(*this);
-    auto* marks = document().layout_node_arena().handle();
+    auto& inputs = document().render_inputs_for_write();
     for (auto* ancestor = flat_tree_parent(); ancestor; ancestor = ancestor->flat_tree_parent()) {
         if (!update_is_inside_top_layer_member && is_rendered_top_layer_element(*ancestor))
             update_is_inside_top_layer_member = true;
@@ -2736,7 +2734,7 @@ void Node::apply_layout_tree_update_mark(SetNeedsLayoutTreeUpdateReason reason)
         // An ancestor the style tree has not named is on no path the build walks by identity.
         if (!ancestor_style_node)
             continue;
-        if (Layout::RustFFI::layout_arena_set_child_needs_layout_tree_update(marks, ancestor_style_node.value(), true))
+        if (inputs.set_child_needs_layout_tree_update(ancestor_style_node, true))
             break;
     }
     if (update_is_inside_top_layer_member)
@@ -2848,7 +2846,7 @@ void Node::inserted()
     // is focused at all, and only the nodes of that control's own shadow tree hold it.
     if (auto focused_area = document().focused_area(); is<HTML::FormAssociatedTextControlElement>(focused_area.ptr())) {
         if (auto* shadow_root = as_if<ShadowRoot>(root()); shadow_root && shadow_root->host() == focused_area.ptr())
-            document().invalidation_journal().note_is_in_focused_text_control(identity);
+            document().render_inputs_for_write().note_is_in_focused_text_control(identity);
     }
 }
 
@@ -4025,8 +4023,7 @@ void Node::set_needs_layout_update(SetNeedsLayoutReason reason, Layout::LayoutUp
     // A node without a box has nothing to mark, exactly as when this resolved the row first.
     if (!has_layout_box())
         return;
-    document().invalidation_journal().note_needs_layout_update(NodeIdentity::of(*this), reason, propagation);
-    document().note_render_state_mutation();
+    document().render_inputs_for_write().note_needs_layout_update(NodeIdentity::of(*this), reason, propagation);
     document().set_needs_repaint(Badge<Node> {}, InvalidateDisplayList::No);
 }
 

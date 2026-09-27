@@ -153,6 +153,8 @@ public:
     bool tick_clock_leases(Vector<GC::Ref<DOM::Document>> const& docs, size_t first_document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp, bool may_submit);
     // Whether a render clock ticks the lease of `document`, without the main thread.
     bool render_clock_ticks(DOM::Document const&) const;
+    // Whether the document holds a clock lease, whose ticks may lay it out beside the main thread.
+    bool holds_clock_lease(DOM::Document const&) const;
     // Ends every clock lease: the compositor went away, or the process is going.
     void revoke_all_clock_leases();
     // Ends the clock lease of `document`, if it holds one: it was hidden.

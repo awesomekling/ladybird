@@ -513,7 +513,7 @@ void SVGElement::publish_svg_attribute_facts()
     // An element that has not been named by the style tree yet publishes when it is: its style
     // node is what the publication is keyed by.
     if (style_node_id() != 0)
-        document().invalidation_journal().note_svg_attribute_facts(DOM::NodeIdentity::of(*this));
+        document().render_inputs_for_write().note_svg_attribute_facts(DOM::NodeIdentity::of(*this));
 }
 
 // https://svgwg.org/svg2-draft/types.html#__svg__SVGElement__ownerSVGElement

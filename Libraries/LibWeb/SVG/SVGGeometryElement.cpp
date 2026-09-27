@@ -37,7 +37,7 @@ CSS::ElementBoxKind SVGGeometryElement::box_kind() const
 // The style of an element outside the document, where no rule reaches it: the style engine cascades its own
 // presentation attributes and inline style over the initial values. Nothing pins the record: the view taken of it
 // right away pins it if it must.
-static CSS::StyleRecordID declared_only_style_record(CSS::StyleComputer& style_computer, DOM::Document const& document, SVGGeometryElement& element)
+static CSS::StyleRecordID declared_only_style_record(DOM::Document& document, SVGGeometryElement& element)
 {
     auto hints = CSS::StyleComputer::collect_presentational_hint_properties({ element });
     Vector<CSS::Parser::ValueParserFFI::FfiDeclaredProperty> declarations;
@@ -52,7 +52,7 @@ static CSS::StyleRecordID declared_only_style_record(CSS::StyleComputer& style_c
     }
     auto inline_style = element.inline_style();
     return CSS::StyleRecordID { CSS::StyleEngineFFI::style_engine_declared_only_record(
-        style_computer.style_engine().rust_handle(),
+        document.render_inputs_for_write().style_engine().rust_handle(),
         document.style_node_id().value(),
         CSS::element_box_type_adjustment_facts(element),
         CSS::StyleEngineFFI::FfiElementDeclarationKind::SvgPresentationAttribute,
@@ -88,10 +88,10 @@ WebIDL::ExceptionOr<float> SVGGeometryElement::get_total_length()
     auto& style_computer = style_document.style_computer();
     CSS::StyleRecordID record;
     if (is_detached) {
-        record = declared_only_style_record(style_computer, style_document, *this);
+        record = declared_only_style_record(style_document, *this);
     } else {
         DOM::Document::JoinScope join { style_document, DOM::UpdateLayoutReason::SVGPathLength };
-        record = CSS::StyleRecordID { CSS::answer_style_read_demand(join, style_computer.style_engine(), { .node = style_node_id() }).record.style_record };
+        record = CSS::StyleRecordID { CSS::answer_style_read_demand(join, style_computer.style_engine_queries(), { .node = style_node_id() }).record.style_record };
     }
     auto view = style_computer.computed_style_record_view(record);
     if (!view)

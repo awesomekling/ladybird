@@ -2210,9 +2210,11 @@ pub unsafe extern "C" fn rust_random_sharing_input_dependencies(value: *const St
 pub unsafe extern "C" fn rust_random_sharing_absolutize(
     value: *const StyleValueData,
     length: *const core::ffi::c_void,
-    engine: crate::css::style::StyleEngineHandle,
+    engine: crate::css::style::StyleEngineInputHandle,
     node: u32,
 ) -> *const StyleValueData {
+    // The handle the document's render inputs gave out, to write the engine through.
+    let engine = engine.home();
     let data = unsafe { &*value };
     let StyleValueData::RandomValueSharing {
         fixed_value,
