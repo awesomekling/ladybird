@@ -28,6 +28,7 @@
 #include <LibWeb/Gamepad/SDLGamepadForward.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
 #include <LibWeb/Painting/Forward.h>
+#include <LibWeb/Painting/HitTestResult.h>
 #include <LibWebCommon/Page/EventResult.h>
 #include <LibWebCommon/Page/QueuedInputEvent.h>
 #include <LibWebCommon/PixelUnits.h>
@@ -129,10 +130,15 @@ private:
     bool fire_click_events(GC::Ref<DOM::Node>, MouseEventCoordinates const&, CSSPixelPoint screen_position, unsigned button, unsigned buttons, unsigned modifiers, int click_count);
 
     MouseEventCoordinates compute_mouse_event_coordinates(CSSPixelPoint visual_viewport_position, CSSPixelPoint viewport_position, Layout::Node const& layout_node) const;
+    MouseEventCoordinates compute_mouse_event_coordinates(CSSPixelPoint visual_viewport_position, CSSPixelPoint viewport_position, Painting::HitBox const&) const;
     CSSPixelPoint compute_mouse_event_page_offset(CSSPixelPoint event_client_offset) const;
     CSSPixelPoint compute_mouse_event_movement(CSSPixelPoint screen_position) const;
 
     struct Target {
+        // The box the hit went through, in the hit-test snapshot it was found in, which an event dispatched through
+        // the hit reads.
+        Optional<Painting::HitBox> box;
+        // The row of that box, which only the cursor and scrolling still take a layout node of.
         Compositing::RustFFI::NodeSlotId hit_node;
         NonnullRefPtr<Layout::NodeArena> arena;
         RefPtr<Painting::ChromeWidget> chrome_widget;
@@ -140,7 +146,9 @@ private:
         Optional<int> index_in_node;
         bool is_text_fragment { false };
 
-        Layout::Node* layout_node() const;
+        // The box, if layout committed it when the snapshot was published.
+        Painting::HitBox const* committed_box() const;
+        Layout::Node* layout_node_of_hit_box() const;
         GC::Ptr<DOM::Node> dom_node() const;
     };
     Optional<Target> target_for_mouse_position(CSSPixelPoint position);

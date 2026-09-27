@@ -19,11 +19,12 @@
 //! document publishes a snapshot for each hit test it makes, and what did not change since the
 //! last one is shared with it.
 
+use crate::cow_column::ColumnSnapshot;
 use crate::css::css_pixels::CssPixelPoint;
 use crate::css::style::tree::StyleNodeID;
 use crate::layout::FfiCssPixelPoint;
-use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::{NodeFlag, NodeKind, NodeSlotId};
+use crate::layout::{BOUND_ELEMENT_ROWS_PER_CHUNK, LayoutNodeArena};
 use crate::painting::display_list::commands::ContextRef;
 use crate::painting::geometry_read::GeometryRead;
 use crate::painting::hit_test::HitTestList;
@@ -35,6 +36,10 @@ use std::sync::Arc;
 
 pub(crate) struct HitTestSnapshot {
     frame: PublishedFrame,
+    /// The row each element was bound to, which a hit's box finds the box of its element by.
+    element_rows: ColumnSnapshot<NodeSlotId, BOUND_ELEMENT_ROWS_PER_CHUNK>,
+    /// The row the document was bound to: the viewport's.
+    viewport_row: NodeSlotId,
 }
 
 // A snapshot is hit tested on the main thread while the arena is written wherever its owner runs:
@@ -51,6 +56,8 @@ impl LayoutNodeArena {
         self.prepare_hit_test_list_for_query(true, true);
         HitTestSnapshot {
             frame: self.freeze_frame_without_damage(),
+            element_rows: self.publish_bound_element_rows(),
+            viewport_row: self.bound_viewport_row(),
         }
     }
 }
@@ -81,6 +88,12 @@ impl HitTestSnapshot {
         let absolute_rects = RefCell::default();
         let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::HitTest);
         query(list, tree, &PaintSource::new(&self.frame, &absolute_rects))
+    }
+
+    /// Reads the rows the snapshot was published with, whether or not it holds a list.
+    fn read_rows<R>(&self, read: impl FnOnce(&PaintSource<'_>) -> R) -> R {
+        let absolute_rects = RefCell::default();
+        read(&PaintSource::new(&self.frame, &absolute_rects))
     }
 
     /// Runs a query over the list and the rows it was recorded over.
@@ -142,11 +155,13 @@ impl FfiHitNodeIdentity {
 }
 
 /// What a hit on a snapshot's item resolves to: the DOM node an event there is dispatched to, the
-/// row whose style admitted the hit, and where in its node the hit landed.
+/// box whose style admitted the hit, and where in its node the hit landed.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct FfiHitTestSnapshotHit {
     pub node: FfiHitNodeIdentity,
+    pub hit_box: FfiHitBox,
+    /// The row of that box, which only scrolling still takes a layout node of.
     pub hit_node: NodeSlotId,
     pub has_index_in_node: bool,
     pub index_in_node: usize,
@@ -157,6 +172,7 @@ impl Default for FfiHitTestSnapshotHit {
     fn default() -> Self {
         Self {
             node: FfiHitNodeIdentity::default(),
+            hit_box: FfiHitBox::NONE,
             hit_node: NodeSlotId::INVALID,
             has_index_in_node: false,
             index_in_node: 0,
@@ -250,11 +266,136 @@ impl HitTestSnapshot {
             }
             FfiHitTestSnapshotHit {
                 node,
+                hit_box: FfiHitBox::of(rows.slot_is_live(hit_node).then_some(hit_node)),
                 hit_node,
                 has_index_in_node: resolved.has_index_in_node,
                 index_in_node: resolved.index_in_node,
                 is_text_fragment: resolved.is_text_fragment,
             }
+        })
+    }
+}
+
+/// A box of a hit-test snapshot, which a hit went through. Only that snapshot's reads take it: it is not
+/// a slot of the arena, so C++ can hand it to no arena entry.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FfiHitBox {
+    pub index: u32,
+}
+
+impl FfiHitBox {
+    const NONE: Self = Self {
+        index: NodeSlotId::INVALID.index,
+    };
+
+    fn of(row: Option<NodeSlotId>) -> Self {
+        row.map_or(Self::NONE, |row| Self { index: row.index })
+    }
+
+    fn row(self) -> NodeSlotId {
+        NodeSlotId { index: self.index }
+    }
+}
+
+/// What an event dispatched through a hit reads of a box of the snapshot, as it was published.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FfiHitBoxFacts {
+    /// Whether layout committed the box. Nothing below is read of a box it did not commit.
+    pub has_committed_box: bool,
+    pub kind: NodeKind,
+    /// The pseudo-element the box was generated for, encoded as `Layout::Node::encode_generated_for()`, or 0.
+    pub generated_for: u8,
+    /// The DOM node the box stands for, as `Layout::Node::dom_node_identity()` names it: none for an anonymous box.
+    pub identity: FfiHitNodeIdentity,
+    /// The element a box generated for a pseudo-element was generated for; none for any other box.
+    pub generator: FfiHitNodeIdentity,
+    pub parent: FfiHitBox,
+    /// The navigable a navigable container's viewport box shows the content of, where it is hosted here.
+    pub local_content_navigable: crate::painting::host::FfiCrossProcessId,
+    pub accumulated_visual_context: ContextRef,
+    pub absolute_rect: crate::layout::used_values::FfiCssPixelRect,
+    /// The box's position whatever kind of box it is: its first piece's for an inline box.
+    pub box_type_agnostic_position: FfiCssPixelPoint,
+}
+
+impl Default for FfiHitBoxFacts {
+    fn default() -> Self {
+        Self {
+            has_committed_box: false,
+            kind: NodeKind::Unset,
+            generated_for: 0,
+            identity: FfiHitNodeIdentity::default(),
+            generator: FfiHitNodeIdentity::default(),
+            parent: FfiHitBox::NONE,
+            local_content_navigable: Default::default(),
+            accumulated_visual_context: Default::default(),
+            absolute_rect: Default::default(),
+            box_type_agnostic_position: Default::default(),
+        }
+    }
+}
+
+impl HitTestSnapshot {
+    /// The box the DOM node `identity` names was bound to: the viewport for the document.
+    fn bound_box(&self, identity: FfiHitNodeIdentity) -> Option<NodeSlotId> {
+        let row = match identity.kind {
+            FfiHitNodeIdentityKind::None => return None,
+            FfiHitNodeIdentityKind::Document => self.viewport_row,
+            FfiHitNodeIdentityKind::StyleNode => {
+                let element = StyleNodeID::from_raw(identity.style_node)?.element_index()?;
+                *self.element_rows.get(element as usize)?
+            }
+        };
+        self.read_rows(|rows| rows.slot_is_live(row).then_some(row))
+    }
+
+    fn box_facts(&self, row: NodeSlotId) -> FfiHitBoxFacts {
+        self.read_rows(|rows| {
+            let Some(kind) = rows.node_kind_if_live(row) else {
+                return FfiHitBoxFacts::default();
+            };
+            let style_node = rows.node_style_node(row);
+            let generated_for = rows.node_generated_for(row);
+            let identity = if rows.node_flags_if_live(row) & NodeFlag::Anonymous as u32 != 0 {
+                FfiHitNodeIdentity::default()
+            } else if kind == NodeKind::Viewport {
+                FfiHitNodeIdentity::DOCUMENT
+            } else {
+                FfiHitNodeIdentity::of_style_node(style_node)
+            };
+            let mut facts = FfiHitBoxFacts {
+                kind,
+                generated_for,
+                identity,
+                generator: if generated_for != 0 {
+                    FfiHitNodeIdentity::of_style_node(style_node)
+                } else {
+                    FfiHitNodeIdentity::default()
+                },
+                parent: FfiHitBox::of(rows.node_parent_if_live(row)),
+                ..FfiHitBoxFacts::default()
+            };
+            if !rows.paintable_row_is_populated(row) {
+                return facts;
+            }
+            facts.has_committed_box = true;
+            facts.local_content_navigable = rows
+                .replaced_paint_facts(row)
+                .and_then(|facts| facts.navigable_container())
+                .map(|facts| facts.local_content_navigable)
+                .unwrap_or_default();
+            facts.accumulated_visual_context = rows.paintable_data(row).accumulated_visual_context;
+            facts.absolute_rect = crate::painting::paintable_geometry::absolute_rect_or_default(rows, row).into();
+            let first_piece_position = rows
+                .node_is_fragmented_inline(row)
+                .then(|| crate::painting::ffi::inline_first_piece_position(rows, row))
+                .flatten();
+            facts.box_type_agnostic_position = first_piece_position
+                .unwrap_or_else(|| crate::painting::paintable_geometry::absolute_position(rows, row))
+                .into();
+            facts
         })
     }
 }
@@ -400,6 +541,27 @@ pub unsafe extern "C" fn hit_test_snapshot_resolve_hit(
     local_point: FfiCssPixelPoint,
 ) -> FfiHitTestSnapshotHit {
     unsafe { snapshot_from_handle(snapshot) }.resolve_hit(index, local_point.into())
+}
+
+/// The box the DOM node `identity` names was bound to in the snapshot, or none.
+///
+/// # Safety
+///
+/// `snapshot` must be a live handle from `layout_arena_publish_hit_test_snapshot`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hit_test_snapshot_bound_box(
+    snapshot: *const c_void,
+    identity: FfiHitNodeIdentity,
+) -> FfiHitBox {
+    FfiHitBox::of(unsafe { snapshot_from_handle(snapshot) }.bound_box(identity))
+}
+
+/// # Safety
+///
+/// `snapshot` must be a live handle from `layout_arena_publish_hit_test_snapshot`, and `hit_box` a box it answered.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hit_test_snapshot_box_facts(snapshot: *const c_void, hit_box: FfiHitBox) -> FfiHitBoxFacts {
+    unsafe { snapshot_from_handle(snapshot) }.box_facts(hit_box.row())
 }
 
 #[cfg(test)]

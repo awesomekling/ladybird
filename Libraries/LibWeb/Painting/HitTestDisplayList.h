@@ -63,7 +63,7 @@ public:
     TraversalDecision hit_test_all(CSSPixelPoint, DOM::Document const&, double device_pixels_per_css_pixel, ChromeMetrics const&, Function<TraversalDecision(HitTestResult)> const&) const;
 
 private:
-    HitTestDisplayList(u64 visual_context_tree_structural_epoch, Layout::NodeArena&, ChromeWidgetRegistry&, void const* snapshot);
+    HitTestDisplayList(u64 visual_context_tree_structural_epoch, Layout::NodeArena&, ChromeWidgetRegistry&, NonnullRefPtr<HitTestSnapshot const>);
 
     struct Item {
         size_t item_index { 0 };
@@ -102,9 +102,10 @@ private:
 
     struct QueryContext;
     void publish_snapshot() const;
+    void const* snapshot() const { return m_snapshot->handle(); }
     static Optional<TopmostItem> topmost_item_from(Layout::RustFFI::FfiTopmostItem const&);
     [[nodiscard]] Item item(size_t index) const;
-    [[nodiscard]] Layout::RustFFI::FfiCaretLineExport caret_line(size_t line_index) const { return Layout::RustFFI::hit_test_snapshot_caret_line(m_snapshot, line_index); }
+    [[nodiscard]] Layout::RustFFI::FfiCaretLineExport caret_line(size_t line_index) const { return Layout::RustFFI::hit_test_snapshot_caret_line(snapshot(), line_index); }
 
     [[nodiscard]] Optional<TopmostItem> find_topmost_item(CSSPixelPoint, DOM::Document const&, double device_pixels_per_css_pixel, ChromeMetrics const&) const;
     void find_topmost_items_for_caret(CSSPixelPoint, DOM::Document const&, double device_pixels_per_css_pixel, ChromeMetrics const&, Optional<TopmostItem>& caret_item, Optional<TopmostItem>& hit_item) const;
@@ -130,8 +131,8 @@ private:
     u64 m_visual_context_tree_structural_epoch { 0 };
     NonnullRefPtr<Layout::NodeArena> m_arena;
     NonnullRefPtr<ChromeWidgetRegistry> m_chrome_widget_registry;
-    // The HitTestSnapshot the list reads, which it releases.
-    mutable void const* m_snapshot { nullptr };
+    // The snapshot the list reads, which the hits it finds hold as well.
+    mutable NonnullRefPtr<HitTestSnapshot const> m_snapshot;
     u64 m_rust_generation { 0 };
 };
 
