@@ -32,6 +32,9 @@ pub enum FfiCommitMessageKind {
     /// it: the document gives the new tree a new paint state once it has taken in what the build
     /// found out before this. This one is about the document itself.
     LayoutTreeReplaced,
+    /// The node is a list owner a tree build found showing stale list-item counters, so its layout
+    /// tree has to be built again.
+    ListItemCountersStale,
 }
 
 /// One thing the render side has to tell the document. The node it is about is named by the style

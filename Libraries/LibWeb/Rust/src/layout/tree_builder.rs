@@ -3177,6 +3177,22 @@ const _: () = {
 };
 
 impl TreeBuildHostHalf {
+    /// Adds the list owners the build found showing stale list-item counters to what it found out,
+    /// for the document to mark for another build as it pays the half.
+    pub(crate) fn report_list_owners_with_stale_item_counters(&mut self, list_owners: &[StyleNodeID]) {
+        self.reports.extend(
+            list_owners
+                .iter()
+                .map(|list_owner| crate::layout::commit::FfiCommitMessage {
+                    style_node: list_owner.raw(),
+                    other_style_node: 0,
+                    kind: crate::layout::commit::FfiCommitMessageKind::ListItemCountersStale,
+                    pending_face: 0,
+                    pending_face_has_been_retried: false,
+                }),
+        );
+    }
+
     /// Pays what the walk let go of, as it would have while the walk ran: the boxes nodes gained or
     /// lost, the host-owned objects of the rows it freed, and the style changes of the shells of
     /// the boxes it kept. Then what the build found out goes to the document, in the order the
