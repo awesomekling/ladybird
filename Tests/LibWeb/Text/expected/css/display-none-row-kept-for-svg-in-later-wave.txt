@@ -1,0 +1,4 @@
+style drives for the 4 arriving elements: 5
+span has a style record: true
+gradient has a style record: true
+span animations once shown: 1
