@@ -600,7 +600,13 @@ static void record_subtree_arrivals(DOM::Document& document, ReadonlySpan<GC::Re
 
     // An image names the areas of its map by identity (see Painting::refresh_image_map_area_facts()), and the insertion
     // of an area or a map published them without one.
-    if (any_of(arrivals, [](auto const& arrival) { return is<HTML::HTMLAreaElement>(*arrival.node) || is<HTML::HTMLMapElement>(*arrival.node); }))
+    // A map element is told apart by its name: HTMLMapElement has no fast type check, and is<> would take a
+    // dynamic_cast for every arrival.
+    auto is_map_element = [](DOM::Node const& node) {
+        auto const* element = as_if<DOM::Element>(node);
+        return element && element->is_html_element() && element->local_name() == HTML::TagNames::map;
+    };
+    if (any_of(arrivals, [&](auto const& arrival) { return is<HTML::HTMLAreaElement>(*arrival.node) || is_map_element(*arrival.node); }))
         Painting::refresh_image_map_area_facts(document);
 
     // The insertion that connected a subtree marked it for the layout tree build under the identity it did not have
