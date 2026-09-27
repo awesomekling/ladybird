@@ -30,6 +30,19 @@ class Size;
 
 namespace Web::Layout {
 
+// The document's layout node arena as the Rust layout entries take it; the first creates the arena if the document
+// has none yet.
+WEB_API void* document_layout_arena(DOM::Document&);
+WEB_API void* document_layout_arena_if_created(DOM::Document const&);
+
+// A layout tree build's walk runs on the render side; the document readies it.
+RustFFI::FfiDocumentStyleForBuild document_style_for_build(DOM::Document&);
+
+// What a layout tree build owes the rows it stamped for their images, which the document attaches once the frame the
+// build ran in is over. Each answers whether the box was handed a provider whose image is already there.
+bool attach_owed_style_resources(DOM::Document&, Compositing::RustFFI::NodeSlotId, bool owns_content_replacement_image);
+bool attach_owed_generated_image(DOM::Document&, Compositing::RustFFI::NodeSlotId, u32 style_node, RustFFI::FfiPseudoElement, RustFFI::FfiGeneratedContentItem, Compositing::RustFFI::NodeSlotId pseudo_element_box);
+
 // Registers the document-side answers every layout pass needs on the arena, once per document.
 WEB_API void register_layout_host(NodeArena&, DOM::Document&);
 

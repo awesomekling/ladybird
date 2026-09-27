@@ -13,11 +13,8 @@
 #include <LibWeb/DOM/Range.h>
 #include <LibWeb/HTML/EventLoop/MainThreadPhases.h>
 #include <LibWeb/HTML/LocalNavigable.h>
+#include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
-#include <LibWeb/Layout/Node.h>
-#include <LibWeb/Layout/NodeArena.h>
-#include <LibWeb/Layout/TreeBuilder.h>
-#include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/DocumentPaintState.h>
 #include <LibWeb/Painting/PaintingRustBridge.h>
@@ -61,7 +58,7 @@ static bool layout_tree_build_may_create_viewport(Document& document)
     if (document.created_for_appropriate_template_contents())
         return false;
     return !document.has_layout_root()
-        || Layout::RustFFI::layout_arena_needs_full_layout_tree_update(document.layout_node_arena().handle())
+        || Layout::RustFFI::layout_arena_needs_full_layout_tree_update(Layout::document_layout_arena(document))
         || document.needs_layout_tree_update();
 }
 
@@ -134,7 +131,7 @@ Layout::RustFFI::FfiLayoutUpdateDocumentFacts Document::layout_update_document_f
 
 void Document::renew_clock_layout_frame()
 {
-    auto* arena = layout_node_arena_if_created();
+    auto* arena = Layout::document_layout_arena_if_created(*this);
     if (!arena)
         return;
     // The clock's ticks lay the document out from these facts beside the main thread, so its geometry moves with no
@@ -148,7 +145,7 @@ void Document::renew_clock_layout_frame()
         .has_document_style = false,
         .document_style = {},
     };
-    Layout::RustFFI::layout_arena_renew_clock_layout_frame(arena->handle(), &round);
+    Layout::RustFFI::layout_arena_renew_clock_layout_frame(arena, &round);
 }
 
 // Ends the layout update a layout frame ran on the document side, once the frame is over: the epochs the update began,
@@ -166,7 +163,7 @@ void Document::end_layout_frame_update(void* arena)
 // layout update on the document side.
 void Document::take_in_layout_frame_effects(Layout::RustFFI::FfiLayoutFrameEffects const& effects)
 {
-    auto* arena = layout_node_arena().handle();
+    auto* arena = Layout::document_layout_arena(*this);
 
     // A document retiring its render state takes the frame back only to end the update: the rows the frame owes
     // resources, the commit it made and the rendering it prepared go away with the render state, and nothing of it is
@@ -330,11 +327,11 @@ bool Document::update_style_and_layout_once(UpdateLayoutReason reason, Throttled
     if (pass_submission == LayoutPassSubmission::MaySubmitWithStyle
         && (needs_layout_tree_update() || child_needs_layout_tree_update() || render_inputs().has_pending_top_layer_change()
             || !m_list_owners_pending_item_renumber.is_empty()
-            || Layout::RustFFI::layout_arena_needs_full_layout_tree_update(layout_node_arena().handle())))
+            || Layout::RustFFI::layout_arena_needs_full_layout_tree_update(Layout::document_layout_arena(*this))))
         return false;
 
-    auto& arena = layout_node_arena();
-    Layout::RustFFI::layout_arena_begin_update_layout(arena.handle());
+    auto* arena = Layout::document_layout_arena(*this);
+    Layout::RustFFI::layout_arena_begin_update_layout(arena);
 
     begin_style_stabilization_epoch();
 
@@ -349,7 +346,7 @@ bool Document::update_style_and_layout_once(UpdateLayoutReason reason, Throttled
     // The update's first round's style runs here, ahead of the update. One that runs in the flight begins here: its pass
     // is submitted for the update to collect, and the rest of the style update is installed as the flight is taken back.
     bool const style_in_flight = pass_submission == LayoutPassSubmission::MaySubmitWithStyle
-        && Layout::RustFFI::layout_arena_collect_style_pass_for_flight(arena.handle(), may_submit_pass);
+        && Layout::RustFFI::layout_arena_collect_style_pass_for_flight(arena, may_submit_pass);
     if (style_in_flight)
         submit_style_for_flight();
     else
@@ -376,7 +373,7 @@ bool Document::update_style_and_layout_once(UpdateLayoutReason reason, Throttled
         for (size_t index = 0; index < sources.size() && index < 2; ++index)
             inputs.viewport_propagation_sources[index] = sources[index].value();
     }
-    auto outcome = Layout::RustFFI::layout_arena_update_layout(arena.handle(), &inputs);
+    auto outcome = Layout::RustFFI::layout_arena_update_layout(arena, &inputs);
     if (outcome == Layout::RustFFI::FfiLayoutUpdateOutcome::FlightReady || outcome == Layout::RustFFI::FfiLayoutUpdateOutcome::FlightWithStyleReady) {
         // The flight records the document after its layout only if the document seals what that reads before it submits
         // the flight. A document that is to update its style after the layout lays out again before it shows anything.
@@ -384,7 +381,7 @@ bool Document::update_style_and_layout_once(UpdateLayoutReason reason, Throttled
         bool style_runs_in_flight = outcome == Layout::RustFFI::FfiLayoutUpdateOutcome::FlightWithStyleReady;
         if (auto navigable = this->navigable())
             navigable->seal_flight_paint(*this, !needs_style_update_after_layout(style_runs_in_flight));
-        Layout::RustFFI::layout_arena_submit_prepared_flight(arena.handle());
+        Layout::RustFFI::layout_arena_submit_prepared_flight(arena);
         return true;
     }
     return outcome == Layout::RustFFI::FfiLayoutUpdateOutcome::PassSubmitted;
