@@ -74,6 +74,7 @@ RENDER_STAGE_ALLOWED = {
     **render_stage_entries(
         MAIN_THREAD_ONLY,
         [
+            "clock_frames.rs:PUBLICATIONS",
             "flight.rs:TAKEN_BACK_OUTCOME",
             "flight.rs:FLIGHT_ENDS",
             "flight.rs:FLIGHT_STYLE_ENDS",
@@ -248,7 +249,6 @@ RENDER_STAGE_ALLOWED = {
     **render_stage_entries(
         LOCKED,
         [
-            "clock_frames.rs:LEASES",
             "css/ffi_stats.rs:COMPLETE_STYLE_UPDATE_STATE",
             "css/parser/stylesheet_cache.rs:CACHE",
             "css/style/atoms.rs:GLOBAL_ATOMS",

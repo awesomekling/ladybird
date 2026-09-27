@@ -1591,9 +1591,8 @@ GC::Ref<JS::Object> Internals::get_render_clock_counters() const
     define("ticksPosted"sv, counters.ticks_posted);
     define("ticksFolded"sv, counters.ticks_folded);
     define("ticksRun"sv, counters.ticks_run);
-    define("ticksDroppedNested"sv, counters.ticks_dropped_nested);
     define("ticksDroppedMainBusy"sv, counters.ticks_dropped_main_busy);
-    define("ticksDroppedWithoutLease"sv, counters.ticks_dropped_without_lease);
+    define("ticksDroppedWithoutClock"sv, counters.ticks_dropped_without_clock);
     define("ticksDroppedPaused"sv, counters.ticks_dropped_paused);
     define("ticksDroppedNeedingMain"sv, counters.ticks_dropped_needing_main);
     define("ticksDroppedStale"sv, counters.ticks_dropped_stale);

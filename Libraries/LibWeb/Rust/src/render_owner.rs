@@ -131,6 +131,8 @@ pub(crate) struct RenderState {
     /// its paint preparation and its animation sampling state.
     arena: Box<ArenaHandle>,
     changes: ChangeQueue,
+    /// The document's clock, which ticks its animations while the main thread started it.
+    clock: Option<crate::clock_frames::DocumentClock>,
 }
 
 impl RenderState {
@@ -288,6 +290,8 @@ pub(crate) enum ToOwner {
     Recall { document: DocumentId },
     /// Drops the render state of `document`. Nothing waits for it.
     Destroy { document: DocumentId },
+    /// Starts, changes, stops or ticks the clock of a document, or lets the ticks in as the main thread idles.
+    Clock(crate::clock_frames::ClockMessage),
 }
 
 impl ToOwner {
@@ -303,6 +307,7 @@ impl ToOwner {
             | Self::Ask { document, .. }
             | Self::Recall { document }
             | Self::Destroy { document } => *document,
+            Self::Clock(message) => message.document(),
         }
     }
 
@@ -379,6 +384,7 @@ fn handle_message(message: ToOwner) {
             let state = RenderState {
                 arena: arena.0,
                 changes: ChangeQueue::default(),
+                clock: None,
             };
             STATES.with_borrow_mut(|states| {
                 let previous = states.insert(document, state);
@@ -467,6 +473,7 @@ fn handle_message(message: ToOwner) {
                 state.retire();
             }
         }
+        ToOwner::Clock(message) => crate::clock_frames::handle_on_owner(message),
     }
 }
 
@@ -499,8 +506,34 @@ pub(crate) fn apply_changes_through(document: DocumentId, through: ChangeSeq, ta
     }
 }
 
+/// On the owner thread: runs `operation` on the clock slot of `document`'s render state, with the handle of the arena
+/// it ticks.
+pub(crate) fn with_clock<R>(
+    document: DocumentId,
+    operation: impl FnOnce(&mut Option<crate::clock_frames::DocumentClock>, *mut c_void) -> R,
+) -> Option<R> {
+    with_state(document, |state| {
+        let arena = state.arena_handle();
+        operation(&mut state.clock, arena)
+    })
+}
+
+/// On the owner thread: the document whose clock the render clock ticks at the display ticks of the compositor
+/// context `context`.
+pub(crate) fn document_with_clock_at(context: u64) -> Option<DocumentId> {
+    if context == 0 {
+        return None;
+    }
+    STATES.with_borrow(|states| {
+        states
+            .iter()
+            .find(|(_, state)| state.clock.as_ref().is_some_and(|clock| clock.context() == context))
+            .map(|(document, _)| *document)
+    })
+}
+
 /// Sends `message` to the owner: to the Rendering thread, or handled right here where there is none.
-fn send(message: ToOwner) {
+pub(crate) fn send(message: ToOwner) {
     if let Err(message) = crate::stage_thread::send_to_owner(message) {
         handle(message);
     }
@@ -812,8 +845,8 @@ pub unsafe extern "C" fn render_owner_destroy_document(document: FfiRenderDocume
     // A frame in flight owns the arena until it is taken back, and a stage of the document that reaches no arena (a
     // style pass) its engine: the owner drops the state only once the main thread has taken back every stage of it.
     crate::stage_thread::join_document_frame_in_flight_at(arena, file!(), line!(), column!());
-    // The render side no longer ticks the document's animations.
-    crate::clock_frames::rust_clock_lease_revoke(arena);
+    // The document's clock goes with its render state.
+    crate::clock_frames::document_destroyed(document.document);
     crate::layout::flush_arena_censuses();
     destroy_document(document.document);
 }
