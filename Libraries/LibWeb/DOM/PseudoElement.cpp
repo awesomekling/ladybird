@@ -12,6 +12,7 @@
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/PseudoElement.h>
 #include <LibWeb/Layout/Node.h>
+#include <LibWeb/Painting/BoxViews.h>
 
 namespace Web::DOM {
 
@@ -59,7 +60,18 @@ Layout::NodeWithStyle* SyntheticPseudoElement::unsafe_layout_node() const
     auto* arena = m_originating_element->document().layout_node_arena_if_created();
     if (!arena || m_originating_element->style_node_id() == 0)
         return nullptr;
-    return static_cast<Layout::NodeWithStyle*>(Layout::RustFFI::layout_arena_bound_pseudo_element_shell(arena->handle(), m_originating_element->style_node_id().value(), Layout::Node::encode_generated_for(m_type)));
+    return static_cast<Layout::NodeWithStyle*>(Layout::RustFFI::layout_arena_bound_pseudo_element_shell(arena->handle(), m_originating_element->style_node_id().value(), encode_generated_for(m_type)));
+}
+
+bool SyntheticPseudoElement::has_box() const
+{
+    if (!m_originating_element || m_originating_element->style_node_id() == 0)
+        return false;
+    auto* arena = m_originating_element->document().layout_arena_handle();
+    if (!arena)
+        return false;
+    auto row = Layout::RustFFI::layout_arena_bound_row_of(arena, m_originating_element->style_node_id().value(), encode_generated_for(m_type));
+    return row.slot.index != Compositing::RustFFI::INVALID_NODE_SLOT_INDEX;
 }
 
 CSSPixelPoint SyntheticPseudoElement::scroll_offset() const
@@ -68,11 +80,11 @@ CSSPixelPoint SyntheticPseudoElement::scroll_offset() const
         return {};
     // The render side stores the offset, so a write still in the journal lands before the read.
     m_originating_element->document().drain_invalidation_journal();
-    auto* arena = m_originating_element->document().layout_node_arena_if_created();
-    if (!arena)
+    auto render_document = m_originating_element->document().render_document_id();
+    if (render_document == 0)
         return {};
-    return Layout::RustFFI::render_owner_pseudo_element_scroll_offset(arena->render_document(),
-        m_originating_element->style_node_id().value(), Layout::Node::encode_generated_for(m_type));
+    return Layout::RustFFI::render_owner_pseudo_element_scroll_offset(render_document,
+        m_originating_element->style_node_id().value(), encode_generated_for(m_type));
 }
 
 void SyntheticPseudoElement::set_scroll_offset(CSSPixelPoint value)
@@ -86,7 +98,7 @@ void SyntheticPseudoElement::set_scroll_offset(CSSPixelPoint value)
         arena = &m_originating_element->document().layout_node_arena();
     }
     Layout::RustFFI::layout_arena_set_pseudo_element_scroll_offset(arena->handle(),
-        m_originating_element->style_node_id().value(), Layout::Node::encode_generated_for(m_type), value);
+        m_originating_element->style_node_id().value(), encode_generated_for(m_type), value);
 }
 
 void SyntheticPseudoElement::set_layout_node(Layout::NodeWithStyle* value)
@@ -127,7 +139,7 @@ void SyntheticPseudoElement::replace_style_record(RefPtr<CSS::PublishedStyleReco
     auto* arena = m_originating_element->document().layout_node_arena_if_created();
     if (!arena || m_originating_element->style_node_id() == 0)
         return;
-    if (auto row = arena->bound_row(m_originating_element->style_node_id(), Layout::Node::encode_generated_for(m_type)))
+    if (auto row = arena->bound_row(m_originating_element->style_node_id(), encode_generated_for(m_type)))
         Layout::NodeWithStyle::set_style_record(row, m_style_record);
 }
 
@@ -180,6 +192,11 @@ Layout::NodeWithStyle* ElementReferencePseudoElement::layout_node() const
 Layout::NodeWithStyle* ElementReferencePseudoElement::unsafe_layout_node() const
 {
     return m_referenced_element->unsafe_layout_node();
+}
+
+bool ElementReferencePseudoElement::has_box() const
+{
+    return Painting::bound_row_kind(m_referenced_element->document(), NodeIdentity::of(*m_referenced_element)).has_value();
 }
 
 Node& ElementReferencePseudoElement::root() const

@@ -775,6 +775,16 @@ Layout::NodeArena& Document::layout_node_arena()
     return *m_layout_node_arena;
 }
 
+void* Document::layout_arena_handle() const
+{
+    return m_layout_node_arena ? m_layout_node_arena->handle() : nullptr;
+}
+
+Layout::RustFFI::DocumentId Document::render_document_id() const
+{
+    return m_layout_node_arena ? m_layout_node_arena->render_document() : 0;
+}
+
 void Document::reset_style_invalidation_counters() const
 {
     m_style_invalidation_counters = {};
@@ -863,7 +873,7 @@ void Document::publish_query_snapshot_after_read(Painting::QueryVisualContexts v
             return true;
         if (!document.may_publish_query_snapshot())
             return false;
-        auto published = Painting::QuerySnapshot::publish(document, *document.m_layout_node_arena, visual_contexts);
+        auto published = Painting::QuerySnapshot::publish(document, visual_contexts);
         if (!published)
             return false;
         document.m_render_inputs.publish_query_snapshot(published.release_nonnull());
@@ -1847,21 +1857,32 @@ void Document::tear_down_layout_tree_for_svg_image_document(Badge<SVG::SVGDecode
     tear_down_layout_tree();
 }
 
+// Whether the element is bound to a box, which then holds the style the element published: what the box paints with is
+// read from the element.
+static bool is_bound_to_box(Element const& element)
+{
+    return Painting::bound_row_kind(element.document(), NodeIdentity::of(element)).has_value();
+}
+
+static Color background_color_of_box(Element const& element)
+{
+    auto const* background = element.style_group<CSS::ComputedValues::BackgroundValues>();
+    return background ? background->background_color_value() : Color::Transparent;
+}
+
 Color Document::background_color() const
 {
     // CSS2 says we should use the HTML element's background color unless it's transparent...
     // NB: Called during painting inside update_layout().
-    if (auto* html_element = this->html_element(); html_element && html_element->unsafe_layout_node()) {
-        auto color = html_element->unsafe_layout_node()->background_color();
+    if (auto* html_element = this->html_element(); html_element && is_bound_to_box(*html_element)) {
+        auto color = background_color_of_box(*html_element);
         if (color.alpha())
             return color;
     }
 
     // ...in which case we use the BODY element's background color.
-    if (auto* body_element = body(); body_element && body_element->unsafe_layout_node()) {
-        auto color = body_element->unsafe_layout_node()->background_color();
-        return color;
-    }
+    if (auto* body_element = body(); body_element && is_bound_to_box(*body_element))
+        return background_color_of_box(*body_element);
 
     // By default, the document is transparent.
     // The outermost canvas is colored by the PageHost.
@@ -1880,7 +1901,7 @@ Color Document::canvas_background_color_as_last_laid_out() const
 
 CSS::PreferredColorScheme Document::canvas_color_scheme() const
 {
-    if (auto* html_element = this->html_element(); html_element && html_element->unsafe_layout_node())
+    if (auto* html_element = this->html_element(); html_element && is_bound_to_box(*html_element))
         VERIFY(layout_is_up_to_date());
     return canvas_color_scheme_as_last_laid_out();
 }
@@ -1890,11 +1911,11 @@ CSS::PreferredColorScheme Document::canvas_color_scheme_as_last_laid_out() const
     auto color_scheme = CSS::PreferredColorScheme::Light;
     auto root_color_scheme_is_normal = true;
     auto root_color_scheme_was_computed = false;
-    if (auto* html_element = this->html_element(); html_element && html_element->unsafe_layout_node()) {
+    auto const* root_ui_values = html_element() && is_bound_to_box(*html_element()) ? html_element()->style_group<CSS::ComputedValues::InheritedUIValues>() : nullptr;
+    if (root_ui_values) {
         root_color_scheme_was_computed = true;
-        auto const& layout_node = *html_element->unsafe_layout_node();
-        root_color_scheme_is_normal = layout_node.color_schemes().is_empty();
-        if (layout_node.color_scheme() == CSS::PreferredColorScheme::Dark) {
+        root_color_scheme_is_normal = root_ui_values->color_schemes_span().is_empty();
+        if (root_ui_values->color_scheme_value() == CSS::PreferredColorScheme::Dark) {
             color_scheme = CSS::PreferredColorScheme::Dark;
         } else if (root_color_scheme_is_normal && m_supported_color_schemes.has_value()) {
             auto preferred_color_scheme = page().preferred_color_scheme();
@@ -1922,11 +1943,11 @@ CSS::ImageRendering Document::background_image_rendering() const
         return CSS::ImageRendering::Auto;
 
     // NB: Called during painting inside update_layout().
-    auto body_layout_node = body_element->unsafe_layout_node();
-    if (!body_layout_node)
+    auto const* inherited_box = is_bound_to_box(*body_element) ? body_element->style_group<CSS::ComputedValues::InheritedBoxValues>() : nullptr;
+    if (!inherited_box)
         return CSS::ImageRendering::Auto;
 
-    return body_layout_node->image_rendering();
+    return static_cast<CSS::ImageRendering>(inherited_box->image_rendering);
 }
 
 void Document::update_base_element(Badge<HTML::HTMLBaseElement>)
@@ -2259,12 +2280,11 @@ void Document::apply_layout_commit_effects(Layout::RustFFI::FfiLayoutCommitEffec
 
 Optional<Layout::RustFFI::FfiGeometryReadAnswer> Document::update_layout_answering_geometry_read(Element const& element, UpdateLayoutReason reason, Layout::RustFFI::FfiGeometryReadKind kind)
 {
-    auto* arena = layout_node_arena_if_created();
-    if (!arena || element.style_node_id() == 0) {
+    if (render_document_id() == 0 || element.style_node_id() == 0) {
         update_layout_if_needed_for_node(element, reason);
         return {};
     }
-    Layout::RustFFI::render_owner_begin_geometry_query(arena->render_document(), element.style_node_id().value(), kind);
+    Layout::RustFFI::render_owner_begin_geometry_query(render_document_id(), element.style_node_id().value(), kind);
     update_layout_if_needed_for_node(element, reason);
     auto answer = Layout::RustFFI::render_owner_take_geometry_answer();
     if (!answer.answered)
@@ -2825,23 +2845,6 @@ void Document::prepare_for_rendering()
     if (!m_layout_node_arena)
         return;
 
-    // The update reads each box's scroll-offset flag, and the render side reads the offset the box
-    // publishes, in place of the offset the DOM stores.
-    static bool const verify_scroll_offset_flags = getenv("LIBWEB_VERIFY_SCROLL_OFFSET_FLAGS") != nullptr;
-    if (verify_scroll_offset_flags) {
-        for_each_shadow_including_inclusive_descendant([](DOM::Node& node) {
-            if (auto const* layout_node = node.unsafe_layout_node())
-                layout_node->verify_published_scroll_offset();
-            if (auto const* element = as_if<DOM::Element>(node)) {
-                element->for_each_synthetic_pseudo_element([](CSS::PseudoElement, DOM::SyntheticPseudoElement const& pseudo_element) {
-                    if (auto const* layout_node = pseudo_element.unsafe_layout_node())
-                        layout_node->verify_published_scroll_offset();
-                });
-            }
-            return TraversalDecision::Continue;
-        });
-    }
-
     auto outcome = Painting::rust_prepare_for_rendering(*this, m_needs_accumulated_visual_contexts_update);
     if (outcome.requires_visual_context_update)
         set_needs_accumulated_visual_contexts_update(true);
@@ -3088,9 +3091,8 @@ void Document::obtain_theme_color()
             if (!css_value.is_null() && css_value->has_color()) {
                 CSS::ColorResolutionContext color_resolution_context {};
                 // NB: Called during theme color computation, layout may be stale.
-                if (html_element() && html_element()->unsafe_layout_node()) {
-                    color_resolution_context = CSS::ColorResolutionContext::for_layout_node_with_style(*html_element()->unsafe_layout_node());
-                }
+                if (html_element() && is_bound_to_box(*html_element()))
+                    color_resolution_context = CSS::ColorResolutionContext::for_element(AbstractElement { *html_element() });
 
                 theme_color = css_value->to_color(color_resolution_context).value();
                 return TraversalDecision::Break;
@@ -3285,25 +3287,24 @@ static CSSPixelPoint hover_event_page_offset(Optional<HoverEventData> const& hov
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-mouseevent-offsetx
-static CSSPixelPoint compute_mouse_event_offset(CSSPixelPoint position, Layout::Node const& layout_node)
+static CSSPixelPoint compute_mouse_event_offset(CSSPixelPoint position, Document const& document, NodeIdentity identity)
 {
-    auto inverse_transform_point = [](Layout::Node const& layout_node, CSSPixelPoint position) -> Optional<CSSPixelPoint> {
-        auto& document = layout_node.document();
+    auto inverse_transform_point = [&](CSSPixelPoint position) -> Optional<CSSPixelPoint> {
         if (!document.has_committed_viewport_box())
             return {};
         auto pixel_ratio = static_cast<float>(document.page().client().device_pixels_per_css_pixel());
         auto visual_context_tree = document.visual_context_tree();
         auto transformed_position = visual_context_tree.inverse_transform_point(
-            Painting::accumulated_visual_context(layout_node).spatial, position.to_type<float>() * pixel_ratio);
+            Painting::accumulated_visual_context(document, identity).spatial, position.to_type<float>() * pixel_ratio);
         return (transformed_position / pixel_ratio).to_type<CSSPixels>();
     };
 
     CSSPixelPoint offset_position = position;
-    if (auto transformed_position = inverse_transform_point(layout_node, position); transformed_position.has_value())
+    if (auto transformed_position = inverse_transform_point(position); transformed_position.has_value())
         offset_position = *transformed_position;
 
-    auto const top_left_of_layout_node = Painting::box_type_agnostic_position(layout_node);
-    return offset_position - top_left_of_layout_node;
+    auto const top_left_of_box = Painting::box_type_agnostic_position(document, identity);
+    return offset_position - top_left_of_box;
 }
 
 static CSSPixelPoint hover_event_offset_for_target(Optional<HoverEventData> const& hover_event_data, Node const& target)
@@ -3312,16 +3313,13 @@ static CSSPixelPoint hover_event_offset_for_target(Optional<HoverEventData> cons
         return {};
 
     // Boundary events are dispatched in a batch, and earlier listeners in the batch can invalidate layout. The event
-    // offsets still need to be based on the layout tree that was used for the platform hit-test, so avoid helpers that
-    // assert layout is up to date.
-    auto* layout_node = target.unsafe_layout_node();
-    if (!layout_node)
+    // offsets still need to be based on the layout tree that was used for the platform hit-test, so this reads the
+    // committed box rather than asserting that layout is up to date.
+    auto identity = NodeIdentity::of(target);
+    if (!Painting::has_committed_box(target.document(), identity))
         return hover_event_data->viewport_position;
 
-    if (!Painting::has_committed_box(*layout_node))
-        return hover_event_data->viewport_position;
-
-    return compute_mouse_event_offset(hover_event_data->page_offset, *layout_node);
+    return compute_mouse_event_offset(hover_event_data->page_offset, target.document(), identity);
 }
 
 static void mark_mouse_transition_event_as_trusted_if_needed(Event& event, Optional<HoverEventData> const& hover_event_data)
@@ -6788,7 +6786,7 @@ void Document::queue_an_intersection_observer_entry(IntersectionObserver::Inters
 }
 
 // https://www.w3.org/TR/intersection-observer/#compute-the-intersection
-static CSSPixelRect compute_intersection(GC::Ref<Element> target, CSSPixelRect target_rect, IntersectionObserver::IntersectionObserver const& observer, Layout::Box const* root_layout_box, CSSPixelRect const& root_bounds, Compositing::AccumulatedVisualContextTree const& visual_context_tree)
+static CSSPixelRect compute_intersection(GC::Ref<Element> target, CSSPixelRect target_rect, IntersectionObserver::IntersectionObserver const& observer, Compositing::RustFFI::NodeSlotId root_box, CSSPixelRect const& root_bounds, Compositing::AccumulatedVisualContextTree const& visual_context_tree)
 {
     auto& document = target->document();
     auto const& scroll_margin = observer.scroll_margin_values();
@@ -6804,8 +6802,8 @@ static CSSPixelRect compute_intersection(GC::Ref<Element> target, CSSPixelRect t
         return clip_rect;
     };
     return Layout::RustFFI::layout_arena_intersection_observer_intersection_rect(
-        document.layout_node_arena().handle(), Layout::Node::slot_id(target->layout_node()), target_rect,
-        Layout::Node::slot_id(root_layout_box), root_bounds,
+        document.layout_arena_handle(), Painting::committed_row_slot(document, NodeIdentity::of(*target)), target_rect,
+        root_box, root_bounds,
         Painting::rect_to_viewport_transform(document, visual_context_tree),
         const_cast<Vector<CSS::LengthPercentage>*>(&scroll_margin), inflate_scroll_container_clip_rect_by_scroll_margin);
 }
@@ -6848,11 +6846,17 @@ void Document::run_the_update_intersection_observations_steps(HighResolutionTime
 
         // Pre-compute per-observer values to avoid repeated work in the per-target loop.
         auto intersection_root_node = observer->intersection_root_node();
-        // An inline element root has a committed box but no Layout::Box. No containing block chain passes
-        // through it, so it stops no walk.
-        Layout::Box const* root_layout_box = nullptr;
-        if (auto const* root_layout_node = intersection_root_node->layout_node(); root_layout_node && Painting::has_committed_box(*root_layout_node))
-            root_layout_box = as_if<Layout::Box>(root_layout_node);
+        // An inline element root has a committed box, but no containing block chain passes through an inline box, so
+        // it stops no walk.
+        auto root_box = Compositing::RustFFI::NodeSlotId_INVALID;
+        {
+            auto const& root_document = intersection_root_node->document();
+            auto root_identity = NodeIdentity::of(*intersection_root_node);
+            auto root_kind = Painting::bound_row_kind(root_document, root_identity);
+            if (root_kind.has_value() && *root_kind != Layout::RustFFI::NodeKind::InlineNode && *root_kind != Layout::RustFFI::NodeKind::BreakNode
+                && Painting::has_committed_box(root_document, root_identity))
+                root_box = Painting::committed_row_slot(root_document, root_identity);
+        }
         bool is_implicit_root = observer->is_implicit_root();
         bool root_is_element = intersection_root_node->is_element();
 
@@ -6889,7 +6893,7 @@ void Document::run_the_update_intersection_observations_steps(HighResolutionTime
             // NOTE: Check if target has a layout node is not in the spec but required to match other browsers.
             // AD-HOC: A target whose document was excluded from this rendering update has stale layout; treat it as
             //         not intersecting like other engines instead of reading its geometry.
-            if (!root_is_hidden && target->document().layout_is_up_to_date() && target->layout_node() && (is_implicit_root || &target->document() == &intersection_root_node->document()) && !(root_is_element && !target->is_descendant_of(*intersection_root_node))) {
+            if (!root_is_hidden && target->document().layout_is_up_to_date() && Painting::bound_row_kind(target->document(), NodeIdentity::of(*target)).has_value() && (is_implicit_root || &target->document() == &intersection_root_node->document()) && !(root_is_element && !target->is_descendant_of(*intersection_root_node))) {
                 auto target_visual_context_tree = sampled_visual_context_tree(target->document());
                 if (!target_visual_context_tree.has_value())
                     continue;
@@ -6899,7 +6903,7 @@ void Document::run_the_update_intersection_observations_steps(HighResolutionTime
 
                 // 5. Let intersectionRect be the result of running the compute the intersection algorithm on target and
                 //    observer’s intersection root.
-                intersection_rect = compute_intersection(target, target_rect, *observer, root_layout_box, root_bounds, *target_visual_context_tree);
+                intersection_rect = compute_intersection(target, target_rect, *observer, root_box, root_bounds, *target_visual_context_tree);
 
                 // 6. Let targetArea be targetRect’s area.
                 auto target_area = target_rect.width() * target_rect.height();
@@ -9543,10 +9547,8 @@ Optional<LayoutOverlapBlocker> Document::layout_overlap_blocker()
     //     that has never been laid out has no paint state, and so no such element.
     if (document_element() && m_paint_state) {
         for (auto box_slot : m_paint_state->boxes_with_auto_content_visibility()) {
-            auto* layout_node = Painting::layout_node_for_committed_slot(layout_node_arena(), box_slot);
-            if (!layout_node)
-                continue;
-            auto* element = as_if<Element>(layout_node->dom_node());
+            auto dom_node = Painting::dom_node_identity_of_committed_slot(*this, box_slot).resolve(*this);
+            auto* element = as_if<Element>(dom_node.ptr());
             if (element && element->proximity_to_the_viewport() == ProximityToTheViewport::NotDetermined)
                 return LayoutOverlapBlocker::ContentVisibilityAutoFirstDetermination;
         }
@@ -9791,8 +9793,8 @@ void Document::process_pending_top_layer_layout_changes()
             // anonymous wrappers and inline fragments behind; the parent subtree rebuild heals
             // that structure, while the top layer pass rebuilds the element itself.
             // NB: Called during top layer processing, outside layout tree construction.
-            auto* element_layout_node = element->unsafe_layout_node();
-            bool element_has_box_at_normal_position = element_layout_node && element_layout_node->parent() && !element_layout_node->topmost_layout_node_of_top_layer_placement();
+            auto placement = element->box_placement();
+            bool element_has_box_at_normal_position = (placement & Layout::RustFFI::BOX_PLACEMENT_HAS_PARENT) && !(placement & Layout::RustFFI::BOX_PLACEMENT_IN_TOP_LAYER);
             if (element_has_box_at_normal_position) {
                 if (auto* flat_tree_parent = element->flat_tree_parent(); flat_tree_parent && !flat_tree_parent->is_document())
                     flat_tree_parent->set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::TopLayerMembershipChange);
@@ -10344,13 +10346,7 @@ void Document::reset_cursor_blink_cycle()
 void Document::set_cursor_position_needs_repaint()
 {
     auto repaint_position = [](DOM::Position& position) {
-        auto node = position.node();
-        if (auto* text = as_if<DOM::Text>(*node)) {
-            if (auto* layout_text_node = as_if<Layout::TextNode>(text->unsafe_layout_node()))
-                layout_text_node->set_needs_repaint(InvalidateDisplayList::PaintCommands);
-            return;
-        }
-        node->set_needs_repaint(InvalidateDisplayList::PaintCommands);
+        position.node()->set_needs_repaint(InvalidateDisplayList::PaintCommands);
     };
 
     auto position = cursor_position();
@@ -10502,10 +10498,16 @@ void Document::schedule_full_accumulated_visual_context_rebuild(Layout::RustFFI:
 
 void Document::schedule_accumulated_visual_context_update(Layout::Row const& row, AccumulatedVisualContextUpdateScope scope)
 {
-    if (!Painting::has_committed_box(row))
+    schedule_accumulated_visual_context_update(row.slot(), scope);
+}
+
+void Document::schedule_accumulated_visual_context_update(Compositing::RustFFI::NodeSlotId slot, AccumulatedVisualContextUpdateScope scope)
+{
+    auto* arena = layout_arena_handle();
+    if (!arena || slot.index == Compositing::RustFFI::INVALID_NODE_SLOT_INDEX || !Layout::RustFFI::layout_arena_has_committed_box(arena, slot))
         return;
     render_inputs_for_write().note_visual_context_box_dirty(
-        row.slot(),
+        slot,
         scope == AccumulatedVisualContextUpdateScope::Values
             ? Layout::RustFFI::FfiVisualContextBoxDirtyKind::StyleValueChange
             : Layout::RustFFI::FfiVisualContextBoxDirtyKind::StyleStructuralChange);
@@ -10515,11 +10517,12 @@ void Document::schedule_accumulated_visual_context_update(Layout::Row const& row
 
 void Document::schedule_accumulated_visual_context_update(Element& element, AccumulatedVisualContextUpdateScope scope)
 {
-    if (auto* layout_node = element.unsafe_layout_node())
-        schedule_accumulated_visual_context_update(*layout_node, scope);
-    element.for_each_synthetic_pseudo_element([&](CSS::PseudoElement, SyntheticPseudoElement const& pseudo_element) {
-        if (auto* pseudo_element_layout_node = pseudo_element.unsafe_layout_node())
-            schedule_accumulated_visual_context_update(*pseudo_element_layout_node, scope);
+    schedule_accumulated_visual_context_update(Painting::committed_row_slot(*this, NodeIdentity::of(element)), scope);
+    auto* arena = layout_arena_handle();
+    if (!arena || element.style_node_id() == 0)
+        return;
+    element.for_each_synthetic_pseudo_element([&](CSS::PseudoElement type, SyntheticPseudoElement const&) {
+        schedule_accumulated_visual_context_update(Layout::RustFFI::layout_arena_bound_row_of(arena, element.style_node_id().value(), encode_generated_for(type)).slot, scope);
     });
 }
 

@@ -1265,64 +1265,6 @@ CSS::ElementBoxKind Element::box_kind() const
     return CSS::ElementBoxKind::FromDisplay;
 }
 
-Layout::NodeWithStyle* Element::create_layout_node_for_display_type(DOM::Document& document, CSS::Display const& display, CSS::LayoutStyle style, Element* element)
-{
-    if (display.is_none())
-        return nullptr;
-
-    if (display.is_contents())
-        return nullptr;
-
-    if (display.is_table_inside() || display.is_table_row_group() || display.is_table_header_group() || display.is_table_footer_group() || display.is_table_row())
-        return &Layout::allocate_layout_node<Layout::Box>(document, element, style);
-
-    if (display.is_list_item())
-        return &Layout::allocate_layout_node<Layout::Box>(document, element, style, Layout::RustFFI::NodeKind::ListItemBox);
-
-    if (display.is_table_cell())
-        return &Layout::allocate_layout_node<Layout::Box>(document, element, style, Layout::RustFFI::NodeKind::BlockContainer);
-
-    if (display.is_table_column() || display.is_table_column_group() || display.is_table_caption()) {
-        // FIXME: This is just an incorrect placeholder until we improve table layout support.
-        return &Layout::allocate_layout_node<Layout::Box>(document, element, style, Layout::RustFFI::NodeKind::BlockContainer);
-    }
-
-    if (display.is_math_inside()) {
-        // https://w3c.github.io/mathml-core/#new-display-math-value
-        // MathML elements with a computed display value equal to block math or inline math control box generation
-        // and layout according to their tag name, as described in the relevant sections.
-        // FIXME: Figure out what kind of node we should make for them. For now, we'll stick with a generic Box.
-        return &Layout::allocate_layout_node<Layout::Box>(document, element, style, Layout::RustFFI::NodeKind::BlockContainer);
-    }
-
-    if (display.is_inline_outside()) {
-        if (display.is_flow_root_inside())
-            return &Layout::allocate_layout_node<Layout::Box>(document, element, style, Layout::RustFFI::NodeKind::BlockContainer);
-        if (display.is_flow_inside())
-            return &Layout::allocate_layout_node<Layout::NodeWithStyle>(document, element, style, Layout::RustFFI::NodeKind::InlineNode);
-        if (display.is_flex_inside())
-            return &Layout::allocate_layout_node<Layout::Box>(document, element, style);
-        if (display.is_grid_inside())
-            return &Layout::allocate_layout_node<Layout::Box>(document, element, style);
-        dbgln_if(LIBWEB_CSS_DEBUG, "FIXME: Support display: {}", display.to_string());
-        return &Layout::allocate_layout_node<Layout::NodeWithStyle>(document, element, style, Layout::RustFFI::NodeKind::InlineNode);
-    }
-
-    if (display.is_flex_inside() || display.is_grid_inside())
-        return &Layout::allocate_layout_node<Layout::Box>(document, element, style);
-
-    if (display.is_flow_inside() || display.is_flow_root_inside())
-        return &Layout::allocate_layout_node<Layout::Box>(document, element, style, Layout::RustFFI::NodeKind::BlockContainer);
-
-    dbgln("FIXME: CSS display '{}' not implemented yet.", display.to_string());
-
-    // FIXME: We don't actually support `display: block ruby`, this is just a hack to prevent a crash
-    if (display.is_ruby_inside())
-        return &Layout::allocate_layout_node<Layout::Box>(document, element, style, Layout::RustFFI::NodeKind::BlockContainer);
-
-    return &Layout::allocate_layout_node<Layout::NodeWithStyle>(document, element, style, Layout::RustFFI::NodeKind::InlineNode);
-}
-
 void Element::apply_presentational_hints(Vector<CSS::StyleProperty>& properties) const
 {
     // https://html.spec.whatwg.org/multipage/rendering.html#the-page
@@ -1425,53 +1367,55 @@ static CSS::StyleComputer::ComputedStyleInvalidation decode_style_record_invalid
     result.any_computed_value_changed = packed & to_underlying(CSS::StyleEngineFFI::FfiStyleInvalidationField::AnyComputedValueChanged);
     return result;
 }
-// The row of the pseudo-element's box, found without making a shell for a synthetic pseudo-element's.
-static Layout::Row pseudo_element_layout_row(Element const& element, CSS::PseudoElement pseudo_element)
+// The box of the pseudo-element, or of the element an element-backed pseudo-element stands in for, as the slot the arena
+// binds it to.
+static Compositing::RustFFI::NodeSlotId pseudo_element_box(Element const& element, CSS::PseudoElement pseudo_element)
 {
     if (CSS::is_synthetic_pseudo_element(pseudo_element)) {
-        auto* arena = const_cast<Document&>(element.document()).layout_node_arena_if_created();
-        if (!arena)
-            return {};
-        return arena->bound_row(element.style_node_id(), Layout::Node::encode_generated_for(pseudo_element));
+        auto* arena = element.document().layout_arena_handle();
+        if (!arena || element.style_node_id() == 0)
+            return Compositing::RustFFI::NodeSlotId_INVALID;
+        return Layout::RustFFI::layout_arena_bound_row_of(arena, element.style_node_id().value(), encode_generated_for(pseudo_element)).slot;
     }
-    if (auto* layout_node = element.pseudo_element_unsafe_layout_node(pseudo_element))
-        return *layout_node;
-    return {};
+    if (auto element_data = element.get_pseudo_element(pseudo_element); element_data.has_value()) {
+        if (auto const* element_reference = as_if<ElementReferencePseudoElement>(*element_data))
+            return Painting::committed_row_slot(element.document(), NodeIdentity::of(*element_reference->referenced_element()));
+    }
+    return Compositing::RustFFI::NodeSlotId_INVALID;
 }
 
 struct ElementDependentInvalidationState {
-    // The box's row, found without making a shell for it.
-    Layout::Row row;
+    // The box, as the slot the arena binds it to.
+    Compositing::RustFFI::NodeSlotId box { Compositing::RustFFI::NodeSlotId_INVALID };
     Optional<ValueComparingRefPtr<CSS::CounterStyle const>> list_counter_style;
     bool has_snapshot { false };
 
+    bool has_box() const { return box.index != Compositing::RustFFI::INVALID_NODE_SLOT_INDEX; }
+
     // The counter style the box's marker renders from. Only a list item renders a marker, so only its counter style
-    // can matter; a display change to or from list-item rebuilds the box regardless.
-    static Optional<ValueComparingRefPtr<CSS::CounterStyle const>> list_counter_style_of(Layout::Row const& row, CSS::StyleScope const& style_scope)
+    // can matter; a display change to or from list-item rebuilds the box regardless. It is resolved from the style the
+    // box holds.
+    static Optional<ValueComparingRefPtr<CSS::CounterStyle const>> list_counter_style_of(Document const& document, Compositing::RustFFI::NodeSlotId box, CSS::StyleScope const& style_scope)
     {
-        // A shell resolved the counter style when first asked and keeps it until its style changes; a row
-        // without one resolves it now, as a shell made now would.
-        if (auto const* shell = static_cast<Layout::NodeWithStyle const*>(row.shell_if_made())) {
-            if (!shell->display().is_list_item())
-                return {};
-            if (auto const& list_style_type = shell->list_style_type(); list_style_type.has<RefPtr<CSS::CounterStyle const>>())
-                return list_style_type.get<RefPtr<CSS::CounterStyle const>>();
+        auto* arena = document.layout_arena_handle();
+        if (!arena)
             return {};
-        }
-        if (!row.display().is_list_item())
+        auto const* payloads = Layout::RustFFI::layout_arena_node_style_payloads(arena, box);
+        auto const* box_values = CSS::style_group_from_payloads<CSS::ComputedValues::BoxValues>(payloads);
+        if (!box_values || !CSS::display_from_ffi_display(box_values->display).is_list_item())
             return {};
-        auto list_style_type = Layout::NodeWithStyle::style_group_of<CSS::ComputedValues::InheritedListValues>(row.style_payloads()).list_style_type_value(style_scope);
+        auto list_style_type = CSS::style_group_from_payloads<CSS::ComputedValues::InheritedListValues>(payloads)->list_style_type_value(style_scope);
         if (list_style_type.has<RefPtr<CSS::CounterStyle const>>())
             return list_style_type.get<RefPtr<CSS::CounterStyle const>>();
         return {};
     }
 
-    void snapshot(CSS::StyleScope const& style_scope)
+    void snapshot(Document const& document, CSS::StyleScope const& style_scope)
     {
-        if (!row)
+        if (!has_box())
             return;
-        list_counter_style = list_counter_style_of(row, style_scope);
-        row = {};
+        list_counter_style = list_counter_style_of(document, box, style_scope);
+        box = Compositing::RustFFI::NodeSlotId_INVALID;
         has_snapshot = true;
     }
 };
@@ -1481,13 +1425,13 @@ struct ElementDependentInvalidationState {
 // registered counter styles, and the arena keeps what each box was built with.
 static bool content_counter_styles_changed(DOM::AbstractElement const& abstract_element)
 {
-    auto* arena = abstract_element.document().layout_node_arena_if_created();
-    if (!arena)
+    auto render_document = abstract_element.document().render_document_id();
+    if (render_document == 0)
         return false;
     auto const generated_for = abstract_element.pseudo_element().has_value()
-        ? Layout::Node::encode_generated_for(*abstract_element.pseudo_element())
+        ? encode_generated_for(*abstract_element.pseudo_element())
         : 0;
-    return Layout::RustFFI::render_owner_content_counter_styles_changed(arena->render_document(), abstract_element.element().style_node_id().value(), generated_for)
+    return Layout::RustFFI::render_owner_content_counter_styles_changed(render_document, abstract_element.element().style_node_id().value(), generated_for)
         == Layout::RustFFI::CONTENT_COUNTER_STYLES_CHANGED;
 }
 
@@ -1579,8 +1523,8 @@ static void add_element_dependent_invalidation(CSS::RequiredInvalidationAfterSty
         }
     };
 
-    if (old_state.row) {
-        compare(ElementDependentInvalidationState::list_counter_style_of(old_state.row, abstract_element.element().style_scope()));
+    if (old_state.has_box()) {
+        compare(ElementDependentInvalidationState::list_counter_style_of(abstract_element.document(), old_state.box, abstract_element.element().style_scope()));
     } else if (old_state.has_snapshot) {
         compare(old_state.list_counter_style);
     }
@@ -1666,14 +1610,14 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
         auto pseudo_element_style = computed_style(pseudo_element);
         auto const* pseudo_element_values = pseudo_element_style ? &*pseudo_element_style : nullptr;
         ElementDependentInvalidationState old_state {
-            .row = pseudo_element_layout_row(*this, pseudo_element),
+            .box = pseudo_element_box(*this, pseudo_element),
             .list_counter_style = {},
             .has_snapshot = false,
         };
         RefPtr<CSS::ComputedValues const> style_to_preserve_for_detachment;
         if (pseudo_element_values && pseudo_element_values->animated_properties()) {
-            auto had_layout_node = !!old_state.row;
-            old_state.snapshot(style_scope());
+            auto had_layout_node = old_state.has_box();
+            old_state.snapshot(document(), style_scope());
             if (had_layout_node)
                 style_to_preserve_for_detachment = CSS::ComputedValues::Builder { *pseudo_element_values }.build();
         }
@@ -1831,14 +1775,15 @@ void Element::set_needs_layout_tree_rebuild(SetNeedsLayoutTreeUpdateReason reaso
     // wrapper. Other style changes rebuild from the parent. Top layer elements are handled separately because their
     // boxes are siblings of the root.
     // NB: Called outside layout tree construction.
-    auto* layout_node = unsafe_layout_node();
+    auto has_box = Painting::bound_row_kind(document(), NodeIdentity::of(*this)).has_value();
+    auto placement = box_placement();
     // An element that just left the top layer keeps its box as a viewport child until the
     // pending membership change is processed, so the parent must not be rebuilt for it either.
-    bool element_box_is_placed_in_top_layer = layout_node && layout_node->topmost_layout_node_of_top_layer_placement();
+    bool element_box_is_placed_in_top_layer = placement & Layout::RustFFI::BOX_PLACEMENT_IN_TOP_LAYER;
     if (rendered_in_top_layer() || element_box_is_placed_in_top_layer) {
         // An attached box is replaced in its viewport slot, keeping top layer order; a fresh
         // insert of a detached member appends out of order, so it needs a zone rebuild.
-        if (!layout_node || !layout_node->parent())
+        if (!(placement & Layout::RustFFI::BOX_PLACEMENT_HAS_PARENT))
             document().set_top_layer_needs_layout_zone_rebuild();
         set_needs_layout_tree_update(true, reason);
         return;
@@ -1848,7 +1793,7 @@ void Element::set_needs_layout_tree_rebuild(SetNeedsLayoutTreeUpdateReason reaso
     // the insertion-specific invalidation on its parent instead of widening it to StyleChange.
     // An existing display:none element can have the same marker after a child insertion; its box
     // presence change must still schedule the new box for insertion into the retained parent.
-    if (!layout_node && may_reuse_layout_node_for_child_list_insertion()
+    if (!has_box && may_reuse_layout_node_for_child_list_insertion()
         && rebuild_root != CSS::LayoutTreeRebuildRoot::BoxPresenceChange)
         return;
     if (rebuild_root == CSS::LayoutTreeRebuildRoot::BoxPresenceChange && apply_box_presence_change_in_place(reason))
@@ -1959,17 +1904,14 @@ static bool dom_subtree_generates_list_item_boxes(Element const& element)
 
 // NB: Reads box kinds rather than styles: the element whose box is going away already carries
 //     its display: none style.
-static bool layout_subtree_contains_list_item_boxes(Layout::Node const& layout_node)
+static bool layout_subtree_contains_list_item_boxes(Element const& element)
 {
-    bool contains_list_item_boxes = false;
-    layout_node.for_each_in_inclusive_subtree([&](Layout::Node const& descendant) {
-        if (descendant.kind() == Layout::RustFFI::NodeKind::ListItemBox) {
-            contains_list_item_boxes = true;
-            return TraversalDecision::Break;
-        }
-        return TraversalDecision::Continue;
-    });
-    return contains_list_item_boxes;
+    auto& document = element.document();
+    auto* arena = document.layout_arena_handle();
+    auto slot = Painting::committed_row_slot(document, NodeIdentity::of(element));
+    if (!arena || slot.index == Compositing::RustFFI::INVALID_NODE_SLOT_INDEX)
+        return false;
+    return Layout::RustFFI::layout_arena_subtree_contains_box_of_kind(arena, slot, Layout::RustFFI::NodeKind::ListItemBox);
 }
 
 // The element's box stopped or started existing (display: none <-> a box display). Instead of
@@ -1986,9 +1928,12 @@ bool Element::apply_box_presence_change_in_place(SetNeedsLayoutTreeUpdateReason 
     GC::Ptr<Element> parent = parent_or_shadow_host_element();
     if (!parent || (parent->shadow_root() && !is_shadow_root_child) || assigned_slot() || is<HTML::HTMLSlotElement>(*parent))
         return false;
-    auto* parent_layout_node = parent->unsafe_layout_node();
-    if (!parent_layout_node)
+    auto parent_box_display = parent->box_display();
+    if (!parent_box_display.has_value())
         return false;
+    auto parent_display = *parent_box_display;
+    auto parent_placement = parent->box_placement();
+    bool parent_children_are_inline = parent_placement & Layout::RustFFI::BOX_PLACEMENT_CHILDREN_ARE_INLINE;
     if (first_letter_owner_for_layout_subtree_from(*parent))
         return false;
     if (CSS::subtree_affects_generated_content_state(*this))
@@ -1999,19 +1944,19 @@ bool Element::apply_box_presence_change_in_place(SetNeedsLayoutTreeUpdateReason 
     auto display = style->display();
 
     if (display.is_none()) {
-        auto* layout_node = unsafe_layout_node();
-        if (!layout_node)
+        auto box_kind = Painting::bound_row_kind(document(), NodeIdentity::of(*this));
+        if (!box_kind.has_value())
             return false;
         // The box's own style already says display: none, so its level comes from where it sits: a
         // block container with block-level children holds block-level boxes directly, one with
         // inline-level children holds inline-level boxes. Only atomic inlines detach from an inline
         // run; an inline box may have been split around block-level descendants.
-        bool box_is_block_level = !parent_layout_node->children_are_inline();
-        if (!box_is_block_level && layout_node->kind() == Layout::RustFFI::NodeKind::InlineNode)
+        bool box_is_block_level = !parent_children_are_inline;
+        if (!box_is_block_level && *box_kind == Layout::RustFFI::NodeKind::InlineNode)
             return false;
         if (!Node::can_detach_layout_subtree_in_place(*this, *parent, box_is_block_level))
             return false;
-        if (layout_subtree_contains_list_item_boxes(*layout_node) && list_item_box_change_is_observable(*this, *parent))
+        if (layout_subtree_contains_list_item_boxes(*this) && list_item_box_change_is_observable(*this, *parent))
             return false;
 
         // Rebuilding the element in place with display: none clears its stale box out of the
@@ -2025,20 +1970,19 @@ bool Element::apply_box_presence_change_in_place(SetNeedsLayoutTreeUpdateReason 
     if (style->position() == CSS::Positioning::Fixed || style->float_() != CSS::Float::None)
         return false;
 
-    auto parent_display = parent_layout_node->display();
     bool parent_is_block_container = (parent_display.is_flow_inside() || parent_display.is_flow_root_inside()) && !parent_display.is_inline_outside();
     bool can_insert_in_place = false;
     // OPTIMIZATION: An absolutely positioned box cannot disturb its parent's formatting structure. Build only the
     //               inserted subtree when the retained parent does not need anonymous or table fixup.
     if (style->position() == CSS::Positioning::Absolute)
         can_insert_in_place = (parent_display.is_flex_inside() || parent_display.is_grid_inside())
-            || (parent_is_block_container && !parent_layout_node->children_are_inline());
+            || (parent_is_block_container && !parent_children_are_inline);
     else if (parent_display.is_flex_inside() || parent_display.is_grid_inside())
         can_insert_in_place = true;
     else if (parent_is_block_container && display.is_block_outside())
-        can_insert_in_place = !parent_layout_node->children_are_inline() || !parent_layout_node->has_children();
+        can_insert_in_place = !parent_children_are_inline || !(parent_placement & Layout::RustFFI::BOX_PLACEMENT_HAS_CHILDREN);
     else if (parent_is_block_container && display.is_inline_outside())
-        can_insert_in_place = parent_layout_node->children_are_inline() && parent_layout_node->has_children();
+        can_insert_in_place = parent_children_are_inline && (parent_placement & Layout::RustFFI::BOX_PLACEMENT_HAS_CHILDREN);
     if (!can_insert_in_place)
         return false;
     if (dom_subtree_generates_list_item_boxes(*this) && list_item_box_change_is_observable(*this, *parent))
@@ -2378,7 +2322,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
         CSS::ComputedStyleRecordView new_computed_values { published_new_style_record };
         VERIFY(new_computed_values);
         ElementDependentInvalidationState old_state {
-            .row = layout_row(),
+            .box = Painting::committed_row_slot(document(), NodeIdentity::of(*this)),
             .list_counter_style = {},
             .has_snapshot = false,
         };
@@ -2451,7 +2395,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::compare_engine_computed_style
         auto new_computed_values = computed_style();
         VERIFY(new_computed_values);
         ElementDependentInvalidationState old_state {
-            .row = layout_row(),
+            .box = Painting::committed_row_slot(document(), NodeIdentity::of(*this)),
             .list_counter_style = {},
             .has_snapshot = false,
         };
@@ -3012,43 +2956,59 @@ static void publish_layout_after_read(Document const& document)
     const_cast<Document&>(document).publish_query_snapshot_after_read(Painting::QueryVisualContexts::Stale);
 }
 
+// Reads the element's principal box in the query snapshot the document publishes for the reads after this one, which
+// describes the style and layout the read brought up to date. Empty if the snapshot cannot convert the box's rects to
+// viewport space through the visual contexts it was published with.
+template<typename QueryResult>
+static Optional<QueryResult> query_client_rects_in_published_view(Element const& element, Painting::QueryVisualContexts visual_contexts, auto&& query)
+{
+    auto& document = const_cast<Document&>(element.document());
+    document.publish_query_snapshot_after_read(visual_contexts);
+    auto view = document.query_view_for_clean_read();
+    if (!view.has_value()) {
+        // A document that keeps no snapshot past the read is read through one published for this read alone. One whose
+        // layout tree was torn down has no box to read.
+        if (!document.has_paint_state())
+            return QueryResult {};
+        auto snapshot = Painting::QuerySnapshot::publish(document, visual_contexts);
+        if (!snapshot)
+            return QueryResult {};
+        view = Painting::QueryView { snapshot.release_nonnull() };
+    }
+    // 1. If the element on which it was invoked does not have an associated layout box return an empty DOMRectList
+    //    object and stop this algorithm.
+    // INTEROP: For a table, the spec lists the table box and its caption boxes separately. Chrome reports the table
+    //          wrapper box, which is their union.
+    auto box = view->principal_box_of(element);
+    if (!box.has_value())
+        return QueryResult {};
+    return query(*view, *box);
+}
+
 template<typename QueryResult>
 static QueryResult query_client_rects_after_layout_update(Element const& element, auto&& query)
 {
     auto& document = const_cast<Document&>(element.document());
-    // The read leaves style and layout up to date for the reads after it, and they read what they describe then.
-    auto visual_contexts = Painting::QueryVisualContexts::Stale;
-    ScopeGuard publish_query_snapshot = [&] {
-        document.publish_query_snapshot_after_read(visual_contexts);
-    };
 
     // NOTE: Ensure that layout is up-to-date before looking at metrics.
     if constexpr (IsSame<QueryResult, CSSPixelRect>) {
         // The update that ran for the read answers it where it ran.
         auto answer = document.update_layout_answering_geometry_read(element, UpdateLayoutReason::ElementGetClientRects, Layout::RustFFI::FfiGeometryReadKind::BoundingClientRect);
-        if (answer.has_value() && (!answer->has_box || document.client_rects_need_no_accumulated_visual_contexts_update()))
+        if (answer.has_value() && (!answer->has_box || document.client_rects_need_no_accumulated_visual_contexts_update())) {
+            // The read leaves style and layout up to date for the reads after it, and they read what they describe then.
+            document.publish_query_snapshot_after_read(Painting::QueryVisualContexts::Stale);
             return answer->rect;
+        }
     } else {
         document.update_layout_if_needed_for_node(element, UpdateLayoutReason::ElementGetClientRects);
     }
 
-    // 1. If the element on which it was invoked does not have an associated layout box return an empty DOMRectList
-    //    object and stop this algorithm.
-    // INTEROP: For a table, the spec lists the table box and its caption boxes separately. Chrome reports the table
-    //          wrapper box, which is their union.
-    auto const* layout_node = element.principal_layout_node();
-    if (!layout_node)
-        return QueryResult {};
-
-    if (document.can_compute_client_rects_without_accumulated_visual_contexts_update(*layout_node))
-        return query(*layout_node, Painting::identity_rect_to_viewport_transform());
+    if (auto answer = query_client_rects_in_published_view<QueryResult>(element, Painting::QueryVisualContexts::Stale, query); answer.has_value())
+        return answer.release_value();
 
     // NOTE: Make sure CSS transforms are resolved before they are used to calculate the rect position.
     document.update_paint_and_hit_testing_properties_if_needed();
-    visual_contexts = Painting::QueryVisualContexts::UpToDate;
-
-    auto visual_context_tree = document.visual_context_tree();
-    return query(*layout_node, Painting::rect_to_viewport_transform(document, visual_context_tree));
+    return query_client_rects_in_published_view<QueryResult>(element, Painting::QueryVisualContexts::UpToDate, query).value_or(QueryResult {});
 }
 
 // A read with nothing sent since the document published its query snapshot is answered from it. Empty if the snapshot
@@ -3068,11 +3028,11 @@ static Optional<QueryResult> query_client_rects_in_query_view(Element const& ele
 }
 
 template<typename QueryResult>
-static QueryResult query_client_rects(Element const& element, auto&& query_in_view, auto&& query)
+static QueryResult query_client_rects(Element const& element, auto&& query)
 {
     if (!element.document().navigable())
         return QueryResult {};
-    auto answer = query_client_rects_in_query_view<QueryResult>(element, query_in_view);
+    auto answer = query_client_rects_in_query_view<QueryResult>(element, query);
     if (!answer.has_value())
         return query_client_rects_after_layout_update<QueryResult>(element, query);
     return answer.release_value();
@@ -3082,27 +3042,17 @@ static QueryResult query_client_rects(Element const& element, auto&& query_in_vi
 CSSPixelRect Element::get_bounding_client_rect() const
 {
     // 1. Let list be the result of invoking getClientRects() on element.
-    return query_client_rects<CSSPixelRect>(
-        *this,
-        [](Painting::QueryView const& view, Painting::QueryBox box) {
-            return view.bounding_client_rect(box);
-        },
-        [](Layout::Node const& layout_node, auto const& rect_to_viewport_transform) {
-            return Painting::bounding_client_rect(layout_node, rect_to_viewport_transform);
-        });
+    return query_client_rects<CSSPixelRect>(*this, [](Painting::QueryView const& view, Painting::QueryBox box) {
+        return view.bounding_client_rect(box);
+    });
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-element-getclientrects
 Vector<CSSPixelRect> Element::get_client_rects() const
 {
-    return query_client_rects<Vector<CSSPixelRect>>(
-        *this,
-        [](Painting::QueryView const& view, Painting::QueryBox box) {
-            return view.client_rects(box);
-        },
-        [](Layout::Node const& layout_node, auto const& rect_to_viewport_transform) {
-            return Painting::client_rects(layout_node, rect_to_viewport_transform);
-        });
+    return query_client_rects<Vector<CSSPixelRect>>(*this, [](Painting::QueryView const& view, Painting::QueryBox box) {
+        return view.client_rects(box);
+    });
 }
 
 CSSPixelRect Element::bounding_client_rect_assuming_layout_clean() const
@@ -3114,10 +3064,14 @@ CSSPixelRect Element::bounding_client_rect_assuming_layout_clean() const
 
 CSSPixelRect Element::bounding_client_rect_assuming_layout_clean(Compositing::AccumulatedVisualContextTree const& visual_context_tree) const
 {
-    auto const* layout_node = principal_layout_node();
-    if (!layout_node)
+    // The table wrapper box is the principal box of a table, and contains its caption boxes.
+    auto* arena = document().layout_arena_handle();
+    if (!arena || style_node_id() == 0)
         return {};
-    return Painting::bounding_client_rect(*layout_node, Painting::rect_to_viewport_transform(document(), visual_context_tree));
+    auto principal_box = Layout::RustFFI::layout_arena_principal_box_of(arena, style_node_id().value());
+    if (principal_box.index == Compositing::RustFFI::INVALID_NODE_SLOT_INDEX)
+        return {};
+    return Layout::RustFFI::layout_arena_bounding_client_rect(arena, principal_box, Painting::rect_to_viewport_transform(document(), visual_context_tree));
 }
 
 int Element::client_top() const
@@ -3187,13 +3141,13 @@ int Element::client_width() const
     publish_layout_after_read(document());
 
     // 1. If the element has no associated CSS layout box or if the CSS layout box is inline, return zero.
-    auto const* layout_node = this->layout_node();
-    if (!layout_node || !Painting::has_committed_box(*layout_node))
+    auto identity = NodeIdentity::of(*this);
+    if (!Painting::has_committed_box(document(), identity))
         return 0;
 
     // 3. Return the width of the padding edge excluding the width of any rendered scrollbar between the padding edge and the border edge,
     // ignoring any transforms that apply to the element and its ancestors.
-    return Painting::absolute_padding_box_rect(*layout_node).width().to_int();
+    return Painting::absolute_padding_box_rect(document(), identity).width().to_int();
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-element-clientheight
@@ -3214,13 +3168,13 @@ int Element::client_height() const
     publish_layout_after_read(document());
 
     // 1. If the element has no associated CSS layout box or if the CSS layout box is inline, return zero.
-    auto const* layout_node = this->layout_node();
-    if (!layout_node || !Painting::has_committed_box(*layout_node))
+    auto identity = NodeIdentity::of(*this);
+    if (!Painting::has_committed_box(document(), identity))
         return 0;
 
     // 3. Return the height of the padding edge excluding the height of any rendered scrollbar between the padding edge and the border edge,
     //    ignoring any transforms that apply to the element and its ancestors.
-    return Painting::absolute_padding_box_rect(*layout_node).height().to_int();
+    return Painting::absolute_padding_box_rect(document(), identity).height().to_int();
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-element-currentcsszoom
@@ -3355,11 +3309,25 @@ Layout::NodeWithStyle* Element::pseudo_element_unsafe_layout_node(CSS::PseudoEle
         auto* arena = const_cast<Document&>(document()).layout_node_arena_if_created();
         if (!arena)
             return nullptr;
-        return static_cast<Layout::NodeWithStyle*>(Layout::RustFFI::layout_arena_bound_pseudo_element_shell(arena->handle(), style_node_id().value(), Layout::Node::encode_generated_for(pseudo_element)));
+        return static_cast<Layout::NodeWithStyle*>(Layout::RustFFI::layout_arena_bound_pseudo_element_shell(arena->handle(), style_node_id().value(), encode_generated_for(pseudo_element)));
     }
     if (auto element_data = get_pseudo_element(pseudo_element); element_data.has_value())
         return element_data->unsafe_layout_node();
     return nullptr;
+}
+
+bool Element::has_pseudo_element_box(CSS::PseudoElement pseudo_element) const
+{
+    if (CSS::is_synthetic_pseudo_element(pseudo_element)) {
+        auto* arena = document().layout_arena_handle();
+        if (!arena || style_node_id() == 0)
+            return false;
+        auto box = Layout::RustFFI::layout_arena_bound_row_of(arena, style_node_id().value(), encode_generated_for(pseudo_element)).slot;
+        return box.index != Compositing::RustFFI::INVALID_NODE_SLOT_INDEX;
+    }
+    if (auto element_data = get_pseudo_element(pseudo_element); element_data.has_value())
+        return element_data->has_box();
+    return false;
 }
 
 // https://html.spec.whatwg.org/multipage/semantics-other.html#selector-enabled
@@ -3510,7 +3478,7 @@ bool Element::has_synthetic_pseudo_elements() const
         bool has_any_synthetic_pseudo_elements = false;
 
         for_each_synthetic_pseudo_element([&](CSS::PseudoElement, SyntheticPseudoElement const& pseudo_element) {
-            if (pseudo_element.layout_node()) {
+            if (pseudo_element.has_box()) {
                 has_any_synthetic_pseudo_elements = true;
                 return IterationDecision::Break;
             }
@@ -3548,7 +3516,7 @@ void Element::serialize_children_as_json(JsonObjectSerializer<Utf16StringBuilder
 
     auto serialize_pseudo_element = [&](CSS::PseudoElement pseudo_element_type, PseudoElement const& pseudo_element) {
         // FIXME: Find a way to make these still inspectable? (eg, `::before { display: none }`)
-        if (!pseudo_element.layout_node())
+        if (!pseudo_element.has_box())
             return;
         auto object = MUST(children.add_object());
         auto pseudo_element_name = Utf16String::formatted("::{}", CSS::pseudo_element_name(pseudo_element_type));
@@ -3682,6 +3650,18 @@ bool Element::is_scroll_container() const
         || Layout::overflow_value_makes_box_a_scroll_container(static_cast<CSS::Overflow>(box_values->overflow_y));
 }
 
+// Whether the element's box is a scroll container. The box's overflow is what the element's style says once the viewport
+// took what the root and the body propagate to it, which the box's own style has and the element's does not.
+static bool box_is_scroll_container(Element const& element)
+{
+    auto& document = element.document();
+    auto* arena = document.layout_arena_handle();
+    auto slot = Painting::committed_row_slot(document, NodeIdentity::of(element));
+    if (!arena || slot.index == Compositing::RustFFI::INVALID_NODE_SLOT_INDEX)
+        return false;
+    return Layout::RustFFI::layout_arena_box_is_scroll_container(arena, slot);
+}
+
 // https://drafts.csswg.org/cssom-view/#dom-element-scrolltop
 double Element::scroll_top() const
 {
@@ -3719,13 +3699,12 @@ double Element::scroll_top() const
     // 8. If the element does not have any associated box, return zero and terminate these steps.
     // NB: A box that is not a scroll container is never scrolled away from its default alignment, even if it keeps a
     //     stored scroll offset from when it was one for restoration when it becomes one again.
-    auto const* layout_node = this->layout_node();
-    if (!layout_node || !layout_node->is_scroll_container())
+    if (!box_is_scroll_container(*this))
         return 0.0;
 
     // 9. Return the y-coordinate of the scrolling area at the alignment point with the top of the padding edge of the element.
     // FIXME: Is this correct?
-    return Painting::scroll_offset(*layout_node).y().to_double();
+    return Painting::scroll_offset(document, NodeIdentity::of(*this)).y().to_double();
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-element-scrollleft
@@ -3765,13 +3744,12 @@ double Element::scroll_left() const
     // 8. If the element does not have any associated box, return zero and terminate these steps.
     // NB: A box that is not a scroll container is never scrolled away from its default alignment, even if it keeps a
     //     stored scroll offset from when it was one for restoration when it becomes one again.
-    auto const* layout_node = this->layout_node();
-    if (!layout_node || !layout_node->is_scroll_container())
+    if (!box_is_scroll_container(*this))
         return 0.0;
 
     // 9. Return the x-coordinate of the scrolling area at the alignment point with the left of the padding edge of the element.
     // FIXME: Is this correct?
-    return Painting::scroll_offset(*layout_node).x().to_double();
+    return Painting::scroll_offset(document, NodeIdentity::of(*this)).x().to_double();
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-element-scrollleft
@@ -3817,17 +3795,13 @@ void Element::set_scroll_left(double x)
     }
 
     // 10. If the element does not have any associated box, the element has no associated scrolling box, or the element has no overflow, terminate these steps.
-    auto* layout_node = this->layout_node();
-    if (!layout_node)
-        return;
-
-    if (!layout_node->is_scroll_container())
+    if (!box_is_scroll_container(*this))
         return;
 
     // FIXME: or the element has no overflow.
 
     // 11. Scroll the element to x,scrollTop, with the scroll behavior being "auto".
-    auto scroll_offset = Painting::scroll_offset(*layout_node);
+    auto scroll_offset = Painting::scroll_offset(document, NodeIdentity::of(*this));
     scroll_offset.set_x(CSSPixels::nearest_value_for(x));
     if (auto navigable = document.navigable())
         navigable->perform_a_scroll_of_an_element(*this, scroll_offset, Bindings::ScrollBehavior::Auto);
@@ -3875,17 +3849,13 @@ void Element::set_scroll_top(double y)
     }
 
     // 10. If the element does not have any associated box, the element has no associated scrolling box, or the element has no overflow, terminate these steps.
-    auto* layout_node = this->layout_node();
-    if (!layout_node)
-        return;
-
-    if (!layout_node->is_scroll_container())
+    if (!box_is_scroll_container(*this))
         return;
 
     // FIXME: or the element has no overflow.
 
     // 11. Scroll the element to scrollLeft,y, with the scroll behavior being "auto".
-    auto scroll_offset = Painting::scroll_offset(*layout_node);
+    auto scroll_offset = Painting::scroll_offset(document, NodeIdentity::of(*this));
     scroll_offset.set_y(CSSPixels::nearest_value_for(y));
     if (auto navigable = document.navigable())
         navigable->perform_a_scroll_of_an_element(*this, scroll_offset, Bindings::ScrollBehavior::Auto);
@@ -3904,9 +3874,8 @@ int Element::scroll_width()
     // NOTE: Ensure that layout is up-to-date before looking at metrics.
     document.update_layout(UpdateLayoutReason::ElementScrollWidth);
     publish_layout_after_read(document);
-    auto const* viewport_layout_node = document.layout_node();
-    VERIFY(viewport_layout_node && Painting::has_committed_box(*viewport_layout_node));
-    auto viewport_scrollable_overflow_rect = Painting::scrollable_overflow_rect(*viewport_layout_node);
+    VERIFY(Painting::has_committed_box(document, NodeIdentity::of_document()));
+    auto viewport_scrollable_overflow_rect = Painting::scrollable_overflow_rect(document, NodeIdentity::of_document());
     VERIFY(viewport_scrollable_overflow_rect.has_value());
 
     // 3. Let viewport width be the width of the viewport excluding the width of the scroll bar, if any,
@@ -3925,12 +3894,12 @@ int Element::scroll_width()
         return max(viewport_scrolling_area_width, viewport_width);
 
     // 6. If the element does not have any associated box return zero and terminate these steps.
-    auto const* layout_node = this->layout_node();
-    if (!layout_node || !Painting::has_committed_box(*layout_node))
+    auto identity = NodeIdentity::of(*this);
+    if (!Painting::has_committed_box(document, identity))
         return 0;
 
     // 7. Return the width of the element’s scrolling area.
-    if (auto scrollable_overflow_rect = Painting::scrollable_overflow_rect(*layout_node); scrollable_overflow_rect.has_value())
+    if (auto scrollable_overflow_rect = Painting::scrollable_overflow_rect(document, identity); scrollable_overflow_rect.has_value())
         return scrollable_overflow_rect->width().to_int();
 
     return 0;
@@ -3949,9 +3918,8 @@ int Element::scroll_height()
     // NOTE: Ensure that layout is up-to-date before looking at metrics.
     document.update_layout(UpdateLayoutReason::ElementScrollHeight);
     publish_layout_after_read(document);
-    auto const* viewport_layout_node = document.layout_node();
-    VERIFY(viewport_layout_node && Painting::has_committed_box(*viewport_layout_node));
-    auto viewport_scrollable_overflow_rect = Painting::scrollable_overflow_rect(*viewport_layout_node);
+    VERIFY(Painting::has_committed_box(document, NodeIdentity::of_document()));
+    auto viewport_scrollable_overflow_rect = Painting::scrollable_overflow_rect(document, NodeIdentity::of_document());
     VERIFY(viewport_scrollable_overflow_rect.has_value());
 
     // 3. Let viewport height be the height of the viewport excluding the height of the scroll bar, if any,
@@ -3970,12 +3938,12 @@ int Element::scroll_height()
         return max(viewport_scrolling_area_height, viewport_height);
 
     // 6. If the element does not have any associated box return zero and terminate these steps.
-    auto const* layout_node = this->layout_node();
-    if (!layout_node || !Painting::has_committed_box(*layout_node))
+    auto identity = NodeIdentity::of(*this);
+    if (!Painting::has_committed_box(document, identity))
         return 0;
 
     // 7. Return the height of the element’s scrolling area.
-    if (auto scrollable_overflow_rect = Painting::scrollable_overflow_rect(*layout_node); scrollable_overflow_rect.has_value()) {
+    if (auto scrollable_overflow_rect = Painting::scrollable_overflow_rect(document, identity); scrollable_overflow_rect.has_value()) {
         return scrollable_overflow_rect->height().to_int();
     }
     return 0;
@@ -4391,12 +4359,12 @@ static CSSPixelPoint determine_the_scroll_into_view_position(Element& target, CS
             CSSPixels::nearest_value_for(visual_viewport.height()),
         };
         scrolling_box_rect = { visual_viewport.offset(), visible_size };
-        if (auto* layout_node = document.layout_node())
-            scrolling_box_rect = Painting::scroll_snapport_rect(*layout_node, scrolling_box_rect);
+        scrolling_box_rect = Painting::scroll_snapport_rect(document, NodeIdentity::of_document(), scrolling_box_rect);
         current_scroll_position = document.navigable()->viewport_scroll_offset() + visual_viewport.offset();
-    } else if (auto* layout_node = scrolling_box.layout_node(); layout_node && Painting::has_committed_box(*layout_node)) {
-        current_scroll_position = Painting::scroll_offset(*layout_node);
-        scrolling_box_rect = Painting::transform_rect_to_viewport(*layout_node, Painting::scroll_snapport_rect(*layout_node), Compositing::AccumulatedVisualContextTree::IncludeVisualViewportTransform::No);
+    } else if (auto identity = NodeIdentity::of(scrolling_box); Painting::has_committed_box(scrolling_box.document(), identity)) {
+        auto const& document = scrolling_box.document();
+        current_scroll_position = Painting::scroll_offset(document, identity);
+        scrolling_box_rect = Painting::transform_rect_to_viewport(document, identity, Painting::scroll_snapport_rect(document, identity), Compositing::AccumulatedVisualContextTree::IncludeVisualViewportTransform::No);
     } else {
         return {};
     }
@@ -4551,8 +4519,8 @@ static void scroll_an_element_into_view(Element& target, Element::ScrollBehavior
     auto* ancestor = target.parent();
     Vector<Node&> scrolling_boxes;
     while (ancestor) {
-        auto const* ancestor_layout_node = ancestor->layout_node();
-        if (ancestor_layout_node && Painting::has_committed_box(*ancestor_layout_node) && Painting::has_scrollable_overflow(*ancestor_layout_node))
+        auto ancestor_identity = NodeIdentity::of(*ancestor);
+        if (Painting::has_committed_box(ancestor->document(), ancestor_identity) && Painting::has_scrollable_overflow(ancestor->document(), ancestor_identity))
             scrolling_boxes.append(*ancestor);
         ancestor = ancestor->parent();
     }
@@ -4574,9 +4542,10 @@ static void scroll_an_element_into_view(Element& target, Element::ScrollBehavior
         //         are considered, so move the target to where this scroll is going to leave it. The viewport is always
         //         the outermost scrolling box, so its own scroll cannot affect a later iteration.
         if (!scrolling_box.is_document()) {
-            if (auto const* layout_node = scrolling_box.layout_node(); layout_node && Painting::has_committed_box(*layout_node)) {
-                target_bounding_border_box.translate_by(Painting::scroll_offset(*layout_node) - Painting::clamp_scroll_offset(*layout_node, position));
-                auto scrollport_rect = Painting::transform_rect_to_viewport(*layout_node, Painting::absolute_padding_box_rect(*layout_node), Compositing::AccumulatedVisualContextTree::IncludeVisualViewportTransform::No);
+            auto const& document = scrolling_box.document();
+            if (auto identity = NodeIdentity::of(scrolling_box); Painting::has_committed_box(document, identity)) {
+                target_bounding_border_box.translate_by(Painting::scroll_offset(document, identity) - Painting::clamp_scroll_offset(document, identity, position));
+                auto scrollport_rect = Painting::transform_rect_to_viewport(document, identity, Painting::absolute_padding_box_rect(document, identity), Compositing::AccumulatedVisualContextTree::IncludeVisualViewportTransform::No);
                 auto visible_rect = target_bounding_border_box.intersected(scrollport_rect);
                 if (!visible_rect.is_empty())
                     target_bounding_border_box = visible_rect;
@@ -4693,9 +4662,12 @@ ENUMERATE_ARIA_ATTRIBUTES
 
 bool Element::is_hidden() const
 {
-    if (layout_node() == nullptr)
+    // The element's box holds the style the element published, so the visibility is read from that.
+    auto const* inherited_box = has_layout_box() ? style_group<CSS::ComputedValues::InheritedBoxValues>() : nullptr;
+    if (!inherited_box)
         return true;
-    if (layout_node()->visibility() == CSS::Visibility::Hidden || layout_node()->visibility() == CSS::Visibility::Collapse || layout_node()->content_visibility() == CSS::ContentVisibility::Hidden)
+    auto visibility = static_cast<CSS::Visibility>(inherited_box->visibility);
+    if (visibility == CSS::Visibility::Hidden || visibility == CSS::Visibility::Collapse || static_cast<CSS::ContentVisibility>(inherited_box->content_visibility) == CSS::ContentVisibility::Hidden)
         return true;
     for (ParentNode const* self_or_ancestor = this; self_or_ancestor; self_or_ancestor = self_or_ancestor->parent_or_shadow_host()) {
         if (self_or_ancestor->is_element()) {
@@ -5257,8 +5229,6 @@ void Element::clear_style_record_on_removal()
                 input.engine().set_element_container_query_inputs(input, style_node, {});
         });
     }
-    if (auto row = layout_row())
-        Layout::NodeWithStyle::set_style_record(row, nullptr);
 }
 
 void Element::set_computed_style(CSS::StyleDrainScope const& scope, Optional<CSS::PseudoElement> pseudo_element_type, CSS::StyleRecordID style_record_identity)
@@ -5638,8 +5608,7 @@ void Element::scroll(Bindings::ScrollToOptions options, GC::Ptr<WebIDL::Promise>
     // 10. If the element does not have any associated box, the element has no associated scrolling box, or the element
     //     has no overflow, return a resolved Promise and abort the remaining steps.
     // FIXME: or the element has no overflow
-    auto* layout_node = this->layout_node();
-    if (!layout_node || !layout_node->is_scroll_container()) {
+    if (!box_is_scroll_container(*this)) {
         if (promise)
             WebIDL::resolve_promise(*promise);
         return;
@@ -5704,8 +5673,7 @@ bool Element::check_visibility(CheckVisibilityOptions const& options)
     document().update_layout_if_needed_for_node(*this, UpdateLayoutReason::ElementCheckVisibility);
 
     // 1. If this does not have an associated box, return false.
-    auto const* layout_node = this->layout_node();
-    if (!layout_node || !Painting::has_committed_box(*layout_node))
+    if (!Painting::has_committed_box(document(), NodeIdentity::of(*this)))
         return false;
 
     // 2. If an ancestor of this in the flat tree has content-visibility: hidden, return false.
@@ -5764,7 +5732,7 @@ void Element::determine_proximity_to_the_viewport()
     // viewport soon. A margin of 50% is suggested as a reasonable default.
     viewport_rect.inflate(viewport_rect.width(), viewport_rect.height());
     // FIXME: We don't have paint containment or the overflow clip edge yet, so this is just using the absolute rect for now.
-    if (Painting::absolute_rect(*unsafe_layout_node()).intersects(viewport_rect)) {
+    if (Painting::absolute_rect(document(), NodeIdentity::of(*this)).intersects(viewport_rect)) {
         ensure_element_rare_data().proximity_to_the_viewport = ProximityToTheViewport::CloseToTheViewport;
         return;
     }
@@ -6627,11 +6595,7 @@ void Element::invalidate_lang_value()
 bool Element::not_rendered() const
 {
     // An element is not rendered if it does not have an associated box.
-    auto const* layout_node = this->layout_node();
-    if (!layout_node || !Painting::has_committed_box(*layout_node))
-        return true;
-
-    return false;
+    return !Painting::has_committed_box(document(), NodeIdentity::of(*this));
 }
 
 bool Element::meets_focusable_area_rendering_requirements() const

@@ -954,6 +954,10 @@ public:
     [[nodiscard]] Layout::NodeArena& layout_node_arena();
     [[nodiscard]] Layout::NodeArena* layout_node_arena_if_created() { return m_layout_node_arena; }
     [[nodiscard]] Layout::NodeArena const* layout_node_arena_if_created() const { return m_layout_node_arena; }
+    // The handle the render side's entries name the document's layout arena by, or null before the arena is created.
+    [[nodiscard]] void* layout_arena_handle() const;
+    // The name the render owner knows the document's render state by, which is invalid (0) before the arena is created.
+    [[nodiscard]] Layout::RustFFI::DocumentId render_document_id() const;
     Painting::ChromeWidgetRegistry& chrome_widget_registry() { return *m_chrome_widget_registry; }
     Painting::ChromeWidgetRegistry const& chrome_widget_registry() const { return *m_chrome_widget_registry; }
 
@@ -1383,6 +1387,8 @@ public:
     bool client_rects_need_no_accumulated_visual_contexts_update() const;
     void schedule_accumulated_visual_context_update(Element&, AccumulatedVisualContextUpdateScope);
     void schedule_accumulated_visual_context_update(Layout::Row const&, AccumulatedVisualContextUpdateScope);
+    // The same for the box in `slot` of the document's layout arena, which may be one no node identity names.
+    void schedule_accumulated_visual_context_update(Compositing::RustFFI::NodeSlotId, AccumulatedVisualContextUpdateScope);
 
     Compositing::SnappedAreas const& snapped_areas_of_scroll_container(Compositing::AsyncScrollNodeStableID const&) const;
     void set_snapped_areas_of_scroll_container(Compositing::AsyncScrollNodeStableID const&, Compositing::SnappedAreas);
