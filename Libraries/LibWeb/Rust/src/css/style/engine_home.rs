@@ -278,10 +278,6 @@ impl StyleEngineHome {
         if self.state() == (true, Owed::Nothing) {
             return;
         }
-        // Work a stage the main thread waits for joined it for reaches the engine as that stage does.
-        if crate::stage_thread::running_join_work() {
-            return;
-        }
         let only_wait = crate::stage_thread::style_engine_entrances_only_wait();
         let mut joined = false;
         loop {
@@ -553,7 +549,6 @@ impl StyleEngineHandle {
         if self.is_null()
             || !crate::stage_thread::style_engine_entrances_only_wait()
             || crate::stage_thread::no_stage_is_submitted()
-            || crate::stage_thread::running_join_work()
             || crate::stage_thread::running_inside_stage()
             || LENT_TO_THIS_THREAD.get().0 == self.address()
         {
