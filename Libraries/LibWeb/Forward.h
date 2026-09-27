@@ -971,6 +971,7 @@ class Box;
 class Node;
 class NodeArena;
 class NodeWithStyle;
+class Row;
 class TextNode;
 class Viewport;
 

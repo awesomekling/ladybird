@@ -125,8 +125,11 @@ void SyntheticPseudoElement::replace_style_record(CSS::StyleRecordID style_recor
     if (old_style_record_identity == style_record_identity)
         return;
     m_style_record_identity = style_record_identity;
-    if (auto* layout_node = unsafe_layout_node())
-        layout_node->set_style_record_identity(style_record_identity);
+    auto* arena = m_originating_element->document().layout_node_arena_if_created();
+    if (!arena || m_originating_element->style_node_id() == 0)
+        return;
+    if (auto row = arena->bound_row(m_originating_element->style_node_id(), Layout::Node::encode_generated_for(m_type)))
+        Layout::NodeWithStyle::set_style_record_identity(row, style_record_identity);
 }
 
 void SyntheticPseudoElement::set_computed_style(CSS::StyleRecordID style_record_identity)

@@ -28,7 +28,7 @@ Compositing::RustFFI::NodeSlotId committed_row_slot(Layout::Node const&);
 Compositing::RustFFI::NodeSlotId viewport_row_slot(DOM::Document const&);
 Layout::RustFFI::FfiCommittedRow committed_row(Layout::Node const&);
 
-WEB_API bool has_committed_box(Layout::Node const&);
+WEB_API bool has_committed_box(Layout::Row const&);
 WEB_API Layout::Node* layout_node_for_committed_slot(Layout::NodeArena&, Compositing::RustFFI::NodeSlotId);
 WEB_API u64 committed_row_reset_version(Layout::NodeArena&, Compositing::RustFFI::NodeSlotId);
 
@@ -86,8 +86,8 @@ WEB_API Layout::RustFFI::FfiFocusedTextControlSelection resolve_focused_text_con
 WEB_API Layout::RustFFI::FfiFocusedAreaOutline resolve_focused_area_outline(DOM::Document const&, Vector<u8>& path_bytes);
 WEB_API void push_selection_pseudo_style(DOM::Element const&);
 
-WEB_API void set_needs_repaint(Layout::Node const&, InvalidateDisplayList = InvalidateDisplayList::PaintCommandsAndHitTestList);
-WEB_API void set_needs_repaint_in_subtree(Layout::Node const&);
+WEB_API void set_needs_repaint(Layout::Row const&, InvalidateDisplayList = InvalidateDisplayList::PaintCommandsAndHitTestList);
+WEB_API void set_needs_repaint_in_subtree(Layout::Row const&);
 
 enum class PaintCacheInvalidation : u8 {
     PaintAndHitTest,
@@ -107,12 +107,12 @@ enum class RepaintDamageStage : u8 {
 };
 
 WEB_API void invalidate_paint_cache(Layout::Node const&);
-WEB_API void invalidate_propagated_text_decoration_caches(Layout::Node const&);
-WEB_API void apply_paint_cache_invalidation(Layout::Node const&, PaintCacheInvalidation, PaintCacheInvalidationStage);
-WEB_API void apply_repaint_damage(Layout::Node const&, InvalidateDisplayList, RepaintDamageStage);
+WEB_API void invalidate_propagated_text_decoration_caches(Layout::Row const&);
+WEB_API void apply_paint_cache_invalidation(Layout::Row const&, PaintCacheInvalidation, PaintCacheInvalidationStage);
+WEB_API void apply_repaint_damage(Layout::Row const&, InvalidateDisplayList, RepaintDamageStage);
 WEB_API void apply_repaint_damage(Layout::TextNode const&, InvalidateDisplayList, RepaintDamageStage);
-WEB_API void apply_subtree_repaint_damage(Layout::Node const&, RepaintDamageStage);
-WEB_API void repaint_after_style_change(Layout::Node const&, CSS::RequiredInvalidationAfterStyleChange const&);
+WEB_API void apply_subtree_repaint_damage(Layout::Row const&, RepaintDamageStage);
+WEB_API void repaint_after_style_change(Layout::Row const&, CSS::RequiredInvalidationAfterStyleChange const&);
 
 WEB_API Layout::RustFFI::FfiRectToViewportTransform identity_rect_to_viewport_transform();
 WEB_API Layout::RustFFI::FfiRectToViewportTransform rect_to_viewport_transform(DOM::Document const&, Compositing::AccumulatedVisualContextTree const&);

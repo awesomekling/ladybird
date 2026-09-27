@@ -16,7 +16,8 @@ enum class StyleHoldsImageValues : u8 {
     Yes,
 };
 
-WEB_API void push_paint_facts_after_style_attach(Layout::NodeWithStyle&, StyleHoldsImageValues);
+// `dom_node` is the node the row was built for.
+WEB_API void push_paint_facts_after_style_attach(Layout::Row const&, DOM::Node* dom_node, StyleHoldsImageValues);
 WEB_API void push_layer_image_paint_facts(Layout::NodeWithStyle const&);
 WEB_API void push_form_control_paint_facts(HTML::HTMLInputElement&);
 WEB_API void push_canvas_paint_facts(HTML::HTMLCanvasElement const&);

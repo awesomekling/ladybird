@@ -1383,7 +1383,7 @@ public:
     void schedule_full_accumulated_visual_context_rebuild(Layout::RustFFI::FfiVisualContextGlobalRebuildReason);
     bool can_compute_client_rects_without_accumulated_visual_contexts_update(Layout::Node const&) const;
     void schedule_accumulated_visual_context_update(Element&, AccumulatedVisualContextUpdateScope);
-    void schedule_accumulated_visual_context_update(Layout::Node const&, AccumulatedVisualContextUpdateScope);
+    void schedule_accumulated_visual_context_update(Layout::Row const&, AccumulatedVisualContextUpdateScope);
 
     Compositing::SnappedAreas const& snapped_areas_of_scroll_container(Compositing::AsyncScrollNodeStableID const&) const;
     void set_snapped_areas_of_scroll_container(Compositing::AsyncScrollNodeStableID const&, Compositing::SnappedAreas);

@@ -42,6 +42,8 @@ public:
     // The layout row this identity's node is bound to in `arena`, if any. This is the arena's own
     // index; no DOM node is asked for its layout node.
     [[nodiscard]] Layout::Node* bound_layout_node(Layout::NodeArena&) const;
+    // The same row, found without making a shell for it.
+    [[nodiscard]] Layout::Row bound_row(Layout::NodeArena const&) const;
 
 private:
     enum class Kind : u8 {

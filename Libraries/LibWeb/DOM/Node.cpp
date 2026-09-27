@@ -2755,18 +2755,18 @@ void Node::apply_layout_tree_update_mark(SetNeedsLayoutTreeUpdateReason reason)
         document().set_child_needs_layout_tree_update(true);
 
     // NB: Propagating layout invalidation, layout is not up to date.
-    if (auto layout_node = this->unsafe_layout_node()) {
+    if (auto row = layout_row()) {
         auto classification = Layout::RustFFI::layout_arena_classify_layout_tree_update(
-            layout_node->arena_handle(), Layout::Node::slot_id(layout_node),
+            row.arena_handle(), row.slot(),
             is_structural_boundary_self_rebuild_reason(reason));
 
         if (classification.marks_partial_relayout_boundary_self_only) {
-            layout_node->set_needs_layout_update(SetNeedsLayoutReason::LayoutTreeUpdate, Layout::LayoutUpdatePropagation::BoundarySelfOnly);
+            row.set_needs_layout_update(SetNeedsLayoutReason::LayoutTreeUpdate, Layout::LayoutUpdatePropagation::BoundarySelfOnly);
         } else if (reason == SetNeedsLayoutTreeUpdateReason::NodeInsertBefore) {
             // What an insertion invalidates depends on the boxes it attaches, which only the layout tree build knows.
-            Layout::RustFFI::layout_arena_defer_child_list_insertion_layout_update(layout_node->arena_handle(), Layout::Node::slot_id(layout_node));
+            Layout::RustFFI::layout_arena_defer_child_list_insertion_layout_update(row.arena_handle(), row.slot());
         } else {
-            layout_node->set_needs_layout_update(SetNeedsLayoutReason::LayoutTreeUpdate, Layout::LayoutUpdatePropagation::ThroughAncestors);
+            row.set_needs_layout_update(SetNeedsLayoutReason::LayoutTreeUpdate, Layout::LayoutUpdatePropagation::ThroughAncestors);
         }
 
         // FIXME: Escalating a rebuild past anonymous parents is not optimal, and we should
@@ -4003,6 +4003,20 @@ Layout::Node const* Node::unsafe_layout_node() const
             layout_node = static_cast<Layout::Node const*>(Layout::RustFFI::layout_arena_bound_viewport_shell(arena->handle()));
     }
     return layout_node;
+}
+
+Layout::Row Node::layout_row() const
+{
+    auto* arena = m_document->layout_node_arena_if_created();
+    if (!arena)
+        return {};
+    if (auto const* element = as_if<Element>(*this))
+        return element->style_node_id() != 0 ? arena->bound_row(element->style_node_id()) : Layout::Row {};
+    if (auto const* text = as_if<Text>(*this))
+        return text->style_node_id() != 0 ? arena->bound_row(text->style_node_id()) : Layout::Row {};
+    if (is_document())
+        return arena->bound_viewport_row();
+    return {};
 }
 
 void Node::set_needs_repaint(InvalidateDisplayList should_invalidate_display_list)

@@ -169,13 +169,15 @@ void InvalidationJournal::note_form_control_paint_facts(NodeIdentity identity, b
     drain_if_the_render_side_is_reading();
 }
 
-void InvalidationJournal::note_paint_facts(NodeIdentity identity, PaintFactsFamily family, Function<void(Layout::Node const&)>&& update)
+void InvalidationJournal::note_paint_facts(NodeIdentity identity, PaintFactsFamily family, PaintFactsUpdate&& update)
 {
     count_entry_during_flight(HTML::EventLoop::JournalEntryKind::PaintFacts);
-    auto& rare = entry_for(identity).ensure_rare();
+    auto& entry = entry_for(identity);
+    auto& rare = entry.ensure_rare();
     switch (family) {
     case PaintFactsFamily::LayerImage:
         rare.layer_image_paint_facts_update = move(update);
+        entry.clears_layer_image_paint_facts = false;
         break;
     case PaintFactsFamily::ReplacedImage:
         rare.replaced_image_paint_facts_update = move(update);
@@ -197,7 +199,17 @@ void InvalidationJournal::note_paint_facts(NodeIdentity identity, PaintFactsFami
     drain_if_the_render_side_is_reading();
 }
 
-void InvalidationJournal::note_unanchored_paint_facts(Compositing::RustFFI::NodeSlotId slot, Function<void(Layout::Node const&)>&& update)
+void InvalidationJournal::note_layer_image_paint_facts_cleared(NodeIdentity identity)
+{
+    count_entry_during_flight(HTML::EventLoop::JournalEntryKind::PaintFacts);
+    auto& entry = entry_for(identity);
+    entry.clears_layer_image_paint_facts = true;
+    if (entry.rare)
+        entry.rare->layer_image_paint_facts_update = nullptr;
+    drain_if_the_render_side_is_reading();
+}
+
+void InvalidationJournal::note_unanchored_paint_facts(Compositing::RustFFI::NodeSlotId slot, PaintFactsUpdate&& update)
 {
     count_entry_during_flight(HTML::EventLoop::JournalEntryKind::PaintFacts);
     if (is_empty() && !m_holds_next_generation)
@@ -216,8 +228,8 @@ void InvalidationJournal::publish_unanchored_paint_facts()
     if (!arena)
         return;
     for (auto const& [slot, update] : updates) {
-        if (auto* layout_node = arena->node_if_live(slot))
-            update(*layout_node);
+        if (auto row = arena->row_if_live(slot))
+            update(row);
     }
 }
 
@@ -581,16 +593,16 @@ void InvalidationJournal::drain()
             if (node && (entry.needs_scroll_offset_publish || (rare && !rare->pseudo_element_scroll_offsets.is_empty())))
                 publish_scroll_offsets(*node, entry);
 
-            if (!entry.needs_layout_update && !entry.needs_repaint && !entry.needs_subtree_repaint && !entry.has_dom_paint_facts && !rare && !entry.invalidate_paint_and_hit_test_cache && !entry.invalidate_propagated_text_decoration_caches)
+            if (!entry.needs_layout_update && !entry.needs_repaint && !entry.needs_subtree_repaint && !entry.has_dom_paint_facts && !rare && !entry.clears_layer_image_paint_facts && !entry.invalidate_paint_and_hit_test_cache && !entry.invalidate_propagated_text_decoration_caches)
                 continue;
             // A node whose box went away between the mark and here has nothing left to mark.
-            auto* layout_node = arena ? entry.identity.bound_layout_node(*arena) : nullptr;
-            if (!layout_node)
+            auto row = arena ? entry.identity.bound_row(*arena) : Layout::Row {};
+            if (!row)
                 continue;
             if (entry.needs_layout_update)
-                layout_node->set_needs_layout_update(entry.layout_reason, entry.layout_propagation);
+                row.set_needs_layout_update(entry.layout_reason, entry.layout_propagation);
             if (entry.has_dom_paint_facts) {
-                auto changed = Layout::RustFFI::layout_arena_set_node_dom_paint_facts(layout_node->arena_handle(), Layout::Node::slot_id(layout_node), entry.dom_paint_facts);
+                auto changed = Layout::RustFFI::layout_arena_set_node_dom_paint_facts(row.arena_handle(), row.slot(), entry.dom_paint_facts);
                 if (changed && node)
                     node->set_needs_repaint();
             }
@@ -602,40 +614,42 @@ void InvalidationJournal::drain()
                     .canvas_id = rare->canvas_id,
                     .content_generation = rare->canvas_content_generation,
                 };
-                auto changed = Layout::RustFFI::layout_arena_set_canvas_paint_facts(layout_node->arena_handle(), Layout::Node::slot_id(layout_node), facts);
-                if (changed && Painting::has_committed_box(*layout_node))
-                    Painting::apply_paint_cache_invalidation(*layout_node, Painting::PaintCacheInvalidation::PaintAndHitTest, Painting::PaintCacheInvalidationStage::JournalDrain);
+                auto changed = Layout::RustFFI::layout_arena_set_canvas_paint_facts(row.arena_handle(), row.slot(), facts);
+                if (changed && Painting::has_committed_box(row))
+                    Painting::apply_paint_cache_invalidation(row, Painting::PaintCacheInvalidation::PaintAndHitTest, Painting::PaintCacheInvalidationStage::JournalDrain);
             }
-            if (rare && rare->has_form_control_paint_facts && (layout_node->kind() == Layout::RustFFI::NodeKind::CheckBox || layout_node->kind() == Layout::RustFFI::NodeKind::RadioButton)) {
+            if (rare && rare->has_form_control_paint_facts && (row.kind() == Layout::RustFFI::NodeKind::CheckBox || row.kind() == Layout::RustFFI::NodeKind::RadioButton)) {
                 Layout::RustFFI::FfiFormControlPaintFacts facts {
                     .enabled = rare->form_control_enabled,
                     .checked = rare->form_control_checked,
                     .indeterminate = rare->form_control_indeterminate,
                     .being_activated = rare->form_control_being_activated,
                 };
-                auto changed = Layout::RustFFI::layout_arena_set_form_control_paint_facts(layout_node->arena_handle(), Layout::Node::slot_id(layout_node), facts);
-                if (changed && Painting::has_committed_box(*layout_node))
-                    Painting::set_needs_repaint(*layout_node, InvalidateDisplayList::PaintCommands);
+                auto changed = Layout::RustFFI::layout_arena_set_form_control_paint_facts(row.arena_handle(), row.slot(), facts);
+                if (changed && Painting::has_committed_box(row))
+                    Painting::set_needs_repaint(row, InvalidateDisplayList::PaintCommands);
             }
+            if (entry.clears_layer_image_paint_facts)
+                Layout::RustFFI::layout_arena_set_layer_image_paint_facts(row.arena_handle(), row.slot(), nullptr, 0);
             if (rare && rare->layer_image_paint_facts_update)
-                rare->layer_image_paint_facts_update(*layout_node);
+                rare->layer_image_paint_facts_update(row);
             if (rare && rare->replaced_image_paint_facts_update)
-                rare->replaced_image_paint_facts_update(*layout_node);
+                rare->replaced_image_paint_facts_update(row);
             if (rare && rare->video_paint_facts_update)
-                rare->video_paint_facts_update(*layout_node);
+                rare->video_paint_facts_update(row);
             if (rare && rare->navigable_container_paint_facts_update)
-                rare->navigable_container_paint_facts_update(*layout_node);
+                rare->navigable_container_paint_facts_update(row);
             if (entry.invalidate_paint_and_hit_test_cache)
-                Painting::apply_paint_cache_invalidation(*layout_node, Painting::PaintCacheInvalidation::PaintAndHitTest, Painting::PaintCacheInvalidationStage::JournalDrain);
+                Painting::apply_paint_cache_invalidation(row, Painting::PaintCacheInvalidation::PaintAndHitTest, Painting::PaintCacheInvalidationStage::JournalDrain);
             if (entry.invalidate_propagated_text_decoration_caches)
-                Painting::apply_paint_cache_invalidation(*layout_node, Painting::PaintCacheInvalidation::PropagatedTextDecorations, Painting::PaintCacheInvalidationStage::JournalDrain);
+                Painting::apply_paint_cache_invalidation(row, Painting::PaintCacheInvalidation::PropagatedTextDecorations, Painting::PaintCacheInvalidationStage::JournalDrain);
             if (entry.needs_subtree_repaint)
-                Painting::apply_subtree_repaint_damage(*layout_node, Painting::RepaintDamageStage::JournalDrain);
+                Painting::apply_subtree_repaint_damage(row, Painting::RepaintDamageStage::JournalDrain);
             if (entry.needs_repaint) {
-                if (auto* text_node = as_if<Layout::TextNode>(*layout_node))
-                    Painting::apply_repaint_damage(*text_node, entry.invalidate_display_list, Painting::RepaintDamageStage::JournalDrain);
-                else if (Painting::has_committed_box(*layout_node))
-                    Painting::apply_repaint_damage(*layout_node, entry.invalidate_display_list, Painting::RepaintDamageStage::JournalDrain);
+                if (row.is_text())
+                    Painting::apply_repaint_damage(as<Layout::TextNode>(row.shell()), entry.invalidate_display_list, Painting::RepaintDamageStage::JournalDrain);
+                else if (Painting::has_committed_box(row))
+                    Painting::apply_repaint_damage(row, entry.invalidate_display_list, Painting::RepaintDamageStage::JournalDrain);
             }
         }
         // The next generation reuses the storage, unless what the drain wrote through noted more.

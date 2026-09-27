@@ -10502,12 +10502,12 @@ void Document::schedule_full_accumulated_visual_context_rebuild(Layout::RustFFI:
     set_needs_accumulated_visual_contexts_update(true);
 }
 
-void Document::schedule_accumulated_visual_context_update(Layout::Node const& layout_node, AccumulatedVisualContextUpdateScope scope)
+void Document::schedule_accumulated_visual_context_update(Layout::Row const& row, AccumulatedVisualContextUpdateScope scope)
 {
-    if (!Painting::has_committed_box(layout_node))
+    if (!Painting::has_committed_box(row))
         return;
     invalidation_journal().note_visual_context_box_dirty(
-        Painting::committed_row_slot(layout_node),
+        row.slot(),
         scope == AccumulatedVisualContextUpdateScope::Values
             ? Layout::RustFFI::FfiVisualContextBoxDirtyKind::StyleValueChange
             : Layout::RustFFI::FfiVisualContextBoxDirtyKind::StyleStructuralChange);
