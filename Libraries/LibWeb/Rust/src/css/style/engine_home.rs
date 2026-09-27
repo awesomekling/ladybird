@@ -10,7 +10,9 @@
 //! home and has no way to the engine but the home's. The right to reach the engine is its
 //! [`StyleEngineToken`], of which there is one per engine. It is at home on the main thread, or
 //! with the one submitted stage that took it by value ([`StyleEngineHandle::lend`]) and sends it
-//! home once it is done with the engine ([`StyleEngineLoan::send_home`], or the loan's drop).
+//! home once it is done with the engine ([`StyleEngineLoan::send_home`], or the loan's drop). The
+//! main thread settles the lend once it has taken the stage back ([`StyleEngineSettlement`]), which
+//! keeps the home until then, even where the engine has gone away first.
 //!
 //! The main thread enters the engine through the home. With the token home it goes on at once.
 //! With the token away it waits for the stage that holds it and nothing else, unless what the stage
@@ -22,6 +24,7 @@ use std::cell::{Cell, UnsafeCell};
 use std::ffi::c_void;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 
@@ -91,6 +94,20 @@ struct StyleEngineHome {
     holder: Cell<Option<Holder>>,
     /// The layout arena of the engine's document, which the stages that take the token run for.
     arena: Cell<usize>,
+}
+
+/// What the main thread owes the home of a token it lent to a stage, once it has taken the stage
+/// back: the lend's settlement, which keeps the home until then. On the main thread.
+#[must_use = "a lend is settled once its stage is taken back"]
+pub(crate) struct StyleEngineSettlement {
+    home: Rc<StyleEngineHome>,
+}
+
+impl StyleEngineSettlement {
+    /// Takes the token back from the stage it was lent to, which the main thread has taken back.
+    pub(crate) fn settle(self) {
+        self.home.settle();
+    }
 }
 
 /// A token lent to a stage, which it sends home when it is done with the engine, or when it drops
@@ -291,13 +308,14 @@ impl StyleEngineHandle {
         self.0.is_null()
     }
 
-    /// Gives `engine` a home, with its token, and returns the handle that names it.
+    /// Gives `engine` a home, with its token, and returns the handle that names it. The handle holds
+    /// the home until [`Self::destroy`], and each lend's settlement until it is settled.
     pub(crate) fn create(engine: Box<StyleEngine>) -> Self {
         Self::with_home(NonNull::from(Box::leak(engine)))
     }
 
     fn with_home(engine: NonNull<StyleEngine>) -> Self {
-        let home = Box::new(StyleEngineHome {
+        let home = Rc::new(StyleEngineHome {
             engine,
             slot: UnsafeCell::new(Slot {
                 token: Some(StyleEngineToken {
@@ -310,7 +328,7 @@ impl StyleEngineHandle {
             holder: Cell::new(None),
             arena: Cell::new(0),
         });
-        Self(Box::into_raw(home).cast())
+        Self(Rc::into_raw(home).cast_mut().cast())
     }
 
     /// A home for an engine a unit test owns, which the handle names for as long as the engine
@@ -336,8 +354,8 @@ impl StyleEngineHandle {
         unsafe { &*self.0.cast::<StyleEngineHome>() }
     }
 
-    /// Takes the engine out of its home, which goes away. The main thread brings the token home
-    /// first.
+    /// Takes the engine out of its home, which goes away once every lend of the token is settled.
+    /// The main thread brings the token home first.
     ///
     /// # Safety
     ///
@@ -347,8 +365,8 @@ impl StyleEngineHandle {
         self.bring_home(entry);
         let home = self.home();
         home.settle();
-        // SAFETY: Guaranteed by the caller.
-        let home = unsafe { Box::from_raw(self.0.cast::<StyleEngineHome>()) };
+        // SAFETY: Guaranteed by the caller: this is the handle's hold on the home, from `create`.
+        let home = unsafe { Rc::from_raw(self.0.cast::<StyleEngineHome>().cast_const()) };
         // SAFETY: The home owned the engine, which `create` leaked into it, and its token is home.
         unsafe { Box::from_raw(home.engine.as_ptr()) }
     }
@@ -359,9 +377,9 @@ impl StyleEngineHandle {
     }
 
     /// Lends the token to a stage of the `holder` kind, which sends it home owing no less than
-    /// `owed_at_best`. On the main thread, which brings the token home first. [`Self::settle`] takes
-    /// it back once the main thread has taken the stage back.
-    pub(crate) fn lend(self, holder: Holder, owed_at_best: Owed) -> StyleEngineLoan {
+    /// `owed_at_best`. On the main thread, which brings the token home first, and settles the lend
+    /// with the settlement once it has taken the stage back.
+    pub(crate) fn lend(self, holder: Holder, owed_at_best: Owed) -> (StyleEngineLoan, StyleEngineSettlement) {
         let home = self.home();
         debug_assert!(
             home.state() == (true, Owed::Nothing),
@@ -375,16 +393,20 @@ impl StyleEngineHandle {
         slot.away = Some((arrival, owed_at_best));
         home.holder.set(Some(holder));
         crate::stage_thread::release_handoff();
-        StyleEngineLoan {
-            token: Some(token),
-            home: self.address(),
-            to_home,
-        }
-    }
-
-    /// Takes the token back from the stage it was lent to, which the main thread has taken back.
-    pub(crate) fn settle(self) {
-        self.home().settle();
+        let home_pointer = self.0.cast::<StyleEngineHome>().cast_const();
+        // SAFETY: The handle names a live home, which `Rc::into_raw` made; the settlement holds it too.
+        let home = unsafe {
+            Rc::increment_strong_count(home_pointer);
+            Rc::from_raw(home_pointer)
+        };
+        (
+            StyleEngineLoan {
+                token: Some(token),
+                home: self.address(),
+                to_home,
+            },
+            StyleEngineSettlement { home },
+        )
     }
 
     /// The kind of stage the token is lent to, until its frame is taken back.
@@ -498,47 +520,61 @@ mod tests {
     #[test]
     fn a_lent_token_comes_home_with_what_its_stage_sends() {
         let (_engine, handle) = test_engine();
-        let loan = handle.lend(Holder::LayoutPass, Owed::Nothing);
+        let (loan, settlement) = handle.lend(Holder::LayoutPass, Owed::Nothing);
         assert!(!handle.is_home());
         assert_eq!(handle.holder(), Some(Holder::LayoutPass));
         loan.send_home(Owed::Nothing);
         assert!(handle.is_home());
         // The holder stays until the frame is taken back.
         assert_eq!(handle.holder(), Some(Holder::LayoutPass));
-        handle.settle();
+        settlement.settle();
         assert_eq!(handle.holder(), None);
     }
 
     #[test]
     fn a_dropped_loan_sends_the_token_home_owing_the_take_back() {
         let (_engine, handle) = test_engine();
-        let loan = handle.lend(Holder::StylePass, Owed::TakeBack);
+        let (loan, settlement) = handle.lend(Holder::StylePass, Owed::TakeBack);
         drop(loan);
         assert!(!handle.is_home());
         assert_eq!(handle.home().state(), (true, Owed::TakeBack));
-        handle.settle();
+        settlement.settle();
         assert!(handle.is_home());
     }
 
     #[test]
     fn record_reads_go_on_while_the_install_is_owed() {
         let (_engine, handle) = test_engine();
-        let loan = handle.lend(Holder::LayoutPass, Owed::Install);
+        let (loan, settlement) = handle.lend(Holder::LayoutPass, Owed::Install);
         loan.send_home(Owed::Install);
         assert!(Access::RecordRead.goes_on_owing(handle.home().state().1));
         assert!(!Access::Any.goes_on_owing(handle.home().state().1));
-        handle.settle();
+        settlement.settle();
+    }
+
+    #[test]
+    fn a_lend_settles_after_its_engine_has_gone_away() {
+        let handle = StyleEngineHandle::create(Box::new(StyleEngine::new(
+            super::super::memory::DeviceClass::ForegroundDesktop,
+        )));
+        let (loan, settlement) = handle.lend(Holder::StylePass, Owed::TakeBack);
+        loan.send_home(Owed::TakeBack);
+        // SAFETY: The handle came from `create`, and is not used again.
+        drop(unsafe { handle.destroy("test destroy") });
+        // The settlement kept the home, which goes away with it.
+        assert_eq!(Rc::strong_count(&settlement.home), 1);
+        settlement.settle();
     }
 
     #[test]
     fn an_entrance_that_only_waits_recalls_a_clock_lend_that_holds_the_token() {
         use std::cell::RefCell;
-        use std::rc::Rc;
 
         let (_engine, handle) = test_engine();
         let arena = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         handle.link_arena(arena as usize);
-        let loan = Rc::new(RefCell::new(Some(handle.lend(Holder::ClockLend, Owed::TakeBack))));
+        let (loan, settlement) = handle.lend(Holder::ClockLend, Owed::TakeBack);
+        let loan = Rc::new(RefCell::new(Some(loan)));
         let taken_back = Rc::new(Cell::new(false));
         // SAFETY: Nothing reaches the arena, which the lend only names.
         unsafe {
@@ -546,7 +582,7 @@ mod tests {
                 arena,
                 move || {
                     drop(loan.borrow_mut().take());
-                    handle.settle();
+                    settlement.settle();
                 },
                 {
                     let taken_back = taken_back.clone();
@@ -578,7 +614,7 @@ mod tests {
 
         let (mut engine, handle) = test_engine();
         let engine_address = &raw mut *engine;
-        let mut loan = handle.lend(Holder::LayoutPass, Owed::Nothing);
+        let (mut loan, settlement) = handle.lend(Holder::LayoutPass, Owed::Nothing);
         let handle_in_cpp = HandleInCpp(handle);
         let reached = std::thread::spawn(move || {
             let handle_in_cpp = handle_in_cpp;
@@ -596,6 +632,6 @@ mod tests {
         // SAFETY: The engine is live and nothing else borrows it.
         let entered = unsafe { handle.enter("test entrance") };
         assert_eq!(std::ptr::from_mut(entered), engine_address);
-        handle.settle();
+        settlement.settle();
     }
 }
