@@ -336,7 +336,11 @@ void FrameScheduler::submit_pass(FrameTicket::SubmittedPass::Kind kind, Vector<G
     // Only a main half with a ticket submits, and the pass comes before any recording.
     VERIFY(m_ticket);
     VERIFY(m_ticket->navigables.is_empty());
-    m_ticket->submitted_pass = FrameTicket::SubmittedPass { kind, move(documents), document_index, frame_timestamp };
+    // The document sealed what its flight records as it submitted the flight.
+    GC::Ptr<LocalNavigable> sealed_flight_paint;
+    if (auto navigable = documents[document_index]->navigable(); kind == FrameTicket::SubmittedPass::Kind::Flight && navigable && navigable->has_sealed_flight_paint())
+        sealed_flight_paint = navigable;
+    m_ticket->submitted_pass = FrameTicket::SubmittedPass { kind, move(documents), document_index, frame_timestamp, {}, sealed_flight_paint };
     m_state = State::InFlight;
     m_event_loop.did_submit_frame();
 }
@@ -345,10 +349,7 @@ bool FrameScheduler::pass_in_flight_records() const
 {
     if (!awaits_pass() || m_ticket->submitted_pass->kind != FrameTicket::SubmittedPass::Kind::Flight)
         return false;
-    auto const& pass = *m_ticket->submitted_pass;
-    auto const& document = pass.documents[pass.document_index];
-    auto navigable = document->navigable();
-    if (!navigable || !navigable->has_sealed_flight_paint())
+    if (!m_ticket->submitted_pass->sealed_flight_paint)
         return false;
     // A flight that runs the style of its layout records only if it applies that style itself; otherwise the rendering
     // update lays out after it, and records then.
@@ -402,7 +403,7 @@ void FrameScheduler::commit()
             document->finish_submitted_style_update();
         // A flight that went on from the layout pass to record the document hands its frame off here, as the frame of a
         // recording in flight is.
-        if (auto navigable = document->navigable(); navigable && navigable->has_sealed_flight_paint()) {
+        if (auto navigable = exchange(m_ticket->submitted_pass->sealed_flight_paint, nullptr)) {
             using FlightPaintEnd = LocalNavigable::FlightPaintEnd;
             auto end = FlightPaintEnd::NotRecorded;
             if (outcome.reached == Layout::RustFFI::FfiFlightStage::Present)
@@ -1612,8 +1613,10 @@ void FrameScheduler::visit_edges(JS::Cell::Visitor& visitor)
             visitor.visit(submitted.frame.recording->document);
     }
     visitor.visit(m_ticket->painted_local_roots);
-    if (m_ticket->submitted_pass.has_value())
+    if (m_ticket->submitted_pass.has_value()) {
         visitor.visit(m_ticket->submitted_pass->documents);
+        visitor.visit(m_ticket->submitted_pass->sealed_flight_paint);
+    }
 }
 
 }
