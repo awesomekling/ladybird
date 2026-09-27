@@ -7320,10 +7320,12 @@ pub unsafe extern "C" fn layout_arena_set_style_record_host_callbacks(
 ) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
-    unsafe { super::HostTables::from_handle(arena) }
+    let host_tables = unsafe { super::HostTables::from_handle(arena) };
+    host_tables
         .shell_style_changed_host
         .set(Some((callbacks.context, callbacks.shell_style_changed)));
     assert!(!callbacks.style_engine.is_null());
+    host_tables.style_engine.set(Some(callbacks.style_engine));
     // SAFETY: As above.
     unsafe { LayoutNodeArena::from_handle(arena) }.set_style_engine(callbacks.style_engine);
 }
@@ -7332,9 +7334,9 @@ pub unsafe extern "C" fn layout_arena_set_style_record_host_callbacks(
 pub unsafe extern "C" fn layout_arena_clear_style_record_host_callbacks(arena: *mut c_void) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
-    unsafe { super::HostTables::from_handle(arena) }
-        .shell_style_changed_host
-        .set(None);
+    let host_tables = unsafe { super::HostTables::from_handle(arena) };
+    host_tables.shell_style_changed_host.set(None);
+    host_tables.style_engine.set(None);
     // SAFETY: As above.
     unsafe { LayoutNodeArena::from_handle(arena) }.set_style_engine(crate::css::style::StyleEngineHandle::null());
 }

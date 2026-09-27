@@ -65,9 +65,19 @@ pub(crate) struct HostTables {
     /// What each row of the style batch a flight applied marked of its element's layout nodes, by style node, packed
     /// as an `FfiStyleInvalidationField` word, with the record it installed, while the host installs the batch.
     flight_style_damages: RefCell<HashMap<crate::css::style::tree::StyleNodeID, (u32, u64)>>,
+    /// The document's style engine, which the host linked the arena to, for the document thread to lend its token
+    /// and ask where it is without reaching the arena.
+    pub(super) style_engine: Cell<Option<crate::css::style::StyleEngineHandle>>,
 }
 
 impl HostTables {
+    /// The document's style engine, or null before the host links the arena to one.
+    pub(crate) fn style_engine(&self) -> crate::css::style::StyleEngineHandle {
+        self.style_engine
+            .get()
+            .unwrap_or_else(crate::css::style::StyleEngineHandle::null)
+    }
+
     /// Notes that the document runs a layout update. A document runs one at a time.
     pub(crate) fn begin_layout_update(&self) {
         let was_running = self.layout_update_is_running.replace(true);
