@@ -99,6 +99,7 @@ mod prefix;
 pub mod program;
 mod program_updates;
 mod publication;
+pub(crate) mod record_payloads;
 #[cfg(feature = "style-recording")]
 pub mod record_replay;
 mod resource_contexts;

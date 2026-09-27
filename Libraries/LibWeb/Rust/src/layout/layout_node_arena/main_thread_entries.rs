@@ -415,15 +415,7 @@ unsafe extern "C" fn layout_arena_forget_style_node(arena: *mut c_void, style_no
 unsafe extern "C" fn layout_arena_adopt_derived_node_style(arena: *mut c_void, node: NodeSlotId, record: u64) {
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let arena = unsafe { LayoutNodeArena::from_handle(arena) };
-    let derived = arena.with_style_engine(|engine| {
-        engine.pin_layout_style_record(record);
-        DerivedStyleRecord {
-            record,
-            payloads: crate::layout::node_data::StylePayloadsRef::new(
-                engine.style_record_payloads(record).unwrap().as_ptr().cast(),
-            ),
-        }
-    });
+    let derived = arena.with_style_engine(|engine| engine.pin_derived_style_record(record));
     arena.apply_reinherited_style_record(node, derived, ShellStyleChangeNotice::Now(&main_thread));
 }
 
@@ -447,14 +439,13 @@ unsafe extern "C" fn layout_arena_set_layout_display(arena: *mut c_void, node: N
 ///
 /// # Safety
 ///
-/// The arena must be live on the document thread, `node` must name a live row with style, and
-/// `payloads` must be the payloads the style engine holds for `style_record`.
+/// The arena must be live on the document thread, `node` must name a live row with style, and the
+/// style engine must hold `style_record`.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn layout_arena_install_row_style(
     arena: *mut c_void,
     node: NodeSlotId,
     style_record: u64,
-    payloads: *const c_void,
 ) -> *mut c_void {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
@@ -469,7 +460,7 @@ unsafe extern "C" fn layout_arena_install_row_style(
     // Taking the adoption hands the host a pin of its own, so this comes after the old pin went.
     let installed_ahead = arena.take_animation_adoption(node, style_record);
     if !installed_ahead {
-        if arena.set_node_style(node, style_record, payloads) {
+        if arena.set_node_style(node, style_record) {
             arena.refresh_style_flags(node);
         }
         arena.enroll_node_for_svg_paint_resources_sync(node);
@@ -511,14 +502,13 @@ unsafe extern "C" fn layout_arena_row_style_record(arena: *mut c_void, node: Nod
 ///
 /// # Safety
 ///
-/// The arena must be live on the document thread, `node` must name a live row with style, and
-/// `payloads` must be the payloads the style engine holds for `style_record`.
+/// The arena must be live on the document thread, `node` must name a live row with style, and the
+/// style engine must hold `style_record`.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn layout_arena_replace_row_style_record(
     arena: *mut c_void,
     node: NodeSlotId,
     style_record: u64,
-    payloads: *const c_void,
     changes_layout_affecting_style: bool,
 ) {
     assert!(!arena.is_null(), "layout node arena handle is null");
@@ -534,7 +524,7 @@ unsafe extern "C" fn layout_arena_replace_row_style_record(
     // Taking the adoption hands the host a pin of its own, so this comes after the old pin went.
     let installed_ahead = arena.take_animation_adoption(node, style_record);
     if !installed_ahead {
-        if arena.set_node_style(node, style_record, payloads) {
+        if arena.set_node_style(node, style_record) {
             arena.refresh_style_flags(node);
         }
         arena.enroll_node_for_svg_paint_resources_sync(node);

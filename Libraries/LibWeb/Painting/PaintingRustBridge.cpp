@@ -773,10 +773,6 @@ Optional<PendingDisplayListRecording> begin_rust_display_list_recording(DOM::Doc
     auto const submitted = Layout::RustFFI::layout_arena_has_recording_in_flight(arena);
     if (!submitted)
         HTML::main_thread_event_loop().did_wait_for_recording(current_recording_origin(), rust_timer.elapsed_time().to_nanoseconds());
-    // The recording reads the style records its frame's rows name while the document goes on beside it: the engine
-    // reclaims none of them until the frame has been taken in.
-    else
-        HTML::main_thread_event_loop().frame_scheduler().hold_style_records_for_frame(document);
     return PendingDisplayListRecording {
         .document = document,
         .arena = arena,

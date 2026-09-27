@@ -12,7 +12,7 @@ use super::geometry::AvailableSpace;
 use super::host_tables::HostTables;
 use super::rendered_text::{FfiTextSourceRange, RenderedTextBoundary, TextContent, TextFragments};
 use super::svg_formatting_context::FfiSvgAttributeFacts;
-use super::tree_shape::{Chunk, RetiredSlots, ShapeWriter, TreeShape};
+use super::tree_shape::{Chunk, ShapeWriter, TreeShape};
 
 /// How many interned names one SVG element's publication can name.
 const PUBLISHED_REFERENCE_ATOM_COUNT: usize = 5;
@@ -33,7 +33,7 @@ use crate::layout::CssPixels;
 use crate::layout::FfiReplacedContentFacts;
 use crate::layout::node_data::{
     AncestorFact, DomPaintFact, FfiNodeConstructionFacts, FfiNodeLink, FfiStylePayloads, MAX_NODE_SLOT_COUNT, NodeData,
-    NodeFlag, NodeKind, NodeSlotId, PaintNode, ShellId, StylePayloadsRef,
+    NodeFlag, NodeKind, NodeSlotId, ShellId,
 };
 use crate::layout::used_values::FfiCssPixelPoint;
 use std::cell::Cell;
@@ -1604,12 +1604,7 @@ impl LayoutNodeArena {
     /// Publishes what the paint side reads of every node. A chunk whose nodes are unchanged since
     /// the last publication is shared with it, and a changed one is copied only while an earlier
     /// publication still holds it.
-    pub(crate) fn publish_paint_tree(
-        &mut self,
-    ) -> (
-        crate::cow_column::ColumnSnapshot<PaintNode, SLOTS_PER_CHUNK>,
-        RetiredSlots,
-    ) {
+    pub(crate) fn publish_paint_tree(&mut self) -> super::tree_shape::PublishedShape {
         self.tree_shape.publish(&self.chunks)
     }
 
@@ -2159,7 +2154,7 @@ impl LayoutNodeArena {
                 continue;
             }
             if row.new_style_record != row.old_style_record {
-                if self.set_node_style(slot, row.new_style_record, row.payloads) {
+                if self.set_node_style(slot, row.new_style_record) {
                     self.refresh_style_flags(slot);
                 }
                 self.enroll_node_for_svg_paint_resources_sync(slot);
@@ -2316,18 +2311,15 @@ impl LayoutNodeArena {
         let unadopted = std::mem::take(&mut *self.flight_style_adoptions.borrow_mut());
         let restored = !unadopted.is_empty();
         for adoption in unadopted {
-            let payloads = self.with_style_engine(|engine| {
-                engine
-                    .style_record_payloads(adoption.host_style_record)
-                    .map(|payloads| payloads.as_ptr().cast::<c_void>())
-            });
+            let host_record_is_live =
+                self.with_style_store(|engine| engine.style_record_payloads(adoption.host_style_record).is_some());
             // The host holds its record, so the engine has its payloads; a row whose element left
             // keeps the flight's record until its box goes.
-            if let Some(payloads) = payloads
+            if host_record_is_live
                 && self.slot_is_live(adoption.slot)
                 && self.style_records[adoption.slot.slot_index() as usize].get() == adoption.style_record
             {
-                self.install_row_style_over_host(adoption.slot, adoption.host_style_record, payloads, true);
+                self.install_row_style_over_host(adoption.slot, adoption.host_style_record, true);
                 self.reinherit_anonymous_descendants(adoption.slot, ShellStyleChangeNotice::Now(main_thread));
             }
             self.with_style_engine(|engine| engine.unpin_layout_style_record(adoption.style_record));
@@ -2355,15 +2347,11 @@ impl LayoutNodeArena {
         if slot.is_invalid() || self.node_style_record_is_pinned_by_arena(slot) {
             return false;
         }
-        let Some(payloads) = self.with_style_engine(|engine| {
-            engine
-                .style_record_payloads(style_record)
-                .map(|payloads| payloads.as_ptr().cast::<c_void>())
-        }) else {
+        if self.with_style_store(|engine| engine.style_record_payloads(style_record).is_none()) {
             return false;
-        };
+        }
         let host_style_record = self.style_records[slot.slot_index() as usize].get();
-        self.install_row_style_over_host(slot, style_record, payloads, needs_relayout);
+        self.install_row_style_over_host(slot, style_record, needs_relayout);
         self.with_style_engine(|engine| engine.pin_layout_style_record(style_record));
         let superseded = {
             let mut log = self.animation_adoption_log.borrow_mut();
@@ -2387,14 +2375,8 @@ impl LayoutNodeArena {
 
     /// Sets a row's style to `style_record` ahead of the host or back to the host's, with the caches a
     /// style change over the row resets and, where `needs_relayout` says so, its layout mark.
-    fn install_row_style_over_host(
-        &self,
-        slot: NodeSlotId,
-        style_record: u64,
-        payloads: *const c_void,
-        needs_relayout: bool,
-    ) {
-        if self.set_node_style(slot, style_record, payloads) {
+    fn install_row_style_over_host(&self, slot: NodeSlotId, style_record: u64, needs_relayout: bool) {
+        if self.set_node_style(slot, style_record) {
             self.refresh_style_flags(slot);
         }
         self.enroll_node_for_svg_paint_resources_sync(slot);
@@ -2416,14 +2398,8 @@ impl LayoutNodeArena {
         let restored = std::mem::take(&mut *self.animation_adoption_log.borrow_mut());
         let mut rows = Vec::with_capacity(restored.len());
         for adoption in restored {
-            let payloads = self.with_style_engine(|engine| {
-                engine
-                    .style_record_payloads(adoption.host_style_record)
-                    .map(|payloads| payloads.as_ptr().cast::<c_void>())
-            });
             // The host holds its record, so the engine has its payloads.
-            let payloads = payloads.expect("the host's style record is live");
-            self.install_row_style_over_host(adoption.slot, adoption.host_style_record, payloads, true);
+            self.install_row_style_over_host(adoption.slot, adoption.host_style_record, true);
             rows.push((adoption.slot, adoption.style_record));
         }
         rows
@@ -2468,9 +2444,17 @@ impl LayoutNodeArena {
         self.animation_adoption_log.borrow().is_empty()
     }
 
-    pub(crate) fn set_node_style(&self, id: NodeSlotId, style_record: u64, payloads: *const c_void) -> bool {
+    pub(crate) fn set_node_style(&self, id: NodeSlotId, style_record: u64) -> bool {
         self.assert_owner_thread();
-        self.write_shape(id).set_style(StylePayloadsRef::new(payloads));
+        // NB: A test may drive an arena that has no engine, whose rows have no style.
+        let payloads = (!self.style_engine.get().0.is_null())
+            .then(|| self.with_style_store(|engine| engine.style_record_payload_owner(style_record).cloned()))
+            .flatten();
+        debug_assert!(
+            payloads.is_some() || self.style_engine.get().0.is_null(),
+            "a row is given the style of a live record"
+        );
+        self.write_shape(id).set_style(payloads);
         self.set_node_flag(id, NodeFlag::FollowsPrincipalStyle, false);
         self.invalidate_overflow_after_style_change(id);
         let previous = self.style_records[id.slot_index() as usize].replace(style_record);
@@ -3248,19 +3232,7 @@ impl LayoutNodeArena {
                     && self.data(parent).flags.get() & NodeFlag::IsPseudoElementPrincipalBox as u32 != 0
                     && self.data(parent).generated_for.get() == data.generated_for.get();
                 if follows_principal {
-                    let derived = self.with_style_engine(|engine| {
-                        engine.pin_layout_style_record(parent_style_record);
-                        DerivedStyleRecord {
-                            record: parent_style_record,
-                            payloads: StylePayloadsRef::new(
-                                engine
-                                    .style_record_payloads(parent_style_record)
-                                    .unwrap()
-                                    .as_ptr()
-                                    .cast(),
-                            ),
-                        }
-                    });
+                    let derived = self.with_style_engine(|engine| engine.pin_derived_style_record(parent_style_record));
                     self.apply_reinherited_style_record(child, derived, notice);
                     self.set_node_flag(child, NodeFlag::FollowsPrincipalStyle, true);
                     self.reinherit_anonymous_descendants(child, notice);
@@ -3268,8 +3240,9 @@ impl LayoutNodeArena {
                 } else {
                     let derived =
                         self.reinherit_anonymous_style_record(self.node_style_record(child), parent_style_record);
+                    let record = derived.record;
                     self.apply_reinherited_style_record(child, derived, notice);
-                    self.reinherit_anonymous_children(child, derived.record, notice);
+                    self.reinherit_anonymous_children(child, record, notice);
                 }
             }
             child = next_sibling;
@@ -3283,8 +3256,9 @@ impl LayoutNodeArena {
         notice: ShellStyleChangeNotice<'_>,
     ) {
         let previous_payloads = self.data(slot).style.get();
+        let derived_payloads = derived.payloads.as_ref().map_or(std::ptr::null(), |payloads| payloads.as_ptr());
         let changes_layout_affecting_style =
-            !style_payloads_equal_in_layout_affecting_groups(previous_payloads.as_ptr(), derived.payloads.as_ptr());
+            !style_payloads_equal_in_layout_affecting_groups(previous_payloads.as_ptr(), derived_payloads);
         self.replace_arena_pinned_style_record(slot, derived);
         if changes_layout_affecting_style {
             self.bump_fragment_cache_epoch_of_self_and_ancestors(slot);
@@ -3565,7 +3539,7 @@ impl LayoutNodeArena {
             NodeKind::Unset,
             "stamped an anonymous box onto a bound slot"
         );
-        assert!(derived.record != 0 && !derived.payloads.is_null());
+        assert!(derived.record != 0);
         data.set_kind(kind);
         data.set_flags(super::node_facts::construction_flags(
             &FfiNodeConstructionFacts {
@@ -3751,10 +3725,10 @@ impl LayoutNodeArena {
 
     pub(crate) fn stamp_dom_element_row(&self, slot: NodeSlotId, kind: NodeKind, style_node: StyleNodeID) {
         self.stamp_dom_row(slot, kind, Some(style_node));
-        let (record, payloads) = self
+        let (record, _) = self
             .with_style_engine(|engine| engine.element_published_style_record(style_node))
             .expect("an element whose box is built has published its style");
-        if self.set_node_style(slot, record, payloads) {
+        if self.set_node_style(slot, record) {
             self.refresh_style_flags(slot);
         }
         self.enroll_node_for_svg_paint_resources_sync(slot);
@@ -3778,10 +3752,10 @@ impl LayoutNodeArena {
         // before its shell exists; binding it to the pseudo-element comes later.
         self.set_node_flag(slot, NodeFlag::Anonymous, true);
         self.write_shape(slot).set_generated_for(pseudo_kind + 1);
-        let (record, payloads) = self
+        let (record, _) = self
             .with_style_engine(|engine| engine.pseudo_published_style_record(generator, pseudo_kind))
             .expect("a pseudo-element whose box is built has published its style");
-        if self.set_node_style(slot, record, payloads) {
+        if self.set_node_style(slot, record) {
             self.refresh_style_flags(slot);
         }
         self.enroll_node_for_svg_paint_resources_sync(slot);
@@ -4217,7 +4191,7 @@ impl LayoutNodeArena {
     pub(crate) fn replace_arena_pinned_style_record(&self, slot: NodeSlotId, derived: DerivedStyleRecord) {
         self.assert_owner_thread();
         let previously_pinned = self.style_records_pinned_by_arena[slot.slot_index() as usize].replace(true);
-        assert!(derived.record != 0 && !derived.payloads.is_null());
+        assert!(derived.record != 0);
         let previous_style_record = self.style_records[slot.slot_index() as usize].replace(derived.record);
         self.write_shape(slot).set_style(derived.payloads);
         self.refresh_style_flags(slot);
@@ -6087,19 +6061,7 @@ impl LayoutNodeArena {
     /// document's navigable, which the viewport's row holds.
     pub(crate) fn publish_document_style(&self, record: u64, viewport_scroll_offset: FfiCssPixelPoint) {
         self.published_viewport_scroll_offset.set(viewport_scroll_offset);
-        let derived = self.with_style_engine(|engine| {
-            engine.pin_layout_style_record(record);
-            DerivedStyleRecord {
-                record,
-                payloads: StylePayloadsRef::new(
-                    engine
-                        .style_record_payloads(record)
-                        .expect("the document's style must be live")
-                        .as_ptr()
-                        .cast(),
-                ),
-            }
-        });
+        let derived = self.with_style_engine(|engine| engine.pin_derived_style_record(record));
         self.release_published_document_style();
         self.published_document_style.set(Some(derived));
     }
@@ -7076,16 +7038,11 @@ pub unsafe extern "C" fn layout_arena_flight_style_damage(
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_set_node_style(
-    arena: *mut c_void,
-    id: NodeSlotId,
-    style_record: u64,
-    payloads: *const c_void,
-) {
+pub unsafe extern "C" fn layout_arena_set_node_style(arena: *mut c_void, id: NodeSlotId, style_record: u64) {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
     let arena = unsafe { LayoutNodeArena::from_handle(arena) };
-    if arena.set_node_style(id, style_record, payloads) {
+    if arena.set_node_style(id, style_record) {
         arena.refresh_style_flags(id);
     }
     arena.enroll_node_for_svg_paint_resources_sync(id);
@@ -7923,16 +7880,13 @@ mod tests {
     #[test]
     fn an_anonymous_box_stamped_by_the_arena_keeps_its_style_record_until_freed() {
         let mut arena = LayoutNodeArena::new();
-        let payloads = [std::ptr::null::<c_void>(); 1];
+        let home = std::sync::Arc::default();
+        let payloads = std::sync::Arc::new(crate::css::style::record_payloads::StyleRecordPayloads::retain(
+            &[crate::css::host_shared::SharedPayload::null()],
+            &home,
+        ));
         let slot = arena.allocate_unbound();
-        arena.stamp_anonymous_box(
-            slot,
-            NodeKind::InlineNode,
-            DerivedStyleRecord {
-                record: 7,
-                payloads: crate::layout::node_data::StylePayloadsRef::new(payloads.as_ptr().cast()),
-            },
-        );
+        arena.stamp_anonymous_box(slot, NodeKind::InlineNode, DerivedStyleRecord { record: 7, payloads: Some(payloads) });
         assert_eq!(arena.data(slot).kind.get(), NodeKind::InlineNode);
         assert!(arena.data(slot).flags.get() & NodeFlag::Anonymous as u32 != 0);
         assert!(arena.data(slot).flags.get() & NodeFlag::HasStyle as u32 != 0);
@@ -7940,7 +7894,7 @@ mod tests {
         assert!(arena.node_style_record_is_pinned_by_arena(slot));
 
         let element = arena.allocate(test_construction_facts_with_kind(NodeKind::InlineNode));
-        arena.set_node_style(element, 9, payloads.as_ptr().cast());
+        arena.set_node_style(element, 9);
         assert_eq!(arena.node_style_record(element), 9);
         assert!(!arena.node_style_record_is_pinned_by_arena(element));
 

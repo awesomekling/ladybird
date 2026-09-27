@@ -22,7 +22,6 @@ use super::{StyleEngine, StyleNodeID, transaction};
 use crate::css::computed_value_views::ComputedValuesView;
 use crate::css::host_shared::SharedPayload;
 use std::collections::HashSet;
-use std::ffi::c_void;
 
 /// A row of a style pass's batch a flight applies to the layout nodes of its element.
 #[derive(Clone, Copy, Debug)]
@@ -30,8 +29,6 @@ pub(crate) struct FlightStyleRow {
     pub(crate) style_node: StyleNodeID,
     pub(crate) old_style_record: u64,
     pub(crate) new_style_record: u64,
-    /// The payloads of the new record, which the layout nodes borrow.
-    pub(crate) payloads: *const c_void,
     /// What the move damages, packed as an `FfiStyleInvalidationField` word.
     pub(crate) damage: u32,
     /// Whether the element is one the viewport takes its overflow, writing mode and direction
@@ -170,14 +167,13 @@ impl StyleEngine {
             if holds_resources(answer.old_style_record) || holds_resources(answer.new_style_record) {
                 return Err(FfiFlightStyleDecline::Resources);
             }
-            let Some(payloads) = self.style_record_payloads(answer.new_style_record) else {
+            if self.style_record_payloads(answer.new_style_record).is_none() {
                 return Err(FfiFlightStyleDecline::Row);
-            };
+            }
             rows.push(FlightStyleRow {
                 style_node: node,
                 old_style_record: answer.old_style_record,
                 new_style_record: answer.new_style_record,
-                payloads: payloads.as_ptr().cast::<c_void>(),
                 damage,
                 viewport_propagation_source: viewport_propagation_sources.contains(&node),
             });

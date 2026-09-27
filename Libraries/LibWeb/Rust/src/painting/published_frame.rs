@@ -20,12 +20,10 @@ use crate::layout::LayoutNodeArena;
 use crate::layout::PublishedTextSlot;
 use crate::layout::SLOTS_PER_CHUNK;
 use crate::layout::fragment_tree::FragmentLink;
-use crate::layout::node_data::{
-    CompositorAnimationFrameKind, DomPaintFact, FfiStylePayloads, NodeFlag, NodeKind, NodeSlotId, PaintNode,
-};
+use crate::layout::node_data::{CompositorAnimationFrameKind, DomPaintFact, NodeFlag, NodeKind, NodeSlotId, PaintNode};
 use crate::layout::node_facts;
 use crate::layout::text_chunker::GraphemeSegmenter;
-use crate::layout::tree_shape::RetiredSlots;
+use crate::layout::tree_shape::{PublishedShape, PublishedStyle, RetiredSlots};
 use crate::layout::used_values::FfiCssPixelRect;
 use crate::layout::{RenderedText, RenderedTextBoundary, TextFragments};
 use crate::painting::fragment_ownership::FragmentOwnershipFilter;
@@ -73,6 +71,9 @@ pub(crate) struct PublishedRows {
 pub(crate) struct PublishedFrame {
     pub(super) rows: PublishedRows,
     nodes: ColumnSnapshot<PaintNode, SLOTS_PER_CHUNK>,
+    /// Each node's style, owned: the frame holds a reference on every style record's payloads it
+    /// reads, so what the document's style engine reclaims meanwhile does not reach it.
+    styles: ColumnSnapshot<PublishedStyle, SLOTS_PER_CHUNK>,
     /// Keeps the arena from reusing a slot this frame may name until the frame is dropped.
     _retired_slots: RetiredSlots,
     damage: FrameDamage,
@@ -140,7 +141,7 @@ impl PublishedPaintState {
 }
 
 // A frame is read on whichever thread paints it while the document writes its live columns: it
-// holds no cell, no raw pointer and no borrow of the document.
+// holds no cell, no raw pointer and no borrow of the document, and owns everything it reads.
 const _: () = {
     const fn assert_published<T: Send + Sync + 'static>() {}
     assert_published::<PublishedFrame>();
@@ -149,8 +150,7 @@ const _: () = {
 impl PublishedFrame {
     pub(crate) fn new(
         rows: PublishedRows,
-        nodes: ColumnSnapshot<PaintNode, SLOTS_PER_CHUNK>,
-        retired_slots: RetiredSlots,
+        shape: PublishedShape,
         damage: FrameDamage,
         paint_state: PublishedPaintState,
         facts: PublishedPaintFacts,
@@ -158,8 +158,9 @@ impl PublishedFrame {
     ) -> Self {
         Self {
             rows,
-            nodes,
-            _retired_slots: retired_slots,
+            nodes: shape.nodes,
+            styles: shape.styles,
+            _retired_slots: shape.retired_slots,
             damage,
             paint_state,
             facts,
@@ -209,18 +210,14 @@ impl PublishedFrame {
 
     fn node_and_style(&self, id: NodeSlotId) -> Option<(&PaintNode, Option<ComputedValuesView<'_>>)> {
         let node = self.node(id)?;
-        Some((node, Self::style_of(node)))
+        Some((node, self.style_at(id)))
     }
 
-    fn style_of(node: &PaintNode) -> Option<ComputedValuesView<'_>> {
-        if node.style.is_null() {
-            return None;
-        }
-        // SAFETY: A non-null style pointer addresses a style container's group pointer array,
-        // which FfiStylePayloads mirrors exactly. The document reclaims no style record a frame
-        // it published may name until it has taken that frame back (hold_style_records_for_frame).
-        let payloads = unsafe { &*node.style.as_ptr().cast::<FfiStylePayloads>() };
-        Some(ComputedValuesView::new(&payloads.groups))
+    /// The style of the node in a slot the caller has found live.
+    #[inline]
+    fn style_at(&self, id: NodeSlotId) -> Option<ComputedValuesView<'_>> {
+        let payloads = self.styles.get(id.slot_index() as usize)?.0.as_deref()?;
+        Some(ComputedValuesView::new(&payloads.as_ffi().groups))
     }
 
     /// The node in a slot a read requires to be live.
@@ -891,7 +888,8 @@ impl PaintRead for PaintSource<'_> {
     }
 
     fn node_style_if_live(&self, id: NodeSlotId) -> Option<ComputedValuesView<'_>> {
-        PublishedFrame::style_of(self.frame.node(id)?)
+        self.frame.node(id)?;
+        self.frame.style_at(id)
     }
 
     fn node_containing_block_if_live(&self, id: NodeSlotId) -> Option<NodeSlotId> {

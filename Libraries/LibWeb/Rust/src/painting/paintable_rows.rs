@@ -1685,12 +1685,11 @@ impl LayoutNodeArena {
             layer_images,
             svg_paint_resources: self.svg_paint_resources().publish(),
         };
-        let (nodes, retired_slots) = self.publish_paint_tree();
+        let shape = self.publish_paint_tree();
         let geometry_epoch = self.paintable_rows.absolute_rect_memo_epoch.get();
         PublishedFrame::new(
             rows,
-            nodes,
-            retired_slots,
+            shape,
             self.paint_damage_for_frame(),
             paint_state,
             facts,

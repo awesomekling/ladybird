@@ -12,6 +12,10 @@
 //! brings the rows of every node written since it last published up to date when it publishes
 //! again, so publishing costs the nodes written since, not the whole tree.
 //!
+//! A node's style is not in its [`PaintNode`]: the row owns its record's payloads through a
+//! [`StyleCell`], and the arena publishes those owners in a column of their own, so a publication
+//! holds every style it names and a row copies a reference count only when its style changes.
+//!
 //! The fields a [`PaintNode`] copies are [`ShapeCell`]s. They read like a `Cell`, but only a
 //! [`ShapeWriter`] writes one, and only a [`Chunk`] hands out a writer, through which a write that
 //! changes a field marks its node in the chunk. A write the next publication would miss does not
@@ -27,6 +31,7 @@
 use super::layout_node_arena::SLOTS_PER_CHUNK;
 use super::node_data::{NodeData, NodeKind, NodeSlotId, PaintNode, StylePayloadsRef};
 use crate::cow_column::{ColumnSnapshot, CowColumn};
+use crate::css::style::record_payloads::StyleRecordPayloads;
 use std::cell::Cell;
 use std::ops::Deref;
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -55,6 +60,43 @@ impl<T: Copy> ShapeCell<T> {
     #[inline]
     fn set(&self, value: T) {
         self.0.set(value);
+    }
+}
+
+/// A node's style: the payloads of its record, which the row owns. It reads like a [`ShapeCell`] of
+/// the payload pointer, and only a [`ShapeWriter`] writes it.
+pub(crate) struct StyleCell(Cell<Option<Arc<StyleRecordPayloads>>>);
+
+impl StyleCell {
+    pub(crate) const fn new() -> Self {
+        Self(Cell::new(None))
+    }
+
+    /// The row's payload pointer array, or null for a row without style.
+    #[inline]
+    pub(crate) fn get(&self) -> StylePayloadsRef {
+        self.with_owner(|owner| {
+            owner.map_or(StylePayloadsRef::null(), |payloads| {
+                StylePayloadsRef::new(payloads.as_ptr())
+            })
+        })
+    }
+
+    /// A reference of the row's own on its payloads, for a publication to hold.
+    fn owner(&self) -> Option<Arc<StyleRecordPayloads>> {
+        self.with_owner(|owner| owner.cloned())
+    }
+
+    fn owner_address(&self) -> usize {
+        self.with_owner(|owner| owner.map_or(0, |payloads| Arc::as_ptr(payloads).addr()))
+    }
+
+    #[inline]
+    fn with_owner<R>(&self, read: impl FnOnce(Option<&Arc<StyleRecordPayloads>>) -> R) -> R {
+        // SAFETY: The cell is not `Sync`, and `read` cannot reach the cell: every caller above hands
+        // it a closure that only reads the owner it is given, so no write replaces the value while
+        // the reference lives.
+        read(unsafe { &*self.0.as_ptr() }.as_ref())
     }
 }
 
@@ -117,8 +159,12 @@ impl ShapeWriter<'_> {
         self.write(&self.data.compositor_animation_frame_kinds, kinds);
     }
 
-    pub(crate) fn set_style(&self, style: StylePayloadsRef) {
-        self.write(&self.data.style, style);
+    pub(crate) fn set_style(&self, style: Option<Arc<StyleRecordPayloads>>) {
+        let address = style.as_ref().map_or(0, |payloads| Arc::as_ptr(payloads).addr());
+        if self.data.style.owner_address() != address {
+            self.written_rows.set(self.written_rows.get() | self.row_bit);
+            drop(self.data.style.0.replace(style));
+        }
     }
 }
 
@@ -175,10 +221,29 @@ impl Chunk {
     }
 }
 
+/// A node's style owner as a published row. A row is the same as another when it names the same
+/// owner: an owner's payloads never change once published.
+#[derive(Clone, Default)]
+pub(crate) struct PublishedStyle(pub(crate) Option<Arc<StyleRecordPayloads>>);
+
+impl PublishedStyle {
+    fn address(&self) -> Option<usize> {
+        self.0.as_ref().map(|payloads| Arc::as_ptr(payloads).addr())
+    }
+}
+
+impl PartialEq for PublishedStyle {
+    fn eq(&self, other: &Self) -> bool {
+        crate::cow_column::same_payload(self.0.as_ref(), other.0.as_ref(), |_, _| false)
+    }
+}
+
 /// The arena's column of what the paint side reads of every node, which it publishes from, and the
 /// slots its publications retire.
 pub(crate) struct TreeShape {
     nodes: CowColumn<PaintNode, SLOTS_PER_CHUNK>,
+    /// Every node's style owner, beside its row in `nodes`.
+    styles: CowColumn<PublishedStyle, SLOTS_PER_CHUNK>,
     /// The epoch of the latest publication, while one that holds it is alive.
     latest_epoch: Weak<RetireEpoch>,
     /// Where dropped epochs send the slots they retired.
@@ -191,6 +256,7 @@ impl Default for TreeShape {
         let (returns, returned_slots) = channel();
         Self {
             nodes: CowColumn::default(),
+            styles: CowColumn::default(),
             latest_epoch: Weak::new(),
             returned_slots,
             returns,
@@ -202,10 +268,7 @@ impl TreeShape {
     /// Brings the rows of every node written since the last publication up to date and publishes
     /// the column. Slots freed from now on are retired until the returned [`RetiredSlots`] is
     /// dropped.
-    pub(crate) fn publish(
-        &mut self,
-        chunks: &[Box<Chunk>],
-    ) -> (ColumnSnapshot<PaintNode, SLOTS_PER_CHUNK>, RetiredSlots) {
+    pub(crate) fn publish(&mut self, chunks: &[Box<Chunk>]) -> PublishedShape {
         self.update(chunks);
         let epoch = Arc::new(RetireEpoch {
             slots: Mutex::default(),
@@ -217,7 +280,11 @@ impl TreeShape {
             debug_assert!(chained.is_ok(), "only the latest epoch is chained to");
         }
         self.latest_epoch = Arc::downgrade(&epoch);
-        (self.nodes.publish(), RetiredSlots { _epoch: epoch })
+        PublishedShape {
+            nodes: self.nodes.publish(),
+            styles: self.styles.publish(),
+            retired_slots: RetiredSlots { _epoch: epoch },
+        }
     }
 
     /// Retires a freed slot while a publication that may name it is alive. A slot that is not
@@ -242,6 +309,7 @@ impl TreeShape {
     /// change.
     fn update(&mut self, chunks: &[Box<Chunk>]) {
         self.nodes.grow_to(chunks.len() * SLOTS_PER_CHUNK);
+        self.styles.grow_to(chunks.len() * SLOTS_PER_CHUNK);
         for (chunk_index, chunk) in chunks.iter().enumerate() {
             for (word_index, word) in chunk.written_rows.iter().enumerate() {
                 let mut written = word.replace(0);
@@ -249,12 +317,27 @@ impl TreeShape {
                     let offset = word_index * 64 + written.trailing_zeros() as usize;
                     written &= written - 1;
                     let index = chunk_index * SLOTS_PER_CHUNK + offset;
-                    let node = PaintNode::of(&chunk.slots[offset]);
-                    self.nodes.set(index, node).expect("the column holds every chunk");
+                    let data = &chunk.slots[offset];
+                    self.nodes.set(index, PaintNode::of(data)).expect("the column holds every chunk");
+                    // Clone the owner only for a row whose owner changed.
+                    let published_style = self.styles.get(index).and_then(PublishedStyle::address);
+                    if published_style.unwrap_or(0) != data.style.owner_address() {
+                        self.styles
+                            .set(index, PublishedStyle(data.style.owner()))
+                            .expect("the column holds every chunk");
+                    }
                 }
             }
         }
     }
+}
+
+/// What one publication of the tree's shape holds: every node's row, the style each row names, and
+/// the slots freed since, which are not reused while it is alive.
+pub(crate) struct PublishedShape {
+    pub(crate) nodes: ColumnSnapshot<PaintNode, SLOTS_PER_CHUNK>,
+    pub(crate) styles: ColumnSnapshot<PublishedStyle, SLOTS_PER_CHUNK>,
+    pub(crate) retired_slots: RetiredSlots,
 }
 
 /// Keeps the slots freed after a publication from being reused while it is alive.
@@ -301,7 +384,7 @@ impl TreeShape {
     /// Whether the column changed since it was last published, once it is brought up to date.
     pub(crate) fn changed_since_publish(&mut self, chunks: &[Box<Chunk>]) -> bool {
         self.update(chunks);
-        self.nodes.written_since_publish()
+        self.nodes.written_since_publish() || self.styles.written_since_publish()
     }
 }
 
@@ -311,6 +394,7 @@ mod tests {
     use crate::layout::LayoutNodeArena;
     use crate::layout::SLOTS_PER_CHUNK;
     use crate::layout::node_data::{NodeFlag, NodeKind, NodeSlotId, PaintNode};
+    use crate::layout::tree_shape::PublishedShape;
 
     fn tree(arena: &mut LayoutNodeArena) -> (NodeSlotId, NodeSlotId, NodeSlotId) {
         let root = arena.allocate_for_test().slot;
@@ -335,7 +419,11 @@ mod tests {
         let mut arena = LayoutNodeArena::new();
         let (root, first, second) = tree(&mut arena);
         arena.set_node_flag(first, NodeFlag::Anonymous, true);
-        let (nodes, _retired) = arena.publish_paint_tree();
+        let PublishedShape {
+            nodes,
+            retired_slots: _retired,
+            ..
+        } = arena.publish_paint_tree();
         for id in [root, first, second] {
             assert!(node(&nodes, id) == Some(&PaintNode::of(arena.data(id))));
         }
@@ -346,7 +434,11 @@ mod tests {
     fn a_published_column_does_not_see_later_writes() {
         let mut arena = LayoutNodeArena::new();
         let (root, first, second) = tree(&mut arena);
-        let (nodes, _retired) = arena.publish_paint_tree();
+        let PublishedShape {
+            nodes,
+            retired_slots: _retired,
+            ..
+        } = arena.publish_paint_tree();
 
         arena.remove_child(root, first);
         arena.set_node_flag(second, NodeFlag::IsFlexItem, true);
@@ -362,7 +454,11 @@ mod tests {
         assert_eq!(node(&nodes, second).unwrap().flags & NodeFlag::IsFlexItem as u32, 0);
         assert!(node(&nodes, second).unwrap().next_sibling.is_invalid());
 
-        let (later, _retired_later) = arena.publish_paint_tree();
+        let PublishedShape {
+            nodes: later,
+            retired_slots: _retired_later,
+            ..
+        } = arena.publish_paint_tree();
         assert!(node(&later, first).is_none());
         assert_eq!(node(&later, root).unwrap().first_child, second);
         assert_eq!(node(&later, second).unwrap().next_sibling, added);
@@ -389,7 +485,11 @@ mod tests {
     fn a_slot_a_live_publication_names_is_not_reused_until_it_is_dropped() {
         let mut arena = LayoutNodeArena::new();
         let (root, first, _) = tree(&mut arena);
-        let (nodes, retired) = arena.publish_paint_tree();
+        let PublishedShape {
+            nodes,
+            retired_slots: retired,
+            ..
+        } = arena.publish_paint_tree();
         arena.remove_child(root, first);
         arena.free_subtree(first).destroy_shells_and_invoke_callbacks();
 
@@ -412,7 +512,11 @@ mod tests {
     fn an_earlier_publication_keeps_the_slots_freed_after_a_later_one() {
         let mut arena = LayoutNodeArena::new();
         let (root, first, _) = tree(&mut arena);
-        let (earlier, earlier_retired) = arena.publish_paint_tree();
+        let PublishedShape {
+            nodes: earlier,
+            retired_slots: earlier_retired,
+            ..
+        } = arena.publish_paint_tree();
         let later = arena.publish_paint_tree();
         arena.remove_child(root, first);
         arena.free_subtree(first).destroy_shells_and_invoke_callbacks();
@@ -455,7 +559,11 @@ mod tests {
         arena.remove_child(root, first);
         arena.free_subtree(first).destroy_shells_and_invoke_callbacks();
         std::thread::spawn(move || {
-            let (nodes, _retired) = published;
+            let PublishedShape {
+                nodes,
+                retired_slots: _retired,
+                ..
+            } = published;
             assert_eq!(node(&nodes, first).unwrap().parent, root);
         })
         .join()

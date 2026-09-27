@@ -23,10 +23,9 @@ namespace Web::HTML {
 //   before the frame is submitted. A stage that comes to name one in its output has to put it in the ticket.
 // - The layout arena, the recording, and the images and fonts the recording paints: not on the heap. The frame owns
 //   the arena and the recording, and images and fonts are reference counted resources.
-// - Shared style records, which the frame reads through the style payloads of the arena's rows: owned by the style
-//   engine. A record the main thread unpins beside the frame (a removed node's, a computed style view's) stays until
-//   the engine reclaims unreachable records, so each document whose frame goes to the render side holds reclamation off
-//   in its style engine until the frame is consumed.
+// - Shared style records, which the frame reads through the style payloads of the arena's rows: not on the heap. A
+//   row's payloads are reference counted, and the frame holds a reference on each one its rows name, so what the style
+//   engine reclaims beside the frame does not reach it.
 //
 // The frame scheduler calls hold_for_frame_in_flight() for each document whose frame it hands to the render side, and
 // release_holds_for_frame_in_flight() once consume-commit has taken the frame in.

@@ -3975,12 +3975,22 @@ impl RetainedState {
     }
 
     pub(crate) fn style_record_payloads(&self, style_record: u64) -> Option<&[SharedPayload]> {
+        self.style_record_payload_owner(style_record)
+            .map(|payloads| payloads.as_slice())
+    }
+
+    /// The record's payloads as the value that owns them; see
+    /// [`computed::ComputedGroupSets::style_record_payload_owner`].
+    pub(crate) fn style_record_payload_owner(
+        &self,
+        style_record: u64,
+    ) -> Option<&std::sync::Arc<super::record_payloads::StyleRecordPayloads>> {
         if !computed::ComputedGroupSets::record_is_animation_overlay(style_record)
             && !self.computed_group_sets.final_style_record_is_live(style_record)
         {
             return None;
         }
-        self.computed_group_sets.style_record_payloads(style_record)
+        self.computed_group_sets.style_record_payload_owner(style_record)
     }
 
     pub(crate) fn style_record_dependency_flags(&self, style_record: u64) -> Option<u8> {
