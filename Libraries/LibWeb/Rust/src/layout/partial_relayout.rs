@@ -786,20 +786,6 @@ pub unsafe extern "C" fn layout_arena_defer_child_list_insertion_layout_update(
 
 /// # Safety
 ///
-/// The arena must remain valid for the duration of the call, and `parent` and `child` must name
-/// live nodes in this arena. The child's subtree must still be intact.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_note_contained_abspos_child_removal(
-    arena: *mut c_void,
-    parent: NodeSlotId,
-    child: NodeSlotId,
-) {
-    // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
-    unsafe { LayoutNodeArena::from_handle(arena) }.note_contained_abspos_child_removal(parent, child);
-}
-
-/// # Safety
-///
 /// The arena must remain valid for the duration of the call, and `node` must name a live node
 /// in this arena.
 #[unsafe(no_mangle)]

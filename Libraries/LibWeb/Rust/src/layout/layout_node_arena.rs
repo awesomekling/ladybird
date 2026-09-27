@@ -6691,33 +6691,6 @@ pub unsafe extern "C" fn layout_arena_bump_fragment_cache_epoch_of_self_and_ance
     unsafe { LayoutNodeArena::from_handle(arena) }.bump_fragment_cache_epoch_of_self_and_ancestors(node);
 }
 
-/// Publishes the elements registered under one anchor name in one tree scope, in tree order.
-///
-/// # Safety
-///
-/// `elements` must name `count` element identities for the duration of the call.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_set_anchor_name_elements(
-    arena: *mut c_void,
-    scope_host: u32,
-    anchor_name: usize,
-    elements: *const u32,
-    count: usize,
-) {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    let elements: Vec<_> = if count == 0 {
-        Vec::new()
-    } else {
-        // SAFETY: The C++ caller keeps the element array alive for this call.
-        unsafe { std::slice::from_raw_parts(elements, count) }
-            .iter()
-            .filter_map(|&raw| StyleNodeID::from_raw(raw))
-            .collect()
-    };
-    // SAFETY: The C++ wrapper keeps the arena alive for this call.
-    unsafe { LayoutNodeArena::from_handle(arena) }.set_anchor_name_elements(scope_host, anchor_name, &elements);
-}
-
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_set_node_dom_paint_facts(arena: *mut c_void, id: NodeSlotId, facts: u8) -> bool {
     assert!(!arena.is_null(), "layout node arena handle is null");
