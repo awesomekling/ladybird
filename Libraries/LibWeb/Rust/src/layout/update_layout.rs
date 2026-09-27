@@ -1142,9 +1142,9 @@ impl LayoutFrame {
 
     /// Runs the frame with the render owner, and asks it `query` about `document` once the frame is over. The steps
     /// that need the document thread (the host steps of each round's style update, the frame's end) run right here,
-    /// as the document thread's own; each style pass of the round and the rest of the round run on the owner, with the
-    /// document's render state, while this thread waits. Nothing joins this thread meanwhile. A round after the first
-    /// that has style for the document thread to run stops the loop, which answers nothing and goes on with
+    /// as the document thread's own; each style transaction of the round and the rest of the round run on the owner,
+    /// with the document's render state, while this thread waits. Nothing joins this thread meanwhile. A round after
+    /// the first that has style for the document thread to run stops the loop, which answers nothing and goes on with
     /// `resumed_after_document_style` once the document has run it.
     ///
     /// # Safety
