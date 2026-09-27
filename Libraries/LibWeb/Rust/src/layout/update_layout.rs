@@ -44,6 +44,9 @@ pub(crate) use main_thread_entries::MainThreadFfiEntry;
 #[repr(C)]
 pub struct FfiLayoutUpdateHostCallbacks {
     pub context: *mut c_void,
+    /// Runs the document's style update as a round after the first starts: container queries make
+    /// style depend on the layout of the round before. The first round's style runs ahead of the
+    /// update.
     pub update_style: unsafe extern "C" fn(*mut c_void),
     pub process_pending_list_item_renumbers: unsafe extern "C" fn(*mut c_void),
     pub process_pending_top_layer_layout_changes: unsafe extern "C" fn(*mut c_void),
@@ -176,8 +179,8 @@ pub struct FfiLayoutUpdateInputs {
     /// (under `LIBWEB_STAGE_OVERLAP=layout`), rather than waiting for it.
     pub may_submit_pass: bool,
     /// Whether the update's first round runs its style pass in the flight that runs its layout,
-    /// rather than on the document thread ahead of it: the document thread submitted the pass
-    /// ahead of the update (see `layout_arena_collect_style_pass_for_flight`).
+    /// which the document thread submitted ahead of the update (see
+    /// `layout_arena_collect_style_pass_for_flight`), rather than having run it ahead of the update.
     pub style_in_flight: bool,
     /// The style nodes of the elements the viewport propagates from, or zero, a relayout of which
     /// the flight does not finish as a partial relayout.
@@ -624,6 +627,18 @@ enum FrameEnd {
     Over(FfiLayoutUpdateEnd),
 }
 
+/// Where a style round's style runs.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum RoundStyle {
+    /// On the document thread, as the round starts: a round after the first.
+    OnDocumentThread,
+    /// On the document thread ahead of the update: the first round's.
+    RanAhead,
+    /// In the flight, as the pass the document thread submitted ahead of the update: the first
+    /// round's.
+    InFlight,
+}
+
 /// The style and layout stabilization loop of one layout update, run as one stage. It holds no
 /// borrow of the stage run it is in: the joins are handed to each step that makes one, so a round
 /// can stop ahead of its full layout pass and go on once the pass has run.
@@ -646,9 +661,8 @@ struct LayoutFrame {
     /// What the frame's tree builds and commits owe the document thread beyond their own joins, in
     /// the order the frame made them, which the next join pays before its work.
     owed_host_halves: Cell<Vec<OwedHostHalf>>,
-    /// Whether the next style round takes the style pass the document thread submitted for the
-    /// flight to run, rather than running style on the document thread.
-    collects_style_pass: bool,
+    /// Where the next style round's style runs.
+    round_style: RoundStyle,
     /// The style pass the first round collected, which the flight runs as the round's style.
     style_pass: Option<crate::css::style::bridge::StylePassJob>,
     /// Whether the frame's first round ran its style in the flight.
@@ -1094,8 +1108,9 @@ impl LayoutFrame {
 
     /// Starts a round on the document thread, with no stage run outstanding: pays what the frame
     /// owes the document thread, then marks the list owners the last build found showing stale
-    /// counters for a layout tree rebuild, runs style and the list item renumbers and top layer
-    /// changes it leaves, and reads the facts after them. When the round lays out, it readies what
+    /// counters for a layout tree rebuild, runs style (unless the first round's ran ahead of the
+    /// update) and the list item renumbers and top layer changes it leaves, and reads the facts
+    /// after them. When the round lays out, it readies what
     /// comes next: the tree build, or the sources of the layout pass when no tree build comes
     /// first. Style is the document's own loop over its elements, and a tree update mark is set on
     /// the DOM node, which widens it to what the node's layout node and its document ask for.
@@ -1118,17 +1133,19 @@ impl LayoutFrame {
         }
         let list_owners_to_rebuild = std::mem::take(&mut self.list_owners_to_rebuild);
         host.rebuild_list_owners_with_stale_item_counters(main_thread, &list_owners_to_rebuild);
-        // The first round's style runs in the flight, as the pass the document thread submitted
-        // ahead of the update. The document only asks for that when the round lays out the tree it
-        // has, which the flight then styles: the round readies no tree build.
-        if std::mem::take(&mut self.collects_style_pass) {
-            debug_assert!(
-                !self.arena().layout_root().is_invalid() && !self.arena().needs_full_layout_tree_update(),
-                "a round whose style runs in the flight lays out the tree it has"
-            );
-            self.style_pass = crate::css::style::bridge::take_style_pass_collected_for_flight();
-        } else {
-            host.update_style(main_thread);
+        // The first round's style is the document's to run ahead of the update, or to submit for the
+        // flight to run. The document only submits it when the round lays out the tree it has, which
+        // the flight then styles: the round readies no tree build.
+        match std::mem::replace(&mut self.round_style, RoundStyle::OnDocumentThread) {
+            RoundStyle::OnDocumentThread => host.update_style(main_thread),
+            RoundStyle::RanAhead => {}
+            RoundStyle::InFlight => {
+                debug_assert!(
+                    !self.arena().layout_root().is_invalid() && !self.arena().needs_full_layout_tree_update(),
+                    "a round whose style runs in the flight lays out the tree it has"
+                );
+                self.style_pass = crate::css::style::bridge::take_style_pass_collected_for_flight();
+            }
         }
         host.process_pending_list_item_renumbers(main_thread);
         host.process_pending_top_layer_layout_changes(main_thread);
@@ -1498,7 +1515,7 @@ unsafe fn make_clock_layout_frame(
             list_owners_to_rebuild: Vec::new(),
             selection: host.read_selection(main_thread),
             owed_host_halves: Cell::default(),
-            collects_style_pass: false,
+            round_style: RoundStyle::OnDocumentThread,
             style_pass: None,
             style_ran_in_flight: false,
         },
@@ -1714,7 +1731,11 @@ impl LayoutPassJob {
             list_owners_to_rebuild: Vec::new(),
             selection: None,
             owed_host_halves: Cell::default(),
-            collects_style_pass: style_in_flight,
+            round_style: if style_in_flight {
+                RoundStyle::InFlight
+            } else {
+                RoundStyle::RanAhead
+            },
             style_pass: None,
             style_ran_in_flight: false,
         };

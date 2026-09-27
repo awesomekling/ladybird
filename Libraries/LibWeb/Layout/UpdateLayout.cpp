@@ -229,12 +229,15 @@ bool Document::update_style_and_layout_once(UpdateLayoutReason reason, Throttled
     //     callbacks): before layout_arena_update_layout returns, or once a submitted pass's frame is taken back.
 
     bool const may_submit_pass = pass_submission != LayoutPassSubmission::Wait;
-    // The first round's style that runs in the flight begins here, ahead of the update: its pass is submitted for the
-    // update to collect, and the rest of the style update is installed as the flight is taken back.
+    // The update's first round's style runs here, ahead of the update. One that runs in the flight begins here: its pass
+    // is submitted for the update to collect, and the rest of the style update is installed as the flight is taken back.
+    // The style of the rounds after the first runs as each of them starts.
     bool const style_in_flight = pass_submission == LayoutPassSubmission::MaySubmitWithStyle
         && Layout::RustFFI::layout_arena_collect_style_pass_for_flight(arena.handle(), may_submit_pass);
     if (style_in_flight)
         submit_style_for_flight();
+    else
+        update_style();
 
     Layout::RustFFI::FfiLayoutUpdateInputs inputs {
         .reason_is_inspect_devtools_layout_data = reason == UpdateLayoutReason::InspectDevToolsLayoutData,
