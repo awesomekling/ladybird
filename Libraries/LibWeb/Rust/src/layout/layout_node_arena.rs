@@ -752,7 +752,7 @@ impl FreedSubtree {
             "a test arena has no host to own image objects"
         );
         for reset in self.paintable_row_resets {
-            reset.invoke_callback_on_main_thread(&main_thread);
+            reset.invoke_callback_on_main_thread(&main_thread, NodeSlotId::INVALID);
         }
         Self::unpin_style_records(
             self.style_engine,
@@ -4050,7 +4050,7 @@ impl LayoutNodeArena {
             }
             HostHandback::PaintableRowReset(reset) => {
                 super::tree_build_seal::note_host_call("paintable_row_reset");
-                reset.invoke_callback_on_main_thread(main_thread);
+                reset.invoke_callback_on_main_thread(main_thread, self.bound_viewport_row());
             }
             HostHandback::ShellStyleChanged {
                 slot,
