@@ -347,6 +347,12 @@ RefPtr<PublishedStyleRecord const> StyleEngine::publish_style_record(StyleDrainS
     return PublishedStyleRecord::adopt(StyleEngineFFI::style_engine_publish_style_record_in_drain(scope, rust_handle(), style_record.value()));
 }
 
+StyleEngineFFI::FfiRecordDemandAnswer StyleEngine::answer_read_demand(StyleNodeID node, u8 pseudo_kind, bool exclude_inline_style, bool targeted, bool read_only, StyleRecordID parent_highlight)
+{
+    auto* layout_node_arena = m_style_computer ? m_style_computer->document().layout_node_arena_if_created() : nullptr;
+    return StyleEngineFFI::style_engine_answer_read_demand(rust_handle(), layout_node_arena ? layout_node_arena->handle() : nullptr, node.value(), pseudo_kind, exclude_inline_style, targeted, read_only, parent_highlight.value());
+}
+
 StyleEngine::SettledAnimationDefinitions StyleEngine::take_settled_animation_definitions(StyleDrainScope const& scope, StyleNodeID node, u8 pseudo_kind)
 {
     auto taken = StyleEngineFFI::style_engine_take_settled_animation_definitions(scope, rust_handle(), node.value(), pseudo_kind);

@@ -236,8 +236,8 @@ pub struct FfiRecordDemandAnswer {
     pub published_record: *const c_void,
 }
 
-// SAFETY: `published_record` is an owned `Arc` of a `PublishedStyleRecord`, which is `Send + Sync`,
-// in raw form: the answer moves the reference with it.
+// SAFETY: `published_record` is null, or an owned `Arc` of a `PublishedStyleRecord`, which is
+// `Send + Sync`, in raw form: the answer moves the reference with it.
 unsafe impl Send for FfiRecordDemandAnswer {}
 
 /// One record slot per synthetic pseudo-element kind in a retried record.
@@ -4707,16 +4707,79 @@ pub unsafe fn replay_republish_record_environment(engine: StyleEngineHandle, nod
         .unwrap_or(0)
 }
 
-/// Answer a style read the host has to answer synchronously, as a CSSOM read does, in a style
-/// stage run of its own: the host has joined the frame in flight, and the engine computes the
-/// answer where it computes every other record. `pseudo_kind == u8::MAX` selects the originating
-/// element.
+/// A style read the host has to answer synchronously, as a CSSOM read of an element whose style is
+/// not up to date does: the record of an element or, for `pseudo_kind != u8::MAX`, of one of its
+/// pseudo-elements, which no style update installs.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct RecordDemand {
+    pub(crate) node: u32,
+    pub(crate) pseudo_kind: u8,
+    pub(crate) exclude_inline_style: bool,
+    pub(crate) targeted: bool,
+    pub(crate) read_only: bool,
+    pub(crate) parent_highlight: u64,
+}
+
+/// The answer to a [`RecordDemand`]: the record, as the value the host reads it through, beside what
+/// the engine says of it.
+pub(crate) struct RecordDemandAnswer {
+    /// The answer as the host takes it, with no record handle of its own.
+    ffi: FfiRecordDemandAnswer,
+    record: Option<std::sync::Arc<super::published_record::PublishedStyleRecord>>,
+}
+
+impl std::fmt::Debug for RecordDemandAnswer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RecordDemandAnswer")
+            .field("style_record", &self.ffi.record.style_record)
+            .field("is_absent", &self.ffi.is_absent)
+            .finish_non_exhaustive()
+    }
+}
+
+impl RecordDemand {
+    /// Answers the demand with `engine`, where the engine computes every other record.
+    pub(crate) fn answer(self, engine: &mut StyleEngine) -> RecordDemandAnswer {
+        let ffi = answer_record_demand_for_host(
+            engine,
+            self.node,
+            self.pseudo_kind,
+            self.exclude_inline_style,
+            self.targeted,
+            self.read_only,
+            self.parent_highlight,
+        );
+        let record = (!ffi.is_absent)
+            .then(|| engine.publish_style_record(ffi.record.style_record))
+            .flatten();
+        RecordDemandAnswer { ffi, record }
+    }
+}
+
+impl RecordDemandAnswer {
+    /// The answer as the host takes it, which owns a reference to the record.
+    fn into_ffi(self) -> FfiRecordDemandAnswer {
+        FfiRecordDemandAnswer {
+            published_record: self
+                .record
+                .map_or(std::ptr::null(), super::published_record::into_handle),
+            ..self.ffi
+        }
+    }
+}
+
+/// Answer a style read the host has to answer synchronously, as a CSSOM read does. The render owner
+/// answers it with the engine of the document's render state, in a round trip after the document's
+/// earlier changes (`Query::ComputedStyle`); where it does not, a style stage run of its own does,
+/// with the frame in flight joined. `pseudo_kind == u8::MAX` selects the originating element.
 ///
 /// # Safety
-/// `engine` must be live.
+/// `engine` must be live, and `layout_arena` the document's live layout arena or null.
 #[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
 pub unsafe extern "C" fn style_engine_answer_read_demand(
     engine: StyleEngineInputHandle,
+    layout_arena: *mut c_void,
     node: u32,
     pseudo_kind: u8,
     exclude_inline_style: bool,
@@ -4724,20 +4787,63 @@ pub unsafe extern "C" fn style_engine_answer_read_demand(
     read_only: bool,
     parent_highlight: u64,
 ) -> FfiRecordDemandAnswer {
-    let engine = unsafe { engine_entrance(engine, "style_engine_answer_read_demand") };
-    abort_on_panic(|| {
-        crate::stage_thread::run_stage(move || {
-            answer_record_demand_for_host(
-                engine,
-                node,
-                pseudo_kind,
-                exclude_inline_style,
-                targeted,
-                read_only,
-                parent_highlight,
+    let demand = RecordDemand {
+        node,
+        pseudo_kind,
+        exclude_inline_style,
+        targeted,
+        read_only,
+        parent_highlight,
+    };
+    // SAFETY: The host passes its document's live layout arena, or null.
+    let document = (!layout_arena.is_null())
+        .then(|| unsafe { crate::layout::ArenaHandle::document_of(layout_arena) })
+        .filter(|document| crate::render_owner::runs_style_of(*document));
+    if let Some(document) = document {
+        // This thread only brings the engine's token home, so that no stage holds the engine while the owner reads
+        // it.
+        engine.home().bring_home("style_engine_answer_read_demand");
+        super::seal::note_engine_call("style_engine_answer_read_demand");
+        // SAFETY: The arena is the document's, and this thread reaches the engine again only once the owner has
+        // answered.
+        let answer = unsafe {
+            crate::render_owner::ask(
+                document,
+                layout_arena,
+                crate::render_owner::Query::ComputedStyle(demand),
             )
-        })
-    })
+        };
+        if let crate::render_owner::Answer::ComputedStyle(Some(answer)) = answer {
+            return answer.into_ffi();
+        }
+    }
+    let engine = unsafe { engine_entrance(engine, "style_engine_answer_read_demand") };
+    abort_on_panic(|| crate::stage_thread::run_stage(move || demand.answer(engine))).into_ffi()
+}
+
+/// Replays a recorded record demand.
+///
+/// # Safety
+/// `engine` must be live.
+pub unsafe fn replay_answer_read_demand(
+    engine: StyleEngineHandle,
+    node: u32,
+    pseudo_kind: u8,
+    exclude_inline_style: bool,
+    targeted: bool,
+    read_only: bool,
+    parent_highlight: u64,
+) -> FfiRecordDemandAnswer {
+    let demand = RecordDemand {
+        node,
+        pseudo_kind,
+        exclude_inline_style,
+        targeted,
+        read_only,
+        parent_highlight,
+    };
+    // The replay compares what the engine answered, and holds none of the records.
+    demand.answer(unsafe { engine.for_replay() }).ffi
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -4788,11 +4894,6 @@ fn answer_record_demand_for_host(
         },
     };
     result.row_facts = engine.style_row_facts(node);
-    if !result.is_absent {
-        result.published_record = engine
-            .publish_style_record(result.record.style_record)
-            .map_or(std::ptr::null(), super::published_record::into_handle);
-    }
     engine.record_boundary_call(EventKind::AnswerRecordDemand, |payload| {
         payload.write_u32(node.raw());
         payload.write_u8(pseudo_kind);

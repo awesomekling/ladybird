@@ -135,6 +135,9 @@ public:
     // The record as a value that owns everything a read of it reads, for the drain to install; null for a record the
     // engine no longer holds. Nothing reads a record through its identity: every read is made through the value.
     [[nodiscard]] RefPtr<PublishedStyleRecord const> publish_style_record(StyleDrainScope const&, StyleRecordID style_record) const;
+    // A style read that has to answer synchronously: the render owner answers it with the document's engine. The
+    // answer owns one reference to the record it names (published_record), which the caller adopts.
+    [[nodiscard]] StyleEngineFFI::FfiRecordDemandAnswer answer_read_demand(StyleNodeID node, u8 pseudo_kind, bool exclude_inline_style, bool targeted, bool read_only, StyleRecordID parent_highlight);
     // The animation definitions an engine-settled row left for the host, taken so that exactly one
     // application drains them. Borrowed until the next row's are taken.
     struct SettledAnimationDefinitions {
@@ -607,7 +610,7 @@ public:
     // it. Settling the published match answer as it answers is settling what a pass would answer.
     StyleEngineFFI::FfiRecordDemandAnswer answer_read_demand(StyleNodeID node, u8 pseudo_kind, bool exclude_inline_style, bool targeted, bool read_only, StyleRecordID parent_highlight) const
     {
-        return StyleEngineFFI::style_engine_answer_read_demand(m_engine.rust_handle(), node.value(), pseudo_kind, exclude_inline_style, targeted, read_only, parent_highlight.value());
+        return m_engine.answer_read_demand(node, pseudo_kind, exclude_inline_style, targeted, read_only, parent_highlight);
     }
     void end_style_record_view_epoch() const { m_engine.end_style_record_view_epoch(); }
 

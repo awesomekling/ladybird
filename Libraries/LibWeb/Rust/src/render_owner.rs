@@ -138,7 +138,19 @@ pub(crate) struct RenderState {
 impl RenderState {
     /// Answers `query` from the state as the units before it left it.
     fn answer(&mut self, query: Query) -> Answer {
-        Answer::of(query, self.arena.arena_mut())
+        match query {
+            Query::ComputedStyle(demand) => {
+                let engine = self.style_engine();
+                if engine.is_null() {
+                    debug_assert!(false, "the owner answers the style reads of a document with an engine");
+                    return Answer::unanswered(query);
+                }
+                // SAFETY: The engine is the document's, and the document thread waits for the answer with the
+                // engine's token home.
+                Answer::ComputedStyle(Some(unsafe { engine.reach_on_owner(|engine| demand.answer(engine)) }))
+            }
+            _ => Answer::of(query, self.arena.arena_mut()),
+        }
     }
 
     /// The document's style engine, which the arena links (null before it links one). The units the owner runs for the
@@ -179,13 +191,20 @@ pub(crate) enum Query {
     },
     /// How many layout passes and tree builds the document's layout has run, for tests.
     LayoutCounts,
+    /// The computed style of an element or one of its pseudo-elements, which a read cannot wait for a style update
+    /// to install: a getComputedStyle() read of an element whose style is not up to date, for one. The owner answers
+    /// the demand with the engine of the document's render state.
+    ComputedStyle(crate::css::style::bridge::RecordDemand),
 }
 
 /// The answer to a [`Query`], of the variant the query asked for.
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug)]
 pub(crate) enum Answer {
     Geometry(FfiGeometryReadAnswer),
     LayoutCounts(LayoutCounts),
+    /// The record the demand answered, as the value the main thread reads it through; none where the owner left the
+    /// demand to the main thread.
+    ComputedStyle(Option<crate::css::style::bridge::RecordDemandAnswer>),
 }
 
 /// How many layout passes and tree builds a document's layout has run.
@@ -202,9 +221,11 @@ impl Answer {
         match query {
             Query::Geometry { .. } => Self::Geometry(FfiGeometryReadAnswer::default()),
             Query::LayoutCounts => Self::LayoutCounts(LayoutCounts::default()),
+            Query::ComputedStyle(_) => Self::ComputedStyle(None),
         }
     }
 
+    /// Answers `query` from `arena` alone. A question the engine answers is left to the main thread.
     fn of(query: Query, arena: &mut LayoutNodeArena) -> Self {
         match query {
             Query::Geometry { node, kind } => Self::Geometry(answer_geometry(arena, node, kind)),
@@ -213,6 +234,7 @@ impl Answer {
                 full_layouts: arena.full_layout_count(),
                 tree_builds: arena.layout_tree_build_stats(),
             }),
+            Query::ComputedStyle(_) => Self::unanswered(query),
         }
     }
 }
