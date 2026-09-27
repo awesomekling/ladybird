@@ -6954,7 +6954,7 @@ bool LocalNavigable::submit_presentation(PendingCompositorFrame& pending_frame)
     // The frame in flight presents what it records, from the recording's ticket. A recording the main thread waited
     // for, or one it took in already, is finished by consume-commit, and so is every frame of the ticket after it.
     auto* recording = pending_frame.recording.ptr();
-    if (recording && (recording->run != Painting::RecordingRun::InSubmittedFrame || !Layout::RustFFI::layout_arena_has_recording_in_flight(recording->arena)))
+    if (recording && (recording->run != Painting::RecordingRun::InSubmittedFrame || !recording->submitted_ticket.is_in_flight()))
         return false;
     auto frame_sink = compositor_context().prepare_to_submit_frame_from_render_side();
     if (!frame_sink)
@@ -6963,7 +6963,7 @@ bool LocalNavigable::submit_presentation(PendingCompositorFrame& pending_frame)
     presentation->recording = recording;
     if (recording) {
         presentation->render_state_generation = Layout::RustFFI::layout_arena_render_state_generation(recording->arena);
-        presentation->recording_ticket = Layout::RustFFI::layout_arena_recording_ticket_for_presentation(recording->arena);
+        presentation->recording_ticket = recording->submitted_ticket.retain_for_presentation();
     }
     presentation->frame_sink = move(frame_sink);
     presentation->is_presented_by_frame_in_flight = true;
@@ -7121,6 +7121,7 @@ static void present_from_flight(void* context, void const* visual_context_tree, 
         .visual_context_tree = tree,
         .cache_mode = Painting::PaintCommandCacheMode::ReadWrite,
         .run = Painting::RecordingRun::InSubmittedFrame,
+        .submitted_ticket = {},
         .surface_clear_color = flight.surface_clear_color,
         .device_viewport_rect = flight.device_viewport_rect,
         .wheel_event_region_state = flight.wheel_event_region_state,
@@ -7344,6 +7345,7 @@ LocalNavigable::FinishedFlightPaint LocalNavigable::finish_flight_paint(DOM::Doc
         .visual_context_tree = document.paint_state().visual_context_tree_without_update(document),
         .cache_mode = Painting::PaintCommandCacheMode::ReadWrite,
         .run = Painting::RecordingRun::InSubmittedFrame,
+        .submitted_ticket = {},
         .surface_clear_color = canvas_background_color,
         .device_viewport_rect = seal->recording.device_viewport_rect,
         .wheel_event_region_state = seal->recording.wheel_event_region_state,

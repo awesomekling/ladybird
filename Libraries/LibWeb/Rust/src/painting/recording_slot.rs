@@ -105,6 +105,11 @@ impl RecordingTicket {
         self.presented_by_frame.store(true, Ordering::Relaxed);
     }
 
+    /// Whether the document took what the recording left in.
+    pub(crate) fn is_taken_in(&self) -> bool {
+        matches!(*self.lock(), TicketState::TakenIn)
+    }
+
     /// On the presentation stage: whether the recording unwound, and left nothing to present.
     pub(crate) fn was_abandoned(&self) -> bool {
         matches!(*self.wait_for_answer(), TicketState::Abandoned)
@@ -264,15 +269,9 @@ impl LayoutNodeArena {
         self.take_in_recording(false);
     }
 
+    #[cfg(test)]
     pub(crate) fn has_recording_in_flight(&self) -> bool {
         self.recording_slot().borrow().in_flight.is_some()
-    }
-
-    /// The ticket of the recording in flight, for the frame's presentation to publish its answer.
-    pub(crate) fn recording_ticket_for_presentation(&self) -> Option<Arc<RecordingTicket>> {
-        let ticket = self.recording_slot().borrow().in_flight.clone()?;
-        ticket.will_be_presented();
-        Some(ticket)
     }
 
     fn take_in_recording(&self, wait: bool) {

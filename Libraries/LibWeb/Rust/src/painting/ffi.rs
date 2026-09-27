@@ -1546,8 +1546,10 @@ impl RecordingJob {
 
 /// Records the document's display list and leaves the recording pending in the arena. With
 /// `run` [`FfiRecordingRun::InSubmittedFrame`], and a frame scheduler that submits recordings, the
-/// recording runs in the submitted frame and this returns before it has; otherwise it runs now, on
-/// the stage thread, while the caller waits for it. The document thread never records itself.
+/// recording runs in the submitted frame and this returns before it has, leaving the ticket it answers
+/// on in `submitted_ticket`, retained for the caller, which learns from it whether the recording is still
+/// in flight; otherwise it runs now, on the stage thread, while the caller waits for it, and
+/// `submitted_ticket` is left null. The document thread never records itself.
 ///
 /// # Safety
 ///
@@ -1555,13 +1557,17 @@ impl RecordingJob {
 /// Input arrays and byte buffers must remain valid and immutable throughout this call;
 /// fonts for enabled overlays must be live `Gfx::Font`s. A submitted recording owns the arena
 /// until the host takes the frame back, and the host keeps the arena alive until then.
+/// `submitted_ticket` must point to writable storage.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_record_display_list(
     arena_handle: *mut c_void,
     viewport: NodeSlotId,
     inputs: crate::painting::host::FfiRecordingInputs,
     run: FfiRecordingRun,
+    submitted_ticket: *mut *const c_void,
 ) -> bool {
+    // SAFETY: Guaranteed by the caller.
+    unsafe { *submitted_ticket = std::ptr::null() };
     crate::layout::main_side_census::note_rendering_update(arena_handle);
     // A recording of the document the frame in flight made (one a main-thread record, such as a display list dump,
     // reaches beside the frame) is the frame's to publish, which the frame's presentation may not, and which a read of
@@ -1616,7 +1622,9 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
         let arena = unsafe { arena_from_handle_mut(arena_handle) };
         let input = recording_stage_input(arena, viewport, recording_inputs.into_owned());
         let (job, ticket) = RecordingJob::new(input, should_paint_overlay, frame_generation);
-        arena.recording().await_recording(ticket);
+        arena.recording().await_recording(ticket.clone());
+        // SAFETY: Guaranteed by the caller.
+        unsafe { *submitted_ticket = std::sync::Arc::into_raw(ticket).cast() };
         crate::stage_thread::submit_recording(arena_handle, move || job.run());
         return true;
     }
@@ -2108,38 +2116,49 @@ pub unsafe extern "C" fn layout_arena_publish_recording_in_frame(
     crate::painting::record::publish::publish_recording(arena, pending, &presentation, &publish)
 }
 
-/// Whether a recording of the arena's document is in flight: submitted, and not taken in yet.
+/// Whether the recording whose ticket `layout_arena_record_display_list` handed the document thread is still in
+/// flight: the document has not taken it in yet. The ticket is what the recording answers on, so this reaches no arena.
 ///
 /// # Safety
 ///
-/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
+/// `ticket` must be a live ticket from `layout_arena_record_display_list`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_has_recording_in_flight(arena: *mut c_void) -> bool {
-    // SAFETY: The caller passes a live handle. This reads only the recording slot, which the recording in flight does
-    // not reach, so it goes through no door that would take the recording in.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.has_recording_in_flight()
+pub unsafe extern "C" fn layout_recording_ticket_is_in_flight(ticket: *const c_void) -> bool {
+    // SAFETY: Guaranteed by the caller.
+    !unsafe { &*ticket.cast::<crate::painting::recording_slot::RecordingTicket>() }.is_taken_in()
 }
 
-/// The ticket of the recording of the arena's document in flight, retained for the frame's
-/// presentation to publish the recording's answer from, or null if none is in flight. The document
-/// takes the answer in once the presentation has published it.
+/// Retains the ticket `ticket` for the frame's presentation, which publishes the recording's answer from it: the
+/// document takes the answer in once the presentation has published it.
 ///
 /// # Safety
 ///
-/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
+/// `ticket` must be a live ticket from `layout_arena_record_display_list`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_recording_ticket_for_presentation(arena: *mut c_void) -> *const c_void {
-    // SAFETY: The caller passes a live handle. This reads only the recording slot, which the recording in flight does
-    // not reach (its job holds no arena), so it goes through no door that would take the recording in.
-    let arena = unsafe { &*arena.cast::<LayoutNodeArena>() };
-    arena
-        .recording_ticket_for_presentation()
-        .map_or(std::ptr::null(), |ticket| std::sync::Arc::into_raw(ticket).cast())
+pub unsafe extern "C" fn layout_recording_ticket_retain_for_presentation(ticket: *const c_void) -> *const c_void {
+    // SAFETY: Guaranteed by the caller.
+    let retained = unsafe { layout_recording_ticket_retain(ticket) };
+    // SAFETY: As above.
+    unsafe { &*retained.cast::<crate::painting::recording_slot::RecordingTicket>() }.will_be_presented();
+    retained
+}
+
+/// Retains `ticket` once more, for another holder to release.
+///
+/// # Safety
+///
+/// `ticket` must be a live ticket from `layout_arena_record_display_list`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_recording_ticket_retain(ticket: *const c_void) -> *const c_void {
+    let ticket = ticket.cast::<crate::painting::recording_slot::RecordingTicket>();
+    // SAFETY: Guaranteed by the caller.
+    unsafe { std::sync::Arc::increment_strong_count(ticket) };
+    ticket.cast()
 }
 
 /// # Safety
 ///
-/// `ticket` must be null or come from `layout_arena_recording_ticket_for_presentation`, released
+/// `ticket` must be null or a retained ticket from `layout_arena_record_display_list`, released
 /// once.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_recording_ticket_release(ticket: *const c_void) {
@@ -2155,7 +2174,7 @@ pub unsafe extern "C" fn layout_recording_ticket_release(ticket: *const c_void) 
 ///
 /// # Safety
 ///
-/// `ticket` must be a live ticket from `layout_arena_recording_ticket_for_presentation`.
+/// `ticket` must be a live ticket from `layout_recording_ticket_retain_for_presentation`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_recording_ticket_was_abandoned(ticket: *const c_void) -> bool {
     // SAFETY: Guaranteed by the caller.
@@ -2177,7 +2196,7 @@ pub struct FfiPresentedRecording {
 ///
 /// # Safety
 ///
-/// `ticket` must be a live ticket from `layout_arena_recording_ticket_for_presentation`, and this
+/// `ticket` must be a live ticket from `layout_recording_ticket_retain_for_presentation`, and this
 /// must run on the presentation stage of the frame in flight; the callbacks in `publish` are called
 /// synchronously with their context, which the host lent that stage. `out` must point to writable
 /// storage.

@@ -71,6 +71,57 @@
 
 namespace Web::Painting {
 
+SubmittedRecordingTicket SubmittedRecordingTicket::adopt(void const* ticket)
+{
+    SubmittedRecordingTicket adopted;
+    adopted.m_ticket = ticket;
+    return adopted;
+}
+
+SubmittedRecordingTicket::SubmittedRecordingTicket(SubmittedRecordingTicket const& other)
+    : m_ticket(other.m_ticket ? Layout::RustFFI::layout_recording_ticket_retain(other.m_ticket) : nullptr)
+{
+}
+
+SubmittedRecordingTicket::SubmittedRecordingTicket(SubmittedRecordingTicket&& other)
+    : m_ticket(exchange(other.m_ticket, nullptr))
+{
+}
+
+SubmittedRecordingTicket& SubmittedRecordingTicket::operator=(SubmittedRecordingTicket const& other)
+{
+    if (this != &other) {
+        SubmittedRecordingTicket copy { other };
+        swap(m_ticket, copy.m_ticket);
+    }
+    return *this;
+}
+
+SubmittedRecordingTicket& SubmittedRecordingTicket::operator=(SubmittedRecordingTicket&& other)
+{
+    if (this != &other) {
+        Layout::RustFFI::layout_recording_ticket_release(m_ticket);
+        m_ticket = exchange(other.m_ticket, nullptr);
+    }
+    return *this;
+}
+
+SubmittedRecordingTicket::~SubmittedRecordingTicket()
+{
+    Layout::RustFFI::layout_recording_ticket_release(m_ticket);
+}
+
+bool SubmittedRecordingTicket::is_in_flight() const
+{
+    return m_ticket && Layout::RustFFI::layout_recording_ticket_is_in_flight(m_ticket);
+}
+
+void const* SubmittedRecordingTicket::retain_for_presentation() const
+{
+    VERIFY(m_ticket);
+    return Layout::RustFFI::layout_recording_ticket_retain_for_presentation(m_ticket);
+}
+
 static_assert(to_underlying(CSS::FontSmoothing::Auto) == to_underlying(Compositing::FontSmoothing::Auto));
 static_assert(to_underlying(CSS::FontSmoothing::None) == to_underlying(Compositing::FontSmoothing::None));
 static_assert(to_underlying(CSS::FontSmoothing::Antialiased) == to_underlying(Compositing::FontSmoothing::Antialiased));
@@ -763,10 +814,12 @@ Optional<PendingDisplayListRecording> begin_rust_display_list_recording(DOM::Doc
     auto visual_context_tree = document.paint_state().visual_context_tree(document);
     auto rust_timer = Core::ElapsedTimer::start_new(Core::TimerType::Precise);
     auto ffi_run = run == RecordingRun::InSubmittedFrame ? Layout::RustFFI::FfiRecordingRun::InSubmittedFrame : Layout::RustFFI::FfiRecordingRun::Now;
-    if (!Layout::RustFFI::layout_arena_record_display_list(arena, viewport_row_slot(document), inputs, ffi_run))
+    void const* ticket = nullptr;
+    if (!Layout::RustFFI::layout_arena_record_display_list(arena, viewport_row_slot(document), inputs, ffi_run, &ticket))
         return {};
     // NB: The render side may still record while the main thread waits, if the frame scheduler does not submit recordings.
-    auto const submitted = Layout::RustFFI::layout_arena_has_recording_in_flight(arena);
+    auto submitted_ticket = SubmittedRecordingTicket::adopt(ticket);
+    auto const submitted = submitted_ticket.is_in_flight();
     if (!submitted)
         HTML::main_thread_event_loop().did_wait_for_recording(current_recording_origin(), rust_timer.elapsed_time().to_nanoseconds());
     return PendingDisplayListRecording {
@@ -776,6 +829,7 @@ Optional<PendingDisplayListRecording> begin_rust_display_list_recording(DOM::Doc
         .visual_context_tree = move(visual_context_tree),
         .cache_mode = cache_mode,
         .run = submitted ? RecordingRun::InSubmittedFrame : RecordingRun::Now,
+        .submitted_ticket = move(submitted_ticket),
         .surface_clear_color = placeholder_display_list.surface_clear_color(),
         .device_viewport_rect = device_viewport_rect,
         .wheel_event_region_state = wheel_event_region_state,
