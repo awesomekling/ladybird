@@ -180,24 +180,18 @@ static StyleNodeID identity_of_shadow_root(DOM::ShadowRoot& shadow_root, StyleEn
         // nothing the engine can enumerate. It is named here rather than where a scope is numbered,
         // because numbering must not mint a place in the tree: a sheet detaching from a scope whose
         // root has already left would otherwise give that root a new identity on its way out.
-        style_engine.publish_input([tree_scope = tree_scope_of(shadow_root), root = shadow_root.style_node_id()](StyleInputScope const& input) {
-            input.engine().set_tree_scope_root(tree_scope, root);
-        });
+        style_engine.record_tree_scope_root(tree_scope_of(shadow_root), shadow_root.style_node_id());
     }
     // A shadow root built from the document's styles rather than its own decides with the author
     // origin from there, which is otherwise bounded by the scope it is attached to.
     if (shadow_root.uses_document_style_sheets()) {
-        style_engine.publish_input([tree_scope = tree_scope_of(shadow_root)](StyleInputScope const& input) {
-            input.engine().set_tree_scope_uses_document_sheets(tree_scope);
-        });
+        style_engine.record_tree_scope_uses_document_sheets(tree_scope_of(shadow_root));
     }
     // The host link is established every time rather than only when the identity is minted, because
     // the two can be asked for in either order: a root whose identity was taken while its host had
     // none would otherwise stay unlinked once the host arrived.
     if (auto host = shadow_root.host(); host && host->style_node_id() != no_style_node) {
-        style_engine.publish_input([host = host->style_node_id(), root = shadow_root.style_node_id()](StyleInputScope const& input) {
-            input.engine().set_shadow_root(host, root);
-        });
+        style_engine.record_shadow_root(host->style_node_id(), shadow_root.style_node_id());
     }
     return shadow_root.style_node_id();
 }
@@ -329,9 +323,7 @@ static void record_element_arrival_delta(DOM::Element& element, StyleEngine& sty
     // and the link is what lets a `:host` or `::slotted()` rule in that tree reach the host instead
     // of the document.
     if (auto shadow_root = element.shadow_root(); shadow_root && shadow_root->style_node_id() != no_style_node) {
-        style_engine.publish_input([host = element.style_node_id(), root = shadow_root->style_node_id()](StyleInputScope const& input) {
-            input.engine().set_shadow_root(host, root);
-        });
+        style_engine.record_shadow_root(element.style_node_id(), shadow_root->style_node_id());
     }
     style_engine.record_tree_delta({
         .node = element.style_node_id().value(),
@@ -540,9 +532,7 @@ static void record_subtree_arrivals(DOM::Document& document, ReadonlySpan<GC::Re
                 auto& shadow_root = as<DOM::ShadowRoot>(*arrival.node);
                 shadow_root.set_style_node_id(identity);
                 style_computer.register_style_node(identity, shadow_root);
-                style_engine.publish_input([tree_scope = arrival.tree_scope, identity](StyleInputScope const& input) {
-                    input.engine().set_tree_scope_root(tree_scope, identity);
-                });
+                style_engine.record_tree_scope_root(arrival.tree_scope, identity);
             }
         }
     }
