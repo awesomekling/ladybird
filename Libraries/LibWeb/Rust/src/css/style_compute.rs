@@ -4226,7 +4226,7 @@ unsafe fn compose_selected_animation_effects(
     }
     let keyframe_input = FfiAnimationKeyframeLonghandInput {
         underlying_longhand_table: input.longhand_table.cast(),
-        style_engine: std::ptr::from_ref(&*engine).cast(),
+        retained_style_state: std::ptr::from_ref::<crate::css::style::RetainedState>(engine).cast(),
         inheritance_parent_style_record: input.inheritance_parent_style_record,
         resolved_properties: resolved.properties.cast(),
         property_count: resolved.count,
@@ -4390,7 +4390,8 @@ pub struct FfiDocumentLonghandInput {
 #[repr(C)]
 pub struct FfiAnimationKeyframeLonghandInput {
     pub underlying_longhand_table: *const ComputedLonghandTable,
-    pub style_engine: *const c_void,
+    /// The retained state of the style engine the inheritance parent record belongs to.
+    pub retained_style_state: *const c_void,
     pub inheritance_parent_style_record: u64,
     pub resolved_properties: *const c_void,
     pub property_count: usize,
@@ -4742,10 +4743,10 @@ impl<'a> HighlightInheritance<'a> {
 }
 
 fn keyframe_parent_snapshot_for_style_record(
-    style_engine: &crate::css::style::StyleEngine,
+    retained_style_state: &crate::css::style::RetainedState,
     style_record: u64,
 ) -> ParentSnapshot<'_> {
-    let mut snapshot = parent_snapshot_for_style_record(style_engine, style_record, None);
+    let mut snapshot = parent_snapshot_for_style_record(retained_style_state, style_record, None);
     snapshot.inherited_value_overlay = snapshot.stored_animated_overlay;
     snapshot
 }
@@ -6947,9 +6948,9 @@ pub unsafe extern "C" fn rust_compute_animation_keyframe_longhands(
     let parent_snapshot = if input.inheritance_parent_style_record == 0 {
         None
     } else {
-        let style_engine = unsafe { &*input.style_engine.cast::<crate::css::style::StyleEngine>() };
+        let retained_style_state = unsafe { &*input.retained_style_state.cast::<crate::css::style::RetainedState>() };
         Some(keyframe_parent_snapshot_for_style_record(
-            style_engine,
+            retained_style_state,
             input.inheritance_parent_style_record,
         ))
     };
