@@ -10,14 +10,12 @@
 #include <AK/NeverDestroyed.h>
 #include <AK/Once.h>
 #include <AK/RWLock.h>
-#include <AK/ScopeGuard.h>
 #include <AK/Singleton.h>
 #include <AK/TemporaryChange.h>
 #include <AK/Time.h>
 #include <AK/WeakPtr.h>
 #include <AK/kmalloc.h>
 #include <LibCore/Event.h>
-#include <LibCore/EventLoop.h>
 #include <LibCore/EventLoopImplementationUnix.h>
 #include <LibCore/EventReceiver.h>
 #include <LibCore/Notifier.h>
@@ -226,14 +224,9 @@ int EventLoopImplementationUnix::exec()
     VERIFY_NOT_REACHED();
 }
 
-// How deep the calling thread is in pump(): an event loop nested in a handler (spin_until()) pumps at a depth above 1.
-static thread_local int s_pump_depth = 0;
-
 size_t EventLoopImplementationUnix::pump(PumpMode mode)
 {
     ScopedAutoreleasePool autorelease_pool;
-    ++s_pump_depth;
-    ScopeGuard leave_pump = [] { --s_pump_depth; };
     static_cast<EventLoopManagerUnix&>(EventLoopManager::the()).wait_for_events(mode);
     return ThreadEventQueue::current().process();
 }
@@ -282,28 +275,6 @@ void EventLoopManagerUnix::wait_for_events(EventLoopImplementation::PumpMode mod
         }
     }
 
-    // The outermost loop of the thread tells its idle observer that it blocks.
-    auto const* idle_observer = s_pump_depth == 1 && (should_wait_forever || timeout > 0) ? idle_observer_for_current_thread() : nullptr;
-    if (idle_observer) {
-        idle_observer->will_block();
-        // What the observer posted or scheduled, the wait below has to see: posting an event does not wake this thread.
-        if (ThreadEventQueue::current().has_pending_events()) {
-            should_wait_forever = false;
-            timeout = 0;
-        } else {
-            auto now = MonotonicTime::now();
-            thread_data.timeouts.absolutize_relative_timeouts(now);
-            if (auto next_timer_expiration = thread_data.timeouts.next_timer_expiration(); next_timer_expiration.has_value()) {
-                auto until_expiration = max(next_timer_expiration.value() - now, AK::Duration::zero());
-                auto timer_timeout = static_cast<i32>(min<i64>(AK::NumericLimits<i32>::max(), until_expiration.to_milliseconds()));
-                if (should_wait_forever || timer_timeout < timeout) {
-                    should_wait_forever = false;
-                    timeout = timer_timeout;
-                }
-            }
-        }
-    }
-
 try_select_again:
     // select() and wait for file system events, calls to wake(), POSIX signals, or timer expirations.
     auto error_or_marked_fd_count = System::poll(thread_data.poll_fds, should_wait_forever ? -1 : timeout);
@@ -315,8 +286,6 @@ try_select_again:
         dbgln("EventLoopImplementationUnix::wait_for_events: {}", error_or_marked_fd_count.error());
         VERIFY_NOT_REACHED();
     }
-    if (idle_observer)
-        idle_observer->did_wake();
 
     // We woke up due to a call to wake() or a POSIX signal.
     // Handle signals and see whether we need to handle events as well.

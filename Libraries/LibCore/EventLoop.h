@@ -139,14 +139,4 @@ private:
 
 CORE_API void deferred_invoke(ESCAPING Function<void()>);
 
-// What a thread learns of its outermost event loop going idle: will_block runs right before it blocks waiting for
-// events, and did_wake right after it wakes, before it handles anything. A nested loop (spin_until()) tells neither.
-// Only the Unix implementation tells it.
-struct EventLoopIdleObserver {
-    void (*will_block)();
-    void (*did_wake)();
-};
-CORE_API void set_idle_observer_for_current_thread(EventLoopIdleObserver const*);
-CORE_API EventLoopIdleObserver const* idle_observer_for_current_thread();
-
 }
