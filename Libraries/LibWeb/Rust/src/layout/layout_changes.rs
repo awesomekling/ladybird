@@ -9,7 +9,7 @@
 //! never reaches the arena itself.
 
 use super::LayoutNodeArena;
-use super::layout_node_arena::LayoutUpdateMarksHandle;
+use super::layout_node_arena::{HostPayment, LayoutUpdateMarksHandle};
 use super::node_data::{CompositorAnimationFrameKind, NodeFlag, NodeSlotId};
 use super::partial_relayout::FfiLayoutTreeUpdateClassification;
 use super::tree_builder::FfiRemovedBoxPlace;
@@ -78,10 +78,10 @@ pub(crate) enum LayoutChange {
         pseudo_kind: u8,
         offset: FfiCssPixelPoint,
     },
-    /// The element took a new identity, and what its pseudo-elements have scrolled to goes with it.
-    MovePseudoElementScrollOffsets {
-        old_generator: StyleNodeID,
-        new_generator: StyleNodeID,
+    /// The DOM node with `old` took `new`, or none: see [`LayoutNodeArena::change_style_node`].
+    StyleNodeChanged {
+        old: StyleNodeID,
+        new: Option<StyleNodeID>,
     },
     /// Whether the node sits in the user agent shadow tree of the focused text control.
     SetIdentityInFocusedTextControl {
@@ -195,10 +195,7 @@ impl LayoutChange {
                 pseudo_kind,
                 offset,
             } => arena.set_pseudo_element_scroll_offset(generator, pseudo_kind, offset),
-            Self::MovePseudoElementScrollOffsets {
-                old_generator,
-                new_generator,
-            } => arena.move_pseudo_element_scroll_offsets(old_generator, new_generator),
+            Self::StyleNodeChanged { old, new } => arena.change_style_node(old, new),
             Self::SetIdentityInFocusedTextControl { node, value } => {
                 arena.set_identity_in_focused_text_control(node, value);
             }
@@ -343,6 +340,46 @@ pub(super) unsafe fn not_taken_in(arena: *mut c_void, seq: ChangeSeq) -> bool {
 pub(super) unsafe fn send_through_marks(marks: LayoutUpdateMarksHandle, change: LayoutChange) {
     // SAFETY: Guaranteed by the caller.
     unsafe { send(marks.arena, change) };
+}
+
+/// A write the main thread waits for the owner to make, as it pays what the write owes the host at once.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum LayoutWrite {
+    /// Takes the layout subtree `root` heads out of the tree, and frees it: every row in it is prepared for leaving the
+    /// tree, and the subtree is detached from its parent, if it has one.
+    DropSubtree(NodeSlotId),
+}
+
+impl LayoutWrite {
+    /// Makes the write, and answers what it owes the host.
+    pub(crate) fn apply(self, arena: &mut LayoutNodeArena) -> HostPayment {
+        match self {
+            Self::DropSubtree(root) => {
+                if !arena.slot_is_live(root) {
+                    return HostPayment::nothing();
+                }
+                arena.release_published_paintable_rows();
+                arena.owed_for(|arena| {
+                    super::layout_node_arena::prepare_subtree_for_detach(arena, root);
+                    super::layout_node_arena::detach_and_free_subtree(arena, root);
+                })
+            }
+        }
+    }
+}
+
+/// Has the owner of the document whose arena `arena` names make `write`, once the frame in flight that owns the arena,
+/// if any, has been taken back, and answers what the write owes the host.
+///
+/// # Safety
+///
+/// `arena` must be a live arena handle on the document thread.
+pub(crate) unsafe fn write(arena: *mut c_void, write: LayoutWrite) -> HostPayment {
+    // SAFETY: Guaranteed by the caller.
+    match unsafe { crate::render_owner::ask_about(arena, Query::Write(write)) } {
+        Answer::Payment(payment) => payment,
+        _ => HostPayment::nothing(),
+    }
 }
 
 /// A question the main thread asks about a document's layout tree.

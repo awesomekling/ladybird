@@ -179,6 +179,10 @@ void RenderInputs::set_needs_full_layout_tree_update(bool value)
 static void apply_style_node_change(Node& node, CSS::StyleNodeID old_style_node, CSS::StyleNodeID new_style_node)
 {
     auto& document = node.document();
+    // The arena names the node it tells about a binding change by identity, so a node changing identity is one the
+    // arena cannot name. Its box-presence bits are re-committed here instead, from the row its old identity reaches,
+    // which the new identity takes as the render owner takes the change in.
+    auto box = new_style_node != 0 ? Painting::BoxSlot::bound_to(document, NodeIdentity::of_style_node(old_style_node)) : Painting::BoxSlot {};
     if (auto* arena = document.layout_arena_handle(); arena && old_style_node != 0) {
         // What the element has scrolled to is keyed by its identity, and goes with it; the element still holds the
         // offset, so it is simply republished.
@@ -189,10 +193,6 @@ static void apply_style_node_change(Node& node, CSS::StyleNodeID old_style_node,
         // including rows of a removed subtree that outlive the disconnection.
         Layout::RustFFI::layout_arena_style_node_changed(arena, old_style_node.value(), new_style_node.value());
     }
-    // The arena names the node it tells about a binding change by identity, so a node changing
-    // identity is one the arena cannot name. Its box-presence bits are re-committed here instead,
-    // from the row its new identity reaches.
-    auto box = Painting::BoxSlot::bound_to(node);
     node.set_box_presence(static_cast<bool>(box), box.has_committed_box());
 }
 
