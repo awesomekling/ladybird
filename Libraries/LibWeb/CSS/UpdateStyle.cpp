@@ -706,27 +706,12 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
     RequiredInvalidationAfterStyleChange transaction_invalidation;
     begin_noting_declaration_changes_during_apply();
     ScopeGuard end_noting_declaration_changes = [] { end_noting_declaration_changes_during_apply(); };
-    // Unstyled descendants of display:none need no record until a targeted read or visibility
-    // change asks for one. SVG resources and existing animations can still consume style while
-    // hidden, so retain their inheritance prerequisites in this batch. An element has animations when
-    // any animation is associated with it, relevant or not: a timeline can make one relevant later,
-    // and the style engine keeps the same rows.
-    HashTable<StyleNodeID> required_in_hidden_subtrees;
     // The effects the batch's rows leave for the host, applied once the whole batch is installed. The
     // explicit-inheritance marks are monotone and a parent applies before its children, so draining
     // them after the batch marks the parent no later than the C++ path does.
     StyleEffectDrain row_effects;
     // The elements whose records an environment move of a row before them republished.
     HashTable<StyleNodeID> republished_nodes;
-    for (auto const& reaction : reactions) {
-        auto element = document.style_computer().element_for_style_node(reaction.style_node);
-        if (!element || (!element->is_svg_element() && !element->has_associated_animations()))
-            continue;
-        for (Optional<DOM::AbstractElement> ancestor = DOM::AbstractElement { *element }; ancestor.has_value(); ancestor = ancestor->element_to_inherit_style_from()) {
-            if (required_in_hidden_subtrees.set(ancestor->element().style_node_id()) == HashSetResult::KeptExistingEntry)
-                break;
-        }
-    }
     {
         for (size_t reaction_index = 0; reaction_index < reactions.size(); ++reaction_index) {
             auto const& published_reaction = reactions[reaction_index];
@@ -813,16 +798,17 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
             if (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::SkippedHidden)
                 continue;
 
-            // The engine skips an unstyled row below a hidden ancestor itself, unless the row keeps its style for an SVG
-            // element or an animated one among the rows of the rest of the pass, which can come in a later wave than this
-            // one and so be missing from the set above. A record the engine computed says it did not skip the row, and the
-            // host installs it rather than leave the engine holding a record the element never received. The host decides
-            // by the set above only for a row it computes itself.
+            // Unstyled descendants of display:none need no record until a targeted read or visibility change asks for one.
+            // SVG resources and existing animations can still consume style while hidden, so the engine keeps the rows they
+            // inherit from, over the rows of the rest of the pass, which can come in a later wave than this one. The engine
+            // skips an unstyled row it does not keep itself: a record it computed says it did not skip the row, and the host
+            // installs it rather than leave the engine holding a record the element never received.
+            bool const kept_in_hidden_subtree = reaction.record_damage & to_underlying(StyleEngineFFI::FfiStyleInvalidationField::KeptInHiddenSubtree);
             bool const engine_computed_record = reaction.new_style_record != 0
                 && (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::Computed
                     || reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::RetriedAfterAncestors
                     || reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::RetriedMaterialization);
-            if (!element->has_style() && !engine_computed_record && !required_in_hidden_subtrees.contains(element->style_node_id())) {
+            if (!element->has_style() && !engine_computed_record && !kept_in_hidden_subtree) {
                 bool hidden = false;
                 for (auto ancestor = DOM::AbstractElement { *element }.element_to_inherit_style_from(); ancestor.has_value(); ancestor = ancestor->element_to_inherit_style_from()) {
                     if (auto const* ancestor_style_record = ancestor->published_style_record()) {

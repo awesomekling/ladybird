@@ -118,6 +118,9 @@ pub enum FfiStyleInvalidationField {
     /// the old record with no counter styles the host would compare, as it was no list item and
     /// its content named no counters.
     DamageIsTotal = 1 << 30,
+    /// The row keeps its style below a hidden ancestor for an SVG element or an animated one among
+    /// the rows of the rest of the pass: the host installs it though it holds no style for it.
+    KeptInHiddenSubtree = 0x8000_0000,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
