@@ -1981,33 +1981,6 @@ pub(crate) fn run_stage_for_test<R: Send>(stage: impl FnOnce() -> R + Send) -> R
     unsafe { run_stage_on(tests::test_thread(), stage) }
 }
 
-/// Has the calling thread hold a stage of the document whose arena is `arena` in flight, which has finished, for a
-/// unit test that stands in for a submitted stage, until [`take_stand_in_stages_for_test`].
-#[cfg(test)]
-pub(crate) fn stand_in_submitted_stage_for_test(arena: *mut c_void) {
-    let (to_caller, from_stage) = channel::<StageOutcome>();
-    let _ = to_caller.send(Ok(()));
-    SUBMITTED.with_borrow_mut(|submitted| {
-        submitted.push(SubmittedStage {
-            label: "test",
-            role: "test",
-            hold_labels: Vec::new(),
-            arena: arena as usize,
-            reply: StageReply {
-                from_stage,
-                outcome: None,
-            },
-            on_taken_back: None,
-            _count: SubmittedStageCount::new(),
-        });
-    });
-}
-
-#[cfg(test)]
-pub(crate) fn take_stand_in_stages_for_test() {
-    SUBMITTED.with_borrow_mut(Vec::clear);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

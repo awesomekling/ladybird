@@ -2366,8 +2366,8 @@ impl Drop for HostKeyframeSets {
 
 /// Gives up the `@keyframes` row of a shadow root's scope, which is on its way out, with the
 /// references to the keyframe sets it names, `sets`, which the engine lets go of through `release`
-/// once the row is gone. It never waits for the engine: a garbage collection's finalizer calls it,
-/// and while a stage holds the engine's token, the row goes once the token is home.
+/// once the row is gone. A garbage collection's finalizer calls it: it waits for the owner, never
+/// for the engine's token.
 ///
 /// # Safety
 /// `engine` must be live; `release` must accept `sets` once, on the main thread.
@@ -2379,25 +2379,35 @@ pub unsafe extern "C" fn style_engine_unpublish_tree_scope_animation_keyframes(
     sets: *mut std::ffi::c_void,
     release: unsafe extern "C" fn(*mut std::ffi::c_void),
 ) {
-    let entry = "style_engine_unpublish_tree_scope_animation_keyframes";
-    super::seal::note_engine_call(entry);
-    let sets = HostKeyframeSets { sets, release };
-    let unpublish = move |engine: &mut super::StyleEngine| {
-        // SAFETY: An empty row names no style value.
-        unsafe {
-            engine.set_tree_scope_animation_keyframes(
-                TreeScopeID(tree_scope),
-                shadow_root_identity,
-                &[],
-                &[],
-                PublishedEffectBuffers::default(),
-            );
-        }
-        engine.count_animation_keyframe_scopes();
-        drop(sets);
-    };
-    // SAFETY: Guaranteed by the caller.
-    unsafe { engine.home().write_or_defer(entry, unpublish) };
+    let _sets = HostKeyframeSets { sets, release };
+    super::owner_calls::ask_from_finalizer(
+        engine.home(),
+        "style_engine_unpublish_tree_scope_animation_keyframes",
+        super::owner_calls::StyleQuery::UnpublishTreeScopeAnimationKeyframes {
+            tree_scope,
+            shadow_root_identity,
+        },
+    );
+}
+
+/// Gives up the `@keyframes` row [`style_engine_unpublish_tree_scope_animation_keyframes`] names,
+/// on the owner.
+pub(crate) fn owner_unpublish_tree_scope_animation_keyframes(
+    engine: &mut super::StyleEngine,
+    tree_scope: u32,
+    shadow_root_identity: usize,
+) {
+    // SAFETY: An empty row names no style value.
+    unsafe {
+        engine.set_tree_scope_animation_keyframes(
+            TreeScopeID(tree_scope),
+            shadow_root_identity,
+            &[],
+            &[],
+            PublishedEffectBuffers::default(),
+        );
+    }
+    engine.count_animation_keyframe_scopes();
 }
 
 impl super::StyleEngine {

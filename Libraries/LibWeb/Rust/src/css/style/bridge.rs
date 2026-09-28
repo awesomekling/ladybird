@@ -2426,9 +2426,39 @@ pub unsafe extern "C" fn style_engine_apply_transaction(
     engine: StyleEngineInputHandle,
     transaction: &FfiStyleInputTransaction,
 ) {
-    let engine = unsafe { engine_entrance(engine, "style_engine_apply_transaction") };
+    let handle = engine.home();
+    let Some(document) = crate::css::style::owner_calls::owning_document(handle) else {
+        // SAFETY: Guaranteed by the caller.
+        crate::css::style::owner_calls::without_owner(handle, "style_engine_apply_transaction", |engine| unsafe {
+            apply_input_transaction_on_document_thread(engine, transaction);
+        });
+        return;
+    };
+    // The input goes to the owner as a change, which it applies before the next unit or query that reaches the
+    // engine. The grant answers the host now: the owner grants the identities after the input, which names none of
+    // them.
     // SAFETY: Guaranteed by the caller.
-    unsafe { apply_input_transaction_on_document_thread(engine, transaction) };
+    let grant = StyleNodeGrant::of(transaction);
+    let input = unsafe { InputForPass::take_from(transaction) };
+    handle.bring_home("style_engine_apply_transaction");
+    super::seal::note_engine_call("style_engine_apply_transaction");
+    crate::render_owner::send_change(
+        engine.through_render_inputs(),
+        document,
+        crate::render_owner::Change::StyleInputs(input),
+    );
+    if !grant.is_empty() {
+        crate::css::style::owner_calls::ask(
+            handle,
+            "style_engine_apply_transaction",
+            crate::css::style::owner_calls::StyleQuery::GrantStyleNodes {
+                elements: grant.elements,
+                element_count: grant.element_count,
+                texts: grant.texts,
+                text_count: grant.text_count,
+            },
+        );
+    }
 }
 
 /// Applies `transaction` to `engine` on the document thread, grant and all, as
@@ -6133,10 +6163,8 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
 ) -> FfiStyleTransactionView {
     // SAFETY: Guaranteed by the caller.
     let install_feedback = unsafe { install_feedback.borrow() };
-    // SAFETY: The host passes its document's live layout arena, or null.
-    let document = (!layout_arena.is_null())
-        .then(|| unsafe { crate::layout::ArenaHandle::document_of(layout_arena) })
-        .filter(|document| crate::render_owner::runs_style_of(*document));
+    // The document whose render state links the engine, which the arena the host passes, if any, is the arena of.
+    let document = crate::css::style::owner_calls::owning_document(engine.home());
     if let Some(document) = document {
         // The owner takes the whole transaction: it begins it with the inputs the host froze, runs its pass and
         // finishes it, and the host reads the answers it left. This thread only brings the engine's token home, so
@@ -6185,30 +6213,27 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
         return view;
     }
     // An engine of no document's render state (one a document never made, as a unit test's) runs its transaction
-    // right here: no owner holds it. A document's engine has render state from its first style transaction on.
-    debug_assert!(
-        layout_arena.is_null(),
-        "a document's style transaction runs on the render owner"
-    );
-    let engine = unsafe { engine_entrance(engine, "style_engine_take_style_transaction") };
-    settle_pseudo_elements_in_next_pass(engine, install_feedback.pseudo_element_settles);
-    // SAFETY: Guaranteed by the caller.
-    if let Some(input) = unsafe { input.as_ref() } {
-        // SAFETY: As above.
-        unsafe { apply_input_transaction_on_document_thread(engine, input) };
-    }
-    record_applied_style_reactions(engine, install_feedback.applied_style_reactions);
-    let Some(root) = StyleNodeID::from_raw(root) else {
-        return FfiStyleTransactionView::default();
-    };
-    // SAFETY: Guaranteed by the caller.
-    unsafe { begin_style_transaction(engine, computation_inputs) };
-    // SAFETY: The host passes its document's live layout arena, or null.
-    let committed_boxes = unsafe { super::animations::CommittedTransformReferenceBoxes::lend(layout_arena) };
-    // The pass samples at the times the host published for this update.
-    let timeline_samples = engine.animation_timeline_samples().clone();
-    let output = run_style_pass(engine, root, committed_boxes, &timeline_samples);
-    finish_style_transaction(engine, root, output).0
+    // right here: no owner holds it.
+    crate::css::style::owner_calls::without_owner(engine.home(), "style_engine_take_style_transaction", |engine| {
+        settle_pseudo_elements_in_next_pass(engine, install_feedback.pseudo_element_settles);
+        // SAFETY: Guaranteed by the caller.
+        if let Some(input) = unsafe { input.as_ref() } {
+            // SAFETY: As above.
+            unsafe { apply_input_transaction_on_document_thread(engine, input) };
+        }
+        record_applied_style_reactions(engine, install_feedback.applied_style_reactions);
+        let Some(root) = StyleNodeID::from_raw(root) else {
+            return FfiStyleTransactionView::default();
+        };
+        // SAFETY: Guaranteed by the caller.
+        unsafe { begin_style_transaction(engine, computation_inputs) };
+        // SAFETY: The host passes its document's live layout arena, or null.
+        let committed_boxes = unsafe { super::animations::CommittedTransformReferenceBoxes::lend(layout_arena) };
+        // The pass samples at the times the host published for this update.
+        let timeline_samples = engine.animation_timeline_samples().clone();
+        let output = run_style_pass(engine, root, committed_boxes, &timeline_samples);
+        finish_style_transaction(engine, root, output).0
+    })
 }
 
 /// A style transaction the render owner runs with the style engine of the document's render state while the document
@@ -6274,6 +6299,11 @@ impl Default for StyleNodeGrant {
 }
 
 impl StyleNodeGrant {
+    /// Whether the host asks for no identity.
+    fn is_empty(&self) -> bool {
+        self.element_count == 0 && self.text_count == 0
+    }
+
     fn of(transaction: &FfiStyleInputTransaction) -> Self {
         Self {
             elements: transaction.element_identity_grant,
@@ -6468,9 +6498,10 @@ pub unsafe extern "C" fn style_engine_submit_style_transaction(
     // A layout frame that runs its first round's style in its flight takes the pass along instead.
     let Some(mut pass) = STYLE_PASS_FOR_FLIGHT.with(|collected| match collected.borrow_mut().as_mut() {
         Some(slot) => {
-            // The frame goes on to read the engine on the document thread before its flight runs the
-            // pass, so the input goes in now.
-            pass.apply_input_on_document_thread(engine);
+            // The frame goes on to read the engine before its flight runs the pass, and each of its reads comes after
+            // the input, which the owner applies first.
+            // SAFETY: As above.
+            unsafe { pass.send_input_to_owner(layout_arena) };
             *slot = Some(pass);
             None
         }
@@ -6578,20 +6609,6 @@ impl PassInput {
 }
 
 impl StylePassJob {
-    /// Applies the pass's input to its engine `engine` on the document thread, before the pass is
-    /// submitted.
-    fn apply_input_on_document_thread(&mut self, engine: StyleEngineHandle) {
-        let PassInput::Here(input, _) = std::mem::replace(&mut self.input, PassInput::None) else {
-            return;
-        };
-        // SAFETY: The pass has not been submitted, so the engine's token is home.
-        let engine = unsafe { engine.enter("style pass input on the document thread") };
-        engine
-            .counters
-            .bump(super::instrumentation::Counter::InputTransactionsAppliedOnDocumentThread);
-        input.apply(engine);
-    }
-
     /// Sends the pass's input to the owner of `layout_arena`'s render state as a change, which the pass applies as its
     /// first step on the owner.
     ///
@@ -6652,35 +6669,28 @@ pub(crate) unsafe fn prepare_style_pass(
     install_feedback: InstallFeedback<'_>,
 ) -> StylePassJob {
     let through_render_inputs = engine.through_render_inputs();
-    let engine = unsafe { engine_entrance(engine, "style_engine_take_style_transaction") };
-    assert!(
+    debug_assert!(
         !layout_arena.is_null(),
         "a submitted style pass is submitted for its document's layout arena"
     );
     let root = StyleNodeID::from_raw(root).expect("a submitted style pass has a root");
-    assert!(
-        engine.host.submitted_style_pass_output.is_none(),
-        "one style pass is in flight at a time"
-    );
     // SAFETY: Guaranteed by the caller.
-    if let Some(transaction) = unsafe { input.as_ref() } {
-        // SAFETY: Guaranteed by the caller.
-        unsafe { StyleNodeGrant::of(transaction).grant(engine) };
-    }
+    let grant = unsafe { input.as_ref() }.map_or_else(StyleNodeGrant::default, StyleNodeGrant::of);
+    // The owner grants the identities, begins the transaction with the inputs the host froze, and takes what the pass
+    // takes along, while this thread waits with them.
+    let prepared = crate::css::style::owner_calls::ask(
+        engine.home(),
+        "style_engine_take_style_transaction",
+        crate::css::style::owner_calls::StyleQuery::PrepareStylePass {
+            computation_inputs,
+            layout_arena,
+            grant,
+        },
+    )
+    .prepared_style_pass();
     // SAFETY: Guaranteed by the caller.
     let input = unsafe { InputForPass::handed_over(input, install_feedback) };
-    engine.computed_group_sets.begin_pass_beside_host_pins();
-    // SAFETY: Guaranteed by the caller.
-    unsafe { begin_style_transaction(engine, computation_inputs) };
-    engine.host.atom_sweep_waits_for_host = true;
-    // The pass never reaches the arena, which the main thread goes on writing beside it: it takes
-    // along the committed boxes of the nodes it may sample against them.
-    // SAFETY: Guaranteed by the caller: no stage owns the arena yet.
-    let snapshot = unsafe {
-        super::animations::CommittedTransformReferenceBoxSnapshot::take(layout_arena, engine.state.animated_nodes())
-    };
-    // It takes along the times the host published for this update as well, which it samples at.
-    let timeline_samples = engine.animation_timeline_samples().clone();
+    let (snapshot, timeline_samples) = *prepared;
     StylePassJob {
         root,
         snapshot,
@@ -6689,6 +6699,47 @@ pub(crate) unsafe fn prepare_style_pass(
             PassInput::Here(Box::new(input), through_render_inputs)
         }),
     }
+}
+
+/// What a submitted style pass takes along from its preparation on the render owner: the committed boxes of the nodes
+/// it may sample, and the times it samples at.
+pub(crate) type PreparedStylePass = Box<(
+    super::animations::CommittedTransformReferenceBoxSnapshot,
+    super::animations::AnimationTimelineSamples,
+)>;
+
+/// Prepares the style pass [`prepare_style_pass`] submits with `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`prepare_style_pass`], with the host's inputs and grant arrays live while the document thread waits.
+pub(crate) unsafe fn owner_prepare_style_pass(
+    engine: &mut StyleEngine,
+    computation_inputs: FfiDocumentStyleComputationInputs,
+    layout_arena: *mut c_void,
+    grant: StyleNodeGrant,
+) -> PreparedStylePass {
+    debug_assert!(
+        engine.host.submitted_style_pass_output.is_none(),
+        "one style pass is in flight at a time"
+    );
+    // A pass left unfinished answers nobody: the one submitted now replaces it.
+    engine.host.submitted_style_pass_output = None;
+    // SAFETY: Guaranteed by the caller.
+    unsafe { grant.grant(engine) };
+    engine.computed_group_sets.begin_pass_beside_host_pins();
+    // SAFETY: Guaranteed by the caller.
+    unsafe { begin_style_transaction(engine, computation_inputs) };
+    engine.host.atom_sweep_waits_for_host = true;
+    // The pass never reaches the arena, which the main thread goes on writing beside it: it takes
+    // along the committed boxes of the nodes it may sample against them.
+    // SAFETY: The owner holds the arena, and the document thread waits.
+    let snapshot = unsafe {
+        super::animations::CommittedTransformReferenceBoxSnapshot::take(layout_arena, engine.state.animated_nodes())
+    };
+    // It takes along the times the host published for this update as well, which it samples at.
+    let timeline_samples = engine.animation_timeline_samples().clone();
+    Box::new((snapshot, timeline_samples))
 }
 
 /// The answers of the style pass [`style_engine_submit_style_transaction`] submitted, once the
@@ -6712,13 +6763,12 @@ pub unsafe extern "C" fn style_engine_finish_submitted_style_transaction(
         !layout_arena.is_null(),
         "a submitted style pass is submitted for its document's layout arena"
     );
-    // SAFETY: Guaranteed by the caller.
-    let document = (!layout_arena.is_null())
-        .then(|| unsafe { crate::layout::ArenaHandle::document_of(layout_arena) })
-        .filter(|document| crate::render_owner::runs_style_of(*document));
-    let Some(document) = document else {
-        let engine = unsafe { engine_entrance(engine, "style_engine_finish_submitted_style_transaction") };
-        return finish_submitted_style_transaction(engine, host_named_atoms_beside_pass).0;
+    let Some(document) = crate::css::style::owner_calls::owning_document(engine.home()) else {
+        return crate::css::style::owner_calls::without_owner(
+            engine.home(),
+            "style_engine_finish_submitted_style_transaction",
+            |engine| finish_submitted_style_transaction(engine, host_named_atoms_beside_pass).0,
+        );
     };
     engine
         .home()
@@ -8228,29 +8278,4 @@ impl FfiStyleHostStep {
 #[unsafe(no_mangle)]
 pub extern "C" fn style_engine_note_host_step(step: FfiStyleHostStep) {
     super::seal::note_engine_call(step.name());
-}
-
-/// Where the main thread enters the engine to write it: waits for a frame in flight that reaches
-/// the engine first (see [`StyleEngineHandle::enter`]), then counts the call for the style stage
-/// seal. Only a handle the document's render inputs gave out enters here.
-///
-/// # Safety
-/// `engine` must name a live engine, and no other borrow of it may be live while the returned one
-/// is used.
-pub(crate) unsafe fn engine_entrance<'a>(engine: StyleEngineInputHandle, entry: &'static str) -> &'a mut StyleEngine {
-    // SAFETY: Guaranteed by the caller.
-    let engine = unsafe { engine.home().enter(entry) };
-    super::seal::note_engine_call(entry);
-    engine
-}
-
-/// Like [`engine_entrance`], for an entrance that reads the engine and writes nothing of it.
-///
-/// # Safety
-/// As for [`engine_entrance`].
-pub(crate) unsafe fn engine_read_entrance<'a>(engine: StyleEngineHandle, entry: &'static str) -> &'a StyleEngine {
-    // SAFETY: Guaranteed by the caller.
-    let engine = unsafe { engine.enter(entry) };
-    super::seal::note_engine_call(entry);
-    engine
 }

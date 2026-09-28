@@ -90,6 +90,11 @@ impl EngineChange {
 pub(crate) enum StyleQuery {
     /// Nothing but the changes before it: the main thread is about to reach the engine itself.
     ApplyChanges,
+    /// Gives up the `@keyframes` row of a shadow root's scope, which is on its way out.
+    UnpublishTreeScopeAnimationKeyframes {
+        tree_scope: u32,
+        shadow_root_identity: usize,
+    },
     /// A read the boundary specification generates.
     Boundary(BoundaryRead),
     /// A style read the host answers synchronously, as a CSSOM read does.
@@ -369,6 +374,13 @@ pub(crate) enum StyleQuery {
     PublishStyleRecord {
         style_record: u64,
     },
+    /// Prepares a style pass the main thread submits: grants the identities its input asks for, begins its
+    /// transaction with the inputs the host froze, and takes what the pass takes along.
+    PrepareStylePass {
+        computation_inputs: super::bridge::FfiDocumentStyleComputationInputs,
+        layout_arena: *mut c_void,
+        grant: super::bridge::StyleNodeGrant,
+    },
 }
 
 /// The answer to a [`StyleQuery`], of the variant the query asks for.
@@ -386,6 +398,7 @@ pub(crate) enum StyleAnswer {
     ContainerEffects(super::bridge::FfiNativeContainerMatchResult),
     TransitionStep(super::bridge::FfiTransitionStepDecidedInPass),
     AnimationDefinitions(super::bridge::FfiSettledAnimationDefinitions),
+    PreparedStylePass(super::bridge::PreparedStylePass),
     RecordDemand(super::bridge::FfiRecordDemandAnswer),
 }
 
@@ -520,6 +533,19 @@ impl StyleAnswer {
         }
     }
 
+    pub(crate) fn prepared_style_pass(self) -> super::bridge::PreparedStylePass {
+        match self {
+            Self::PreparedStylePass(value) => value,
+            _ => {
+                debug_assert!(
+                    false,
+                    "a style pass preparation is answered with what the pass takes along"
+                );
+                Box::default()
+            }
+        }
+    }
+
     pub(crate) fn record_demand(self) -> super::bridge::FfiRecordDemandAnswer {
         match self {
             Self::RecordDemand(value) => value,
@@ -536,6 +562,17 @@ impl StyleQuery {
     fn answer(self, engine: &mut StyleEngine) -> StyleAnswer {
         match self {
             Self::ApplyChanges => StyleAnswer::None,
+            Self::UnpublishTreeScopeAnimationKeyframes {
+                tree_scope,
+                shadow_root_identity,
+            } => {
+                super::animations::owner_unpublish_tree_scope_animation_keyframes(
+                    engine,
+                    tree_scope,
+                    shadow_root_identity,
+                );
+                StyleAnswer::None
+            }
             Self::Boundary(read) => read.answer(engine).into(),
             // A read answered where there is no owner runs as the owner would run it: on the stage thread, whose
             // stack a style computation needs.
@@ -1013,6 +1050,13 @@ impl StyleQuery {
             Self::PublishStyleRecord { style_record } => StyleAnswer::Pointer(
                 crate::css::style::bridge::owner_publish_style_record(engine, style_record),
             ),
+            Self::PrepareStylePass {
+                computation_inputs,
+                layout_arena,
+                grant,
+            } => StyleAnswer::PreparedStylePass(unsafe {
+                super::bridge::owner_prepare_style_pass(engine, computation_inputs, layout_arena, grant)
+            }),
         }
     }
 
@@ -1074,21 +1118,38 @@ impl StyleQueryRef {
 }
 
 /// The document whose render state links `engine`, if its render owner runs its style.
-fn owning_document(engine: StyleEngineHandle) -> Option<DocumentId> {
+pub(crate) fn owning_document(engine: StyleEngineHandle) -> Option<DocumentId> {
     Some(engine.document()).filter(|document| crate::render_owner::runs_style_of(*document))
+}
+
+/// Runs `run` with `engine` on the calling thread, which holds it alone: an engine no document's render state links
+/// (a unit test's, the replay tool's, a document's that has none) has no owner to ask. `entry` names the door the
+/// calling thread took, for the style seal.
+pub(crate) fn without_owner<R>(
+    engine: StyleEngineHandle,
+    entry: &'static str,
+    run: impl FnOnce(&mut StyleEngine) -> R,
+) -> R {
+    debug_assert!(
+        owning_document(engine).is_none(),
+        "the engine of a document's render state is the owner's to reach"
+    );
+    // SAFETY: No owner reaches an engine no document's render state links.
+    let engine = unsafe { engine.enter(entry) };
+    super::seal::note_engine_call(entry);
+    run(engine)
 }
 
 /// Sends `change` to the owner of `engine`'s document, which applies it before the next unit or query that reaches
 /// the engine. `entry` names the door the main thread took, for the style seal.
 pub(crate) fn send(engine: StyleEngineInputHandle, entry: &'static str, change: EngineChange) {
     let handle = engine.home();
-    handle.bring_home(entry);
-    super::seal::note_engine_call(entry);
     let Some(document) = owning_document(handle) else {
-        // SAFETY: No owner reaches an engine no document's render state links: the calling thread holds it alone.
-        change.apply(unsafe { handle.enter(entry) });
+        without_owner(handle, entry, |engine| change.apply(engine));
         return;
     };
+    handle.bring_home(entry);
+    super::seal::note_engine_call(entry);
     crate::render_owner::send_change(
         engine.through_render_inputs(),
         document,
@@ -1099,24 +1160,32 @@ pub(crate) fn send(engine: StyleEngineInputHandle, entry: &'static str, change: 
 /// Asks the owner of `engine`'s document `query`, and waits for the answer, which comes after every change the thread
 /// sent before. `entry` names the door the main thread took, for the style seal.
 pub(crate) fn ask(engine: StyleEngineHandle, entry: &'static str, query: StyleQuery) -> StyleAnswer {
+    let Some(document) = owning_document(engine) else {
+        return without_owner(engine, entry, |engine| query.answer(engine));
+    };
     engine.bring_home(entry);
     super::seal::note_engine_call(entry);
+    ask_document(document, entry, query)
+}
+
+/// Like [`ask`], for a garbage collection's finalizer, which must not wait for the engine's token: the main thread may
+/// hold the loan that would send it home. The owner, which answers, never waits for the main thread.
+pub(crate) fn ask_from_finalizer(engine: StyleEngineHandle, entry: &'static str, query: StyleQuery) -> StyleAnswer {
     let Some(document) = owning_document(engine) else {
-        // SAFETY: No owner reaches an engine no document's render state links: the calling thread holds it alone.
-        return query.answer(unsafe { engine.enter(entry) });
+        return without_owner(engine, entry, |engine| query.answer(engine));
     };
+    super::seal::note_engine_call(entry);
     ask_document(document, entry, query)
 }
 
 /// Like [`ask`], for a read of what a published record holds only, which goes on while the install of the batch a
 /// stage published is still owed.
 pub(crate) fn ask_records(engine: StyleEngineHandle, entry: &'static str, query: StyleQuery) -> StyleAnswer {
+    let Some(document) = owning_document(engine) else {
+        return without_owner(engine, entry, |engine| query.answer(engine));
+    };
     engine.bring_home_to_read_records(entry);
     super::seal::note_engine_call(entry);
-    let Some(document) = owning_document(engine) else {
-        // SAFETY: No owner reaches an engine no document's render state links: the calling thread holds it alone.
-        return query.answer(unsafe { engine.enter(entry) });
-    };
     ask_document(document, entry, query)
 }
 
