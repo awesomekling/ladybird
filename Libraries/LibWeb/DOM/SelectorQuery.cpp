@@ -117,19 +117,36 @@ CSS::SelectorFFI::FfiUtf16View utf16_view_to_ffi(Utf16View view)
 static_assert(sizeof(Utf16FlyString) == sizeof(uintptr_t));
 
 constexpr CSS::SelectorFFI::FfiDomSelectorCallbacks dom_selector_callbacks {
-    .element_names = [](void const* pointer) -> CSS::SelectorFFI::FfiDomElementNames {
+    .element = [](void const* pointer, uintptr_t const* names, size_t name_count, CSS::SelectorFFI::DomAttribute* attributes, size_t capacity) -> CSS::SelectorFFI::FfiDomElement {
         auto const& element = element_from_ffi(pointer);
         auto const& namespace_uri = element.namespace_uri();
         auto const& classes = element.class_names();
+        size_t attribute_count = 0;
+        if (name_count > 0) {
+            ReadonlySpan<uintptr_t> wanted_names { names, name_count };
+            for (auto const& attribute : element.attribute_list()) {
+                auto local_name = attribute.name.local_name().raw_identity();
+                if (!wanted_names.contains_slow(local_name))
+                    continue;
+                if (attribute_count < capacity) {
+                    auto const& attribute_namespace = attribute.name.namespace_();
+                    attributes[attribute_count] = {
+                        .local_name = local_name,
+                        .namespace_uri = attribute_namespace.has_value() && !attribute_namespace->is_empty() ? attribute_namespace->raw_identity() : 0,
+                        .value = utf16_view_to_ffi(attribute.value),
+                    };
+                }
+                ++attribute_count;
+            }
+        }
         return {
             .local_name = element.local_name().raw_identity(),
             .namespace_uri = namespace_uri.has_value() && !namespace_uri->is_empty() ? namespace_uri->raw_identity() : 0,
             .id = element.id().has_value() ? element.id()->raw_identity() : 0,
             .classes = reinterpret_cast<uintptr_t const*>(classes.data()),
             .class_count = classes.size(),
-            .is_html_element_in_html_document = element.is_html_element() && element.document().is_html_document(),
-            .ids_and_classes_ignore_case = element.document().in_quirks_mode(),
-            .is_document_element = &element == element.document().document_element(),
+            .attribute_count = attribute_count,
+            .is_html_element = element.is_html_element(),
         };
     },
     .parent_element = [](void const* element) { return node_to_ffi(element_from_ffi(element).parent_element().ptr()); },
@@ -161,19 +178,6 @@ constexpr CSS::SelectorFFI::FfiDomSelectorCallbacks dom_selector_callbacks {
         }
         return nullptr;
     },
-    .visit_attribute_values = [](void const* pointer, uintptr_t name, bool any_namespace, void* context, bool (*visit)(void*, CSS::SelectorFFI::FfiUtf16View)) {
-        auto const& element = element_from_ffi(pointer);
-        auto local_name = Utf16FlyString::from_raw(name);
-        if (!any_namespace) {
-            auto value = element.get_attribute_ns({}, local_name);
-            return value.has_value() && visit(context, utf16_view_to_ffi(*value));
-        }
-        bool visited = false;
-        element.for_each_attribute([&](QualifiedName attribute_name, Utf16String value) {
-            if (!visited && attribute_name.local_name() == local_name)
-                visited = visit(context, utf16_view_to_ffi(value));
-        });
-        return visited; },
     .id_or_class_equals_ignoring_ascii_case = [](void const* pointer, bool is_class, uintptr_t name_identity) {
         auto const& element = element_from_ffi(pointer);
         auto name = Utf16FlyString::from_raw(name_identity);
@@ -209,12 +213,16 @@ public:
         GC::Ptr<Element const> shadow_host;
         if (auto const* shadow_root = as_if<ShadowRoot>(node.root()))
             shadow_host = shadow_root->host();
+        auto const& document = node.document();
         m_query = {
             .selectors = selectors.data(),
             .selector_count = selectors.size(),
             .callbacks = &dom_selector_callbacks,
             .scope = node_to_ffi(scope),
             .shadow_host = node_to_ffi(shadow_host.ptr()),
+            .document_element = node_to_ffi(document.document_element()),
+            .in_html_document = document.is_html_document(),
+            .ids_and_classes_ignore_case = document.in_quirks_mode(),
         };
     }
 

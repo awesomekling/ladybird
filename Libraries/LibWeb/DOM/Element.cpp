@@ -5066,6 +5066,14 @@ size_t Element::attribute_list_size() const
     return m_attributes ? m_attributes->size() : 0;
 }
 
+ReadonlySpan<Element::Attribute> Element::attribute_list() const
+{
+    synchronize_all_attributes();
+    if (!m_attributes)
+        return {};
+    return m_attributes->span();
+}
+
 CSS::ComputedStyleRecordView Element::computed_style(Optional<CSS::PseudoElement> pseudo_element_type) const
 {
     return CSS::ComputedStyleRecordView { published_style_record(pseudo_element_type) };
