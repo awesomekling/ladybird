@@ -3031,12 +3031,21 @@ impl StyleEngineState {
                 // the host installs the composition after it applies the plan. The host runs a
                 // row's transition step after it installs the composition, as it does after its own
                 // sample.
+                // A row whose plan starts the element's first animations is sampled here too, over the
+                // effects the plan creates: the host creates them as it applies the plan, before it
+                // installs the composition, as it would before its own first sample.
+                let animated = self.retained.computed_group_sets.adjustment_facts(node)
+                    & bridge::element_adjustment_fact::HAS_ANIMATIONS
+                    != 0
+                    || self.retained.nodes_owing_an_animation_sample.contains(&node);
+                let starts_animating = !animated
+                    && self
+                        .retained
+                        .nodes_owing_animation_definitions
+                        .contains_key(&(node, u8::MAX));
                 let animates = engine_computed_delta.is_some()
                     && self.retained.engine_computed_records_pending.contains_key(&node)
-                    && (self.retained.computed_group_sets.adjustment_facts(node)
-                        & bridge::element_adjustment_fact::HAS_ANIMATIONS
-                        != 0
-                        || self.retained.nodes_owing_an_animation_sample.contains(&node));
+                    && (animated || starts_animating);
                 if animates {
                     // A document element this pass settled is not installed yet, and a `rem` the
                     // row resolves reads the record it settled.
@@ -3060,24 +3069,41 @@ impl StyleEngineState {
                     });
                     // What the host's comparison of the move to the composition would ask for,
                     // answered with the composition.
-                    if let Ok(published) = published
-                        && let Some((old_style_record, _)) = engine_computed_delta
-                        && old_style_record.raw() != published.style_record
-                        && self
-                            .retained
-                            .computed_group_sets
-                            .style_record_view(old_style_record.raw())
-                            .is_some()
-                    {
-                        let damage = self.retained.element_record_damage(
+                    if let Ok(published) = published {
+                        let damage = match engine_computed_delta {
+                            Some((old_style_record, _))
+                                if old_style_record.raw() != published.style_record
+                                    && self
+                                        .retained
+                                        .computed_group_sets
+                                        .style_record_view(old_style_record.raw())
+                                        .is_some() =>
+                            {
+                                self.retained.element_record_damage(
+                                    node,
+                                    false,
+                                    old_style_record.raw(),
+                                    published.style_record,
+                                ) | bridge::FfiStyleInvalidationField::EngineComputed as u32
+                            }
+                            _ => 0,
+                        };
+                        self.retained.rows_sampled_in_pass.insert(
                             node,
-                            false,
-                            old_style_record.raw(),
-                            published.style_record,
-                        ) | bridge::FfiStyleInvalidationField::EngineComputed as u32;
-                        self.retained
-                            .rows_sampled_in_pass
-                            .insert(node, engine_sample::SettledRowPublication { damage, ..published });
+                            engine_sample::SettledRowPublication {
+                                damage,
+                                starts_animating,
+                                ..published
+                            },
+                        );
+                        // A keyframe-borne `inherit` on a non-inherited property marks the parent, as
+                        // the host's first sample records it.
+                        if starts_animating
+                            && published.keyframes_inherited_non_inherited_style_groups != 0
+                            && let Some(parent) = self.retained.tree.parent(node)
+                        {
+                            self.retained.note_children_explicitly_inherit(parent);
+                        }
                     }
                 }
                 // A row that owes the whole transition step has it decided here, over the

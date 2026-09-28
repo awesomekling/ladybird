@@ -4250,6 +4250,9 @@ pub struct FfiRowSampledInPass {
     /// The host compares with the record it named as it asked for the sample, or, for a row the
     /// pass sampled, with the record the row moved from.
     pub damage: u32,
+    /// Whether the pass sampled the row for the animations the plan it leaves starts, which the host
+    /// creates as it applies the plan: the first sample of an element that animated nothing before.
+    pub starts_animating: bool,
 }
 
 /// Takes what the pass published for a row whose animations it sampled, so that exactly one
@@ -4646,6 +4649,7 @@ fn sample_record_without_overlay_slot(
         uses_tree_counting_function: sample.uses_tree_counting_function,
         rebuilt_every_group: false,
         damage: 0,
+        starts_animating: false,
     };
     if !engine.animation_overlay_changed(style_record, sample.style.overlay) {
         return Ok(unchanged);
@@ -4812,6 +4816,7 @@ impl FfiRowSampledInPass {
             custom_property_environment_named: false,
             rebuilt_every_group: false,
             damage: 0,
+            starts_animating: false,
         }
     }
 }
@@ -5388,6 +5393,7 @@ fn row_sampled_in_pass(
             custom_property_environment_named: false,
             rebuilt_every_group: published.rebuilt_every_group,
             damage: published.damage,
+            starts_animating: published.starts_animating,
         },
     }
 }
