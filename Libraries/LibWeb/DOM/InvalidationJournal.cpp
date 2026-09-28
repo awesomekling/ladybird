@@ -563,8 +563,10 @@ void InvalidationJournal::drain()
             if (entry.needs_layout_update)
                 m_document.render_inputs_for_write().set_needs_layout_update(box.slot(), entry.layout_reason, entry.layout_propagation);
             if (entry.has_dom_paint_facts) {
-                auto changed = Layout::RustFFI::layout_arena_set_node_dom_paint_facts(box.arena(), box.slot(), entry.dom_paint_facts);
-                if (changed && node)
+                // The owner takes the facts in with its next unit, so whether they changed is not known here: the
+                // node repaints either way.
+                Layout::RustFFI::layout_arena_set_node_dom_paint_facts(box.arena(), box.slot(), entry.dom_paint_facts);
+                if (node)
                     node->set_needs_repaint();
             }
             if (rare && rare->has_canvas_paint_facts) {
