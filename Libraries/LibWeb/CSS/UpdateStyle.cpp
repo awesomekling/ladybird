@@ -241,7 +241,7 @@ StyleEffectDrain::PseudoElementStyleRecords StyleEffectDrain::pseudo_element_sty
 {
     PseudoElementStyleRecords records {};
     element.for_each_synthetic_pseudo_element([&](PseudoElement pseudo_element, auto const&) {
-        records[to_underlying(pseudo_element) - to_underlying(first_synthetic_pseudo_element)] = element.style_record_identity(pseudo_element);
+        records[to_underlying(pseudo_element) - to_underlying(first_synthetic_pseudo_element)] = element.published_style_record(pseudo_element);
     });
     return records;
 }
@@ -257,9 +257,9 @@ void StyleEffectDrain::take_layout_node_style_records(DOM::Document& document)
         auto element = document.style_computer().element_for_style_node(row->style_node);
         if (!element)
             continue;
-        row->style_record = element->style_record_identity();
+        row->style_record = element->published_style_record();
         auto pseudo_element_style_records = pseudo_element_style_records_of(*element);
-        if (any_of(pseudo_element_style_records, [](auto style_record) { return style_record.value() != 0; })) {
+        if (any_of(pseudo_element_style_records, [](auto const& style_record) { return !!style_record; })) {
             VERIFY(m_pseudo_element_style_records.size() < NumericLimits<u32>::max());
             row->pseudo_element_style_records = static_cast<u32>(m_pseudo_element_style_records.size());
             m_pseudo_element_style_records.append(pseudo_element_style_records);
@@ -267,16 +267,7 @@ void StyleEffectDrain::take_layout_node_style_records(DOM::Document& document)
     }
 }
 
-// The style being installed is held by its record; if it is not, the box keeps the style it has.
-static void apply_style_to_box(StyleDrainScope const& scope, Painting::BoxSlot const& box, StyleRecordID style_record)
-{
-    auto published = scope.engine().publish_style_record(scope, style_record);
-    ASSERT(published);
-    if (published)
-        Layout::apply_style_to_box(box, *published);
-}
-
-void StyleEffectDrain::apply_layout_node_style(StyleDrainScope const& scope, DOM::Document& document, StyleNodeID style_node, RequiredInvalidationAfterStyleChange const& invalidation, StyleRecordID style_record, PseudoElementStyleRecords const& pseudo_element_style_records)
+void StyleEffectDrain::apply_layout_node_style(DOM::Document& document, StyleNodeID style_node, RequiredInvalidationAfterStyleChange const& invalidation, PublishedStyleRecord const* style_record, PseudoElementStyleRecords const& pseudo_element_style_records)
 {
     if (invalidation.needs_layout_tree_rebuild())
         return;
@@ -287,21 +278,21 @@ void StyleEffectDrain::apply_layout_node_style(StyleDrainScope const& scope, DOM
     // If we're keeping the layout tree, we can just apply the new style to the existing layout tree.
     auto identity = DOM::NodeIdentity::of_style_node(style_node);
     auto box = Painting::BoxSlot::bound_to(document, identity);
-    ASSERT(!box || style_record.value() != 0);
+    ASSERT(!box || style_record);
     // A flight applied the row's record to the layout nodes and painted after it: the element's box only takes the record
     // into its mirror, and its pseudo-elements' records are the ones they hold. A row whose record or pseudo-element
     // records are others than the flight's is installed here over what the flight did, marks and all.
-    bool const moves_pseudo_element_records = any_of(pseudo_element_style_records, [](auto record) { return record.value() != 0; });
-    auto applied_by_flight = marks_of_flight(arena, style_node, false, style_record);
+    bool const moves_pseudo_element_records = any_of(pseudo_element_style_records, [](auto const& record) { return !!record; });
+    auto applied_by_flight = marks_of_flight(arena, style_node, false, style_record ? style_record->identity() : StyleRecordID {});
     if (applied_by_flight.has_value() && !moves_pseudo_element_records && flight_marks_cover(*applied_by_flight, invalidation)) {
-        if (box && style_record.value() != 0)
-            apply_style_to_box(scope, box, style_record);
+        if (box && style_record)
+            Layout::apply_style_to_box(box, *style_record);
         return;
     }
     (void)marks_of_flight(arena, style_node, true);
     ++s_rows_the_flight_left_to_mark;
-    if (box && style_record.value() != 0) {
-        apply_style_to_box(scope, box, style_record);
+    if (box && style_record) {
+        Layout::apply_style_to_box(box, *style_record);
         if (Painting::has_committed_box(box))
             Painting::repaint_after_style_change(box, invalidation);
     }
@@ -316,12 +307,12 @@ void StyleEffectDrain::apply_layout_node_style(StyleDrainScope const& scope, DOM
     }
 
     for (size_t index = 0; index < pseudo_element_style_records.size(); ++index) {
-        auto pseudo_element_style_record = pseudo_element_style_records[index];
+        auto const& pseudo_element_style_record = pseudo_element_style_records[index];
         if (!pseudo_element_style_record)
             continue;
         auto pseudo_element = static_cast<PseudoElement>(to_underlying(first_synthetic_pseudo_element) + index);
         if (auto pseudo_element_box = Painting::BoxSlot::bound_to(document, identity, pseudo_element)) {
-            apply_style_to_box(scope, pseudo_element_box, pseudo_element_style_record);
+            Layout::apply_style_to_box(pseudo_element_box, *pseudo_element_style_record);
             if (Painting::has_committed_box(pseudo_element_box))
                 Painting::repaint_after_style_change(pseudo_element_box, invalidation);
         }
@@ -339,7 +330,7 @@ void StyleEffectDrain::apply_render_half(StyleDrainScope const& scope, DOM::Docu
             auto const& pseudo_element_style_records = row->pseudo_element_style_records == NumericLimits<u32>::max()
                 ? no_pseudo_element_style_records
                 : m_pseudo_element_style_records[row->pseudo_element_style_records];
-            apply_layout_node_style(scope, document, row->style_node, row->invalidation, *row->style_record, pseudo_element_style_records);
+            apply_layout_node_style(document, row->style_node, row->invalidation, *row->style_record, pseudo_element_style_records);
             continue;
         }
         if (auto const* row = effect.get_pointer<RestoreRowDebts>()) {

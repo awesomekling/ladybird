@@ -1081,6 +1081,9 @@ pub struct HostState {
     /// The records the answer of the last style transaction names, published for the host's drain of it, which the
     /// engine's home takes over as whoever reached the engine for the transaction is done with it.
     pub(super) records_for_drain: Option<Vec<(u64, std::sync::Arc<published_record::PublishedStyleRecord>)>>,
+    /// The records the owner named the host otherwise since whoever reached the engine last was done with it: the
+    /// samples and read demands it answered, which the engine's home takes over with the news.
+    pub(super) records_named: Vec<(u64, std::sync::Arc<published_record::PublishedStyleRecord>)>,
     /// What the owner decided of each pseudo-element row it answered last, with the record the row moved to, which the
     /// engine's home takes over for the host's drain: whether the counter styles the row's generated content names
     /// differ from the ones its box was built with, as a `CONTENT_COUNTER_STYLES_*` answer.

@@ -1743,10 +1743,10 @@ static void note_svg_paint_resource_style_change(Element& element)
 
 // The records the element installed reach its layout nodes in the drain's render half, or at once
 // where no drain takes them.
-static void apply_layout_node_style_after_installation(CSS::StyleDrainScope const& scope, Element& element, CSS::StyleEffectDrain* effect_drain, CSS::RequiredInvalidationAfterStyleChange const& invalidation)
+static void apply_layout_node_style_after_installation(Element& element, CSS::StyleEffectDrain* effect_drain, CSS::RequiredInvalidationAfterStyleChange const& invalidation)
 {
     if (!effect_drain) {
-        element.apply_computed_style_to_layout_node_if_needed(scope, invalidation);
+        element.apply_computed_style_to_layout_node_if_needed(invalidation);
         return;
     }
     note_svg_paint_resource_style_change(element);
@@ -1756,7 +1756,7 @@ static void apply_layout_node_style_after_installation(CSS::StyleDrainScope cons
 CSS::RequiredInvalidationAfterStyleChange Element::install_engine_pseudo_element_records_after_sample(CSS::StyleDrainScope const& scope, bool& did_change_custom_properties, bool old_is_list_item, EnginePseudoElementRecords const* records, CSS::StyleEffectDrain* effect_drain)
 {
     auto invalidation = recompute_pseudo_element_styles(scope, did_change_custom_properties, old_is_list_item, records);
-    apply_layout_node_style_after_installation(scope, *this, effect_drain, with_style_row_counter_style_invalidation(*this, invalidation));
+    apply_layout_node_style_after_installation(*this, effect_drain, with_style_row_counter_style_invalidation(*this, invalidation));
     return invalidation;
 }
 
@@ -1988,10 +1988,10 @@ bool Element::apply_box_presence_change_in_place(SetNeedsLayoutTreeUpdateReason 
     return true;
 }
 
-void Element::apply_computed_style_to_layout_node_if_needed(CSS::StyleDrainScope const& scope, CSS::RequiredInvalidationAfterStyleChange const& invalidation)
+void Element::apply_computed_style_to_layout_node_if_needed(CSS::RequiredInvalidationAfterStyleChange const& invalidation)
 {
     note_svg_paint_resource_style_change(*this);
-    CSS::StyleEffectDrain::apply_layout_node_style(scope, document(), style_node_id(), invalidation, style_record_identity(), CSS::StyleEffectDrain::pseudo_element_style_records_of(*this));
+    CSS::StyleEffectDrain::apply_layout_node_style(document(), style_node_id(), invalidation, published_style_record(), CSS::StyleEffectDrain::pseudo_element_style_records_of(*this));
 }
 
 void Element::record_style_query_custom_property_reference(Optional<CSS::PseudoElement> pseudo_element, Utf16FlyString const& name)
@@ -2290,7 +2290,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
         if (!CSS::deferring_engine_pseudo_installation())
             invalidation |= recompute_pseudo_element_styles(scope, did_change_custom_properties, false, &pseudo_element_records, pseudo_element_damages);
         publish_custom_property_names(move(custom_property_environment));
-        apply_layout_node_style_after_installation(scope, *this, effect_drain, invalidation);
+        apply_layout_node_style_after_installation(*this, effect_drain, invalidation);
         return invalidation;
     }
     // The engine derives records this way only when the element's animation names are exactly what
@@ -2377,7 +2377,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
     if (new_style_record != old_style_record || did_change_custom_properties)
         invalidate_descendant_styles_depending_on_style_container_query();
     if (comparison == EngineRecordComparison::AtInstallation) {
-        apply_layout_node_style_after_installation(scope, *this, effect_drain, with_style_row_counter_style_invalidation(*this, result.invalidation));
+        apply_layout_node_style_after_installation(*this, effect_drain, with_style_row_counter_style_invalidation(*this, result.invalidation));
     }
     return result.invalidation;
 }
@@ -2403,7 +2403,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::compare_engine_computed_style
             document().style_invalidation_counters().element_computed_style_changes++;
         invalidation |= result.invalidation;
     }
-    apply_layout_node_style_after_installation(scope, *this, effect_drain, with_style_row_counter_style_invalidation(*this, invalidation));
+    apply_layout_node_style_after_installation(*this, effect_drain, with_style_row_counter_style_invalidation(*this, invalidation));
     return invalidation;
 }
 
