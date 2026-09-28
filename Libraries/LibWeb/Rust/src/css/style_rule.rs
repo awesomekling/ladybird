@@ -145,7 +145,7 @@ mod tests {
 
         let mut declarations = style.declarations.clone();
         assert!(declarations.remove(property_id::WIDTH));
-        unsafe extern "C" fn notify(_: *mut c_void, _: u32) {}
+        unsafe extern "C" fn notify(_: *mut c_void) {}
         unsafe {
             style_engine_native_rule_declarations_changed(
                 engine.input_handle(),

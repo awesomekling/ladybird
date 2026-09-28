@@ -292,9 +292,9 @@ mod tests {
                 &[],
             )
         };
-        let mut notifications = Vec::<u32>::new();
-        unsafe extern "C" fn notify(context: *mut std::ffi::c_void, rule: u32) {
-            unsafe { &mut *context.cast::<Vec<u32>>() }.push(rule);
+        let mut notifications = 0_usize;
+        unsafe extern "C" fn notify(context: *mut std::ffi::c_void) {
+            *unsafe { &mut *context.cast::<usize>() } += 1;
         }
         let initial = engine.engine().current_rule_version(id).declaration_block;
         unsafe {
@@ -319,7 +319,7 @@ mod tests {
         }
         let second = engine.engine().current_rule_version(id).declaration_block;
         assert_ne!(first, second);
-        assert_eq!(notifications, [id.0 + 1, id.0 + 1]);
+        assert_eq!(notifications, 2);
         rust_rule_list_clear(children);
         unsafe {
             style_engine_native_rule_declarations_changed(
@@ -330,7 +330,7 @@ mod tests {
             );
         }
         assert_eq!(engine.engine().current_rule_version(id).declaration_block, second);
-        assert_eq!(notifications.len(), 2);
+        assert_eq!(notifications, 2);
     }
 
     #[test]

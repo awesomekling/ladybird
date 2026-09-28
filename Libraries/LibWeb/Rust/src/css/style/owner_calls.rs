@@ -74,6 +74,8 @@ pub(crate) enum EngineChange {
     /// The host took the transition step the pass decided for an element's row, or for its synthetic pseudo-element
     /// of `pseudo_kind`.
     TransitionStepTakenByHost { node: StyleNodeID, pseudo_kind: Option<u8> },
+    /// The rules the main thread compiled of a sheet, and the selectors it replaced, which the engine publishes.
+    CompileRules(Box<crate::css::rule::compilation::CompiledRules>),
     /// The native rules of `identities` left their sheet, in the order the engine removes them: each with what
     /// removing the ones before it left, where it still holds it.
     RemoveNativeRules(Box<[u64]>),
@@ -269,6 +271,7 @@ impl EngineChange {
                 let added = engine.add_sheet(object, origin);
                 debug_assert!(added == sheet, "the engine numbers its sheets as the main thread does");
             }
+            Self::CompileRules(compiled) => compiled.publish(engine),
             Self::RemoveNativeRules(identities) => {
                 for identity in identities {
                     if let Some(rule) = engine.native_rule_id(identity) {
@@ -495,8 +498,10 @@ pub(crate) enum StyleQuery {
     },
     /// Removes the native rules of `count` identities in order, and writes the engine id plus one each had as it went,
     /// or 0 for one gone already.
-    /// Compiles a sheet's rules into the engine, or replaces their selectors, as the walk says.
-    Compile(crate::css::rule::compilation::OwnerCompilation),
+    /// The engine's id of the native rule of `identity` plus one, or zero where it holds none.
+    NativeRuleId {
+        identity: u64,
+    },
     TakePseudoElementEnvironmentNamedInSettle {
         node: u32,
         pseudo_kind: u8,
@@ -962,10 +967,8 @@ impl StyleQuery {
                 unsafe { super::bridge::owner_record_benchmark_marker(engine, name, length, is_ascii) };
                 StyleAnswer::None
             }
-            Self::Compile(compilation) => {
-                // SAFETY: The main thread waits for the answer, keeping what the walk points at live.
-                unsafe { compilation.run(engine) };
-                StyleAnswer::None
+            Self::NativeRuleId { identity } => {
+                StyleAnswer::U32(engine.native_rule_id(identity).map_or(0, |id| id.0 + 1))
             }
             Self::TakePseudoElementEnvironmentNamedInSettle { node, pseudo_kind } => StyleAnswer::Bool(unsafe {
                 crate::css::style::bridge::owner_take_pseudo_element_environment_named_in_settle(

@@ -4811,8 +4811,8 @@ pub(crate) struct HomeAnswers {
     pub(crate) deferred_inputs: DeferredInputs,
     /// The custom-property environments elements and their synthetic pseudo-elements hold.
     pub(crate) environments: HeldEnvironments,
-    /// The engine's id of each native rule it holds, by the rule's identity.
-    rule_ids: super::native_rules::NativeRuleIdentities,
+    /// The native rules the engine holds, by identity, each with its id where the engine has published it.
+    rules: HashMap<u64, Option<RuleID>>,
     /// How many sheets the main thread added.
     sheets: u32,
     /// The elements with anchor names registered.
@@ -5158,9 +5158,14 @@ impl HomeAnswers {
             StyleChange::Engine(EngineChange::TransitionStepTakenByHost { node, pseudo_kind }) => {
                 self.transition_steps.forget(*node, *pseudo_kind);
             }
+            StyleChange::Engine(EngineChange::CompileRules(compiled)) => {
+                for identity in compiled.compiled_identities() {
+                    self.rules.insert(identity, None);
+                }
+            }
             StyleChange::Engine(EngineChange::RemoveNativeRules(identities)) => {
                 for identity in identities {
-                    self.rule_ids.remove(identity);
+                    self.rules.remove(identity);
                 }
             }
             _ => self.deferred_inputs.follow_sent(change, leaves),
@@ -5191,20 +5196,18 @@ impl HomeAnswers {
         }
         for (identity, id) in news.rule_ids {
             match id {
-                Some(id) => self.rule_ids.insert(identity, id),
-                None => {
-                    self.rule_ids.remove(&identity);
-                }
-            }
+                Some(id) => self.rules.insert(identity, Some(id)),
+                None => self.rules.remove(&identity),
+            };
         }
         if let Some(steps) = news.transition_steps {
             self.transition_steps.adopt(steps);
         }
     }
 
-    /// The engine's id of the native rule of `identity` plus one, or zero where it holds none.
-    fn rule_id(&self, identity: u64) -> u32 {
-        self.rule_ids.get(&identity).map_or(0, |id| id.0 + 1)
+    /// Whether the engine holds the native rule of `identity`, once it has applied what the main thread sent.
+    pub(crate) fn holds_rule(&self, identity: u64) -> bool {
+        self.rules.contains_key(&identity)
     }
 
     /// Whether an element has anchor names registered.
@@ -6125,9 +6128,20 @@ pub unsafe extern "C" fn style_engine_add_sheet(
 /// Engine must be live.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_native_rule_id(engine: StyleEngineHandle, identity: u64) -> u32 {
-    engine.bring_home("style_engine_native_rule_id");
-    // SAFETY: The engine is home.
-    unsafe { engine.answers() }.rule_id(identity)
+    const ENTRY: &str = "style_engine_native_rule_id";
+    engine.bring_home(ENTRY);
+    // SAFETY: On the main thread.
+    match unsafe { engine.answers() }.rules.get(&identity) {
+        None => 0,
+        Some(Some(id)) => id.0 + 1,
+        // The engine has not published the rule the main thread compiled yet: it does now.
+        Some(None) => crate::css::style::owner_calls::ask(
+            engine,
+            ENTRY,
+            crate::css::style::owner_calls::StyleQuery::NativeRuleId { identity },
+        )
+        .u32(),
+    }
 }
 
 /// Publish a native declaration edit through its owning rule and return whether it declares
@@ -6141,7 +6155,7 @@ pub unsafe extern "C" fn style_engine_native_rule_declarations_changed(
     engine: StyleEngineInputHandle,
     rule: *const c_void,
     context: *mut c_void,
-    notify: unsafe extern "C" fn(*mut c_void, u32),
+    notify: unsafe extern "C" fn(*mut c_void),
 ) -> bool {
     const ENTRY: &str = "style_engine_native_rule_declarations_changed";
     let (identity, declarations) = {
@@ -6152,8 +6166,8 @@ pub unsafe extern "C" fn style_engine_native_rule_declarations_changed(
         (identity, rule.cascade_declarations())
     };
     engine.home().bring_home(ENTRY);
-    // SAFETY: The engine is home.
-    let rule = unsafe { engine.home().answers() }.rule_id(identity);
+    // SAFETY: On the main thread.
+    let holds = unsafe { engine.home().answers() }.holds_rule(identity);
     let declares_transitions = declarations.as_ref().is_some_and(|declarations| {
         declarations.properties.iter().any(|declaration| {
             crate::css::property_metadata::property_defines_a_css_transition(declaration.property_id)
@@ -6165,12 +6179,12 @@ pub unsafe extern "C" fn style_engine_native_rule_declarations_changed(
         ENTRY,
         crate::css::style::owner_calls::EngineChange::RuleDeclarationsChanged { identity, declarations },
     );
-    if rule == 0 {
+    if !holds {
         return false;
     }
     // The host's notification reaches no engine: it moves the document's style environment version on.
     super::seal::note_host_call("native_rule_declarations_changed.notify");
-    unsafe { notify(context, rule) };
+    unsafe { notify(context) };
     declares_transitions
 }
 
@@ -6196,7 +6210,8 @@ pub(crate) fn owner_rule_declarations_changed(
     }
 }
 
-/// Find the next compiled rule after an inserted native subtree, without creating CSSOM objects.
+/// The identity of the next rule the engine holds after an inserted native subtree, or zero, without creating CSSOM
+/// objects.
 ///
 /// # Safety
 /// Engine and sheet must be live native allocations.
@@ -6205,13 +6220,13 @@ pub unsafe extern "C" fn style_engine_native_rule_successor(
     engine: StyleEngineHandle,
     sheet: *const c_void,
     identity: u64,
-) -> u32 {
+) -> u64 {
     engine.bring_home("style_engine_native_rule_successor");
-    // SAFETY: The engine is home.
+    // SAFETY: On the main thread.
     let answers = unsafe { engine.answers() };
     // SAFETY: Guaranteed by the caller.
     let sheet = unsafe { &*sheet.cast::<crate::css::style_sheet::NativeStyleSheet>() };
-    crate::css::rule::mutation::successor(sheet, identity, |identity| answers.rule_id(identity))
+    crate::css::rule::mutation::successor(sheet, identity, |identity| answers.holds_rule(identity))
 }
 
 /// Retire a native subtree, with host callbacks only for document and cascade-cache notifications.

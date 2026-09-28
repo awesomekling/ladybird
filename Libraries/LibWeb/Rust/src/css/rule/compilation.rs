@@ -14,7 +14,8 @@ use std::ffi::c_void;
 use std::rc::Rc;
 
 mod publication;
-use publication::{NativeCompilationResult, NativeStylePublication, Publication, SelectorInputs};
+pub(crate) use publication::CompiledRules;
+use publication::{NativeCompilationResult, NativeStylePublication, Planner, SelectorInputs};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -164,7 +165,7 @@ unsafe fn visit_rule(
     context: &CompilationContext,
     environment: MediaEnvironment<'_>,
     callbacks: &NativeCompilationCallbacks,
-    mut publication: Option<&mut Publication<'_>>,
+    mut publication: Option<&mut Planner>,
 ) {
     let selectors = publication
         .is_some()
@@ -178,7 +179,7 @@ unsafe fn visit_rule(
     }
     let result = publication
         .as_deref_mut()
-        .map_or_else(NativeCompilationResult::default, |publication| unsafe {
+        .map_or_else(NativeCompilationResult::default, |publication| {
             publication.compile(rule, sheet, context, selectors.as_deref())
         });
     if !unsafe {
@@ -238,7 +239,7 @@ unsafe fn visit_list(
     context: &CompilationContext,
     environment: MediaEnvironment<'_>,
     callbacks: &NativeCompilationCallbacks,
-    mut publication: Option<&mut Publication<'_>>,
+    mut publication: Option<&mut Planner>,
 ) {
     let _ = list.visit_rules(&mut |rule| {
         unsafe {
@@ -327,10 +328,9 @@ pub unsafe extern "C" fn rust_style_sheet_visit_compilation(
 /// Compile a native stylesheet or inserted subtree into its document's style program.
 /// Host callbacks receive completed rule identities, not instructions to compile individual rules.
 ///
-/// The main thread walks the rules first, and the host answers what the walk asks of it. The render owner then walks
-/// them again with those answers, and compiles and publishes each rule into the engine it owns. The host hears of each
-/// rule the owner's walk visited, with what it published, once the owner is done: its `visit_rule` must answer true,
-/// as the owner's walk descends into every rule's children.
+/// The main thread walks the rules once, with the host's answers, and plans what the engine publishes of each: the
+/// host hears of each rule as the walk visits it, and the render owner publishes the plan into the engine it owns as
+/// it applies the change that carries it, with the changes the main thread sent before.
 ///
 /// # Safety
 /// The graph and callback requirements of rust_style_sheet_visit_compilation apply. Publication
@@ -344,39 +344,24 @@ pub unsafe extern "C" fn rust_style_sheet_compile(
     callbacks: &NativeCompilationCallbacks,
     publication: &NativeStylePublication,
 ) {
-    let mut answers = HostAnswers::default();
+    let mut planner = Planner::new(publication.sheet, publication.before);
     unsafe {
-        answers.record(callbacks, |recording| {
-            visit_compilation(
-                sheet,
-                rule_identity,
-                NativeCompilationPurpose::Rules,
-                source,
-                environment.borrow(),
-                recording,
-                None,
-            );
-        });
-    }
-    crate::css::style::owner_calls::ask(
-        publication.engine,
-        "rust_style_sheet_compile",
-        crate::css::style::owner_calls::StyleQuery::Compile(OwnerCompilation {
+        visit_compilation(
             sheet,
             rule_identity,
-            purpose: NativeCompilationPurpose::Rules,
+            NativeCompilationPurpose::Rules,
             source,
-            environment,
-            publication: *publication,
-            answers: &raw mut answers,
-        }),
-    );
-    unsafe { answers.tell_host(callbacks) };
+            environment.borrow(),
+            callbacks,
+            Some(&mut planner),
+        );
+    }
+    send_plan(publication.engine, "rust_style_sheet_compile", planner);
 }
 
 /// Update the selectors of a style rule and its native descendants without materializing CSSOM.
 ///
-/// The main thread and the render owner walk the rules as for rust_style_sheet_compile.
+/// The main thread walks and plans the rules as for rust_style_sheet_compile.
 ///
 /// # Safety
 /// The graph, callback, and publication requirements of rust_style_sheet_compile apply.
@@ -389,31 +374,37 @@ pub unsafe extern "C" fn rust_style_sheet_replace_selectors(
     callbacks: &NativeCompilationCallbacks,
     publication: &NativeStylePublication,
 ) {
-    let mut answers = HostAnswers::default();
+    let engine = publication.engine;
+    let mut planner = Planner::new(publication.sheet, publication.before);
+    // SAFETY: On the main thread, which borrows its answers only for the call.
+    let holds = |identity| unsafe { engine.home().answers() }.holds_rule(identity);
     unsafe {
-        answers.record(callbacks, |recording| {
-            replace_selectors(sheet, rule_identity, source, environment.borrow(), recording, None);
-        });
-    }
-    crate::css::style::owner_calls::ask(
-        publication.engine,
-        "rust_style_sheet_replace_selectors",
-        crate::css::style::owner_calls::StyleQuery::Compile(OwnerCompilation {
+        replace_selectors(
             sheet,
             rule_identity,
-            purpose: NativeCompilationPurpose::Selectors,
             source,
-            environment,
-            publication: *publication,
-            answers: &raw mut answers,
-        }),
-    );
-    unsafe { answers.tell_host(callbacks) };
+            environment.borrow(),
+            callbacks,
+            &mut planner,
+            &holds,
+        );
+    }
+    send_plan(engine, "rust_style_sheet_replace_selectors", planner);
 }
 
-/// Replaces the selectors of the rule of `rule_identity` and its descendants with `publication`. Without one, the walk
-/// only asks the host what the walk with one asks it, whichever rules the engine holds: it visits the subtree of every
-/// rule whose selectors change, which the walk with one visits only for a rule the engine did not hold.
+/// Sends the owner of `engine` what `planner` planned, if anything. `entry` names the door the main thread took.
+fn send_plan(engine: crate::css::style::StyleEngineInputHandle, entry: &'static str, planner: Planner) {
+    if let Some(compiled) = planner.into_compiled_rules() {
+        crate::css::style::owner_calls::send(
+            engine,
+            entry,
+            crate::css::style::owner_calls::EngineChange::CompileRules(Box::new(compiled)),
+        );
+    }
+}
+
+/// Plans with `planner` the new selectors of the rule of `rule_identity` and its descendants, where the engine
+/// `holds` them, and compiles the subtree of each it does not.
 ///
 /// # Safety
 /// As for rust_style_sheet_replace_selectors.
@@ -423,7 +414,8 @@ unsafe fn replace_selectors(
     source: *const c_void,
     environment: MediaEnvironment<'_>,
     callbacks: &NativeCompilationCallbacks,
-    mut publication: Option<&mut Publication<'_>>,
+    planner: &mut Planner,
+    holds: &dyn Fn(u64) -> bool,
 ) {
     let mut path = Vec::new();
     if !find_rule_path(sheet.rules(), sheet, rule_identity, &mut path) {
@@ -443,7 +435,7 @@ unsafe fn replace_selectors(
                 target_source,
                 environment,
                 callbacks,
-                publication.is_some(),
+                true,
                 None,
             )
         };
@@ -458,10 +450,7 @@ unsafe fn replace_selectors(
     let mut pending = vec![(target, context)];
     let mut affected = Vec::new();
     while let Some((rule, context)) = pending.pop() {
-        let selectors = publication
-            .is_some()
-            .then(|| unsafe { context.selectors.matching_selectors(RuleRef::Materialized(&rule)) })
-            .flatten();
+        let selectors = unsafe { context.selectors.matching_selectors(RuleRef::Materialized(&rule)) };
         if has_compiled_children(RuleRef::Materialized(&rule))
             && let Some(children) = &rule.children
         {
@@ -471,7 +460,7 @@ unsafe fn replace_selectors(
                     target_source,
                     environment,
                     callbacks,
-                    publication.is_some(),
+                    true,
                     selectors.clone(),
                 )
             };
@@ -491,42 +480,19 @@ unsafe fn replace_selectors(
         }
     }
     for (rule, context, selectors) in affected {
-        let Some(publication) = publication.as_deref_mut() else {
-            // Whether the engine holds the rule is the owner's to know: the walk asks the host what compiling the
-            // rule's subtree anew would.
-            unsafe {
-                visit_compilation(
-                    sheet,
-                    rule.identity,
-                    NativeCompilationPurpose::Rules,
-                    source,
-                    environment,
-                    callbacks,
-                    None,
-                );
-            }
-            continue;
-        };
-        if publication.engine.native_rule_id(rule.identity).is_some() {
-            debug_assert!(
-                selectors.is_some(),
-                "a walk with a publication binds each style rule's selectors"
-            );
+        if holds(rule.identity) || planner.compiles(rule.identity) {
+            debug_assert!(selectors.is_some(), "the walk binds each style rule's selectors");
             if let Some(selectors) = &selectors {
-                publication.replace_selectors(RuleRef::Materialized(&rule), target_sheet, &context, selectors);
+                planner.replace_selectors(RuleRef::Materialized(&rule), target_sheet, &context, selectors);
             }
             continue;
         }
         // A previously empty selector list may become matchable. Publish that newly active
         // subtree with its current conditions and source-order position.
-        let before_rule = crate::css::rule::mutation::successor(sheet, rule.identity, |identity| {
-            publication.engine.native_rule_id(identity).map_or(0, |id| id.0 + 1)
+        let before = crate::css::rule::mutation::successor(sheet, rule.identity, |identity| {
+            holds(identity) || planner.compiles(identity)
         });
-        let mut publication = Publication {
-            engine: &mut *publication.engine,
-            sheet: publication.sheet,
-            before_rule,
-        };
+        let before = std::mem::replace(&mut planner.before, before);
         unsafe {
             visit_compilation(
                 sheet,
@@ -535,9 +501,10 @@ unsafe fn replace_selectors(
                 source,
                 environment,
                 callbacks,
-                Some(&mut publication),
+                Some(&mut *planner),
             );
         }
+        planner.before = before;
     }
 }
 
@@ -548,7 +515,7 @@ unsafe fn visit_compilation(
     source: *const c_void,
     environment: MediaEnvironment<'_>,
     callbacks: &NativeCompilationCallbacks,
-    mut publication: Option<&mut Publication<'_>>,
+    mut publication: Option<&mut Planner>,
 ) {
     let context = CompilationContext {
         purpose,
@@ -580,7 +547,7 @@ unsafe fn visit_compilation(
         context: &CompilationContext,
         environment: MediaEnvironment<'_>,
         callbacks: &NativeCompilationCallbacks,
-        mut publication: Option<&mut Publication<'_>>,
+        mut publication: Option<&mut Planner>,
     ) -> std::ops::ControlFlow<()> {
         if rule.identity() == identity {
             unsafe {
@@ -637,244 +604,6 @@ unsafe fn visit_compilation(
             publication.as_deref_mut(),
         )
     });
-}
-
-/// What the host's compilation callbacks answered a walk on the main thread, by what they were asked, which a walk
-/// the render owner runs over the same rules reads instead of calling the host; and each rule that walk visited, with
-/// what compiling it published, which the host hears of once the owner is done.
-#[derive(Default)]
-pub(crate) struct HostAnswers {
-    import_sources: std::collections::HashMap<(usize, u64), usize>,
-    implicit_scope_roots: std::collections::HashMap<usize, u32>,
-    visits: Vec<RecordedVisit>,
-}
-
-/// What the main thread's walk lends its callbacks: the host they ask, and the answers they record.
-struct Recording<'a> {
-    host: &'a NativeCompilationCallbacks,
-    answers: &'a mut HostAnswers,
-}
-
-/// A rule the owner's walk visited, with the context it visited it in, which the host's `visit_rule` takes.
-struct RecordedVisit {
-    source: *const c_void,
-    identity: u64,
-    rule_type: NativeRuleType,
-    layer_name: Vec<u16>,
-    scopes: Vec<NativeCompilationScope>,
-    containers: Vec<*const ContainerConditionsData>,
-    conditions_hold: bool,
-    in_a_layer: bool,
-    gated_by_container_query: bool,
-    result: NativeCompilationResult,
-}
-
-impl HostAnswers {
-    /// Runs the main thread's `walk` with callbacks that ask `host`, and records its answers. The walk visits no rule
-    /// for the host: the owner's walk does.
-    ///
-    /// # Safety
-    ///
-    /// `host` must be as rust_style_sheet_visit_compilation requires.
-    unsafe fn record(&mut self, host: &NativeCompilationCallbacks, walk: impl FnOnce(&NativeCompilationCallbacks)) {
-        unsafe extern "C" fn import_source(
-            context: *const c_void,
-            source: *const c_void,
-            identity: u64,
-            sheet: &NativeStyleSheet,
-        ) -> *const c_void {
-            // SAFETY: The context is the recording `record` lends the walk.
-            let Recording { host, answers } = unsafe { &mut *context.cast::<Recording>().cast_mut() };
-            let imported = unsafe { (host.import_source)(host.context, source, identity, sheet) };
-            answers
-                .import_sources
-                .insert((source as usize, identity), imported as usize);
-            imported
-        }
-        unsafe extern "C" fn implicit_scope_root(context: *const c_void, source: *const c_void) -> u32 {
-            // SAFETY: As above.
-            let Recording { host, answers } = unsafe { &mut *context.cast::<Recording>().cast_mut() };
-            let root = unsafe { (host.implicit_scope_root)(host.context, source) };
-            answers.implicit_scope_roots.insert(source as usize, root);
-            root
-        }
-        unsafe extern "C" fn visit_rule(
-            _: *const c_void,
-            _: *const c_void,
-            _: u64,
-            _: NativeRuleType,
-            _: &NativeCompilationContext,
-            _: NativeCompilationResult,
-        ) -> bool {
-            true
-        }
-        let mut recording = Recording { host, answers: self };
-        let callbacks = NativeCompilationCallbacks {
-            context: std::ptr::from_mut(&mut recording).cast(),
-            import_source,
-            implicit_scope_root,
-            visit_rule,
-        };
-        walk(&callbacks);
-    }
-
-    /// The callbacks the owner's walk answers from what the main thread's walk recorded, recording each visit.
-    fn replaying(&mut self) -> NativeCompilationCallbacks {
-        unsafe extern "C" fn import_source(
-            context: *const c_void,
-            source: *const c_void,
-            identity: u64,
-            _: &NativeStyleSheet,
-        ) -> *const c_void {
-            // SAFETY: The context is the answers `replaying` lends the walk.
-            let answers = unsafe { &*context.cast::<HostAnswers>() };
-            let imported = answers.import_sources.get(&(source as usize, identity));
-            debug_assert!(
-                imported.is_some(),
-                "the owner's walk asks only what the main thread's walk asked"
-            );
-            imported.map_or(std::ptr::null(), |&imported| imported as *const c_void)
-        }
-        unsafe extern "C" fn implicit_scope_root(context: *const c_void, source: *const c_void) -> u32 {
-            // SAFETY: As above.
-            let answers = unsafe { &*context.cast::<HostAnswers>() };
-            let root = answers.implicit_scope_roots.get(&(source as usize));
-            debug_assert!(
-                root.is_some(),
-                "the owner's walk asks only what the main thread's walk asked"
-            );
-            root.copied().unwrap_or(0)
-        }
-        unsafe extern "C" fn visit_rule(
-            context: *const c_void,
-            source: *const c_void,
-            identity: u64,
-            rule_type: NativeRuleType,
-            compilation: &NativeCompilationContext,
-            result: NativeCompilationResult,
-        ) -> bool {
-            // SAFETY: As above.
-            let answers = unsafe { &mut *context.cast::<HostAnswers>().cast_mut() };
-            // SAFETY: The walk lends the context's arrays for the call.
-            let (layer_name, scopes, containers) = unsafe {
-                (
-                    crate::css::style::bridge::borrow(compilation.layer_name.utf16, compilation.layer_name.length)
-                        .to_vec(),
-                    crate::css::style::bridge::borrow(compilation.scopes, compilation.scope_count).to_vec(),
-                    crate::css::style::bridge::borrow(compilation.containers, compilation.container_count).to_vec(),
-                )
-            };
-            answers.visits.push(RecordedVisit {
-                source,
-                identity,
-                rule_type,
-                layer_name,
-                scopes,
-                containers,
-                conditions_hold: compilation.conditions_hold,
-                in_a_layer: compilation.in_a_layer,
-                gated_by_container_query: compilation.gated_by_container_query,
-                result,
-            });
-            true
-        }
-        NativeCompilationCallbacks {
-            context: std::ptr::from_mut(self).cast(),
-            import_source,
-            implicit_scope_root,
-            visit_rule,
-        }
-    }
-
-    /// Tells `host` of each rule the owner's walk visited, in the order it visited them.
-    ///
-    /// # Safety
-    ///
-    /// `host` must be as rust_style_sheet_visit_compilation requires.
-    unsafe fn tell_host(self, host: &NativeCompilationCallbacks) {
-        for visit in &self.visits {
-            let context = NativeCompilationContext {
-                layer_name: FfiUtf16View {
-                    ascii: std::ptr::null(),
-                    utf16: visit.layer_name.as_ptr(),
-                    length: visit.layer_name.len(),
-                },
-                scopes: visit.scopes.as_ptr(),
-                scope_count: visit.scopes.len(),
-                containers: visit.containers.as_ptr(),
-                container_count: visit.containers.len(),
-                conditions_hold: visit.conditions_hold,
-                in_a_layer: visit.in_a_layer,
-                gated_by_container_query: visit.gated_by_container_query,
-            };
-            let descends = unsafe {
-                (host.visit_rule)(
-                    host.context,
-                    visit.source,
-                    visit.identity,
-                    visit.rule_type,
-                    &context,
-                    visit.result,
-                )
-            };
-            debug_assert!(descends, "a compiling host descends into every rule");
-        }
-    }
-}
-
-/// A walk of a sheet's rules the render owner runs with the engine it owns: compiling them into it, or replacing their
-/// selectors, with the host's answers the main thread recorded. What it points at is the main thread's, which waits.
-pub(crate) struct OwnerCompilation {
-    pub(crate) sheet: *const NativeStyleSheet,
-    pub(crate) rule_identity: u64,
-    pub(crate) purpose: NativeCompilationPurpose,
-    pub(crate) source: *const c_void,
-    pub(crate) environment: FfiMediaEnvironment,
-    pub(crate) publication: NativeStylePublication,
-    pub(crate) answers: *mut HostAnswers,
-}
-
-impl OwnerCompilation {
-    /// Walks the rules on the owner, publishing into `engine`, the one it answers from.
-    ///
-    /// # Safety
-    ///
-    /// On the owner, while the main thread waits keeping what the walk points at live.
-    pub(crate) unsafe fn run(self, engine: &mut crate::css::style::StyleEngine) {
-        // SAFETY: Guaranteed by the caller.
-        let (sheet, answers) = unsafe { (&*self.sheet, &mut *self.answers) };
-        let callbacks = answers.replaying();
-        // SAFETY: As above.
-        let environment = unsafe { self.environment.borrow() };
-        let mut publication = Publication {
-            engine,
-            sheet: self.publication.sheet,
-            before_rule: self.publication.before_rule,
-        };
-        match self.purpose {
-            NativeCompilationPurpose::Rules => unsafe {
-                visit_compilation(
-                    sheet,
-                    self.rule_identity,
-                    NativeCompilationPurpose::Rules,
-                    self.source,
-                    environment,
-                    &callbacks,
-                    Some(&mut publication),
-                );
-            },
-            NativeCompilationPurpose::Selectors => unsafe {
-                replace_selectors(
-                    sheet,
-                    self.rule_identity,
-                    self.source,
-                    environment,
-                    &callbacks,
-                    Some(&mut publication),
-                );
-            },
-        }
-    }
 }
 
 #[cfg(test)]
@@ -1581,7 +1310,7 @@ mod tests {
             _: &NativeCompilationContext,
             result: NativeCompilationResult,
         ) -> bool {
-            if result.rule_id != 0 {
+            if result.published {
                 unsafe { &*context.cast::<std::cell::Cell<usize>>() }.update(|count| count + 1);
             }
             true
@@ -1639,9 +1368,9 @@ mod tests {
             visit_rule: visit,
         };
         let publication = NativeStylePublication {
-            engine: engine.handle(),
+            engine: engine.input_handle(),
             sheet: compiled_sheet.0 + 1,
-            before_rule: 0,
+            before: 0,
         };
         let environment = FfiMediaEnvironment {
             values: std::ptr::null(),
@@ -1722,16 +1451,19 @@ mod tests {
             );
         }
         let next = crate::css::rule::mutation::successor(&source, import_identity, |identity| unsafe {
-            crate::css::style::bridge::style_engine_native_rule_id(engine.handle(), identity)
+            crate::css::style::bridge::style_engine_native_rule_id(engine.handle(), identity) != 0
         });
-        assert_eq!(next, 2);
+        assert_eq!(
+            engine.engine().native_rule_id(next),
+            Some(crate::css::style::program::RuleID(1))
+        );
         let mut imported_engine = OwnedStyleEngine::new(Box::new(StyleEngine::new(DeviceClass::ForegroundDesktop)));
         let imported_sheet = imported_engine
             .engine()
             .add_sheet(StyleSheetObjectID(1), CascadeOrigin::Author);
         compiled.set(0);
         let imported_publication = NativeStylePublication {
-            engine: imported_engine.handle(),
+            engine: imported_engine.input_handle(),
             sheet: imported_sheet.0 + 1,
             ..publication
         };
@@ -1877,7 +1609,7 @@ mod tests {
             .engine()
             .add_sheet(StyleSheetObjectID(1), CascadeOrigin::Author);
         let exposed_publication = NativeStylePublication {
-            engine: exposed_engine.handle(),
+            engine: exposed_engine.input_handle(),
             sheet: exposed_sheet.0 + 1,
             ..publication
         };
