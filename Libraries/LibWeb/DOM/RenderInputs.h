@@ -68,29 +68,33 @@ public:
     void note_svg_paint_resources_changed();
     void note_visual_viewport_transform();
 
-    // The marks the arena keeps for a row of the document to be laid out again by the next layout, and what the
+    // The marks the arena keeps for a row of the document, named by its slot, to be laid out again by the next layout, and what the
     // next layout lays it out from: the row's intrinsic size and fragment caches, and the natural size of the image
     // its box owns. Nothing else writes them.
-    void set_needs_layout_update(Layout::Row const&, SetNeedsLayoutReason, Layout::LayoutUpdatePropagation = Layout::LayoutUpdatePropagation::ThroughAncestors);
+    void set_needs_layout_update(Compositing::RustFFI::NodeSlotId, SetNeedsLayoutReason, Layout::LayoutUpdatePropagation = Layout::LayoutUpdatePropagation::ThroughAncestors);
     // A style change that altered what sizes or places the row itself: a partial relayout re-resolves its own size
     // and position instead of reusing them.
-    void set_needs_own_geometry_update(Layout::Row const&);
-    void reset_intrinsic_size_caches_of_self_and_ancestors(Layout::Row const&);
-    void set_owned_image_natural_size(Layout::Row const&, Layout::RustFFI::FfiReplacedContentFacts const&);
+    void set_needs_own_geometry_update(Compositing::RustFFI::NodeSlotId);
+    void reset_intrinsic_size_caches_of_self_and_ancestors(Compositing::RustFFI::NodeSlotId);
+    void set_owned_image_natural_size(Compositing::RustFFI::NodeSlotId, Layout::RustFFI::FfiReplacedContentFacts const&);
     // Takes a removed node's box out of its parent's in place, marking what that lays out again, if the layout tree
     // lets it go.
     [[nodiscard]] Layout::RustFFI::FfiRemovedBoxDetach detach_removed_box_in_place(Layout::RustFFI::FfiRemovedBoxPlace const&);
     // What an insertion under the row invalidates, which the layout tree build decides once it attached the boxes.
-    void defer_child_list_insertion_layout_update(Layout::Row const&);
+    void defer_child_list_insertion_layout_update(Compositing::RustFFI::NodeSlotId);
     // The text under the row renders again from its characters, or with the language it now resolves, which lays the
     // row out again where any does.
-    void invalidate_text_content(Layout::Row const&);
-    void enroll_text_after_language_change(Layout::Row const&);
+    void invalidate_text_content(Compositing::RustFFI::NodeSlotId);
+    void enroll_text_after_language_change(Compositing::RustFFI::NodeSlotId);
 
     // The layout tree update marks the arena keeps for the nodes of the document. Whether the mark changed.
     bool merge_layout_tree_update_mark(CSS::StyleNodeID, bool value, u8 reuse_reason);
     bool set_child_needs_layout_tree_update(CSS::StyleNodeID, bool value);
     void set_needs_full_layout_tree_update(bool);
+
+    // The node took another style node identity than `old_style_node`: its rows, and those of its pseudo-elements,
+    // take the new one, and the old one is retired.
+    void note_style_node_changed(Node&, CSS::StyleNodeID old_style_node);
 
     // An element whose style attribute changed, for the next style update to parse.
     void mark_style_attribute_dirty(Element&);

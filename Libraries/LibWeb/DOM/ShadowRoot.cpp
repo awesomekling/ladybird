@@ -24,7 +24,6 @@
 #include <LibWeb/HTML/RadioButtonGroupRegistry.h>
 #include <LibWeb/HTML/XMLSerializer.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
-#include <LibWeb/Layout/NodeArena.h>
 #include <LibWeb/TrustedTypes/RequireTrustedTypesForDirective.h>
 #include <LibWeb/TrustedTypes/TrustedTypePolicy.h>
 
@@ -79,8 +78,8 @@ void ShadowRoot::set_style_node_id(CSS::StyleNodeID style_node_id)
     m_style_node_id = style_node_id;
     // The arena keys layout tree update marks by identity alone, so one handed to this root holds
     // none, whatever the node that held it before left behind.
-    if (auto* arena = document().layout_node_arena_if_created(); arena && style_node_id != 0)
-        Layout::RustFFI::layout_arena_clear_layout_tree_update_marks(arena->handle(), style_node_id.value());
+    if (auto* arena = document().layout_arena_handle(); arena && style_node_id != 0)
+        Layout::RustFFI::layout_arena_clear_layout_tree_update_marks(arena, style_node_id.value());
 }
 
 // https://fullscreen.spec.whatwg.org/#dom-document-fullscreenelement

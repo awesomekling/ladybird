@@ -12,7 +12,6 @@
 #include <LibWeb/DOM/Text.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/Window.h>
-#include <LibWeb/Layout/TextNode.h>
 
 namespace Web::DOM {
 
@@ -175,7 +174,7 @@ void Text::set_style_node_id(CSS::StyleNodeID style_node_id)
         return;
     auto old_style_node_id = m_style_node_id;
     m_style_node_id = style_node_id;
-    Layout::Node::dom_node_style_node_changed(*this, old_style_node_id);
+    document().render_inputs_for_write().note_style_node_changed(*this, old_style_node_id);
 }
 
 Optional<Element::Directionality> Text::directionality() const

@@ -803,7 +803,7 @@ void NodeWithStyle::set_style_record(CSS::PublishedStyleRecord const* style_reco
         pin_style_record_for_cxx_consumers();
 
     if (changes_layout_affecting_style && !installed_ahead)
-        document().render_inputs_for_write().reset_intrinsic_size_caches_of_self_and_ancestors(*this);
+        document().render_inputs_for_write().reset_intrinsic_size_caches_of_self_and_ancestors(slot_id(this));
 }
 
 void NodeWithStyle::set_style_record(Row const& row, CSS::PublishedStyleRecord const* style_record)
@@ -998,61 +998,6 @@ void Node::set_generated_for(CSS::PseudoElement type, DOM::Element& element)
     publish_unique_node_id();
     if (auto* node_with_style = as_if<NodeWithStyle>(*this))
         node_with_style->bind_generated_style_record(element.published_style_record(type));
-}
-
-void Node::dom_node_style_node_changed(DOM::Node& dom_node, CSS::StyleNodeID old_style_node)
-{
-    auto new_style_node = Node::style_node_of(&dom_node);
-    auto* arena = dom_node.document().layout_node_arena_if_created();
-    // A mark the new identity's previous holder left does not carry over to this node: it was keyed by the identity
-    // alone, and may sit in this arena after that node moved to another document. The marks are the host's, so this
-    // goes through beside a frame too, ahead of any mark made under the new identity.
-    if (arena && new_style_node != 0)
-        RustFFI::layout_arena_clear_layout_tree_update_marks(arena->handle(), new_style_node.value());
-    // A layout pass or clock tick in flight has what the document publishes to the engine wait for it, so the node
-    // goes on under its new identity beside it, and the arena takes the change in once the frame has been taken in.
-    if (HTML::FrameScheduler::arena_changes_wait_for_frame(dom_node.document())) {
-        HTML::main_thread_event_loop().frame_scheduler().defer_arena_change(GC::create_function(dom_node.heap(), [node = GC::Ref { dom_node }, old_style_node, new_style_node] {
-            apply_dom_node_style_node_change(node, old_style_node, new_style_node);
-        }));
-        return;
-    }
-    apply_dom_node_style_node_change(dom_node, old_style_node, new_style_node);
-}
-
-void Node::apply_dom_node_style_node_change(DOM::Node& dom_node, CSS::StyleNodeID old_style_node, CSS::StyleNodeID new_style_node)
-{
-    auto* arena = dom_node.document().layout_node_arena_if_created();
-    if (arena) {
-        // The node's rows, and those of its pseudo-elements, take its new identity along with their
-        // bindings. Both are still keyed by the old identity here, so this precedes retiring it.
-        if (old_style_node != 0 && new_style_node != 0) {
-            if (auto* layout_node = static_cast<Node*>(RustFFI::layout_arena_bound_shell(arena->handle(), old_style_node.value())))
-                RustFFI::layout_arena_set_style_node_of_rows_sharing_dom_node_with(arena->handle(), layout_node->m_slot, new_style_node.value());
-            if (auto* element = as_if<DOM::Element>(dom_node)) {
-                element->for_each_synthetic_pseudo_element([&](CSS::PseudoElement pseudo_element, DOM::SyntheticPseudoElement const&) {
-                    if (auto* layout_node = static_cast<Node*>(RustFFI::layout_arena_bound_pseudo_element_shell(arena->handle(), old_style_node.value(), encode_generated_for(pseudo_element))))
-                        RustFFI::layout_arena_set_style_node_of_generated_subtree(arena->handle(), layout_node->m_slot, new_style_node.value());
-                });
-            }
-            // What the node's pseudo-elements have scrolled to is keyed by the same pair, and
-            // takes the node's new identity along with their bindings.
-            RustFFI::layout_arena_move_pseudo_element_scroll_offsets(arena->handle(), old_style_node.value(), new_style_node.value());
-            // So does what the element itself has scrolled to, which is keyed by the identity
-            // alone; the element still holds the offset, so it is simply republished.
-            if (auto* element = as_if<DOM::Element>(dom_node))
-                publish_element_scroll_offset(*element);
-        }
-        // A retired identity may be reused, so it leaves every row carrying it, including rows of a
-        // removed subtree that outlive the disconnection.
-        if (old_style_node != 0)
-            RustFFI::layout_arena_forget_style_node(arena->handle(), old_style_node.value());
-    }
-    // The arena names the node it tells about a binding change by identity, so a node changing
-    // identity is one the arena cannot name. Its box-presence bits are re-committed here instead,
-    // from the row its new identity reaches.
-    Node const* row = arena ? DOM::NodeIdentity::of(dom_node).bound_layout_node(*arena) : nullptr;
-    dom_node.set_box_presence(row != nullptr, row && Painting::has_committed_box(*row));
 }
 
 CSS::StyleNodeID Node::style_node_id() const

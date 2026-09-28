@@ -21,7 +21,7 @@ namespace Web::CSS::Invalidation {
 static void enroll_language_dependent_text(Layout::Node& root)
 {
     // The owner lays the root out again where any text under it renders with the language.
-    root.document().render_inputs_for_write().enroll_text_after_language_change(root);
+    root.document().render_inputs_for_write().enroll_text_after_language_change(Layout::Node::slot_id(&root));
 }
 
 // `lang` and `dir` both inherit, so a change on one element changes what every element under it

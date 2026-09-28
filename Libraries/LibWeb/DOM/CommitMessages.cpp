@@ -14,10 +14,10 @@
 #include <LibWeb/DOM/Node.h>
 #include <LibWeb/Dump.h>
 #include <LibWeb/HTML/LocalNavigable.h>
-#include <LibWeb/Layout/Box.h>
-#include <LibWeb/Layout/NodeArena.h>
+#include <LibWeb/HTML/NavigableContainer.h>
 #include <LibWeb/Page/EventHandler.h>
 #include <LibWeb/Painting/BoxSlot.h>
+#include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/SVG/SVGElement.h>
 
 namespace Web::DOM {
@@ -278,11 +278,11 @@ void CommitMessages::apply(Message const& message)
             node->set_needs_layout_tree_update(true, message.layout_tree_update_reason);
         return;
     case Kind::NavigableContainerViewportCommitted:
-        // The committed box is the one the identity is bound to in the arena; no DOM node is asked
-        // for its layout node.
-        if (auto* arena = m_document.layout_node_arena_if_created()) {
-            if (auto* box = as_if<Layout::Box>(message.identity.bound_layout_node(*arena)))
-                box->notify_content_navigable_of_committed_viewport();
+        // A navigable another process hosts learns its viewport from the UI process, which the container tells of
+        // the viewport's rect when its document is painted.
+        if (auto box = Painting::BoxSlot::bound_to(m_document, message.identity)) {
+            if (auto* content_navigable = as_if<HTML::LocalNavigable>(as<HTML::NavigableContainer>(*box.dom_node()).content_navigable().ptr()))
+                content_navigable->set_viewport_size(Painting::content_size(box));
         }
         return;
     case Kind::SvgResourceReferenced: {
