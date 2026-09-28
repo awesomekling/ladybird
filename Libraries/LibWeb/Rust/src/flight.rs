@@ -14,8 +14,9 @@
 use crate::css::style::StyleEngineHandle;
 use crate::css::style::bridge::StylePassJob;
 use crate::css::style::engine_home::{Holder, Owed, StyleEngineLoan, StyleEngineSettlement};
+use crate::frame_news::{FrameSent, FrameSeq};
 use crate::layout::update_layout::{LayoutPassJob, LayoutPassTakeBack};
-use crate::render_owner::{FrameEffects, RenderingUpdate};
+use crate::render_owner::RenderingUpdate;
 use std::cell::Cell;
 use std::ffi::c_void;
 
@@ -344,7 +345,18 @@ impl FlightTakeBack {
     }
 }
 
+/// A flight the main thread sent, as it waits for the flight's news: what it runs as it adopts the news.
+struct SentFlight {
+    seq: FrameSeq,
+    began: FfiFlightStage,
+    settlement: Option<StyleEngineSettlement>,
+    take_back: FlightTakeBack,
+}
+
 thread_local! {
+    // On the main thread, the flights it sent whose news it has not adopted yet, in the order it sent them.
+    static SENT_FLIGHTS: std::cell::RefCell<std::collections::VecDeque<SentFlight>> =
+        const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
     // On the main thread, the outcome of the flight it took back last, until the frame scheduler
     // takes it.
     static TAKEN_BACK_OUTCOME: Cell<Option<FfiFlightOutcome>> = const { Cell::new(None) };
@@ -357,21 +369,27 @@ thread_local! {
         const { Cell::new([[0; FLIGHT_STAGE_COUNT]; FLIGHT_END_REASON_COUNT]) };
 }
 
-/// Submits `flight` for the document whose arena is `arena`.
+/// Submits `flight` for the document whose arena is `arena`. What it leaves comes back as the frame's news.
 ///
 /// # Safety
 ///
-/// As for [`crate::stage_thread::submit_stage_with_take_back`]: what each of the flight's stages reaches, the
+/// As for [`crate::stage_thread::submit_rendering_update`]: what each of the flight's stages reaches, the
 /// frame in flight owns until the main thread takes it back.
-pub(crate) unsafe fn submit(arena: *mut c_void, flight: Flight) {
-    let (effects, effects_of_update) = std::sync::mpsc::channel::<crate::stage_thread::FrameOwns<FrameEffects>>();
+pub(crate) unsafe fn submit(arena: *mut c_void, flight: Flight) -> FrameSent {
     let reach = flight.reach();
     let stage_holds = flight.stage_holds();
     // SAFETY: Guaranteed by the caller: the document thread still owns the arena.
     let style_engine = unsafe { crate::layout::HostTables::beside_frame(arena) }.style_engine();
     let (loan, settlement) = flight.lend_style_engine(style_engine).unzip();
-    let take_back = flight.take_back();
-    let began = flight.began;
+    let (sent, seq, news) = crate::frame_news::send_frame();
+    SENT_FLIGHTS.with_borrow_mut(|flights| {
+        flights.push_back(SentFlight {
+            seq,
+            began: flight.began,
+            settlement,
+            take_back: flight.take_back(),
+        });
+    });
     // SAFETY: Guaranteed by the caller.
     let document = unsafe { crate::layout::ArenaHandle::document_of(arena) };
     // SAFETY: Guaranteed by the caller.
@@ -381,35 +399,53 @@ pub(crate) unsafe fn submit(arena: *mut c_void, flight: Flight) {
             stage_holds,
             arena,
             document,
-            RenderingUpdate::new(flight, loan, effects),
-            move || {
-                if let Some(settlement) = settlement {
-                    settlement.settle();
-                }
-                // An update whose handling panicked sent none: the main thread runs the frame from where it began.
-                let FrameEffects { mut outcome, ran } = effects_of_update.try_recv().map_or_else(
-                    |_| {
-                        debug_assert!(false, "a rendering update that was taken back sent its effects");
-                        FrameEffects {
-                            outcome: FfiFlightOutcome {
-                                began,
-                                reached: began,
-                                end: FfiFlightEndReason::StageRunsOnMain,
-                            },
-                            ran: FlightRan::default(),
-                        }
-                    },
-                    crate::stage_thread::FrameOwns::into_inner,
-                );
-                take_back.finish(&mut outcome);
-                FLIGHT_ENDS.with(|ends| {
-                    let mut counts = ends.get();
-                    counts[outcome.end as usize][outcome.reached as usize] += 1;
-                    ends.set(counts);
-                });
-                TAKEN_BACK_OUTCOME.with(|taken_back| taken_back.set(Some(outcome)));
-                TAKEN_BACK_PAINT.with_borrow_mut(|paint| *paint = ran.paint);
+            RenderingUpdate::new(flight, loan, seq, news),
+        );
+    }
+    sent
+}
+
+/// Adopts the news that the flight `seq` ended with `outcome`, having left `ran`: ends on the main thread what each
+/// of its stages left for it, and keeps where it ended for the frame scheduler.
+pub(crate) fn adopt_flight_end(seq: FrameSeq, mut outcome: FfiFlightOutcome, ran: FlightRan) {
+    let sent = SENT_FLIGHTS.with_borrow_mut(|flights| {
+        let sent = flights.pop_front();
+        debug_assert!(
+            sent.as_ref().is_some_and(|sent| sent.seq == seq),
+            "flight news comes in the order the flights were sent"
+        );
+        sent
+    });
+    let Some(sent) = sent else {
+        return;
+    };
+    if let Some(settlement) = sent.settlement {
+        settlement.settle();
+    }
+    sent.take_back.finish(&mut outcome);
+    FLIGHT_ENDS.with(|ends| {
+        let mut counts = ends.get();
+        counts[outcome.end as usize][outcome.reached as usize] += 1;
+        ends.set(counts);
+    });
+    TAKEN_BACK_OUTCOME.with(|taken_back| taken_back.set(Some(outcome)));
+    TAKEN_BACK_PAINT.with_borrow_mut(|paint| *paint = ran.paint);
+}
+
+/// Ends each flight the main thread took back that posted no news, as its run panicked: where it began, as if it had
+/// run nothing, so the rendering update runs the frame from there.
+pub(crate) fn end_flights_without_news() {
+    while let Some(sent) = SENT_FLIGHTS.with_borrow(|flights| flights.front().map(|sent| (sent.seq, sent.began))) {
+        debug_assert!(false, "a flight that was taken back posted its news");
+        let (seq, began) = sent;
+        adopt_flight_end(
+            seq,
+            FfiFlightOutcome {
+                began,
+                reached: began,
+                end: FfiFlightEndReason::StageRunsOnMain,
             },
+            FlightRan::default(),
         );
     }
 }

@@ -14,7 +14,7 @@
 //!   owner queues and applies, in order, at the next point that needs it: a unit of a rendering update, or a query.
 //!   A write to the style engine waits in the engine's home, and whoever reaches the engine next applies it first.
 //! - a [`RenderingUpdate`]: the stages of a frame, which the owner runs as units ([`FrameUnit`]) and answers with
-//!   [`FrameEffects`], the typed results the main thread applies where it takes the frame in.
+//!   the frame's news ([`crate::frame_news`]), the typed results the main thread adopts where it takes the frame in.
 //! - a [`Query`]: a question about the document as of the changes sent before it, answered in one round trip
 //!   ([`Answer`]). The owner serves a waiting query between units: a rendering update in progress serves the
 //!   messages that arrived meanwhile after each unit (style, the layout rounds, paint preparation), so a query waits
@@ -44,7 +44,6 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::Sender;
 
 /// The main thread's name for one document's render state. The main thread mints it, so naming a new document
 /// needs no round trip.
@@ -698,21 +697,15 @@ impl Answer {
     }
 }
 
-/// The typed results of a rendering update the owner ran, which the main thread applies where it takes the frame
-/// in: where the update ended, and what its stages left for the document.
-pub(crate) struct FrameEffects {
-    pub(crate) outcome: crate::flight::FfiFlightOutcome,
-    pub(crate) ran: crate::flight::FlightRan,
-}
-
 /// The stages of one rendering update of a document, as the main thread prepared them. The owner runs them unit by
 /// unit (style, the layout rounds, paint preparation, the recording) and regains control after each: where the main
 /// thread recalls it ([`ToOwner::Recall`]), the update ends there, and the main thread goes on from where it ended.
 pub(crate) struct RenderingUpdate {
     flight: crate::flight::Flight,
     style_engine: Option<crate::css::style::engine_home::StyleEngineLoan>,
-    /// Where the owner sends the update's effects.
-    effects: Sender<crate::stage_thread::FrameOwns<FrameEffects>>,
+    /// The frame the update is, and where the owner posts its news.
+    seq: crate::frame_news::FrameSeq,
+    news: crate::frame_news::NewsSender,
     /// How the owner runs it, with the render state of its document, where the owner holds one. The owner reaches
     /// the pipeline only through the updates it is sent, so what reaches the owner without reaching the pipeline (the
     /// unit tests' stage threads) links without it.
@@ -723,12 +716,14 @@ impl RenderingUpdate {
     pub(crate) fn new(
         flight: crate::flight::Flight,
         style_engine: Option<crate::css::style::engine_home::StyleEngineLoan>,
-        effects: Sender<crate::stage_thread::FrameOwns<FrameEffects>>,
+        seq: crate::frame_news::FrameSeq,
+        news: crate::frame_news::NewsSender,
     ) -> Self {
         Self {
             flight,
             style_engine,
-            effects,
+            seq,
+            news,
             run: Self::run_flight,
         }
     }
@@ -739,11 +734,11 @@ impl RenderingUpdate {
 
     fn run_flight(self, owner: &Owner, state: Option<*mut ArenaHandle>) {
         let (outcome, ran) = self.flight.run(owner, self.style_engine, state);
-        // SAFETY: What the update's stages left is the frame's, which the main thread reaches only once it has taken
-        // the frame back.
-        let effects = unsafe { crate::stage_thread::FrameOwns::new(FrameEffects { outcome, ran }) };
-        // The main thread keeps the receiver until it has taken the frame back.
-        let _ = self.effects.send(effects);
+        self.news.post(crate::frame_news::FrameNews::FlightEnded {
+            seq: self.seq,
+            outcome,
+            ran,
+        });
     }
 }
 

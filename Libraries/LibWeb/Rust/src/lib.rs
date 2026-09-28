@@ -17,6 +17,7 @@ mod rust_panic;
 pub mod clock_frames;
 mod encoding_detection;
 pub mod flight;
+pub(crate) mod frame_news;
 pub use libcompositing_rust::fast_hash;
 
 pub(crate) mod cow_column;

@@ -254,9 +254,9 @@ struct SubmittedStage {
     // test's hold names a stage by it.
     arena: usize,
     reply: StageReply,
-    // What the main thread runs once it has taken the stage back, before anything else reaches
-    // what the stage owned.
-    on_taken_back: Box<dyn FnOnce()>,
+    // What the main thread runs once it has taken a clock tick back, before anything else reaches
+    // what the tick owned. A flight's end comes as the frame's news instead.
+    on_taken_back: Option<Box<dyn FnOnce()>>,
     _count: SubmittedStageCount,
 }
 
@@ -357,7 +357,6 @@ pub(crate) unsafe fn submit_rendering_update(
     arena: *mut c_void,
     document: crate::render_owner::DocumentId,
     update: crate::render_owner::RenderingUpdate,
-    on_taken_back: impl FnOnce() + 'static,
 ) {
     let hold_labels = std::iter::once(FLIGHT_STAGE)
         .chain(stage_holds.iter().copied())
@@ -374,7 +373,7 @@ pub(crate) unsafe fn submit_rendering_update(
                 update: Box::new(update),
                 ticket,
             },
-            on_taken_back,
+            None,
         );
     }
 }
@@ -391,12 +390,21 @@ pub(crate) unsafe fn submit_clock_tick(
     on_taken_back: impl FnOnce() + 'static,
 ) {
     // SAFETY: Guaranteed by the caller.
-    unsafe { submit_to_owner("clock", "clock", vec!["clock"], arena, tick, on_taken_back) };
+    unsafe {
+        submit_to_owner(
+            "clock",
+            "clock",
+            vec!["clock"],
+            arena,
+            tick,
+            Some(Box::new(on_taken_back)),
+        );
+    };
 }
 
 /// Sends the render owner the message `message` makes of a submitted run labelled `label`, and returns at once. The
-/// main thread runs `on_taken_back` once it has taken the run back: at the top of the event loop, or in the forced join
-/// that takes it back first. It runs ahead of the frame scheduler's consume-commit, in submission order. The run owns
+/// main thread runs `on_taken_back`, if any, once it has taken the run back: at the top of the event loop, or in the
+/// forced join that takes it back first, ahead of the frame's news and the frame scheduler's consume-commit. The run owns
 /// the arena `arena` until the main thread takes the frame back: the frame scheduler does at the top of its event loop
 /// once the run has finished, and a main-thread access to the arena does before it goes on ([`join_frame_in_flight`]).
 /// A style pass reaches only its document's style engine, which it takes along (`crate::css::style::engine_home`).
@@ -411,7 +419,7 @@ unsafe fn submit_to_owner(
     hold_labels: Vec<&'static str>,
     arena: *mut c_void,
     message: impl FnOnce(SubmittedRunTicket) -> crate::render_owner::ToOwner,
-    on_taken_back: impl FnOnce() + 'static,
+    on_taken_back: Option<Box<dyn FnOnce()>>,
 ) {
     let thread = stage_thread();
     let (ticket, reply) = SubmittedRunTicket::new(thread, next_submitted_run(label, arena));
@@ -422,7 +430,7 @@ unsafe fn submit_to_owner(
         // The stage thread only goes away if the process is going away.
         std::process::abort();
     }
-    note_submitted(label, role, hold_labels, arena, reply, Box::new(on_taken_back));
+    note_submitted(label, role, hold_labels, arena, reply, on_taken_back);
 }
 
 fn next_submitted_run(label: &'static str, arena: *mut c_void) -> SubmittedRun {
@@ -441,7 +449,7 @@ fn note_submitted(
     hold_labels: Vec<&'static str>,
     arena: *mut c_void,
     reply: StageReply,
-    on_taken_back: Box<dyn FnOnce()>,
+    on_taken_back: Option<Box<dyn FnOnce()>>,
 ) {
     SUBMITTED.with(|submitted| {
         submitted.borrow_mut().push(SubmittedStage {
@@ -943,9 +951,19 @@ pub(crate) fn frame_in_flight_has_finished() -> bool {
         && PAINTING.with_borrow_mut(|painting| painting.iter_mut().all(PaintStage::poll))
 }
 
-/// Waits for every stage of the frame in flight and takes the frame back. Returns whether there was
-/// one. A panic in one of its stages continues here. The frame's effects are the caller's to apply.
-pub(crate) fn take_frame_in_flight() -> bool {
+/// Waits for every stage of the frame in flight and takes the frame back, adopting its news at `at`. Returns whether
+/// there was one. A panic in one of its stages continues here. The frame's effects are the caller's to apply.
+pub(crate) fn take_frame_in_flight(at: &crate::frame_news::LegacyJoin) -> bool {
+    take_back_submitted(at)
+}
+
+/// Takes the frame in flight back at the top of the event loop, if every stage of it has finished, adopting its news.
+/// Returns whether it took one. Never waits.
+pub(crate) fn take_finished_frame(at: &crate::frame_news::TaskBoundary) -> bool {
+    frame_in_flight_has_finished() && take_back_submitted(at)
+}
+
+fn take_back_submitted(at: &impl crate::frame_news::AdoptionPoint) -> bool {
     let stages = SUBMITTED.with_borrow_mut(std::mem::take);
     let paint_stages = PAINTING.with_borrow_mut(std::mem::take);
     if stages.is_empty() && paint_stages.is_empty() {
@@ -957,7 +975,7 @@ pub(crate) fn take_frame_in_flight() -> bool {
         if let Err(payload) = stage.wait() {
             panic.get_or_insert(payload);
         }
-        on_taken_back.push(stage.on_taken_back);
+        on_taken_back.extend(stage.on_taken_back);
     }
     for mut stage in paint_stages {
         if let Err(payload) = stage.wait().wait() {
@@ -971,6 +989,7 @@ pub(crate) fn take_frame_in_flight() -> bool {
     for take_back in on_taken_back {
         take_back();
     }
+    crate::frame_news::adopt_news(at);
     true
 }
 
@@ -1095,7 +1114,7 @@ fn join_reached_stage(label: &'static str, role: &'static str, file: &'static st
             crate::render_owner::recall_rendering_update(document);
         }
     }
-    take_frame_in_flight();
+    take_frame_in_flight(&crate::frame_news::LegacyJoin::waiting_for_the_frame());
     // SAFETY: Called on the main thread, with the frame taken back.
     unsafe { (host.consume_commit)() }
 }
@@ -1289,7 +1308,7 @@ pub extern "C" fn rust_stage_thread_frame_in_flight_has_finished() -> bool {
 /// consume-commit, which is the caller's. Returns whether there was one.
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_stage_thread_take_frame_in_flight() -> bool {
-    take_frame_in_flight()
+    take_frame_in_flight(&crate::frame_news::LegacyJoin::waiting_for_the_frame())
 }
 
 /// A forced join of the whole frame in flight, as an access to render state makes one: waits for

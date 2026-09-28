@@ -3453,6 +3453,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             manifest_dir.join("src/stage_thread.rs"),
             manifest_dir.join("src/clock_frames.rs"),
             manifest_dir.join("src/flight.rs"),
+            manifest_dir.join("src/frame_news.rs"),
             manifest_dir.join("src/render_owner.rs"),
             manifest_dir.join("src/render_owner/devtools.rs"),
         ],
