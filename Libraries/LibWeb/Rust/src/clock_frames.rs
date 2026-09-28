@@ -1287,9 +1287,14 @@ fn run_display_tick_on(
             reach_and_run_tick,
         )));
     });
-    let Some(Ok((outcome, laid_out, presented_frame))) = tick else {
-        // A tick has nobody to hand a panic to.
-        std::process::abort();
+    let (outcome, laid_out, presented_frame) = match tick {
+        Some(Ok(ran)) => ran,
+        // A tick has nobody to hand a panic to: it is dropped, and the clock stops at the host, whose next rendering
+        // update takes it.
+        _ => {
+            debug_assert!(false, "a display tick panicked");
+            (FfiClockTickOutcome::NeedsMain, false, false)
+        }
     };
     let presented = outcome == FfiClockTickOutcome::Presented;
     if !presented {
