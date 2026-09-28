@@ -1581,14 +1581,16 @@ bool StyleEngine::match_element(StyleNodeID node, Vector<RuleMatch>& matches, Ma
     return true;
 }
 
-bool StyleEngine::counter(size_t index, StringView& out_name, u64& out_value) const
+void StyleEngine::for_each_counter(Function<void(StringView name, u64 value)> const& callback) const
 {
-    size_t name_length = 0;
-    auto const* name = StyleEngineFFI::style_engine_counter(rust_handle(), index, &out_value, &name_length);
-    if (!name)
-        return false;
-    out_name = StringView { name, name_length };
-    return true;
+    Vector<u64> values;
+    values.resize(StyleEngineFFI::style_engine_counter_count());
+    StyleEngineFFI::style_engine_counters(rust_handle(), values.data(), values.size());
+    for (size_t index = 0; index < values.size(); ++index) {
+        size_t name_length = 0;
+        auto const* name = StyleEngineFFI::style_engine_counter_name(index, &name_length);
+        callback(StringView { name, name_length }, values[index]);
+    }
 }
 
 }

@@ -3415,10 +3415,10 @@ pub unsafe extern "C" fn style_engine_match_element(
     capacity: usize,
     compact_for_cascade: bool,
 ) -> usize {
-    crate::css::style::owner_calls::ask(
+    crate::css::style::owner_calls::ask_devtools(
         engine.home(),
         "style_engine_match_element",
-        crate::css::style::owner_calls::StyleQuery::MatchElement {
+        crate::css::style::owner_calls::DevToolsStyleQuery::MatchElement {
             node,
             out,
             capacity,
@@ -6508,21 +6508,12 @@ pub(crate) unsafe fn owner_native_rule_target(
 /// Engine must be live.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_has_suspended_style_pass(engine: StyleEngineHandle) -> bool {
-    crate::css::style::owner_calls::ask(
+    crate::css::style::owner_calls::ask_devtools(
         engine,
         "style_engine_has_suspended_style_pass",
-        crate::css::style::owner_calls::StyleQuery::HasSuspendedStylePass,
+        crate::css::style::owner_calls::DevToolsStyleQuery::HasSuspendedStylePass,
     )
     .is()
-}
-
-/// Answers [`style_engine_has_suspended_style_pass`] from `engine`, on the render owner.
-///
-/// # Safety
-///
-/// As for [`style_engine_has_suspended_style_pass`].
-pub(crate) unsafe fn owner_has_suspended_style_pass(engine: &StyleEngine) -> bool {
-    engine.state.host.suspended_style_pass.is_some()
 }
 
 /// What the container conditions of an element's row left for the host to record, in the shape an
@@ -7849,107 +7840,91 @@ pub unsafe fn replay_set_reclaimed_style_atoms(engine: StyleEngineHandle, atoms:
     };
     engine.host.replay_reclaimed_style_atoms = Some(atoms.iter().copied().map(StyleAtomID).collect());
 }
-/// Reads one counter by index, returning its stable name and writing its value and name length, or
-/// null once the index is past the end. C++ enumerates the counters this way rather than
-/// duplicating the list. The name is borrowed static UTF-8 and is not nul-terminated.
-///
-/// # Safety
-/// `engine` must be live, and the out pointers must be writable.
+/// The number of style engine counters, which [`style_engine_counters`] reads and [`style_engine_counter_name`] names.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_counter(
-    engine: StyleEngineHandle,
-    index: usize,
-    out_value: *mut u64,
-    out_name_length: *mut usize,
-) -> *const u8 {
-    crate::css::style::owner_calls::ask(
-        engine,
-        "style_engine_counter",
-        crate::css::style::owner_calls::StyleQuery::Counter {
-            index,
-            out_value,
-            out_name_length,
-        },
-    )
-    .pointer()
-    .cast::<u8>()
+pub extern "C" fn style_engine_counter_count() -> usize {
+    crate::css::style::instrumentation::COUNTER_COUNT
 }
 
-/// Answers [`style_engine_counter`] from `engine`, on the render owner.
+/// The stable name of the counter at `index`, borrowed static UTF-8 that is not nul-terminated, whose length it writes.
+///
+/// # Safety
+/// `index` must be less than [`style_engine_counter_count`], and `out_name_length` writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_counter_name(index: usize, out_name_length: *mut usize) -> *const u8 {
+    let name = crate::css::style::instrumentation::COUNTER_NAMES[index];
+    unsafe { *out_name_length = name.len() };
+    name.as_ptr()
+}
+
+/// Reads the values of the first `count` counters into `values`, for DevTools and Internals.
+///
+/// # Safety
+/// `engine` must be live, and `values` must point at `count` writable values.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_counters(engine: StyleEngineHandle, values: *mut u64, count: usize) {
+    crate::css::style::owner_calls::ask_devtools(
+        engine,
+        "style_engine_counters",
+        crate::css::style::owner_calls::DevToolsStyleQuery::Counters { values, count },
+    );
+}
+
+/// Answers [`style_engine_counters`] from `engine`, on the render owner.
 ///
 /// # Safety
 ///
-/// As for [`style_engine_counter`].
-pub(crate) unsafe fn owner_counter(
-    engine: &StyleEngine,
-    index: usize,
-    out_value: *mut u64,
-    out_name_length: *mut usize,
-) -> *const u8 {
-    let result = engine.counters().iter().nth(index);
-    engine.record_boundary_call(EventKind::Counter, |payload| {
-        payload.write_u64(u64::try_from(index).expect("counter index exceeds u64"));
-        payload.write_bool(result.is_some());
-        if let Some((name, value)) = result {
+/// As for [`style_engine_counters`].
+pub(crate) unsafe fn owner_counters(engine: &StyleEngine, values: *mut u64, count: usize) {
+    // SAFETY: Guaranteed by the caller.
+    let values = unsafe { borrow_mut(values, count) };
+    for (index, (slot, (name, value))) in values.iter_mut().zip(engine.counters().iter()).enumerate() {
+        *slot = value;
+        engine.record_boundary_call(EventKind::Counter, |payload| {
+            payload.write_u64(u64::try_from(index).expect("counter index exceeds u64"));
+            payload.write_bool(true);
             payload.write_bytes(name.as_bytes());
             payload.write_u64(value);
-        }
-    });
-    let Some((name, value)) = result else {
-        return std::ptr::null();
-    };
-    unsafe {
-        *out_value = value;
-        *out_name_length = name.len();
+        });
     }
-    name.as_ptr()
 }
 
 /// Records a benchmark phase marker when capture is enabled.
 ///
 /// # Safety
-/// `engine` must be live, and `name` must point at `length` readable UTF-16 code units.
+/// `engine` must be live, and `name` must point at `length` readable Latin-1 bytes where `is_ascii`, or UTF-16 code
+/// units where not.
 #[cfg(feature = "style-recording")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_record_benchmark_marker(
-    engine: StyleEngineHandle,
+    engine: StyleEngineInputHandle,
     name: *const c_void,
     length: usize,
     is_ascii: bool,
 ) {
-    crate::css::style::owner_calls::ask(
+    // SAFETY: Guaranteed by the caller.
+    let name = if is_ascii {
+        unsafe { borrow(name.cast::<u8>(), length) }
+            .iter()
+            .map(|&unit| u16::from(unit))
+            .collect()
+    } else {
+        unsafe { borrow(name.cast::<u16>(), length) }.into()
+    };
+    crate::css::style::owner_calls::send(
         engine,
         "style_engine_record_benchmark_marker",
-        crate::css::style::owner_calls::StyleQuery::BenchmarkMarker { name, length, is_ascii },
+        crate::css::style::owner_calls::EngineChange::BenchmarkMarker(name),
     );
 }
 
-/// Answers [`style_engine_record_benchmark_marker`] with `engine`, on the render owner.
-///
-/// # Safety
-///
-/// As for [`style_engine_record_benchmark_marker`].
+/// Records the benchmark phase marker `name` with `engine`, on the render owner, where it records.
 #[cfg(feature = "style-recording")]
-pub(crate) unsafe fn owner_record_benchmark_marker(
-    engine: &StyleEngine,
-    name: *const c_void,
-    length: usize,
-    is_ascii: bool,
-) {
+pub(crate) fn record_benchmark_marker(engine: &StyleEngine, name: &[u16]) {
     if engine.recording_id().is_none() {
         return;
     }
-    engine.record_boundary_call(EventKind::BenchmarkMarker, |payload| {
-        if is_ascii {
-            let name = unsafe { borrow(name.cast::<u8>(), length) };
-            payload.write_length(name.len());
-            for &code_unit in name {
-                payload.write_u16(u16::from(code_unit));
-            }
-        } else {
-            payload.write_u16_slice(unsafe { borrow(name.cast::<u16>(), length) });
-        }
-    });
+    engine.record_boundary_call(EventKind::BenchmarkMarker, |payload| payload.write_u16_slice(name));
 }
 
 pub(crate) unsafe fn borrow<'a, T>(pointer: *const T, count: usize) -> &'a [T] {
@@ -8572,21 +8547,12 @@ pub unsafe extern "C" fn style_engine_size_query_container_scan_visits(
     engine: StyleEngineInputHandle,
     reset: bool,
 ) -> u64 {
-    crate::css::style::owner_calls::ask(
+    crate::css::style::owner_calls::ask_devtools(
         engine.home(),
         "style_engine_size_query_container_scan_visits",
-        crate::css::style::owner_calls::StyleQuery::SizeQueryContainerScanVisits { reset },
+        crate::css::style::owner_calls::DevToolsStyleQuery::SizeQueryContainerScanVisits { reset },
     )
     .u64()
-}
-
-/// Answers [`style_engine_size_query_container_scan_visits`] from `engine`, on the render owner.
-///
-/// # Safety
-///
-/// As for [`style_engine_size_query_container_scan_visits`].
-pub(crate) unsafe fn owner_size_query_container_scan_visits(engine: &mut StyleEngine, reset: bool) -> u64 {
-    engine.size_query_container_scan_visits(reset)
 }
 
 /// Records every element whose style a size query or container-relative unit decided against the

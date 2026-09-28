@@ -85,14 +85,12 @@ TEST_CASE(flush_does_not_recycle_atoms_before_the_bridge_can_forget_them)
 
 static u64 counter_value(Web::CSS::StyleEngine const& engine, StringView expected_name)
 {
-    for (size_t index = 0;; ++index) {
-        StringView name;
-        u64 value = 0;
-        if (!engine.counter(index, name, value))
-            VERIFY_NOT_REACHED();
+    Optional<u64> found;
+    engine.for_each_counter([&](StringView name, u64 value) {
         if (name == expected_name)
-            return value;
-    }
+            found = value;
+    });
+    return found.value();
 }
 
 TEST_CASE(reclaimed_language_atoms_republish_their_text)

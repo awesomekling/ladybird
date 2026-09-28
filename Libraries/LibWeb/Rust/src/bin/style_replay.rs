@@ -39,6 +39,7 @@ use libweb_rust::css::style::cascade::CascadeOperator;
 use libweb_rust::css::style::cascade::SpecifiedValueID;
 use libweb_rust::css::style::fast_hash::FastMap;
 use libweb_rust::css::style::index::StyleAtomID;
+use libweb_rust::css::style::instrumentation::COUNTER_NAMES;
 use libweb_rust::css::style::memory::MEMORY_CATEGORIES;
 #[cfg(test)]
 use libweb_rust::css::style::memory::MemoryCategory;
@@ -281,11 +282,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     let (_, owned) = read_owned_engine(&mut event.payload, &live_engines)?;
                     let engine = owned.handle();
                     let counter_reader =
-                        amplification_counter_reader.get_or_insert_with(|| AmplificationCounterReader::new(engine));
+                        amplification_counter_reader.get_or_insert_with(|| AmplificationCounterReader::new());
                     let before = counter_reader.read(engine);
                     let detailed_before = options.detailed_counters.then(|| {
                         detailed_counter_reader
-                            .get_or_insert_with(|| DetailedCounterReader::new(engine))
+                            .get_or_insert_with(|| DetailedCounterReader::new())
                             .read(engine)
                     });
                     let start = Instant::now();
@@ -421,11 +422,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         error: None,
                     };
                     let counter_reader =
-                        amplification_counter_reader.get_or_insert_with(|| AmplificationCounterReader::new(engine));
+                        amplification_counter_reader.get_or_insert_with(|| AmplificationCounterReader::new());
                     let before = counter_reader.read(engine);
                     let detailed_before = options.detailed_counters.then(|| {
                         detailed_counter_reader
-                            .get_or_insert_with(|| DetailedCounterReader::new(engine))
+                            .get_or_insert_with(|| DetailedCounterReader::new())
                             .read(engine)
                     });
                     if expected.style_atoms_swept {
@@ -740,18 +741,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         true => Some((event.payload.read_bytes()?.to_vec(), event.payload.read_u64()?)),
                         false => None,
                     };
-                    let mut actual_value = 0;
-                    let mut actual_name_length = 0;
-                    let actual_name = unsafe {
-                        bridge::style_engine_counter(engine, index, &mut actual_value, &mut actual_name_length)
-                    };
-                    let actual = match actual_name.is_null() {
-                        true => None,
-                        false => Some((
-                            unsafe { std::slice::from_raw_parts(actual_name, actual_name_length) }.to_vec(),
-                            actual_value,
-                        )),
-                    };
+                    let actual = unsafe { engine.for_replay() }
+                        .counters()
+                        .iter()
+                        .nth(index)
+                        .map(|(name, value)| (name.as_bytes().to_vec(), value));
                     if actual != expected {
                         return Err(format!("counter {index} diverged: expected {expected:?}, got {actual:?}").into());
                     }
@@ -1546,19 +1540,10 @@ struct DetailedCounterLedger {
 }
 
 impl DetailedCounterReader {
-    fn new(engine: StyleEngineHandle) -> Self {
-        let mut names = Vec::new();
-        for index in 0.. {
-            let mut value = 0_u64;
-            let mut name_length = 0_usize;
-            let name = unsafe { bridge::style_engine_counter(engine, index, &mut value, &mut name_length) };
-            if name.is_null() {
-                break;
-            }
-            let name = unsafe { std::slice::from_raw_parts(name, name_length) };
-            names.push(String::from_utf8(name.to_vec()).unwrap());
+    fn new() -> Self {
+        Self {
+            names: COUNTER_NAMES.iter().map(|name| (*name).to_owned()).collect(),
         }
-        Self { names }
     }
 
     fn read(&self, engine: StyleEngineHandle) -> Vec<u64> {
@@ -1603,7 +1588,7 @@ impl DetailedCounterLedger {
 }
 
 impl AmplificationCounterReader {
-    fn new(engine: StyleEngineHandle) -> Self {
+    fn new() -> Self {
         let mut reader = Self {
             ingress_touched: usize::MAX,
             selector_changed: Vec::new(),
@@ -1613,15 +1598,8 @@ impl AmplificationCounterReader {
             cascade_changed: usize::MAX,
             cascade_touched: usize::MAX,
         };
-        for index in 0.. {
-            let mut value = 0_u64;
-            let mut name_length = 0_usize;
-            let name = unsafe { bridge::style_engine_counter(engine, index, &mut value, &mut name_length) };
-            if name.is_null() {
-                break;
-            }
-            let name = unsafe { std::slice::from_raw_parts(name, name_length) };
-            match name {
+        for (index, name) in COUNTER_NAMES.iter().enumerate() {
+            match name.as_bytes() {
                 b"normalizedUniqueKeys" => reader.ingress_touched = index,
                 b"selectorTruthAdditions" | b"selectorTruthRemovals" => reader.selector_changed.push(index),
                 b"candidateChecks"
@@ -1732,10 +1710,11 @@ fn amplification_stage_report(changed_rows: u64, touched_rows: u64, flushes: u64
 }
 
 fn read_counter_value(engine: StyleEngineHandle, index: usize) -> u64 {
-    let mut value = 0_u64;
-    let mut name_length = 0_usize;
-    let name = unsafe { bridge::style_engine_counter(engine, index, &mut value, &mut name_length) };
-    assert!(!name.is_null(), "cached counter index is out of range");
+    let (_, value) = unsafe { engine.for_replay() }
+        .counters()
+        .iter()
+        .nth(index)
+        .expect("cached counter index is out of range");
     value
 }
 
