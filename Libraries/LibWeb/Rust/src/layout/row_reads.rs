@@ -13,7 +13,9 @@
 //! latest one does not reflect yet: then it asks the owner to publish them again first.
 
 use super::layout_changes::LayoutChange;
-use super::layout_node_arena::{BOUND_ROWS_PER_CHUNK, PseudoElementRows, SLOTS_PER_CHUNK};
+use super::layout_node_arena::{
+    BOUND_ROWS_PER_CHUNK, PSEUDO_ELEMENT_ROWS_PER_CHUNK, PseudoElementRows, SLOTS_PER_CHUNK,
+};
 use super::node_data::{FfiNodeLink, GENERATED_FOR_FIRST_LETTER, NodeKind, NodeSlotId, PaintNode};
 use super::node_facts;
 use super::tree_shape::PublishedStyle;
@@ -44,7 +46,8 @@ pub(crate) struct RowSnapshot {
     /// The row each element is bound to, by its element index, and each text node, by its text index.
     pub(super) element_rows: ColumnSnapshot<NodeSlotId, BOUND_ROWS_PER_CHUNK>,
     pub(super) text_rows: ColumnSnapshot<NodeSlotId, BOUND_ROWS_PER_CHUNK>,
-    pub(super) pseudo_element_rows: Arc<PseudoElementRows>,
+    /// The rows of each element's pseudo-elements, by its element index.
+    pub(super) pseudo_element_rows: ColumnSnapshot<PseudoElementRows, PSEUDO_ELEMENT_ROWS_PER_CHUNK>,
     /// The row the document is bound to: the viewport's.
     pub(super) viewport_row: NodeSlotId,
     /// The last change of the document thread's the rows include.
@@ -230,15 +233,10 @@ impl RowSnapshot {
 
     /// The row the pseudo-element of kind `generated_for` on the element with `generator` is bound to.
     pub(crate) fn bound_pseudo_element_row(&self, generator: StyleNodeID, generated_for: u8) -> Option<NodeSlotId> {
-        self.pseudo_element_rows
-            .get(&(generator, generated_for))
+        let rows = self.pseudo_element_rows.get(generator.element_index()? as usize)?;
+        rows.get(usize::from(generated_for).checked_sub(1)?)
             .copied()
             .filter(|row| self.node(*row).is_some())
-    }
-
-    /// Whether any pseudo-element is bound to a row.
-    pub(crate) fn has_pseudo_element_rows(&self) -> bool {
-        !self.pseudo_element_rows.is_empty()
     }
 
     /// The row the document is bound to: the viewport.
