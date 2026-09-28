@@ -86,7 +86,6 @@ Layout::RustFFI::FfiLayoutUpdateHostCallbacks Document::layout_update_host_callb
         .context = this,
         .document_facts = [](void* context) { return static_cast<Document*>(context)->layout_update_document_facts(); },
         .take_in_frame_effects = [](void* context, Layout::RustFFI::FfiLayoutFrameEffects const* effects) { static_cast<Document*>(context)->take_in_layout_frame_effects(*effects); },
-        .finish_submitted_style_update = [](void* context) { static_cast<Document*>(context)->finish_style_update_submitted_in_flight(); },
         .start_round = [](void* context, bool runs_style, void* sink) {
             auto& document = *static_cast<Document*>(context);
             if (runs_style)
@@ -180,16 +179,9 @@ void Document::take_in_layout_frame_effects(Layout::RustFFI::FfiLayoutFrameEffec
     // resources, the commit it made and the rendering it prepared go away with the render state, and nothing of it is
     // published. So what the frame leaves for the host is dropped, and the document is told nothing.
     if (m_retiring_render_state) {
-        m_style_repaint_owed_to_flight = false;
-        m_style_repaint_owed_to_flight_invalidates_hit_test = false;
         end_layout_frame_update(arena);
         return;
     }
-
-    // The install of a style batch a flight applied owes the flight the repaint of the batch, which the flight's recording
-    // is if it stands; otherwise the document paints again.
-    if (effects.settles_flight_style_repaint)
-        settle_style_repaint_owed_to_flight(effects.flight_style_repaint_recorded);
 
     // An image box that owns its image's provider is handed it here, and lays out again if the image is already there.
     for (auto const& owed : ReadonlySpan<Layout::RustFFI::FfiOwedImageResources> { effects.owed_image_resources, effects.owed_image_resources_count }) {
@@ -278,26 +270,6 @@ bool Document::submit_layout_for_rendering_update()
     return update_style_and_layout_once(UpdateLayoutReason::HTMLEventLoopRenderingUpdate, ThrottledAnimationSamplingScope::Document, LayoutPassSubmission::MaySubmit);
 }
 
-// A style update whose first pass leaves the layout tree as it is runs in the flight that lays the document out after it:
-// the layout update begins as the rendering update's would, and its first round submits the style pass for the flight to
-// run instead of running style itself, unless the document's layout tree is to be built again first.
-// Opt-in for now (LIBWEB_FLIGHT_STYLE=1): otherwise the style pass runs in a flight of its own ahead of the layout.
-bool Document::style_runs_in_layout_flights()
-{
-    static bool const enabled = [] {
-        auto const* value = getenv("LIBWEB_FLIGHT_STYLE");
-        return value && StringView { value, strlen(value) } == "1"sv;
-    }();
-    return enabled;
-}
-
-bool Document::submit_style_and_layout_for_rendering_update()
-{
-    if (!style_runs_in_layout_flights() || m_created_for_appropriate_template_contents || !has_layout_root())
-        return false;
-    return update_style_and_layout_once(UpdateLayoutReason::HTMLEventLoopRenderingUpdate, ThrottledAnimationSamplingScope::Document, LayoutPassSubmission::MaySubmitWithStyle);
-}
-
 bool Document::update_style_and_layout_once(UpdateLayoutReason reason, ThrottledAnimationSamplingScope animation_sampling_scope, LayoutPassSubmission pass_submission)
 {
     auto navigable = this->navigable();
@@ -327,15 +299,6 @@ bool Document::update_style_and_layout_once(UpdateLayoutReason reason, Throttled
     // made from inside the pass write through on their own.
     drain_invalidation_journal();
 
-    // The style a flight runs ahead of its layout is the style of a layout update that builds no layout tree first and
-    // has no host step between its style and its layout that reads style: otherwise the style runs in a flight of its
-    // own, and the layout on the main thread after it.
-    if (pass_submission == LayoutPassSubmission::MaySubmitWithStyle
-        && (needs_layout_tree_update() || child_needs_layout_tree_update() || render_inputs().has_pending_top_layer_change()
-            || !m_list_owners_pending_item_renumber.is_empty()
-            || Layout::RustFFI::layout_arena_needs_full_layout_tree_update(Layout::document_layout_arena(*this))))
-        return false;
-
     auto* arena = Layout::document_layout_arena(*this);
     Layout::RustFFI::layout_arena_begin_update_layout(arena);
 
@@ -349,14 +312,8 @@ bool Document::update_style_and_layout_once(UpdateLayoutReason reason, Throttled
     //     before layout_arena_update_layout returns, or once a submitted pass's frame is taken back.
 
     bool const may_submit_pass = pass_submission != LayoutPassSubmission::Wait;
-    // The update's first round's style runs here, ahead of the update. One that runs in the flight begins here: its pass
-    // is submitted for the update to collect, and the rest of the style update is installed as the flight is taken back.
-    bool const style_in_flight = pass_submission == LayoutPassSubmission::MaySubmitWithStyle
-        && Layout::RustFFI::layout_arena_collect_style_pass_for_flight(arena, may_submit_pass);
-    if (style_in_flight)
-        submit_style_for_flight();
-    else
-        update_style();
+    // The update's first round's style runs here, ahead of the update.
+    update_style();
 
     LayoutRoundReading first_round;
     read_layout_round(*this, first_round, [&] {
@@ -369,23 +326,14 @@ bool Document::update_style_and_layout_once(UpdateLayoutReason reason, Throttled
         .reason_is_inspect_devtools_layout_data = reason == UpdateLayoutReason::InspectDevToolsLayoutData,
         .is_template_contents_document = m_created_for_appropriate_template_contents,
         .may_submit_pass = may_submit_pass,
-        .style_in_flight = style_in_flight,
-        .viewport_propagation_sources = {},
         .first_round = first_round.round,
     };
-    if (style_in_flight) {
-        auto sources = CSS::StyleEffectDrain::viewport_propagation_sources_of(*this);
-        for (size_t index = 0; index < sources.size() && index < 2; ++index)
-            inputs.viewport_propagation_sources[index] = sources[index].value();
-    }
     auto outcome = Layout::RustFFI::layout_arena_update_layout(arena, &inputs);
-    if (outcome == Layout::RustFFI::FfiLayoutUpdateOutcome::FlightReady || outcome == Layout::RustFFI::FfiLayoutUpdateOutcome::FlightWithStyleReady) {
+    if (outcome == Layout::RustFFI::FfiLayoutUpdateOutcome::FlightReady) {
         // The flight records the document after its layout only if the document seals what that reads before it submits
         // the flight. A document that is to update its style after the layout lays out again before it shows anything.
-        // The style a flight runs ahead of its layout is not such an update: the flight's take-back installs it.
-        bool style_runs_in_flight = outcome == Layout::RustFFI::FfiLayoutUpdateOutcome::FlightWithStyleReady;
         if (auto navigable = this->navigable())
-            navigable->seal_flight_paint(*this, !needs_style_update_after_layout(style_runs_in_flight));
+            navigable->seal_flight_paint(*this, !needs_style_update_after_layout());
         Layout::RustFFI::layout_arena_submit_prepared_flight(arena);
         return true;
     }

@@ -2302,11 +2302,11 @@ void Document::process_pending_list_item_renumbers()
     }
 }
 
-bool Document::needs_style_update_after_layout(bool style_runs_in_flight)
+bool Document::needs_style_update_after_layout()
 {
     return has_size_containers_needing_evaluation_after_layout()
         || render_inputs().needs_animated_style_update()
-        || (!style_runs_in_flight && style_computer().style_engine().has_pending_transaction());
+        || style_computer().style_engine().has_pending_transaction();
 }
 
 void Document::clear_devtools_layout_inspection_data()

@@ -73,26 +73,6 @@ unsafe extern "C" fn layout_arena_update_layout(
     })
 }
 
-/// Whether the layout update the document thread is about to run, which may submit its full layout
-/// pass if `may_submit_pass`, runs its first round's style in the flight it submits. If it does,
-/// the style pass the document thread submits next is collected for the update, which it then
-/// begins style for and submits ahead of the update, as the update's first round would have.
-///
-/// # Safety
-///
-/// `arena` must be a live handle with a registered layout host, used on the document thread
-/// between `layout_arena_begin_update_layout` and the layout update.
-#[unsafe(no_mangle)]
-unsafe extern "C" fn layout_arena_collect_style_pass_for_flight(arena: *mut c_void, may_submit_pass: bool) -> bool {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    let _main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
-    if !runs_style_in_flight(may_submit_pass) {
-        return false;
-    }
-    crate::css::style::bridge::collect_next_style_pass_for_flight();
-    true
-}
-
 /// Submits the flight the document's layout update readied (see
 /// `FfiLayoutUpdateOutcome::FlightReady`), once the document has sealed what its recording reads.
 ///

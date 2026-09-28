@@ -974,11 +974,6 @@ fn stage_thread_holds_run_for_queued_stage() -> bool {
     }
 }
 
-/// Whether the stage thread holds a run for a test's hold.
-pub(crate) fn stage_thread_holds_a_run() -> bool {
-    lock_stage_hold().0.holding.is_some()
-}
-
 /// Whether the calling thread has submitted a run the hold `armed` names that has not finished yet.
 fn has_unfinished_run_armed(armed: &ArmedHold) -> bool {
     let names = |hold_labels: &[&'static str], document: usize| {
@@ -1677,11 +1672,6 @@ impl<F> FrameOwns<F> {
     // Taken through a method, so a closure captures the wrapper rather than its field.
     pub(crate) fn into_inner(self) -> F {
         self.0
-    }
-
-    /// The value, for the thread that owns the frame it goes into as it is.
-    pub(crate) fn get(&self) -> &F {
-        &self.0
     }
 
     /// The value, for the thread that owns the frame it goes into as it is.
