@@ -21,7 +21,6 @@
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
 #include <LibWeb/HTML/LocalNavigable.h>
 #include <LibWeb/HTML/LocalTraversableNavigable.h>
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/WebDriver/Actions.h>
@@ -170,9 +169,9 @@ static CSSPixelPoint get_parent_offset(HTML::BrowsingContext const& browsing_con
         CSSPixels border_left_width = 0;
         CSSPixels border_top_width = 0;
 
-        auto const* layout_node = container_element->layout_node();
-        if (layout_node && Painting::has_committed_box(*layout_node)) {
-            auto const box_model = Painting::box_model(*layout_node);
+        auto box = Painting::BoxSlot::bound_to(*container_element);
+        if (Painting::has_committed_box(box)) {
+            auto const box_model = Painting::box_model(box);
 
             // 7. Let borderLeftWidth be the computed border-left-width of containerElement in CSS pixels.
             border_left_width = box_model.border.left;

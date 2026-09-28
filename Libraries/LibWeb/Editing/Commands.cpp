@@ -29,7 +29,6 @@
 #include <LibWeb/HTML/HTMLTableElement.h>
 #include <LibWeb/HTML/Numbers.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/Namespace.h>
 #include <LibWeb/Selection/SelectionModifier.h>
 #include <LibWeb/TrustedTypes/RequireTrustedTypesForDirective.h>

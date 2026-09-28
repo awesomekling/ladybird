@@ -4336,6 +4336,11 @@ fn node_kind_is_svg_box(kind: NodeKind) -> bool {
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn layout_node_kind_is_box(kind: NodeKind) -> bool {
+    node_kind_is_box(kind)
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn layout_node_kind_is_replaced_box(kind: NodeKind) -> bool {
     node_facts::kind_is_replaced_box(kind)
 }

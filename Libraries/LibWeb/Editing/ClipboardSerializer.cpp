@@ -28,8 +28,8 @@
 #include <LibWeb/HTML/HTMLUListElement.h>
 #include <LibWeb/HTML/Parser/HTMLParser.h>
 #include <LibWeb/HTML/XMLSerializer.h>
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/Namespace.h>
+#include <LibWeb/Painting/BoxSlot.h>
 #include <LibWeb/VisualLines.h>
 
 #include <LibWeb/Editing/StyledMarkupSerializer.h>
@@ -103,10 +103,11 @@ private:
         if (!m_range->intersects_node(const_cast<DOM::Node&>(node)))
             return;
 
-        auto const* layout_node = node.layout_node();
+        auto box = Painting::BoxSlot::bound_to(node);
+        auto const* box_values = box ? box.style_group<CSS::ComputedValues::BoxValues>() : nullptr;
         bool is_rendered_block = false;
-        if (layout_node && is<Layout::NodeWithStyle>(*layout_node)) {
-            auto display = as<Layout::NodeWithStyle>(*layout_node).display();
+        if (box_values) {
+            auto display = CSS::display_from_ffi_display(box_values->display);
             is_rendered_block = display.is_block_outside() || display.is_table_caption();
         }
 
@@ -114,7 +115,7 @@ private:
             request_line_breaks(is<HTML::HTMLParagraphElement>(node) ? 2 : 1);
 
         if (auto const* text = as_if<DOM::Text>(node)) {
-            if (!layout_node || layout_node->user_select_used_value() == CSS::UserSelect::None)
+            if (!box || node.user_select_used_value() == CSS::UserSelect::None)
                 return;
             // Source formatting whitespace between blocks has a layout node but produces no painted text. TextIterator
             // based engines omit it from the plain-text clipboard representation.
@@ -135,7 +136,7 @@ private:
             if (range_fully_contains_node(node))
                 request_explicit_line_break();
         } else if (auto const* image = as_if<HTML::HTMLImageElement>(node)) {
-            if (range_fully_contains_node(node) && layout_node && layout_node->user_select_used_value() != CSS::UserSelect::None)
+            if (range_fully_contains_node(node) && box && node.user_select_used_value() != CSS::UserSelect::None)
                 append(image->alt());
         } else {
             node.for_each_child([&](DOM::Node const& child) {
@@ -144,8 +145,8 @@ private:
             });
         }
 
-        if (layout_node && is<Layout::NodeWithStyle>(*layout_node)) {
-            auto display = as<Layout::NodeWithStyle>(*layout_node).display();
+        if (box_values) {
+            auto display = CSS::display_from_ffi_display(box_values->display);
             if (display.is_table_cell() && node.next_sibling())
                 append("\t"_utf16);
             if (display.is_table_row() && node.next_sibling())

@@ -49,8 +49,12 @@ public:
     Layout::RustFFI::NodeKind kind() const { return m_kind; }
     StringView kind_name() const;
     bool is_viewport() const { return m_kind == Layout::RustFFI::NodeKind::Viewport; }
+    bool is_box() const { return Layout::RustFFI::layout_node_kind_is_box(m_kind); }
     bool is_text() const { return m_kind == Layout::RustFFI::NodeKind::TextNode || m_kind == Layout::RustFFI::NodeKind::GeneratedTextNode; }
     bool is_svg_box() const { return Layout::RustFFI::layout_node_kind_is_svg_box(m_kind); }
+    bool is_atomic_inline() const;
+    // The viewport, and a box whose overflow is neither visible nor clip.
+    bool is_scroll_container() const;
 
     u32 flags() const;
     bool has_flag(Layout::RustFFI::NodeFlag flag) const { return (flags() & static_cast<u32>(flag)) != 0; }
@@ -61,6 +65,8 @@ public:
     BoxSlot parent() const { return linked(Layout::RustFFI::FfiNodeLink::Parent); }
     BoxSlot first_child() const { return linked(Layout::RustFFI::FfiNodeLink::FirstChild); }
     BoxSlot next_sibling() const { return linked(Layout::RustFFI::FfiNodeLink::NextSibling); }
+    // The box after this one in a pre-order walk of the subtree `root` names, or no box past its end.
+    BoxSlot next_in_pre_order(BoxSlot const& root) const;
     // The arena finds the containing block by walking up the layout tree.
     BoxSlot containing_block() const;
 
@@ -97,5 +103,6 @@ private:
 };
 
 WEB_API StringView layout_node_kind_name(Layout::RustFFI::NodeKind);
+WEB_API bool overflow_value_makes_box_a_scroll_container(CSS::Overflow);
 
 }

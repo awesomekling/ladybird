@@ -19,7 +19,6 @@
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/IntersectionObserver/IntersectionObserver.h>
-#include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/ValueParserRustFFI.h>
@@ -389,8 +388,8 @@ CSSPixelRect IntersectionObserver::root_intersection_rectangle(Compositing::Accu
         rect = visual_context_tree
             ? element->bounding_client_rect_assuming_layout_clean(*visual_context_tree)
             : element->bounding_client_rect_assuming_layout_clean();
-        if (auto const* layout_node = element->layout_node(); layout_node && Painting::has_committed_box(*layout_node))
-            intersection_root_is_scrollable = layout_node->is_scroll_container();
+        if (auto box = Painting::BoxSlot::bound_to(*element); Painting::has_committed_box(box))
+            intersection_root_is_scrollable = box.is_scroll_container();
     }
 
     // When calculating the root intersection rectangle for a same-origin-domain target, the rectangle is then
