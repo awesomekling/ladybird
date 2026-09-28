@@ -1385,13 +1385,9 @@ impl RetainedState {
             .set(tree_scope, shadow_root_identity, keyframes);
         // The host drops the sets the scope published before, so a plan still owed names what the
         // table publishes now.
-        for plan in self
-            .nodes_owing_animation_definitions
-            .values_mut()
-            .chain(self.animation_definitions_being_applied.as_mut())
-        {
-            plan.resolve_keyframes_again(&self.animation_keyframes);
-        }
+        let keyframes = &self.animation_keyframes;
+        self.nodes_owing_animation_definitions
+            .for_each_value_mut(|plan| plan.resolve_keyframes_again(keyframes));
     }
 
     /// The `@keyframes` the document's style scopes define.
@@ -1963,8 +1959,7 @@ impl StyleEngineState {
                 transition_steps_decided_in_pass: Default::default(),
                 pseudo_element_transition_steps_decided_in_pass: Default::default(),
                 counter_style_environment_identities: HashMap::default(),
-                nodes_owing_animation_definitions: HashMap::default(),
-                animation_definitions_being_applied: None,
+                nodes_owing_animation_definitions: Default::default(),
                 css_defined_animations: Default::default(),
                 animation_timing_rows: Default::default(),
                 animation_effect_descriptions: Default::default(),

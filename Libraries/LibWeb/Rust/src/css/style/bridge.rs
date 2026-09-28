@@ -4794,6 +4794,12 @@ pub(crate) struct HomeAnswers {
     anchored: HashSet<StyleNodeID>,
     /// The transition steps the passes decided that the host has not taken yet.
     transition_steps: super::transition_step::TransitionStepsForHost,
+    /// The animation plans the rows left that the host has not taken yet.
+    animation_plans: HashMap<(StyleNodeID, u8), AnimationPlanForHost>,
+    /// Whether a `@keyframes` change the main thread sent may have moved plans the owner has not handed over again.
+    animation_plans_await_news: bool,
+    /// The plan the host applies now, whose definitions it reads until it takes the next.
+    animation_plan_being_applied: Option<super::animations::SettledAnimationPlan>,
     /// The ASCII-lowercase local names of the attributes a selector the main thread sent tests the value text of.
     attribute_value_text_names: Vec<crate::css::retained_fly_string::RetainedUtf16FlyString>,
     /// Moves whenever `attribute_value_text_names` grows.
@@ -4818,6 +4824,7 @@ pub(crate) struct EngineNews {
     anchored: Vec<(StyleNodeID, bool)>,
     rule_ids: Vec<(u64, Option<RuleID>)>,
     transition_steps: Option<super::transition_step::TransitionStepTables>,
+    animation_plans: Vec<((StyleNodeID, u8), Option<AnimationPlanForHost>)>,
 }
 
 // SAFETY: The pointers name the host's objects, which the main thread alone reads, and which the engine keeps alive
@@ -4879,6 +4886,12 @@ impl EngineNews {
         self.records_named.append(&mut engine.host.records_named);
         if let Some(steps) = engine.transition_steps_moved() {
             self.transition_steps = Some(steps);
+        }
+        for (node, pseudo_kind) in engine.retained.nodes_owing_animation_definitions.take_written() {
+            self.animation_plans.push((
+                (node, pseudo_kind),
+                settled_animation_plan_for_host(engine, node, pseudo_kind),
+            ));
         }
     }
 }
@@ -5143,6 +5156,13 @@ impl HomeAnswers {
             StyleChange::Engine(EngineChange::RowSampledTakenByHost(node)) => {
                 self.rows_sampled.remove(node);
             }
+            StyleChange::Engine(EngineChange::AnimationPlanTakenByHost { node, pseudo_kind }) => {
+                self.animation_plans.remove(&(*node, *pseudo_kind));
+            }
+            StyleChange::Engine(EngineChange::SetTreeScopeAnimationKeyframes { .. }) => {
+                self.animation_plans.clear();
+                self.animation_plans_await_news = true;
+            }
             StyleChange::Engine(EngineChange::TransitionStepTakenByHost { node, pseudo_kind }) => {
                 self.transition_steps.forget(*node, *pseudo_kind);
             }
@@ -5206,6 +5226,13 @@ impl HomeAnswers {
         if let Some(steps) = news.transition_steps {
             self.transition_steps.adopt(steps);
         }
+        for (key, plan) in news.animation_plans {
+            match plan {
+                Some(plan) => self.animation_plans.insert(key, plan),
+                None => self.animation_plans.remove(&key),
+            };
+        }
+        self.animation_plans_await_news = false;
     }
 
     /// Whether the engine holds the native rule of `identity`, once it has applied what the main thread sent.
@@ -5338,7 +5365,8 @@ impl FfiSettledAnimationDefinitions {
 }
 
 /// Takes the animation plan an engine-settled row left for the host, so that exactly one
-/// application drains it.
+/// application drains it. The main thread takes it from its copy of the plans the rows left: only one a `@keyframes`
+/// change it sent since may have moved waits for the owner to apply the change and hand the plans over again.
 ///
 /// # Safety
 /// `engine` must be live for this call, and the definitions must be read before the next call.
@@ -5348,39 +5376,75 @@ pub unsafe extern "C" fn style_engine_take_settled_animation_definitions(
     node: u32,
     pseudo_kind: u8,
 ) -> FfiSettledAnimationDefinitions {
-    crate::css::style::owner_calls::ask(
-        engine.home(),
-        "style_engine_take_settled_animation_definitions",
-        crate::css::style::owner_calls::StyleQuery::TakeSettledAnimationDefinitions { node, pseudo_kind },
-    )
-    .animation_definitions()
-}
-
-/// Answers [`style_engine_take_settled_animation_definitions`] from `engine`, on the render owner.
-///
-/// # Safety
-///
-/// As for [`style_engine_take_settled_animation_definitions`].
-pub(crate) unsafe fn owner_take_settled_animation_definitions(
-    engine: &mut crate::css::style::StyleEngine,
-    node: u32,
-    pseudo_kind: u8,
-) -> FfiSettledAnimationDefinitions {
+    const ENTRY: &str = "style_engine_take_settled_animation_definitions";
     let Some(node) = StyleNodeID::from_raw(node) else {
         return FfiSettledAnimationDefinitions::absent();
     };
-    let Some(element_display_is_none) = engine
-        .take_settled_animation_definitions(node, pseudo_kind)
-        .map(|plan| plan.element_display_is_none())
+    // SAFETY: On the main thread.
+    let answers = unsafe { engine.home().answers() };
+    let taken = match answers.animation_plans_await_news {
+        false => answers.animation_plans.remove(&(node, pseudo_kind)).inspect(|_| {
+            crate::css::style::owner_calls::send(
+                engine,
+                ENTRY,
+                crate::css::style::owner_calls::EngineChange::AnimationPlanTakenByHost { node, pseudo_kind },
+            );
+        }),
+        true => crate::css::style::owner_calls::ask(
+            engine.home(),
+            ENTRY,
+            crate::css::style::owner_calls::StyleQuery::TakeSettledAnimationPlan { node, pseudo_kind },
+        )
+        .animation_plan(),
+    };
+    let Some(AnimationPlanForHost {
+        plan,
+        in_display_none_subtree,
+    }) = taken
     else {
         return FfiSettledAnimationDefinitions::absent();
     };
+    // SAFETY: On the main thread.
+    let plan = unsafe { engine.home().answers() }
+        .animation_plan_being_applied
+        .insert(plan);
+    FfiSettledAnimationDefinitions {
+        definitions: plan.definitions().as_ptr().cast(),
+        count: plan.definitions().len(),
+        owed: true,
+        in_display_none_subtree,
+    }
+}
+
+/// Answers [`style_engine_take_settled_animation_definitions`] from `engine`, on the render owner, once it applied the
+/// `@keyframes` changes the main thread sent.
+pub(crate) fn owner_take_settled_animation_plan(
+    engine: &mut StyleEngine,
+    node: StyleNodeID,
+    pseudo_kind: u8,
+) -> Option<AnimationPlanForHost> {
+    let taken = settled_animation_plan_for_host(engine, node, pseudo_kind)?;
+    engine
+        .retained
+        .nodes_owing_animation_definitions
+        .remove(&(node, pseudo_kind));
+    Some(taken)
+}
+
+/// A copy of the plan a row left for `node`, or for its pseudo-element of `pseudo_kind`, for the host to apply, and
+/// whether the element is in a `display: none` subtree.
+fn settled_animation_plan_for_host(
+    engine: &StyleEngine,
+    node: StyleNodeID,
+    pseudo_kind: u8,
+) -> Option<AnimationPlanForHost> {
+    let plan = engine.settled_animation_plan_for_host(node, pseudo_kind)?;
     // https://drafts.csswg.org/css-animations-1/#animations
     // An element that is not rendered starts no animation. The record says whether the element's
     // own display is `none`; a pseudo-element's originating element and any other element's parent
     // and its ancestors say the rest. Which definitions start an animation is decided as the plan
     // is applied, against the animations the element holds then, so this is answered either way.
-    let in_display_none_subtree = element_display_is_none || {
+    let in_display_none_subtree = plan.element_display_is_none() || {
         let start = match pseudo_kind {
             u8::MAX => engine.tree().parent(node).or_else(|| engine.tree().host_of(node)),
             _ => Some(node),
@@ -5389,15 +5453,17 @@ pub(crate) unsafe fn owner_take_settled_animation_definitions(
             super::animations::has_inclusive_ancestor_with_display_none_ignoring_animations(engine, start)
         })
     };
-    let plan = engine
-        .settled_animation_definitions_being_applied()
-        .expect("the plan was just taken");
-    FfiSettledAnimationDefinitions {
-        definitions: plan.definitions().as_ptr().cast(),
-        count: plan.definitions().len(),
-        owed: true,
+    Some(AnimationPlanForHost {
+        plan,
         in_display_none_subtree,
-    }
+    })
+}
+
+/// An animation plan a row left, as the host applies it.
+pub(crate) struct AnimationPlanForHost {
+    plan: super::animations::SettledAnimationPlan,
+    /// Whether the element is in a `display: none` subtree, which starts no animation.
+    in_display_none_subtree: bool,
 }
 
 /// The record as a published value that owns everything a read of it reads (see
