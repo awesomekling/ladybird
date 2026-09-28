@@ -481,16 +481,6 @@ public:
     // callers may omit rules whose declarations cannot win; exact callers receive the same answer
     // as the document pass. Returns false when matching could not complete.
     bool match_element(StyleNodeID node, Vector<RuleMatch>&, MatchPurpose);
-    void* compile_selector_query(ReadonlySpan<void const*> selectors);
-    // For an engine with no StyleComputer to reach its elements through: when the new query demands attribute value
-    // text that earlier facts were published without, the callback republishes every attribute value the engine holds.
-    void* compile_selector_query(ReadonlySpan<void const*> selectors, Function<void()> const& backfill_attribute_value_texts);
-    static void destroy_selector_query(void*);
-    void prepare_selector_query();
-    Optional<bool> selector_query_matches(void const* query, StyleNodeID node, StyleNodeID scope_root, StyleNodeID shadow_root);
-    Optional<bool> selector_query_matches_without_document_root(void const* query, StyleNodeID node, StyleNodeID scope_root, StyleNodeID shadow_root);
-    bool selector_query_all(void* query, StyleNodeID root, bool include_root, StyleNodeID scope_root, StyleNodeID shadow_root, bool has_document_root, Vector<StyleNodeID>& matches);
-    bool selector_query_first(void* query, StyleNodeID root, bool include_root, StyleNodeID scope_root, StyleNodeID shadow_root, bool has_document_root, StyleNodeID& matched);
 
     // Enumerates the engine's counters. Returns false once index is past the last counter.
     bool counter(size_t index, StringView& out_name, u64& out_value) const;
@@ -604,9 +594,8 @@ private:
     bool m_css_transitions_may_observe_style_changes { false };
 };
 
-// What a read asks of the document's style engine beyond what a const engine answers: interning a name, compiling and
-// running a selector query, matching the rules of one element, marking a benchmark, and keeping the records a read
-// views alive while it views them. None of it is an input: it changes no answer of a style or layout pass, so it needs
+// What a read asks of the document's style engine beyond what a const engine answers: interning a name, matching the
+// rules of one element, marking a benchmark, and keeping the records a read views alive while it views them. None of it is an input: it changes no answer of a style or layout pass, so it needs
 // none of the document's render inputs (DOM::RenderInputs) and leaves the query snapshot the document published in
 // place. It reaches nothing else of the engine.
 class StyleEngineQueries {
@@ -614,12 +603,6 @@ public:
     StyleEngine const& engine() const { return m_engine; }
 
     StyleAtomID intern_atom(Utf16FlyString const& name) const { return m_engine.intern_atom(name); }
-    void* compile_selector_query(ReadonlySpan<void const*> selectors) const { return m_engine.compile_selector_query(selectors); }
-    void prepare_selector_query() const { m_engine.prepare_selector_query(); }
-    Optional<bool> selector_query_matches(void const* query, StyleNodeID node, StyleNodeID scope_root, StyleNodeID shadow_root) const { return m_engine.selector_query_matches(query, node, scope_root, shadow_root); }
-    Optional<bool> selector_query_matches_without_document_root(void const* query, StyleNodeID node, StyleNodeID scope_root, StyleNodeID shadow_root) const { return m_engine.selector_query_matches_without_document_root(query, node, scope_root, shadow_root); }
-    bool selector_query_all(void* query, StyleNodeID root, bool include_root, StyleNodeID scope_root, StyleNodeID shadow_root, bool has_document_root, Vector<StyleNodeID>& matches) const { return m_engine.selector_query_all(query, root, include_root, scope_root, shadow_root, has_document_root, matches); }
-    bool selector_query_first(void* query, StyleNodeID root, bool include_root, StyleNodeID scope_root, StyleNodeID shadow_root, bool has_document_root, StyleNodeID& matched) const { return m_engine.selector_query_first(query, root, include_root, scope_root, shadow_root, has_document_root, matched); }
     bool match_element(StyleNodeID node, Vector<StyleEngine::RuleMatch>& matches, StyleEngine::MatchPurpose purpose) const { return m_engine.match_element(node, matches, purpose); }
     void record_benchmark_marker(Utf16View name) const { m_engine.record_benchmark_marker(name); }
     void begin_style_record_view_epoch() const { m_engine.begin_style_record_view_epoch(); }

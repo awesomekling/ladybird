@@ -3159,6 +3159,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             manifest_dir.join("src/css/selector_parser.rs"),
             manifest_dir.join("src/css/selector_operations.rs"),
             manifest_dir.join("src/css/selector_serialization.rs"),
+            manifest_dir.join("src/css/dom_selector_matching.rs"),
             manifest_dir.join("src/css/ffi_support.rs"),
         ],
         &out_dir,

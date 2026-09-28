@@ -554,7 +554,6 @@ class ParentNode;
 class Position;
 class ProcessingInstruction;
 class PseudoElement;
-class IsolatedSelectorQueryEngineCache;
 class QuerySelectorResultCache;
 class Range;
 class RegisteredObserver;

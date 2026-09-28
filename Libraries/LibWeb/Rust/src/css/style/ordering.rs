@@ -2126,9 +2126,7 @@ impl StyleEngineState {
     }
 
     pub(super) fn sweep_style_atoms(&mut self, counters: &mut Counters) {
-        let decision = self.retained.atoms.sweep_decision();
-        counters.add(Counter::AtomSweepPinReleasesSkipped, decision.skipped_pin_releases);
-        if !decision.should_sweep && self.host.replay_reclaimed_style_atoms.is_none() {
+        if !self.retained.atoms.should_sweep() && self.host.replay_reclaimed_style_atoms.is_none() {
             return;
         }
         if self.host.atom_sweep_waits_for_host {
