@@ -423,7 +423,6 @@ impl RetainedState {
         };
         let written = self.state_written_facts(node, state);
         let container_unit_mask = written.container_relative_length_unit_mask;
-        let tree_counting_key = self.tree_counting_key_for(node, written);
         if written.has_written_tree_counting || self.nodes_with_tree_counting_records.contains(&node) {
             scratch.recompute_in_full = true;
         }
@@ -837,8 +836,7 @@ impl RetainedState {
             current_environment,
             RootFontInputs::from_document(&inputs),
             self.monospace_cohort_key(node, state),
-            self.substitution_attributes_key(node, None, state),
-            tree_counting_key,
+            self.element_reads(node, None, state, current_environment),
         );
         // The row takes another node's record whole, so its plan is decided from that record's
         // own longhands rather than from a drive of this node's; a record holding none is no
@@ -1724,7 +1722,7 @@ impl RetainedState {
             .and_then(|(parent, parent_record)| self.cold_record_parent(node, parent, parent_record, state))
             .map(|parent| ColdRecordKey {
                 monospace_recascaded_font_size: self.monospace_cohort_key(node, state),
-                substitution_attributes: self.substitution_attributes_key(node, None, state),
+                element_reads: self.element_reads(node, None, state, parent_environment),
                 parent,
                 previous_style_record: 0,
                 generation: cascade_state.0,
@@ -1734,7 +1732,6 @@ impl RetainedState {
                 environment: parent_environment,
                 font_environment_generation: inputs.font_environment_generation,
                 root_font_inputs: RootFontInputs::from_document(&inputs),
-                tree_counting_key: self.tree_counting_key_for(node, written),
             });
         let delta_property_count = self.winner_groups.winner_count_in_state(state) as u64;
         if !(scratch.targeted_record_demand && facts & bridge::element_adjustment_fact::HAS_ANIMATIONS != 0)
@@ -1805,7 +1802,7 @@ impl RetainedState {
             .and_then(|(parent, parent_record)| self.cold_record_parent(node, parent, parent_record, state))
             .map(|parent| ColdRecordKey {
                 monospace_recascaded_font_size: self.monospace_cohort_key(node, state),
-                substitution_attributes: self.substitution_attributes_key(node, None, state),
+                element_reads: self.element_reads(node, None, state, environment),
                 parent,
                 previous_style_record: 0,
                 generation: cascade_state.0,
@@ -1815,7 +1812,6 @@ impl RetainedState {
                 environment,
                 font_environment_generation: inputs.font_environment_generation,
                 root_font_inputs: RootFontInputs::from_document(&inputs),
-                tree_counting_key: self.tree_counting_key_for(node, written),
             });
         if let Some(delta) = self.assign_cached_cold_record(
             node,
@@ -1841,8 +1837,7 @@ impl RetainedState {
                 environment: key.environment,
                 font_environment_generation: key.font_environment_generation,
                 root_font_inputs: key.root_font_inputs,
-                substitution_attributes: key.substitution_attributes,
-                tree_counting_key: key.tree_counting_key,
+                element_reads: key.element_reads,
             };
             self.engine_cold_record_donors
                 .get(&donor_key)?
@@ -2236,48 +2231,68 @@ impl RetainedState {
         self.tree.shadow_host_of(node).unwrap_or(node)
     }
 
-    /// The per-element inputs a record cache must distinguish: attributes and element-scoped random bases.
-    fn substitution_attributes_key(&self, node: StyleNodeID, pseudo_kind: Option<u8>, state: CascadeStateID) -> u64 {
+    /// What a record `state` computes under the custom-property `environment` reads of `node`, or of its
+    /// pseudo-element `pseudo_kind`, beyond its winners and its parent. A substituted winner reads what its value
+    /// under `environment` reads, and one `environment` has not substituted yet may read anything: elements whose
+    /// winners substitute alike share a record, wherever they sit and whatever else their attributes hold.
+    pub(super) fn element_reads(
+        &self,
+        node: StyleNodeID,
+        pseudo_kind: Option<u8>,
+        state: CascadeStateID,
+        environment: u64,
+    ) -> ElementReads {
         use std::hash::{Hash, Hasher};
-        let environment = self
-            .computed_group_sets
-            .custom_property_environment_identity(node)
-            .unwrap_or(0);
         let written = self.state_written_facts(node, state);
-        if !written.may_read_element_random && !written.reads_attributes {
-            return 0;
-        }
-        let reads_random = written.may_read_element_random
-            && self.winner_groups.winners_in_state(state).any(|winner| {
+        let mut reads_random = false;
+        let mut reads_tree_counting = written.has_written_tree_counting;
+        if written.may_read_element_random || written.has_substitutions {
+            for winner in self.winner_groups.winners_in_state(state) {
                 let Some(winner) = self.winner_groups.resolved_winner(winner) else {
-                    return false;
+                    continue;
                 };
                 let Some((_, value, checks)) = self.written_winner_value(node, &winner) else {
-                    return false;
+                    continue;
                 };
-                match checks.substitution {
+                let longhand = winner.property >= crate::css::property_metadata::FIRST_LONGHAND_PROPERTY_ID;
+                let (random, tree_counting) = match checks.substitution {
+                    WrittenSubstitution::None => (checks.reads_element_random, false),
+                    WrittenSubstitution::PendingShorthand => (true, longhand),
                     WrittenSubstitution::Unresolved => self
                         .custom_property_environments
                         .substitution(value, winner.property, environment)
-                        .is_none_or(|value| {
-                            crate::css::style_compute::collect_external_value_dependencies(value.data())
-                                .has_unfixed_random_sharing
+                        .map_or((true, longhand), |value| {
+                            let reads = crate::css::style_compute::collect_external_value_dependencies(value.data());
+                            (
+                                reads.has_unfixed_random_sharing,
+                                longhand && reads.uses_tree_counting_function,
+                            )
                         }),
-                    WrittenSubstitution::PendingShorthand => true,
-                    WrittenSubstitution::None => checks.reads_element_random,
-                }
-            });
-        if !reads_random && !written.reads_attributes {
-            return 0;
+                };
+                reads_random |= random;
+                reads_tree_counting |= tree_counting;
+            }
         }
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        if reads_random {
-            node.hash(&mut hasher);
+        let attributes = if reads_random || written.reads_attributes {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            if reads_random {
+                node.hash(&mut hasher);
+            }
+            self.facts
+                .substitution_attributes(self.substitution_attribute_element(node, pseudo_kind))
+                .hash(&mut hasher);
+            hasher.finish() | 1
+        } else {
+            0
+        };
+        ElementReads {
+            attributes,
+            tree_counting: if reads_tree_counting {
+                (self.tree.tree_scope(node).0, self.element_tree_counting_inputs(node))
+            } else {
+                (0, 0)
+            },
         }
-        self.facts
-            .substitution_attributes(self.substitution_attribute_element(node, pseudo_kind))
-            .hash(&mut hasher);
-        hasher.finish() | 1
     }
 
     /// What a record for this node under this cascade state owes the monospace recascade, as a
@@ -2725,7 +2740,7 @@ impl RetainedState {
                 .cold_record_parent(node, parent, parent_record, cascade_state.1)
                 .map(|parent| ColdRecordKey {
                     monospace_recascaded_font_size: self.monospace_cohort_key(node, cascade_state.1),
-                    substitution_attributes: self.substitution_attributes_key(node, None, cascade_state.1),
+                    element_reads: self.element_reads(node, None, cascade_state.1, environment),
                     parent,
                     previous_style_record: old_style_record.raw(),
                     generation: cascade_state.0,
@@ -2735,7 +2750,6 @@ impl RetainedState {
                     environment,
                     font_environment_generation: self.document_style_computation_inputs.font_environment_generation,
                     root_font_inputs: RootFontInputs::from_document(&self.document_style_computation_inputs),
-                    tree_counting_key: self.state_tree_counting_key(node, cascade_state.1),
                 });
             if let Some((old_record, record)) = self.assign_cached_cold_record(
                 node,
@@ -3077,8 +3091,7 @@ impl RetainedState {
                 environment: key.environment,
                 font_environment_generation: key.font_environment_generation,
                 root_font_inputs: key.root_font_inputs,
-                substitution_attributes: key.substitution_attributes,
-                tree_counting_key: key.tree_counting_key,
+                element_reads: key.element_reads,
             };
             let donors = self.engine_cold_record_donors.entry(donor_key).or_default();
             if let Some(existing) = donors.iter_mut().find(|donor| donor.state == key.state) {
@@ -3326,7 +3339,7 @@ impl RetainedState {
         let swap_eligible = self.computed_group_sets.node_inherited_group_swap_eligible(node);
         let key = ColdRecordKey {
             monospace_recascaded_font_size: self.monospace_cohort_key(node, cascade_state.1),
-            substitution_attributes: self.substitution_attributes_key(node, None, cascade_state.1),
+            element_reads: self.element_reads(node, None, cascade_state.1, custom_property_environment),
             parent,
             previous_style_record: previous_style_record.map_or(0, computed::FinalStyleRecordID::raw),
             generation: cascade_state.0,
@@ -3336,7 +3349,6 @@ impl RetainedState {
             environment: custom_property_environment,
             font_environment_generation: inputs.font_environment_generation,
             root_font_inputs: RootFontInputs::from_document(&inputs),
-            tree_counting_key: self.state_tree_counting_key(node, cascade_state.1),
         };
         self.remember_cold_record(
             key,
@@ -3598,10 +3610,7 @@ impl RetainedState {
     /// produce one even when the written winner does not name it, so its cache key carries the
     /// position as well.
     pub(crate) fn state_tree_counting_key(&self, node: StyleNodeID, state: CascadeStateID) -> (u32, u64) {
-        self.tree_counting_key_for(node, self.state_written_facts(node, state))
-    }
-
-    pub(super) fn tree_counting_key_for(&self, node: StyleNodeID, facts: StateWrittenFacts) -> (u32, u64) {
+        let facts = self.state_written_facts(node, state);
         if facts.has_written_tree_counting || facts.has_substitutions {
             (self.tree.tree_scope(node).0, self.element_tree_counting_inputs(node))
         } else {
@@ -5267,10 +5276,7 @@ pub(super) struct ColdRecordKey {
     environment: u64,
     font_environment_generation: u64,
     root_font_inputs: RootFontInputs,
-    /// What the node's attributes hold, when its winners substitute `attr()`: two elements alike
-    /// in everything else do not share a record their attributes computed. Zero otherwise.
-    substitution_attributes: u64,
-    tree_counting_key: (u32, u64),
+    element_reads: ElementReads,
 }
 
 /// What a first record reads of the parent's style: its inherited groups, its custom-property
@@ -5298,10 +5304,18 @@ pub(super) type RecordCohortKey = (
     u64,
     RootFontInputs,
     i32,
-    u64,
-    (u32, u64),
+    ElementReads,
 );
 pub(super) type RecordCohortValue = (computed::FinalStyleRecordID, u32);
+
+/// What a record reads of its element beyond its winners and its parent, on which the elements
+/// sharing the record must agree: the element's attributes and element-scoped random bases, and its
+/// tree-counting inputs, each zero where no winner reads it ([`RetainedState::element_reads`]).
+#[derive(Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub(super) struct ElementReads {
+    attributes: u64,
+    tree_counting: (u32, u64),
+}
 
 /// A first record the engine keeps for reuse, with the swap eligibility its assignment carries.
 #[derive(Clone, Copy)]
@@ -5325,8 +5339,7 @@ pub(super) struct ColdRecordDonorKey {
     environment: u64,
     font_environment_generation: u64,
     root_font_inputs: RootFontInputs,
-    substitution_attributes: u64,
-    tree_counting_key: (u32, u64),
+    element_reads: ElementReads,
 }
 
 #[derive(Clone, Copy)]
@@ -5768,8 +5781,7 @@ pub(super) struct PseudoCohortKey {
     font_environment_generation: u64,
     custom_property_registration_generation: u64,
     root_font_inputs: RootFontInputs,
-    substitution_attributes: u64,
-    tree_counting_key: (u32, u64),
+    element_reads: ElementReads,
 }
 
 /// The synthetic pseudo-element kinds, as the C++ `PseudoElement` enumeration numbers them.
