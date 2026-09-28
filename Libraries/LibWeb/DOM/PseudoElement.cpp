@@ -11,6 +11,7 @@
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/PseudoElement.h>
+#include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/Painting/BoxSlot.h>
 
@@ -89,7 +90,7 @@ void SyntheticPseudoElement::set_scroll_offset(CSSPixelPoint value)
     if (!arena) {
         if (value.is_zero())
             return;
-        arena = m_originating_element->document().layout_node_arena().handle();
+        arena = Layout::document_layout_arena(m_originating_element->document());
     }
     Layout::RustFFI::layout_arena_set_pseudo_element_scroll_offset(arena,
         m_originating_element->style_node_id().value(), encode_generated_for(m_type), value);

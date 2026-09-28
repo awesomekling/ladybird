@@ -137,10 +137,10 @@
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/HTML/XMLSerializer.h>
 #include <LibWeb/IntersectionObserver/IntersectionObserver.h>
+#include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
 #include <LibWeb/Layout/NodeArena.h>
 #include <LibWeb/Layout/TreeBuilder.h>
-#include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Loader/ContentBlocker.h>
 #include <LibWeb/MathML/MathMLElement.h>
 #include <LibWeb/MathML/TagNames.h>
@@ -2142,7 +2142,7 @@ static bool register_anchor_names_in_engine(Scope const& scope, DOM::Document& d
     // A document that registers a name is one that lays out, so the arena the fact belongs to is
     // worth creating here rather than replaying the registry later.
     if (has_names)
-        (void)document.layout_node_arena();
+        (void)Layout::document_layout_arena(document);
     auto registered = CSS::StyleEngineFFI::style_engine_register_anchor_names(scope, scope.engine().rust_handle(), style_node.value(), style_record.value());
     return registered & 1;
 }

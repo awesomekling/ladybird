@@ -2403,7 +2403,7 @@ void Document::process_pending_list_item_renumbers()
         bool const rebuild = list_owner->list_item_renumber_affects_rendered_content();
         if (rebuild)
             list_owner->set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::ListItemCounters);
-        Layout::RustFFI::layout_arena_set_list_owner_has_stale_item_counters(layout_node_arena().handle(), style_node.value(), !rebuild);
+        Layout::RustFFI::layout_arena_set_list_owner_has_stale_item_counters(Layout::document_layout_arena(*this), style_node.value(), !rebuild);
     }
 }
 
