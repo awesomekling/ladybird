@@ -10,8 +10,9 @@
 //! sampling state) is constructed on the Rendering thread and dropped there. The main thread holds a [`DocumentId`]
 //! and has three typed ways in, none of which takes a closure:
 //!
-//! - a [`Change`]: owned `Send` data, numbered per document ([`ChangeSeq`]), fire and forget. The owner queues it
-//!   and applies it, in order, at the next point that needs it: a unit of a rendering update, or a query.
+//! - a change: owned `Send` data, fire and forget. An [`ArenaChange`], numbered per document ([`ChangeSeq`]), the
+//!   owner queues and applies, in order, at the next point that needs it: a unit of a rendering update, or a query.
+//!   A write to the style engine waits in the engine's home, and whoever reaches the engine next applies it first.
 //! - a [`RenderingUpdate`]: the stages of a frame, which the owner runs as units ([`FrameUnit`]) and answers with
 //!   [`FrameEffects`], the typed results the main thread applies where it takes the frame in.
 //! - a [`Query`]: a question about the document as of the changes sent before it, answered in one round trip
@@ -33,12 +34,11 @@
 //! During the port the main thread still reaches the arena and the style engine directly through the handles the
 //! owner gives out when it creates the state ([`FfiRenderDocument`]); those doors are what the flip deletes.
 
-use crate::css::style::bridge::InputForPass;
 use crate::css::style::tree::StyleNodeID;
 use crate::layout::node_data::{NodeKind, NodeSlotId};
 use crate::layout::{ArenaHandle, FfiCssPixelRect, LayoutNodeArena};
 use std::cell::RefCell;
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
@@ -65,26 +65,12 @@ impl DocumentId {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
 pub(crate) struct ChangeSeq(u64);
 
-/// One write to a document's render state, as owned data the owner applies in the order the main thread made it.
+/// A write the main thread makes to a document's layout arena, as owned data the owner applies in the order the main
+/// thread made it, before the next unit or query that reaches the arena.
 ///
-/// Adding a kind of write is adding a variant and its arm in [`Change::apply`]: the main thread sends it with
-/// [`send_change`], and the owner applies it with everything before it at the next unit that needs it.
-#[allow(clippy::large_enum_variant)]
-pub(crate) enum Change {
-    /// The style inputs the main thread recorded since the last transaction: DOM tree insertions, removals and
-    /// moves, element arrivals, class, ID and attribute features, element states, inline style and presentational
-    /// hint declarations, and the host facts they read. The engine applies them as one batch, which is how its
-    /// invalidation sees them.
-    StyleInputs(InputForPass),
-    /// A write to the document's style engine, which the owner applies before the next unit or query that reaches
-    /// the engine, in order with the style inputs.
-    Engine(crate::css::style::owner_calls::EngineChange),
-    /// A write to the document's layout arena, which the owner applies before the next unit or query that reaches
-    /// the arena.
-    Arena(ArenaChange),
-}
-
-/// A write the main thread makes to a document's layout arena.
+/// Adding a kind of write is adding a variant and its arm in [`ArenaChange::apply`]: the main thread sends it with
+/// [`send_arena_change`]. A write to the document's style engine waits in the engine's home instead, for whoever
+/// reaches the engine next ([`crate::css::style::StyleEngineInputHandle::send`]).
 pub(crate) enum ArenaChange {
     /// Whether the document is an SVG file decoded as an image, which the layout of its SVG roots reads.
     DocumentIsDecodedSvg(bool),
@@ -175,26 +161,6 @@ impl ArenaChange {
     }
 }
 
-/// What of a document's render state the unit applying changes holds. A unit applies only the changes whose target
-/// it holds; the rest stay queued for the next unit that does.
-pub(crate) struct ChangeTarget<'a> {
-    pub(crate) style_engine: &'a mut crate::css::style::StyleEngine,
-}
-
-impl Change {
-    fn apply(self, target: &mut ChangeTarget<'_>) {
-        match self {
-            Change::StyleInputs(inputs) => inputs.apply(target.style_engine),
-            Change::Engine(change) => change.apply(target.style_engine),
-            Change::Arena(_) => debug_assert!(false, "a style unit applies no arena change"),
-        }
-    }
-
-    fn writes_arena(&self) -> bool {
-        matches!(self, Change::Arena(_))
-    }
-}
-
 /// How a unit that applies a document's changes reaches its style engine.
 enum EngineReach<'a> {
     /// The main thread waits for the unit, with the engine home.
@@ -217,49 +183,22 @@ impl EngineReach<'_> {
     }
 }
 
-/// A document's changes the owner has received and not applied yet, in order.
+/// A document's arena changes the owner has received and not applied yet, in order.
 #[derive(Default)]
 struct ChangeQueue {
     received_through: ChangeSeq,
-    applied_through: ChangeSeq,
-    pending: VecDeque<(ChangeSeq, Change)>,
+    pending: Vec<ArenaChange>,
 }
 
 impl ChangeQueue {
-    fn receive(&mut self, seq: ChangeSeq, change: Change) {
+    fn receive(&mut self, seq: ChangeSeq, change: ArenaChange) {
         debug_assert_eq!(
             seq.0,
             self.received_through.0 + 1,
             "a document's changes reach the owner in order"
         );
         self.received_through = seq;
-        self.pending.push_back((seq, change));
-    }
-
-    /// Takes the changes through `through` that `wanted` picks, in order, and leaves the rest queued. A change to the
-    /// arena and one to the engine write disjoint state, so each kind keeps its own order.
-    fn take_through(&mut self, through: ChangeSeq, wanted: impl Fn(&Change) -> bool) -> Vec<Change> {
-        debug_assert!(
-            through <= self.received_through,
-            "a unit applies only changes sent before it"
-        );
-        let mut taken = Vec::new();
-        let mut kept = VecDeque::new();
-        while let Some((seq, change)) = self.pending.pop_front() {
-            if seq > through {
-                self.pending.push_front((seq, change));
-                break;
-            }
-            if wanted(&change) {
-                self.applied_through = self.applied_through.max(seq);
-                taken.push(change);
-            } else {
-                kept.push_back((seq, change));
-            }
-        }
-        kept.append(&mut self.pending);
-        self.pending = kept;
-        taken
+        self.pending.push(change);
     }
 }
 
@@ -274,70 +213,34 @@ pub(crate) struct RenderState {
 }
 
 impl RenderState {
-    /// Applies the changes the owner has received, which every unit and query comes after.
+    /// Applies the changes the owner has received, which every unit and query comes after. What the main thread wrote
+    /// to the style engine the reach of the engine applies first.
     fn apply_changes(&mut self, mut reach: EngineReach<'_>) {
-        self.apply_arena_changes(&mut reach);
-        self.apply_style_changes(&mut reach);
-    }
-
-    /// Applies the arena changes the owner has received, which every unit and query that reaches the arena comes after.
-    fn apply_arena_changes(&mut self, reach: &mut EngineReach<'_>) {
-        let received = self.changes.received_through;
-        let changes = self.changes.take_through(received, Change::writes_arena);
-        if changes.is_empty() {
+        if self.changes.pending.is_empty() {
             return;
         }
+        let changes = std::mem::take(&mut self.changes.pending);
         // Linking the arena reaches the engine it links. Putting back the rows a style install did not adopt, and
         // retaining the atoms an SVG publication names, reach the engine through the arena.
         let engine = changes
             .iter()
-            .find_map(|change| match change {
-                Change::Arena(change) => change.linked_engine(),
-                _ => None,
-            })
+            .find_map(ArenaChange::linked_engine)
             .unwrap_or_else(|| self.style_engine());
+        let face_owner = std::ptr::from_mut::<ArenaHandle>(&mut self.arena) as u64;
         let arena = self.arena.arena_mut();
         let apply = |arena: &mut LayoutNodeArena, mut engine: Option<&mut crate::css::style::StyleEngine>| {
             for change in changes {
-                if let Change::Arena(change) = change {
-                    change.apply(arena, engine.as_deref_mut());
-                }
+                change.apply(arena, engine.as_deref_mut());
             }
         };
         if engine.is_null() {
             apply(arena, None);
             return;
         }
+        // The faces what the main thread wrote to the engine wants are this document's, whichever document's unit the
+        // owner serves the changes beside.
+        let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(face_owner);
         reach.reach(engine, |engine| apply(arena, Some(engine)));
-    }
-
-    /// Applies the changes to the style engine the owner has received, in order, which every unit and query that
-    /// reaches the engine comes after, as it came after the main thread's writes when the main thread made them
-    /// directly. The owner reaches the engine only while the main thread waits for it or has lent it a stage, so
-    /// nothing reads the engine beside them.
-    fn apply_style_changes(&mut self, reach: &mut EngineReach<'_>) {
-        if self.changes.pending.is_empty() {
-            return;
-        }
-        let received = self.changes.received_through;
-        let changes = self.changes.take_through(received, |change| !change.writes_arena());
-        if changes.is_empty() {
-            return;
-        }
-        let engine = self.style_engine();
-        if engine.is_null() {
-            debug_assert!(false, "the owner applies style changes of a document with an engine");
-            return;
-        }
-        // The faces applying them wants are this document's, whichever document's unit the owner serves them beside.
-        let _wanted_face_owner =
-            libgfx_rust::font::WantedFaceOwner::enter(std::ptr::from_mut::<ArenaHandle>(&mut self.arena) as u64);
-        reach.reach(engine, |engine| {
-            let mut target = ChangeTarget { style_engine: engine };
-            for change in changes {
-                change.apply(&mut target);
-            }
-        });
     }
 
     /// Answers `query` from the state as the units before it left it.
@@ -816,7 +719,7 @@ pub(crate) enum ToOwner {
     Changes {
         document: DocumentId,
         first: ChangeSeq,
-        changes: Vec<Change>,
+        changes: Vec<ArenaChange>,
     },
     /// Runs the rendering update `update` of `document` as the submitted run `ticket`.
     RenderingUpdate {
@@ -842,10 +745,9 @@ pub(crate) enum ToOwner {
         transaction: Box<crate::css::style::bridge::OwnerStyleTransaction>,
         reply: crate::stage_thread::OwnerReplyTo<crate::css::style::bridge::OwnerStyleTransactionView>,
     },
-    /// Answers `query` about `document` after its changes through `through`. The document thread waits.
+    /// Answers `query` about `document` after the changes sent before it. The document thread waits.
     Ask {
         document: DocumentId,
-        through: ChangeSeq,
         query: Query,
         reply: crate::stage_thread::OwnerReplyTo<Answer>,
     },
@@ -944,10 +846,6 @@ thread_local! {
     static RECALLED: RefCell<std::collections::HashSet<DocumentId>> = RefCell::new(std::collections::HashSet::new());
     // On a document thread, the number of the last change it sent for each document.
     static SENT_THROUGH: RefCell<HashMap<DocumentId, ChangeSeq>> = RefCell::new(HashMap::new());
-    // On a document thread, the documents it sent a change to the style engine of that no query it asked since has
-    // come after: the owner may not have applied it yet.
-    static STYLE_CHANGES_SENT: RefCell<std::collections::HashSet<DocumentId>> =
-        RefCell::new(std::collections::HashSet::new());
     // On a document thread, the number of the last change it sent for each document ahead of a unit or question that
     // reaches the document's arena, which the owner applies every change it received before.
     static TAKEN_IN_THROUGH: RefCell<HashMap<DocumentId, ChangeSeq>> = RefCell::new(HashMap::new());
@@ -1021,21 +919,8 @@ fn handle_message(message: ToOwner) {
             // As for a layout unit, the pass finds the arena inside its answer.
             (*pass).run(|| with_state(document, RenderState::state));
         }
-        ToOwner::Ask {
-            document,
-            through,
-            query,
-            reply,
-        } => reply.answer(|| {
-            with_state(document, |state| {
-                state.apply_changes(EngineReach::Home);
-                debug_assert!(
-                    state.changes.pending.front().is_none_or(|(seq, _)| *seq > through),
-                    "a query is answered after the changes sent before it"
-                );
-                state.answer(query)
-            })
-            .unwrap_or_else(|| Answer::left_to_host(query))
+        ToOwner::Ask { document, query, reply } => reply.answer(|| {
+            with_state(document, |state| state.answer(query)).unwrap_or_else(|| Answer::left_to_host(query))
         }),
         ToOwner::Recall { document } => {
             // A rendering update the owner deferred ends at its first unit. The update was sent before the recall, so
@@ -1071,20 +956,6 @@ fn with_state<R>(document: DocumentId, operation: impl FnOnce(&mut RenderState) 
         );
         state.map(operation)
     })
-}
-
-/// On the owner thread: applies the changes of `document` through `through` that `target` can take.
-pub(crate) fn apply_changes_through(document: DocumentId, through: ChangeSeq, target: &mut ChangeTarget<'_>) {
-    if !document.is_valid() {
-        return;
-    }
-    let changes = with_state(document, |state| {
-        state.changes.take_through(through, |change| !change.writes_arena())
-    })
-    .unwrap_or_default();
-    for change in changes {
-        change.apply(target);
-    }
 }
 
 /// On the owner thread: the style engine the arena of `document`'s render state links.
@@ -1137,7 +1008,7 @@ pub(crate) fn send(message: ToOwner) {
         // Without a Rendering thread, the thread that sends a change is the owner, and runs nothing beside it: the
         // change applies to the arena as it is sent.
         if let Some(document) = changes_of.filter(|_| !crate::stage_thread::has_owner_thread()) {
-            with_state(document, |state| state.apply_arena_changes(&mut EngineReach::Home));
+            with_state(document, |state| state.apply_changes(EngineReach::Home));
         }
     }
 }
@@ -1187,38 +1058,9 @@ pub(crate) fn create_document() -> (DocumentId, *mut c_void) {
 /// Drops the render state of `document` on the owner. Nothing waits for it.
 pub(crate) fn destroy_document(document: DocumentId) {
     SENT_THROUGH.with_borrow_mut(|sent| sent.remove(&document));
-    STYLE_CHANGES_SENT.with_borrow_mut(|sent| sent.remove(&document));
     TAKEN_IN_THROUGH.with_borrow_mut(|taken_in| taken_in.remove(&document));
     FRAME_KEYS.with_borrow_mut(|keys| keys.remove(&document));
     send(ToOwner::Destroy { document });
-}
-
-/// Sends `change` for `document`, and answers with its number: a unit that applies the changes through it applies
-/// this one. Only the document thread that came through the document's render inputs sends one, having dropped the
-/// query snapshot the document published.
-pub(crate) fn send_change(
-    _through: crate::css::style::ThroughRenderInputs,
-    document: DocumentId,
-    change: Change,
-) -> ChangeSeq {
-    let seq = SENT_THROUGH.with_borrow_mut(|sent| {
-        let seq = sent.entry(document).or_default();
-        seq.0 += 1;
-        *seq
-    });
-    STYLE_CHANGES_SENT.with_borrow_mut(|sent| sent.insert(document));
-    send(ToOwner::Changes {
-        document,
-        first: seq,
-        changes: vec![change],
-    });
-    seq
-}
-
-/// On a document thread: whether it sent a change to the style engine of `document` that no query it asked since came
-/// after, which the owner may not have applied yet.
-pub(crate) fn has_unapplied_style_changes(document: DocumentId) -> bool {
-    document.is_valid() && STYLE_CHANGES_SENT.with_borrow(|sent| sent.contains(&document))
 }
 
 /// Sends the arena write `change` for `document`, which the owner applies before the next unit or query that reaches
@@ -1232,7 +1074,7 @@ pub(crate) fn send_arena_change(document: DocumentId, change: ArenaChange) -> Ch
     send(ToOwner::Changes {
         document,
         first: seq,
-        changes: vec![Change::Arena(change)],
+        changes: vec![change],
     });
     seq
 }
@@ -1274,18 +1116,8 @@ pub(crate) fn recall_rendering_update(document: DocumentId) {
 ///
 /// `arena` must be the live arena of `document`, which no stage the document thread submitted owns.
 pub(crate) unsafe fn ask(document: DocumentId, arena: *mut c_void, query: Query) -> Answer {
-    let through = sent_through(document);
     let answer = crate::stage_thread::wait_for_owner(
-        |reply| {
-            // The owner applies every style change sent before the query first.
-            STYLE_CHANGES_SENT.with_borrow_mut(|sent| sent.remove(&document));
-            ToOwner::Ask {
-                document,
-                through,
-                query,
-                reply,
-            }
-        },
+        |reply| ToOwner::Ask { document, query, reply },
         || {
             if let Some(answer) =
                 STATES.with_borrow_mut(|states| states.get_mut(&document).map(|state| state.answer(query)))
@@ -1323,17 +1155,7 @@ pub(crate) fn ask_engine(document: DocumentId, query: Query) -> Answer {
     if let Some(answer) = STATES.with_borrow_mut(|states| states.get_mut(&document).map(|state| state.answer(query))) {
         return answer;
     }
-    let through = sent_through(document);
-    let answer = crate::stage_thread::wait_for_owner_thread(|reply| {
-        // The owner applies every style change sent before the query first.
-        STYLE_CHANGES_SENT.with_borrow_mut(|sent| sent.remove(&document));
-        ToOwner::Ask {
-            document,
-            through,
-            query,
-            reply,
-        }
-    });
+    let answer = crate::stage_thread::wait_for_owner_thread(|reply| ToOwner::Ask { document, query, reply });
     match answer {
         Some(outcome) => {
             debug_assert!(outcome.is_ok(), "the render owner panicked answering {query:?}");
@@ -1349,18 +1171,8 @@ pub(crate) fn ask_engine(document: DocumentId, query: Query) -> Answer {
 /// Asks the owner `query` about `document` and waits for the answer, as [`ask`] does, for a document thread that
 /// names no arena: where the owner cannot answer it, the question is left to the host.
 pub(crate) fn ask_owner(document: DocumentId, query: Query) -> Answer {
-    let through = sent_through(document);
     let answer = crate::stage_thread::wait_for_owner(
-        |reply| {
-            // The owner applies every style change sent before the query first.
-            STYLE_CHANGES_SENT.with_borrow_mut(|sent| sent.remove(&document));
-            ToOwner::Ask {
-                document,
-                through,
-                query,
-                reply,
-            }
-        },
+        |reply| ToOwner::Ask { document, query, reply },
         || {
             STATES
                 .with_borrow_mut(|states| states.get_mut(&document).map(|state| state.answer(query)))
@@ -1566,14 +1378,11 @@ pub(crate) fn run_style_transaction(
 ) -> crate::css::style::bridge::OwnerStyleTransactionView {
     let transaction = Box::new(transaction);
     if STATES.with_borrow(|states| states.contains_key(&document)) {
-        // The input stays with the transaction, which applies it first.
         return run_style_on_owner(document, transaction);
     }
     let transaction = std::cell::Cell::new(Some(transaction));
     let ran = crate::stage_thread::wait_for_owner_thread(|reply| {
-        let mut transaction = transaction.take().expect("the transaction is sent once");
-        // Its input goes ahead of it, as a change of its document.
-        transaction.send_input_to_owner(document);
+        let transaction = transaction.take().expect("the transaction is sent once");
         ToOwner::Style {
             document,
             transaction,
@@ -1783,20 +1592,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_unit_applies_the_changes_through_its_number_in_order() {
-        let mut queue = ChangeQueue::default();
-        assert!(queue.take_through(ChangeSeq(0), |_| true).is_empty());
-        queue.receive(ChangeSeq(1), Change::StyleInputs(InputForPass::empty()));
-        queue.receive(ChangeSeq(2), Change::StyleInputs(InputForPass::empty()));
-        queue.receive(ChangeSeq(3), Change::StyleInputs(InputForPass::empty()));
-        assert_eq!(queue.take_through(ChangeSeq(2), |_| true).len(), 2);
-        assert_eq!(queue.applied_through, ChangeSeq(2));
-        assert_eq!(queue.take_through(ChangeSeq(2), |_| true).len(), 0);
-        assert_eq!(queue.take_through(ChangeSeq(3), |_| true).len(), 1);
-        assert!(queue.pending.is_empty());
-    }
-
-    #[test]
     fn a_running_update_defers_its_own_documents_destroy_and_serves_the_rest() {
         let running = DocumentId::mint();
         let other = DocumentId::mint();
@@ -1813,7 +1608,7 @@ mod tests {
         let changes = |document| ToOwner::Changes {
             document,
             first: ChangeSeq(1),
-            changes: vec![Change::StyleInputs(InputForPass::empty())],
+            changes: vec![ArenaChange::BeginLayoutTrace],
         };
         assert_eq!(sorted(changes(running)), "serve");
         assert_eq!(sorted(changes(other)), "serve");
@@ -1846,7 +1641,7 @@ mod tests {
         let changes = |document| ToOwner::Changes {
             document,
             first: ChangeSeq(1),
-            changes: vec![Change::StyleInputs(InputForPass::empty())],
+            changes: vec![ArenaChange::BeginLayoutTrace],
         };
         // A message of a document the owner deferred a message of goes after it; another document's goes on.
         let deferred = [Some(deferred_document)];
@@ -1910,10 +1705,10 @@ mod tests {
             handle(ToOwner::Changes {
                 document,
                 first: seq,
-                changes: vec![Change::StyleInputs(InputForPass::empty())],
+                changes: vec![ArenaChange::BeginLayoutTrace],
             });
-            let applied = with_state(document, |state| state.changes.take_through(seq, |_| true).len()).unwrap();
-            assert_eq!(applied, 1);
+            let received = with_state(document, |state| state.changes.pending.len()).unwrap();
+            assert_eq!(received, 1);
             handle(ToOwner::Destroy { document });
             STATES.with_borrow(|states| states.is_empty())
         });
@@ -1943,12 +1738,7 @@ mod tests {
             );
             let query = Query::Engine(cell.for_owner());
             let (reply, answered) = crate::stage_thread::owner_reply_for_test();
-            handle(ToOwner::Ask {
-                document,
-                through: ChangeSeq::default(),
-                query,
-                reply,
-            });
+            handle(ToOwner::Ask { document, query, reply });
             let outcome = answered();
             assert!(outcome.is_err(), "the owner panicked answering");
             // The host takes the read as unanswered, and does not answer it again with the engine the owner left.
