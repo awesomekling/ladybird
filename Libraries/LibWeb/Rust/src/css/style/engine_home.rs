@@ -35,6 +35,7 @@ use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 /// What C++ holds for one document's style engine: a pointer to its home, opaque to C++. It has no
 /// way to the engine but the home's.
@@ -65,8 +66,7 @@ impl StyleEngineInputHandle {
         home.pending.fetch_or(leaves.0, Ordering::Relaxed);
         // SAFETY: On the main thread, with the engine home: nothing reaches the engine, or what the home keeps for it.
         unsafe { &mut *home.answers.get() }.follow_sent(&change, leaves);
-        // SAFETY: As above.
-        unsafe { &mut *home.unapplied.get() }.push(change);
+        home.exchange().unapplied.push(change);
     }
 }
 
@@ -149,9 +149,8 @@ struct StyleEngineHome {
     arena: usize,
     /// The document whose render state's arena links the engine, whose render owner owns the engine.
     document: crate::render_owner::DocumentId,
-    /// What the main thread wrote to the engine since it was last reached, in order. Written by the main thread, and
-    /// taken by whoever reaches the engine next.
-    unapplied: UnsafeCell<Vec<StyleChange>>,
+    /// What crosses between the main thread and whoever reaches the engine, which may run beside it.
+    exchange: Mutex<Exchange>,
     /// The [`PendingFacts`] whoever last reached the engine left, with what the main thread sent since. Written by the
     /// main thread, or by whoever reaches the engine while it waits or has lent the engine.
     pending: AtomicU8,
@@ -163,7 +162,19 @@ struct StyleEngineHome {
     reached_by_owning_thread: Cell<bool>,
 }
 
+/// What the main thread hands whoever reaches its engine.
+#[derive(Default)]
+struct Exchange {
+    /// What the main thread wrote to the engine since it was last reached, in order: the main thread pushes, and
+    /// whoever reaches the engine next takes them.
+    unapplied: Vec<StyleChange>,
+}
+
 impl StyleEngineHome {
+    fn exchange(&self) -> MutexGuard<'_, Exchange> {
+        self.exchange.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     /// Follows what the thread that owns the engine left in `engine`, reaching it directly through
     /// [`OwnedStyleEngine::engine`], as a reach would as it is done.
     fn follow_owning_thread(&self, engine: &mut StyleEngine) {
@@ -182,10 +193,10 @@ impl StyleEngineHome {
     ///
     /// # Safety
     ///
-    /// Nothing else reaches the engine or its home's changes meanwhile.
+    /// Nothing else reaches the engine meanwhile.
     unsafe fn apply_unapplied(&self, engine: &mut StyleEngine) -> bool {
-        // SAFETY: Guaranteed by the caller. Taken whole, as applying a change may reach the engine's handle again.
-        let changes = std::mem::take(unsafe { &mut *self.unapplied.get() });
+        // Taken whole, as applying a change may reach the engine's handle again, and the main thread sends on meanwhile.
+        let changes = std::mem::take(&mut self.exchange().unapplied);
         let wrote = !changes.is_empty();
         for change in changes {
             change.apply(engine);
@@ -440,7 +451,7 @@ impl StyleEngineHandle {
             holder: Cell::new(None),
             arena: arena.addr(),
             document,
-            unapplied: UnsafeCell::new(Vec::new()),
+            exchange: Mutex::default(),
             pending: AtomicU8::new(0),
             answers: UnsafeCell::default(),
             reached_by_owning_thread: Cell::new(false),
