@@ -938,7 +938,7 @@ static void apply_animation_overlay(CSS::StyleDrainScope const& scope, DOM::Abst
         //     layout node directly instead of going through the owning element.
         if (element.pseudo_element().has_value()) {
             if (auto pseudo_element_box = Painting::BoxSlot::of_pseudo_element(*target, element.pseudo_element().value()))
-                element.document().schedule_accumulated_visual_context_update(pseudo_element_box.slot(), scope);
+                element.document().schedule_accumulated_visual_context_update(pseudo_element_box, scope);
         } else {
             element.document().schedule_accumulated_visual_context_update(target, scope);
         }
