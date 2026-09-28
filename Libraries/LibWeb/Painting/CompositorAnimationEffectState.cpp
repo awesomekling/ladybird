@@ -355,19 +355,5 @@ void CompositorAnimationEffectState::reset()
 }
 
 // For callers outside Painting that still hold a layout node; these go with the Layout classes.
-bool CompositorAnimationKeyframes::transform_preserves_axes(Layout::Node const& layout_node) const
-{
-    return transform_preserves_axes(BoxSlot::of(layout_node.document(), Layout::Node::slot_id(&layout_node)));
-}
-
-bool CompositorAnimationKeyframes::only_translates_horizontally(Layout::Node const& layout_node) const
-{
-    return only_translates_horizontally(BoxSlot::of(layout_node.document(), Layout::Node::slot_id(&layout_node)));
-}
-
-CompositorAnimationEffectState::BuildOutcome CompositorAnimationEffectState::build(CompositorAnimationKeyframes const& keyframes, Layout::Node const& layout_node, Compositing::RustFFI::FfiVisualAnimationTargetKind target_kind, TimingAnchor timing_anchor)
-{
-    return build(keyframes, BoxSlot::of(layout_node.document(), Layout::Node::slot_id(&layout_node)), target_kind, timing_anchor);
-}
 
 }

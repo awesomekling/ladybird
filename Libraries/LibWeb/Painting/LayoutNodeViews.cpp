@@ -49,11 +49,6 @@ CSSPixelPoint absolute_position(Layout::Node const& node)
     return absolute_position(box_slot(node));
 }
 
-CSSPixelSize content_size(Layout::Node const& node)
-{
-    return content_size(box_slot(node));
-}
-
 CSSPixels content_width(Layout::Node const& node)
 {
     return content_width(box_slot(node));
@@ -87,11 +82,6 @@ CSSPixelRect transform_reference_box(Layout::Node const& node)
 CSSPixelRect transform_rect_to_viewport(Layout::Node const& node, CSSPixelRect const& rect, Compositing::AccumulatedVisualContextTree::IncludeVisualViewportTransform include_visual_viewport_transform)
 {
     return transform_rect_to_viewport(box_slot(node), rect, include_visual_viewport_transform);
-}
-
-CSSPixelPoint inverse_transform_point(Layout::Node const& node, CSSPixelPoint position)
-{
-    return inverse_transform_point(box_slot(node), position);
 }
 
 CSSPixelPoint cumulative_scroll_compensation(Layout::Node const& node)

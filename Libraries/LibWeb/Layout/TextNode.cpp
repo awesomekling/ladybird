@@ -177,7 +177,7 @@ void TextNode::set_needs_repaint(InvalidateDisplayList should_invalidate_display
 {
     auto identity = dom_node_identity();
     if (!identity) {
-        Painting::apply_repaint_damage(*this, should_invalidate_display_list);
+        Painting::apply_text_repaint_damage(Painting::BoxSlot::of(document(), slot_id(this)), should_invalidate_display_list);
         return;
     }
     const_cast<DOM::Document&>(document()).invalidation_journal().note_needs_repaint(identity, should_invalidate_display_list);

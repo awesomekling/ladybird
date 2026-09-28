@@ -43,12 +43,4 @@ bool Box::is_partial_relayout_boundary() const
     return RustFFI::layout_arena_node_is_partial_relayout_boundary(arena_handle(), Node::slot_id(this));
 }
 
-void Box::notify_content_navigable_of_committed_viewport()
-{
-    // A navigable another process hosts learns its viewport from the UI process, which the container tells of the
-    // viewport's rect when its document is painted.
-    if (auto* content_navigable = as_if<HTML::LocalNavigable>(as<HTML::NavigableContainer>(*dom_node()).content_navigable().ptr()))
-        content_navigable->set_viewport_size(Painting::content_size(*this));
-}
-
 }
