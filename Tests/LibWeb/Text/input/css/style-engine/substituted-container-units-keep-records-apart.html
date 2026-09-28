@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<script src="../../include.js"></script>
+<style>
+    .container {
+        container-type: inline-size;
+    }
+    .item {
+        --width: 50cqw;
+        width: var(--width);
+        height: 10px;
+    }
+</style>
+<div class="container" style="width: 100px"></div>
+<div class="container" style="width: 300px"></div>
+<script>
+    // Alike items added to containers of different sizes share no record: the value their width substitutes to reads
+    // each item's own container.
+    test(() => {
+        document.body.offsetWidth;
+        const items = [];
+        for (const container of document.querySelectorAll(".container"))
+            items.push(container.appendChild(document.createElement("div")));
+        for (const item of items)
+            item.className = "item";
+        for (const item of items)
+            println(`width: ${getComputedStyle(item).width}`);
+    });
+</script>
