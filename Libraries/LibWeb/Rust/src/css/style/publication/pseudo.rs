@@ -473,9 +473,9 @@ impl RetainedState {
                         font_environment_generation: inputs.font_environment_generation,
                         custom_property_registration_generation: inputs.custom_property_registration_generation,
                         root_font_inputs: RootFontInputs::from_document(&inputs),
-                        substitution_attributes: state
-                            .map_or(0, |state| self.substitution_attributes_key(node, Some(kind), state)),
-                        tree_counting_key: state.map_or((0, 0), |state| self.state_tree_counting_key(node, state)),
+                        element_reads: state.map_or_else(ElementReads::default, |state| {
+                            self.element_reads(node, Some(kind), state, environment)
+                        }),
                     }),
             );
             let cascade_state = state.map(|state| (generation, state));
