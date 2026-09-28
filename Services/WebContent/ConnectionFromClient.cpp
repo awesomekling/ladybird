@@ -76,8 +76,6 @@
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/HTML/WorkerAgentParent.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
-#include <LibWeb/Layout/Node.h>
-#include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Loader/ContentBlocker.h>
 #include <LibWeb/Loader/ResourceLoader.h>
 #include <LibWeb/Loader/SourceHighlighter.h>
@@ -1092,15 +1090,15 @@ void ConnectionFromClient::debug_request(Compositing::PageId page_id, ByteString
 
     if (request == "dump-layout-tree") {
         if (auto doc = page->page().local_traversable()->active_document()) {
-            if (auto* viewport = doc->layout_node())
-                Web::dump_tree(*viewport);
+            if (auto viewport = Web::Painting::BoxSlot::viewport_of(*doc))
+                Web::dump_tree(viewport);
         }
         return;
     }
 
     if (request == "dump-stacking-context-tree") {
         if (auto doc = page->page().local_traversable()->active_document()) {
-            if (doc->layout_node()) {
+            if (Web::Painting::BoxSlot::viewport_of(*doc)) {
                 VERIFY(doc->has_committed_viewport_box());
                 doc->update_paint_and_hit_testing_properties_if_needed();
                 StringBuilder builder;
@@ -1437,7 +1435,7 @@ void ConnectionFromClient::inspect_dom_node(Compositing::PageId page_id, WebView
 
     // Nodes without layout (aka non-visible nodes) do not have box metrics, but DevTools can still ask for their style
     // rules and computed properties.
-    if (property_type == WebView::DOMNodeProperties::Type::Layout && !node->layout_node()) {
+    if (property_type == WebView::DOMNodeProperties::Type::Layout && !Web::Painting::BoxSlot::bound_to(*node)) {
         async_did_inspect_dom_node(page_id, { property_type, {} });
         return;
     }
@@ -1463,17 +1461,17 @@ void ConnectionFromClient::inspect_dom_node(Compositing::PageId page_id, WebView
         return serialized;
     };
 
-    auto serialize_layout = [&](Web::Layout::Node const* layout_node) {
-        if (!layout_node || !layout_node->is_box() || !Web::Painting::has_committed_box(*layout_node)) {
+    auto serialize_layout = [&](Web::Painting::BoxSlot const& box) {
+        if (!box.is_box() || !Web::Painting::has_committed_box(box)) {
             return JsonObject {};
         }
 
-        auto const box_model = Web::Painting::box_model(*layout_node);
+        auto const box_model = Web::Painting::box_model(box);
 
         JsonObject serialized;
 
-        serialized.set("width"sv, Web::Painting::content_width(*layout_node).to_double());
-        serialized.set("height"sv, Web::Painting::content_height(*layout_node).to_double());
+        serialized.set("width"sv, Web::Painting::content_width(box).to_double());
+        serialized.set("height"sv, Web::Painting::content_height(box).to_double());
 
         serialized.set("padding-top"sv, box_model.padding.top.to_double());
         serialized.set("padding-right"sv, box_model.padding.right.to_double());
@@ -1537,7 +1535,7 @@ void ConnectionFromClient::inspect_dom_node(Compositing::PageId page_id, WebView
         serialized = serialize_computed_style();
         break;
     case WebView::DOMNodeProperties::Type::Layout:
-        serialized = serialize_layout(element.layout_node());
+        serialized = serialize_layout(Web::Painting::BoxSlot::bound_to(element));
         break;
     case WebView::DOMNodeProperties::Type::UsedFonts:
         serialized = serialize_used_fonts();
@@ -1549,11 +1547,11 @@ void ConnectionFromClient::inspect_dom_node(Compositing::PageId page_id, WebView
 
 static Optional<JsonObject> flex_layout_for_node(Web::DOM::Node const& node)
 {
-    auto const* layout_node = node.layout_node();
-    if (!layout_node || !Web::Painting::has_committed_box(*layout_node))
+    auto box = Web::Painting::BoxSlot::bound_to(node);
+    if (!Web::Painting::has_committed_box(box))
         return {};
 
-    auto serialized_layout = Web::Painting::flex_layout_json(*layout_node, node.unique_id());
+    auto serialized_layout = Web::Painting::flex_layout_json(box, node.unique_id());
     if (!serialized_layout.has_value())
         return {};
 
@@ -1564,11 +1562,11 @@ static Optional<JsonObject> flex_layout_for_node(Web::DOM::Node const& node)
 
 static Optional<JsonObject> grid_layout_for_node(Web::DOM::Node const& node)
 {
-    auto const* layout_node = node.layout_node();
-    if (!layout_node || !Web::Painting::has_committed_box(*layout_node))
+    auto box = Web::Painting::BoxSlot::bound_to(node);
+    if (!Web::Painting::has_committed_box(box))
         return {};
 
-    auto serialized_layout = Web::Painting::grid_layout_json(*layout_node, node.unique_id());
+    auto serialized_layout = Web::Painting::grid_layout_json(box, node.unique_id());
     if (!serialized_layout.has_value())
         return {};
 
@@ -1794,7 +1792,7 @@ void ConnectionFromClient::highlight_dom_node(Compositing::PageId page_id, Compo
         return;
 
     document.update_layout(Web::DOM::UpdateLayoutReason::Debugging);
-    if (!node->layout_node())
+    if (!Web::Painting::BoxSlot::bound_to(*node))
         return;
 
     document.set_highlighted_node(node, pseudo_element);
@@ -1850,7 +1848,7 @@ void ConnectionFromClient::highlight_flexbox(Compositing::PageId page_id, Compos
 
     auto& document = node->document();
     document.update_layout(Web::DOM::UpdateLayoutReason::Debugging);
-    if (!node->layout_node())
+    if (!Web::Painting::BoxSlot::bound_to(*node))
         return;
 
     document.set_flexbox_highlighted_node(node, flexbox_inspector_overlay_options_from_json(options));
@@ -1887,7 +1885,7 @@ void ConnectionFromClient::highlight_grid(Compositing::PageId page_id, Compositi
 
     auto& document = node->document();
     document.update_layout(Web::DOM::UpdateLayoutReason::Debugging);
-    if (!node->layout_node())
+    if (!Web::Painting::BoxSlot::bound_to(*node))
         return;
 
     document.set_grid_highlighted_node(node, grid_inspector_overlay_options_from_json(options));
@@ -2486,13 +2484,13 @@ static void append_layout_tree(Web::Page& page, StringBuilder& builder)
 
     update_layout_of_hosted_documents(page);
 
-    auto* layout_root = document->layout_node();
+    auto layout_root = Web::Painting::BoxSlot::viewport_of(*document);
     if (!layout_root) {
         builder.append("(no layout tree)"sv);
         return;
     }
 
-    Web::dump_tree(builder, *layout_root);
+    Web::dump_tree(builder, layout_root);
 }
 
 static void append_stacking_context_tree(Web::Page& page, StringBuilder& builder)
@@ -2505,8 +2503,7 @@ static void append_stacking_context_tree(Web::Page& page, StringBuilder& builder
 
     document->update_layout(Web::DOM::UpdateLayoutReason::Debugging);
 
-    auto* layout_root = document->layout_node();
-    if (!layout_root) {
+    if (!Web::Painting::BoxSlot::viewport_of(*document)) {
         builder.append("(no layout tree)"sv);
         return;
     }
@@ -2573,9 +2570,19 @@ void ConnectionFromClient::get_selected_text(Compositing::PageId page_id, u64 re
     async_did_get_selected_text(page_id, request_id, selection);
 }
 
-static WebView::DictionaryLookupTextStyle dictionary_lookup_text_style_from_layout_node(Web::Layout::Node const& layout_node, double zoom_level)
+// The font list of the style the box reads: its own, or, for a box that holds none, such as a text box, its parent's.
+static Gfx::FontCascadeList const* dictionary_lookup_font_list(Web::Painting::BoxSlot const& box)
 {
-    auto const& font = layout_node.first_available_font();
+    if (auto const* font_values = box.style_group<Web::CSS::ComputedValues::FontValues>())
+        return &font_values->font_list_value();
+    if (auto const* font_values = box.parent().style_group<Web::CSS::ComputedValues::FontValues>())
+        return &font_values->font_list_value();
+    return nullptr;
+}
+
+static WebView::DictionaryLookupTextStyle dictionary_lookup_text_style_from_font_list(Gfx::FontCascadeList const& font_list, double zoom_level)
+{
+    auto const& font = font_list.first_available_font();
     return {
         .font_family = font.family().to_string(),
         .ui_point_size = font.pixel_size() * static_cast<float>(zoom_level),
@@ -2584,18 +2591,17 @@ static WebView::DictionaryLookupTextStyle dictionary_lookup_text_style_from_layo
     };
 }
 
-static Web::Layout::Node const* layout_node_for_dictionary_lookup(Web::DOM::Node const& node)
+static Gfx::FontCascadeList const* font_list_for_dictionary_lookup(Web::DOM::Node const& node)
 {
     for (auto const* current = &node; current; current = current->parent_or_shadow_host_node()) {
-        auto const* layout_node = current->layout_node();
-        if (layout_node && layout_node->has_style_or_parent_with_style())
-            return layout_node;
+        if (auto const* font_list = dictionary_lookup_font_list(Web::Painting::BoxSlot::bound_to(*current)))
+            return font_list;
     }
 
     return nullptr;
 }
 
-static Optional<Gfx::IntPoint> dictionary_lookup_baseline_origin_for_range(Web::DOM::Range& range, Web::Page& page, Web::Layout::Node const& layout_node)
+static Optional<Gfx::IntPoint> dictionary_lookup_baseline_origin_for_range(Web::DOM::Range& range, Web::Page& page, Gfx::FontCascadeList const& font_list)
 {
     auto& document = range.start_container()->document();
     auto navigable = document.navigable();
@@ -2612,7 +2618,7 @@ static Optional<Gfx::IntPoint> dictionary_lookup_baseline_origin_for_range(Web::
     if (rect->width() <= 0 || rect->height() <= 0)
         return {};
 
-    auto const& font = layout_node.first_available_font();
+    auto const& font = font_list.first_available_font();
     Compositing::CSSPixelPoint baseline_origin {
         Compositing::CSSPixels::nearest_value_for(rect->x()),
         Compositing::CSSPixels::nearest_value_for(rect->y() + font.pixel_metrics().ascent),
@@ -2637,18 +2643,18 @@ void ConnectionFromClient::get_selected_text_for_lookup(Compositing::PageId page
 
     auto document = navigable->active_document();
     auto range = document ? document->get_selection()->range() : nullptr;
-    auto const* layout_node = range ? layout_node_for_dictionary_lookup(range->start_container()) : nullptr;
-    if (!layout_node && document) {
+    auto const* font_list = range ? font_list_for_dictionary_lookup(range->start_container()) : nullptr;
+    if (!font_list && document) {
         if (auto active_element = document->active_element())
-            layout_node = layout_node_for_dictionary_lookup(*active_element);
+            font_list = font_list_for_dictionary_lookup(*active_element);
     }
 
     Optional<WebView::DictionaryLookupTextStyle> style;
     Optional<Gfx::IntPoint> baseline_origin;
-    if (layout_node) {
-        style = dictionary_lookup_text_style_from_layout_node(*layout_node, navigable->page().client().zoom_level());
+    if (font_list) {
+        style = dictionary_lookup_text_style_from_font_list(*font_list, navigable->page().client().zoom_level());
         if (range)
-            baseline_origin = dictionary_lookup_baseline_origin_for_range(*range, page->page(), *layout_node);
+            baseline_origin = dictionary_lookup_baseline_origin_for_range(*range, page->page(), *font_list);
     }
 
     async_did_get_selected_text_for_lookup(page_id, request_id, WebView::DictionaryLookup {

@@ -136,16 +136,16 @@ void dump_tree(StringBuilder& builder, DOM::Node const& node)
     --indent;
 }
 
-void dump_tree(Layout::Node const& layout_node)
+void dump_tree(Painting::BoxSlot const& layout_root)
 {
     StringBuilder builder;
-    dump_tree(builder, layout_node, true);
+    dump_tree(builder, layout_root, true);
     dbgln("{}", builder.string_view());
 }
 
-void dump_tree(StringBuilder& builder, Layout::Node const& layout_node, bool interactive)
+void dump_tree(StringBuilder& builder, Painting::BoxSlot const& layout_root, bool interactive)
 {
-    Painting::dump_layout_tree(builder, layout_node, interactive);
+    Painting::dump_layout_tree(builder, layout_root, interactive);
 }
 
 void dump_selector(CSS::Selector const& selector)
