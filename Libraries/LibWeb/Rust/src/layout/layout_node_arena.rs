@@ -1114,7 +1114,13 @@ pub(crate) struct StaleWalkFacts {
 /// carries the engine along as a `&mut StyleEngine` would be carried: the link is `Send` exactly
 /// when the engine is.
 #[derive(Clone, Copy)]
-struct StyleEngineLink(crate::css::style::StyleEngineHandle);
+pub(crate) struct StyleEngineLink(crate::css::style::StyleEngineHandle);
+
+impl StyleEngineLink {
+    pub(crate) fn handle(self) -> crate::css::style::StyleEngineHandle {
+        self.0
+    }
+}
 
 // SAFETY: The link stands for an exclusive borrow of the engine, which the compiler checks is
 // `Send`. The engine is only reached through it by whoever holds the arena exclusively, while the
@@ -2834,17 +2840,18 @@ impl LayoutNodeArena {
         self.style_records_pinned_by_host[id.slot_index() as usize].get()
     }
 
-    pub(crate) fn set_style_engine(&self, style_engine: crate::css::style::StyleEngineHandle) {
-        self.style_engine.set(StyleEngineLink(style_engine));
+    /// Links the arena to the document's style engine `link` names, which is `engine`.
+    pub(crate) fn link_style_engine(&self, link: StyleEngineLink, engine: &mut StyleEngine) {
+        self.style_engine.set(link);
+        engine.install_layout_style_snapshots(self.layout_style_snapshots.clone());
+        self.host_style_record_pins.set(engine.host_style_record_pins());
+    }
+
+    /// Drops the arena's link to its style engine, which the host is about to destroy.
+    pub(crate) fn unlink_style_engine(&self) {
+        self.style_engine
+            .set(StyleEngineLink(crate::css::style::StyleEngineHandle::null()));
         self.host_style_record_pins.set(None);
-        if !style_engine.is_null() {
-            // The stages that take the engine's token run for this arena.
-            style_engine.link_arena(std::ptr::from_ref(self) as usize, self.document);
-            // SAFETY: The registered style engine outlives this arena's live nodes.
-            let engine = unsafe { style_engine.enter("layout arena style engine link") };
-            engine.install_layout_style_snapshots(self.layout_style_snapshots.clone());
-            self.host_style_record_pins.set(engine.host_style_record_pins());
-        }
     }
 
     pub(crate) fn set_document_is_decoded_svg(&self, is_decoded_svg: bool) {
@@ -7221,32 +7228,44 @@ pub unsafe extern "C" fn layout_arena_attach_shell(arena: *mut c_void, id: NodeS
     unsafe { LayoutNodeArena::from_handle(arena) }.attach_shell(id, shell);
 }
 
+/// Registers the host's style record callbacks, and links the document's render state to its style engine: the
+/// owner links the arena as it takes the change in.
+///
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread, and the engine must outlive the registration.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_set_style_record_host_callbacks(
     arena: *mut c_void,
     callbacks: FfiStyleRecordHostCallbacks,
 ) {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: As above.
-    let host_tables = unsafe { super::HostTables::from_handle(arena) };
+    assert!(!callbacks.style_engine.is_null());
+    // SAFETY: Guaranteed by the caller.
+    let host_tables = unsafe { HostTables::beside_frame(arena) };
     host_tables
         .shell_style_changed_host
         .set(Some((callbacks.context, callbacks.shell_style_changed)));
-    assert!(!callbacks.style_engine.is_null());
     host_tables.style_engine.set(Some(callbacks.style_engine));
     // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }.set_style_engine(callbacks.style_engine);
+    let document = unsafe { super::ArenaHandle::document_of(arena) };
+    // The stages that take the engine's token run for this arena, and its owner is the document's.
+    callbacks.style_engine.link_arena(arena.addr(), document);
+    let link = StyleEngineLink(callbacks.style_engine);
+    crate::render_owner::send_arena_change(document, crate::render_owner::ArenaChange::LinkStyleEngine(link));
 }
 
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_clear_style_record_host_callbacks(arena: *mut c_void) {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: As above.
-    let host_tables = unsafe { super::HostTables::from_handle(arena) };
+    // SAFETY: Guaranteed by the caller.
+    let host_tables = unsafe { HostTables::beside_frame(arena) };
     host_tables.shell_style_changed_host.set(None);
     host_tables.style_engine.set(None);
     // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }.set_style_engine(crate::css::style::StyleEngineHandle::null());
+    let document = unsafe { super::ArenaHandle::document_of(arena) };
+    crate::render_owner::send_arena_change(document, crate::render_owner::ArenaChange::UnlinkStyleEngine);
 }
 
 /// # Safety

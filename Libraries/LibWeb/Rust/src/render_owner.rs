@@ -123,10 +123,24 @@ pub(crate) enum ArenaChange {
     SvgStyleReferences { element: StyleNodeID, references: [u32; 4] },
     /// An SVG element left the document with what its presentation attributes parse to.
     SvgAttributeFactsCleared(StyleNodeID),
+    /// The arena's nodes take their style from the document's style engine.
+    LinkStyleEngine(crate::layout::StyleEngineLink),
+    /// The host is about to destroy the document's style engine.
+    UnlinkStyleEngine,
 }
 
 impl ArenaChange {
-    fn apply(self, arena: &mut LayoutNodeArena) {
+    /// The engine the change links the arena to, which applying it reaches.
+    fn linked_engine(&self) -> Option<crate::css::style::StyleEngineHandle> {
+        match self {
+            ArenaChange::LinkStyleEngine(link) => Some(link.handle()),
+            _ => None,
+        }
+    }
+
+    /// Applies the change to `arena`, with the engine the arena links, or the one the change links it to, where the
+    /// unit reaches one.
+    fn apply(self, arena: &mut LayoutNodeArena, engine: Option<&mut crate::css::style::StyleEngine>) {
         match self {
             ArenaChange::DocumentIsDecodedSvg(is_decoded_svg) => arena.set_document_is_decoded_svg(is_decoded_svg),
             ArenaChange::StyleSnapshotScrollStates(states) => arena.publish_style_snapshot_scroll_states(&states),
@@ -152,6 +166,11 @@ impl ArenaChange {
                 arena.set_style_node_svg_style_references(element, references);
             }
             ArenaChange::SvgAttributeFactsCleared(element) => arena.clear_style_node_svg_attribute_facts(element),
+            ArenaChange::LinkStyleEngine(link) => match engine {
+                Some(engine) => arena.link_style_engine(link, engine),
+                None => debug_assert!(false, "linking the style engine reaches it"),
+            },
+            ArenaChange::UnlinkStyleEngine => arena.unlink_style_engine(),
         }
     }
 }
@@ -268,22 +287,28 @@ impl RenderState {
         if changes.is_empty() {
             return;
         }
-        let engine = self.style_engine();
+        // Linking the arena reaches the engine it links. Putting back the rows a style install did not adopt, and
+        // retaining the atoms an SVG publication names, reach the engine through the arena.
+        let engine = changes
+            .iter()
+            .find_map(|change| match change {
+                Change::Arena(change) => change.linked_engine(),
+                _ => None,
+            })
+            .unwrap_or_else(|| self.style_engine());
         let arena = self.arena.arena_mut();
-        let apply = |arena: &mut LayoutNodeArena| {
+        let apply = |arena: &mut LayoutNodeArena, mut engine: Option<&mut crate::css::style::StyleEngine>| {
             for change in changes {
                 if let Change::Arena(change) = change {
-                    change.apply(arena);
+                    change.apply(arena, engine.as_deref_mut());
                 }
             }
         };
         if engine.is_null() {
-            apply(arena);
+            apply(arena, None);
             return;
         }
-        // Putting back the rows a style install did not adopt, and retaining the atoms an SVG publication names, reach
-        // the engine through the arena.
-        reach.reach(engine, |_| apply(arena));
+        reach.reach(engine, |engine| apply(arena, Some(engine)));
     }
 
     /// Applies the changes to the style engine the owner has received, in order, which every unit and query that
