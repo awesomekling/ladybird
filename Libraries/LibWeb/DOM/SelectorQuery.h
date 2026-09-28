@@ -7,7 +7,6 @@
 #pragma once
 
 #include <AK/HashMap.h>
-#include <AK/OwnPtr.h>
 #include <AK/RefCounted.h>
 #include <AK/Vector.h>
 #include <LibGC/Cell.h>
@@ -18,8 +17,6 @@
 
 namespace Web::DOM {
 
-class IsolatedSelectorQueryEngine;
-
 // A selectors string parsed for use by querySelector(All), matches() and closest().
 // Documents cache these per selector string, so one SelectorQuery may be reused by many queries.
 class SelectorQuery : public RefCounted<SelectorQuery> {
@@ -28,8 +25,6 @@ public:
     {
         return adopt_ref(*new SelectorQuery(move(selectors)));
     }
-
-    ~SelectorQuery();
 
     CSS::SelectorList const& selectors() const { return m_selectors; }
 
@@ -49,25 +44,10 @@ public:
 private:
     explicit SelectorQuery(CSS::SelectorList&&);
 
-    void* engine_query(Document&) const;
-    bool matches_simple_selector_in_dom(Element const&) const;
-    bool matches_tree_in_dom(Element const&) const;
-    bool should_match_tree_in_dom(Document&, ParentNode* subtree_root) const;
-    bool matches_in_style_engine(Element const&, ParentNode const& scope) const;
-
     CSS::SelectorList m_selectors;
-    // Compiled into the document's style engine the first time a match needs the engine, not before: a query the DOM
-    // matches alone must not enter the engine, which a style pass in flight owns.
-    mutable void* m_engine_query { nullptr };
+    // The selectors as the DOM matcher takes them.
+    Vector<CSS::SelectorFFI::RustSelector const*> m_rust_selectors;
     mutable u64 m_last_use { 0 };
-    bool m_can_match_in_dom { false };
-    bool m_can_match_locally_in_dom { false };
-    bool m_dom_matching_needs_id { false };
-    bool m_dom_matching_needs_classes { false };
-    // Whether every selector's compounds can be matched in the DOM one at a time, walking its combinators there.
-    bool m_can_match_tree_in_dom { false };
-    bool m_tree_dom_matching_needs_id { false };
-    bool m_tree_dom_matching_needs_classes { false };
 
     // Whether the selector is a lone `*`, which every element matches: a query then collects the
     // subtree's elements without matching any of them.
@@ -136,37 +116,6 @@ private:
     };
 
     HashMap<Key, Entry, KeyTraits> m_entries;
-};
-
-// The document's style engine knows only connected nodes, so a selector query against a disconnected element
-// matches in an engine of its own, populated with the whole tree the element is in. Building one costs a walk of
-// that tree, so this cache keeps one per tree root for every query against the tree to share. Entries are validated
-// lazily against the root's mutation version counters, like query results are.
-class IsolatedSelectorQueryEngineCache {
-    AK_MAKE_NONCOPYABLE(IsolatedSelectorQueryEngineCache);
-    AK_MAKE_NONMOVABLE(IsolatedSelectorQueryEngineCache);
-
-public:
-    AK_ALLOC_WITH_KMALLOC;
-
-    IsolatedSelectorQueryEngineCache();
-    ~IsolatedSelectorQueryEngineCache();
-
-    IsolatedSelectorQueryEngine& engine_for(ParentNode& root);
-    void clear();
-    void visit_edges(GC::Cell::Visitor&);
-
-private:
-    struct Entry {
-        // Weak so the cache never keeps a disconnected tree alive, and so that a dead root can never be confused with
-        // a new node allocated at the same address.
-        GC::Weak<ParentNode> root;
-        u64 dom_tree_version { 0 };
-        u64 character_data_version { 0 };
-        NonnullOwnPtr<IsolatedSelectorQueryEngine> engine;
-    };
-
-    HashMap<GC::RawPtr<ParentNode const>, Entry> m_entries;
 };
 
 }
