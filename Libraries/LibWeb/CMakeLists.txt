@@ -817,7 +817,6 @@ set(SOURCES
     Painting/BoxModelMetrics.cpp
     Painting/BoxSlot.cpp
     Painting/BoxViews.cpp
-    Painting/LayoutNodeViews.cpp
     Painting/PaintFacts.cpp
     Painting/ChromeWidget.cpp
     Painting/DocumentPaintState.cpp
