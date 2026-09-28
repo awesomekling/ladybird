@@ -32,7 +32,6 @@
 #include <LibWeb/HTML/HTMLElement.h>
 #include <LibWeb/Layout/ImageProvider.h>
 #include <LibWeb/Layout/LayoutRustBridge.h>
-#include <LibWeb/Layout/NodeArena.h>
 #include <LibWeb/Painting/PaintableTypes.h>
 #include <LibWeb/Painting/PaintingRustBridge.h>
 #include <LibWeb/SVG/FragmentIdentifier.h>
@@ -363,26 +362,27 @@ Gfx::GlyphRun::TextType text_type_for_code_point(u32 code_point);
 
 void* document_layout_arena(DOM::Document& document)
 {
-    return document.layout_node_arena().handle();
+    // Asking for the arena makes it.
+    (void)document.layout_node_arena();
+    return document.layout_arena_handle();
 }
 
 void* document_layout_arena_if_created(DOM::Document const& document)
 {
-    auto const* arena = document.layout_node_arena_if_created();
-    return arena ? arena->handle() : nullptr;
+    return document.layout_arena_handle();
 }
 
 Optional<RustFFI::DocumentId> document_render_document_if_created(DOM::Document const& document)
 {
-    auto const* arena = document.layout_node_arena_if_created();
-    if (!arena)
+    if (!document.layout_arena_handle())
         return {};
-    return arena->render_document();
+    return document.render_document_id();
 }
 
 RustFFI::DocumentId document_render_document(DOM::Document& document)
 {
-    return document.layout_node_arena().render_document();
+    (void)document_layout_arena(document);
+    return document.render_document_id();
 }
 
 void register_layout_host(DOM::Document& document)
