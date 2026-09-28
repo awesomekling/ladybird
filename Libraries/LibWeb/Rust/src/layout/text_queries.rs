@@ -8,6 +8,7 @@ use super::LayoutNodeArena;
 use super::node_data::{GENERATED_FOR_FIRST_LETTER, NodeSlotId};
 use super::node_facts::{kind_is_box, kind_is_text, node_style_view};
 use super::rendered_text::{FfiRenderedTextView, FfiTextSourceRange, RenderedTextBoundary, ensure_text_content};
+use crate::css::computed_value_views::ComputedValuesView;
 use crate::css::css_enums::{visibility, white_space_collapse};
 use crate::css::ffi_support::FfiUtf16View;
 use crate::render_owner::{ArenaAnswer, ArenaQuery, LentSlice};
@@ -117,13 +118,31 @@ impl MappedText {
 
 fn collapses_whitespace(arena: &LayoutNodeArena, node: NodeSlotId) -> bool {
     let parent = arena.data(node).parent.get();
+    node_style_view(arena.data(parent)).is_some_and(style_collapses_white_space)
+}
+
+/// Whether a text row whose parent has `style` collapses white space.
+pub(crate) fn style_collapses_white_space(style: ComputedValuesView<'_>) -> bool {
     matches!(
-        node_style_view(arena.data(parent))
-            .expect("text parent has style")
-            .inherited_text()
-            .white_space_collapse,
+        style.inherited_text().white_space_collapse,
         white_space_collapse::COLLAPSE | white_space_collapse::PRESERVE_BREAKS
     )
+}
+
+/// Appends a row's rendered `text` to `to`, with each run of white space collapsed to its first unit if `collapse`.
+pub(crate) fn append_rendered_text(to: &mut Vec<u16>, text: &[u16], collapse: bool) {
+    if !collapse {
+        to.extend_from_slice(text);
+        return;
+    }
+    let mut previous_is_space = false;
+    for &unit in text {
+        let is_space = matches!(unit, 0x09..=0x0d | 0x20);
+        if !is_space || !previous_is_space {
+            to.push(unit);
+        }
+        previous_is_space = is_space;
+    }
 }
 
 fn word_range(
@@ -305,18 +324,11 @@ impl LayoutNodeArena {
                 debug_assert!(false, "a text row is read once its text is up to date");
                 continue;
             };
-            if !collapse_whitespace || !collapses_whitespace(self, node) {
-                text.extend_from_slice(&content.text);
-                continue;
-            }
-            let mut previous_is_space = false;
-            for &unit in &content.text {
-                let is_space = matches!(unit, 0x09..=0x0d | 0x20);
-                if !is_space || !previous_is_space {
-                    text.push(unit);
-                }
-                previous_is_space = is_space;
-            }
+            append_rendered_text(
+                &mut text,
+                &content.text,
+                collapse_whitespace && collapses_whitespace(self, node),
+            );
         }
         text
     }

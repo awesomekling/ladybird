@@ -10,6 +10,7 @@
 #include <AK/Optional.h>
 #include <AK/RefCounted.h>
 #include <AK/RefPtr.h>
+#include <AK/Utf16String.h>
 #include <AK/Vector.h>
 #include <LibWeb/CSS/Enums.h>
 #include <LibWeb/Export.h>
@@ -86,6 +87,10 @@ public:
     // Empty if the snapshot cannot convert the box's rects to viewport space.
     Optional<Vector<CSSPixelRect>> client_rects(QueryBox) const;
     Optional<CSSPixelRect> bounding_client_rect(QueryBox) const;
+
+    // The text the boxes of the text node whose box is `slot` render, with whitespace collapsed where their style
+    // collapses it if asked to. Empty where layout left a box without its text.
+    Optional<Utf16String> rendered_text(Compositing::RustFFI::NodeSlotId, bool collapse_whitespace) const;
 
 private:
     NonnullRefPtr<QuerySnapshot const> m_snapshot;

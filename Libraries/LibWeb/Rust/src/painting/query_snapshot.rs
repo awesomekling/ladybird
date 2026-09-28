@@ -28,8 +28,9 @@ use crate::css::style::tree::StyleNodeID;
 use crate::layout::fragment_tree::FragmentLink;
 use crate::layout::node_data::{NodeFlag, NodeKind, NodeSlotId, PaintNode};
 use crate::layout::node_facts::{self, QueryFacts};
+use crate::layout::text_queries::{append_rendered_text, style_collapses_white_space};
 use crate::layout::tree_shape::{PublishedShape, PublishedStyle};
-use crate::layout::{BOUND_ELEMENT_ROWS_PER_CHUNK, LayoutNodeArena, SLOTS_PER_CHUNK};
+use crate::layout::{BOUND_ELEMENT_ROWS_PER_CHUNK, LayoutNodeArena, PublishedTextSlot, SLOTS_PER_CHUNK};
 use crate::painting::client_rects;
 use crate::painting::geometry_read::GeometryRead;
 use crate::painting::paintable_data::PaintableData;
@@ -75,6 +76,8 @@ pub(crate) struct QuerySnapshot {
     /// Every node's style, which the snapshot keeps alive for the facts it reads of it.
     styles: ColumnSnapshot<PublishedStyle, SLOTS_PER_CHUNK>,
     element_rows: ColumnSnapshot<NodeSlotId, BOUND_ELEMENT_ROWS_PER_CHUNK>,
+    /// The rendered text of every text row, as layout left it.
+    text: ColumnSnapshot<PublishedTextSlot, SLOTS_PER_CHUNK>,
     viewport_conversion: ViewportConversion,
 }
 
@@ -112,6 +115,7 @@ impl LayoutNodeArena {
             nodes,
             styles,
             element_rows: self.publish_bound_element_rows(),
+            text: self.publish_text(),
             viewport_conversion,
         })
     }
@@ -129,15 +133,37 @@ impl QuerySnapshot {
 
     /// What a geometry query reads of the style of the node in a live slot.
     fn facts(&self, id: NodeSlotId) -> Option<QueryFacts> {
-        let node = self.node(id)?;
-        let style = self
-            .styles
+        Some(QueryFacts::of_style(self.node(id)?, self.style(id)))
+    }
+
+    /// The text the rows of the text node whose primary row is `primary` render, with whitespace collapsed where
+    /// their style collapses it if `collapse_whitespace`, or `None` where layout left a row without it.
+    pub(crate) fn rendered_text(&self, primary: NodeSlotId, collapse_whitespace: bool) -> Option<Vec<u16>> {
+        let first_letter = self.text_slot(primary)?.first_letter;
+        let first_letter = self.node(first_letter).is_some().then_some(first_letter);
+        let mut text = Vec::new();
+        for row in first_letter.into_iter().chain([primary]) {
+            let rendered = self.text_slot(row)?.rendered.as_deref()?;
+            let collapse = collapse_whitespace
+                && self
+                    .node_parent_if_live(row)
+                    .and_then(|parent| self.style(parent))
+                    .is_some_and(style_collapses_white_space);
+            append_rendered_text(&mut text, &rendered.text, collapse);
+        }
+        Some(text)
+    }
+
+    fn text_slot(&self, id: NodeSlotId) -> Option<&PublishedTextSlot> {
+        self.node(id)?;
+        self.text
             .get(id.slot_index() as usize)
-            .and_then(|style| style.0.as_deref());
-        Some(QueryFacts::of_style(
-            node,
-            style.map(|record| ComputedValuesView::new(&record.payloads.as_ffi().groups)),
-        ))
+            .filter(|slot| slot.generation == id.generation())
+    }
+
+    fn style(&self, id: NodeSlotId) -> Option<ComputedValuesView<'_>> {
+        let record = self.styles.get(id.slot_index() as usize)?.0.as_deref()?;
+        Some(ComputedValuesView::new(&record.payloads.as_ffi().groups))
     }
 
     /// The box the element is bound to: its layout node.
@@ -420,6 +446,39 @@ pub(crate) fn into_handle(snapshot: QuerySnapshot) -> *const std::ffi::c_void {
 pub unsafe extern "C" fn query_snapshot_release(snapshot: *const std::ffi::c_void) {
     assert!(!snapshot.is_null(), "query snapshot handle is null");
     drop(unsafe { Arc::from_raw(snapshot.cast::<QuerySnapshot>()) });
+}
+
+/// Hands `append` the text the rows of the text node whose primary row is `primary` render, with whitespace collapsed
+/// where their style collapses it if `collapse_whitespace`. `false`, having handed it nothing, where layout left a row
+/// without its text.
+///
+/// # Safety
+///
+/// `snapshot` must be a live handle from `layout_arena_publish_query_snapshot`, and `append` must be callable with
+/// `context` for the duration of this call. It copies the text it is handed.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn query_snapshot_rendered_text(
+    snapshot: *const std::ffi::c_void,
+    primary: NodeSlotId,
+    collapse_whitespace: bool,
+    context: *mut std::ffi::c_void,
+    append: unsafe extern "C" fn(*mut std::ffi::c_void, crate::layout::rendered_text::FfiRenderedTextView),
+) -> bool {
+    let snapshot = unsafe { snapshot_from_handle(snapshot) };
+    let Some(text) = snapshot.rendered_text(primary, collapse_whitespace) else {
+        return false;
+    };
+    // SAFETY: Guaranteed by the caller.
+    unsafe {
+        append(
+            context,
+            crate::layout::rendered_text::FfiRenderedTextView {
+                text: text.as_ptr(),
+                length_in_code_units: text.len(),
+            },
+        );
+    }
+    true
 }
 
 /// The box the element with `style_node` is bound to, or none.

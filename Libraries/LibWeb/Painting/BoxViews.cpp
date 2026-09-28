@@ -26,6 +26,7 @@
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/Painting/DocumentPaintState.h>
 #include <LibWeb/Painting/PaintingRustBridge.h>
+#include <LibWeb/Painting/QueryView.h>
 #include <LibWeb/SVG/SVGFilterElement.h>
 #include <LibWebCommon/CSS/SystemColor.h>
 
@@ -437,7 +438,13 @@ Utf16String rendered_text(BoxSlot const& text_box, bool collapse_whitespace)
     if (!text_box.is_text())
         return {};
     // The rendered text is refreshed from the data the mirror holds, so data the journal still holds goes through first.
-    text_box.document().drain_invalidation_journal();
+    auto& document = text_box.document();
+    document.drain_invalidation_journal();
+    // The query snapshot the document holds has it, where it holds one and layout left the text there.
+    if (auto view = document.query_view_for_clean_read(); view.has_value()) {
+        if (auto text = view->rendered_text(text_box.slot(), collapse_whitespace); text.has_value())
+            return text.release_value();
+    }
     Utf16String text;
     Layout::RustFFI::layout_arena_collect_rendered_text(text_box.arena(), text_box.slot(), collapse_whitespace, &text,
         [](void* context, Layout::RustFFI::FfiRenderedTextView view) {

@@ -107,6 +107,18 @@ Optional<Vector<CSSPixelRect>> QueryView::client_rects(QueryBox box) const
     return rects;
 }
 
+Optional<Utf16String> QueryView::rendered_text(Compositing::RustFFI::NodeSlotId slot, bool collapse_whitespace) const
+{
+    Utf16String text;
+    auto has_text = Layout::RustFFI::query_snapshot_rendered_text(m_snapshot->m_handle, slot, collapse_whitespace, &text,
+        [](void* context, Layout::RustFFI::FfiRenderedTextView view) {
+            *static_cast<Utf16String*>(context) = Utf16String::from_utf16({ reinterpret_cast<char16_t const*>(view.text), view.length_in_code_units });
+        });
+    if (!has_text)
+        return {};
+    return text;
+}
+
 Optional<CSSPixelRect> QueryView::bounding_client_rect(QueryBox box) const
 {
     CSSPixelRect rect;
