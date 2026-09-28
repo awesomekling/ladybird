@@ -102,7 +102,22 @@ private:
     };
 
     struct QueryContext;
-    void publish_snapshot() const;
+
+    // The snapshot a query reads, published as the query starts and let go of as it ends: a held snapshot keeps the
+    // arena from reusing the slots freed after it was published, so the list holds none between queries. A query made
+    // inside another, from a callback of it, reads a snapshot of its own, and the outer query its own again after it.
+    class [[nodiscard]] QuerySnapshotScope {
+        AK_MAKE_NONCOPYABLE(QuerySnapshotScope);
+        AK_MAKE_NONMOVABLE(QuerySnapshotScope);
+
+    public:
+        explicit QuerySnapshotScope(HitTestDisplayList const&);
+        ~QuerySnapshotScope();
+
+    private:
+        HitTestDisplayList const& m_list;
+        RefPtr<HitTestSnapshot const> m_outer_snapshot;
+    };
     void const* snapshot() const { return m_snapshot->handle(); }
     static Optional<TopmostItem> topmost_item_from(Layout::RustFFI::FfiTopmostItem const&);
     [[nodiscard]] Item item(size_t index) const;
@@ -132,7 +147,7 @@ private:
     u64 m_visual_context_tree_structural_epoch { 0 };
     GC::Weak<DOM::Document> m_document;
     NonnullRefPtr<ChromeWidgetRegistry> m_chrome_widget_registry;
-    // The snapshot the list reads, which the hits it finds hold as well. None until the first query publishes one.
+    // The snapshot the query in progress reads, which the hits it finds hold as well. None outside a query.
     mutable RefPtr<HitTestSnapshot const> m_snapshot;
     u64 m_rust_generation { 0 };
 };
