@@ -77,6 +77,8 @@ pub(crate) enum EngineChange {
     /// The host took the transition step the pass decided for an element's row, or for its synthetic pseudo-element
     /// of `pseudo_kind`.
     TransitionStepTakenByHost { node: StyleNodeID, pseudo_kind: Option<u8> },
+    /// The host took the environment the engine named for a synthetic pseudo-element as it settled it, from its copy.
+    PseudoElementEnvironmentTakenByHost { node: StyleNodeID, pseudo_kind: u8 },
     /// The rules the main thread compiled of a sheet, and the selectors it replaced, which the engine publishes.
     CompileRules(Box<crate::css::rule::compilation::CompiledRules>),
     /// The `@keyframes` one style scope defines now, in place of the ones it defined before.
@@ -160,6 +162,7 @@ impl EngineChange {
             | Self::RowSampledTakenByHost(_)
             | Self::AnimationPlanTakenByHost { .. }
             | Self::TransitionStepTakenByHost { .. }
+            | Self::PseudoElementEnvironmentTakenByHost { .. }
             | Self::SetTreeScopeAnimationKeyframes { .. }
             | Self::ElementStyleInputAbsorbedByHost { .. }
             | Self::SetElementCustomPropertyData(..)
@@ -278,6 +281,9 @@ impl EngineChange {
             }
             Self::TransitionStepTakenByHost { node, pseudo_kind } => {
                 engine.transition_step_taken_by_host(node, pseudo_kind);
+            }
+            Self::PseudoElementEnvironmentTakenByHost { node, pseudo_kind } => {
+                engine.take_pseudo_element_environment_named_in_settle(node, pseudo_kind);
             }
             Self::SetElementTransitions {
                 node,
@@ -479,10 +485,6 @@ pub(crate) enum StyleQuery {
     /// The engine's id of the native rule of `identity` plus one, or zero where it holds none.
     NativeRuleId {
         identity: u64,
-    },
-    TakePseudoElementEnvironmentNamedInSettle {
-        node: u32,
-        pseudo_kind: u8,
     },
     TakePseudoElementSampledInPass {
         node: u32,
@@ -886,13 +888,6 @@ impl StyleQuery {
             Self::NativeRuleId { identity } => {
                 StyleAnswer::U32(engine.native_rule_id(identity).map_or(0, |id| id.0 + 1))
             }
-            Self::TakePseudoElementEnvironmentNamedInSettle { node, pseudo_kind } => StyleAnswer::Bool(unsafe {
-                crate::css::style::bridge::owner_take_pseudo_element_environment_named_in_settle(
-                    engine,
-                    node,
-                    pseudo_kind,
-                )
-            }),
             Self::TakePseudoElementSampledInPass { node, pseudo_kind } => StyleAnswer::RowSampled(unsafe {
                 crate::css::style::bridge::owner_take_pseudo_element_sampled_in_pass(engine, node, pseudo_kind)
             }),
