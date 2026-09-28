@@ -1026,10 +1026,6 @@ static bool install_engine_sample_of_installed_record(CSS::StyleDrainScope const
 {
     GC::Ref<DOM::Element> target = element.element();
     auto& document = target->document();
-    // Publishing can replace the record the element's layout node would be built from on first
-    // use, so it is built while that record is live.
-    if (!element.pseudo_element().has_value())
-        Layout::make_host_mirror_of_box(Painting::BoxSlot::bound_to(*target));
     auto const sample = CSS::StyleEngineFFI::style_engine_sample_installed_record(scope.engine().rust_handle(), target->style_node_id().value(),
         CSS::pseudo_element_to_ffi(element.pseudo_element()), data.style_record_before_update.value(), Layout::document_layout_arena_if_created(document));
     if (!sample.present)
