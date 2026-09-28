@@ -77,6 +77,13 @@ struct Element::RareData
     Optional<Utf16FlyString> name;
     Optional<Dir> dir;
     CSSPixelPoint scroll_offset;
+    // What each of the element's synthetic pseudo-elements has scrolled to. The render side keeps it by the element's
+    // identity too, for the boxes it builds, and forgets it with that identity.
+    struct PseudoElementScrollOffset {
+        CSS::PseudoElement type;
+        CSSPixelPoint offset;
+    };
+    Vector<PseudoElementScrollOffset> pseudo_element_scroll_offsets;
     // https://drafts.csswg.org/css-conditional-5/#scrolled
     // The edges the most recent relative scroll of this element's scrolling box went toward, as scroll-state(scrolled)
     // reads them.

@@ -169,19 +169,6 @@ impl CountersSets {
             value: Some(0),
         });
     }
-
-    /// Whether the innermost `list-item` counter in the element's set counts forward and was created
-    /// by the element itself.
-    pub(crate) fn innermost_list_item_counter_is_own_forward_counter(&self, element: StyleNodeID) -> bool {
-        let owner = CounterOwner::element(element);
-        let Some(set) = self.sets.get(&owner) else {
-            return false;
-        };
-        set.iter()
-            .rev()
-            .find(|counter| is_list_item_counter_name(counter.name.units()))
-            .is_some_and(|counter| !counter.reversed && counter.originating_element == owner)
-    }
 }
 
 /// The published style `owner` resolves its counters from. The style store settles no record for

@@ -1414,18 +1414,16 @@ struct ElementDependentInvalidationState {
     }
 };
 
-// Whether the counter styles the element's generated content names now differ from the ones the box
-// built for it renders from. The build resolves them from the published record and the tree scope's
-// registered counter styles, and the arena keeps what each box was built with.
-static bool content_counter_styles_changed(DOM::AbstractElement const& abstract_element)
+// Whether the counter styles the element's generated content names in the record it moves to differ from the ones the
+// box built for it renders from. The build resolves them from the published record and the tree scope's registered
+// counter styles, and the arena keeps what each box was built with, so the render owner decides it for each
+// pseudo-element row it answers and leaves that for the drain. Only a pseudo-element's box renders generated content.
+static bool content_counter_styles_changed(CSS::StyleDrainScope const& scope, DOM::AbstractElement const& abstract_element, CSS::StyleRecordID new_style_record)
 {
-    auto render_document = abstract_element.document().render_document_id();
-    if (render_document == 0)
+    auto pseudo_element = abstract_element.pseudo_element();
+    if (!pseudo_element.has_value())
         return false;
-    auto const generated_for = abstract_element.pseudo_element().has_value()
-        ? encode_generated_for(*abstract_element.pseudo_element())
-        : 0;
-    return Layout::RustFFI::render_owner_content_counter_styles_changed(render_document, abstract_element.element().style_node_id().value(), generated_for)
+    return CSS::StyleEngineFFI::style_engine_content_counter_styles_changed(scope, scope.engine().rust_handle(), abstract_element.element().style_node_id().value(), to_underlying(*pseudo_element), new_style_record.value())
         == Layout::RustFFI::CONTENT_COUNTER_STYLES_CHANGED;
 }
 
@@ -1497,14 +1495,14 @@ static CSS::RequiredInvalidationAfterStyleChange with_style_row_counter_style_in
     return invalidation;
 }
 
-static void add_element_dependent_invalidation(CSS::RequiredInvalidationAfterStyleChange& invalidation, CSS::ComputedValues const& new_computed_values, ElementDependentInvalidationState const& old_state, DOM::AbstractElement& abstract_element)
+static void add_element_dependent_invalidation(CSS::StyleDrainScope const& scope, CSS::RequiredInvalidationAfterStyleChange& invalidation, CSS::ComputedValues const& new_computed_values, CSS::StyleRecordID new_style_record, ElementDependentInvalidationState const& old_state, DOM::AbstractElement& abstract_element)
 {
     // NB: Even if the computed value hasn't changed the resolved counter style may have (e.g. if the relevant
     //     @counter-style rule was modified, or a new rule with the same name took precedence over the old one).
     // Generated content and the marker live inside the element's own layout subtree, so, like a
     // 'content' change, they rebuild from the element rather than its parent.
     auto compare = [&](Optional<ValueComparingRefPtr<CSS::CounterStyle const>> const& old_list_counter_style) {
-        if (content_counter_styles_changed(abstract_element))
+        if (content_counter_styles_changed(scope, abstract_element, new_style_record))
             invalidation |= CSS::RequiredInvalidationAfterStyleChange::rebuild_layout_tree_from(CSS::LayoutTreeRebuildRoot::Self);
 
         if (old_list_counter_style.has_value()) {
@@ -1553,7 +1551,7 @@ static CSS::StyleComputer::ComputedStyleInvalidation compute_required_invalidati
         return result;
 
     CSS::RequiredInvalidationAfterStyleChange counter_style_invalidation;
-    add_element_dependent_invalidation(counter_style_invalidation, new_computed_values, old_state, abstract_element);
+    add_element_dependent_invalidation(scope, counter_style_invalidation, new_computed_values, style_record_delta.new_style_record, old_state, abstract_element);
     add_counter_style_invalidation(result.invalidation, abstract_element.element(), counter_style_invalidation);
     return result;
 }
@@ -1632,7 +1630,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
             } else {
                 DOM::AbstractElement abstract_element { *this, pseudo_element };
                 CSS::RequiredInvalidationAfterStyleChange counter_style_invalidation;
-                add_element_dependent_invalidation(counter_style_invalidation, *new_pseudo_element_style, old_state, abstract_element);
+                add_element_dependent_invalidation(scope, counter_style_invalidation, *new_pseudo_element_style, style_record_delta.new_style_record, old_state, abstract_element);
                 counter_styles_changed = !counter_style_invalidation.is_none();
             }
         }
@@ -3265,6 +3263,12 @@ void Element::set_style_node_id(CSS::StyleNodeID style_node_id)
     note_animation_timing_rows_identity_changed();
     auto old_style_node_id = m_style_node_id;
     m_style_node_id = style_node_id;
+    // What the pseudo-elements scrolled to goes with an identity the element gives up as it leaves the document, as on
+    // the render side.
+    if (!style_node_id) {
+        if (auto* rare_data = element_rare_data())
+            rare_data->pseudo_element_scroll_offsets.clear();
+    }
     document().render_inputs_for_write().note_style_node_changed(*this, old_style_node_id);
 }
 
@@ -5842,13 +5846,16 @@ void Element::unregister_intersection_observer(Badge<IntersectionObserver::Inter
 
 CSSPixelPoint Element::scroll_offset(Optional<CSS::PseudoElement> pseudo_element_type) const
 {
-    if (pseudo_element_type.has_value()) {
-        if (auto pseudo_element = get_synthetic_pseudo_element(*pseudo_element_type); pseudo_element.has_value())
-            return pseudo_element->scroll_offset();
-        return {};
-    }
     auto const* rare_data = element_rare_data();
-    return rare_data ? rare_data->scroll_offset : CSSPixelPoint {};
+    if (!rare_data)
+        return {};
+    if (pseudo_element_type.has_value()) {
+        if (!get_synthetic_pseudo_element(*pseudo_element_type).has_value())
+            return {};
+        auto scrolled = rare_data->pseudo_element_scroll_offsets.first_matching([&](auto const& scrolled) { return scrolled.type == *pseudo_element_type; });
+        return scrolled.has_value() ? scrolled->offset : CSSPixelPoint {};
+    }
+    return rare_data->scroll_offset;
 }
 
 u8 Element::last_relative_scroll_direction() const
@@ -5870,10 +5877,16 @@ void Element::set_scroll_offset(Optional<CSS::PseudoElement> pseudo_element_type
     // write is journalled here, next to the store, rather than by each caller. It reaches the render
     // side at the next drain, which any read of a published offset forces first.
     if (pseudo_element_type.has_value()) {
-        auto pseudo_element = get_synthetic_pseudo_element(*pseudo_element_type);
-        if (!pseudo_element.has_value())
+        if (!get_synthetic_pseudo_element(*pseudo_element_type).has_value())
             return;
-        auto offset_changed = pseudo_element->scroll_offset() != offset;
+        auto offset_changed = scroll_offset(pseudo_element_type) != offset;
+        if (offset_changed) {
+            // A zero offset is the absence of one, as the render side keeps it.
+            auto& offsets = ensure_element_rare_data().pseudo_element_scroll_offsets;
+            offsets.remove_all_matching([&](auto const& scrolled) { return scrolled.type == *pseudo_element_type; });
+            if (!offset.is_zero())
+                offsets.append({ *pseudo_element_type, offset });
+        }
         document().render_inputs_for_write().note_pseudo_element_scroll_offset(NodeIdentity::of(*this), *pseudo_element_type, offset, offset_changed);
         return;
     }

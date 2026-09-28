@@ -17,8 +17,8 @@ namespace Web::CSS {
 // must be clamped to that range." - https://drafts.csswg.org/css-lists-3/#auto-numbering
 using CounterValue = i32;
 
-// NB: The CSS counters sets live in the layout node arena, which resolves them during the layout tree
-//     build. This reads back the one thing the document asks about outside a build.
+// Whether the innermost list-item counter of an element counts forward and was created by the element, as its style
+// says: the CSS counters sets live in the layout node arena, which resolves them during the layout tree build.
 bool innermost_list_item_counter_is_own_forward_counter(DOM::Element const&);
 
 Utf16FlyString const& list_item_counter_name();

@@ -312,6 +312,7 @@
     "layout_arena_committed_transform_reference_box",
     "style_engine_acknowledge_engine_computed_record",
     "style_engine_consume_element_style_input",
+    "style_engine_content_counter_styles_changed",
     "style_engine_discard_container_effects",
     "style_engine_discard_style_transaction_outputs",
     "style_engine_element_record_damage",

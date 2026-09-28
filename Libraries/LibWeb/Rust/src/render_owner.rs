@@ -104,8 +104,6 @@ pub(crate) enum ArenaChange {
     SelectionStyleChanged(StyleNodeID),
     /// An element published a `::selection` style, which the rows that paint text under it take.
     SelectionPseudoStylePublished(StyleNodeID),
-    /// The host took these of the scroll containers finished layout tree builds gave a style.
-    BuiltScrollSnapContainersTaken(Vec<NodeSlotId>),
     /// Each layout pass and formatting context run from now on leaves a line in the layout trace, for tests.
     BeginLayoutTrace,
     /// The host took the layout trace: tracing ends.
@@ -151,7 +149,6 @@ impl ArenaChange {
             | ArenaChange::DropUnadoptedAnimationSamples
             | ArenaChange::HostHearsBoxPresence(_)
             | ArenaChange::SelectionStyleChanged(_)
-            | ArenaChange::BuiltScrollSnapContainersTaken(_)
             | ArenaChange::BeginLayoutTrace
             | ArenaChange::EndLayoutTrace
             | ArenaChange::SvgAttributeFacts { .. }
@@ -194,7 +191,6 @@ impl ArenaChange {
             ArenaChange::SelectionPseudoStylePublished(element) => {
                 crate::painting::selection::sync_selection_pseudo_style(arena, element);
             }
-            ArenaChange::BuiltScrollSnapContainersTaken(taken) => arena.drop_built_scroll_snap_containers(&taken),
             ArenaChange::BeginLayoutTrace => arena.layout_trace().begin(),
             ArenaChange::EndLayoutTrace => arena.layout_trace().end(),
             ArenaChange::SvgAttributeFacts { element, facts, points } => {
@@ -350,7 +346,7 @@ impl RenderState {
                 ) as u64);
                 // SAFETY: The engine is the document's, and the document thread waits for the answer, keeping what
                 // the query borrows live.
-                unsafe { engine.reach_on_owner(owner, |engine| query.answer(engine)) };
+                unsafe { engine.reach_on_owner(owner, |engine| query.answer(engine, self.arena.arena())) };
                 Answer::Engine(EngineAnswered::Answered)
             }
             _ => Answer::of_state_reaching_engine(owner, query, &mut self.arena),
@@ -425,18 +421,6 @@ pub(crate) enum Query {
 /// A read of a document's layout arena, which [`Query::Arena`] asks.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum ArenaQuery {
-    /// Whether a box of the document has ever been given a scroll snap type.
-    MayHaveScrollSnapAreas,
-    /// The live scroll containers finished layout tree builds gave a style that the host has not taken, each with
-    /// whether it snaps.
-    BuiltScrollSnapContainers,
-    /// Whether the innermost list-item counter of an element counts forward and was created by it.
-    InnermostListItemCounterIsOwnForwardCounter(StyleNodeID),
-    /// What a pseudo-element's box has scrolled to.
-    PseudoElementScrollOffset { generator: StyleNodeID, pseudo_kind: u8 },
-    /// Whether the counter styles an element's or pseudo-element's generated content names differ from the ones its
-    /// box was built with.
-    ContentCounterStylesChanged(crate::layout::counters::CounterOwner),
     /// The text a pseudo-element's generated content resolved to when its box was built: its alt text when it has one,
     /// otherwise every string in it.
     GeneratedContentAccessibleText(crate::layout::counters::CounterOwner),
@@ -501,10 +485,6 @@ impl<T> LentSlice<T> {
 /// The answer to an [`ArenaQuery`].
 #[derive(Debug)]
 pub(crate) enum ArenaAnswer {
-    Flag(bool),
-    Byte(u8),
-    Point(crate::layout::used_values::FfiCssPixelPoint),
-    BuiltScrollSnapContainers(Vec<(crate::layout::node_data::NodeSlotId, bool)>),
     Text(Vec<u16>),
     DebugText(crate::layout::debug_text::DebugText),
     Range(crate::layout::rendered_text::FfiTextSourceRange),
@@ -518,14 +498,6 @@ pub(crate) enum ArenaAnswer {
 impl ArenaQuery {
     fn left_to_host(self) -> ArenaAnswer {
         match self {
-            ArenaQuery::MayHaveScrollSnapAreas | ArenaQuery::InnermostListItemCounterIsOwnForwardCounter(_) => {
-                ArenaAnswer::Flag(false)
-            }
-            ArenaQuery::BuiltScrollSnapContainers => ArenaAnswer::BuiltScrollSnapContainers(Vec::new()),
-            ArenaQuery::PseudoElementScrollOffset { .. } => ArenaAnswer::Point(Default::default()),
-            ArenaQuery::ContentCounterStylesChanged(_) => {
-                ArenaAnswer::Byte(LayoutNodeArena::CONTENT_COUNTER_STYLES_NOT_RECORDED)
-            }
             ArenaQuery::GeneratedContentAccessibleText(_) | ArenaQuery::RenderedText { .. } => {
                 ArenaAnswer::Text(Vec::new())
             }
@@ -560,22 +532,6 @@ impl ArenaQuery {
 
     fn answer(self, arena: &LayoutNodeArena) -> ArenaAnswer {
         match self {
-            ArenaQuery::MayHaveScrollSnapAreas => ArenaAnswer::Flag(arena.may_have_scroll_snap_areas()),
-            ArenaQuery::BuiltScrollSnapContainers => {
-                ArenaAnswer::BuiltScrollSnapContainers(arena.built_scroll_snap_containers())
-            }
-            ArenaQuery::InnermostListItemCounterIsOwnForwardCounter(element) => ArenaAnswer::Flag(
-                arena
-                    .counters_sets()
-                    .borrow()
-                    .innermost_list_item_counter_is_own_forward_counter(element),
-            ),
-            ArenaQuery::PseudoElementScrollOffset { generator, pseudo_kind } => {
-                ArenaAnswer::Point(arena.pseudo_element_scroll_offset(generator, pseudo_kind))
-            }
-            ArenaQuery::ContentCounterStylesChanged(owner) => {
-                ArenaAnswer::Byte(arena.content_counter_styles_changed(owner))
-            }
             ArenaQuery::GeneratedContentAccessibleText(owner) => {
                 ArenaAnswer::Text(arena.generated_content().borrow().accessible_text(owner).to_vec())
             }
@@ -1438,102 +1394,6 @@ pub(crate) unsafe fn ask_arena_of(arena: *mut c_void, query: ArenaQuery) -> Aren
             debug_assert!(false, "an arena query is answered from the arena");
             query.left_to_host()
         }
-    }
-}
-
-fn ask_arena_flag(document: DocumentId, query: ArenaQuery) -> bool {
-    match ask_arena(document, query) {
-        ArenaAnswer::Flag(flag) => flag,
-        _ => false,
-    }
-}
-
-/// Whether a box of `document` has ever been given a scroll snap type, by a restyle or by a layout tree build.
-#[unsafe(no_mangle)]
-pub extern "C" fn render_owner_may_have_scroll_snap_areas(document: DocumentId) -> bool {
-    ask_arena_flag(document, ArenaQuery::MayHaveScrollSnapAreas)
-}
-
-/// Hands the host the scroll containers finished layout tree builds of `document` gave a style, each with whether it
-/// was a scroll snap container then.
-///
-/// # Safety
-///
-/// `callback` must be callable with `context` for the duration of this call.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn render_owner_take_built_scroll_snap_containers(
-    document: DocumentId,
-    context: *mut c_void,
-    callback: unsafe extern "C" fn(*mut c_void, crate::layout::node_data::NodeSlotId, bool),
-) {
-    let ArenaAnswer::BuiltScrollSnapContainers(built) = ask_arena(document, ArenaQuery::BuiltScrollSnapContainers)
-    else {
-        return;
-    };
-    if built.is_empty() {
-        return;
-    }
-    send_arena_change(
-        document,
-        ArenaChange::BuiltScrollSnapContainersTaken(built.iter().map(|&(row, _)| row).collect()),
-    );
-    for (row, is_scroll_snap_container) in built {
-        // SAFETY: Guaranteed by the caller.
-        unsafe { callback(context, row, is_scroll_snap_container) };
-    }
-}
-
-/// Whether the innermost list-item counter of the element with `style_node` in `document` counts forward and was
-/// created by that element.
-#[unsafe(no_mangle)]
-pub extern "C" fn render_owner_innermost_list_item_counter_is_own_forward_counter(
-    document: DocumentId,
-    style_node: u32,
-) -> bool {
-    let Some(element) = StyleNodeID::from_raw(style_node) else {
-        return false;
-    };
-    ask_arena_flag(
-        document,
-        ArenaQuery::InnermostListItemCounterIsOwnForwardCounter(element),
-    )
-}
-
-/// What the pseudo-element `pseudo_kind` of the element with `generator` in `document` has scrolled to.
-#[unsafe(no_mangle)]
-pub extern "C" fn render_owner_pseudo_element_scroll_offset(
-    document: DocumentId,
-    generator: u32,
-    pseudo_kind: u8,
-) -> crate::layout::used_values::FfiCssPixelPoint {
-    let Some(generator) = StyleNodeID::from_raw(generator) else {
-        return Default::default();
-    };
-    match ask_arena(
-        document,
-        ArenaQuery::PseudoElementScrollOffset { generator, pseudo_kind },
-    ) {
-        ArenaAnswer::Point(point) => point,
-        _ => Default::default(),
-    }
-}
-
-/// Whether the counter styles the record of the pseudo-element `generated_for` of the element `style_node` in
-/// `document` names now differ from the ones the box built for it renders from, as the `CONTENT_COUNTER_STYLES_*`
-/// answers.
-#[unsafe(no_mangle)]
-pub extern "C" fn render_owner_content_counter_styles_changed(
-    document: DocumentId,
-    style_node: u32,
-    generated_for: u8,
-) -> u8 {
-    let Some(element) = StyleNodeID::from_raw(style_node) else {
-        return LayoutNodeArena::CONTENT_COUNTER_STYLES_NOT_RECORDED;
-    };
-    let owner = crate::layout::counters::CounterOwner { element, generated_for };
-    match ask_arena(document, ArenaQuery::ContentCounterStylesChanged(owner)) {
-        ArenaAnswer::Byte(answer) => answer,
-        _ => LayoutNodeArena::CONTENT_COUNTER_STYLES_NOT_RECORDED,
     }
 }
 

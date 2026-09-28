@@ -5,19 +5,25 @@
  */
 
 #include <AK/NeverDestroyed.h>
+#include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/CSS/CountersSet.h>
-#include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
-#include <LibWeb/Layout/LayoutRustBridge.h>
 
 namespace Web::CSS {
 
+// NB: An element whose counter-reset instantiates a list-item counter creates the innermost one of its counters set,
+//     which counts forward unless it is reversed. One that instantiates none has no list-item counter of its own but
+//     one counter-set or counter-increment instantiates, where it has no other, which this leaves out.
 bool innermost_list_item_counter_is_own_forward_counter(DOM::Element const& element)
 {
-    auto render_document = Layout::document_render_document_if_created(element.document());
-    if (!render_document.has_value())
+    auto style = element.computed_style();
+    if (!style)
         return false;
-    return Layout::RustFFI::render_owner_innermost_list_item_counter_is_own_forward_counter(*render_document, element.style_node_id().value());
+    // https://drafts.csswg.org/css-lists-3/#counter-reset
+    // "If multiple instances of the same <counter-name> occur in the property value, only the last one is honored."
+    auto counter_reset = style->counter_reset();
+    auto list_item_reset = counter_reset.last_matching([](auto const& definition) { return definition.name == list_item_counter_name(); });
+    return list_item_reset.has_value() && !list_item_reset->is_reversed;
 }
 
 Utf16FlyString const& list_item_counter_name()

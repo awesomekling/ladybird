@@ -31,12 +31,9 @@ WEB_API Compositing::SnapAxes snap_axes_of_scroll_container(BoxSlot const& snap_
 
 WEB_API bool is_scroll_snap_container(BoxSlot const&);
 
-// Whether a box of the document has ever been given a scroll snap type, by a restyle or by a layout tree build.
-WEB_API bool document_may_have_scroll_snap_areas(DOM::Document const&);
-
-// Registers the scroll snap containers the layout tree builds made since this was last asked, and forgets the snapped
-// areas of the scroll containers they made that do not snap.
-WEB_API void take_built_scroll_snap_containers(DOM::Document&);
+// Takes a scroll container a layout tree build gave a style: registers it where it snaps, and otherwise forgets what it
+// snapped to.
+WEB_API void take_built_scroll_container(DOM::Document&, Compositing::RustFFI::NodeSlotId, bool is_scroll_snap_container);
 
 // The geometry snap position selection runs over, collected from the layout of a snap container and of the snap areas
 // it captures.
