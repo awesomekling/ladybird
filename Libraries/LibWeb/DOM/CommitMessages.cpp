@@ -17,6 +17,7 @@
 #include <LibWeb/Layout/Box.h>
 #include <LibWeb/Layout/NodeArena.h>
 #include <LibWeb/Page/EventHandler.h>
+#include <LibWeb/Painting/BoxSlot.h>
 #include <LibWeb/SVG/SVGElement.h>
 
 namespace Web::DOM {
@@ -332,11 +333,9 @@ void CommitMessages::apply(Message const& message)
         m_document.set_top_layer_needs_layout_zone_rebuild();
         return;
     case Kind::UnexpectedFragmentedInline:
-        if (auto* arena = m_document.layout_node_arena_if_created()) {
-            if (auto* node = message.identity.bound_layout_node(*arena)) {
-                dbgln("FIXME: InlineFormattingContext::dimension_box_on_line got unexpected box in inline context:");
-                dump_tree(*node);
-            }
+        if (auto box = Painting::BoxSlot::bound_to(m_document, message.identity)) {
+            dbgln("FIXME: InlineFormattingContext::dimension_box_on_line got unexpected box in inline context:");
+            dump_tree(box);
         }
         return;
     }
