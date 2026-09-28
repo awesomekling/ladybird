@@ -241,7 +241,6 @@ public:
     u64 frames_presented_by_flights(DOM::Document&) const;
     void take_in_next_recording_before_its_presentation(bool take);
     u64 recordings_taken_in_before_their_presentation() const;
-    bool submits_layout_pass() const;
     void release_held_frame();
     u64 forced_join_count(Utf16String const& stage) const;
     bool frame_in_flight_holds_document() const;

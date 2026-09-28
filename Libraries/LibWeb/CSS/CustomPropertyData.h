@@ -24,7 +24,7 @@ namespace Web::CSS {
 // Chain of custom property maps with structural sharing.
 // Each node stores only the properties declared directly on its element,
 // with a parent pointer to the inherited chain.
-// NB: A style pass beside the main thread (LIBWEB_STAGE_OVERLAP=style) references the data elements hold.
+// NB: A style pass beside the main thread references the data elements hold.
 class WEB_API CustomPropertyData : public AtomicRefCounted<CustomPropertyData> {
 public:
     static NonnullRefPtr<CustomPropertyData> create(

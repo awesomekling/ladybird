@@ -73,7 +73,7 @@ pub(crate) unsafe fn read_committed<R>(arena: *mut c_void, read: impl FnOnce(&Pa
 /// live while the returned one is used.
 unsafe fn arena_of_owner_unit<'a>(arena: *mut c_void) -> &'a mut LayoutNodeArena {
     debug_assert!(
-        !crate::stage_thread::has_owner_thread() || crate::stage_thread::on_owner_thread(),
+        crate::stage_thread::on_owner_thread(),
         "only a unit the owner runs holds the arena"
     );
     // SAFETY: Guaranteed by the caller.
@@ -1718,7 +1718,7 @@ pub unsafe extern "C" fn layout_arena_record_display_list(
     // SAFETY: Guaranteed by the caller.
     let frame_generation = unsafe { crate::layout::frame_retirement::frame_generation(arena_handle) };
     let arguments = (viewport, inputs, frame_generation);
-    if run == FfiRecordingRun::InSubmittedFrame && crate::stage_thread::submits("recording") {
+    if run == FfiRecordingRun::InSubmittedFrame && crate::stage_thread::submits() {
         // SAFETY: Guaranteed by the caller; this thread waits for the pass, which reads the inputs it lends.
         let prepared = unsafe {
             crate::painting::owner_pass::run_held_pass(
@@ -2419,8 +2419,7 @@ pub unsafe extern "C" fn layout_arena_take_in_recording(arena: *mut c_void) {
 }
 
 /// Runs `handoff(context)`, which hands a navigable's finished frame to its compositor frame sink,
-/// as a render stage: on the stage thread under `LIBWEB_STAGE_THREAD=lockstep` or `overlap`, here
-/// otherwise.
+/// as a render stage, on the stage thread.
 ///
 /// # Safety
 ///

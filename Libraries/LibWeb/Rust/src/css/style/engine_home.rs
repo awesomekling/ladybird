@@ -663,7 +663,7 @@ impl StyleEngineHandle {
             self.bring_home("owner work on the main thread");
         } else {
             debug_assert!(
-                crate::stage_thread::running_inside_stage() || !crate::stage_thread::owner_is_elsewhere(),
+                crate::stage_thread::running_inside_stage() || crate::stage_thread::on_owner_thread(),
                 "the main thread reaches a style engine through its arena"
             );
         }

@@ -240,25 +240,24 @@ interface Internals {
     undefined resetRenderingSchedulerCounters();
     undefined setMainThreadPhaseProfileEnabled(boolean enabled);
     DOMString getMainThreadPhaseProfile();
-    // Under LIBWEB_STAGE_THREAD=overlap, holds the next recording submitted to the render side
-    // until releaseHeldFrame(), so that tasks run beside that frame in flight. Returns whether it
-    // will hold one; it never does in the other modes. It holds the recording at `point`:
+    // Holds the next recording submitted to the render side until releaseHeldFrame(), so that tasks
+    // run beside that frame in flight. Returns whether it will hold one: not for an unknown `point`
+    // or a document without a layout arena. It holds the recording at `point`:
     // "before-run", "mid-recording" (holding the arena's paint state and scratch) or
     // "before-completion" (finished, before the main thread hears of it); with a document, only
     // that document's recording. A main-thread wait for the recording releases it too; a stage the
     // main thread would queue behind it (the layout update of a document painted after it) runs on
     // the main thread instead.
     boolean holdNextRecordingFrame(optional DOMString point = "before-run", optional Document? document = null);
-    // Like holdNextRecordingFrame(), for the next full layout pass a rendering update submits, under
-    // LIBWEB_STAGE_THREAD=overlap with LIBWEB_STAGE_OVERLAP naming "layout". It holds the pass at
-    // "before-run" or "before-completion" (laid out, before the main thread hears of it).
+    // Like holdNextRecordingFrame(), for the next full layout pass a rendering update submits. It
+    // holds the pass at "before-run" or "before-completion" (laid out, before the main thread hears
+    // of it).
     boolean holdNextLayoutFrame(optional DOMString point = "before-run", optional Document? document = null);
     // Like holdNextRecordingFrame(), for the next clock lease tick a rendering update submits ("before-run" or
     // "before-completion").
     boolean holdNextClockTick(optional DOMString point = "before-run", optional Document? document = null);
-    // Like holdNextLayoutFrame(), for the first style pass a rendering update submits, under
-    // LIBWEB_STAGE_THREAD=overlap with LIBWEB_STAGE_OVERLAP naming "style". It holds the pass at
-    // "before-run" or "before-completion" (styled, before the main thread hears of it).
+    // Like holdNextLayoutFrame(), for the first style pass a rendering update submits. It holds the
+    // pass at "before-run" or "before-completion" (styled, before the main thread hears of it).
     boolean holdNextStyleFrame(optional DOMString point = "before-run", optional Document? document = null);
     // Blocks (bounded) until the stage a hold is armed for is held and returns where, or "" if none
     // is. Returns "" at once if no such stage has been submitted, since none can be while it blocks.
@@ -277,9 +276,6 @@ interface Internals {
     // sets it resets it with false.
     undefined takeInNextRecordingBeforeItsPresentation(optional boolean take = true);
     unsigned long long recordingsTakenInBeforeTheirPresentation();
-    // Whether rendering updates submit their layout pass (under LIBWEB_STAGE_THREAD=overlap with LIBWEB_STAGE_OVERLAP
-    // naming "layout"), which holdNextLayoutFrame() can hold.
-    boolean submitsLayoutPass();
     undefined releaseHeldFrame();
     // How many forced joins (main-thread accesses that waited for the frame in flight and took it in, or, from inside a
     // garbage collection, only waited for it) reached a frame with a stage `stage` names ("recording", "layout" or
@@ -311,9 +307,8 @@ interface Internals {
     // How many animations the compositor runs on the last visual context tree this window's navigable handed it, read
     // without taking in the frame in flight.
     unsigned long long presentedCompositorAnimationCount();
-    // Whether the rendering update has submitted its style or layout pass (under LIBWEB_STAGE_OVERLAP naming "style" or
-    // "layout") and goes on with the rest, which submits its recordings, once the main thread has taken the pass back
-    // between tasks.
+    // Whether the rendering update has submitted its style or layout pass and goes on with the rest, which submits its
+    // recordings, once the main thread has taken the pass back between tasks.
     boolean renderingUpdateAwaitsPass();
     // How many times main-thread code took a style pass in flight back before its time (a forced join), since the
     // process started. A write that queues its style input beside the pass leaves it unchanged.

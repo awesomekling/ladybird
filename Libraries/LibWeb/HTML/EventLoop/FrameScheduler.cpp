@@ -695,7 +695,7 @@ static bool moves_boxes(Animations::KeyframeEffect const& effect)
 
 static Optional<ClockLeasePlan> clock_lease_plan(DOM::Document& document)
 {
-    if (!Layout::RustFFI::rust_stage_thread_submits_clock())
+    if (!Layout::RustFFI::rust_stage_thread_submits())
         return {};
     if (!document.is_fully_active() || document.hidden() || document.is_decoded_svg())
         return {};
@@ -1004,7 +1004,7 @@ void FrameScheduler::inject_render_clock_tick(double frame_time, Function<void(b
     // Without a render clock host, no tick reaches the main thread, and without a lease a render clock would tick, no
     // lease takes it.
     bool const render_clock_ticks_a_lease = any_of(m_clock_leases, [](auto const& hold) { return hold.render_clock_context.has_value(); });
-    if (!Layout::RustFFI::rust_stage_thread_submits_clock() || s_frame_scheduler_with_host != this || !render_clock_ticks_a_lease) {
+    if (!Layout::RustFFI::rust_stage_thread_submits() || s_frame_scheduler_with_host != this || !render_clock_ticks_a_lease) {
         Core::deferred_invoke([on_end = move(on_end)] { on_end(false); });
         return;
     }
@@ -1013,7 +1013,7 @@ void FrameScheduler::inject_render_clock_tick(double frame_time, Function<void(b
     bool injected = false;
     auto frame_time_nanoseconds = static_cast<i64>(frame_time * 1'000'000.0);
     for (auto& hold : m_clock_leases) {
-        if (m_injected_clock_tick_sender && hold.render_clock_context.has_value())
+        if (hold.render_clock_context.has_value())
             injected |= Layout::RustFFI::rust_render_clock_inject_tick(m_injected_clock_tick_sender, hold.render_clock_context->value(), frame_time_nanoseconds);
     }
     if (!injected) {

@@ -20,7 +20,7 @@
             await new Promise(resolve => window.addEventListener("load", resolve, { once: true }));
         await nextFrame();
 
-        // Under LIBWEB_STAGE_THREAD=overlap, the recording this style change needs is submitted to the render side and
+        // The recording this style change needs is submitted to the render side and
         // held there, and the task below runs beside it, with the frame in flight. In the other modes, the task runs
         // after the rendering update.
         const held = internals.holdNextRecordingFrame();

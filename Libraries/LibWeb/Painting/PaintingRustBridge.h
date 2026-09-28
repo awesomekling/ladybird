@@ -64,8 +64,7 @@ struct InspectorOverlayInputs {
 // Resolves what the recording reads on the main thread and has the render side record it. Returns nothing if there is
 // nothing to record; otherwise finish_rust_display_list_recording() finishes it once the render side has recorded it.
 WEB_API Optional<PendingDisplayListRecording> begin_rust_display_list_recording(DOM::Document&, Compositing::DisplayList const& placeholder_display_list, Compositing::DisplayListResourceStorage&, PaintCommandCacheMode, HTML::PaintConfig const&, InspectorOverlayInputs const&, RecordingRun);
-// What the main thread seals of a recording that a flight makes after its layout (LIBWEB_STAGE_OVERLAP naming flight),
-// beyond what it hands the flight.
+// What the main thread seals of a recording that a flight makes after its layout, beyond what it hands the flight.
 struct FlightRecordingSeal {
     DevicePixelRect device_viewport_rect;
     BlockingWheelEventRegionState wheel_event_region_state;

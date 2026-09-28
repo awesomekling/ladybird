@@ -336,9 +336,8 @@ public:
     Compositor::NavigablePresenter const& presenter_beside_frame_in_flight() const { return *m_presenter; }
     Compositing::DisplayListResourceStorage& display_list_resource_storage();
 
-    // LIBWEB_STAGE_OVERLAP naming flight: seals what the recording that the document's flight makes after its layout
-    // reads, if the navigable may be painted that way, and with `may_present`, how the flight presents it where the
-    // render side presents. Returns whether it sealed it.
+    // Seals what the recording that the document's flight makes after its layout reads, if the navigable may be painted
+    // that way, and with `may_present`, how the flight presents it. Returns whether it sealed it.
     bool seal_flight_paint(DOM::Document&, bool may_present);
     Optional<Painting::FlightPaintDecline> flight_paint_decline(DOM::Document&) const;
     // Takes in the paint of the document's flight once the flight has been taken back: publishes the recording the

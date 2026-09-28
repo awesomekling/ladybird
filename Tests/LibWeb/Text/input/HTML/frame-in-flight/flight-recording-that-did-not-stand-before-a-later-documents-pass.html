@@ -22,9 +22,7 @@
         await twoFrames();
         const counters = internals.getRenderingSchedulerCounters();
         const leftWork = Object.values(counters.flightEnds.hostLeftWork).reduce((sum, count) => sum + count, 0);
-        const flew = Object.values(counters.flightEnds).some(byStage => Object.values(byStage).some(count => count > 0));
         return {
-            flew,
             facts,
             flightRecorded: facts.armed && facts.heldAt === "before-run" && leftWork >= 1,
             presentedAheadOfMoreWork: counters.flightEnds.hostLeftWork.present >= 1,
@@ -43,13 +41,11 @@
         for (let i = 0; i < 3; ++i)
             await twoFrames();
         const run = await paintAgainAfterFlight(inner, 30, 35);
-        // Without flights (LIBWEB_FLIGHT=0) nothing records ahead of the rendering update.
-        const noFlights = !run.flew;
         println(`held as armed: ${heldAsArmed(run.facts, "before-run")}`);
-        println(`flight's frame painted again where it flew: ${noFlights || run.flightRecorded}`);
+        println(`flight's frame painted again: ${run.flightRecorded}`);
         println(`recording again waited for: ${!run.flightRecorded || run.waited >= 1}`);
         println(`width ${run.width}, inner width ${run.innerWidth}`);
-        println(`presented ahead of more work: ${noFlights || run.presentedAheadOfMoreWork}`);
+        println(`presented ahead of more work: ${run.presentedAheadOfMoreWork}`);
         done();
     });
 </script>

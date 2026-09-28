@@ -1888,29 +1888,23 @@ static bool hold_next_submitted_stage(StringView label, Utf16String const& point
             return false;
         arena = node_arena;
     }
-    return Layout::RustFFI::rust_stage_thread_hold_next_submitted_stage(reinterpret_cast<u8 const*>(label.characters_without_null_termination()), label.length(), hold_point, arena);
+    Layout::RustFFI::rust_stage_thread_hold_next_submitted_stage(reinterpret_cast<u8 const*>(label.characters_without_null_termination()), label.length(), hold_point, arena);
+    return true;
 }
 
 bool Internals::hold_next_recording_frame(Utf16String const& point, GC::Ptr<DOM::Document> document)
 {
     // A flight that goes on from the layout pass records in its record stage: whichever of the two records first is held.
-    if (Layout::RustFFI::rust_stage_thread_submits_flight()) {
-        if (point == "before-run"sv)
-            return hold_next_submitted_stage("recording|flight:record"sv, point, document);
-        if (point == "mid-recording"sv)
-            return hold_next_submitted_stage("recording|flight:record"sv, point, document);
+    if (point == "before-completion"sv)
         return hold_next_submitted_stage("recording|flight:recorded"sv, point, document);
-    }
-    return hold_next_submitted_stage("recording"sv, point, document);
+    return hold_next_submitted_stage("recording|flight:record"sv, point, document);
 }
 
 bool Internals::hold_next_layout_frame(Utf16String const& point, GC::Ptr<DOM::Document> document)
 {
     // A flight runs the layout pass as its layout stage: that is held before it runs, and the flight once it has laid
     // out (not a flight that ran only the style pass before it).
-    if (Layout::RustFFI::rust_stage_thread_submits_flight())
-        return hold_next_submitted_stage(point == "before-run"sv ? "flight:layout"sv : "flight:laid-out"sv, point, document);
-    return hold_next_submitted_stage("layout"sv, point, document);
+    return hold_next_submitted_stage(point == "before-run"sv ? "flight:layout"sv : "flight:laid-out"sv, point, document);
 }
 
 bool Internals::hold_next_clock_tick(Utf16String const& point, GC::Ptr<DOM::Document> document)
@@ -1921,9 +1915,7 @@ bool Internals::hold_next_clock_tick(Utf16String const& point, GC::Ptr<DOM::Docu
 bool Internals::hold_next_style_frame(Utf16String const& point, GC::Ptr<DOM::Document> document)
 {
     // A flight runs the style pass first: its style is held before it runs, and the flight once it has run.
-    if (Layout::RustFFI::rust_stage_thread_submits_flight())
-        return hold_next_submitted_stage(point == "before-run"sv ? "flight:style"sv : "flight"sv, point, document);
-    return hold_next_submitted_stage("style"sv, point, document);
+    return hold_next_submitted_stage(point == "before-run"sv ? "flight:style"sv : "flight"sv, point, document);
 }
 
 Utf16String Internals::wait_for_held_frame()
@@ -1967,11 +1959,6 @@ void Internals::take_in_next_recording_before_its_presentation(bool take)
 u64 Internals::recordings_taken_in_before_their_presentation() const
 {
     return HTML::main_thread_event_loop().frame_scheduler().recordings_taken_in_before_their_presentation();
-}
-
-bool Internals::submits_layout_pass() const
-{
-    return Layout::RustFFI::rust_stage_thread_submits_layout();
 }
 
 void Internals::release_held_frame()

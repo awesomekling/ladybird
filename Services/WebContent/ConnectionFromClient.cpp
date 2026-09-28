@@ -524,14 +524,11 @@ void ConnectionFromClient::attach_render_clock()
         struct Sender {
             AK_ALLOC_WITH_KMALLOC;
             Web::Layout::RustFFI::ClockSender* sender { nullptr };
-            bool created { false };
             ~Sender() { Web::Layout::RustFFI::rust_render_clock_sender_destroy(sender); }
         };
         auto render_clock = Web::Compositor::RenderClock::create([sender = make<Sender>()](Compositing::CompositorContextId context_id, i64 frame_time_nanoseconds, double) {
-            if (!exchange(sender->created, true))
-                sender->sender = Web::Layout::RustFFI::rust_render_clock_sender_create();
             if (!sender->sender)
-                return;
+                sender->sender = Web::Layout::RustFFI::rust_render_clock_sender_create();
             (void)Web::Layout::RustFFI::rust_render_clock_post_tick(sender->sender, context_id.value(), frame_time_nanoseconds);
         });
         if (render_clock.is_error()) {

@@ -5,9 +5,8 @@
  */
 
 //! One flight: the stages of a rendering update (style, the layout rounds, the recording and the
-//! presentation) run one after another as one submitted stage run, by default or under
-//! `LIBWEB_STAGE_OVERLAP` naming `flight`. The main thread seals what the stages read when it
-//! submits the flight. The flight runs its stages until it has run them all or reaches one that
+//! presentation) run one after another as one submitted stage run. The main thread seals what the
+//! stages read when it submits the flight. The flight runs its stages until it has run them all or reaches one that
 //! needs the main thread, and ends there: the frame scheduler goes on with the rendering update
 //! where the flight ended, on the path a rendering update that submitted that stage on its own
 //! would have taken.
@@ -447,12 +446,6 @@ pub unsafe extern "C" fn rust_flight_take_paint(
         visual_context_update: products.visual_context_update,
         scroll_state_refreshed: products.scroll_state_snapshot.is_some(),
     }
-}
-
-/// Whether the rendering update submits its style pass, and its layout pass, as a flight.
-#[unsafe(no_mangle)]
-pub extern "C" fn rust_stage_thread_submits_flight() -> bool {
-    crate::stage_thread::submits_flight()
 }
 
 /// How many flights the main thread took back that ended for `reason` after running up to

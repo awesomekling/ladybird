@@ -543,13 +543,13 @@ public:
     // Returns true if the update's full layout pass was submitted to run beside the main thread. The update then ends
     // once the frame in flight is taken back.
     bool update_style_and_layout_once(UpdateLayoutReason, ThrottledAnimationSamplingScope, LayoutPassSubmission = LayoutPassSubmission::Wait);
-    // The rendering update's layout update, whose full layout pass runs beside the main thread under
-    // LIBWEB_STAGE_OVERLAP=layout. Returns true if it does; the rendering update goes on once the frame is taken back.
+    // The rendering update's layout update, whose full layout pass runs beside the main thread. Returns true if it does;
+    // the rendering update goes on once the frame is taken back.
     [[nodiscard]] bool submit_layout_for_rendering_update();
     // Hands the clock lease's ticks a fresh layout frame to lay out in, with the document as it stands now.
     void renew_clock_layout_frame();
-    // The rendering update's style update, whose first pass runs beside the main thread under
-    // LIBWEB_STAGE_OVERLAP=style. Returns true if it does; the rendering update goes on once the frame is taken back.
+    // The rendering update's style update, whose first pass runs beside the main thread. Returns true if it does; the
+    // rendering update goes on once the frame is taken back.
     [[nodiscard]] bool submit_style_for_rendering_update();
     // Runs the rest of the style update submit_style_for_rendering_update() submitted, once its frame is taken back.
     void finish_submitted_style_update();

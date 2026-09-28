@@ -108,9 +108,8 @@ fn run_and_publish<A, R>(arena: &mut LayoutNodeArena, body: fn(&mut LayoutNodeAr
 }
 
 /// Runs the paint pass `body` with `arguments` over the render state of `arena`'s document on the render owner, sent as
-/// the kind of pass `kind` makes, and waits for its answer. Where the owner does not run it (no Rendering thread, the
-/// calling thread is the owner, an arena of no document's render state, or a test holds the run it would queue
-/// behind), it runs right here.
+/// the kind of pass `kind` makes, and waits for its answer. Where the owner does not run it (the calling thread is the
+/// owner, an arena of no document's render state, or a test holds the run it would queue behind), it runs right here.
 pub(crate) fn run_paint_pass<A, R>(
     arena: &mut LayoutNodeArena,
     kind: fn(Pass<A, R>) -> PaintPass,
