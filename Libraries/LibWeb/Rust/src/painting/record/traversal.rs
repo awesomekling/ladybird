@@ -179,6 +179,10 @@ fn record_display_list_impl<O: Observer>(
     };
     let mut hit_test_list = recorder.list;
     hit_test_list.generation = paint_state.hit_test_list_generation + 1;
+    // A hit test reads the list where the rows publish it once the document takes it in, without reaching the owner,
+    // so what a query derives from the list is built here, over the rows it was recorded over.
+    hit_test_list.build_spatial_indexes_if_needed();
+    hit_test_list.build_caret_lines_if_needed(&paintable_rows);
     let output = RecordingOutput {
         recorded_structural_epoch: structural_epoch,
         frame_inputs,

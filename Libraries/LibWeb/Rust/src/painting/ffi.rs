@@ -4206,18 +4206,16 @@ pub unsafe extern "C" fn layout_arena_filter_functions_serialize(
     true
 }
 
+/// The generation of the document's hit-test list as the rows published it, or zero for none.
+///
 /// # Safety
 ///
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_hit_test_list_generation(arena: *mut c_void) -> u64 {
     // SAFETY: Guaranteed by the caller.
-    unsafe {
-        crate::painting::owner_pass::run_held_pass(arena, (), |arena, ()| {
-            arena.try_take_in_recording();
-            arena.hit_test_list.borrow().as_ref().map_or(0, |list| list.generation)
-        })
-    }
+    let rows = unsafe { crate::layout::row_reads::RowSnapshot::published(arena) };
+    rows.paintable.hit_test_list.as_ref().map_or(0, |list| list.generation)
 }
 
 pub(crate) fn ffi_topmost(
@@ -4252,7 +4250,6 @@ mod tests {
     use crate::css::css_pixels::CssPixelRect;
     use crate::layout::LayoutNodeArena;
     use crate::layout::node_data::NodeKind;
-    use crate::painting::hit_test::HitTestList;
     use crate::painting::host::FfiRootBackgroundSource;
     use crate::painting::paintable_data::FfiOverflowData;
     use crate::painting::record::damage::PaintDamage;
@@ -4268,71 +4265,65 @@ mod tests {
     }
 
     #[test]
-    fn hit_test_queries_measure_viewport_overflow_before_reading_it() {
-        for (spatial_indexes, caret_lines) in [(true, false), (true, true), (false, true), (false, false)] {
-            let mut arena = LayoutNodeArena::new();
-            let viewport = arena.allocate_for_test().slot;
-            arena.write_shape(viewport).set_kind(NodeKind::Viewport);
-            arena.populate_paintable_row(viewport);
-            arena.scrollable_overflow.viewport.set(Some(viewport));
-            let root = arena.allocate_for_test().slot;
-            arena.populate_paintable_row(root);
-            *arena.hit_test_list.borrow_mut() = Some(std::sync::Arc::new(HitTestList::default()));
-            {
-                let mut state = arena.paint_state().borrow_mut();
-                state.root_background_source = Some(FfiRootBackgroundSource {
-                    root_layout_node: root,
-                    ..Default::default()
-                });
-                state.visual_context.tree = Some(std::sync::Arc::new(VisualContextTree::create(TransformData {
-                    matrix: libgfx_rust::FloatMatrix4x4::identity(),
-                    origin: Default::default(),
-                    sorting_context_root_index: None,
-                    flattens_inherited_transform: false,
-                    role: TransformDataRole::CssTransform,
-                    synthetic_plane: false,
-                    establishes_sorting_context: false,
-                })));
-                state.visual_context.dirty_boxes.clear();
-            }
-            // Leave stale overflow for the hit-test query to measure before it reads. Losing
-            // scrollability must invalidate both the root background and visual context.
-            arena.committed_side_data_mut(viewport).overflow_relative_to_padding_box = FfiOverflowData {
-                rect: CssPixelRect::new(
-                    CssPixels::from_integer(0),
-                    CssPixels::from_integer(0),
-                    CssPixels::from_integer(100),
-                    CssPixels::from_integer(2000),
-                )
-                .into(),
-                has_scrollable_overflow: true,
-            };
-            arena
-                .paintable_side_data(viewport)
-                .overflow_measured_this_commit
-                .set(true);
-            arena.note_publishing_paint_recording_started();
-            arena.clear_paint_damage_consumed_by_published_recording();
-
-            // A hit-test snapshot prepares the list for its query before it publishes the rows.
-            arena.prepare_hit_test_list_for_query(spatial_indexes, caret_lines);
-            let rect = arena.with_committed_rows(|rows| {
-                crate::painting::paintable_geometry::scrollable_overflow_rect(rows, viewport)
+    fn committed_rows_measure_viewport_overflow_before_reading_it() {
+        let mut arena = LayoutNodeArena::new();
+        let viewport = arena.allocate_for_test().slot;
+        arena.write_shape(viewport).set_kind(NodeKind::Viewport);
+        arena.populate_paintable_row(viewport);
+        arena.scrollable_overflow.viewport.set(Some(viewport));
+        let root = arena.allocate_for_test().slot;
+        arena.populate_paintable_row(root);
+        {
+            let mut state = arena.paint_state().borrow_mut();
+            state.root_background_source = Some(FfiRootBackgroundSource {
+                root_layout_node: root,
+                ..Default::default()
             });
-            assert_eq!(rect, Some(CssPixelRect::default()));
-            assert!(arena.scrollable_overflow.geometry_changed.get());
-            assert!(arena.scrollable_overflow.scrollability_changed.get());
-            assert!(arena.paint_damage_of_row(root).contains(PaintDamage::DRAW_BACKGROUND));
-            assert!(
-                arena
-                    .paint_damage_of_row(viewport)
-                    .contains(PaintDamage::SCROLL_METADATA)
-            );
-            assert!(
-                arena.paint_state().borrow().visual_context.dirty_boxes.boxes[&viewport]
-                    .contains(VisualContextBoxDirtyKind::ScrollableOverflowFlipped)
-            );
+            state.visual_context.tree = Some(std::sync::Arc::new(VisualContextTree::create(TransformData {
+                matrix: libgfx_rust::FloatMatrix4x4::identity(),
+                origin: Default::default(),
+                sorting_context_root_index: None,
+                flattens_inherited_transform: false,
+                role: TransformDataRole::CssTransform,
+                synthetic_plane: false,
+                establishes_sorting_context: false,
+            })));
+            state.visual_context.dirty_boxes.clear();
         }
+        // Leave stale overflow for the committed rows to measure before they are read. Losing
+        // scrollability must invalidate both the root background and visual context.
+        arena.committed_side_data_mut(viewport).overflow_relative_to_padding_box = FfiOverflowData {
+            rect: CssPixelRect::new(
+                CssPixels::from_integer(0),
+                CssPixels::from_integer(0),
+                CssPixels::from_integer(100),
+                CssPixels::from_integer(2000),
+            )
+            .into(),
+            has_scrollable_overflow: true,
+        };
+        arena
+            .paintable_side_data(viewport)
+            .overflow_measured_this_commit
+            .set(true);
+        arena.note_publishing_paint_recording_started();
+        arena.clear_paint_damage_consumed_by_published_recording();
+
+        let rect = arena
+            .with_committed_rows(|rows| crate::painting::paintable_geometry::scrollable_overflow_rect(rows, viewport));
+        assert_eq!(rect, Some(CssPixelRect::default()));
+        assert!(arena.scrollable_overflow.geometry_changed.get());
+        assert!(arena.scrollable_overflow.scrollability_changed.get());
+        assert!(arena.paint_damage_of_row(root).contains(PaintDamage::DRAW_BACKGROUND));
+        assert!(
+            arena
+                .paint_damage_of_row(viewport)
+                .contains(PaintDamage::SCROLL_METADATA)
+        );
+        assert!(
+            arena.paint_state().borrow().visual_context.dirty_boxes.boxes[&viewport]
+                .contains(VisualContextBoxDirtyKind::ScrollableOverflowFlipped)
+        );
     }
 
     #[test]

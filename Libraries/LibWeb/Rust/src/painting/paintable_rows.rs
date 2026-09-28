@@ -159,7 +159,7 @@ mod tests {
     }
 
     #[test]
-    fn a_frame_holds_the_hit_test_list_and_the_rows_the_visual_context_tree() {
+    fn a_frame_holds_the_rows_with_their_hit_test_list_and_visual_context_tree() {
         use crate::painting::hit_test::HitTestList;
         use crate::painting::visual_context::{TransformData, TransformDataRole, VisualContextTree};
         use std::sync::Arc;
@@ -185,12 +185,15 @@ mod tests {
         *arena.hit_test_list.get_mut() = list(1);
         let published_tree = tree();
         arena.paint_state().borrow_mut().visual_context.tree = published_tree.clone();
-        let frame = arena.freeze_frame_without_damage();
+        let frame = arena.freeze_paint_frame();
         *arena.hit_test_list.get_mut() = list(2);
         arena.paint_state().borrow_mut().visual_context.tree = tree();
         arena.publish_rows();
 
-        assert_eq!(frame.hit_test_list.as_ref().map(|list| list.generation), Some(1));
+        assert_eq!(
+            frame.rows.paintable.hit_test_list.as_ref().map(|list| list.generation),
+            Some(1)
+        );
         assert!(Arc::ptr_eq(
             frame.rows.paintable.visual_context_tree.as_ref().unwrap(),
             published_tree.as_ref().unwrap()
@@ -1439,6 +1442,7 @@ impl LayoutNodeArena {
                 scroll_offsets: store.scroll_offsets.snapshot(),
                 image_map_areas: store.image_map_areas.snapshot(),
                 visual_context_tree,
+                hit_test_list: self.hit_test_list.get_mut().clone(),
             };
             store.published = Some(published.clone());
             return published;
@@ -1467,6 +1471,7 @@ impl LayoutNodeArena {
         published.scroll_offsets = store.scroll_offsets.snapshot();
         published.image_map_areas = store.image_map_areas.snapshot();
         published.visual_context_tree = visual_context_tree;
+        published.hit_test_list = self.hit_test_list.get_mut().clone();
         published.clone()
     }
 
@@ -1498,70 +1503,20 @@ impl LayoutNodeArena {
     /// Publishes the rows as they are now, for a recording to read while the arena goes on
     /// changing.
     pub(crate) fn freeze_paint_frame(&mut self) -> PublishedFrame {
-        self.freeze_frame(true)
-    }
-
-    /// Like [`Self::freeze_paint_frame`], for a reader that reads no paint damage: a hit test.
-    pub(crate) fn freeze_frame_without_damage(&mut self) -> PublishedFrame {
-        self.freeze_frame(false)
-    }
-
-    fn freeze_frame(&mut self, with_damage: bool) -> PublishedFrame {
         self.publish_rows();
         let retired_slots = self.retire_freed_slots_while_frame_lives();
-        let hit_test_list = self.hit_test_list.get_mut().clone();
-        let hit_test_item_capacity_hint = hit_test_list.as_ref().map_or(0, |list| list.items.len());
+        let hit_test_item_capacity_hint = self.hit_test_list.get_mut().as_ref().map_or(0, |list| list.items.len());
         let paint_state = crate::painting::published_frame::PublishedPaintState::new(
             &self.paint_state().borrow(),
             hit_test_item_capacity_hint,
         );
-        let damage = if with_damage {
-            self.paint_damage_for_frame()
-        } else {
-            crate::painting::record::damage::FrameDamage::default()
-        };
-        PublishedFrame::new(self.published_rows(), hit_test_list, retired_slots, damage, paint_state)
+        let damage = self.paint_damage_for_frame();
+        PublishedFrame::new(self.published_rows(), retired_slots, damage, paint_state)
     }
 
     /// The geometry epoch of the absolute rect memo, which a publication of the rows carries.
     pub(crate) fn absolute_rect_memo_epoch(&self) -> u64 {
         self.paintable_rows.absolute_rect_memo_epoch.get()
-    }
-
-    /// Builds the structures a hit-test query derives from the list before the rows are
-    /// published, so that the query only reads.
-    pub(crate) fn prepare_hit_test_list_for_query(&mut self, needs_spatial_indexes: bool, needs_caret_lines: bool) {
-        // A recording the frame presented has a newer list for the document to take in.
-        self.try_take_in_recording();
-        let needs_building = self.hit_test_list.get_mut().as_ref().is_some_and(|list| {
-            (needs_spatial_indexes && !list.spatial_indexes_built) || (needs_caret_lines && !list.caret_lines_built)
-        });
-        if needs_building {
-            crate::painting::owner_pass::run_paint_pass(
-                self,
-                crate::painting::owner_pass::PaintPass::HitTestList,
-                |arena, (needs_spatial_indexes, needs_caret_lines)| {
-                    arena.build_hit_test_list_for_query(needs_spatial_indexes, needs_caret_lines);
-                },
-                (needs_spatial_indexes, needs_caret_lines),
-            );
-        }
-    }
-
-    /// Builds the structures a hit-test query derives from the list that [`Self::prepare_hit_test_list_for_query`]
-    /// finds missing.
-    pub(crate) fn build_hit_test_list_for_query(&mut self, needs_spatial_indexes: bool, needs_caret_lines: bool) {
-        let mut list = std::mem::take(self.hit_test_list.get_mut());
-        if let Some(list) = list.as_mut() {
-            let list = std::sync::Arc::make_mut(list);
-            if needs_spatial_indexes {
-                list.build_spatial_indexes_if_needed();
-            }
-            if needs_caret_lines {
-                list.build_caret_lines_if_needed(&self.paintable_rows());
-            }
-        }
-        *self.hit_test_list.get_mut() = list;
     }
 
     /// Reads the rows as committed, which it publishes first.

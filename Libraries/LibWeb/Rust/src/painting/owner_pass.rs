@@ -31,8 +31,6 @@ pub(crate) enum PaintPass {
     ScrollState(Pass<bool, Option<Vec<libgfx_rust::FloatPoint>>>),
     /// Measures the scrollable overflow a commit or a writer left unmeasured.
     ScrollableOverflow(Pass<(), ()>),
-    /// Builds what a hit-test query derives from the hit-test list: its spatial indexes, its caret lines, or both.
-    HitTestList(Pass<(bool, bool), ()>),
     /// Runs the function a pass on the waiting thread's stack holds ([`run_held_pass`]), and leaves its answer there.
     Held(Pass<CallerWaits<*mut dyn RunHeldPass>, ()>),
 }
@@ -70,7 +68,6 @@ impl PaintPass {
             Self::VisualViewportTransform(pass) => pass.run(state),
             Self::ScrollState(pass) => pass.run(state),
             Self::ScrollableOverflow(pass) => pass.run(state),
-            Self::HitTestList(pass) => pass.run(state),
             Self::Held(pass) => pass.run(state),
         }
     }
