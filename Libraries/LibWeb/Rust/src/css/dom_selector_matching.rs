@@ -18,8 +18,7 @@ use super::css_tokenizer::TokenizerInput;
 use super::ffi_support::FfiUtf16View;
 use super::selector::{
     AttributeCaseType, AttributeSelector, Combinator, CompiledSelector, Direction, NamespaceType, PseudoClassSelector,
-    PseudoClassType, QualifiedName, RustSelector, SimpleSelector, is_ascii_case_insensitive_html_attribute,
-    language_range_matches_tag,
+    PseudoClassType, QualifiedName, RustSelector, SimpleSelector, language_range_matches_tag,
 };
 use super::style::selector::{AttributeOperator, attribute_value_matches};
 
@@ -426,9 +425,7 @@ impl<'a> DomMatcher<'a> {
             AttributeCaseType::Insensitive => true,
             AttributeCaseType::Sensitive => false,
             AttributeCaseType::Default => {
-                is_html_element_in_html_document
-                    && qualified_name.namespace_type != NamespaceType::Any
-                    && is_ascii_case_insensitive_html_attribute(&qualified_name.name)
+                is_html_element_in_html_document && attribute.names_legacy_case_insensitive_attribute
             }
         };
 

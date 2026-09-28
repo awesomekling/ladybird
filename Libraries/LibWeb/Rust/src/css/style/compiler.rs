@@ -887,12 +887,7 @@ impl<'a> SelectorCompiler<'a> {
             // Some attribute names compare their values ASCII case-insensitively, but only for an
             // HTML element in an HTML document, so the subject decides which rule applies.
             AttributeCaseType::Default => {
-                let names_a_legacy_attribute =
-                    matches!(
-                        attribute.qualified_name.namespace_type,
-                        NamespaceType::Default | NamespaceType::None
-                    ) && crate::css::selector::is_ascii_case_insensitive_html_attribute(&attribute.qualified_name.name);
-                match names_a_legacy_attribute && !self.html_element_namespace.is_none() {
+                match attribute.names_legacy_case_insensitive_attribute && !self.html_element_namespace.is_none() {
                     true => AttributeCase::InsensitiveForNamespace(self.html_element_namespace),
                     false => AttributeCase::Sensitive,
                 }
