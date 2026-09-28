@@ -38,7 +38,7 @@ use super::cascade::CascadeOperator;
 use super::compiler::ImplicitScopeRoot;
 use super::compiler::NamespaceScope;
 use super::compiler::ScopeChain;
-use super::engine_home::{Holder, Owed, StyleEngineLoan};
+use super::engine_home::{Holder, Owed, PendingFacts, StyleEngineLoan};
 use super::index::FeatureValue;
 use super::index::LocalFeatureKey;
 use super::index::StyleAtomID;
@@ -2420,6 +2420,34 @@ pub(crate) unsafe fn owner_grant_style_nodes(
     grant_style_nodes(engine, elements, texts);
 }
 
+/// What a document's style engine holds for its next style transaction, as [`PendingFacts`] says.
+#[repr(C)]
+pub struct FfiPendingFacts {
+    pub transaction: bool,
+    pub deferred_geometry_transaction: bool,
+    pub deferred_element_style_inputs: bool,
+    pub child_dependent_selectors: bool,
+    pub may_affect_layout_geometry: bool,
+}
+
+/// What the style engine `engine` names holds for its next style transaction, which the main thread reads from the
+/// engine's home: the owner leaves it there, and the main thread adds what the changes it sends since may leave.
+///
+/// # Safety
+/// `engine` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_pending_facts(engine: StyleEngineHandle) -> FfiPendingFacts {
+    engine.bring_home("style_engine_pending_facts");
+    let facts = engine.pending_facts();
+    FfiPendingFacts {
+        transaction: facts.contains(PendingFacts::TRANSACTION),
+        deferred_geometry_transaction: facts.contains(PendingFacts::DEFERRED_GEOMETRY),
+        deferred_element_style_inputs: facts.contains(PendingFacts::DEFERRED_ELEMENT_INPUTS),
+        child_dependent_selectors: facts.contains(PendingFacts::CHILD_DEPENDENT_SELECTORS),
+        may_affect_layout_geometry: facts.contains(PendingFacts::MAY_AFFECT_GEOMETRY),
+    }
+}
+
 /// Applies one flat style input transaction.
 ///
 /// # Safety
@@ -2439,6 +2467,7 @@ pub unsafe extern "C" fn style_engine_apply_transaction(
     let input = unsafe { InputForPass::take_from(transaction) };
     handle.bring_home("style_engine_apply_transaction");
     super::seal::note_engine_call("style_engine_apply_transaction");
+    handle.note_sent(PendingFacts::ELEMENT_INPUT);
     crate::render_owner::send_change(
         engine.through_render_inputs(),
         handle.document(),

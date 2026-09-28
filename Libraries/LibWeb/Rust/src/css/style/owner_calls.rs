@@ -20,7 +20,7 @@ use super::bridge::{
     FfiPublishedAnimationCustomDeclaration, FfiPublishedAnimationDeclaration, FfiPublishedAnimationEffect,
     FfiPublishedAnimationKeyframe, FfiPublishedLinearEasingPoint, FfiPublishedTransition, FfiRuleMatch,
 };
-use super::engine_home::{StyleEngineHandle, StyleEngineInputHandle};
+use super::engine_home::{PendingFacts, StyleEngineHandle, StyleEngineInputHandle};
 use crate::layout::LayoutNodeArena;
 use crate::render_owner::{Answer, DocumentId, EngineAnswered, Query};
 use std::ffi::c_void;
@@ -47,8 +47,77 @@ pub(crate) enum EngineChange {
 }
 
 impl EngineChange {
+    /// What the change may leave the engine holding for its next style transaction, where it holds `held`, which the
+    /// main thread knows once it sends it.
+    pub(crate) fn leaves(&self, held: PendingFacts) -> PendingFacts {
+        use BoundaryWrite as Write;
+        match self {
+            Self::Boundary(Write::MakeDeferredPseudoElementStyleObservable { .. }) => {
+                PendingFacts::OBSERVABLE_DEFERRED_PSEUDO_ELEMENTS
+            }
+            // Only the elements whose deferred style was made observable owe an input.
+            Self::Boundary(Write::SetPseudoElementStyleDeferred { .. })
+                if !held.contains(PendingFacts::OBSERVABLE_DEFERRED_PSEUDO_ELEMENTS) =>
+            {
+                PendingFacts::NONE
+            }
+            // What only keeps the host's rows, indexes and publications beside the engine's state, or takes an input
+            // away.
+            Self::Boundary(
+                Write::NoteHostEntry { .. }
+                | Write::SetFoldIdAndClassNameCase { .. }
+                | Write::SetHtmlElementNamespace { .. }
+                | Write::SetCounterStyleEnvironmentIdentity { .. }
+                | Write::RestoreRowDebts { .. }
+                | Write::SetSampledCompositionIdentity { .. }
+                | Write::NoteAttributeNameForms { .. }
+                | Write::ConsumeElementStyleInput { .. }
+                | Write::AcknowledgeEngineComputedRecord { .. }
+                | Write::DiscardStyleTransactionOutputs { .. }
+                | Write::ReleaseTransitionBaselines { .. }
+                | Write::BeginStyleRecordViewEpoch { .. }
+                | Write::EndStyleRecordViewEpoch { .. }
+                | Write::SetAttributeValueText { .. }
+                | Write::SetElementCustomPropertyNames { .. }
+                | Write::SetElementAnimationNames { .. }
+                | Write::SetElementCssDefinedAnimations { .. }
+                | Write::SetElementAnimationTimingRows { .. }
+                | Write::SetAnimationTimelineSamples { .. }
+                | Write::SetRootElementFontMetrics { .. },
+            )
+            | Self::DiscardContainerEffects { .. }
+            | Self::PrepareRootFontResolution { .. } => PendingFacts::NONE,
+            // Only an element that loses its record may owe its resources an input.
+            Self::Boundary(Write::SetElementContainerQueryInputs { record, .. }) if *record != 0 => PendingFacts::NONE,
+            Self::Boundary(
+                Write::RecordElementStyleInput { .. }
+                | Write::RecordDerivedElementStyleInput { .. }
+                | Write::RecordTreeCountingStyleInput { .. }
+                | Write::RecordFlatTreeDescendantStyleInputs { .. }
+                | Write::RecordContainerQueryInput { .. }
+                | Write::SetPseudoElementStyleDeferred { .. }
+                | Write::SetElementContainerQueryInputs { .. },
+            )
+            | Self::RecordSizeContainerQueryDependents { .. } => PendingFacts::ELEMENT_INPUT,
+            _ => PendingFacts::ANY_CHANGE,
+        }
+    }
+
     /// Applies the change to `engine`, on the owner.
     pub(crate) fn apply(self, engine: &mut StyleEngine) {
+        if !cfg!(debug_assertions) {
+            return self.apply_to(engine);
+        }
+        let held = engine.pending_facts();
+        let may_leave = held.union(self.leaves(held));
+        self.apply_to(engine);
+        assert!(
+            may_leave.contains(engine.pending_facts()),
+            "a style engine change left more than the main thread took it to"
+        );
+    }
+
+    fn apply_to(self, engine: &mut StyleEngine) {
         match self {
             Self::Boundary(write) => write.apply(engine),
             Self::RecordSizeContainerQueryDependents { node } => unsafe {
@@ -1120,6 +1189,7 @@ pub(crate) fn send(engine: StyleEngineInputHandle, entry: &'static str, change: 
     let handle = engine.home();
     handle.bring_home(entry);
     super::seal::note_engine_call(entry);
+    handle.note_sent(change.leaves(handle.pending_facts()));
     crate::render_owner::send_change(
         engine.through_render_inputs(),
         handle.document(),

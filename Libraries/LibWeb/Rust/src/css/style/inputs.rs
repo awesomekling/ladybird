@@ -2380,6 +2380,40 @@ impl StyleEngineState {
         !self.host.flushing_deferred_geometry_journal && !self.host.deferred_geometry_journal.is_empty()
     }
 
+    /// What the engine holds for its next style transaction, which its home keeps for the main thread to read.
+    #[must_use]
+    pub(crate) fn pending_facts(&self) -> PendingFacts {
+        let mut facts = PendingFacts::NONE;
+        for (holds, fact) in [
+            (self.has_pending_transaction(), PendingFacts::TRANSACTION),
+            (
+                self.has_deferred_geometry_transaction(),
+                PendingFacts::DEFERRED_GEOMETRY,
+            ),
+            (
+                self.has_deferred_element_style_inputs(),
+                PendingFacts::DEFERRED_ELEMENT_INPUTS,
+            ),
+            (
+                self.may_have_child_dependent_selectors(),
+                PendingFacts::CHILD_DEPENDENT_SELECTORS,
+            ),
+            (
+                !self.host.journal.is_empty() || self.pending_transaction_may_affect_layout_geometry(),
+                PendingFacts::MAY_AFFECT_GEOMETRY,
+            ),
+            (
+                !self.retained.deferred_pseudo_element_observable_nodes.is_empty(),
+                PendingFacts::OBSERVABLE_DEFERRED_PSEUDO_ELEMENTS,
+            ),
+        ] {
+            if holds {
+                facts = facts.union(fact);
+            }
+        }
+        facts
+    }
+
     /// Whether any element style input is still deferred, waiting for the first transaction with a
     /// document root. A rootless flush drains the journal but preserves these — so an engine that
     /// reports no pending transaction can still owe an element its recomputation.
