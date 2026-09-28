@@ -21,6 +21,7 @@ use super::bridge::{
     FfiPublishedAnimationKeyframe, FfiPublishedLinearEasingPoint, FfiPublishedTransition, FfiRuleMatch,
 };
 use super::engine_home::{StyleEngineHandle, StyleEngineInputHandle};
+use crate::layout::LayoutNodeArena;
 use crate::render_owner::{Answer, DocumentId, EngineAnswered, Query};
 use std::ffi::c_void;
 use std::ptr::NonNull;
@@ -365,11 +366,9 @@ pub(crate) enum StyleQuery {
         snapshot: *const c_void,
         memo: usize,
     },
-    /// Publishes the anchor names registration moved to the layout arena whose handle is `arena`, or leaves them for
-    /// an arena where it is null.
-    PublishAnchorNames {
-        arena: *mut c_void,
-    },
+    /// Publishes the anchor names registration moved to the document's layout arena, or leaves them for an arena where
+    /// it has none.
+    PublishAnchorNames,
     /// A record as a published value, which the drain installs.
     PublishStyleRecord {
         style_record: u64,
@@ -558,8 +557,8 @@ impl StyleAnswer {
 }
 
 impl StyleQuery {
-    /// Answers the query from `engine`, on the owner.
-    fn answer(self, engine: &mut StyleEngine) -> StyleAnswer {
+    /// Answers the query from `engine` and the document's layout arena, if it has one, on the owner.
+    fn answer(self, engine: &mut StyleEngine, arena: Option<&LayoutNodeArena>) -> StyleAnswer {
         match self {
             Self::ApplyChanges => StyleAnswer::None,
             Self::UnpublishTreeScopeAnimationKeyframes {
@@ -1041,8 +1040,8 @@ impl StyleQuery {
                 unsafe { crate::css::style::bridge::owner_publish_font_face_snapshot(engine, snapshot, memo) };
                 StyleAnswer::None
             }
-            Self::PublishAnchorNames { arena } => {
-                unsafe { crate::css::style::bridge::owner_publish_anchor_names(engine, arena) };
+            Self::PublishAnchorNames => {
+                engine.publish_anchor_names(arena);
                 StyleAnswer::None
             }
             Self::PublishStyleRecord { style_record } => StyleAnswer::Pointer(
@@ -1100,16 +1099,16 @@ pub(crate) struct StyleQueryRef(NonNull<StyleQueryCell>);
 unsafe impl Send for StyleQueryRef {}
 
 impl StyleQueryRef {
-    /// Answers the query from `engine`, on the owner.
+    /// Answers the query from `engine` and the document's layout arena, on the owner.
     ///
     /// # Safety
     ///
     /// The main thread must wait for the answer, with the cell live.
-    pub(crate) unsafe fn answer(self, engine: &mut StyleEngine) {
+    pub(crate) unsafe fn answer(self, engine: &mut StyleEngine, arena: &LayoutNodeArena) {
         // SAFETY: Guaranteed by the caller.
         let cell = unsafe { &mut *self.0.as_ptr() };
         if let Some(query) = cell.query.take() {
-            cell.answer = Some(query.answer(engine));
+            cell.answer = Some(query.answer(engine, Some(arena)));
         }
         cell.retired = std::mem::take(&mut engine.host.retired_custom_property_data);
     }
@@ -1159,7 +1158,7 @@ pub(crate) fn send(engine: StyleEngineInputHandle, entry: &'static str, change: 
 /// sent before. `entry` names the door the main thread took, for the style seal.
 pub(crate) fn ask(engine: StyleEngineHandle, entry: &'static str, query: StyleQuery) -> StyleAnswer {
     let Some(document) = owning_document(engine) else {
-        return without_owner(engine, entry, |engine| query.answer(engine));
+        return without_owner(engine, entry, |engine| query.answer(engine, None));
     };
     engine.bring_home(entry);
     super::seal::note_engine_call(entry);
@@ -1170,7 +1169,7 @@ pub(crate) fn ask(engine: StyleEngineHandle, entry: &'static str, query: StyleQu
 /// hold the loan that would send it home. The owner, which answers, never waits for the main thread.
 pub(crate) fn ask_from_finalizer(engine: StyleEngineHandle, entry: &'static str, query: StyleQuery) -> StyleAnswer {
     let Some(document) = owning_document(engine) else {
-        return without_owner(engine, entry, |engine| query.answer(engine));
+        return without_owner(engine, entry, |engine| query.answer(engine, None));
     };
     super::seal::note_engine_call(entry);
     ask_document(document, entry, query)
@@ -1180,7 +1179,7 @@ pub(crate) fn ask_from_finalizer(engine: StyleEngineHandle, entry: &'static str,
 /// stage published is still owed.
 pub(crate) fn ask_records(engine: StyleEngineHandle, entry: &'static str, query: StyleQuery) -> StyleAnswer {
     let Some(document) = owning_document(engine) else {
-        return without_owner(engine, entry, |engine| query.answer(engine));
+        return without_owner(engine, entry, |engine| query.answer(engine, None));
     };
     engine.bring_home_to_read_records(entry);
     super::seal::note_engine_call(entry);

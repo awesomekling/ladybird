@@ -2149,9 +2149,9 @@ static bool register_anchor_names_in_engine(Scope const& scope, DOM::Document& d
 }
 
 template<typename Scope>
-static void publish_anchor_names_in_engine(Scope const& scope, DOM::Document& document)
+static void publish_anchor_names_in_engine(Scope const& scope)
 {
-    CSS::StyleEngineFFI::style_engine_publish_anchor_names(scope, scope.engine().rust_handle(), document.layout_arena_handle());
+    CSS::StyleEngineFFI::style_engine_publish_anchor_names(scope, scope.engine().rust_handle());
 }
 
 RefPtr<CSS::CustomPropertyData const> Element::custom_property_environment_of_engine_record(CSS::PublishedStyleRecord const& style_record, bool& installable) const
@@ -2285,7 +2285,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
         set_computed_style(scope, {}, new_style_record);
         if (!effect_drain) {
             register_anchor_names(scope);
-            publish_anchor_names_in_engine(scope, document());
+            publish_anchor_names_in_engine(scope);
         } else if (!computed_style()->anchor_names().is_empty())
             effect_drain->append(CSS::StyleEffectDrain::AnchorNames { style_node_id() });
         if (is_document_element())
@@ -2345,7 +2345,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
         set_computed_style(scope, {}, new_style_record);
         if (!effect_drain) {
             register_anchor_names(scope);
-            publish_anchor_names_in_engine(scope, document());
+            publish_anchor_names_in_engine(scope);
         } else if (!old_computed_values->anchor_names().is_empty() || !new_computed_values->anchor_names().is_empty())
             effect_drain->append(CSS::StyleEffectDrain::AnchorNames { style_node_id() });
         if (is_document_element()) {
@@ -2461,7 +2461,7 @@ void Element::clear_computed_styles_from_display_none_descendants(CSS::StyleDrai
         });
         return TraversalDecision::Continue;
     });
-    publish_anchor_names_in_engine(scope, document());
+    publish_anchor_names_in_engine(scope);
 }
 
 void Element::invalidate_descendant_styles_depending_on_style_container_query()

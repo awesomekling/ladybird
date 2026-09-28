@@ -6022,29 +6022,18 @@ pub(crate) unsafe fn owner_register_anchor_names(
     u8::from(registered.had_names) | (u8::from(registered.has_names) << 1)
 }
 
-/// Publishes the anchor names registration moved since the last publication to `arena`, which may
-/// be null, in which case they wait for an arena.
+/// Publishes the anchor names registration moved since the last publication to the document's
+/// layout arena; without one, they wait for an arena.
 ///
 /// # Safety
-/// Engine must be live, and `arena` null or a live layout node arena.
+/// Engine must be live.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_publish_anchor_names(engine: StyleEngineInputHandle, arena: *mut c_void) {
+pub unsafe extern "C" fn style_engine_publish_anchor_names(engine: StyleEngineInputHandle) {
     crate::css::style::owner_calls::ask(
         engine.home(),
         "style_engine_publish_anchor_names",
-        crate::css::style::owner_calls::StyleQuery::PublishAnchorNames { arena },
+        crate::css::style::owner_calls::StyleQuery::PublishAnchorNames,
     );
-}
-
-/// Answers [`style_engine_publish_anchor_names`] with `engine`, on the render owner, which holds the arena.
-///
-/// # Safety
-///
-/// As for [`style_engine_publish_anchor_names`].
-pub(crate) unsafe fn owner_publish_anchor_names(engine: &mut StyleEngine, arena: *mut c_void) {
-    // SAFETY: The caller keeps the arena alive for this call.
-    let arena = (!arena.is_null()).then(|| unsafe { crate::layout::LayoutNodeArena::from_handle(arena) });
-    engine.publish_anchor_names(arena);
 }
 
 /// Interns one name identity and returns its document-local atom.
@@ -6193,7 +6182,6 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
         let transaction = OwnerStyleTransaction::Whole {
             root,
             computation_inputs,
-            layout_arena,
             input,
             grant,
             render_half,
@@ -6246,8 +6234,6 @@ pub(crate) enum OwnerStyleTransaction {
         /// What the host froze for the transaction. What it points to is the document thread's, which keeps it as it
         /// is while it waits.
         computation_inputs: FfiDocumentStyleComputationInputs,
-        /// The document's layout arena, which the owner holds: the pass samples its committed boxes.
-        layout_arena: *mut c_void,
         /// The style input the host recorded since the last transaction, which the transaction applies first.
         input: PassInput,
         /// Where the engine writes the identities it grants the host with the input.
@@ -6364,17 +6350,21 @@ impl OwnerStyleTransaction {
     }
 
     /// Runs the transaction with the document's engine `engine`, on the render owner, which then
-    /// applies the render half of its batch too where the host asked.
+    /// applies the render half of its batch too where the host asked. `state` is the document's
+    /// render state, whose committed boxes the pass samples.
     ///
     /// # Safety
     ///
     /// The document thread waits for it, as the type requires.
-    pub(crate) unsafe fn run(self, engine: &mut StyleEngine) -> OwnerStyleTransactionView {
+    pub(crate) unsafe fn run(
+        self,
+        engine: &mut StyleEngine,
+        state: &mut crate::layout::ArenaHandle,
+    ) -> OwnerStyleTransactionView {
         let (view, retired, applied) = match self {
             Self::Whole {
                 root,
                 computation_inputs,
-                layout_arena,
                 input,
                 grant,
                 render_half,
@@ -6384,24 +6374,23 @@ impl OwnerStyleTransaction {
                 input.apply(engine);
                 // SAFETY: Guaranteed by the caller.
                 unsafe { begin_style_transaction(engine, computation_inputs) };
-                // SAFETY: As above.
-                let committed_boxes =
-                    unsafe { super::animations::CommittedTransformReferenceBoxes::lend(layout_arena) };
+                // SAFETY: The owner holds the render state, and the pass is done with the boxes when it returns.
+                let committed_boxes = unsafe {
+                    super::animations::CommittedTransformReferenceBoxes::lend(std::ptr::from_mut(state).cast())
+                };
                 // The pass samples at the times the host published for this update.
                 let timeline_samples = engine.animation_timeline_samples().clone();
                 let output = run_style_pass(engine, root, committed_boxes, &timeline_samples);
                 let (mut view, retired) = finish_style_transaction(engine, root, output);
                 let mut applied = None;
-                if let Some(viewport_propagation_sources) = render_half {
-                    // SAFETY: The owner holds the document's arena, and the document thread waits.
-                    if let Some(effects) =
-                        unsafe { apply_render_half_on_owner(engine, layout_arena, &viewport_propagation_sources) }
-                    {
-                        view.render_half_applied = true;
-                        view.render_half_moved_visual_contexts = effects.moved_visual_contexts;
-                        view.render_half_repaint = effects.repaint;
-                        applied = Some(effects.applied);
-                    }
+                if let Some(viewport_propagation_sources) = render_half
+                    && let Some(effects) =
+                        apply_render_half_on_owner(engine, state.arena_mut(), &viewport_propagation_sources)
+                {
+                    view.render_half_applied = true;
+                    view.render_half_moved_visual_contexts = effects.moved_visual_contexts;
+                    view.render_half_repaint = effects.repaint;
+                    applied = Some(effects.applied);
                 }
                 (view, retired, applied)
             }
@@ -6421,24 +6410,15 @@ impl OwnerStyleTransaction {
 /// layout, paint and the visual contexts, which the host's install then leaves alone. Answers what
 /// the rows' moves ask of the document if it applied the batch; a batch any row of which the host
 /// styles in a way of its own is the host's to apply whole.
-///
-/// # Safety
-///
-/// On the render owner, which holds `layout_arena`, the live arena of the engine's document.
-unsafe fn apply_render_half_on_owner(
+fn apply_render_half_on_owner(
     engine: &StyleEngine,
-    layout_arena: *mut c_void,
+    arena: &mut crate::layout::LayoutNodeArena,
     viewport_propagation_sources: &[StyleNodeID],
 ) -> Option<OwnerRenderHalfEffects> {
-    if layout_arena.is_null() {
-        return None;
-    }
     let rows = engine.rows_the_owner_applies(viewport_propagation_sources).ok()?;
     if rows.is_empty() {
         return None;
     }
-    // SAFETY: Guaranteed by the caller.
-    let arena = unsafe { crate::layout::LayoutNodeArena::from_handle(layout_arena) };
     arena.apply_flight_style_rows(&rows).ok()?;
     // No flight reads whether one applied a batch: the host's render half ends with the update.
     arena.take_flight_style_applied();

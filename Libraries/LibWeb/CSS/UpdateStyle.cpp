@@ -404,7 +404,7 @@ void StyleEffectDrain::apply_render_half(StyleDrainScope const& scope, DOM::Docu
             });
     }
     // The rows registered their anchor names, and each name they moved is published once.
-    StyleEngineFFI::style_engine_publish_anchor_names(scope, scope.engine().rust_handle(), document.layout_arena_handle());
+    StyleEngineFFI::style_engine_publish_anchor_names(scope, scope.engine().rust_handle());
     m_render_effects.clear();
     m_pseudo_element_style_records.clear();
 }
