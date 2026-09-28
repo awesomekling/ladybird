@@ -81,9 +81,13 @@ pub struct FfiDomSelectorCallbacks {
     pub next_element_sibling: unsafe extern "C" fn(element: *const c_void) -> *const c_void,
     pub first_element_child: unsafe extern "C" fn(element: *const c_void) -> *const c_void,
     pub count_element_siblings: unsafe extern "C" fn(element: *const c_void, which: FfiSiblingCount) -> u32,
-    /// The first element after `node` in tree order that is a descendant of `root`. `node` is `root` itself to start.
-    /// Both may be any node.
-    pub next_element_in_subtree: unsafe extern "C" fn(node: *const c_void, root: *const c_void) -> *const c_void,
+    /// The first element after `node` in tree order that is a descendant of `root`, skipping the subtrees whose
+    /// attribute name filter lacks one of the bits of `attribute_names`. `node` is `root` itself to start. Both may be
+    /// any node.
+    pub next_element_in_subtree:
+        unsafe extern "C" fn(node: *const c_void, root: *const c_void, attribute_names: u64) -> *const c_void,
+    /// The bit of the DOM's attribute name filter for a local name.
+    pub attribute_name_filter_bit: unsafe extern "C" fn(local_name: usize) -> u64,
     /// Whether the element's id (or one of its classes, when `is_class` is set) is `name`, compared ASCII
     /// case-insensitively.
     pub id_or_class_equals_ignoring_ascii_case:
@@ -299,7 +303,7 @@ impl<'a> DomMatcher<'a> {
     }
 
     fn next_element_in_subtree(&self, node: Element, root: Element) -> Option<Element> {
-        optional_element(unsafe { (self.dom.next_element_in_subtree)(node, root) })
+        optional_element(unsafe { (self.dom.next_element_in_subtree)(node, root, 0) })
     }
 
     fn matches_selector(&mut self, selector: &CompiledSelector, element: Element, state: MatchState) -> bool {
@@ -859,6 +863,30 @@ impl<'a> DomMatcher<'a> {
         }
     }
 
+    /// The attribute name filter bits of the attributes an element must have to match the selector.
+    fn subject_attribute_names(&self, selector: &CompiledSelector) -> u64 {
+        let Some(subject) = selector.compound_selectors.last() else {
+            return 0;
+        };
+        subject
+            .simple_selectors
+            .iter()
+            .filter_map(|simple| match simple {
+                // A name with an uppercase letter compares in one case or the other depending on the element.
+                SimpleSelector::Attribute(attribute)
+                    if attribute.qualified_name.namespace_type != NamespaceType::Named
+                        && attribute.qualified_name.interned_name_identity()
+                            == attribute.qualified_name.interned_lowercase_name_identity() =>
+                {
+                    attribute.qualified_name.interned_name_identity()
+                }
+                _ => None,
+            })
+            .fold(0, |names, name| {
+                names | unsafe { (self.dom.attribute_name_filter_bit)(name) }
+            })
+    }
+
     fn matches_any(&mut self, selectors: &[&CompiledSelector], element: Element) -> bool {
         let state = self.top_level_state();
         selectors
@@ -922,11 +950,17 @@ pub unsafe extern "C" fn rust_dom_selector_query_subtree(
     found: unsafe extern "C" fn(context: *mut c_void, element: *const c_void) -> bool,
 ) {
     let (selectors, mut matcher) = unsafe { query_parts(query) };
-    let mut candidate = matcher.next_element_in_subtree(root, root);
+    // A subtree none of whose elements has every attribute name each selector's subject names holds no match.
+    let attribute_names = selectors
+        .iter()
+        .map(|selector| matcher.subject_attribute_names(selector))
+        .fold(u64::MAX, |common, names| common & names);
+    let next = |node| optional_element(unsafe { (matcher.dom.next_element_in_subtree)(node, root, attribute_names) });
+    let mut candidate = next(root);
     while let Some(element) = candidate {
         if matcher.matches_any(&selectors, element) && unsafe { found(context, element) } {
             return;
         }
-        candidate = matcher.next_element_in_subtree(element, root);
+        candidate = next(element);
     }
 }
