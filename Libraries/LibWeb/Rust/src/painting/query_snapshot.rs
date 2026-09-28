@@ -54,6 +54,29 @@ enum ViewportConversion {
     },
 }
 
+impl ViewportConversion {
+    /// How a snapshot of the rows `tree` converts rects to viewport space, as `viewport` says.
+    fn of(tree: &RowSnapshot, viewport: &FfiQuerySnapshotViewport) -> Self {
+        if !viewport.has_committed_viewport_box {
+            return Self::Identity;
+        }
+        if !viewport.visual_contexts_are_up_to_date {
+            return Self::UntransformedOnly {
+                viewport_scroll_offset_is_zero: viewport.viewport_scroll_offset_is_zero,
+            };
+        }
+        // SAFETY: The caller passes the scroll offsets its paint state holds, alive for the call.
+        let offsets = unsafe {
+            libcompositing_rust::ffi::ffi_slice(viewport.device_scroll_offsets, viewport.device_scroll_offsets_len)
+        };
+        Self::VisualContexts {
+            tree: tree.paintable.visual_context_tree.clone(),
+            device_scroll_offsets: offsets.into(),
+            device_pixels_per_css_pixel: viewport.device_pixels_per_css_pixel,
+        }
+    }
+}
+
 /// What the main thread passes the arena for a snapshot's viewport conversion: whether the
 /// document has a committed viewport box, whether its accumulated visual contexts are up to date,
 /// and its scroll state as the main thread's paint state holds it.
@@ -93,27 +116,17 @@ impl QuerySnapshot {
     /// The committed geometry of the document whose rows are `tree`, which converts rects to viewport space as
     /// `viewport` says.
     pub(crate) fn new(tree: Arc<RowSnapshot>, viewport: &FfiQuerySnapshotViewport) -> Self {
-        let viewport_conversion = if !viewport.has_committed_viewport_box {
-            ViewportConversion::Identity
-        } else if !viewport.visual_contexts_are_up_to_date {
-            ViewportConversion::UntransformedOnly {
-                viewport_scroll_offset_is_zero: viewport.viewport_scroll_offset_is_zero,
-            }
-        } else {
-            // SAFETY: The caller passes the scroll offsets its paint state holds, alive for the call.
-            let offsets = unsafe {
-                libcompositing_rust::ffi::ffi_slice(viewport.device_scroll_offsets, viewport.device_scroll_offsets_len)
-            };
-            ViewportConversion::VisualContexts {
-                tree: tree.paintable.visual_context_tree.clone(),
-                device_scroll_offsets: offsets.into(),
-                device_pixels_per_css_pixel: viewport.device_pixels_per_css_pixel,
-            }
-        };
+        let viewport_conversion = ViewportConversion::of(&tree, viewport);
         Self {
             tree,
             viewport_conversion,
         }
+    }
+
+    /// Converts rects to viewport space with `viewport`, as a snapshot published with it would: a snapshot the owner
+    /// published takes the main thread's scroll state as the main thread adopts it.
+    pub(crate) fn convert_with(&mut self, viewport: &FfiQuerySnapshotViewport) {
+        self.viewport_conversion = ViewportConversion::of(&self.tree, viewport);
     }
 
     fn node(&self, id: NodeSlotId) -> Option<&PaintNode> {
@@ -559,6 +572,36 @@ pub unsafe extern "C" fn query_snapshot_any_ancestor_establishes_a_fixed_positio
     query_box: FfiQueryBox,
 ) -> bool {
     unsafe { snapshot_from_handle(snapshot) }.any_ancestor_establishes_a_fixed_position_containing_block(query_box.id())
+}
+
+/// The used geometry of a box that a computed style read reports.
+#[repr(C)]
+#[derive(Default)]
+pub struct FfiUsedBoxGeometry {
+    pub content_size: crate::layout::used_values::FfiCssPixelSize,
+    pub absolute_border_box_rect: crate::layout::used_values::FfiCssPixelRect,
+    pub box_model: crate::painting::ffi::FfiBoxModelMetrics,
+}
+
+/// # Safety
+///
+/// `snapshot` must be a live handle from `layout_arena_publish_query_snapshot`, and `query_box` a
+/// box it answered.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn query_snapshot_used_box_geometry(
+    snapshot: *const std::ffi::c_void,
+    query_box: FfiQueryBox,
+) -> FfiUsedBoxGeometry {
+    let snapshot = unsafe { snapshot_from_handle(snapshot) };
+    let id = query_box.id();
+    if !snapshot.paintable_row_is_populated(id) {
+        return FfiUsedBoxGeometry::default();
+    }
+    FfiUsedBoxGeometry {
+        content_size: paintable_geometry::committed_content_size(snapshot, id),
+        absolute_border_box_rect: paintable_geometry::absolute_border_box_rect(snapshot, id).into(),
+        box_model: crate::painting::ffi::FfiBoxModelMetrics::of(snapshot, id),
+    }
 }
 
 /// # Safety

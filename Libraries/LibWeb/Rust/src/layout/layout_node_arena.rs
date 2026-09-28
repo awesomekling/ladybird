@@ -1164,6 +1164,11 @@ pub(crate) struct LayoutNodeArena {
     /// The rows as the document thread reads them, without reaching the arena (see
     /// [`super::row_reads`]).
     pub(super) published_rows: super::row_reads::RowSnapshotSlot,
+    /// How many rows the arena published.
+    rows_published: u64,
+    /// While a display tick runs over the arena, the rows it published, if any, which the document thread reads once it
+    /// adopts the tick rather than beside the task it runs (see [`Self::hold_published_rows`]).
+    held_rows: Option<Option<Arc<super::row_reads::RowSnapshot>>>,
     /// The last change of the document thread's the arena took in, which the rows it publishes include.
     changes_taken_in: crate::render_owner::ChangeSeq,
     /// The subtree roots the last layout tree build rebuilt, waiting for the partial relayout
@@ -1340,6 +1345,8 @@ impl LayoutNodeArena {
             layout_root: Cell::new(NodeSlotId::INVALID),
             published_layout_tree_state: AtomicU64::new(LayoutTreeState::default().pack()),
             published_rows: Default::default(),
+            rows_published: 0,
+            held_rows: None,
             changes_taken_in: Default::default(),
             pending_rebuilt_subtree_roots: RefCell::new(Vec::new()),
             pending_layout_tree_update_escaped_rebuild_roots: Cell::new(false),
@@ -1913,6 +1920,7 @@ impl LayoutNodeArena {
     /// Publishes the rows the document thread reads (see [`super::row_reads`]) where it reads them,
     /// in place of the ones published before.
     pub(crate) fn publish_rows(&mut self) {
+        self.rows_published += 1;
         let (nodes, styles) = self.tree_shape.publish_columns(&self.chunks, &self.style_nodes);
         let paintable = self.publish_paintable_rows();
         let (replaced, layer_images) = self.publish_paint_fact_tables();
@@ -1935,8 +1943,29 @@ impl LayoutNodeArena {
             geometry_epoch: self.absolute_rect_memo_epoch(),
             paint_status: self.paint_status(),
             changes_taken_in: self.changes_taken_in,
+            generation: self.rows_published,
         };
-        self.published_rows.publish(Arc::new(rows));
+        self.publish(Arc::new(rows));
+    }
+
+    fn publish(&mut self, rows: Arc<super::row_reads::RowSnapshot>) {
+        match &mut self.held_rows {
+            Some(held) => *held = Some(rows),
+            None => self.published_rows.publish(rows),
+        }
+    }
+
+    /// Keeps the rows the arena publishes from now on from the document thread, for a display tick that runs beside
+    /// its task: they are the tick's to hand it ([`Self::take_held_rows`]).
+    pub(crate) fn hold_published_rows(&mut self) {
+        debug_assert!(self.held_rows.is_none(), "one display tick holds the rows at a time");
+        self.held_rows = Some(None);
+    }
+
+    /// Publishes rows where the document thread reads them again, and returns those the arena published since it held
+    /// them, if any.
+    pub(crate) fn take_held_rows(&mut self) -> Option<Arc<super::row_reads::RowSnapshot>> {
+        self.held_rows.take().flatten()
     }
 
     /// Republishes the rows published last without their paintable rows, which lets a writer that runs while nothing
@@ -1949,7 +1978,7 @@ impl LayoutNodeArena {
         let mut released = super::row_reads::RowSnapshot::clone(&rows);
         drop(rows);
         released.paintable = Default::default();
-        self.published_rows.publish(Arc::new(released));
+        self.publish(Arc::new(released));
     }
 
     /// Keeps a slot freed from now on from being reused until the returned pin is dropped: a frame that names slots to
@@ -1960,7 +1989,10 @@ impl LayoutNodeArena {
 
     /// The rows the arena published last, for a snapshot of its own to share.
     pub(crate) fn published_rows(&self) -> Arc<super::row_reads::RowSnapshot> {
-        self.published_rows.shared()
+        match &self.held_rows {
+            Some(Some(held)) => Arc::clone(held),
+            _ => self.published_rows.shared(),
+        }
     }
 
     pub(crate) fn bound_viewport_row(&self) -> NodeSlotId {
