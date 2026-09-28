@@ -139,6 +139,7 @@ impl EngineChange {
                 | Write::AbsorbElementStyleInput { .. }
                 | Write::AcknowledgeEngineComputedRecord { .. }
                 | Write::DiscardStyleTransactionOutputs { .. }
+                | Write::RecordTransitionBaseline { .. }
                 | Write::ReleaseTransitionBaselines { .. }
                 | Write::BeginStyleRecordViewEpoch { .. }
                 | Write::EndStyleRecordViewEpoch { .. }
