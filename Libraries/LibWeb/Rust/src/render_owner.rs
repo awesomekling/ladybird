@@ -101,6 +101,8 @@ pub(crate) enum ArenaChange {
     DropUnadoptedAnimationSamples,
     /// Whether the host listens for the boxes the document's nodes gain and lose.
     HostHearsBoxPresence(bool),
+    /// A write to the document's layout marks or layout facts.
+    Layout(crate::layout::layout_changes::LayoutChange),
 }
 
 impl ArenaChange {
@@ -115,6 +117,7 @@ impl ArenaChange {
             }
             ArenaChange::DropUnadoptedAnimationSamples => arena.drop_animation_adoptions(),
             ArenaChange::HostHearsBoxPresence(hears) => arena.set_host_hears_box_presence(hears),
+            ArenaChange::Layout(change) => change.apply(arena),
         }
     }
 }
@@ -336,6 +339,8 @@ pub(crate) enum Query {
     Arena(ArenaQuery),
     /// A read of the document's style engine, which the owner answers into the query the main thread holds.
     Engine(crate::css::style::owner_calls::StyleQueryRef),
+    /// A question about the document's layout tree.
+    Layout(crate::layout::layout_changes::LayoutRead),
 }
 
 /// A read of a document's layout arena, which [`Query::Arena`] asks.
@@ -419,6 +424,7 @@ pub(crate) enum Answer {
     Is(bool),
     Payment(OwedToHost),
     Engine(EngineAnswered),
+    Layout(crate::layout::layout_changes::LayoutReadAnswer),
 }
 
 /// What became of a [`Query::Engine`].
@@ -522,6 +528,7 @@ impl Answer {
             Query::FinishOwnerStyleHostHalf => Self::Payment(OwedToHost(crate::layout::HostPayment::nothing())),
             Query::Arena(query) => Self::Arena(query.left_to_host()),
             Query::Engine(_) => Self::Engine(EngineAnswered::LeftToHost),
+            Query::Layout(read) => Self::Layout(read.unanswered()),
         }
     }
 
@@ -574,6 +581,7 @@ impl Answer {
             Query::FinishOwnerStyleHostHalf => Self::Payment(OwedToHost(arena.finish_flight_style_host_half().1)),
             Query::Arena(query) => Self::Arena(query.answer(arena)),
             Query::Engine(_) => Self::left_to_host(query),
+            Query::Layout(read) => Self::Layout(read.answer(arena)),
         }
     }
 }
@@ -711,6 +719,18 @@ impl ToOwner {
         }
     }
 
+    /// Whether the owner applies the arena changes it received before handling the message.
+    fn reaches_arena(&self) -> bool {
+        matches!(
+            self,
+            Self::RenderingUpdate { .. }
+                | Self::Style { .. }
+                | Self::Layout { .. }
+                | Self::Paint { .. }
+                | Self::Ask { .. }
+        )
+    }
+
     /// Whether the owner may handle the message inside a stage it runs for a document thread, which it waits for in
     /// the middle of: the message is a unit or a question a document thread waits for, or what those come after.
     pub(crate) fn may_be_served_inside_a_stage(&self) -> bool {
@@ -772,6 +792,9 @@ thread_local! {
     // come after: the owner may not have applied it yet.
     static STYLE_CHANGES_SENT: RefCell<std::collections::HashSet<DocumentId>> =
         RefCell::new(std::collections::HashSet::new());
+    // On a document thread, the number of the last change it sent for each document ahead of a unit or question that
+    // reaches the document's arena, which the owner applies every change it received before.
+    static TAKEN_IN_THROUGH: RefCell<HashMap<DocumentId, ChangeSeq>> = RefCell::new(HashMap::new());
     // On a document thread, the address of each document's arena it created, which names the frame in flight of the
     // document: nothing reaches the arena through it.
     static FRAME_KEYS: RefCell<HashMap<DocumentId, usize>> = RefCell::new(HashMap::new());
@@ -997,6 +1020,7 @@ pub(crate) fn create_document() -> (DocumentId, *mut c_void) {
 pub(crate) fn destroy_document(document: DocumentId) {
     SENT_THROUGH.with_borrow_mut(|sent| sent.remove(&document));
     STYLE_CHANGES_SENT.with_borrow_mut(|sent| sent.remove(&document));
+    TAKEN_IN_THROUGH.with_borrow_mut(|taken_in| taken_in.remove(&document));
     FRAME_KEYS.with_borrow_mut(|keys| keys.remove(&document));
     send(ToOwner::Destroy { document });
 }
@@ -1043,6 +1067,22 @@ pub(crate) fn send_arena_change(document: DocumentId, change: ArenaChange) -> Ch
         changes: vec![Change::Arena(change)],
     });
     seq
+}
+
+/// Whether the owner takes in change `seq` the calling document thread sent for `document` before anything it asks of
+/// the document's arena next: a unit or question the thread sent since reaches the arena after it.
+pub(crate) fn taken_in_before_next_arena_reach(document: DocumentId, seq: ChangeSeq) -> bool {
+    TAKEN_IN_THROUGH.with_borrow(|taken_in| taken_in.get(&document).is_some_and(|through| *through >= seq))
+}
+
+/// On a document thread, as it sends the owner `message`: where the message reaches its document's arena, the owner
+/// takes in every change the thread sent before it first.
+pub(crate) fn note_sending(message: &ToOwner) {
+    if message.reaches_arena() {
+        let document = message.document();
+        let through = sent_through(document);
+        TAKEN_IN_THROUGH.with_borrow_mut(|taken_in| taken_in.insert(document, through));
+    }
 }
 
 /// The number of the last change the calling document thread sent for `document`.

@@ -7423,6 +7423,11 @@ pub unsafe extern "C" fn layout_arena_layout_is_up_to_date(
     document_needs_layout_tree_build: bool,
 ) -> bool {
     assert!(!arena.is_null(), "layout node arena handle is null");
+    // A layout change the document thread sent is one the owner lays out in the next layout update.
+    // SAFETY: As above.
+    if unsafe { super::layout_changes::changes_sent_not_taken_in(arena) } {
+        return false;
+    }
     // SAFETY: As above.
     unsafe { LayoutNodeArena::from_handle(arena) }.layout_is_up_to_date(document_needs_layout_tree_build)
 }

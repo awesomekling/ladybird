@@ -40,6 +40,8 @@ pub(crate) struct HostTables {
     /// Observer sets the arena has handed back that a newer set displaced before the handback was
     /// paid, in the order they were displaced.
     pub(super) image_observer_sets_owed: RefCell<Vec<(NodeSlotId, *mut c_void)>>,
+    /// The number of the last change the document thread sent the owner that lays a node out again.
+    pub(super) last_relayout_change_sent: Cell<Option<crate::render_owner::ChangeSeq>>,
     /// How the host names a node a layout trace mentions, set when tracing begins.
     pub(super) layout_trace_describe_node: Cell<Option<super::trace::NodeDescriber>>,
     /// The generation of the document's render state, which retiring it moves on. See

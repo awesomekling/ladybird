@@ -87,11 +87,10 @@ unsafe extern "C" fn rust_removed_box_detachable_in_place(
     place: *const FfiRemovedBoxPlace,
 ) -> bool {
     assert!(!arena.is_null() && !place.is_null());
-    // SAFETY: The entry point's contract puts this call on the document thread.
-    let _main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     // SAFETY: Guaranteed by the entry point's contract.
-    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
-    removed_box_detachable_in_place(arena, unsafe { &*place }).is_some()
+    let read = crate::layout::layout_changes::LayoutRead::RemovedBoxDetachableInPlace(unsafe { *place });
+    // SAFETY: As above.
+    unsafe { crate::layout::layout_changes::ask_bool(arena, read) }
 }
 
 /// Detaches the box of the node `place` names from its parent's box in place, with the paint state of every box in

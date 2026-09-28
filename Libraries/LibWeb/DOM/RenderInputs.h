@@ -82,9 +82,10 @@ public:
     [[nodiscard]] Layout::RustFFI::FfiRemovedBoxDetach detach_removed_box_in_place(Layout::RustFFI::FfiRemovedBoxPlace const&);
     // What an insertion under the row invalidates, which the layout tree build decides once it attached the boxes.
     void defer_child_list_insertion_layout_update(Layout::Row const&);
-    // The text under the row renders again from its characters, or with the language it now resolves: whether any did.
+    // The text under the row renders again from its characters, or with the language it now resolves, which lays the
+    // row out again where any does.
     void invalidate_text_content(Layout::Row const&);
-    [[nodiscard]] bool enroll_text_after_language_change(Layout::Row const&);
+    void enroll_text_after_language_change(Layout::Row const&);
 
     // The layout tree update marks the arena keeps for the nodes of the document. Whether the mark changed.
     bool merge_layout_tree_update_mark(CSS::StyleNodeID, bool value, u8 reuse_reason);

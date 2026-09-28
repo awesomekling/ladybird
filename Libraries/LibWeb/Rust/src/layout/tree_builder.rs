@@ -629,7 +629,7 @@ fn detach_remaining_layout_rows_for_removal(arena: *mut LayoutNodeArena, style_n
 }
 
 /// A DOM sibling of a node leaving the document, as whether the node's box can be detached in place reads it.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 #[repr(C)]
 pub struct FfiRemovedBoxSibling {
     pub present: bool,
@@ -641,7 +641,7 @@ pub struct FfiRemovedBoxSibling {
 
 /// Which kind of box a detached child is. DOM removal reads it from the child's style; a style
 /// change that stopped generating the box has already swapped the style, so it names the level.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 // NB: `FromStyle` is constructed by C++ through the FFI.
 #[allow(dead_code)]
@@ -652,7 +652,7 @@ pub enum FfiDetachedBoxLevel {
 }
 
 /// Where the box of a node leaving the document sits, as the DOM has it: the node, its parent and its siblings.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 #[repr(C)]
 pub struct FfiRemovedBoxPlace {
     /// The node's identity, or 0 for none.
@@ -4352,18 +4352,14 @@ pub extern "C" fn layout_node_kind_is_svg_graphics_box(kind: NodeKind) -> bool {
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_node_is_atomic_inline(arena: *mut c_void, id: NodeSlotId) -> bool {
-    // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
-    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
-    let data = arena.data(id);
-    node_facts::node_is_atomic_inline(data, node_facts::node_style_view(data))
+    // SAFETY: The C++ caller passes the live arena handle of its document.
+    unsafe { super::layout_changes::ask_bool(arena, super::layout_changes::LayoutRead::NodeIsAtomicInline(id)) }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_node_is_fragmented_inline(arena: *mut c_void, id: NodeSlotId) -> bool {
-    // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
-    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
-    let data = arena.data(id);
-    node_facts::node_is_fragmented_inline(data, node_facts::node_style_view(data))
+    // SAFETY: The C++ caller passes the live arena handle of its document.
+    unsafe { super::layout_changes::ask_bool(arena, super::layout_changes::LayoutRead::NodeIsFragmentedInline(id)) }
 }
 
 fn node_is_generated_for_pseudo_element(data: &NodeData) -> bool {

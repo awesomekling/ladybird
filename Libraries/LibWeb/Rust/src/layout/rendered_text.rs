@@ -118,10 +118,18 @@ fn transform_uses_locale(transform: u8) -> bool {
 pub unsafe extern "C" fn layout_arena_enroll_text_after_language_change(
     marks: LayoutUpdateMarksHandle,
     root: NodeSlotId,
-) -> bool {
-    let arena = marks.arena;
-    // SAFETY: The DOM invalidator lends the live arena for this traversal.
-    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
+) {
+    // SAFETY: The render inputs hand out the marks of their document's live arena.
+    unsafe {
+        super::layout_changes::send_through_marks(
+            marks,
+            super::layout_changes::LayoutChange::EnrollTextAfterLanguageChange { root },
+        );
+    }
+}
+
+/// Enrolls the text under `root` whose rendering depends on the language for a content sync: whether any did.
+pub(super) fn enroll_text_after_language_change(arena: &LayoutNodeArena, root: NodeSlotId) -> bool {
     let mut changed = false;
     let mut enroll = |node| {
         if !super::node_facts::kind_is_text(arena.data(node).kind.get()) {
@@ -363,8 +371,8 @@ pub(super) fn length_in_code_units(text: &ak::Utf16String) -> usize {
 /// The arena must be live on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_text_has_source_range(arena: *mut c_void, id: NodeSlotId) -> bool {
-    // SAFETY: The caller lends the arena for this synchronous metadata query.
-    unsafe { LayoutNodeArena::from_handle(arena) }.text_has_source_range(id)
+    // SAFETY: The caller passes the live arena handle of its document.
+    unsafe { super::layout_changes::ask_bool(arena, super::layout_changes::LayoutRead::TextHasSourceRange(id)) }
 }
 
 /// The arena must be live on the document thread with no outstanding borrows.
@@ -437,9 +445,13 @@ fn sync_text_content(arena: &mut LayoutNodeArena, id: NodeSlotId) {
 /// The arena must be exclusively available and `id` must name a live text node.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_invalidate_text_content(marks: LayoutUpdateMarksHandle, id: NodeSlotId) {
-    let arena = marks.arena;
-    // SAFETY: DOM mutation publishes invalidation outside layout and painting.
-    unsafe { LayoutNodeArena::from_handle_mut(arena) }.invalidate_text_content(id);
+    // SAFETY: The render inputs hand out the marks of their document's live arena.
+    unsafe {
+        super::layout_changes::send_through_marks(
+            marks,
+            super::layout_changes::LayoutChange::InvalidateTextContent { node: id },
+        );
+    }
 }
 
 /// # Safety
