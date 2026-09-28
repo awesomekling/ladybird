@@ -50,6 +50,8 @@ pub(crate) enum EngineChange {
     },
     /// The host took what the pass published for the row of an element whose animations it sampled.
     RowSampledTakenByHost(StyleNodeID),
+    /// The host took the animation plan the row of an element, or of its pseudo-element of `pseudo_kind`, left.
+    AnimationPlanTakenByHost { node: StyleNodeID, pseudo_kind: u8 },
     /// The host took what the container conditions of an element's row read of its containers, which the engine
     /// records.
     ContainerEffectsTakenByHost(StyleNodeID),
@@ -153,6 +155,7 @@ impl EngineChange {
             | Self::PrepareRootFontResolution { .. }
             | Self::PublishFontFaceSnapshot { .. }
             | Self::RowSampledTakenByHost(_)
+            | Self::AnimationPlanTakenByHost { .. }
             | Self::TransitionStepTakenByHost { .. }
             | Self::SetTreeScopeAnimationKeyframes { .. }
             | Self::ElementStyleInputAbsorbedByHost { .. }
@@ -249,6 +252,9 @@ impl EngineChange {
             }
             Self::RowSampledTakenByHost(node) => {
                 engine.take_row_sampled_in_pass(node);
+            }
+            Self::AnimationPlanTakenByHost { node, pseudo_kind } => {
+                engine.take_settled_animation_plan_taken_by_host(node, pseudo_kind);
             }
             Self::ContainerEffectsTakenByHost(node) => {
                 engine.take_and_record_container_effects(node);
@@ -501,8 +507,9 @@ pub(crate) enum StyleQuery {
         node: u32,
         pseudo_kind: u8,
     },
-    TakeSettledAnimationDefinitions {
-        node: u32,
+    /// Takes the animation plan a row left, which the main thread's copy may not follow.
+    TakeSettledAnimationPlan {
+        node: StyleNodeID,
         pseudo_kind: u8,
     },
     /// A record as a published value, which the drain installs.
@@ -529,7 +536,7 @@ pub(crate) enum StyleAnswer {
     Pointer(*const c_void),
     RowSampled(super::bridge::FfiRowSampledInPass),
     RecordDelta(super::bridge::FfiStyleRecordDelta),
-    AnimationDefinitions(super::bridge::FfiSettledAnimationDefinitions),
+    AnimationPlan(Option<super::bridge::AnimationPlanForHost>),
     PreparedStylePass(super::bridge::PreparedStylePass),
     RecordDemand(super::bridge::FfiRecordDemandAnswer),
 }
@@ -625,12 +632,12 @@ impl StyleAnswer {
         }
     }
 
-    pub(crate) fn animation_definitions(self) -> super::bridge::FfiSettledAnimationDefinitions {
+    pub(crate) fn animation_plan(self) -> Option<super::bridge::AnimationPlanForHost> {
         match self {
-            Self::AnimationDefinitions(value) => value,
+            Self::AnimationPlan(value) => value,
             _ => {
-                debug_assert!(false, "animation definitions are answered with animation definitions");
-                super::bridge::FfiSettledAnimationDefinitions::absent()
+                debug_assert!(false, "an animation plan is answered with an animation plan");
+                None
             }
         }
     }
@@ -937,9 +944,9 @@ impl StyleQuery {
             Self::TakePseudoElementSampledInPass { node, pseudo_kind } => StyleAnswer::RowSampled(unsafe {
                 crate::css::style::bridge::owner_take_pseudo_element_sampled_in_pass(engine, node, pseudo_kind)
             }),
-            Self::TakeSettledAnimationDefinitions { node, pseudo_kind } => StyleAnswer::AnimationDefinitions(unsafe {
-                crate::css::style::bridge::owner_take_settled_animation_definitions(engine, node, pseudo_kind)
-            }),
+            Self::TakeSettledAnimationPlan { node, pseudo_kind } => StyleAnswer::AnimationPlan(
+                crate::css::style::bridge::owner_take_settled_animation_plan(engine, node, pseudo_kind),
+            ),
             Self::PublishStyleRecord { style_record } => StyleAnswer::Pointer(
                 crate::css::style::bridge::owner_publish_style_record(engine, style_record),
             ),

@@ -2400,10 +2400,7 @@ pub(crate) struct SettledAnimationPlan {
     definitions: Box<[crate::css::style_compute::FfiComputedAnimation]>,
     /// The names the definitions point at, owned for as long as they are.
     names: Box<[CssString]>,
-    #[expect(
-        dead_code,
-        reason = "the timing functions the definitions point at, retained for as long as they are"
-    )]
+    /// The timing functions the definitions point at, retained for as long as they are.
     timing_functions: Box<[crate::css::style_value::RetainedStyleValueData]>,
     element_display_is_none: bool,
     /// Where the definitions' names resolve: the scope the winning `animation-name` declaration
@@ -2419,6 +2416,25 @@ pub(crate) struct SettledAnimationPlan {
 //         table publishes.
 unsafe impl Send for SettledAnimationPlan {}
 unsafe impl Sync for SettledAnimationPlan {}
+
+impl Clone for SettledAnimationPlan {
+    /// A plan of its own, whose definitions name its own names.
+    fn clone(&self) -> Self {
+        let names = self.names.clone();
+        let mut definitions = self.definitions.clone();
+        for (definition, name) in definitions.iter_mut().zip(names.iter()) {
+            definition.name = name.as_ptr();
+        }
+        Self {
+            definitions,
+            names,
+            timing_functions: self.timing_functions.clone(),
+            element_display_is_none: self.element_display_is_none,
+            declaration_scope: self.declaration_scope,
+            element_tree_scope: self.element_tree_scope,
+        }
+    }
+}
 
 impl SettledAnimationPlan {
     /// Assume ownership of the definitions and of the name and timing function each one names. The

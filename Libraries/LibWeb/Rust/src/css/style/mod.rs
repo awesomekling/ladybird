@@ -838,10 +838,7 @@ pub struct RetainedState {
     /// animations, and the plan each one leaves for the host. Like the transition debt it is an
     /// effect of the row rather than a part of the record: the host drains it after the batch, in
     /// the order it applied the rows.
-    nodes_owing_animation_definitions: HashMap<(StyleNodeID, u8), animations::SettledAnimationPlan>,
-    /// The plan the host is applying right now, held for the length of that application: the host
-    /// reads the definitions through the engine's own storage and copies what it keeps.
-    animation_definitions_being_applied: Option<animations::SettledAnimationPlan>,
+    nodes_owing_animation_definitions: drain_table::FollowedTable<(StyleNodeID, u8), animations::SettledAnimationPlan>,
     /// The names of the CSS animations the host holds for each element, which the animation stage
     /// matches its newly computed definitions against.
     css_defined_animations: animations::CssDefinedAnimations,

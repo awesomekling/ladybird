@@ -1303,36 +1303,33 @@ impl RetainedState {
         (scope != tree::TreeScopeID::DOCUMENT).then_some(scope)
     }
 
-    /// The animation definitions the engine-computed record the host is about to install for this
-    /// node leaves to be applied after the batch, taking the debt with the answer so that exactly
-    /// one application drains it. The plan stays alive until the next one is taken, which is long
-    /// enough for the host to read it.
-    pub(crate) fn take_settled_animation_definitions(
-        &mut self,
-        node: StyleNodeID,
-        pseudo_kind: u8,
-    ) -> Option<&animations::SettledAnimationPlan> {
-        self.animation_definitions_being_applied = self.nodes_owing_animation_definitions.remove(&(node, pseudo_kind));
-        if let Some(plan) = &self.animation_definitions_being_applied {
-            // The host takes a reference to each set a definition names, so it must be one a scope
-            // still publishes.
-            assert!(
-                plan.definitions()
-                    .iter()
-                    .all(|definition| definition.keyframe_set.is_null()
-                        || self
-                            .animation_keyframes
-                            .description(definition.keyframe_set as usize)
-                            .is_some()),
-                "a settled animation plan names a keyframe set no scope publishes"
-            );
-        }
-        self.animation_definitions_being_applied.as_ref()
+    /// The plan the engine-computed record the host installs for this node leaves to be applied after the batch, as
+    /// the host's copy of it took it, so that exactly one application drains it.
+    pub(crate) fn take_settled_animation_plan_taken_by_host(&mut self, node: StyleNodeID, pseudo_kind: u8) {
+        self.nodes_owing_animation_definitions
+            .take_taken_by_host(&(node, pseudo_kind));
     }
 
-    /// The plan `take_settled_animation_definitions` last took.
-    pub(crate) fn settled_animation_definitions_being_applied(&self) -> Option<&animations::SettledAnimationPlan> {
-        self.animation_definitions_being_applied.as_ref()
+    /// A copy of the plan a row left for `node`, or for its pseudo-element of `pseudo_kind`, for the host to apply.
+    pub(crate) fn settled_animation_plan_for_host(
+        &self,
+        node: StyleNodeID,
+        pseudo_kind: u8,
+    ) -> Option<animations::SettledAnimationPlan> {
+        let plan = self.nodes_owing_animation_definitions.get(&(node, pseudo_kind))?;
+        // The host takes a reference to each set a definition names, so it must be one a scope
+        // still publishes.
+        assert!(
+            plan.definitions()
+                .iter()
+                .all(|definition| definition.keyframe_set.is_null()
+                    || self
+                        .animation_keyframes
+                        .description(definition.keyframe_set as usize)
+                        .is_some()),
+            "a settled animation plan names a keyframe set no scope publishes"
+        );
+        Some(plan.clone())
     }
 
     /// Account for a record the engine derived and leave its commitment to C++'s acknowledgement.

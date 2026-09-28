@@ -115,6 +115,30 @@ impl<K: Eq + Hash + Copy, V> FollowedTable<K, V> {
         removed
     }
 
+    /// Writes every entry in place.
+    pub(crate) fn for_each_value_mut(&mut self, mut write: impl FnMut(&mut V)) {
+        for (key, value) in &mut self.entries {
+            self.written.push(*key);
+            write(value);
+        }
+    }
+
+    pub(crate) fn retain(&mut self, mut keep: impl FnMut(&K, &mut V) -> bool) {
+        let written = &mut self.written;
+        self.entries.retain(|key, value| {
+            let kept = keep(key, value);
+            if !kept {
+                written.push(*key);
+            }
+            kept
+        });
+    }
+
+    /// Takes the entry the host took from its copy already.
+    pub(crate) fn take_taken_by_host(&mut self, key: &K) -> Option<V> {
+        self.entries.remove(key)
+    }
+
     /// The keys written since the home last followed the table.
     pub(crate) fn take_written(&mut self) -> Vec<K> {
         std::mem::take(&mut self.written)
