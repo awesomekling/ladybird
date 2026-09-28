@@ -88,6 +88,10 @@ void EventLoop::set_holds_rendering_opportunities_for_testing(Optional<bool> hol
     s_holds_rendering_opportunities_for_testing = holds;
 }
 
+// One frame interval at 60 Hz: how long a rendering task waits behind other tasks before it runs ahead of them, and
+// how long after its rendering opportunity the display has offered another.
+static constexpr u64 rendering_task_queue_wait_limit_nanoseconds = 1'000'000'000 / 60;
+
 void EventLoop::run_rendering_task()
 {
     VERIFY(m_rendering_task_queued);
@@ -104,6 +108,13 @@ void EventLoop::run_rendering_task()
     }
     m_rendering_scheduler_counters.rendering_task_blocked_on_frame_nanoseconds += m_frame_scheduler->finish_frame_now();
     m_rendering_task_queued = false;
+    // AD-HOC: The in-parallel steps set the last render opportunity time at every rendering opportunity, and the display
+    //         went on offering them while this task waited behind other tasks. A task that waited a display frame or
+    //         more takes the latest of them, so a document those tasks created is not given a frame from before it
+    //         existed. An injected opportunity keeps the time it was given.
+    if (m_last_render_opportunity_source != RenderingOpportunitySource::Manual
+        && MonotonicTime::now().nanoseconds() - m_rendering_task_queued_at_nanoseconds >= rendering_task_queue_wait_limit_nanoseconds)
+        m_last_render_opportunity_time = max(m_last_render_opportunity_time, HighResolutionTime::unsafe_shared_current_time());
     update_the_rendering();
 }
 
@@ -118,9 +129,6 @@ void EventLoop::queue_held_rendering_task_if_frame_finished()
     m_rendering_task_runs_ahead = true;
     queue_a_task(Task::Source::Rendering, this, nullptr, *m_rendering_task_function);
 }
-
-// How long a rendering task waits behind other tasks before it runs ahead of them: one frame interval at 60 Hz.
-static constexpr u64 rendering_task_queue_wait_limit_nanoseconds = 1'000'000'000 / 60;
 
 bool EventLoop::rendering_task_runs_ahead_of_queue() const
 {
@@ -554,6 +562,7 @@ bool EventLoop::rendering_opportunity(HighResolutionTime::DOMHighResTimeStamp fr
     //          IPC delivery so rendering timestamps remain monotonic and never describe a future frame.
     auto now = HighResolutionTime::unsafe_shared_current_time();
     m_last_render_opportunity_time = max(m_last_render_opportunity_time, min(frame_time, now));
+    m_last_render_opportunity_source = source;
 
     // AD-HOC: A nested event loop can deliver a timer while a rendering update is running. Keep the request pending
     //         so the PageClient can schedule it for the next opportunity instead of queueing a second rendering task.
