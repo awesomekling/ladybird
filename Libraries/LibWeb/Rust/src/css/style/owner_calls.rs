@@ -106,13 +106,6 @@ pub(crate) enum EngineChange {
     SetElementCustomPropertyData(StyleNodeID, Option<HandedCustomPropertyEnvironment>),
     /// The custom-property environment one of an element's synthetic pseudo-elements now holds, or that it holds none.
     SetPseudoElementCustomPropertyData(StyleNodeID, u8, Option<HandedCustomPropertyEnvironment>),
-    /// The host folded the style input an element owes into the reaction it applies to it, as
-    /// [`StyleEngine::absorb_element_style_input`] does.
-    ElementStyleInputAbsorbedByHost {
-        node: StyleNodeID,
-        reaction: u8,
-        inherited_style_groups: u8,
-    },
     /// A benchmark phase marker, in UTF-16, which a recording engine records.
     #[cfg(feature = "style-recording")]
     BenchmarkMarker(Box<[u16]>),
@@ -143,6 +136,7 @@ impl EngineChange {
                 | Write::SetSampledCompositionIdentity { .. }
                 | Write::NoteAttributeNameForms { .. }
                 | Write::ConsumeElementStyleInput { .. }
+                | Write::AbsorbElementStyleInput { .. }
                 | Write::AcknowledgeEngineComputedRecord { .. }
                 | Write::DiscardStyleTransactionOutputs { .. }
                 | Write::ReleaseTransitionBaselines { .. }
@@ -164,7 +158,6 @@ impl EngineChange {
             | Self::TransitionStepTakenByHost { .. }
             | Self::PseudoElementEnvironmentTakenByHost { .. }
             | Self::SetTreeScopeAnimationKeyframes { .. }
-            | Self::ElementStyleInputAbsorbedByHost { .. }
             | Self::SetElementCustomPropertyData(..)
             | Self::SetPseudoElementCustomPropertyData(..)
             | Self::AddSheet { .. }
@@ -266,13 +259,6 @@ impl EngineChange {
             }
             Self::ContainerEffectsTakenByHost(node) => {
                 engine.take_and_record_container_effects(node);
-            }
-            Self::ElementStyleInputAbsorbedByHost {
-                node,
-                reaction,
-                inherited_style_groups,
-            } => {
-                engine.absorb_element_style_input(node, reaction, inherited_style_groups, false);
             }
             #[cfg(feature = "style-recording")]
             Self::BenchmarkMarker(name) => super::bridge::record_benchmark_marker(engine, &name),
@@ -528,7 +514,6 @@ impl From<BoundaryResult> for StyleAnswer {
     fn from(result: BoundaryResult) -> Self {
         match result {
             BoundaryResult::Bool(value) => Self::Bool(value),
-            BoundaryResult::U32(value) => Self::U32(value),
             BoundaryResult::U64(value) => Self::U64(value),
             BoundaryResult::Usize(value) => Self::Usize(value),
         }
@@ -539,7 +524,6 @@ impl From<BoundaryResult> for StyleAnswer {
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum BoundaryResult {
     Bool(bool),
-    U32(u32),
     U64(u64),
     Usize(usize),
 }

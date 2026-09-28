@@ -794,14 +794,9 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                 continue;
             }
             // A reaction the engine derived for this element while applying an earlier one in
-            // this batch joins the element's own reaction where it covers it.
+            // this batch is answered by the element's own reaction where that covers it.
             auto reaction = published_reaction;
-            if (auto absorbed = scope.engine().absorb_element_style_input(
-                    StyleNodeID { reaction.style_node }, reaction.reaction, reaction.inherited_style_groups);
-                absorbed != 0) {
-                reaction.reaction = static_cast<u8>(absorbed & 0xff);
-                reaction.inherited_style_groups = static_cast<u8>(absorbed >> 8);
-            }
+            scope.engine().absorb_element_style_input(StyleNodeID { reaction.style_node }, reaction.reaction, reaction.inherited_style_groups);
             if (reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::SkippedHidden)
                 continue;
 
