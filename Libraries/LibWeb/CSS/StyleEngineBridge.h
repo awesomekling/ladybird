@@ -529,7 +529,14 @@ private:
     HashTable<StyleAtomID> m_published_language_atoms;
     HashTable<StyleAtomID> m_published_custom_property_names;
     HashMap<StyleAtomID, HashMap<StyleAtomID, StyleAtomID>> m_attribute_name_atoms;
-    HashMap<StyleAtomID, u32> m_attribute_value_text_readers;
+    struct AttributeName {
+        // What the readers of the value text are known by.
+        Utf16FlyString folded_local_name;
+        bool has_no_namespace { false };
+        // Which read the value text, as bits, until the requirements move.
+        Optional<u32> value_text_readers;
+    };
+    HashMap<StyleAtomID, AttributeName> m_attribute_names;
     u64 m_atom_generation { 1 };
     PublishedTransactionVersion m_published_transaction_version { 0, 0 };
     u32 m_connected_element_count_at_last_transaction { 0 };

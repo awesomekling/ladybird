@@ -116,6 +116,25 @@ pub struct AttributeSelector {
     pub case_type: AttributeCaseType,
 }
 
+impl AttributeSelector {
+    /// Whether matching may read the text of the value: an atom answers only presence and an exact case-sensitive
+    /// comparison, and a legacy HTML attribute given no case compares ASCII case-insensitively on an HTML element.
+    fn reads_value_text(&self) -> bool {
+        match (self.match_type, self.case_type) {
+            (AttributeMatchType::HasAttribute, _) | (AttributeMatchType::ExactValue, AttributeCaseType::Sensitive) => {
+                false
+            }
+            (AttributeMatchType::ExactValue, AttributeCaseType::Default) => {
+                matches!(
+                    self.qualified_name.namespace_type,
+                    NamespaceType::Default | NamespaceType::None
+                ) && is_ascii_case_insensitive_html_attribute(&self.qualified_name.name)
+            }
+            _ => true,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct AnPlusBPattern {
     pub step_size: i32,
@@ -347,6 +366,34 @@ impl CompiledSelector {
 
     pub fn id(&self) -> u64 {
         self.id
+    }
+
+    /// Visits the ASCII-lowercase local name of every attribute the selector, nested ones included, tests the
+    /// value of by its text: all the names its compiled program reads value text of, and a few more, as a name is
+    /// visited whatever its namespace.
+    pub(crate) fn visit_attribute_value_text_names(&self, visit: &mut impl FnMut(&RetainedUtf16FlyString)) {
+        for simple_selector in self
+            .compound_selectors
+            .iter()
+            .flat_map(|compound| &compound.simple_selectors)
+        {
+            match simple_selector {
+                SimpleSelector::Attribute(attribute) if attribute.reads_value_text() => {
+                    visit(&attribute.qualified_name.lowercase_name);
+                }
+                SimpleSelector::PseudoClass(pseudo_class) => {
+                    for selector in &pseudo_class.argument_selector_list {
+                        selector.visit_attribute_value_text_names(visit);
+                    }
+                }
+                SimpleSelector::PseudoElement(pseudo_element) => {
+                    if let PseudoElementValue::CompoundSelector(selector) = &pseudo_element.value {
+                        selector.visit_attribute_value_text_names(visit);
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
     /// https://www.w3.org/TR/selectors-4/#specificity-rules

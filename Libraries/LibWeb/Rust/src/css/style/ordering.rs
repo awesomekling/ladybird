@@ -2174,13 +2174,6 @@ impl StyleEngineState {
         }
         self.retained.facts.forget_atoms(&reclaimable);
         self.retained.custom_property_environments.forget_names(&reclaimable);
-        let requirement_count = self.retained.attribute_value_text_names.len();
-        self.retained
-            .attribute_value_text_names
-            .retain(|atom| reclaimable.binary_search(atom).is_err());
-        if self.retained.attribute_value_text_names.len() != requirement_count {
-            self.retained.attribute_value_text_requirements_version += 1;
-        }
         let reclaimed = self.retained.atoms.finish_sweep(&reclaimable);
         counters.bump(Counter::AtomSweeps);
         counters.add(Counter::AtomSweepRootSlotsVisited, visited);

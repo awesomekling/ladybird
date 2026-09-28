@@ -1110,8 +1110,6 @@ pub struct RetainedState {
     transaction_fact_view: Option<TransactionFactView>,
     facts: ElementFactStore,
     programs: SelectorPrograms,
-    attribute_value_text_names: HashSet<StyleAtomID>,
-    attribute_value_text_requirements_version: u64,
     selector_programs_need_sweep: bool,
     routing: Arc<RoutingRegistry>,
     /// Exact selector changes and refresh requests emitted by the current transaction.

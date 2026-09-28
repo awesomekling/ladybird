@@ -544,7 +544,8 @@ StyleAtomID StyleEngine::intern_attribute_name(Utf16FlyString const& local_name,
 
     StyleAtomID folded_name;
     StyleAtomID folded_local;
-    if (auto folded = local_name.to_ascii_lowercase(); folded != local_name) {
+    auto folded = local_name.to_ascii_lowercase();
+    if (folded != local_name) {
         auto folded_atom = intern_atom(folded);
         folded_name = in_namespace(folded_atom);
         folded_local = acquire_qualified_atom(StyleEngine::any_namespace, folded_atom);
@@ -561,6 +562,7 @@ StyleAtomID StyleEngine::intern_attribute_name(Utf16FlyString const& local_name,
         input.engine().note_attribute_name_forms(name, any_namespace, folded_name, folded_local, local_name_code_units, has_no_namespace);
     });
     names_by_namespace.set(namespace_atom, name);
+    m_attribute_names.set(name, { .folded_local_name = move(folded), .has_no_namespace = namespace_atom == 0, .value_text_readers = {} });
     return name;
 }
 
@@ -598,17 +600,8 @@ void StyleEngine::backfill_attribute_value_text_if_required(StyleAtomID name, Ut
 
 void StyleEngine::publish_attribute_value_text(StyleAtomID atom, Utf16View value, bool read_by_selectors)
 {
-    // The engine holds one copy of the text per currently used value. Ask whether it survived
-    // reclamation before copying it out of the attribute's representation again. Text an attr()
+    // The engine holds one copy of the text per currently used value, and keeps the one it holds. Text an attr()
     // asked for is still news to the selectors once one of their names spells the same value.
-    if (StyleEngineFFI::style_engine_has_attribute_value_text(rust_handle(), atom.value())) {
-        if (read_by_selectors) {
-            u16 const no_text = 0;
-            StyleEngineFFI::style_engine_set_attribute_value_text(rust_handle(), atom.value(), &no_text, 0, true);
-        }
-        return;
-    }
-
     Vector<u16> code_units;
     code_units.ensure_capacity(value.length_in_code_units());
     for (size_t i = 0; i < value.length_in_code_units(); ++i)
@@ -622,15 +615,20 @@ bool StyleEngine::refresh_attribute_value_text_requirements()
     if (version == m_attribute_value_text_requirements_version)
         return false;
     m_attribute_value_text_requirements_version = version;
-    m_attribute_value_text_readers.clear();
+    for (auto& it : m_attribute_names)
+        it.value.value_text_readers = {};
     return true;
 }
 
 u32 StyleEngine::attribute_value_text_readers(StyleAtomID name)
 {
-    return m_attribute_value_text_readers.ensure(name, [&] {
-        return StyleEngineFFI::style_engine_attribute_value_text_readers(rust_handle(), name.value());
-    });
+    auto it = m_attribute_names.find(name);
+    if (it == m_attribute_names.end())
+        return 0;
+    auto& attribute_name = it->value;
+    if (!attribute_name.value_text_readers.has_value())
+        attribute_name.value_text_readers = StyleEngineFFI::style_engine_attribute_value_text_readers(rust_handle(), attribute_name.folded_local_name.raw_identity(), attribute_name.has_no_namespace);
+    return *attribute_name.value_text_readers;
 }
 
 void StyleEngine::record_element_language_write(u32 node, StyleAtomID language, Utf16View tag)
@@ -1473,7 +1471,7 @@ StyleEngine::PublishedStyleTransaction StyleEngine::publish_style_transaction_vi
             reclaimed_atoms.set(atom_id);
             m_published_language_atoms.remove(atom_id);
             m_published_custom_property_names.remove(atom_id);
-            m_attribute_value_text_readers.remove(atom_id);
+            m_attribute_names.remove(atom_id);
             if (reclaimed.raw == 0)
                 continue;
             auto atom = m_atoms.take(reclaimed.raw);

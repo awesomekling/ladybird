@@ -174,12 +174,6 @@ impl StyleEngine {
     }
 }
 
-/// A selector reads the value text of an attribute name, as
-/// [`RetainedState::attribute_value_text_readers`] answers.
-pub const ATTRIBUTE_VALUE_TEXT_READ_BY_SELECTORS: u32 = 1;
-/// An `attr()` can read the value text of an attribute name.
-pub const ATTRIBUTE_VALUE_TEXT_READ_BY_ATTR: u32 = 2;
-
 impl RetainedState {
     pub(crate) fn element_tree_counting_inputs(&self, node: StyleNodeID) -> u64 {
         if !self.tree().is_live(node) {
@@ -599,13 +593,6 @@ impl RetainedState {
             }
         }
         let compiled = compiler.finish();
-        let mut requirements_changed = false;
-        for name in compiled.attribute_value_text_names() {
-            requirements_changed |= self.attribute_value_text_names.insert(name);
-        }
-        if requirements_changed {
-            self.attribute_value_text_requirements_version += 1;
-        }
         if let Some(reusable) = reusable
             && self.programs.get(reusable) == &compiled
         {
@@ -615,41 +602,6 @@ impl RetainedState {
         self.selector_programs_need_sweep |= reusable.is_some();
         self.programs.settle_memory(&mut self.memory);
         program
-    }
-
-    /// Moves whenever a name comes to require its value text: a selector's here, or an `attr()`'s
-    /// anywhere in the process.
-    pub fn attribute_value_text_requirements_version(&self) -> u64 {
-        self.attribute_value_text_requirements_version
-            .wrapping_add(crate::css::parser::arbitrary_substitution::attr_names_read_generation())
-    }
-
-    /// Which readers of an attribute name's value text there are, as `ATTRIBUTE_VALUE_TEXT_READ_BY_*`
-    /// bits: a selector whose operator an atom cannot answer, and an `attr()`. The host records the
-    /// text of a value under this name only if there is one.
-    #[must_use]
-    pub fn attribute_value_text_readers(&self, name: StyleAtomID) -> u32 {
-        let mut readers = 0;
-        if self
-            .facts
-            .attribute_name_keys(name)
-            .any(|key| self.attribute_value_text_names.contains(&key))
-        {
-            readers |= ATTRIBUTE_VALUE_TEXT_READ_BY_SELECTORS;
-        }
-        if self.attr_may_read_attribute(name) {
-            readers |= ATTRIBUTE_VALUE_TEXT_READ_BY_ATTR;
-        }
-        readers
-    }
-
-    /// Substitution reads only attributes in no namespace, by local name.
-    fn attr_may_read_attribute(&self, name: StyleAtomID) -> bool {
-        self.facts.attribute_name_has_no_namespace(name)
-            && self
-                .facts
-                .attribute_name_text(name)
-                .is_some_and(crate::css::parser::arbitrary_substitution::attr_may_read_name)
     }
 
     #[must_use]
@@ -2072,8 +2024,6 @@ impl StyleEngineState {
                 transaction_fact_view: None,
                 facts: ElementFactStore::new(),
                 programs,
-                attribute_value_text_names: HashSet::default(),
-                attribute_value_text_requirements_version: 0,
                 selector_programs_need_sweep: false,
                 routing: Arc::new(RoutingRegistry::new()),
                 selector_truth_changes: SelectorTruthChanges::default(),
