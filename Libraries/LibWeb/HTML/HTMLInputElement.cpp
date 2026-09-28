@@ -53,7 +53,6 @@
 #include <LibWeb/HTML/SharedResourceRequest.h>
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/HighResolutionTime/TimeOrigin.h>
-#include <LibWeb/Layout/Box.h>
 #include <LibWeb/MimeSniff/Resource.h>
 #include <LibWeb/Namespace.h>
 #include <LibWeb/Page/Page.h>
@@ -2577,8 +2576,8 @@ WebIDL::UnsignedLong HTMLInputElement::height() const
         return 0;
 
     // Return the rendered height of the image, in CSS pixels, if the image is being rendered.
-    if (auto const* layout_node = this->layout_node(); layout_node && Painting::has_committed_box(*layout_node))
-        return Painting::content_height(*layout_node).to_int();
+    if (auto box = Painting::BoxSlot::bound_to(*this); Painting::has_committed_box(box))
+        return Painting::content_height(box).to_int();
 
     // On setting [the width or height IDL attribute], they must act as if they reflected the respective content attributes of the same name.
     if (auto height_string = get_attribute(HTML::AttributeNames::height); height_string.has_value()) {
@@ -2612,8 +2611,8 @@ WebIDL::UnsignedLong HTMLInputElement::width() const
         return 0;
 
     // Return the rendered width of the image, in CSS pixels, if the image is being rendered.
-    if (auto const* layout_node = this->layout_node(); layout_node && Painting::has_committed_box(*layout_node))
-        return Painting::content_width(*layout_node).to_int();
+    if (auto box = Painting::BoxSlot::bound_to(*this); Painting::has_committed_box(box))
+        return Painting::content_width(box).to_int();
 
     // On setting [the width or height IDL attribute], they must act as if they reflected the respective content attributes of the same name.
     if (auto width_string = get_attribute(HTML::AttributeNames::width); width_string.has_value()) {

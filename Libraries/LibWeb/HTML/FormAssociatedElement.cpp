@@ -37,7 +37,6 @@
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/ValidityState.h>
 #include <LibWeb/Infra/SerializedURL.h>
-#include <LibWeb/Layout/TextNode.h>
 #include <LibWeb/Page/EventHandler.h>
 #include <LibWeb/UIEvents/InputTypes.h>
 #include <LibWeb/VisualLines.h>
@@ -1405,16 +1404,13 @@ void FormAssociatedTextControlElement::selection_was_changed(SelectionSource sou
     }
 
     auto text_node = form_associated_element_to_text_node();
-    if (!text_node)
-        return;
     // NB: Called during selection change handling, layout may be stale.
-    auto* layout_text_node = as_if<Layout::TextNode>(text_node->unsafe_layout_node());
-    if (!layout_text_node)
+    if (!text_node || !text_node->has_layout_box())
         return;
 
     if (m_selection_start == m_selection_end)
         text_node->document().reset_cursor_blink_cycle();
-    layout_text_node->set_needs_repaint(InvalidateDisplayList::PaintCommands);
+    text_node->set_needs_repaint(InvalidateDisplayList::PaintCommands);
 
     // AD-HOC: Only scroll the cursor into view for UI-driven selection changes (like keyboard input). Programmatic
     //         changes (input.value, setSelectionRange) do not cause the cursor to scroll into view. This matches the

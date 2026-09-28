@@ -80,8 +80,7 @@
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/HTML/WindowProxy.h>
 #include <LibWeb/HTML/XMLSerializer.h>
-#include <LibWeb/Layout/Node.h>
-#include <LibWeb/Layout/Viewport.h>
+#include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Loader/GeneratedPagesLoader.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/BoxViews.h>
@@ -4731,13 +4730,13 @@ CSSPixelPoint LocalNavigable::to_page_position(CSSPixelPoint a_position)
             break;
         if (!ancestor->container())
             return {};
-        auto const* layout_node = ancestor->container()->layout_node();
-        if (!layout_node || !Painting::has_committed_box(*layout_node))
+        auto container_box = Painting::BoxSlot::bound_to(*ancestor->container());
+        if (!Painting::has_committed_box(container_box))
             return {};
 
-        auto point = Painting::absolute_position(*layout_node);
+        auto point = Painting::absolute_position(container_box);
         point.translate_by(position);
-        position = Painting::transform_rect_to_viewport(*layout_node, { point, { 0, 0 } }).location();
+        position = Painting::transform_rect_to_viewport(container_box, { point, { 0, 0 } }).location();
 
         auto parent = ancestor->parent();
         ancestor = parent ? &as<LocalNavigable>(*parent) : nullptr;
@@ -4783,13 +4782,13 @@ void LocalNavigable::clamp_viewport_scroll_offset()
     auto document = active_document();
     if (!document || !document->layout_is_up_to_date())
         return;
-    auto* layout_node = document->layout_node();
-    if (!layout_node)
+    auto viewport_box = Painting::BoxSlot::viewport_of(*document);
+    if (!viewport_box)
         return;
-    if (!Painting::scrollable_overflow_rect(*layout_node).has_value())
+    if (!Painting::scrollable_overflow_rect(viewport_box).has_value())
         return;
-    auto minimum_scroll_offset = Painting::minimum_scroll_offset(*layout_node);
-    auto maximum_scroll_offset = Painting::maximum_scroll_offset(*layout_node);
+    auto minimum_scroll_offset = Painting::minimum_scroll_offset(viewport_box);
+    auto maximum_scroll_offset = Painting::maximum_scroll_offset(viewport_box);
     CSSPixelPoint clamped = {
         clamp(m_viewport_scroll_offset.x(), minimum_scroll_offset.x(), maximum_scroll_offset.x()),
         clamp(m_viewport_scroll_offset.y(), minimum_scroll_offset.y(), maximum_scroll_offset.y()),
@@ -5021,34 +5020,6 @@ Optional<CSSPixelPoint> LocalNavigable::scroll_offset_for(Compositing::AsyncScro
     return element->scroll_offset(pseudo_element_from_async_scroll_node_stable_id(stable_node_id));
 }
 
-static Layout::Node* layout_node_for_async_scroll_node(DOM::Document& document, Compositing::AsyncScrollNodeStableID stable_node_id)
-{
-    if (stable_node_id.kind == Compositing::AsyncScrollNodeKind::Viewport) {
-        if (stable_node_id.node_id != document.unique_id())
-            return nullptr;
-        return document.unsafe_layout_node();
-    }
-
-    auto* element = element_for_async_scroll_node_stable_id(document, stable_node_id);
-    if (!element)
-        return nullptr;
-    if (auto pseudo_element = pseudo_element_from_async_scroll_node_stable_id(stable_node_id); pseudo_element.has_value()) {
-        auto synthetic_pseudo_element = element->get_synthetic_pseudo_element(*pseudo_element);
-        if (!synthetic_pseudo_element.has_value())
-            return nullptr;
-        return synthetic_pseudo_element->layout_node();
-    }
-    return element->layout_node();
-}
-
-Layout::Node* LocalNavigable::layout_node_for_async_scroll_node_stable_id(Compositing::AsyncScrollNodeStableID stable_node_id)
-{
-    auto document = active_document();
-    if (!document)
-        return nullptr;
-    return layout_node_for_async_scroll_node(*document, stable_node_id);
-}
-
 bool LocalNavigable::set_scroll_offset_for(Compositing::AsyncScrollNodeStableID stable_node_id, CSSPixelPoint scroll_offset)
 {
     auto document = active_document();
@@ -5066,10 +5037,10 @@ bool LocalNavigable::set_scroll_offset_for(Compositing::AsyncScrollNodeStableID 
     if (!element_for_async_scroll_node_stable_id(*document, stable_node_id))
         return false;
     document->update_layout(DOM::UpdateLayoutReason::ElementScroll);
-    auto* layout_node = layout_node_for_async_scroll_node(*document, stable_node_id);
-    if (!layout_node)
+    auto scrolling_box = Painting::scrolling_box_for_async_scroll_node_stable_id(*document, stable_node_id);
+    if (!scrolling_box)
         return false;
-    return Painting::set_scroll_offset(*layout_node, scroll_offset) == Painting::ScrollHandled::Yes;
+    return Painting::set_scroll_offset(scrolling_box, scroll_offset) == Painting::ScrollHandled::Yes;
 }
 
 RefPtr<Painting::Scrollbar> LocalNavigable::scrollbar_dragged_by_compositor(Compositing::ScrollbarDraggedByCompositor const& scrollbar)
@@ -5077,26 +5048,21 @@ RefPtr<Painting::Scrollbar> LocalNavigable::scrollbar_dragged_by_compositor(Comp
     auto document = active_document();
     if (!document)
         return nullptr;
-    auto* scrolling_box = layout_node_for_async_scroll_node(*document, scrollbar.scroller_stable_node_id);
-    if (!scrolling_box || !Painting::has_committed_box(*scrolling_box))
+    auto scrolling_box = Painting::scrolling_box_for_async_scroll_node_stable_id(*document, scrollbar.scroller_stable_node_id);
+    if (!Painting::has_committed_box(scrolling_box))
         return nullptr;
     auto direction = scrollbar.vertical ? Painting::ScrollDirection::Vertical : Painting::ScrollDirection::Horizontal;
-    return document->chrome_widget_registry().get_or_create_scrollbar(*document, Painting::committed_row_slot(*scrolling_box), direction);
+    return document->chrome_widget_registry().get_or_create_scrollbar(*document, scrolling_box.slot(), direction);
 }
 
 // NB: A scroll the compositor reports can arrive while layout is out of date, so this reads the committed layout.
-static Layout::Node* committed_scrolling_box_for_async_scroll_node(DOM::Document& document, Compositing::AsyncScrollNodeStableID stable_node_id)
+static Painting::BoxSlot committed_scrolling_box_for_async_scroll_node(DOM::Document& document, Compositing::AsyncScrollNodeStableID stable_node_id)
 {
-    Layout::Node* scrolling_box = nullptr;
-    if (stable_node_id.kind == Compositing::AsyncScrollNodeKind::Viewport) {
-        if (stable_node_id.node_id == document.unique_id())
-            scrolling_box = document.unsafe_layout_node();
-    } else if (stable_node_id.kind == Compositing::AsyncScrollNodeKind::Element) {
-        if (auto* element = element_for_async_scroll_node_stable_id(document, stable_node_id))
-            scrolling_box = element->unsafe_layout_node();
-    }
-    if (!scrolling_box || !Painting::has_committed_box(*scrolling_box))
-        return nullptr;
+    if (stable_node_id.kind == Compositing::AsyncScrollNodeKind::PseudoElement)
+        return {};
+    auto scrolling_box = Painting::scrolling_box_for_async_scroll_node_stable_id(document, stable_node_id);
+    if (!Painting::has_committed_box(scrolling_box))
+        return {};
     return scrolling_box;
 }
 
@@ -5107,8 +5073,8 @@ static void record_relative_scroll(DOM::Document& document, Compositing::AsyncSc
 {
     if (delta.is_zero())
         return;
-    if (auto* scrolling_box = committed_scrolling_box_for_async_scroll_node(document, stable_node_id))
-        document.scroll_state_query_containers().did_scroll_relatively(*scrolling_box, delta);
+    if (auto scrolling_box = committed_scrolling_box_for_async_scroll_node(document, stable_node_id))
+        document.scroll_state_query_containers().did_scroll_relatively(scrolling_box, delta);
 }
 
 static void record_relative_scroll(DOM::Document& document, Compositing::AsyncScrollNodeStableID stable_node_id, Optional<CSSPixelPoint> old_offset, Optional<CSSPixelPoint> new_offset)
@@ -5319,8 +5285,7 @@ void LocalNavigable::re_snap_scroll_containers_after_layout_change()
     if (!document->layout_is_up_to_date() || document->is_running_update_layout())
         return;
 
-    auto const* viewport_layout_node = document->layout_node();
-    if (!viewport_layout_node || !Painting::has_committed_box(*viewport_layout_node))
+    if (!Painting::has_committed_box(Painting::BoxSlot::viewport_of(*document)))
         return;
 
     if (m_user_scroll_gesture_hold_count > 0)
@@ -5333,10 +5298,10 @@ void LocalNavigable::re_snap_scroll_containers_after_layout_change()
 
     bool any_snap_container_deferred = false;
     for (auto snap_container_slot : snap_containers) {
-        auto const* snap_container = document->layout_node_arena().node_if_live(snap_container_slot);
+        auto snap_container = Painting::BoxSlot::of(*document, snap_container_slot);
         if (!snap_container)
             continue;
-        auto stable_node_id = Painting::async_scroll_node_stable_id(*snap_container);
+        auto stable_node_id = Painting::async_scroll_node_stable_id(snap_container);
         if (!stable_node_id.has_value())
             continue;
 
@@ -5359,7 +5324,7 @@ void LocalNavigable::re_snap_scroll_containers_after_layout_change()
             .focused_node = document->focused_area(),
             .targeted_element = document->target_element(),
         };
-        auto snap_destination = Painting::select_resnap_destination(*snap_container, *current_scroll_offset, resnap_selection);
+        auto snap_destination = Painting::select_resnap_destination(snap_container, *current_scroll_offset, resnap_selection);
 
         // Scrolling behavior for re-snapping to the same box as before however, is UA-defined. The UA may, for
         // example, when snapped to the start of a section, choose not to animate the scroll to the section's new
@@ -5541,7 +5506,7 @@ void LocalNavigable::user_scroll_did_settle(UserScrollSettlement settlement)
         }
 
         if (snaps_at_this_settlement && can_snap) {
-            auto const* snap_container = layout_node_for_async_scroll_node(*document, *stable_node_id);
+            auto snap_container = Painting::scrolling_box_for_async_scroll_node_stable_id(*document, *stable_node_id);
             auto current_scroll_offset = scroll_offset_for(*stable_node_id);
             if (snap_container && current_scroll_offset.has_value()) {
                 Compositing::SnapSelectionStrategy strategy;
@@ -5553,7 +5518,7 @@ void LocalNavigable::user_scroll_did_settle(UserScrollSettlement settlement)
                             strategy.start_offset = *entry.scroll_offset_at_gesture_start;
                     }
                 }
-                auto snap_destination = Painting::adjust_scroll_destination_for_snapping(*snap_container, *current_scroll_offset, strategy);
+                auto snap_destination = Painting::adjust_scroll_destination_for_snapping(snap_container, *current_scroll_offset, strategy);
                 record_snapped_areas_of_scroll_container(*document, *stable_node_id, snap_destination);
                 if (snap_destination.position != *current_scroll_offset) {
                     // The snap animation queues this target's scrollend event once it completes.
@@ -6647,13 +6612,14 @@ bool LocalNavigable::active_document_opts_out_of_force_dark() const
     if (!document)
         return false;
 
-    if (auto* html_element = document->html_element(); html_element && html_element->layout_node()) {
-        auto const& layout_node = *html_element->layout_node();
-        if (layout_node.color_scheme_only())
-            return true;
-        auto schemes = layout_node.color_schemes();
-        if (!schemes.is_empty())
-            return lists_a_dark_scheme(schemes);
+    if (auto* html_element = document->html_element()) {
+        if (auto const* ui_values = Painting::BoxSlot::bound_to(*html_element).style_group<CSS::ComputedValues::InheritedUIValues>()) {
+            if (ui_values->color_scheme_only)
+                return true;
+            auto schemes = ui_values->color_schemes_span();
+            if (!schemes.is_empty())
+                return lists_a_dark_scheme(schemes);
+        }
     }
 
     if (document->supported_color_schemes_are_only())
@@ -7240,7 +7206,7 @@ bool LocalNavigable::seal_flight_paint_now(DOM::Document& document, bool may_pre
                     .present_viewport_rect = page().css_to_device_rect(viewport_rect()).to_type<int>(),
                 },
                 document_paint_state.display_list_used_as_paint_command_cache_source()));
-            auto* arena = document.layout_node_arena().handle();
+            auto* arena = Layout::document_layout_arena(document);
             presentation->presenter = presenter();
             presentation->render_state_generation = Layout::RustFFI::layout_arena_render_state_generation(arena);
             presentation->frame_sink = move(frame_sink);
@@ -7340,7 +7306,7 @@ LocalNavigable::FinishedFlightPaint LocalNavigable::finish_flight_paint(DOM::Doc
     //     in flight owned the arena until now.
     auto recording = make<Painting::PendingDisplayListRecording>(Painting::PendingDisplayListRecording {
         .document = document,
-        .arena = document.layout_node_arena().handle(),
+        .arena = Layout::document_layout_arena(document),
         .resource_storage = presenter().resource_storage(),
         .visual_context_tree = document.paint_state().visual_context_tree_without_update(document),
         .cache_mode = Painting::PaintCommandCacheMode::ReadWrite,
@@ -7516,19 +7482,19 @@ GC::Ref<WebIDL::Promise> LocalNavigable::perform_a_scroll_of_a_scrolling_box(Com
     if (trigger == ScrollTrigger::Programmatic && destination_snapping == DestinationSnapping::SelectSnapPosition) {
         abandon_snapping_of_user_scroll_gesture(stable_node_id);
         document->update_layout(DOM::UpdateLayoutReason::ElementScroll);
-        if (auto const* snap_container = layout_node_for_async_scroll_node(*document, stable_node_id)) {
+        if (auto snap_container = Painting::scrolling_box_for_async_scroll_node_stable_id(*document, stable_node_id)) {
             Compositing::SnapSelectionStrategy strategy;
             if (relative_displacement.has_value() && !relative_displacement->is_zero())
                 strategy = { Compositing::SnapSelectionStrategy::Type::EndPositionAndDirection, *initial_scroll_offset, *relative_displacement };
-            auto snap_destination = Painting::adjust_scroll_destination_for_snapping(*snap_container, position, strategy);
+            auto snap_destination = Painting::adjust_scroll_destination_for_snapping(snap_container, position, strategy);
             position = snap_destination.position;
             record_snapped_areas_of_scroll_container(*document, stable_node_id, snap_destination);
         }
     }
 
     if (scroll_kind == Painting::ScrollKind::Relative || relative_displacement.has_value()) {
-        if (auto* scrolling_box = committed_scrolling_box_for_async_scroll_node(*document, stable_node_id))
-            record_relative_scroll(*document, stable_node_id, initial_scroll_offset, Painting::clamp_scroll_offset(*scrolling_box, position));
+        if (auto scrolling_box = committed_scrolling_box_for_async_scroll_node(*document, stable_node_id))
+            record_relative_scroll(*document, stable_node_id, initial_scroll_offset, Painting::clamp_scroll_offset(scrolling_box, position));
     }
 
     auto should_scroll_smoothly = behavior == Bindings::ScrollBehavior::Smooth;
@@ -7847,8 +7813,9 @@ GC::Ref<WebIDL::Promise> LocalNavigable::perform_a_scroll_of_the_viewport(CSSPix
     // NB: Must update layout before accessing paintables.
     doc->update_layout(DOM::UpdateLayoutReason::NavigableViewportScroll);
 
-    auto minimum_scroll_offset = Painting::minimum_scroll_offset(*doc->layout_node()).to_type<double>();
-    auto maximum_scroll_offset = Painting::maximum_scroll_offset(*doc->layout_node()).to_type<double>();
+    auto viewport_box = Painting::BoxSlot::viewport_of(*doc);
+    auto minimum_scroll_offset = Painting::minimum_scroll_offset(viewport_box).to_type<double>();
+    auto maximum_scroll_offset = Painting::maximum_scroll_offset(viewport_box).to_type<double>();
     auto new_viewport_scroll_offset = m_viewport_scroll_offset.to_type<double>() + Gfx::Point(layout_dx, layout_dy);
     // NOTE: Clamp to the scrolling area.
     new_viewport_scroll_offset.set_x(clamp(new_viewport_scroll_offset.x(), minimum_scroll_offset.x(), maximum_scroll_offset.x()));

@@ -3644,14 +3644,7 @@ bool Element::is_scroll_container() const
 // took what the root and the body propagate to it, which the box's own style has and the element's does not.
 static bool box_is_scroll_container(Element const& element)
 {
-    auto box = Painting::BoxSlot::bound_to(element);
-    if (box.is_viewport())
-        return true;
-    auto const* box_values = box.style_group<CSS::ComputedValues::BoxValues>();
-    if (!box_values)
-        return false;
-    return Layout::overflow_value_makes_box_a_scroll_container(static_cast<CSS::Overflow>(box_values->overflow_x))
-        || Layout::overflow_value_makes_box_a_scroll_container(static_cast<CSS::Overflow>(box_values->overflow_y));
+    return Painting::BoxSlot::bound_to(element).is_scroll_container();
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-element-scrolltop

@@ -40,7 +40,6 @@
 #include <LibWeb/HighResolutionTime/TimeOrigin.h>
 #include <LibWeb/IndexedDB/Internal/Algorithms.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/Painting/DocumentPaintState.h>

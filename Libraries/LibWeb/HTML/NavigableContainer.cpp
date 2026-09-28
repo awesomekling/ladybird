@@ -29,7 +29,6 @@
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/HTML/WindowProxy.h>
 #include <LibWeb/HighResolutionTime/TimeOrigin.h>
-#include <LibWeb/Layout/Box.h>
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/BoxViews.h>
@@ -500,25 +499,26 @@ bool NavigableContainer::currently_delays_the_load_event() const
     return m_content_navigable->delays_the_load_event_of_its_container();
 }
 
-// Clips rect to the document's viewport and to every overflow-clipping containing block above layout_node.
-static CSSPixelRect visible_part_in_document_viewport(Layout::Node const& layout_node, CSSPixelRect rect)
+// Clips rect to the document's viewport and to every overflow-clipping containing block above box.
+static CSSPixelRect visible_part_in_document_viewport(Painting::BoxSlot const& box, CSSPixelRect rect)
 {
-    auto visible = rect.intersected(CSSPixelRect { {}, layout_node.document().viewport_rect().size() });
-    for (auto const* ancestor = layout_node.containing_block(); ancestor && Painting::has_committed_box(*ancestor); ancestor = ancestor->containing_block()) {
-        if (ancestor->overflow_x() == CSS::Overflow::Visible && ancestor->overflow_y() == CSS::Overflow::Visible)
+    auto visible = rect.intersected(CSSPixelRect { {}, box.document().viewport_rect().size() });
+    for (auto ancestor = box.containing_block(); Painting::has_committed_box(ancestor); ancestor = ancestor.containing_block()) {
+        auto const& box_values = *ancestor.style_group<CSS::ComputedValues::BoxValues>();
+        if (static_cast<CSS::Overflow>(box_values.overflow_x) == CSS::Overflow::Visible && static_cast<CSS::Overflow>(box_values.overflow_y) == CSS::Overflow::Visible)
             continue;
-        visible.intersect(Painting::transform_rect_to_viewport(*ancestor, Painting::absolute_padding_box_rect(*ancestor)));
+        visible.intersect(Painting::transform_rect_to_viewport(ancestor, Painting::absolute_padding_box_rect(ancestor)));
     }
     return visible;
 }
 
 // The bounding box, in the coordinates of the content box's document, of a rect in that document's viewport.
-static CSSPixelRect transform_rect_to_local(Layout::Node const& layout_node, CSSPixelRect const& rect)
+static CSSPixelRect transform_rect_to_local(Painting::BoxSlot const& box, CSSPixelRect const& rect)
 {
-    auto top_left = Painting::transform_to_local_coordinates(layout_node, rect.top_left());
+    auto top_left = Painting::transform_to_local_coordinates(box, rect.top_left());
     auto bottom_right = top_left;
     for (auto corner : { rect.top_right(), rect.bottom_left(), rect.bottom_right() }) {
-        auto local = Painting::transform_to_local_coordinates(layout_node, corner);
+        auto local = Painting::transform_to_local_coordinates(box, corner);
         top_left = { min(top_left.x(), local.x()), min(top_left.y(), local.y()) };
         bottom_right = { max(bottom_right.x(), local.x()), max(bottom_right.y(), local.y()) };
     }
@@ -534,33 +534,33 @@ void NavigableContainer::report_content_navigable_viewport_rect()
     // document before it records.
     if (!document().layout_is_up_to_date())
         return;
-    auto const* layout_node = this->layout_node();
-    if (!layout_node || !Painting::is_navigable_container_viewport_paintable(*layout_node))
+    auto box = Painting::BoxSlot::bound_to(*this);
+    if (!Painting::is_navigable_container_viewport_paintable(box))
         return;
 
     // The content navigable's viewport is the container's content box, which keeps its size under the transforms
     // above the container. Those place its origin in the viewport of the local root through the viewports of the
     // documents between them, each of which shows only part of it.
-    auto content_box = Painting::absolute_rect(*layout_node);
-    auto origin = Painting::transform_rect_to_viewport(*layout_node, { content_box.location(), {} }).location();
-    auto visible = visible_part_in_document_viewport(*layout_node, Painting::transform_rect_to_viewport(*layout_node, content_box));
-    Vector<Layout::Node const*> containers { layout_node };
+    auto content_box = Painting::absolute_rect(box);
+    auto origin = Painting::transform_rect_to_viewport(box, { content_box.location(), {} }).location();
+    auto visible = visible_part_in_document_viewport(box, Painting::transform_rect_to_viewport(box, content_box));
+    Vector<Painting::BoxSlot> containers { box };
     auto navigable = document().navigable();
     for (; navigable && !navigable->is_local_root();) {
         auto container = navigable->container();
         if (container && !container->document().layout_is_up_to_date())
             return;
-        auto const* container_layout_node = container ? container->layout_node() : nullptr;
-        if (!container_layout_node || !Painting::is_navigable_container_viewport_paintable(*container_layout_node))
+        auto container_box = container ? Painting::BoxSlot::bound_to(*container) : Painting::BoxSlot {};
+        if (!Painting::is_navigable_container_viewport_paintable(container_box))
             return;
         // The content box's origin is the origin of the child's viewport, and the transforms above the container
         // apply to the child as they do to the container.
-        auto container_position = Painting::absolute_position(*container_layout_node);
-        origin = Painting::transform_rect_to_viewport(*container_layout_node, { origin.translated(container_position), {} }).location();
-        visible = Painting::transform_rect_to_viewport(*container_layout_node, visible.translated(container_position));
-        auto container_rect = Painting::transform_rect_to_viewport(*container_layout_node, Painting::absolute_rect(*container_layout_node));
-        visible.intersect(visible_part_in_document_viewport(*container_layout_node, container_rect));
-        containers.append(container_layout_node);
+        auto container_position = Painting::absolute_position(container_box);
+        origin = Painting::transform_rect_to_viewport(container_box, { origin.translated(container_position), {} }).location();
+        visible = Painting::transform_rect_to_viewport(container_box, visible.translated(container_position));
+        auto container_rect = Painting::transform_rect_to_viewport(container_box, Painting::absolute_rect(container_box));
+        visible.intersect(visible_part_in_document_viewport(container_box, container_rect));
+        containers.append(container_box);
         navigable = container->document().navigable();
     }
     if (!navigable)
@@ -571,8 +571,8 @@ void NavigableContainer::report_content_navigable_viewport_rect()
         visible.intersect(*intersection);
 
     // The visible part is the content's to intersect with, so it goes back through the transforms into the content box.
-    for (auto const* container_layout_node : containers.in_reverse())
-        visible = transform_rect_to_local(*container_layout_node, visible).translated(-Painting::absolute_position(*container_layout_node));
+    for (auto const& container_box : containers.in_reverse())
+        visible = transform_rect_to_local(container_box, visible).translated(-Painting::absolute_position(container_box));
     visible.intersect({ {}, content_box.size() });
 
     // The report is in the device pixels the content is laid out in, so a change of zoom level reports again.

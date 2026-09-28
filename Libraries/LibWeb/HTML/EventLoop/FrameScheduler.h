@@ -210,7 +210,7 @@ public:
     // Runs `change` on the arena of `document`, if it has one: now, or once the frame in flight has been taken in, if
     // changes to that arena wait for it. A deferred change keeps only the document alive, so `change` holds no GC
     // pointer of its own.
-    static void change_arena(DOM::Document&, Function<void(Layout::NodeArena&)>);
+    static void change_arena(DOM::Document&, Function<void(void* arena)>);
 
     EventLoop& event_loop() { return m_event_loop; }
 

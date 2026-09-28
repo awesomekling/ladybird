@@ -432,6 +432,20 @@ static Optional<Layout::RustFFI::FfiCaretRectResult> caret_at_atomic_child(BoxSl
     return resolve(offset);
 }
 
+Utf16String rendered_text(BoxSlot const& text_box, bool collapse_whitespace)
+{
+    if (!text_box.is_text())
+        return {};
+    // The rendered text is refreshed from the data the mirror holds, so data the journal still holds goes through first.
+    text_box.document().drain_invalidation_journal();
+    Utf16String text;
+    Layout::RustFFI::layout_arena_collect_rendered_text(text_box.arena(), text_box.slot(), collapse_whitespace, &text,
+        [](void* context, Layout::RustFFI::FfiRenderedTextView view) {
+            *static_cast<Utf16String*>(context) = Utf16String::from_utf16({ reinterpret_cast<char16_t const*>(view.text), view.length_in_code_units });
+        });
+    return text;
+}
+
 // Caret rect for a cursor parked on this paintable's DOM node at the given child offset, e.g. on an empty line
 // rendered by a <br> child or in an empty editable element.
 CSSPixelRect caret_rect_for_child_offset(BoxSlot const& block, size_t offset)

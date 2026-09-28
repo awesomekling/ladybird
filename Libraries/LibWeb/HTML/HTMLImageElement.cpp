@@ -46,7 +46,6 @@
 #include <LibWeb/HTML/SharedResourceRequest.h>
 #include <LibWeb/HTML/SupportedImageTypes.h>
 #include <LibWeb/HTML/Window.h>
-#include <LibWeb/Layout/Box.h>
 #include <LibWeb/Loader/ResourceLoader.h>
 #include <LibWeb/Namespace.h>
 #include <LibWeb/Painting/BoxViews.h>
@@ -96,7 +95,7 @@ static BatchingDispatcher& batching_dispatcher()
     return *dispatcher;
 }
 
-static bool image_element_dimensions_may_depend_on_intrinsic_size(Layout::Box const& image_box)
+static bool image_element_dimensions_may_depend_on_intrinsic_size(Painting::BoxSlot const& image_box)
 {
     auto size_is_definite = [](CSS::Size const& size) {
         return size.is_length() || (size.is_calculated() && !size.contains_percentage());
@@ -105,19 +104,12 @@ static bool image_element_dimensions_may_depend_on_intrinsic_size(Layout::Box co
         return size.is_none() || size_is_definite(size);
     };
 
-    auto const& width = image_box.width();
-    auto const& height = image_box.height();
-    if (!size_is_definite(width) || !size_is_definite(height))
+    auto const& sizing = *image_box.style_group<CSS::ComputedValues::SizingValues>();
+    if (!size_is_definite(CSS::Size::view(sizing.width)) || !size_is_definite(CSS::Size::view(sizing.height)))
         return true;
-
-    auto const& min_width = image_box.min_width();
-    auto const& min_height = image_box.min_height();
-    if (!size_is_definite(min_width) || !size_is_definite(min_height))
+    if (!size_is_definite(CSS::Size::view(sizing.min_width)) || !size_is_definite(CSS::Size::view(sizing.min_height)))
         return true;
-
-    auto const& max_width = image_box.max_width();
-    auto const& max_height = image_box.max_height();
-    if (!size_constraint_is_definite_or_none(max_width) || !size_constraint_is_definite_or_none(max_height))
+    if (!size_constraint_is_definite_or_none(CSS::Size::view(sizing.max_width)) || !size_constraint_is_definite_or_none(CSS::Size::view(sizing.max_height)))
         return true;
 
     return false;
@@ -140,25 +132,25 @@ void HTMLImageElement::set_needs_layout_update_or_repaint_after_image_data_chang
 
 void HTMLImageElement::update_layout_after_image_data_change(DOM::SetNeedsLayoutReason reason)
 {
-    auto layout_node = unsafe_layout_node();
-    auto* image_box = layout_node && layout_node->kind() == Layout::RustFFI::NodeKind::ImageBox ? static_cast<Layout::Box*>(layout_node) : nullptr;
+    auto box = Painting::BoxSlot::bound_to(*this);
+    bool const is_image_box = box.kind() == Layout::RustFFI::NodeKind::ImageBox;
 
-    // The request state change may have flipped which kind of layout node create_layout_node()
-    // produces (ImageBox vs. non-replaced alt text container); if the existing node no longer
-    // matches, it has to be rebuilt, not just laid out again. (An img whose box comes from
-    // `content: url(...)` reads as a mismatch here and takes a wasted rebuild — harmless.)
-    if (layout_node && (image_box != nullptr) == (renders_as_alt_text() && !alt().is_empty())) {
+    // The request state change may have flipped which kind of box the layout tree build makes
+    // (ImageBox vs. non-replaced alt text container); if the existing box no longer matches, it
+    // has to be rebuilt, not just laid out again. (An img whose box comes from `content: url(...)`
+    // reads as a mismatch here and takes a wasted rebuild — harmless.)
+    if (box && is_image_box == (renders_as_alt_text() && !alt().is_empty())) {
         set_needs_layout_tree_update(true, DOM::SetNeedsLayoutTreeUpdateReason::HTMLImageElementUpdateTheImageData);
         return;
     }
 
-    if (!image_box || image_element_dimensions_may_depend_on_intrinsic_size(*image_box)) {
+    if (!is_image_box || image_element_dimensions_may_depend_on_intrinsic_size(box)) {
         image_provider_contents_changed();
         set_needs_layout_update(reason);
         return;
     }
 
-    document().render_inputs_for_write().reset_intrinsic_size_caches_of_self_and_ancestors(Layout::Node::slot_id(image_box));
+    document().render_inputs_for_write().reset_intrinsic_size_caches_of_self_and_ancestors(box.slot());
     image_provider_contents_changed();
 }
 
@@ -381,8 +373,8 @@ WebIDL::UnsignedLong HTMLImageElement::width() const
     const_cast<DOM::Document&>(document()).update_layout_if_needed_for_node(*this, DOM::UpdateLayoutReason::HTMLImageElementWidth);
 
     // Return the rendered width of the image, in CSS pixels, if the image is being rendered.
-    if (auto const* layout_node = this->layout_node(); layout_node && Painting::has_committed_box(*layout_node))
-        return Painting::content_width(*layout_node).to_int();
+    if (auto box = Painting::BoxSlot::bound_to(*this); Painting::has_committed_box(box))
+        return Painting::content_width(box).to_int();
 
     // On setting [the width or height IDL attribute], they must act as if they reflected the respective content attributes of the same name.
     if (auto width_attr = get_attribute(HTML::AttributeNames::width); width_attr.has_value()) {
@@ -412,8 +404,8 @@ WebIDL::UnsignedLong HTMLImageElement::height() const
     const_cast<DOM::Document&>(document()).update_layout_if_needed_for_node(*this, DOM::UpdateLayoutReason::HTMLImageElementHeight);
 
     // Return the rendered height of the image, in CSS pixels, if the image is being rendered.
-    if (auto const* layout_node = this->layout_node(); layout_node && Painting::has_committed_box(*layout_node))
-        return Painting::content_height(*layout_node).to_int();
+    if (auto box = Painting::BoxSlot::bound_to(*this); Painting::has_committed_box(box))
+        return Painting::content_height(box).to_int();
 
     // On setting [the width or height IDL attribute], they must act as if they reflected the respective content attributes of the same name.
     if (auto height_attr = get_attribute(HTML::AttributeNames::height); height_attr.has_value()) {
@@ -487,15 +479,15 @@ int HTMLImageElement::x() const
     // to the element and its ancestors, or zero if there is no box.
     const_cast<DOM::Document&>(document()).update_layout_if_needed_for_node(*this, DOM::UpdateLayoutReason::HTMLImageElementX);
 
-    auto const* layout_node = this->layout_node();
-    if (!layout_node || !Painting::has_committed_box(*layout_node))
+    auto box = Painting::BoxSlot::bound_to(*this);
+    if (!Painting::has_committed_box(box))
         return 0;
 
     // Scroll frames are created together with the visual context tree at the lazy resolution point,
     // so resolve it before reading the enclosing scroll node below.
     const_cast<DOM::Document&>(document()).update_paint_and_hit_testing_properties_if_needed();
 
-    return (Painting::absolute_border_box_rect(*layout_node).x() - Painting::cumulative_scroll_compensation(*layout_node).x()).to_int();
+    return (Painting::absolute_border_box_rect(box).x() - Painting::cumulative_scroll_compensation(box).x()).to_int();
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-htmlimageelement-y
@@ -506,15 +498,15 @@ int HTMLImageElement::y() const
     // to the element and its ancestors, or zero if there is no box.
     const_cast<DOM::Document&>(document()).update_layout_if_needed_for_node(*this, DOM::UpdateLayoutReason::HTMLImageElementY);
 
-    auto const* layout_node = this->layout_node();
-    if (!layout_node || !Painting::has_committed_box(*layout_node))
+    auto box = Painting::BoxSlot::bound_to(*this);
+    if (!Painting::has_committed_box(box))
         return 0;
 
     // Scroll frames are created together with the visual context tree at the lazy resolution point,
     // so resolve it before reading the enclosing scroll node below.
     const_cast<DOM::Document&>(document()).update_paint_and_hit_testing_properties_if_needed();
 
-    return (Painting::absolute_border_box_rect(*layout_node).y() - Painting::cumulative_scroll_compensation(*layout_node).y()).to_int();
+    return (Painting::absolute_border_box_rect(box).y() - Painting::cumulative_scroll_compensation(box).y()).to_int();
 }
 
 // https://html.spec.whatwg.org/multipage/embedded-content.html#dom-img-complete
