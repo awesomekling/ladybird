@@ -120,7 +120,8 @@ pub(super) unsafe fn send(arena: *mut c_void, change: LayoutChange) {
 /// `arena` must be a live arena handle on the document thread.
 pub(crate) unsafe fn changes_sent_not_taken_in(arena: *mut c_void) -> bool {
     assert!(!arena.is_null(), "layout node arena handle is null");
-    if crate::stage_thread::running_inside_stage() {
+    // Without a Rendering thread, a change goes to the arena as it is sent.
+    if crate::stage_thread::running_inside_stage() || !crate::stage_thread::has_owner_thread() {
         return false;
     }
     // SAFETY: Guaranteed by the caller.
