@@ -2471,28 +2471,34 @@ impl SettledAnimationPlan {
 /// has no committed box, which is the host's own condition for having no reference box.
 ///
 /// This is a read of an earlier stage's committed output rather than of the element: the box is
-/// taken from the layout arena's paintable rows by style-node identity, so the stage never follows
-/// the element's layout-node pointer into the DOM. Publishing a box per node at commit time
-/// instead would mean resolving every committed row's absolute rect on every layout, which layout
-/// does lazily today and only for the rows that are painted.
+/// taken from the paintable rows `rows` of the row the element is bound to, `row`, so the stage
+/// never follows the element's layout-node pointer into the DOM. Publishing a box per node at
+/// commit time instead would mean resolving every committed row's absolute rect on every layout,
+/// which layout does lazily today and only for the rows that are painted.
+#[must_use]
+pub(crate) fn committed_transform_reference_box(
+    rows: &impl crate::painting::published_frame::PaintRead,
+    row: Option<crate::layout::node_data::NodeSlotId>,
+) -> Option<(f64, f64)> {
+    let row = row.filter(|row| rows.paintable_row_is_populated(*row))?;
+    let style = rows.node_style_if_live(row)?;
+    let rect = crate::painting::visual_context::node_values::transform_reference_box(style, rows, row);
+    Some((rect.width.to_double(), rect.height.to_double()))
+}
+
+/// [`committed_transform_reference_box`] of `node` in the arena `arena`.
 ///
 /// # Safety
-/// `arena` must be the document's live layout arena, or null for a document that has none, which
-/// has no committed boxes.
-#[must_use]
-pub(crate) unsafe fn committed_transform_reference_box(
+/// `arena` must be the document's live layout arena, which the caller holds, or null for a
+/// document that has none, which has no committed boxes.
+unsafe fn committed_transform_reference_box_in_arena(
     arena: *mut std::ffi::c_void,
     node: StyleNodeID,
 ) -> Option<(f64, f64)> {
+    // SAFETY: Guaranteed by the caller.
     let arena = unsafe { arena.cast::<crate::layout::LayoutNodeArena>().as_ref() }?;
     let row = arena.bound_row(node);
-    if row.is_invalid() || !arena.paintable_row_is_populated(row) {
-        return None;
-    }
-    let style = arena.node_style_if_live(row)?;
-    let paintable_rows = arena.paintable_rows();
-    let rect = crate::painting::visual_context::node_values::transform_reference_box(style, &paintable_rows, row);
-    Some((rect.width.to_double(), rect.height.to_double()))
+    committed_transform_reference_box(&arena.paintable_rows(), (!row.is_invalid()).then_some(row))
 }
 
 /// Where a style pass finds the transform reference boxes the last committed layout left, which a
@@ -2537,7 +2543,7 @@ impl CommittedTransformReferenceBoxes {
     pub(crate) fn transform_reference_box(self, node: StyleNodeID) -> Result<Option<(f64, f64)>, &'static str> {
         match self.0 {
             // SAFETY: Guaranteed by `lend`'s caller.
-            Source::LentArena(arena) => Ok(unsafe { committed_transform_reference_box(arena, node) }),
+            Source::LentArena(arena) => Ok(unsafe { committed_transform_reference_box_in_arena(arena, node) }),
             // SAFETY: Guaranteed by `taken_along`'s caller.
             Source::TakenAlong(snapshot) => unsafe { &*snapshot }
                 .boxes
@@ -2562,7 +2568,7 @@ impl CommittedTransformReferenceBoxSnapshot {
     pub(crate) unsafe fn take(arena: *mut std::ffi::c_void, nodes: impl Iterator<Item = StyleNodeID>) -> Self {
         let boxes = nodes
             // SAFETY: Guaranteed by the caller.
-            .map(|node| (node, unsafe { committed_transform_reference_box(arena, node) }))
+            .map(|node| (node, unsafe { committed_transform_reference_box_in_arena(arena, node) }))
             .collect();
         Self { boxes }
     }
