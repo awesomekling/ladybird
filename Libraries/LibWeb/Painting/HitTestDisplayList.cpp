@@ -63,12 +63,18 @@ HitTestDisplayList::~HitTestDisplayList() = default;
 // A list outlives the rows it was recorded over: a scroll, a clip or a transform moves what a point hits through the
 // committed rows and the visual context tree (hit_test/snapshot.rs). So each query reads a snapshot published for it,
 // which builds what a query derives from the list the first time one is published.
-void HitTestDisplayList::publish_snapshot() const
+HitTestDisplayList::QuerySnapshotScope::QuerySnapshotScope(HitTestDisplayList const& list)
+    : m_list(list)
+    , m_outer_snapshot(move(list.m_snapshot))
 {
-    auto* arena = m_document ? Layout::document_layout_arena_if_created(*m_document) : nullptr;
-    if (!arena)
-        return;
-    m_snapshot = HitTestSnapshot::adopt(Layout::RustFFI::layout_arena_publish_hit_test_snapshot(arena));
+    auto* arena = list.m_document ? Layout::document_layout_arena_if_created(*list.m_document) : nullptr;
+    if (arena)
+        list.m_snapshot = HitTestSnapshot::adopt(Layout::RustFFI::layout_arena_publish_hit_test_snapshot(arena));
+}
+
+HitTestDisplayList::QuerySnapshotScope::~QuerySnapshotScope()
+{
+    m_list.m_snapshot = move(m_outer_snapshot);
 }
 
 bool HitTestDisplayList::is_current() const
@@ -79,7 +85,7 @@ bool HitTestDisplayList::is_current() const
 
 Optional<HitBox> HitTestDisplayList::bound_box_of(DOM::NodeIdentity identity) const
 {
-    publish_snapshot();
+    QuerySnapshotScope snapshot_scope { *this };
     if (!m_snapshot)
         return {};
     return HitBox::bound_box_in(*m_snapshot, identity);
@@ -406,7 +412,7 @@ Optional<CaretPosition> HitTestDisplayList::caret_position_at_line_edge(DOM::Nod
 {
     if (!is_current())
         return {};
-    publish_snapshot();
+    QuerySnapshotScope snapshot_scope { *this };
     CaretPositionQueryContext context { node, offset };
     auto line = Layout::RustFFI::hit_test_snapshot_caret_line_for_position(snapshot(), context.query, offset, affinity == TextAffinity::Downstream);
     if (!line.has_line)
@@ -419,7 +425,7 @@ Optional<CaretPosition> HitTestDisplayList::caret_position_on_adjacent_line(DOM:
 {
     if (!is_current())
         return {};
-    publish_snapshot();
+    QuerySnapshotScope snapshot_scope { *this };
     CaretPositionQueryContext position_context { node, offset };
     auto current_line = Layout::RustFFI::hit_test_snapshot_caret_line_for_position(snapshot(), position_context.query, offset, affinity == TextAffinity::Downstream);
     if (!current_line.has_line)
@@ -439,7 +445,7 @@ Optional<CSSPixels> HitTestDisplayList::caret_line_block_coordinate(DOM::Node co
 {
     if (!is_current())
         return {};
-    publish_snapshot();
+    QuerySnapshotScope snapshot_scope { *this };
     CaretPositionQueryContext context { node, offset };
     auto line = Layout::RustFFI::hit_test_snapshot_caret_line_for_position(snapshot(), context.query, offset, affinity == TextAffinity::Downstream);
     if (!line.has_line)
@@ -459,7 +465,7 @@ Optional<CaretPosition> HitTestDisplayList::caret_position_from_point(CSSPixelPo
 {
     if (m_visual_context_tree_structural_epoch != document.visual_context_tree_structural_epoch() || !is_current())
         return {};
-    publish_snapshot();
+    QuerySnapshotScope snapshot_scope { *this };
     // First find both the topmost hit-test item and the topmost item that can directly produce a caret.
     // Non-caret items are still needed to keep later line fallback scoped to the hit content.
     // FIXME: Caret placement compares items by record order alone, ignoring the depth-sorted paint order of
@@ -556,7 +562,7 @@ Optional<HitTestResult> HitTestDisplayList::hit_test(CSSPixelPoint point, DOM::D
 {
     if (m_visual_context_tree_structural_epoch != document.visual_context_tree_structural_epoch() || !is_current())
         return {};
-    publish_snapshot();
+    QuerySnapshotScope snapshot_scope { *this };
 
     auto topmost_item = find_topmost_item(point, document, device_pixels_per_css_pixel, chrome_metrics);
     if (!topmost_item.has_value())
@@ -568,7 +574,7 @@ TraversalDecision HitTestDisplayList::hit_test_all(CSSPixelPoint point, DOM::Doc
 {
     if (m_visual_context_tree_structural_epoch != document.visual_context_tree_structural_epoch() || !is_current())
         return TraversalDecision::Continue;
-    publish_snapshot();
+    QuerySnapshotScope snapshot_scope { *this };
 
     for (auto item_index : hit_item_indices_topmost_first(point, document, device_pixels_per_css_pixel, chrome_metrics)) {
         auto item_facts = item(item_index);
