@@ -18,14 +18,14 @@
 </style>
 <div id="row"><div id="box"></div><div id="after">after</div></div>
 <script>
-    // Under LIBWEB_RENDER_CLOCK_FRAMES, a clock lease ticks the animation until it ends, and the main thread takes
+    // A clock lease ticks the animation until it ends, and the main thread takes
     // over for its end. What the ticks installed in the layout arena leaves nothing behind the end state shows.
     // Timers only: an animation frame callback would end the lease.
     const box = document.getElementById("box");
     const ticksBefore = window.internals ? internals.clockTicksPresented() : 0;
     box.addEventListener("animationend", () => {
         // Under the variable, no tick at all fails the match.
-        if (window.internals && internals.clockFramesEnabled() && internals.clockTicksPresented() === ticksBefore)
+        if (window.internals && internals.clockTicksPresented() === ticksBefore)
             document.getElementById("after").style.backgroundColor = "red";
         setTimeout(() => document.documentElement.classList.remove("reftest-wait"), 50);
     });

@@ -34,13 +34,12 @@
         return performance.now();
     }
 
-    // Under LIBWEB_RENDER_CLOCK_FRAMES, a render clock tick whose sample the arena cannot take (text-transform flips
+    // A render clock tick whose sample the arena cannot take (text-transform flips
     // halfway and needs a layout tree build) ends the lease: no later tick samples over the record only the host's
     // adoption keeps alive. The main thread adopts the tick and takes the animation over.
     asyncTest(async done => {
         const box = document.getElementById("box");
         const animation = box.getAnimations()[0];
-        const enabled = internals.clockFramesEnabled();
         internals.setManualRenderingOpportunities(true, true);
         await nextTask();
         let frameTime = performance.now();
@@ -63,9 +62,9 @@
         const after = internals.getRenderClockCounters();
         frameTime = await frameTimeAfter(frameTime);
         const onceMore = await internals.injectClockTick(frameTime);
-        println(`ticks before and past the flip taken: ${!enabled || (beforeFlip && pastFlip)}`);
-        println(`the tick past the flip needed the main thread: ${!enabled || after.ticksNeedingMain === counters.ticksNeedingMain + 1}`);
-        println(`no tick after it: ${!enabled || !onceMore}`);
+        println(`ticks before and past the flip taken: ${beforeFlip && pastFlip}`);
+        println(`the tick past the flip needed the main thread: ${after.ticksNeedingMain === counters.ticksNeedingMain + 1}`);
+        println(`no tick after it: ${!onceMore}`);
 
         // The main thread takes the animation over.
         for (let i = 0; i < 3; ++i) {

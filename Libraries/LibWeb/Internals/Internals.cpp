@@ -1575,11 +1575,6 @@ u64 Internals::clock_ticks_presented() const
     return Layout::RustFFI::rust_clock_ticks_presented();
 }
 
-bool Internals::clock_frames_enabled() const
-{
-    return Layout::RustFFI::rust_stage_thread_submits_clock();
-}
-
 u64 Internals::clock_ticks_received() const
 {
     auto counters = Layout::RustFFI::rust_render_clock_counters();

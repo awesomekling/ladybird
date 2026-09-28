@@ -32,11 +32,10 @@
         return performance.now();
     }
 
-    // Under LIBWEB_RENDER_CLOCK_FRAMES, a display frame can reach the rendering update only after a clock tick at a later
+    // A display frame can reach the rendering update only after a clock tick at a later
     // frame time has presented and moved the document timeline, as after a long task. The animation frame callbacks of
     // that rendering update get the time the timeline shows, not the time of the older display frame.
     asyncTest(async done => {
-        const enabled = internals.clockFramesEnabled();
         internals.setManualRenderingOpportunities(true, true);
         await nextTask();
         let frameTime = performance.now();
@@ -59,9 +58,9 @@
         const [now, timelineTime] = await promise;
         internals.setManualRenderingOpportunities(false);
 
-        println(`a lease took the tick: ${!enabled || taken}`);
+        println(`a lease took the tick: ${taken}`);
         println(`animation frame time matches the timeline: ${now === timelineTime}`);
-        println(`animation frame time is not before the tick: ${!enabled || now >= tickTime - 1}`);
+        println(`animation frame time is not before the tick: ${now >= tickTime - 1}`);
         done();
     });
 </script>

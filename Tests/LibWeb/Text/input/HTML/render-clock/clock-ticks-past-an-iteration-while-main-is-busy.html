@@ -21,11 +21,10 @@
     // boundaries of its iterations: the events of a new iteration wait for the next rendering update anyway.
     asyncTest(async done => {
         const box = document.getElementById("box");
-        const enabled = internals.clockFramesEnabled();
         const presentedHeight = () => internals.presentedBorderBox(box)?.height ?? 0;
 
         // Until the page's animation has a clock (it never gets one without clock frames).
-        for (let frames = 0; enabled && frames < 600 && !internals.renderClockTicks(document); ++frames)
+        for (let frames = 0; frames < 600 && !internals.renderClockTicks(document); ++frames)
             await new Promise(resolve => requestAnimationFrame(resolve));
 
         // The task: plain JS, on until the presented height has moved twice after several iterations have ended, however
@@ -43,7 +42,7 @@
             if (now - start >= 400)
                 heights.add(presentedHeight());
         }
-        println(`the presented height moves past the first iterations: ${!enabled || heights.size >= 3}`);
+        println(`the presented height moves past the first iterations: ${heights.size >= 3}`);
         done();
     });
 </script>

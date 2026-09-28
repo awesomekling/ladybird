@@ -130,7 +130,6 @@ RENDER_STAGE_ALLOWED = {
     **render_stage_entries(
         ENVIRONMENT_SWITCH,
         [
-            "clock_frames.rs:ENABLED",
             "layout/fc_run_cache.rs:MODE",
         ],
     ),

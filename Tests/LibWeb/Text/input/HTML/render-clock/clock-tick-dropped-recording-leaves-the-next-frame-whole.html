@@ -42,13 +42,12 @@
         return performance.now();
     }
 
-    // Under LIBWEB_RENDER_CLOCK_FRAMES, a render clock tick whose recording is dropped (here: it sizes an SVG image at a size
+    // A render clock tick whose recording is dropped (here: it sizes an SVG image at a size
     // nothing rendered it at) assembled that recording in the retained paint-order tree. The main thread's next frame must
     // not copy the published frame's output by that tree's ranges: it records the content after the box from scratch.
     // Under --verify-paint-cache, the frame that copied by the dropped recording's ranges diverges and aborts.
     asyncTest(async done => {
         await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-        const enabled = internals.clockFramesEnabled();
         internals.setManualRenderingOpportunities(true, true);
         await nextTask();
         let frameTime = performance.now();
@@ -72,7 +71,7 @@
         }
         internals.setManualRenderingOpportunities(false);
 
-        println(`the tick handed over to the main thread: ${!enabled || countersAfter.ticksNeedingMain - countersBefore.ticksNeedingMain === 1}`);
+        println(`the tick handed over to the main thread: ${countersAfter.ticksNeedingMain - countersBefore.ticksNeedingMain === 1}`);
         println(`the main thread rendered after it: ${document.querySelectorAll(".after").length === 3}`);
         done();
     });

@@ -20,14 +20,13 @@
     // The render clock ticks nothing for a hidden page, whose lease ends as it is hidden (and whose context the
     // Compositor delivers no display ticks for), and ticks its animation again once it is visible.
     asyncTest(async done => {
-        const enabled = internals.clockFramesEnabled();
         const ticks = () => internals.getRenderClockCounters().ticksInstalled;
         // Waits for the render clock to install a tick, however long the display takes to deliver it.
         const nextTick = async () => {
             const target = ticks() + 1;
             do
                 await new Promise(resolve => setTimeout(resolve, 5));
-            while (enabled && ticks() < target);
+            while (ticks() < target);
         };
 
         await nextTick();

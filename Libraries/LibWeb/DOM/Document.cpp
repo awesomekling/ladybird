@@ -4985,7 +4985,7 @@ void Document::update_the_visibility_state(HTML::VisibilityState visibility_stat
     // 2. Set document's visibility state to visibilityState.
     m_visibility_state = visibility_state;
 
-    // LIBWEB_RENDER_CLOCK_FRAMES: A hidden document renders nothing, its rendering updates included, so nothing else
+    // A hidden document renders nothing, its rendering updates included, so nothing else
     // would end the clock lease its render clock goes on asking display ticks for.
     if (visibility_state == HTML::VisibilityState::Hidden)
         HTML::main_thread_event_loop().frame_scheduler().revoke_clock_lease_of(*this);

@@ -636,7 +636,7 @@ public:
     virtual void did_finish_rendering_update() { }
     virtual void set_manual_rendering_opportunities([[maybe_unused]] bool enabled, [[maybe_unused]] bool with_clock_ticks) { }
     virtual void inject_rendering_opportunity([[maybe_unused]] double frame_time) { }
-    // LIBWEB_RENDER_CLOCK_FRAMES: Has a render clock tick the clock lease of the compositor context's document at the
+    // Has a render clock tick the clock lease of the compositor context's document at the
     // context's display ticks, without the main thread, until it is disarmed. Returns false where nothing does.
     virtual bool arm_render_clock([[maybe_unused]] Compositing::CompositorContextId context_id) { return false; }
     virtual void disarm_render_clock([[maybe_unused]] Compositing::CompositorContextId context_id) { }

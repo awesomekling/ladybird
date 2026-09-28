@@ -410,10 +410,10 @@ pub(crate) fn submits(label: &'static str) -> bool {
 }
 
 /// Whether `LIBWEB_STAGE_OVERLAP` lets the stage `label` run beside the main thread. A clock tick
-/// goes where the layout pass it runs ahead of goes, where clock frames are on.
+/// goes where the layout pass it runs ahead of goes.
 fn stage_overlaps(label: &str) -> bool {
     let overlaps = |label: &str| overlapping_stages().iter().any(|stage| stage == label);
-    overlaps(label) || (label == "clock" && crate::clock_frames::enabled() && overlaps("layout"))
+    overlaps(label) || (label == "clock" && overlaps("layout"))
 }
 
 /// Hands `stage` to the stage thread and returns at once, and has the main thread run

@@ -15,7 +15,7 @@
 <script>
     const nextTask = () => new Promise(resolve => setTimeout(resolve, 0));
 
-    // Under LIBWEB_RENDER_CLOCK_FRAMES, a clock lease's tick owns the document's arena and style engine while it is in
+    // A clock lease's tick owns the document's arena and style engine while it is in
     // flight: a style write beside it waits for it, and a geometry read joins it, and sees what it installed. The
     // time the animation reports stays the same within the task.
     asyncTest(async done => {
@@ -48,15 +48,9 @@
             internals.setManualRenderingOpportunities(false);
         internals.setRenderClockSuspended(false);
 
-        if (internals.clockFramesEnabled()) {
-            println(`held at: ${heldAt}`);
-            println(`write joined the tick: ${joinsAfterWrite !== joinsBefore}`);
-            println(`read joined the tick: ${joinsAfterRead === joinsBefore + 1}`);
-        } else {
-            println("held at: before-completion");
-            println("write joined the tick: false");
-            println("read joined the tick: true");
-        }
+        println(`held at: ${heldAt}`);
+        println(`write joined the tick: ${joinsAfterWrite !== joinsBefore}`);
+        println(`read joined the tick: ${joinsAfterRead === joinsBefore + 1}`);
         println(`currentTime stable within the task: ${animation.currentTime === time}`);
         println(`width is the one composed at currentTime: ${Math.abs(width - expectedWidth) <= 0.5}`);
         println(`height: ${height}`);

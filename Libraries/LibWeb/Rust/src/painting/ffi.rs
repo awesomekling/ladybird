@@ -1812,7 +1812,7 @@ unsafe fn prepare_recording<'a>(
         }
     };
     // A clock lease's ticks record again with what this recording records with.
-    if crate::clock_frames::enabled() && recording_inputs.publishes_recording {
+    if recording_inputs.publishes_recording {
         arena.paint_state().borrow_mut().clock_recording = Some(crate::painting::paint_state::ClockRecording {
             viewport,
             inputs: recording_inputs.clone().into_owned(),

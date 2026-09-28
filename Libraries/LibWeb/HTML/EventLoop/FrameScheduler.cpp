@@ -43,7 +43,7 @@ namespace Web::HTML {
 
 static FrameScheduler* s_frame_scheduler_with_host = nullptr;
 
-// LIBWEB_RENDER_CLOCK_FRAMES: A render clock ticks the leases beside the main thread, and tells it where a tick ended
+// A render clock ticks the leases beside the main thread, and tells it where a tick ended
 // one, or left it something to adopt. The stage thread reaches the main thread through this.
 struct RenderClockNeedsMain {
     Mutex mutex;
@@ -80,8 +80,6 @@ static HashMap<void*, LocalNavigable::RenderClockFrameKit*>& render_clock_kits()
 
 static void install_render_clock_host()
 {
-    if (!Layout::RustFFI::rust_clock_frames_enabled())
-        return;
     Layout::RustFFI::rust_render_clock_set_present([](void* arena) {
         MutexLocker locker(render_clock_kits_mutex());
         auto* kit = render_clock_kits().get(arena).value_or(nullptr);
@@ -858,8 +856,6 @@ void FrameScheduler::revoke_clock_lease(size_t index)
 
 void FrameScheduler::grant_clock_leases()
 {
-    if (!Layout::RustFFI::rust_clock_frames_enabled())
-        return;
     // What the render clock's ticks left since the rendering update began goes in before a lease starts its clock anew.
     adopt_render_clock_ticks_if_any();
     auto documents = m_synchronous_update ? Vector<GC::Root<DOM::Document>> {} : m_event_loop.documents_in_this_event_loop_matching([](auto&) { return true; });

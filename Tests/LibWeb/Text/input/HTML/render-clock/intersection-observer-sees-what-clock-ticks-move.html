@@ -31,9 +31,8 @@
 </div>
 <script src="../../include.js"></script>
 <script>
-    // An intersection observer sees what an animation moves as it runs: a render clock that ticks the animation under
-    // LIBWEB_RENDER_CLOCK_FRAMES runs no rendering update, which is where observers observe, so the main thread's
-    // rendering updates tick it instead.
+    // An intersection observer sees what an animation moves as it runs: a render clock that ticks the animation runs no
+    // rendering update, which is where observers observe, so the main thread's rendering updates tick it instead.
     asyncTest(async done => {
         const box = document.getElementById("box");
         const below = document.getElementById("below");

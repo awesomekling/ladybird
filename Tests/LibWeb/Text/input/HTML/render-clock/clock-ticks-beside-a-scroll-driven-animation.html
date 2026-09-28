@@ -37,14 +37,13 @@
     // main thread takes in, and the clock goes on ticking after it.
     asyncTest(async done => {
         const bar = document.getElementById("bar");
-        const enabled = internals.clockFramesEnabled();
         const ticks = () => internals.getRenderClockCounters().ticksInstalled;
         // Waits for the render clock to install a tick, however long the display takes to deliver it.
         const nextTick = async () => {
             const target = ticks() + 1;
             do
                 await new Promise(resolve => setTimeout(resolve, 5));
-            while (enabled && ticks() < target);
+            while (ticks() < target);
         };
         const widthFollowsScroll = () => {
             const maxScroll = document.documentElement.scrollHeight - innerHeight;
@@ -57,7 +56,7 @@
             await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
             await nextTick();
             println(`scrolled to ${offset}: ${scrollY === offset}`);
-            println(`the render clock ticks the page: ${!enabled || internals.renderClockTicks(document)}`);
+            println(`the render clock ticks the page: ${internals.renderClockTicks(document)}`);
             println(`width follows the scroll: ${widthFollowsScroll()}`);
         }
         done();

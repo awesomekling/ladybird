@@ -828,18 +828,6 @@ void AnimationEffect::visit_edges(GC::Cell::Visitor& visitor)
     visitor.visit(m_associated_animation);
 }
 
-// LIBWEB_RENDER_CLOCK_FRAMES: the render side installs what an animation sample published over the element's box
-// in the layout arena, ahead of the host, which then applies the adoption log entry that leaves. Both still run
-// on the main thread, one after the other.
-static bool render_side_installs_animation_samples()
-{
-    static bool const installs = [] {
-        auto const* value = getenv("LIBWEB_RENDER_CLOCK_FRAMES");
-        return !value || StringView { value, strlen(value) } != "0"sv;
-    }();
-    return installs;
-}
-
 enum class InstalledInArena {
     No,
     Yes,
@@ -963,7 +951,7 @@ void apply_published_animation_overlay(CSS::StyleDrainScope const& scope, DOM::A
 // leaves a pseudo-element, a composition its caller compares itself, and one that rebuilds the layout tree to the host.
 static bool install_animation_sample_in_arena(CSS::StyleDrainScope const& scope, DOM::AbstractElement element, CSS::StyleEngineFFI::FfiAnimationInvalidation const& animated_property_invalidation, CSS::StyleRecordID new_style_record, bool caller_applies_invalidation)
 {
-    if (!render_side_installs_animation_samples() || element.pseudo_element().has_value() || caller_applies_invalidation)
+    if (element.pseudo_element().has_value() || caller_applies_invalidation)
         return false;
     auto invalidation = CSS::decode_style_invalidation(animated_property_invalidation.invalidation);
     if (invalidation.needs_layout_tree_rebuild())

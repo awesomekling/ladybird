@@ -21,7 +21,6 @@
     // touches no DOM. The render side goes on ticking the animation while the task runs: the height it presents grows.
     asyncTest(async done => {
         const box = document.getElementById("box");
-        const enabled = internals.clockFramesEnabled();
         const presentedHeight = () => internals.presentedBorderBox(box)?.height ?? 0;
 
         let looping = true;
@@ -32,7 +31,7 @@
         requestAnimationFrame(frame);
         // Some frames of the loop first, until the page's animations have a clock (they never get one without clock
         // frames).
-        for (let frames = 0; frames < 10 || (enabled && frames < 600 && !internals.renderClockTicks(document)); ++frames)
+        for (let frames = 0; frames < 10 || (frames < 600 && !internals.renderClockTicks(document)); ++frames)
             await new Promise(resolve => requestAnimationFrame(resolve));
 
         // The task: at least 500 ms of plain JS, and on until the presented height has grown, however slowly the
@@ -53,8 +52,8 @@
                 break;
         }
         looping = false;
-        println(`presented a box before the task: ${!enabled || heightBefore >= 20}`);
-        println(`the presented height grows while the task runs: ${!enabled || heightAfter > heightBefore}`);
+        println(`presented a box before the task: ${heightBefore >= 20}`);
+        println(`the presented height grows while the task runs: ${heightAfter > heightBefore}`);
         done();
     });
 </script>

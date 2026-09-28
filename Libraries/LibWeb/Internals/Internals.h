@@ -216,7 +216,6 @@ public:
     void reset_style_invalidation_counters();
     GC::Ref<JS::Object> join_counters_object() const;
     u64 clock_ticks_presented() const;
-    bool clock_frames_enabled() const;
     u64 clock_ticks_received() const;
     bool render_clock_ticks(DOM::Document const&) const;
     GC::Ptr<Geometry::DOMRect> presented_border_box(DOM::Element const&) const;

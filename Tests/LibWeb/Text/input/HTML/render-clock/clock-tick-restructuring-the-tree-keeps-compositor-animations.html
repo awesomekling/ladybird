@@ -63,7 +63,7 @@
         return performance.now();
     }
 
-    // Under LIBWEB_RENDER_CLOCK_FRAMES, a render clock tick whose layout ends the overflow of a box with overflow: hidden
+    // A render clock tick whose layout ends the overflow of a box with overflow: hidden
     // changes the structure of the visual context tree, which drops the compositor's animations. The tree the tick takes
     // to the compositor carries the transform animation of the spinner still, whose node the tick kept: without it, the
     // compositor would show the spinner where the main thread last laid it down, until the main thread's next frame.
@@ -71,7 +71,6 @@
         const clipper = document.getElementById("clipper");
         const shrinker = document.getElementById("shrinker");
         const animation = shrinker.getAnimations()[0];
-        const enabled = internals.clockFramesEnabled();
         internals.setManualRenderingOpportunities(true, true);
         await nextTask();
         // 10 px per second: the shrinker overflows the clipper at 105px, and fits it a second later.
@@ -92,7 +91,7 @@
         const epochChanged = internals.visualContextTreeStructuralEpoch() !== epochBefore;
         const animationsAfterTick = internals.presentedCompositorAnimationCount();
         println(`the compositor ran the spinner's animation before the tick: ${animationsBefore === 1}`);
-        println(`the tick ended the clipper's overflow and presented it: ${!enabled || (taken && epochChanged && after.ticksPresented === before.ticksPresented + 1)}`);
+        println(`the tick ended the clipper's overflow and presented it: ${taken && epochChanged && after.ticksPresented === before.ticksPresented + 1}`);
         println(`the tree the tick presented carries the spinner's animation: ${animationsAfterTick === 1}`);
         frameTime = await frameTimeAfter(frameTime);
         await renderAt(frameTime);

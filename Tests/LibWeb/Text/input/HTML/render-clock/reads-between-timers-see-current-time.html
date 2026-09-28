@@ -17,7 +17,7 @@
 <div id="box"></div>
 <script src="../../include.js"></script>
 <script>
-    // Under LIBWEB_RENDER_CLOCK_FRAMES, the render clock ticks the page's animation while the main thread idles between
+    // The render clock ticks the page's animation while the main thread idles between
     // timers, and an iframe that changes at every timer has rendering updates run beside those ticks. Each of them
     // moves the timeline, and shows the animation at the time it moved it to: every read sees the width composed at
     // the currentTime it reads.

@@ -19,7 +19,7 @@
 <script>
     const nextTask = () => new Promise(resolve => setTimeout(resolve, 0));
 
-    // Under LIBWEB_RENDER_CLOCK_FRAMES, a style change a task made before a rendering update (here one a geometry read
+    // A style change a task made before a rendering update (here one a geometry read
     // deferred) is its own style change event, whatever clock lease tick the rendering update submits: a transition a
     // later task starts beside the tick runs from it.
     asyncTest(async done => {

@@ -513,15 +513,13 @@ void ConnectionFromClient::connect_to_compositor_process(IPC::TransportHandle ha
     }
 #endif
 
-    // LIBWEB_RENDER_CLOCK_FRAMES: The render clock's channel follows, on connect and on reconnect alike: a reconnect
+    // The render clock's channel follows, on connect and on reconnect alike: a reconnect
     // swaps the channel, not the clock's thread.
     attach_render_clock();
 }
 
 void ConnectionFromClient::attach_render_clock()
 {
-    if (!Web::Layout::RustFFI::rust_clock_frames_enabled())
-        return;
     if (!m_render_clock) {
         // The sender is made and used on the clock thread, which posts every tick.
         struct Sender {

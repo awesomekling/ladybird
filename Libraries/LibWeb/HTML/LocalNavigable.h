@@ -312,7 +312,7 @@ public:
     bool submit_presentation(PendingCompositorFrame&);
     void adopt_presented_frame(PendingCompositorFrame&);
 
-    // LIBWEB_RENDER_CLOCK_FRAMES: What a clock lease's ticks present the navigable's frames with while the main thread
+    // What a clock lease's ticks present the navigable's frames with while the main thread
     // idles: a presentation sealed as the frame the navigable last painted was, and a recording to publish, as its
     // recording was published. Whoever holds a kit keeps the document alive.
     struct RenderClockFrameKit {
@@ -682,7 +682,7 @@ private:
     PendingAsyncScrollOperation& ensure_pending_async_scroll_operation(Compositing::AsyncScrollOperationID);
     // The latest publication of the compositor's async scroll updates this navigable adopted.
     u64 m_adopted_async_scroll_sequence { 0 };
-    // LIBWEB_RENDER_CLOCK_FRAMES: the frame the navigable last painted, which a render clock kit is sealed as.
+    // The frame the navigable last painted, which a render clock kit is sealed as.
     struct LastPaintedFrame {
         PaintConfig paint_config;
         Compositing::KeyboardScrollState keyboard_scroll_state;

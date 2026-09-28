@@ -33,13 +33,12 @@
         return performance.now();
     }
 
-    // Under LIBWEB_RENDER_CLOCK_FRAMES, a render clock tick that sizes an SVG background image to the animated box paints it at a
+    // A render clock tick that sizes an SVG background image to the animated box paints it at a
     // size the main thread has not rendered the image at: it presents no frame with the image missing from it, and the
     // main thread's rendering update, which renders the image at that size, takes over.
     asyncTest(async done => {
         const box = document.getElementById("box");
         await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-        const enabled = internals.clockFramesEnabled();
         internals.setManualRenderingOpportunities(true, true);
         await nextTask();
         let frameTime = performance.now();
@@ -52,7 +51,7 @@
         while (internals.frameSchedulerState() !== "idle")
             await nextTask();
 
-        const leased = !enabled || internals.renderClockTicks(document);
+        const leased = internals.renderClockTicks(document);
         const countersBefore = internals.getRenderClockCounters();
         // Far enough past the last frame that the box has grown by pixels, at a size nothing rendered the image at yet.
         frameTime = await frameTimeAfter(frameTime + 20);
@@ -61,9 +60,9 @@
         internals.setManualRenderingOpportunities(false);
 
         println(`the lease was granted: ${leased}`);
-        println(`a lease took the tick: ${!enabled || taken}`);
+        println(`a lease took the tick: ${taken}`);
         println(`frames presented with the image missing: ${countersAfter.ticksPresented - countersBefore.ticksPresented}`);
-        println(`the tick handed over to the main thread: ${!enabled || countersAfter.ticksNeedingMain - countersBefore.ticksNeedingMain === 1}`);
+        println(`the tick handed over to the main thread: ${countersAfter.ticksNeedingMain - countersBefore.ticksNeedingMain === 1}`);
         done();
     });
 </script>

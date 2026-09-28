@@ -72,7 +72,7 @@ public:
     PageHost& page_host() { return *m_page_host; }
     PageHost const& page_host() const { return *m_page_host; }
     Web::Compositor::CompositorConnection* compositor_process_connection() const;
-    // LIBWEB_RENDER_CLOCK_FRAMES: the render clock that ticks clock leases at display ticks, without the main thread.
+    // The render clock that ticks clock leases at display ticks, without the main thread.
     Web::Compositor::RenderClock* render_clock() const { return m_render_clock.ptr(); }
     void did_destroy_compositor_context(Compositing::CompositorContextId);
 

@@ -47,14 +47,13 @@
         return performance.now();
     }
 
-    // Under LIBWEB_RENDER_CLOCK_FRAMES, a render clock tick whose layout moves a box that owns a clip moves what the
+    // A render clock tick whose layout moves a box that owns a clip moves what the
     // visual contexts hold, but not their structure: the tick presents its frame, and takes the tree to the compositor
     // with it.
     asyncTest(async done => {
         const box = document.getElementById("box");
         const clipper = document.getElementById("clipper");
         const animation = box.getAnimations()[0];
-        const enabled = internals.clockFramesEnabled();
         internals.setManualRenderingOpportunities(true, true);
         await nextTask();
         let frameTime = performance.now();
@@ -71,7 +70,7 @@
         frameTime = await frameTimeAfter(frameTime);
         const taken = await internals.injectClockTick(frameTime);
         const after = internals.getRenderClockCounters();
-        println(`the tick moved the clip and presented it: ${!enabled || (taken && after.ticksPresented === before.ticksPresented + 1 && after.ticksMovingVisualContexts === before.ticksMovingVisualContexts)}`);
+        println(`the tick moved the clip and presented it: ${taken && after.ticksPresented === before.ticksPresented + 1 && after.ticksMovingVisualContexts === before.ticksMovingVisualContexts}`);
         frameTime = await frameTimeAfter(frameTime);
         internals.injectRenderingOpportunity(frameTime);
         await nextTask();
