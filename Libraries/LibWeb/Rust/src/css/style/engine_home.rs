@@ -164,6 +164,19 @@ struct StyleEngineHome {
 }
 
 impl StyleEngineHome {
+    /// Follows what the thread that owns the engine left in `engine`, reaching it directly through
+    /// [`OwnedStyleEngine::engine`], as a reach would as it is done.
+    fn follow_owning_thread(&self, engine: &mut StyleEngine) {
+        if !self.reached_by_owning_thread.take() {
+            return;
+        }
+        self.pending.store(engine.pending_facts().0, Ordering::Relaxed);
+        // SAFETY: The owning thread is done with the engine, and nothing else reaches it.
+        let answers = unsafe { &mut *self.answers.get() };
+        answers.follow(engine);
+        answers.trade_with(engine);
+    }
+
     /// Applies to `engine` what the main thread wrote to it since it was last reached, by whoever reaches it now, and
     /// answers whether it wrote anything.
     ///
@@ -238,16 +251,28 @@ unsafe fn reach_on_this_thread<T>(home: usize, engine: *mut StyleEngine, run: im
             LENT_TO_THIS_THREAD.set(self.0);
         }
     }
-    let _restore = Restore(LENT_TO_THIS_THREAD.replace(home));
-    // SAFETY: Guaranteed by the caller; off the main thread, only the home's changes and facts are touched, which the
-    // main thread leaves alone while the engine is reached.
+    let outer = LENT_TO_THIS_THREAD.replace(home);
+    // A reach within one of the same engine finds it as the outer one left it.
+    let outermost = outer != home;
+    let _restore = Restore(outer);
+    // SAFETY: Guaranteed by the caller; off the main thread, only the home's changes, facts and answers are touched,
+    // which the main thread leaves alone while the engine is reached.
     let (engine, home) = unsafe { (&mut *engine, &*(home as *const StyleEngineHome)) };
+    if outermost {
+        home.follow_owning_thread(engine);
+        // SAFETY: As above.
+        unsafe { &mut *home.answers.get() }.trade_with(engine);
+    }
     // SAFETY: As above.
     unsafe { home.apply_unapplied(engine) };
     let result = run(engine);
     home.pending.store(engine.pending_facts().0, Ordering::Relaxed);
     // SAFETY: As above.
-    unsafe { &mut *home.answers.get() }.follow(engine);
+    let answers = unsafe { &mut *home.answers.get() };
+    answers.follow(engine);
+    if outermost {
+        answers.trade_with(engine);
+    }
     result
 }
 
@@ -486,14 +511,8 @@ impl StyleEngineHandle {
     /// Follows what the thread that owns the engine left in it, reaching it directly, as a reach would as it is done.
     fn follow_owning_thread(self) {
         let home = self.home();
-        if !home.reached_by_owning_thread.take() {
-            return;
-        }
         // SAFETY: The owning thread reaches the engine only through `OwnedStyleEngine::engine`, whose borrow has ended.
-        let engine = unsafe { &mut *home.engine.as_ptr() };
-        home.pending.store(engine.pending_facts().0, Ordering::Relaxed);
-        // SAFETY: As above.
-        unsafe { &mut *home.answers.get() }.follow(engine);
+        home.follow_owning_thread(unsafe { &mut *home.engine.as_ptr() });
     }
 
     /// What the home answers the main thread with, of what the engine holds.
@@ -663,9 +682,14 @@ impl OwnedStyleEngine {
 
     /// The engine, once its owner has applied every change the thread sent it.
     pub fn engine(&mut self) -> &mut StyleEngine {
-        self.handle.home().reached_by_owning_thread.set(true);
+        let home = self.handle.home();
         // SAFETY: The engine is live while this is, and the borrow of this keeps any other out.
-        unsafe { self.handle.enter("owned style engine") }
+        let engine = unsafe { self.handle.enter("owned style engine") };
+        if !home.reached_by_owning_thread.replace(true) {
+            // SAFETY: As above.
+            unsafe { &mut *home.answers.get() }.trade_with(engine);
+        }
+        engine
     }
 }
 

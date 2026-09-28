@@ -151,6 +151,28 @@ pub(crate) struct TransitionStepForHost {
 unsafe impl Send for TransitionStepForHost {}
 unsafe impl Sync for TransitionStepForHost {}
 
+/// The steps a pass decided for the rows it published and for the synthetic pseudo-elements it settled, which the
+/// host takes as it installs them, from the engine's home: whoever reaches the engine lends them back to it first.
+#[derive(Default)]
+pub(crate) struct TransitionStepsForHost {
+    elements: super::fast_hash::FastMap<StyleNodeID, TransitionStepForHost>,
+    pseudo_elements: super::fast_hash::FastMap<(StyleNodeID, u8), TransitionStepForHost>,
+    /// The step the host took last, which what it was handed points into until it takes the next.
+    taken: Option<TransitionStepForHost>,
+}
+
+impl TransitionStepsForHost {
+    /// Takes the step decided for `node`'s row, or for its synthetic pseudo-element of `pseudo_kind`, so that exactly
+    /// one installation applies it.
+    pub(crate) fn take(&mut self, node: StyleNodeID, pseudo_kind: Option<u8>) -> Option<&TransitionStepForHost> {
+        let step = match pseudo_kind {
+            None => self.elements.remove(&node),
+            Some(kind) => self.pseudo_elements.remove(&(node, kind)),
+        }?;
+        Some(self.taken.insert(step))
+    }
+}
+
 impl TransitionStepForHost {
     #[must_use]
     pub(crate) fn actions(&self) -> &[FfiTransitionStepAction] {
@@ -693,27 +715,14 @@ impl StyleEngineState {
             .style_record)
     }
 
-    /// Take the step the pass decided for a row, so that exactly one installation applies it. What
-    /// it points at stays alive until the next take.
-    pub(crate) fn take_transition_step_decided_in_pass(&mut self, node: StyleNodeID) -> Option<&TransitionStepForHost> {
-        let step = self.retained.transition_steps_decided_in_pass.remove(&node)?;
-        self.retained.taken_transition_step = Some(step);
-        self.retained.taken_transition_step.as_ref()
-    }
-
-    /// Take the step the engine decided for a pseudo-element it settled, so that exactly one
-    /// installation applies it. What it points at stays alive until the next take.
-    pub(crate) fn take_pseudo_element_transition_step_decided_in_pass(
-        &mut self,
-        node: StyleNodeID,
-        pseudo_kind: u8,
-    ) -> Option<&TransitionStepForHost> {
-        let step = self
-            .retained
-            .pseudo_element_transition_steps_decided_in_pass
-            .remove(&(node, pseudo_kind))?;
-        self.retained.taken_transition_step = Some(step);
-        self.retained.taken_transition_step.as_ref()
+    /// Hands the engine's home the steps decided in the pass for the host to take, as whoever reached the engine is
+    /// done with it: `steps` holds the engine's until it reaches the engine again.
+    pub(crate) fn lend_transition_steps(&mut self, steps: &mut TransitionStepsForHost) {
+        std::mem::swap(&mut self.retained.transition_steps_decided_in_pass, &mut steps.elements);
+        std::mem::swap(
+            &mut self.retained.pseudo_element_transition_steps_decided_in_pass,
+            &mut steps.pseudo_elements,
+        );
     }
 
     /// A row the pass settles again leaves no earlier decision behind: the host applies only a step

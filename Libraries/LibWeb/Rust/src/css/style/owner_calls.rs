@@ -499,16 +499,9 @@ pub(crate) enum StyleQuery {
         node: u32,
         pseudo_kind: u8,
     },
-    TakePseudoElementTransitionStepDecidedInPass {
-        node: u32,
-        pseudo_kind: u8,
-    },
     TakeSettledAnimationDefinitions {
         node: u32,
         pseudo_kind: u8,
-    },
-    TakeTransitionStepDecidedInPass {
-        node: u32,
     },
     /// A record as a published value, which the drain installs.
     PublishStyleRecord {
@@ -534,7 +527,6 @@ pub(crate) enum StyleAnswer {
     Pointer(*const c_void),
     RowSampled(super::bridge::FfiRowSampledInPass),
     RecordDelta(super::bridge::FfiStyleRecordDelta),
-    TransitionStep(super::bridge::FfiTransitionStepDecidedInPass),
     AnimationDefinitions(super::bridge::FfiSettledAnimationDefinitions),
     PreparedStylePass(super::bridge::PreparedStylePass),
     RecordDemand(super::bridge::FfiRecordDemandAnswer),
@@ -627,16 +619,6 @@ impl StyleAnswer {
             _ => {
                 debug_assert!(false, "a record move is answered with a record move");
                 super::bridge::FfiStyleRecordDelta::default()
-            }
-        }
-    }
-
-    pub(crate) fn transition_step(self) -> super::bridge::FfiTransitionStepDecidedInPass {
-        match self {
-            Self::TransitionStep(value) => value,
-            _ => {
-                debug_assert!(false, "a transition step is answered with a transition step");
-                super::bridge::FfiTransitionStepDecidedInPass::absent()
             }
         }
     }
@@ -1005,20 +987,8 @@ impl StyleQuery {
             Self::TakePseudoElementSampledInPass { node, pseudo_kind } => StyleAnswer::RowSampled(unsafe {
                 crate::css::style::bridge::owner_take_pseudo_element_sampled_in_pass(engine, node, pseudo_kind)
             }),
-            Self::TakePseudoElementTransitionStepDecidedInPass { node, pseudo_kind } => {
-                StyleAnswer::TransitionStep(unsafe {
-                    crate::css::style::bridge::owner_take_pseudo_element_transition_step_decided_in_pass(
-                        engine,
-                        node,
-                        pseudo_kind,
-                    )
-                })
-            }
             Self::TakeSettledAnimationDefinitions { node, pseudo_kind } => StyleAnswer::AnimationDefinitions(unsafe {
                 crate::css::style::bridge::owner_take_settled_animation_definitions(engine, node, pseudo_kind)
-            }),
-            Self::TakeTransitionStepDecidedInPass { node } => StyleAnswer::TransitionStep(unsafe {
-                crate::css::style::bridge::owner_take_transition_step_decided_in_pass(engine, node)
             }),
             Self::PublishStyleRecord { style_record } => StyleAnswer::Pointer(
                 crate::css::style::bridge::owner_publish_style_record(engine, style_record),

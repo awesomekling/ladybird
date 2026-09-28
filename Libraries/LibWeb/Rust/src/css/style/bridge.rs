@@ -2171,31 +2171,11 @@ pub unsafe extern "C" fn style_engine_take_transition_step_decided_in_pass(
     engine: StyleEngineInputHandle,
     node: u32,
 ) -> FfiTransitionStepDecidedInPass {
-    crate::css::style::owner_calls::ask(
-        engine.home(),
-        "style_engine_take_transition_step_decided_in_pass",
-        crate::css::style::owner_calls::StyleQuery::TakeTransitionStepDecidedInPass { node },
-    )
-    .transition_step()
-}
-
-/// Answers [`style_engine_take_transition_step_decided_in_pass`] from `engine`, on the render owner.
-///
-/// # Safety
-///
-/// As for [`style_engine_take_transition_step_decided_in_pass`].
-pub(crate) unsafe fn owner_take_transition_step_decided_in_pass(
-    engine: &mut crate::css::style::StyleEngine,
-    node: u32,
-) -> FfiTransitionStepDecidedInPass {
-    match StyleNodeID::from_raw(node).and_then(|node| engine.take_transition_step_decided_in_pass(node)) {
-        Some(step) => FfiTransitionStepDecidedInPass {
-            present: true,
-            actions: step.actions().as_ptr(),
-            action_count: step.actions().len(),
-        },
-        None => FfiTransitionStepDecidedInPass::absent(),
-    }
+    engine
+        .home()
+        .bring_home("style_engine_take_transition_step_decided_in_pass");
+    // SAFETY: The engine is home.
+    unsafe { engine.home().answers() }.take_transition_step(node, None)
 }
 
 /// Take the transition step the engine decided for a synthetic pseudo-element it settled, which
@@ -2210,34 +2190,11 @@ pub unsafe extern "C" fn style_engine_take_pseudo_element_transition_step_decide
     node: u32,
     pseudo_kind: u8,
 ) -> FfiTransitionStepDecidedInPass {
-    crate::css::style::owner_calls::ask(
-        engine.home(),
-        "style_engine_take_pseudo_element_transition_step_decided_in_pass",
-        crate::css::style::owner_calls::StyleQuery::TakePseudoElementTransitionStepDecidedInPass { node, pseudo_kind },
-    )
-    .transition_step()
-}
-
-/// Answers [`style_engine_take_pseudo_element_transition_step_decided_in_pass`] from `engine`, on the render owner.
-///
-/// # Safety
-///
-/// As for [`style_engine_take_pseudo_element_transition_step_decided_in_pass`].
-pub(crate) unsafe fn owner_take_pseudo_element_transition_step_decided_in_pass(
-    engine: &mut crate::css::style::StyleEngine,
-    node: u32,
-    pseudo_kind: u8,
-) -> FfiTransitionStepDecidedInPass {
-    match StyleNodeID::from_raw(node)
-        .and_then(|node| engine.take_pseudo_element_transition_step_decided_in_pass(node, pseudo_kind))
-    {
-        Some(step) => FfiTransitionStepDecidedInPass {
-            present: true,
-            actions: step.actions().as_ptr(),
-            action_count: step.actions().len(),
-        },
-        None => FfiTransitionStepDecidedInPass::absent(),
-    }
+    engine
+        .home()
+        .bring_home("style_engine_take_pseudo_element_transition_step_decided_in_pass");
+    // SAFETY: The engine is home.
+    unsafe { engine.home().answers() }.take_transition_step(node, Some(pseudo_kind))
 }
 
 /// The transform reference box the last committed layout left for `node`, which the animation
@@ -4836,6 +4793,8 @@ pub(crate) struct HomeAnswers {
     sheets: u32,
     /// The elements with anchor names registered.
     anchored: HashSet<StyleNodeID>,
+    /// The transition steps the last pass decided, which the engine lends the home while nothing reaches it.
+    transition_steps: super::transition_step::TransitionStepsForHost,
 }
 
 /// The custom-property environment each element and each of its synthetic pseudo-elements holds, as the host reads it:
@@ -5085,6 +5044,26 @@ impl HomeAnswers {
             true => !self.anchored.insert(node),
             false => self.anchored.remove(&node),
         }
+    }
+
+    /// Takes the transition step the last pass decided for `node`'s row, or for its synthetic pseudo-element of
+    /// `pseudo_kind`, so that exactly one installation applies it. What it points at stays alive until the next take.
+    fn take_transition_step(&mut self, node: u32, pseudo_kind: Option<u8>) -> FfiTransitionStepDecidedInPass {
+        let step = StyleNodeID::from_raw(node).and_then(|node| self.transition_steps.take(node, pseudo_kind));
+        match step {
+            Some(step) => FfiTransitionStepDecidedInPass {
+                present: true,
+                actions: step.actions().as_ptr(),
+                action_count: step.actions().len(),
+            },
+            None => FfiTransitionStepDecidedInPass::absent(),
+        }
+    }
+
+    /// Lends `engine` back what the home keeps of it while nothing reaches it, as whoever reaches it first begins, or
+    /// takes it again as the last is done: the home and the engine trade places.
+    pub(crate) fn trade_with(&mut self, engine: &mut StyleEngine) {
+        engine.lend_transition_steps(&mut self.transition_steps);
     }
 
     /// Names the next sheet the main thread adds.

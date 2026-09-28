@@ -105,7 +105,6 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
         element_transitions,
         transition_steps_decided_in_pass,
         pseudo_element_transition_steps_decided_in_pass,
-        taken_transition_step,
         counter_style_environment_identities,
         nodes_owing_animation_definitions,
         animation_definitions_being_applied,
@@ -243,7 +242,6 @@ fn every_retained_member_is_shareable(state: &RetainedState) {
     assert_member_is_sync(element_transitions);
     assert_member_is_sync(transition_steps_decided_in_pass);
     assert_member_is_sync(pseudo_element_transition_steps_decided_in_pass);
-    assert_member_is_sync(taken_transition_step);
     assert_member_is_sync(counter_style_environment_identities);
     assert_member_is_sync(nodes_owing_animation_definitions);
     assert_member_is_sync(animation_definitions_being_applied);

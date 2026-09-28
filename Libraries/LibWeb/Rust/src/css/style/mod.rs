@@ -987,8 +987,6 @@ pub struct RetainedState {
     /// The transition steps the engine decided for the pseudo-elements it settled, which the host
     /// applies where it installs their records.
     pseudo_element_transition_steps_decided_in_pass: HashMap<(StyleNodeID, u8), transition_step::TransitionStepForHost>,
-    /// The step the host took last, which what it was handed points into.
-    taken_transition_step: Option<transition_step::TransitionStepForHost>,
     /// What each tree scope's registered counter styles are, as one identity per scope. A record
     /// whose `content` or `list-style-type` names an overridable counter style is only the answer
     /// while the registry it named is the one in place, so the record carries the identity and a

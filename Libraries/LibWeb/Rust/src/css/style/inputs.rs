@@ -2036,7 +2036,6 @@ impl StyleEngineState {
                 element_transitions: Default::default(),
                 transition_steps_decided_in_pass: HashMap::default(),
                 pseudo_element_transition_steps_decided_in_pass: HashMap::default(),
-                taken_transition_step: None,
                 counter_style_environment_identities: HashMap::default(),
                 nodes_owing_animation_definitions: HashMap::default(),
                 animation_definitions_being_applied: None,
