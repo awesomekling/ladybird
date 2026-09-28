@@ -6792,13 +6792,14 @@ RefPtr<Compositor::Presentation> LocalNavigable::seal_presentation(PendingCompos
 
 Compositor::NavigablePresenter& LocalNavigable::presenter(SourceLocation location)
 {
-    // The render clock's ticks present from the presenter until the main thread takes it back, with what they presented.
-    if (m_presenter->take_back_from_render_clock())
-        HTML::main_thread_event_loop().frame_scheduler().adopt_render_clock_frames_of(*this);
     // The frame in flight presents from the presenter until it is taken in.
     if (m_presenter->is_lent_to_frame_in_flight())
         Layout::RustFFI::rust_stage_thread_join_frame_in_flight(reinterpret_cast<u8 const*>(location.filename().characters_without_null_termination()), location.filename().length(), location.line_number());
     VERIFY(!m_presenter->is_lent_to_frame_in_flight());
+    // The render clock's ticks present from the presenter until the main thread takes it back, with what they presented:
+    // the frame in flight may have handed it on to them.
+    if (m_presenter->take_back_from_render_clock())
+        HTML::main_thread_event_loop().frame_scheduler().adopt_render_clock_frames_of(*this);
     return *m_presenter;
 }
 
@@ -6924,18 +6925,17 @@ Optional<LocalNavigable::PendingCompositorFrame> LocalNavigable::begin_painting_
 
 // The presentation stage of the frame in flight: publishes the navigable's recording, builds its compositor frame from
 // the presenter lent to it and hands the frame to the compositor. Reaches no document: the presentation was sealed
-// where the rendering update began the frame.
-static void present_from_frame_in_flight(void* context)
+// where the rendering update began the frame. Returns whether it handed the frame over.
+static bool present_from_frame_in_flight(Compositor::Presentation& presentation)
 {
-    auto& presentation = *static_cast<Compositor::Presentation*>(context);
     // The recording panicked: the frame shows nothing, and the panic continues where the main thread takes it back.
     if (presentation.recording_ticket && Layout::RustFFI::layout_recording_ticket_was_abandoned(presentation.recording_ticket))
-        return;
+        return false;
     Optional<Compositor::PublishedDisplayList> published;
     if (presentation.recording) {
         published = Painting::publish_rust_display_list_recording_in_frame(*presentation.recording, presentation.recording_ticket, presentation.paint_command_cache_source.ptr(), presentation.inputs.paint_command_cache_source_resources, presentation.source);
         if (!published.has_value())
-            return;
+            return false;
         if (published->becomes_paint_command_cache_source)
             presentation.inputs.paint_command_cache_source_resources = published->command_resources;
         presentation.published = published;
@@ -6945,6 +6945,15 @@ static void present_from_frame_in_flight(void* context)
     presentation.frame_sink->submit(move(frame));
     if (carries_scene)
         presentation.presented_scene_epoch = presentation.presenter->did_present_scene();
+    return true;
+}
+
+// Presents the frame in flight, after which the render clock's ticks present after it, where its document has them.
+static void present_frame_in_flight(void* context)
+{
+    auto& presentation = *static_cast<Compositor::Presentation*>(context);
+    if (present_from_frame_in_flight(presentation))
+        FrameScheduler::did_present_frame_in_flight(presentation);
 }
 
 bool LocalNavigable::submit_presentation(PendingCompositorFrame& pending_frame)
@@ -6970,7 +6979,7 @@ bool LocalNavigable::submit_presentation(PendingCompositorFrame& pending_frame)
     presentation->is_presented_by_frame_in_flight = true;
     m_presenter->lend_to_frame_in_flight();
     // The presentation publishes the recording from its ticket and reaches no arena.
-    Layout::RustFFI::rust_stage_thread_submit_presentation(recording ? recording->arena : nullptr, present_from_frame_in_flight, presentation.ptr());
+    Layout::RustFFI::rust_stage_thread_submit_presentation(recording ? recording->arena : nullptr, present_frame_in_flight, presentation.ptr());
     return true;
 }
 
@@ -6996,6 +7005,10 @@ void LocalNavigable::adopt_presented_frame(PendingCompositorFrame& pending_frame
         return;
     }
     Painting::take_recording_trace_if_pending(document);
+    // The frame handed the presenter on to the render clock, and the main thread took in what the ticks presented after
+    // it already.
+    if (presentation.presented_scene_epoch.has_value() && *presentation.presented_scene_epoch < m_presenter->adopted_scene_epoch())
+        return;
     document->adopt_published_recording(recording, *presentation.published);
     // The recording painted an SVG-as-image the main thread had not rendered yet as an empty image. It renders the
     // image before the next recording, which paints it.
@@ -7005,26 +7018,47 @@ void LocalNavigable::adopt_presented_frame(PendingCompositorFrame& pending_frame
 
 Optional<LocalNavigable::RenderClockFrameKit> LocalNavigable::seal_render_clock_frame_kit()
 {
-    if (!m_last_painted_frame_for_render_clock.has_value() || !is_local_root() || !has_compositor_context() || m_presenter->is_lent_to_frame_in_flight())
+    if (!is_local_root() || !has_compositor_context())
         return {};
     auto document = active_document();
-    auto& last = *m_last_painted_frame_for_render_clock;
-    if (!document || last.recording->document.ptr() != document.ptr() || !document->has_paint_state() || !document->has_committed_viewport_box())
+    if (!document || !document->has_paint_state() || !document->has_committed_viewport_box())
         return {};
-    // A tree update the compositor has not had yet goes with the next frame the main thread paints.
-    if (document->paint_state().visual_context_tree_needs_compositor_update())
-        return {};
-    PendingCompositorFrame frame {
-        .document = *document,
-        .paint_config = last.paint_config,
-        .keyboard_scroll_state = last.keyboard_scroll_state,
-        .recording = make<Painting::PendingDisplayListRecording>(*last.recording),
-        .presentation = {},
-    };
-    frame.recording->run = Painting::RecordingRun::InSubmittedFrame;
-    auto presentation = seal_presentation(frame);
-    if (!presentation)
-        return {};
+    RefPtr<Compositor::Presentation> presentation;
+    OwnPtr<Painting::PendingDisplayListRecording> recording;
+    if (m_presenter->is_lent_to_frame_in_flight()) {
+        // Beside a frame in flight, the ticks present after that frame, as it was presented, and nothing before: the kit
+        // takes all it presents with from the frame (see follow_presented_frame()).
+        presentation = adopt_ref(*new Compositor::Presentation({ {}, {}, false, {} },
+            Compositor::PresentationInputs {
+                .context_id = compositor_context().id(),
+                .paint_config = {},
+                .keyboard_scroll_state = {},
+                .paint_command_cache_source_resources = {},
+                .present_viewport_rect = {},
+            },
+            nullptr));
+    } else {
+        if (!m_last_painted_frame_for_render_clock.has_value())
+            return {};
+        auto& last = *m_last_painted_frame_for_render_clock;
+        if (last.recording->document.ptr() != document.ptr())
+            return {};
+        // A tree update the compositor has not had yet goes with the next frame the main thread paints.
+        if (document->paint_state().visual_context_tree_needs_compositor_update())
+            return {};
+        PendingCompositorFrame frame {
+            .document = *document,
+            .paint_config = last.paint_config,
+            .keyboard_scroll_state = last.keyboard_scroll_state,
+            .recording = make<Painting::PendingDisplayListRecording>(*last.recording),
+            .presentation = {},
+        };
+        frame.recording->run = Painting::RecordingRun::InSubmittedFrame;
+        presentation = seal_presentation(frame);
+        if (!presentation)
+            return {};
+        recording = move(frame.recording);
+    }
     auto frame_sink = compositor_context().prepare_to_submit_frame_from_render_side();
     if (!frame_sink)
         return {};
@@ -7032,7 +7066,7 @@ Optional<LocalNavigable::RenderClockFrameKit> LocalNavigable::seal_render_clock_
     presentation->presenter = m_presenter;
     presentation->frame_sink = move(frame_sink);
     presentation->is_presented_by_frame_in_flight = true;
-    return RenderClockFrameKit { .presentation = presentation.release_nonnull(), .recording = frame.recording.release_nonnull(), .presented = false };
+    return RenderClockFrameKit { .presentation = presentation.release_nonnull(), .recording = move(recording), .presented = false };
 }
 
 void LocalNavigable::present_render_clock_frame(RenderClockFrameKit& kit)
@@ -7062,11 +7096,31 @@ void LocalNavigable::present_render_clock_frame(RenderClockFrameKit& kit)
     presentation.published.clear();
     presentation.presented_scene_epoch.clear();
     kit.recording->timer.start();
-    present_from_frame_in_flight(&presentation);
+    present_from_frame_in_flight(presentation);
     // The next tick's recording is identical to what this one published where it changes nothing.
     if (presentation.published.has_value() && presentation.published->becomes_paint_command_cache_source)
         presentation.paint_command_cache_source = presentation.published->display_list;
     kit.presented = true;
+}
+
+bool LocalNavigable::follow_presented_frame(RenderClockFrameKit& kit, Compositor::Presentation& presented)
+{
+    // A frame that recorded nothing leaves the ticks nothing to present after.
+    if (!presented.recording)
+        return false;
+    auto& presentation = *kit.presentation;
+    auto& source = presented.source;
+    // The frame took its tree to the compositor.
+    presentation.source = Compositor::SealedPresentationSource { source.published_display_list_visual_context_tree(), source.async_scrolling_stamp(), false, source.scroll_state_snapshot() };
+    presentation.inputs = presented.inputs;
+    if (presented.published.has_value() && presented.published->becomes_paint_command_cache_source)
+        presentation.paint_command_cache_source = presented.published->display_list;
+    else
+        presentation.paint_command_cache_source = presented.paint_command_cache_source;
+    kit.recording = make<Painting::PendingDisplayListRecording>(*presented.recording);
+    kit.recording->run = Painting::RecordingRun::InSubmittedFrame;
+    kit.recording->submitted_ticket = {};
+    return true;
 }
 
 void LocalNavigable::adopt_render_clock_frame_kit(RenderClockFrameKit& kit)
@@ -7138,7 +7192,7 @@ static void present_from_flight(void* context, void const* visual_context_tree, 
     }
     // NB: The flight updated the visual contexts, which the frame takes to the compositor.
     flight.presentation->source = Compositor::SealedPresentationSource { move(tree), flight.async_scrolling_stamp, true, move(scroll_state_snapshot) };
-    present_from_frame_in_flight(flight.presentation.ptr());
+    present_frame_in_flight(flight.presentation.ptr());
 }
 
 // What the recording that a document's flight makes after its layout reads of the navigable, sealed where the flight

@@ -319,7 +319,9 @@ public:
         AK_ALLOC_WITH_KMALLOC;
 
         NonnullRefPtr<Compositor::Presentation> presentation;
-        NonnullOwnPtr<Painting::PendingDisplayListRecording> recording;
+        // None for a kit sealed beside a frame in flight until it follows that frame (see follow_presented_frame()),
+        // which it does before a tick presents from it.
+        OwnPtr<Painting::PendingDisplayListRecording> recording;
         // Whether a tick presented from the kit since the main thread last took it in.
         bool presented { false };
     };
@@ -327,6 +329,9 @@ public:
     // On the render side, with the main thread idle: publishes what a tick recorded, and hands the frame to the
     // compositor.
     static void present_render_clock_frame(RenderClockFrameKit&);
+    // On the render side, as the frame in flight `presented` of the kit's document presented: the ticks present after
+    // it, as it was presented. Returns whether they can.
+    static bool follow_presented_frame(RenderClockFrameKit&, Compositor::Presentation& presented);
     // Takes in what the ticks presented from the kit: the scene, and the recording they published last.
     void adopt_render_clock_frame_kit(RenderClockFrameKit&);
 

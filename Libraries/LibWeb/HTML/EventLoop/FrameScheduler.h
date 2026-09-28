@@ -168,6 +168,9 @@ public:
     // The main thread took the presenter of `navigable` back from the render clock: what the ticks presented from it
     // is the navigable's now.
     void adopt_render_clock_frames_of(LocalNavigable&);
+    // On the render side, as the frame in flight `presented` presented: the render clock's ticks of a document with a
+    // clock lease present after it, from its presenter, which the frame hands on to them.
+    static void did_present_frame_in_flight(Compositor::Presentation& presented);
     // A render clock tick ended a lease; the rendering update takes over.
     void render_clock_needs_main();
     // For tests: whether leases are left to the main thread's rendering updates, with no render clock armed.
@@ -247,6 +250,12 @@ private:
         Optional<double> timeline_time_for_update {};
         // The time the document timeline read in the last rendering update that rendered the document.
         double timeline_time_of_last_update { -AK::Infinity<double> };
+        // Whether the lease was granted since the last rendering update that rendered the document began: the render
+        // clock's display ticks since then ticked the lease it replaced, if any.
+        bool granted_since_last_update { true };
+        // Whether the render clock has had no display tick of the lease since the last rendering update began: it has
+        // not fallen behind, and ticks the lease at its next one.
+        bool awaits_display_tick { false };
         // What the render clock's ticks present the document's frames with.
         OwnPtr<LocalNavigable::RenderClockFrameKit> render_clock_kit {};
         // Whether the lease ends once the document has adopted the tick in flight: it was revoked beside it.
