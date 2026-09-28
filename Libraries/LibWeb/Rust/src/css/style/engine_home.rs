@@ -17,9 +17,8 @@
 //! ([`StyleEngineHandle::reach_on_owner`], which only the owner's [`crate::render_owner::Owner`] can call), by a stage
 //! it is lent to, or by the thread that owns it with its render state ([`OwnedStyleEngine`]). The main thread waits for
 //! the engine before what it sends the render owner. With the engine home it goes on at once. With the engine lent it
-//! waits for the stage that holds it and nothing else, unless what the stage will still owe the frame it runs in (the
-//! install of its style batch, or the frame's take-back) keeps the entrance out: then it takes that frame in, as a
-//! forced join does.
+//! waits for the stage that holds it and nothing else, unless the stage will still owe the frame it runs in its
+//! take-back, which keeps the entrance out: then it takes that frame in, as a forced join does.
 //!
 //! Whoever reaches the engine may run beside the main thread (a display tick does), so the two share nothing but the
 //! home's [`Exchange`], which a lock guards. What the main thread writes to the engine waits there
@@ -115,13 +114,10 @@ impl PendingFacts {
 
 /// What the main thread still owes the frame of the stage that sent the engine home, before an
 /// entrance may go on.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Owed {
     /// Nothing: the engine is home.
     Nothing,
-    /// The install of the style batch the stage's pass published, which changes no published
-    /// record: an entrance that only reads one goes on.
-    Install,
     /// The frame's take-back.
     TakeBack,
 }
@@ -333,25 +329,6 @@ impl Drop for StyleEngineLoan {
     }
 }
 
-/// What an entrance does with the engine.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Access {
-    /// Anything.
-    Any,
-    /// Only reads what a published record holds.
-    RecordRead,
-}
-
-impl Access {
-    /// Whether the access may go on while the main thread owes the frame `owed`.
-    fn goes_on_owing(self, owed: Owed) -> bool {
-        match self {
-            Self::Any => owed == Owed::Nothing,
-            Self::RecordRead => owed <= Owed::Install,
-        }
-    }
-}
-
 impl StyleEngineHome {
     /// # Safety
     ///
@@ -404,16 +381,16 @@ impl StyleEngineHome {
         }
     }
 
-    /// Brings the engine home for an entrance that does `access`, as the module describes. `file`
-    /// and `line` name the entrance for the forced-join log.
-    fn bring_home(&self, access: Access, file: &'static str, line: u32) {
+    /// Brings the engine home for an entrance, as the module describes. `file` and `line` name the
+    /// entrance for the forced-join log.
+    fn bring_home(&self, file: &'static str, line: u32) {
         if self.state() == (true, Owed::Nothing) {
             return;
         }
         let mut joined = false;
         loop {
             let (arrived, owed) = self.state();
-            if access.goes_on_owing(owed) {
+            if owed == Owed::Nothing {
                 if arrived {
                     return;
                 }
@@ -585,7 +562,7 @@ impl StyleEngineHandle {
             home.state() == (true, Owed::Nothing),
             "a style engine is lent to a stage while another holds it"
         );
-        home.bring_home(Access::Any, "style engine lend", 0);
+        home.bring_home("style engine lend", 0);
         // SAFETY: On the main thread.
         let slot = unsafe { home.slot() };
         let (to_home, arrival) = channel();
@@ -676,28 +653,18 @@ impl StyleEngineHandle {
     /// Brings the engine home for the main thread, which is about to enter it at `entry`
     /// once it has done what it does before.
     pub(crate) fn bring_home(self, entry: &'static str) {
-        self.bring_home_for(Access::Any, entry, 0);
-    }
-
-    /// Like [`Self::bring_home`], for a read of what a published record holds only, which goes on while the install of
-    /// the stage's batch is still owed.
-    pub(crate) fn bring_home_to_read_records(self, entry: &'static str) {
-        self.bring_home_for(Access::RecordRead, entry, 0);
+        self.bring_home_at(entry, 0);
     }
 
     /// Like [`Self::bring_home`], for a C++ call site `file` and `line` name.
     pub(crate) fn bring_home_at(self, file: &'static str, line: u32) {
-        self.bring_home_for(Access::Any, file, line);
-    }
-
-    fn bring_home_for(self, access: Access, file: &'static str, line: u32) {
         if self.is_null() || crate::stage_thread::no_stage_is_submitted() {
             return;
         }
         if LENT_TO_THIS_THREAD.get() == self.address() || crate::stage_thread::running_inside_stage() {
             return;
         }
-        self.home().bring_home(access, file, line);
+        self.home().bring_home(file, line);
     }
 
     /// The engine of an engine that runs only for a replay, which no frame is ever in flight for.
@@ -790,16 +757,6 @@ mod tests {
         assert_eq!(handle.home().state(), (true, Owed::TakeBack));
         settlement.settle();
         assert!(handle.is_home());
-    }
-
-    #[test]
-    fn record_reads_go_on_while_the_install_is_owed() {
-        let (_engine, handle) = test_engine();
-        let (loan, settlement) = handle.lend(Holder::LayoutPass, Owed::Install);
-        loan.send_home(Owed::Install);
-        assert!(Access::RecordRead.goes_on_owing(handle.home().state().1));
-        assert!(!Access::Any.goes_on_owing(handle.home().state().1));
-        settlement.settle();
     }
 
     #[test]

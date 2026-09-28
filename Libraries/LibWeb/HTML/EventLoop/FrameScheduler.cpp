@@ -169,11 +169,6 @@ FrameScheduler::~FrameScheduler()
     Layout::RustFFI::rust_render_clock_sender_destroy(m_injected_clock_tick_sender);
 }
 
-bool FrameScheduler::submits_frames()
-{
-    return Layout::RustFFI::rust_stage_thread_wants_frame_scheduler_host() || s_frame_scheduler_with_host;
-}
-
 void FrameScheduler::begin_main_half(bool synchronous)
 {
     // A rendering update that has to start now (a synchronous one, or one a rendering opportunity started while the
@@ -184,7 +179,7 @@ void FrameScheduler::begin_main_half(bool synchronous)
     VERIFY(!m_ticket);
     m_synchronous_update = synchronous;
     m_rendering_update_waits_for_recordings = false;
-    if (!synchronous && submits_frames()) {
+    if (!synchronous) {
         install_frame_scheduler_host(*this);
         // Only the main thread's own scheduler submits frames.
         if (s_frame_scheduler_with_host == this)
@@ -266,24 +261,8 @@ bool FrameScheduler::submit()
 
 void FrameScheduler::submit_document_pass(Vector<GC::Ref<DOM::Document>> documents, size_t document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp)
 {
-    // The ticket runs the pass the frame in flight holds, whichever the document chose to submit.
-    auto kind = FrameTicket::SubmittedPass::Kind::Layout;
-    switch (Layout::RustFFI::rust_stage_thread_submitted_document_pass()) {
-    case Layout::RustFFI::FfiSubmittedDocumentPass::Style:
-        kind = FrameTicket::SubmittedPass::Kind::Style;
-        break;
-    case Layout::RustFFI::FfiSubmittedDocumentPass::Layout:
-        kind = FrameTicket::SubmittedPass::Kind::Layout;
-        break;
-    case Layout::RustFFI::FfiSubmittedDocumentPass::Flight:
-        kind = FrameTicket::SubmittedPass::Kind::Flight;
-        break;
-    case Layout::RustFFI::FfiSubmittedDocumentPass::None:
-        // The document submitted a pass, which the frame in flight holds.
-        ASSERT(false);
-        break;
-    }
-    submit_pass(kind, move(documents), document_index, frame_timestamp);
+    // A document submits its passes as a flight.
+    submit_pass(FrameTicket::SubmittedPass::Kind::Flight, move(documents), document_index, frame_timestamp);
 }
 
 void FrameScheduler::submit_pass(FrameTicket::SubmittedPass::Kind kind, Vector<GC::Ref<DOM::Document>> documents, size_t document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp)
@@ -340,17 +319,12 @@ void FrameScheduler::commit()
     bool const counts_as_a_frame = m_state == State::InFlight;
     auto start_nanoseconds = MonotonicTime::now().nanoseconds();
     m_state = State::Consuming;
-    // NB: The layout pass's frame has nothing to publish: its take-back ended the document's layout update already. The
-    //     style pass's frame ends the document's style update here: its drain installs what the pass computed.
-    if (m_ticket->submitted_pass.has_value() && m_ticket->submitted_pass->kind == FrameTicket::SubmittedPass::Kind::Style)
-        m_ticket->submitted_pass->documents[m_ticket->submitted_pass->document_index]->finish_submitted_style_update();
-    // A flight that began with the style pass ends the document's style update here as a style pass's frame does. One
-    // that began with the layout pass took its layout frame back already.
+    // A flight that began with the style pass ends the document's style update here: its drain installs what the pass
+    // computed. One that began with the layout pass took its layout frame back already.
     if (m_ticket->submitted_pass.has_value() && m_ticket->submitted_pass->kind == FrameTicket::SubmittedPass::Kind::Flight) {
         auto outcome = Layout::RustFFI::rust_flight_take_outcome();
         m_ticket->submitted_pass->flight_outcome = outcome;
         auto document = m_ticket->submitted_pass->documents[m_ticket->submitted_pass->document_index];
-        // A flight that ran its layout's style had the style installed as its layout frame was taken back.
         if (outcome.began == Layout::RustFFI::FfiFlightStage::Style && document->has_submitted_style_update())
             document->finish_submitted_style_update();
         // A flight that went on from the layout pass to record the document hands its frame off here, as the frame of a
@@ -487,12 +461,9 @@ void FrameScheduler::run_tail()
             if (tick_clock_leases(submitted_pass->documents, submitted_pass->document_index + 1, submitted_pass->frame_timestamp, true))
                 return;
             m_event_loop.resume_rendering_update_after_style({}, submitted_pass->documents, 0, submitted_pass->frame_timestamp);
-        } else if (submitted_pass->kind == FrameTicket::SubmittedPass::Kind::Style)
-            m_event_loop.resume_rendering_update_after_style({}, submitted_pass->documents, submitted_pass->document_index, submitted_pass->frame_timestamp);
-        else if (submitted_pass->kind == FrameTicket::SubmittedPass::Kind::Flight)
+        } else {
             resume_rendering_update_after_flight(*submitted_pass);
-        else
-            m_event_loop.resume_rendering_update_after_layout({}, submitted_pass->documents, submitted_pass->document_index, submitted_pass->frame_timestamp);
+        }
         return;
     }
     auto painted_local_roots = move(m_ticket->painted_local_roots);

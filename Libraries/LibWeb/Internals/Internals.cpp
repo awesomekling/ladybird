@@ -1671,8 +1671,6 @@ GC::Ref<JS::Object> Internals::join_counters_object() const
         object->define_direct_property("cleanReadNanoseconds"_utf16_fly_string, JS::Value(counters.clean_read_nanoseconds), JS::default_attributes);
         object->define_direct_property("maxNanoseconds"_utf16_fly_string, JS::Value(counters.max_nanoseconds), JS::default_attributes);
         object->define_direct_property("joinsThatPublishedNothing"_utf16_fly_string, JS::Value(counters.joins_that_published_nothing), JS::default_attributes);
-        object->define_direct_property("frameWaits"_utf16_fly_string, JS::Value(counters.frame_waits), JS::default_attributes);
-        object->define_direct_property("frameWaitNanoseconds"_utf16_fly_string, JS::Value(counters.frame_wait_nanoseconds), JS::default_attributes);
         return object;
     };
 
@@ -1688,8 +1686,6 @@ GC::Ref<JS::Object> Internals::join_counters_object() const
         totals.clean_read_nanoseconds += counters.clean_read_nanoseconds;
         totals.max_nanoseconds = max(totals.max_nanoseconds, counters.max_nanoseconds);
         totals.joins_that_published_nothing += counters.joins_that_published_nothing;
-        totals.frame_waits += counters.frame_waits;
-        totals.frame_wait_nanoseconds += counters.frame_wait_nanoseconds;
         if (counters.calls == 0)
             continue;
         auto name = Utf16FlyString::from_utf16(DOM::to_string(static_cast<DOM::UpdateLayoutReason>(reason)));

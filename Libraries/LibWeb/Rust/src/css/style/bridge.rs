@@ -5548,12 +5548,12 @@ pub unsafe extern "C" fn style_engine_publish_style_record(
     engine: StyleEngineHandle,
     style_record: u64,
 ) -> *const c_void {
-    engine.bring_home_to_read_records("style_engine_publish_style_record");
+    engine.bring_home("style_engine_publish_style_record");
     // SAFETY: No stage holds the engine.
     if let Some(record) = unsafe { engine.answers() }.record(style_record) {
         return super::published_record::into_handle(record);
     }
-    crate::css::style::owner_calls::ask_records(
+    crate::css::style::owner_calls::ask(
         engine,
         "style_engine_publish_style_record",
         crate::css::style::owner_calls::StyleQuery::PublishStyleRecord { style_record },
