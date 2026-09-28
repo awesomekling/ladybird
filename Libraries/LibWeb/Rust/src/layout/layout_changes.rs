@@ -10,9 +10,11 @@
 
 use super::LayoutNodeArena;
 use super::layout_node_arena::LayoutUpdateMarksHandle;
-use super::node_data::NodeSlotId;
+use super::node_data::{CompositorAnimationFrameKind, NodeFlag, NodeSlotId};
 use super::partial_relayout::FfiLayoutTreeUpdateClassification;
 use super::tree_builder::FfiRemovedBoxPlace;
+use super::used_values::FfiCssPixelPoint;
+use crate::css::style::tree::{NaturalSize, StyleNodeID};
 use crate::render_owner::{Answer, ArenaChange, DocumentId, Query};
 use std::ffi::c_void;
 
@@ -23,6 +25,11 @@ pub(crate) enum LayoutChange {
         node: NodeSlotId,
         propagate_through_ancestors: bool,
     },
+    SetNeedsOwnGeometryUpdate {
+        node: NodeSlotId,
+    },
+    /// What the node's content is sized from changed: its fragment caches and intrinsic sizes, and those of its
+    /// ancestors, are stale.
     ResetCachedIntrinsicSizesOfSelfAndAncestors {
         node: NodeSlotId,
     },
@@ -37,6 +44,54 @@ pub(crate) enum LayoutChange {
         root: NodeSlotId,
     },
     RecordPartialRelayoutEscape,
+    /// The owned provider of the image box `node` shows an image of this natural size now.
+    SetOwnedImageNaturalSize {
+        node: NodeSlotId,
+        natural_size: NaturalSize,
+    },
+    /// A fact of the node's DOM node the host stamps into its row.
+    SetNodeFlag {
+        node: NodeSlotId,
+        flag: NodeFlag,
+        value: bool,
+    },
+    /// What the rows built for the DOM node of `node` are painted and hit-tested with.
+    SetNodeDomPaintFacts {
+        node: NodeSlotId,
+        facts: u8,
+    },
+    /// Whether the compositor animates the box on its own frames of `kind`, as the rendering update chose.
+    SetNodeNeedsCompositorAnimationFrame {
+        node: NodeSlotId,
+        kind: CompositorAnimationFrameKind,
+        value: bool,
+    },
+    /// What the element has scrolled to.
+    SetElementScrollOffset {
+        element: StyleNodeID,
+        offset: FfiCssPixelPoint,
+    },
+    /// What the pseudo-element `pseudo_kind` of `generator` has scrolled to.
+    SetPseudoElementScrollOffset {
+        generator: StyleNodeID,
+        pseudo_kind: u8,
+        offset: FfiCssPixelPoint,
+    },
+    /// The element took a new identity, and what its pseudo-elements have scrolled to goes with it.
+    MovePseudoElementScrollOffsets {
+        old_generator: StyleNodeID,
+        new_generator: StyleNodeID,
+    },
+    /// Whether the node sits in the user agent shadow tree of the focused text control.
+    SetIdentityInFocusedTextControl {
+        node: StyleNodeID,
+        value: bool,
+    },
+    /// Whether the list owner's items were renumbered without its layout tree being rebuilt.
+    SetListOwnerHasStaleItemCounters {
+        list_owner: StyleNodeID,
+        value: bool,
+    },
 }
 
 impl LayoutChange {
@@ -52,8 +107,14 @@ impl LayoutChange {
                     arena.set_needs_layout_update(node, propagate_through_ancestors);
                 }
             }
+            Self::SetNeedsOwnGeometryUpdate { node } => {
+                if arena.slot_is_live(node) {
+                    arena.set_node_flag(node, NodeFlag::NeedsOwnGeometryUpdate, true);
+                }
+            }
             Self::ResetCachedIntrinsicSizesOfSelfAndAncestors { node } => {
                 if arena.slot_is_live(node) {
+                    arena.bump_fragment_cache_epoch_of_self_and_ancestors(node);
                     arena.reset_cached_intrinsic_sizes_of_self_and_ancestors(node);
                 }
             }
@@ -73,6 +134,42 @@ impl LayoutChange {
                 }
             }
             Self::RecordPartialRelayoutEscape => arena.record_partial_relayout_escape(),
+            Self::SetOwnedImageNaturalSize { node, natural_size } => {
+                if arena.slot_is_live(node) {
+                    arena.set_owned_image_natural_size(node, natural_size);
+                }
+            }
+            Self::SetNodeFlag { node, flag, value } => {
+                if arena.slot_is_live(node) {
+                    arena.set_node_flag(node, flag, value);
+                }
+            }
+            Self::SetNodeDomPaintFacts { node, facts } => {
+                if arena.slot_is_live(node) {
+                    arena.set_node_dom_paint_facts(node, facts);
+                }
+            }
+            Self::SetNodeNeedsCompositorAnimationFrame { node, kind, value } => {
+                if arena.slot_is_live(node) {
+                    arena.set_node_needs_compositor_animation_frame(node, kind, value);
+                }
+            }
+            Self::SetElementScrollOffset { element, offset } => arena.set_element_scroll_offset(element, offset),
+            Self::SetPseudoElementScrollOffset {
+                generator,
+                pseudo_kind,
+                offset,
+            } => arena.set_pseudo_element_scroll_offset(generator, pseudo_kind, offset),
+            Self::MovePseudoElementScrollOffsets {
+                old_generator,
+                new_generator,
+            } => arena.move_pseudo_element_scroll_offsets(old_generator, new_generator),
+            Self::SetIdentityInFocusedTextControl { node, value } => {
+                arena.set_identity_in_focused_text_control(node, value);
+            }
+            Self::SetListOwnerHasStaleItemCounters { list_owner, value } => {
+                arena.set_list_owner_has_stale_item_counters(list_owner, value);
+            }
         }
     }
 

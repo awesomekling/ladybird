@@ -10,6 +10,7 @@ use super::formatting_context::LayoutMode;
 use super::geometry::AvailableSize;
 use super::geometry::AvailableSpace;
 use super::host_tables::HostTables;
+use super::layout_changes::LayoutChange;
 use super::rendered_text::{FfiTextSourceRange, RenderedTextBoundary, TextContent, TextFragments};
 use super::svg_formatting_context::FfiSvgAttributeFacts;
 use super::tree_shape::{Chunk, ShapeWriter, TreeShape};
@@ -2855,8 +2856,6 @@ impl LayoutNodeArena {
     pub(crate) const SCROLL_OFFSETS_WRITER: &str = "scroll offsets";
     /// The writer the main side's selection state writes are attributed to.
     pub(crate) const SELECTION_WRITER: &str = "selection state";
-    /// The writer the rendering update's compositor animation choices are attributed to.
-    pub(crate) const COMPOSITOR_ELIGIBILITY_WRITER: &str = "compositor animation eligibility";
     /// The writer a DOM tree mutation's writes to the style mirror and the arena are attributed to.
     pub(crate) const DOM_TREE_MUTATION_WRITER: &str = "DOM tree mutation";
 
@@ -3324,13 +3323,13 @@ impl LayoutNodeArena {
         ReplacedContentInput::NaturalSize(natural_size)
     }
 
+    /// Records the natural size of the image `id`'s owned provider shows. A row that has handed its provider back
+    /// since the provider published it shows no image of its own any more.
     pub(crate) fn set_owned_image_natural_size(&self, id: NodeSlotId, natural_size: NaturalSize) {
         self.assert_owner_thread();
-        assert!(
-            self.rows_with_owned_image_provider.borrow().contains(&id),
-            "only a row that owns its image's provider publishes the image's natural size"
-        );
-        self.owned_image_natural_sizes.borrow_mut().insert(id, natural_size);
+        if self.rows_with_owned_image_provider.borrow().contains(&id) {
+            self.owned_image_natural_sizes.borrow_mut().insert(id, natural_size);
+        }
     }
 
     /// Which principal box the element asks for, before its computed style has a say. A text
@@ -4776,20 +4775,17 @@ impl LayoutNodeArena {
         self.data(id).dom_paint_facts.get() & fact as u8 != 0
     }
 
-    pub(crate) fn set_node_dom_paint_facts(&self, id: NodeSlotId, facts: u8) -> bool {
+    pub(crate) fn set_node_dom_paint_facts(&self, id: NodeSlotId, facts: u8) {
         self.assert_owner_thread();
-        let mut any_changed = false;
         for row in self.rows_sharing_dom_node_with(id) {
             let data = self.write_shape(row);
             if data.dom_paint_facts.get() == facts {
                 continue;
             }
             data.set_dom_paint_facts(facts);
-            any_changed = true;
             use crate::painting::record::damage::PaintDamage;
             self.push_paint_damage_for_repaint(row, PaintDamage::ALL_HIT | PaintDamage::SCROLL_METADATA);
         }
-        any_changed
     }
 
     pub(crate) fn note_rows_share_dom_node(&self, bound_row: NodeSlotId, added_row: NodeSlotId) {
@@ -6582,24 +6578,11 @@ pub unsafe extern "C" fn layout_arena_node_generated_for(arena: *mut c_void, id:
 
 /// # Safety
 ///
-/// The arena must remain valid for the duration of the call, and `node` must name a live node
-/// in this arena.
+/// `arena` must be a live handle on the document thread.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_bump_fragment_cache_epoch_of_self_and_ancestors(
-    marks: LayoutUpdateMarksHandle,
-    node: NodeSlotId,
-) {
-    let arena = marks.arena;
-    // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
-    unsafe { LayoutNodeArena::from_handle(arena) }.bump_fragment_cache_epoch_of_self_and_ancestors(node);
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_set_node_dom_paint_facts(arena: *mut c_void, id: NodeSlotId, facts: u8) -> bool {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: The C++ wrapper keeps the arena alive for this call and
-    // serializes all access on the document thread.
-    unsafe { LayoutNodeArena::from_handle(arena) }.set_node_dom_paint_facts(id, facts)
+pub unsafe extern "C" fn layout_arena_set_node_dom_paint_facts(arena: *mut c_void, id: NodeSlotId, facts: u8) {
+    // SAFETY: Guaranteed by the caller.
+    unsafe { super::layout_changes::send(arena, LayoutChange::SetNodeDomPaintFacts { node: id, facts }) };
 }
 
 /// Pins, for the host, the style record of the box the element or text node with `style_node` is
@@ -6629,6 +6612,9 @@ pub unsafe extern "C" fn layout_arena_pin_bound_box_style_record_for_detachment(
     arena.pin_node_style_record_for_host(row, arena.node_style_record(row));
 }
 
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_set_node_flag(
     arena: *mut c_void,
@@ -6636,10 +6622,13 @@ pub unsafe extern "C" fn layout_arena_set_node_flag(
     flag: HostNodeFlag,
     value: bool,
 ) {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: The C++ wrapper keeps the arena alive for this call and
-    // serializes all access on the document thread.
-    unsafe { LayoutNodeArena::from_handle(arena) }.set_node_flag(id, flag.into(), value);
+    let change = LayoutChange::SetNodeFlag {
+        node: id,
+        flag: flag.into(),
+        value,
+    };
+    // SAFETY: Guaranteed by the caller.
+    unsafe { super::layout_changes::send(arena, change) };
 }
 
 /// Mark the node `id` names to have its own geometry updated by the next layout, without laying out
@@ -6650,10 +6639,8 @@ pub unsafe extern "C" fn layout_arena_set_node_flag(
 /// The arena must remain valid for the duration of the call, and `id` must name a live node in it.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_set_needs_own_geometry_update(marks: LayoutUpdateMarksHandle, id: NodeSlotId) {
-    let arena = marks.arena;
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }.set_node_flag(id, NodeFlag::NeedsOwnGeometryUpdate, true);
+    // SAFETY: The render inputs hand out the marks of their document's live arena.
+    unsafe { super::layout_changes::send_through_marks(marks, LayoutChange::SetNeedsOwnGeometryUpdate { node: id }) };
 }
 
 /// What the door of one main-side writer cost: how often it was passed, and how often and for how
@@ -6774,21 +6761,29 @@ pub unsafe extern "C" fn layout_arena_join_frame_for_dom_tree_mutation(arena: *m
     arena.pass_main_side_door(LayoutNodeArena::DOM_TREE_MUTATION_WRITER);
 }
 
-/// Whether the box keeps content the compositor animates. Like the frames below, it is chosen by
-/// the rendering update between frames, so it goes through the same door rather than a journal.
+/// Whether the box keeps content the compositor animates, as the rendering update chose between frames.
+///
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_set_node_retains_compositor_animated_content(
     arena: *mut c_void,
     id: NodeSlotId,
     value: bool,
 ) {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on the document thread.
-    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
-    arena.join_frame_for_main_side_write(LayoutNodeArena::COMPOSITOR_ELIGIBILITY_WRITER);
-    arena.set_node_flag(id, NodeFlag::HasAnimatedOpacityOrTransform, value);
+    let change = LayoutChange::SetNodeFlag {
+        node: id,
+        flag: NodeFlag::HasAnimatedOpacityOrTransform,
+        value,
+    };
+    // SAFETY: Guaranteed by the caller.
+    unsafe { super::layout_changes::send(arena, change) };
 }
 
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_set_node_needs_compositor_animation_frame(
     arena: *mut c_void,
@@ -6796,11 +6791,9 @@ pub unsafe extern "C" fn layout_arena_set_node_needs_compositor_animation_frame(
     kind: super::node_data::CompositorAnimationFrameKind,
     value: bool,
 ) {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on the document thread.
-    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
-    arena.join_frame_for_main_side_write(LayoutNodeArena::COMPOSITOR_ELIGIBILITY_WRITER);
-    arena.set_node_needs_compositor_animation_frame(id, kind, value);
+    let change = LayoutChange::SetNodeNeedsCompositorAnimationFrame { node: id, kind, value };
+    // SAFETY: Guaranteed by the caller.
+    unsafe { super::layout_changes::send(arena, change) };
 }
 
 #[unsafe(no_mangle)]
@@ -6812,6 +6805,9 @@ pub unsafe extern "C" fn layout_arena_node_style_node(arena: *mut c_void, id: No
         .map_or(0, StyleNodeID::raw)
 }
 
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_set_pseudo_element_scroll_offset(
     arena: *mut c_void,
@@ -6819,46 +6815,44 @@ pub unsafe extern "C" fn layout_arena_set_pseudo_element_scroll_offset(
     pseudo_kind: u8,
     offset: FfiCssPixelPoint,
 ) {
-    assert!(!arena.is_null(), "layout node arena handle is null");
     let Some(generator) = StyleNodeID::from_raw(generator) else {
         return;
     };
-    // SAFETY: As above.
-    let arena = unsafe { LayoutNodeArena::from_handle_mut(arena) };
-    arena.join_frame_for_main_side_write(LayoutNodeArena::SCROLL_OFFSETS_WRITER);
-    arena.set_pseudo_element_scroll_offset(generator, pseudo_kind, offset);
+    let change = LayoutChange::SetPseudoElementScrollOffset {
+        generator,
+        pseudo_kind,
+        offset,
+    };
+    // SAFETY: Guaranteed by the caller.
+    unsafe { super::layout_changes::send(arena, change) };
 }
 
 /// # Safety
 ///
-/// The arena must remain valid for the duration of the call.
+/// `arena` must be a live handle on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_set_identity_in_focused_text_control(arena: *mut c_void, node: u32, value: bool) {
-    assert!(!arena.is_null(), "layout node arena handle is null");
     let Some(node) = StyleNodeID::from_raw(node) else {
         return;
     };
-    // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle_mut(arena) }.set_identity_in_focused_text_control(node, value);
+    // SAFETY: Guaranteed by the caller.
+    unsafe { super::layout_changes::send(arena, LayoutChange::SetIdentityInFocusedTextControl { node, value }) };
 }
 
 /// # Safety
 ///
-/// The arena must remain valid for the duration of the call.
+/// `arena` must be a live handle on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_set_element_scroll_offset(
     arena: *mut c_void,
     element: u32,
     offset: FfiCssPixelPoint,
 ) {
-    assert!(!arena.is_null(), "layout node arena handle is null");
     let Some(element) = StyleNodeID::from_raw(element) else {
         return;
     };
-    // SAFETY: As above.
-    let arena = unsafe { LayoutNodeArena::from_handle_mut(arena) };
-    arena.join_frame_for_main_side_write(LayoutNodeArena::SCROLL_OFFSETS_WRITER);
-    arena.set_element_scroll_offset(element, offset);
+    // SAFETY: Guaranteed by the caller.
+    unsafe { super::layout_changes::send(arena, LayoutChange::SetElementScrollOffset { element, offset }) };
 }
 
 #[unsafe(no_mangle)]
@@ -6973,8 +6967,6 @@ pub unsafe extern "C" fn layout_arena_set_owned_image_natural_size(
     slot: NodeSlotId,
     facts: FfiReplacedContentFacts,
 ) {
-    let arena = marks.arena;
-    assert!(!arena.is_null(), "layout node arena handle is null");
     let has_aspect_ratio = facts.auto_content_aspect_ratio_denominator != CssPixels::default();
     let natural_size = NaturalSize {
         width: facts
@@ -6988,8 +6980,12 @@ pub unsafe extern "C" fn layout_arena_set_owned_image_natural_size(
             facts.auto_content_aspect_ratio_denominator.raw_value(),
         )),
     };
-    // SAFETY: The handle came from layout_arena_create and outlives this call.
-    unsafe { LayoutNodeArena::from_handle(arena) }.set_owned_image_natural_size(slot, natural_size);
+    let change = LayoutChange::SetOwnedImageNaturalSize {
+        node: slot,
+        natural_size,
+    };
+    // SAFETY: The render inputs hand out the marks of their document's live arena.
+    unsafe { super::layout_changes::send_through_marks(marks, change) };
 }
 
 #[unsafe(no_mangle)]
@@ -7000,23 +6996,27 @@ pub unsafe extern "C" fn layout_arena_owned_image_provider(arena: *mut c_void, s
         .owned_image_provider(unsafe { super::HostTables::from_handle(arena) }, slot)
 }
 
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_move_pseudo_element_scroll_offsets(
     arena: *mut c_void,
     old_generator: u32,
     new_generator: u32,
 ) {
-    assert!(!arena.is_null(), "layout node arena handle is null");
     let (Some(old_generator), Some(new_generator)) = (
         StyleNodeID::from_raw(old_generator),
         StyleNodeID::from_raw(new_generator),
     ) else {
         return;
     };
-    // SAFETY: As above.
-    let arena = unsafe { LayoutNodeArena::from_handle_mut(arena) };
-    arena.join_frame_for_main_side_write(LayoutNodeArena::SCROLL_OFFSETS_WRITER);
-    arena.move_pseudo_element_scroll_offsets(old_generator, new_generator);
+    let change = LayoutChange::MovePseudoElementScrollOffsets {
+        old_generator,
+        new_generator,
+    };
+    // SAFETY: Guaranteed by the caller.
+    unsafe { super::layout_changes::send(arena, change) };
 }
 
 /// What the flight that applied the style row of `style_node`'s element marked of its layout nodes,
@@ -7231,10 +7231,10 @@ pub unsafe extern "C" fn layout_arena_set_list_owner_has_stale_item_counters(
     list_owner: u32,
     value: bool,
 ) {
-    assert!(!arena.is_null(), "layout node arena handle is null");
     let list_owner = StyleNodeID::from_raw(list_owner).expect("a list owner has an identity");
-    // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }.set_list_owner_has_stale_item_counters(list_owner, value);
+    let change = LayoutChange::SetListOwnerHasStaleItemCounters { list_owner, value };
+    // SAFETY: Guaranteed by the caller.
+    unsafe { super::layout_changes::send(arena, change) };
 }
 
 #[unsafe(no_mangle)]

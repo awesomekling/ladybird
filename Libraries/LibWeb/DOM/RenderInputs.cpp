@@ -125,7 +125,6 @@ void RenderInputs::set_needs_own_geometry_update(Compositing::RustFFI::NodeSlotI
 
 void RenderInputs::reset_intrinsic_size_caches_of_self_and_ancestors(Compositing::RustFFI::NodeSlotId slot)
 {
-    Layout::RustFFI::layout_arena_bump_fragment_cache_epoch_of_self_and_ancestors(layout_update_marks(m_document), slot);
     Layout::RustFFI::layout_arena_reset_cached_intrinsic_sizes_of_self_and_ancestors(layout_update_marks(m_document), slot);
 }
 
