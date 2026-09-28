@@ -221,7 +221,7 @@ void Animatable::associate_with_animation(GC::Ref<Animation> animation)
     as<DOM::Element>(*this).document().associate_with_animation(animation);
     animation->did_associate_with_target();
 
-    publish_animation_timing_rows();
+    invalidate_animation_timing_rows();
 }
 
 void Animatable::disassociate_with_animation(GC::Ref<Animation> animation)
@@ -236,7 +236,7 @@ void Animatable::disassociate_with_animation(GC::Ref<Animation> animation)
 
     as<DOM::Element>(*this).document().disassociate_with_animation(animation);
 
-    publish_animation_timing_rows();
+    invalidate_animation_timing_rows();
 }
 
 void Animatable::on_document_changed(DOM::Document& old_document, DOM::Document& new_document)
@@ -248,6 +248,9 @@ void Animatable::on_document_changed(DOM::Document& old_document, DOM::Document&
         old_document.disassociate_with_animation(animation);
         new_document.associate_with_animation(animation);
     }
+    // The old document may never publish again, and the element publishes to the style engine of the one it is in.
+    if (m_impl->timing_rows_are_dirty)
+        new_document.note_dirty_animation_timing_rows({}, static_cast<DOM::Element&>(*this));
 }
 
 void Animatable::cancel_css_animations_and_transitions()
@@ -281,7 +284,7 @@ void Animatable::cancel_css_animations_and_transitions()
     for (auto& animation : animations_to_cancel)
         animation->cancel(Animation::ShouldInvalidate::No);
 
-    publish_animation_timing_rows();
+    invalidate_animation_timing_rows();
 }
 
 // The longhands the element's installed style gives a matching transition-property entry. The
@@ -430,6 +433,16 @@ void Animatable::set_css_defined_animations(Optional<CSS::PseudoElement> pseudo_
     //     is one flag for all of them.
     if (!animations.is_empty())
         impl.has_css_defined_animations = true;
+    // A timing row says whether its animation's owning element lists it (see publish_animation_timing_rows()), so the
+    // rows of every animation the list named or names move with it.
+    auto invalidate_style_timing_rows_of = [](Vector<GC::Ref<CSS::CSSAnimation>> const* list) {
+        if (!list)
+            return;
+        for (auto const& animation : *list)
+            animation->invalidate_style_timing_row();
+    };
+    invalidate_style_timing_rows_of(impl.css_defined_animations[index].ptr());
+    invalidate_style_timing_rows_of(&animations);
     impl.css_defined_animations[index] = make<Vector<GC::Ref<CSS::CSSAnimation>>>(move(animations));
     publish_css_defined_animations(index);
 }
@@ -465,19 +478,38 @@ void Animatable::publish_css_defined_animations(size_t index)
 // list. A style change can cancel and restart a transition any number of times before that frame, and every style
 // update would otherwise republish and redescribe each of the dead ones. A CSS animation stays, as the next plan of the
 // element that lists it can play it again.
+//
+// NB: The rows are published again when an animation's timing moves, not when its timeline's time does. On a timeline
+//     whose time only increases, an animation that is not relevant stays so until its timing moves. On any other one
+//     it can become relevant again, so it keeps its row until it leaves.
 static bool is_leaving_its_target(Animation const& animation)
 {
-    return animation.disassociation_from_target_pending() && !is<CSS::CSSAnimation>(animation) && !animation.is_relevant();
+    if (!animation.disassociation_from_target_pending() || is<CSS::CSSAnimation>(animation))
+        return false;
+    if (auto timeline = animation.timeline(); timeline && !timeline->is_monotonically_increasing())
+        return false;
+    return !animation.is_relevant();
+}
+
+void Animatable::invalidate_animation_timing_rows()
+{
+    auto& impl = ensure_impl();
+    if (exchange(impl.timing_rows_are_dirty, true))
+        return;
+    // NB: Every Animatable is an Element.
+    auto& element = static_cast<DOM::Element&>(*this);
+    element.document().note_dirty_animation_timing_rows({}, element);
 }
 
 // Which of the animations an element holds are relevant is a question about the WAAPI timing
 // model, not about the GC heap: it is answered from the animation's own timing and the current time
 // of its timeline. Publish the timing, once per list, so the style stage can answer it itself.
-void Animatable::publish_animation_timing_rows()
+void Animatable::publish_animation_timing_rows(Badge<DOM::Document>)
 {
-    // NB: Every Animatable is an Element, and every style update asks this of every animated one, so this does not
-    //     pay for a cross-cast to learn it.
+    // NB: Every Animatable is an Element.
     auto* element = static_cast<DOM::Element*>(this);
+    if (m_impl)
+        m_impl->timing_rows_are_dirty = false;
 
     auto slot_of = [](KeyframeEffect const& effect) {
         auto pseudo_element = effect.pseudo_element_type();
@@ -665,8 +697,17 @@ void Animatable::publish_animation_timing_rows()
 
 void Animatable::note_animation_timing_rows_identity_changed()
 {
-    if (m_impl)
-        m_impl->published_timing_rows_are_stale = true;
+    if (!m_impl)
+        return;
+    m_impl->published_timing_rows_are_stale = true;
+    invalidate_animation_timing_rows();
+    // The row of an animation this element owns names it by its style node, whichever element the animation targets.
+    for (auto const& animations : m_impl->css_defined_animations) {
+        if (!animations)
+            continue;
+        for (auto const& animation : *animations)
+            animation->invalidate_style_timing_row();
+    }
 }
 
 Animatable::AnimationTimingRowCounters Animatable::animation_timing_row_counters()

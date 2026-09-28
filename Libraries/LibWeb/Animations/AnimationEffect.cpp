@@ -309,6 +309,13 @@ void AnimationEffect::normalize_specified_timing()
             m_iteration_duration = TimeValue { TimeValue::Type::Milliseconds, m_specified_iteration_duration.get<double>() };
         }
     }
+    timing_changed();
+}
+
+void AnimationEffect::timing_changed()
+{
+    if (m_associated_animation)
+        m_associated_animation->invalidate_style_timing_row();
 }
 
 // https://www.w3.org/TR/web-animations-1/#dom-animationeffect-updatetiming
@@ -1065,7 +1072,7 @@ void AnimationUpdateContext::publish_animation_inputs_before_sample(DOM::Element
 {
     auto& document = element.document();
     if (&document == s_document_with_open_batch_publication && s_open_batch_publication_published) {
-        element.publish_animation_timing_rows();
+        document.publish_dirty_animation_timing_rows();
         return;
     }
     document.publish_animation_environment_for_style_update();
@@ -1119,20 +1126,11 @@ AnimationUpdateContext::~AnimationUpdateContext()
     // Building the overlay below is a style computation, and it samples each effect from the timing
     // the document published rather than from the effect. Whatever this update moved - a timeline
     // that ticked, a start time a pending task committed, an effect script detached from its
-    // animation - moved it after the last publication, so publish again here, the last moment
-    // before the stage reads.
-    if (!elements.is_empty()) {
-        auto& document = elements.begin()->key.element().document();
-        if (&document == s_document_with_open_batch_publication && s_open_batch_publication_published) {
-            for (auto& it : elements)
-                it.key.element().publish_animation_timing_rows();
-        } else {
-            publish_animation_inputs_before_sample(elements.begin()->key.element());
-        }
-    }
-
+    // animation - moved it after the last publication, so what moved is published here, the last
+    // moment before the stage reads.
     if (elements.is_empty())
         return;
+    publish_animation_inputs_before_sample(elements.begin()->key.element());
     if (drain_scope) {
         install_engine_samples(*drain_scope, elements);
         return;

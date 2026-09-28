@@ -1114,8 +1114,12 @@ public:
 
     u32 allocate_animation_timeline_identity() { return ++m_next_animation_timeline_identity; }
     // Publish what the style stage needs to know about animation timing: the current time of every
-    // timeline, and the timing of every animation an element holds a keyframe effect for.
+    // timeline, and the timing rows of every element whose animations moved since it last published.
     void publish_animation_environment_for_style_update();
+    // The elements whose timing rows moved since they were last published. Taking them publishes each
+    // and leaves none, so a publication costs what moved, never every animated element.
+    void publish_dirty_animation_timing_rows();
+    void note_dirty_animation_timing_rows(Badge<Animations::Animatable>, Element& element) { m_elements_with_dirty_animation_timing_rows.append(element); }
 
     void associate_with_timeline(GC::Ref<Animations::AnimationTimeline>);
     void disassociate_with_timeline(GC::Ref<Animations::AnimationTimeline>);
@@ -2103,6 +2107,7 @@ private:
     // NB: Weak so the document does not unnecessarily keep animations alive. Note that this also includes animations
     //     associated with elements in shadow trees so differs from getAnimations()
     GC::WeakHashSet<Animations::Animation> m_associated_animations;
+    Vector<GC::Ref<Element>> m_elements_with_dirty_animation_timing_rows;
 
     // https://www.w3.org/TR/web-animations-1/#document-default-document-timeline
     GC::Ptr<Animations::DocumentTimeline> m_default_timeline;

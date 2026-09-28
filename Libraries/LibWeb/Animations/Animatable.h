@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include <AK/Badge.h>
 #include <AK/FlyString.h>
 #include <AK/HashMap.h>
 #include <AK/Utf16FlyString.h>
@@ -60,9 +61,11 @@ public:
     void cancel_css_animations_and_transitions();
 
     // The timing of every animation this element holds a keyframe effect for, which is what the
-    // style stage decides relevance from. Published whole per animation list, since any of it can
-    // have moved by the time the stage looks, and only when it has.
-    void publish_animation_timing_rows();
+    // style stage decides relevance from. Everything a row is built from moves through
+    // invalidate_animation_timing_rows(), which queues the element on its document, and the
+    // document publishes the elements it took off that queue (Document::publish_dirty_animation_timing_rows()).
+    void invalidate_animation_timing_rows();
+    void publish_animation_timing_rows(Badge<DOM::Document>);
     // The style engine holds nothing this element published under an identity it no longer has.
     void note_animation_timing_rows_identity_changed();
 
@@ -112,6 +115,8 @@ private:
         Vector<PublishedTimingRows> published_timing_rows;
         // The element's style node changed since the lists above were published.
         bool published_timing_rows_are_stale { false };
+        // The element is queued on its document to publish its timing rows.
+        bool timing_rows_are_dirty { false };
         bool is_sorted_by_composite_order { true };
         bool has_css_defined_animations { false };
 

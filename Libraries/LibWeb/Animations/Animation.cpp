@@ -111,6 +111,7 @@ void Animation::set_effect(GC::Ptr<AnimationEffect> new_effect, ShouldInvalidate
     // 7. Run the procedure to update an animation’s finished state for animation with the did seek flag set to false,
     //    and the synchronously notify flag set to false.
     update_finished_state(DidSeek::No, SynchronouslyNotify::No, should_invalidate);
+    invalidate_style_timing_row();
 }
 
 GC::Ptr<AnimationTimeline> Animation::timeline_for_bindings() const
@@ -129,6 +130,7 @@ void Animation::set_timeline(GC::Ptr<AnimationTimeline> new_timeline)
     // 2. If new timeline is the same object as old timeline, abort this procedure.
     if (new_timeline == old_timeline)
         return;
+    invalidate_style_timing_row();
 
     // 3. Let previous play state be animation’s play state.
     auto previous_play_state = play_state();
@@ -302,6 +304,7 @@ WebIDL::ExceptionOr<void> Animation::set_start_time_for_bindings(NullableCSSNumb
     // AD-HOC: The validate_a_css_numberish_time throws on validation failure which is handled by the TRY() macro so
     //         there is no need to assign the `valid start time` variable here.
     auto new_start_time = TRY(validate_a_css_numberish_time(raw_new_start_time));
+    invalidate_style_timing_row();
 
     // 3. Set auto align start time to false.
     m_auto_align_start_time = false;
@@ -385,13 +388,16 @@ void Animation::calculate_auto_aligned_start_time()
     auto end_offset = TimeValue { TimeValue::Type::Percentage, 100 };
 
     // 7. Set start time to start offset if effective playback rate ≥ 0, and end offset otherwise.
-    if (effective_playback_rate() >= 0.0)
-        m_start_time = start_offset;
-    else
-        m_start_time = end_offset;
+    auto start_time = effective_playback_rate() >= 0.0 ? start_offset : end_offset;
+
+    // NB: Every update of a progress-based timeline runs this, and once the start time is aligned it moves nothing.
+    if (m_start_time == start_time && !m_hold_time.has_value())
+        return;
+    m_start_time = start_time;
 
     // 8. Clear hold time.
     m_hold_time = {};
+    invalidate_style_timing_row();
 }
 
 // https://www.w3.org/TR/web-animations-1/#animation-current-time
@@ -443,6 +449,7 @@ WebIDL::ExceptionOr<void> Animation::set_current_time_for_bindings(NullableCSSNu
     // AD-HOC: We validate here instead of within silently_set_current_time so we have access to the `TimeValue`
     //         value within this function.
     auto seek_time = TRY(validate_a_css_numberish_time(raw_seek_time));
+    invalidate_style_timing_row();
 
     // 1. Run the steps to silently set the current time of animation to seek time.
     TRY(silently_set_current_time(seek_time));
@@ -478,6 +485,7 @@ WebIDL::ExceptionOr<void> Animation::set_current_time_for_bindings(NullableCSSNu
 WebIDL::ExceptionOr<void> Animation::set_playback_rate(double new_playback_rate)
 {
     // Setting this attribute follows the procedure to set the playback rate of this object to the new value.
+    invalidate_style_timing_row();
 
     // 1. Clear any pending playback rate on animation.
     m_pending_playback_rate = {};
@@ -640,6 +648,7 @@ bool Animation::is_replaceable() const
 
 void Animation::set_replace_state(AnimationReplaceState value)
 {
+    invalidate_style_timing_row();
     if (value == AnimationReplaceState::Removed) {
         // Remove the associated effect from its target, if applicable
         if (m_effect && m_effect->target())
@@ -703,6 +712,7 @@ void Animation::cancel(ShouldInvalidate should_invalidate)
     //       style computation is already updating the animation effect stack.
 
     auto& realm = HTML::relevant_realm(relevant_global_object());
+    invalidate_style_timing_row();
 
     // 1. If animation’s play state is not idle, perform the following steps:
     if (play_state() != AnimationPlayState::Idle) {
@@ -779,6 +789,7 @@ WebIDL::ExceptionOr<void> Animation::finish()
         return WebIDL::InvalidStateError::create("Animation with a playback rate of 0 cannot be finished"_utf16);
     if (effective_playback_rate > 0.0 && isinf(associated_effect_end().value))
         return WebIDL::InvalidStateError::create("Animation with no end cannot be finished"_utf16);
+    invalidate_style_timing_row();
 
     // 2. Apply any pending playback rate to animation.
     apply_any_pending_playback_rate();
@@ -846,6 +857,8 @@ WebIDL::ExceptionOr<void> Animation::play(ShouldInvalidate should_invalidate)
 // https://drafts.csswg.org/web-animations-2/#play-an-animation
 WebIDL::ExceptionOr<void> Animation::play_an_animation(AutoRewind auto_rewind, ShouldInvalidate should_invalidate)
 {
+    invalidate_style_timing_row();
+
     // 1. Let aborted pause be a boolean flag that is true if animation has a pending pause task, and false otherwise.
     auto aborted_pause = m_pending_pause_task == TaskState::Scheduled;
 
@@ -955,6 +968,7 @@ WebIDL::ExceptionOr<void> Animation::play_an_animation(AutoRewind auto_rewind, S
 void Animation::disassociate_from_target_if_inert()
 {
     m_disassociation_from_target_pending = false;
+    invalidate_style_timing_row();
     // Script may have revived the animation since the disassociation was scheduled.
     if (!m_effect || !m_effect->target() || pending() || is_relevant())
         return;
@@ -974,6 +988,25 @@ void Animation::did_associate_with_target()
     schedule_disassociation_from_target();
 }
 
+void Animation::schedule_disassociation_from_target()
+{
+    if (exchange(m_disassociation_from_target_pending, true))
+        return;
+    invalidate_style_timing_row();
+}
+
+void Animation::invalidate_style_timing_row()
+{
+    if (auto target = m_effect ? m_effect->target() : nullptr)
+        target->invalidate_animation_timing_rows();
+}
+
+void Animation::set_owning_element(Optional<DOM::AbstractElement>&& owning_element)
+{
+    m_owning_element = move(owning_element);
+    invalidate_style_timing_row();
+}
+
 // https://www.w3.org/TR/web-animations-1/#dom-animation-pause
 WebIDL::ExceptionOr<void> Animation::pause()
 {
@@ -984,6 +1017,7 @@ WebIDL::ExceptionOr<void> Animation::pause()
     // 2. If the play state of animation is paused, abort these steps.
     if (play_state() == AnimationPlayState::Paused)
         return {};
+    invalidate_style_timing_row();
 
     // 3. Let seek time be a time value that is initially unresolved.
     Optional<TimeValue> seek_time;
@@ -1062,6 +1096,7 @@ WebIDL::ExceptionOr<void> Animation::update_playback_rate(double new_playback_ra
     //       following logic, we want to immediately apply the pending playback rate of animation if it is currently
     //       finished regardless of whether or not it will still be finished after we apply the pending playback rate.
     auto previous_play_state = play_state();
+    invalidate_style_timing_row();
 
     // 2. Let animation’s pending playback rate be new playback rate.
     m_pending_playback_rate = new_playback_rate;
@@ -1126,6 +1161,7 @@ WebIDL::ExceptionOr<void> Animation::reverse()
     //    "InvalidStateError" DOMException and abort these steps.
     if (!m_timeline || m_timeline->is_inactive())
         return WebIDL::InvalidStateError::create("Cannot reverse an animation with an inactive timeline"_utf16);
+    invalidate_style_timing_row();
 
     // 2. Let original pending playback rate be animation’s pending playback rate.
     auto original_pending_playback_rate = m_pending_playback_rate;
@@ -1280,6 +1316,7 @@ void Animation::update()
 
 void Animation::effect_timing_changed(Badge<AnimationEffect>)
 {
+    invalidate_style_timing_row();
     update_finished_state(DidSeek::No, SynchronouslyNotify::Yes);
 }
 
@@ -1475,6 +1512,11 @@ WebIDL::ExceptionOr<void> Animation::silently_set_current_time(Optional<TimeValu
 void Animation::update_finished_state(DidSeek did_seek, SynchronouslyNotify synchronously_notify, ShouldInvalidate should_invalidate, Optional<TimeValue> observed_current_time)
 {
     auto& realm = HTML::relevant_realm(relevant_global_object());
+    // NB: Every animation frame runs this for every running animation, and it rarely moves anything the target's
+    //     timing rows read, so it only invalidates them when it does.
+    auto const start_time = m_start_time;
+    auto const hold_time = m_hold_time;
+    auto const was_finished = m_is_finished;
 
     // 1. Let the unconstrained current time be the result of calculating the current time substituting an unresolved
     //    time value for the hold time if did seek is false. If did seek is true, the unconstrained current time is
@@ -1559,6 +1601,7 @@ void Animation::update_finished_state(DidSeek did_seek, SynchronouslyNotify sync
             // 2. Resolve animation’s current finished promise object with animation.
             Bindings::resolve_animation_promise(current_finished_promise(), *this);
             m_is_finished = true;
+            invalidate_style_timing_row();
 
             // 3. Create an AnimationPlaybackEvent, finishEvent.
             // 4. Set finishEvent’s type attribute to finish.
@@ -1641,6 +1684,9 @@ void Animation::update_finished_state(DidSeek did_seek, SynchronouslyNotify sync
     if (current_finished_state && !pending() && !is_relevant())
         schedule_disassociation_from_target();
 
+    if (m_start_time != start_time || m_hold_time != hold_time || m_is_finished != was_finished)
+        invalidate_style_timing_row();
+
     if (should_invalidate == ShouldInvalidate::Yes)
         invalidate_effect();
 }
@@ -1696,6 +1742,8 @@ bool Animation::is_ready() const
 // Step 12 of https://www.w3.org/TR/web-animations-1/#playing-an-animation-section
 void Animation::run_pending_play_task()
 {
+    invalidate_style_timing_row();
+
     // 1. Assert that at least one of animation’s start time or hold time is resolved.
     VERIFY(m_start_time.has_value() || m_hold_time.has_value());
 
@@ -1786,6 +1834,8 @@ bool Animation::is_ready_to_run_pending_pause_task() const
 // Step 10 of https://www.w3.org/TR/web-animations-1/#pause-an-animation
 void Animation::run_pending_pause_task()
 {
+    invalidate_style_timing_row();
+
     // 1. Let ready time be the time value of the timeline associated with animation at the moment when the user agent
     //    completed processing necessary to suspend playback of animation’s associated effect.
     // FIXME: We can get a more accurate time here if we record the actual instant the above is true rather than waiting
@@ -1865,12 +1915,14 @@ void Animation::set_provisional_effect(GC::Ref<AnimationEffect> effect)
     VERIFY(!effect->associated_animation());
     effect->set_associated_animation(this);
     m_effect = effect;
+    invalidate_style_timing_row();
 }
 
 void Animation::discard_provisional_effect()
 {
     VERIFY(m_effect);
     VERIFY(m_effect->associated_animation() == GC::Ptr<Animation> { *this });
+    invalidate_style_timing_row();
     m_effect->set_associated_animation({});
     m_effect = nullptr;
 }

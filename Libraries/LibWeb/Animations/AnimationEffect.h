@@ -112,22 +112,42 @@ public:
     void set_specified_end_delay(double end_delay) { m_specified_end_delay = end_delay; }
 
     Bindings::FillMode fill_mode() const { return m_fill_mode; }
-    void set_fill_mode(Bindings::FillMode fill_mode) { m_fill_mode = fill_mode; }
+    void set_fill_mode(Bindings::FillMode fill_mode)
+    {
+        m_fill_mode = fill_mode;
+        timing_changed();
+    }
 
     double iteration_start() const { return m_iteration_start; }
-    void set_iteration_start(double iteration_start) { m_iteration_start = iteration_start; }
+    void set_iteration_start(double iteration_start)
+    {
+        m_iteration_start = iteration_start;
+        timing_changed();
+    }
 
     double iteration_count() const { return m_iteration_count; }
-    void set_iteration_count(double iteration_count) { m_iteration_count = iteration_count; }
+    void set_iteration_count(double iteration_count)
+    {
+        m_iteration_count = iteration_count;
+        timing_changed();
+    }
 
     TimeValue const& iteration_duration() const { return m_iteration_duration; }
     void set_specified_iteration_duration(Variant<double, Utf16String> iteration_duration) { m_specified_iteration_duration = move(iteration_duration); }
 
     Bindings::PlaybackDirection playback_direction() const { return m_playback_direction; }
-    void set_playback_direction(Bindings::PlaybackDirection playback_direction) { m_playback_direction = playback_direction; }
+    void set_playback_direction(Bindings::PlaybackDirection playback_direction)
+    {
+        m_playback_direction = playback_direction;
+        timing_changed();
+    }
 
     CSS::EasingFunction const& timing_function() const { return m_timing_function; }
-    void set_timing_function(CSS::EasingFunction value) { m_timing_function = move(value); }
+    void set_timing_function(CSS::EasingFunction value)
+    {
+        m_timing_function = move(value);
+        timing_changed();
+    }
 
     GC::Ptr<Animation> associated_animation() const { return m_associated_animation; }
     void set_associated_animation(GC::Ptr<Animation> value);
@@ -189,6 +209,8 @@ protected:
 
     void update_style_if_needed() const;
     void invalidate_effect();
+    // The timing rows the target publishes read the effect's normalized timing, so every write of it goes through here.
+    void timing_changed();
 
     virtual void visit_edges(GC::Cell::Visitor&) override;
     virtual GC::Ptr<Bindings::Wrappable> relevant_global_impl() const override;

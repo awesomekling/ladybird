@@ -983,6 +983,7 @@ void StyleEngine::submit_recorded_input(RecordedInputGoesTo goes_to)
     if (m_style_computer) {
         take_in_pending_style_arrivals(m_style_computer->document());
         record_changed_node_lists(m_style_computer->document(), *this);
+        m_style_computer->document().publish_dirty_animation_timing_rows();
     }
     StyleInputScope const input { *this };
     if (m_style_computer)
