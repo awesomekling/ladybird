@@ -163,6 +163,8 @@ void PageClient::visit_edges(JS::Cell::Visitor& visitor)
         visitor.visit(promise.value);
     for (auto& check : m_pending_unload_checks)
         visitor.visit(check.value);
+    for (auto& navigable : m_child_navigables_pending_destruction)
+        visitor.visit(navigable.value);
     for (auto& controller : m_download_controllers)
         visitor.visit(controller.value);
     for (auto& reader : m_download_readers)
@@ -1604,7 +1606,19 @@ void PageClient::page_did_request_history_operation(Web::HTML::CrossProcessId op
 
 void PageClient::page_did_request_child_navigable_unload(Web::HTML::CrossProcessId navigable_id)
 {
+    // The child has already been marked as destroyed, so a lookup through the page no longer finds it.
+    GC::Ptr<Web::HTML::Navigable> navigable = Web::HTML::local_navigable_with_id(navigable_id);
+    if (!navigable || &navigable->page() != &page())
+        navigable = Web::HTML::remote_navigable_with_id(page(), navigable_id);
+    VERIFY(navigable);
+    m_child_navigables_pending_destruction.set(navigable_id, *navigable);
     client().async_request_child_navigable_unload(m_id, navigable_id);
+}
+
+void PageClient::continue_child_navigable_destruction(Web::HTML::CrossProcessId navigable_id)
+{
+    if (auto navigable = m_child_navigables_pending_destruction.take(navigable_id); navigable.has_value())
+        Web::HTML::NavigableContainer::continue_destroying_the_child_navigable(*navigable);
 }
 
 void PageClient::page_did_request_remote_document_abort(Web::HTML::CrossProcessId navigable_id)
