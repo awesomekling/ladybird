@@ -25,9 +25,6 @@ pub(crate) enum LayoutChange {
         node: NodeSlotId,
         propagate_through_ancestors: bool,
     },
-    SetNeedsOwnGeometryUpdate {
-        node: NodeSlotId,
-    },
     /// The box may be a partial relayout boundary, which the owner decides as it takes the change in: a boundary lays
     /// out alone, as `update` says.
     SetNeedsLayoutUpdateOfPossibleBoundary {
@@ -173,11 +170,6 @@ impl LayoutChange {
             } => {
                 if arena.slot_is_live(node) {
                     arena.set_needs_layout_update(node, propagate_through_ancestors);
-                }
-            }
-            Self::SetNeedsOwnGeometryUpdate { node } => {
-                if arena.slot_is_live(node) {
-                    arena.set_node_flag(node, NodeFlag::NeedsOwnGeometryUpdate, true);
                 }
             }
             Self::SetNeedsLayoutUpdateOfPossibleBoundary { node, update } => {
@@ -363,7 +355,6 @@ impl LayoutChange {
             | Self::SetNeedsLayoutUpdateOfPossibleBoundary { .. }
             | Self::SetNodeNeedsCompositorAnimationFrame { .. }
             | Self::SetNeedsLayoutUpdate { .. }
-            | Self::SetNeedsOwnGeometryUpdate { .. }
             | Self::SetNeedsFullLayoutTreeUpdate(_)
             | Self::ResetCachedIntrinsicSizesOfSelfAndAncestors { .. }
             | Self::DeferChildListInsertionLayoutUpdate { .. }
