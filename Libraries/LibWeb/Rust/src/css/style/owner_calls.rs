@@ -13,9 +13,8 @@
 
 use super::StyleEngine;
 use super::bridge::{
-    BoundaryRead, BoundaryWrite, FfiAppliedStyleReaction, FfiElementDeclarationKind, FfiNativeRuleTarget,
-    FfiPublishedAnimationCustomDeclaration, FfiPublishedAnimationDeclaration, FfiPublishedAnimationEffect,
-    FfiPublishedAnimationKeyframe, FfiPublishedLinearEasingPoint, FfiRuleMatch, InputForPass,
+    BoundaryRead, BoundaryWrite, FfiAppliedStyleReaction, FfiElementDeclarationKind, FfiNativeRuleTarget, FfiRuleMatch,
+    InputForPass,
 };
 use super::engine_home::{PendingFacts, StyleEngineHandle, StyleEngineInputHandle};
 use super::inputs::HandedCustomPropertyEnvironment;
@@ -76,6 +75,12 @@ pub(crate) enum EngineChange {
     TransitionStepTakenByHost { node: StyleNodeID, pseudo_kind: Option<u8> },
     /// The rules the main thread compiled of a sheet, and the selectors it replaced, which the engine publishes.
     CompileRules(Box<crate::css::rule::compilation::CompiledRules>),
+    /// The `@keyframes` one style scope defines now, in place of the ones it defined before.
+    SetTreeScopeAnimationKeyframes {
+        tree_scope: super::tree::TreeScopeID,
+        shadow_root_identity: usize,
+        keyframes: super::animations::TreeScopeKeyframes,
+    },
     /// The native rules of `identities` left their sheet, in the order the engine removes them: each with what
     /// removing the ones before it left, where it still holds it.
     RemoveNativeRules(Box<[u64]>),
@@ -148,6 +153,7 @@ impl EngineChange {
             | Self::PublishFontFaceSnapshot { .. }
             | Self::RowSampledTakenByHost(_)
             | Self::TransitionStepTakenByHost { .. }
+            | Self::SetTreeScopeAnimationKeyframes { .. }
             | Self::ElementStyleInputAbsorbedByHost { .. }
             | Self::SetElementCustomPropertyData(..)
             | Self::SetPseudoElementCustomPropertyData(..)
@@ -272,6 +278,14 @@ impl EngineChange {
                 debug_assert!(added == sheet, "the engine numbers its sheets as the main thread does");
             }
             Self::CompileRules(compiled) => compiled.publish(engine),
+            Self::SetTreeScopeAnimationKeyframes {
+                tree_scope,
+                shadow_root_identity,
+                keyframes,
+            } => {
+                engine.set_tree_scope_animation_keyframes(tree_scope, shadow_root_identity, keyframes);
+                engine.count_animation_keyframe_scopes();
+            }
             Self::RemoveNativeRules(identities) => {
                 for identity in identities {
                     if let Some(rule) = engine.native_rule_id(identity) {
@@ -334,10 +348,6 @@ impl StyleChange {
 /// it reads and writes, and the owner answers it with that entry's body.
 pub(crate) enum StyleQuery {
     /// Gives up the `@keyframes` row of a shadow root's scope, which is on its way out.
-    UnpublishTreeScopeAnimationKeyframes {
-        tree_scope: u32,
-        shadow_root_identity: usize,
-    },
     /// A read the boundary specification generates.
     Boundary(BoundaryRead),
     /// A style read the host answers synchronously, as a CSSOM read does.
@@ -424,26 +434,6 @@ pub(crate) enum StyleQuery {
         node: u32,
         pseudo_kind: u8,
         environment: u64,
-    },
-    SetTreeScopeAnimationKeyframes {
-        tree_scope: u32,
-        shadow_root_identity: usize,
-        name_lengths: *const u32,
-        name_units: *const u16,
-        name_unit_count: usize,
-        count: usize,
-        descriptions: *const FfiPublishedAnimationEffect,
-        description_count: usize,
-        keyframes: *const FfiPublishedAnimationKeyframe,
-        keyframe_count: usize,
-        declarations: *const FfiPublishedAnimationDeclaration,
-        declaration_count: usize,
-        custom_declarations: *const FfiPublishedAnimationCustomDeclaration,
-        custom_declaration_count: usize,
-        linear_points: *const FfiPublishedLinearEasingPoint,
-        linear_point_count: usize,
-        base_url_bytes: *const u8,
-        base_url_byte_count: usize,
     },
     DecideTransitionStepForInstalledRecord {
         node: u32,
@@ -672,17 +662,6 @@ impl StyleQuery {
     /// Answers the query from `engine`, on the owner.
     fn answer(self, engine: &mut StyleEngine) -> StyleAnswer {
         match self {
-            Self::UnpublishTreeScopeAnimationKeyframes {
-                tree_scope,
-                shadow_root_identity,
-            } => {
-                super::animations::owner_unpublish_tree_scope_animation_keyframes(
-                    engine,
-                    tree_scope,
-                    shadow_root_identity,
-                );
-                StyleAnswer::None
-            }
             Self::Boundary(read) => read.answer(engine).into(),
             // A read answered where there is no owner runs as the owner would run it: on the stage thread, whose
             // stack a style computation needs.
@@ -825,51 +804,6 @@ impl StyleQuery {
                     environment,
                 )
             }),
-            Self::SetTreeScopeAnimationKeyframes {
-                tree_scope,
-                shadow_root_identity,
-                name_lengths,
-                name_units,
-                name_unit_count,
-                count,
-                descriptions,
-                description_count,
-                keyframes,
-                keyframe_count,
-                declarations,
-                declaration_count,
-                custom_declarations,
-                custom_declaration_count,
-                linear_points,
-                linear_point_count,
-                base_url_bytes,
-                base_url_byte_count,
-            } => {
-                unsafe {
-                    crate::css::style::bridge::owner_set_tree_scope_animation_keyframes(
-                        engine,
-                        tree_scope,
-                        shadow_root_identity,
-                        name_lengths,
-                        name_units,
-                        name_unit_count,
-                        count,
-                        descriptions,
-                        description_count,
-                        keyframes,
-                        keyframe_count,
-                        declarations,
-                        declaration_count,
-                        custom_declarations,
-                        custom_declaration_count,
-                        linear_points,
-                        linear_point_count,
-                        base_url_bytes,
-                        base_url_byte_count,
-                    );
-                };
-                StyleAnswer::None
-            }
             Self::DecideTransitionStepForInstalledRecord {
                 node,
                 pseudo_kind,
@@ -1069,11 +1003,22 @@ pub(crate) fn ask(engine: StyleEngineHandle, entry: &'static str, query: StyleQu
     ask_document(engine.document(), entry, query)
 }
 
-/// Like [`ask`], for a garbage collection's finalizer, which must not wait for the engine: the main thread may
-/// hold the loan that would send it home. The owner, which answers, never waits for the main thread.
-pub(crate) fn ask_from_finalizer(engine: StyleEngineHandle, entry: &'static str, query: StyleQuery) -> StyleAnswer {
+/// Leaves the change that gives up the `@keyframes` row of a shadow root's scope, from a garbage collection's
+/// finalizer, which must not wait for the engine (the main thread may hold the loan that would send it home) and must
+/// not borrow the home's answers (the collection may run while the main thread does). The change leaves nothing the
+/// answers follow. `entry` names the door the main thread took, for the style seal.
+pub(crate) fn unpublish_tree_scope_keyframes_from_finalizer(
+    engine: StyleEngineInputHandle,
+    entry: &'static str,
+    tree_scope: super::tree::TreeScopeID,
+    shadow_root_identity: usize,
+) {
     super::seal::note_engine_call(entry);
-    ask_document(engine.document(), entry, query)
+    engine.send_unfollowed(StyleChange::Engine(EngineChange::SetTreeScopeAnimationKeyframes {
+        tree_scope,
+        shadow_root_identity,
+        keyframes: super::animations::TreeScopeKeyframes::none(),
+    }));
 }
 
 /// Like [`ask`], for a read of what a published record holds only, which goes on while the install of the batch a
