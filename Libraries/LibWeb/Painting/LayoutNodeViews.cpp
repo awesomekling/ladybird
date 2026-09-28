@@ -69,21 +69,6 @@ BoxModelMetrics box_model(Layout::Node const& node)
     return box_model(box_slot(node));
 }
 
-CSSPixels border_box_width(Layout::Node const& node)
-{
-    return border_box_width(box_slot(node));
-}
-
-CSSPixels border_box_height(Layout::Node const& node)
-{
-    return border_box_height(box_slot(node));
-}
-
-bool has_scrollable_overflow(Layout::Node const& node)
-{
-    return has_scrollable_overflow(box_slot(node));
-}
-
 Optional<CSSPixelRect> scrollable_overflow_rect(Layout::Node const& node)
 {
     return scrollable_overflow_rect(box_slot(node));
@@ -94,49 +79,9 @@ bool is_positioned(Layout::Node const& node)
     return is_positioned(box_slot(node));
 }
 
-CSSPixelSize svg_viewport_size(Layout::Node const& node)
-{
-    return svg_viewport_size(box_slot(node));
-}
-
-Optional<Gfx::AffineTransform> svg_viewport_transform(Layout::Node const& node)
-{
-    return svg_viewport_transform(box_slot(node));
-}
-
 CSSPixelRect transform_reference_box(Layout::Node const& node)
 {
     return transform_reference_box(box_slot(node));
-}
-
-Vector<CSSPixelRect> client_rects(Layout::Node const& node, Layout::RustFFI::FfiRectToViewportTransform const& rect_to_viewport_transform)
-{
-    return client_rects(box_slot(node), rect_to_viewport_transform);
-}
-
-CSSPixelRect bounding_client_rect(Layout::Node const& node, Layout::RustFFI::FfiRectToViewportTransform const& rect_to_viewport_transform)
-{
-    return bounding_client_rect(box_slot(node), rect_to_viewport_transform);
-}
-
-bool has_stacking_context(Layout::Node const& node)
-{
-    return has_stacking_context(box_slot(node));
-}
-
-bool has_accumulated_visual_context(Layout::Node const& node)
-{
-    return has_accumulated_visual_context(box_slot(node));
-}
-
-Compositing::ContextRef accumulated_visual_context(Layout::Node const& node)
-{
-    return accumulated_visual_context(box_slot(node));
-}
-
-Compositing::ContextRef accumulated_visual_context_for_descendants(Layout::Node const& node)
-{
-    return accumulated_visual_context_for_descendants(box_slot(node));
 }
 
 Compositing::SpatialNodeIndex own_scroll_node_index(Layout::Node const& node)
@@ -159,11 +104,6 @@ CSSPixelPoint cumulative_scroll_compensation(Layout::Node const& node)
     return cumulative_scroll_compensation(box_slot(node));
 }
 
-Gfx::Path const* committed_svg_path(Layout::Node const& node)
-{
-    return committed_svg_path(box_slot(node));
-}
-
 CSS::RustStyleValueHandle used_value_for_grid_template(Layout::Node const& node, CSS::PropertyID property)
 {
     return used_value_for_grid_template(box_slot(node), property);
@@ -172,21 +112,6 @@ CSS::RustStyleValueHandle used_value_for_grid_template(Layout::Node const& node,
 bool is_navigable_container_viewport_paintable(Layout::Node const& node)
 {
     return is_navigable_container_viewport_paintable(box_slot(node));
-}
-
-bool is_viewport_paintable(Layout::Node const& node)
-{
-    return is_viewport_paintable(box_slot(node));
-}
-
-bool is_paintable_with_lines(Layout::Node const& node)
-{
-    return is_paintable_with_lines(box_slot(node));
-}
-
-bool is_svg_svg_paintable(Layout::Node const& node)
-{
-    return is_svg_svg_paintable(box_slot(node));
 }
 
 CSSPixelPoint box_type_agnostic_position(Layout::Node const& node)
@@ -199,24 +124,9 @@ CSSPixelPoint transform_to_local_coordinates(Layout::Node const& node, CSSPixelP
     return transform_to_local_coordinates(box_slot(node), position);
 }
 
-Optional<String> grid_layout_json(Layout::Node const& node, UniqueNodeID container_node_id)
-{
-    return grid_layout_json(box_slot(node), container_node_id);
-}
-
-Optional<String> flex_layout_json(Layout::Node const& node, UniqueNodeID container_node_id)
-{
-    return flex_layout_json(box_slot(node), container_node_id);
-}
-
 bool is_visible(Layout::Node const& node)
 {
     return is_visible(box_slot(node));
-}
-
-bool visible_for_hit_testing(Layout::Node const& node)
-{
-    return visible_for_hit_testing(box_slot(node));
 }
 
 CSS::Display display(Layout::Node const& node)
@@ -232,15 +142,6 @@ CSSPixelRect caret_rect_for_child_offset(Layout::Node const& block, size_t offse
 bool has_committed_box(Layout::Row const& row)
 {
     return has_committed_box(box_slot(row));
-}
-
-Layout::Node* layout_node_for_committed_slot(Layout::NodeArena& arena, Compositing::RustFFI::NodeSlotId slot)
-{
-    auto* document = arena.document();
-    if (!document)
-        return nullptr;
-    auto box = committed_box(*document, slot);
-    return box ? arena.node_if_live(box.slot()) : nullptr;
 }
 
 u64 committed_row_reset_version(Layout::NodeArena& arena, Compositing::RustFFI::NodeSlotId slot)
@@ -321,11 +222,6 @@ CSSPixelRect scroll_snapport_rect(Layout::Node const& node, CSSPixelRect scrollp
 WheelScrollableAxes wheel_scrollable_axes(Layout::Node const& node)
 {
     return wheel_scrollable_axes(box_slot(node));
-}
-
-bool could_be_scrolled_by_wheel_event(Layout::Node const& node)
-{
-    return could_be_scrolled_by_wheel_event(box_slot(node));
 }
 
 Optional<Compositing::AsyncScrollNodeStableID> async_scroll_node_stable_id(Layout::Node const& node)

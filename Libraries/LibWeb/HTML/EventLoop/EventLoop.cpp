@@ -1033,10 +1033,10 @@ bool EventLoop::run_rendering_update_from_step_16(Vector<GC::Ref<DOM::Document>>
             auto* document_element = document->document_element();
             if (document_element) {
                 for (auto box_slot : document->paint_state().boxes_with_auto_content_visibility()) {
-                    auto* layout_node = Painting::layout_node_for_committed_slot(document->layout_node_arena(), box_slot);
-                    if (!layout_node)
+                    auto box = Painting::committed_box(*document, box_slot);
+                    if (!box)
                         continue;
-                    auto* element = as_if<DOM::Element>(layout_node->dom_node());
+                    auto* element = as_if<DOM::Element>(box.dom_node().ptr());
                     if (!element)
                         continue;
 
