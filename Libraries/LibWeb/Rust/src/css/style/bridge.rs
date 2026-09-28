@@ -2002,56 +2002,12 @@ pub unsafe extern "C" fn style_engine_set_element_animation_effect_descriptions(
     base_url_bytes: *const u8,
     base_url_byte_count: usize,
 ) {
-    crate::css::style::owner_calls::ask(
-        engine.home(),
-        "style_engine_set_element_animation_effect_descriptions",
-        crate::css::style::owner_calls::StyleQuery::SetElementAnimationEffectDescriptions {
-            node,
-            slot,
-            effects,
-            effect_count,
-            keyframes,
-            keyframe_count,
-            declarations,
-            declaration_count,
-            custom_declarations,
-            custom_declaration_count,
-            linear_points,
-            linear_point_count,
-            base_url_bytes,
-            base_url_byte_count,
-        },
-    );
-}
-
-/// Answers [`style_engine_set_element_animation_effect_descriptions`] from `engine`, on the render owner.
-///
-/// # Safety
-///
-/// As for [`style_engine_set_element_animation_effect_descriptions`].
-#[allow(clippy::too_many_arguments)]
-pub(crate) unsafe fn owner_set_element_animation_effect_descriptions(
-    engine: &mut crate::css::style::StyleEngine,
-    node: u32,
-    slot: u8,
-    effects: *const FfiPublishedAnimationEffect,
-    effect_count: usize,
-    keyframes: *const FfiPublishedAnimationKeyframe,
-    keyframe_count: usize,
-    declarations: *const FfiPublishedAnimationDeclaration,
-    declaration_count: usize,
-    custom_declarations: *const FfiPublishedAnimationCustomDeclaration,
-    custom_declaration_count: usize,
-    linear_points: *const FfiPublishedLinearEasingPoint,
-    linear_point_count: usize,
-    base_url_bytes: *const u8,
-    base_url_byte_count: usize,
-) {
     let Some(node) = StyleNodeID::from_raw(node) else {
         return;
     };
-    let buffers = unsafe {
-        published_effect_buffers(
+    // SAFETY: Guaranteed by the caller. The effects take references of their own to the values they name.
+    let effects = unsafe {
+        crate::css::style::animations::build_published_effects(published_effect_buffers(
             effects,
             effect_count,
             keyframes,
@@ -2064,9 +2020,13 @@ pub(crate) unsafe fn owner_set_element_animation_effect_descriptions(
             linear_point_count,
             base_url_bytes,
             base_url_byte_count,
-        )
+        ))
     };
-    unsafe { engine.set_element_animation_effect_descriptions(node, slot, buffers) };
+    crate::css::style::owner_calls::send(
+        engine,
+        "style_engine_set_element_animation_effect_descriptions",
+        crate::css::style::owner_calls::EngineChange::SetElementAnimationEffectDescriptions { node, slot, effects },
+    );
 }
 
 /// Gather the flat buffers a list of effect descriptions travels in. An element's effects and the
@@ -2149,38 +2109,24 @@ pub unsafe extern "C" fn style_engine_set_element_transitions(
     transitions: *const FfiPublishedTransition,
     count: usize,
 ) {
-    crate::css::style::owner_calls::ask(
-        engine.home(),
-        "style_engine_set_element_transitions",
-        crate::css::style::owner_calls::StyleQuery::SetElementTransitions {
-            node,
-            slot,
-            transitions,
-            count,
-        },
-    );
-}
-
-/// Answers [`style_engine_set_element_transitions`] from `engine`, on the render owner.
-///
-/// # Safety
-///
-/// As for [`style_engine_set_element_transitions`].
-pub(crate) unsafe fn owner_set_element_transitions(
-    engine: &mut crate::css::style::StyleEngine,
-    node: u32,
-    slot: u8,
-    transitions: *const FfiPublishedTransition,
-    count: usize,
-) {
     let Some(node) = StyleNodeID::from_raw(node) else {
         return;
     };
     let transitions = match count {
         0 => &[][..],
+        // SAFETY: Guaranteed by the caller.
         _ => unsafe { std::slice::from_raw_parts(transitions, count) },
     };
-    unsafe { engine.set_element_transitions(node, slot, transitions) };
+    crate::css::style::owner_calls::send(
+        engine,
+        "style_engine_set_element_transitions",
+        crate::css::style::owner_calls::EngineChange::SetElementTransitions {
+            node,
+            slot,
+            // SAFETY: Guaranteed by the caller.
+            transitions: unsafe { super::transition_step::ElementTransitions::published(transitions) },
+        },
+    );
 }
 
 /// One property's decision in a transition step the pass decided: the action, as

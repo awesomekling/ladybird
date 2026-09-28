@@ -15,7 +15,7 @@ use super::StyleEngine;
 use super::bridge::{
     BoundaryRead, BoundaryWrite, FfiAppliedStyleReaction, FfiElementDeclarationKind, FfiNativeRuleTarget,
     FfiPublishedAnimationCustomDeclaration, FfiPublishedAnimationDeclaration, FfiPublishedAnimationEffect,
-    FfiPublishedAnimationKeyframe, FfiPublishedLinearEasingPoint, FfiPublishedTransition, FfiRuleMatch, InputForPass,
+    FfiPublishedAnimationKeyframe, FfiPublishedLinearEasingPoint, FfiRuleMatch, InputForPass,
 };
 use super::engine_home::{PendingFacts, StyleEngineHandle, StyleEngineInputHandle};
 use super::inputs::HandedCustomPropertyEnvironment;
@@ -71,6 +71,18 @@ pub(crate) enum EngineChange {
         style_record: u64,
         had_names: bool,
         has_names: bool,
+    },
+    /// The transitions one of an element's lists now holds.
+    SetElementTransitions {
+        node: StyleNodeID,
+        slot: super::animations::AnimationSlot,
+        transitions: Box<[super::transition_step::PublishedTransition]>,
+    },
+    /// The effects the host holds for one of an element's animation lists, in composite order.
+    SetElementAnimationEffectDescriptions {
+        node: StyleNodeID,
+        slot: super::animations::AnimationSlot,
+        effects: Vec<super::animations::PublishedEffect>,
     },
     /// The custom-property environment an element now holds, or that it holds none.
     SetElementCustomPropertyData(StyleNodeID, Option<HandedCustomPropertyEnvironment>),
@@ -132,7 +144,9 @@ impl EngineChange {
             | Self::SetElementCustomPropertyData(..)
             | Self::SetPseudoElementCustomPropertyData(..)
             | Self::AddSheet { .. }
-            | Self::RegisterAnchorNames { .. } => PendingFacts::NONE,
+            | Self::RegisterAnchorNames { .. }
+            | Self::SetElementTransitions { .. }
+            | Self::SetElementAnimationEffectDescriptions { .. } => PendingFacts::NONE,
             // What the host takes records the containers it reads, some to evaluate after layout.
             Self::ContainerEffectsTakenByHost(_) => PendingFacts::SIZE_CONTAINERS_AFTER_LAYOUT,
             // Only an element that loses its record may owe its resources an input.
@@ -242,6 +256,14 @@ impl EngineChange {
                     registered.had_names == had_names && registered.has_names == has_names,
                     "the main thread knows which elements register anchor names as the engine does"
                 );
+            }
+            Self::SetElementTransitions {
+                node,
+                slot,
+                transitions,
+            } => engine.set_element_transitions(node, slot, transitions),
+            Self::SetElementAnimationEffectDescriptions { node, slot, effects } => {
+                engine.set_element_animation_effect_descriptions(node, slot, effects);
             }
             Self::AddSheet { object, origin, sheet } => {
                 let added = engine.add_sheet(object, origin);
@@ -388,28 +410,6 @@ pub(crate) enum StyleQuery {
         node: u32,
         pseudo_kind: u8,
         environment: u64,
-    },
-    SetElementTransitions {
-        node: u32,
-        slot: u8,
-        transitions: *const FfiPublishedTransition,
-        count: usize,
-    },
-    SetElementAnimationEffectDescriptions {
-        node: u32,
-        slot: u8,
-        effects: *const FfiPublishedAnimationEffect,
-        effect_count: usize,
-        keyframes: *const FfiPublishedAnimationKeyframe,
-        keyframe_count: usize,
-        declarations: *const FfiPublishedAnimationDeclaration,
-        declaration_count: usize,
-        custom_declarations: *const FfiPublishedAnimationCustomDeclaration,
-        custom_declaration_count: usize,
-        linear_points: *const FfiPublishedLinearEasingPoint,
-        linear_point_count: usize,
-        base_url_bytes: *const u8,
-        base_url_byte_count: usize,
     },
     SetTreeScopeAnimationKeyframes {
         tree_scope: u32,
@@ -832,54 +832,6 @@ impl StyleQuery {
                     environment,
                 )
             }),
-            Self::SetElementTransitions {
-                node,
-                slot,
-                transitions,
-                count,
-            } => {
-                unsafe {
-                    crate::css::style::bridge::owner_set_element_transitions(engine, node, slot, transitions, count);
-                };
-                StyleAnswer::None
-            }
-            Self::SetElementAnimationEffectDescriptions {
-                node,
-                slot,
-                effects,
-                effect_count,
-                keyframes,
-                keyframe_count,
-                declarations,
-                declaration_count,
-                custom_declarations,
-                custom_declaration_count,
-                linear_points,
-                linear_point_count,
-                base_url_bytes,
-                base_url_byte_count,
-            } => {
-                unsafe {
-                    crate::css::style::bridge::owner_set_element_animation_effect_descriptions(
-                        engine,
-                        node,
-                        slot,
-                        effects,
-                        effect_count,
-                        keyframes,
-                        keyframe_count,
-                        declarations,
-                        declaration_count,
-                        custom_declarations,
-                        custom_declaration_count,
-                        linear_points,
-                        linear_point_count,
-                        base_url_bytes,
-                        base_url_byte_count,
-                    );
-                };
-                StyleAnswer::None
-            }
             Self::SetTreeScopeAnimationKeyframes {
                 tree_scope,
                 shadow_root_identity,

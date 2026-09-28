@@ -62,27 +62,18 @@ impl ElementTransitions {
         self.rows.keys().map(|(node, _)| *node)
     }
 
-    /// Replace one list. An empty list drops the row.
+    /// The transitions a list holds, as the engine keeps them, each with its own reference to the values it names.
     ///
     /// # Safety
     /// Every value must be a live style value the host holds a reference to for the duration of the
     /// call.
-    pub(crate) unsafe fn set(
-        &mut self,
-        node: StyleNodeID,
-        slot: AnimationSlot,
-        transitions: &[FfiPublishedTransition],
-    ) {
-        if transitions.is_empty() {
-            self.rows.remove(&(node, slot));
-            return;
-        }
+    pub(crate) unsafe fn published(transitions: &[FfiPublishedTransition]) -> Box<[PublishedTransition]> {
         let retain = |value: *const std::ffi::c_void| unsafe {
             RetainedStyleValueData::from_retained_pointer(crate::css::style_value::rust_style_value_retain(
                 value.cast(),
             ))
         };
-        let transitions = transitions
+        transitions
             .iter()
             .map(|transition| PublishedTransition {
                 property_id: transition.property_id,
@@ -95,7 +86,15 @@ impl ElementTransitions {
                 start_time: transition.start_time,
                 end_time: transition.end_time,
             })
-            .collect();
+            .collect()
+    }
+
+    /// Replace one list. An empty list drops the row.
+    pub(crate) fn set(&mut self, node: StyleNodeID, slot: AnimationSlot, transitions: Box<[PublishedTransition]>) {
+        if transitions.is_empty() {
+            self.rows.remove(&(node, slot));
+            return;
+        }
         self.rows.insert((node, slot), transitions);
     }
 
@@ -161,16 +160,13 @@ impl TransitionStepForHost {
 
 impl RetainedState {
     /// Replace the transitions one of an element's lists holds.
-    ///
-    /// # Safety
-    /// Every value must be a live style value for the duration of the call.
-    pub(crate) unsafe fn set_element_transitions(
+    pub(crate) fn set_element_transitions(
         &mut self,
         node: StyleNodeID,
         slot: AnimationSlot,
-        transitions: &[FfiPublishedTransition],
+        transitions: Box<[PublishedTransition]>,
     ) {
-        unsafe { self.element_transitions.set(node, slot, transitions) };
+        self.element_transitions.set(node, slot, transitions);
     }
 
     /// The transition step of an element whose row installs `installed_style_record` over
