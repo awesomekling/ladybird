@@ -365,6 +365,8 @@ pub(crate) struct RowsSentAhead {
     links: HashMap<NodeSlotId, LinksSentAhead>,
     /// The change that wrote the latest of them.
     latest: ChangeSeq,
+    /// The last change the rows it forgot what they include of had taken in: every change noted since is later.
+    forgotten_through: ChangeSeq,
 }
 
 /// The links of a row that the boxes the document thread took out of the tree changed, each with the change that did.
@@ -376,15 +378,21 @@ struct LinksSentAhead {
 }
 
 impl RowsSentAhead {
-    /// Forgets what the rows `rows` include.
+    /// Forgets what the rows `rows` include. Only rows that took in more than it last forgot walk what it holds, so the
+    /// reads of a drain the owner publishes nothing during do not walk it once per row.
     fn forget_taken_in(&mut self, rows: &RowSnapshot) {
         let through = rows.changes_taken_in;
-        if self.latest <= through {
-            if self.latest != ChangeSeq::default() {
-                *self = Self::default();
-            }
+        if through == self.forgotten_through {
             return;
         }
+        if self.latest <= through {
+            *self = Self {
+                forgotten_through: through,
+                ..Self::default()
+            };
+            return;
+        }
+        self.forgotten_through = through;
         let ahead = |seq: &ChangeSeq| *seq > through;
         self.styles.retain(|_, (seq, _)| ahead(seq));
         self.detached.retain(|_, seq| ahead(seq));
