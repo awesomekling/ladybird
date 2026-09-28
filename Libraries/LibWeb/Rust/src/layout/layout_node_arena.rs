@@ -643,8 +643,6 @@ pub(crate) struct FreedSubtree {
     /// that left the document.
     arena_pinned_style_records: Vec<u64>,
     host_pinned_style_records: Vec<u64>,
-    style_engine: crate::css::style::StyleEngineHandle,
-    host_style_record_pins: Option<HostPinsHandle>,
 }
 
 /// Who hears that a shell's style changed: the host at once, which only the main thread can ask,
@@ -952,68 +950,26 @@ impl FreedSubtree {
         for reset in self.paintable_row_resets {
             reset.invoke_callback_on_main_thread(&main_thread, NodeSlotId::INVALID);
         }
-        Self::unpin_style_records(
-            self.style_engine,
-            self.host_style_record_pins,
-            self.arena_pinned_style_records,
-            self.host_pinned_style_records,
-        );
-    }
-
-    fn unpin_style_records(
-        style_engine: crate::css::style::StyleEngineHandle,
-        host_style_record_pins: Option<HostPinsHandle>,
-        arena_pinned_style_records: Vec<u64>,
-        host_pinned_style_records: Vec<u64>,
-    ) {
-        if style_engine.is_null() {
-            return;
-        }
-        for style_record in host_pinned_style_records {
-            unpin_host_style_record(style_engine, host_style_record_pins, style_record);
-        }
-        if arena_pinned_style_records.is_empty() {
-            return;
-        }
-        // The arena's own pins are the engine's, which a style pass in flight owns.
-        // SAFETY: Registration and unregistration keep the style engine live.
-        let engine = unsafe { style_engine.enter("freed subtree style record pins") };
-        for style_record in arena_pinned_style_records {
-            engine.unpin_layout_style_record(style_record);
-        }
+        // A test arena links no engine, which the rows' pins would be released in.
     }
 }
 
-/// Pins a record for the host's readers in the document thread's table, or with the engine when
-/// no document thread has one (an engine a test drives).
-fn pin_host_style_record(
-    style_engine: crate::css::style::StyleEngineHandle,
-    host_style_record_pins: Option<HostPinsHandle>,
-    record: u64,
-) {
-    match host_style_record_pins {
+/// Pins a record for the host's readers in the document thread's table, or with the arena's engine when no document
+/// thread has one (an engine a test drives).
+fn pin_host_style_record(arena: &LayoutNodeArena, record: u64) {
+    match arena.host_style_record_pins.get() {
         // SAFETY: The arena's owner is the document thread, or runs while it waits.
         Some(pins) => unsafe { pins.pins() }.pin(record),
-        None => {
-            // SAFETY: Registration and unregistration keep the style engine live.
-            unsafe { style_engine.enter("host style record pin") }.pin_layout_style_record(record);
-        }
+        None => arena.with_style_engine(|engine| engine.pin_layout_style_record(record)),
     }
 }
 
 /// Releases a pin [`pin_host_style_record`] took.
-fn unpin_host_style_record(
-    style_engine: crate::css::style::StyleEngineHandle,
-    host_style_record_pins: Option<HostPinsHandle>,
-    record: u64,
-) {
-    match host_style_record_pins {
+fn unpin_host_style_record(arena: &LayoutNodeArena, record: u64) {
+    match arena.host_style_record_pins.get() {
         // SAFETY: As for `pin_host_style_record`.
         Some(pins) => unsafe { pins.pins() }.unpin(record),
-        None => {
-            // SAFETY: Registration and unregistration keep the style engine live.
-            unsafe { style_engine.enter("host style record unpin") }.unpin_layout_style_record(record);
-        }
+        None => arena.with_style_engine(|engine| engine.unpin_layout_style_record(record)),
     }
 }
 
@@ -1794,8 +1750,6 @@ impl LayoutNodeArena {
             paintable_row_resets,
             arena_pinned_style_records,
             host_pinned_style_records,
-            style_engine: self.style_engine.get().0,
-            host_style_record_pins: self.host_style_record_pins.get(),
         }
     }
 
@@ -2841,7 +2795,7 @@ impl LayoutNodeArena {
             return;
         }
         self.style_records_pinned_by_host[id.slot_index() as usize].set(record);
-        pin_host_style_record(self.style_engine.get().0, self.host_style_record_pins.get(), record);
+        pin_host_style_record(self, record);
     }
 
     /// Release the pin the host holds on `slot`'s style record, if it holds one.
@@ -2851,7 +2805,7 @@ impl LayoutNodeArena {
         if record == 0 {
             return;
         }
-        unpin_host_style_record(self.style_engine.get().0, self.host_style_record_pins.get(), record);
+        unpin_host_style_record(self, record);
     }
 
     /// Pins the record of the box `style_node`'s node, or its pseudo-element of kind `generated_for`, is bound to, for
@@ -4350,8 +4304,6 @@ impl LayoutNodeArena {
             paintable_row_resets,
             arena_pinned_style_records,
             host_pinned_style_records,
-            style_engine,
-            host_style_record_pins,
         } = freed;
         for shell in shells {
             self.hand_back(HostHandback::Shell(shell));
@@ -4365,12 +4317,17 @@ impl LayoutNodeArena {
         for reset in paintable_row_resets {
             self.hand_back(HostHandback::PaintableRowReset(reset));
         }
-        FreedSubtree::unpin_style_records(
-            style_engine,
-            host_style_record_pins,
-            arena_pinned_style_records,
-            host_pinned_style_records,
-        );
+        for style_record in host_pinned_style_records {
+            unpin_host_style_record(self, style_record);
+        }
+        if !arena_pinned_style_records.is_empty() {
+            // The arena's own pins are the engine's.
+            self.with_style_engine(|engine| {
+                for style_record in arena_pinned_style_records {
+                    engine.unpin_layout_style_record(style_record);
+                }
+            });
+        }
     }
 
     /// Records that `row` is gaining or losing its committed box. The paint state is borrowed for
@@ -6756,14 +6713,14 @@ pub unsafe extern "C" fn layout_arena_join_frame_for_dom_tree_mutation(arena: *m
         }
         crate::stage_thread::FrameForDomTreeMutation::GoesOnBeside { owns_arena } => owns_arena,
     };
-    if frame_owns_arena {
-        record_door_pass(LayoutNodeArena::DOM_TREE_MUTATION_WRITER, None);
-        return;
-    }
-    // NB: No stage of the frame in flight owns the arena, so there is nothing for LayoutNodeArena::from_handle() to join.
-    // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on the document thread.
-    let arena = unsafe { &*arena.cast::<LayoutNodeArena>() };
-    arena.pass_main_side_door(LayoutNodeArena::DOM_TREE_MUTATION_WRITER);
+    // A layout pass runs on the render owner, and runs no script to mutate the tree; a tree build or a paint pass the
+    // document thread runs in place must not see the tree change under it either.
+    assert!(
+        frame_owns_arena
+            || !(super::tree_build_seal::build_is_running() || crate::painting::seal::current_pass_name().is_some()),
+        "the main side mutated the DOM tree while a render stage was running"
+    );
+    record_door_pass(LayoutNodeArena::DOM_TREE_MUTATION_WRITER, None);
 }
 
 /// Whether the box keeps content the compositor animates, as the rendering update chose between frames.
