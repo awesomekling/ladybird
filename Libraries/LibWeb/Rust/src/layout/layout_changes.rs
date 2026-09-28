@@ -15,7 +15,7 @@ use super::partial_relayout::FfiLayoutTreeUpdateClassification;
 use super::tree_builder::FfiRemovedBoxPlace;
 use super::used_values::FfiCssPixelPoint;
 use crate::css::style::tree::{NaturalSize, StyleNodeID};
-use crate::render_owner::{Answer, ArenaChange, DocumentId, Query};
+use crate::render_owner::{Answer, ArenaChange, ChangeSeq, DocumentId, Query};
 use std::ffi::c_void;
 
 /// One write of the main thread to a document's layout marks or layout facts, which the owner applies to the arena
@@ -28,6 +28,7 @@ pub(crate) enum LayoutChange {
     SetNeedsOwnGeometryUpdate {
         node: NodeSlotId,
     },
+    SetNeedsFullLayoutTreeUpdate(bool),
     /// What the node's content is sized from changed: its fragment caches and intrinsic sizes, and those of its
     /// ancestors, are stale.
     ResetCachedIntrinsicSizesOfSelfAndAncestors {
@@ -121,6 +122,7 @@ impl LayoutChange {
                     arena.set_node_flag(node, NodeFlag::NeedsOwnGeometryUpdate, true);
                 }
             }
+            Self::SetNeedsFullLayoutTreeUpdate(value) => arena.set_needs_full_layout_tree_update(value),
             Self::ResetCachedIntrinsicSizesOfSelfAndAncestors { node } => {
                 if arena.slot_is_live(node) {
                     arena.bump_fragment_cache_epoch_of_self_and_ancestors(node);
@@ -196,25 +198,28 @@ impl LayoutChange {
     fn lays_out_again(&self) -> bool {
         matches!(
             self,
-            Self::SetNeedsLayoutUpdate { .. } | Self::EnrollTextAfterLanguageChange { .. }
+            Self::SetNeedsLayoutUpdate { .. }
+                | Self::EnrollTextAfterLanguageChange { .. }
+                | Self::SetNeedsFullLayoutTreeUpdate(true)
         )
     }
 }
 
-/// Sends `change` to the owner of the document whose arena `arena` names. A host call of a unit the owner runs is the
-/// owner's already: it applies the change to the arena the unit holds, in place.
+/// Sends `change` to the owner of the document whose arena `arena` names, and answers its number. A host call of a
+/// unit the owner runs is the owner's already: it applies the change to the arena the unit holds, in place, and
+/// answers none.
 ///
 /// # Safety
 ///
 /// `arena` must be a live arena handle, on the document thread or inside a unit the owner runs for it.
-pub(super) unsafe fn send(arena: *mut c_void, change: LayoutChange) {
+pub(super) unsafe fn send(arena: *mut c_void, change: LayoutChange) -> Option<ChangeSeq> {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // A test's hold on the owner has the document thread read the arena in place, which the change goes to as well.
     if crate::stage_thread::running_inside_stage() || crate::stage_thread::owner_work_runs_here() {
         // SAFETY: The unit the owner runs holds the arena, and its document thread waits for it; or the document
         // thread does the owner's work.
         change.apply(unsafe { &mut *super::ArenaHandle::held_by_waiting_thread(arena) }.arena_mut());
-        return;
+        return None;
     }
     // SAFETY: Guaranteed by the caller.
     let document = unsafe { super::ArenaHandle::document_of(arena) };
@@ -226,6 +231,7 @@ pub(super) unsafe fn send(arena: *mut c_void, change: LayoutChange) {
             .last_relayout_change_sent
             .set(Some(seq));
     }
+    Some(seq)
 }
 
 /// Whether the document thread sent the owner a change that lays a node out again, which nothing it sent since reaches
@@ -235,19 +241,27 @@ pub(super) unsafe fn send(arena: *mut c_void, change: LayoutChange) {
 ///
 /// `arena` must be a live arena handle on the document thread.
 pub(crate) unsafe fn changes_sent_not_taken_in(arena: *mut c_void) -> bool {
+    // SAFETY: Guaranteed by the caller.
+    let sent = unsafe { super::HostTables::beside_frame(arena) }
+        .last_relayout_change_sent
+        .get();
+    // SAFETY: Guaranteed by the caller.
+    sent.is_some_and(|seq| unsafe { not_taken_in(arena, seq) })
+}
+
+/// Whether the change `seq` the document thread sent the owner of the arena `arena` names is one nothing it sent since
+/// reaches the arena after: the arena does not have it yet.
+///
+/// # Safety
+///
+/// `arena` must be a live arena handle on the document thread.
+pub(super) unsafe fn not_taken_in(arena: *mut c_void, seq: ChangeSeq) -> bool {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // Without a Rendering thread, a change goes to the arena as it is sent.
     if crate::stage_thread::running_inside_stage() || !crate::stage_thread::has_owner_thread() {
         return false;
     }
     // SAFETY: Guaranteed by the caller.
-    let Some(seq) = unsafe { super::HostTables::beside_frame(arena) }
-        .last_relayout_change_sent
-        .get()
-    else {
-        return false;
-    };
-    // SAFETY: As above.
     let document = unsafe { super::ArenaHandle::document_of(arena) };
     !crate::render_owner::taken_in_before_next_arena_reach(document, seq)
 }

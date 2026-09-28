@@ -43,6 +43,7 @@ use std::cell::RefCell;
 use std::ffi::c_void;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 
 mod main_thread_entries;
@@ -1275,6 +1276,9 @@ pub(crate) struct LayoutNodeArena {
     fragment_cache_epoch_changed_during_layout_pass: Cell<bool>,
     /// The viewport the last layout tree build placed, invalid once that box is freed.
     layout_root: Cell<NodeSlotId>,
+    /// The layout tree's state as the document thread reads it, without reaching the arena (see
+    /// [`LayoutTreeState`]): republished wherever what it is read from changes.
+    published_layout_tree_state: AtomicU64,
     /// The subtree roots the last layout tree build rebuilt, waiting for the partial relayout
     /// plan that follows it. A full layout pass covers every one of them, so its commit clears
     /// them.
@@ -1451,6 +1455,7 @@ impl LayoutNodeArena {
             active_layout_pass_depth: Cell::new(0),
             fragment_cache_epoch_changed_during_layout_pass: Cell::new(false),
             layout_root: Cell::new(NodeSlotId::INVALID),
+            published_layout_tree_state: AtomicU64::new(LayoutTreeState::default().pack()),
             pending_rebuilt_subtree_roots: RefCell::new(Vec::new()),
             pending_layout_tree_update_escaped_rebuild_roots: Cell::new(false),
             stale_list_item_counter_rendered: Cell::new(false),
@@ -1723,6 +1728,7 @@ impl LayoutNodeArena {
             self.layout_root.set(NodeSlotId::INVALID);
             self.pending_rebuilt_subtree_roots.get_mut().clear();
             self.pending_layout_tree_update_escaped_rebuild_roots.set(false);
+            self.publish_layout_tree_state();
         }
         if !self.scrollable_overflow.non_child_boxes.borrow().is_empty() {
             self.scrollable_overflow.contained_boxes_dirty.set(true);
@@ -2925,6 +2931,18 @@ impl LayoutNodeArena {
 
     pub(crate) fn set_layout_root(&self, viewport: NodeSlotId) {
         self.layout_root.set(viewport);
+        self.publish_layout_tree_state();
+    }
+
+    /// Publishes the layout tree's state for the document thread to read. Whatever writes the root, its layout update
+    /// mark, the full tree update flag or the partial relayout boundary roots calls this.
+    pub(crate) fn publish_layout_tree_state(&self) {
+        let state = LayoutTreeState {
+            root: self.layout_root(),
+            laid_out: self.layout_is_up_to_date(false),
+            needs_full_layout_tree_update: self.needs_full_layout_tree_update(),
+        };
+        self.published_layout_tree_state.store(state.pack(), Ordering::Release);
     }
 
     pub(crate) fn layout_root(&self) -> NodeSlotId {
@@ -3084,6 +3102,7 @@ impl LayoutNodeArena {
 
     pub(crate) fn set_needs_full_layout_tree_update(&self, value: bool) {
         self.needs_full_layout_tree_update.set(value);
+        self.publish_layout_tree_state();
     }
 
     /// The style engine the arena's nodes take their style from, or null before it has one.
@@ -4865,6 +4884,9 @@ impl LayoutNodeArena {
             self.remove_layout_update_flag_node(id);
         }
         data.set_flags(updated);
+        if flag == NodeFlag::NeedsLayoutUpdate && updated != previous && id == self.layout_root() {
+            self.publish_layout_tree_state();
+        }
         // Retaining compositor-animated content decides whether a non-invertible transform
         // still records its stacking context.
         if flag == NodeFlag::HasAnimatedOpacityOrTransform && updated != previous {
@@ -4982,6 +5004,7 @@ impl LayoutNodeArena {
                 data.set_flags(data.flags.get() & !flags_to_clear);
                 self.remove_layout_update_flag_node(node);
             });
+            self.publish_layout_tree_state();
             return;
         }
 
@@ -5016,6 +5039,7 @@ impl LayoutNodeArena {
             data.set_flags(data.flags.get() & !flags_to_clear);
             self.remove_layout_update_flag_node(node);
         }
+        self.publish_layout_tree_state();
     }
 
     fn node_is_capable_of_forming_a_containing_block(&self, id: NodeSlotId) -> bool {
@@ -7221,22 +7245,43 @@ pub unsafe extern "C" fn layout_arena_set_list_owner_has_stale_item_counters(
     unsafe { super::layout_changes::send(arena, change) };
 }
 
+/// Whether the whole layout tree is to be built again: as the document thread last asked, until the owner takes that
+/// in, and then as the owner published it.
+///
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_needs_full_layout_tree_update(arena: *mut c_void) -> bool {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }.needs_full_layout_tree_update()
+    // SAFETY: Guaranteed by the caller.
+    if let Some((seq, value)) = unsafe { HostTables::beside_frame(arena) }
+        .full_layout_tree_update_sent
+        .get()
+        && unsafe { super::layout_changes::not_taken_in(arena, seq) }
+    {
+        return value;
+    }
+    // SAFETY: Guaranteed by the caller.
+    unsafe { LayoutTreeState::published(arena) }.needs_full_layout_tree_update
 }
 
+/// # Safety
+///
+/// `marks` must name a live arena, on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_set_needs_full_layout_tree_update(
     marks: LayoutTreeUpdateMarksHandle,
     value: bool,
 ) {
     let arena = marks.arena;
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }.set_needs_full_layout_tree_update(value);
+    // SAFETY: Guaranteed by the caller.
+    if let Some(seq) = unsafe { super::layout_changes::send(arena, LayoutChange::SetNeedsFullLayoutTreeUpdate(value)) }
+    {
+        // SAFETY: As above.
+        unsafe { HostTables::beside_frame(arena) }
+            .full_layout_tree_update_sent
+            .set(Some((seq, value)));
+    }
 }
 
 /// Whether the node `style_node` names holds a layout tree update mark of its own.
@@ -7382,26 +7427,85 @@ pub unsafe extern "C" fn layout_arena_subtree_may_need_layout_tree_update(arena:
     unsafe { super::tree_update_marks::subtree_may_hold_document_marks(arena, style_node) }
 }
 
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_layout_root(arena: *mut c_void) -> NodeSlotId {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }.layout_root()
+    // SAFETY: Guaranteed by the caller.
+    unsafe { LayoutTreeState::published(arena) }.root
 }
 
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_layout_is_up_to_date(
     arena: *mut c_void,
     document_needs_layout_tree_build: bool,
 ) -> bool {
-    assert!(!arena.is_null(), "layout node arena handle is null");
     // A layout change the document thread sent is one the owner lays out in the next layout update.
-    // SAFETY: As above.
+    // SAFETY: Guaranteed by the caller.
     if unsafe { super::layout_changes::changes_sent_not_taken_in(arena) } {
         return false;
     }
     // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }.layout_is_up_to_date(document_needs_layout_tree_build)
+    !document_needs_layout_tree_build && unsafe { LayoutTreeState::published(arena) }.laid_out
+}
+
+/// What the document thread reads of a document's layout tree: the arena publishes it wherever it changes.
+#[derive(Clone, Copy)]
+struct LayoutTreeState {
+    root: NodeSlotId,
+    /// The layout is up to date, the document's own tree build marks aside (see
+    /// [`LayoutNodeArena::layout_is_up_to_date`]).
+    laid_out: bool,
+    needs_full_layout_tree_update: bool,
+}
+
+impl Default for LayoutTreeState {
+    fn default() -> Self {
+        Self {
+            root: NodeSlotId::INVALID,
+            laid_out: false,
+            needs_full_layout_tree_update: false,
+        }
+    }
+}
+
+impl LayoutTreeState {
+    const LAID_OUT: u64 = 1 << 32;
+    const NEEDS_FULL_LAYOUT_TREE_UPDATE: u64 = 1 << 33;
+
+    fn pack(self) -> u64 {
+        let mut packed = u64::from(self.root.index);
+        if self.laid_out {
+            packed |= Self::LAID_OUT;
+        }
+        if self.needs_full_layout_tree_update {
+            packed |= Self::NEEDS_FULL_LAYOUT_TREE_UPDATE;
+        }
+        packed
+    }
+
+    /// The state the arena `handle` names published, once the frame in flight, which may change it, is taken back.
+    ///
+    /// # Safety
+    ///
+    /// `handle` must be a live handle on the document thread.
+    unsafe fn published(handle: *mut c_void) -> Self {
+        assert!(!handle.is_null(), "layout node arena handle is null");
+        crate::stage_thread::join_frame_in_flight(handle);
+        // SAFETY: Guaranteed by the caller. A handle is also a pointer to its arena, and the projection reads an atomic
+        // the arena's owner writes, borrowing nothing of the arena beside it.
+        let packed = unsafe { &*std::ptr::addr_of!((*handle.cast::<LayoutNodeArena>()).published_layout_tree_state) }
+            .load(Ordering::Acquire);
+        Self {
+            root: NodeSlotId { index: packed as u32 },
+            laid_out: packed & Self::LAID_OUT != 0,
+            needs_full_layout_tree_update: packed & Self::NEEDS_FULL_LAYOUT_TREE_UPDATE != 0,
+        }
+    }
 }
 
 /// What a sync of the enrolled content takes from the arena ahead of a pass: what each enrolled
