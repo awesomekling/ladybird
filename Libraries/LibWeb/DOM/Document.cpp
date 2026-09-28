@@ -8021,13 +8021,13 @@ void Document::update_compositor_animations()
 
         auto matrix = Gfx::FloatMatrix4x4::identity();
         if (auto translate = transform->translate_value())
-            matrix = matrix * translate->to_matrix(nullptr);
+            matrix = matrix * translate->to_matrix({});
         if (auto rotate = transform->rotate_value())
-            matrix = matrix * rotate->to_matrix(nullptr);
+            matrix = matrix * rotate->to_matrix({});
         if (auto scale = transform->scale_value())
-            matrix = matrix * scale->to_matrix(nullptr);
+            matrix = matrix * scale->to_matrix({});
         transform->for_each_transformation([&](auto const& transformation) {
-            matrix = matrix * transformation.to_matrix(nullptr);
+            matrix = matrix * transformation.to_matrix({});
         });
 
         constexpr auto epsilon = AK::NumericLimits<float>::epsilon();

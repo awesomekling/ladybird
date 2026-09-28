@@ -12,7 +12,7 @@
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/PseudoElement.h>
 #include <LibWeb/DOM/ShadowRoot.h>
-#include <LibWeb/Layout/Node.h>
+#include <LibWeb/Painting/BoxSlot.h>
 
 namespace Web::DOM {
 
@@ -74,18 +74,11 @@ AbstractElement::TreeCountingFunctionResolutionContext AbstractElement::tree_cou
     };
 }
 
-Layout::NodeWithStyle* AbstractElement::layout_node()
+Painting::BoxSlot AbstractElement::box() const
 {
     if (m_pseudo_element.has_value())
-        return m_element->pseudo_element_layout_node(*m_pseudo_element);
-    return m_element->layout_node();
-}
-
-Layout::NodeWithStyle* AbstractElement::unsafe_layout_node()
-{
-    if (m_pseudo_element.has_value())
-        return m_element->pseudo_element_unsafe_layout_node(*m_pseudo_element);
-    return m_element->unsafe_layout_node();
+        return Painting::BoxSlot::of_pseudo_element(m_element, *m_pseudo_element);
+    return Painting::BoxSlot::bound_to(m_element);
 }
 
 GC::Ptr<Element const> AbstractElement::parent_element() const

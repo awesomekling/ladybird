@@ -38,7 +38,6 @@ public:
     // Records the direction of a relative scroll of a scrolling box by the delta, which scroll-state(scrolled) reads
     // for the element whose scrolling box it is. The direction is kept whether or not the element is a query container
     // yet, so a query that starts asking later reads it too.
-    void did_scroll_relatively(Layout::Node const& scrolling_box, CSSPixelPoint delta);
     void did_scroll_relatively(Painting::BoxSlot const& scrolling_box, CSSPixelPoint delta);
 
     enum class Snapshot : u8 {

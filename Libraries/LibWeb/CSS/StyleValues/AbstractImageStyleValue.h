@@ -23,7 +23,6 @@ public:
     using StyleValue::StyleValue;
 
     virtual void load_any_resources(DOM::Document&) { }
-    virtual void load_any_resources(Layout::NodeWithStyle const&);
 
     virtual bool is_paintable(GC::Ptr<HTML::DecodedImageData>) const = 0;
     virtual SizeWithAspectRatio natural_size(HTML::DecodedImageData const&) const;

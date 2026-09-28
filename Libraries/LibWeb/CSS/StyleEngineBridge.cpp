@@ -28,8 +28,8 @@
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/ShadowRoot.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
+#include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
-#include <LibWeb/Layout/NodeArena.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/StyleValueRustFFI.h>
@@ -398,8 +398,8 @@ RefPtr<PublishedStyleRecord const> StyleEngine::publish_style_record(StyleDrainS
 
 StyleEngineFFI::FfiRecordDemandAnswer StyleEngine::answer_read_demand(StyleNodeID node, u8 pseudo_kind, bool exclude_inline_style, bool targeted, bool read_only, StyleRecordID parent_highlight)
 {
-    auto* layout_node_arena = m_style_computer ? m_style_computer->document().layout_node_arena_if_created() : nullptr;
-    return StyleEngineFFI::style_engine_answer_read_demand(rust_handle(), layout_node_arena ? layout_node_arena->handle() : nullptr, node.value(), pseudo_kind, exclude_inline_style, targeted, read_only, parent_highlight.value());
+    auto* layout_arena = m_style_computer ? m_style_computer->document().layout_arena_handle() : nullptr;
+    return StyleEngineFFI::style_engine_answer_read_demand(rust_handle(), layout_arena, node.value(), pseudo_kind, exclude_inline_style, targeted, read_only, parent_highlight.value());
 }
 
 StyleEngine::SettledAnimationDefinitions StyleEngine::take_settled_animation_definitions(StyleDrainScope const& scope, StyleNodeID node, u8 pseudo_kind)
@@ -1356,8 +1356,7 @@ void StyleEngine::lend_style_transaction_inputs(RecordedInputGoesTo recorded_inp
     // The render owner runs the transaction with the document's render state, which the arena is
     // created with. A sample the pass takes resolves a percentage translation against the boxes
     // the last layout committed.
-    auto* layout_node_arena = m_style_computer ? &m_style_computer->document().layout_node_arena() : nullptr;
-    auto* layout_arena = layout_node_arena ? layout_node_arena->handle() : nullptr;
+    auto* layout_arena = m_style_computer ? Layout::document_layout_arena(m_style_computer->document()) : nullptr;
     // The transaction takes the reactions the host applied along, whatever else it takes.
     ScopeGuard install_feedback_went = [&] {
         m_applied_style_reactions.clear_with_capacity();
@@ -1459,8 +1458,8 @@ StyleEngine::PublishedStyleTransaction StyleEngine::finish_submitted_style_trans
     // What was recorded beside the pass is held (see begin_holding_input_recorded_beside_pass()), and it may name an
     // atom the pass found unused.
     // The render owner finishes it with the document's render state, which the arena the pass was submitted for is.
-    auto* layout_node_arena = m_style_computer ? m_style_computer->document().layout_node_arena_if_created() : nullptr;
-    auto view = StyleEngineFFI::style_engine_finish_submitted_style_transaction(rust_handle(), m_holds_input_recorded_beside_pass, layout_node_arena ? layout_node_arena->handle() : nullptr);
+    auto* layout_arena = m_style_computer ? m_style_computer->document().layout_arena_handle() : nullptr;
+    auto view = StyleEngineFFI::style_engine_finish_submitted_style_transaction(rust_handle(), m_holds_input_recorded_beside_pass, layout_arena);
     auto bridge_microseconds = (MonotonicTime::now() - bridge_started_at).to_truncated_microseconds();
     return publish_style_transaction_view(view, exchange(m_submitted_style_transaction_microseconds, 0), bridge_microseconds);
 }

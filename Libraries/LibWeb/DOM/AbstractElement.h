@@ -26,11 +26,8 @@ public:
     Element const& element() const { return m_element; }
     Optional<CSS::PseudoElement> pseudo_element() const { return m_pseudo_element; }
 
-    Layout::NodeWithStyle* layout_node();
-    Layout::NodeWithStyle const* layout_node() const { return const_cast<AbstractElement*>(this)->layout_node(); }
-
-    Layout::NodeWithStyle* unsafe_layout_node();
-    Layout::NodeWithStyle const* unsafe_layout_node() const { return const_cast<AbstractElement*>(this)->unsafe_layout_node(); }
+    // The box the element, or its pseudo-element, is rendered as.
+    Painting::BoxSlot box() const;
 
     struct TreeCountingFunctionResolutionContext {
         size_t sibling_count;

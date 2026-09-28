@@ -26,7 +26,7 @@
 #include <LibWeb/DOM/AdoptedStyleSheets.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/HTML/EventLoop/MainThreadPhases.h>
-#include <LibWeb/Layout/NodeArena.h>
+#include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Loader/ContentBlocker.h>
 #include <LibWeb/Namespace.h>
 #include <LibWeb/Page/Page.h>
@@ -1234,7 +1234,7 @@ void StyleScope::publish_counter_styles() const
 
         auto* parent = scope.parent_counter_style_scope();
         Parser::ValueParserFFI::rust_publish_counter_styles(
-            document().layout_node_arena().handle(),
+            Layout::document_layout_arena(document()),
             scope.style_engine_tree_scope().value(),
             parent ? parent->style_engine_tree_scope().value() : 0,
             parent != nullptr,

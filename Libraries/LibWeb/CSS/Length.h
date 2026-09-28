@@ -62,7 +62,6 @@ public:
         [[nodiscard]] static ResolutionContext for_document(DOM::Document const&);
         [[nodiscard]] static ResolutionContext for_element(DOM::AbstractElement const&);
         [[nodiscard]] static ResolutionContext for_element(DOM::AbstractElement const&, ComputedValues const&);
-        [[nodiscard]] static ResolutionContext for_layout_node(Layout::NodeWithStyle const&);
 
         CSSPixelRect viewport_rect;
         FontMetrics font_metrics;
@@ -137,13 +136,6 @@ public:
 
     [[nodiscard]] CSSPixels to_px(ResolutionContext const&) const;
 
-    [[nodiscard]] ALWAYS_INLINE CSSPixels to_px(Layout::NodeWithStyle const& node) const
-    {
-        if (is_absolute())
-            return absolute_length_to_px();
-        return to_px_slow_case(node);
-    }
-
     ALWAYS_INLINE double to_px_without_rounding(ResolutionContext const& context) const
     {
         if (is_absolute())
@@ -213,8 +205,6 @@ public:
     static Length from_style_value(NonnullRefPtr<StyleValue const> const&, Optional<Length> percentage_basis);
 
 private:
-    [[nodiscard]] CSSPixels to_px_slow_case(Layout::NodeWithStyle const&) const;
-
     LengthUnit m_unit;
     double m_value { 0 };
 };

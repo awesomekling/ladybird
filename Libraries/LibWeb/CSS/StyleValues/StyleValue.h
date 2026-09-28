@@ -158,7 +158,6 @@ struct ColorResolutionContext {
     CalculationResolutionContext calculation_resolution_context;
 
     [[nodiscard]] static ColorResolutionContext for_element(DOM::AbstractElement const&);
-    [[nodiscard]] static ColorResolutionContext for_layout_node_with_style(Layout::NodeWithStyle const&);
 };
 
 class WEB_API StyleValue : public RefCounted<StyleValue> {

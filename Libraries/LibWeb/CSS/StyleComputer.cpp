@@ -104,10 +104,9 @@
 #include <LibWeb/HTML/Parser/HTMLParser.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/Layout/LayoutRustBridge.h>
-#include <LibWeb/Layout/Node.h>
-#include <LibWeb/Layout/NodeArena.h>
 #include <LibWeb/Namespace.h>
 #include <LibWeb/Page/Page.h>
+#include <LibWeb/Painting/BoxSlot.h>
 #include <LibWeb/Platform/FontPlugin.h>
 #include <LibWeb/SVG/SVGElement.h>
 #include <LibWeb/StyleValueRustFFI.h>
@@ -545,12 +544,6 @@ void StyleComputer::for_each_property_expanding_shorthands(PropertyID property_i
     }
 }
 
-static void* layout_arena_handle(DOM::Document& document)
-{
-    auto* arena = document.layout_node_arena_if_created();
-    return arena ? arena->handle() : nullptr;
-}
-
 // The size of the element's transform reference box, as the last committed layout left it, which a
 // keyframe or transition resolves a percentage translation against. The stage asks the layout arena
 // by identity rather than following the element's layout-node pointer: the box is an earlier stage's
@@ -558,7 +551,7 @@ static void* layout_arena_handle(DOM::Document& document)
 static void apply_committed_transform_reference_box(StyleDrainScope const& scope, DOM::AbstractElement abstract_element, StyleValueFFI::FfiAnimationContext& animation_context)
 {
     auto committed = StyleEngineFFI::layout_arena_committed_transform_reference_box(scope,
-        layout_arena_handle(abstract_element.document()), abstract_element.element().style_node_id().value());
+        abstract_element.document().layout_arena_handle(), abstract_element.element().style_node_id().value());
     if (!committed.has_box)
         return;
     animation_context.has_transform_reference_box = true;
@@ -759,10 +752,9 @@ static StyleEngineFFI::FfiRowSampledInPass resample_installed_record_after_host_
 {
     auto& element = abstract_element.element();
     if (!abstract_element.pseudo_element().has_value())
-        (void)element.unsafe_layout_node();
-    auto* layout_node_arena = element.document().layout_node_arena_if_created();
+        Layout::make_host_mirror_of_box(Painting::BoxSlot::bound_to(element));
     auto resampled = StyleEngineFFI::style_engine_sample_installed_record(scope.engine().rust_handle(), element.style_node_id().value(),
-        pseudo_element_to_ffi(abstract_element.pseudo_element()), installed_style_record.value(), layout_node_arena ? layout_node_arena->handle() : nullptr);
+        pseudo_element_to_ffi(abstract_element.pseudo_element()), installed_style_record.value(), element.document().layout_arena_handle());
     if (resampled.present && resampled.custom_property_environment_moved)
         Animations::install_sampled_custom_property_environment(scope, abstract_element, resampled);
     return resampled;
@@ -864,11 +856,10 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_inst
         // Publishing can replace the record the element's layout node would be built from on first
         // use, so it is built while that record is live.
         if (!abstract_element.pseudo_element().has_value())
-            (void)element.unsafe_layout_node();
-        auto* layout_node_arena = document().layout_node_arena_if_created();
+            Layout::make_host_mirror_of_box(Painting::BoxSlot::bound_to(element));
         engine_composition = StyleEngineFFI::style_engine_decide_transition_step_for_installed_record(scope.engine().rust_handle(),
             element.style_node_id().value(), pseudo_element_to_ffi(abstract_element.pseudo_element()), before_change_style_record.value(),
-            installed_style_record.value(), layout_node_arena ? layout_node_arena->handle() : nullptr);
+            installed_style_record.value(), document().layout_arena_handle());
         if (engine_composition.present) {
             engine_decided = abstract_element.pseudo_element().has_value()
                 ? StyleEngineFFI::style_engine_take_pseudo_element_transition_step_decided_in_pass(scope.engine().rust_handle(), element.style_node_id().value(), pseudo_element_to_ffi(abstract_element.pseudo_element()))
@@ -935,13 +926,13 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_inst
     }
     if (!abstract_element.pseudo_element().has_value() && inherited_style_groups != 0 && !g_transition_step_follow_up_left_to_caller)
         scope.engine().record_flat_tree_descendant_style_input_changes(element.style_node_id(), StyleEngine::InheritedStyle, inherited_style_groups);
-    // Refreshing the computed style published the record to the layout node; inherited values and
-    // image resources need the C++ side effects on top.
-    if (auto* layout_node = abstract_element.unsafe_layout_node()) {
+    // Refreshing the computed style published the record to the box; inherited values and image
+    // resources need the C++ side effects on top.
+    if (auto box = abstract_element.box()) {
         if (animated_property_invalidation.requires_layout_node_style_application)
-            layout_node->apply_style(*abstract_element.published_style_record());
+            Layout::apply_style_to_box(box, *abstract_element.published_style_record());
         else if (animated_property_invalidation.requires_style_resource_update)
-            layout_node->attach_style_resources();
+            Layout::attach_style_resources_to_box(box);
     }
     return invalidation;
 }

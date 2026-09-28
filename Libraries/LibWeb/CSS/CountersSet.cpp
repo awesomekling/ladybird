@@ -8,17 +8,16 @@
 #include <LibWeb/CSS/CountersSet.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
-#include <LibWeb/Layout/Node.h>
-#include <LibWeb/Layout/NodeArena.h>
+#include <LibWeb/Layout/LayoutRustBridge.h>
 
 namespace Web::CSS {
 
 bool innermost_list_item_counter_is_own_forward_counter(DOM::Element const& element)
 {
-    auto* arena = const_cast<DOM::Document&>(element.document()).layout_node_arena_if_created();
-    if (!arena)
+    auto render_document = Layout::document_render_document_if_created(element.document());
+    if (!render_document.has_value())
         return false;
-    return Layout::RustFFI::render_owner_innermost_list_item_counter_is_own_forward_counter(arena->render_document(), element.style_node_id().value());
+    return Layout::RustFFI::render_owner_innermost_list_item_counter_is_own_forward_counter(*render_document, element.style_node_id().value());
 }
 
 Utf16FlyString const& list_item_counter_name()

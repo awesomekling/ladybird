@@ -16,7 +16,6 @@
 #include <LibWeb/CSS/StyleValues/NumberStyleValue.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/HTML/DecodedImageData.h>
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/ImagePaint.h>
 #include <LibWeb/Painting/PaintingRustBridge.h>
@@ -53,11 +52,6 @@ ValueComparingNonnullRefPtr<StyleValue const> CursorStyleValue::absolutized(Comp
         absolutized_y = y()->absolutized(computation_context);
 
     return CursorStyleValue::create(image().absolutized(computation_context)->as_abstract_image(), absolutized_x, absolutized_y);
-}
-
-Optional<Gfx::ImageCursor> CursorStyleValue::make_image_cursor(Layout::NodeWithStyle const& layout_node, GC::Ptr<HTML::DecodedImageData> decoded_image_data) const
-{
-    return make_image_cursor(layout_node.document(), Painting::gradient_stop_color_resolution_context(layout_node), decoded_image_data);
 }
 
 Optional<Gfx::ImageCursor> CursorStyleValue::make_image_cursor(DOM::Document const& document, Color current_color, GC::Ptr<HTML::DecodedImageData> decoded_image_data) const
