@@ -15,21 +15,25 @@
 //! thread applies and answers right here, as the owner would.
 
 use super::StyleEngine;
-use super::bridge::{BoundaryRead, BoundaryWrite, FfiElementDeclarationKind, FfiNativeRuleTarget, FfiRuleMatch};
+use super::bridge::{
+    BoundaryRead, BoundaryWrite, FfiAppliedStyleReaction, FfiElementDeclarationKind, FfiNativeRuleTarget,
+    FfiPublishedAnimationCustomDeclaration, FfiPublishedAnimationDeclaration, FfiPublishedAnimationEffect,
+    FfiPublishedAnimationKeyframe, FfiPublishedLinearEasingPoint, FfiPublishedTransition, FfiRuleMatch,
+};
 use super::engine_home::{StyleEngineHandle, StyleEngineInputHandle};
 use crate::render_owner::{Answer, DocumentId, EngineAnswered, Query};
 use std::ffi::c_void;
 use std::ptr::NonNull;
 
-/// A write to a document's style engine, which the render owner applies.
+/// A write to a document's style engine, which the render owner applies. A write that lends the engine what the host
+/// owns for the call is a [`StyleQuery`] instead, which the main thread waits for.
 #[derive(Debug)]
 pub(crate) enum EngineChange {
     /// A write the boundary specification generates.
-    #[expect(
-        dead_code,
-        reason = "the generated writes go to the owner with the style inputs recorded then read back"
-    )]
     Boundary(BoundaryWrite),
+    /// Records every element whose style a size query or container-relative unit decided against the container
+    /// `node`, as a change of what the container answers.
+    RecordSizeContainerQueryDependents { node: u32 },
 }
 
 impl EngineChange {
@@ -37,12 +41,17 @@ impl EngineChange {
     pub(crate) fn apply(self, engine: &mut StyleEngine) {
         match self {
             Self::Boundary(write) => write.apply(engine),
+            Self::RecordSizeContainerQueryDependents { node } => unsafe {
+                crate::css::style::bridge::owner_record_size_container_query_dependents(engine, node);
+            },
         }
     }
 }
 
-/// A read of a document's style engine, which the render owner answers. What its pointers point at is the main
-/// thread's, which waits for the answer; each variant's reader says what it reads and writes.
+/// A read of a document's style engine, or a write that lends the engine what the host owns for the call, which the
+/// render owner answers. What its pointers point at is the main thread's, which waits for the answer. Each variant is
+/// the FFI entry of its name (`style_engine_match_element` for [`Self::MatchElement`]), whose documentation says what
+/// it reads and writes, and the owner answers it with that entry's body.
 pub(crate) enum StyleQuery {
     /// Nothing but the changes before it: the main thread is about to reach the engine itself.
     ApplyChanges,
@@ -148,6 +157,127 @@ pub(crate) enum StyleQuery {
         property_id: u16,
         value: *const crate::css::style_value::StyleValueData,
     },
+    SetElementCustomPropertyData {
+        node: u32,
+        data: *const c_void,
+        store: *const c_void,
+        environment: u64,
+        is_animation_overlay: bool,
+        declares: bool,
+        animation_base: *const c_void,
+        animation_base_store: *const c_void,
+        animation_base_environment: u64,
+    },
+    SetPseudoElementCustomPropertyData {
+        node: u32,
+        pseudo: u8,
+        data: *const c_void,
+        store: *const c_void,
+        environment: u64,
+        is_animation_overlay: bool,
+        declares_own: bool,
+        animation_base: *const c_void,
+        animation_base_store: *const c_void,
+        animation_base_environment: u64,
+    },
+    InstallSampledCustomPropertyEnvironment {
+        node: u32,
+        pseudo_kind: u8,
+        environment: u64,
+    },
+    SetElementTransitions {
+        node: u32,
+        slot: u8,
+        transitions: *const FfiPublishedTransition,
+        count: usize,
+    },
+    SetElementAnimationEffectDescriptions {
+        node: u32,
+        slot: u8,
+        effects: *const FfiPublishedAnimationEffect,
+        effect_count: usize,
+        keyframes: *const FfiPublishedAnimationKeyframe,
+        keyframe_count: usize,
+        declarations: *const FfiPublishedAnimationDeclaration,
+        declaration_count: usize,
+        custom_declarations: *const FfiPublishedAnimationCustomDeclaration,
+        custom_declaration_count: usize,
+        linear_points: *const FfiPublishedLinearEasingPoint,
+        linear_point_count: usize,
+        base_url_bytes: *const u8,
+        base_url_byte_count: usize,
+    },
+    SetTreeScopeAnimationKeyframes {
+        tree_scope: u32,
+        shadow_root_identity: usize,
+        name_lengths: *const u32,
+        name_units: *const u16,
+        name_unit_count: usize,
+        count: usize,
+        descriptions: *const FfiPublishedAnimationEffect,
+        description_count: usize,
+        keyframes: *const FfiPublishedAnimationKeyframe,
+        keyframe_count: usize,
+        declarations: *const FfiPublishedAnimationDeclaration,
+        declaration_count: usize,
+        custom_declarations: *const FfiPublishedAnimationCustomDeclaration,
+        custom_declaration_count: usize,
+        linear_points: *const FfiPublishedLinearEasingPoint,
+        linear_point_count: usize,
+        base_url_bytes: *const u8,
+        base_url_byte_count: usize,
+    },
+    DecideTransitionStepForInstalledRecord {
+        node: u32,
+        pseudo_kind: u8,
+        before_change_style_record: u64,
+        installed_style_record: u64,
+        layout_arena: *mut c_void,
+    },
+    RemoveComputedPseudo {
+        node: u32,
+        pseudo_kind: u8,
+    },
+    PublishComputedGroups {
+        node: u32,
+        pseudo_kind: u8,
+        payloads: *const *const c_void,
+        count: usize,
+        inherited_group_count: usize,
+        custom_property_environment: u64,
+        inherited_group_swap_candidate: bool,
+        counter_style_environment_identity: u64,
+        animation_overlay_identity: u64,
+        animated_overlay: *const c_void,
+        animation_overlay_payloads: *const *const c_void,
+        animation_overlay_payload_count: usize,
+        longhand_table: *const c_void,
+        custom_property_store: *const c_void,
+    },
+    AppliedStyleReactionsDeriveInput {
+        node: u32,
+        applied: *const FfiAppliedStyleReaction,
+        count: usize,
+    },
+    GrantStyleNodes {
+        elements: *mut u32,
+        element_count: usize,
+        texts: *mut u32,
+        text_count: usize,
+    },
+    DecideTransitions {
+        before_style_record: u64,
+        after_longhand_table: *const c_void,
+        after_animated_overlay: *const c_void,
+        input: *mut crate::css::transition::FfiTransitionInput,
+        actions: *mut crate::css::transition::FfiTransitionAction,
+    },
+    #[cfg(feature = "style-recording")]
+    BenchmarkMarker {
+        name: *const c_void,
+        length: usize,
+        is_ascii: bool,
+    },
 }
 
 /// The answer to a [`StyleQuery`], of the variant the query asks for.
@@ -160,6 +290,7 @@ pub(crate) enum StyleAnswer {
     /// A pointer into what the engine or the host owns, as the query's reader says.
     Pointer(*const c_void),
     RowSampled(super::bridge::FfiRowSampledInPass),
+    RecordDelta(super::bridge::FfiStyleRecordDelta),
     RecordDemand(super::bridge::FfiRecordDemandAnswer),
 }
 
@@ -178,10 +309,6 @@ impl From<BoundaryResult> for StyleAnswer {
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum BoundaryResult {
     Bool(bool),
-    #[expect(
-        dead_code,
-        reason = "the generated reads of 32 bits go to the owner with the transaction drivers"
-    )]
     U32(u32),
     U64(u64),
     Usize(usize),
@@ -244,6 +371,16 @@ impl StyleAnswer {
             _ => {
                 debug_assert!(false, "a sample is answered with a sample");
                 super::bridge::FfiRowSampledInPass::absent()
+            }
+        }
+    }
+
+    pub(crate) fn record_delta(self) -> super::bridge::FfiStyleRecordDelta {
+        match self {
+            Self::RecordDelta(value) => value,
+            _ => {
+                debug_assert!(false, "a record move is answered with a record move");
+                super::bridge::FfiStyleRecordDelta::default()
             }
         }
     }
@@ -412,6 +549,264 @@ impl StyleQuery {
                 }
                 .cast(),
             ),
+            Self::SetElementCustomPropertyData {
+                node,
+                data,
+                store,
+                environment,
+                is_animation_overlay,
+                declares,
+                animation_base,
+                animation_base_store,
+                animation_base_environment,
+            } => {
+                unsafe {
+                    crate::css::style::bridge::owner_set_element_custom_property_data(
+                        engine,
+                        node,
+                        data,
+                        store,
+                        environment,
+                        is_animation_overlay,
+                        declares,
+                        animation_base,
+                        animation_base_store,
+                        animation_base_environment,
+                    );
+                };
+                StyleAnswer::None
+            }
+            Self::SetPseudoElementCustomPropertyData {
+                node,
+                pseudo,
+                data,
+                store,
+                environment,
+                is_animation_overlay,
+                declares_own,
+                animation_base,
+                animation_base_store,
+                animation_base_environment,
+            } => {
+                unsafe {
+                    crate::css::style::bridge::owner_set_pseudo_element_custom_property_data(
+                        engine,
+                        node,
+                        pseudo,
+                        data,
+                        store,
+                        environment,
+                        is_animation_overlay,
+                        declares_own,
+                        animation_base,
+                        animation_base_store,
+                        animation_base_environment,
+                    );
+                };
+                StyleAnswer::None
+            }
+            Self::InstallSampledCustomPropertyEnvironment {
+                node,
+                pseudo_kind,
+                environment,
+            } => StyleAnswer::Bool(unsafe {
+                crate::css::style::bridge::owner_install_sampled_custom_property_environment(
+                    engine,
+                    node,
+                    pseudo_kind,
+                    environment,
+                )
+            }),
+            Self::SetElementTransitions {
+                node,
+                slot,
+                transitions,
+                count,
+            } => {
+                unsafe {
+                    crate::css::style::bridge::owner_set_element_transitions(engine, node, slot, transitions, count);
+                };
+                StyleAnswer::None
+            }
+            Self::SetElementAnimationEffectDescriptions {
+                node,
+                slot,
+                effects,
+                effect_count,
+                keyframes,
+                keyframe_count,
+                declarations,
+                declaration_count,
+                custom_declarations,
+                custom_declaration_count,
+                linear_points,
+                linear_point_count,
+                base_url_bytes,
+                base_url_byte_count,
+            } => {
+                unsafe {
+                    crate::css::style::bridge::owner_set_element_animation_effect_descriptions(
+                        engine,
+                        node,
+                        slot,
+                        effects,
+                        effect_count,
+                        keyframes,
+                        keyframe_count,
+                        declarations,
+                        declaration_count,
+                        custom_declarations,
+                        custom_declaration_count,
+                        linear_points,
+                        linear_point_count,
+                        base_url_bytes,
+                        base_url_byte_count,
+                    );
+                };
+                StyleAnswer::None
+            }
+            Self::SetTreeScopeAnimationKeyframes {
+                tree_scope,
+                shadow_root_identity,
+                name_lengths,
+                name_units,
+                name_unit_count,
+                count,
+                descriptions,
+                description_count,
+                keyframes,
+                keyframe_count,
+                declarations,
+                declaration_count,
+                custom_declarations,
+                custom_declaration_count,
+                linear_points,
+                linear_point_count,
+                base_url_bytes,
+                base_url_byte_count,
+            } => {
+                unsafe {
+                    crate::css::style::bridge::owner_set_tree_scope_animation_keyframes(
+                        engine,
+                        tree_scope,
+                        shadow_root_identity,
+                        name_lengths,
+                        name_units,
+                        name_unit_count,
+                        count,
+                        descriptions,
+                        description_count,
+                        keyframes,
+                        keyframe_count,
+                        declarations,
+                        declaration_count,
+                        custom_declarations,
+                        custom_declaration_count,
+                        linear_points,
+                        linear_point_count,
+                        base_url_bytes,
+                        base_url_byte_count,
+                    );
+                };
+                StyleAnswer::None
+            }
+            Self::DecideTransitionStepForInstalledRecord {
+                node,
+                pseudo_kind,
+                before_change_style_record,
+                installed_style_record,
+                layout_arena,
+            } => StyleAnswer::RowSampled(unsafe {
+                crate::css::style::bridge::owner_decide_transition_step_for_installed_record(
+                    engine,
+                    node,
+                    pseudo_kind,
+                    before_change_style_record,
+                    installed_style_record,
+                    layout_arena,
+                )
+            }),
+            Self::RemoveComputedPseudo { node, pseudo_kind } => StyleAnswer::RecordDelta(unsafe {
+                crate::css::style::bridge::owner_remove_computed_pseudo(engine, node, pseudo_kind)
+            }),
+            Self::PublishComputedGroups {
+                node,
+                pseudo_kind,
+                payloads,
+                count,
+                inherited_group_count,
+                custom_property_environment,
+                inherited_group_swap_candidate,
+                counter_style_environment_identity,
+                animation_overlay_identity,
+                animated_overlay,
+                animation_overlay_payloads,
+                animation_overlay_payload_count,
+                longhand_table,
+                custom_property_store,
+            } => StyleAnswer::RecordDelta(unsafe {
+                crate::css::style::bridge::owner_publish_computed_groups(
+                    engine,
+                    node,
+                    pseudo_kind,
+                    payloads,
+                    count,
+                    inherited_group_count,
+                    custom_property_environment,
+                    inherited_group_swap_candidate,
+                    counter_style_environment_identity,
+                    animation_overlay_identity,
+                    animated_overlay,
+                    animation_overlay_payloads,
+                    animation_overlay_payload_count,
+                    longhand_table,
+                    custom_property_store,
+                )
+            }),
+            Self::AppliedStyleReactionsDeriveInput { node, applied, count } => StyleAnswer::Bool(unsafe {
+                crate::css::style::bridge::owner_applied_style_reactions_derive_input(engine, node, applied, count)
+            }),
+            Self::GrantStyleNodes {
+                elements,
+                element_count,
+                texts,
+                text_count,
+            } => {
+                unsafe {
+                    crate::css::style::bridge::owner_grant_style_nodes(
+                        engine,
+                        elements,
+                        element_count,
+                        texts,
+                        text_count,
+                    );
+                };
+                StyleAnswer::None
+            }
+            Self::DecideTransitions {
+                before_style_record,
+                after_longhand_table,
+                after_animated_overlay,
+                input,
+                actions,
+            } => {
+                unsafe {
+                    crate::css::transition::owner_decide_transitions(
+                        engine,
+                        before_style_record,
+                        after_longhand_table,
+                        after_animated_overlay,
+                        input,
+                        actions,
+                    );
+                }
+                StyleAnswer::None
+            }
+            #[cfg(feature = "style-recording")]
+            Self::BenchmarkMarker { name, length, is_ascii } => {
+                unsafe { super::bridge::owner_record_benchmark_marker(engine, name, length, is_ascii) };
+                StyleAnswer::None
+            }
         }
     }
 
@@ -428,6 +823,9 @@ impl StyleQuery {
 pub(crate) struct StyleQueryCell {
     query: Option<StyleQuery>,
     answer: Option<StyleAnswer>,
+    /// The custom-property data the engine retired answering the query, and before it, which only the main thread
+    /// releases: it drops the cell once the owner has answered.
+    retired: Vec<super::inputs::RetainedCustomPropertyData>,
 }
 
 impl StyleQueryCell {
@@ -435,6 +833,7 @@ impl StyleQueryCell {
         Self {
             query: Some(query),
             answer: None,
+            retired: Vec::new(),
         }
     }
 
@@ -464,6 +863,7 @@ impl StyleQueryRef {
         if let Some(query) = cell.query.take() {
             cell.answer = Some(query.answer(engine));
         }
+        cell.retired = std::mem::take(&mut engine.host.retired_custom_property_data);
     }
 }
 
@@ -474,10 +874,6 @@ fn owning_document(engine: StyleEngineHandle) -> Option<DocumentId> {
 
 /// Sends `change` to the owner of `engine`'s document, which applies it before the next unit or query that reaches
 /// the engine. `entry` names the door the main thread took, for the style seal.
-#[expect(
-    dead_code,
-    reason = "the generated writes go to the owner with the style inputs recorded then read back"
-)]
 pub(crate) fn send(engine: StyleEngineInputHandle, entry: &'static str, change: EngineChange) {
     let handle = engine.home();
     handle.bring_home(entry);
@@ -503,26 +899,17 @@ pub(crate) fn ask(engine: StyleEngineHandle, entry: &'static str, query: StyleQu
         // SAFETY: No owner reaches an engine no document's render state links: the calling thread holds it alone.
         return query.answer(unsafe { engine.enter(entry) });
     };
-    ask_document(engine, document, entry, query)
+    ask_document(document, entry, query)
 }
 
-fn ask_document(
-    engine: StyleEngineHandle,
-    document: DocumentId,
-    entry: &'static str,
-    query: StyleQuery,
-) -> StyleAnswer {
+fn ask_document(document: DocumentId, entry: &'static str, query: StyleQuery) -> StyleAnswer {
     let mut cell = StyleQueryCell::new(query);
-    let answered = crate::render_owner::ask_owner(document, Query::Engine(cell.for_owner()));
-    let StyleQueryCell { query, answer } = cell;
+    let answered = crate::render_owner::ask_engine(document, Query::Engine(cell.for_owner()));
+    let StyleQueryCell { query, answer, retired } = cell;
+    // What the owner retired is released here, on the main thread.
+    drop(retired);
     match (answered, answer, query) {
         (Answer::Engine(EngineAnswered::Answered), Some(answer), _) => answer,
-        // Where the owner holds no engine of the document (a test holds the run the query would queue behind), the
-        // calling thread answers as the owner would.
-        (Answer::Engine(EngineAnswered::LeftToHost), _, Some(query)) => {
-            // SAFETY: The owner does not reach the engine meanwhile: the thread holds the run it would reach it in.
-            query.answer(unsafe { engine.enter(entry) })
-        }
         (_, _, query) => {
             debug_assert!(false, "the render owner left the style read {entry} unanswered");
             query.map_or(StyleAnswer::None, |query| query.unanswered())
@@ -538,7 +925,7 @@ pub(crate) fn apply_changes_before_main_reaches(engine: StyleEngineHandle) {
         return;
     }
     let mut cell = StyleQueryCell::new(StyleQuery::ApplyChanges);
-    let answered = crate::render_owner::ask_owner(document, Query::Engine(cell.for_owner()));
+    let answered = crate::render_owner::ask_engine(document, Query::Engine(cell.for_owner()));
     debug_assert!(
         !matches!(answered, Answer::Engine(EngineAnswered::Unanswered)),
         "the render owner panicked applying style changes"

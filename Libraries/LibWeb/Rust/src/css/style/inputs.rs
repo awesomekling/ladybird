@@ -165,15 +165,14 @@ impl RetainedState {
         environment: u64,
         declares: bool,
         animation_base: Option<(u64, *const std::ffi::c_void, *const std::ffi::c_void)>,
-    ) {
+    ) -> Option<HeldCustomPropertyEnvironment> {
         if data.is_null() {
-            self.element_custom_property_data.remove(&node);
-            return;
+            return self.element_custom_property_data.remove(&node);
         }
         if let Some(existing) = self.element_custom_property_data.get(&node)
             && existing.data.as_ref().is_some_and(|existing| existing.data() == data)
         {
-            return;
+            return None;
         }
         if environment != 0 {
             self.computed_group_sets
@@ -197,7 +196,7 @@ impl RetainedState {
                 }),
                 data: Some(unsafe { RetainedCustomPropertyData::retain(data, store) }),
             },
-        );
+        )
     }
 
     /// The identity, the store and the host object of the environment the one an element holds was
@@ -252,10 +251,9 @@ impl RetainedState {
         environment: u64,
         declares_own: bool,
         animation_base: Option<(u64, *const std::ffi::c_void, *const std::ffi::c_void)>,
-    ) {
+    ) -> Option<HeldCustomPropertyEnvironment> {
         if data.is_null() {
-            self.pseudo_element_custom_property_data.remove(&(node, pseudo));
-            return;
+            return self.pseudo_element_custom_property_data.remove(&(node, pseudo));
         }
         if self
             .pseudo_element_custom_property_data
@@ -263,7 +261,7 @@ impl RetainedState {
             .and_then(|existing| existing.data.as_ref())
             .is_some_and(|existing| existing.data() == data)
         {
-            return;
+            return None;
         }
         self.pseudo_element_custom_property_data.insert(
             (node, pseudo),
@@ -278,7 +276,7 @@ impl RetainedState {
                     data: crate::css::host_shared::HostShared::new(data),
                 }),
             },
-        );
+        )
     }
 
     /// The kinds of the element's synthetic pseudo-elements that hold a custom-property
@@ -3231,7 +3229,9 @@ impl StyleEngineState {
     pub fn mint_style_nodes(&mut self, nodes: &[StyleNodeID], counters: &mut Counters) {
         for &node in nodes {
             self.retained.tree.mint_element(node, &mut self.retained.memory);
-            self.retained.element_custom_property_data.remove(&node);
+            if let Some(held) = self.retained.element_custom_property_data.remove(&node) {
+                self.host.retired_custom_property_data.extend(held.data);
+            }
             counters.bump(Counter::StyleNodesAllocated);
         }
         self.publish_budget_inputs();

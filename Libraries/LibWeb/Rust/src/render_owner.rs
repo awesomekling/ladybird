@@ -78,10 +78,6 @@ pub(crate) enum Change {
     StyleInputs(InputForPass),
     /// A write to the document's style engine, which the owner applies before the next unit or query that reaches
     /// the engine, in order with the style inputs.
-    #[expect(
-        dead_code,
-        reason = "the generated writes go to the owner with the style inputs recorded then read back"
-    )]
     Engine(crate::css::style::owner_calls::EngineChange),
     /// A write to the document's layout arena, which the owner applies before the next unit or query that reaches
     /// the arena.
@@ -232,6 +228,9 @@ impl RenderState {
             debug_assert!(false, "the owner applies style changes of a document with an engine");
             return;
         }
+        // The faces applying them wants are this document's, whichever document's unit the owner serves them beside.
+        let _wanted_face_owner =
+            libgfx_rust::font::WantedFaceOwner::enter(std::ptr::from_mut::<ArenaHandle>(&mut self.arena) as u64);
         // SAFETY: The engine is the document's, and the document thread reaches it only through the owner, or once it
         // has taken back the stage it lent it.
         unsafe {
@@ -1145,6 +1144,37 @@ pub(crate) unsafe fn ask_about(arena: *mut c_void, query: Query) -> Answer {
     let document = unsafe { ArenaHandle::document_of(arena) };
     // SAFETY: As above.
     unsafe { ask(document, arena, query) }
+}
+
+/// Asks the owner the engine query `query` about `document` and waits for the answer, as of every change the calling
+/// thread sent before. Only the owner answers it: a run a test holds serves it between the run's units. The thread that
+/// holds the document's render state (the owner, or without a Rendering thread the thread its messages are handled on)
+/// answers it right here.
+pub(crate) fn ask_engine(document: DocumentId, query: Query) -> Answer {
+    if let Some(answer) = STATES.with_borrow_mut(|states| states.get_mut(&document).map(|state| state.answer(query))) {
+        return answer;
+    }
+    let through = sent_through(document);
+    let answer = crate::stage_thread::wait_for_owner_thread(|reply| {
+        // The owner applies every style change sent before the query first.
+        STYLE_CHANGES_SENT.with_borrow_mut(|sent| sent.remove(&document));
+        ToOwner::Ask {
+            document,
+            through,
+            query,
+            reply,
+        }
+    });
+    match answer {
+        Some(outcome) => {
+            debug_assert!(outcome.is_ok(), "the render owner panicked answering {query:?}");
+            Answer::of_outcome(query, outcome)
+        }
+        None => {
+            debug_assert!(false, "the engine query of document {document:?} has no owner");
+            Answer::unanswered(query)
+        }
+    }
 }
 
 /// Asks the owner `query` about `document` and waits for the answer, as [`ask`] does, for a document thread that
