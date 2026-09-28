@@ -55,7 +55,7 @@ impl RetainedState {
     /// Keep what a row the engine answers read of its containers for the host, which records it
     /// when it installs the element's record, as it does for a row it computes itself.
     pub(crate) fn note_container_effects_for_host(&mut self, node: StyleNodeID, verdict: &ContainerVerdict) {
-        let noted = self.container_effects_for_host.entry(node).or_default();
+        let noted = self.container_effects_for_host.entry_or_default(node);
         noted.depends_on_size |= verdict.depends_on_size;
         noted.depends_on_style |= verdict.depends_on_style;
         noted.effects.extend(verdict.effects.iter().cloned());
@@ -386,8 +386,9 @@ impl RetainedState {
         }
     }
 
+    /// Takes what the host took from its copy of the table already.
     pub(crate) fn take_container_effects_for_host(&mut self, node: StyleNodeID) -> Option<ContainerVerdict> {
-        self.container_effects_for_host.remove(&node)
+        self.container_effects_for_host.take_taken_by_host(&node)
     }
 
     /// Evaluate a rule's container conditions for a subject. `None` when the rule has no target.

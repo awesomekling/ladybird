@@ -32,6 +32,7 @@ use crate::css::host_shared::{HostShared, SharedPayload};
 use crate::css::selector::CompiledSelector;
 use crate::css::style_value::RetainedStyleValueData;
 
+use super::HashMap;
 use super::HashSet;
 use super::batch_matcher::RuleMatch;
 use super::cascade::CascadeOperator;
@@ -1679,41 +1680,33 @@ pub unsafe extern "C" fn style_engine_publish_font_face_snapshot(
     snapshot: *const c_void,
     memo: usize,
 ) {
-    crate::css::style::owner_calls::ask(
-        engine.home(),
+    // The change holds references of its own, taken here: both are counted atomically.
+    crate::css::style::owner_calls::send(
+        engine,
         "style_engine_publish_font_face_snapshot",
-        crate::css::style::owner_calls::StyleQuery::PublishFontFaceSnapshot { snapshot, memo },
+        crate::css::style::owner_calls::EngineChange::PublishFontFaceSnapshot {
+            // SAFETY: Guaranteed by the caller.
+            snapshot: unsafe { super::font_faces::retained(snapshot) },
+            // SAFETY: Guaranteed by the caller.
+            memo: unsafe { super::font_faces::RetainedFontCascadeMemo::retain(memo) },
+        },
     );
 }
 
-/// Answers [`style_engine_publish_font_face_snapshot`] from `engine`, on the render owner.
-///
-/// # Safety
-///
-/// As for [`style_engine_publish_font_face_snapshot`].
-pub(crate) unsafe fn owner_publish_font_face_snapshot(
+/// Applies [`style_engine_publish_font_face_snapshot`] to `engine`, on the render owner.
+pub(crate) fn owner_publish_font_face_snapshot(
     engine: &mut crate::css::style::StyleEngine,
-    snapshot: *const c_void,
-    memo: usize,
+    snapshot: Option<std::sync::Arc<super::font_faces::FontFaceSnapshot>>,
+    memo: Option<super::font_faces::RetainedFontCascadeMemo>,
 ) {
-    if engine
-        .retained
-        .font_cascade_memo
-        .as_ref()
-        .is_none_or(|held| held.address() != memo)
-    {
-        // SAFETY: The caller guarantees the memo is live.
-        engine.retained.font_cascade_memo = unsafe { super::font_faces::RetainedFontCascadeMemo::retain(memo) };
+    let retained = &mut engine.retained;
+    if retained.font_cascade_memo.as_ref().map(|held| held.address()) != memo.as_ref().map(|memo| memo.address()) {
+        retained.font_cascade_memo = memo;
     }
-    let held = &mut engine.retained.font_face_snapshot;
-    if held
-        .as_ref()
-        .is_some_and(|current| super::font_faces::as_pointer(current) == snapshot)
+    if retained.font_face_snapshot.as_ref().map(std::sync::Arc::as_ptr) != snapshot.as_ref().map(std::sync::Arc::as_ptr)
     {
-        return;
+        retained.font_face_snapshot = snapshot;
     }
-    // SAFETY: The caller guarantees the pointer is live.
-    *held = unsafe { super::font_faces::retained(snapshot) };
 }
 
 /// Publishes the previous document-element font answer before style evaluation begins.
@@ -4297,25 +4290,20 @@ pub unsafe extern "C" fn style_engine_take_row_sampled_in_pass(
     engine: StyleEngineInputHandle,
     node: u32,
 ) -> FfiRowSampledInPass {
-    crate::css::style::owner_calls::ask(
-        engine.home(),
-        "style_engine_take_row_sampled_in_pass",
-        crate::css::style::owner_calls::StyleQuery::TakeRowSampledInPass { node },
-    )
-    .row_sampled()
-}
-
-/// Answers [`style_engine_take_row_sampled_in_pass`] from `engine`, on the render owner.
-///
-/// # Safety
-///
-/// As for [`style_engine_take_row_sampled_in_pass`].
-pub(crate) unsafe fn owner_take_row_sampled_in_pass(
-    engine: &mut crate::css::style::StyleEngine,
-    node: u32,
-) -> FfiRowSampledInPass {
-    let published = StyleNodeID::from_raw(node).and_then(|node| engine.take_row_sampled_in_pass(node));
-    row_sampled_in_pass(engine, published)
+    const ENTRY: &str = "style_engine_take_row_sampled_in_pass";
+    engine.home().bring_home(ENTRY);
+    // SAFETY: The engine is home.
+    let taken = StyleNodeID::from_raw(node)
+        .and_then(|node| Some((node, unsafe { engine.home().drain_answers() }.take_row_sampled(node)?)));
+    let Some((node, sampled)) = taken else {
+        return FfiRowSampledInPass::absent();
+    };
+    crate::css::style::owner_calls::send(
+        engine,
+        ENTRY,
+        crate::css::style::owner_calls::EngineChange::RowSampledTakenByHost(node),
+    );
+    sampled
 }
 
 /// Takes what the engine published for a synthetic pseudo-element whose animations it sampled as
@@ -4809,6 +4797,60 @@ impl FfiRowSampledInPass {
     }
 }
 
+/// What the engine keeps for the host's drain of its last style transaction, which the engine's home keeps for the main
+/// thread to read and take from without asking the render owner. The main thread tells the engine what it took.
+#[derive(Default)]
+pub(crate) struct DrainAnswers {
+    /// The records the transaction's answer names, by record.
+    records: Vec<(u64, std::sync::Arc<super::published_record::PublishedStyleRecord>)>,
+    /// What each row's container conditions read of its containers.
+    container_effects: HashMap<StyleNodeID, super::container_queries::ContainerVerdict>,
+    /// What the pass published for each row whose animations it sampled.
+    rows_sampled: HashMap<StyleNodeID, FfiRowSampledInPass>,
+}
+
+impl DrainAnswers {
+    /// Follows what `engine` keeps, as whoever reached it is done with it.
+    pub(crate) fn follow(&mut self, engine: &mut StyleEngine) {
+        if let Some(records) = engine.host.records_for_drain.take() {
+            self.records = records;
+        }
+        if engine.retained.container_effects_for_host.take_moved() {
+            self.container_effects
+                .clone_from(&engine.retained.container_effects_for_host);
+        }
+        if engine.retained.rows_sampled_in_pass.take_moved() {
+            self.rows_sampled.clear();
+            self.rows_sampled.extend(
+                engine
+                    .retained
+                    .rows_sampled_in_pass
+                    .iter()
+                    .map(|(&node, &published)| (node, row_sampled_in_pass(engine, Some(published)))),
+            );
+        }
+    }
+
+    pub(crate) fn record(
+        &self,
+        style_record: u64,
+    ) -> Option<std::sync::Arc<super::published_record::PublishedStyleRecord>> {
+        let index = self
+            .records
+            .binary_search_by_key(&style_record, |(record, _)| *record)
+            .ok()?;
+        Some(std::sync::Arc::clone(&self.records[index].1))
+    }
+
+    fn take_container_effects(&mut self, node: StyleNodeID) -> Option<super::container_queries::ContainerVerdict> {
+        self.container_effects.remove(&node)
+    }
+
+    fn take_row_sampled(&mut self, node: StyleNodeID) -> Option<FfiRowSampledInPass> {
+        self.rows_sampled.remove(&node)
+    }
+}
+
 fn row_sampled_in_pass(
     engine: &StyleEngine,
     published: Option<super::engine_sample::SettledRowPublication>,
@@ -4939,6 +4981,11 @@ pub unsafe extern "C" fn style_engine_publish_style_record(
     engine: StyleEngineHandle,
     style_record: u64,
 ) -> *const c_void {
+    engine.bring_home_to_read_records("style_engine_publish_style_record");
+    // SAFETY: No stage holds the engine.
+    if let Some(record) = unsafe { engine.drain_answers() }.record(style_record) {
+        return super::published_record::into_handle(record);
+    }
     crate::css::style::owner_calls::ask_records(
         engine,
         "style_engine_publish_style_record",
@@ -5916,27 +5963,24 @@ pub unsafe extern "C" fn style_engine_take_container_effects(
     engine: StyleEngineInputHandle,
     node: u32,
 ) -> FfiNativeContainerMatchResult {
-    crate::css::style::owner_calls::ask(
-        engine.home(),
-        "style_engine_take_container_effects",
-        crate::css::style::owner_calls::StyleQuery::TakeContainerEffects { node },
-    )
-    .container_effects()
-}
-
-/// Answers [`style_engine_take_container_effects`] from `engine`, on the render owner.
-///
-/// # Safety
-///
-/// As for [`style_engine_take_container_effects`].
-pub(crate) unsafe fn owner_take_container_effects(
-    engine: &mut crate::css::style::StyleEngine,
-    node: u32,
-) -> FfiNativeContainerMatchResult {
-    let Some(verdict) = StyleNodeID::from_raw(node).and_then(|node| engine.take_and_record_container_effects(node))
-    else {
+    const ENTRY: &str = "style_engine_take_container_effects";
+    engine.home().bring_home(ENTRY);
+    // SAFETY: The engine is home.
+    let taken = StyleNodeID::from_raw(node).and_then(|node| {
+        Some((
+            node,
+            unsafe { engine.home().drain_answers() }.take_container_effects(node)?,
+        ))
+    });
+    let Some((node, verdict)) = taken else {
         return FfiNativeContainerMatchResult::default();
     };
+    // The engine records what the effects read of its containers as it takes them too.
+    crate::css::style::owner_calls::send(
+        engine,
+        ENTRY,
+        crate::css::style::owner_calls::EngineChange::ContainerEffectsTakenByHost(node),
+    );
     let effects = (!verdict.effects.is_empty()).then(|| {
         Box::into_raw(Box::new(ContainerEffects {
             effects: verdict.effects,
@@ -5963,6 +6007,10 @@ pub unsafe extern "C" fn style_engine_discard_container_effects(engine: StyleEng
         "style_engine_discard_container_effects",
         crate::css::style::owner_calls::EngineChange::DiscardContainerEffects { node },
     );
+    if let Some(node) = StyleNodeID::from_raw(node) {
+        // SAFETY: Sending the change brought the engine home.
+        unsafe { engine.home().drain_answers() }.take_container_effects(node);
+    }
 }
 
 /// Answers [`style_engine_discard_container_effects`] from `engine`, on the render owner.
@@ -6886,6 +6934,25 @@ fn finish_style_transaction(
         engine.forget_recording_atom_mappings(output.reclaimed_style_atoms.iter().map(|reclaimed| reclaimed.atom));
     }
     engine.install_ffi_style_transaction_output(output);
+    // The drain reads the record each row names: they travel with the answer. A recording records the host's reads of
+    // them as it makes them.
+    if engine.recording_id().is_none() {
+        let mut records: Vec<_> = engine
+            .host
+            .ffi_style_transaction_output
+            .answers
+            .iter()
+            .filter_map(|answer| {
+                Some((
+                    answer.new_style_record,
+                    engine.publish_style_record(answer.new_style_record)?,
+                ))
+            })
+            .collect();
+        records.sort_unstable_by_key(|(style_record, _)| *style_record);
+        records.dedup_by_key(|(style_record, _)| *style_record);
+        engine.host.records_for_drain = Some(records);
+    }
     let output = &engine.host.ffi_style_transaction_output;
     let view = FfiStyleTransactionView {
         transaction_version: output.transaction_version,

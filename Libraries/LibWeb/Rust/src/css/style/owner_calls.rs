@@ -18,6 +18,7 @@ use super::bridge::{
     FfiPublishedAnimationKeyframe, FfiPublishedLinearEasingPoint, FfiPublishedTransition, FfiRuleMatch, InputForPass,
 };
 use super::engine_home::{PendingFacts, StyleEngineHandle, StyleEngineInputHandle};
+use super::tree::StyleNodeID;
 use crate::layout::LayoutNodeArena;
 use crate::render_owner::{Answer, DocumentId, EngineAnswered, Query};
 use std::ffi::c_void;
@@ -25,7 +26,6 @@ use std::ptr::NonNull;
 
 /// A write to a document's style engine, which the render owner applies. A write that lends the engine what the host
 /// owns for the call is a [`StyleQuery`] instead, which the main thread waits for.
-#[derive(Debug)]
 pub(crate) enum EngineChange {
     /// A write the boundary specification generates.
     Boundary(BoundaryWrite),
@@ -41,6 +41,17 @@ pub(crate) enum EngineChange {
     DiscardContainerEffects { node: u32 },
     /// Publishes the previous document-element font answer before style evaluation begins.
     PrepareRootFontResolution { generation: u64 },
+    /// The document's `@font-face` table for the generation the next update computes against, and the memo its
+    /// resolutions go into.
+    PublishFontFaceSnapshot {
+        snapshot: Option<std::sync::Arc<super::font_faces::FontFaceSnapshot>>,
+        memo: Option<super::font_faces::RetainedFontCascadeMemo>,
+    },
+    /// The host took what the pass published for the row of an element whose animations it sampled.
+    RowSampledTakenByHost(StyleNodeID),
+    /// The host took what the container conditions of an element's row read of its containers, which the engine
+    /// records.
+    ContainerEffectsTakenByHost(StyleNodeID),
 }
 
 impl EngineChange {
@@ -83,7 +94,10 @@ impl EngineChange {
                 | Write::SetRootElementFontMetrics { .. },
             )
             | Self::DiscardContainerEffects { .. }
-            | Self::PrepareRootFontResolution { .. } => PendingFacts::NONE,
+            | Self::PrepareRootFontResolution { .. }
+            | Self::PublishFontFaceSnapshot { .. }
+            | Self::RowSampledTakenByHost(_)
+            | Self::ContainerEffectsTakenByHost(_) => PendingFacts::NONE,
             // Only an element that loses its record may owe its resources an input.
             Self::Boundary(Write::SetElementContainerQueryInputs { record, .. }) if *record != 0 => PendingFacts::NONE,
             Self::Boundary(
@@ -146,6 +160,15 @@ impl EngineChange {
             Self::PrepareRootFontResolution { generation } => unsafe {
                 crate::css::style::bridge::owner_prepare_root_font_resolution(engine, generation);
             },
+            Self::PublishFontFaceSnapshot { snapshot, memo } => {
+                crate::css::style::bridge::owner_publish_font_face_snapshot(engine, snapshot, memo);
+            }
+            Self::RowSampledTakenByHost(node) => {
+                engine.take_row_sampled_in_pass(node);
+            }
+            Self::ContainerEffectsTakenByHost(node) => {
+                engine.take_and_record_container_effects(node);
+            }
         }
     }
 }
@@ -425,9 +448,6 @@ pub(crate) enum StyleQuery {
     },
     /// Compiles a sheet's rules into the engine, or replaces their selectors, as the walk says.
     Compile(crate::css::rule::compilation::OwnerCompilation),
-    TakeContainerEffects {
-        node: u32,
-    },
     RegisterAnchorNames {
         node: u32,
         style_record: u64,
@@ -444,19 +464,12 @@ pub(crate) enum StyleQuery {
         node: u32,
         pseudo_kind: u8,
     },
-    TakeRowSampledInPass {
-        node: u32,
-    },
     TakeSettledAnimationDefinitions {
         node: u32,
         pseudo_kind: u8,
     },
     TakeTransitionStepDecidedInPass {
         node: u32,
-    },
-    PublishFontFaceSnapshot {
-        snapshot: *const c_void,
-        memo: usize,
     },
     /// Publishes the anchor names registration moved to the document's layout arena, or leaves them for an arena where
     /// it has none.
@@ -486,7 +499,6 @@ pub(crate) enum StyleAnswer {
     RowSampled(super::bridge::FfiRowSampledInPass),
     RecordDelta(super::bridge::FfiStyleRecordDelta),
     RuleDeclarations(Option<super::bridge::PublishedRuleDeclarations>),
-    ContainerEffects(super::bridge::FfiNativeContainerMatchResult),
     TransitionStep(super::bridge::FfiTransitionStepDecidedInPass),
     AnimationDefinitions(super::bridge::FfiSettledAnimationDefinitions),
     PreparedStylePass(super::bridge::PreparedStylePass),
@@ -590,16 +602,6 @@ impl StyleAnswer {
             _ => {
                 debug_assert!(false, "a declaration edit is answered with what it published");
                 None
-            }
-        }
-    }
-
-    pub(crate) fn container_effects(self) -> super::bridge::FfiNativeContainerMatchResult {
-        match self {
-            Self::ContainerEffects(value) => value,
-            _ => {
-                debug_assert!(false, "container effects are answered with container effects");
-                super::bridge::FfiNativeContainerMatchResult::default()
             }
         }
     }
@@ -1093,9 +1095,6 @@ impl StyleQuery {
                 unsafe { compilation.run(engine) };
                 StyleAnswer::None
             }
-            Self::TakeContainerEffects { node } => StyleAnswer::ContainerEffects(unsafe {
-                crate::css::style::bridge::owner_take_container_effects(engine, node)
-            }),
             Self::RegisterAnchorNames { node, style_record } => StyleAnswer::U32(u32::from(unsafe {
                 crate::css::style::bridge::owner_register_anchor_names(engine, node, style_record)
             })),
@@ -1118,19 +1117,12 @@ impl StyleQuery {
                     )
                 })
             }
-            Self::TakeRowSampledInPass { node } => StyleAnswer::RowSampled(unsafe {
-                crate::css::style::bridge::owner_take_row_sampled_in_pass(engine, node)
-            }),
             Self::TakeSettledAnimationDefinitions { node, pseudo_kind } => StyleAnswer::AnimationDefinitions(unsafe {
                 crate::css::style::bridge::owner_take_settled_animation_definitions(engine, node, pseudo_kind)
             }),
             Self::TakeTransitionStepDecidedInPass { node } => StyleAnswer::TransitionStep(unsafe {
                 crate::css::style::bridge::owner_take_transition_step_decided_in_pass(engine, node)
             }),
-            Self::PublishFontFaceSnapshot { snapshot, memo } => {
-                unsafe { crate::css::style::bridge::owner_publish_font_face_snapshot(engine, snapshot, memo) };
-                StyleAnswer::None
-            }
             Self::PublishAnchorNames => {
                 engine.publish_anchor_names(arena);
                 StyleAnswer::None

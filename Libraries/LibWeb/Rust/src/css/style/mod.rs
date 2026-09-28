@@ -69,6 +69,7 @@ mod custom_property_environments;
 mod deferred_pseudo;
 #[cfg(test)]
 mod differential_tests;
+pub(crate) mod drain_table;
 pub(crate) mod engine_home;
 pub(crate) mod engine_sample;
 pub(crate) mod engine_sample_check;
@@ -823,7 +824,7 @@ pub struct RetainedState {
     native_rules: native_rules::NativeRuleRegistry,
     /// What the container conditions of the rows the engine answered left for the host to record,
     /// per element, taken when the host installs the element's record.
-    container_effects_for_host: HashMap<StyleNodeID, container_queries::ContainerVerdict>,
+    container_effects_for_host: drain_table::DrainTable<StyleNodeID, container_queries::ContainerVerdict>,
     /// Each node's gated rules and whether their conditions held when its winners were published:
     /// the winners hold a gated rule's declarations exactly where it did.
     published_container_verdicts: HashMap<StyleNodeID, Vec<(RuleID, bool, bool)>>,
@@ -961,7 +962,7 @@ pub struct RetainedState {
     pseudo_settles_owed: std::collections::BTreeMap<StyleNodeID, publication::OwedPseudoSettle>,
     /// The rows whose animations the pass sampled itself, with what it published for them: the
     /// host installs the composition rather than sampling again, and applies what it left.
-    rows_sampled_in_pass: HashMap<StyleNodeID, engine_sample::SettledRowPublication>,
+    rows_sampled_in_pass: drain_table::DrainTable<StyleNodeID, engine_sample::SettledRowPublication>,
     /// The synthetic pseudo-elements whose animations the engine sampled as it settled them over
     /// their element's composition, with what it published for them: the host installs the
     /// composition rather than sampling again.
@@ -1239,6 +1240,9 @@ pub struct HostState {
     /// Identities released at transaction settlement. The FFI keeps this batch borrowed until C++
     /// has removed its matching fly-string references and atom-keyed memo entries.
     reclaimed_style_atoms: Vec<ReclaimedStyleAtom>,
+    /// The records the answer of the last style transaction names, published for the host's drain of it, which the
+    /// engine's home takes over as whoever reached the engine for the transaction is done with it.
+    pub(super) records_for_drain: Option<Vec<(u64, std::sync::Arc<published_record::PublishedStyleRecord>)>>,
     /// The custom-property environments of elements a transaction retired. Their reference counts
     /// belong to the host and are not atomic, and a transaction may run on the stage thread, so
     /// the transaction leaves them here and the bridge releases them on the document thread.
