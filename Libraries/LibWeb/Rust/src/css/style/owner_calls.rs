@@ -53,6 +53,18 @@ pub(crate) enum EngineChange {
     /// The host took what the container conditions of an element's row read of its containers, which the engine
     /// records.
     ContainerEffectsTakenByHost(StyleNodeID),
+    /// A sheet of `origin`, which the main thread names `sheet` as it adds it: the engine's sheets are numbered in the
+    /// order they are added.
+    AddSheet {
+        object: super::program::StyleSheetObjectID,
+        origin: crate::css::cascaded_properties::CascadeOrigin,
+        sheet: super::program::SheetID,
+    },
+    /// The declarations the native rule of `identity` now holds, which the engine publishes where it holds the rule.
+    RuleDeclarationsChanged {
+        identity: u64,
+        declarations: Option<std::sync::Arc<crate::css::declaration_block::DeclarationBlockData>>,
+    },
     /// The custom-property environment an element now holds, or that it holds none.
     SetElementCustomPropertyData(StyleNodeID, Option<HandedCustomPropertyEnvironment>),
     /// The custom-property environment one of an element's synthetic pseudo-elements now holds, or that it holds none.
@@ -112,7 +124,8 @@ impl EngineChange {
             | Self::ContainerEffectsTakenByHost(_)
             | Self::ElementStyleInputAbsorbedByHost { .. }
             | Self::SetElementCustomPropertyData(..)
-            | Self::SetPseudoElementCustomPropertyData(..) => PendingFacts::NONE,
+            | Self::SetPseudoElementCustomPropertyData(..)
+            | Self::AddSheet { .. } => PendingFacts::NONE,
             // Only an element that loses its record may owe its resources an input.
             Self::Boundary(Write::SetElementContainerQueryInputs { record, .. }) if *record != 0 => PendingFacts::NONE,
             Self::Boundary(
@@ -208,6 +221,13 @@ impl EngineChange {
                 inherited_style_groups,
             } => {
                 engine.absorb_element_style_input(node, reaction, inherited_style_groups, false);
+            }
+            Self::AddSheet { object, origin, sheet } => {
+                let added = engine.add_sheet(object, origin);
+                debug_assert!(added == sheet, "the engine numbers its sheets as the main thread does");
+            }
+            Self::RuleDeclarationsChanged { identity, declarations } => {
+                super::bridge::owner_rule_declarations_changed(engine, identity, declarations);
             }
             // What the element held before is the document thread's to release.
             Self::SetElementCustomPropertyData(node, handed) => {
@@ -310,16 +330,9 @@ pub(crate) enum StyleQuery {
         hint_count: usize,
         inline_block: *const c_void,
     },
-    NativeRuleId {
-        identity: u64,
-    },
     NativeRuleTarget {
         rule: u32,
         result: *mut FfiNativeRuleTarget,
-    },
-    NativeRuleSuccessor {
-        sheet: *const c_void,
-        identity: u64,
     },
     SampleInstalledRecord {
         node: u32,
@@ -448,11 +461,6 @@ pub(crate) enum StyleQuery {
         length: usize,
         is_ascii: bool,
     },
-    /// Publishes the declarations the native rule of `identity` now holds, if the engine holds it.
-    RuleDeclarationsChanged {
-        identity: u64,
-        declarations: Option<std::sync::Arc<crate::css::declaration_block::DeclarationBlockData>>,
-    },
     /// Removes the native rules of `count` identities in order, and writes the engine id plus one each had as it went,
     /// or 0 for one gone already.
     RemoveNativeRules {
@@ -512,7 +520,6 @@ pub(crate) enum StyleAnswer {
     Pointer(*const c_void),
     RowSampled(super::bridge::FfiRowSampledInPass),
     RecordDelta(super::bridge::FfiStyleRecordDelta),
-    RuleDeclarations(Option<super::bridge::PublishedRuleDeclarations>),
     TransitionStep(super::bridge::FfiTransitionStepDecidedInPass),
     AnimationDefinitions(super::bridge::FfiSettledAnimationDefinitions),
     PreparedStylePass(super::bridge::PreparedStylePass),
@@ -606,16 +613,6 @@ impl StyleAnswer {
             _ => {
                 debug_assert!(false, "a record move is answered with a record move");
                 super::bridge::FfiStyleRecordDelta::default()
-            }
-        }
-    }
-
-    pub(crate) fn rule_declarations(self) -> Option<super::bridge::PublishedRuleDeclarations> {
-        match self {
-            Self::RuleDeclarations(value) => value,
-            _ => {
-                debug_assert!(false, "a declaration edit is answered with what it published");
-                None
             }
         }
     }
@@ -758,15 +755,9 @@ impl StyleQuery {
                     inline_block,
                 )
             }),
-            Self::NativeRuleId { identity } => {
-                StyleAnswer::U32(unsafe { crate::css::style::bridge::owner_native_rule_id(engine, identity) })
-            }
             Self::NativeRuleTarget { rule, result } => {
                 StyleAnswer::Bool(unsafe { crate::css::style::bridge::owner_native_rule_target(engine, rule, result) })
             }
-            Self::NativeRuleSuccessor { sheet, identity } => StyleAnswer::U32(unsafe {
-                crate::css::style::bridge::owner_native_rule_successor(engine, sheet, identity)
-            }),
             Self::SampleInstalledRecord {
                 node,
                 pseudo_kind,
@@ -1020,9 +1011,6 @@ impl StyleQuery {
                 unsafe { super::bridge::owner_record_benchmark_marker(engine, name, length, is_ascii) };
                 StyleAnswer::None
             }
-            Self::RuleDeclarationsChanged { identity, declarations } => StyleAnswer::RuleDeclarations(
-                super::bridge::owner_rule_declarations_changed(engine, identity, declarations),
-            ),
             Self::RemoveNativeRules { identities, ids, count } => {
                 // SAFETY: The main thread lends both arrays, of `count` each, until it has the answer.
                 let (identities, ids) = unsafe {

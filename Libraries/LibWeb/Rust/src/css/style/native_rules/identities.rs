@@ -29,7 +29,7 @@ impl NativeRuleIdentities {
         page.slots[(*identity % IDENTITIES_PER_PAGE as u64) as usize].map(|id| RuleID(id.get() - 1))
     }
 
-    pub(super) fn insert(&mut self, identity: u64, id: RuleID) {
+    pub(in crate::css::style) fn insert(&mut self, identity: u64, id: RuleID) {
         let stored_id = NonZeroU32::new(id.0.checked_add(1).expect("semantic rule identity space exhausted")).unwrap();
         let page = self
             .pages
@@ -48,7 +48,7 @@ impl NativeRuleIdentities {
         }
     }
 
-    pub(super) fn remove(&mut self, identity: &u64) -> Option<RuleID> {
+    pub(in crate::css::style) fn remove(&mut self, identity: &u64) -> Option<RuleID> {
         let page_number = identity / IDENTITIES_PER_PAGE as u64;
         let page = self.pages.get_mut(&page_number)?;
         let id = page.slots[(*identity % IDENTITIES_PER_PAGE as u64) as usize].take()?;

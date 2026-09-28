@@ -27,7 +27,7 @@
 //! and the main thread adds what each change it sends may leave.
 
 use super::StyleEngine;
-use super::bridge::DrainAnswers;
+use super::bridge::HomeAnswers;
 use super::owner_calls::StyleChange;
 use std::cell::{Cell, UnsafeCell};
 use std::ffi::c_void;
@@ -64,7 +64,7 @@ impl StyleEngineInputHandle {
         let leaves = change.leaves(self.0.pending_facts());
         home.pending.fetch_or(leaves.0, Ordering::Relaxed);
         // SAFETY: On the main thread, with the engine home: nothing reaches the engine, or what the home keeps for it.
-        unsafe { &mut *home.drain.get() }.follow_sent(&change, leaves);
+        unsafe { &mut *home.answers.get() }.follow_sent(&change, leaves);
         // SAFETY: As above.
         unsafe { &mut *home.unapplied.get() }.push(change);
     }
@@ -153,9 +153,12 @@ struct StyleEngineHome {
     /// The [`PendingFacts`] whoever last reached the engine left, with what the main thread sent since. Written by the
     /// main thread, or by whoever reaches the engine while it waits or has lent the engine.
     pending: AtomicU8,
-    /// What the engine keeps for the main thread's drain of its last style transaction. Written by whoever reaches the
-    /// engine, as it is done with it.
-    drain: UnsafeCell<DrainAnswers>,
+    /// What the home answers the main thread with, of what the engine holds. Written by whoever reaches the engine, as
+    /// it is done with it, and by the main thread as it sends the engine a change.
+    answers: UnsafeCell<HomeAnswers>,
+    /// Whether the thread that owns the engine with its render state (a unit test's, or the replay tool's) reached it
+    /// through [`OwnedStyleEngine::engine`] since the home last followed it.
+    reached_by_owning_thread: Cell<bool>,
 }
 
 impl StyleEngineHome {
@@ -242,7 +245,7 @@ unsafe fn reach_on_this_thread<T>(home: usize, engine: *mut StyleEngine, run: im
     let result = run(engine);
     home.pending.store(engine.pending_facts().0, Ordering::Relaxed);
     // SAFETY: As above.
-    unsafe { &mut *home.drain.get() }.follow(engine);
+    unsafe { &mut *home.answers.get() }.follow(engine);
     result
 }
 
@@ -412,7 +415,8 @@ impl StyleEngineHandle {
             document,
             unapplied: UnsafeCell::new(Vec::new()),
             pending: AtomicU8::new(0),
-            drain: UnsafeCell::default(),
+            answers: UnsafeCell::default(),
+            reached_by_owning_thread: Cell::new(false),
         });
         let handle = Self(Rc::into_raw(home).cast_mut().cast());
         crate::render_owner::send_arena_change(
@@ -473,18 +477,33 @@ impl StyleEngineHandle {
     /// What the engine holds for its next style transaction, as whoever last reached it left it, with what the main
     /// thread sent it since. On the main thread.
     pub(crate) fn pending_facts(self) -> PendingFacts {
+        self.follow_owning_thread();
         PendingFacts(self.home().pending.load(Ordering::Relaxed))
     }
 
-    /// What the engine keeps for the main thread's drain of its last style transaction.
+    /// Follows what the thread that owns the engine left in it, reaching it directly, as a reach would as it is done.
+    fn follow_owning_thread(self) {
+        let home = self.home();
+        if !home.reached_by_owning_thread.take() {
+            return;
+        }
+        // SAFETY: The owning thread reaches the engine only through `OwnedStyleEngine::engine`, whose borrow has ended.
+        let engine = unsafe { &mut *home.engine.as_ptr() };
+        home.pending.store(engine.pending_facts().0, Ordering::Relaxed);
+        // SAFETY: As above.
+        unsafe { &mut *home.answers.get() }.follow(engine);
+    }
+
+    /// What the home answers the main thread with, of what the engine holds.
     ///
     /// # Safety
     ///
     /// On the main thread, with no stage holding the engine, and no other borrow of it live.
     #[allow(clippy::mut_from_ref)]
-    pub(crate) unsafe fn drain_answers<'a>(self) -> &'a mut DrainAnswers {
+    pub(crate) unsafe fn answers<'a>(self) -> &'a mut HomeAnswers {
+        self.follow_owning_thread();
         // SAFETY: Guaranteed by the caller: nothing else writes the home's answers meanwhile.
-        unsafe { &mut *self.home().drain.get() }
+        unsafe { &mut *self.home().answers.get() }
     }
 
     /// The document whose render state's arena links the engine, whose render owner owns it.
@@ -642,6 +661,7 @@ impl OwnedStyleEngine {
 
     /// The engine, once its owner has applied every change the thread sent it.
     pub fn engine(&mut self) -> &mut StyleEngine {
+        self.handle.home().reached_by_owning_thread.set(true);
         // SAFETY: The engine is live while this is, and the borrow of this keeps any other out.
         unsafe { self.handle.enter("owned style engine") }
     }
