@@ -146,6 +146,7 @@
 #include <LibWeb/MathML/TagNames.h>
 #include <LibWeb/Namespace.h>
 #include <LibWeb/Page/Page.h>
+#include <LibWeb/Painting/BoxSlot.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/Painting/QueryView.h>
 #include <LibWeb/Platform/EventLoopPlugin.h>
@@ -1367,55 +1368,50 @@ static CSS::StyleComputer::ComputedStyleInvalidation decode_style_record_invalid
     result.any_computed_value_changed = packed & to_underlying(CSS::StyleEngineFFI::FfiStyleInvalidationField::AnyComputedValueChanged);
     return result;
 }
-// The box of the pseudo-element, or of the element an element-backed pseudo-element stands in for, as the slot the arena
-// binds it to.
-static Compositing::RustFFI::NodeSlotId pseudo_element_box(Element const& element, CSS::PseudoElement pseudo_element)
+// Calls the callback for every box of the layout subtree the root heads, in pre-order, the root first.
+template<typename Callback>
+static void for_each_box_in_inclusive_subtree(Painting::BoxSlot const& root, Callback callback)
 {
-    if (CSS::is_synthetic_pseudo_element(pseudo_element)) {
-        auto* arena = element.document().layout_arena_handle();
-        if (!arena || element.style_node_id() == 0)
-            return Compositing::RustFFI::NodeSlotId_INVALID;
-        return Layout::RustFFI::layout_arena_bound_row_of(arena, element.style_node_id().value(), encode_generated_for(pseudo_element)).slot;
+    for (auto box = root; box;) {
+        if (callback(box) == TraversalDecision::Break)
+            return;
+        if (auto child = box.first_child()) {
+            box = child;
+            continue;
+        }
+        while (box != root && !box.next_sibling())
+            box = box.parent();
+        if (box == root)
+            return;
+        box = box.next_sibling();
     }
-    if (auto element_data = element.get_pseudo_element(pseudo_element); element_data.has_value()) {
-        if (auto const* element_reference = as_if<ElementReferencePseudoElement>(*element_data))
-            return Painting::committed_row_slot(element.document(), NodeIdentity::of(*element_reference->referenced_element()));
-    }
-    return Compositing::RustFFI::NodeSlotId_INVALID;
 }
 
 struct ElementDependentInvalidationState {
-    // The box, as the slot the arena binds it to.
-    Compositing::RustFFI::NodeSlotId box { Compositing::RustFFI::NodeSlotId_INVALID };
+    Painting::BoxSlot box;
     Optional<ValueComparingRefPtr<CSS::CounterStyle const>> list_counter_style;
     bool has_snapshot { false };
-
-    bool has_box() const { return box.index != Compositing::RustFFI::INVALID_NODE_SLOT_INDEX; }
 
     // The counter style the box's marker renders from. Only a list item renders a marker, so only its counter style
     // can matter; a display change to or from list-item rebuilds the box regardless. It is resolved from the style the
     // box holds.
-    static Optional<ValueComparingRefPtr<CSS::CounterStyle const>> list_counter_style_of(Document const& document, Compositing::RustFFI::NodeSlotId box, CSS::StyleScope const& style_scope)
+    static Optional<ValueComparingRefPtr<CSS::CounterStyle const>> list_counter_style_of(Painting::BoxSlot const& box, CSS::StyleScope const& style_scope)
     {
-        auto* arena = document.layout_arena_handle();
-        if (!arena)
-            return {};
-        auto const* payloads = Layout::RustFFI::layout_arena_node_style_payloads(arena, box);
-        auto const* box_values = CSS::style_group_from_payloads<CSS::ComputedValues::BoxValues>(payloads);
+        auto const* box_values = box.style_group<CSS::ComputedValues::BoxValues>();
         if (!box_values || !CSS::display_from_ffi_display(box_values->display).is_list_item())
             return {};
-        auto list_style_type = CSS::style_group_from_payloads<CSS::ComputedValues::InheritedListValues>(payloads)->list_style_type_value(style_scope);
+        auto list_style_type = box.style_group<CSS::ComputedValues::InheritedListValues>()->list_style_type_value(style_scope);
         if (list_style_type.has<RefPtr<CSS::CounterStyle const>>())
             return list_style_type.get<RefPtr<CSS::CounterStyle const>>();
         return {};
     }
 
-    void snapshot(Document const& document, CSS::StyleScope const& style_scope)
+    void snapshot(CSS::StyleScope const& style_scope)
     {
-        if (!has_box())
+        if (!box)
             return;
-        list_counter_style = list_counter_style_of(document, box, style_scope);
-        box = Compositing::RustFFI::NodeSlotId_INVALID;
+        list_counter_style = list_counter_style_of(box, style_scope);
+        box = {};
         has_snapshot = true;
     }
 };
@@ -1523,8 +1519,8 @@ static void add_element_dependent_invalidation(CSS::RequiredInvalidationAfterSty
         }
     };
 
-    if (old_state.has_box()) {
-        compare(ElementDependentInvalidationState::list_counter_style_of(abstract_element.document(), old_state.box, abstract_element.element().style_scope()));
+    if (old_state.box) {
+        compare(ElementDependentInvalidationState::list_counter_style_of(old_state.box, abstract_element.element().style_scope()));
     } else if (old_state.has_snapshot) {
         compare(old_state.list_counter_style);
     }
@@ -1610,14 +1606,14 @@ CSS::RequiredInvalidationAfterStyleChange Element::recompute_pseudo_element_styl
         auto pseudo_element_style = computed_style(pseudo_element);
         auto const* pseudo_element_values = pseudo_element_style ? &*pseudo_element_style : nullptr;
         ElementDependentInvalidationState old_state {
-            .box = pseudo_element_box(*this, pseudo_element),
+            .box = Painting::BoxSlot::of_pseudo_element(*this, pseudo_element),
             .list_counter_style = {},
             .has_snapshot = false,
         };
         RefPtr<CSS::ComputedValues const> style_to_preserve_for_detachment;
         if (pseudo_element_values && pseudo_element_values->animated_properties()) {
-            auto had_layout_node = old_state.has_box();
-            old_state.snapshot(document(), style_scope());
+            auto had_layout_node = !!old_state.box;
+            old_state.snapshot(style_scope());
             if (had_layout_node)
                 style_to_preserve_for_detachment = CSS::ComputedValues::Builder { *pseudo_element_values }.build();
         }
@@ -1775,15 +1771,14 @@ void Element::set_needs_layout_tree_rebuild(SetNeedsLayoutTreeUpdateReason reaso
     // wrapper. Other style changes rebuild from the parent. Top layer elements are handled separately because their
     // boxes are siblings of the root.
     // NB: Called outside layout tree construction.
-    auto has_box = Painting::bound_row_kind(document(), NodeIdentity::of(*this)).has_value();
-    auto placement = box_placement();
+    auto box = Painting::BoxSlot::bound_to(*this);
     // An element that just left the top layer keeps its box as a viewport child until the
     // pending membership change is processed, so the parent must not be rebuilt for it either.
-    bool element_box_is_placed_in_top_layer = placement & Layout::RustFFI::BOX_PLACEMENT_IN_TOP_LAYER;
+    bool element_box_is_placed_in_top_layer = box && box_is_placed_in_top_layer();
     if (rendered_in_top_layer() || element_box_is_placed_in_top_layer) {
         // An attached box is replaced in its viewport slot, keeping top layer order; a fresh
         // insert of a detached member appends out of order, so it needs a zone rebuild.
-        if (!(placement & Layout::RustFFI::BOX_PLACEMENT_HAS_PARENT))
+        if (!box.parent())
             document().set_top_layer_needs_layout_zone_rebuild();
         set_needs_layout_tree_update(true, reason);
         return;
@@ -1793,7 +1788,7 @@ void Element::set_needs_layout_tree_rebuild(SetNeedsLayoutTreeUpdateReason reaso
     // the insertion-specific invalidation on its parent instead of widening it to StyleChange.
     // An existing display:none element can have the same marker after a child insertion; its box
     // presence change must still schedule the new box for insertion into the retained parent.
-    if (!has_box && may_reuse_layout_node_for_child_list_insertion()
+    if (!box && may_reuse_layout_node_for_child_list_insertion()
         && rebuild_root != CSS::LayoutTreeRebuildRoot::BoxPresenceChange)
         return;
     if (rebuild_root == CSS::LayoutTreeRebuildRoot::BoxPresenceChange && apply_box_presence_change_in_place(reason))
@@ -1904,14 +1899,17 @@ static bool dom_subtree_generates_list_item_boxes(Element const& element)
 
 // NB: Reads box kinds rather than styles: the element whose box is going away already carries
 //     its display: none style.
-static bool layout_subtree_contains_list_item_boxes(Element const& element)
+static bool layout_subtree_contains_list_item_boxes(Painting::BoxSlot const& layout_subtree)
 {
-    auto& document = element.document();
-    auto* arena = document.layout_arena_handle();
-    auto slot = Painting::committed_row_slot(document, NodeIdentity::of(element));
-    if (!arena || slot.index == Compositing::RustFFI::INVALID_NODE_SLOT_INDEX)
-        return false;
-    return Layout::RustFFI::layout_arena_subtree_contains_box_of_kind(arena, slot, Layout::RustFFI::NodeKind::ListItemBox);
+    bool contains_list_item_boxes = false;
+    for_each_box_in_inclusive_subtree(layout_subtree, [&](Painting::BoxSlot const& box) {
+        if (box.kind() == Layout::RustFFI::NodeKind::ListItemBox) {
+            contains_list_item_boxes = true;
+            return TraversalDecision::Break;
+        }
+        return TraversalDecision::Continue;
+    });
+    return contains_list_item_boxes;
 }
 
 // The element's box stopped or started existing (display: none <-> a box display). Instead of
@@ -1928,12 +1926,13 @@ bool Element::apply_box_presence_change_in_place(SetNeedsLayoutTreeUpdateReason 
     GC::Ptr<Element> parent = parent_or_shadow_host_element();
     if (!parent || (parent->shadow_root() && !is_shadow_root_child) || assigned_slot() || is<HTML::HTMLSlotElement>(*parent))
         return false;
-    auto parent_box_display = parent->box_display();
-    if (!parent_box_display.has_value())
+    auto parent_box = Painting::BoxSlot::bound_to(*parent);
+    auto const* parent_box_values = parent_box.style_group<CSS::ComputedValues::BoxValues>();
+    if (!parent_box_values)
         return false;
-    auto parent_display = *parent_box_display;
-    auto parent_placement = parent->box_placement();
-    bool parent_children_are_inline = parent_placement & Layout::RustFFI::BOX_PLACEMENT_CHILDREN_ARE_INLINE;
+    auto parent_display = CSS::display_from_ffi_display(parent_box_values->display);
+    bool parent_children_are_inline = parent_box.has_flag(Layout::RustFFI::NodeFlag::ChildrenAreInline);
+    bool parent_has_children = !!parent_box.first_child();
     if (first_letter_owner_for_layout_subtree_from(*parent))
         return false;
     if (CSS::subtree_affects_generated_content_state(*this))
@@ -1944,19 +1943,19 @@ bool Element::apply_box_presence_change_in_place(SetNeedsLayoutTreeUpdateReason 
     auto display = style->display();
 
     if (display.is_none()) {
-        auto box_kind = Painting::bound_row_kind(document(), NodeIdentity::of(*this));
-        if (!box_kind.has_value())
+        auto box = Painting::BoxSlot::bound_to(*this);
+        if (!box)
             return false;
         // The box's own style already says display: none, so its level comes from where it sits: a
         // block container with block-level children holds block-level boxes directly, one with
         // inline-level children holds inline-level boxes. Only atomic inlines detach from an inline
         // run; an inline box may have been split around block-level descendants.
         bool box_is_block_level = !parent_children_are_inline;
-        if (!box_is_block_level && *box_kind == Layout::RustFFI::NodeKind::InlineNode)
+        if (!box_is_block_level && box.kind() == Layout::RustFFI::NodeKind::InlineNode)
             return false;
         if (!Node::can_detach_layout_subtree_in_place(*this, *parent, box_is_block_level))
             return false;
-        if (layout_subtree_contains_list_item_boxes(*this) && list_item_box_change_is_observable(*this, *parent))
+        if (layout_subtree_contains_list_item_boxes(box) && list_item_box_change_is_observable(*this, *parent))
             return false;
 
         // Rebuilding the element in place with display: none clears its stale box out of the
@@ -1980,9 +1979,9 @@ bool Element::apply_box_presence_change_in_place(SetNeedsLayoutTreeUpdateReason 
     else if (parent_display.is_flex_inside() || parent_display.is_grid_inside())
         can_insert_in_place = true;
     else if (parent_is_block_container && display.is_block_outside())
-        can_insert_in_place = !parent_children_are_inline || !(parent_placement & Layout::RustFFI::BOX_PLACEMENT_HAS_CHILDREN);
+        can_insert_in_place = !parent_children_are_inline || !parent_has_children;
     else if (parent_is_block_container && display.is_inline_outside())
-        can_insert_in_place = parent_children_are_inline && (parent_placement & Layout::RustFFI::BOX_PLACEMENT_HAS_CHILDREN);
+        can_insert_in_place = parent_children_are_inline && parent_has_children;
     if (!can_insert_in_place)
         return false;
     if (dom_subtree_generates_list_item_boxes(*this) && list_item_box_change_is_observable(*this, *parent))
@@ -2151,8 +2150,7 @@ static bool register_anchor_names_in_engine(Scope const& scope, DOM::Document& d
 template<typename Scope>
 static void publish_anchor_names_in_engine(Scope const& scope, DOM::Document& document)
 {
-    auto* arena = document.layout_node_arena_if_created();
-    CSS::StyleEngineFFI::style_engine_publish_anchor_names(scope, scope.engine().rust_handle(), arena ? arena->handle() : nullptr);
+    CSS::StyleEngineFFI::style_engine_publish_anchor_names(scope, scope.engine().rust_handle(), document.layout_arena_handle());
 }
 
 RefPtr<CSS::CustomPropertyData const> Element::custom_property_environment_of_engine_record(CSS::PublishedStyleRecord const& style_record, bool& installable) const
@@ -2322,7 +2320,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
         CSS::ComputedStyleRecordView new_computed_values { published_new_style_record };
         VERIFY(new_computed_values);
         ElementDependentInvalidationState old_state {
-            .box = Painting::committed_row_slot(document(), NodeIdentity::of(*this)),
+            .box = Painting::BoxSlot::bound_to(*this),
             .list_counter_style = {},
             .has_snapshot = false,
         };
@@ -2395,7 +2393,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::compare_engine_computed_style
         auto new_computed_values = computed_style();
         VERIFY(new_computed_values);
         ElementDependentInvalidationState old_state {
-            .box = Painting::committed_row_slot(document(), NodeIdentity::of(*this)),
+            .box = Painting::BoxSlot::bound_to(*this),
             .list_counter_style = {},
             .has_snapshot = false,
         };
@@ -2450,8 +2448,8 @@ void Element::clear_computed_styles_from_display_none_descendants(CSS::StyleDrai
 
         // The layout tree is torn down after the style transaction. Keep its style alive until then without
         // retaining the record as the descendant's current computed style.
-        if (auto* layout_node = element->unsafe_layout_node())
-            layout_node->pin_style_record_for_detachment();
+        if (auto* arena = element->document().layout_arena_handle())
+            Layout::RustFFI::layout_arena_pin_bound_box_style_record_for_detachment(arena, element->style_node_id().value(), 0);
         element->m_style_record = nullptr;
         element->m_installed_display_is_contents = false;
         element->m_installed_display_is_list_item = false;
@@ -3065,13 +3063,13 @@ CSSPixelRect Element::bounding_client_rect_assuming_layout_clean() const
 CSSPixelRect Element::bounding_client_rect_assuming_layout_clean(Compositing::AccumulatedVisualContextTree const& visual_context_tree) const
 {
     // The table wrapper box is the principal box of a table, and contains its caption boxes.
-    auto* arena = document().layout_arena_handle();
-    if (!arena || style_node_id() == 0)
+    auto principal_box = Painting::BoxSlot::bound_to(*this);
+    if (!principal_box)
         return {};
-    auto principal_box = Layout::RustFFI::layout_arena_principal_box_of(arena, style_node_id().value());
-    if (principal_box.index == Compositing::RustFFI::INVALID_NODE_SLOT_INDEX)
-        return {};
-    return Layout::RustFFI::layout_arena_bounding_client_rect(arena, principal_box, Painting::rect_to_viewport_transform(document(), visual_context_tree));
+    if (auto const* box_values = principal_box.style_group<CSS::ComputedValues::BoxValues>();
+        box_values && CSS::display_from_ffi_display(box_values->display).is_table_inside() && principal_box.parent().kind() == Layout::RustFFI::NodeKind::TableWrapper)
+        principal_box = principal_box.parent();
+    return Painting::bounding_client_rect(principal_box, Painting::rect_to_viewport_transform(document(), visual_context_tree));
 }
 
 int Element::client_top() const
@@ -3318,16 +3316,7 @@ Layout::NodeWithStyle* Element::pseudo_element_unsafe_layout_node(CSS::PseudoEle
 
 bool Element::has_pseudo_element_box(CSS::PseudoElement pseudo_element) const
 {
-    if (CSS::is_synthetic_pseudo_element(pseudo_element)) {
-        auto* arena = document().layout_arena_handle();
-        if (!arena || style_node_id() == 0)
-            return false;
-        auto box = Layout::RustFFI::layout_arena_bound_row_of(arena, style_node_id().value(), encode_generated_for(pseudo_element)).slot;
-        return box.index != Compositing::RustFFI::INVALID_NODE_SLOT_INDEX;
-    }
-    if (auto element_data = get_pseudo_element(pseudo_element); element_data.has_value())
-        return element_data->has_box();
-    return false;
+    return !!Painting::BoxSlot::of_pseudo_element(*this, pseudo_element);
 }
 
 // https://html.spec.whatwg.org/multipage/semantics-other.html#selector-enabled
@@ -3493,16 +3482,20 @@ bool Element::has_synthetic_pseudo_elements() const
 
 void Element::clear_synthetic_pseudo_element_layout_nodes()
 {
-    for_each_synthetic_pseudo_element([&](CSS::PseudoElement, SyntheticPseudoElement& pseudo_element) {
-        if (auto layout_node = pseudo_element.layout_node()) {
-            layout_node->for_each_in_inclusive_subtree([](Layout::Node& node) {
-                node.clear_committed_box();
+    for_each_synthetic_pseudo_element([&](CSS::PseudoElement type, SyntheticPseudoElement& pseudo_element) {
+        if (auto box = Painting::BoxSlot::of_pseudo_element(*this, type)) {
+            // The pseudo-element's box leaves the layout tree with everything in it, its committed boxes cleared first.
+            Vector<Compositing::RustFFI::NodeSlotId> boxes;
+            for_each_box_in_inclusive_subtree(box, [&](Painting::BoxSlot const& descendant) {
+                boxes.append(descendant.slot());
                 return TraversalDecision::Continue;
             });
-            layout_node->prepare_subtree_for_detach_from_layout_tree();
-            Layout::destroy_layout_subtree(*layout_node);
+            for (auto slot : boxes)
+                Layout::RustFFI::layout_arena_paintable_cleared_from_node(box.arena(), slot);
+            Layout::RustFFI::layout_arena_prepare_subtree_for_detach(box.arena(), box.slot());
+            Layout::RustFFI::layout_arena_detach_and_free_subtree(box.arena(), box.slot());
         }
-        pseudo_element.set_layout_node(nullptr);
+        pseudo_element.unbind_box();
     });
 }
 
@@ -3654,12 +3647,14 @@ bool Element::is_scroll_container() const
 // took what the root and the body propagate to it, which the box's own style has and the element's does not.
 static bool box_is_scroll_container(Element const& element)
 {
-    auto& document = element.document();
-    auto* arena = document.layout_arena_handle();
-    auto slot = Painting::committed_row_slot(document, NodeIdentity::of(element));
-    if (!arena || slot.index == Compositing::RustFFI::INVALID_NODE_SLOT_INDEX)
+    auto box = Painting::BoxSlot::bound_to(element);
+    if (box.is_viewport())
+        return true;
+    auto const* box_values = box.style_group<CSS::ComputedValues::BoxValues>();
+    if (!box_values)
         return false;
-    return Layout::RustFFI::layout_arena_box_is_scroll_container(arena, slot);
+    return Layout::overflow_value_makes_box_a_scroll_container(static_cast<CSS::Overflow>(box_values->overflow_x))
+        || Layout::overflow_value_makes_box_a_scroll_container(static_cast<CSS::Overflow>(box_values->overflow_y));
 }
 
 // https://drafts.csswg.org/cssom-view/#dom-element-scrolltop

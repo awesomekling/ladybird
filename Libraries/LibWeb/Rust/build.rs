@@ -3492,7 +3492,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             manifest_dir.join("src/painting/ffi.rs"),
             manifest_dir.join("src/painting/ffi/main_thread_entries.rs"),
             manifest_dir.join("src/painting/query_snapshot.rs"),
-            manifest_dir.join("src/painting/dom_box_reads.rs"),
             manifest_dir.join("src/stage_thread.rs"),
             manifest_dir.join("src/clock_frames.rs"),
             manifest_dir.join("src/flight.rs"),
