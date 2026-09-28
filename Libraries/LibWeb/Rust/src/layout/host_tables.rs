@@ -14,7 +14,7 @@ use super::formatting_context::FfiLayoutHostCallbacks;
 use super::layout_node_arena::{BoxPresenceHost, ShellFactory, ShellStyleChangedHost};
 use super::node_data::NodeSlotId;
 use super::update_layout::LayoutUpdateHost;
-use crate::css::style::fast_hash::FastMap as HashMap;
+use crate::css::style::fast_hash::{FastMap as HashMap, FastSet as HashSet};
 use crate::painting::host::GeometryHostCallbacks;
 use crate::painting::paintable_rows::ChromeStateCallback;
 use std::cell::Cell;
@@ -36,13 +36,15 @@ pub(crate) struct HostTables {
     pub(super) shell_style_changed_host: Cell<Option<ShellStyleChangedHost>>,
     pub(crate) geometry_host: Cell<Option<GeometryHostCallbacks>>,
     pub(crate) chrome_state_callback: Cell<Option<ChromeStateCallback>>,
-    /// The image provider each row that owns one owns. The arena knows which rows those are.
+    /// The image provider the host gave each row that owns one. The owner is told which rows those are, and hands
+    /// each back as its row lets go of it.
     pub(super) owned_image_providers: RefCell<HashMap<NodeSlotId, *mut c_void>>,
-    /// The image observer set each row that holds one holds. The arena knows which rows those are.
+    /// The image observer set the host gave each row that holds one, told to the owner and handed back as for
+    /// [`Self::owned_image_providers`].
     pub(super) image_observer_sets: RefCell<HashMap<NodeSlotId, *mut c_void>>,
-    /// Observer sets the arena has handed back that a newer set displaced before the handback was
-    /// paid, in the order they were displaced.
-    pub(super) image_observer_sets_owed: RefCell<Vec<(NodeSlotId, *mut c_void)>>,
+    /// The image boxes the tree builds of the layout update in progress stamped to own their image's provider, which
+    /// the host has not handed it yet: until the frame is over, such a box shows no image.
+    pub(super) image_boxes_awaiting_owned_provider: RefCell<HashSet<NodeSlotId>>,
     /// The number of the last change the document thread sent the owner that lays a node out again.
     pub(super) last_relayout_change_sent: Cell<Option<crate::render_owner::ChangeSeq>>,
     /// The generation of the document's render state, which retiring it moves on. See
@@ -81,10 +83,23 @@ impl HostTables {
         debug_assert!(!was_running, "a layout update is already running");
     }
 
+    /// Gives `slot` the image observer set `observers`, or none, and answers the set it held (or null).
+    pub(crate) fn replace_image_observers(&self, slot: NodeSlotId, observers: *mut c_void) -> *mut c_void {
+        let mut sets = self.image_observer_sets.borrow_mut();
+        let previous = if observers.is_null() {
+            sets.remove(&slot)
+        } else {
+            sets.insert(slot, observers)
+        };
+        previous.unwrap_or(std::ptr::null_mut())
+    }
+
     /// Notes that the document's layout update is over.
     pub(crate) fn end_layout_update(&self) {
         let was_running = self.layout_update_is_running.replace(false);
         debug_assert!(was_running, "no layout update is running");
+        // The frame's end handed every box awaiting its provider the provider, or its row is gone.
+        self.image_boxes_awaiting_owned_provider.borrow_mut().clear();
     }
 
     /// Whether the document runs a layout update.

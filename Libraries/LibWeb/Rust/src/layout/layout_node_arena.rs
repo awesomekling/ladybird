@@ -638,7 +638,7 @@ pub(crate) enum OwedImageResources {
 pub(crate) struct FreedSubtree {
     shells: Vec<ShellId>,
     rows_with_owned_image_provider: Vec<NodeSlotId>,
-    rows_with_image_observers: Vec<NodeSlotId>,
+    rows_with_image_observers: Vec<(NodeSlotId, usize)>,
     paintable_row_resets: Vec<crate::painting::paintable_rows::PaintableRowReset>,
     arena_pinned_style_records: Vec<u64>,
     host_pinned_style_records: Vec<u64>,
@@ -666,8 +666,14 @@ enum HostHandback {
     /// A row's host objects, named by the row. The host tables hold the objects themselves, and
     /// the payer looks them up before it pays anything, which is where the arena let go of them.
     OwnedImageProvider(NodeSlotId),
-    ImageObservers(NodeSlotId),
+    /// The observer set `set` names, which the host may have replaced since the arena was told of it.
+    ImageObservers {
+        row: NodeSlotId,
+        set: usize,
+    },
     OwnedImageProviderDetach(NodeSlotId),
+    /// A row the build stamped to own its image's provider, which the host hands it once the frame is over.
+    ImageBoxAwaitsOwnedProvider(NodeSlotId),
     PaintableRowReset(crate::painting::paintable_rows::PaintableRowReset),
     /// A shell whose row's style changed while the tree build ran. The host is handed the style
     /// the row has when this is paid, and nothing if the row has gone by then.
@@ -701,8 +707,9 @@ impl HostHandbacks {
                 }
             }
             HostHandback::OwnedImageProvider(_)
-            | HostHandback::ImageObservers(_)
+            | HostHandback::ImageObservers { .. }
             | HostHandback::OwnedImageProviderDetach(_)
+            | HostHandback::ImageBoxAwaitsOwnedProvider(_)
             | HostHandback::PaintableRowReset(_)
             | HostHandback::Shell(_)
             | HostHandback::ShellStyleChanged { .. } => {}
@@ -721,8 +728,12 @@ enum ResolvedHostHandback {
     },
     Shell(ShellId),
     OwnedImageProvider(NodeSlotId),
-    ImageObservers(NodeSlotId),
+    ImageObservers {
+        row: NodeSlotId,
+        set: usize,
+    },
     OwnedImageProviderDetach(NodeSlotId),
+    ImageBoxAwaitsOwnedProvider(NodeSlotId),
     PaintableRowReset {
         reset: crate::painting::paintable_rows::PaintableRowReset,
         viewport_row: NodeSlotId,
@@ -773,9 +784,14 @@ impl HostPayment {
                 }
                 ResolvedHostHandback::Shell(shell) => destroy_shell(main_thread, shell.host_object(main_thread)),
                 ResolvedHostHandback::OwnedImageProvider(_) => destroy_owned_image_provider(main_thread, object),
-                ResolvedHostHandback::ImageObservers(_) => destroy_image_observers(main_thread, object),
+                ResolvedHostHandback::ImageObservers { .. } => destroy_image_observers(main_thread, object),
                 ResolvedHostHandback::OwnedImageProviderDetach(_) => {
                     notify_owned_image_provider_of_detach(main_thread, object);
+                }
+                ResolvedHostHandback::ImageBoxAwaitsOwnedProvider(row) => {
+                    if let Some(host_tables) = main_thread.host_tables() {
+                        host_tables.image_boxes_awaiting_owned_provider.borrow_mut().insert(row);
+                    }
                 }
                 ResolvedHostHandback::PaintableRowReset { reset, viewport_row } => {
                     super::tree_build_seal::note_host_call("paintable_row_reset");
@@ -819,15 +835,18 @@ fn take_host_objects_owed(
                 ResolvedHostHandback::OwnedImageProviderDetach(row) => {
                     host_tables.owned_image_providers.borrow().get(row).copied()
                 }
-                ResolvedHostHandback::ImageObservers(row) => {
-                    let mut owed = host_tables.image_observer_sets_owed.borrow_mut();
-                    match owed.iter().position(|(owed_row, _)| owed_row == row) {
-                        Some(index) => Some(owed.remove(index).1),
-                        None => host_tables.image_observer_sets.borrow_mut().remove(row),
+                // A set the host has replaced since is gone already: the host deleted it as it replaced it.
+                ResolvedHostHandback::ImageObservers { row, set } => {
+                    let mut sets = host_tables.image_observer_sets.borrow_mut();
+                    if sets.get(row).is_some_and(|held| held.addr() == *set) {
+                        sets.remove(row)
+                    } else {
+                        None
                     }
                 }
                 ResolvedHostHandback::BoxPresence { .. }
                 | ResolvedHostHandback::Shell(_)
+                | ResolvedHostHandback::ImageBoxAwaitsOwnedProvider(_)
                 | ResolvedHostHandback::PaintableRowReset { .. }
                 | ResolvedHostHandback::ShellStyleChanged { .. } => None,
             };
@@ -1203,10 +1222,10 @@ pub(crate) struct LayoutNodeArena {
     /// The natural size of the image each row that owns its image's provider shows, as the provider
     /// publishes it: zero while the image is not available.
     owned_image_natural_sizes: RefCell<HashMap<NodeSlotId, NaturalSize>>,
-    /// The rows that hold the set of image observers their style asks for. Like the provider a row
-    /// owns, the set is made for the row and is of no use without it, so the arena hands it back
-    /// when the row is freed. The sets are in the host tables.
-    rows_with_image_observers: RefCell<HashSet<NodeSlotId>>,
+    /// The rows that hold the set of image observers their style asks for, each with the address that names its set.
+    /// Like the provider a row owns, the set is made for the row and is of no use without it, so the arena hands it
+    /// back when the row is freed. The sets are in the host tables.
+    rows_with_image_observers: RefCell<HashMap<NodeSlotId, usize>>,
     /// Where each element sits in the shadow-including tree, as the tree build last saw it, indexed
     /// by the element's dense index. An element's DOM parent only changes when it is inserted or
     /// removed, and either one makes the tree build visit it again, so the fact keeps up with the
@@ -1409,7 +1428,7 @@ impl LayoutNodeArena {
             own_layout_tree_update_marks: RefCell::new(LayoutTreeUpdateMarks::default()),
             rows_with_owned_image_provider: RefCell::new(HashSet::default()),
             owned_image_natural_sizes: RefCell::new(HashMap::default()),
-            rows_with_image_observers: RefCell::new(HashSet::default()),
+            rows_with_image_observers: RefCell::new(HashMap::default()),
             shadow_including_parent_elements: RefCell::new(Vec::new()),
             anchor_name_elements: RefCell::new(HashMap::default()),
             bound_viewport_row: Cell::new(NodeSlotId::INVALID),
@@ -1728,8 +1747,8 @@ impl LayoutNodeArena {
                 rows_with_owned_image_provider.push(slot);
             }
             self.owned_image_natural_sizes.get_mut().remove(&slot);
-            if self.rows_with_image_observers.get_mut().remove(&slot) {
-                rows_with_image_observers.push(slot);
+            if let Some(set) = self.rows_with_image_observers.get_mut().remove(&slot) {
+                rows_with_image_observers.push((slot, set));
             }
             if self.style_records_pinned_by_arena[slot.slot_index() as usize].get() {
                 arena_pinned_style_records.push(self.style_records[slot.slot_index() as usize].get());
@@ -4041,70 +4060,33 @@ impl LayoutNodeArena {
         self.set_node_flag(slot, NodeFlag::InsetsUseAnchorFunctions, insets_use_anchor_functions);
     }
 
-    /// Give `slot` the image provider it owns. A row is given one once, while it is being built.
-    pub(crate) fn set_owned_image_provider(&self, host_tables: &HostTables, slot: NodeSlotId, provider: *mut c_void) {
+    /// Notes that the host gave `slot` the image provider it owns, which the arena hands back with the row.
+    pub(crate) fn note_row_owns_image_provider(&self, slot: NodeSlotId) {
         self.assert_owner_thread();
-        assert!(!provider.is_null(), "a row was given a null owned image provider");
-        let previous = host_tables.owned_image_providers.borrow_mut().insert(slot, provider);
-        assert!(previous.is_none(), "a row was given a second owned image provider");
         self.rows_with_owned_image_provider.borrow_mut().insert(slot);
     }
 
-    /// The image provider `slot` owns, or null for a row whose image comes from its DOM element or
-    /// whose provider the arena has handed back.
-    pub(crate) fn owned_image_provider(&self, host_tables: &HostTables, slot: NodeSlotId) -> *mut c_void {
-        if !self.rows_with_owned_image_provider.borrow().contains(&slot) {
-            return std::ptr::null_mut();
-        }
-        host_tables
-            .owned_image_providers
-            .borrow()
-            .get(&slot)
-            .copied()
-            .unwrap_or(std::ptr::null_mut())
-    }
-
-    /// Give `slot` the image observer set its style asks for, and hand back the set it held. The
-    /// caller deletes the old set after this returns, so a resource both sets observe is never
-    /// dropped and refetched between them.
+    /// Gives `slot` the image observer set `observers`, or none, in place, for a main-thread entry that writes the
+    /// arena itself, and answers the set it held (see [`layout_arena_replace_image_observers`]).
     pub(crate) fn replace_image_observers(
         &self,
         host_tables: &HostTables,
         slot: NodeSlotId,
         observers: *mut c_void,
     ) -> *mut c_void {
-        self.assert_owner_thread();
-        let mut rows = self.rows_with_image_observers.borrow_mut();
-        let mut sets = host_tables.image_observer_sets.borrow_mut();
-        if !rows.contains(&slot)
-            && let Some(owed) = sets.remove(&slot)
-        {
-            // The arena has handed this set back and the host has not been paid for it yet. It
-            // stays owed to the handback rather than to this caller.
-            host_tables.image_observer_sets_owed.borrow_mut().push((slot, owed));
-        }
-        let previous = if observers.is_null() {
-            rows.remove(&slot);
-            sets.remove(&slot)
-        } else {
-            rows.insert(slot);
-            sets.insert(slot, observers)
-        };
-        previous.unwrap_or(std::ptr::null_mut())
+        self.set_row_image_observers(slot, observers.addr());
+        host_tables.replace_image_observers(slot, observers)
     }
 
-    /// The image observer set `slot` holds, or null for a row whose style asks for none or whose
-    /// set the arena has handed back.
-    pub(crate) fn image_observers(&self, host_tables: &HostTables, slot: NodeSlotId) -> *mut c_void {
-        if !self.rows_with_image_observers.borrow().contains(&slot) {
-            return std::ptr::null_mut();
+    /// Notes the image observer set the host gave `slot`, named by `set`, or that it gave it none (`set` is 0).
+    pub(crate) fn set_row_image_observers(&self, slot: NodeSlotId, set: usize) {
+        self.assert_owner_thread();
+        let mut rows = self.rows_with_image_observers.borrow_mut();
+        if set == 0 {
+            rows.remove(&slot);
+        } else {
+            rows.insert(slot, set);
         }
-        host_tables
-            .image_observer_sets
-            .borrow()
-            .get(&slot)
-            .copied()
-            .unwrap_or(std::ptr::null_mut())
     }
 
     /// Records whether the host listens for box presence, which it registers in the host tables.
@@ -4252,9 +4234,12 @@ impl LayoutNodeArena {
                         }
                         HostHandback::Shell(shell) => ResolvedHostHandback::Shell(shell),
                         HostHandback::OwnedImageProvider(row) => ResolvedHostHandback::OwnedImageProvider(row),
-                        HostHandback::ImageObservers(row) => ResolvedHostHandback::ImageObservers(row),
+                        HostHandback::ImageObservers { row, set } => ResolvedHostHandback::ImageObservers { row, set },
                         HostHandback::OwnedImageProviderDetach(row) => {
                             ResolvedHostHandback::OwnedImageProviderDetach(row)
+                        }
+                        HostHandback::ImageBoxAwaitsOwnedProvider(row) => {
+                            ResolvedHostHandback::ImageBoxAwaitsOwnedProvider(row)
                         }
                         HostHandback::PaintableRowReset(reset) => {
                             ResolvedHostHandback::PaintableRowReset { reset, viewport_row }
@@ -4315,8 +4300,8 @@ impl LayoutNodeArena {
         for row in rows_with_owned_image_provider {
             self.hand_back(HostHandback::OwnedImageProvider(row));
         }
-        for row in rows_with_image_observers {
-            self.hand_back(HostHandback::ImageObservers(row));
+        for (row, set) in rows_with_image_observers {
+            self.hand_back(HostHandback::ImageObservers { row, set });
         }
         for reset in paintable_row_resets {
             self.hand_back(HostHandback::PaintableRowReset(reset));
@@ -6237,7 +6222,7 @@ impl LayoutNodeArena {
     /// Owes the host the attachment of `id`'s style resources once the running frame is over.
     pub(crate) fn defer_style_resources(&self, id: NodeSlotId, owns_content_replacement_image: bool) {
         if owns_content_replacement_image {
-            self.image_boxes_awaiting_owned_provider.borrow_mut().insert(id);
+            self.await_owned_provider(id);
         }
         self.image_resources_owed_to_host.borrow_mut().push((
             id,
@@ -6306,7 +6291,7 @@ impl LayoutNodeArena {
         item: super::tree_builder::FfiGeneratedContentItem,
         pseudo_element_box: NodeSlotId,
     ) {
-        self.image_boxes_awaiting_owned_provider.borrow_mut().insert(id);
+        self.await_owned_provider(id);
         self.image_resources_owed_to_host.borrow_mut().push((
             id,
             OwedImageResources::GeneratedImage {
@@ -6399,6 +6384,12 @@ impl LayoutNodeArena {
         std::mem::take(&mut *self.image_resources_owed_to_host.borrow_mut())
     }
 
+    /// Makes `id` an image box that awaits the provider it owns, which the host reads as well.
+    fn await_owned_provider(&self, id: NodeSlotId) {
+        self.image_boxes_awaiting_owned_provider.borrow_mut().insert(id);
+        self.hand_back(HostHandback::ImageBoxAwaitsOwnedProvider(id));
+    }
+
     /// Whether `id` is an image box that owns its image's provider and has not been handed it yet.
     pub(crate) fn image_box_awaits_owned_provider(&self, id: NodeSlotId) -> bool {
         self.image_boxes_awaiting_owned_provider.borrow().contains(&id)
@@ -6486,8 +6477,11 @@ pub(crate) struct NodeAllocation {
 /// The arena must be live on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_image_box_awaits_owned_provider(arena: *mut c_void, slot: NodeSlotId) -> bool {
-    // SAFETY: The C++ wrapper keeps the arena alive for this call.
-    unsafe { LayoutNodeArena::from_handle(arena) }.image_box_awaits_owned_provider(slot)
+    // SAFETY: Guaranteed by the caller.
+    unsafe { HostTables::beside_frame(arena) }
+        .image_boxes_awaiting_owned_provider
+        .borrow()
+        .contains(&slot)
 }
 
 /// Records whether attaching a row's style resources loaded any image.
@@ -6897,8 +6891,8 @@ pub(crate) fn prepare_row_for_detach(arena_ref: &LayoutNodeArena, row: NodeSlotI
         row,
         crate::painting::record::damage::PaintDamage::ALL_DRAW | crate::painting::record::damage::PaintDamage::ALL_HIT,
     );
-    if is_node_with_style && arena_ref.rows_with_image_observers.borrow_mut().remove(&row) {
-        arena_ref.hand_back(HostHandback::ImageObservers(row));
+    if is_node_with_style && let Some(set) = arena_ref.rows_with_image_observers.borrow_mut().remove(&row) {
+        arena_ref.hand_back(HostHandback::ImageObservers { row, set });
     }
     if kind == NodeKind::ImageBox && arena_ref.rows_with_owned_image_provider.borrow().contains(&row) {
         arena_ref.hand_back(HostHandback::OwnedImageProviderDetach(row));
@@ -6916,42 +6910,67 @@ pub(crate) fn prepare_subtree_for_detach(arena: &LayoutNodeArena, root: NodeSlot
     }
 }
 
+/// Gives `slot` the image observer set its style asks for, or none, and answers the set it held, which the caller
+/// deletes once this returns: a resource both sets observe is never dropped and refetched between them.
+///
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_replace_image_observers(
     arena: *mut c_void,
     slot: NodeSlotId,
     observers: *mut c_void,
 ) -> *mut c_void {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: The handle came from layout_arena_create and outlives this call.
-    unsafe { LayoutNodeArena::from_handle(arena) }.replace_image_observers(
-        unsafe { super::HostTables::from_handle(arena) },
-        slot,
-        observers,
-    )
+    // SAFETY: Guaranteed by the caller.
+    let previous = unsafe { HostTables::beside_frame(arena) }.replace_image_observers(slot, observers);
+    if !observers.is_null() || !previous.is_null() {
+        let change = LayoutChange::SetRowImageObservers {
+            node: slot,
+            set: observers.addr(),
+        };
+        // SAFETY: Guaranteed by the caller.
+        unsafe { super::layout_changes::send(arena, change) };
+    }
+    previous
 }
 
+/// The image observer set `slot` holds, or null for a row whose style asks for none.
+///
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_image_observers(arena: *mut c_void, slot: NodeSlotId) -> *mut c_void {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: The handle came from layout_arena_create and outlives this call.
-    unsafe { LayoutNodeArena::from_handle(arena) }
-        .image_observers(unsafe { super::HostTables::from_handle(arena) }, slot)
+    // SAFETY: Guaranteed by the caller.
+    unsafe { HostTables::beside_frame(arena) }
+        .image_observer_sets
+        .borrow()
+        .get(&slot)
+        .copied()
+        .unwrap_or(std::ptr::null_mut())
 }
 
+/// Gives `slot` the image provider it owns. A row is given one once, as the frame that built it ends.
+///
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_set_owned_image_provider(
     arena: *mut c_void,
     slot: NodeSlotId,
     provider: *mut c_void,
 ) {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: The handle came from layout_arena_create and outlives this call.
-    unsafe { LayoutNodeArena::from_handle(arena) }.set_owned_image_provider(
-        unsafe { super::HostTables::from_handle(arena) },
-        slot,
-        provider,
-    );
+    assert!(!provider.is_null(), "a row was given a null owned image provider");
+    // SAFETY: Guaranteed by the caller.
+    let previous = unsafe { HostTables::beside_frame(arena) }
+        .owned_image_providers
+        .borrow_mut()
+        .insert(slot, provider);
+    assert!(previous.is_none(), "a row was given a second owned image provider");
+    // SAFETY: Guaranteed by the caller.
+    unsafe { super::layout_changes::send(arena, LayoutChange::RowOwnsImageProvider { node: slot }) };
 }
 
 /// Publishes the natural size of the image `slot`'s owned provider shows, as the auto content size
@@ -6988,12 +7007,20 @@ pub unsafe extern "C" fn layout_arena_set_owned_image_natural_size(
     unsafe { super::layout_changes::send_through_marks(marks, change) };
 }
 
+/// The image provider `slot` owns, or null for a row whose image comes from its DOM element.
+///
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_owned_image_provider(arena: *mut c_void, slot: NodeSlotId) -> *mut c_void {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: The handle came from layout_arena_create and outlives this call.
-    unsafe { LayoutNodeArena::from_handle(arena) }
-        .owned_image_provider(unsafe { super::HostTables::from_handle(arena) }, slot)
+    // SAFETY: Guaranteed by the caller.
+    unsafe { HostTables::beside_frame(arena) }
+        .owned_image_providers
+        .borrow()
+        .get(&slot)
+        .copied()
+        .unwrap_or(std::ptr::null_mut())
 }
 
 /// # Safety
@@ -7690,7 +7717,7 @@ mod tests {
     }
 
     #[test]
-    fn an_observer_set_handed_back_stays_owed_when_a_newer_set_displaces_it() {
+    fn an_observer_set_the_host_replaced_before_its_handback_is_paid_for_once() {
         let mut arena = LayoutNodeArena::new();
         let host_tables = crate::layout::HostTables::default();
         let main_thread = crate::stage::MainThread::for_test_with_host(&host_tables);
@@ -7699,21 +7726,23 @@ mod tests {
         let second = std::ptr::dangling_mut::<u8>().wrapping_add(2).cast::<c_void>();
         assert!(arena.replace_image_observers(&host_tables, row, first).is_null());
 
-        // The row lets go of its set, and the host gives it a new one before the handback is paid.
+        // The row lets go of its set, and the host replaces it, deleting it, before the handback is paid.
         arena.begin_paying_host_handbacks(&main_thread);
-        assert!(arena.rows_with_image_observers.borrow_mut().remove(&row));
-        arena.hand_back(super::HostHandback::ImageObservers(row));
-        assert!(arena.image_observers(&host_tables, row).is_null());
-        assert!(arena.replace_image_observers(&host_tables, row, second).is_null());
-        assert_eq!(arena.image_observers(&host_tables, row), second);
+        let set = arena.rows_with_image_observers.borrow_mut().remove(&row);
+        assert_eq!(set, Some(first.addr()));
+        arena.hand_back(super::HostHandback::ImageObservers { row, set: first.addr() });
+        assert_eq!(host_tables.replace_image_observers(row, second), first);
 
-        // The handback still pays with the set the row let go of.
+        // The handback pays nothing: the set it names is gone, and the row's new one stays.
         let handbacks = std::mem::take(&mut *arena.host_handbacks.borrow_mut());
         assert_eq!(
             super::take_host_objects_owed(&main_thread, &arena.resolve_host_handbacks(handbacks).0),
-            vec![first]
+            vec![std::ptr::null_mut()]
         );
-        assert_eq!(arena.image_observers(&host_tables, row), second);
+        assert_eq!(
+            host_tables.image_observer_sets.borrow().get(&row).copied(),
+            Some(second)
+        );
         arena.close_host_handback_span();
 
         assert_eq!(
