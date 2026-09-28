@@ -753,7 +753,7 @@ pub struct OwnedStyleEngine {
 
 impl OwnedStyleEngine {
     pub(crate) fn new(engine: Box<StyleEngine>) -> Self {
-        let (document, arena) = crate::render_owner::create_document();
+        let (document, arena) = crate::render_owner::create_document(crate::render_owner::TakeIn::WhenWaitedFor);
         // SAFETY: The owner just created the arena, which it keeps until the document is destroyed, with this.
         let handle = unsafe { StyleEngineHandle::create(engine, arena) };
         Self { handle, document }

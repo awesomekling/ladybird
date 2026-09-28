@@ -1351,7 +1351,22 @@ pub(crate) fn acquire_owner() {
 
 /// The next message of the stage thread's own loop: the oldest deferred one, or the next to arrive.
 fn next_message() -> Option<StageMessage> {
-    DEFERRED.with_borrow_mut(VecDeque::pop_front).or_else(next_incoming)
+    if let Some(message) = DEFERRED.with_borrow_mut(VecDeque::pop_front) {
+        return Some(message);
+    }
+    // With nothing waiting, the owner takes in what the document threads sent it before it waits for more: beside
+    // them, rather than at the start of the next unit or question they would wait for.
+    if on_owner_thread() {
+        let waiting =
+            INCOMING.with(|incoming| incoming.borrow().as_ref().and_then(|incoming| incoming.try_recv().ok()));
+        if waiting.is_some() {
+            return waiting;
+        }
+        tsan::acquire(stage_thread());
+        crate::render_owner::take_in_sent_changes();
+        tsan::release(stage_thread());
+    }
+    next_incoming()
 }
 
 /// The next message to arrive, for a wait inside something the stage thread runs, which leaves what it defers for the
