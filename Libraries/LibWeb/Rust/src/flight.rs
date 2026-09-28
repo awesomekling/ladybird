@@ -239,6 +239,7 @@ impl Flight {
         let state = state.unwrap_or_else(|| unsafe {
             crate::layout::ArenaHandle::held_by_waiting_thread(self.arena as *mut c_void)
         });
+        let owns_arena = self.layout.is_some();
         if let Some(layout) = self.layout.as_mut() {
             layout.hand_state(state);
         }
@@ -392,8 +393,11 @@ impl Flight {
                 FfiFlightStage::StyleRenderHalf | FfiFlightStage::Record => Some(FfiFlightEndReason::StageRunsOnMain),
             };
             if let Some(end) = end {
-                // SAFETY: The frame in flight owns the arena, and nothing borrows it between stages.
-                unsafe { &mut *state }.arena_mut().publish_rows();
+                // A style pass alone does not own the arena, which the main thread goes on writing beside it.
+                if owns_arena {
+                    // SAFETY: The frame in flight owns the arena, and nothing borrows it between stages.
+                    unsafe { &mut *state }.arena_mut().publish_rows();
+                }
                 if reached >= FfiFlightStage::Rounds {
                     crate::stage_thread::hold_before_flight_completion("flight:laid-out");
                 }

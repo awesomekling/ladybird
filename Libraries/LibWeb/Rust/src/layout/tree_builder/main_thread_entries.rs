@@ -9,7 +9,7 @@
 //! mint the capability nor call an entry that does.
 
 use super::*;
-use crate::layout::layout_node_arena::LayoutUpdateMarksHandle;
+use crate::layout::layout_changes::{self, LayoutWrite};
 
 pub(crate) struct MainThreadFfiEntry {
     _private: (),
@@ -21,103 +21,22 @@ const MAIN_THREAD_FFI_ENTRY: MainThreadFfiEntry = MainThreadFfiEntry { _private:
 ///
 /// # Safety
 ///
-/// The callback table, arena, and element must remain valid for the duration of the call.
+/// `arena` must be a live handle on the document thread.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn rust_detach_top_layer_element_layout_subtree(arena: *mut c_void, style_node: u32) {
-    assert!(!arena.is_null());
-    // SAFETY: The entry point's contract puts this call on the document thread.
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
-    // SAFETY: Guaranteed by the entry point's contract.
-    unsafe {
-        super::layout_node_arena::paying_host_handbacks(&main_thread, arena, || {
-            // The clear retires the layout tree update marks of the boxes it gives up, which the
-            // document thread holds.
-            super::super::tree_update_marks::lend_to_stale_box_clear(arena, || {
-                detach_top_layer_element_layout_subtree(arena.cast(), style_node);
-            });
-        });
-    }
-}
-
-/// Detaches what is left of the boxes of the nodes of a subtree as it leaves the document, while
-/// their identities still name them: their synthetic pseudo-elements' boxes, subtree and all, the
-/// paint state of their own boxes, and their boxes' top layer placements, which are viewport
-/// children rather than part of the parent's box subtree, so the parent's rebuild would never
-/// detach them. The rows are found by identity, so no shell is made for any of this.
-///
-/// # Safety
-///
-/// The arena must remain valid for the duration of the call, which must be made on the document
-/// thread, and `style_nodes` must point to `style_node_count` identities.
-#[unsafe(no_mangle)]
-unsafe extern "C" fn rust_detach_remaining_layout_rows_for_removal(
-    arena: *mut c_void,
-    style_nodes: *const u32,
-    style_node_count: usize,
-) {
-    assert!(!arena.is_null());
-    if style_node_count == 0 {
+    // A top-layer member the style engine no longer tracks has left the DOM. Nothing of it is in the mirror, and
+    // nothing of it is bound to a row, so there is nothing to detach or clear.
+    let Some(element) = StyleNodeID::from_raw(style_node) else {
         return;
-    }
-    assert!(!style_nodes.is_null());
-    // SAFETY: Guaranteed by the entry point's contract.
-    let style_nodes = unsafe { std::slice::from_raw_parts(style_nodes, style_node_count) };
-    // SAFETY: The entry point's contract puts this call on the document thread.
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
-    // SAFETY: Guaranteed by the entry point's contract.
-    unsafe {
-        super::layout_node_arena::paying_host_handbacks(&main_thread, arena, || {
-            for &style_node in style_nodes {
-                detach_remaining_layout_rows_for_removal(arena.cast(), style_node);
-            }
-        });
-    }
-}
-
-/// Whether the layout tree lets the box of the node `place` names be detached from its parent's box in place, as the
-/// render owner published its rows.
-///
-/// # Safety
-///
-/// The arena must remain valid for the duration of the call, which must be made on the document thread, and `place`
-/// must point to a valid place.
-#[unsafe(no_mangle)]
-unsafe extern "C" fn rust_removed_box_detachable_in_place(
-    arena: *mut c_void,
-    place: *const FfiRemovedBoxPlace,
-) -> bool {
-    assert!(!place.is_null());
-    // SAFETY: Guaranteed by the entry point's contract.
-    removed_box_detachable_in_place(unsafe { RowSnapshot::published(arena) }, unsafe { &*place }).is_some()
-}
-
-/// Detaches the box of the node `place` names from its parent's box in place, with the paint state of every box in
-/// its subtree, if the layout tree lets it go; see rust_removed_box_detachable_in_place.
-///
-/// # Safety
-///
-/// The arena must remain valid for the duration of the call, which must be made on the document thread, and `place`
-/// must point to a valid place.
-#[unsafe(no_mangle)]
-unsafe extern "C" fn rust_detach_removed_box_in_place(
-    marks: LayoutUpdateMarksHandle,
-    place: *const FfiRemovedBoxPlace,
-) -> FfiRemovedBoxDetach {
-    let arena = marks.arena;
-    assert!(!arena.is_null() && !place.is_null());
-    // SAFETY: The entry point's contract puts this call on the document thread.
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
-    // SAFETY: Guaranteed by the entry point's contract.
-    let Some((layout_node, parent)) =
-        removed_box_detachable_in_place(unsafe { RowSnapshot::published(arena) }, unsafe { &*place })
-    else {
-        return FfiRemovedBoxDetach::NotAllowed;
     };
-    // SAFETY: Guaranteed by the entry point's contract.
-    unsafe {
-        LayoutNodeArena::from_handle_mut(arena).release_published_paintable_rows();
-        super::layout_node_arena::paying_host_handbacks(&main_thread, arena, || {
-            detach_removed_box_in_place(arena.cast(), layout_node, parent)
+    // SAFETY: Guaranteed by the caller.
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+    // The clear retires the layout tree update marks of the boxes it gives up, which the document thread holds.
+    // SAFETY: As above.
+    let payment = unsafe {
+        super::super::tree_update_marks::lend_to_stale_box_clear(arena, || {
+            layout_changes::write(arena, LayoutWrite::DetachTopLayerElement(element))
         })
-    }
+    };
+    payment.pay(&main_thread);
 }

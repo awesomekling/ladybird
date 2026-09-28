@@ -105,21 +105,6 @@ unsafe extern "C" fn layout_arena_first_wheel_scrollable_box_in_containing_block
 ///
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
 #[unsafe(no_mangle)]
-unsafe extern "C" fn layout_arena_paintable_cleared_from_node(arena: *mut c_void, layout_node: NodeSlotId) {
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
-    // SAFETY: Guaranteed by the entry point's contract.
-    unsafe {
-        arena_from_handle_mut(arena).release_published_paintable_rows();
-        crate::layout::paying_host_handbacks(&main_thread, arena, || {
-            clear_paintable_row_of_node(arena_from_handle_mut(arena), layout_node);
-        });
-    }
-}
-
-/// # Safety
-///
-/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
-#[unsafe(no_mangle)]
 unsafe extern "C" fn layout_arena_paintable_event_dispatch_slot(arena: *mut c_void, slot: NodeSlotId) -> NodeSlotId {
     let _main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let paintable_rows = unsafe { main_side_paintable_rows(arena) };
