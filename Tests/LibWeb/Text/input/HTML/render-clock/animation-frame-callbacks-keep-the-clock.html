@@ -43,6 +43,9 @@
         // A frame: the render clock's display tick, then the rendering update, whose frame callback answers whether the
         // page has a clock.
         const frame = async () => {
+            // The last rendering update ends (and grants the page its clock again) before the next frame begins.
+            while (internals.frameSchedulerState() !== "idle")
+                await nextTask();
             frameTime = await frameTimeAfter(frameTime);
             await internals.injectClockTick(frameTime);
             const clockInCallback = new Promise(resolve => requestAnimationFrame(() => resolve(internals.renderClockTicks(document))));

@@ -43,6 +43,9 @@
             internals.injectRenderingOpportunity(frameTime);
             await nextTask();
         }
+        // The rendering updates end before the test goes on.
+        while (internals.frameSchedulerState() !== "idle")
+            await nextTask();
 
         const countersBefore = internals.getRenderClockCounters();
         let taken = 0;
