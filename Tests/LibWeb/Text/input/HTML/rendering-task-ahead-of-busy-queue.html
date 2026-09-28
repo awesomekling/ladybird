@@ -1,8 +1,7 @@
 <!DOCTYPE html>
 <script src="../include.js"></script>
 <script>
-    // Where rendering opportunities are held, a rendering task that has waited a frame interval behind other tasks
-    // runs ahead of them, but never twice without one of them in between.
+    // A rendering task that has waited a frame interval behind other tasks runs ahead of them, but never twice without one of them in between.
     function busy(milliseconds) {
         const end = performance.now() + milliseconds;
         while (performance.now() < end) { }
@@ -10,7 +9,6 @@
 
     asyncTest(async done => {
         await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
-        internals.setRenderingOpportunityHold(true);
         internals.setManualRenderingOpportunities(true);
         const before = internals.getRenderingSchedulerCounters();
         const tasks = 20;
@@ -29,7 +27,6 @@
         await allRun;
         const after = internals.getRenderingSchedulerCounters();
         internals.setManualRenderingOpportunities(false);
-        internals.resetRenderingOpportunityHold();
         println(`waited behind some tasks: ${tasksBeforeAnimationFrame > 0}`);
         println(`ran ahead of the rest: ${tasksBeforeAnimationFrame > 0 && tasksBeforeAnimationFrame < tasks}`);
         println(`counted as ahead of the queue: ${after.renderingTasksAheadOfQueue - before.renderingTasksAheadOfQueue === 1}`);

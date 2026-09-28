@@ -124,8 +124,7 @@ public:
         Array<u64, to_underlying(JournalEntryKind::Count)> journal_entries_during_flight {};
         u64 finished_frame_consumer_calls { 0 };
         // How long rendering tasks waited for the render side to finish the previous rendering update's frame before
-        // they could start (finish_frame_now()), and how many held their rendering opportunity instead of waiting
-        // (LIBWEB_RENDERING_OPPORTUNITY_HOLD).
+        // they could start (finish_frame_now()), and how many held their rendering opportunity instead of waiting.
         u64 rendering_task_blocked_on_frame_nanoseconds { 0 };
         u64 rendering_tasks_held { 0 };
         // Rendering tasks that ran ahead of tasks queued before them.
@@ -179,15 +178,13 @@ public:
     bool rendering_opportunity(HighResolutionTime::DOMHighResTimeStamp frame_time, RenderingOpportunitySource);
     bool rendering_task_queued_or_running() const { return m_rendering_task_queued || m_running_rendering_task; }
 
-    // Whether a rendering task that finds the previous rendering update's frame still in flight holds its rendering
-    // opportunity instead of waiting for the frame (LIBWEB_RENDERING_OPPORTUNITY_HOLD). The held rendering update runs
-    // at the step 1 that takes that frame in and runs its tail, ahead of the tasks queued meanwhile.
-    static bool holds_rendering_opportunities();
-    static void set_holds_rendering_opportunities_for_testing(Optional<bool>);
+    // Whether the rendering task found the previous rendering update's frame still in flight and holds its rendering
+    // opportunity instead of waiting for the frame. The held rendering update runs at the step 1 that takes that frame
+    // in and runs its tail, ahead of the tasks queued meanwhile.
     bool rendering_task_held() const { return m_rendering_task_held; }
-    // Whether the queued rendering task runs before the other tasks queued ahead of it. Asked by the task queue. Where
-    // rendering opportunities are held, a held rendering task does once it is queued again, and so does one that has
-    // waited a frame interval behind other tasks, but not twice without another task in between.
+    // Whether the queued rendering task runs before the other tasks queued ahead of it. Asked by the task queue. A held
+    // rendering task does once it is queued again, and so does one that has waited a frame interval behind other tasks,
+    // but not twice without another task in between.
     bool rendering_task_runs_ahead_of_queue() const;
     void did_run_rendering_task_ahead_of_queue();
     bool running_synchronous_rendering_update() const { return m_running_synchronous_rendering_update; }

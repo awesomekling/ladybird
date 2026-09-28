@@ -295,11 +295,6 @@ interface Internals {
     boolean frameInFlightReferencesAreAlive();
     // With withClockTicks, the leases a render clock would tick take the display ticks injectClockTick() hands them.
     undefined setManualRenderingOpportunities(boolean enabled, optional boolean withClockTicks = false);
-    // Whether a rendering task that finds the previous rendering update's frame in flight holds its rendering
-    // opportunity instead of waiting for the frame, overriding LIBWEB_RENDERING_OPPORTUNITY_HOLD until
-    // resetRenderingOpportunityHold(). A test that sets it resets it.
-    undefined setRenderingOpportunityHold(boolean enabled);
-    undefined resetRenderingOpportunityHold();
     // Whether the rendering task holds its rendering opportunity until the frame in flight has finished.
     boolean renderingTaskHeld();
     undefined injectRenderingOpportunity(double frameTimeMs);
