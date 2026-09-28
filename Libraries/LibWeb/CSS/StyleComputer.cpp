@@ -396,25 +396,25 @@ void StyleComputer::begin_transition_stabilization_epoch()
 // Whether a later pass of the stabilization epoch can still give this element a transition whose
 // before-change style is the one it holds now: the element's scope has size container queries, so
 // a later pass can happen at all, or a later pass has already happened.
-bool StyleComputer::pin_transition_stabilization_baseline_if_a_later_pass_may_need_it(StyleDrainScope const& scope, DOM::AbstractElement abstract_element) const
+void StyleComputer::pin_transition_stabilization_baseline_if_a_later_pass_may_need_it(StyleDrainScope const& scope, DOM::AbstractElement abstract_element) const
 {
     if (abstract_element.element().style_node_id() == 0)
-        return false;
+        return;
     if (!abstract_element.style_scope().rule_cache().has_size_container_queries
         && !document().is_in_style_stabilization_feedback_epoch())
-        return false;
-    return record_transition_stabilization_baseline(scope, abstract_element);
+        return;
+    record_transition_stabilization_baseline(scope, abstract_element);
 }
 
-bool StyleComputer::record_transition_stabilization_baseline(StyleDrainScope const& scope, DOM::AbstractElement abstract_element, Optional<StyleRecordID> before_change_style_record) const
+void StyleComputer::record_transition_stabilization_baseline(StyleDrainScope const& scope, DOM::AbstractElement abstract_element, Optional<StyleRecordID> before_change_style_record) const
 {
     auto style_node_id = abstract_element.element().style_node_id();
     if (style_node_id == 0)
-        return false;
+        return;
     // A row the engine settled is drained once its record is installed, so the style the element
     // holds is already the after-change one. The row names the style it moved away from.
     auto style_record_identity = before_change_style_record.value_or_lazy_evaluated([&] { return abstract_element.style_record_identity(); });
-    return scope.engine().record_transition_baseline(scope, style_node_id, pseudo_element_to_ffi(abstract_element.pseudo_element()), style_record_identity);
+    scope.engine().record_transition_baseline(scope, style_node_id, pseudo_element_to_ffi(abstract_element.pseudo_element()), style_record_identity);
 }
 
 // A provisionally started transition already contributed to the style published by the pass that
@@ -801,7 +801,7 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_inst
     VERIFY(installed_style_record);
 
     // https://drafts.csswg.org/css-transitions-2/#defining-before-change-style
-    (void)record_transition_stabilization_baseline(scope, abstract_element, before_change_style_record);
+    record_transition_stabilization_baseline(scope, abstract_element, before_change_style_record);
     if (auto baseline = scope.engine().transition_baseline(scope, abstract_element.element().style_node_id(), pseudo_element_to_ffi(abstract_element.pseudo_element())); baseline != 0)
         before_change_style_record = StyleRecordID { baseline };
 

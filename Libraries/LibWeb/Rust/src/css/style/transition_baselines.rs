@@ -25,21 +25,20 @@ impl RetainedState {
     /// Style, layout or animation feedback can give a target a transition in any later pass of
     /// the epoch, and that transition starts from the style the target held before the epoch's
     /// first pass. The first record named for a target is that style: it is kept, pinned, until
-    /// the epoch commits. Says whether this call recorded it.
-    pub(crate) fn record_transition_baseline(&mut self, node: StyleNodeID, pseudo_kind: u8, style_record: u64) -> bool {
+    /// the epoch commits.
+    pub(crate) fn record_transition_baseline(&mut self, node: StyleNodeID, pseudo_kind: u8, style_record: u64) {
         if style_record == 0 || self.transition_baselines.contains_key(&(node, pseudo_kind)) {
-            return false;
+            return;
         }
         // A settled row can name a before-change record the engine has already released: an
         // animation overlay goes the moment its node's assignment moves off it and nothing pins
         // it. Such a record is no style to decide against, and the pass that samples the target
         // records the baseline instead.
         if !self.computed_group_sets.style_record_is_held(style_record) {
-            return false;
+            return;
         }
         self.computed_group_sets.pin_style_record(style_record);
         self.transition_baselines.insert((node, pseudo_kind), style_record);
-        true
     }
 
     /// The before-change style the epoch decides the target's transitions against, or 0 before a
