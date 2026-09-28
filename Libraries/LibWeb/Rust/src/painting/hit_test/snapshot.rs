@@ -74,11 +74,6 @@ impl HitTestSnapshot {
         self.frame.rows.hit_test_list.as_deref()
     }
 
-    /// The generation of the list, as the document's paint state numbered it; zero for none.
-    fn generation(&self) -> u64 {
-        self.list().map_or(0, |list| list.generation)
-    }
-
     /// Runs a query over the list, the visual context tree it converts points through and the rows it
     /// was recorded over, or answers `default` where the snapshot holds no list to query.
     pub(super) fn query<R>(
@@ -434,16 +429,6 @@ pub unsafe extern "C" fn hit_test_snapshot_release(snapshot: *const c_void) {
     drop(unsafe { Arc::from_raw(snapshot.cast::<HitTestSnapshot>()) });
 }
 
-/// The generation of the snapshot's list, as the document's paint state numbered it; zero for none.
-///
-/// # Safety
-///
-/// `snapshot` must be a live handle from `layout_arena_publish_hit_test_snapshot`.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn hit_test_snapshot_generation(snapshot: *const c_void) -> u64 {
-    unsafe { snapshot_from_handle(snapshot) }.generation()
-}
-
 /// Visits the chrome widgets the document's hit-test list holds items of, and answers the list's generation (zero for
 /// none). A recording's list is visited as it is taken in, and nothing a query derives from it is built for that: a
 /// query builds it as it publishes its snapshot.
@@ -612,14 +597,17 @@ mod tests {
         arena.paint_state().borrow_mut().visual_context.tree = None;
         arena.publish_paintable_rows();
 
-        assert_eq!(snapshot.generation(), 1);
         let list = snapshot.list().expect("the snapshot holds its list");
+        assert_eq!(list.generation, 1);
         assert!(list.spatial_indexes_built && list.caret_lines_built);
         assert!(snapshot.query(false, |_, tree, _| std::ptr::eq(
             tree,
             published_tree.as_deref().unwrap()
         )));
-        assert_eq!(arena.publish_hit_test_snapshot().generation(), 2);
+        assert_eq!(
+            arena.publish_hit_test_snapshot().list().map(|list| list.generation),
+            Some(2)
+        );
     }
 
     /// A snapshot names the DOM node a row stands for as the host names it, from the style node its
