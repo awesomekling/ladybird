@@ -365,11 +365,6 @@ pub(crate) enum StyleQuery {
         capacity: usize,
         compact_for_cascade: bool,
     },
-    ConsumePublishedMatchAnswer {
-        node: u32,
-        out: *mut FfiRuleMatch,
-        capacity: usize,
-    },
     ElementRecordDamage {
         node: u32,
         old_style_record: u64,
@@ -702,9 +697,6 @@ impl StyleQuery {
                 compact_for_cascade,
             } => StyleAnswer::Usize(unsafe {
                 crate::css::style::bridge::owner_match_element(engine, node, out, capacity, compact_for_cascade)
-            }),
-            Self::ConsumePublishedMatchAnswer { node, out, capacity } => StyleAnswer::Usize(unsafe {
-                crate::css::style::bridge::owner_consume_published_match_answer(engine, node, out, capacity)
             }),
             Self::ElementRecordDamage {
                 node,

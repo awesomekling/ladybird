@@ -489,7 +489,6 @@ public:
 private:
     using InputTransaction = StyleEngineFFI::FfiStyleInputTransaction;
 
-    bool read_matches(StyleNodeID, Vector<RuleMatch>&, Optional<MatchPurpose>);
     void apply_transaction(StyleInputScope const&, InputTransaction const&);
     // Where the input submit_recorded_input() takes goes: to the engine at once, or to the style transaction
     // lend_style_transaction_inputs() hands it over with, which applies it as its first step.

@@ -1004,19 +1004,6 @@ impl StyleEngine {
         self.state.consume_published_match_answer(node, &mut self.counters)
     }
 
-    /// Stream a published answer into its consumer. A materialized payload needs no copy; an
-    /// identity-only payload is restored in cascade order before it crosses the bridge.
-    #[inline]
-    pub(super) fn consume_published_match_answer_with(
-        &mut self,
-        node: StyleNodeID,
-        capacity: usize,
-        consume: impl FnMut(usize, StyleNodeID, RuleID, SemanticDeclarationID, Option<tree::PseudoElementTarget>, u32, u32),
-    ) -> Option<usize> {
-        self.state
-            .consume_published_match_answer_with(node, capacity, consume, &mut self.counters)
-    }
-
     /// Read the shareable identity of one answer from the immediately preceding style transaction.
     ///
     /// A contextual answer has no identity and must still consume its complete payload. A shared
