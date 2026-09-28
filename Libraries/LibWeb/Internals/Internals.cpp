@@ -1627,7 +1627,7 @@ GC::Ref<JS::Object> Internals::get_render_clock_counters() const
     define("ticksPosted"sv, counters.ticks_posted);
     define("ticksFolded"sv, counters.ticks_folded);
     define("ticksRun"sv, counters.ticks_run);
-    define("ticksDroppedMainBusy"sv, counters.ticks_dropped_main_busy);
+    define("ticksPresentedByMain"sv, counters.ticks_presented_by_main);
     define("ticksDroppedWithoutClock"sv, counters.ticks_dropped_without_clock);
     define("ticksDroppedPaused"sv, counters.ticks_dropped_paused);
     define("ticksDroppedNeedingMain"sv, counters.ticks_dropped_needing_main);
@@ -1637,8 +1637,7 @@ GC::Ref<JS::Object> Internals::get_render_clock_counters() const
     define("ticksPresented"sv, counters.ticks_presented);
     define("ticksNeedingMain"sv, counters.ticks_needing_main);
     define("ticksMovingVisualContexts"sv, counters.ticks_moving_visual_contexts);
-    define("ticksWakingMainToAdopt"sv, counters.ticks_waking_main_to_adopt);
-    define("ticksMissedAskingMain"sv, counters.ticks_missed_asking_main);
+    define("ticksAskingMainToAdopt"sv, counters.ticks_asking_main_to_adopt);
     return object;
 }
 

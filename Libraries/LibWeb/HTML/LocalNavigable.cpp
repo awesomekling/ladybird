@@ -52,6 +52,7 @@
 #include <LibWeb/HTML/DocumentState.h>
 #include <LibWeb/HTML/DragDataStore.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
+#include <LibWeb/HTML/EventLoop/FrameScheduler.h>
 #include <LibWeb/HTML/HTMLBRElement.h>
 #include <LibWeb/HTML/HTMLHtmlElement.h>
 #include <LibWeb/HTML/HTMLIFrameElement.h>
@@ -6792,6 +6793,9 @@ RefPtr<Compositor::Presentation> LocalNavigable::seal_presentation(PendingCompos
 
 Compositor::NavigablePresenter& LocalNavigable::presenter(SourceLocation location)
 {
+    // The render clock's ticks present from the presenter until the main thread takes it back, with what they presented.
+    if (m_presenter->take_back_from_render_clock())
+        HTML::main_thread_event_loop().frame_scheduler().adopt_render_clock_frames_of(*this);
     // The frame in flight presents from the presenter until it is taken in.
     if (m_presenter->is_lent_to_frame_in_flight())
         Layout::RustFFI::rust_stage_thread_join_frame_in_flight(reinterpret_cast<u8 const*>(location.filename().characters_without_null_termination()), location.filename().length(), location.line_number());

@@ -26,6 +26,12 @@ struct ClockSender;
 
 }
 
+namespace Web::Painting {
+
+class QuerySnapshot;
+
+}
+
 namespace Web::HTML {
 
 // A rendering update's frame, submitted to the render side. The main thread goes back to its event loop while the
@@ -159,16 +165,21 @@ public:
     void revoke_all_clock_leases();
     // Ends the clock lease of `document`, if it holds one: it was hidden.
     void revoke_clock_lease_of(DOM::Document const&);
-    // The main thread's outermost event loop is about to block: the render clock may tick the leases until it wakes.
-    void main_thread_will_idle();
-    // The main thread woke: the documents adopt what the render clock's ticks installed while it idled.
-    void main_thread_did_wake();
+    // The documents adopt what the render clock's ticks installed beside the main thread since it last looked, before
+    // anything else reaches them.
+    void adopt_render_clock_ticks_if_any();
+    // The render clock asked the main thread to adopt what its ticks left, after `injected_ticks_run` more ticks a test
+    // injected ran.
+    void render_clock_asks_to_adopt(size_t injected_ticks_run);
+    // The main thread took the presenter of `navigable` back from the render clock: what the ticks presented from it
+    // is the navigable's now.
+    void adopt_render_clock_frames_of(LocalNavigable&);
     // A render clock tick ended a lease; the rendering update takes over.
     void render_clock_needs_main();
     // For tests: whether leases are left to the main thread's rendering updates, with no render clock armed.
     void set_render_clock_suspended(bool);
-    // For tests: hands the leases a render clock ticks a display tick at `frame_time` (unsafe shared current time, ms)
-    // once the main thread goes idle, and calls `on_end` once it has run, with whether a lease took it.
+    // For tests: hands the leases a render clock ticks a display tick at `frame_time` (unsafe shared current time, ms),
+    // and calls `on_end` once it has run, with whether a lease took it.
     void inject_render_clock_tick(double frame_time, Function<void(bool)> on_end);
     // For tests: has the next frame added to the ticket whose recording is in flight take that recording in before its
     // presentation would be submitted, as a forced join during the main half would.
@@ -240,6 +251,8 @@ private:
         // The time the document timeline reads in the rendering update running now: that of the render clock's last
         // tick, where the rendering update leaves the lease to the render clock.
         Optional<double> timeline_time_for_update {};
+        // The time the document timeline read in the last rendering update that rendered the document.
+        double timeline_time_of_last_update { -AK::Infinity<double> };
         // What the render clock's ticks present the document's frames with.
         OwnPtr<LocalNavigable::RenderClockFrameKit> render_clock_kit {};
         // Whether the lease ends once the document has adopted the tick in flight: it was revoked beside it.
@@ -248,12 +261,18 @@ private:
     void adopt_render_clock_ticks();
     void replace_render_clock_kit(ClockLeaseHold&, OwnPtr<LocalNavigable::RenderClockFrameKit>);
     void update_render_clock(ClockLeaseHold&, Optional<Compositing::CompositorContextId>);
-    bool publish_clock_lease_targets(ClockLeaseHold const&);
+    void publish_clock_lease_targets(ClockLeaseHold const&);
     bool submit_clock_tick(Vector<GC::Ref<DOM::Document>> const& docs, size_t first_document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp);
     // Ends the lease at `index`, or, where its tick is in flight, has it end once the document adopted the tick.
     void revoke_clock_lease(size_t index);
     bool clock_tick_in_flight_for(DOM::Document const&) const;
-    void adopt_clock_tick(DOM::Document&);
+    // What a document adopted of the render clock's ticks: the timeline time of the tick it adopted (NaN without a
+    // running clock), and the query snapshot of what that tick laid out, if it did.
+    struct AdoptedClockTicks {
+        double time { 0 };
+        RefPtr<Painting::QuerySnapshot const> query_snapshot;
+    };
+    AdoptedClockTicks adopt_clock_tick(DOM::Document&);
 
     EventLoop& m_event_loop;
     State m_state { State::Idle };
@@ -269,12 +288,7 @@ private:
 
     Vector<ClockLeaseHold> m_clock_leases;
     bool m_render_clock_suspended { false };
-    // The display ticks tests injected, waiting for the main thread to go idle, and those the render side runs now.
-    struct InjectedClockTick {
-        double frame_time { 0 };
-        Function<void(bool)> on_end;
-    };
-    Vector<InjectedClockTick> m_injected_clock_ticks;
+    // What waits for the display ticks tests injected, which the render side runs now.
     Vector<Function<void(bool)>> m_injected_clock_ticks_in_flight;
     Layout::RustFFI::ClockSender* m_injected_clock_tick_sender { nullptr };
 

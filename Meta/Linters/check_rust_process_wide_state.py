@@ -74,7 +74,8 @@ RENDER_STAGE_ALLOWED = {
     **render_stage_entries(
         MAIN_THREAD_ONLY,
         [
-            "clock_frames.rs:PUBLICATIONS",
+            "clock_frames.rs:CLOCKS",
+            "clock_frames.rs:ADOPTING",
             "flight.rs:TAKEN_BACK_OUTCOME",
             "flight.rs:FLIGHT_ENDS",
             "flight.rs:FLIGHT_STYLE_ENDS",
@@ -91,9 +92,7 @@ RENDER_STAGE_ALLOWED = {
     **render_stage_entries(
         CLOCK_HANDOFF,
         [
-            "clock_frames.rs:GATE",
             "clock_frames.rs:TICKS_TO_ADOPT",
-            "clock_frames.rs:INJECTED_TICKS_PENDING",
         ],
     ),
     **render_stage_entries(
@@ -101,7 +100,7 @@ RENDER_STAGE_ALLOWED = {
         [
             "clock_frames.rs:NEEDS_MAIN",
             "clock_frames.rs:PRESENT",
-            "clock_frames.rs:WAKE_MAIN",
+            "clock_frames.rs:ADOPT_ON_MAIN",
         ],
     ),
     **render_stage_entries(

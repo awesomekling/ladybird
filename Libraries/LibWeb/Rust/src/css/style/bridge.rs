@@ -4581,21 +4581,21 @@ pub(crate) unsafe fn sample_installed_record_for_clock_tick(
     }
 }
 
-/// Takes the next sample the last clock tick of the document whose layout arena is `layout_arena`
-/// left for the host to adopt: the element's style node and the record it held before the tick, and
-/// whether the arena took the sample's record ahead of the host. False once none is left.
+/// Takes the next sample of what the clock ticks of a document left for the host to adopt, as the
+/// host took it (`rust_document_clock_take_adoption`): the element's style node and the record it
+/// held before the tick, and whether the arena took the sample's record ahead of the host. False
+/// once none is left.
 ///
 /// # Safety
 /// The out pointers must be valid for writes, and the tick taken back.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_clock_tick_take_entry(
-    layout_arena: *mut c_void,
     node: *mut u32,
     style_record_before: *mut u64,
     installed_in_arena: *mut bool,
     sample: *mut FfiRowSampledInPass,
 ) -> bool {
-    let Some(entry) = crate::clock_frames::take_clock_tick_entry(layout_arena) else {
+    let Some(entry) = crate::clock_frames::take_clock_tick_entry() else {
         return false;
     };
     // SAFETY: Guaranteed by the caller.

@@ -8,6 +8,7 @@
 
 #include <AK/Atomic.h>
 #include <AK/AtomicRefCounted.h>
+#include <AK/Mutex.h>
 #include <AK/NonnullRefPtr.h>
 #include <AK/NumericLimits.h>
 #include <AK/Optional.h>
@@ -185,16 +186,42 @@ public:
 
     // Main thread only: whether the frame in flight presents from this presenter, which it owns until the main thread
     // takes the frame in.
-    bool is_lent_to_frame_in_flight() const { return m_lent_to_frame_in_flight; }
+    bool is_lent_to_frame_in_flight() const { return m_holder.load() == Holder::FrameInFlight; }
     void lend_to_frame_in_flight()
     {
-        VERIFY(!m_lent_to_frame_in_flight);
-        m_lent_to_frame_in_flight = true;
+        take_back_from_render_clock();
+        VERIFY(m_holder.exchange(Holder::FrameInFlight) == Holder::Main);
     }
     void take_back_from_frame_in_flight()
     {
-        VERIFY(m_lent_to_frame_in_flight);
-        m_lent_to_frame_in_flight = false;
+        VERIFY(m_holder.exchange(Holder::Main) == Holder::FrameInFlight);
+    }
+
+    // LIBWEB_RENDER_CLOCK_FRAMES: The main thread lends the presenter to the render clock's ticks until it next needs
+    // it. Taking it back waits for a tick that presents from it now, and returns whether it was lent.
+    void lend_to_render_clock()
+    {
+        MutexLocker locker(m_render_clock_mutex);
+        auto expected = Holder::Main;
+        if (!m_holder.compare_exchange_strong(expected, Holder::RenderClock))
+            VERIFY(expected == Holder::RenderClock);
+    }
+    bool take_back_from_render_clock()
+    {
+        MutexLocker locker(m_render_clock_mutex);
+        auto expected = Holder::RenderClock;
+        return m_holder.compare_exchange_strong(expected, Holder::Main);
+    }
+    // On the Rendering thread: runs `present` if the presenter is lent to the render clock, which the main thread takes
+    // it back from only once it has run. Returns whether it ran.
+    template<typename Callback>
+    bool present_for_render_clock(Callback present)
+    {
+        MutexLocker locker(m_render_clock_mutex);
+        if (m_holder.load() != Holder::RenderClock)
+            return false;
+        present();
+        return true;
     }
 
     // How many scenes (display lists and visual context trees) this presenter has handed its compositor context. Read
@@ -225,7 +252,15 @@ private:
     u64 m_compositor_display_list_visual_context_tree_structural_epoch { 0 };
     Compositing::DisplayListResourceSet m_compositor_display_list_resources;
     Compositing::DisplayListResourceSet m_compositor_display_list_command_resources;
-    bool m_lent_to_frame_in_flight { false };
+    // Who presents from the presenter: the main thread, the frame in flight, or the render clock's ticks, which present
+    // from it with the mutex held.
+    enum class Holder : u8 {
+        Main,
+        FrameInFlight,
+        RenderClock,
+    };
+    Atomic<Holder> m_holder { Holder::Main };
+    Mutex m_render_clock_mutex;
     Atomic<u64> m_presented_scene_epoch { 0 };
     Atomic<u64> m_compositor_visual_animation_count { 0 };
     u64 m_adopted_scene_epoch { 0 };
