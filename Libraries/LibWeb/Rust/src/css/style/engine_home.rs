@@ -142,8 +142,8 @@ pub(crate) struct StyleEngineLoan {
 unsafe impl Send for StyleEngineLoan {}
 
 thread_local! {
-    // The engine a stage lent the loan it holds to while it runs, as its home and the engine.
-    static LENT_TO_THIS_THREAD: Cell<(usize, *mut StyleEngine)> = const { Cell::new((0, std::ptr::null_mut())) };
+    // The home of the engine a stage lent the loan it holds to while it runs.
+    static LENT_TO_THIS_THREAD: Cell<usize> = const { Cell::new(0) };
 }
 
 /// Set while the main thread waits for an engine to come home, for a flight that sends one home
@@ -162,13 +162,13 @@ pub(crate) fn main_waits_for_arrival() -> bool {
 ///
 /// Nothing else reaches the engine until this returns.
 unsafe fn reach_on_this_thread<T>(home: usize, engine: *mut StyleEngine, run: impl FnOnce(&mut StyleEngine) -> T) -> T {
-    struct Restore((usize, *mut StyleEngine));
+    struct Restore(usize);
     impl Drop for Restore {
         fn drop(&mut self) {
             LENT_TO_THIS_THREAD.set(self.0);
         }
     }
-    let _restore = Restore(LENT_TO_THIS_THREAD.replace((home, engine)));
+    let _restore = Restore(LENT_TO_THIS_THREAD.replace(home));
     // SAFETY: Guaranteed by the caller.
     run(unsafe { &mut *engine })
 }
@@ -268,9 +268,9 @@ impl StyleEngineHome {
         }
     }
 
-    /// Brings the engine home for an entrance that does `access`, as the module describes. `file`,
-    /// `line` and `column` name the entrance for the forced-join log.
-    fn bring_home(&self, access: Access, file: &'static str, line: u32, column: u32) {
+    /// Brings the engine home for an entrance that does `access`, as the module describes. `file`
+    /// and `line` name the entrance for the forced-join log.
+    fn bring_home(&self, access: Access, file: &'static str, line: u32) {
         if self.state() == (true, Owed::Nothing) {
             return;
         }
@@ -286,7 +286,7 @@ impl StyleEngineHome {
             }
             if !joined {
                 joined = true;
-                crate::stage_thread::join_frame_holding_style_engine(self.arena.get(), file, line, column);
+                crate::stage_thread::join_frame_holding_style_engine(self.arena.get(), file, line);
                 continue;
             }
             // Nothing could take the frame in, as work a stage joined the main thread for, or a
@@ -416,7 +416,7 @@ impl StyleEngineHandle {
             home.state() == (true, Owed::Nothing),
             "a style engine is lent to a stage while another holds it"
         );
-        home.bring_home(Access::Any, "style engine lend", 0, 0);
+        home.bring_home(Access::Any, "style engine lend", 0);
         // SAFETY: On the main thread.
         let slot = unsafe { home.slot() };
         let (to_home, arrival) = channel();
@@ -461,28 +461,14 @@ impl StyleEngineHandle {
     /// The handle must name a live engine, and no other borrow of the engine may be live while the
     /// returned one is used.
     pub(crate) unsafe fn enter<'a>(self, entry: &'static str) -> &'a mut StyleEngine {
-        // SAFETY: Guaranteed by the caller.
-        unsafe { self.enter_for(Access::Any, entry) }
-    }
-
-    /// # Safety
-    ///
-    /// As for [`Self::enter`].
-    unsafe fn enter_for<'a>(self, access: Access, entry: &'static str) -> &'a mut StyleEngine {
-        let home = self.home();
-        let (lent_home, lent_engine) = LENT_TO_THIS_THREAD.get();
-        if lent_home == self.address() {
-            // SAFETY: The stage that holds the loan lent it to this thread; guaranteed by the caller.
-            return unsafe { &mut *lent_engine };
+        let engine = self.home().engine.as_ptr();
+        if LENT_TO_THIS_THREAD.get() == self.address() {
+            // SAFETY: The stage that holds the loan lent the engine to this thread; guaranteed by the
+            // caller.
+            return unsafe { &mut *engine };
         }
         // An engine is lent only to a submitted stage, so with none submitted every engine is home.
-        if crate::stage_thread::no_stage_is_submitted() {
-            // What the main thread sent the owner of the engine goes in before the main thread reaches it.
-            super::owner_calls::apply_changes_before_main_reaches(self);
-            // SAFETY: Guaranteed by the caller.
-            return unsafe { &mut *home.engine.as_ptr() };
-        }
-        if crate::stage_thread::running_inside_stage() {
+        if !crate::stage_thread::no_stage_is_submitted() && crate::stage_thread::running_inside_stage() {
             debug_assert!(
                 !crate::stage_thread::running_submitted_stage(),
                 "a submitted stage reaches a style engine it holds no loan of"
@@ -490,45 +476,41 @@ impl StyleEngineHandle {
             // A stage the main thread waits for reaches the engine as the main thread would, which
             // brought the engine home before it waited.
             // SAFETY: Guaranteed by the caller.
-            return unsafe { &mut *home.engine.as_ptr() };
+            return unsafe { &mut *engine };
         }
-        home.bring_home(access, entry, 0, 0);
+        self.bring_home(entry);
+        // What the main thread sent the owner of the engine goes in before the main thread reaches it.
         super::owner_calls::apply_changes_before_main_reaches(self);
-        // SAFETY: The engine is home, or the stage that holds it is done with it as far as `access`
-        // reaches; guaranteed by the caller.
-        unsafe { &mut *home.engine.as_ptr() }
+        // SAFETY: The engine is home, or the stage that holds it is done with it; guaranteed by the
+        // caller.
+        unsafe { &mut *engine }
     }
 
     /// Brings the engine home for the main thread, which is about to enter it at `entry`
     /// once it has done what it does before.
     pub(crate) fn bring_home(self, entry: &'static str) {
-        self.bring_home_at(entry, 0, 0);
+        self.bring_home_for(Access::Any, entry, 0);
     }
 
     /// Like [`Self::bring_home`], for a read of what a published record holds only, which goes on while the install of
     /// the stage's batch is still owed.
     pub(crate) fn bring_home_to_read_records(self, entry: &'static str) {
-        if self.is_null() || crate::stage_thread::no_stage_is_submitted() {
-            return;
-        }
-        let (lent_home, _) = LENT_TO_THIS_THREAD.get();
-        if lent_home == self.address() || crate::stage_thread::running_inside_stage() {
-            return;
-        }
-        self.home().bring_home(Access::RecordRead, entry, 0, 0);
+        self.bring_home_for(Access::RecordRead, entry, 0);
     }
 
-    /// Like [`Self::bring_home`], for a C++ call site `file` and `line` name (`column` 0 where it
-    /// has none).
-    pub(crate) fn bring_home_at(self, file: &'static str, line: u32, column: u32) {
+    /// Like [`Self::bring_home`], for a C++ call site `file` and `line` name.
+    pub(crate) fn bring_home_at(self, file: &'static str, line: u32) {
+        self.bring_home_for(Access::Any, file, line);
+    }
+
+    fn bring_home_for(self, access: Access, file: &'static str, line: u32) {
         if self.is_null() || crate::stage_thread::no_stage_is_submitted() {
             return;
         }
-        let (lent_home, _) = LENT_TO_THIS_THREAD.get();
-        if lent_home == self.address() || crate::stage_thread::running_inside_stage() {
+        if LENT_TO_THIS_THREAD.get() == self.address() || crate::stage_thread::running_inside_stage() {
             return;
         }
-        self.home().bring_home(Access::Any, file, line, column);
+        self.home().bring_home(access, file, line);
     }
 
     /// The engine of an engine that runs only for a replay, which no frame is ever in flight for.

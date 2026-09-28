@@ -2523,7 +2523,7 @@ pub unsafe extern "C" fn layout_arena_join_frame_reaching_style_engine(
     // SAFETY: Guaranteed by the caller.
     unsafe { super::HostTables::beside_frame(arena) }
         .style_engine()
-        .bring_home_at(file, line, 0);
+        .bring_home_at(file, line);
 }
 
 /// Waits for the document's frame in flight only if one of its stages owns the arena (a layout pass
