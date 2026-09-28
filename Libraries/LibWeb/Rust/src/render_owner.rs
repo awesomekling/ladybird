@@ -11,8 +11,9 @@
 //! and has three typed ways in, none of which takes a closure:
 //!
 //! - a change: owned `Send` data, fire and forget. An [`ArenaChange`], numbered per document ([`ChangeSeq`]), the
-//!   owner queues and applies, in order, at the next point that needs it: a unit of a rendering update, or a query.
-//!   A write to the style engine waits in the engine's home, and whoever reaches the engine next applies it first.
+//!   owner queues and applies, in order, as soon as it idles ([`take_in_sent_changes`]), or at the next point that
+//!   needs it: a unit of a rendering update, or a query. A write to the style engine waits in the engine's home, and
+//!   whoever reaches the engine next applies it first.
 //! - a [`RenderingUpdate`]: the stages of a frame, which the owner runs as units ([`FrameUnit`]) and answers with
 //!   the frame's news ([`crate::frame_news`]), the typed results the main thread adopts where it takes the frame in.
 //! - a [`Query`]: a question about the document as of the changes sent before it, answered in one round trip
@@ -313,6 +314,8 @@ pub(crate) fn do_owner_work_here<R>(op: impl FnOnce(&Owner) -> R) -> R {
 enum EngineReach<'a> {
     /// As the owner.
     Owner(&'a Owner),
+    /// As the owner, beside the main thread, which does not wait for it.
+    OwnerBesideMain(&'a Owner),
     /// The unit runs beside the main thread, which lent it the engine.
     Lent(&'a mut crate::css::style::engine_home::StyleEngineLoan),
 }
@@ -326,6 +329,8 @@ impl EngineReach<'_> {
         match self {
             // SAFETY: The engine is the document's, which the arena that links it keeps alive.
             Self::Owner(owner) => unsafe { engine.reach_on_owner(owner, run) },
+            // SAFETY: As above.
+            Self::OwnerBesideMain(owner) => unsafe { engine.reach_on_owner_beside_main(owner, run) },
             Self::Lent(loan) => loan.lend_to_this_thread(run),
         }
     }
@@ -358,6 +363,17 @@ pub(crate) struct RenderState {
     changes: ChangeQueue,
     /// The document's clock, which ticks its animations while the main thread started it.
     clock: Option<crate::clock_frames::DocumentClock>,
+    take_in: TakeIn,
+}
+
+/// When the owner takes in what a document thread sent: as it idles, or only in a unit the thread waits for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TakeIn {
+    /// The document thread goes on beside the owner, which takes in what it sent as it idles.
+    AsTheOwnerIdles,
+    /// The thread that sends the changes holds the document's style engine itself (a unit test's, the replay tool's):
+    /// nothing may reach the engine beside it.
+    WhenWaitedFor,
 }
 
 impl RenderState {
@@ -786,7 +802,11 @@ impl RenderingUpdate {
 pub(crate) enum ToOwner {
     /// Takes in the render state of `document`, whose arena the document thread took from the spare the owner built
     /// ahead of it ([`create_document`]), and builds the next spare.
-    Create { document: DocumentId, arena: SpareArena },
+    Create {
+        document: DocumentId,
+        arena: SpareArena,
+        take_in: TakeIn,
+    },
     /// Changes `first`, `first + 1`, ... of `document`.
     Changes {
         document: DocumentId,
@@ -938,11 +958,16 @@ pub(crate) fn handle(message: ToOwner) {
 
 fn handle_message(owner: &Owner, message: ToOwner) {
     match message {
-        ToOwner::Create { document, arena } => {
+        ToOwner::Create {
+            document,
+            arena,
+            take_in,
+        } => {
             let state = RenderState {
                 arena: arena.0,
                 changes: ChangeQueue::default(),
                 clock: None,
+                take_in,
             };
             STATES.with_borrow_mut(|states| {
                 let previous = states.insert(document, state);
@@ -1012,6 +1037,21 @@ fn handle_message(owner: &Owner, message: ToOwner) {
         }
         ToOwner::Clock(message) => crate::clock_frames::handle_on_owner(owner, message),
     }
+}
+
+/// On the owner thread, with no message waiting: applies what the document threads sent each render state, which the
+/// state queued for the next unit or question that reaches it. The owner takes it in beside the document thread, which
+/// goes on writing, so the unit it waits for next finds it applied.
+pub(crate) fn take_in_sent_changes() {
+    let owner = Owner::here();
+    STATES.with_borrow_mut(|states| {
+        for state in states
+            .values_mut()
+            .filter(|state| state.take_in == TakeIn::AsTheOwnerIdles)
+        {
+            state.apply_changes(EngineReach::OwnerBesideMain(&owner));
+        }
+    });
 }
 
 /// On the owner thread, as the rendering update of `document` begins: whether the document thread recalled it already.
@@ -1102,7 +1142,7 @@ fn build_spare() {
 /// Creates the render state of a new document, and answers with its name and the address of its arena. The arena is
 /// the spare the owner built ahead, or where the owner has built none yet, one built here; either way the owner takes
 /// the state in, and nothing waits for it.
-pub(crate) fn create_document() -> (DocumentId, *mut c_void) {
+pub(crate) fn create_document(take_in: TakeIn) -> (DocumentId, *mut c_void) {
     let document = DocumentId::mint();
     let spare = SPARE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
     // The owner built the spare before it released the handling of the message it built it in.
@@ -1117,6 +1157,7 @@ pub(crate) fn create_document() -> (DocumentId, *mut c_void) {
     send(ToOwner::Create {
         document,
         arena: SpareArena(arena),
+        take_in,
     });
     (document, address)
 }
@@ -1554,7 +1595,7 @@ pub struct FfiRenderDocument {
 /// thread's remaining doors reach.
 #[unsafe(no_mangle)]
 pub extern "C" fn render_owner_create_document() -> FfiRenderDocument {
-    let (document, arena) = create_document();
+    let (document, arena) = create_document(TakeIn::AsTheOwnerIdles);
     FfiRenderDocument { document, arena }
 }
 
@@ -1689,6 +1730,7 @@ mod tests {
             handle(ToOwner::Create {
                 document,
                 arena: SpareArena(Box::new(ArenaHandle::new_for(document, std::thread::current().id()))),
+                take_in: TakeIn::WhenWaitedFor,
             });
             assert!(SPARE.lock().unwrap().is_some());
             let seq = ChangeSeq(1);
@@ -1705,6 +1747,35 @@ mod tests {
         assert!(owner.join().unwrap());
     }
 
+    #[test]
+    fn the_owner_takes_in_what_a_document_thread_sent_as_it_idles() {
+        let owner = std::thread::spawn(|| {
+            let beside = DocumentId::mint();
+            let waited_for = DocumentId::mint();
+            for (document, take_in) in [(beside, TakeIn::AsTheOwnerIdles), (waited_for, TakeIn::WhenWaitedFor)] {
+                handle(ToOwner::Create {
+                    document,
+                    arena: SpareArena(Box::new(ArenaHandle::new_for(document, std::thread::current().id()))),
+                    take_in,
+                });
+                handle(ToOwner::Changes {
+                    document,
+                    first: ChangeSeq(1),
+                    changes: vec![ArenaChange::BeginLayoutTrace],
+                });
+            }
+            take_in_sent_changes();
+            let pending = |document| with_state(document, |state| state.changes.pending.len()).unwrap();
+            // The thread that holds the engine of the other document itself may be reaching it: its changes wait for
+            // a unit it waits for.
+            let pending = (pending(beside), pending(waited_for));
+            handle(ToOwner::Destroy { document: beside });
+            handle(ToOwner::Destroy { document: waited_for });
+            pending
+        });
+        assert_eq!(owner.join().unwrap(), (0, 1));
+    }
+
     // The owner of a test build panics answering the style read of a document with no engine.
     #[cfg(debug_assertions)]
     #[test]
@@ -1715,6 +1786,7 @@ mod tests {
             handle(ToOwner::Create {
                 document,
                 arena: SpareArena(arena),
+                take_in: TakeIn::WhenWaitedFor,
             });
             let mut cell = crate::css::style::owner_calls::StyleQueryCell::new(
                 crate::css::style::owner_calls::StyleQuery::ReadDemand(crate::css::style::bridge::RecordDemand {
@@ -1756,6 +1828,7 @@ mod tests {
             handle(ToOwner::Create {
                 document,
                 arena: SpareArena(arena),
+                take_in: TakeIn::WhenWaitedFor,
             });
             // The owner finds the arena of the document's render state, the arena the document thread sent.
             let (reply, answered) = crate::stage_thread::owner_reply_for_test();
