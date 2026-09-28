@@ -19,13 +19,17 @@
 //! it and nothing else, unless what the stage will still owe the frame it runs in (the install of its
 //! style batch, or the frame's take-back) keeps the entrance out: then it takes that frame in, as a
 //! forced join does.
+//!
+//! What the engine holds for its next style transaction the main thread reads from the home, without asking the owner:
+//! whoever reaches the engine leaves the [`PendingFacts`] it found there as it is done, and the main thread adds what
+//! each change it sends may leave.
 
 use super::StyleEngine;
 use std::cell::{Cell, UnsafeCell};
 use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 
 /// What C++ holds for one document's style engine: a pointer to its home, opaque to C++. It has no
@@ -60,6 +64,41 @@ impl StyleEngineInputHandle {
 /// document takes one along, so no input reaches the owner beside a snapshot that says the document is as it was.
 #[derive(Clone, Copy)]
 pub(crate) struct ThroughRenderInputs(());
+
+/// What a style engine holds for its next style transaction, which the main thread reads from the engine's home.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub(crate) struct PendingFacts(u8);
+
+impl PendingFacts {
+    pub(crate) const NONE: Self = Self(0);
+    /// [`StyleEngine::has_pending_transaction`].
+    pub(crate) const TRANSACTION: Self = Self(1);
+    /// [`StyleEngine::has_deferred_geometry_transaction`].
+    pub(crate) const DEFERRED_GEOMETRY: Self = Self(1 << 1);
+    /// [`StyleEngine::has_deferred_element_style_inputs`].
+    pub(crate) const DEFERRED_ELEMENT_INPUTS: Self = Self(1 << 2);
+    /// [`StyleEngine::may_have_child_dependent_selectors`].
+    pub(crate) const CHILD_DEPENDENT_SELECTORS: Self = Self(1 << 3);
+    /// What is pending may move layout geometry, as far as the engine tells without looking into its journal:
+    /// [`StyleEngine::pending_transaction_may_affect_layout_geometry`] with the journal taken to affect it.
+    pub(crate) const MAY_AFFECT_GEOMETRY: Self = Self(1 << 4);
+    /// An element's deferred pseudo-element style was made observable, which a change of what is deferred owes an
+    /// input.
+    pub(crate) const OBSERVABLE_DEFERRED_PSEUDO_ELEMENTS: Self = Self(1 << 5);
+    /// What an element's style input may leave.
+    pub(crate) const ELEMENT_INPUT: Self =
+        Self(Self::TRANSACTION.0 | Self::DEFERRED_ELEMENT_INPUTS.0 | Self::MAY_AFFECT_GEOMETRY.0);
+    /// What any change may leave, but a deferred geometry transaction, which only a geometry read defers.
+    pub(crate) const ANY_CHANGE: Self = Self(Self::ELEMENT_INPUT.0 | Self::CHILD_DEPENDENT_SELECTORS.0);
+
+    pub(crate) const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    pub(crate) const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+}
 
 /// What the main thread still owes the frame of the stage that sent the engine home, before an
 /// entrance may go on.
@@ -103,6 +142,9 @@ struct StyleEngineHome {
     arena: usize,
     /// The document whose render state's arena links the engine, whose render owner owns the engine.
     document: crate::render_owner::DocumentId,
+    /// The [`PendingFacts`] whoever last reached the engine left, with what the main thread sent since. Written by the
+    /// main thread, or by whoever reaches the engine while it waits or has lent the engine.
+    pending: AtomicU8,
 }
 
 /// What the main thread owes the home of an engine it lent to a stage, once it has taken the stage
@@ -150,11 +192,11 @@ pub(crate) fn main_waits_for_arrival() -> bool {
 }
 
 /// Runs `run` with `engine`, whose home is `home`, which whatever `run` calls reaches through the engine's handle or
-/// its document's arena too.
+/// its document's arena too, and leaves the home the [`PendingFacts`] `run` left.
 ///
 /// # Safety
 ///
-/// Nothing else reaches the engine until this returns.
+/// `home` must be live, and nothing else may reach the engine until this returns.
 unsafe fn reach_on_this_thread<T>(home: usize, engine: *mut StyleEngine, run: impl FnOnce(&mut StyleEngine) -> T) -> T {
     struct Restore(usize);
     impl Drop for Restore {
@@ -164,7 +206,12 @@ unsafe fn reach_on_this_thread<T>(home: usize, engine: *mut StyleEngine, run: im
     }
     let _restore = Restore(LENT_TO_THIS_THREAD.replace(home));
     // SAFETY: Guaranteed by the caller.
-    run(unsafe { &mut *engine })
+    let engine = unsafe { &mut *engine };
+    let result = run(engine);
+    // SAFETY: Guaranteed by the caller; of the home, only its atomic is touched off the main thread.
+    let pending = unsafe { &(*(home as *const StyleEngineHome)).pending };
+    pending.store(engine.pending_facts().0, Ordering::Relaxed);
+    result
 }
 
 impl StyleEngineLoan {
@@ -331,6 +378,7 @@ impl StyleEngineHandle {
             holder: Cell::new(None),
             arena: arena.addr(),
             document,
+            pending: AtomicU8::new(0),
         });
         let handle = Self(Rc::into_raw(home).cast_mut().cast());
         crate::render_owner::send_arena_change(
@@ -386,6 +434,17 @@ impl StyleEngineHandle {
         let engine = self.home().engine.as_ptr();
         // SAFETY: Guaranteed by the caller.
         unsafe { reach_on_this_thread(self.address(), engine, run) }
+    }
+
+    /// What the engine holds for its next style transaction, as whoever last reached it left it, with what the main
+    /// thread sent it since. On the main thread.
+    pub(crate) fn pending_facts(self) -> PendingFacts {
+        PendingFacts(self.home().pending.load(Ordering::Relaxed))
+    }
+
+    /// Notes that the main thread sent the engine a change that may leave `facts`.
+    pub(crate) fn note_sent(self, facts: PendingFacts) {
+        self.home().pending.fetch_or(facts.0, Ordering::Relaxed);
     }
 
     /// The document whose render state's arena links the engine, whose render owner owns it.

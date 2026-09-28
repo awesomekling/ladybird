@@ -2230,15 +2230,8 @@ void Document::update_layout_if_needed_for_node(Node const& node, UpdateLayoutRe
         && !may_have_style_query_dependencies) {
         if (embedding_document_chain_is_clean()) {
             synchronize_dirty_style_attributes();
-            auto& style_engine = render_inputs_for_write().style_engine();
-            if (!style_engine.pending_transaction_may_affect_layout_geometry()) {
-                // A later inline transition declaration still needs the pending style as its
-                // before-change style, even though this geometry read can reuse the current layout.
-                if (!style_engine.has_pending_transaction()
-                    || style_engine.defer_pending_transaction_for_geometry_read()) {
-                    return;
-                }
-            }
+            if (render_inputs_for_write().style_engine().defer_pending_transaction_for_geometry_read())
+                return;
         }
     }
 

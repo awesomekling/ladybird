@@ -1504,12 +1504,12 @@ StyleEngine::PublishedStyleTransaction StyleEngine::publish_style_transaction_vi
 
 bool StyleEngine::may_have_child_dependent_selectors() const
 {
-    return StyleEngineFFI::style_engine_may_have_child_dependent_selectors(rust_handle());
+    return StyleEngineFFI::style_engine_pending_facts(rust_handle()).child_dependent_selectors;
 }
 
 bool StyleEngine::has_pending_transaction() const
 {
-    return has_recorded_input() || has_install_feedback() || StyleEngineFFI::style_engine_has_pending_transaction(rust_handle());
+    return has_recorded_input() || has_install_feedback() || StyleEngineFFI::style_engine_pending_facts(rust_handle()).transaction;
 }
 
 void StyleEngine::settle_pseudo_elements_in_next_pass(StyleDrainScope const&, StyleNodeID style_node, bool old_is_list_item, ReadonlySpan<u64> held_pseudo_records)
@@ -1547,12 +1547,6 @@ void StyleEngine::record_applied_style_reaction(StyleNodeID style_node, u8 react
     m_install_feedback_held_back = false;
 }
 
-bool StyleEngine::pending_transaction_may_affect_layout_geometry()
-{
-    submit_recorded_input();
-    return StyleEngineFFI::style_engine_pending_transaction_may_affect_layout_geometry(rust_handle());
-}
-
 bool StyleEngine::has_deferred_geometry_transaction() const
 {
     // The submitted pass took the transaction a geometry read deferred with the rest of its inputs, and only a
@@ -1560,12 +1554,12 @@ bool StyleEngine::has_deferred_geometry_transaction() const
     // frame's style rounds have applied every transaction, a deferred one included.
     if (Layout::RustFFI::rust_stage_thread_style_pass_holds_style_engine(rust_handle()) || layout_pass_is_in_flight())
         return false;
-    return StyleEngineFFI::style_engine_has_deferred_geometry_transaction(rust_handle());
+    return StyleEngineFFI::style_engine_pending_facts(rust_handle()).deferred_geometry_transaction;
 }
 
 bool StyleEngine::has_deferred_element_style_inputs() const
 {
-    return StyleEngineFFI::style_engine_has_deferred_element_style_inputs(rust_handle());
+    return StyleEngineFFI::style_engine_pending_facts(rust_handle()).deferred_element_style_inputs;
 }
 
 bool StyleEngine::has_deferred_element_style_input(StyleNodeID style_node) const
@@ -1580,6 +1574,10 @@ bool StyleEngine::has_deferred_element_style_input(StyleNodeID style_node) const
 bool StyleEngine::defer_pending_transaction_for_geometry_read()
 {
     submit_recorded_input();
+    // Only a pending transaction needs the owner to look into it, and to defer it.
+    auto facts = StyleEngineFFI::style_engine_pending_facts(rust_handle());
+    if (!facts.transaction)
+        return !facts.may_affect_layout_geometry;
     return StyleEngineFFI::style_engine_defer_pending_transaction_for_geometry_read(rust_handle());
 }
 
