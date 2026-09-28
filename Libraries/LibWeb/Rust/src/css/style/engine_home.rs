@@ -20,11 +20,14 @@
 //! style batch, or the frame's take-back) keeps the entrance out: then it takes that frame in, as a
 //! forced join does.
 //!
-//! What the engine holds for its next style transaction the main thread reads from the home, without asking the owner:
-//! whoever reaches the engine leaves the [`PendingFacts`] it found there as it is done, and the main thread adds what
-//! each change it sends may leave.
+//! What the main thread writes to the engine waits in the home ([`StyleEngineInputHandle::send`]), and whoever
+//! reaches the engine next applies it first: the render owner, a stage the engine is lent to, or the main thread at an
+//! entrance of its own. What the engine then holds for its next style transaction the main thread reads from the
+//! home, without asking the owner: whoever reaches the engine leaves the [`PendingFacts`] it found there as it is done,
+//! and the main thread adds what each change it sends may leave.
 
 use super::StyleEngine;
+use super::owner_calls::StyleChange;
 use std::cell::{Cell, UnsafeCell};
 use std::ffi::c_void;
 use std::ptr::NonNull;
@@ -53,17 +56,16 @@ impl StyleEngineInputHandle {
         self.0
     }
 
-    /// That the document thread came through its render inputs' one entrance to take this handle.
-    pub(crate) fn through_render_inputs(self) -> ThroughRenderInputs {
-        ThroughRenderInputs(())
+    /// Leaves `change` in the engine's home, for whoever reaches the engine next to apply first. On the main thread,
+    /// with the engine home.
+    pub(crate) fn send(self, change: StyleChange) {
+        let home = self.0.home();
+        home.pending
+            .fetch_or(change.leaves(self.0.pending_facts()).0, Ordering::Relaxed);
+        // SAFETY: On the main thread, with the engine home: nothing reaches the engine, or what waits for it.
+        unsafe { &mut *home.unapplied.get() }.push(change);
     }
 }
-
-/// That the document thread came through its render inputs' one entrance, which dropped the query snapshot its document
-/// published: only a [`StyleEngineInputHandle`] makes one. What the thread sends the render owner as a change of the
-/// document takes one along, so no input reaches the owner beside a snapshot that says the document is as it was.
-#[derive(Clone, Copy)]
-pub(crate) struct ThroughRenderInputs(());
 
 /// What a style engine holds for its next style transaction, which the main thread reads from the engine's home.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -142,9 +144,30 @@ struct StyleEngineHome {
     arena: usize,
     /// The document whose render state's arena links the engine, whose render owner owns the engine.
     document: crate::render_owner::DocumentId,
+    /// What the main thread wrote to the engine since it was last reached, in order. Written by the main thread, and
+    /// taken by whoever reaches the engine next.
+    unapplied: UnsafeCell<Vec<StyleChange>>,
     /// The [`PendingFacts`] whoever last reached the engine left, with what the main thread sent since. Written by the
     /// main thread, or by whoever reaches the engine while it waits or has lent the engine.
     pending: AtomicU8,
+}
+
+impl StyleEngineHome {
+    /// Applies to `engine` what the main thread wrote to it since it was last reached, by whoever reaches it now, and
+    /// answers whether it wrote anything.
+    ///
+    /// # Safety
+    ///
+    /// Nothing else reaches the engine or its home's changes meanwhile.
+    unsafe fn apply_unapplied(&self, engine: &mut StyleEngine) -> bool {
+        // SAFETY: Guaranteed by the caller. Taken whole, as applying a change may reach the engine's handle again.
+        let changes = std::mem::take(unsafe { &mut *self.unapplied.get() });
+        let wrote = !changes.is_empty();
+        for change in changes {
+            change.apply(engine);
+        }
+        wrote
+    }
 }
 
 /// What the main thread owes the home of an engine it lent to a stage, once it has taken the stage
@@ -205,12 +228,13 @@ unsafe fn reach_on_this_thread<T>(home: usize, engine: *mut StyleEngine, run: im
         }
     }
     let _restore = Restore(LENT_TO_THIS_THREAD.replace(home));
-    // SAFETY: Guaranteed by the caller.
-    let engine = unsafe { &mut *engine };
+    // SAFETY: Guaranteed by the caller; off the main thread, only the home's changes and facts are touched, which the
+    // main thread leaves alone while the engine is reached.
+    let (engine, home) = unsafe { (&mut *engine, &*(home as *const StyleEngineHome)) };
+    // SAFETY: As above.
+    unsafe { home.apply_unapplied(engine) };
     let result = run(engine);
-    // SAFETY: Guaranteed by the caller; of the home, only its atomic is touched off the main thread.
-    let pending = unsafe { &(*(home as *const StyleEngineHome)).pending };
-    pending.store(engine.pending_facts().0, Ordering::Relaxed);
+    home.pending.store(engine.pending_facts().0, Ordering::Relaxed);
     result
 }
 
@@ -378,6 +402,7 @@ impl StyleEngineHandle {
             holder: Cell::new(None),
             arena: arena.addr(),
             document,
+            unapplied: UnsafeCell::new(Vec::new()),
             pending: AtomicU8::new(0),
         });
         let handle = Self(Rc::into_raw(home).cast_mut().cast());
@@ -440,11 +465,6 @@ impl StyleEngineHandle {
     /// thread sent it since. On the main thread.
     pub(crate) fn pending_facts(self) -> PendingFacts {
         PendingFacts(self.home().pending.load(Ordering::Relaxed))
-    }
-
-    /// Notes that the main thread sent the engine a change that may leave `facts`.
-    pub(crate) fn note_sent(self, facts: PendingFacts) {
-        self.home().pending.fetch_or(facts.0, Ordering::Relaxed);
     }
 
     /// The document whose render state's arena links the engine, whose render owner owns it.
@@ -520,15 +540,19 @@ impl StyleEngineHandle {
             );
             // A stage the main thread waits for reaches the engine as the main thread would, which
             // brought the engine home before it waited.
-            // SAFETY: Guaranteed by the caller.
-            return unsafe { &mut *engine };
+        } else {
+            self.bring_home(entry);
         }
-        self.bring_home(entry);
-        // What the main thread sent the owner of the engine goes in before the main thread reaches it.
-        super::owner_calls::apply_changes_before_main_reaches(self);
-        // SAFETY: The engine is home, or the stage that holds it is done with it; guaranteed by the
-        // caller.
-        unsafe { &mut *engine }
+        // SAFETY: The engine is home, or the stage that holds it is done with it, and the main thread
+        // reaches it or waits; guaranteed by the caller.
+        let engine = unsafe { &mut *engine };
+        let home = self.home();
+        // What the main thread wrote to the engine goes in before anything reaches it.
+        // SAFETY: As above.
+        if unsafe { home.apply_unapplied(engine) } {
+            home.pending.store(engine.pending_facts().0, Ordering::Relaxed);
+        }
+        engine
     }
 
     /// Brings the engine home for the main thread, which is about to enter it at `entry`

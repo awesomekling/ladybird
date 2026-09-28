@@ -6,19 +6,16 @@
 
 //! What the main thread asks of the style engine of its document, which the render owner owns.
 //!
-//! The main thread does not enter the engine. A write is an [`EngineChange`] it sends as a change of the document: the
-//! owner applies it, in order with the style inputs, before the next unit or query that reaches the engine. A read is
-//! a [`StyleQuery`] it asks: the owner answers it in one round trip, after every change the main thread sent before
-//! it, into the query the main thread holds while it waits.
-//!
-//! An engine no document's render state links (one a unit test or the replay tool makes) has no owner: the calling
-//! thread applies and answers right here, as the owner would.
+//! The main thread does not enter the engine. A write is a [`StyleChange`] it leaves in the engine's home: whoever
+//! reaches the engine next applies it first, in order with the style inputs. A read is a [`StyleQuery`] it asks: the
+//! owner answers it in one round trip, after every change the main thread made before it, into the query the main
+//! thread holds while it waits.
 
 use super::StyleEngine;
 use super::bridge::{
     BoundaryRead, BoundaryWrite, FfiAppliedStyleReaction, FfiElementDeclarationKind, FfiNativeRuleTarget,
     FfiPublishedAnimationCustomDeclaration, FfiPublishedAnimationDeclaration, FfiPublishedAnimationEffect,
-    FfiPublishedAnimationKeyframe, FfiPublishedLinearEasingPoint, FfiPublishedTransition, FfiRuleMatch,
+    FfiPublishedAnimationKeyframe, FfiPublishedLinearEasingPoint, FfiPublishedTransition, FfiRuleMatch, InputForPass,
 };
 use super::engine_home::{PendingFacts, StyleEngineHandle, StyleEngineInputHandle};
 use crate::layout::LayoutNodeArena;
@@ -153,13 +150,39 @@ impl EngineChange {
     }
 }
 
+/// A write the main thread makes to its document's style engine, which waits in the engine's home for whoever reaches
+/// the engine next to apply first ([`StyleEngineInputHandle::send`]), in the order the main thread made it.
+#[allow(clippy::large_enum_variant)]
+pub(crate) enum StyleChange {
+    /// The style inputs the host recorded since the last transaction: DOM tree insertions, removals and moves, element
+    /// arrivals, class, ID and attribute features, element states, inline style and presentational hint declarations,
+    /// and the host facts they read. The engine applies them as one batch, which is how its invalidation sees them.
+    Inputs(InputForPass),
+    Engine(EngineChange),
+}
+
+impl StyleChange {
+    /// What the change may leave the engine holding for its next style transaction, where it holds `held`.
+    pub(crate) fn leaves(&self, held: PendingFacts) -> PendingFacts {
+        match self {
+            Self::Inputs(_) => PendingFacts::ELEMENT_INPUT,
+            Self::Engine(change) => change.leaves(held),
+        }
+    }
+
+    pub(crate) fn apply(self, engine: &mut StyleEngine) {
+        match self {
+            Self::Inputs(inputs) => inputs.apply(engine),
+            Self::Engine(change) => change.apply(engine),
+        }
+    }
+}
+
 /// A read of a document's style engine, or a write that lends the engine what the host owns for the call, which the
 /// render owner answers. What its pointers point at is the main thread's, which waits for the answer. Each variant is
 /// the FFI entry of its name (`style_engine_match_element` for [`Self::MatchElement`]), whose documentation says what
 /// it reads and writes, and the owner answers it with that entry's body.
 pub(crate) enum StyleQuery {
-    /// Nothing but the changes before it: the main thread is about to reach the engine itself.
-    ApplyChanges,
     /// Gives up the `@keyframes` row of a shadow root's scope, which is on its way out.
     UnpublishTreeScopeAnimationKeyframes {
         tree_scope: u32,
@@ -629,7 +652,6 @@ impl StyleQuery {
     /// Answers the query from `engine` and the document's layout arena, on the owner.
     fn answer(self, engine: &mut StyleEngine, arena: &LayoutNodeArena) -> StyleAnswer {
         match self {
-            Self::ApplyChanges => StyleAnswer::None,
             Self::UnpublishTreeScopeAnimationKeyframes {
                 tree_scope,
                 shadow_root_identity,
@@ -1183,18 +1205,12 @@ impl StyleQueryRef {
     }
 }
 
-/// Sends `change` to the owner of `engine`'s document, which applies it before the next unit or query that reaches
-/// the engine. `entry` names the door the main thread took, for the style seal.
+/// Leaves `change` for whoever reaches `engine` next to apply first. `entry` names the door the main thread took, for
+/// the style seal.
 pub(crate) fn send(engine: StyleEngineInputHandle, entry: &'static str, change: EngineChange) {
-    let handle = engine.home();
-    handle.bring_home(entry);
+    engine.home().bring_home(entry);
     super::seal::note_engine_call(entry);
-    handle.note_sent(change.leaves(handle.pending_facts()));
-    crate::render_owner::send_change(
-        engine.through_render_inputs(),
-        handle.document(),
-        crate::render_owner::Change::Engine(change),
-    );
+    engine.send(StyleChange::Engine(change));
 }
 
 /// Asks the owner of `engine`'s document `query`, and waits for the answer, which comes after every change the thread
@@ -1233,19 +1249,4 @@ fn ask_document(document: DocumentId, entry: &'static str, query: StyleQuery) ->
             query.map_or(StyleAnswer::None, |query| query.unanswered())
         }
     }
-}
-
-/// On the main thread, about to reach `engine` itself at a door still left: has the owner apply the changes to the
-/// engine the thread sent before, which the thread's reach comes after.
-pub(crate) fn apply_changes_before_main_reaches(engine: StyleEngineHandle) {
-    let document = engine.document();
-    if !crate::render_owner::has_unapplied_style_changes(document) {
-        return;
-    }
-    let mut cell = StyleQueryCell::new(StyleQuery::ApplyChanges);
-    let answered = crate::render_owner::ask_engine(document, Query::Engine(cell.for_owner()));
-    debug_assert!(
-        !matches!(answered, Answer::Engine(EngineAnswered::Unanswered)),
-        "the render owner panicked applying style changes"
-    );
 }
