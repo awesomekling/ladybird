@@ -1,0 +1,97 @@
+<!doctype html>
+<script src="../include.js"></script>
+<div id="host"></div>
+<script>
+test(() => {
+    const host = document.getElementById("host");
+    function deepTree() {
+        const top = document.createElement("section");
+        let node = top;
+        for (let i = 0; i < 5; ++i)
+            node = node.appendChild(document.createElement("div"));
+        return { top, leaf: node };
+    }
+    function check(name, selector) {
+        println(`${name}: ${document.querySelectorAll(selector).length} ${host.querySelectorAll(selector).length} ${document.querySelector(selector) !== null}`);
+    }
+
+    const connected = deepTree();
+    host.append(connected.top);
+    check("before any attribute", "[data-late]");
+    connected.leaf.setAttribute("data-late", "1");
+    check("setAttribute on a connected descendant", "[data-late]");
+
+    const appended = deepTree();
+    appended.leaf.setAttribute("data-appended", "");
+    host.append(appended.top);
+    check("appended subtree", "[data-appended]");
+
+    const inserted = deepTree();
+    inserted.leaf.setAttribute("data-inserted", "");
+    host.insertBefore(inserted.top, host.firstChild);
+    check("inserted subtree", "[data-inserted]");
+
+    const moved = deepTree();
+    moved.leaf.setAttribute("data-moved", "");
+    document.body.append(moved.top);
+    connected.leaf.append(moved.top);
+    check("moved subtree", "[data-moved]");
+
+    const styled = deepTree();
+    host.append(styled.top);
+    styled.leaf.style.color = "red";
+    check("style set through CSSOM", "[style]");
+
+    const attribute = document.createAttribute("data-node");
+    const nodeTarget = deepTree();
+    host.append(nodeTarget.top);
+    nodeTarget.leaf.setAttributeNode(attribute);
+    check("setAttributeNode", "[data-node]");
+
+    const named = deepTree();
+    host.append(named.top);
+    named.leaf.attributes.setNamedItem(document.createAttribute("data-named"));
+    check("setNamedItem", "[data-named]");
+
+    const toggled = deepTree();
+    host.append(toggled.top);
+    toggled.leaf.toggleAttribute("data-toggled");
+    check("toggleAttribute", "[data-toggled]");
+
+    const namespaced = deepTree();
+    host.append(namespaced.top);
+    namespaced.leaf.setAttributeNS("urn:test", "t:data-namespaced", "");
+    check("setAttributeNS", "[*|data-namespaced]");
+
+    const original = deepTree();
+    original.leaf.setAttribute("data-cloned", "");
+    host.append(original.top.cloneNode(true));
+    check("cloned subtree", "[data-cloned]");
+
+    const parsed = document.createElement("div");
+    host.append(parsed);
+    parsed.innerHTML = "<p><span><b data-parsed>x</b></span></p>";
+    check("innerHTML", "[data-parsed]");
+
+    const fragment = document.createDocumentFragment();
+    const inFragment = deepTree();
+    fragment.append(inFragment.top);
+    inFragment.leaf.setAttribute("data-fragment", "");
+    host.append(fragment);
+    check("fragment children", "[data-fragment]");
+
+    const both = deepTree();
+    host.append(both.top);
+    both.top.setAttribute("data-first", "");
+    both.leaf.setAttribute("data-first", "");
+    both.leaf.setAttribute("data-second", "");
+    check("compound needing two names", "[data-first][data-second]");
+    check("list of two names", "[data-first], [data-missing]");
+
+    const removed = deepTree();
+    removed.leaf.setAttribute("data-removed", "");
+    host.append(removed.top);
+    removed.leaf.removeAttribute("data-removed");
+    check("removed attribute", "[data-removed]");
+});
+</script>

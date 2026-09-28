@@ -170,14 +170,25 @@ constexpr CSS::SelectorFFI::FfiDomSelectorCallbacks dom_selector_callbacks {
                 ++count;
         }
         return count; },
-    .next_element_in_subtree = [](void const* node, void const* root) -> void const* {
+    .next_element_in_subtree = [](void const* node, void const* root, u64 attribute_names) -> void const* {
         auto const& stay_within = node_from_ffi(root);
-        for (auto const* next = node_from_ffi(node).next_in_pre_order(&stay_within); next; next = next->next_in_pre_order(&stay_within)) {
-            if (next->is_element())
-                return node_to_ffi(next);
+        auto const* next = node_from_ffi(node).next_in_pre_order(&stay_within);
+        while (next) {
+            auto const* element = as_if<Element>(*next);
+            if (!element) {
+                next = next->next_in_pre_order(&stay_within);
+                continue;
+            }
+            if ((element->subtree_attribute_name_filter() & attribute_names) == attribute_names)
+                return node_to_ffi(element);
+            // No element of this subtree has every attribute name, so skip past it.
+            while (next != &stay_within && !next->next_sibling())
+                next = next->parent();
+            next = next == &stay_within ? nullptr : next->next_sibling();
         }
         return nullptr;
     },
+    .attribute_name_filter_bit = [](uintptr_t local_name) { return Element::attribute_name_filter_bit(Utf16FlyString::from_raw(local_name)); },
     .id_or_class_equals_ignoring_ascii_case = [](void const* pointer, bool is_class, uintptr_t name_identity) {
         auto const& element = element_from_ffi(pointer);
         auto name = Utf16FlyString::from_raw(name_identity);
