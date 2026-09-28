@@ -601,16 +601,9 @@ struct ClockLeaseScrollTimeline {
 struct ClockLeasePlan {
     Vector<GC::Ref<Animations::KeyframeEffect>> effects;
     Vector<ClockLeaseScrollTimeline> scroll_timelines;
-    // The timeline time at which the document has something observable to do: an event, a phase change, the end of an
-    // effect. No tick samples at or past it.
+    // The timeline time at which an effect changes its phase, which the main thread has to see: no tick samples at or
+    // past it. The events of a new iteration wait for the next rendering update, which sends them as ever.
     double deadline { AK::Infinity<double> };
-};
-
-struct EffectBoundaries {
-    // The next time, in the local time of the effect, at which its phase or current iteration changes.
-    double next_boundary;
-    // The next time at which its phase changes.
-    double next_phase_change;
 };
 
 // The local times from which, and up to which, the phase and the current iteration of `effect` stay what they are at
@@ -663,7 +656,8 @@ static Optional<ClockLeaseScrollTimeline> clock_lease_scroll_timeline(DOM::Docum
     return scroll_timeline;
 }
 
-static Optional<EffectBoundaries> next_boundaries_in_local_time(Animations::KeyframeEffect const& effect, double local_time)
+// The next time, in the local time of `effect`, at which its phase changes.
+static Optional<double> next_phase_change_in_local_time(Animations::KeyframeEffect const& effect, double local_time)
 {
     if (effect.start_delay().type != Animations::TimeValue::Type::Milliseconds
         || effect.iteration_duration().type != Animations::TimeValue::Type::Milliseconds
@@ -673,11 +667,10 @@ static Optional<EffectBoundaries> next_boundaries_in_local_time(Animations::Keyf
     auto iteration_duration = effect.iteration_duration().value;
     auto active_end = start_delay + effect.active_duration().value;
     if (local_time < start_delay)
-        return EffectBoundaries { start_delay, start_delay };
+        return start_delay;
     if (!(iteration_duration > 0) || local_time >= active_end)
         return {};
-    auto next_iteration_start = start_delay + (floor((local_time - start_delay) / iteration_duration) + 1) * iteration_duration;
-    return EffectBoundaries { min(next_iteration_start, active_end), active_end };
+    return active_end;
 }
 
 // Whether a clock lease can tick the running animations of `document`, and which of their effects it ticks. The lease
@@ -798,10 +791,10 @@ static Optional<ClockLeasePlan> clock_lease_plan(DOM::Document& document)
             }
             if (!local_time.has_value() || local_time->type != Animations::TimeValue::Type::Milliseconds)
                 return {};
-            auto boundaries = next_boundaries_in_local_time(keyframe_effect, local_time->value);
-            if (!boundaries.has_value())
+            auto next_phase_change = next_phase_change_in_local_time(keyframe_effect, local_time->value);
+            if (!next_phase_change.has_value())
                 return {};
-            plan.deadline = min(plan.deadline, timeline_time->value + (boundaries->next_boundary - local_time->value) / animation.playback_rate());
+            plan.deadline = min(plan.deadline, timeline_time->value + (*next_phase_change - local_time->value) / animation.playback_rate());
             if (!ticks_effect)
                 continue;
             if (intersections_are_observed && moves_boxes(keyframe_effect))
