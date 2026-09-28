@@ -34,6 +34,8 @@
 //! During the port the main thread still reaches the arena and the style engine directly through the handles the
 //! owner gives out when it creates the state ([`FfiRenderDocument`]); those doors are what the flip deletes.
 
+mod devtools;
+
 use crate::css::style::tree::StyleNodeID;
 use crate::layout::node_data::{NodeKind, NodeSlotId};
 use crate::layout::{ArenaHandle, FfiCssPixelRect, LayoutNodeArena};
@@ -402,11 +404,6 @@ pub(crate) enum Query {
         node: StyleNodeID,
         kind: FfiGeometryReadKind,
     },
-    /// How many layout passes and tree builds the document's layout has run, for tests.
-    LayoutCounts,
-    /// How many rows of the layout subtree `root` heads carry a pre-order label no greater than the row before them,
-    /// for tests.
-    PreOrderLabelViolations { root: NodeSlotId },
     /// A read of the document's layout arena.
     Arena(ArenaQuery),
     /// A read of the document's style engine, which the owner answers into the query the main thread holds.
@@ -416,6 +413,8 @@ pub(crate) enum Query {
     /// The document's rows as of every change the main thread sent, which the owner publishes: with the scrollable
     /// overflow a commit or a writer left measured first where `measured_overflow`.
     CommittedRows { measured_overflow: bool },
+    /// A read for tests and debugging, which only Internals and the WebContent debug requests ask.
+    DevTools(devtools::DevToolsQuery),
 }
 
 /// A read of a document's layout arena, which [`Query::Arena`] asks.
@@ -424,10 +423,6 @@ pub(crate) enum ArenaQuery {
     /// The text a pseudo-element's generated content resolved to when its box was built: its alt text when it has one,
     /// otherwise every string in it.
     GeneratedContentAccessibleText(crate::layout::counters::CounterOwner),
-    /// What the layout trace traced since it began.
-    LayoutTrace,
-    /// The document's stacking context tree, for tests.
-    StackingContextTree,
     /// The text the rows of the text node whose primary row is `primary` render, with whitespace collapsed where their
     /// style collapses it if `collapse_whitespace`.
     RenderedText {
@@ -447,10 +442,6 @@ pub(crate) enum ArenaQuery {
         case_sensitive: bool,
         excluded: LentSlice<NodeSlotId>,
     },
-    /// The style record a row holds, for tests.
-    NodeStyleRecord(NodeSlotId),
-    /// Where the stacking context structure below `viewport` differs from what paint preparation recorded, for tests.
-    StackingContextVerification { viewport: NodeSlotId },
     /// The SVG-as-image renders the next recording, which reads the given inputs, is predicted to paint: the ones the
     /// last recording painted or missed, and the first paints of the rows it records afresh.
     PaintedVectorImages {
@@ -486,12 +477,9 @@ impl<T> LentSlice<T> {
 #[derive(Debug)]
 pub(crate) enum ArenaAnswer {
     Text(Vec<u16>),
-    DebugText(crate::layout::debug_text::DebugText),
     Range(crate::layout::rendered_text::FfiTextSourceRange),
     Rows(Vec<NodeSlotId>),
     TextRanges(Vec<crate::layout::text_queries::FfiDomTextRange>),
-    StyleRecord(u64),
-    Report(String),
     VectorImages(Vec<crate::painting::record::vector_images::VectorImageRenderRequest>),
 }
 
@@ -501,7 +489,6 @@ impl ArenaQuery {
             ArenaQuery::GeneratedContentAccessibleText(_) | ArenaQuery::RenderedText { .. } => {
                 ArenaAnswer::Text(Vec::new())
             }
-            ArenaQuery::LayoutTrace | ArenaQuery::StackingContextTree => ArenaAnswer::DebugText(Default::default()),
             ArenaQuery::WordRange { dom_offset, .. } => {
                 ArenaAnswer::Range(crate::layout::rendered_text::FfiTextSourceRange {
                     start: dom_offset,
@@ -510,8 +497,6 @@ impl ArenaQuery {
             }
             ArenaQuery::SearchCandidates { .. } => ArenaAnswer::Rows(Vec::new()),
             ArenaQuery::FindText { .. } => ArenaAnswer::TextRanges(Vec::new()),
-            ArenaQuery::NodeStyleRecord(_) => ArenaAnswer::StyleRecord(0),
-            ArenaQuery::StackingContextVerification { .. } => ArenaAnswer::Report(String::new()),
             ArenaQuery::PaintedVectorImages { .. } => ArenaAnswer::VectorImages(Vec::new()),
         }
     }
@@ -535,10 +520,6 @@ impl ArenaQuery {
             ArenaQuery::GeneratedContentAccessibleText(owner) => {
                 ArenaAnswer::Text(arena.generated_content().borrow().accessible_text(owner).to_vec())
             }
-            ArenaQuery::LayoutTrace => ArenaAnswer::DebugText(arena.layout_trace().text()),
-            ArenaQuery::StackingContextTree => {
-                ArenaAnswer::DebugText(crate::painting::stacking_context::dump::stacking_context_tree(arena))
-            }
             ArenaQuery::RenderedText {
                 primary,
                 collapse_whitespace,
@@ -553,14 +534,6 @@ impl ArenaQuery {
                 // SAFETY: The document thread waits for the answer.
                 ArenaAnswer::TextRanges(arena.matching_text(unsafe { query.get() }, case_sensitive))
             }
-            ArenaQuery::NodeStyleRecord(row) => ArenaAnswer::StyleRecord(if arena.slot_is_live(row) {
-                arena.node_style_record(row)
-            } else {
-                0
-            }),
-            ArenaQuery::StackingContextVerification { viewport } => ArenaAnswer::Report(
-                crate::painting::stacking_context::verify::verification_report(arena, viewport),
-            ),
             ArenaQuery::PaintedVectorImages {
                 css_viewport_rect,
                 document_declares_light_or_dark_color_scheme,
@@ -579,13 +552,12 @@ impl ArenaQuery {
 #[derive(Debug)]
 pub(crate) enum Answer {
     Geometry(FfiGeometryReadAnswer),
-    LayoutCounts(LayoutCounts),
     Arena(ArenaAnswer),
-    Count(u64),
     Engine(EngineAnswered),
     Payment(crate::layout::HostPayment),
     /// The owner published the rows the document thread reads.
     Published,
+    DevTools(devtools::DevToolsAnswer),
 }
 
 /// What became of a [`Query::Engine`].
@@ -601,50 +573,15 @@ pub(crate) enum EngineAnswered {
 }
 
 impl Answer {
-    /// The count a [`Query::PreOrderLabelViolations`] answered.
-    pub(crate) fn count(self) -> u64 {
-        match self {
-            Self::Count(count) => count,
-            _ => {
-                debug_assert!(false, "a count is answered with a count");
-                0
-            }
-        }
-    }
-}
-
-/// How many layout passes and tree builds a document's layout has run.
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct LayoutCounts {
-    pub(crate) partial_layouts: u64,
-    pub(crate) full_layouts: u64,
-    pub(crate) tree_builds: crate::layout::update_layout::FfiLayoutTreeBuildStats,
-    pub(crate) arena: FfiArenaCounts,
-}
-
-/// How many slots and measurements a document's layout arena holds or has taken, for tests.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Default)]
-pub struct FfiArenaCounts {
-    pub live_slots: u64,
-    pub pre_order_relabels: u64,
-    pub intrinsic_measurements: u64,
-    pub intrinsic_inline_measurements: u64,
-    pub table_cell_measurement_cache_misses: u64,
-    pub retained_inline_items: u64,
-}
-
-impl Answer {
     /// The answer that leaves the question to the main thread, as it answered it before the owner did.
     fn left_to_host(query: Query) -> Self {
         match query {
             Query::Geometry { .. } => Self::Geometry(FfiGeometryReadAnswer::default()),
-            Query::LayoutCounts => Self::LayoutCounts(LayoutCounts::default()),
-            Query::PreOrderLabelViolations { .. } => Self::Count(0),
             Query::Arena(query) => Self::Arena(query.left_to_host()),
             Query::Engine(_) => Self::Engine(EngineAnswered::LeftToHost),
             Query::Write(_) => Self::Payment(crate::layout::HostPayment::nothing()),
             Query::CommittedRows { .. } => Self::Published,
+            Query::DevTools(query) => Self::DevTools(query.left_to_host()),
         }
     }
 
@@ -693,20 +630,20 @@ impl Answer {
     /// Answers `query` from the arena of `state` and the layout scratch beside it, which it readies first, or makes
     /// the write it is, publishing the rows it changed.
     fn of_state(query: Query, state: &mut ArenaHandle) -> Self {
-        if let Query::Write(write) = query {
-            let arena = state.arena_mut();
-            let payment = write.apply(arena);
-            arena.publish_rows();
-            return Self::Payment(payment);
+        match query {
+            Query::Write(write) => {
+                let arena = state.arena_mut();
+                let payment = write.apply(arena);
+                arena.publish_rows();
+                Self::Payment(payment)
+            }
+            Query::DevTools(query) => Self::DevTools(query.answer(state)),
+            _ => {
+                let arena = state.arena_mut();
+                Self::prepare(query, arena);
+                Self::of(query, arena)
+            }
         }
-        let (arena, scratch) = state.arena_and_scratch();
-        let retained_inline_items = scratch.retained_inline_item_count();
-        Self::prepare(query, arena);
-        let mut answer = Self::of(query, arena);
-        if let Self::LayoutCounts(counts) = &mut answer {
-            counts.arena.retained_inline_items = retained_inline_items;
-        }
-        answer
     }
 
     /// Answers `query` from `arena` alone, which [`Self::prepare`] readied. A question reads the arena, and writes
@@ -714,45 +651,18 @@ impl Answer {
     pub(crate) fn of(query: Query, arena: &LayoutNodeArena) -> Self {
         match query {
             Query::Geometry { node, kind } => Self::Geometry(answer_geometry(arena, node, kind)),
-            Query::LayoutCounts => Self::LayoutCounts(LayoutCounts {
-                partial_layouts: arena.partial_layout_count(),
-                full_layouts: arena.full_layout_count(),
-                tree_builds: arena.layout_tree_build_stats(),
-                arena: FfiArenaCounts {
-                    live_slots: u64::from(arena.live_slot_count()),
-                    pre_order_relabels: arena.pre_order_relabel_count(),
-                    intrinsic_measurements: arena.intrinsic_measurement_count(),
-                    intrinsic_inline_measurements: arena.intrinsic_inline_measurement_count(),
-                    table_cell_measurement_cache_misses: arena.table_cell_measurement_cache_miss_count(),
-                    retained_inline_items: 0,
-                },
-            }),
-            Query::PreOrderLabelViolations { root } => Self::Count(pre_order_label_violations(arena, root)),
             Query::Arena(query) => Self::Arena(query.answer(arena)),
             Query::Engine(_) => Self::left_to_host(query),
-            Query::Write(_) => {
-                debug_assert!(false, "a write is made with the state, not answered from the arena");
+            Query::Write(_) | Query::DevTools(_) => {
+                debug_assert!(
+                    false,
+                    "a write or a devtools read is answered with the state, not from the arena"
+                );
                 Self::left_to_host(query)
             }
             Query::CommittedRows { .. } => Self::Published,
         }
     }
-}
-
-fn pre_order_label_violations(arena: &LayoutNodeArena, root: NodeSlotId) -> u64 {
-    if !arena.slot_is_live(root) {
-        return 0;
-    }
-    let mut violation_count = 0u64;
-    let mut previous_label: Option<u64> = None;
-    arena.for_each_node_in_layout_subtree_in_pre_order(root, |node| {
-        let label = arena.node_pre_order_label(node);
-        if previous_label.is_some_and(|previous| label <= previous) {
-            violation_count += 1;
-        }
-        previous_label = Some(label);
-    });
-    violation_count
 }
 
 /// The typed results of a rendering update the owner ran, which the main thread applies where it takes the frame
@@ -1309,34 +1219,6 @@ pub extern "C" fn render_owner_committed_border_box(document: DocumentId, style_
         Answer::Geometry(answer) => answer,
         _ => FfiGeometryReadAnswer::default(),
     }
-}
-
-/// The counts of the layout arena of `document`, which the owner answers, for tests.
-#[unsafe(no_mangle)]
-pub extern "C" fn render_owner_arena_counts(document: DocumentId) -> FfiArenaCounts {
-    if !document.is_valid() {
-        return FfiArenaCounts::default();
-    }
-    join_frame_of(document);
-    match ask_owner(document, Query::LayoutCounts) {
-        Answer::LayoutCounts(counts) => counts.arena,
-        _ => {
-            debug_assert!(false, "layout counts are answered with counts");
-            FfiArenaCounts::default()
-        }
-    }
-}
-
-/// How many rows of the layout subtree `root` heads come in pre-order after a row with a label not below theirs, for
-/// tests.
-///
-/// # Safety
-///
-/// `arena` must be a live handle on the document thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_pre_order_label_violation_count(arena: *mut c_void, root: NodeSlotId) -> u64 {
-    // SAFETY: Guaranteed by the caller.
-    unsafe { ask_about(arena, Query::PreOrderLabelViolations { root }) }.count()
 }
 
 /// On a document thread: takes back the frame in flight of `document`, if any, so that a read finds the document as

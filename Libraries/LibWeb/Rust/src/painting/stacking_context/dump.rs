@@ -6,13 +6,11 @@
 
 use crate::css::css_pixels::CssPixelRect;
 use crate::layout::LayoutNodeArena;
-use crate::layout::debug_text::{AppendBytes, DebugText, DescribeDomNode};
+use crate::layout::debug_text::DebugText;
 use crate::layout::node_data::NodeSlotId;
 use crate::painting::dump::push_css_pixel_rect;
 use crate::painting::paintable_geometry;
 use crate::painting::style_queries;
-use crate::render_owner::{ArenaAnswer, ArenaQuery, DocumentId};
-use std::ffi::c_void;
 use std::fmt::Write;
 
 /// The stacking context tree of the document whose arena is `arena`, for tests: a line per stacking context, nested
@@ -24,28 +22,6 @@ pub(crate) fn stacking_context_tree(arena: &LayoutNodeArena) -> DebugText {
         visit(&mut output, arena, viewport, 0);
     }
     output
-}
-
-/// Hands `append_text` the stacking context tree of `document`, for tests, with the DOM node of each box it names as
-/// `describe_node` describes it.
-///
-/// # Safety
-///
-/// `describe_node` and `append_text` must be callable with `context` for the duration of this call.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn render_owner_dump_stacking_context_tree(
-    document: DocumentId,
-    context: *mut c_void,
-    describe_node: DescribeDomNode,
-    append_text: AppendBytes,
-) {
-    let ArenaAnswer::DebugText(text) = crate::render_owner::ask_arena(document, ArenaQuery::StackingContextTree) else {
-        return;
-    };
-    // SAFETY: Guaranteed by the caller.
-    let text = unsafe { text.finish_with_host(context, describe_node) };
-    // SAFETY: As above.
-    unsafe { append_text(context, text.as_ptr(), text.len()) };
 }
 
 fn visit(output: &mut DebugText, arena: &LayoutNodeArena, root: NodeSlotId, depth: usize) {
