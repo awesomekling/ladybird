@@ -20,7 +20,6 @@ use super::bridge::{
 use super::engine_home::{PendingFacts, StyleEngineHandle, StyleEngineInputHandle};
 use super::inputs::HandedCustomPropertyEnvironment;
 use super::tree::StyleNodeID;
-use crate::layout::LayoutNodeArena;
 use crate::render_owner::{Answer, DocumentId, EngineAnswered, Query};
 use std::ffi::c_void;
 use std::ptr::NonNull;
@@ -64,6 +63,14 @@ pub(crate) enum EngineChange {
     RuleDeclarationsChanged {
         identity: u64,
         declarations: Option<std::sync::Arc<crate::css::declaration_block::DeclarationBlockData>>,
+    },
+    /// The anchor names the record `style_record` installs on an element, in place of the ones it registered before,
+    /// which the main thread knows it `has_names` of.
+    RegisterAnchorNames {
+        node: StyleNodeID,
+        style_record: u64,
+        had_names: bool,
+        has_names: bool,
     },
     /// The custom-property environment an element now holds, or that it holds none.
     SetElementCustomPropertyData(StyleNodeID, Option<HandedCustomPropertyEnvironment>),
@@ -124,7 +131,8 @@ impl EngineChange {
             | Self::ElementStyleInputAbsorbedByHost { .. }
             | Self::SetElementCustomPropertyData(..)
             | Self::SetPseudoElementCustomPropertyData(..)
-            | Self::AddSheet { .. } => PendingFacts::NONE,
+            | Self::AddSheet { .. }
+            | Self::RegisterAnchorNames { .. } => PendingFacts::NONE,
             // What the host takes records the containers it reads, some to evaluate after layout.
             Self::ContainerEffectsTakenByHost(_) => PendingFacts::SIZE_CONTAINERS_AFTER_LAYOUT,
             // Only an element that loses its record may owe its resources an input.
@@ -222,6 +230,18 @@ impl EngineChange {
                 inherited_style_groups,
             } => {
                 engine.absorb_element_style_input(node, reaction, inherited_style_groups, false);
+            }
+            Self::RegisterAnchorNames {
+                node,
+                style_record,
+                had_names,
+                has_names,
+            } => {
+                let registered = engine.register_anchor_names(node, style_record);
+                debug_assert!(
+                    registered.had_names == had_names && registered.has_names == has_names,
+                    "the main thread knows which elements register anchor names as the engine does"
+                );
             }
             Self::AddSheet { object, origin, sheet } => {
                 let added = engine.add_sheet(object, origin);
@@ -471,10 +491,6 @@ pub(crate) enum StyleQuery {
     },
     /// Compiles a sheet's rules into the engine, or replaces their selectors, as the walk says.
     Compile(crate::css::rule::compilation::OwnerCompilation),
-    RegisterAnchorNames {
-        node: u32,
-        style_record: u64,
-    },
     TakePseudoElementEnvironmentNamedInSettle {
         node: u32,
         pseudo_kind: u8,
@@ -494,9 +510,6 @@ pub(crate) enum StyleQuery {
     TakeTransitionStepDecidedInPass {
         node: u32,
     },
-    /// Publishes the anchor names registration moved to the document's layout arena, or leaves them for an arena where
-    /// it has none.
-    PublishAnchorNames,
     /// A record as a published value, which the drain installs.
     PublishStyleRecord {
         style_record: u64,
@@ -663,8 +676,8 @@ impl StyleAnswer {
 }
 
 impl StyleQuery {
-    /// Answers the query from `engine` and the document's layout arena, on the owner.
-    fn answer(self, engine: &mut StyleEngine, arena: &LayoutNodeArena) -> StyleAnswer {
+    /// Answers the query from `engine`, on the owner.
+    fn answer(self, engine: &mut StyleEngine) -> StyleAnswer {
         match self {
             Self::UnpublishTreeScopeAnimationKeyframes {
                 tree_scope,
@@ -1030,9 +1043,6 @@ impl StyleQuery {
                 unsafe { compilation.run(engine) };
                 StyleAnswer::None
             }
-            Self::RegisterAnchorNames { node, style_record } => StyleAnswer::U32(u32::from(unsafe {
-                crate::css::style::bridge::owner_register_anchor_names(engine, node, style_record)
-            })),
             Self::TakePseudoElementEnvironmentNamedInSettle { node, pseudo_kind } => StyleAnswer::Bool(unsafe {
                 crate::css::style::bridge::owner_take_pseudo_element_environment_named_in_settle(
                     engine,
@@ -1058,10 +1068,6 @@ impl StyleQuery {
             Self::TakeTransitionStepDecidedInPass { node } => StyleAnswer::TransitionStep(unsafe {
                 crate::css::style::bridge::owner_take_transition_step_decided_in_pass(engine, node)
             }),
-            Self::PublishAnchorNames => {
-                engine.publish_anchor_names(arena);
-                StyleAnswer::None
-            }
             Self::PublishStyleRecord { style_record } => StyleAnswer::Pointer(
                 crate::css::style::bridge::owner_publish_style_record(engine, style_record),
             ),
@@ -1117,16 +1123,16 @@ pub(crate) struct StyleQueryRef(NonNull<StyleQueryCell>);
 unsafe impl Send for StyleQueryRef {}
 
 impl StyleQueryRef {
-    /// Answers the query from `engine` and the document's layout arena, on the owner.
+    /// Answers the query from `engine`, on the owner.
     ///
     /// # Safety
     ///
     /// The main thread must wait for the answer, with the cell live.
-    pub(crate) unsafe fn answer(self, engine: &mut StyleEngine, arena: &LayoutNodeArena) {
+    pub(crate) unsafe fn answer(self, engine: &mut StyleEngine) {
         // SAFETY: Guaranteed by the caller.
         let cell = unsafe { &mut *self.0.as_ptr() };
         if let Some(query) = cell.query.take() {
-            cell.answer = Some(query.answer(engine, arena));
+            cell.answer = Some(query.answer(engine));
         }
         cell.retired = std::mem::take(&mut engine.host.retired_custom_property_data);
     }

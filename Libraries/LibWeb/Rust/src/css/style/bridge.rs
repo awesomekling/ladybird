@@ -4888,6 +4888,8 @@ pub(crate) struct HomeAnswers {
     rule_ids: super::native_rules::NativeRuleIdentities,
     /// How many sheets the main thread added.
     sheets: u32,
+    /// The elements with anchor names registered.
+    anchored: HashSet<StyleNodeID>,
 }
 
 /// The custom-property environment each element and each of its synthetic pseudo-elements holds, as the host reads it:
@@ -5130,6 +5132,15 @@ impl HomeAnswers {
         self.rule_ids.get(&identity).map_or(0, |id| id.0 + 1)
     }
 
+    /// Follows the main thread registering an element's anchor names, which `has_names` says whether there are, and
+    /// answers whether it had names registered.
+    fn register_anchor_names(&mut self, node: StyleNodeID, has_names: bool) -> bool {
+        match has_names {
+            true => !self.anchored.insert(node),
+            false => self.anchored.remove(&node),
+        }
+    }
+
     /// Names the next sheet the main thread adds.
     fn add_sheet(&mut self) -> SheetID {
         let sheet = SheetID(self.sheets);
@@ -5144,6 +5155,12 @@ impl HomeAnswers {
         }
         self.deferred_inputs.follow(engine);
         self.environments.follow(engine);
+        for node in engine.retained.anchor_names.take_written() {
+            match engine.retained.anchor_names.registers(node) {
+                true => self.anchored.insert(node),
+                false => self.anchored.remove(&node),
+            };
+        }
         for identity in std::mem::take(&mut engine.native_rules.written_identities) {
             match engine.native_rule_id(identity) {
                 Some(id) => self.rule_ids.insert(identity, id),
@@ -6363,9 +6380,9 @@ pub(crate) unsafe fn owner_discard_container_effects(engine: &mut crate::css::st
 }
 
 /// Registers the anchor names of the record `style_record` installs on an element in place of the
-/// ones it registered before. The names that moved wait for `style_engine_publish_anchor_names`. A
-/// zero record registers nothing. Returns bit 0 when the element had names registered, and bit 1
-/// when it has now.
+/// ones it registered before, which `has_names` says whether there are. The names that moved wait for
+/// `style_engine_publish_anchor_names`. A zero record registers nothing. Returns bit 0 when the element
+/// had names registered, and bit 1 when it has now.
 ///
 /// # Safety
 /// Engine must be live.
@@ -6374,32 +6391,26 @@ pub unsafe extern "C" fn style_engine_register_anchor_names(
     engine: StyleEngineInputHandle,
     node: u32,
     style_record: u64,
+    has_names: bool,
 ) -> u8 {
-    crate::css::style::owner_calls::ask(
-        engine.home(),
-        "style_engine_register_anchor_names",
-        crate::css::style::owner_calls::StyleQuery::RegisterAnchorNames { node, style_record },
-    )
-    .u32()
-    .try_into()
-    .unwrap_or(0)
-}
-
-/// Answers [`style_engine_register_anchor_names`] from `engine`, on the render owner.
-///
-/// # Safety
-///
-/// As for [`style_engine_register_anchor_names`].
-pub(crate) unsafe fn owner_register_anchor_names(
-    engine: &mut crate::css::style::StyleEngine,
-    node: u32,
-    style_record: u64,
-) -> u8 {
+    const ENTRY: &str = "style_engine_register_anchor_names";
     let Some(node) = StyleNodeID::from_raw(node) else {
         return 0;
     };
-    let registered = engine.register_anchor_names(node, style_record);
-    u8::from(registered.had_names) | (u8::from(registered.has_names) << 1)
+    engine.home().bring_home(ENTRY);
+    // SAFETY: The engine is home.
+    let had_names = unsafe { engine.home().answers() }.register_anchor_names(node, has_names);
+    crate::css::style::owner_calls::send(
+        engine,
+        ENTRY,
+        crate::css::style::owner_calls::EngineChange::RegisterAnchorNames {
+            node,
+            style_record,
+            had_names,
+            has_names,
+        },
+    );
+    u8::from(had_names) | (u8::from(has_names) << 1)
 }
 
 /// Publishes the anchor names registration moved since the last publication to the document's
@@ -6409,10 +6420,10 @@ pub(crate) unsafe fn owner_register_anchor_names(
 /// Engine must be live.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_publish_anchor_names(engine: StyleEngineInputHandle) {
-    crate::css::style::owner_calls::ask(
-        engine.home(),
-        "style_engine_publish_anchor_names",
-        crate::css::style::owner_calls::StyleQuery::PublishAnchorNames,
+    super::seal::note_engine_call("style_engine_publish_anchor_names");
+    crate::render_owner::send_arena_change(
+        engine.home().document(),
+        crate::render_owner::ArenaChange::PublishAnchorNames,
     );
 }
 

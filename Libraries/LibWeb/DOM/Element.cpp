@@ -2141,7 +2141,7 @@ static bool register_anchor_names_in_engine(Scope const& scope, DOM::Document& d
     // worth creating here rather than replaying the registry later.
     if (has_names)
         (void)Layout::document_layout_arena(document);
-    auto registered = CSS::StyleEngineFFI::style_engine_register_anchor_names(scope, scope.engine().rust_handle(), style_node.value(), style_record.value());
+    auto registered = CSS::StyleEngineFFI::style_engine_register_anchor_names(scope, scope.engine().rust_handle(), style_node.value(), style_record.value(), has_names);
     return registered & 1;
 }
 

@@ -25,6 +25,8 @@ pub(crate) struct AnchorNameRegistry {
     /// The names registration moved since they were last published. Putting a name's elements in
     /// tree order costs a sort, so a batch of registrations publishes each name it moved once.
     unpublished: Vec<(TreeScopeID, usize)>,
+    /// The elements whose registration moved since the engine's home last followed them.
+    written: Vec<StyleNodeID>,
 }
 
 impl AnchorNameRegistry {
@@ -34,6 +36,7 @@ impl AnchorNameRegistry {
         let Some((tree_scope, names)) = self.by_element.remove(&node) else {
             return;
         };
+        self.written.push(node);
         for name in names {
             let key = (tree_scope, name.raw());
             if let Some(elements) = self.by_name.get_mut(&key) {
@@ -43,6 +46,16 @@ impl AnchorNameRegistry {
                 }
             }
         }
+    }
+
+    /// Whether `node` has names registered.
+    pub(crate) fn registers(&self, node: StyleNodeID) -> bool {
+        self.by_element.contains_key(&node)
+    }
+
+    /// The elements whose registration moved since the engine's home last followed them.
+    pub(crate) fn take_written(&mut self) -> Vec<StyleNodeID> {
+        std::mem::take(&mut self.written)
     }
 }
 
@@ -78,6 +91,7 @@ impl StyleEngine {
             self.retained.tree.tree_scope(node)
         };
         let registry = &mut self.retained.anchor_names;
+        registry.written.push(node);
         let old = registry.by_element.remove(&node);
         let registered = AnchorNamesRegistered {
             had_names: old.is_some(),
