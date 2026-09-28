@@ -19,12 +19,12 @@
 //! document publishes a snapshot for each hit test it makes, and what did not change since the
 //! last one is shared with it.
 
-use crate::cow_column::ColumnSnapshot;
 use crate::css::css_pixels::CssPixelPoint;
 use crate::css::style::tree::StyleNodeID;
 use crate::layout::FfiCssPixelPoint;
+use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::{NodeFlag, NodeKind, NodeSlotId};
-use crate::layout::{BOUND_ELEMENT_ROWS_PER_CHUNK, LayoutNodeArena};
+use crate::layout::row_reads::RowSnapshot;
 use crate::painting::display_list::commands::ContextRef;
 use crate::painting::geometry_read::GeometryRead;
 use crate::painting::hit_test::HitTestList;
@@ -36,10 +36,8 @@ use std::sync::Arc;
 
 pub(crate) struct HitTestSnapshot {
     frame: PublishedFrame,
-    /// The row each element was bound to, which a hit's box finds the box of its element by.
-    element_rows: ColumnSnapshot<NodeSlotId, BOUND_ELEMENT_ROWS_PER_CHUNK>,
-    /// The row the document was bound to: the viewport's.
-    viewport_row: NodeSlotId,
+    /// The row each DOM node was bound to, which a hit's box finds the box of its element by.
+    bound_rows: Arc<RowSnapshot>,
 }
 
 // A snapshot is hit tested on the main thread while the arena is written wherever its owner runs:
@@ -54,10 +52,11 @@ impl LayoutNodeArena {
     pub(crate) fn publish_hit_test_snapshot(&mut self) -> HitTestSnapshot {
         // The frame's rows pin the list as it is once its structures are built.
         self.prepare_hit_test_list_for_query(true, true);
+        let frame = self.freeze_frame_without_damage();
+        self.publish_rows();
         HitTestSnapshot {
-            frame: self.freeze_frame_without_damage(),
-            element_rows: self.publish_bound_element_rows(),
-            viewport_row: self.bound_viewport_row(),
+            frame,
+            bound_rows: self.published_rows(),
         }
     }
 
@@ -344,10 +343,11 @@ impl HitTestSnapshot {
     fn bound_box(&self, identity: FfiHitNodeIdentity) -> Option<NodeSlotId> {
         let row = match identity.kind {
             FfiHitNodeIdentityKind::None => return None,
-            FfiHitNodeIdentityKind::Document => self.viewport_row,
+            FfiHitNodeIdentityKind::Document => self.bound_rows.viewport_row()?,
             FfiHitNodeIdentityKind::StyleNode => {
-                let element = StyleNodeID::from_raw(identity.style_node)?.element_index()?;
-                *self.element_rows.get(element as usize)?
+                let element = StyleNodeID::from_raw(identity.style_node)?;
+                element.element_index()?;
+                self.bound_rows.bound_row(element)?
             }
         };
         self.read_rows(|rows| rows.slot_is_live(row).then_some(row))

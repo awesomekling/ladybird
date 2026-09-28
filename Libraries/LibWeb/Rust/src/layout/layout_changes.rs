@@ -282,7 +282,12 @@ pub(super) unsafe fn send(arena: *mut c_void, change: LayoutChange) -> Option<Ch
     if crate::stage_thread::running_inside_stage() || crate::stage_thread::owner_work_runs_here() {
         // SAFETY: The unit the owner runs holds the arena, and its document thread waits for it; or the document
         // thread does the owner's work.
-        change.apply(unsafe { &mut *super::ArenaHandle::held_by_waiting_thread(arena) }.arena_mut());
+        let arena = unsafe { &mut *super::ArenaHandle::held_by_waiting_thread(arena) }.arena_mut();
+        change.apply(arena);
+        // The unit publishes the rows as it ends; the document thread reads them next.
+        if !crate::stage_thread::running_inside_stage() {
+            arena.publish_rows();
+        }
         return None;
     }
     // SAFETY: Guaranteed by the caller.

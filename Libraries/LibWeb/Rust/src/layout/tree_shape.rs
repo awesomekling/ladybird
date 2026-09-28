@@ -89,11 +89,6 @@ impl StyleCell {
         self.with_owner(|owner| owner.cloned())
     }
 
-    /// The dependency flags of the row's record, or zero for a row without style.
-    pub(crate) fn dependency_flags(&self) -> u8 {
-        self.with_owner(|owner| owner.map_or(0, |record| record.dependency_flags))
-    }
-
     fn owner_address(&self) -> usize {
         self.with_owner(|owner| owner.map_or(0, |record| Arc::as_ptr(record).addr()))
     }
@@ -150,6 +145,10 @@ impl ShapeWriter<'_> {
 
     pub(crate) fn set_next_sibling(&self, sibling: NodeSlotId) {
         self.write(&self.data.next_sibling, sibling);
+    }
+
+    pub(crate) fn set_next_row_built_for_same_node(&self, row: NodeSlotId) {
+        self.write(&self.data.next_row_built_for_same_node, row);
     }
 
     pub(crate) fn set_kind(&self, kind: NodeKind) {
@@ -286,7 +285,7 @@ impl TreeShape {
         chunks: &[Box<Chunk>],
         style_nodes: &[Cell<Option<StyleNodeID>>],
     ) -> PublishedShape {
-        self.update(chunks, style_nodes);
+        let (nodes, styles) = self.publish_columns(chunks, style_nodes);
         let epoch = Arc::new(RetireEpoch {
             slots: Mutex::default(),
             later: OnceLock::new(),
@@ -298,10 +297,25 @@ impl TreeShape {
         }
         self.latest_epoch = Arc::downgrade(&epoch);
         PublishedShape {
-            nodes: self.nodes.publish(),
-            styles: self.styles.publish(),
+            nodes,
+            styles,
             retired_slots: RetiredSlots { _epoch: epoch },
         }
+    }
+
+    /// Brings the rows of every node written since the last publication up to date and publishes
+    /// the columns alone, for a reader that names no slot to anyone and so keeps no freed slot from
+    /// being reused.
+    pub(crate) fn publish_columns(
+        &mut self,
+        chunks: &[Box<Chunk>],
+        style_nodes: &[Cell<Option<StyleNodeID>>],
+    ) -> (
+        ColumnSnapshot<PaintNode, SLOTS_PER_CHUNK>,
+        ColumnSnapshot<PublishedStyle, SLOTS_PER_CHUNK>,
+    ) {
+        self.update(chunks, style_nodes);
+        (self.nodes.publish(), self.styles.publish())
     }
 
     /// Retires a freed slot while a publication that may name it is alive. A slot that is not

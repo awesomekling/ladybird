@@ -201,8 +201,6 @@ pub enum CompositorAnimationFrameKind {
 pub enum FfiNodeLink {
     Parent,
     FirstChild,
-    LastChild,
-    PreviousSibling,
     NextSibling,
 }
 
@@ -254,6 +252,11 @@ pub(crate) struct NodeData {
     pub dom_paint_facts: ShapeCell<u8>,
     pub ancestor_facts: Cell<u8>,
     pub style: StyleCell,
+    /// The next of the rows built for the same DOM node, which are chained into a ring through the
+    /// rows themselves; a row that is the only one built for its node links to nothing. The chain
+    /// lives on the rows rather than under a key so that it survives the node's identity being
+    /// retired and re-issued.
+    pub next_row_built_for_same_node: ShapeCell<NodeSlotId>,
 }
 
 /// What the paint side reads of a layout node, copied out of its [`NodeData`] when the arena
@@ -269,6 +272,7 @@ pub(crate) struct PaintNode {
     pub(crate) parent: NodeSlotId,
     pub(crate) first_child: NodeSlotId,
     pub(crate) next_sibling: NodeSlotId,
+    pub(crate) next_row_built_for_same_node: NodeSlotId,
     /// The style node of what the node was built for, which is how the host names that DOM node.
     pub(crate) style_node: Option<crate::css::style::tree::StyleNodeID>,
 }
@@ -285,6 +289,7 @@ impl Default for PaintNode {
             parent: NodeSlotId::INVALID,
             first_child: NodeSlotId::INVALID,
             next_sibling: NodeSlotId::INVALID,
+            next_row_built_for_same_node: NodeSlotId::INVALID,
             style_node: None,
         }
     }
@@ -303,6 +308,7 @@ impl PaintNode {
             parent: data.parent.get(),
             first_child: data.first_child.get(),
             next_sibling: data.next_sibling.get(),
+            next_row_built_for_same_node: data.next_row_built_for_same_node.get(),
             style_node,
         }
     }
@@ -328,6 +334,7 @@ impl Default for NodeData {
             ancestor_facts: Cell::new(0),
             fragment_cache_epoch: Cell::new(0),
             style: StyleCell::new(),
+            next_row_built_for_same_node: ShapeCell::new(NodeSlotId::INVALID),
         }
     }
 }
@@ -344,7 +351,7 @@ mod tests {
 
     #[test]
     fn intrinsic_cache_epoch_uses_existing_node_data_padding() {
-        assert_eq!(std::mem::size_of::<NodeData>(), 48);
+        assert_eq!(std::mem::size_of::<NodeData>(), 56);
         assert_eq!(std::mem::offset_of!(NodeData, intrinsic_cache_epoch), 22);
         assert_eq!(std::mem::offset_of!(NodeData, flags), 24);
         assert_eq!(std::mem::offset_of!(NodeData, fragment_cache_epoch), 28);
@@ -355,6 +362,7 @@ mod tests {
         assert_eq!(std::mem::offset_of!(NodeData, dom_paint_facts), 38);
         assert_eq!(std::mem::offset_of!(NodeData, ancestor_facts), 39);
         assert_eq!(std::mem::offset_of!(NodeData, style), 40);
+        assert_eq!(std::mem::offset_of!(NodeData, next_row_built_for_same_node), 48);
     }
 
     #[test]

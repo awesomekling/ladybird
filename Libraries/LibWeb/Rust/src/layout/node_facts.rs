@@ -489,30 +489,25 @@ pub(crate) fn containing_block_establishment_flag(is_fixed_position: bool) -> No
 /// What a geometry query reads of a node beside its kind and flags, taken from its style. A
 /// [`crate::painting::query_snapshot::QuerySnapshot`] reads these of the styles it published.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct QueryFacts(u16);
+pub(crate) struct QueryFacts(u8);
 
 impl QueryFacts {
-    const POSITION: u16 = 0b111;
-    const FRAGMENTED_INLINE: u16 = 1 << 3;
-    const POSITIONED: u16 = 1 << 4;
-    const FORMS_CONTAINING_BLOCK_FOR_CHILDREN: u16 = 1 << 5;
-    const TABLE_INSIDE: u16 = 1 << 6;
-    const MAY_TRANSFORM: u16 = 1 << 7;
+    const POSITION: u8 = 0b111;
+    const FRAGMENTED_INLINE: u8 = 1 << 3;
+    const POSITIONED: u8 = 1 << 4;
+    const TABLE_INSIDE: u8 = 1 << 5;
+    const MAY_TRANSFORM: u8 = 1 << 6;
 
     /// The facts of a node's style `style`.
     pub(crate) fn of_style(data: &impl NodeShape, style: Option<ComputedValuesView<'_>>) -> Self {
-        let mut facts = node_position(style) as u16 & Self::POSITION;
-        let mut set = |fact: u16, value: bool| {
+        let mut facts = node_position(style) & Self::POSITION;
+        let mut set = |fact: u8, value: bool| {
             if value {
                 facts |= fact;
             }
         };
         set(Self::FRAGMENTED_INLINE, node_is_fragmented_inline(data, style));
         set(Self::POSITIONED, node_is_positioned(data, style));
-        set(
-            Self::FORMS_CONTAINING_BLOCK_FOR_CHILDREN,
-            node_forms_containing_block_for_children(data, style),
-        );
         if let Some(style) = style {
             set(Self::TABLE_INSIDE, style.display().is_table_inside());
             let transform = style.transform();
@@ -530,7 +525,7 @@ impl QueryFacts {
 
     /// The computed value of `position`, or static for a node without style.
     pub(crate) fn position(self) -> u8 {
-        (self.0 & Self::POSITION) as u8
+        self.0 & Self::POSITION
     }
 
     /// See [`node_is_fragmented_inline`].
@@ -541,11 +536,6 @@ impl QueryFacts {
     /// See [`node_is_positioned`].
     pub(crate) fn is_positioned(self) -> bool {
         self.0 & Self::POSITIONED != 0
-    }
-
-    /// See [`node_forms_containing_block_for_children`].
-    pub(crate) fn forms_containing_block_for_children(self) -> bool {
-        self.0 & Self::FORMS_CONTAINING_BLOCK_FOR_CHILDREN != 0
     }
 
     /// Whether the computed display has a table inner display type.

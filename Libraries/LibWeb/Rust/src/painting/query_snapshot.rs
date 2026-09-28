@@ -7,12 +7,11 @@
 //! What a document publishes for the main thread to answer geometry reads from.
 //!
 //! A [`QuerySnapshot`] is the committed geometry of a document as it was when the document
-//! published it: its paintable rows, the shape of its layout tree with the facts of each node's
-//! style that a geometry read looks at, which box each element is bound to, and how a rect is
-//! converted to viewport space. It is immutable and owns all of it, through the copy-on-write
-//! generations the arena's columns publish, so it is read on the main thread while the arena goes
-//! on changing, and outlives nothing it names. It keeps no style record alive: the facts it reads
-//! of a style were copied out of it when the node was published.
+//! published it: its paintable rows, the rows of its layout tree as the document thread reads them
+//! (see [`crate::layout::row_reads`]), and how a rect is converted to viewport space. It is
+//! immutable and owns all of it, through the copy-on-write generations the arena's columns publish,
+//! so it is read on the main thread while the arena goes on changing, and outlives nothing it
+//! names.
 //!
 //! Reads go through [`GeometryRead`], which is all a snapshot answers. It holds no arena and does
 //! not dereference to one, so a read written against it cannot reach the render side's state, and
@@ -28,9 +27,9 @@ use crate::css::style::tree::StyleNodeID;
 use crate::layout::fragment_tree::FragmentLink;
 use crate::layout::node_data::{NodeFlag, NodeKind, NodeSlotId, PaintNode};
 use crate::layout::node_facts::{self, QueryFacts};
+use crate::layout::row_reads::RowSnapshot;
 use crate::layout::text_queries::{append_rendered_text, style_collapses_white_space};
-use crate::layout::tree_shape::{PublishedShape, PublishedStyle};
-use crate::layout::{BOUND_ELEMENT_ROWS_PER_CHUNK, LayoutNodeArena, PublishedTextSlot, SLOTS_PER_CHUNK};
+use crate::layout::{LayoutNodeArena, PublishedTextSlot, SLOTS_PER_CHUNK};
 use crate::painting::client_rects;
 use crate::painting::geometry_read::GeometryRead;
 use crate::painting::paintable_data::PaintableData;
@@ -72,14 +71,10 @@ pub struct FfiQuerySnapshotViewport {
 
 pub(crate) struct QuerySnapshot {
     rows: PublishedRows,
-    nodes: ColumnSnapshot<PaintNode, SLOTS_PER_CHUNK>,
-    /// Every node's style, which the snapshot keeps alive for the facts it reads of it.
-    styles: ColumnSnapshot<PublishedStyle, SLOTS_PER_CHUNK>,
-    element_rows: ColumnSnapshot<NodeSlotId, BOUND_ELEMENT_ROWS_PER_CHUNK>,
+    /// The shape and style of every row, and the row each node is bound to.
+    tree: Arc<RowSnapshot>,
     /// The rendered text of every text row, as layout left it.
     text: ColumnSnapshot<PublishedTextSlot, SLOTS_PER_CHUNK>,
-    /// The row the document was bound to: the viewport's.
-    viewport_row: NodeSlotId,
     viewport_conversion: ViewportConversion,
 }
 
@@ -110,15 +105,12 @@ impl LayoutNodeArena {
                 device_pixels_per_css_pixel: viewport.device_pixels_per_css_pixel,
             }
         };
-        // The snapshot names no slot to anyone, so it does not keep freed slots from being reused.
-        let PublishedShape { nodes, styles, .. } = self.publish_paint_tree();
+        let rows = self.publish_paintable_rows_for_query()?;
+        self.publish_rows();
         Some(QuerySnapshot {
-            rows: self.publish_paintable_rows_for_query()?,
-            nodes,
-            styles,
-            element_rows: self.publish_bound_element_rows(),
+            rows,
+            tree: self.published_rows(),
             text: self.publish_text(),
-            viewport_row: self.bound_viewport_row(),
             viewport_conversion,
         })
     }
@@ -126,12 +118,7 @@ impl LayoutNodeArena {
 
 impl QuerySnapshot {
     fn node(&self, id: NodeSlotId) -> Option<&PaintNode> {
-        if id.is_invalid() {
-            return None;
-        }
-        self.nodes
-            .get(id.slot_index() as usize)
-            .filter(|node| node.generation != 0 && node.generation == id.generation())
+        self.tree.node(id)
     }
 
     /// What a geometry query reads of the style of the node in a live slot.
@@ -165,19 +152,18 @@ impl QuerySnapshot {
     }
 
     fn style(&self, id: NodeSlotId) -> Option<ComputedValuesView<'_>> {
-        let record = self.styles.get(id.slot_index() as usize)?.0.as_deref()?;
-        Some(ComputedValuesView::new(&record.payloads.as_ffi().groups))
+        self.tree.style(id)
     }
 
     /// The box the element is bound to: its layout node.
     pub(crate) fn element_box(&self, element: StyleNodeID) -> Option<NodeSlotId> {
-        let row = *self.element_rows.get(element.element_index()? as usize)?;
-        self.node(row).is_some().then_some(row)
+        element.element_index()?;
+        self.tree.bound_row(element)
     }
 
     /// The box the document is bound to: the viewport.
     pub(crate) fn viewport_box(&self) -> Option<NodeSlotId> {
-        self.node(self.viewport_row).is_some().then_some(self.viewport_row)
+        self.tree.viewport_row()
     }
 
     /// https://drafts.csswg.org/css-tables-3/#table-wrapper-box
@@ -230,39 +216,8 @@ impl QuerySnapshot {
         false
     }
 
-    /// The box whose content box a node is laid out against, found by walking its ancestors as
-    /// the arena's own walk does.
     fn containing_block(&self, id: NodeSlotId) -> Option<NodeSlotId> {
-        let node = self.node(id)?;
-        let position = if node_facts::kind_is_text(node.kind) {
-            positioning::STATIC
-        } else {
-            self.facts(id)?.position()
-        };
-        if position != positioning::ABSOLUTE && position != positioning::FIXED {
-            let mut ancestor = self.node_parent_if_live(id);
-            while let Some(candidate) = ancestor {
-                if self.facts(candidate)?.forms_containing_block_for_children() {
-                    return Some(candidate);
-                }
-                ancestor = self.node_parent_if_live(candidate);
-            }
-            return None;
-        }
-        let is_fixed_position = position == positioning::FIXED;
-        let establishes_containing_block = node_facts::containing_block_establishment_flag(is_fixed_position) as u32;
-        let mut current = id;
-        while let Some(ancestor) = self.node_parent_if_live(current) {
-            current = ancestor;
-            if self.node_kind_if_live(current).is_some_and(node_facts::kind_is_box)
-                && self.node_flags_if_live(current) & establishes_containing_block != 0
-            {
-                return Some(current);
-            }
-        }
-        // A fixed-position box with no ancestor establishing its containing block is laid out
-        // against the root.
-        is_fixed_position.then_some(current)
+        self.tree.containing_block(id)
     }
 
     /// The border box of the box's first fragment, relative to the initial containing block and
@@ -435,8 +390,7 @@ impl GeometryRead for QuerySnapshot {
     }
 
     fn node_parent_if_live(&self, id: NodeSlotId) -> Option<NodeSlotId> {
-        let parent = self.node(id)?.parent;
-        (!parent.is_invalid()).then_some(parent)
+        self.tree.parent(id)
     }
 
     fn node_is_fragmented_inline(&self, id: NodeSlotId) -> bool {
