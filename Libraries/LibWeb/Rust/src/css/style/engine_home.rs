@@ -615,6 +615,39 @@ impl StyleEngineHandle {
         engine
     }
 
+    /// The engine, for the document's arena that links it, where the arena is reached: in a unit of the render owner,
+    /// which reaches or is lent the engine on this thread or runs while the main thread waits for it. The main thread
+    /// does not reach an engine through its arena: it sends the owner what it writes, and asks what it reads, unless it
+    /// does the owner's work itself, where a test holds the owner's run.
+    ///
+    /// # Safety
+    ///
+    /// As for [`Self::enter`].
+    pub(crate) unsafe fn reach_linked<'a>(self) -> &'a mut StyleEngine {
+        // SAFETY: The unit reaches the engine, and the caller guarantees the rest.
+        let engine = unsafe { &mut *self.home().engine.as_ptr() };
+        if LENT_TO_THIS_THREAD.get() == self.address() {
+            return engine;
+        }
+        if crate::stage_thread::owner_work_runs_here() {
+            // As an entrance of the main thread's own would, it brings the engine home first.
+            self.bring_home("owner work on the main thread");
+        } else {
+            debug_assert!(
+                crate::stage_thread::running_inside_stage() || !crate::stage_thread::owner_is_elsewhere(),
+                "the main thread reaches a style engine through its arena"
+            );
+        }
+        // A unit the main thread waits for reaches the engine as the main thread would, which brought the engine home
+        // before it waited; what the main thread wrote to it goes in first.
+        let home = self.home();
+        // SAFETY: As above.
+        if unsafe { home.apply_unapplied(engine) } {
+            home.pending.store(engine.pending_facts().0, Ordering::Relaxed);
+        }
+        engine
+    }
+
     /// Brings the engine home for the main thread, which is about to enter it at `entry`
     /// once it has done what it does before.
     pub(crate) fn bring_home(self, entry: &'static str) {

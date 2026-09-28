@@ -831,10 +831,12 @@ pub unsafe extern "C" fn layout_arena_background_color_can_be_compositor_animate
     slot: NodeSlotId,
 ) -> bool {
     let arena = unsafe { arena_from_handle(arena) };
+    // The source the document's last preparation for rendering found, which it prepared the committed rows with.
+    let root_background_source = arena.paint_state().borrow().root_background_source.unwrap_or_default();
     crate::painting::record::paint::background_resolution::background_color_can_be_compositor_animated(
         &arena.paintable_rows(),
         slot,
-        crate::layout::root_background_source(arena),
+        root_background_source,
     )
 }
 
@@ -2395,16 +2397,25 @@ pub unsafe extern "C" fn layout_arena_scroll_snap_axes(
     crate::painting::scroll_snap::snap_axes_of_scroll_container(arena, snap_container)
 }
 
+/// Tells the render owner that the element with `element_style_node` published a `::selection` style, which the rows
+/// that paint text under it paint selected text with. Nothing waits for it.
+///
 /// # Safety
 ///
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_sync_selection_pseudo_style(arena: *mut c_void, element_style_node: u32) {
-    let arena = unsafe { arena_from_handle(arena) };
     let Some(element) = crate::css::style::tree::StyleNodeID::from_raw(element_style_node) else {
         return;
     };
-    crate::painting::selection::sync_selection_pseudo_style(arena, element);
+    // SAFETY: Guaranteed by the caller.
+    let document = unsafe { crate::layout::ArenaHandle::document_of(arena) };
+    if document.is_valid() {
+        crate::render_owner::send_arena_change(
+            document,
+            crate::render_owner::ArenaChange::SelectionPseudoStylePublished(element),
+        );
+    }
 }
 
 /// # Safety

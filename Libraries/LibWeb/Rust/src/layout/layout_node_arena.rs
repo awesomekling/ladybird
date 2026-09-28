@@ -3130,9 +3130,8 @@ impl LayoutNodeArena {
         self.style_engine.get().0
     }
 
-    /// The style engine, for a read or write of it through the arena. A style pass in flight owns
-    /// the engine but not the arena, so a main-side access joins the pass here, as an entrance of
-    /// the engine's own does.
+    /// The style engine the arena links, for a read or write of it through the arena, which only the
+    /// render owner's units reach.
     ///
     /// # Safety
     ///
@@ -3141,7 +3140,7 @@ impl LayoutNodeArena {
         let style_engine = self.style_engine.get().0;
         assert!(!style_engine.is_null(), "layout node arena has no style record host");
         // SAFETY: The engine outlives the arena's live nodes, and the caller guarantees the rest.
-        unsafe { style_engine.enter("layout arena style engine access") }
+        unsafe { style_engine.reach_linked() }
     }
 
     // The engine outlives the arena's live nodes. No host callback runs while this
