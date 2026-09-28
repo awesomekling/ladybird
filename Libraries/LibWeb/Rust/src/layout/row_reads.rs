@@ -26,7 +26,7 @@ use crate::css::style::fast_hash::FastMap as HashMap;
 use crate::css::style::published_record::PublishedStyleRecord;
 use crate::css::style::tree::StyleNodeID;
 use crate::painting::published_frame::{PaintStatus, PublishedPaintFacts, PublishedRows};
-use crate::render_owner::{ChangeSeq, RowFact};
+use crate::render_owner::{ChangeSeq, ScriptForcedRead};
 use smallvec::SmallVec;
 use std::cell::Cell;
 use std::ffi::c_void;
@@ -108,28 +108,16 @@ impl RowSnapshot {
     }
 
     /// The rows the arena `handle` names published last, as of every change the document thread sent that alters them
-    /// ([`crate::render_owner::ArenaChange`] says which [`RowFact`] each alters): where the owner has not published rows that reflect those
+    /// ([`crate::render_owner::ArenaChange`] says which do): where the owner has not published rows that reflect those
     /// yet, the document thread asks it to.
     ///
     /// # Safety
     ///
     /// As for [`Self::published`].
     #[track_caller]
-    pub(crate) unsafe fn current<'a>(handle: *mut c_void) -> &'a Self {
+    pub(crate) unsafe fn current<'a>(handle: *mut c_void, read: ScriptForcedRead) -> &'a Self {
         // SAFETY: Guaranteed by the caller.
-        unsafe { Self::published_as_of_sent_changes(handle, Freshness::Current, RowFact::ALL) }
-    }
-
-    /// Like [`Self::current`], for a read of the rows' tree alone ([`RowFact::Tree`]): a change the thread sent to a
-    /// row's style or paint facts leaves it be.
-    ///
-    /// # Safety
-    ///
-    /// As for [`Self::published`].
-    #[track_caller]
-    pub(crate) unsafe fn current_tree<'a>(handle: *mut c_void) -> &'a Self {
-        // SAFETY: Guaranteed by the caller.
-        unsafe { Self::published_as_of_sent_changes(handle, Freshness::Current, &[RowFact::Tree]) }
+        unsafe { Self::published_as_of_sent_changes(handle, Freshness::Current, read) }
     }
 
     /// Like [`Self::current`], with the rows as committed: once the scrollable overflow a commit or a writer left is
@@ -139,9 +127,9 @@ impl RowSnapshot {
     ///
     /// As for [`Self::published`].
     #[track_caller]
-    pub(crate) unsafe fn committed<'a>(handle: *mut c_void) -> &'a Self {
+    pub(crate) unsafe fn committed<'a>(handle: *mut c_void, read: ScriptForcedRead) -> &'a Self {
         // SAFETY: Guaranteed by the caller.
-        unsafe { Self::published_as_of_sent_changes(handle, Freshness::Committed, RowFact::ALL) }
+        unsafe { Self::published_as_of_sent_changes(handle, Freshness::Committed, read) }
     }
 
     /// Like [`Self::current`], as of every change the document thread sent, for a test that reads what the owner counts
@@ -151,9 +139,9 @@ impl RowSnapshot {
     ///
     /// As for [`Self::published`].
     #[track_caller]
-    pub(crate) unsafe fn settled<'a>(handle: *mut c_void) -> &'a Self {
+    pub(crate) unsafe fn settled<'a>(handle: *mut c_void, read: ScriptForcedRead) -> &'a Self {
         // SAFETY: Guaranteed by the caller.
-        unsafe { Self::published_as_of_sent_changes(handle, Freshness::Settled, RowFact::ALL) }
+        unsafe { Self::published_as_of_sent_changes(handle, Freshness::Settled, read) }
     }
 
     /// Like [`Self::current`], shared, so the rows outlive the next publication.
@@ -161,9 +149,9 @@ impl RowSnapshot {
     /// # Safety
     ///
     /// `handle` must be a live handle on the document thread.
-    pub(crate) unsafe fn current_shared(handle: *mut c_void) -> Arc<Self> {
+    pub(crate) unsafe fn current_shared(handle: *mut c_void, read: ScriptForcedRead) -> Arc<Self> {
         // SAFETY: Guaranteed by the caller.
-        unsafe { Self::current(handle) };
+        unsafe { Self::current(handle, read) };
         // SAFETY: As above; the rows were just read, and nothing published since.
         unsafe { Self::read_slot(handle) }.shared()
     }
@@ -172,7 +160,7 @@ impl RowSnapshot {
     unsafe fn published_as_of_sent_changes<'a>(
         handle: *mut c_void,
         freshness: Freshness,
-        reads: &[RowFact],
+        read: ScriptForcedRead,
     ) -> &'a Self {
         // SAFETY: Guaranteed by the caller.
         let rows = unsafe { Self::published(handle) };
@@ -180,7 +168,7 @@ impl RowSnapshot {
         let document = unsafe { super::ArenaHandle::document_of(handle) };
         let changes_to_reflect = match freshness {
             Freshness::Settled => crate::render_owner::sent_through(document),
-            Freshness::Current | Freshness::Committed => crate::render_owner::sent_row_changes_through(document, reads),
+            Freshness::Current | Freshness::Committed => crate::render_owner::sent_row_changes_through(document),
         };
         // The owner holds no state of an arena of no document (a unit test's), which is written in place: the thread
         // that holds it publishes it.
@@ -196,6 +184,7 @@ impl RowSnapshot {
                 crate::render_owner::Query::CommittedRows {
                     measured_overflow: committed,
                 },
+                read,
             )
         };
         // SAFETY: As above.
@@ -353,13 +342,15 @@ impl RowSnapshotSlot {
 }
 
 /// What the document thread wrote to rows that the rows it last read do not include yet, each with the change that
-/// wrote it: the styles it applied to rows (a record, or none where the arena derives the row's style from now on), and
-/// the boxes it took out of their parents in place, with the links that closed over them. Its reads answer them over
-/// the snapshot, as the rows will read once the owner has published them.
+/// wrote it: the styles it applied to rows (a record, or none where the arena derives the row's style from now on), the
+/// boxes it took out of the tree and freed, subtree and all, with the links that closed over them, and the boxes whose
+/// committed box it cleared. Its reads answer them over the snapshot, as the rows will read once the owner has
+/// published them.
 #[derive(Default)]
 pub(crate) struct RowsSentAhead {
     styles: HashMap<NodeSlotId, (ChangeSeq, Option<Arc<PublishedStyleRecord>>)>,
     detached: HashMap<NodeSlotId, ChangeSeq>,
+    cleared: HashMap<NodeSlotId, ChangeSeq>,
     links: HashMap<NodeSlotId, LinksSentAhead>,
     /// The change that wrote the latest of them.
     latest: ChangeSeq,
@@ -394,6 +385,7 @@ impl RowsSentAhead {
         let ahead = |seq: &ChangeSeq| *seq > through;
         self.styles.retain(|_, (seq, _)| ahead(seq));
         self.detached.retain(|_, seq| ahead(seq));
+        self.cleared.retain(|_, seq| ahead(seq));
         self.links.retain(|_, links| {
             for link in [
                 &mut links.first_child,
@@ -417,7 +409,24 @@ impl RowsSentAhead {
         }
     }
 
-    /// Notes that the change `sent` took the box `row`, which read as `removed`, out of its parent `parent`.
+    /// Notes that the change `sent` freed the box `row`, subtree and all, which hung from no parent.
+    pub(crate) fn note_freed(&mut self, sent: Option<ChangeSeq>, row: NodeSlotId) {
+        if let Some(sent) = sent {
+            self.detached.insert(row, sent);
+            self.latest = sent;
+        }
+    }
+
+    /// Notes that the change `sent` cleared the committed box of `row`, which stays in the tree.
+    pub(crate) fn note_cleared(&mut self, sent: Option<ChangeSeq>, row: NodeSlotId) {
+        if let Some(sent) = sent {
+            self.cleared.insert(row, sent);
+            self.latest = sent;
+        }
+    }
+
+    /// Notes that the change `sent` took the box `row`, which read as `removed`, out of its parent `parent`, and freed
+    /// it, subtree and all.
     pub(crate) fn note_detached(
         &mut self,
         sent: Option<ChangeSeq>,
@@ -473,6 +482,27 @@ impl<'a> RowsAsSent<'a> {
         match self.sent.styles.get(&id) {
             Some((_, Some(record))) => Some(record),
             _ => self.rows.style_record(id),
+        }
+    }
+
+    /// Whether `slot` has a committed box: a change the thread sent frees the subtrees it detached and clears the
+    /// committed boxes it named, and populates none.
+    pub(crate) fn has_committed_box(&self, slot: NodeSlotId) -> bool {
+        if !self.rows.paintable.paintable_row_is_populated(slot) || self.sent.cleared.contains_key(&slot) {
+            return false;
+        }
+        if self.sent.detached.is_empty() {
+            return true;
+        }
+        let mut row = slot;
+        loop {
+            if self.sent.detached.contains_key(&row) {
+                return false;
+            }
+            match self.rows.node(row) {
+                Some(node) if !node.parent.is_invalid() => row = node.parent,
+                _ => return true,
+            }
         }
     }
 

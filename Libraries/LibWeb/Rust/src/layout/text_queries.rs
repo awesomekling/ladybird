@@ -11,6 +11,7 @@ use super::rendered_text::{FfiRenderedTextView, FfiTextSourceRange, RenderedText
 use crate::css::computed_value_views::ComputedValuesView;
 use crate::css::css_enums::{visibility, white_space_collapse};
 use crate::css::ffi_support::FfiUtf16View;
+use crate::render_owner::ScriptForcedRead;
 use crate::render_owner::{ArenaAnswer, ArenaQuery, LentSlice};
 use std::ffi::c_void;
 use std::ops::Range;
@@ -437,7 +438,9 @@ pub unsafe extern "C" fn layout_arena_collect_rendered_text(
         collapse_whitespace,
     };
     // SAFETY: Guaranteed by the caller.
-    let ArenaAnswer::Text(text) = (unsafe { crate::render_owner::ask_arena_of(arena, read) }) else {
+    let ArenaAnswer::Text(text) =
+        (unsafe { crate::render_owner::ask_arena_of(arena, read, ScriptForcedRead::at_script_entry()) })
+    else {
         return;
     };
     // SAFETY: Guaranteed by the caller.
@@ -465,7 +468,13 @@ pub unsafe extern "C" fn layout_arena_text_word_range(
     dom_offset: usize,
 ) -> FfiTextSourceRange {
     // SAFETY: Guaranteed by the caller.
-    match unsafe { crate::render_owner::ask_arena_of(arena, ArenaQuery::WordRange { primary, dom_offset }) } {
+    match unsafe {
+        crate::render_owner::ask_arena_of(
+            arena,
+            ArenaQuery::WordRange { primary, dom_offset },
+            ScriptForcedRead::for_internal_hop(),
+        )
+    } {
         ArenaAnswer::Range(range) => range,
         _ => FfiTextSourceRange {
             start: dom_offset,
@@ -499,15 +508,20 @@ pub unsafe extern "C" fn layout_arena_find_matching_text(
         return;
     }
     // SAFETY: Guaranteed by the caller.
-    let excluded: Vec<NodeSlotId> =
-        match unsafe { crate::render_owner::ask_arena_of(arena, ArenaQuery::SearchCandidates { viewport }) } {
-            // SAFETY: Guaranteed by the caller.
-            ArenaAnswer::Rows(rows) => rows
-                .into_iter()
-                .filter(|&row| !unsafe { is_searchable(context, row) })
-                .collect(),
-            _ => Vec::new(),
-        };
+    let excluded: Vec<NodeSlotId> = match unsafe {
+        crate::render_owner::ask_arena_of(
+            arena,
+            ArenaQuery::SearchCandidates { viewport },
+            ScriptForcedRead::at_script_entry(),
+        )
+    } {
+        // SAFETY: Guaranteed by the caller.
+        ArenaAnswer::Rows(rows) => rows
+            .into_iter()
+            .filter(|&row| !unsafe { is_searchable(context, row) })
+            .collect(),
+        _ => Vec::new(),
+    };
     let find = ArenaQuery::FindText {
         viewport,
         query: LentSlice::new(&query),
@@ -515,7 +529,9 @@ pub unsafe extern "C" fn layout_arena_find_matching_text(
         excluded: LentSlice::new(&excluded),
     };
     // SAFETY: Guaranteed by the caller.
-    let ArenaAnswer::TextRanges(matches) = (unsafe { crate::render_owner::ask_arena_of(arena, find) }) else {
+    let ArenaAnswer::TextRanges(matches) =
+        (unsafe { crate::render_owner::ask_arena_of(arena, find, ScriptForcedRead::at_script_entry()) })
+    else {
         return;
     };
     for range in matches {

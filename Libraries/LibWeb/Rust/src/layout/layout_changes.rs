@@ -15,7 +15,7 @@ use super::partial_relayout::FfiPossibleBoundaryUpdate;
 use super::tree_builder::FfiRemovedBoxPlace;
 use super::used_values::FfiCssPixelPoint;
 use crate::css::style::tree::{NaturalSize, StyleNodeID};
-use crate::render_owner::{Answer, ArenaChange, ChangeSeq, Query, RowFact};
+use crate::render_owner::{Answer, ArenaChange, ChangeSeq, Query, ScriptForcedRead};
 use std::ffi::c_void;
 
 /// One write of the main thread to a document's layout marks or layout facts, which the owner applies to the arena
@@ -337,20 +337,20 @@ impl LayoutChange {
         }
     }
 
-    /// What of the rows the owner publishes applying the change can alter: the rows themselves and their identities,
-    /// their styles, or their DOM paint facts. Marks for the next layout, the flags it reads, and what the
+    /// Whether applying the change can alter what the rows the owner publishes answer the document thread: the rows
+    /// themselves, their DOM facts, identities and styles. Marks for the next layout, the flags it reads, and what the
     /// arena keeps for the host (the document thread keeps its own copy of the compositor animation frames) alter
     /// none.
-    pub(crate) fn alters(&self) -> Option<RowFact> {
+    pub(crate) fn alters_published_rows(&self) -> bool {
         match self {
-            Self::DetachRemainingRowsForRemoval { .. }
+            Self::SetNodeDomPaintFacts { .. }
+            | Self::DetachRemainingRowsForRemoval { .. }
             | Self::DetachRemovedBoxInPlace { .. }
-            | Self::StyleNodeChanged { .. } => Some(RowFact::Tree),
-            Self::InstallRowStyle { .. }
+            | Self::StyleNodeChanged { .. }
+            | Self::InstallRowStyle { .. }
             | Self::ReplaceRowStyleRecord { .. }
             | Self::AdoptDerivedNodeStyle { .. }
-            | Self::InstallAnimationSample { .. } => Some(RowFact::Style),
-            Self::SetNodeDomPaintFacts { .. } => Some(RowFact::Paint),
+            | Self::InstallAnimationSample { .. } => true,
             Self::SetNodeFlag { .. }
             | Self::SetNeedsLayoutUpdateOfPossibleBoundary { .. }
             | Self::SetNodeNeedsCompositorAnimationFrame { .. }
@@ -370,7 +370,7 @@ impl LayoutChange {
             | Self::RowOwnsImageProvider { .. }
             | Self::SetStyleImageResourcesAttached { .. }
             | Self::PinBoundBoxStyleRecordForDetachment { .. }
-            | Self::SetTableSpans { .. } => None,
+            | Self::SetTableSpans { .. } => false,
         }
     }
 
@@ -527,7 +527,7 @@ impl LayoutWrite {
 /// `arena` must be a live arena handle on the document thread.
 pub(crate) unsafe fn write(arena: *mut c_void, write: LayoutWrite) -> HostPayment {
     // SAFETY: Guaranteed by the caller.
-    match unsafe { crate::render_owner::ask_about(arena, Query::Write(write)) } {
+    match unsafe { crate::render_owner::ask_about(arena, Query::Write(write), ScriptForcedRead::for_internal_hop()) } {
         Answer::Payment(payment) => payment,
         _ => HostPayment::nothing(),
     }

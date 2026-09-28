@@ -13,6 +13,7 @@ use crate::layout::debug_text::{AppendBytes, DebugText, DescribeDomNode};
 use crate::layout::node_data::NodeSlotId;
 use crate::layout::update_layout::FfiLayoutTreeBuildStats;
 use crate::layout::{ArenaHandle, LayoutNodeArena};
+use crate::render_owner::ScriptForcedRead;
 use std::ffi::c_void;
 
 /// A read of a document's render state for tests and debugging, which [`Query::DevTools`] asks.
@@ -131,7 +132,7 @@ fn pre_order_label_violations(arena: &LayoutNodeArena, root: NodeSlotId) -> u64 
 /// `arena` must be a live handle on the document thread.
 unsafe fn ask(arena: *mut c_void, query: DevToolsQuery) -> DevToolsAnswer {
     // SAFETY: Guaranteed by the caller.
-    match unsafe { super::ask_about(arena, Query::DevTools(query)) } {
+    match unsafe { super::ask_about(arena, Query::DevTools(query), ScriptForcedRead::at_script_entry()) } {
         Answer::DevTools(answer) => answer,
         _ => query.left_to_host(),
     }
@@ -193,7 +194,9 @@ pub unsafe extern "C" fn render_owner_dump_stacking_context_tree(
     }
     super::join_frame_of(document);
     let Answer::DevTools(DevToolsAnswer::Trace(text)) =
-        super::ask_owner(document, Query::DevTools(DevToolsQuery::StackingContextTree))
+        super::ask_owner(document, Query::DevTools(DevToolsQuery::StackingContextTree), unsafe {
+            ScriptForcedRead::at_script_entry()
+        })
     else {
         return;
     };
@@ -210,7 +213,9 @@ pub extern "C" fn render_owner_arena_counts(document: DocumentId) -> FfiArenaCou
         return FfiArenaCounts::default();
     }
     super::join_frame_of(document);
-    match super::ask_owner(document, Query::DevTools(DevToolsQuery::LayoutCounts)) {
+    match super::ask_owner(document, Query::DevTools(DevToolsQuery::LayoutCounts), unsafe {
+        ScriptForcedRead::at_script_entry()
+    }) {
         Answer::DevTools(DevToolsAnswer::LayoutCounts(counts)) => counts.arena,
         _ => FfiArenaCounts::default(),
     }
