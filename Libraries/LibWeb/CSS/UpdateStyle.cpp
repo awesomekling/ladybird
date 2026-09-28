@@ -182,12 +182,11 @@ void StyleEffectDrain::apply_layout_invalidation(DOM::Document& document, Viewpo
     // A node without a box has nothing to mark.
     if (!box)
         return;
-    // A relayout-only style change on an absolutely positioned partial relayout boundary
-    // stays confined to it: the box contributes nothing to ancestor layout, and partial
-    // relayout re-resolves the boundary's own size and position. A rendered ::backdrop
-    // disqualifies the element, because pseudo-element style diffs are merged into the
-    // element's invalidation while the ::backdrop box is a sibling of the element's box,
-    // outside the subtree a boundary-self relayout covers.
+    // A relayout-only style change on an absolutely positioned box stays confined to it where the render owner finds it
+    // a partial relayout boundary as it takes the mark in: the box contributes nothing to ancestor layout, and partial
+    // relayout re-resolves the boundary's own size and position. A rendered ::backdrop disqualifies the element,
+    // because pseudo-element style diffs are merged into the element's invalidation while the ::backdrop box is a
+    // sibling of the element's box, outside the subtree a boundary-self relayout covers.
     auto propagation = Layout::LayoutUpdatePropagation::ThroughAncestors;
     auto box_is_absolutely_positioned = [&] {
         auto position = static_cast<Positioning>(box.style_group<ComputedValues::BoxValues>()->position);
@@ -197,10 +196,8 @@ void StyleEffectDrain::apply_layout_invalidation(DOM::Document& document, Viewpo
         && !is_viewport_propagation_source
         && !box.is_text()
         && box_is_absolutely_positioned()
-        && Layout::RustFFI::layout_arena_node_is_partial_relayout_boundary(box.arena(), box.slot())
         && !pseudo_element_box(PseudoElement::Backdrop)) {
-        document.render_inputs_for_write().set_needs_own_geometry_update(box.slot());
-        propagation = Layout::LayoutUpdatePropagation::BoundarySelfOnly;
+        propagation = Layout::LayoutUpdatePropagation::SelfOnlyIfBoundary;
     }
     document.render_inputs_for_write().note_needs_layout_update(DOM::NodeIdentity::of_style_node(style_node), DOM::SetNeedsLayoutReason::StyleChange, propagation);
     document.note_style_change_needs_layout_update({});

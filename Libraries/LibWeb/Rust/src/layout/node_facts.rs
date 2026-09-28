@@ -393,14 +393,14 @@ pub(crate) fn node_has_auto_content_box_size(data: &NodeData) -> bool {
 // kind, stamped DOM identity, the live IsFlexItem flag, or whether the parent
 // is a flex or grid container.
 pub(crate) fn node_creates_block_formatting_context(
-    data: &NodeData,
+    data: &impl NodeShape,
     style: Option<ComputedValuesView<'_>>,
     parent_is_flex_or_grid_container: bool,
 ) -> bool {
-    if kind_is_replaced_box(data.kind.get()) {
+    if kind_is_replaced_box(data.kind()) {
         return false;
     }
-    if data.kind.get() == NodeKind::SVGForeignObjectBox {
+    if data.kind() == NodeKind::SVGForeignObjectBox {
         return true;
     }
     if let Some(style) = style {
@@ -424,10 +424,10 @@ pub(crate) fn node_creates_block_formatting_context(
         }
     }
     if has_flag(data, NodeFlag::IsHtmlHtmlElement)
-        || data.kind.get() == NodeKind::FieldSetBox
+        || data.kind() == NodeKind::FieldSetBox
         // https://drafts.csswg.org/css-lists-3/#list-style-position-outside
         // "If the list item is a block container: the marker box is a block container"
-        || data.kind.get() == NodeKind::ListItemMarkerBox
+        || data.kind() == NodeKind::ListItemMarkerBox
         || has_flag(data, NodeFlag::UsesButtonLayout)
     {
         return true;

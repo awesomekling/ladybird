@@ -18,6 +18,7 @@ use crate::layout::node_data::{
     GENERATED_FOR_AFTER, GENERATED_FOR_BACKDROP, GENERATED_FOR_BEFORE, GENERATED_FOR_FIRST_LETTER,
     GENERATED_FOR_MARKER, NodeData, NodeFlag, NodeKind, NodeSlotId,
 };
+use crate::layout::row_reads::RowSnapshot;
 use crate::layout::text_chunker::{GraphemeSegmenter, code_point_at, code_unit_length_for_code_point};
 use crate::layout::tree_mutation::{UnplacedLayoutNode, free_subtree_and_hand_back};
 use crate::layout::{ComputedValuesView, FfiDisplay};
@@ -678,25 +679,22 @@ pub enum FfiRemovedBoxDetach {
 }
 
 /// The box of the node `place` names and its parent's box, if the layout tree lets the box be detached from the
-/// parent's in place. It reads the rows by identity, so no shell is made for any box it looks at.
+/// parent's in place, as the render owner published the rows.
 pub(crate) fn removed_box_detachable_in_place(
-    arena: &LayoutNodeArena,
+    rows: &RowSnapshot,
     place: &FfiRemovedBoxPlace,
 ) -> Option<(NodeSlotId, NodeSlotId)> {
-    let layout_node = arena.bound_row(StyleNodeID::from_raw(place.style_node)?);
+    let layout_node = rows.bound_row(StyleNodeID::from_raw(place.style_node)?)?;
     let parent = if place.parent_is_document {
-        arena.bound_viewport_row()
+        rows.viewport_row()
     } else {
-        StyleNodeID::from_raw(place.parent_style_node).map_or(NodeSlotId::INVALID, |parent| arena.bound_row(parent))
-    };
-    if layout_node.is_invalid() || parent.is_invalid() {
+        rows.bound_row(StyleNodeID::from_raw(place.parent_style_node)?)
+    }?;
+    let row = rows.node(layout_node)?;
+    if !node_kind_is_node_with_style(row.kind) {
         return None;
     }
-    let data = arena.node_data_if_live(layout_node)?;
-    if !node_kind_is_node_with_style(data.kind.get()) {
-        return None;
-    }
-    let style = arena.node_style_if_live(layout_node);
+    let style = rows.style(layout_node);
 
     // OPTIMIZATION: Absolutely positioned boxes do not participate in their DOM parent's inline or block formatting
     //               structure, even when they are attached to an ancestor containing block. Removing them cannot
@@ -705,28 +703,30 @@ pub(crate) fn removed_box_detachable_in_place(
         if place.parent_is_body {
             return Some((layout_node, parent));
         }
-        let containing_block_is_of_parent = arena.node_containing_block_if_live(layout_node).is_some_and(|block| {
+        let containing_block_is_of_parent = rows.containing_block(layout_node).is_some_and(|block| {
             if place.parent_is_document {
-                return block == arena.bound_viewport_row();
+                return block == parent;
             }
-            !node_has_flag(arena.data(block), NodeFlag::Anonymous)
-                && arena
-                    .node_style_node(block)
-                    .is_some_and(|node| node.raw() == place.parent_style_node)
+            rows.node(block).is_some_and(|block| {
+                !node_facts::has_flag(block, NodeFlag::Anonymous)
+                    && block
+                        .style_node
+                        .is_some_and(|node| node.raw() == place.parent_style_node)
+            })
         });
         if containing_block_is_of_parent {
             return Some((layout_node, parent));
         }
     }
 
-    if data.parent.get() != parent {
+    if row.parent != parent {
         return None;
     }
-    if node_facts::node_is_out_of_flow(data, style) {
+    if node_facts::node_is_out_of_flow(row, style) {
         return None;
     }
-    let parent_data = arena.node_data_if_live(parent)?;
-    if !node_kind_is_node_with_style(parent_data.kind.get()) {
+    let parent_row = rows.node(parent)?;
+    if !node_kind_is_node_with_style(parent_row.kind) {
         return None;
     }
 
@@ -734,56 +734,57 @@ pub(crate) fn removed_box_detachable_in_place(
         if !sibling.present {
             return true;
         }
-        let sibling_box =
-            StyleNodeID::from_raw(sibling.style_node).map_or(NodeSlotId::INVALID, |node| arena.bound_row(node));
-        if !sibling_box.is_invalid() {
-            return arena.data(sibling_box).parent.get() == parent;
+        match StyleNodeID::from_raw(sibling.style_node).and_then(|node| rows.bound_row(node)) {
+            Some(sibling_box) => rows.parent(sibling_box) == Some(parent),
+            None => !sibling.is_contents,
         }
-        !sibling.is_contents
     };
     if !sibling_is_direct_layout_child(&place.previous_sibling) && !sibling_is_direct_layout_child(&place.next_sibling)
     {
         return None;
     }
 
-    let parent_display = node_facts::node_display(arena.node_style_if_live(parent));
+    let parent_display = node_facts::node_display(rows.style(parent));
     if parent_display.is_flex_inside() || parent_display.is_grid_inside() {
         return Some((layout_node, parent));
     }
 
-    let is_anonymous = |node: NodeSlotId| node_has_flag(arena.data(node), NodeFlag::Anonymous);
-    let parent_children_are_inline = node_has_flag(parent_data, NodeFlag::ChildrenAreInline);
+    let parent_children_are_inline = node_facts::has_flag(parent_row, NodeFlag::ChildrenAreInline);
     let allowed =
         if (parent_display.is_flow_inside() || parent_display.is_flow_root_inside()) && !parent_children_are_inline {
             // Direct block children and in-flow atomic inline children can be detached without changing
             // anonymous wrapper structure. Other box kinds still rebuild the parent so tree fixup can
             // reconstruct any affected wrappers.
-            let previous = data.previous_sibling.get();
-            let next = data.next_sibling.get();
-            if !previous.is_invalid() && is_anonymous(previous) && !next.is_invalid() && is_anonymous(next) {
-                return None;
-            }
+            let is_anonymous = |node: NodeSlotId| {
+                rows.node(node)
+                    .is_some_and(|node| node_facts::has_flag(node, NodeFlag::Anonymous))
+            };
             // Once only anonymous wrappers would remain, a full rebuild would place their inline
             // content directly in the parent instead.
+            let mut previous = NodeSlotId::INVALID;
             let mut an_anonymous_inline_wrapper_remains = false;
             let mut an_in_flow_block_level_sibling_remains = false;
-            let mut sibling = parent_data.first_child.get();
-            while !sibling.is_invalid() {
-                let sibling_data = arena.data(sibling);
-                let next_sibling = sibling_data.next_sibling.get();
+            let mut sibling = parent_row.first_child;
+            while let Some(sibling_row) = rows.node(sibling) {
+                if sibling_row.next_sibling == layout_node {
+                    previous = sibling;
+                }
                 if sibling != layout_node
-                    && !(node_kind_is_node_with_style(sibling_data.kind.get())
-                        && node_facts::node_is_out_of_flow(sibling_data, arena.node_style_if_live(sibling)))
+                    && !(node_kind_is_node_with_style(sibling_row.kind)
+                        && node_facts::node_is_out_of_flow(sibling_row, rows.style(sibling)))
                 {
-                    if node_has_flag(sibling_data, NodeFlag::Anonymous)
-                        && node_has_flag(sibling_data, NodeFlag::ChildrenAreInline)
+                    if node_facts::has_flag(sibling_row, NodeFlag::Anonymous)
+                        && node_facts::has_flag(sibling_row, NodeFlag::ChildrenAreInline)
                     {
                         an_anonymous_inline_wrapper_remains = true;
                     } else {
                         an_in_flow_block_level_sibling_remains = true;
                     }
                 }
-                sibling = next_sibling;
+                sibling = sibling_row.next_sibling;
+            }
+            if is_anonymous(previous) && is_anonymous(row.next_sibling) {
+                return None;
             }
             if an_anonymous_inline_wrapper_remains && !an_in_flow_block_level_sibling_remains {
                 return None;
@@ -4347,18 +4348,6 @@ pub extern "C" fn layout_node_kind_is_svg_box(kind: NodeKind) -> bool {
 #[unsafe(no_mangle)]
 pub extern "C" fn layout_node_kind_is_svg_graphics_box(kind: NodeKind) -> bool {
     svg_formatting_context::kind_is_svg_graphics_box(kind)
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_node_is_atomic_inline(arena: *mut c_void, id: NodeSlotId) -> bool {
-    // SAFETY: The C++ caller passes the live arena handle of its document.
-    unsafe { super::layout_changes::ask_bool(arena, super::layout_changes::LayoutRead::NodeIsAtomicInline(id)) }
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_node_is_fragmented_inline(arena: *mut c_void, id: NodeSlotId) -> bool {
-    // SAFETY: The C++ caller passes the live arena handle of its document.
-    unsafe { super::layout_changes::ask_bool(arena, super::layout_changes::LayoutRead::NodeIsFragmentedInline(id)) }
 }
 
 fn node_is_generated_for_pseudo_element(data: &NodeData) -> bool {

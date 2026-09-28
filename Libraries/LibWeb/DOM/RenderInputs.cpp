@@ -115,12 +115,16 @@ void RenderInputs::set_needs_layout_update(Compositing::RustFFI::NodeSlotId slot
                 dbgln_if(UPDATE_LAYOUT_DEBUG, "NEED LAYOUT {}", to_string(reason));
         }
     }
-    Layout::RustFFI::layout_arena_set_needs_layout_update(layout_update_marks(m_document), slot, propagation == Layout::LayoutUpdatePropagation::ThroughAncestors);
+    if (propagation == Layout::LayoutUpdatePropagation::SelfOnlyIfBoundary) {
+        set_needs_layout_update_of_possible_boundary(slot, Layout::RustFFI::FfiPossibleBoundaryUpdate::StyleChange);
+        return;
+    }
+    Layout::RustFFI::layout_arena_set_needs_layout_update(layout_update_marks(m_document), slot, true);
 }
 
-void RenderInputs::set_needs_own_geometry_update(Compositing::RustFFI::NodeSlotId slot)
+void RenderInputs::set_needs_layout_update_of_possible_boundary(Compositing::RustFFI::NodeSlotId slot, Layout::RustFFI::FfiPossibleBoundaryUpdate update)
 {
-    Layout::RustFFI::layout_arena_set_needs_own_geometry_update(layout_update_marks(m_document), slot);
+    Layout::RustFFI::layout_arena_set_needs_layout_update_of_possible_boundary(layout_update_marks(m_document), slot, update);
 }
 
 void RenderInputs::reset_intrinsic_size_caches_of_self_and_ancestors(Compositing::RustFFI::NodeSlotId slot)

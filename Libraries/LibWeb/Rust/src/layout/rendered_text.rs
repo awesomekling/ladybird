@@ -10,7 +10,6 @@ use super::text_transform::{TextRenderingOptions, may_require_bidi_processing, r
 use super::{ComputedValuesView, LayoutNodeArena};
 use crate::css::css_enums::text_transform;
 use std::cell::{OnceCell, RefCell};
-use std::ffi::c_void;
 use std::sync::Arc;
 
 /// Selects the beginning or end of a transformed span for offsets inside it.
@@ -364,15 +363,6 @@ pub(super) fn length_in_code_units(text: &ak::Utf16String) -> usize {
         ak::Utf16StringUnits::Ascii(units) => units.len(),
         ak::Utf16StringUnits::Utf16(units) => units.len(),
     }
-}
-
-/// # Safety
-///
-/// The arena must be live on the document thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_text_has_source_range(arena: *mut c_void, id: NodeSlotId) -> bool {
-    // SAFETY: The caller passes the live arena handle of its document.
-    unsafe { super::layout_changes::ask_bool(arena, super::layout_changes::LayoutRead::TextHasSourceRange(id)) }
 }
 
 /// The arena must be live on the document thread with no outstanding borrows.

@@ -29,10 +29,10 @@ class Scrollbar;
 namespace Web::Layout {
 
 // Whether a row marked for layout carries the mark up through its ancestors, or, as a partial relayout boundary, keeps
-// it to itself.
+// it to itself with its own geometry, which the render owner decides for a row that may be one as it takes the mark in.
 enum class LayoutUpdatePropagation : u8 {
     ThroughAncestors,
-    BoundarySelfOnly,
+    SelfOnlyIfBoundary,
 };
 
 }

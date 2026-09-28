@@ -12,7 +12,7 @@
 
 use super::layout_changes::LayoutChange;
 use super::layout_node_arena::{BOUND_ROWS_PER_CHUNK, PseudoElementRows, SLOTS_PER_CHUNK};
-use super::node_data::{FfiNodeLink, NodeKind, NodeSlotId, PaintNode};
+use super::node_data::{FfiNodeLink, GENERATED_FOR_FIRST_LETTER, NodeKind, NodeSlotId, PaintNode};
 use super::node_facts;
 use super::tree_shape::PublishedStyle;
 use super::{HostTables, LayoutNodeArena};
@@ -549,6 +549,46 @@ pub unsafe extern "C" fn layout_arena_adopt_derived_node_style(arena: *mut c_voi
         .styles_sent_ahead
         .borrow_mut()
         .note(node, None, sent);
+}
+
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_node_is_atomic_inline(arena: *mut c_void, id: NodeSlotId) -> bool {
+    // SAFETY: Guaranteed by the caller.
+    let rows = unsafe { RowSnapshot::published(arena) };
+    rows.node(id)
+        .is_some_and(|node| node_facts::node_is_atomic_inline(node, rows.style(id)))
+}
+
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_node_is_fragmented_inline(arena: *mut c_void, id: NodeSlotId) -> bool {
+    // SAFETY: Guaranteed by the caller.
+    let rows = unsafe { RowSnapshot::published(arena) };
+    rows.node(id)
+        .is_some_and(|node| node_facts::node_is_fragmented_inline(node, rows.style(id)))
+}
+
+/// Whether the text row `id` renders a slice of its text node's data: the remainder beside a `::first-letter` box,
+/// whose first letter slice is a row built for the same text node inside that box. The layout tree build decides the
+/// slices, so a change to the data rebuilds them.
+///
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_text_has_source_range(arena: *mut c_void, id: NodeSlotId) -> bool {
+    // SAFETY: Guaranteed by the caller.
+    let rows = unsafe { RowSnapshot::published(arena) };
+    rows.rows_built_for_same_node(id).iter().skip(1).any(|&row| {
+        rows.parent(row)
+            .and_then(|parent| rows.node(parent))
+            .is_some_and(|parent| parent.generated_for == GENERATED_FOR_FIRST_LETTER)
+    })
 }
 
 #[cfg(test)]

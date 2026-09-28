@@ -74,8 +74,8 @@ unsafe extern "C" fn rust_detach_remaining_layout_rows_for_removal(
     }
 }
 
-/// Whether the layout tree lets the box of the node `place` names be detached from its parent's box in place. The
-/// rows are found by identity, so no shell is made for any box it looks at.
+/// Whether the layout tree lets the box of the node `place` names be detached from its parent's box in place, as the
+/// render owner published its rows.
 ///
 /// # Safety
 ///
@@ -86,11 +86,9 @@ unsafe extern "C" fn rust_removed_box_detachable_in_place(
     arena: *mut c_void,
     place: *const FfiRemovedBoxPlace,
 ) -> bool {
-    assert!(!arena.is_null() && !place.is_null());
+    assert!(!place.is_null());
     // SAFETY: Guaranteed by the entry point's contract.
-    let read = crate::layout::layout_changes::LayoutRead::RemovedBoxDetachableInPlace(unsafe { *place });
-    // SAFETY: As above.
-    unsafe { crate::layout::layout_changes::ask_bool(arena, read) }
+    removed_box_detachable_in_place(unsafe { RowSnapshot::published(arena) }, unsafe { &*place }).is_some()
 }
 
 /// Detaches the box of the node `place` names from its parent's box in place, with the paint state of every box in
@@ -111,7 +109,7 @@ unsafe extern "C" fn rust_detach_removed_box_in_place(
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     // SAFETY: Guaranteed by the entry point's contract.
     let Some((layout_node, parent)) =
-        removed_box_detachable_in_place(unsafe { LayoutNodeArena::from_handle(arena) }, unsafe { &*place })
+        removed_box_detachable_in_place(unsafe { RowSnapshot::published(arena) }, unsafe { &*place })
     else {
         return FfiRemovedBoxDetach::NotAllowed;
     };

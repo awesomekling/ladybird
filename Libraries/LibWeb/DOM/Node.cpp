@@ -2750,8 +2750,11 @@ void Node::apply_layout_tree_update_mark(SetNeedsLayoutTreeUpdateReason reason)
             box.arena(), box.slot(),
             is_structural_boundary_self_rebuild_reason(reason));
 
-        if (classification.marks_partial_relayout_boundary_self_only) {
-            document().render_inputs_for_write().set_needs_layout_update(box.slot(), SetNeedsLayoutReason::LayoutTreeUpdate, Layout::LayoutUpdatePropagation::BoundarySelfOnly);
+        if (classification.may_be_partial_relayout_boundary) {
+            auto update = reason == SetNeedsLayoutTreeUpdateReason::NodeInsertBefore
+                ? Layout::RustFFI::FfiPossibleBoundaryUpdate::ChildListInsertion
+                : Layout::RustFFI::FfiPossibleBoundaryUpdate::ChildListChange;
+            document().render_inputs_for_write().set_needs_layout_update_of_possible_boundary(box.slot(), update);
         } else if (reason == SetNeedsLayoutTreeUpdateReason::NodeInsertBefore) {
             // What an insertion invalidates depends on the boxes it attaches, which only the layout tree build knows.
             document().render_inputs_for_write().defer_child_list_insertion_layout_update(box.slot());
