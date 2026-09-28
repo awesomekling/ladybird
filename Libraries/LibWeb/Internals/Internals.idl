@@ -227,7 +227,8 @@ interface Internals {
     undefined setRenderClockSuspended(boolean suspended);
     // Hands the leases a render clock ticks a display tick at frameTimeMs (like injectRenderingOpportunity()), as the
     // render clock would. Resolves with whether a lease took it, once it has run and the page adopted it. With
-    // setManualRenderingOpportunities(true, true), no display tick but these reaches the leases.
+    // setManualRenderingOpportunities(true, true), no display tick but these reaches the leases. Beside a frame a hold
+    // keeps in flight, the tick waits for the held run and takes nothing back.
     Promise<boolean> injectClockTick(double frameTimeMs);
     undefined resetJoinCounters();
     // Prints the reasons that blocked this document the longest to the debug log.

@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<style>
+    .box {
+        width: 100px;
+        height: 20px;
+        animation: flip 20s linear;
+    }
+    /* Each sample 2 s apart floats the box differently: a sample the arena cannot take, which only its entry keeps. */
+    @keyframes flip {
+        0% { float: none; }
+        10% { float: left; }
+        20% { float: none; }
+        30% { float: left; }
+        40% { float: none; }
+        50% { float: left; }
+        60% { float: none; }
+        70% { float: left; }
+        80% { float: none; }
+        90% { float: left; }
+        100% { float: none; }
+    }
+    .hidden {
+        display: none;
+    }
+</style>
+<script src="../../include.js"></script>
+<script>
+    function nextTask() {
+        const { promise, resolve } = Promise.withResolvers();
+        const channel = new MessageChannel();
+        channel.port1.onmessage = resolve;
+        channel.port2.postMessage(null);
+        return promise;
+    }
+
+    async function frameTimeAfter(time) {
+        while (performance.now() <= time + 1)
+            await nextTask();
+        return performance.now();
+    }
+
+    // A clock tick samples an element's animation while the style pass of a rendering update that clears the element's
+    // style (display: none, or its animation gone) is in flight. The page adopts the tick before it has taken the pass
+    // back: the sample goes over nothing, as the element holds no animated style once the pass is in.
+    async function clearBesideATick(clear) {
+        const box = document.body.appendChild(document.createElement("div"));
+        box.className = "box";
+        let frameTime = performance.now();
+        for (let i = 0; i < 20 && !internals.renderClockTicks(document); ++i) {
+            frameTime = await frameTimeAfter(frameTime);
+            internals.injectRenderingOpportunity(frameTime);
+            await nextTask();
+            while (internals.frameSchedulerState() !== "idle")
+                await nextTask();
+        }
+        const leased = internals.renderClockTicks(document);
+        frameTime = await frameTimeAfter(frameTime);
+        await internals.injectClockTick(frameTime);
+
+        clear(box);
+        internals.holdNextStyleFrame("before-completion", document);
+        frameTime = await frameTimeAfter(frameTime);
+        internals.injectRenderingOpportunity(frameTime);
+        let heldAt = "";
+        for (let i = 0; i < 100 && !heldAt; ++i) {
+            await nextTask();
+            heldAt = internals.waitForHeldFrame();
+        }
+        // The tick waits for the held pass, and runs once it is done, before the page takes the pass back.
+        const ticksRun = internals.getRenderClockCounters().ticksRun;
+        const ticked = internals.injectClockTick(frameTime + 2000);
+        internals.releaseHeldFrame();
+        internals.waitForFrameToFinish();
+        for (const start = performance.now(); performance.now() - start < 1000 && internals.getRenderClockCounters().ticksRun === ticksRun; ) { }
+        for (const start = performance.now(); performance.now() - start < 20; ) { }
+        const tickRan = internals.getRenderClockCounters().ticksRun !== ticksRun;
+        const taken = await ticked;
+        while (internals.frameSchedulerState() !== "idle")
+            await nextTask();
+        println(`leased: ${leased}, held: ${heldAt}, tick ran beside the pass: ${tickRan}, taken: ${taken}`);
+        const style = getComputedStyle(box);
+        println(`display: ${style.display}, float: ${style.float}, animations: ${box.getAnimations().length}`);
+        box.remove();
+    }
+
+    asyncTest(async done => {
+        internals.setManualRenderingOpportunities(true, true);
+        await nextTask();
+        await clearBesideATick(box => box.classList.add("hidden"));
+        await clearBesideATick(box => (box.style.animation = "none"));
+        internals.setManualRenderingOpportunities(false);
+        done();
+    });
+</script>

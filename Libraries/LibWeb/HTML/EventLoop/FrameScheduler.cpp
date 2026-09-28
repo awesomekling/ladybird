@@ -1219,7 +1219,7 @@ FrameScheduler::AdoptedClockTicks FrameScheduler::adopt_clock_tick(DOM::Document
     // What the ticks left, the document adopts as the last of them left it. Their snapshot converts rects to viewport
     // space as one the document published now would: the ticks move no visual context.
     auto visual_contexts = document.accumulated_visual_contexts_are_up_to_date() ? Painting::QueryVisualContexts::UpToDate : Painting::QueryVisualContexts::Stale;
-    auto adoption = Layout::RustFFI::rust_document_clock_take_adoption(arena, Painting::QuerySnapshot::viewport_of(document, visual_contexts));
+    auto adoption = Layout::RustFFI::rust_document_clock_take_adoption(document.style_computer().style_engine().rust_handle(), arena, Painting::QuerySnapshot::viewport_of(document, visual_contexts));
     AdoptedClockTicks adopted { adoption.time, Painting::QuerySnapshot::adopt(adoption.query_snapshot, visual_contexts) };
     if (!adoption.has_samples)
         return adopted;
@@ -1235,7 +1235,8 @@ FrameScheduler::AdoptedClockTicks FrameScheduler::adopt_clock_tick(DOM::Document
         CSS::StyleEngineFFI::FfiRowSampledInPass sample {};
         while (CSS::StyleEngineFFI::style_engine_clock_tick_take_entry(&style_node, &style_record_before, &installed_in_arena, &sample)) {
             auto element = document.style_computer().element_for_style_node(CSS::StyleNodeID { style_node });
-            // An element that left the document, or that the main thread restyled beside the tick, takes nothing.
+            // An element that left the document, or that the main thread restyled beside the tick (a frame in flight
+            // that held the engine included, which taking the adoption took in), takes nothing.
             if (!element || !element->is_connected() || DOM::AbstractElement { *element }.style_record_identity().value() != style_record_before)
                 continue;
             if (!sample.present)

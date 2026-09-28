@@ -1613,7 +1613,10 @@ GC::Ref<WebIDL::Promise> Internals::inject_clock_tick(double frame_time_ms)
 {
     auto promise = WebIDL::create_promise_for(window());
     auto frame_time = window().associated_document().relevant_settings_object().time_origin() + frame_time_ms;
-    frame_scheduler_after_rendering_updates().inject_render_clock_tick(frame_time, [window = GC::Root { window() }, promise = GC::Root { promise }](bool ticked) {
+    // Beside a frame the test holds, the tick waits behind the held run, as a display tick would.
+    auto held_at = Layout::RustFFI::FfiStageHoldPoint::BeforeRun;
+    auto& frame_scheduler = Layout::RustFFI::rust_stage_thread_wait_for_held_stage(0, &held_at) ? HTML::main_thread_event_loop().frame_scheduler() : frame_scheduler_after_rendering_updates();
+    frame_scheduler.inject_render_clock_tick(frame_time, [window = GC::Root { window() }, promise = GC::Root { promise }](bool ticked) {
         HTML::TemporaryExecutionContext execution_context { window->principal_realm() };
         WebIDL::resolve_promise(*promise, JS::Value(ticked));
     });

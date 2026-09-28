@@ -44,6 +44,10 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct StyleEngineHandle(*mut c_void);
 
+/// That the main thread has an engine home ([`StyleEngineHandle::bring_home`]): no frame in flight holds it, so no
+/// entrance of the engine takes a frame in until the main thread submits one again.
+pub(crate) struct AtHome(());
+
 /// What C++ holds to send one document's style engine an input or run its style update: the same
 /// home as a [`StyleEngineHandle`], which C++ reads the engine through. Only a style engine C++ may
 /// write hands it out, and only the document's render inputs give that out, dropping the query
@@ -652,19 +656,20 @@ impl StyleEngineHandle {
 
     /// Brings the engine home for the main thread, which is about to enter it at `entry`
     /// once it has done what it does before.
-    pub(crate) fn bring_home(self, entry: &'static str) {
-        self.bring_home_at(entry, 0);
+    pub(crate) fn bring_home(self, entry: &'static str) -> AtHome {
+        self.bring_home_at(entry, 0)
     }
 
     /// Like [`Self::bring_home`], for a C++ call site `file` and `line` name.
-    pub(crate) fn bring_home_at(self, file: &'static str, line: u32) {
+    pub(crate) fn bring_home_at(self, file: &'static str, line: u32) -> AtHome {
         if self.is_null() || crate::stage_thread::no_stage_is_submitted() {
-            return;
+            return AtHome(());
         }
         if LENT_TO_THIS_THREAD.get() == self.address() || crate::stage_thread::running_inside_stage() {
-            return;
+            return AtHome(());
         }
         self.home().bring_home(file, line);
+        AtHome(())
     }
 
     /// The engine of an engine that runs only for a replay, which no frame is ever in flight for.
