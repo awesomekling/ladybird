@@ -2367,7 +2367,7 @@ impl Drop for HostKeyframeSets {
 /// Gives up the `@keyframes` row of a shadow root's scope, which is on its way out, with the
 /// references to the keyframe sets it names, `sets`, which the engine lets go of through `release`
 /// once the row is gone. A garbage collection's finalizer calls it: it waits for the owner, never
-/// for the engine's token.
+/// for the engine.
 ///
 /// # Safety
 /// `engine` must be live; `release` must accept `sets` once, on the main thread.

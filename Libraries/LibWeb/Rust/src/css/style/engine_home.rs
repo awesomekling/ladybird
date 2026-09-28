@@ -7,22 +7,22 @@
 //! Where one document's style engine lives, and the right to reach it.
 //!
 //! C++ and the layout arena name an engine by a [`StyleEngineHandle`], which points to the engine's
-//! home and has no way to the engine but the home's. The right to reach the engine is its
-//! [`StyleEngineToken`], of which there is one per engine. It is at home on the main thread, or
-//! with the one submitted stage that took it by value ([`StyleEngineHandle::lend`]) and sends it
-//! home once it is done with the engine ([`StyleEngineLoan::send_home`], or the loan's drop). The
-//! main thread settles the lend once it has taken the stage back ([`StyleEngineSettlement`]), which
-//! keeps the home until then, even where the engine has gone away first.
+//! home and has no way to the engine but the home's. The engine is at home, or lent to the one
+//! submitted stage that holds its [`StyleEngineLoan`] ([`StyleEngineHandle::lend`]), which sends
+//! word home once it is done with the engine ([`StyleEngineLoan::send_home`], or the loan's drop).
+//! The main thread settles the lend once it has taken the stage back ([`StyleEngineSettlement`]),
+//! which keeps the home until then, even where the engine has gone away first.
 //!
-//! The main thread enters the engine through the home. With the token home it goes on at once.
-//! With the token away it waits for the stage that holds it and nothing else, unless what the stage
-//! will still owe the frame it runs in (the install of its style batch, or the frame's take-back)
-//! keeps the entrance out: then it takes that frame in, as a forced join does.
+//! The main thread still enters the engine through the home where the layout arena reaches it (a
+//! style install, a record pin), and waits for the engine before what it sends the render owner.
+//! With the engine home it goes on at once. With the engine lent it waits for the stage that holds
+//! it and nothing else, unless what the stage will still owe the frame it runs in (the install of its
+//! style batch, or the frame's take-back) keeps the entrance out: then it takes that frame in, as a
+//! forced join does.
 
 use super::StyleEngine;
 use std::cell::{Cell, UnsafeCell};
 use std::ffi::c_void;
-use std::marker::PhantomData;
 use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -54,11 +54,6 @@ impl StyleEngineInputHandle {
         ThroughRenderInputs(())
     }
 
-    /// The replay tool stands in for the host, and for its render inputs with it.
-    pub fn standing_in_for_render_inputs(handle: StyleEngineHandle) -> Self {
-        Self(handle)
-    }
-
     /// A unit test stands in for the host as well, for an engine it owns.
     #[cfg(test)]
     pub(crate) fn for_test_engine(engine: *mut StyleEngine) -> Self {
@@ -72,23 +67,11 @@ impl StyleEngineInputHandle {
 #[derive(Clone, Copy)]
 pub(crate) struct ThroughRenderInputs(());
 
-/// The right to reach one style engine. Exactly one exists per engine: only the engine's home makes
-/// it, and it cannot be cloned. It is `Send`, so a stage can take it along, and not `Sync`, so a
-/// shared borrow of it stays on the thread that holds it.
-pub(crate) struct StyleEngineToken {
-    engine: NonNull<StyleEngine>,
-    not_sync: PhantomData<Cell<()>>,
-}
-
-// SAFETY: The token is the only right to reach its engine, and the engine is `Send` (asserted
-// beside the layout arena's link to it): whoever holds the token reaches the engine alone.
-unsafe impl Send for StyleEngineToken {}
-
-/// What the main thread still owes the frame of the stage that sent the token home, before an
+/// What the main thread still owes the frame of the stage that sent the engine home, before an
 /// entrance may go on.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub(crate) enum Owed {
-    /// Nothing: the token is home.
+    /// Nothing: the engine is home.
     Nothing,
     /// The install of the style batch the stage's pass published, which changes no published
     /// record: an entrance that only reads one goes on.
@@ -97,7 +80,7 @@ pub(crate) enum Owed {
     TakeBack,
 }
 
-/// The kind of stage the token is lent to, until the frame it runs in is taken back.
+/// The kind of stage the engine is lent to, until the frame it runs in is taken back.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Holder {
     /// A style pass alone, which what the host publishes to the engine waits to be drained by.
@@ -107,18 +90,12 @@ pub(crate) enum Holder {
     LayoutPass,
 }
 
-/// A token a stage sends home.
-struct Arrival {
-    token: StyleEngineToken,
-    owed: Owed,
-}
-
-/// Where the token is: home, owing its stage's frame nothing or `owed`, or away.
+/// Where the engine is: home, owing its stage's frame `owed`, or away.
 struct Slot {
-    token: Option<StyleEngineToken>,
     owed: Owed,
-    /// While a stage holds the token: where it sends the token home, and the least it will owe then.
-    away: Option<(Receiver<Arrival>, Owed)>,
+    /// While a stage holds the engine: where it sends what it owes once it is done with the engine,
+    /// and the least it will owe then.
+    away: Option<(Receiver<Owed>, Owed)>,
 }
 
 /// Where one document's style engine lives.
@@ -126,15 +103,15 @@ struct StyleEngineHome {
     engine: NonNull<StyleEngine>,
     /// Written on the main thread only, and read on a stage only while the main thread waits for it.
     slot: UnsafeCell<Slot>,
-    /// Whom the token is lent to, until the frame it went into is taken back.
+    /// Whom the engine is lent to, until the frame it went into is taken back.
     holder: Cell<Option<Holder>>,
-    /// The layout arena of the engine's document, which the stages that take the token run for.
+    /// The layout arena of the engine's document, which the stages the engine is lent to run for.
     arena: Cell<usize>,
     /// The document whose render state's arena links the engine, whose render owner owns the engine.
     document: Cell<crate::render_owner::DocumentId>,
 }
 
-/// What the main thread owes the home of a token it lent to a stage, once it has taken the stage
+/// What the main thread owes the home of an engine it lent to a stage, once it has taken the stage
 /// back: the lend's settlement, which keeps the home until then. On the main thread.
 #[must_use = "a lend is settled once its stage is taken back"]
 pub(crate) struct StyleEngineSettlement {
@@ -142,31 +119,38 @@ pub(crate) struct StyleEngineSettlement {
 }
 
 impl StyleEngineSettlement {
-    /// Takes the token back from the stage it was lent to, which the main thread has taken back.
+    /// Takes the engine back from the stage it was lent to, which the main thread has taken back.
     pub(crate) fn settle(self) {
         self.home.settle();
     }
 }
 
-/// A token lent to a stage, which it sends home when it is done with the engine, or when it drops
-/// the loan, owing the frame's take-back then.
+/// The right to reach one style engine, lent to a stage: the one right to it while the stage holds
+/// it. It is `Send`, so a stage can take it along, and not `Sync`, so a shared borrow of it stays on
+/// the thread that holds it. The loan's drop sends the engine home, owing what [`Self::send_home`]
+/// said, or the frame's take-back.
 pub(crate) struct StyleEngineLoan {
-    token: Option<StyleEngineToken>,
+    engine: NonNull<StyleEngine>,
     /// The home, which names the engine lent to a thread.
     home: usize,
-    to_home: Sender<Arrival>,
+    to_home: Sender<Owed>,
+    owed: Owed,
 }
 
+// SAFETY: The loan is the only right to reach its engine, and the engine is `Send` (asserted beside
+// the layout arena's link to it): whoever holds the loan reaches the engine alone.
+unsafe impl Send for StyleEngineLoan {}
+
 thread_local! {
-    // The engine a stage lent the token it holds to while it runs, as its home and the engine.
+    // The engine a stage lent the loan it holds to while it runs, as its home and the engine.
     static LENT_TO_THIS_THREAD: Cell<(usize, *mut StyleEngine)> = const { Cell::new((0, std::ptr::null_mut())) };
 }
 
-/// Set while the main thread waits for a token to come home, for a flight that sends one home
+/// Set while the main thread waits for an engine to come home, for a flight that sends one home
 /// owing its take-back to end there.
 static MAIN_WAITS_FOR_ARRIVAL: AtomicBool = AtomicBool::new(false);
 
-/// Whether the main thread waits for a stage to send a token home.
+/// Whether the main thread waits for a stage to send an engine home.
 pub(crate) fn main_waits_for_arrival() -> bool {
     MAIN_WAITS_FOR_ARRIVAL.load(Ordering::Acquire)
 }
@@ -194,30 +178,22 @@ impl StyleEngineLoan {
     /// calls that reaches the engine through its handle or its document's arena reaches it through
     /// this loan.
     pub(crate) fn lend_to_this_thread<T>(&mut self, run: impl FnOnce(&mut StyleEngine) -> T) -> T {
-        let engine = self.token.as_ref().expect("a loan holds its token").engine.as_ptr();
-        // SAFETY: The loan holds the token, and so the right to reach the engine.
-        unsafe { reach_on_this_thread(self.home, engine, run) }
+        // SAFETY: The loan is the right to reach the engine.
+        unsafe { reach_on_this_thread(self.home, self.engine.as_ptr(), run) }
     }
 
-    /// Sends the token home: the stage is done with the engine, and the main thread owes its frame
-    /// `owed` before an entrance goes on.
+    /// Sends the engine home: the stage is done with it, and the main thread owes its frame `owed`
+    /// before an entrance goes on.
     pub(crate) fn send_home(mut self, owed: Owed) {
-        self.send(owed);
-    }
-
-    fn send(&mut self, owed: Owed) {
-        let Some(token) = self.token.take() else {
-            return;
-        };
-        crate::stage_thread::release_handoff();
-        // The home keeps its receiver until the token has arrived.
-        let _ = self.to_home.send(Arrival { token, owed });
+        self.owed = owed;
     }
 }
 
 impl Drop for StyleEngineLoan {
     fn drop(&mut self) {
-        self.send(Owed::TakeBack);
+        crate::stage_thread::release_handoff();
+        // The home keeps its receiver until the engine has arrived.
+        let _ = self.to_home.send(self.owed);
     }
 }
 
@@ -250,7 +226,7 @@ impl StyleEngineHome {
         unsafe { &mut *self.slot.get() }
     }
 
-    /// Takes in the token a stage sent home, if one has, or waits for it if `wait`. On the main
+    /// Takes in the engine a stage sent home, if it has, or waits for it if `wait`. On the main
     /// thread.
     fn take_in_arrival(&self, wait: bool) {
         // SAFETY: On the main thread.
@@ -267,21 +243,20 @@ impl StyleEngineHome {
         } else {
             arrival.try_recv()
         };
-        let Arrival { token, owed } = match received {
-            Ok(arrival) => arrival,
+        let owed = match received {
+            Ok(owed) => owed,
             Err(TryRecvError::Empty) => return,
-            // The stage lost the token, which only a stage that aborts does.
-            Err(TryRecvError::Disconnected) => std::process::abort(),
+            // A loan's drop sends the engine home, so only a stage that aborts loses it.
+            Err(TryRecvError::Disconnected) => {
+                debug_assert!(false, "a stage lost the style engine lent to it");
+                Owed::TakeBack
+            }
         };
         crate::stage_thread::acquire_handoff();
-        *slot = Slot {
-            token: Some(token),
-            owed,
-            away: None,
-        };
+        *slot = Slot { owed, away: None };
     }
 
-    /// Whether the token is home, and what the main thread owes, or at best will owe, the frame of
+    /// Whether the engine is home, and what the main thread owes, or at best will owe, the frame of
     /// the stage it was lent to, once whatever the stage sent home has been taken in.
     fn state(&self) -> (bool, Owed) {
         self.take_in_arrival(false);
@@ -293,7 +268,7 @@ impl StyleEngineHome {
         }
     }
 
-    /// Brings the token home for an entrance that does `access`, as the module describes. `file`,
+    /// Brings the engine home for an entrance that does `access`, as the module describes. `file`,
     /// `line` and `column` name the entrance for the forced-join log.
     fn bring_home(&self, access: Access, file: &'static str, line: u32, column: u32) {
         if self.state() == (true, Owed::Nothing) {
@@ -307,14 +282,12 @@ impl StyleEngineHome {
                 return;
             }
             if !arrived && (only_wait || access.goes_on_owing(owed)) {
-                // An entrance that must not wait leaves its write for the token instead
-                // (`StyleEngineHandle::write_or_defer`): the main thread may hold the loan that
-                // would send it home.
+                // The main thread may hold the loan that would send the engine home.
                 debug_assert!(
                     !only_wait,
-                    "a style engine entrance that must not wait waits for its token"
+                    "a style engine entrance that must not wait waits for its engine"
                 );
-                self.wait_for_arrival();
+                self.take_in_arrival(true);
                 continue;
             }
             if !joined {
@@ -325,18 +298,13 @@ impl StyleEngineHome {
             // Nothing could take the frame in, as work a stage joined the main thread for, or a
             // garbage collection, cannot: the entrance only waits for the stage to be done.
             if !arrived {
-                self.wait_for_arrival();
+                self.take_in_arrival(true);
             }
             return;
         }
     }
 
-    /// Waits for the stage that holds the token to send it home, and takes it in.
-    fn wait_for_arrival(&self) {
-        self.take_in_arrival(true);
-    }
-
-    /// Takes the token back from the stage it was lent to, whose frame the main thread has taken
+    /// Takes the engine back from the stage it was lent to, whose frame the main thread has taken
     /// back. On the main thread.
     fn settle(&self) {
         self.take_in_arrival(true);
@@ -356,7 +324,7 @@ impl StyleEngineHandle {
         self.0.is_null()
     }
 
-    /// Gives `engine` a home, with its token, and returns the handle that names it. The handle holds
+    /// Gives `engine` a home and returns the handle that names it. The handle holds
     /// the home until [`Self::destroy`], and each lend's settlement until it is settled.
     pub(crate) fn create(engine: Box<StyleEngine>) -> Self {
         Self::with_home(NonNull::from(Box::leak(engine)))
@@ -366,10 +334,6 @@ impl StyleEngineHandle {
         let home = Rc::new(StyleEngineHome {
             engine,
             slot: UnsafeCell::new(Slot {
-                token: Some(StyleEngineToken {
-                    engine,
-                    not_sync: PhantomData,
-                }),
                 owed: Owed::Nothing,
                 away: None,
             }),
@@ -403,8 +367,8 @@ impl StyleEngineHandle {
         unsafe { &*self.0.cast::<StyleEngineHome>() }
     }
 
-    /// Takes the engine out of its home, which goes away once every lend of the token is settled.
-    /// The main thread brings the token home first.
+    /// Takes the engine out of its home, which goes away once every lend of the engine is settled.
+    /// The main thread brings the engine home first.
     ///
     /// # Safety
     ///
@@ -416,17 +380,17 @@ impl StyleEngineHandle {
         home.settle();
         // SAFETY: Guaranteed by the caller: this is the handle's hold on the home, from `create`.
         let home = unsafe { Rc::from_raw(self.0.cast::<StyleEngineHome>().cast_const()) };
-        // SAFETY: The home owned the engine, which `create` leaked into it, and its token is home.
+        // SAFETY: The home owned the engine, which `create` leaked into it, and the engine is home.
         unsafe { Box::from_raw(home.engine.as_ptr()) }
     }
 
     /// On the render owner, in a unit it runs with the render state of the engine's document: runs `run` with the
-    /// engine, which whatever `run` calls reaches through the handle too. The owner takes no token: it holds the
+    /// engine, which whatever `run` calls reaches through the handle too. The owner takes no loan: it holds the
     /// document's render state, and the main thread waits for the unit.
     ///
     /// # Safety
     ///
-    /// The handle must name a live engine whose token is home, and the main thread must wait for the unit, reaching
+    /// The handle must name a live engine that is home, and the main thread must wait for the unit, reaching
     /// nothing of the engine, until this returns.
     pub(crate) unsafe fn reach_on_owner<T>(self, run: impl FnOnce(&mut StyleEngine) -> T) -> T {
         // Only the engine's address is read of the home, which the main thread does not write while it waits.
@@ -435,7 +399,7 @@ impl StyleEngineHandle {
         unsafe { reach_on_this_thread(self.address(), engine, run) }
     }
 
-    /// Names the layout arena of the engine's document `document`, which the stages that take the token run for.
+    /// Names the layout arena of the engine's document `document`, which the stages the engine is lent to run for.
     pub(crate) fn link_arena(self, arena: usize, document: crate::render_owner::DocumentId) {
         self.home().arena.set(arena);
         self.home().document.set(document);
@@ -449,8 +413,8 @@ impl StyleEngineHandle {
         self.home().document.get()
     }
 
-    /// Lends the token to a stage of the `holder` kind, which sends it home owing no less than
-    /// `owed_at_best`. On the main thread, which brings the token home first, and settles the lend
+    /// Lends the engine to a stage of the `holder` kind, which sends it home owing no less than
+    /// `owed_at_best`. On the main thread, which brings the engine home first, and settles the lend
     /// with the settlement once it has taken the stage back.
     pub(crate) fn lend(self, holder: Holder, owed_at_best: Owed) -> (StyleEngineLoan, StyleEngineSettlement) {
         let home = self.home();
@@ -462,7 +426,6 @@ impl StyleEngineHandle {
         // SAFETY: On the main thread.
         let slot = unsafe { home.slot() };
         let (to_home, arrival) = channel();
-        let token = slot.token.take().expect("the token is home");
         slot.away = Some((arrival, owed_at_best));
         home.holder.set(Some(holder));
         crate::stage_thread::release_handoff();
@@ -474,15 +437,16 @@ impl StyleEngineHandle {
         };
         (
             StyleEngineLoan {
-                token: Some(token),
+                engine: home.engine,
                 home: self.address(),
                 to_home,
+                owed: Owed::TakeBack,
             },
             StyleEngineSettlement { home },
         )
     }
 
-    /// The kind of stage the token is lent to, until its frame is taken back.
+    /// The kind of stage the engine is lent to, until its frame is taken back.
     pub(crate) fn holder(self) -> Option<Holder> {
         if self.is_null() {
             return None;
@@ -495,8 +459,8 @@ impl StyleEngineHandle {
         self.is_null() || self.home().state() == (true, Owed::Nothing)
     }
 
-    /// The engine, for whoever holds the token: a stage it is lent to, on the thread the stage lent
-    /// it to, or the main thread, which brings the token home first for an entrance at `entry`.
+    /// The engine, for whoever may reach it: a stage it is lent to, on the thread the stage lent it
+    /// to, or the main thread, which brings the engine home first for an entrance at `entry`.
     ///
     /// # Safety
     ///
@@ -514,10 +478,10 @@ impl StyleEngineHandle {
         let home = self.home();
         let (lent_home, lent_engine) = LENT_TO_THIS_THREAD.get();
         if lent_home == self.address() {
-            // SAFETY: The stage that holds the token lent it to this thread; guaranteed by the caller.
+            // SAFETY: The stage that holds the loan lent it to this thread; guaranteed by the caller.
             return unsafe { &mut *lent_engine };
         }
-        // A token is lent only to a submitted stage, so with none submitted every token is home.
+        // An engine is lent only to a submitted stage, so with none submitted every engine is home.
         if crate::stage_thread::no_stage_is_submitted() {
             // What the main thread sent the owner of the engine goes in before the main thread reaches it.
             super::owner_calls::apply_changes_before_main_reaches(self);
@@ -527,21 +491,21 @@ impl StyleEngineHandle {
         if crate::stage_thread::running_inside_stage() {
             debug_assert!(
                 !crate::stage_thread::running_submitted_stage(),
-                "a submitted stage reaches a style engine it holds no token for"
+                "a submitted stage reaches a style engine it holds no loan of"
             );
             // A stage the main thread waits for reaches the engine as the main thread would, which
-            // brought the token home before it waited.
+            // brought the engine home before it waited.
             // SAFETY: Guaranteed by the caller.
             return unsafe { &mut *home.engine.as_ptr() };
         }
         home.bring_home(access, entry, 0, 0);
         super::owner_calls::apply_changes_before_main_reaches(self);
-        // SAFETY: The token is home, or the stage that holds it is done with the engine as far as
-        // `access` reaches; guaranteed by the caller.
+        // SAFETY: The engine is home, or the stage that holds it is done with it as far as `access`
+        // reaches; guaranteed by the caller.
         unsafe { &mut *home.engine.as_ptr() }
     }
 
-    /// Brings the token home for the main thread, which is about to enter the engine at `entry`
+    /// Brings the engine home for the main thread, which is about to enter it at `entry`
     /// once it has done what it does before.
     pub(crate) fn bring_home(self, entry: &'static str) {
         self.bring_home_at(entry, 0, 0);
@@ -596,7 +560,7 @@ mod tests {
     }
 
     #[test]
-    fn a_lent_token_comes_home_with_what_its_stage_sends() {
+    fn a_lent_engine_comes_home_with_what_its_stage_sends() {
         let (_engine, handle) = test_engine();
         let (loan, settlement) = handle.lend(Holder::LayoutPass, Owed::Nothing);
         assert!(!handle.is_home());
@@ -610,7 +574,7 @@ mod tests {
     }
 
     #[test]
-    fn a_dropped_loan_sends_the_token_home_owing_the_take_back() {
+    fn a_dropped_loan_sends_the_engine_home_owing_the_take_back() {
         let (_engine, handle) = test_engine();
         let (loan, settlement) = handle.lend(Holder::StylePass, Owed::TakeBack);
         drop(loan);
@@ -646,7 +610,7 @@ mod tests {
 
     #[test]
     fn a_stage_reaches_the_engine_through_the_loan_it_lent_to_its_thread() {
-        // A handle is not `Send`: a stage reaches its engine through its token alone. C++ the stage
+        // A handle is not `Send`: a stage reaches its engine through its loan alone. C++ the stage
         // calls may hold the handle all the same, which this stands in for.
         struct HandleInCpp(StyleEngineHandle);
         // SAFETY: The test only uses the handle as C++ would.
@@ -668,7 +632,7 @@ mod tests {
         .join()
         .unwrap();
         assert_eq!(reached, engine_address as usize);
-        // The main thread's entrance takes the token in, and goes on.
+        // The main thread's entrance takes the engine in, and goes on.
         // SAFETY: The engine is live and nothing else borrows it.
         let entered = unsafe { handle.enter("test entrance") };
         assert_eq!(std::ptr::from_mut(entered), engine_address);

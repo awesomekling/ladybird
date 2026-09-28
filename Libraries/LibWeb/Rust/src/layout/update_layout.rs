@@ -2133,7 +2133,7 @@ unsafe fn go_on_from_driven_frame(
         return outcome;
     }
     let take_back = pass.take_back();
-    // The pass reads the style engine through the arena, and takes the engine's token along.
+    // The pass reads the style engine through the arena, and takes the engine along.
     // SAFETY: Guaranteed by the caller.
     let style_engine = unsafe { super::HostTables::beside_frame(arena_handle) }.style_engine();
     let (loan, settlement) = (!style_engine.is_null())
@@ -2146,7 +2146,7 @@ unsafe fn go_on_from_driven_frame(
         .unzip();
     // SAFETY: The frame reaches only the arena and its style engine, which the frame in flight owns
     // until the document thread takes it back: every document-thread path to the arena and the tree
-    // update marks it holds joins the frame first, and the engine's token goes with the pass.
+    // update marks it holds joins the frame first, and the engine goes with the pass.
     unsafe {
         crate::stage_thread::submit_stage_with_take_back(
             "layout",
@@ -2502,7 +2502,7 @@ pub unsafe extern "C" fn layout_arena_join_frame_in_flight(
     crate::stage_thread::join_document_frame_in_flight_at(arena, file, line, 0);
 }
 
-/// Brings the document's style engine token home, as an entrance of the engine does (see
+/// Brings the document's style engine home, as an entrance of the engine does (see
 /// `crate::css::style::engine_home`), for a main-side write to the engine. `file` and `line` name
 /// the C++ call site for the forced-join log.
 ///

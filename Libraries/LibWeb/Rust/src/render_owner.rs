@@ -155,9 +155,9 @@ impl Change {
 
 /// How a unit that applies a document's changes reaches its style engine.
 enum EngineReach<'a> {
-    /// The main thread waits for the unit, with the engine's token home.
+    /// The main thread waits for the unit, with the engine home.
     Home,
-    /// The unit runs beside the main thread, which lent it the token.
+    /// The unit runs beside the main thread, which lent it the engine.
     Lent(&'a mut crate::css::style::engine_home::StyleEngineLoan),
 }
 
@@ -168,7 +168,7 @@ impl EngineReach<'_> {
         run: impl FnOnce(&mut crate::css::style::StyleEngine) -> T,
     ) -> T {
         match self {
-            // SAFETY: The engine is the document's, and the main thread waits for the unit with the token home.
+            // SAFETY: The engine is the document's, and the main thread waits for the unit with the engine home.
             Self::Home => unsafe { engine.reach_on_owner(run) },
             Self::Lent(loan) => loan.lend_to_this_thread(run),
         }
@@ -336,7 +336,7 @@ impl RenderState {
     }
 
     /// The state's arena and what lives beside it, for a rendering update, which runs beside the main thread with the
-    /// style engine's token lent to it as `style_engine`.
+    /// style engine lent to it as `style_engine`.
     fn state_beside_main_thread(
         &mut self,
         style_engine: Option<&mut crate::css::style::engine_home::StyleEngineLoan>,

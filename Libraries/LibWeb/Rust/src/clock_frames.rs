@@ -824,7 +824,7 @@ pub unsafe extern "C" fn rust_document_clock_submit_tick(
     *published.outcome.lock().expect("clock publication outcome") = None;
     // The host shows what this tick installs itself.
     published.presented_since_adoption.store(false, Ordering::Release);
-    // The tick samples the engine, and takes its token along.
+    // The tick samples the engine, and takes it along.
     let engine = engine.home();
     let (loan, settlement) = (!engine.is_null())
         .then(|| engine.lend(Holder::LayoutPass, Owed::TakeBack))
