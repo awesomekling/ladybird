@@ -654,47 +654,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 EventKind::ConsumePublishedMatchAnswer => {
-                    let (_, engine) = read_owned_engine(&mut event.payload, &live_engines)?;
-                    let node = event.payload.read_u32()?;
-                    let capacity = usize::try_from(event.payload.read_u64()?)?;
-                    let expected_result = usize::try_from(event.payload.read_u64()?)?;
-                    let has_output = event.payload.read_bool()?;
-                    let expected = match has_output {
-                        true => read_rule_matches(&mut event.payload)?,
-                        false => Vec::new(),
-                    };
-                    let mut actual = vec![
-                        FfiRuleMatch {
-                            node: 0,
-                            rule: 0,
-                            semantic_declaration: 0,
-                            pseudo_element: 0,
-                            scope_host: 0,
-                            scope_proximity: 0,
-                        };
-                        capacity
-                    ];
-                    let actual_result = unsafe {
-                        bridge::style_engine_consume_published_match_answer(
-                            engine.input_handle(),
-                            node,
-                            actual.as_mut_ptr(),
-                            capacity,
-                        )
-                    };
-                    if actual_result != expected_result {
-                        return Err(format!(
-                        "published match consumption diverged for node {node}: expected count {expected_result}, got {actual_result}"
-                    )
-                    .into());
-                    }
-                    if has_output && !rule_matches_equal(&actual[..actual_result], &expected) {
-                        return Err(format!(
-                            "published matches diverged for node {node}: expected {expected:?}, got {:?}",
-                            &actual[..actual_result]
-                        )
-                        .into());
-                    }
+                    return Err("the recording predates the host reading only the matches it asks for".into());
                 }
                 EventKind::ForEachFlatTreeDescendant => {
                     let engine = read_engine(&mut event.payload, &live_engines)?;

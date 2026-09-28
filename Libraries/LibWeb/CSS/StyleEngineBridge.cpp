@@ -1555,13 +1555,16 @@ void StyleEngine::end_deferred_geometry_transaction_flush()
     StyleEngineFFI::style_engine_end_deferred_geometry_transaction_flush(rust_handle());
 }
 
-bool StyleEngine::read_matches(StyleNodeID node, Vector<RuleMatch>& matches, Optional<MatchPurpose> purpose)
+bool StyleEngine::match_element(StyleNodeID node, Vector<RuleMatch>& matches, MatchPurpose purpose)
 {
+    // A synchronous match is an observation boundary. Most matching follows a published style
+    // transaction, but detached-document style reads can arrive directly while mutation facts are
+    // still staged. Settle those facts before asking the committed arrangement.
+    if (has_pending_transaction())
+        flush();
     matches.resize(max(m_element_match_capacity, 16u));
     auto read = [&] {
-        if (!purpose.has_value())
-            return StyleEngineFFI::style_engine_consume_published_match_answer(rust_handle(), node.value(), matches.data(), matches.size());
-        return StyleEngineFFI::style_engine_match_element(rust_handle(), node.value(), matches.data(), matches.size(), *purpose == MatchPurpose::Cascade);
+        return StyleEngineFFI::style_engine_match_element(rust_handle(), node.value(), matches.data(), matches.size(), purpose == MatchPurpose::Cascade);
     };
     auto count = read();
     if (count == NumericLimits<size_t>::max())
@@ -1576,16 +1579,6 @@ bool StyleEngine::read_matches(StyleNodeID node, Vector<RuleMatch>& matches, Opt
     }
     matches.shrink(count);
     return true;
-}
-
-bool StyleEngine::match_element(StyleNodeID node, Vector<RuleMatch>& matches, MatchPurpose purpose)
-{
-    // A synchronous match is an observation boundary. Most matching follows a published style
-    // transaction, but detached-document style reads can arrive directly while mutation facts are
-    // still staged. Settle those facts before asking the committed arrangement.
-    if (has_pending_transaction())
-        flush();
-    return read_matches(node, matches, purpose);
 }
 
 bool StyleEngine::counter(size_t index, StringView& out_name, u64& out_value) const

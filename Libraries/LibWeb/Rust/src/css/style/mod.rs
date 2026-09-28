@@ -284,7 +284,6 @@ use program::RuleID;
 use program::RuleKind;
 use program::RuleVersion;
 use program::SelectorProgramID;
-use program::SemanticDeclarationID;
 use program::SheetID;
 use program::StyleSheetObjectID;
 use program::StyleSheetProgram;

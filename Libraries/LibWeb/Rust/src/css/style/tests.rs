@@ -7038,21 +7038,6 @@ fn an_identity_only_published_prefix_answer_is_returned_in_cascade_order() {
         matches.iter().map(|matched| matched.rule).collect::<Vec<_>>(),
         [general, specific]
     );
-
-    let mut streamed = Vec::new();
-    assert_eq!(
-        engine.consume_published_match_answer_with(nodes[3], 0, |_, _, rule, _, _, _, _| streamed.push(rule)),
-        Some(2)
-    );
-    assert!(streamed.is_empty());
-    assert_eq!(
-        engine.consume_published_match_answer_with(nodes[3], 2, |index, _, rule, _, _, _, _| {
-            assert_eq!(index, streamed.len());
-            streamed.push(rule);
-        }),
-        Some(2)
-    );
-    assert_eq!(streamed, [general, specific]);
 }
 
 #[test]
