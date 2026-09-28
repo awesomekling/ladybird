@@ -6667,7 +6667,7 @@ void Document::run_the_update_intersection_observations_steps(HighResolutionTime
     // 2. For each observer in observer list:
 
     // AD-HOC: With no observer there is nothing to observe, and nothing to prepare the paint state for: the rendering
-    //         update prepares it when it paints.
+    //         update's paint prepares it, beside the main thread.
     if (m_intersection_observers.is_empty())
         return;
 
