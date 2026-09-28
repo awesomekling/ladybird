@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 mod identities;
 mod targets;
-use identities::NativeRuleIdentities;
+pub(super) use identities::NativeRuleIdentities;
 use targets::NativeRuleTargets;
 
 #[derive(Clone)]
@@ -35,6 +35,8 @@ struct NativeRuleConditions {
 pub(super) struct NativeRuleRegistry {
     pub targets: NativeRuleTargets,
     pub identities: NativeRuleIdentities,
+    /// The identities written since the engine's home last followed them.
+    pub written_identities: Vec<u64>,
     memory: MemoryLease,
 }
 
@@ -43,6 +45,7 @@ impl Default for NativeRuleRegistry {
         Self {
             targets: NativeRuleTargets::default(),
             identities: NativeRuleIdentities::default(),
+            written_identities: Vec::new(),
             memory: MemoryLease::new(MemoryCategory::RuleProgram),
         }
     }
@@ -118,6 +121,7 @@ impl NativeRuleRegistry {
             let identity = target.identity.get();
             if self.identities.get(&identity) == Some(id) {
                 self.identities.remove(&identity);
+                self.written_identities.push(identity);
             }
         }
         self.reconcile_memory(memory);
@@ -180,6 +184,7 @@ impl RetainedState {
             }
         };
         self.native_rules.identities.insert(identity, id);
+        self.native_rules.written_identities.push(identity);
         self.native_rules.targets.insert(id, target);
         self.native_rules.reconcile_memory(&mut self.memory);
     }

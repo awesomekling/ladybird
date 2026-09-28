@@ -2454,7 +2454,7 @@ pub unsafe extern "C" fn style_engine_has_deferred_element_style_input(engine: S
     engine.bring_home(ENTRY);
     // SAFETY: The engine is home.
     if let Some(owes) = StyleNodeID::from_raw(node).map_or(Some(false), |node| {
-        unsafe { engine.drain_answers() }.deferred_inputs.owes(node)
+        unsafe { engine.answers() }.deferred_inputs.owes(node)
     }) {
         return owes;
     }
@@ -2485,7 +2485,7 @@ pub unsafe extern "C" fn style_engine_absorb_element_style_input(
     };
     engine.home().bring_home(ENTRY);
     // SAFETY: The engine is home.
-    match unsafe { engine.home().drain_answers() }
+    match unsafe { engine.home().answers() }
         .deferred_inputs
         .absorb(style_node, reaction, inherited_style_groups)
     {
@@ -4367,7 +4367,7 @@ pub unsafe extern "C" fn style_engine_take_row_sampled_in_pass(
     engine.home().bring_home(ENTRY);
     // SAFETY: The engine is home.
     let taken = StyleNodeID::from_raw(node)
-        .and_then(|node| Some((node, unsafe { engine.home().drain_answers() }.take_row_sampled(node)?)));
+        .and_then(|node| Some((node, unsafe { engine.home().answers() }.take_row_sampled(node)?)));
     let Some((node, sampled)) = taken else {
         return FfiRowSampledInPass::absent();
     };
@@ -4870,10 +4870,11 @@ impl FfiRowSampledInPass {
     }
 }
 
-/// What the engine keeps for the host's drain of its last style transaction, which the engine's home keeps for the main
-/// thread to read and take from without asking the render owner. The main thread tells the engine what it took.
+/// What the engine's home answers the main thread with, of what the engine holds, without asking the render owner: what
+/// the drain of the last style transaction reads and takes, which the main thread tells the engine it took, and what
+/// the engine holds that the main thread follows as it sends the engine a change.
 #[derive(Default)]
-pub(crate) struct DrainAnswers {
+pub(crate) struct HomeAnswers {
     /// The records the transaction's answer names, by record.
     records: Vec<(u64, std::sync::Arc<super::published_record::PublishedStyleRecord>)>,
     /// What each row's container conditions read of its containers.
@@ -4883,6 +4884,10 @@ pub(crate) struct DrainAnswers {
     pub(crate) deferred_inputs: DeferredInputs,
     /// The custom-property environments elements and their synthetic pseudo-elements hold.
     pub(crate) environments: HeldEnvironments,
+    /// The engine's id of each native rule it holds, by the rule's identity.
+    rule_ids: super::native_rules::NativeRuleIdentities,
+    /// How many sheets the main thread added.
+    sheets: u32,
 }
 
 /// The custom-property environment each element and each of its synthetic pseudo-elements holds, as the host reads it:
@@ -5105,7 +5110,7 @@ impl DeferredInputs {
     }
 }
 
-impl DrainAnswers {
+impl HomeAnswers {
     /// Follows a change the main thread sends, which may leave `leaves`.
     pub(crate) fn follow_sent(&mut self, change: &crate::css::style::owner_calls::StyleChange, leaves: PendingFacts) {
         use super::owner_calls::{EngineChange, StyleChange};
@@ -5120,6 +5125,18 @@ impl DrainAnswers {
         }
     }
 
+    /// The engine's id of the native rule of `identity` plus one, or zero where it holds none.
+    fn rule_id(&self, identity: u64) -> u32 {
+        self.rule_ids.get(&identity).map_or(0, |id| id.0 + 1)
+    }
+
+    /// Names the next sheet the main thread adds.
+    fn add_sheet(&mut self) -> SheetID {
+        let sheet = SheetID(self.sheets);
+        self.sheets += 1;
+        sheet
+    }
+
     /// Follows what `engine` keeps, as whoever reached it is done with it.
     pub(crate) fn follow(&mut self, engine: &mut StyleEngine) {
         if let Some(records) = engine.host.records_for_drain.take() {
@@ -5127,6 +5144,14 @@ impl DrainAnswers {
         }
         self.deferred_inputs.follow(engine);
         self.environments.follow(engine);
+        for identity in std::mem::take(&mut engine.native_rules.written_identities) {
+            match engine.native_rule_id(identity) {
+                Some(id) => self.rule_ids.insert(identity, id),
+                None => {
+                    self.rule_ids.remove(&identity);
+                }
+            }
+        }
         if engine.retained.container_effects_for_host.take_moved() {
             self.container_effects
                 .clone_from(&engine.retained.container_effects_for_host);
@@ -5295,7 +5320,7 @@ pub unsafe extern "C" fn style_engine_publish_style_record(
 ) -> *const c_void {
     engine.bring_home_to_read_records("style_engine_publish_style_record");
     // SAFETY: No stage holds the engine.
-    if let Some(record) = unsafe { engine.drain_answers() }.record(style_record) {
+    if let Some(record) = unsafe { engine.answers() }.record(style_record) {
         return super::published_record::into_handle(record);
     }
     crate::css::style::owner_calls::ask_records(
@@ -6003,27 +6028,42 @@ pub unsafe extern "C" fn style_engine_native_container_effects_release(effects: 
     }
 }
 
+/// Adds a sheet of `origin` for the host's `object`, and answers its id plus one. The main thread names the sheet: the
+/// engine numbers its sheets in the order they are added.
+///
+/// # Safety
+/// Engine must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_add_sheet(
+    engine: StyleEngineInputHandle,
+    object: u32,
+    origin: FfiCascadeOrigin,
+) -> u32 {
+    const ENTRY: &str = "style_engine_add_sheet";
+    engine.home().bring_home(ENTRY);
+    // SAFETY: The engine is home.
+    let sheet = unsafe { engine.home().answers() }.add_sheet();
+    crate::css::style::owner_calls::send(
+        engine,
+        ENTRY,
+        crate::css::style::owner_calls::EngineChange::AddSheet {
+            object: StyleSheetObjectID(object),
+            origin: origin.decode(),
+            sheet,
+        },
+    );
+    sheet.0 + 1
+}
+
 /// Resolve a native rule identity in this document's engine, including shared sheets.
 ///
 /// # Safety
 /// Engine must be live.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_native_rule_id(engine: StyleEngineHandle, identity: u64) -> u32 {
-    crate::css::style::owner_calls::ask(
-        engine,
-        "style_engine_native_rule_id",
-        crate::css::style::owner_calls::StyleQuery::NativeRuleId { identity },
-    )
-    .u32()
-}
-
-/// Answers [`style_engine_native_rule_id`] from `engine`, on the render owner.
-///
-/// # Safety
-///
-/// As for [`style_engine_native_rule_id`].
-pub(crate) unsafe fn owner_native_rule_id(engine: &StyleEngine, identity: u64) -> u32 {
-    engine.native_rule_id(identity).map_or(0, |id| id.0 + 1)
+    engine.bring_home("style_engine_native_rule_id");
+    // SAFETY: The engine is home.
+    unsafe { engine.answers() }.rule_id(identity)
 }
 
 /// Publish a native declaration edit through its owning rule and return whether it declares
@@ -6039,6 +6079,7 @@ pub unsafe extern "C" fn style_engine_native_rule_declarations_changed(
     context: *mut c_void,
     notify: unsafe extern "C" fn(*mut c_void, u32),
 ) -> bool {
+    const ENTRY: &str = "style_engine_native_rule_declarations_changed";
     let (identity, declarations) = {
         let rule = unsafe { &*rule.cast::<crate::css::rule::NativeRule>() };
         let Some(identity) = rule.declaration_owner_identity() else {
@@ -6046,28 +6087,27 @@ pub unsafe extern "C" fn style_engine_native_rule_declarations_changed(
         };
         (identity, rule.cascade_declarations())
     };
-    // The host's notification reaches no engine (it moves the document's style environment version on), so the owner
-    // publishes the declarations first, in one round trip, and the host hears of a rule the engine holds after.
-    let published = crate::css::style::owner_calls::ask(
-        engine.home(),
-        "style_engine_native_rule_declarations_changed",
-        crate::css::style::owner_calls::StyleQuery::RuleDeclarationsChanged { identity, declarations },
-    )
-    .rule_declarations();
-    let Some(published) = published else {
+    engine.home().bring_home(ENTRY);
+    // SAFETY: The engine is home.
+    let rule = unsafe { engine.home().answers() }.rule_id(identity);
+    let declares_transitions = declarations.as_ref().is_some_and(|declarations| {
+        declarations.properties.iter().any(|declaration| {
+            crate::css::property_metadata::property_defines_a_css_transition(declaration.property_id)
+        })
+    });
+    // The owner publishes the declarations where the engine holds the rule, before anything reads the engine again.
+    crate::css::style::owner_calls::send(
+        engine,
+        ENTRY,
+        crate::css::style::owner_calls::EngineChange::RuleDeclarationsChanged { identity, declarations },
+    );
+    if rule == 0 {
         return false;
-    };
+    }
+    // The host's notification reaches no engine: it moves the document's style environment version on.
     super::seal::note_host_call("native_rule_declarations_changed.notify");
-    unsafe { notify(context, published.rule) };
-    published.declares_transitions
-}
-
-/// What publishing a native rule's declarations did, where the engine holds the rule.
-#[derive(Clone, Copy)]
-pub(crate) struct PublishedRuleDeclarations {
-    /// The rule's engine id plus one.
-    pub(crate) rule: u32,
-    pub(crate) declares_transitions: bool,
+    unsafe { notify(context, rule) };
+    declares_transitions
 }
 
 /// Publishes the declarations the native rule of `identity` now holds, on the render owner, if the engine holds the
@@ -6076,18 +6116,20 @@ pub(crate) fn owner_rule_declarations_changed(
     engine: &mut StyleEngine,
     identity: u64,
     declarations: Option<std::sync::Arc<crate::css::declaration_block::DeclarationBlockData>>,
-) -> Option<PublishedRuleDeclarations> {
-    let id = engine.native_rules.identities.get(&identity)?;
+) {
+    let Some(id) = engine.native_rules.identities.get(&identity) else {
+        return;
+    };
     let rule = id.0 + 1;
-    let target = engine.native_rules.targets.get_mut(&id)?;
+    let Some(target) = engine.native_rules.targets.get_mut(&id) else {
+        return;
+    };
     target.declarations = declarations.clone();
     let version = engine.next_declaration_block_version();
     operations::record_rule_declarations_changed(engine, rule, version);
-    Some(PublishedRuleDeclarations {
-        rule,
-        declares_transitions: declarations
-            .is_some_and(|declarations| publish_rule_declarations(engine, rule, &declarations)),
-    })
+    if let Some(declarations) = declarations {
+        publish_rule_declarations(engine, rule, &declarations);
+    }
 }
 
 /// Find the next compiled rule after an inserted native subtree, without creating CSSOM objects.
@@ -6100,24 +6142,12 @@ pub unsafe extern "C" fn style_engine_native_rule_successor(
     sheet: *const c_void,
     identity: u64,
 ) -> u32 {
-    crate::css::style::owner_calls::ask(
-        engine,
-        "style_engine_native_rule_successor",
-        crate::css::style::owner_calls::StyleQuery::NativeRuleSuccessor { sheet, identity },
-    )
-    .u32()
-}
-
-/// Answers [`style_engine_native_rule_successor`] from `engine`, on the render owner.
-///
-/// # Safety
-///
-/// As for [`style_engine_native_rule_successor`].
-pub(crate) unsafe fn owner_native_rule_successor(engine: &StyleEngine, sheet: *const c_void, identity: u64) -> u32 {
+    engine.bring_home("style_engine_native_rule_successor");
+    // SAFETY: The engine is home.
+    let answers = unsafe { engine.answers() };
+    // SAFETY: Guaranteed by the caller.
     let sheet = unsafe { &*sheet.cast::<crate::css::style_sheet::NativeStyleSheet>() };
-    crate::css::rule::mutation::successor(sheet, identity, |identity| {
-        engine.native_rules.identities.get(&identity).map_or(0, |id| id.0 + 1)
-    })
+    crate::css::rule::mutation::successor(sheet, identity, |identity| answers.rule_id(identity))
 }
 
 /// Retire a native subtree, with host callbacks only for document and cascade-cache notifications.
@@ -6278,12 +6308,8 @@ pub unsafe extern "C" fn style_engine_take_container_effects(
     const ENTRY: &str = "style_engine_take_container_effects";
     engine.home().bring_home(ENTRY);
     // SAFETY: The engine is home.
-    let taken = StyleNodeID::from_raw(node).and_then(|node| {
-        Some((
-            node,
-            unsafe { engine.home().drain_answers() }.take_container_effects(node)?,
-        ))
-    });
+    let taken = StyleNodeID::from_raw(node)
+        .and_then(|node| Some((node, unsafe { engine.home().answers() }.take_container_effects(node)?)));
     let Some((node, verdict)) = taken else {
         return FfiNativeContainerMatchResult::default();
     };
@@ -6321,7 +6347,7 @@ pub unsafe extern "C" fn style_engine_discard_container_effects(engine: StyleEng
     );
     if let Some(node) = StyleNodeID::from_raw(node) {
         // SAFETY: Sending the change brought the engine home.
-        unsafe { engine.home().drain_answers() }.take_container_effects(node);
+        unsafe { engine.home().answers() }.take_container_effects(node);
     }
 }
 
@@ -7486,7 +7512,7 @@ pub unsafe extern "C" fn style_engine_element_custom_property_data(
 ) -> *const c_void {
     engine.bring_home("style_engine_element_custom_property_data");
     // SAFETY: The engine is home.
-    let environments = &unsafe { engine.drain_answers() }.environments;
+    let environments = &unsafe { engine.answers() }.environments;
     let (data, environment) =
         StyleNodeID::from_raw(node).map_or((std::ptr::null(), 0), |node| environments.element(node));
     // SAFETY: Guaranteed by the caller.
@@ -7549,7 +7575,7 @@ pub unsafe extern "C" fn style_engine_pseudo_element_custom_property_data(
 ) -> *const c_void {
     engine.bring_home("style_engine_pseudo_element_custom_property_data");
     // SAFETY: The engine is home.
-    let environments = &unsafe { engine.drain_answers() }.environments;
+    let environments = &unsafe { engine.answers() }.environments;
     let (data, environment) =
         StyleNodeID::from_raw(node).map_or((std::ptr::null(), 0), |node| environments.pseudo_element(node, pseudo));
     // SAFETY: Guaranteed by the caller.
@@ -7569,7 +7595,7 @@ pub unsafe extern "C" fn style_engine_pseudo_elements_with_custom_property_data(
 ) -> u64 {
     engine.bring_home("style_engine_pseudo_elements_with_custom_property_data");
     // SAFETY: The engine is home.
-    let environments = &unsafe { engine.drain_answers() }.environments;
+    let environments = &unsafe { engine.answers() }.environments;
     StyleNodeID::from_raw(node).map_or(0, |node| environments.pseudo_element_kinds(node))
 }
 
