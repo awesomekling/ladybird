@@ -5308,7 +5308,7 @@ void LocalNavigable::re_snap_scroll_containers_after_layout_change()
     if (!document || !document->needs_scroll_container_resnap())
         return;
 
-    if (!Painting::document_may_have_scroll_snap_areas(*document)) {
+    if (!document->may_have_scroll_snap_areas()) {
         document->cancel_scheduled_scroll_container_resnap();
         return;
     }

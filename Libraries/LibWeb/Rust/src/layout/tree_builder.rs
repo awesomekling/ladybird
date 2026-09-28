@@ -13,6 +13,7 @@ use crate::css::style::StyleEngine;
 use crate::css::style::bridge::{ElementBoxKind, element_adjustment_fact};
 use crate::css::style::layout_style::{AnonymousStyleKind, AnonymousStyleOverrides};
 use crate::css::style::tree::StyleNodeID;
+use crate::layout::formatting_context::FfiBuiltScrollContainer;
 use crate::layout::layout_node_arena::{
     LayoutNodeArena, LayoutUpdateMarksHandle, StaleWalkFacts, prepare_subtree_for_detach,
 };
@@ -3335,6 +3336,7 @@ struct TreeBuildStageOutput {
     outcome: FfiLayoutTreeBuildOutcome,
     reports: Vec<crate::layout::commit::FfiCommitMessage>,
     handbacks: super::layout_node_arena::HostHandbacks,
+    scroll_containers: Vec<FfiBuiltScrollContainer>,
 }
 
 /// What a finished layout tree build walk owes the host, and what it found out for the document.
@@ -3344,6 +3346,7 @@ struct TreeBuildStageOutput {
 pub(crate) struct TreeBuildHostHalf {
     reports: Vec<crate::layout::commit::FfiCommitMessage>,
     handbacks: super::layout_node_arena::HostHandbacks,
+    scroll_containers: Vec<FfiBuiltScrollContainer>,
 }
 
 // The walk's handbacks name the rows they owe for by slot, so the walk crosses back on its own terms.
@@ -3375,6 +3378,7 @@ impl TreeBuildHostHalf {
         TreeBuildPayment {
             payment: arena.resolve_host_handbacks(self.handbacks),
             reports: self.reports,
+            scroll_containers: self.scroll_containers,
         }
     }
 }
@@ -3384,12 +3388,14 @@ impl TreeBuildHostHalf {
 pub(crate) struct TreeBuildPayment {
     payment: super::layout_node_arena::HostPayment,
     reports: Vec<crate::layout::commit::FfiCommitMessage>,
+    scroll_containers: Vec<FfiBuiltScrollContainer>,
 }
 
 impl TreeBuildPayment {
     /// Pays what the walk let go of, as it would have while the walk ran: the boxes nodes gained or lost, and the
     /// host-owned objects of the rows it freed. Then what the build found out goes to the document, in the order the
-    /// build found it out; nothing can clear a DOM update flag again once the walk is complete.
+    /// build found it out; nothing can clear a DOM update flag again once the walk is complete. The scroll containers
+    /// it gave a style come last, before any style the document applies after the build.
     pub(crate) fn pay(self, main_thread: &crate::stage::MainThread) {
         self.payment.pay(main_thread);
         if !self.reports.is_empty() {
@@ -3397,6 +3403,13 @@ impl TreeBuildPayment {
             // SAFETY: The document outlives the build, and no arena borrow is held here.
             unsafe {
                 crate::layout::LayoutHost::of(main_thread).deliver_commit_messages(main_thread, &self.reports);
+            };
+        }
+        if !self.scroll_containers.is_empty() {
+            // SAFETY: As above.
+            unsafe {
+                crate::layout::LayoutHost::of(main_thread)
+                    .take_built_scroll_containers(main_thread, &self.scroll_containers);
             };
         }
     }
@@ -3426,8 +3439,16 @@ pub(crate) unsafe fn walk_layout_tree_build(
         outcome,
         reports,
         handbacks,
+        scroll_containers,
     } = run_tree_build_stage(&host, document_style_node);
-    (outcome, TreeBuildHostHalf { reports, handbacks })
+    (
+        outcome,
+        TreeBuildHostHalf {
+            reports,
+            handbacks,
+            scroll_containers,
+        },
+    )
 }
 
 /// The layout tree build stage: the walk that turns the style mirror's flat tree into layout
@@ -3577,6 +3598,21 @@ fn run_tree_build_stage(host: &DomTreeBuilderHost, document_style_node: u32) -> 
     // SAFETY: The stage holds the arena alone, and no borrow above outlives the free.
     let arena = unsafe { &*host.arena };
     let handbacks = arena.take_tree_build_handbacks();
+    // The document takes the scroll containers the build gave a style. Where no box was ever given a scroll snap type,
+    // none of them snaps, and the document has no snapped areas for them to forget.
+    let built = arena.built_scroll_snap_containers();
+    arena.drop_built_scroll_snap_containers(&built.iter().map(|&(slot, _)| slot).collect::<Vec<_>>());
+    let scroll_containers = if arena.may_have_scroll_snap_areas() {
+        built
+            .into_iter()
+            .map(|(slot, is_scroll_snap_container)| FfiBuiltScrollContainer {
+                slot,
+                is_scroll_snap_container,
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
 
     super::tree_build_seal::end_build();
     TreeBuildStageOutput {
@@ -3588,6 +3624,7 @@ fn run_tree_build_stage(host: &DomTreeBuilderHost, document_style_node: u32) -> 
         },
         reports,
         handbacks,
+        scroll_containers,
     }
 }
 

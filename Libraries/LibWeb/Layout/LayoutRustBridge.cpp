@@ -613,9 +613,6 @@ static void did_update_box_style_record(Painting::BoxSlot const& box, void const
     if (!snap_container)
         return;
 
-    // What the layout tree builds found out about their scroll containers comes before what this style says.
-    Painting::take_built_scroll_snap_containers(document);
-
     // A style change can make a box a snap container without the paint tree being built again, so the box registers
     // itself here as well as when it is built.
     if (Painting::is_scroll_snap_container(snap_container)) {
@@ -850,6 +847,10 @@ void register_layout_host(DOM::Document& document)
             // The pass that produced them reads back what they change before it ends. They can arrive
             // as a forced join takes a frame back, so the continuations wait for the next drain point.
             document.commit_messages().apply_script_free(); },
+        .take_built_scroll_containers = [](void* context, RustFFI::FfiBuiltScrollContainer const* built, size_t count) {
+            auto& document = *static_cast<DOM::Document*>(context);
+            for (auto const& scroll_container : ReadonlySpan<RustFFI::FfiBuiltScrollContainer> { built, count })
+                Painting::take_built_scroll_container(document, scroll_container.slot, scroll_container.is_scroll_snap_container); },
     };
     RustFFI::layout_arena_set_layout_host_callbacks(arena, callbacks);
     RustFFI::layout_arena_set_document_is_decoded_svg(arena, document.is_decoded_svg());

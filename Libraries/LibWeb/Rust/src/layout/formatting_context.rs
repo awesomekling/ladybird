@@ -923,6 +923,18 @@ pub struct FfiLayoutHostCallbacks {
     /// The commit messages a finished commit leaves for the document, in the order it produced
     /// them.
     pub deliver_commit_messages: unsafe extern "C" fn(*mut c_void, *const commit::FfiCommitMessage, usize),
+    /// The scroll containers finished layout tree builds gave a style, each with whether it is a
+    /// scroll snap container.
+    pub take_built_scroll_containers: unsafe extern "C" fn(*mut c_void, *const FfiBuiltScrollContainer, usize),
+}
+
+/// A scroll container a layout tree build gave a style, with whether it was a scroll snap
+/// container as the build finished.
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct FfiBuiltScrollContainer {
+    pub slot: NodeSlotId,
+    pub is_scroll_snap_container: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -936,6 +948,7 @@ pub struct FfiLayoutHostCallbacks {
 pub(crate) struct LayoutHost {
     context: *mut c_void,
     deliver_commit_messages: unsafe extern "C" fn(*mut c_void, *const commit::FfiCommitMessage, usize),
+    take_built_scroll_containers: unsafe extern "C" fn(*mut c_void, *const FfiBuiltScrollContainer, usize),
 }
 
 impl From<FfiLayoutHostCallbacks> for LayoutHost {
@@ -943,6 +956,7 @@ impl From<FfiLayoutHostCallbacks> for LayoutHost {
         Self {
             context: host.context,
             deliver_commit_messages: host.deliver_commit_messages,
+            take_built_scroll_containers: host.take_built_scroll_containers,
         }
     }
 }
@@ -963,6 +977,14 @@ impl LayoutHost {
         messages: &[commit::FfiCommitMessage],
     ) {
         unsafe { (self.deliver_commit_messages)(self.context, messages.as_ptr(), messages.len()) };
+    }
+
+    pub(crate) unsafe fn take_built_scroll_containers(
+        &self,
+        _: &crate::stage::MainThread,
+        built: &[FfiBuiltScrollContainer],
+    ) {
+        unsafe { (self.take_built_scroll_containers)(self.context, built.as_ptr(), built.len()) };
     }
 }
 

@@ -46,15 +46,7 @@ bool SyntheticPseudoElement::has_box() const
 
 CSSPixelPoint SyntheticPseudoElement::scroll_offset() const
 {
-    if (!m_originating_element)
-        return {};
-    // The render side stores the offset, so a write still in the journal lands before the read.
-    m_originating_element->document().drain_invalidation_journal();
-    auto render_document = m_originating_element->document().render_document_id();
-    if (render_document == 0)
-        return {};
-    return Layout::RustFFI::render_owner_pseudo_element_scroll_offset(render_document,
-        m_originating_element->style_node_id().value(), encode_generated_for(m_type));
+    return m_originating_element ? m_originating_element->scroll_offset(m_type) : CSSPixelPoint {};
 }
 
 void SyntheticPseudoElement::set_scroll_offset(CSSPixelPoint value)

@@ -19,7 +19,9 @@ use super::bridge::{
 use super::engine_home::{PendingFacts, StyleEngineHandle, StyleEngineInputHandle};
 use super::inputs::HandedCustomPropertyEnvironment;
 use super::tree::StyleNodeID;
+use crate::layout::LayoutNodeArena;
 use crate::render_owner::{Answer, DocumentId, EngineAnswered, Query};
+use smallvec::SmallVec;
 use std::ffi::c_void;
 use std::ptr::NonNull;
 
@@ -660,13 +662,32 @@ impl StyleAnswer {
 
 impl StyleQuery {
     /// Answers the query from `engine`, on the owner.
-    fn answer(self, engine: &mut StyleEngine) -> StyleAnswer {
+    fn answer(self, engine: &mut StyleEngine, arena: &LayoutNodeArena) -> StyleAnswer {
         match self {
             Self::Boundary(read) => read.answer(engine).into(),
             // A read answered where there is no owner runs as the owner would run it: on the stage thread, whose
             // stack a style computation needs.
             Self::ReadDemand(demand) => {
-                StyleAnswer::RecordDemand(crate::stage_thread::run_stage(move || demand.answer(engine)).into_ffi())
+                let node = demand.node;
+                let answering = &mut *engine;
+                let answer = crate::stage_thread::run_stage(move || demand.answer(answering)).into_ffi();
+                // The host installs the pseudo-element records it answers beside the element's as it installs a
+                // transaction's, comparing each against its box.
+                if let Some(node) = StyleNodeID::from_raw(node) {
+                    let record = &answer.record;
+                    let mut verdicts: SmallVec<[_; super::bridge::RETRY_PSEUDO_RECORD_SLOTS]> = (0_u8..)
+                        .zip(record.pseudo_records)
+                        .filter(|&(pseudo_kind, pseudo_record)| {
+                            pseudo_record != 0 && record.pseudo_records_present & (1 << pseudo_kind) != 0
+                        })
+                        .map(|(pseudo_kind, pseudo_record)| ((node, pseudo_kind), (pseudo_record, 0)))
+                        .collect();
+                    super::bridge::decide_content_counter_styles(arena, &mut verdicts);
+                    for (row, verdict) in verdicts {
+                        engine.host.content_counter_style_verdicts.insert(row, verdict);
+                    }
+                }
+                StyleAnswer::RecordDemand(answer)
             }
             Self::MatchElement {
                 node,
@@ -975,16 +996,16 @@ pub(crate) struct StyleQueryRef(NonNull<StyleQueryCell>);
 unsafe impl Send for StyleQueryRef {}
 
 impl StyleQueryRef {
-    /// Answers the query from `engine`, on the owner.
+    /// Answers the query from `engine`, on the owner, whose arena of the document is `arena`.
     ///
     /// # Safety
     ///
     /// The main thread must wait for the answer, with the cell live.
-    pub(crate) unsafe fn answer(self, engine: &mut StyleEngine) {
+    pub(crate) unsafe fn answer(self, engine: &mut StyleEngine, arena: &LayoutNodeArena) {
         // SAFETY: Guaranteed by the caller.
         let cell = unsafe { &mut *self.0.as_ptr() };
         if let Some(query) = cell.query.take() {
-            cell.answer = Some(query.answer(engine));
+            cell.answer = Some(query.answer(engine, arena));
         }
         cell.retired = std::mem::take(&mut engine.host.retired_custom_property_data);
     }

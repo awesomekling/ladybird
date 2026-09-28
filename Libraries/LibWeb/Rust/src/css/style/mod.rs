@@ -1246,6 +1246,10 @@ pub struct HostState {
     /// The records the answer of the last style transaction names, published for the host's drain of it, which the
     /// engine's home takes over as whoever reached the engine for the transaction is done with it.
     pub(super) records_for_drain: Option<Vec<(u64, std::sync::Arc<published_record::PublishedStyleRecord>)>>,
+    /// What the owner decided of each pseudo-element row it answered last, with the record the row moved to, which the
+    /// engine's home takes over for the host's drain: whether the counter styles the row's generated content names
+    /// differ from the ones its box was built with, as a `CONTENT_COUNTER_STYLES_*` answer.
+    pub(super) content_counter_style_verdicts: drain_table::DrainTable<(StyleNodeID, u8), (u64, u8)>,
     /// The custom-property environments of elements a transaction retired. Their reference counts
     /// belong to the host and are not atomic, and a transaction may run on the stage thread, so
     /// the transaction leaves them here and the bridge releases them on the document thread.

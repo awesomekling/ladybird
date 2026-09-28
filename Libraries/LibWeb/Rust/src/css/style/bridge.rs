@@ -4784,6 +4784,8 @@ pub(crate) struct HomeAnswers {
     container_effects: HashMap<StyleNodeID, super::container_queries::ContainerVerdict>,
     /// What the pass published for each row whose animations it sampled.
     rows_sampled: HashMap<StyleNodeID, FfiRowSampledInPass>,
+    /// What the owner decided of each pseudo-element row's counter styles, with the record the row moved to.
+    content_counter_style_verdicts: HashMap<(StyleNodeID, u8), (u64, u8)>,
     pub(crate) deferred_inputs: DeferredInputs,
     /// The custom-property environments elements and their synthetic pseudo-elements hold.
     pub(crate) environments: HeldEnvironments,
@@ -4806,6 +4808,7 @@ pub(crate) struct EngineNews {
     records: Option<Vec<(u64, std::sync::Arc<super::published_record::PublishedStyleRecord>)>>,
     container_effects: Option<HashMap<StyleNodeID, super::container_queries::ContainerVerdict>>,
     rows_sampled: Option<HashMap<StyleNodeID, FfiRowSampledInPass>>,
+    content_counter_style_verdicts: Option<HashMap<(StyleNodeID, u8), (u64, u8)>>,
     applied_reactions_held: bool,
     deferred_inputs: Option<HashMap<StyleNodeID, (u8, u8)>>,
     environments: Vec<(StyleNodeID, Option<HeldEnvironment>)>,
@@ -4854,6 +4857,9 @@ impl EngineNews {
         }
         if engine.retained.container_effects_for_host.take_moved() {
             self.container_effects = Some((*engine.retained.container_effects_for_host).clone());
+        }
+        if engine.host.content_counter_style_verdicts.take_moved() {
+            self.content_counter_style_verdicts = Some((*engine.host.content_counter_style_verdicts).clone());
         }
         if engine.retained.rows_sampled_in_pass.take_moved() {
             self.rows_sampled = Some(
@@ -5160,6 +5166,9 @@ impl HomeAnswers {
         if let Some(rows_sampled) = news.rows_sampled {
             self.rows_sampled = rows_sampled;
         }
+        if let Some(verdicts) = news.content_counter_style_verdicts {
+            self.content_counter_style_verdicts = verdicts;
+        }
         self.deferred_inputs
             .adopt(news.applied_reactions_held, news.deferred_inputs);
         self.environments
@@ -5228,6 +5237,14 @@ impl HomeAnswers {
 
     fn take_row_sampled(&mut self, node: StyleNodeID) -> Option<FfiRowSampledInPass> {
         self.rows_sampled.remove(&node)
+    }
+
+    /// What the owner decided of the counter styles of the pseudo-element `pseudo_kind` of `node` whose row moved to
+    /// `style_record`, if it decided it.
+    fn content_counter_style_verdict(&self, node: StyleNodeID, pseudo_kind: u8, style_record: u64) -> Option<u8> {
+        self.content_counter_style_verdicts
+            .get(&(node, pseudo_kind))
+            .and_then(|&(decided_for, verdict)| (decided_for == style_record).then_some(verdict))
     }
 }
 
@@ -6785,8 +6802,77 @@ impl OwnerStyleTransaction {
                 (view, retired, None)
             }
         };
+        note_content_counter_style_verdicts(engine, state.arena());
         OwnerStyleTransactionView(view, retired, applied)
     }
+}
+
+/// Leaves the host's drain what the owner decides of the counter styles of each pseudo-element row the transaction
+/// answered with that moved to another record (see [`decide_content_counter_styles`]), in place of what it decided for
+/// the transaction before.
+fn note_content_counter_style_verdicts(engine: &mut StyleEngine, arena: &crate::layout::LayoutNodeArena) {
+    let mut verdicts: Vec<_> = engine
+        .host
+        .ffi_style_transaction_output
+        .answers
+        .iter()
+        .filter(|answer| answer.pseudo_kind != u8::MAX && answer.old_style_record != answer.new_style_record)
+        .filter_map(|answer| {
+            let node = StyleNodeID::from_raw(answer.style_node)?;
+            Some(((node, answer.pseudo_kind), (answer.new_style_record, 0)))
+        })
+        .collect();
+    // The arena reaches the engine to read the rows' records, so the answer is not borrowed meanwhile.
+    decide_content_counter_styles(arena, &mut verdicts);
+    let table = &mut engine.host.content_counter_style_verdicts;
+    table.clear();
+    for (row, verdict) in verdicts {
+        table.insert(row, verdict);
+    }
+}
+
+/// A pseudo-element row, named by its element and its kind, with the record it moved to and what the owner decides of
+/// the counter styles that record names, as a `CONTENT_COUNTER_STYLES_*` answer.
+pub(crate) type ContentCounterStyleVerdict = ((StyleNodeID, u8), (u64, u8));
+
+/// Decides, for each pseudo-element row in `rows` with the record it moved to, whether the counter styles its generated
+/// content names differ from the ones its box was built with, which only the arena holds. The host's drain compares
+/// each row it answered against its box, and reads the decision from the engine's home.
+pub(crate) fn decide_content_counter_styles(
+    arena: &crate::layout::LayoutNodeArena,
+    rows: &mut [ContentCounterStyleVerdict],
+) {
+    for ((element, pseudo_kind), (_, verdict)) in rows {
+        *verdict = arena.content_counter_styles_changed(crate::layout::counters::CounterOwner {
+            element: *element,
+            generated_for: *pseudo_kind + 1,
+        });
+    }
+}
+
+/// Whether the counter styles the pseudo-element `pseudo_kind` of `node` names in `style_record`, the record its row
+/// moved to, differ from the ones its box was built with, as the owner decided for the drain, as a
+/// `CONTENT_COUNTER_STYLES_*` answer.
+///
+/// # Safety
+/// `engine` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_content_counter_styles_changed(
+    engine: StyleEngineInputHandle,
+    node: u32,
+    pseudo_kind: u8,
+    style_record: u64,
+) -> u8 {
+    engine.home().bring_home("style_engine_content_counter_styles_changed");
+    let verdict = StyleNodeID::from_raw(node).and_then(|node| {
+        // SAFETY: The engine is home.
+        unsafe { engine.home().answers() }.content_counter_style_verdict(node, pseudo_kind, style_record)
+    });
+    debug_assert!(
+        verdict.is_some(),
+        "the owner decides the counter styles of every pseudo-element row it answers"
+    );
+    verdict.unwrap_or(crate::layout::LayoutNodeArena::CONTENT_COUNTER_STYLES_NOT_RECORDED)
 }
 
 /// Applies the batch a style transaction the owner took left to the layout nodes of the rows'

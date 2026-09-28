@@ -51,10 +51,37 @@ static DOM::Element const* element_of_snap_area(Compositing::SnapAreaIdentity co
 }
 
 // https://drafts.csswg.org/css-scroll-snap-1/#snap-axis
+// NB: The axes come from the style the document last applied to the box its snap properties come from, as the rest of
+//     what it reads of a box's style does: the root element's box for the viewport, to which the root element's snap
+//     properties apply.
 Compositing::SnapAxes snap_axes_of_scroll_container(BoxSlot const& snap_container)
 {
-    auto axes = Layout::RustFFI::layout_arena_scroll_snap_axes(snap_container.arena(), snap_container.slot());
-    return { .x = axes.x, .y = axes.y };
+    auto style_source = snap_container;
+    if (snap_container.is_viewport()) {
+        auto const* document_element = snap_container.document().document_element();
+        style_source = document_element ? BoxSlot::bound_to(*document_element) : BoxSlot {};
+    }
+    auto const* misc_reset_values = style_source.style_group<CSS::ComputedValues::MiscResetValues>();
+    if (!misc_reset_values)
+        return {};
+    auto snap_type = misc_reset_values->scroll_snap_type_value();
+    if (snap_type.strictness == CSS::ScrollSnapStrictness::None)
+        return {};
+    auto const* inherited_box_values = style_source.style_group<CSS::ComputedValues::InheritedBoxValues>();
+    bool const horizontal_writing_mode = !inherited_box_values || inherited_box_values->writing_mode_value() == CSS::WritingMode::HorizontalTb;
+    switch (snap_type.axis) {
+    case CSS::ScrollSnapAxis::X:
+        return { .x = true, .y = false };
+    case CSS::ScrollSnapAxis::Y:
+        return { .x = false, .y = true };
+    case CSS::ScrollSnapAxis::Inline:
+        return { .x = horizontal_writing_mode, .y = !horizontal_writing_mode };
+    case CSS::ScrollSnapAxis::Block:
+        return { .x = !horizontal_writing_mode, .y = horizontal_writing_mode };
+    case CSS::ScrollSnapAxis::Both:
+        return { .x = true, .y = true };
+    }
+    VERIFY_NOT_REACHED();
 }
 
 Optional<Compositing::SnapContainerGeometry> snap_container_geometry(BoxSlot const& snap_container)
@@ -127,40 +154,19 @@ bool is_scroll_snap_container(BoxSlot const& box)
     return !snap_axes_of_scroll_container(box).is_empty();
 }
 
-bool document_may_have_scroll_snap_areas(DOM::Document const& document)
+void take_built_scroll_container(DOM::Document& document, Compositing::RustFFI::NodeSlotId slot, bool is_scroll_snap_container)
 {
-    if (document.may_have_scroll_snap_areas())
-        return true;
-    auto render_document = Layout::document_render_document_if_created(document);
-    return render_document.has_value() && Layout::RustFFI::render_owner_may_have_scroll_snap_areas(*render_document);
-}
-
-void take_built_scroll_snap_containers(DOM::Document& document)
-{
-    auto render_document = Layout::document_render_document_if_created(document);
-    if (!render_document.has_value())
+    auto scroll_container = BoxSlot::of(document, slot);
+    if (!scroll_container)
         return;
-    struct BuiltScrollContainer {
-        Compositing::RustFFI::NodeSlotId slot;
-        bool is_scroll_snap_container { false };
-    };
-    Vector<BuiltScrollContainer> built_scroll_containers;
-    Layout::RustFFI::render_owner_take_built_scroll_snap_containers(*render_document, &built_scroll_containers,
-        [](void* context, Compositing::RustFFI::NodeSlotId slot, bool is_scroll_snap_container) {
-            static_cast<Vector<BuiltScrollContainer>*>(context)->append({ slot, is_scroll_snap_container });
-        });
-    for (auto const& built : built_scroll_containers) {
-        auto scroll_container = BoxSlot::of(document, built.slot);
-        if (!scroll_container)
-            continue;
-        if (built.is_scroll_snap_container) {
-            document.register_scroll_snap_container(scroll_container);
-            continue;
-        }
-        // A box that does not snap is snapped to no snap areas, so that a scroll it is given while it does not snap is
-        // not undone by a re-snap once it snaps again.
-        document.forget_snapped_areas_of_scroll_container(scroll_container);
+    if (is_scroll_snap_container) {
+        document.set_may_have_scroll_snap_areas();
+        document.register_scroll_snap_container(scroll_container);
+        return;
     }
+    // A box that does not snap is snapped to no snap areas, so that a scroll it is given while it does not snap is
+    // not undone by a re-snap once it snaps again.
+    document.forget_snapped_areas_of_scroll_container(scroll_container);
 }
 
 // https://drafts.csswg.org/css-scroll-snap-1/#choosing
