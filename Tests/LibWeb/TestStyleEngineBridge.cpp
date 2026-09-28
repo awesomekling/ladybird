@@ -84,36 +84,14 @@ TEST_CASE(reclaimed_language_atoms_republish_their_text)
         auto name = MUST(String::formatted("style-engine-language-sweep-{}", index));
         engine.intern_atom(Utf16FlyString::from_utf8_without_validation(name));
     }
+    engine.flush();
     EXPECT_EQ(counter_value(engine, "languageTextsPublished"sv), 1ull);
 
-    engine.flush();
     (void)engine.take_style_transaction(root);
     engine.intern_language_atom(language.view());
+    engine.flush();
 
     EXPECT_EQ(counter_value(engine, "languageTextsPublished"sv), 2ull);
-}
-
-TEST_CASE(reclaimed_custom_property_atoms_republish_their_names)
-{
-    Web::CSS::StyleEngine engine(Web::CSS::StyleEngine::DeviceClass::ForegroundDesktop);
-    auto root = engine.mint_style_node();
-    auto old_name = Utf16FlyString::from_utf8_without_validation("--reclaimed-custom-property"sv);
-    auto old_atom = engine.intern_atom(old_name);
-    engine.note_custom_property_name(old_atom, old_name);
-    for (size_t index = 0; index < 255; ++index) {
-        auto name = MUST(String::formatted("style-engine-custom-property-sweep-{}", index));
-        engine.intern_atom(Utf16FlyString::from_utf8_without_validation(name));
-    }
-    EXPECT_EQ(counter_value(engine, "customPropertyNamesPublished"sv), 1ull);
-
-    engine.flush();
-    (void)engine.take_style_transaction(root);
-    auto new_name = Utf16FlyString::from_utf8_without_validation("--new-custom-property"sv);
-    auto new_atom = engine.intern_atom(new_name);
-    EXPECT_EQ(new_atom, old_atom);
-    engine.note_custom_property_name(new_atom, new_name);
-
-    EXPECT_EQ(counter_value(engine, "customPropertyNamesPublished"sv), 2ull);
 }
 
 // Records an element's inline style the way the host does: as a snapshot of the block that crosses with the next

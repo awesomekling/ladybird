@@ -401,6 +401,7 @@ TEST_CASE(style_engine_expands_presentation_hint_shorthands_in_rust)
     Vector<StyleProperty> hints { StyleProperty { Important::No, PropertyID::Border, inherited.properties()[0].value } };
     engine.set_element_presentational_hint_properties(node, StyleEngineFFI::FfiElementDeclarationKind::PresentationalHint, hints);
     EXPECT(!engine.css_transitions_may_observe_style_changes());
+    engine.flush();
     // Border expands through intermediate shorthands such as border-width. Each resulting
     // longhand after the first must reuse the same immutable keyword value. The 17 longhands
     // comprise four widths, four styles, four colors, and five border-image properties.
