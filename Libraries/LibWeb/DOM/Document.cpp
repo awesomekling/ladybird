@@ -3102,16 +3102,6 @@ void Document::obtain_theme_color()
     document().page().client().page_did_change_theme_color(theme_color);
 }
 
-Layout::Viewport const* Document::layout_node() const
-{
-    return static_cast<Layout::Viewport const*>(Node::layout_node());
-}
-
-Layout::Viewport* Document::layout_node()
-{
-    return static_cast<Layout::Viewport*>(Node::layout_node());
-}
-
 Layout::Viewport const* Document::unsafe_layout_node() const
 {
     return static_cast<Layout::Viewport const*>(Node::unsafe_layout_node());
@@ -10558,11 +10548,6 @@ void Document::schedule_full_accumulated_visual_context_rebuild(Layout::RustFFI:
 {
     render_inputs_for_write().note_visual_context_full_rebuild(reason);
     set_needs_accumulated_visual_contexts_update(true);
-}
-
-void Document::schedule_accumulated_visual_context_update(Layout::Row const& row, AccumulatedVisualContextUpdateScope scope)
-{
-    schedule_accumulated_visual_context_update(Painting::BoxSlot::of(*this, row.slot()), scope);
 }
 
 void Document::schedule_accumulated_visual_context_update(Painting::BoxSlot const& box, AccumulatedVisualContextUpdateScope scope)
