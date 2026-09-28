@@ -745,7 +745,9 @@ Optional<Painting::QueryView> Document::query_view_for_clean_read() const
     return Painting::QueryView { snapshot.release_nonnull() };
 }
 
-// Whether what style and layout describe of the document now is what a query snapshot published now would say.
+// Whether what style and layout describe of the document now is what a query snapshot published now would say. A render
+// clock's ticks leave a published snapshot as it is: a task reads animations as the document last adopted them, and
+// adopting a tick writes the render inputs.
 bool Document::may_publish_query_snapshot() const
 {
     auto navigable = this->navigable();
@@ -753,9 +755,6 @@ bool Document::may_publish_query_snapshot() const
         return false;
     // An animation that skipped a per-frame style update catches up on the next read of its target.
     if (render_inputs().has_throttled_animation_style_update())
-        return false;
-    // LIBWEB_RENDER_CLOCK_FRAMES: The render clock lays out a leased document's animations beside the main thread.
-    if (HTML::main_thread_event_loop().frame_scheduler().holds_clock_lease(*this))
         return false;
     // A container's committed viewport that waits in the queue has yet to reach the documents it embeds.
     if (m_commit_messages->has_queued_navigable_container_viewport())
