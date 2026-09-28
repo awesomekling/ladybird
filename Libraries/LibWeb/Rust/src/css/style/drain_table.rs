@@ -70,3 +70,47 @@ impl<K: Eq + Hash, V> DrainTable<K, V> {
         std::mem::take(&mut self.moved)
     }
 }
+
+/// A table whose writes the engine's home follows key by key: each write names its key, and whoever reaches the engine
+/// hands the home what the table holds now under each key written as it is done with the engine.
+pub(crate) struct FollowedTable<K, V> {
+    entries: HashMap<K, V>,
+    written: Vec<K>,
+}
+
+impl<K, V> Default for FollowedTable<K, V> {
+    fn default() -> Self {
+        Self {
+            entries: HashMap::default(),
+            written: Vec::new(),
+        }
+    }
+}
+
+impl<K, V> Deref for FollowedTable<K, V> {
+    type Target = HashMap<K, V>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.entries
+    }
+}
+
+impl<K: Eq + Hash + Copy, V> FollowedTable<K, V> {
+    pub(crate) fn insert(&mut self, key: K, value: V) -> Option<V> {
+        self.written.push(key);
+        self.entries.insert(key, value)
+    }
+
+    pub(crate) fn remove(&mut self, key: &K) -> Option<V> {
+        let removed = self.entries.remove(key);
+        if removed.is_some() {
+            self.written.push(*key);
+        }
+        removed
+    }
+
+    /// The keys written since the home last followed the table.
+    pub(crate) fn take_written(&mut self) -> Vec<K> {
+        std::mem::take(&mut self.written)
+    }
+}
