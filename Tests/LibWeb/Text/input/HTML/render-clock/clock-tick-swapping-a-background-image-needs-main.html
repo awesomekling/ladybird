@@ -23,11 +23,10 @@
         return performance.now();
     }
 
-    // Under LIBWEB_RENDER_CLOCK_FRAMES, a render clock tick that swaps an element's background image for one nothing
+    // A render clock tick that swaps an element's background image for one nothing
     // has loaded yet presents no frame without the image: it hands over to the main thread, which starts loading it.
     asyncTest(async done => {
         const box = document.getElementById("box");
-        const enabled = internals.clockFramesEnabled();
         internals.setManualRenderingOpportunities(true, true);
         await nextTask();
         let frameTime = performance.now();
@@ -60,10 +59,10 @@
         }
         internals.setManualRenderingOpportunities(false);
 
-        println(`a lease took the tick: ${!enabled || taken}`);
-        println(`the tick swapped the image: ${!enabled || swapped}`);
-        println(`frames presented without the image: ${enabled ? countersAfter.ticksPresented - countersBefore.ticksPresented : 0}`);
-        println(`the tick handed over to the main thread: ${!enabled || countersAfter.ticksNeedingMain - countersBefore.ticksNeedingMain === 1}`);
+        println(`a lease took the tick: ${taken}`);
+        println(`the tick swapped the image: ${swapped}`);
+        println(`frames presented without the image: ${countersAfter.ticksPresented - countersBefore.ticksPresented}`);
+        println(`the tick handed over to the main thread: ${countersAfter.ticksNeedingMain - countersBefore.ticksNeedingMain === 1}`);
         done();
     });
 </script>

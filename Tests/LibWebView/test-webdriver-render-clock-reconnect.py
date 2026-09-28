@@ -4,7 +4,7 @@
 #
 # SPDX-License-Identifier: BSD-2-Clause
 
-# Under LIBWEB_RENDER_CLOCK_FRAMES, the render clock presents an idle page's animation from the render side. When the
+# The render clock presents an idle page's animation from the render side. When the
 # Compositor dies, the leases end with the render clock's channel; once the browser has connected a new Compositor, the
 # next rendering update grants them anew, and the render clock presents frames again.
 
@@ -80,7 +80,6 @@ def run_test(webdriver_binary):
             ("XDG_CACHE_HOME", "cache"),
         ):
             environment[variable] = str(Path(temporary) / directory)
-        environment["LIBWEB_RENDER_CLOCK_FRAMES"] = "1"
         port = webdriver_helpers.unused_port()
         webdriver = subprocess.Popen(
             [webdriver_binary, "--headless", "--expose-internals-object", "-l", "127.0.0.1", "-p", str(port)],
@@ -91,8 +90,6 @@ def run_test(webdriver_binary):
             session = webdriver_helpers.create_session(port)
             status, _, body = webdriver_helpers.request(port, "POST", f"/session/{session}/url", {"url": PAGE})
             assert status == 200, body
-            assert execute_async(port, session, "arguments[0](internals.clockFramesEnabled());", []) is True
-
             assert execute_async(port, session, WAIT_FOR_PRESENTED_FRAMES, [5]) is True
 
             compositors = descendants_named(webdriver.pid, "Compositor")

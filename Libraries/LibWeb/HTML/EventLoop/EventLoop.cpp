@@ -842,7 +842,7 @@ void EventLoop::update_the_rendering()
         document->evaluate_media_queries_and_report_changes();
     }
 
-    // LIBWEB_RENDER_CLOCK_FRAMES: A clock lease this rendering update cannot tick ends before step 11, which then
+    // A clock lease this rendering update cannot tick ends before step 11, which then
     // samples the lease's effects itself.
     m_frame_scheduler->prepare_clock_ticks(docs, frame_timestamp);
 
@@ -854,13 +854,13 @@ void EventLoop::update_the_rendering()
     animation_timestamps.ensure_capacity(docs.size());
     for (auto& document : docs) {
         auto timestamp = relative_frame_timestamp_for(frame_timestamp, *document);
-        // LIBWEB_RENDER_CLOCK_FRAMES: A document whose animations a render clock ticks shows its last tick.
+        // A document whose animations a render clock ticks shows its last tick.
         if (auto clock_time = m_frame_scheduler->clock_lease_timeline_time(*document); clock_time.has_value())
             timestamp = *clock_time;
-        // LIBWEB_RENDER_CLOCK_FRAMES: The ticks a render clock presented beside a long task moved the document
-        //                             timeline past a display frame that went by meanwhile. The timeline does not go
-        //                             back, so the document takes its time, and its animation frame callbacks at step
-        //                             14 get that time too.
+        // The ticks a render clock presented beside a long task moved the document
+        // timeline past a display frame that went by meanwhile. The timeline does not go
+        // back, so the document takes its time, and its animation frame callbacks at step
+        // 14 get that time too.
         else if (auto current = document->timeline()->current_time(); current.has_value() && current->type == Animations::TimeValue::Type::Milliseconds && current->value > timestamp)
             timestamp = current->value;
         animation_timestamps.unchecked_append(timestamp);
@@ -905,7 +905,7 @@ void EventLoop::update_the_rendering()
     for (auto& document : docs)
         documents.unchecked_append(*document);
 
-    // LIBWEB_RENDER_CLOCK_FRAMES: Each leased document's tick samples the effects step 11 left to its lease, beside the
+    // Each leased document's tick samples the effects step 11 left to its lease, beside the
     // main thread, and the rendering update goes on at step 16 once every document has adopted its tick.
     if (m_frame_scheduler->tick_clock_leases(documents, 0, frame_timestamp, m_rendering_update_may_overlap_layout)) {
         frame_in_flight = true;
@@ -1284,7 +1284,7 @@ void EventLoop::end_rendering_update()
     for (auto const& page : pages_of_local_roots())
         page->client().did_finish_rendering_update();
 
-    // LIBWEB_RENDER_CLOCK_FRAMES: The next rendering update of a document that has nothing but its animations to show
+    // The next rendering update of a document that has nothing but its animations to show
     // ticks them under a clock lease.
     m_frame_scheduler->grant_clock_leases();
 

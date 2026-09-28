@@ -32,13 +32,12 @@
         return performance.now();
     }
 
-    // Under LIBWEB_RENDER_CLOCK_FRAMES with manual rendering opportunities and clock ticks, the display ticks the leases
+    // With manual rendering opportunities and clock ticks, the display ticks the leases
     // see come from the test alone: each injected tick lays out and presents one frame from the render side, with no
     // rendering update, and a read after it sees the width composed at the time of the tick.
     asyncTest(async done => {
         const box = document.getElementById("box");
         const animation = box.getAnimations()[0];
-        const enabled = internals.clockFramesEnabled();
         internals.setManualRenderingOpportunities(true, true);
         await nextTask();
         let frameTime = performance.now();
@@ -69,10 +68,10 @@
         const updates = internals.getRenderingSchedulerCounters().updatesRun - updatesBefore;
         internals.setManualRenderingOpportunities(false);
 
-        println(`ticks a lease took: ${enabled ? taken : 5}`);
-        println(`frames presented from the render side: ${enabled ? presented : 5}`);
-        println(`frames laid out on the render side: ${enabled ? laidOut : 5}`);
-        println(`rendering updates meanwhile: ${enabled ? updates : 0}`);
+        println(`ticks a lease took: ${taken}`);
+        println(`frames presented from the render side: ${presented}`);
+        println(`frames laid out on the render side: ${laidOut}`);
+        println(`rendering updates meanwhile: ${updates}`);
         println(`mismatches: ${mismatches}`);
         done();
     });

@@ -36,7 +36,6 @@
     // at each of those frames too, the page keeps its clock through the updates, rather than losing it as each one
     // begins and getting it back as it ends: the frame callbacks see it at every frame.
     asyncTest(async done => {
-        const enabled = internals.clockFramesEnabled();
         internals.setManualRenderingOpportunities(true, true);
         await nextTask();
         let frameTime = performance.now();
@@ -52,13 +51,13 @@
             internals.injectRenderingOpportunity(frameTime);
             return clockInCallback;
         };
-        for (let frames = 0; frames < 3 || (enabled && frames < 60 && !internals.renderClockTicks(document)); ++frames)
+        for (let frames = 0; frames < 3 || (frames < 60 && !internals.renderClockTicks(document)); ++frames)
             await frame();
         let keptInEveryFrame = true;
         for (let i = 0; i < 10; ++i)
             keptInEveryFrame &&= await frame();
         internals.setManualRenderingOpportunities(false);
-        println(`the page keeps its clock through the rendering updates: ${!enabled || keptInEveryFrame}`);
+        println(`the page keeps its clock through the rendering updates: ${keptInEveryFrame}`);
         done();
     });
 </script>

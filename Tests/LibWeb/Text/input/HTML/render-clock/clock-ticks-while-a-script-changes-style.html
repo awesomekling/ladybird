@@ -30,11 +30,10 @@
     asyncTest(async done => {
         const box = document.getElementById("box");
         const other = document.getElementById("other");
-        const enabled = internals.clockFramesEnabled();
         const presentedHeight = () => internals.presentedBorderBox(box)?.height ?? 0;
 
         // Until the page's animation has a clock (it never gets one without clock frames).
-        for (let frames = 0; enabled && frames < 600 && !internals.renderClockTicks(document); ++frames)
+        for (let frames = 0; frames < 600 && !internals.renderClockTicks(document); ++frames)
             await new Promise(resolve => requestAnimationFrame(resolve));
 
         // The task: on for ~300 ms, and on until the presented height has moved twice, however slowly the display
@@ -69,7 +68,7 @@
         other.style.setProperty("--shade", "rgb(42, 0, 0)");
         println(`the task reads its own changes: ${readsSeeChanges}`);
         println(`the final background: ${getComputedStyle(other).backgroundColor}`);
-        println(`the presented height moves while the task runs: ${!enabled || heights.size >= 3}`);
+        println(`the presented height moves while the task runs: ${heights.size >= 3}`);
         done();
     });
 </script>

@@ -41,7 +41,7 @@ pub struct PaintState {
     pub(crate) hit_test_list_generation: u64,
     pub(crate) last_recording: Option<Arc<crate::painting::record::RecordingOutput>>,
     pub(crate) selection: Option<Arc<crate::painting::selection::SelectionRange>>,
-    // LIBWEB_RENDER_CLOCK_FRAMES: the inputs of the last recording the main thread published, which
+    // The inputs of the last recording the main thread published, which
     // a clock lease's ticks record again with while the main thread idles.
     pub(crate) clock_recording: Option<ClockRecording>,
     // Shared with the frames published since it last changed.

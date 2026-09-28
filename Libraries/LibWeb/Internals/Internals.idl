@@ -208,14 +208,11 @@ interface Internals {
     // once. Each holds calls, joins, cleanReads, nested, totalNanoseconds,
     // cleanReadNanoseconds and maxNanoseconds.
     [ImplementedAs=join_counters_object] object getJoinCounters();
-    // LIBWEB_RENDER_CLOCK_FRAMES: the clock lease ticks the main thread adopted that installed a sample.
+    // The clock lease ticks the main thread adopted that installed a sample.
     unsigned long long clockTicksPresented();
-    // Whether rendering updates tick clock leases: clock frames are on (unless LIBWEB_RENDER_CLOCK_FRAMES=0), and the
-    // stage thread runs the clock stage beside the main thread.
-    boolean clockFramesEnabled();
-    // LIBWEB_RENDER_CLOCK_FRAMES: the display ticks the render clock handed the stage thread, without the main thread.
+    // The display ticks the render clock handed the stage thread, without the main thread.
     unsigned long long clockTicksReceived();
-    // LIBWEB_RENDER_CLOCK_FRAMES: whether document holds a clock lease a render clock ticks.
+    // Whether document holds a clock lease a render clock ticks.
     boolean renderClockTicks(Document document);
     // What the render clock did with them: ticksPosted, ticksFolded, ticksRun, ticksInstalled, ticksNeedingMain and
     // why it dropped the others.
@@ -256,8 +253,8 @@ interface Internals {
     // LIBWEB_STAGE_THREAD=overlap with LIBWEB_STAGE_OVERLAP naming "layout". It holds the pass at
     // "before-run" or "before-completion" (laid out, before the main thread hears of it).
     boolean holdNextLayoutFrame(optional DOMString point = "before-run", optional Document? document = null);
-    // Like holdNextRecordingFrame(), for the next clock lease tick a rendering update submits under
-    // LIBWEB_RENDER_CLOCK_FRAMES ("before-run" or "before-completion").
+    // Like holdNextRecordingFrame(), for the next clock lease tick a rendering update submits ("before-run" or
+    // "before-completion").
     boolean holdNextClockTick(optional DOMString point = "before-run", optional Document? document = null);
     // Like holdNextLayoutFrame(), for the first style pass a rendering update submits, under
     // LIBWEB_STAGE_THREAD=overlap with LIBWEB_STAGE_OVERLAP naming "style". It holds the pass at

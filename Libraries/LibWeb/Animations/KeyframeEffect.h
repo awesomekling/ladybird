@@ -190,7 +190,7 @@ public:
         m_can_skip_per_frame_style_update_cache.clear();
     }
     bool is_offscreen_throttled() const { return m_is_offscreen_throttled; }
-    // LIBWEB_RENDER_CLOCK_FRAMES: a clock lease samples this effect in its ticks, which the main thread adopts, so the
+    // A clock lease samples this effect in its ticks, which the main thread adopts, so the
     // main thread's own update of the effect's timeline neither samples it nor lets it stop the frame pump.
     bool is_clock_driven() const { return m_is_clock_driven; }
     void set_is_clock_driven(bool value) { m_is_clock_driven = value; }

@@ -4,8 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-//! Clock frames (on unless `LIBWEB_RENDER_CLOCK_FRAMES=0`): the animations of a document ticked on
-//! the render owner.
+//! Clock frames: the animations of a document ticked on the render owner.
 //!
 //! At the end of a rendering update in which nothing but the running animations of a document's
 //! timeline would change what the next one shows, the main thread starts the document's clock: it
@@ -43,12 +42,6 @@ use crate::layout::update_layout::ClockLayoutFrame;
 use crate::layout::{ArenaHandle, LayoutNodeArena};
 use crate::painting::query_snapshot::{FfiQuerySnapshotViewport, QuerySnapshot};
 use crate::render_owner::DocumentId;
-
-/// Whether clock frames are on: unless `LIBWEB_RENDER_CLOCK_FRAMES=0`.
-pub(crate) fn enabled() -> bool {
-    static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| std::env::var("LIBWEB_RENDER_CLOCK_FRAMES").as_deref() != Ok("0"))
-}
 
 /// An element whose animations a clock ticks.
 #[derive(Clone, Copy)]
@@ -564,17 +557,11 @@ pub(crate) fn document_destroyed(document: DocumentId) {
 // The ticks the host adopted that installed a sample.
 static CLOCK_TICKS_PRESENTED: AtomicU64 = AtomicU64::new(0);
 
-/// Whether clock frames are on.
-#[unsafe(no_mangle)]
-pub extern "C" fn rust_clock_frames_enabled() -> bool {
-    enabled()
-}
-
-/// Whether a rendering update may submit a clock tick: clock frames are on and the stage thread
-/// runs the `clock` stage beside the main thread.
+/// Whether a rendering update may submit a clock tick: the stage thread runs the `clock` stage beside the main
+/// thread.
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_stage_thread_submits_clock() -> bool {
-    enabled() && crate::stage_thread::submits("clock")
+    crate::stage_thread::submits("clock")
 }
 
 /// Starts the clock of the document whose layout arena is `arena`, in place of the one it had: it
@@ -1329,7 +1316,7 @@ static TICKS_TO_ADOPT: AtomicBool = AtomicBool::new(false);
 /// last asked, which they adopt before anything else reaches them.
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_render_clock_take_ticks_to_adopt() -> bool {
-    enabled() && TICKS_TO_ADOPT.swap(false, Ordering::AcqRel)
+    TICKS_TO_ADOPT.swap(false, Ordering::AcqRel)
 }
 
 /// Has the main thread adopt what the render clock's ticks left. Runs on the Rendering thread.
@@ -1488,11 +1475,11 @@ pub extern "C" fn rust_render_clock_set_needs_main(needs_main: extern "C" fn(u64
 }
 
 /// A render clock's way to the owner, or null where there is no owner beside the main thread to tick
-/// clocks on (the stages do not overlap, or clock frames are off). The render clock thread owns it,
-/// and destroys it with [`rust_render_clock_sender_destroy`].
+/// clocks on (the stages do not overlap). The render clock thread owns it, and destroys it with
+/// [`rust_render_clock_sender_destroy`].
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_render_clock_sender_create() -> *mut ClockSender {
-    if !enabled() || !crate::stage_thread::owner_runs_beside_main() {
+    if !crate::stage_thread::owner_runs_beside_main() {
         return std::ptr::null_mut();
     }
     Box::into_raw(Box::new(ClockSender { slots: HashMap::new() }))

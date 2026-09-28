@@ -7365,7 +7365,7 @@ void LocalNavigable::finish_painting_next_frame(PendingCompositorFrame& pending_
 {
     // A render clock kit is sealed as this frame was.
     m_keyboard_scroll_state_of_last_frame = pending_frame.keyboard_scroll_state;
-    if (pending_frame.recording && Layout::RustFFI::rust_clock_frames_enabled()) {
+    if (pending_frame.recording) {
         m_last_painted_frame_for_render_clock = LastPaintedFrame {
             .paint_config = pending_frame.paint_config,
             .keyboard_scroll_state = pending_frame.keyboard_scroll_state,

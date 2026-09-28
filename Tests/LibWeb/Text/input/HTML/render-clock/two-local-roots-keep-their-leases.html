@@ -17,22 +17,21 @@
 <div class="box"></div>
 <script src="../../include.js"></script>
 <script>
-    // Under LIBWEB_RENDER_CLOCK_FRAMES, a window's document and a popup's, each a local root, render at rendering
+    // A window's document and a popup's, each a local root, render at rendering
     // opportunities of their own. A rendering update for one leaves the other's clock lease alone, so the render clock
     // ticks both.
     asyncTest(async done => {
         const popup = window.open();
-        const enabled = internals.clockFramesEnabled();
         // Not a timing test. The popup may replace the document it opened with, which then takes the animation again.
         const start = performance.now();
-        while (enabled && !(internals.renderClockTicks(document) && internals.renderClockTicks(popup.document)) && performance.now() - start < 10000) {
+        while (!(internals.renderClockTicks(document) && internals.renderClockTicks(popup.document)) && performance.now() - start < 10000) {
             if (!popup.document.querySelector(".box")) {
                 popup.document.write(`<!DOCTYPE html><style>${document.querySelector("style").textContent}</style><div class="box"></div>`);
                 popup.document.close();
             }
             await new Promise(resolve => setTimeout(resolve, 10));
         }
-        println(`a render clock ticks both documents: ${!enabled || (internals.renderClockTicks(document) && internals.renderClockTicks(popup.document))}`);
+        println(`a render clock ticks both documents: ${internals.renderClockTicks(document) && internals.renderClockTicks(popup.document)}`);
         popup.close();
         done();
     });

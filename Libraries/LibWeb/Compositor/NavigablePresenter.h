@@ -191,7 +191,7 @@ public:
         VERIFY(m_holder.exchange(Holder::Main) == Holder::FrameInFlight);
     }
 
-    // LIBWEB_RENDER_CLOCK_FRAMES: The main thread lends the presenter to the render clock's ticks until it next needs
+    // The main thread lends the presenter to the render clock's ticks until it next needs
     // it. Taking it back waits for a tick that presents from it now, and returns whether it was lent.
     void lend_to_render_clock()
     {

@@ -124,7 +124,7 @@ pub struct FfiLayoutCommitEffects {
     pub clamped_scroll_offsets: *const FfiClampedScrollOffset,
     pub clamped_scroll_offsets_count: usize,
     /// Whether the render side showed what the commits laid out already, having updated the
-    /// visual contexts and recorded and presented the frame (`LIBWEB_RENDER_CLOCK_FRAMES`): the
+    /// visual contexts and recorded and presented the frame: the
     /// document has nothing to paint again for them.
     pub shown_on_render_side: bool,
     /// Whether the flight that ran the frame recorded the document after it, which the document
@@ -1781,8 +1781,8 @@ impl LayoutFrame {
     }
 }
 
-/// A layout frame a document's clock ticks lay out in on the render side while the main thread idles
-/// (`LIBWEB_RENDER_CLOCK_FRAMES`). The main thread makes it with what its rounds read from the
+/// A layout frame a document's clock ticks lay out in on the render side while the main thread idles. The main thread
+/// makes it with what its rounds read from the
 /// document (the facts, the selection), which nothing changes while it idles, and takes it in when
 /// it wakes: it pays what the rounds owe and applies their messages, as it takes in a submitted
 /// pass's frame.

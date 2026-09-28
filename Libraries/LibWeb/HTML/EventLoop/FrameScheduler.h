@@ -67,7 +67,7 @@ public:
         enum class Kind : u8 {
             Style,
             Layout,
-            // A clock lease's tick (LIBWEB_RENDER_CLOCK_FRAMES), which goes on at step 16 for every document.
+            // A clock lease's tick, which goes on at step 16 for every document.
             Clock,
             // A flight (LIBWEB_STAGE_OVERLAP naming flight): the style pass and the stages after it, up to the first
             // one that needs the main thread. The rendering update goes on where the flight ended.
@@ -142,7 +142,7 @@ public:
     // a style pass, consume-commit finishes the document's style update, and that main half may submit the layout pass
     // and the recording; after a layout pass, it may submit the recording.
     void submit_document_pass(Vector<GC::Ref<DOM::Document>> documents, size_t document_index, HighResolutionTime::DOMHighResTimeStamp frame_timestamp);
-    // LIBWEB_RENDER_CLOCK_FRAMES: at the end of a rendering update, grants a clock lease to every document whose next
+    // At the end of a rendering update, grants a clock lease to every document whose next
     // rendering update would change nothing but what the running animations of its document timeline show, and ends
     // the lease of every other one.
     void grant_clock_leases();

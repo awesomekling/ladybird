@@ -35,13 +35,12 @@
         return performance.now();
     }
 
-    // Under LIBWEB_RENDER_CLOCK_FRAMES, the render clock's ticks lay out with the document as it stands when the main
+    // The render clock's ticks lay out with the document as it stands when the main
     // thread goes idle: a zoom that changes the viewport, laid out by a read right away, is what the next tick lays out
     // against, with no rendering update in between.
     asyncTest(async done => {
         const box = document.getElementById("box");
         const animation = box.getAnimations()[0];
-        const enabled = internals.clockFramesEnabled();
         const matches = () => {
             const expected = (window.innerWidth * (10 + (80 * animation.currentTime) / 20000)) / 100;
             return Math.abs(box.getBoundingClientRect().width - expected) <= 0.5;
@@ -67,7 +66,7 @@
         frameTime = await frameTimeAfter(frameTime);
         const tickedAfter = await internals.injectClockTick(frameTime);
         println(`after the zoom: ${matches()}`);
-        println(`ticks a lease took: ${!enabled || (tickedBefore && tickedAfter)}`);
+        println(`ticks a lease took: ${tickedBefore && tickedAfter}`);
         println(`rendering updates meanwhile: ${internals.getRenderingSchedulerCounters().updatesRun - updatesBefore}`);
         internals.resetZoom();
         internals.setManualRenderingOpportunities(false);
