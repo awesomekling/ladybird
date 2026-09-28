@@ -1606,17 +1606,6 @@ impl RetainedState {
             .chain(self.nodes_owing_a_transition_registration.keys().copied())
     }
 
-    /// The timing of one effect, named by the identity the stage looks its description up by.
-    #[must_use]
-    pub(crate) fn element_animation_timing_rows_for_effect(
-        &self,
-        node: StyleNodeID,
-        slot: animations::AnimationSlot,
-        effect_identity: u64,
-    ) -> Option<&animations::AnimationTimingRow> {
-        self.animation_timing_rows.row_for_effect(node, slot, effect_identity)
-    }
-
     /// Record the current time each of the document's animation timelines was sampled at. Published
     /// whole at the style update's begin boundary, since a timeline's time only moves outside one.
     pub fn set_animation_timeline_samples(&mut self, identities: &[u32], words: &[u32], times: &[u64]) {
