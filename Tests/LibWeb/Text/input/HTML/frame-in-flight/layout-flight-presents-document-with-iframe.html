@@ -10,7 +10,6 @@
     // printed until the end, as printing inserts nodes, whose tree build keeps a flight from presenting.
     asyncTest(async done => {
         await new Promise(resolve => frame.complete || frame.contentDocument?.readyState === "complete" ? resolve() : frame.addEventListener("load", resolve, { once: true }));
-        internals.setRenderPresents(true);
         // The iframe paints its first frames after its load: until it has nothing left to paint, the parent's flights
         // leave their paint to the rendering update.
         for (let i = 0; i < 3; ++i)
@@ -21,7 +20,6 @@
             await twoFrames();
         }
         const ends = internals.getRenderingSchedulerCounters().flightEnds;
-        internals.resetRenderPresents();
         let flights = 0;
         for (const byStage of Object.values(ends))
             for (const count of Object.values(byStage))

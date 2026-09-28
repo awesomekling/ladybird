@@ -33,7 +33,6 @@
         while (!frame.contentDocument?.getElementById("inner") || frame.contentDocument.readyState !== "complete")
             await new Promise(resolve => frame.addEventListener("load", resolve, { once: true }));
         const inner = frame.contentDocument.getElementById("inner");
-        internals.setRenderPresents(true);
         // The iframe paints its first frames after its load: until it has nothing left to paint, the parent's flights
         // leave their paint to the rendering update.
         for (let i = 0; i < 3; ++i)
@@ -45,7 +44,6 @@
             inner.style.width = "30px";
         });
         const resize = await step(() => { frame.style.width = "120px"; });
-        internals.resetRenderPresents();
 
         // Without flights (LIBWEB_FLIGHT=0) nothing presents ahead of the rendering update.
         const flew = ends => Object.values(ends).some(byStage => Object.values(byStage).some(count => count > 0));

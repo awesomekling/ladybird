@@ -11,7 +11,6 @@
     // content. Nothing is printed until the end, as printing inserts nodes.
     asyncTest(async done => {
         await new Promise(resolve => window.addEventListener("load", resolve));
-        internals.setRenderPresents(true);
         window.scrollTo(0, 2000);
         for (let i = 0; i < 3; ++i)
             await twoFrames();
@@ -26,7 +25,6 @@
         const presentedByFlight = internals.framesPresentedByFlights(document) - presentedBefore;
         const clamped = window.scrollY === document.documentElement.scrollHeight - window.innerHeight;
         const ends = internals.getRenderingSchedulerCounters().flightEnds;
-        internals.resetRenderPresents();
         const flew = Object.values(ends).some(byStage => Object.values(byStage).some(count => count > 0));
 
         println(`scrolled to: ${scrolledTo}`);

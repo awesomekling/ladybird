@@ -301,13 +301,13 @@ public:
         PaintConfig paint_config;
         Compositing::KeyboardScrollState keyboard_scroll_state;
         OwnPtr<Painting::PendingDisplayListRecording> recording;
-        // What the frame is presented from, sealed where it was begun (unless LIBWEB_RENDER_PRESENTS=0).
+        // What the frame is presented from, sealed where it was begun.
         RefPtr<Compositor::Presentation> presentation;
     };
     Optional<PendingCompositorFrame> begin_painting_next_frame(Painting::RecordingRun);
     void finish_painting_next_frame(PendingCompositorFrame&);
-    // Hands the frame's presentation to the frame in flight, which presents it once it has recorded it
-    // (unless LIBWEB_RENDER_PRESENTS=0). Returns false if the frame is finished and presented here instead.
+    // Hands the frame's presentation to the frame in flight, which presents it once it has recorded it. Returns false if
+    // the frame is finished and presented here instead.
     bool submit_presentation(PendingCompositorFrame&);
     void adopt_presented_frame(PendingCompositorFrame&);
 

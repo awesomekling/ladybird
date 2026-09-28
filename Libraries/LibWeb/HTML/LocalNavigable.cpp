@@ -6712,8 +6712,7 @@ Optional<LocalNavigable::PendingCompositorFrame> LocalNavigable::begin_composito
         // NB: What asks for another recording once this one is prepared asks for the next one.
         m_needs_to_record_display_list = false;
     }
-    if (Compositor::render_presents())
-        pending_frame.presentation = seal_presentation(pending_frame);
+    pending_frame.presentation = seal_presentation(pending_frame);
     return pending_frame;
 }
 
@@ -7182,8 +7181,8 @@ bool LocalNavigable::seal_flight_paint_now(DOM::Document& document, bool may_pre
     page().prepare_canvas_contexts_for_compositing();
     auto hit_test_display_list_invalidations = document.hit_test_display_list_invalidations();
 
-    // Where the render side presents, the flight presents what it records too, unless what its layout leaves the document
-    // to do could ask for another layout first. What is known to ask for one already keeps the flight from presenting.
+    // The flight presents what it records too, unless what its layout leaves the document to do could ask for another
+    // layout first. What is known to ask for one already keeps the flight from presenting.
     // The flight presents the keyboard scroll state of the last frame, which it cannot take again before its layout:
     // once that state is invalidated, the frame is presented from the main thread, which takes the state anew.
     auto keyboard_scroll_state_of_last_frame_is_current = [&] {
@@ -7191,7 +7190,7 @@ bool LocalNavigable::seal_flight_paint_now(DOM::Document& document, bool may_pre
             && (!is_top_level_traversable() || page().keyboard_scroll_state_is_current(m_keyboard_scroll_state_of_last_frame->generation));
     };
     OwnPtr<FlightPresentation> flight_presentation;
-    if (may_present && Compositor::render_presents() && Layout::RustFFI::rust_stage_thread_submits_presentation() && keyboard_scroll_state_of_last_frame_is_current()) {
+    if (may_present && Layout::RustFFI::rust_stage_thread_submits_presentation() && keyboard_scroll_state_of_last_frame_is_current()) {
         if (auto frame_sink = compositor_context().prepare_to_submit_frame_from_render_side()) {
             auto& document_paint_state = document.paint_state();
             Compositing::ScrollStateSnapshot scroll_state_snapshot { document_paint_state.scroll_state_snapshot() };
@@ -7355,11 +7354,9 @@ LocalNavigable::FinishedFlightPaint LocalNavigable::finish_flight_paint(DOM::Doc
         .recording = move(recording),
         .presentation = {},
     };
-    if (Compositor::render_presents()) {
-        pending_frame.presentation = seal_presentation(pending_frame);
-        if (pending_frame.presentation)
-            pending_frame.presentation->inputs.present_viewport_rect = page().css_to_device_rect(viewport_rect()).to_type<int>();
-    }
+    pending_frame.presentation = seal_presentation(pending_frame);
+    if (pending_frame.presentation)
+        pending_frame.presentation->inputs.present_viewport_rect = page().css_to_device_rect(viewport_rect()).to_type<int>();
     finish_painting_next_frame(pending_frame);
     return { .handed_off = true };
 }

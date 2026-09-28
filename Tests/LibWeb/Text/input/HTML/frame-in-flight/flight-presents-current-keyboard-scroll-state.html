@@ -9,7 +9,6 @@
     // instead: the frames flights present after it carry the current state, not the invalidated one. Nothing is
     // printed until the end, as printing inserts nodes, whose tree build keeps a flight from presenting.
     asyncTest(async done => {
-        internals.setRenderPresents(true);
         await twoFrames();
         box.style.width = "20px";
         await twoFrames();
@@ -24,7 +23,6 @@
             after.push(internals.lastFrameKeyboardScrollStateIsCurrent());
         }
         const ends = internals.getRenderingSchedulerCounters().flightEnds;
-        internals.resetRenderPresents();
         let flights = 0;
         for (const byStage of Object.values(ends))
             for (const count of Object.values(byStage))
