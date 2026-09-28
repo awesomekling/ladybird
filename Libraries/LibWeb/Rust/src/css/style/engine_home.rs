@@ -393,6 +393,22 @@ impl StyleEngineHandle {
         unsafe { reach_on_this_thread(self.address(), engine, run) }
     }
 
+    /// Runs `run` with an engine no document's render state links, which only the thread that holds its handle reaches
+    /// (a unit test's, the replay tool's): whatever `run` calls reaches it through the handle too.
+    ///
+    /// # Safety
+    ///
+    /// The handle must name a live engine no render state links, which nothing else reaches until this returns.
+    pub(crate) unsafe fn reach_alone<T>(self, run: impl FnOnce(&mut StyleEngine) -> T) -> T {
+        debug_assert!(
+            !self.document().is_valid() && self.is_home(),
+            "only an engine no render state links is reached alone"
+        );
+        let engine = self.home().engine.as_ptr();
+        // SAFETY: Guaranteed by the caller.
+        unsafe { reach_on_this_thread(self.address(), engine, run) }
+    }
+
     /// Names the layout arena of the engine's document `document`, which the stages the engine is lent to run for.
     pub(crate) fn link_arena(self, arena: usize, document: crate::render_owner::DocumentId) {
         self.home().arena.set(arena);

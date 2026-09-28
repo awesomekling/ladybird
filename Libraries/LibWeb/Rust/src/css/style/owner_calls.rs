@@ -1131,10 +1131,9 @@ pub(crate) fn without_owner<R>(
         owning_document(engine).is_none(),
         "the engine of a document's render state is the owner's to reach"
     );
-    // SAFETY: No owner reaches an engine no document's render state links.
-    let engine = unsafe { engine.enter(entry) };
     super::seal::note_engine_call(entry);
-    run(engine)
+    // SAFETY: No owner reaches an engine no document's render state links: the calling thread holds it alone.
+    unsafe { engine.reach_alone(run) }
 }
 
 /// Sends `change` to the owner of `engine`'s document, which applies it before the next unit or query that reaches
