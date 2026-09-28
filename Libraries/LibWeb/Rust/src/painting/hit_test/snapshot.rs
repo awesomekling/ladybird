@@ -60,6 +60,13 @@ impl LayoutNodeArena {
             viewport_row: self.bound_viewport_row(),
         }
     }
+
+    /// The document's hit-test list as the last recording it took in left it.
+    fn hit_test_list_as_recorded(&self) -> Option<Arc<HitTestList>> {
+        // A recording the frame presented has a newer list for the document to take in.
+        self.try_take_in_recording();
+        self.hit_test_list.borrow().clone()
+    }
 }
 
 impl HitTestSnapshot {
@@ -437,20 +444,23 @@ pub unsafe extern "C" fn hit_test_snapshot_generation(snapshot: *const c_void) -
     unsafe { snapshot_from_handle(snapshot) }.generation()
 }
 
-/// Visits the chrome widgets the snapshot's list holds items of.
+/// Visits the chrome widgets the document's hit-test list holds items of, and answers the list's generation (zero for
+/// none). A recording's list is visited as it is taken in, and nothing a query derives from it is built for that: a
+/// query builds it as it publishes its snapshot.
 ///
 /// # Safety
 ///
-/// `snapshot` must be a live handle from `layout_arena_publish_hit_test_snapshot`, and `visit` must
-/// accept `sink` for the duration of the call.
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread, and `visit` must accept `sink`
+/// for the duration of the call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn hit_test_snapshot_visit_chrome_widgets(
-    snapshot: *const c_void,
+pub unsafe extern "C" fn layout_arena_visit_hit_test_chrome_widgets(
+    arena: *mut c_void,
     sink: *mut c_void,
     visit: unsafe extern "C" fn(*mut c_void, NodeSlotId, u8),
-) {
-    let Some(list) = unsafe { snapshot_from_handle(snapshot) }.list() else {
-        return;
+) -> u64 {
+    let arena = unsafe { crate::painting::ffi::arena_from_handle(arena) };
+    let Some(list) = arena.hit_test_list_as_recorded() else {
+        return 0;
     };
     for item in list.items.iter() {
         if item.chrome_widget_kind != crate::painting::hit_test::CHROME_WIDGET_NONE {
@@ -458,6 +468,7 @@ pub unsafe extern "C" fn hit_test_snapshot_visit_chrome_widgets(
             unsafe { visit(sink, item.paintable, item.chrome_widget_kind) };
         }
     }
+    list.generation
 }
 
 /// # Safety

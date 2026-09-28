@@ -25,13 +25,12 @@ namespace Web::Painting {
 
 NonnullRefPtr<HitTestDisplayList> HitTestDisplayList::create_from_rust_recording(u64 visual_context_tree_structural_epoch, DOM::Document& document, ChromeWidgetRegistry& chrome_widget_registry)
 {
-    auto list = adopt_ref(*new HitTestDisplayList(visual_context_tree_structural_epoch, document, chrome_widget_registry, HitTestSnapshot::adopt(Layout::RustFFI::layout_arena_publish_hit_test_snapshot(Layout::document_layout_arena(document)))));
     struct VisitContext {
         DOM::Document& document;
         ChromeWidgetRegistry& chrome_widget_registry;
     };
     VisitContext visit_context { document, chrome_widget_registry };
-    Layout::RustFFI::hit_test_snapshot_visit_chrome_widgets(list->snapshot(), &visit_context,
+    auto rust_generation = Layout::RustFFI::layout_arena_visit_hit_test_chrome_widgets(Layout::document_layout_arena(document), &visit_context,
         [](void* sink, Compositing::RustFFI::NodeSlotId paintable, u8 chrome_widget_kind) {
             auto& context = *static_cast<VisitContext*>(sink);
             switch (static_cast<ChromeWidgetKind>(chrome_widget_kind)) {
@@ -48,22 +47,22 @@ NonnullRefPtr<HitTestDisplayList> HitTestDisplayList::create_from_rust_recording
                 break;
             }
         });
-    return list;
+    return adopt_ref(*new HitTestDisplayList(visual_context_tree_structural_epoch, document, chrome_widget_registry, rust_generation));
 }
 
-HitTestDisplayList::HitTestDisplayList(u64 visual_context_tree_structural_epoch, DOM::Document& document, ChromeWidgetRegistry& chrome_widget_registry, NonnullRefPtr<HitTestSnapshot const> snapshot)
+HitTestDisplayList::HitTestDisplayList(u64 visual_context_tree_structural_epoch, DOM::Document& document, ChromeWidgetRegistry& chrome_widget_registry, u64 rust_generation)
     : m_visual_context_tree_structural_epoch(visual_context_tree_structural_epoch)
     , m_document(document)
     , m_chrome_widget_registry(chrome_widget_registry)
-    , m_snapshot(move(snapshot))
-    , m_rust_generation(Layout::RustFFI::hit_test_snapshot_generation(m_snapshot->handle()))
+    , m_rust_generation(rust_generation)
 {
 }
 
 HitTestDisplayList::~HitTestDisplayList() = default;
 
 // A list outlives the rows it was recorded over: a scroll, a clip or a transform moves what a point hits through the
-// committed rows and the visual context tree (hit_test/snapshot.rs). So each query reads a snapshot published for it.
+// committed rows and the visual context tree (hit_test/snapshot.rs). So each query reads a snapshot published for it,
+// which builds what a query derives from the list the first time one is published.
 void HitTestDisplayList::publish_snapshot() const
 {
     auto* arena = m_document ? Layout::document_layout_arena_if_created(*m_document) : nullptr;
@@ -81,7 +80,9 @@ bool HitTestDisplayList::is_current() const
 Optional<HitBox> HitTestDisplayList::bound_box_of(DOM::NodeIdentity identity) const
 {
     publish_snapshot();
-    return HitBox::bound_box_in(m_snapshot, identity);
+    if (!m_snapshot)
+        return {};
+    return HitBox::bound_box_in(*m_snapshot, identity);
 }
 
 HitTestDisplayList::Item HitTestDisplayList::item(size_t index) const
@@ -323,7 +324,7 @@ HitTestResult HitTestDisplayList::hit_test_result_for_item(Item item, CSSPixelPo
     // callers that already hold such an item.
     auto result = HitTestResult {
         .node = identity_of_hit_node(resolved.node),
-        .box = HitBox::of(m_snapshot, resolved.hit_box),
+        .box = HitBox::of(*m_snapshot, resolved.hit_box),
         .hit_node = resolved.hit_node,
         .document = m_document,
         .chrome_widget = chrome_widget_for_item(item),
