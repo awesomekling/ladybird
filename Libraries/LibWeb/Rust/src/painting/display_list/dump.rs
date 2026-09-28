@@ -18,6 +18,7 @@ use crate::painting::published_frame::PaintRead;
 use crate::painting::visual_context::VisualContextTree;
 use crate::painting::visual_context::VisualContextTreeDump;
 use crate::painting::visual_context::dump::SlotKind;
+use crate::render_owner::ScriptForcedRead;
 use libgfx_rust::path::OwnedPath;
 use libgfx_rust::{
     Color, CompositingAndBlendingOperator, CornerRadii, FloatPoint, FloatRect, FloatSize, IntPoint, IntRect, IntSize,
@@ -176,7 +177,7 @@ pub unsafe extern "C" fn painting_dump(
     assert!(!display_list.is_null());
     // SAFETY: Guaranteed by the caller.
     let owners = unsafe {
-        crate::painting::ffi::read_current(arena, |rows| {
+        crate::painting::ffi::read_current(arena, ScriptForcedRead::at_script_entry(), |rows| {
             let mut owners = VisualContextNodeOwners::collect(rows, viewport);
             for owners in [&mut owners.spatial, &mut owners.clip, &mut owners.effect] {
                 owners.retain(|_, owner| rows.slot_is_live(*owner));

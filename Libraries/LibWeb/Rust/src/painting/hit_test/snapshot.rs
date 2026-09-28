@@ -27,6 +27,7 @@ use crate::painting::geometry_read::GeometryRead;
 use crate::painting::hit_test::HitTestList;
 use crate::painting::published_frame::{PaintRead, PaintSource};
 use crate::painting::visual_context::VisualContextTree;
+use crate::render_owner::ScriptForcedRead;
 use std::cell::RefCell;
 use std::ffi::c_void;
 use std::sync::Arc;
@@ -384,7 +385,7 @@ pub(super) unsafe fn snapshot_from_handle<'a>(snapshot: *const c_void) -> HitTes
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_hit_test_snapshot(arena: *mut c_void) -> *const c_void {
     // SAFETY: Guaranteed by the caller.
-    Arc::into_raw(unsafe { RowSnapshot::current_shared(arena) }).cast()
+    Arc::into_raw(unsafe { RowSnapshot::current_shared(arena, ScriptForcedRead::for_internal_hop()) }).cast()
 }
 
 /// # Safety

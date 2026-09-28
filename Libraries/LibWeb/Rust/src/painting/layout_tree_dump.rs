@@ -18,6 +18,7 @@ use crate::painting::node_painting;
 use crate::painting::paintable_data::FfiPixelBox;
 use crate::painting::paintable_geometry;
 use crate::painting::published_frame::{PaintRead, PaintSource};
+use crate::render_owner::ScriptForcedRead;
 use std::ffi::c_void;
 
 pub(crate) struct MainThreadFfiEntry {
@@ -138,7 +139,7 @@ pub unsafe extern "C" fn layout_arena_dump_layout_tree(
     };
     // SAFETY: Guaranteed by the caller.
     let dump = unsafe {
-        crate::painting::ffi::read_current(arena, |rows| {
+        crate::painting::ffi::read_current(arena, ScriptForcedRead::at_script_entry(), |rows| {
             let mut dump = LayoutTreeDump::default();
             dump_layout_node(&mut dump, rows, &DumpPalette::new(interactive), root, initial_indent);
             dump

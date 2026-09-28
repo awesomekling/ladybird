@@ -666,12 +666,14 @@ pub unsafe extern "C" fn rust_detach_remaining_layout_rows_for_removal(
     // SAFETY: As above.
     let (rows, mut sent_ahead) = unsafe { super::row_reads::rows_and_sent_ahead(arena) };
     let mut detached = Vec::new();
+    let mut cleared = Vec::new();
     for &node in &nodes {
         detached.extend(
             (1..=crate::layout::node_data::GENERATED_FOR_LAST_SYNTHETIC)
                 .filter_map(|generated_for| rows.bound_pseudo_element_row(node, generated_for)),
         );
         if let Some(row) = rows.bound_row(node) {
+            cleared.push(row);
             detached.extend(topmost_row_of_top_layer_placement(rows, row));
         }
     }
@@ -682,10 +684,17 @@ pub unsafe extern "C" fn rust_detach_remaining_layout_rows_for_removal(
     if sent.is_none() {
         return;
     }
+    for row in cleared {
+        sent_ahead.note_cleared(sent, row);
+    }
     for row in detached {
         let rows_as_sent = super::row_reads::RowsAsSent::new(rows, &sent_ahead);
-        if let Some(removed) = rows_as_sent.node(row).filter(|removed| !removed.parent.is_invalid()) {
-            sent_ahead.note_detached(sent, row, removed.parent, &removed);
+        match rows_as_sent.node(row) {
+            Some(removed) if !removed.parent.is_invalid() => {
+                sent_ahead.note_detached(sent, row, removed.parent, &removed);
+            }
+            Some(_) => sent_ahead.note_freed(sent, row),
+            None => {}
         }
     }
 }

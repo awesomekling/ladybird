@@ -63,33 +63,50 @@ impl DocumentId {
     }
 }
 
+/// The capability to make the document thread wait for the owner, for one question. A script API that must return a
+/// current answer (getComputedStyle, an element's geometry, hit testing, innerText and the like) mints one at the host
+/// entry it calls, and every ask of the owner takes it by value: one ask per call of the API. Internal code (drains,
+/// style and layout updates, painting, event dispatch) holds none, so it cannot ask: it reads the rows the owner
+/// published and what it sent ahead of them.
+pub(crate) struct ScriptForcedRead {
+    _not_send: std::marker::PhantomData<*const ()>,
+}
+
+impl ScriptForcedRead {
+    /// # Safety
+    ///
+    /// Only a host entry that a script API calls for a current answer mints one, once per call, on the document
+    /// thread.
+    pub(crate) unsafe fn at_script_entry() -> Self {
+        Self {
+            _not_send: std::marker::PhantomData,
+        }
+    }
+
+    /// A question internal code still asks the owner, for want of it in what the owner publishes: each caller is a
+    /// round trip left to delete.
+    ///
+    /// # Safety
+    ///
+    /// As for [`Self::at_script_entry`], for a question no script API asks.
+    pub(crate) unsafe fn for_internal_hop() -> Self {
+        Self {
+            _not_send: std::marker::PhantomData,
+        }
+    }
+}
+
 /// The number of a change within its document's stream. The first change a document sends is 1; 0 names the point
 /// before any change.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
 pub(crate) struct ChangeSeq(u64);
 
-/// What of the rows the owner publishes (see [`crate::layout::row_reads`]) a change alters, and a read of them reads: a
-/// read waits only for rows that reflect the changes the thread sent that alter what it reads.
-#[derive(Clone, Copy)]
-pub(crate) enum RowFact {
-    /// Which rows live and are populated, how they link, and which nodes they are bound to.
-    Tree,
-    /// The rows' styles, and what the arena derives of them.
-    Style,
-    /// What the rows paint from, and how far they have scrolled.
-    Paint,
-}
-
-impl RowFact {
-    pub(crate) const ALL: &[Self] = &[Self::Tree, Self::Style, Self::Paint];
-}
-
-/// The changes a document thread sent for a document: the number of the last one, and of the last one that alters each
-/// [`RowFact`].
+/// The changes a document thread sent for a document: the number of the last one, and of the last one that alters the
+/// rows the owner publishes.
 #[derive(Default)]
 struct SentChanges {
     through: ChangeSeq,
-    altering_through: [ChangeSeq; RowFact::ALL.len()],
+    altering_rows_through: ChangeSeq,
 }
 
 /// A write the main thread makes to a document's layout arena, as owned data the owner applies in the order the main
@@ -152,15 +169,15 @@ pub(crate) enum ArenaChange {
 }
 
 impl ArenaChange {
-    /// What of the rows the owner publishes applying the change can alter, so that a read of it the thread makes after
-    /// sending it waits for rows that reflect it. What the next layout or paint reads, and what the arena keeps for the
-    /// host, alter none.
-    fn alters(&self) -> Option<RowFact> {
+    /// Whether applying the change can alter what the rows the owner publishes answer the document thread (see
+    /// [`crate::layout::row_reads`]), so that a read the thread makes after sending it waits for rows that reflect it.
+    /// What the next layout or paint reads, and what the arena keeps for the host, alter none.
+    fn alters_published_rows(&self) -> bool {
         match self {
-            ArenaChange::Layout(change) => change.alters(),
-            ArenaChange::Paint(change) => change.alters(),
+            ArenaChange::Layout(change) => change.alters_published_rows(),
+            ArenaChange::Paint(change) => change.alters_published_rows(),
             // A row the install did not adopt the record of takes another style.
-            ArenaChange::FinishOwnerStyleHostHalf => Some(RowFact::Style),
+            ArenaChange::FinishOwnerStyleHostHalf => true,
             ArenaChange::DocumentIsDecodedSvg(_)
             | ArenaChange::StyleSnapshotScrollStates(_)
             | ArenaChange::OwnedProviderHandedOver(_)
@@ -176,7 +193,7 @@ impl ArenaChange {
             | ArenaChange::UnlinkStyleEngine
             | ArenaChange::SelectionPseudoStylePublished(_)
             | ArenaChange::PublishAnchorNames
-            | ArenaChange::CounterStyles { .. } => None,
+            | ArenaChange::CounterStyles { .. } => false,
         }
     }
 
@@ -1080,12 +1097,12 @@ pub(crate) fn destroy_document(document: DocumentId) {
 /// Sends the arena write `change` for `document`, which the owner applies before the next unit or query that reaches
 /// the arena.
 pub(crate) fn send_arena_change(document: DocumentId, change: ArenaChange) -> ChangeSeq {
-    let alters = change.alters();
+    let alters_published_rows = change.alters_published_rows();
     let seq = SENT_THROUGH.with_borrow_mut(|sent| {
         let sent = sent.entry(document).or_default();
         sent.through.0 += 1;
-        if let Some(fact) = alters {
-            sent.altering_through[fact as usize] = sent.through;
+        if alters_published_rows {
+            sent.altering_rows_through = sent.through;
         }
         sent.through
     });
@@ -1118,17 +1135,12 @@ pub(crate) fn sent_through(document: DocumentId) -> ChangeSeq {
     SENT_THROUGH.with_borrow(|sent| sent.get(&document).map_or_else(ChangeSeq::default, |sent| sent.through))
 }
 
-/// The number of the last change the calling document thread sent for `document` that alters any of `facts` of the rows
-/// the owner publishes: rows that reflect it answer a read of those the thread makes now.
-pub(crate) fn sent_row_changes_through(document: DocumentId, facts: &[RowFact]) -> ChangeSeq {
+/// The number of the last change the calling document thread sent for `document` that alters the rows the owner
+/// publishes: rows that reflect it answer a read the thread makes now.
+pub(crate) fn sent_row_changes_through(document: DocumentId) -> ChangeSeq {
     SENT_THROUGH.with_borrow(|sent| {
-        sent.get(&document).map_or_else(ChangeSeq::default, |sent| {
-            facts
-                .iter()
-                .map(|&fact| sent.altering_through[fact as usize])
-                .max()
-                .unwrap_or_default()
-        })
+        sent.get(&document)
+            .map_or_else(ChangeSeq::default, |sent| sent.altering_rows_through)
     })
 }
 
@@ -1147,7 +1159,7 @@ pub(crate) fn recall_rendering_update(document: DocumentId) {
 /// # Safety
 ///
 /// `arena` must be the live arena of `document`, which no stage the document thread submitted owns.
-pub(crate) unsafe fn ask(document: DocumentId, arena: *mut c_void, query: Query) -> Answer {
+pub(crate) unsafe fn ask(document: DocumentId, arena: *mut c_void, query: Query, _read: ScriptForcedRead) -> Answer {
     if !document.is_valid() {
         // The owner holds no state of an arena of no document (a unit test's): the thread that holds it answers.
         // SAFETY: Guaranteed by the caller.
@@ -1180,13 +1192,13 @@ pub(crate) unsafe fn ask(document: DocumentId, arena: *mut c_void, query: Query)
 /// # Safety
 ///
 /// `arena` must be a live handle on the document thread.
-pub(crate) unsafe fn ask_about(arena: *mut c_void, query: Query) -> Answer {
+pub(crate) unsafe fn ask_about(arena: *mut c_void, query: Query, read: ScriptForcedRead) -> Answer {
     assert!(!arena.is_null(), "layout node arena handle is null");
     crate::stage_thread::join_frame_in_flight(arena);
     // SAFETY: Guaranteed by the caller.
     let document = unsafe { ArenaHandle::document_of(arena) };
     // SAFETY: As above.
-    unsafe { ask(document, arena, query) }
+    unsafe { ask(document, arena, query, read) }
 }
 
 /// Asks the owner the engine query `query` about `document` and waits for the answer, as of every change the calling
@@ -1215,7 +1227,7 @@ pub(crate) fn ask_engine(document: DocumentId, query: Query) -> Answer {
 
 /// Asks the owner `query` about `document` and waits for the answer, as [`ask`] does, for a document thread that
 /// names no arena: where the owner cannot answer it, the question is left to the host.
-pub(crate) fn ask_owner(document: DocumentId, query: Query) -> Answer {
+pub(crate) fn ask_owner(document: DocumentId, query: Query, _read: ScriptForcedRead) -> Answer {
     let answer = crate::stage_thread::wait_for_owner(
         |reply| ToOwner::Ask { document, query, reply },
         |owner| {
@@ -1236,7 +1248,9 @@ pub extern "C" fn render_owner_committed_border_box(document: DocumentId, style_
         return FfiGeometryReadAnswer::default();
     };
     let kind = FfiGeometryReadKind::BorderBox;
-    match ask_owner(document, Query::Geometry { node, kind }) {
+    match ask_owner(document, Query::Geometry { node, kind }, unsafe {
+        ScriptForcedRead::at_script_entry()
+    }) {
         Answer::Geometry(answer) => answer,
         _ => FfiGeometryReadAnswer::default(),
     }
@@ -1253,12 +1267,12 @@ fn join_frame_of(document: DocumentId) {
 
 /// Asks the owner `query` of the layout arena of `document`, once its frame in flight is taken back.
 #[track_caller]
-pub(crate) fn ask_arena(document: DocumentId, query: ArenaQuery) -> ArenaAnswer {
+pub(crate) fn ask_arena(document: DocumentId, query: ArenaQuery, read: ScriptForcedRead) -> ArenaAnswer {
     if !document.is_valid() {
         return query.left_to_host();
     }
     join_frame_of(document);
-    match ask_owner(document, Query::Arena(query)) {
+    match ask_owner(document, Query::Arena(query), read) {
         Answer::Arena(answer) => answer,
         _ => {
             debug_assert!(false, "an arena query is answered from the arena");
@@ -1273,9 +1287,9 @@ pub(crate) fn ask_arena(document: DocumentId, query: ArenaQuery) -> ArenaAnswer 
 /// # Safety
 ///
 /// `arena` must be a live handle on the document thread.
-pub(crate) unsafe fn ask_arena_of(arena: *mut c_void, query: ArenaQuery) -> ArenaAnswer {
+pub(crate) unsafe fn ask_arena_of(arena: *mut c_void, query: ArenaQuery, read: ScriptForcedRead) -> ArenaAnswer {
     // SAFETY: Guaranteed by the caller.
-    match unsafe { ask_about(arena, Query::Arena(query)) } {
+    match unsafe { ask_about(arena, Query::Arena(query), read) } {
         Answer::Arena(answer) => answer,
         _ => {
             debug_assert!(false, "an arena query is answered from the arena");
@@ -1294,7 +1308,9 @@ pub extern "C" fn render_owner_generated_content_accessible_text(
 ) -> usize {
     let text = StyleNodeID::from_raw(style_node).and_then(|element| {
         let owner = crate::layout::counters::CounterOwner { element, generated_for };
-        match ask_arena(document, ArenaQuery::GeneratedContentAccessibleText(owner)) {
+        match ask_arena(document, ArenaQuery::GeneratedContentAccessibleText(owner), unsafe {
+            ScriptForcedRead::at_script_entry()
+        }) {
             ArenaAnswer::Text(text) => Some(text),
             _ => None,
         }

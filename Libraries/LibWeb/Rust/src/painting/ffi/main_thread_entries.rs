@@ -9,6 +9,7 @@
 //! mint the capability nor call an entry that does.
 
 use super::*;
+use crate::render_owner::ScriptForcedRead;
 
 pub(crate) struct MainThreadFfiEntry {
     _private: (),
@@ -34,7 +35,7 @@ unsafe extern "C" fn layout_arena_scrolling_box_for_scroll_step(
     };
     // SAFETY: Guaranteed by the caller.
     unsafe {
-        read_committed(arena, |paintable_rows| {
+        read_committed(arena, ScriptForcedRead::at_script_entry(), |paintable_rows| {
             let scrolling_box = crate::painting::scroll_chain::scrolling_box_for_scroll_step(
                 paintable_rows,
                 target,
@@ -69,7 +70,7 @@ unsafe extern "C" fn layout_arena_for_each_wheel_scrollable_box_in_containing_bl
     };
     // SAFETY: Guaranteed by the caller.
     let boxes = unsafe {
-        read_committed(arena, |paintable_rows| {
+        read_committed(arena, ScriptForcedRead::at_script_entry(), |paintable_rows| {
             let mut boxes = Vec::new();
             crate::painting::scroll_chain::for_each_wheel_scrollable_box_in_containing_block_chain(
                 paintable_rows,
@@ -105,7 +106,7 @@ unsafe extern "C" fn layout_arena_first_wheel_scrollable_box_in_containing_block
     };
     // SAFETY: Guaranteed by the caller.
     unsafe {
-        read_committed(arena, |paintable_rows| {
+        read_committed(arena, ScriptForcedRead::at_script_entry(), |paintable_rows| {
             let scrollable_box = crate::painting::scroll_chain::first_wheel_scrollable_box_in_containing_block_chain(
                 paintable_rows,
                 start,
@@ -123,7 +124,7 @@ unsafe extern "C" fn layout_arena_first_wheel_scrollable_box_in_containing_block
 unsafe extern "C" fn layout_arena_paintable_event_dispatch_slot(arena: *mut c_void, slot: NodeSlotId) -> NodeSlotId {
     // SAFETY: Guaranteed by the caller.
     unsafe {
-        read_committed(arena, |paintable_rows| {
+        read_committed(arena, ScriptForcedRead::at_script_entry(), |paintable_rows| {
             crate::painting::hit_test::resolve::event_dispatch_slot_for_paintable(paintable_rows, slot)
                 .map_or(NodeSlotId::INVALID, |slot| live_slot(paintable_rows, slot))
         })
@@ -137,7 +138,7 @@ unsafe extern "C" fn layout_arena_paintable_event_dispatch_slot(arena: *mut c_vo
 unsafe extern "C" fn layout_arena_paintable_committed_slot(arena: *mut c_void, slot: NodeSlotId) -> NodeSlotId {
     // SAFETY: Guaranteed by the caller.
     unsafe {
-        read_current(arena, |rows| {
+        read_current(arena, ScriptForcedRead::at_script_entry(), |rows| {
             if rows.paintable_row_is_populated(slot) {
                 live_slot(rows, slot)
             } else {
@@ -194,7 +195,7 @@ unsafe extern "C" fn layout_arena_for_each_snap_area(
 ) {
     // SAFETY: Guaranteed by the caller.
     let areas = unsafe {
-        read_committed(arena, |paintable_rows| {
+        read_committed(arena, ScriptForcedRead::at_script_entry(), |paintable_rows| {
             let mut areas = Vec::new();
             crate::painting::scroll_snap::for_each_snap_area(paintable_rows, snap_container, |slot, area| {
                 areas.push((slot, area));
@@ -235,6 +236,7 @@ unsafe extern "C" fn layout_arena_resolve_painted_vector_images(
                 document_declares_light_or_dark_color_scheme: inputs.document_declares_light_or_dark_color_scheme,
                 image_color_scheme_fallback: inputs.image_color_scheme_fallback,
             },
+            ScriptForcedRead::for_internal_hop(),
         )
     }) else {
         return;
@@ -266,7 +268,7 @@ unsafe extern "C" fn layout_arena_resolve_painted_vector_images(
 #[unsafe(no_mangle)]
 unsafe extern "C" fn layout_arena_last_recording_missed_vector_images(arena: *mut c_void) -> bool {
     // SAFETY: Guaranteed by the caller.
-    unsafe { RowSnapshot::current(arena) }
+    unsafe { RowSnapshot::current(arena, ScriptForcedRead::at_script_entry()) }
         .paint_status
         .last_recording_missed_vector_images
 }
@@ -345,7 +347,9 @@ unsafe extern "C" fn layout_arena_publish_svg_filter_image_frames(
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     // SAFETY: Guaranteed by the caller.
     let frames = crate::painting::svg_paint_resources::published_filter_image_frames_in(
-        &unsafe { RowSnapshot::current(arena) }.paint_facts.svg_paint_resources,
+        &unsafe { RowSnapshot::current(arena, ScriptForcedRead::at_script_entry()) }
+            .paint_facts
+            .svg_paint_resources,
     );
     let publish = crate::painting::host::RecordingPublishHost::from(publish);
     for frame in frames {
@@ -409,7 +413,7 @@ unsafe extern "C" fn layout_arena_text_caret_rect_for_position(
 ) -> FfiCaretRectResult {
     // SAFETY: Guaranteed by the caller.
     unsafe {
-        read_committed(arena, |paintable_rows| {
+        read_committed(arena, ScriptForcedRead::at_script_entry(), |paintable_rows| {
             let fragments = paintable_rows.text_fragments(primary);
             caret_rect_result(
                 paintable_rows,
@@ -436,7 +440,7 @@ unsafe extern "C" fn layout_arena_atomic_inline_caret_rect_for_position(
 ) -> FfiCaretRectResult {
     // SAFETY: Guaranteed by the caller.
     unsafe {
-        read_committed(arena, |paintable_rows| {
+        read_committed(arena, ScriptForcedRead::at_script_entry(), |paintable_rows| {
             caret_rect_result(
                 paintable_rows,
                 crate::painting::caret::caret_rect_for_atomic_inline(paintable_rows, primary, after),
@@ -458,7 +462,7 @@ unsafe extern "C" fn layout_arena_paintable_empty_line_caret_rect(
 ) -> FfiEmptyLineCaretRect {
     // SAFETY: Guaranteed by the caller.
     unsafe {
-        read_committed(arena, |paintable_rows| {
+        read_committed(arena, ScriptForcedRead::at_script_entry(), |paintable_rows| {
             if !paintable_rows.paintable_row_is_populated(block) {
                 return FfiEmptyLineCaretRect::default();
             }
@@ -497,7 +501,7 @@ unsafe extern "C" fn layout_arena_for_each_subtree_fragment_rect(
 ) {
     // SAFETY: Guaranteed by the caller.
     let rects = unsafe {
-        read_committed(arena, |paintable_rows| {
+        read_committed(arena, ScriptForcedRead::at_script_entry(), |paintable_rows| {
             let mut rects = Vec::new();
             if !paintable_rows.paintable_row_is_populated(root) {
                 return rects;
