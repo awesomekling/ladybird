@@ -359,7 +359,6 @@ interface Internals {
     // layout node. Useful for asserting that incremental tree builds preserve unaffected nodes.
     unsigned long long layoutNodeIdentity(Node node);
     unsigned long long layoutArenaLiveSlotCount();
-    unsigned long long layoutArenaShellCount();
     double styleEngineMatchDocument();
     // Reports a snapshot of StyleEngine's matched rules for the whole document.
     DOMString styleEngineMatchedRules();

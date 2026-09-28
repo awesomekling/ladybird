@@ -255,7 +255,6 @@ mod tests {
 
         let freed = arena.free_subtree(root.slot);
 
-        assert_eq!(freed.shell_count(), 0, "no row was given a shell");
         for slot in [root.slot, a.slot, b.slot, c.slot] {
             assert!(!arena.slot_is_live(slot));
         }
