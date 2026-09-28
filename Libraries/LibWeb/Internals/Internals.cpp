@@ -2244,13 +2244,6 @@ u64 Internals::layout_arena_live_slot_count()
     return Layout::RustFFI::render_owner_arena_counts(Layout::document_render_document(document)).live_slots;
 }
 
-u64 Internals::layout_arena_shell_count()
-{
-    auto& document = window().associated_document();
-    document.update_layout(DOM::UpdateLayoutReason::Debugging);
-    return Layout::RustFFI::render_owner_arena_counts(Layout::document_render_document(document)).shells;
-}
-
 GC::Ref<JS::Object> Internals::style_engine_transaction_reactions()
 {
     auto& realm = HTML::relevant_realm(window());

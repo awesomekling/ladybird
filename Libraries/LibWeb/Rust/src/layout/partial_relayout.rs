@@ -837,15 +837,9 @@ mod tests {
     use crate::layout::layout_node_arena::{LayoutNodeArena, NodeAllocation};
     use crate::layout::node_data::{NodeFlag, NodeKind, NodeSlotId};
 
-    fn allocate_box_with_a_dummy_shell(arena: &mut LayoutNodeArena) -> NodeAllocation {
+    fn allocate_box(arena: &mut LayoutNodeArena) -> NodeAllocation {
         let allocation = arena.allocate_for_test();
         arena.write_shape(allocation.slot).set_kind(NodeKind::Box);
-        arena
-            .data(allocation.slot)
-            .shell
-            .set(crate::layout::node_data::ShellId::of_host_object(
-                std::ptr::dangling_mut(),
-            ));
         allocation
     }
 
@@ -867,7 +861,7 @@ mod tests {
     #[test]
     fn registering_a_boundary_root_twice_yields_a_single_drained_entry() {
         let mut arena = LayoutNodeArena::new();
-        let allocation = allocate_box_with_a_dummy_shell(&mut arena);
+        let allocation = allocate_box(&mut arena);
         assert!(!arena.has_partial_relayout_boundary_roots());
         arena.register_partial_relayout_boundary_root(allocation.slot);
         arena.register_partial_relayout_boundary_root(allocation.slot);
@@ -880,11 +874,11 @@ mod tests {
     #[test]
     fn a_freed_boundary_root_still_counts_as_pending_but_resolves_to_a_dead_shell() {
         let mut arena = LayoutNodeArena::new();
-        let allocation = allocate_box_with_a_dummy_shell(&mut arena);
+        let allocation = allocate_box(&mut arena);
         arena.register_partial_relayout_boundary_root(allocation.slot);
         free_node(&mut arena, &allocation);
         assert!(arena.has_partial_relayout_boundary_roots());
-        let reused = allocate_box_with_a_dummy_shell(&mut arena);
+        let reused = allocate_box(&mut arena);
         let drained = arena.take_partial_relayout_boundary_roots();
         assert_eq!(drained, vec![allocation.slot]);
         assert!(!arena.slot_is_live(allocation.slot));
@@ -895,10 +889,10 @@ mod tests {
     #[test]
     fn registering_a_boundary_root_prunes_entries_for_freed_nodes() {
         let mut arena = LayoutNodeArena::new();
-        let first = allocate_box_with_a_dummy_shell(&mut arena);
+        let first = allocate_box(&mut arena);
         arena.register_partial_relayout_boundary_root(first.slot);
         free_node(&mut arena, &first);
-        let second = allocate_box_with_a_dummy_shell(&mut arena);
+        let second = allocate_box(&mut arena);
         arena.register_partial_relayout_boundary_root(second.slot);
         assert_eq!(arena.take_partial_relayout_boundary_roots(), vec![second.slot]);
         free_node(&mut arena, &second);
@@ -915,8 +909,8 @@ mod tests {
     #[test]
     fn marking_a_node_marks_clean_ancestors_and_bumps_their_intrinsic_epochs() {
         let mut arena = LayoutNodeArena::new();
-        let parent = allocate_box_with_a_dummy_shell(&mut arena);
-        let child = allocate_box_with_a_dummy_shell(&mut arena);
+        let parent = allocate_box(&mut arena);
+        let child = allocate_box(&mut arena);
         arena.insert_child(parent.slot, child.slot, NodeSlotId::INVALID);
 
         arena.set_needs_layout_update(child.slot, true);
@@ -931,9 +925,9 @@ mod tests {
     #[test]
     fn an_already_dirty_ancestor_stops_the_marking_walk() {
         let mut arena = LayoutNodeArena::new();
-        let grandparent = allocate_box_with_a_dummy_shell(&mut arena);
-        let parent = allocate_box_with_a_dummy_shell(&mut arena);
-        let child = allocate_box_with_a_dummy_shell(&mut arena);
+        let grandparent = allocate_box(&mut arena);
+        let parent = allocate_box(&mut arena);
+        let child = allocate_box(&mut arena);
         arena.insert_child(grandparent.slot, parent.slot, NodeSlotId::INVALID);
         arena.insert_child(parent.slot, child.slot, NodeSlotId::INVALID);
         arena.set_node_flag(parent.slot, NodeFlag::NeedsLayoutUpdate, true);
@@ -948,8 +942,8 @@ mod tests {
     #[test]
     fn remarking_a_dirty_non_boundary_node_leaves_its_parent_clean() {
         let mut arena = LayoutNodeArena::new();
-        let parent = allocate_box_with_a_dummy_shell(&mut arena);
-        let child = allocate_box_with_a_dummy_shell(&mut arena);
+        let parent = allocate_box(&mut arena);
+        let child = allocate_box(&mut arena);
         arena.insert_child(parent.slot, child.slot, NodeSlotId::INVALID);
         arena.set_node_flag(child.slot, NodeFlag::NeedsLayoutUpdate, true);
 
@@ -963,10 +957,10 @@ mod tests {
     #[test]
     fn only_anonymous_non_table_wrapper_box_children_are_marked_alongside_their_parent() {
         let mut arena = LayoutNodeArena::new();
-        let parent = allocate_box_with_a_dummy_shell(&mut arena);
-        let anonymous_child = allocate_box_with_a_dummy_shell(&mut arena);
-        let anonymous_table_wrapper_child = allocate_box_with_a_dummy_shell(&mut arena);
-        let named_child = allocate_box_with_a_dummy_shell(&mut arena);
+        let parent = allocate_box(&mut arena);
+        let anonymous_child = allocate_box(&mut arena);
+        let anonymous_table_wrapper_child = allocate_box(&mut arena);
+        let named_child = allocate_box(&mut arena);
         arena
             .write_shape(anonymous_child.slot)
             .set_flags(arena.data(anonymous_child.slot).flags.get() | (NodeFlag::Anonymous as u32));
@@ -992,7 +986,7 @@ mod tests {
     #[test]
     fn collecting_roots_skips_stale_registered_slots_and_reports_no_eligible_roots() {
         let mut arena = LayoutNodeArena::new();
-        let freed = allocate_box_with_a_dummy_shell(&mut arena);
+        let freed = allocate_box(&mut arena);
         let stale_slot = freed.slot;
         free_node(&mut arena, &freed);
         assert_eq!(arena.collect_partial_relayout_roots(&[stale_slot], &[]), None);
@@ -1001,8 +995,8 @@ mod tests {
     #[test]
     fn collecting_roots_fails_for_a_rebuilt_subtree_with_no_containing_boundary() {
         let mut arena = LayoutNodeArena::new();
-        let parent = allocate_box_with_a_dummy_shell(&mut arena);
-        let child = allocate_box_with_a_dummy_shell(&mut arena);
+        let parent = allocate_box(&mut arena);
+        let child = allocate_box(&mut arena);
         arena.insert_child(parent.slot, child.slot, NodeSlotId::INVALID);
         assert_eq!(arena.collect_partial_relayout_roots(&[], &[child.slot]), None);
         free_node(&mut arena, &parent);
@@ -1011,9 +1005,9 @@ mod tests {
     #[test]
     fn layout_tree_update_classification_escalates_past_anonymous_parents_only() {
         let mut arena = LayoutNodeArena::new();
-        let grandparent = allocate_box_with_a_dummy_shell(&mut arena);
-        let anonymous_parent = allocate_box_with_a_dummy_shell(&mut arena);
-        let child = allocate_box_with_a_dummy_shell(&mut arena);
+        let grandparent = allocate_box(&mut arena);
+        let anonymous_parent = allocate_box(&mut arena);
+        let child = allocate_box(&mut arena);
         arena
             .write_shape(anonymous_parent.slot)
             .set_flags(arena.data(anonymous_parent.slot).flags.get() | (NodeFlag::Anonymous as u32));
@@ -1045,8 +1039,8 @@ mod tests {
     // A parent box with one child registered as a boundary root, drained like a pass would.
     fn arena_with_a_registered_child_root() -> (LayoutNodeArena, NodeAllocation, Vec<NodeSlotId>) {
         let mut arena = LayoutNodeArena::new();
-        let parent = allocate_box_with_a_dummy_shell(&mut arena);
-        let child = allocate_box_with_a_dummy_shell(&mut arena);
+        let parent = allocate_box(&mut arena);
+        let child = allocate_box(&mut arena);
         arena.insert_child(parent.slot, child.slot, NodeSlotId::INVALID);
         arena.set_needs_layout_update(child.slot, false);
         let registered = arena.take_partial_relayout_boundary_roots();
@@ -1122,8 +1116,8 @@ mod tests {
     #[test]
     fn boundary_self_only_marking_records_the_root_and_leaves_the_parent_clean() {
         let mut arena = LayoutNodeArena::new();
-        let parent = allocate_box_with_a_dummy_shell(&mut arena);
-        let child = allocate_box_with_a_dummy_shell(&mut arena);
+        let parent = allocate_box(&mut arena);
+        let child = allocate_box(&mut arena);
         arena.insert_child(parent.slot, child.slot, NodeSlotId::INVALID);
 
         arena.set_needs_layout_update(child.slot, false);
