@@ -639,6 +639,8 @@ pub(crate) struct FreedSubtree {
     rows_with_owned_image_provider: Vec<NodeSlotId>,
     rows_with_image_observers: Vec<(NodeSlotId, usize)>,
     paintable_row_resets: Vec<crate::painting::paintable_rows::PaintableRowReset>,
+    /// The records the arena pinned for the rows: the ones it derived, and the ones it keeps for the boxes of nodes
+    /// that left the document.
     arena_pinned_style_records: Vec<u64>,
     host_pinned_style_records: Vec<u64>,
     style_engine: crate::css::style::StyleEngineHandle,
@@ -1168,6 +1170,9 @@ pub(crate) struct LayoutNodeArena {
     slot_metadata: Vec<SlotMetadata>,
     style_records: Vec<Cell<u64>>,
     style_records_pinned_by_arena: Vec<Cell<bool>>,
+    /// The records the arena pinned for the boxes of nodes that left the document, which are read until they are
+    /// freed. The pins are the engine's, as the arena's own pins are.
+    detached_box_style_record_pins: RefCell<HashMap<NodeSlotId, u64>>,
     /// The style record a row's host has pinned for readers that outlive the row's place in the
     /// tree - a detached box is read until its row is freed - or zero for a row with no such pin.
     /// A pin is counted, so this is a pin of its own beside the arena's rather than a share of it,
@@ -1425,6 +1430,7 @@ impl LayoutNodeArena {
             slot_metadata: Vec::new(),
             style_records: Vec::new(),
             style_records_pinned_by_arena: Vec::new(),
+            detached_box_style_record_pins: RefCell::new(HashMap::default()),
             style_records_pinned_by_host: Vec::new(),
             animation_adoption_log: RefCell::new(Vec::new()),
             flight_style_adoptions: RefCell::new(Vec::new()),
@@ -1771,6 +1777,7 @@ impl LayoutNodeArena {
             if self.style_records_pinned_by_arena[slot.slot_index() as usize].get() {
                 arena_pinned_style_records.push(self.style_records[slot.slot_index() as usize].get());
             }
+            arena_pinned_style_records.extend(self.detached_box_style_record_pins.get_mut().remove(&slot));
             let host_pinned_style_record = self.style_records_pinned_by_host[slot.slot_index() as usize].get();
             if host_pinned_style_record != 0 {
                 host_pinned_style_records.push(host_pinned_style_record);
@@ -2845,6 +2852,26 @@ impl LayoutNodeArena {
             return;
         }
         unpin_host_style_record(self.style_engine.get().0, self.host_style_record_pins.get(), record);
+    }
+
+    /// Pins the record of the box `style_node`'s node, or its pseudo-element of kind `generated_for`, is bound to, for
+    /// the box's readers until it is freed: the node left the document, and its record goes as the host lets go of
+    /// it. A box holds at most one such pin.
+    pub(crate) fn pin_bound_box_style_record_for_detachment(&self, style_node: StyleNodeID, generated_for: u8) {
+        let row = if generated_for == 0 {
+            self.bound_row(style_node)
+        } else {
+            self.bound_pseudo_element_row(style_node, generated_for)
+        };
+        if row.is_invalid() || !super::tree_builder::node_kind_is_node_with_style(self.data(row).kind.get()) {
+            return;
+        }
+        let record = self.node_style_record(row);
+        if record == 0 || self.detached_box_style_record_pins.borrow().contains_key(&row) {
+            return;
+        }
+        self.detached_box_style_record_pins.borrow_mut().insert(row, record);
+        self.with_style_engine(|engine| engine.pin_layout_style_record(record));
     }
 
     /// The style record the host has pinned for `slot`, or zero.
@@ -6566,31 +6593,28 @@ pub unsafe extern "C" fn layout_arena_set_node_dom_paint_facts(arena: *mut c_voi
     unsafe { super::layout_changes::send(arena, LayoutChange::SetNodeDomPaintFacts { node: id, facts }) };
 }
 
-/// Pins, for the host, the style record of the box the element or text node with `style_node` is
-/// bound to, or of the box of its pseudo-element of kind `generated_for`, so that the box keeps
-/// its style readable once the node has left the document. A text box has no record of its own.
+/// Pins the style record of the box the element or text node with `style_node` is bound to, or of the box of its
+/// pseudo-element of kind `generated_for`, so that the box keeps its style readable once the node has left the
+/// document. A text box has no record of its own.
+///
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_pin_bound_box_style_record_for_detachment(
     arena: *mut c_void,
     style_node: u32,
     generated_for: u8,
 ) {
-    assert!(!arena.is_null(), "layout node arena handle is null");
     let Some(style_node) = StyleNodeID::from_raw(style_node) else {
         return;
     };
-    // SAFETY: The C++ wrapper keeps the arena alive for this call and
-    // serializes all access on the document thread.
-    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
-    let row = if generated_for == 0 {
-        arena.bound_row(style_node)
-    } else {
-        arena.bound_pseudo_element_row(style_node, generated_for)
+    let change = LayoutChange::PinBoundBoxStyleRecordForDetachment {
+        style_node,
+        generated_for,
     };
-    if row.is_invalid() || !super::tree_builder::node_kind_is_node_with_style(arena.data(row).kind.get()) {
-        return;
-    }
-    arena.pin_node_style_record_for_host(row, arena.node_style_record(row));
+    // SAFETY: Guaranteed by the caller.
+    unsafe { super::layout_changes::send(arena, change) };
 }
 
 /// # Safety
@@ -7039,43 +7063,29 @@ pub unsafe extern "C" fn layout_arena_flight_style_damage(
     damage.map_or(0, |damage| (1 << 32) | u64::from(damage))
 }
 
-/// Install the record an animation sample published for a style node over its bound row ahead of
-/// the host, which adopts it as it installs the sample. False where the host installs it itself.
+/// Installs the record an animation sample published for a style node over its bound row ahead of the host, which
+/// adopted it as it published it.
 ///
 /// # Safety
 ///
-/// The arena must be live on the document thread, and `style_record` a record the style engine
-/// holds.
+/// `arena` must be a live handle on the document thread, and `style_record` a record the style engine holds.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_install_animation_sample(
     arena: *mut c_void,
     style_node: u32,
     style_record: u64,
     needs_relayout: bool,
-) -> bool {
-    assert!(!arena.is_null(), "layout node arena handle is null");
+) {
     let Some(style_node) = StyleNodeID::from_raw(style_node) else {
-        return false;
+        return;
     };
-    // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }.install_animation_sample(style_node, style_record, needs_relayout)
-}
-
-/// Whether an animation sample installed `style_record` over `node` ahead of the host, which adopts
-/// it now.
-///
-/// # Safety
-///
-/// The arena must be live on the document thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_take_animation_adoption(
-    arena: *mut c_void,
-    node: NodeSlotId,
-    style_record: u64,
-) -> bool {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }.take_animation_adoption(node, style_record)
+    let change = LayoutChange::InstallAnimationSample {
+        style_node,
+        style_record,
+        needs_relayout,
+    };
+    // SAFETY: Guaranteed by the caller.
+    unsafe { super::layout_changes::send(arena, change) };
 }
 
 /// The style record a row holds, for tests.

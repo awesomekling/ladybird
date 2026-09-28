@@ -107,6 +107,18 @@ pub(crate) enum LayoutChange {
         node: NodeSlotId,
         attached: bool,
     },
+    /// The node left the document, and the box it is bound to, or that of its pseudo-element of kind `generated_for`,
+    /// keeps its style readable until it is freed.
+    PinBoundBoxStyleRecordForDetachment {
+        style_node: StyleNodeID,
+        generated_for: u8,
+    },
+    /// An animation sample published this record for the element, which adopted it: the element's row takes it over.
+    InstallAnimationSample {
+        style_node: StyleNodeID,
+        style_record: u64,
+        needs_relayout: bool,
+    },
     /// The table spans the element the row was built for asks for.
     SetTableSpans {
         node: NodeSlotId,
@@ -208,6 +220,26 @@ impl LayoutChange {
                     arena.note_style_image_resources_attached(node, attached);
                 }
             }
+            Self::PinBoundBoxStyleRecordForDetachment {
+                style_node,
+                generated_for,
+            } => arena.pin_bound_box_style_record_for_detachment(style_node, generated_for),
+            Self::InstallAnimationSample {
+                style_node,
+                style_record,
+                needs_relayout,
+            } => {
+                let row = arena.bound_row(style_node);
+                if arena.install_animation_sample(style_node, style_record, needs_relayout) {
+                    // The element adopted the record as it published it, so the adoption leaves the log at once.
+                    let adopted = arena.take_animation_adoption(row, style_record);
+                    debug_assert!(adopted, "an installed sample is adopted");
+                } else if needs_relayout && !row.is_invalid() {
+                    // The host installs the record over the row itself, and the row lays out again as the host's
+                    // install would have marked it.
+                    arena.set_needs_layout_update(row, true);
+                }
+            }
             Self::SetTableSpans {
                 node,
                 column_span,
@@ -229,6 +261,10 @@ impl LayoutChange {
                 | Self::EnrollTextAfterLanguageChange { .. }
                 | Self::SetNeedsFullLayoutTreeUpdate(true)
                 | Self::SetTableSpans { .. }
+                | Self::InstallAnimationSample {
+                    needs_relayout: true,
+                    ..
+                }
         )
     }
 }
