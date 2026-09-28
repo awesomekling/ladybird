@@ -1100,7 +1100,10 @@ impl super::StyleEngineState {
             damage: 0,
         };
         match pseudo {
-            None => self.retained.rows_sampled_in_pass.insert(node, published),
+            None => {
+                self.host.compositions_published.push((node, style_record));
+                self.retained.rows_sampled_in_pass.insert(node, published)
+            }
             Some(kind) => self
                 .retained
                 .pseudo_elements_sampled_in_pass

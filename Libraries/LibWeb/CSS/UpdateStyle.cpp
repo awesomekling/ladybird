@@ -525,7 +525,7 @@ static bool install_composition_sampled_in_pass(StyleDrainScope const& scope, DO
     auto& element = const_cast<DOM::Element&>(abstract_element.element());
     auto& document = element.document();
     // A sample the host published since the pass composed over the row's record again.
-    if (StyleEngineFFI::style_engine_assigned_style_record(document.style_computer().style_engine().rust_handle(), element.style_node_id().value(), NumericLimits<u8>::max()) != sample.style_record)
+    if (!StyleEngineFFI::style_engine_takes_row_sampled_in_pass(document.style_computer().style_engine().rust_handle(), element.style_node_id().value(), sample.style_record))
         return false;
     if (sample.substitution_marks & ComputedValuesFFI::SUBSTITUTION_MARK_VAR)
         element.set_style_uses_var_css_function();

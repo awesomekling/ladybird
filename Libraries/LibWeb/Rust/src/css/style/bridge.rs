@@ -4246,6 +4246,25 @@ pub unsafe extern "C" fn style_engine_take_row_sampled_in_pass(
     sampled
 }
 
+/// Whether the engine still assigns the element of `node` the composition `style_record` of the pass's sample the host
+/// took for its row, which it installs: not where the owner has published another composition as its record since.
+/// On the main thread, which knows it from the news.
+///
+/// # Safety
+/// `engine` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_takes_row_sampled_in_pass(
+    engine: StyleEngineHandle,
+    node: u32,
+    style_record: u64,
+) -> bool {
+    // SAFETY: On the main thread.
+    let answers = unsafe { engine.answers() };
+    StyleNodeID::from_raw(node)
+        .and_then(|node| answers.compositions_of_taken_samples.remove(&node))
+        .is_some_and(|composition| composition == style_record)
+}
+
 /// Takes what the engine published for a synthetic pseudo-element whose animations it sampled as
 /// it settled it, so that exactly one installation applies it.
 ///
@@ -4781,6 +4800,9 @@ pub(crate) struct HomeAnswers {
     container_effects: HashMap<StyleNodeID, super::container_queries::ContainerVerdict>,
     /// What the pass published for each row whose animations it sampled.
     rows_sampled: HashMap<StyleNodeID, FfiRowSampledInPass>,
+    /// The composition each element holds whose pass sample the host took and has not installed yet, as the pass
+    /// published it or as the owner published one since.
+    compositions_of_taken_samples: HashMap<StyleNodeID, u64>,
     /// What the owner decided of each pseudo-element row's counter styles, with the record the row moved to.
     content_counter_style_verdicts: HashMap<(StyleNodeID, u8), (u64, u8)>,
     pub(crate) deferred_inputs: DeferredInputs,
@@ -4814,6 +4836,7 @@ pub(crate) struct EngineNews {
     pending: PendingFacts,
     records: Option<Vec<(u64, std::sync::Arc<super::published_record::PublishedStyleRecord>)>>,
     records_named: Vec<(u64, std::sync::Arc<super::published_record::PublishedStyleRecord>)>,
+    compositions_published: Vec<(StyleNodeID, u64)>,
     container_effects: Option<HashMap<StyleNodeID, super::container_queries::ContainerVerdict>>,
     rows_sampled: Option<HashMap<StyleNodeID, FfiRowSampledInPass>>,
     content_counter_style_verdicts: Option<HashMap<(StyleNodeID, u8), (u64, u8)>>,
@@ -4884,6 +4907,8 @@ impl EngineNews {
             );
         }
         self.records_named.append(&mut engine.host.records_named);
+        self.compositions_published
+            .append(&mut engine.host.compositions_published);
         if let Some(steps) = engine.transition_steps_moved() {
             self.transition_steps = Some(steps);
         }
@@ -5204,6 +5229,11 @@ impl HomeAnswers {
         if let Some(rows_sampled) = news.rows_sampled {
             self.rows_sampled = rows_sampled;
         }
+        for (node, composition) in news.compositions_published {
+            if let Some(held) = self.compositions_of_taken_samples.get_mut(&node) {
+                *held = composition;
+            }
+        }
         if let Some(verdicts) = news.content_counter_style_verdicts {
             self.content_counter_style_verdicts = verdicts;
         }
@@ -5283,7 +5313,9 @@ impl HomeAnswers {
     }
 
     fn take_row_sampled(&mut self, node: StyleNodeID) -> Option<FfiRowSampledInPass> {
-        self.rows_sampled.remove(&node)
+        let sampled = self.rows_sampled.remove(&node)?;
+        self.compositions_of_taken_samples.insert(node, sampled.style_record);
+        Some(sampled)
     }
 
     /// What the owner decided of the counter styles of the pseudo-element `pseudo_kind` of `node` whose row moved to
