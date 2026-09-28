@@ -61,6 +61,11 @@ Optional<QueryBox> QueryView::box_of(DOM::Element const& element) const
     return query_box(Layout::RustFFI::query_snapshot_element_box(m_snapshot->m_handle, style_node.value()));
 }
 
+Optional<QueryBox> QueryView::viewport_box() const
+{
+    return query_box(Layout::RustFFI::query_snapshot_viewport_box(m_snapshot->m_handle));
+}
+
 Optional<QueryBox> QueryView::principal_box_of(DOM::Element const& element) const
 {
     auto style_node = element.style_node_id();
@@ -94,6 +99,19 @@ CSSPixelRect QueryView::absolute_border_box_rect(QueryBox box) const
 CSSPixelRect QueryView::absolute_padding_box_rect(QueryBox box) const
 {
     return Layout::RustFFI::query_snapshot_absolute_padding_box_rect(m_snapshot->m_handle, box.ffi);
+}
+
+CSSPixelRect QueryView::absolute_rect(QueryBox box) const
+{
+    return Layout::RustFFI::query_snapshot_absolute_rect(m_snapshot->m_handle, box.ffi);
+}
+
+Optional<CSSPixelPoint> QueryView::mouse_event_offset(QueryBox box, CSSPixelPoint position) const
+{
+    CSSPixelPoint offset;
+    if (!Layout::RustFFI::query_snapshot_mouse_event_offset(m_snapshot->m_handle, box.ffi, position, &offset))
+        return {};
+    return offset;
 }
 
 Optional<Vector<CSSPixelRect>> QueryView::client_rects(QueryBox box) const

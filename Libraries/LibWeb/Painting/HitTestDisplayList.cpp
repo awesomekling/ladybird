@@ -83,14 +83,6 @@ bool HitTestDisplayList::is_current() const
     return arena && m_rust_generation != 0 && Layout::RustFFI::layout_arena_hit_test_list_generation(arena) == m_rust_generation;
 }
 
-Optional<HitBox> HitTestDisplayList::bound_box_of(DOM::NodeIdentity identity) const
-{
-    QuerySnapshotScope snapshot_scope { *this };
-    if (!m_snapshot)
-        return {};
-    return HitBox::bound_box_in(*m_snapshot, identity);
-}
-
 HitTestDisplayList::Item HitTestDisplayList::item(size_t index) const
 {
     return { index, Layout::RustFFI::hit_test_snapshot_item(snapshot(), index) };

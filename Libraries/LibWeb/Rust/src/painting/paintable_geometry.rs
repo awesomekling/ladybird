@@ -264,6 +264,16 @@ pub(crate) fn absolute_position(arena: &impl GeometryRead, slot: NodeSlotId) -> 
     absolute_rect(arena, slot).location()
 }
 
+/// The position a box's offsets are taken from whatever its type: its first piece's for a fragmented
+/// inline box.
+pub(crate) fn box_type_agnostic_position(arena: &impl GeometryRead, slot: NodeSlotId) -> CssPixelPoint {
+    arena
+        .node_is_fragmented_inline(slot)
+        .then(|| crate::painting::ffi::inline_first_piece_position(arena, slot))
+        .flatten()
+        .unwrap_or_else(|| absolute_position(arena, slot))
+}
+
 pub(crate) fn absolute_padding_box_rect(arena: &impl GeometryRead, slot: NodeSlotId) -> CssPixelRect {
     let data = arena.paintable_data(slot);
     let absolute = absolute_rect(arena, slot);

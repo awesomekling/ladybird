@@ -23,7 +23,7 @@
 use crate::cow_column::ColumnSnapshot;
 use crate::css::computed_value_views::ComputedValuesView;
 use crate::css::css_enums::positioning;
-use crate::css::css_pixels::CssPixelRect;
+use crate::css::css_pixels::{CssPixelPoint, CssPixelRect, CssPixels};
 use crate::css::style::tree::StyleNodeID;
 use crate::layout::fragment_tree::FragmentLink;
 use crate::layout::node_data::{NodeFlag, NodeKind, NodeSlotId, PaintNode};
@@ -78,6 +78,8 @@ pub(crate) struct QuerySnapshot {
     element_rows: ColumnSnapshot<NodeSlotId, BOUND_ELEMENT_ROWS_PER_CHUNK>,
     /// The rendered text of every text row, as layout left it.
     text: ColumnSnapshot<PublishedTextSlot, SLOTS_PER_CHUNK>,
+    /// The row the document was bound to: the viewport's.
+    viewport_row: NodeSlotId,
     viewport_conversion: ViewportConversion,
 }
 
@@ -116,6 +118,7 @@ impl LayoutNodeArena {
             styles,
             element_rows: self.publish_bound_element_rows(),
             text: self.publish_text(),
+            viewport_row: self.bound_viewport_row(),
             viewport_conversion,
         })
     }
@@ -170,6 +173,11 @@ impl QuerySnapshot {
     pub(crate) fn element_box(&self, element: StyleNodeID) -> Option<NodeSlotId> {
         let row = *self.element_rows.get(element.element_index()? as usize)?;
         self.node(row).is_some().then_some(row)
+    }
+
+    /// The box the document is bound to: the viewport.
+    pub(crate) fn viewport_box(&self) -> Option<NodeSlotId> {
+        self.node(self.viewport_row).is_some().then_some(self.viewport_row)
     }
 
     /// https://drafts.csswg.org/css-tables-3/#table-wrapper-box
@@ -264,6 +272,55 @@ impl QuerySnapshot {
             return CssPixelRect::default();
         }
         paintable_geometry::absolute_border_box_rect(self, id)
+    }
+
+    /// The box's rect relative to the initial containing block, ignoring transforms.
+    pub(crate) fn absolute_rect(&self, id: NodeSlotId) -> CssPixelRect {
+        paintable_geometry::absolute_rect_or_default(self, id)
+    }
+
+    /// https://drafts.csswg.org/cssom-view/#dom-mouseevent-offsetx
+    /// The offset from the box of an event at `position`, relative to the initial containing block,
+    /// ignoring the transforms that apply to the box and its ancestors. `None` if the snapshot cannot
+    /// undo them: the box may be transformed, and the visual contexts were not up to date.
+    pub(crate) fn mouse_event_offset(&self, id: NodeSlotId, position: CssPixelPoint) -> Option<CssPixelPoint> {
+        if !self.paintable_row_is_populated(id) {
+            return Some(CssPixelPoint::default());
+        }
+        let untransformed_position = match &self.viewport_conversion {
+            ViewportConversion::Identity | ViewportConversion::VisualContexts { tree: None, .. } => position,
+            ViewportConversion::UntransformedOnly {
+                viewport_scroll_offset_is_zero,
+            } => {
+                if !self.rects_are_untransformed(id, *viewport_scroll_offset_is_zero) {
+                    return None;
+                }
+                position
+            }
+            ViewportConversion::VisualContexts {
+                tree: Some(tree),
+                device_pixels_per_css_pixel,
+                ..
+            } => {
+                let spatial = self.paintable_data(id).accumulated_visual_context.spatial;
+                let point = tree.inverse_transform_point(
+                    spatial,
+                    FloatPoint {
+                        x: position.x.to_float() * device_pixels_per_css_pixel,
+                        y: position.y.to_float() * device_pixels_per_css_pixel,
+                    },
+                );
+                CssPixelPoint::new(
+                    CssPixels::nearest_value_for_f32(point.x / device_pixels_per_css_pixel),
+                    CssPixels::nearest_value_for_f32(point.y / device_pixels_per_css_pixel),
+                )
+            }
+        };
+        let origin = paintable_geometry::box_type_agnostic_position(self, id);
+        Some(CssPixelPoint::new(
+            untransformed_position.x - origin.x,
+            untransformed_position.y - origin.y,
+        ))
     }
 
     /// The padding box of the box's first fragment, relative to the initial containing block and
@@ -492,6 +549,16 @@ pub unsafe extern "C" fn query_snapshot_element_box(snapshot: *const std::ffi::c
     FfiQueryBox::of(StyleNodeID::from_raw(style_node).and_then(|style_node| snapshot.element_box(style_node)))
 }
 
+/// The box the document is bound to, or none.
+///
+/// # Safety
+///
+/// `snapshot` must be a live handle from `layout_arena_publish_query_snapshot`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn query_snapshot_viewport_box(snapshot: *const std::ffi::c_void) -> FfiQueryBox {
+    FfiQueryBox::of(unsafe { snapshot_from_handle(snapshot) }.viewport_box())
+}
+
 /// The principal box of the element with `style_node`, or none.
 ///
 /// # Safety
@@ -565,6 +632,43 @@ pub unsafe extern "C" fn query_snapshot_absolute_padding_box_rect(
     unsafe { snapshot_from_handle(snapshot) }
         .absolute_padding_box_rect(query_box.id())
         .into()
+}
+
+/// # Safety
+///
+/// `snapshot` must be a live handle from `layout_arena_publish_query_snapshot`, and `query_box` a
+/// box it answered.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn query_snapshot_absolute_rect(
+    snapshot: *const std::ffi::c_void,
+    query_box: FfiQueryBox,
+) -> crate::layout::used_values::FfiCssPixelRect {
+    unsafe { snapshot_from_handle(snapshot) }
+        .absolute_rect(query_box.id())
+        .into()
+}
+
+/// Writes the offset from the box of an event at `position` to `offset`. `false`, with nothing
+/// written, if the snapshot cannot undo the transforms that apply to the box.
+///
+/// # Safety
+///
+/// `snapshot` must be a live handle from `layout_arena_publish_query_snapshot`, `query_box` a box it
+/// answered, and `offset` must be writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn query_snapshot_mouse_event_offset(
+    snapshot: *const std::ffi::c_void,
+    query_box: FfiQueryBox,
+    position: crate::layout::used_values::FfiCssPixelPoint,
+    offset: *mut crate::layout::used_values::FfiCssPixelPoint,
+) -> bool {
+    let Some(event_offset) =
+        unsafe { snapshot_from_handle(snapshot) }.mouse_event_offset(query_box.id(), position.into())
+    else {
+        return false;
+    };
+    unsafe { offset.write(event_offset.into()) };
+    true
 }
 
 /// Pushes the box's client rects in viewport space. `false`, with nothing pushed, if the snapshot
