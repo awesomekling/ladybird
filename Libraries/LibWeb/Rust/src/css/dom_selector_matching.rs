@@ -39,6 +39,18 @@ pub struct FfiDomElementNames {
     pub is_document_element: bool,
 }
 
+/// Which of an element's element siblings a child-indexed pseudo-class counts.
+#[repr(u8)]
+#[derive(Clone, Copy)]
+pub enum FfiSiblingCount {
+    Before,
+    After,
+    /// Those before the element with its local name and namespace.
+    BeforeOfSameType,
+    /// Those after the element with its local name and namespace.
+    AfterOfSameType,
+}
+
 /// What the matcher asks of the DOM. Every element pointer is a live element for the duration of the query, and every
 /// element a callback returns is one too, or null for none.
 #[repr(C)]
@@ -50,6 +62,7 @@ pub struct FfiDomSelectorCallbacks {
     pub previous_element_sibling: unsafe extern "C" fn(element: *const c_void) -> *const c_void,
     pub next_element_sibling: unsafe extern "C" fn(element: *const c_void) -> *const c_void,
     pub first_element_child: unsafe extern "C" fn(element: *const c_void) -> *const c_void,
+    pub count_element_siblings: unsafe extern "C" fn(element: *const c_void, which: FfiSiblingCount) -> u32,
     /// The first element after `node` in tree order that is a descendant of `root`. `node` is `root` itself to start.
     /// Both may be any node.
     pub next_element_in_subtree: unsafe extern "C" fn(node: *const c_void, root: *const c_void) -> *const c_void,
@@ -170,6 +183,10 @@ impl<'a> DomMatcher<'a> {
 
     fn next_element_sibling(&self, element: Element) -> Option<Element> {
         optional_element(unsafe { (self.dom.next_element_sibling)(element) })
+    }
+
+    fn count_element_siblings(&self, element: Element, which: FfiSiblingCount) -> u32 {
+        unsafe { (self.dom.count_element_siblings)(element, which) }
     }
 
     fn first_element_child(&self, element: Element) -> Option<Element> {
@@ -496,11 +513,11 @@ impl<'a> DomMatcher<'a> {
             OnlyChild => {
                 self.previous_element_sibling(element).is_none() && self.next_element_sibling(element).is_none()
             }
-            FirstOfType => self.previous_sibling_of_same_type(element).is_none(),
-            LastOfType => self.next_sibling_of_same_type(element).is_none(),
+            FirstOfType => self.count_element_siblings(element, FfiSiblingCount::BeforeOfSameType) == 0,
+            LastOfType => self.count_element_siblings(element, FfiSiblingCount::AfterOfSameType) == 0,
             OnlyOfType => {
-                self.previous_sibling_of_same_type(element).is_none()
-                    && self.next_sibling_of_same_type(element).is_none()
+                self.count_element_siblings(element, FfiSiblingCount::BeforeOfSameType) == 0
+                    && self.count_element_siblings(element, FfiSiblingCount::AfterOfSameType) == 0
             }
             NthChild | NthLastChild | NthOfType | NthLastOfType => self.matches_nth(pseudo_class, element, state),
             Lang => {
@@ -535,87 +552,58 @@ impl<'a> DomMatcher<'a> {
         }
     }
 
-    fn has_same_type(&self, first: Element, second: Element) -> bool {
-        let first = self.names(first);
-        let second = self.names(second);
-        first.local_name == second.local_name && first.namespace_uri == second.namespace_uri
-    }
-
-    fn previous_sibling_of_same_type(&self, element: Element) -> Option<Element> {
-        let mut sibling = self.previous_element_sibling(element);
-        while let Some(candidate) = sibling {
-            if self.has_same_type(candidate, element) {
-                return Some(candidate);
-            }
-            sibling = self.previous_element_sibling(candidate);
-        }
-        None
-    }
-
-    fn next_sibling_of_same_type(&self, element: Element) -> Option<Element> {
-        let mut sibling = self.next_element_sibling(element);
-        while let Some(candidate) = sibling {
-            if self.has_same_type(candidate, element) {
-                return Some(candidate);
-            }
-            sibling = self.next_element_sibling(candidate);
-        }
-        None
-    }
-
     // https://drafts.csswg.org/selectors-4/#child-index
     fn matches_nth(&mut self, pseudo_class: &PseudoClassSelector, element: Element, state: MatchState) -> bool {
-        let argument_state = MatchState {
-            selector_kind: SelectorKind::Normal,
-            anchor: None,
-            ..state
-        };
-        let matches_argument = |this: &mut Self, candidate: Element| {
-            pseudo_class.argument_selector_list.is_empty()
-                || pseudo_class
-                    .argument_selector_list
-                    .iter()
-                    .any(|selector| this.matches_selector(selector, candidate, argument_state))
-        };
-
-        let mut index = 1i32;
-        match pseudo_class.pseudo_class {
-            PseudoClassType::NthChild | PseudoClassType::NthLastChild => {
-                if !matches_argument(self, element) {
-                    return false;
-                }
-                let from_end = pseudo_class.pseudo_class == PseudoClassType::NthLastChild;
-                let step = |this: &Self, candidate: Element| match from_end {
-                    true => this.next_element_sibling(candidate),
-                    false => this.previous_element_sibling(candidate),
-                };
-                let mut sibling = step(self, element);
-                while let Some(candidate) = sibling {
-                    if matches_argument(self, candidate) {
-                        index += 1;
-                    }
-                    sibling = step(self, candidate);
-                }
-            }
-            PseudoClassType::NthOfType => {
-                let mut sibling = self.previous_sibling_of_same_type(element);
-                while let Some(candidate) = sibling {
-                    index += 1;
-                    sibling = self.previous_sibling_of_same_type(candidate);
-                }
-            }
-            PseudoClassType::NthLastOfType => {
-                let mut sibling = self.next_sibling_of_same_type(element);
-                while let Some(candidate) = sibling {
-                    index += 1;
-                    sibling = self.next_sibling_of_same_type(candidate);
-                }
-            }
+        let (from_end, of_same_type) = match pseudo_class.pseudo_class {
+            PseudoClassType::NthChild => (false, false),
+            PseudoClassType::NthLastChild => (true, false),
+            PseudoClassType::NthOfType => (false, true),
+            PseudoClassType::NthLastOfType => (true, true),
             _ => {
                 debug_assert!(false, "not a child-indexed pseudo-class");
                 return false;
             }
-        }
+        };
+        // Only :nth-child() and :nth-last-child() take `of S`.
+        let siblings_before = if of_same_type || pseudo_class.argument_selector_list.is_empty() {
+            let which = match (from_end, of_same_type) {
+                (false, false) => FfiSiblingCount::Before,
+                (true, false) => FfiSiblingCount::After,
+                (false, true) => FfiSiblingCount::BeforeOfSameType,
+                (true, true) => FfiSiblingCount::AfterOfSameType,
+            };
+            self.count_element_siblings(element, which)
+        } else {
+            // `of S` counts the siblings S matches, so each one is matched here.
+            let argument_state = MatchState {
+                selector_kind: SelectorKind::Normal,
+                anchor: None,
+                ..state
+            };
+            let matches_argument = |this: &mut Self, candidate: Element| {
+                pseudo_class
+                    .argument_selector_list
+                    .iter()
+                    .any(|selector| this.matches_selector(selector, candidate, argument_state))
+            };
+            if !matches_argument(self, element) {
+                return false;
+            }
+            let step = |this: &Self, candidate: Element| match from_end {
+                true => this.next_element_sibling(candidate),
+                false => this.previous_element_sibling(candidate),
+            };
+            let mut count = 0u32;
+            let mut sibling = step(self, element);
+            while let Some(candidate) = sibling {
+                if matches_argument(self, candidate) {
+                    count += 1;
+                }
+                sibling = step(self, candidate);
+            }
+            count
+        };
+        let index = i32::try_from(siblings_before).unwrap_or(i32::MAX).saturating_add(1);
         pseudo_class.an_plus_b_pattern.matches(index)
     }
 
