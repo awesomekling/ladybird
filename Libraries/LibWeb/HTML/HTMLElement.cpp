@@ -467,6 +467,10 @@ Utf16String HTMLElement::get_the_text_steps()
     if (!has_layout_box())
         return descendant_text_content();
 
+    // The text nodes' rendered text is read from the query snapshot published here, not asked of the render owner node
+    // by node.
+    document().publish_query_snapshot_after_read(Painting::QueryVisualContexts::Stale);
+
     // 2. Let results be a new empty list.
     Vector<Variant<Utf16String, RequiredLineBreakCount>> results;
 
