@@ -121,11 +121,12 @@ impl EngineChange {
             | Self::PrepareRootFontResolution { .. }
             | Self::PublishFontFaceSnapshot { .. }
             | Self::RowSampledTakenByHost(_)
-            | Self::ContainerEffectsTakenByHost(_)
             | Self::ElementStyleInputAbsorbedByHost { .. }
             | Self::SetElementCustomPropertyData(..)
             | Self::SetPseudoElementCustomPropertyData(..)
             | Self::AddSheet { .. } => PendingFacts::NONE,
+            // What the host takes records the containers it reads, some to evaluate after layout.
+            Self::ContainerEffectsTakenByHost(_) => PendingFacts::SIZE_CONTAINERS_AFTER_LAYOUT,
             // Only an element that loses its record may owe its resources an input.
             Self::Boundary(Write::SetElementContainerQueryInputs { record, .. }) if *record != 0 => PendingFacts::NONE,
             Self::Boundary(
@@ -257,7 +258,8 @@ impl StyleChange {
     /// What the change may leave the engine holding for its next style transaction, where it holds `held`.
     pub(crate) fn leaves(&self, held: PendingFacts) -> PendingFacts {
         match self {
-            Self::Inputs(_) => PendingFacts::ELEMENT_INPUT,
+            // The host's facts that go with them may name a size container to evaluate after layout.
+            Self::Inputs(_) => PendingFacts::ELEMENT_INPUT.union(PendingFacts::SIZE_CONTAINERS_AFTER_LAYOUT),
             Self::Engine(change) => change.leaves(held),
         }
     }
@@ -316,7 +318,6 @@ pub(crate) enum StyleQuery {
     SizeQueryContainerScanVisits {
         reset: bool,
     },
-    HasSizeContainersNeedingEvaluationAfterLayout,
     HasSuspendedStylePass,
     AssignedStyleRecord {
         node: u32,
@@ -727,9 +728,6 @@ impl StyleQuery {
             ),
             Self::SizeQueryContainerScanVisits { reset } => StyleAnswer::U64(unsafe {
                 crate::css::style::bridge::owner_size_query_container_scan_visits(engine, reset)
-            }),
-            Self::HasSizeContainersNeedingEvaluationAfterLayout => StyleAnswer::Bool(unsafe {
-                crate::css::style::bridge::owner_has_size_containers_needing_evaluation_after_layout(engine)
             }),
             Self::HasSuspendedStylePass => {
                 StyleAnswer::Bool(unsafe { crate::css::style::bridge::owner_has_suspended_style_pass(engine) })

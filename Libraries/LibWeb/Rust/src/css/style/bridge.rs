@@ -8321,21 +8321,10 @@ mod tests {
 pub unsafe extern "C" fn style_engine_has_size_containers_needing_evaluation_after_layout(
     engine: StyleEngineHandle,
 ) -> bool {
-    crate::css::style::owner_calls::ask(
-        engine,
-        "style_engine_has_size_containers_needing_evaluation_after_layout",
-        crate::css::style::owner_calls::StyleQuery::HasSizeContainersNeedingEvaluationAfterLayout,
-    )
-    .is()
-}
-
-/// Answers [`style_engine_has_size_containers_needing_evaluation_after_layout`] from `engine`, on the render owner.
-///
-/// # Safety
-///
-/// As for [`style_engine_has_size_containers_needing_evaluation_after_layout`].
-pub(crate) unsafe fn owner_has_size_containers_needing_evaluation_after_layout(engine: &StyleEngine) -> bool {
-    engine.has_size_containers_needing_evaluation_after_layout()
+    engine.bring_home("style_engine_has_size_containers_needing_evaluation_after_layout");
+    engine
+        .pending_facts()
+        .contains(PendingFacts::SIZE_CONTAINERS_AFTER_LAYOUT)
 }
 
 /// The elements the size query container dependent walks have visited; `reset` starts the count
