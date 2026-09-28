@@ -24,7 +24,7 @@ macro_rules! define_counters {
 
         pub const COUNTER_COUNT: usize = 0 $(+ { let _ = Counter::$variant; 1 })+;
 
-        static COUNTER_NAMES: [&str; COUNTER_COUNT] = [$($name,)+];
+        pub static COUNTER_NAMES: [&str; COUNTER_COUNT] = [$($name,)+];
 
         impl Counter {
             #[must_use]

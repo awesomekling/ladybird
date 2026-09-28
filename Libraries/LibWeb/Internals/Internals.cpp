@@ -2156,14 +2156,12 @@ GC::Ref<JS::Object> Internals::style_engine_counters()
     auto& realm = HTML::relevant_realm(window());
     auto object = JS::Object::create(realm, nullptr);
     auto& style_engine = window().associated_document().style_computer().style_engine();
-    StringView name;
-    u64 value = 0;
-    for (size_t index = 0; style_engine.counter(index, name, value); ++index) {
+    style_engine.for_each_counter([&](StringView name, u64 value) {
         object->define_direct_property(
             Utf16FlyString::from_utf8(name),
             JS::Value(static_cast<double>(value)),
             JS::default_attributes);
-    }
+    });
     return object;
 }
 

@@ -111,6 +111,9 @@ pub(crate) enum EngineChange {
         reaction: u8,
         inherited_style_groups: u8,
     },
+    /// A benchmark phase marker, in UTF-16, which a recording engine records.
+    #[cfg(feature = "style-recording")]
+    BenchmarkMarker(Box<[u16]>),
 }
 
 impl EngineChange {
@@ -165,6 +168,8 @@ impl EngineChange {
             | Self::RegisterAnchorNames { .. }
             | Self::SetElementTransitions { .. }
             | Self::SetElementAnimationEffectDescriptions { .. } => PendingFacts::NONE,
+            #[cfg(feature = "style-recording")]
+            Self::BenchmarkMarker(_) => PendingFacts::NONE,
             // What the host takes records the containers it reads, some to evaluate after layout.
             Self::ContainerEffectsTakenByHost(_) => PendingFacts::SIZE_CONTAINERS_AFTER_LAYOUT,
             // Only an element that loses its record may owe its resources an input.
@@ -266,6 +271,8 @@ impl EngineChange {
             } => {
                 engine.absorb_element_style_input(node, reaction, inherited_style_groups, false);
             }
+            #[cfg(feature = "style-recording")]
+            Self::BenchmarkMarker(name) => super::bridge::record_benchmark_marker(engine, &name),
             Self::RegisterAnchorNames { node, style_record, .. } => {
                 engine.register_anchor_names(node, style_record);
             }
@@ -359,12 +366,6 @@ pub(crate) enum StyleQuery {
     Boundary(BoundaryRead),
     /// A style read the host answers synchronously, as a CSSOM read does.
     ReadDemand(super::bridge::RecordDemand),
-    MatchElement {
-        node: u32,
-        out: *mut FfiRuleMatch,
-        capacity: usize,
-        compact_for_cascade: bool,
-    },
     ElementRecordDamage {
         node: u32,
         old_style_record: u64,
@@ -378,15 +379,6 @@ pub(crate) enum StyleQuery {
         originating_style_record: u64,
         counter_styles_changed: bool,
     },
-    Counter {
-        index: usize,
-        out_value: *mut u64,
-        out_name_length: *mut usize,
-    },
-    SizeQueryContainerScanVisits {
-        reset: bool,
-    },
-    HasSuspendedStylePass,
     AssignedStyleRecord {
         node: u32,
         pseudo_kind: u8,
@@ -481,12 +473,6 @@ pub(crate) enum StyleQuery {
         after_animated_overlay: *const c_void,
         input: *mut crate::css::transition::FfiTransitionInput,
         actions: *mut crate::css::transition::FfiTransitionAction,
-    },
-    #[cfg(feature = "style-recording")]
-    BenchmarkMarker {
-        name: *const c_void,
-        length: usize,
-        is_ascii: bool,
     },
     /// Removes the native rules of `count` identities in order, and writes the engine id plus one each had as it went,
     /// or 0 for one gone already.
@@ -690,14 +676,6 @@ impl StyleQuery {
                 }
                 StyleAnswer::RecordDemand(answer)
             }
-            Self::MatchElement {
-                node,
-                out,
-                capacity,
-                compact_for_cascade,
-            } => StyleAnswer::Usize(unsafe {
-                crate::css::style::bridge::owner_match_element(engine, node, out, capacity, compact_for_cascade)
-            }),
             Self::ElementRecordDamage {
                 node,
                 old_style_record,
@@ -723,19 +701,6 @@ impl StyleQuery {
                     counter_styles_changed,
                 )
             }),
-            Self::Counter {
-                index,
-                out_value,
-                out_name_length,
-            } => StyleAnswer::Pointer(
-                unsafe { crate::css::style::bridge::owner_counter(engine, index, out_value, out_name_length) }.cast(),
-            ),
-            Self::SizeQueryContainerScanVisits { reset } => StyleAnswer::U64(unsafe {
-                crate::css::style::bridge::owner_size_query_container_scan_visits(engine, reset)
-            }),
-            Self::HasSuspendedStylePass => {
-                StyleAnswer::Bool(unsafe { crate::css::style::bridge::owner_has_suspended_style_pass(engine) })
-            }
             Self::AssignedStyleRecord { node, pseudo_kind } => StyleAnswer::U64(unsafe {
                 crate::css::style::bridge::owner_assigned_style_record(engine, node, pseudo_kind)
             }),
@@ -918,11 +883,6 @@ impl StyleQuery {
                 }
                 StyleAnswer::None
             }
-            #[cfg(feature = "style-recording")]
-            Self::BenchmarkMarker { name, length, is_ascii } => {
-                unsafe { super::bridge::owner_record_benchmark_marker(engine, name, length, is_ascii) };
-                StyleAnswer::None
-            }
             Self::NativeRuleId { identity } => {
                 StyleAnswer::U32(engine.native_rule_id(identity).map_or(0, |id| id.0 + 1))
             }
@@ -961,9 +921,75 @@ impl StyleQuery {
     }
 }
 
+/// A read only DevTools and Internals make of a document's style engine, which the render owner answers as it answers
+/// a [`StyleQuery`]. No rendering update asks one.
+pub(crate) enum DevToolsStyleQuery {
+    MatchElement {
+        node: u32,
+        out: *mut FfiRuleMatch,
+        capacity: usize,
+        compact_for_cascade: bool,
+    },
+    Counters {
+        values: *mut u64,
+        count: usize,
+    },
+    SizeQueryContainerScanVisits {
+        reset: bool,
+    },
+    HasSuspendedStylePass,
+}
+
+impl DevToolsStyleQuery {
+    /// Answers the query from `engine`, on the owner.
+    fn answer(self, engine: &mut StyleEngine) -> StyleAnswer {
+        match self {
+            Self::MatchElement {
+                node,
+                out,
+                capacity,
+                compact_for_cascade,
+            } => StyleAnswer::Usize(unsafe {
+                super::bridge::owner_match_element(engine, node, out, capacity, compact_for_cascade)
+            }),
+            Self::Counters { values, count } => {
+                unsafe { super::bridge::owner_counters(engine, values, count) };
+                StyleAnswer::None
+            }
+            Self::SizeQueryContainerScanVisits { reset } => {
+                StyleAnswer::U64(engine.size_query_container_scan_visits(reset))
+            }
+            Self::HasSuspendedStylePass => StyleAnswer::Bool(engine.state.host.suspended_style_pass.is_some()),
+        }
+    }
+}
+
+/// What the main thread asks the owner: a style read, or a DevTools one.
+#[allow(clippy::large_enum_variant)]
+enum Question {
+    Style(StyleQuery),
+    DevTools(DevToolsStyleQuery),
+}
+
+impl Question {
+    fn answer(self, engine: &mut StyleEngine, arena: &LayoutNodeArena) -> StyleAnswer {
+        match self {
+            Self::Style(query) => query.answer(engine, arena),
+            Self::DevTools(query) => query.answer(engine),
+        }
+    }
+
+    fn unanswered(&self) -> StyleAnswer {
+        match self {
+            Self::Style(query) => query.unanswered(),
+            Self::DevTools(_) => StyleAnswer::None,
+        }
+    }
+}
+
 /// A query and, once the owner has answered it, its answer, which the main thread holds while it waits.
 pub(crate) struct StyleQueryCell {
-    query: Option<StyleQuery>,
+    query: Option<Question>,
     answer: Option<StyleAnswer>,
     /// The custom-property data the engine retired answering the query, and before it, which only the main thread
     /// releases: it drops the cell once the owner has answered.
@@ -971,7 +997,12 @@ pub(crate) struct StyleQueryCell {
 }
 
 impl StyleQueryCell {
+    #[cfg(test)]
     pub(crate) fn new(query: StyleQuery) -> Self {
+        Self::asking(Question::Style(query))
+    }
+
+    fn asking(query: Question) -> Self {
         Self {
             query: Some(query),
             answer: None,
@@ -1019,7 +1050,7 @@ pub(crate) fn send(engine: StyleEngineInputHandle, entry: &'static str, change: 
 /// sent before. `entry` names the door the main thread took.
 pub(crate) fn ask(engine: StyleEngineHandle, entry: &'static str, query: StyleQuery) -> StyleAnswer {
     engine.bring_home(entry);
-    ask_document(engine.document(), entry, query)
+    ask_document(engine.document(), entry, Question::Style(query))
 }
 
 /// Leaves the change that gives up the `@keyframes` row of a shadow root's scope, from a garbage collection's
@@ -1038,8 +1069,14 @@ pub(crate) fn unpublish_tree_scope_keyframes_from_finalizer(
     }));
 }
 
-fn ask_document(document: DocumentId, entry: &'static str, query: StyleQuery) -> StyleAnswer {
-    let mut cell = StyleQueryCell::new(query);
+/// Asks the owner of `engine`'s document the DevTools read `query`, as [`ask`] asks a style read.
+pub(crate) fn ask_devtools(engine: StyleEngineHandle, entry: &'static str, query: DevToolsStyleQuery) -> StyleAnswer {
+    engine.bring_home(entry);
+    ask_document(engine.document(), entry, Question::DevTools(query))
+}
+
+fn ask_document(document: DocumentId, entry: &'static str, query: Question) -> StyleAnswer {
+    let mut cell = StyleQueryCell::asking(query);
     let answered = crate::render_owner::ask_engine(document, Query::Engine(cell.for_owner()));
     let StyleQueryCell { query, answer, retired } = cell;
     // What the owner retired is released here, on the main thread.

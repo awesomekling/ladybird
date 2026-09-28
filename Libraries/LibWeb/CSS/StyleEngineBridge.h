@@ -480,8 +480,8 @@ public:
     // as the document pass. Returns false when matching could not complete.
     bool match_element(StyleNodeID node, Vector<RuleMatch>&, MatchPurpose);
 
-    // Enumerates the engine's counters. Returns false once index is past the last counter.
-    bool counter(size_t index, StringView& out_name, u64& out_value) const;
+    // Calls back with the name and value of each of the engine's counters, reading them in one go.
+    void for_each_counter(Function<void(StringView name, u64 value)> const&) const;
 
     [[nodiscard]] void* rust_handle() { return m_impl; }
     [[nodiscard]] void const* rust_handle() const { return m_impl; }
