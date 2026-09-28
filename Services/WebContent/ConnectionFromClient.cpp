@@ -797,17 +797,8 @@ void ConnectionFromClient::run_descendant_unload_task(Compositing::PageId page_i
 
 void ConnectionFromClient::continue_child_navigable_destruction(Compositing::PageId page_id, Web::HTML::CrossProcessId navigable_id)
 {
-    auto page = this->page(page_id);
-    if (!page.has_value())
-        return;
-
-    // The child has already been marked as destroyed, so a lookup through the page no longer finds it.
-    GC::Ptr<Web::HTML::Navigable> navigable = Web::HTML::local_navigable_with_id(navigable_id);
-    if (!navigable || &navigable->page() != &page->page())
-        navigable = Web::HTML::remote_navigable_with_id(page->page(), navigable_id);
-    if (!navigable)
-        return;
-    Web::HTML::NavigableContainer::continue_destroying_the_child_navigable(*navigable);
+    if (auto page = this->page(page_id); page.has_value())
+        page->continue_child_navigable_destruction(navigable_id);
 }
 
 // https://html.spec.whatwg.org/multipage/document-lifecycle.html#abort-a-document-and-its-descendants
