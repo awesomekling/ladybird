@@ -27,7 +27,7 @@
 #include <LibWeb/HTML/HTMLSlotElement.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/Window.h>
-#include <LibWeb/Layout/Node.h>
+#include <LibWeb/Painting/BoxSlot.h>
 #include <LibWeb/WebIDL/ExceptionOr.h>
 
 namespace Web::Animations {
@@ -1098,19 +1098,19 @@ bool KeyframeEffect::can_skip_per_frame_style_update() const
                 .target_style_generation = target->animation_style_generation(),
                 .target_subtree_style_generation = target->animation_subtree_style_generation(),
                 .target_is_connected = target->is_connected(),
-                .layout_node = target->unsafe_layout_node(),
+                .box_slot_index = Painting::BoxSlot::bound_to(*target).slot().index,
                 .result = result,
             };
         }
         return result;
     };
     if (target && target->document().layout_is_up_to_date()) {
-        auto const* layout_node = target->unsafe_layout_node();
+        auto const box_slot_index = Painting::BoxSlot::bound_to(*target).slot().index;
         if (m_can_skip_per_frame_style_update_cache.has_value()
             && m_can_skip_per_frame_style_update_cache->target_style_generation == target->animation_style_generation()
             && m_can_skip_per_frame_style_update_cache->target_subtree_style_generation == target->animation_subtree_style_generation()
             && m_can_skip_per_frame_style_update_cache->target_is_connected == target->is_connected()
-            && m_can_skip_per_frame_style_update_cache->layout_node == layout_node) {
+            && m_can_skip_per_frame_style_update_cache->box_slot_index == box_slot_index) {
             ++target->document().style_invalidation_counters().animation_style_skip_cache_hits;
             return m_can_skip_per_frame_style_update_cache->result;
         }
@@ -1157,19 +1157,20 @@ bool KeyframeEffect::can_skip_per_frame_style_update() const
 
     if (!target->document().layout_is_up_to_date())
         return false;
-    auto const* layout_node = target->unsafe_layout_node();
-    if (!layout_node || layout_node->visibility() != CSS::Visibility::Hidden)
+    // A text box holds no style of its own, and has no visibility to read.
+    auto visibility_of = [](Painting::BoxSlot const& box) -> Optional<CSS::Visibility> {
+        if (auto const* inherited_box_values = box.style_group<CSS::ComputedValues::InheritedBoxValues>())
+            return static_cast<CSS::Visibility>(inherited_box_values->visibility);
+        return {};
+    };
+    auto box = Painting::BoxSlot::bound_to(*target);
+    if (visibility_of(box) != CSS::Visibility::Hidden)
         return cache_result(false);
 
-    bool has_visible_descendant = false;
-    layout_node->for_each_in_inclusive_subtree_of_type<Layout::NodeWithStyle>([&](auto const& descendant) {
-        if (descendant.visibility() != CSS::Visibility::Visible)
-            return TraversalDecision::Continue;
-        has_visible_descendant = true;
-        return TraversalDecision::Break;
-    });
-    if (has_visible_descendant)
-        return cache_result(false);
+    for (auto descendant = box; descendant; descendant = descendant.next_in_pre_order(box)) {
+        if (visibility_of(descendant) == CSS::Visibility::Visible)
+            return cache_result(false);
+    }
 
     return cache_result(true);
 }

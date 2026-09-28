@@ -560,6 +560,31 @@ void NodeWithStyle::apply_style(Row const& row, CSS::PublishedStyleRecord const&
     Painting::push_paint_facts_after_style_attach(Painting::BoxSlot::of(document, row.slot()), const_cast<DOM::Node*>(dom_node), Painting::StyleHoldsImageValues::No);
 }
 
+static Row row_of_box(Painting::BoxSlot const& box)
+{
+    auto* arena = box ? box.document().layout_node_arena_if_created() : nullptr;
+    return arena ? arena->row_if_live(box.slot()) : Row {};
+}
+
+void apply_style_to_box(Painting::BoxSlot const& box, CSS::PublishedStyleRecord const& style_record)
+{
+    if (auto row = row_of_box(box); row && !row.is_text())
+        NodeWithStyle::apply_style(row, style_record);
+}
+
+void attach_style_resources_to_box(Painting::BoxSlot const& box)
+{
+    auto row = row_of_box(box);
+    if (row && !row.is_text())
+        as<NodeWithStyle>(row.shell()).attach_style_resources();
+}
+
+void make_host_mirror_of_box(Painting::BoxSlot const& box)
+{
+    if (auto row = row_of_box(box))
+        (void)row.shell();
+}
+
 void NodeWithStyle::apply_style(CSS::PublishedStyleRecord const& style_record)
 {
     auto const style_record_identity = style_record.identity();
@@ -940,16 +965,7 @@ void NodeWithStyle::set_display(CSS::Display display)
 
 bool overflow_value_makes_box_a_scroll_container(CSS::Overflow overflow)
 {
-    switch (overflow) {
-    case CSS::Overflow::Clip:
-    case CSS::Overflow::Visible:
-        return false;
-    case CSS::Overflow::Auto:
-    case CSS::Overflow::Hidden:
-    case CSS::Overflow::Scroll:
-        return true;
-    }
-    VERIFY_NOT_REACHED();
+    return Painting::overflow_value_makes_box_a_scroll_container(overflow);
 }
 
 bool NodeWithStyle::is_scroll_container() const

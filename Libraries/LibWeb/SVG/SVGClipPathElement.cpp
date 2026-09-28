@@ -5,7 +5,6 @@
  */
 
 #include <LibWeb/CSS/StyleEngineInput.h>
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/SVG/AttributeNames.h>
 #include <LibWeb/SVG/SVGClipPathElement.h>
 

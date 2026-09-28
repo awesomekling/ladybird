@@ -7,7 +7,6 @@
 #include <LibWeb/SVG/SVGAnimationElement.h>
 
 #include <LibWeb/HTML/EventNames.h>
-#include <LibWeb/Layout/Node.h>
 
 namespace Web::SVG {
 

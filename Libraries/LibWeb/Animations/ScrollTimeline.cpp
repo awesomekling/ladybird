@@ -11,8 +11,8 @@
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/Window.h>
-#include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Painting/BoxViews.h>
+#include <LibWeb/Painting/Scrolling.h>
 
 namespace Web::Animations {
 
@@ -120,16 +120,19 @@ static Optional<ScrollOffsetData> compute_scroll_offset_data(Variant<GC::Ptr<DOM
     if (propagated_source.visit([](auto const& source) { return source == nullptr; }))
         return {};
 
-    auto const& layout_node = propagated_source.visit([](auto const& source) -> Layout::NodeWithStyle const* { return source->unsafe_layout_node(); });
+    auto box = propagated_source.visit([](auto const& source) { return Painting::BoxSlot::bound_to(*source); });
 
-    if (!layout_node || !layout_node->is_scroll_container())
+    if (!box.is_scroll_container())
         return {};
 
-    if (!Painting::has_committed_box(*layout_node) || !Painting::has_scrollable_overflow(*layout_node))
+    if (!Painting::has_committed_box(box) || !Painting::has_scrollable_overflow(box))
         return {};
 
-    auto const& scrollable_overflow_rect = Painting::scrollable_overflow_rect(*layout_node).value();
-    auto const& computed_axis = computed_scroll_axis(axis, layout_node->writing_mode(), layout_node->direction());
+    auto const* inherited_box_values = box.style_group<CSS::ComputedValues::InheritedBoxValues>();
+    if (!inherited_box_values)
+        return {};
+    auto const& scrollable_overflow_rect = Painting::scrollable_overflow_rect(box).value();
+    auto const& computed_axis = computed_scroll_axis(axis, static_cast<CSS::WritingMode>(inherited_box_values->writing_mode), static_cast<CSS::Direction>(inherited_box_values->direction));
 
     // FIXME: Scroll offset is currently incorrect as it is always relative to the top left of the scrollable overflow
     //        rect when it should instead be relative to the scroll origin.
@@ -138,11 +141,11 @@ static Optional<ScrollOffsetData> compute_scroll_offset_data(Variant<GC::Ptr<DOM
 
     return ScrollOffsetData {
         .scroll_offset = computed_axis.is_vertical
-            ? Painting::scroll_offset(*layout_node).y().to_double()
-            : Painting::scroll_offset(*layout_node).x().to_double(),
+            ? Painting::scroll_offset(box).y().to_double()
+            : Painting::scroll_offset(box).x().to_double(),
         .max_scroll_offset = computed_axis.is_vertical
-            ? scrollable_overflow_rect.height().to_double() - Painting::content_height(*layout_node).to_double()
-            : scrollable_overflow_rect.width().to_double() - Painting::content_width(*layout_node).to_double(),
+            ? scrollable_overflow_rect.height().to_double() - Painting::content_height(box).to_double()
+            : scrollable_overflow_rect.width().to_double() - Painting::content_width(box).to_double(),
         .is_vertical = computed_axis.is_vertical,
     };
 }

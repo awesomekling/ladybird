@@ -16,8 +16,8 @@
 #include <LibWeb/HTML/PotentialCORSRequest.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/SharedResourceRequest.h>
-#include <LibWeb/Layout/Box.h>
 #include <LibWeb/Namespace.h>
+#include <LibWeb/Painting/BoxSlot.h>
 #include <LibWeb/SVG/AttributeNames.h>
 #include <LibWeb/SVG/FragmentIdentifier.h>
 #include <LibWeb/SVG/SVGDecodedImageData.h>
@@ -213,8 +213,8 @@ Gfx::AffineTransform SVGUseElement::additional_element_transform() const
     if (auto* svg_svg_element = first_flat_tree_ancestor_of_type<SVGSVGElement>()) {
         if (auto view_box = svg_svg_element->active_view_box(); view_box.has_value())
             viewport_size = { CSSPixels::nearest_value_for(view_box->width), CSSPixels::nearest_value_for(view_box->height) };
-        else if (auto svg_svg_layout_node = svg_svg_element->unsafe_layout_node())
-            viewport_size = { svg_svg_layout_node->width().to_px(0), svg_svg_layout_node->height().to_px(0) };
+        else if (auto const* sizing = Painting::BoxSlot::bound_to(*svg_svg_element).style_group<CSS::ComputedValues::SizingValues>())
+            viewport_size = { CSS::Size::view(sizing->width).to_px(0), CSS::Size::view(sizing->height).to_px(0) };
     }
 
     auto computed_values = this->computed_style();

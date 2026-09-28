@@ -5,7 +5,6 @@
  */
 
 #include <LibWeb/CSS/StyleEngineInput.h>
-#include <LibWeb/Layout/Box.h>
 #include <LibWeb/SVG/SVGDefsElement.h>
 
 namespace Web::SVG {

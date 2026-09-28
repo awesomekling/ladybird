@@ -5,7 +5,6 @@
  */
 
 #include <LibWeb/CSS/Parser/Parser.h>
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/SVG/SVGAnimatedEnumeration.h>
 #include <LibWeb/SVG/SVGFEGaussianBlurElement.h>
 

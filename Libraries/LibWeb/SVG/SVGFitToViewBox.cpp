@@ -5,7 +5,6 @@
  */
 
 #include <LibWeb/DOM/Element.h>
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/SVG/AttributeNames.h>
 #include <LibWeb/SVG/SVGAnimatedRect.h>
 #include <LibWeb/SVG/SVGFitToViewBox.h>

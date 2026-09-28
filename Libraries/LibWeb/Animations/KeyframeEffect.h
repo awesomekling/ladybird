@@ -253,7 +253,8 @@ private:
         u64 target_style_generation { 0 };
         u64 target_subtree_style_generation { 0 };
         bool target_is_connected { false };
-        Layout::Node const* layout_node { nullptr };
+        // The slot of the target's box, which a layout tree build that gives it another box changes.
+        u32 box_slot_index { 0 };
         bool result { false };
     };
     mutable Optional<CanSkipPerFrameStyleUpdateCache> m_can_skip_per_frame_style_update_cache;
