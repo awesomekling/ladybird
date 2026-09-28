@@ -3607,6 +3607,17 @@ impl ComputedGroupSets {
             for &identity in self.base_style_record_pins.keys() {
                 mark_style_record(identity);
             }
+            // Whoever holds a record as the engine published it (a layout row, a publication of the rows, a
+            // change on its way to the owner, the host) may name it to the engine again, so it holds the
+            // record live. Only the engine hands the value out, so a count of one cannot grow meanwhile.
+            for identity in self.style_records.live_identities() {
+                if self.published_style_records[identity.index()]
+                    .get()
+                    .is_some_and(|record| Arc::strong_count(record) > 1)
+                {
+                    mark_style_record(identity);
+                }
+            }
             if let Some(host_pins) = self.host_pins.table() {
                 host_pins.for_each_pinned(|raw| {
                     let record = FinalStyleRecordID(raw);
@@ -3987,10 +3998,11 @@ impl ComputedGroupSets {
         self.debug_assert_style_record_is_published(raw_style_record);
         let (base_style_record, payloads, animation_overlay_identity, animated_overlay) =
             if let Some(style_record) = final_style_record.base_record() {
-                assert!(
-                    self.style_record_generation_is_live(style_record, final_style_record.base_generation()),
-                    "base style-record is not live"
-                );
+                let live = self.style_record_generation_is_live(style_record, final_style_record.base_generation());
+                debug_assert!(live, "base style-record is not live");
+                if !live {
+                    return None;
+                }
                 let record = self.style_records.get_index(style_record.index())?;
                 (
                     style_record,
@@ -4008,10 +4020,11 @@ impl ComputedGroupSets {
                     HostShared::new(std::ptr::from_ref(overlay.animated_overlay.as_ref())),
                 )
             };
-        assert!(
-            self.style_record_is_live(base_style_record),
-            "base style-record is not live"
-        );
+        let live = self.style_record_is_live(base_style_record);
+        debug_assert!(live, "base style-record is not live");
+        if !live {
+            return None;
+        }
         let record = self.style_records.get_index(base_style_record.index())?;
         let base_payloads = self.sets[record.groups].payloads();
         let fixed_metadata = self
@@ -5127,6 +5140,32 @@ mod tests {
         drop(frame);
         assert_eq!(group_payload_refcount(table_group, payloads[table_group].as_ptr()), 1);
         release_group_payload(table_group, payloads[table_group].as_ptr());
+    }
+
+    /// A layout row holds the record its node moved on from until the change that moves the row
+    /// reaches the owner: a sweep meanwhile leaves the record live, so the row's move can still read
+    /// it by its identity.
+    #[test]
+    fn a_record_held_as_published_outlives_its_node_moving_on() {
+        let mut sets = ComputedGroupSets::default();
+        let target = ComputedStyleTarget::new(StyleNodeID::from_raw(1).unwrap(), u8::MAX);
+        let old = publish_owned(&mut sets, target, &owned_payloads(2), owned_longhand_table())
+            .style_record_identity
+            .raw();
+        let row = sets.publish_style_record(old).expect("the record is live");
+        let new = publish_owned(&mut sets, target, &owned_payloads(3), owned_longhand_table())
+            .style_record_identity
+            .raw();
+        assert_ne!(old, new);
+
+        sets.reclaim_unreachable();
+        assert!(sets.style_record_view(old).is_some());
+
+        // The row moves on too: nothing holds the old record now.
+        drop(row);
+        sets.reclaim_unreachable();
+        assert!(!sets.style_record_is_held(old));
+        assert!(sets.style_record_view(new).is_some());
     }
 
     /// A record the host holds as the engine published it is read through what the value owns: the
