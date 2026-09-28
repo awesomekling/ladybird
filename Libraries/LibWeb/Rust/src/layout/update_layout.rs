@@ -226,7 +226,7 @@ pub struct FfiLayoutFrameEffects {
 #[repr(C)]
 pub struct FfiLayoutRoundFacts {
     pub facts: FfiLayoutUpdateDocumentFacts,
-    /// The document's selection range, or null when it has none.
+    /// The document's selection range, or null when it has none or the document finds the round's layout up to date.
     pub selection: *const FfiSelectionSnapshot,
     /// Whether the document made its style for the round, which `document_style` is then: it does where the round's
     /// tree build may build the viewport.

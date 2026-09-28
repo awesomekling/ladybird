@@ -57,14 +57,18 @@ static bool layout_tree_build_may_create_viewport(Document& document)
 // changes its style leaves have gone through (`read_facts` takes those in, and reads the facts). A round whose tree
 // build may build the viewport is handed the document's style with them, which the document makes on demand rather
 // than publishing: the owner runs the round without asking for it.
+// Only the commits of a round that lays out read the selection, to stamp the boxes they build, so a round whose layout
+// is up to date (and that no DevTools client may force to lay out) is not handed one: reading it walks every node in its
+// range.
 template<typename ReadFacts>
 static void read_layout_round(Document& document, LayoutRoundReading& reading, ReadFacts&& read_facts)
 {
     auto facts = read_facts();
+    bool may_lay_out = facts.should_collect_devtools_layout_data || !document.layout_is_up_to_date();
     reading.selection_nodes.clear();
     reading.round = {
         .facts = facts,
-        .selection = read_selection(document, reading.selection, reading.selection_nodes),
+        .selection = may_lay_out ? read_selection(document, reading.selection, reading.selection_nodes) : nullptr,
         .has_document_style = false,
         .document_style = {},
     };
