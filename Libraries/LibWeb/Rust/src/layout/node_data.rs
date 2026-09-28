@@ -257,6 +257,9 @@ pub(crate) struct NodeData {
     /// lives on the rows rather than under a key so that it survives the node's identity being
     /// retired and re-issued.
     pub next_row_built_for_same_node: ShapeCell<NodeSlotId>,
+    /// Whether the row's style record is one the arena derived for it, which it pins, rather than
+    /// the record of the node it was built for.
+    pub holds_derived_style: ShapeCell<bool>,
 }
 
 /// What the paint side reads of a layout node, copied out of its [`NodeData`] when the arena
@@ -273,6 +276,7 @@ pub(crate) struct PaintNode {
     pub(crate) first_child: NodeSlotId,
     pub(crate) next_sibling: NodeSlotId,
     pub(crate) next_row_built_for_same_node: NodeSlotId,
+    pub(crate) holds_derived_style: bool,
     /// The style node of what the node was built for, which is how the host names that DOM node.
     pub(crate) style_node: Option<crate::css::style::tree::StyleNodeID>,
 }
@@ -290,6 +294,7 @@ impl Default for PaintNode {
             first_child: NodeSlotId::INVALID,
             next_sibling: NodeSlotId::INVALID,
             next_row_built_for_same_node: NodeSlotId::INVALID,
+            holds_derived_style: false,
             style_node: None,
         }
     }
@@ -309,6 +314,7 @@ impl PaintNode {
             first_child: data.first_child.get(),
             next_sibling: data.next_sibling.get(),
             next_row_built_for_same_node: data.next_row_built_for_same_node.get(),
+            holds_derived_style: data.holds_derived_style.get(),
             style_node,
         }
     }
@@ -335,6 +341,7 @@ impl Default for NodeData {
             fragment_cache_epoch: Cell::new(0),
             style: StyleCell::new(),
             next_row_built_for_same_node: ShapeCell::new(NodeSlotId::INVALID),
+            holds_derived_style: ShapeCell::new(false),
         }
     }
 }
@@ -363,6 +370,7 @@ mod tests {
         assert_eq!(std::mem::offset_of!(NodeData, ancestor_facts), 39);
         assert_eq!(std::mem::offset_of!(NodeData, style), 40);
         assert_eq!(std::mem::offset_of!(NodeData, next_row_built_for_same_node), 48);
+        assert_eq!(std::mem::offset_of!(NodeData, holds_derived_style), 52);
     }
 
     #[test]

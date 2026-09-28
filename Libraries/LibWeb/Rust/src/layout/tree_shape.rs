@@ -151,6 +151,13 @@ impl ShapeWriter<'_> {
         self.write(&self.data.next_row_built_for_same_node, row);
     }
 
+    /// Notes whether the row's style is one the arena derived for it, and answers whether it was.
+    pub(crate) fn replace_holds_derived_style(&self, derived: bool) -> bool {
+        let previous = self.data.holds_derived_style.get();
+        self.write(&self.data.holds_derived_style, derived);
+        previous
+    }
+
     pub(crate) fn set_kind(&self, kind: NodeKind) {
         self.write(&self.data.kind, kind);
     }

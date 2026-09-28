@@ -1037,7 +1037,6 @@ pub(crate) struct LayoutNodeArena {
     tree_shape: TreeShape,
     slot_metadata: Vec<SlotMetadata>,
     style_records: Vec<Cell<u64>>,
-    style_records_pinned_by_arena: Vec<Cell<bool>>,
     /// The records the arena pinned for the boxes of nodes that left the document, which are read until they are
     /// freed. The pins are the engine's, as the arena's own pins are.
     detached_box_style_record_pins: RefCell<HashMap<NodeSlotId, u64>>,
@@ -1297,7 +1296,6 @@ impl LayoutNodeArena {
             tree_shape: TreeShape::default(),
             slot_metadata: Vec::new(),
             style_records: Vec::new(),
-            style_records_pinned_by_arena: Vec::new(),
             detached_box_style_record_pins: RefCell::new(HashMap::default()),
             style_records_pinned_by_host: Vec::new(),
             animation_adoption_log: RefCell::new(Vec::new()),
@@ -1556,7 +1554,6 @@ impl LayoutNodeArena {
             }
             self.slot_metadata.push(SlotMetadata::default());
             self.style_records.push(Cell::new(0));
-            self.style_records_pinned_by_arena.push(Cell::new(false));
             self.style_records_pinned_by_host.push(Cell::new(0));
             self.style_nodes.push(Cell::new(None));
             self.next_rows_with_same_style_node.push(Cell::new(NodeSlotId::INVALID));
@@ -1627,7 +1624,7 @@ impl LayoutNodeArena {
             if let Some(set) = self.rows_with_image_observers.get_mut().remove(&slot) {
                 rows_with_image_observers.push((slot, set));
             }
-            if self.style_records_pinned_by_arena[slot.slot_index() as usize].get() {
+            if self.data(slot).holds_derived_style.get() {
                 arena_pinned_style_records.push(self.style_records[slot.slot_index() as usize].get());
             }
             arena_pinned_style_records.extend(self.detached_box_style_record_pins.get_mut().remove(&slot));
@@ -1696,7 +1693,6 @@ impl LayoutNodeArena {
         self.unbind_row(id);
         self.set_node_style_node(id, None);
         self.style_records[index as usize].set(0);
-        self.style_records_pinned_by_arena[index as usize].set(false);
         self.style_records_pinned_by_host[index as usize].set(0);
 
         self.intrinsic_size_caches_to_drop.get_mut().push(index);
@@ -2576,6 +2572,83 @@ impl LayoutNodeArena {
         self.leftover_payment.get_mut().append(payment);
     }
 
+    /// Applies the style of the record `style_record` to a row, taking a style that holds no images: the host's pin
+    /// follows the record, an adoption left by a sample installed ahead is taken, and otherwise the record, its flags
+    /// and the anonymous descendants' inherited style are written. The host took the row's image observers as it sent
+    /// this. A record the engine no longer holds is one the row's node moved on from, which the host installs next.
+    pub(crate) fn install_row_style(&self, node: NodeSlotId, style_record: u64) {
+        if self.with_style_store(|engine| engine.style_record_payloads(style_record).is_none()) {
+            return;
+        }
+        if style_record != self.node_style_record(node) {
+            self.release_node_style_record_pin_for_host(node);
+        }
+        // Taking the adoption hands the host a pin of its own, so this comes after the old pin went.
+        if !self.take_animation_adoption(node, style_record) {
+            if self.set_node_style(node, style_record) {
+                self.refresh_style_flags(node);
+            }
+            self.enroll_node_for_svg_paint_resources_sync(node);
+            self.set_node_flag(node, NodeFlag::HasAnimatedOpacityOrTransform, false);
+            self.reinherit_anonymous_descendants(node);
+        }
+        self.set_row_image_observers(node, 0);
+        self.note_style_image_resources_attached(node, false);
+        // A pseudo-element's row can outlive its DOM pseudo-element's record until the tree is rebuilt.
+        if self.node_generated_for(node) != 0 {
+            self.pin_node_style_record_for_host(node, style_record);
+        }
+    }
+
+    /// Moves a row to its DOM target's record `style_record`, without applying the style: the host's pin follows the
+    /// record, an adoption left by a sample installed ahead is taken, and otherwise the record is written, with the
+    /// caches of the row and its ancestors reset if the move changes the row's layout-affecting style. A row holding a
+    /// record the arena derived for it keeps it, as that record does not follow its DOM target's.
+    pub(crate) fn replace_row_style_record(&self, node: NodeSlotId, style_record: u64) {
+        if self.node_style_record_is_pinned_by_arena(node)
+            || self.with_style_store(|engine| engine.style_record_payloads(style_record).is_none())
+        {
+            return;
+        }
+        let old_style_record = self.node_style_record(node);
+        let keeps_record = old_style_record == style_record;
+        let pinned_by_host = self.node_style_record_pinned_by_host(node);
+        // A record installed ahead of the host is the row's already; the host's pin on the old record still goes
+        // first.
+        if !keeps_record || (pinned_by_host != 0 && pinned_by_host != style_record) {
+            self.release_node_style_record_pin_for_host(node);
+        }
+        // Taking the adoption hands the host a pin of its own, so this comes after the old pin went.
+        if !self.take_animation_adoption(node, style_record) {
+            // The old record stays alive for the comparison below.
+            let _old_style = self.data(node).style.owner();
+            let old_payloads = self.data(node).style.get().as_ptr();
+            if self.set_node_style(node, style_record) {
+                self.refresh_style_flags(node);
+            }
+            self.enroll_node_for_svg_paint_resources_sync(node);
+            let new_payloads = self.data(node).style.get().as_ptr();
+            if !keeps_record
+                && self.style_change_affects_layout(old_style_record, style_record, old_payloads, new_payloads)
+            {
+                self.bump_fragment_cache_epoch_of_self_and_ancestors(node);
+                self.reset_cached_intrinsic_sizes_of_self_and_ancestors(node);
+            }
+        }
+        if pinned_by_host != 0 {
+            self.pin_node_style_record_for_host(node, style_record);
+        }
+    }
+
+    /// Gives a row the record `record` the host derived for it from its DOM target's style, which the arena pins.
+    pub(crate) fn adopt_derived_node_style(&self, node: NodeSlotId, record: u64) {
+        if self.with_style_store(|engine| engine.style_record_payloads(record).is_none()) {
+            return;
+        }
+        let derived = self.with_style_engine(|engine| engine.pin_derived_style_record(record));
+        self.apply_reinherited_style_record(node, derived);
+    }
+
     /// Install the record an animation sample published for `style_node` over the row its box is
     /// bound to, ahead of the host: the row's style, the caches a style change over the row resets,
     /// and the layout mark the sample asks for. The record is logged, pinned, for the host to adopt
@@ -2683,7 +2756,7 @@ impl LayoutNodeArena {
         self.set_node_flag(id, NodeFlag::FollowsPrincipalStyle, false);
         self.invalidate_overflow_after_style_change(id);
         let previous = self.style_records[id.slot_index() as usize].replace(style_record);
-        if self.style_records_pinned_by_arena[id.slot_index() as usize].replace(false) {
+        if self.write_shape(id).replace_holds_derived_style(false) {
             self.with_style_engine(|engine| engine.unpin_layout_style_record(previous));
         }
         self.enroll_text_children_for_content_sync(id);
@@ -2729,11 +2802,7 @@ impl LayoutNodeArena {
     }
 
     pub(crate) fn node_style_record_is_pinned_by_arena(&self, id: NodeSlotId) -> bool {
-        assert!(
-            self.slot_is_live(id),
-            "layout node arena read the style pin of a dead slot"
-        );
-        self.style_records_pinned_by_arena[id.slot_index() as usize].get()
+        self.data(id).holds_derived_style.get()
     }
 
     /// Pin `record` for the host's readers of `slot`. A row holds at most one such pin; asking
@@ -3733,7 +3802,7 @@ impl LayoutNodeArena {
         data.set_kind(kind);
         data.set_flags(super::node_facts::construction_flags(kind, true, 0));
         self.style_records[slot.slot_index() as usize].set(derived.record);
-        self.style_records_pinned_by_arena[slot.slot_index() as usize].set(true);
+        data.replace_holds_derived_style(true);
         data.set_style(derived.published);
         self.enroll_node_for_replaced_content_facts_sync_if_eligible(slot);
     }
@@ -3950,18 +4019,6 @@ impl LayoutNodeArena {
     pub(crate) fn note_row_owns_image_provider(&self, slot: NodeSlotId) {
         self.assert_owner_thread();
         self.rows_with_owned_image_provider.borrow_mut().insert(slot);
-    }
-
-    /// Gives `slot` the image observer set `observers`, or none, in place, for a main-thread entry that writes the
-    /// arena itself, and answers the set it held (see [`layout_arena_replace_image_observers`]).
-    pub(crate) fn replace_image_observers(
-        &self,
-        host_tables: &HostTables,
-        slot: NodeSlotId,
-        observers: *mut c_void,
-    ) -> *mut c_void {
-        self.set_row_image_observers(slot, observers.addr());
-        host_tables.replace_image_observers(slot, observers)
     }
 
     /// Notes the image observer set the host gave `slot`, named by `set`, or that it gave it none (`set` is 0).
@@ -4208,7 +4265,7 @@ impl LayoutNodeArena {
 
     pub(crate) fn replace_arena_pinned_style_record(&self, slot: NodeSlotId, derived: DerivedStyleRecord) {
         self.assert_owner_thread();
-        let previously_pinned = self.style_records_pinned_by_arena[slot.slot_index() as usize].replace(true);
+        let previously_pinned = self.write_shape(slot).replace_holds_derived_style(true);
         assert!(derived.record != 0);
         let previous_style_record = self.style_records[slot.slot_index() as usize].replace(derived.record);
         self.write_shape(slot).set_style(derived.published);
@@ -7482,7 +7539,8 @@ mod tests {
         let row = arena.allocate(test_construction_facts());
         let first = std::ptr::dangling_mut::<u8>().wrapping_add(1).cast::<c_void>();
         let second = std::ptr::dangling_mut::<u8>().wrapping_add(2).cast::<c_void>();
-        assert!(arena.replace_image_observers(&host_tables, row, first).is_null());
+        arena.set_row_image_observers(row, first.addr());
+        assert!(host_tables.replace_image_observers(row, first).is_null());
 
         // The row lets go of its set, and the host replaces it, deleting it, before the handback is paid.
         arena.begin_paying_host_handbacks(&main_thread);
@@ -7503,10 +7561,8 @@ mod tests {
         );
         arena.close_host_handback_span();
 
-        assert_eq!(
-            arena.replace_image_observers(&host_tables, row, std::ptr::null_mut()),
-            second
-        );
+        arena.set_row_image_observers(row, 0);
+        assert_eq!(host_tables.replace_image_observers(row, std::ptr::null_mut()), second);
         arena.free_subtree(row).invoke_callbacks();
     }
 

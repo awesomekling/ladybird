@@ -70,6 +70,8 @@ pub(crate) struct HostTables {
     /// The document's style engine, which the host linked the arena to, for the document thread to lend
     /// and ask where it is without reaching the arena.
     pub(super) style_engine: Cell<Option<crate::css::style::StyleEngineHandle>>,
+    /// The styles the document thread applied to rows that the owner has not taken in yet.
+    pub(super) styles_sent_ahead: RefCell<super::row_reads::StylesSentAhead>,
 }
 
 impl HostTables {
