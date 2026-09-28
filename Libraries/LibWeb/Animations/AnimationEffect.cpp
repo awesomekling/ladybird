@@ -958,9 +958,9 @@ void apply_published_animation_overlay(CSS::StyleDrainScope const& scope, DOM::A
     apply_animation_overlay(scope, element, animated_property_invalidation, new_style_record, caller_applies_invalidation, InstalledInArena::No);
 }
 
-// Install a sample's record over the element's box in the arena ahead of the host, where the render side can, and
-// apply the adoption log entry that leaves. The render side leaves a pseudo-element, a composition its caller
-// compares itself, and one that rebuilds the layout tree to the host.
+// Send the render owner a sample's record to install over the element's box ahead of the host, where the render side
+// can: the owner adopts it for the element at once, and lays the box out again as the sample asks. The render side
+// leaves a pseudo-element, a composition its caller compares itself, and one that rebuilds the layout tree to the host.
 static bool install_animation_sample_in_arena(CSS::StyleDrainScope const& scope, DOM::AbstractElement element, CSS::StyleEngineFFI::FfiAnimationInvalidation const& animated_property_invalidation, CSS::StyleRecordID new_style_record, bool caller_applies_invalidation)
 {
     if (!render_side_installs_animation_samples() || element.pseudo_element().has_value() || caller_applies_invalidation)
@@ -970,15 +970,10 @@ static bool install_animation_sample_in_arena(CSS::StyleDrainScope const& scope,
         return false;
     GC::Ref<DOM::Element> target = element.element();
     auto* layout_arena = Layout::document_layout_arena_if_created(target->document());
-    if (!layout_arena || !Layout::RustFFI::layout_arena_install_animation_sample(layout_arena, target->style_node_id().value(), new_style_record.value(), invalidation.needs_relayout()))
+    if (!layout_arena)
         return false;
+    Layout::RustFFI::layout_arena_install_animation_sample(layout_arena, target->style_node_id().value(), new_style_record.value(), invalidation.needs_relayout());
     apply_animation_overlay(scope, element, animated_property_invalidation, new_style_record, caller_applies_invalidation, InstalledInArena::Yes);
-    // The element's box adopted the record as the element published it. The log may still hold what clock ticks installed
-    // over other boxes, whose entries their elements adopt in turn. One left over this box would put the host's old
-    // record back over it at the next recall; the box and the element hold the record, so it is only dropped.
-    auto box = Painting::BoxSlot::bound_to(*target);
-    [[maybe_unused]] bool const left_in_log = box && Layout::RustFFI::layout_arena_take_animation_adoption(layout_arena, box.slot(), new_style_record.value());
-    ASSERT(!left_in_log);
     return true;
 }
 
