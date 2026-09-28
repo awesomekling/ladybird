@@ -1033,8 +1033,8 @@ impl LayoutFrame {
     ///
     /// On the thread that owns the arena, with nothing else reaching it.
     unsafe fn resolve_owed_host_halves(&mut self) {
-        // What ending the host half of an owner-applied style update owed the host goes before all the frame owes.
-        let leftover = self.arena().take_style_install_leftover();
+        // What the changes the owner applied owe the host goes before all the frame owes.
+        let leftover = self.arena().take_leftover_payment();
         if !leftover.is_nothing() {
             self.host_payments
                 .insert(0, HostHalfPayment::StyleInstallLeft(leftover));

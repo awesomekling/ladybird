@@ -329,6 +329,8 @@ pub(crate) enum Query {
     Engine(crate::css::style::owner_calls::StyleQueryRef),
     /// A question about the document's layout tree.
     Layout(crate::layout::layout_changes::LayoutRead),
+    /// A write to the document's layout tree the main thread waits for, answered with what it owes the host.
+    Write(crate::layout::layout_changes::LayoutWrite),
 }
 
 /// A read of a document's layout arena, which [`Query::Arena`] asks.
@@ -511,6 +513,7 @@ pub(crate) enum Answer {
     Count(u64),
     Engine(EngineAnswered),
     Layout(crate::layout::layout_changes::LayoutReadAnswer),
+    Payment(crate::layout::HostPayment),
 }
 
 /// What became of a [`Query::Engine`].
@@ -569,6 +572,7 @@ impl Answer {
             Query::Arena(query) => Self::Arena(query.left_to_host()),
             Query::Engine(_) => Self::Engine(EngineAnswered::LeftToHost),
             Query::Layout(read) => Self::Layout(read.unanswered()),
+            Query::Write(_) => Self::Payment(crate::layout::HostPayment::nothing()),
         }
     }
 
@@ -608,8 +612,15 @@ impl Answer {
         unsafe { engine.reach_on_owner(|_| Self::of_state(query, state)) }
     }
 
-    /// Answers `query` from the arena of `state` and the layout scratch beside it, which it readies first.
+    /// Answers `query` from the arena of `state` and the layout scratch beside it, which it readies first, or makes
+    /// the write it is, publishing the rows it changed.
     fn of_state(query: Query, state: &mut ArenaHandle) -> Self {
+        if let Query::Write(write) = query {
+            let arena = state.arena_mut();
+            let payment = write.apply(arena);
+            arena.publish_rows();
+            return Self::Payment(payment);
+        }
         let (arena, scratch) = state.arena_and_scratch();
         let retained_inline_items = scratch.retained_inline_item_count();
         Self::prepare(query, arena);
@@ -642,6 +653,10 @@ impl Answer {
             Query::Arena(query) => Self::Arena(query.answer(arena)),
             Query::Engine(_) => Self::left_to_host(query),
             Query::Layout(read) => Self::Layout(read.answer(arena)),
+            Query::Write(_) => {
+                debug_assert!(false, "a write is made with the state, not answered from the arena");
+                Self::left_to_host(query)
+            }
         }
     }
 }

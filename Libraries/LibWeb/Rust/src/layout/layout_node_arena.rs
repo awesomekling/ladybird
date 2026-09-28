@@ -708,6 +708,12 @@ enum ResolvedHostHandback {
 #[must_use]
 pub(crate) struct HostPayment(Vec<ResolvedHostHandback>);
 
+impl std::fmt::Debug for HostPayment {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_tuple("HostPayment").field(&self.0.len()).finish()
+    }
+}
+
 impl HostPayment {
     /// The payment of nothing.
     pub(crate) fn nothing() -> Self {
@@ -1046,9 +1052,9 @@ pub(crate) struct LayoutNodeArena {
     /// The records a flight installed over rows ahead of the host, for the host to adopt as it
     /// installs the style batch the flight applied, pinned until it does.
     flight_style_adoptions: RefCell<Vec<AnimationAdoption>>,
-    /// What putting back the rows the host's install of an owner-applied style update left owes the host, which goes
-    /// with the next payment the owner hands it.
-    style_install_leftover: RefCell<HostPayment>,
+    /// What the changes the owner applied for the document thread owe the host, which goes with the next payment the
+    /// owner hands it.
+    leftover_payment: RefCell<HostPayment>,
     /// What each row of the style batch a flight applied marked of its element's layout nodes, by
     /// style node, packed as an `FfiStyleInvalidationField` word, with the record it installed,
     /// until the host installs the row.
@@ -1296,7 +1302,7 @@ impl LayoutNodeArena {
             style_records_pinned_by_host: Vec::new(),
             animation_adoption_log: RefCell::new(Vec::new()),
             flight_style_adoptions: RefCell::new(Vec::new()),
-            style_install_leftover: RefCell::new(HostPayment::nothing()),
+            leftover_payment: RefCell::new(HostPayment::nothing()),
             flight_style_damages: RefCell::new(HashMap::default()),
             flight_style_handbacks: RefCell::new(None),
             flight_style_applied: Cell::new(false),
@@ -2523,16 +2529,51 @@ impl LayoutNodeArena {
 
     /// Ends the host half of the batches the owner applied as the host took a style update's transactions, once the
     /// host has installed them (see [`Self::finish_flight_style_host_half`]). What that owes the host waits for
-    /// [`Self::take_style_install_leftover`].
+    /// [`Self::take_leftover_payment`].
     pub(crate) fn finish_owner_style_host_half(&self) {
         let (_, payment) = self.finish_flight_style_host_half();
-        self.style_install_leftover.borrow_mut().append(payment);
+        self.leftover_payment.borrow_mut().append(payment);
     }
 
-    /// Takes what ending the host half of owner-applied style updates owes the host, which the host pays before
-    /// anything the owner hands it with it.
-    pub(crate) fn take_style_install_leftover(&self) -> HostPayment {
-        std::mem::replace(&mut *self.style_install_leftover.borrow_mut(), HostPayment::nothing())
+    /// Takes what the changes the owner applied owe the host, which the host pays before anything the owner hands it
+    /// with it.
+    pub(crate) fn take_leftover_payment(&self) -> HostPayment {
+        std::mem::replace(&mut *self.leftover_payment.borrow_mut(), HostPayment::nothing())
+    }
+
+    /// Runs `write`, a change the owner makes for the document thread, in a handback span of its own, and answers
+    /// what it owes the host. What the arena owed before stays owed.
+    pub(crate) fn owed_for(&mut self, write: impl FnOnce(&mut Self)) -> HostPayment {
+        let earlier = std::mem::take(self.host_handbacks.get_mut());
+        self.open_host_handback_span();
+        write(self);
+        let handbacks = std::mem::replace(self.host_handbacks.get_mut(), earlier);
+        self.close_host_handback_span();
+        self.resolve_host_handbacks(handbacks)
+    }
+
+    /// The DOM node with `old` took `new`, or none: its rows, and those of its pseudo-elements, take the new identity
+    /// along with their bindings and what the pseudo-elements have scrolled to, and the old one is retired from every
+    /// row still carrying it, including rows of a removed subtree that outlive the disconnection, since a retired
+    /// identity may be reused. What that owes the host goes with the next payment.
+    pub(crate) fn change_style_node(&mut self, old: StyleNodeID, new: Option<StyleNodeID>) {
+        let payment = self.owed_for(|arena| {
+            if let Some(new) = new {
+                let row = arena.bound_row(old);
+                if !row.is_invalid() {
+                    arena.set_style_node_of_rows_sharing_dom_node_with(row, Some(new));
+                }
+                for generated_for in 1..=super::node_data::GENERATED_FOR_LAST_SYNTHETIC {
+                    let row = arena.bound_pseudo_element_row(old, generated_for);
+                    if !row.is_invalid() {
+                        arena.set_style_node_of_generated_subtree(row, Some(new));
+                    }
+                }
+                arena.move_pseudo_element_scroll_offsets(old, new);
+            }
+            arena.forget_style_node(old);
+        });
+        self.leftover_payment.get_mut().append(payment);
     }
 
     /// Install the record an animation sample published for `style_node` over the row its box is
@@ -6727,29 +6768,6 @@ pub unsafe extern "C" fn layout_arena_owned_image_provider(arena: *mut c_void, s
         .unwrap_or(std::ptr::null_mut())
 }
 
-/// # Safety
-///
-/// `arena` must be a live handle on the document thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_move_pseudo_element_scroll_offsets(
-    arena: *mut c_void,
-    old_generator: u32,
-    new_generator: u32,
-) {
-    let (Some(old_generator), Some(new_generator)) = (
-        StyleNodeID::from_raw(old_generator),
-        StyleNodeID::from_raw(new_generator),
-    ) else {
-        return;
-    };
-    let change = LayoutChange::MovePseudoElementScrollOffsets {
-        old_generator,
-        new_generator,
-    };
-    // SAFETY: Guaranteed by the caller.
-    unsafe { super::layout_changes::send(arena, change) };
-}
-
 /// What the flight that applied the style row of `style_node`'s element marked of its layout nodes,
 /// as a packed `FfiStyleInvalidationField` word with bit 32 set, or zero if it applied none, or
 /// (unless `take`) installed another record than `style_record` there. `take` has the host take it,
@@ -6802,6 +6820,28 @@ pub unsafe extern "C" fn layout_arena_install_animation_sample(
     };
     // SAFETY: Guaranteed by the caller.
     unsafe { super::layout_changes::send(arena, change) };
+}
+
+/// The DOM node with `old_style_node` took `new_style_node`, or none (0): see
+/// [`LayoutNodeArena::change_style_node`].
+///
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_style_node_changed(arena: *mut c_void, old_style_node: u32, new_style_node: u32) {
+    let Some(old) = StyleNodeID::from_raw(old_style_node) else {
+        return;
+    };
+    let change = LayoutChange::StyleNodeChanged {
+        old,
+        new: StyleNodeID::from_raw(new_style_node),
+    };
+    // SAFETY: Guaranteed by the caller.
+    unsafe { super::layout_changes::send(arena, change) };
+    // A retired identity leaves its layout tree update marks behind too, which the document thread holds.
+    // SAFETY: As above.
+    unsafe { super::tree_update_marks::with_document_marks(arena, |marks| marks.clear(old)) };
 }
 
 /// The style record a row holds, for tests.

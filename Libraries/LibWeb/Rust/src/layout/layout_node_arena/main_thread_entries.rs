@@ -9,6 +9,7 @@
 //! mint the capability nor call an entry that does.
 
 use super::*;
+use crate::layout::layout_changes;
 
 pub(crate) struct MainThreadFfiEntry {
     _private: (),
@@ -22,59 +23,13 @@ const MAIN_THREAD_FFI_ENTRY: MainThreadFfiEntry = MainThreadFfiEntry { _private:
 ///
 /// # Safety
 ///
-/// The arena must remain valid for the duration of the call, and `root` must name a live node in
-/// this arena.
-#[unsafe(no_mangle)]
-unsafe extern "C" fn layout_arena_drop_subtree(arena: *mut c_void, root: NodeSlotId) {
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
-    // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on
-    // the document thread.
-    unsafe {
-        (*arena.cast::<LayoutNodeArena>()).release_published_paintable_rows();
-        paying_host_handbacks(&main_thread, arena, || {
-            prepare_subtree_for_detach(LayoutNodeArena::from_handle(arena), root);
-            detach_and_free_subtree(arena.cast(), root);
-        });
-    }
-}
-
-/// The DOM node with `old_style_node` took `new_style_node`, or none (0): its rows, and those of its
-/// pseudo-elements, take the new identity along with their bindings and what the pseudo-elements
-/// have scrolled to, and the old one is retired from every row still carrying it, including rows of
-/// a removed subtree that outlive the disconnection, since a retired identity may be reused.
-///
-/// # Safety
-///
 /// `arena` must be a live handle on the document thread.
 #[unsafe(no_mangle)]
-unsafe extern "C" fn layout_arena_style_node_changed(arena: *mut c_void, old_style_node: u32, new_style_node: u32) {
-    let Some(old_style_node) = StyleNodeID::from_raw(old_style_node) else {
-        return;
-    };
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+unsafe extern "C" fn layout_arena_drop_subtree(arena: *mut c_void, root: NodeSlotId) {
     // SAFETY: Guaranteed by the caller.
-    unsafe {
-        paying_host_handbacks(&main_thread, arena, || {
-            let arena = LayoutNodeArena::from_handle_mut(arena);
-            if let Some(new_style_node) = StyleNodeID::from_raw(new_style_node) {
-                let row = arena.bound_row(old_style_node);
-                if !row.is_invalid() {
-                    arena.set_style_node_of_rows_sharing_dom_node_with(row, Some(new_style_node));
-                }
-                for generated_for in 1..=super::super::node_data::GENERATED_FOR_LAST_SYNTHETIC {
-                    let row = arena.bound_pseudo_element_row(old_style_node, generated_for);
-                    if !row.is_invalid() {
-                        arena.set_style_node_of_generated_subtree(row, Some(new_style_node));
-                    }
-                }
-                arena.move_pseudo_element_scroll_offsets(old_style_node, new_style_node);
-            }
-            arena.forget_style_node(old_style_node);
-        });
-        // A retired identity leaves its layout tree update marks behind too, which the document
-        // thread holds.
-        super::super::tree_update_marks::with_document_marks(arena, |marks| marks.clear(old_style_node));
-    }
+    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+    // SAFETY: As above.
+    unsafe { layout_changes::write(arena, layout_changes::LayoutWrite::DropSubtree(root)) }.pay(&main_thread);
 }
 
 /// The arena and record must be live on the document thread.
@@ -195,8 +150,8 @@ pub(crate) struct OwnerAppliedStyle {
 impl OwnerAppliedStyle {
     /// Takes what applying a batch left in `arena`, on the render owner, which applied it just now.
     pub(crate) fn take_from(arena: &LayoutNodeArena) -> Self {
-        // What ending the host half of earlier updates owes the host comes first.
-        let mut handed_back = arena.take_style_install_leftover();
+        // What the changes the owner applied owe the host comes first.
+        let mut handed_back = arena.take_leftover_payment();
         let applied = arena.resolve_flight_style_handbacks();
         let handed_back = match applied {
             Some(applied) => {
