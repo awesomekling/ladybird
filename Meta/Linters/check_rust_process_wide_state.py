@@ -217,7 +217,6 @@ RENDER_STAGE_ALLOWED = {
             "flight.rs:TAKEN_BACK_PAINT",
             "flight.rs:FLIGHT_ENDS",
             "painting/ffi.rs:SEALED_FLIGHT_PAINT",
-            "stage_thread.rs:STYLE_ENGINE_ENTRANCES_ONLY_WAIT",
             "stage_thread.rs:FORCED_JOIN_SITES",
             "stage_thread.rs:STYLE_PASS_FORCED_JOINS",
             "stage_thread.rs:FORCED_JOINS",
