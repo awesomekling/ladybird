@@ -18,14 +18,9 @@
 //! With the token away it waits for the stage that holds it and nothing else, unless what the stage
 //! will still owe the frame it runs in (the install of its style batch, or the frame's take-back)
 //! keeps the entrance out: then it takes that frame in, as a forced join does.
-//!
-//! An entrance that must not wait, as a garbage collection's finalizer's, leaves a write it can put
-//! off for the token's arrival instead ([`StyleEngineHandle::write_or_defer`]): nothing but the main
-//! thread may send home a token the main thread holds the loan of, as a lend to the render clock's
-//! ticks until it is recalled.
 
 use super::StyleEngine;
-use std::cell::{Cell, RefCell, UnsafeCell};
+use std::cell::{Cell, UnsafeCell};
 use std::ffi::c_void;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
@@ -137,12 +132,7 @@ struct StyleEngineHome {
     arena: Cell<usize>,
     /// The document whose render state's arena links the engine, whose render owner owns the engine.
     document: Cell<crate::render_owner::DocumentId>,
-    /// What entrances that must not wait left for the token's arrival, in the order they left it.
-    deferred_writes: RefCell<Vec<DeferredWrite>>,
 }
-
-/// A write to the engine an entrance left for the token's arrival. On the main thread.
-type DeferredWrite = Box<dyn FnOnce(&mut StyleEngine)>;
 
 /// What the main thread owes the home of a token it lent to a stage, once it has taken the stage
 /// back: the lend's settlement, which keeps the home until then. On the main thread.
@@ -289,13 +279,6 @@ impl StyleEngineHome {
             owed,
             away: None,
         };
-        // What was left for the token goes in before anything else reaches the engine.
-        let writes = std::mem::take(&mut *self.deferred_writes.borrow_mut());
-        for write in writes {
-            // SAFETY: The token is home, and the main thread reaches the engine nowhere else now: an
-            // entrance takes the token in before it reaches the engine.
-            write(unsafe { &mut *self.engine.as_ptr() });
-        }
     }
 
     /// Whether the token is home, and what the main thread owes, or at best will owe, the frame of
@@ -393,7 +376,6 @@ impl StyleEngineHandle {
             holder: Cell::new(None),
             arena: Cell::new(0),
             document: Cell::new(crate::render_owner::DocumentId::default()),
-            deferred_writes: RefCell::new(Vec::new()),
         });
         Self(Rc::into_raw(home).cast_mut().cast())
     }
@@ -432,10 +414,6 @@ impl StyleEngineHandle {
         self.bring_home(entry);
         let home = self.home();
         home.settle();
-        debug_assert!(
-            home.deferred_writes.borrow().is_empty(),
-            "a style engine goes away with writes left for its token"
-        );
         // SAFETY: Guaranteed by the caller: this is the handle's hold on the home, from `create`.
         let home = unsafe { Rc::from_raw(self.0.cast::<StyleEngineHome>().cast_const()) };
         // SAFETY: The home owned the engine, which `create` leaked into it, and its token is home.
@@ -563,37 +541,6 @@ impl StyleEngineHandle {
         unsafe { &mut *home.engine.as_ptr() }
     }
 
-    /// Runs `write` with the engine, entered at `entry`: at once, or, for an entrance that must not
-    /// wait (see [`crate::stage_thread::style_engine_entrances_only_wait`]) while a stage holds the
-    /// token, once the main thread takes the token in, before anything else reaches the engine.
-    ///
-    /// # Safety
-    ///
-    /// As for [`Self::enter`].
-    pub(crate) unsafe fn write_or_defer(self, entry: &'static str, write: impl FnOnce(&mut StyleEngine) + 'static) {
-        if self.write_waits_for_token() {
-            self.home().deferred_writes.borrow_mut().push(Box::new(write));
-            return;
-        }
-        // SAFETY: Guaranteed by the caller.
-        write(unsafe { self.enter(entry) });
-    }
-
-    /// Whether a write that must not wait for the token would: the main thread's entrances only
-    /// wait, and a stage holds the token.
-    fn write_waits_for_token(self) -> bool {
-        if self.is_null()
-            || !crate::stage_thread::style_engine_entrances_only_wait()
-            || crate::stage_thread::no_stage_is_submitted()
-            || crate::stage_thread::running_inside_stage()
-            || LENT_TO_THIS_THREAD.get().0 == self.address()
-        {
-            return false;
-        }
-        let (arrived, _) = self.home().state();
-        !arrived
-    }
-
     /// Brings the token home for the main thread, which is about to enter the engine at `entry`
     /// once it has done what it does before.
     pub(crate) fn bring_home(self, entry: &'static str) {
@@ -695,41 +642,6 @@ mod tests {
         // The settlement kept the home, which goes away with it.
         assert_eq!(Rc::strong_count(&settlement.home), 1);
         settlement.settle();
-    }
-
-    /// Enters `handle` as a garbage collection's finalizer does, with a write that sets `wrote`.
-    fn write_as_a_finalizer(handle: StyleEngineHandle, wrote: &Rc<Cell<u32>>) {
-        let wrote = wrote.clone();
-        crate::stage_thread::rust_stage_thread_begin_style_engine_entrances_that_only_wait();
-        // SAFETY: The engine is live and nothing else borrows it.
-        unsafe { handle.write_or_defer("finalizer", move |_| wrote.set(wrote.get() + 1)) };
-        crate::stage_thread::rust_stage_thread_end_style_engine_entrances_that_only_wait();
-    }
-
-    #[test]
-    fn a_finalizer_leaves_its_write_for_a_token_a_pass_has_not_sent_home() {
-        let (_engine, handle) = test_engine();
-        let arena = std::ptr::NonNull::<c_void>::dangling().as_ptr();
-        handle.link_arena(arena as usize, crate::render_owner::DocumentId::default());
-        let (loan, settlement) = handle.lend(Holder::StylePass, Owed::TakeBack);
-        // Stands in for the pass's stage, which the main thread has not taken back.
-        crate::stage_thread::stand_in_submitted_stage_for_test(arena);
-        let wrote = Rc::new(Cell::new(0));
-        // The finalizer goes on at once: the pass holds the token.
-        write_as_a_finalizer(handle, &wrote);
-        assert_eq!(wrote.get(), 0);
-        write_as_a_finalizer(handle, &wrote);
-        loan.send_home(Owed::TakeBack);
-        assert_eq!(wrote.get(), 0);
-        // The writes go in as the main thread takes the token in, before anything else reaches the
-        // engine.
-        settlement.settle();
-        assert_eq!(wrote.get(), 2);
-        assert!(handle.is_home());
-        // With the token home, a finalizer's write goes in at once.
-        write_as_a_finalizer(handle, &wrote);
-        assert_eq!(wrote.get(), 3);
-        crate::stage_thread::take_stand_in_stages_for_test();
     }
 
     #[test]
