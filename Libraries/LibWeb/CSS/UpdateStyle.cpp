@@ -314,7 +314,7 @@ void StyleEffectDrain::apply_layout_node_style(DOM::Document& document, StyleNod
 
 void StyleEffectDrain::apply_render_half(StyleDrainScope const& scope, DOM::Document& document)
 {
-    static PseudoElementStyleRecords const no_pseudo_element_style_records {};
+    PseudoElementStyleRecords const no_pseudo_element_style_records {};
     auto const viewport_propagation_sources = viewport_propagation_sources_of(document);
     for (auto const& effect : m_render_effects) {
         if (auto const* row = effect.get_pointer<LayoutNodeStyle>()) {
