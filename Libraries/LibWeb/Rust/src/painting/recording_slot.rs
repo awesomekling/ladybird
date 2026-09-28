@@ -156,9 +156,8 @@ impl RecordingTicket {
         Some(result)
     }
 
-    /// Takes what the recording left for the document, once it is all it will leave: waiting for it
-    /// with `wait`, or returning nothing if it is not yet.
-    fn take(&self, wait: bool) -> Option<TicketState> {
+    /// Takes what the recording left for the document, waiting until it is all it will leave.
+    fn take(&self) -> TicketState {
         let mut state = self.lock();
         let mut released_holds = false;
         loop {
@@ -172,10 +171,7 @@ impl RecordingTicket {
                 }
             };
             if is_final {
-                return Some(std::mem::replace(&mut *state, TicketState::TakenIn));
-            }
-            if !wait {
-                return None;
+                return std::mem::replace(&mut *state, TicketState::TakenIn);
             }
             // A test's hold on the recording or its presentation would keep them from answering.
             if !released_holds {
@@ -259,14 +255,8 @@ impl LayoutNodeArena {
     /// What the document keeps of its recordings, with the recording in flight taken in: this waits
     /// for it to answer, and for the frame's presentation to publish the answer if it does.
     pub(crate) fn recording(&self) -> TakenIn<'_> {
-        self.take_in_recording(true);
+        self.take_in_recording();
         TakenIn(self.recording_slot().borrow_mut())
-    }
-
-    /// Takes in the recording in flight if it has answered and its answer is presented, without
-    /// waiting for it.
-    pub(crate) fn try_take_in_recording(&self) {
-        self.take_in_recording(false);
     }
 
     #[cfg(test)]
@@ -274,13 +264,11 @@ impl LayoutNodeArena {
         self.recording_slot().borrow().in_flight.is_some()
     }
 
-    fn take_in_recording(&self, wait: bool) {
+    fn take_in_recording(&self) {
         let Some(ticket) = self.recording_slot().borrow().in_flight.clone() else {
             return;
         };
-        let Some(state) = ticket.take(wait) else {
-            return;
-        };
+        let state = ticket.take();
         self.recording_slot().borrow_mut().in_flight = None;
         match state {
             TicketState::Answered(answer) => {
@@ -327,7 +315,7 @@ mod tests {
                 .present::<()>(|_, _| unreachable!("an abandoned recording presents nothing"))
                 .is_none()
         );
-        assert!(matches!(ticket.take(true), Some(TicketState::Abandoned)));
+        assert!(matches!(ticket.take(), TicketState::Abandoned));
     }
 
     #[test]

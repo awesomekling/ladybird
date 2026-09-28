@@ -4,71 +4,43 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-//! What the main thread hit tests: a document's hit-test list, with the rows it was recorded over.
+//! What the main thread hit tests: a document's hit-test list, with the rows it is hit tested over.
 //!
-//! A [`HitTestSnapshot`] is a [`PublishedFrame`] of the document's committed rows, with the list of
-//! the last recording the document took in and the structures a query derives from it built first:
-//! the frame's rows hold the list and the visual context tree its items convert points through,
-//! and every read a hit test makes of the rows, their layout nodes and their styles is one the frame
-//! answers (see [`super::read`]). It is immutable and owns all of it, so the main thread hit tests
-//! it while the arena goes on changing, and it holds no arena and names no layout node: a hit names
-//! the DOM node it is on as the host names one, and the rows it went through.
+//! A [`HitTestSnapshot`] reads the [`RowSnapshot`] the document published last. Its paintable rows hold the list of the
+//! last recording the document took in, with the structures a query derives from it built as it was recorded, and the
+//! visual context tree its items convert points through, and every read a hit test makes of the rows, their layout
+//! nodes and their styles is one the rows answer (see [`super::read`]). The rows are immutable and own all of it, so
+//! the main thread hit tests them without reaching the arena or its owner, and a hit names no layout node: it names the
+//! DOM node it is on as the host names one, and the rows it went through.
 //!
-//! A list outlives the rows it was recorded over: a scroll, a clip or a transform moves what a point
-//! hits through the visual context tree and the committed rows, not through the list. So the
-//! document publishes a snapshot for each hit test it makes, and what did not change since the
-//! last one is shared with it.
+//! A list outlives the rows it was recorded over: a scroll, a clip or a transform moves what a point hits through the
+//! visual context tree and the committed rows, not through the list. So each hit test reads the latest rows, which
+//! carry the latest list.
 
 use crate::css::css_pixels::CssPixelPoint;
 use crate::css::style::tree::StyleNodeID;
 use crate::layout::FfiCssPixelPoint;
-use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::{NodeFlag, NodeKind, NodeSlotId};
+use crate::layout::row_reads::RowSnapshot;
 use crate::painting::display_list::commands::ContextRef;
 use crate::painting::geometry_read::GeometryRead;
 use crate::painting::hit_test::HitTestList;
-use crate::painting::published_frame::{PaintRead, PaintSource, PublishedFrame};
+use crate::painting::published_frame::{PaintRead, PaintSource};
 use crate::painting::visual_context::VisualContextTree;
 use std::cell::RefCell;
 use std::ffi::c_void;
 use std::sync::Arc;
 
-/// The default snapshot holds no list, so it hits nothing.
-#[derive(Default)]
-pub(crate) struct HitTestSnapshot {
-    /// The frame, whose rows name the row each DOM node was bound to, which a hit's box finds the box of its element
-    /// by.
-    frame: PublishedFrame,
+/// A document's published rows, as a hit test reads them. Rows that hold no list hit nothing.
+#[derive(Clone, Copy)]
+pub(crate) struct HitTestSnapshot<'a> {
+    /// The rows, which name the row each DOM node was bound to, which a hit's box finds the box of its element by.
+    rows: &'a RowSnapshot,
 }
 
-// A snapshot is hit tested on the main thread while the arena is written wherever its owner runs:
-// it holds no cell, no borrow and no handle of the arena.
-const _: () = {
-    const fn assert_published<T: Send + Sync + 'static>() {}
-    assert_published::<HitTestSnapshot>();
-};
-
-impl LayoutNodeArena {
-    /// Publishes the document's committed rows, with its hit-test list, as a snapshot.
-    pub(crate) fn publish_hit_test_snapshot(&mut self) -> HitTestSnapshot {
-        // The frame's rows pin the list as it is once its structures are built.
-        self.prepare_hit_test_list_for_query(true, true);
-        HitTestSnapshot {
-            frame: self.freeze_frame_without_damage(),
-        }
-    }
-
-    /// The document's hit-test list as the last recording it took in left it.
-    fn hit_test_list_as_recorded(&self) -> Option<Arc<HitTestList>> {
-        // A recording the frame presented has a newer list for the document to take in.
-        self.try_take_in_recording();
-        self.hit_test_list.borrow().clone()
-    }
-}
-
-impl HitTestSnapshot {
-    pub(super) fn list(&self) -> Option<&HitTestList> {
-        self.frame.hit_test_list.as_deref()
+impl<'a> HitTestSnapshot<'a> {
+    pub(super) fn list(self) -> Option<&'a HitTestList> {
+        self.rows.paintable.hit_test_list.as_deref()
     }
 
     /// Runs a query over the list, the visual context tree it converts points through and the rows it
@@ -78,7 +50,7 @@ impl HitTestSnapshot {
         default: R,
         query: impl FnOnce(&HitTestList, &VisualContextTree, &PaintSource<'_>) -> R,
     ) -> R {
-        let (Some(list), Some(tree)) = (self.list(), self.frame.rows.paintable.visual_context_tree.as_deref()) else {
+        let (Some(list), Some(tree)) = (self.list(), self.rows.paintable.visual_context_tree.as_deref()) else {
             return default;
         };
         if !list.spatial_indexes_built {
@@ -86,13 +58,13 @@ impl HitTestSnapshot {
         }
         let absolute_rects = RefCell::default();
         let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::HitTest);
-        query(list, tree, &PaintSource::new(&self.frame, &absolute_rects))
+        query(list, tree, &PaintSource::of_rows(self.rows, &absolute_rects))
     }
 
     /// Reads the rows the snapshot was published with, whether or not it holds a list.
     fn read_rows<R>(&self, read: impl FnOnce(&PaintSource<'_>) -> R) -> R {
         let absolute_rects = RefCell::default();
-        read(&PaintSource::new(&self.frame, &absolute_rects))
+        read(&PaintSource::of_rows(self.rows, &absolute_rects))
     }
 
     /// Runs a query over the list and the rows it was recorded over.
@@ -101,7 +73,7 @@ impl HitTestSnapshot {
             return default;
         };
         let absolute_rects = RefCell::default();
-        read(list, &PaintSource::new(&self.frame, &absolute_rects))
+        read(list, &PaintSource::of_rows(self.rows, &absolute_rects))
     }
 }
 
@@ -204,7 +176,7 @@ pub(super) fn dispatch_identity(
     FfiHitNodeIdentity::default()
 }
 
-impl HitTestSnapshot {
+impl HitTestSnapshot<'_> {
     /// https://html.spec.whatwg.org/multipage/image-maps.html#image-map-processing-model
     /// The `<area>` of the map an image is associated with that the point hits, which the image published
     /// onto its row.
@@ -219,7 +191,7 @@ impl HitTestSnapshot {
         let image_rect = crate::painting::paintable_geometry::absolute_rect_or_default(rows, image);
         let x = (local_point.x - image_rect.x).to_float();
         let y = (local_point.y - image_rect.y).to_float();
-        let area = self.frame.rows.paintable.image_map_areas.area_for_point(
+        let area = self.rows.paintable.image_map_areas.area_for_point(
             image,
             x,
             y,
@@ -247,7 +219,7 @@ impl HitTestSnapshot {
             //         elementFromPoint() converge.
             let mut node = FfiHitNodeIdentity::default();
             if rows.node_kind_if_live(item.paintable) == Some(NodeKind::Viewport) {
-                let root = self.frame.paint_state().root_element_row;
+                let root = self.rows.paint_status.root_background_source.root_layout_node;
                 if rows.paintable_row_is_populated(root) {
                     node = dispatch_identity(rows, Some(root), false);
                     hit_node = root;
@@ -336,16 +308,16 @@ impl Default for FfiHitBoxFacts {
     }
 }
 
-impl HitTestSnapshot {
+impl HitTestSnapshot<'_> {
     /// The box the DOM node `identity` names was bound to: the viewport for the document.
     fn bound_box(&self, identity: FfiHitNodeIdentity) -> Option<NodeSlotId> {
         let row = match identity.kind {
             FfiHitNodeIdentityKind::None => return None,
-            FfiHitNodeIdentityKind::Document => self.frame.rows.viewport_row()?,
+            FfiHitNodeIdentityKind::Document => self.rows.viewport_row()?,
             FfiHitNodeIdentityKind::StyleNode => {
                 let element = StyleNodeID::from_raw(identity.style_node)?;
                 element.element_index()?;
-                self.frame.rows.bound_row(element)?
+                self.rows.bound_row(element)?
             }
         };
         self.read_rows(|rows| rows.slot_is_live(row).then_some(row))
@@ -395,38 +367,38 @@ impl HitTestSnapshot {
     }
 }
 
-/// SAFETY: `snapshot` must be a live handle from `layout_arena_publish_hit_test_snapshot`.
-pub(super) unsafe fn snapshot_from_handle<'a>(snapshot: *const c_void) -> &'a HitTestSnapshot {
+/// SAFETY: `snapshot` must be a live handle from `layout_arena_hit_test_snapshot`.
+pub(super) unsafe fn snapshot_from_handle<'a>(snapshot: *const c_void) -> HitTestSnapshot<'a> {
     assert!(!snapshot.is_null(), "hit-test snapshot handle is null");
-    unsafe { &*snapshot.cast::<HitTestSnapshot>() }
+    HitTestSnapshot {
+        rows: unsafe { &*snapshot.cast::<RowSnapshot>() },
+    }
 }
 
-/// Publishes the document's committed rows, with its hit-test list, as a snapshot the caller
-/// releases with `hit_test_snapshot_release`.
+/// The document's rows as the owner published them last, with its hit-test list, as a snapshot the caller releases
+/// with `hit_test_snapshot_release`. It is read without waiting for the owner, unless the document thread sent a change
+/// that alters the rows which they do not include yet.
 ///
 /// # Safety
 ///
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_publish_hit_test_snapshot(arena: *mut c_void) -> *const c_void {
+pub unsafe extern "C" fn layout_arena_hit_test_snapshot(arena: *mut c_void) -> *const c_void {
     // SAFETY: Guaranteed by the caller.
-    let snapshot =
-        unsafe { crate::painting::owner_pass::run_held_pass(arena, (), |arena, ()| arena.publish_hit_test_snapshot()) };
-    Arc::into_raw(Arc::new(snapshot)).cast()
+    Arc::into_raw(unsafe { RowSnapshot::current_shared(arena) }).cast()
 }
 
 /// # Safety
 ///
-/// `snapshot` must be a live handle from `layout_arena_publish_hit_test_snapshot`, released once.
+/// `snapshot` must be a live handle from `layout_arena_hit_test_snapshot`, released once.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hit_test_snapshot_release(snapshot: *const c_void) {
     assert!(!snapshot.is_null(), "hit-test snapshot handle is null");
-    drop(unsafe { Arc::from_raw(snapshot.cast::<HitTestSnapshot>()) });
+    drop(unsafe { Arc::from_raw(snapshot.cast::<RowSnapshot>()) });
 }
 
-/// Visits the chrome widgets the document's hit-test list holds items of, and answers the list's generation (zero for
-/// none). A recording's list is visited as it is taken in, and nothing a query derives from it is built for that: a
-/// query builds it as it publishes its snapshot.
+/// Visits the chrome widgets the document's hit-test list holds items of, as the rows published it, and answers the
+/// list's generation (zero for none). The document visits a recording's list once it took the recording in.
 ///
 /// # Safety
 ///
@@ -438,9 +410,8 @@ pub unsafe extern "C" fn layout_arena_visit_hit_test_chrome_widgets(
     sink: *mut c_void,
     visit: unsafe extern "C" fn(*mut c_void, NodeSlotId, u8),
 ) -> u64 {
-    // SAFETY: Guaranteed by the caller.
-    let list =
-        unsafe { crate::painting::owner_pass::run_held_pass(arena, (), |arena, ()| arena.hit_test_list_as_recorded()) };
+    // SAFETY: Guaranteed by the caller. The list is shared, so the borrow of the rows ends before the host visits.
+    let list = unsafe { RowSnapshot::published(arena) }.paintable.hit_test_list.clone();
     let Some(list) = list else {
         return 0;
     };
@@ -455,7 +426,7 @@ pub unsafe extern "C" fn layout_arena_visit_hit_test_chrome_widgets(
 
 /// # Safety
 ///
-/// `snapshot` must be a live handle from `layout_arena_publish_hit_test_snapshot`.
+/// `snapshot` must be a live handle from `layout_arena_hit_test_snapshot`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hit_test_snapshot_find_topmost_item(
     snapshot: *const c_void,
@@ -471,7 +442,7 @@ pub unsafe extern "C" fn hit_test_snapshot_find_topmost_item(
 ///
 /// # Safety
 ///
-/// `snapshot` must be a live handle from `layout_arena_publish_hit_test_snapshot`, and `push` must
+/// `snapshot` must be a live handle from `layout_arena_hit_test_snapshot`, and `push` must
 /// accept `push_context` for the duration of the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hit_test_snapshot_all(
@@ -492,7 +463,7 @@ pub unsafe extern "C" fn hit_test_snapshot_all(
 
 /// # Safety
 ///
-/// `snapshot` must be a live handle from `layout_arena_publish_hit_test_snapshot`, and `index` an
+/// `snapshot` must be a live handle from `layout_arena_hit_test_snapshot`, and `index` an
 /// item of its list.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hit_test_snapshot_item(snapshot: *const c_void, index: usize) -> FfiHitTestSnapshotItem {
@@ -525,7 +496,7 @@ pub unsafe extern "C" fn hit_test_snapshot_item(snapshot: *const c_void, index: 
 ///
 /// # Safety
 ///
-/// `snapshot` must be a live handle from `layout_arena_publish_hit_test_snapshot`, and `index` an
+/// `snapshot` must be a live handle from `layout_arena_hit_test_snapshot`, and `index` an
 /// item of its list.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hit_test_snapshot_resolve_hit(
@@ -540,7 +511,7 @@ pub unsafe extern "C" fn hit_test_snapshot_resolve_hit(
 ///
 /// # Safety
 ///
-/// `snapshot` must be a live handle from `layout_arena_publish_hit_test_snapshot`.
+/// `snapshot` must be a live handle from `layout_arena_hit_test_snapshot`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hit_test_snapshot_bound_box(
     snapshot: *const c_void,
@@ -551,7 +522,7 @@ pub unsafe extern "C" fn hit_test_snapshot_bound_box(
 
 /// # Safety
 ///
-/// `snapshot` must be a live handle from `layout_arena_publish_hit_test_snapshot`, and `hit_box` a box it answered.
+/// `snapshot` must be a live handle from `layout_arena_hit_test_snapshot`, and `hit_box` a box it answered.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hit_test_snapshot_box_facts(snapshot: *const c_void, hit_box: FfiHitBox) -> FfiHitBoxFacts {
     unsafe { snapshot_from_handle(snapshot) }.box_facts(hit_box.row())
@@ -560,6 +531,7 @@ pub unsafe extern "C" fn hit_test_snapshot_box_facts(snapshot: *const c_void, hi
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::layout::LayoutNodeArena;
     use crate::painting::visual_context::{TransformData, TransformDataRole};
 
     fn tree() -> Option<Arc<VisualContextTree>> {
@@ -574,45 +546,48 @@ mod tests {
         })))
     }
 
-    /// A snapshot answers from the list and the visual context tree it was published with, its
-    /// structures built, whatever the arena publishes after it.
+    /// A snapshot answers from the list and the visual context tree the rows it reads were published with, whatever
+    /// the arena publishes after them.
     #[test]
-    fn a_snapshot_answers_from_what_it_was_published_with() {
+    fn a_snapshot_answers_from_the_rows_it_reads() {
         let mut arena = LayoutNodeArena::new();
-        *arena.hit_test_list.get_mut() = Some(Arc::new(HitTestList {
-            generation: 1,
-            ..Default::default()
-        }));
         let published_tree = tree();
         arena.paint_state().borrow_mut().visual_context.tree = published_tree.clone();
-        let snapshot = arena.publish_hit_test_snapshot();
+        *arena.hit_test_list.get_mut() = Some(Arc::new(HitTestList {
+            generation: 1,
+            spatial_indexes_built: true,
+            ..Default::default()
+        }));
+        arena.publish_rows();
+        let rows = arena.published_rows();
+        let snapshot = HitTestSnapshot { rows: &rows };
 
         *arena.hit_test_list.get_mut() = Some(Arc::new(HitTestList {
             generation: 2,
             ..Default::default()
         }));
         arena.paint_state().borrow_mut().visual_context.tree = None;
-        arena.publish_paintable_rows();
+        arena.publish_rows();
 
         let list = snapshot.list().expect("the snapshot holds its list");
         assert_eq!(list.generation, 1);
-        assert!(list.spatial_indexes_built && list.caret_lines_built);
         assert!(snapshot.query(false, |_, tree, _| std::ptr::eq(
             tree,
             published_tree.as_deref().unwrap()
         )));
+        let rows = arena.published_rows();
         assert_eq!(
-            arena.publish_hit_test_snapshot().list().map(|list| list.generation),
+            HitTestSnapshot { rows: &rows }.list().map(|list| list.generation),
             Some(2)
         );
     }
 
-    /// A snapshot names the DOM node a row stands for as the host names it, from the style node its
-    /// frame published for the row, whatever the arena's rows name after the snapshot: the document
+    /// A snapshot names the DOM node a row stands for as the host names it, from the style node the
+    /// rows it reads published for the row, whatever the arena's rows name after the snapshot: the document
     /// for the viewport, which stands for the root element in a hit, and nothing for an anonymous
     /// row but where it was generated for a pseudo-element and may stand for its element.
     #[test]
-    fn a_snapshot_names_the_dom_node_its_frame_published_for_a_row() {
+    fn a_snapshot_names_the_dom_node_its_rows_published_for_a_row() {
         let mut arena = LayoutNodeArena::new();
         let viewport = arena.allocate_for_test().slot;
         arena.write_shape(viewport).set_kind(NodeKind::Viewport);
@@ -633,7 +608,8 @@ mod tests {
                 root_layout_node: root,
                 ..Default::default()
             });
-        let snapshot = arena.publish_hit_test_snapshot();
+        arena.publish_rows();
+        let snapshot = arena.published_rows();
         arena.set_style_node_for_test(root, StyleNodeID::from_raw(6));
         arena.publish_paint_tree();
 
@@ -642,8 +618,8 @@ mod tests {
             style_node: 5,
         };
         let absolute_rects = RefCell::default();
-        let rows = PaintSource::new(&snapshot.frame, &absolute_rects);
-        assert_eq!(snapshot.frame.paint_state().root_element_row, root);
+        let rows = PaintSource::of_rows(&snapshot, &absolute_rects);
+        assert_eq!(snapshot.paint_status.root_background_source.root_layout_node, root);
         assert!(dispatch_identity(&rows, Some(root), false) == element);
         assert!(dispatch_identity(&rows, Some(viewport), false) == FfiHitNodeIdentity::DOCUMENT);
         assert!(dispatch_identity(&rows, Some(pseudo), false).is_none());

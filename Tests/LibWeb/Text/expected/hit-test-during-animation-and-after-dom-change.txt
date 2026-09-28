@@ -1,0 +1,7 @@
+During the animation:
+(225, 325): mover
+(25, 325): HTML
+(25, 425): under
+After the DOM change:
+(225, 325): HTML
+(25, 425): over

@@ -23,7 +23,7 @@ use crate::painting::host::{
 use crate::painting::published_frame::PaintSource;
 use std::ffi::c_void;
 
-impl HitTestSnapshot {
+impl HitTestSnapshot<'_> {
     /// Runs a query of the list's caret lines, or answers `default` where the snapshot holds no list
     /// with its caret lines built.
     fn read_caret_lines<R>(&self, default: R, read: impl FnOnce(&HitTestList, &PaintSource<'_>) -> R) -> R {
@@ -52,7 +52,7 @@ impl HitTestSnapshot {
 ///
 /// # Safety
 ///
-/// `snapshot` must be a live handle from `layout_arena_publish_hit_test_snapshot`.
+/// `snapshot` must be a live handle from `layout_arena_hit_test_snapshot`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hit_test_snapshot_find_topmost_items_for_caret(
     snapshot: *const c_void,
@@ -70,7 +70,7 @@ pub unsafe extern "C" fn hit_test_snapshot_find_topmost_items_for_caret(
 
 /// # Safety
 ///
-/// `snapshot` must be a live handle from `layout_arena_publish_hit_test_snapshot`.
+/// `snapshot` must be a live handle from `layout_arena_hit_test_snapshot`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hit_test_snapshot_caret_line(
     snapshot: *const c_void,
@@ -94,7 +94,7 @@ pub unsafe extern "C" fn hit_test_snapshot_caret_line(
 ///
 /// # Safety
 ///
-/// `snapshot` must be a live handle from `layout_arena_publish_hit_test_snapshot`, and the query's
+/// `snapshot` must be a live handle from `layout_arena_hit_test_snapshot`, and the query's
 /// boundary descent must be readable for the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hit_test_snapshot_caret_line_for_position(
@@ -119,7 +119,7 @@ pub unsafe extern "C" fn hit_test_snapshot_caret_line_for_position(
 ///
 /// # Safety
 ///
-/// `snapshot` must be a live handle from `layout_arena_publish_hit_test_snapshot`.
+/// `snapshot` must be a live handle from `layout_arena_hit_test_snapshot`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hit_test_snapshot_item_at_line_edge(
     snapshot: *const c_void,
@@ -137,7 +137,7 @@ pub unsafe extern "C" fn hit_test_snapshot_item_at_line_edge(
 
 /// # Safety
 ///
-/// `snapshot` must be a live handle from `layout_arena_publish_hit_test_snapshot`.
+/// `snapshot` must be a live handle from `layout_arena_hit_test_snapshot`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hit_test_snapshot_caret_item_for_line(
     snapshot: *const c_void,
@@ -162,7 +162,7 @@ pub unsafe extern "C" fn hit_test_snapshot_caret_item_for_line(
 
 /// # Safety
 ///
-/// `snapshot` must be a live handle from `layout_arena_publish_hit_test_snapshot`.
+/// `snapshot` must be a live handle from `layout_arena_hit_test_snapshot`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hit_test_snapshot_line_block_coordinate(snapshot: *const c_void, line_index: usize) -> i32 {
     unsafe { snapshot_from_handle(snapshot) }.read_caret_lines(0, |list, _| {
@@ -175,7 +175,7 @@ pub unsafe extern "C" fn hit_test_snapshot_line_block_coordinate(snapshot: *cons
 
 /// # Safety
 ///
-/// `snapshot` must be a live handle from `layout_arena_publish_hit_test_snapshot`.
+/// `snapshot` must be a live handle from `layout_arena_hit_test_snapshot`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hit_test_snapshot_item_is_inline_adjacent_to_line(
     snapshot: *const c_void,
@@ -194,7 +194,7 @@ pub unsafe extern "C" fn hit_test_snapshot_item_is_inline_adjacent_to_line(
 ///
 /// # Safety
 ///
-/// `snapshot` must be a live handle from `layout_arena_publish_hit_test_snapshot`, and the scroll
+/// `snapshot` must be a live handle from `layout_arena_hit_test_snapshot`, and the scroll
 /// offsets and the scope mask `callbacks` points at must be readable for the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hit_test_snapshot_find_closest_line(
@@ -237,7 +237,7 @@ pub unsafe extern "C" fn hit_test_snapshot_find_closest_line(
 ///
 /// # Safety
 ///
-/// `snapshot` must be a live handle from `layout_arena_publish_hit_test_snapshot`, and the scope mask
+/// `snapshot` must be a live handle from `layout_arena_hit_test_snapshot`, and the scope mask
 /// `callbacks` points at must be readable for the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hit_test_snapshot_adjacent_line(
@@ -279,7 +279,7 @@ pub unsafe extern "C" fn hit_test_snapshot_adjacent_line(
 ///
 /// # Safety
 ///
-/// `snapshot` must be a live handle from `layout_arena_publish_hit_test_snapshot`, and `visit` must
+/// `snapshot` must be a live handle from `layout_arena_hit_test_snapshot`, and `visit` must
 /// accept `sink` for the duration of the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hit_test_snapshot_visit_caret_line_nodes(
@@ -301,7 +301,7 @@ pub unsafe extern "C" fn hit_test_snapshot_visit_caret_line_nodes(
 ///
 /// # Safety
 ///
-/// `snapshot` must be a live handle from `layout_arena_publish_hit_test_snapshot`.
+/// `snapshot` must be a live handle from `layout_arena_hit_test_snapshot`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hit_test_snapshot_item_target_node(
     snapshot: *const c_void,
@@ -319,7 +319,7 @@ pub unsafe extern "C" fn hit_test_snapshot_item_target_node(
 ///
 /// # Safety
 ///
-/// `snapshot` must be a live handle from `layout_arena_publish_hit_test_snapshot`.
+/// `snapshot` must be a live handle from `layout_arena_hit_test_snapshot`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hit_test_snapshot_item_dispatch_node(
     snapshot: *const c_void,
@@ -338,7 +338,7 @@ pub unsafe extern "C" fn hit_test_snapshot_item_dispatch_node(
 ///
 /// # Safety
 ///
-/// `snapshot` must be a live handle from `layout_arena_publish_hit_test_snapshot`.
+/// `snapshot` must be a live handle from `layout_arena_hit_test_snapshot`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hit_test_snapshot_resolve_caret(
     snapshot: *const c_void,

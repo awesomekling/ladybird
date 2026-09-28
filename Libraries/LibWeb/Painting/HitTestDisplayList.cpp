@@ -61,15 +61,15 @@ HitTestDisplayList::HitTestDisplayList(u64 visual_context_tree_structural_epoch,
 HitTestDisplayList::~HitTestDisplayList() = default;
 
 // A list outlives the rows it was recorded over: a scroll, a clip or a transform moves what a point hits through the
-// committed rows and the visual context tree (hit_test/snapshot.rs). So each query reads a snapshot published for it,
-// which builds what a query derives from the list the first time one is published.
+// committed rows and the visual context tree (hit_test/snapshot.rs). So each query reads the latest rows the render
+// owner published, which carry the latest list, without waiting for the owner.
 HitTestDisplayList::QuerySnapshotScope::QuerySnapshotScope(HitTestDisplayList const& list)
     : m_list(list)
     , m_outer_snapshot(move(list.m_snapshot))
 {
     auto* arena = list.m_document ? Layout::document_layout_arena_if_created(*list.m_document) : nullptr;
     if (arena)
-        list.m_snapshot = HitTestSnapshot::adopt(Layout::RustFFI::layout_arena_publish_hit_test_snapshot(arena));
+        list.m_snapshot = HitTestSnapshot::adopt(Layout::RustFFI::layout_arena_hit_test_snapshot(arena));
 }
 
 HitTestDisplayList::QuerySnapshotScope::~QuerySnapshotScope()

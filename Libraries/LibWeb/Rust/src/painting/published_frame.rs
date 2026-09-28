@@ -70,15 +70,17 @@ pub(crate) struct PublishedRows {
     pub(super) scroll_offsets: Arc<ScrollOffsets>,
     pub(super) image_map_areas: Arc<ImageMapAreas>,
     pub(super) visual_context_tree: Option<Arc<VisualContextTree>>,
+    /// The hit-test list of the last recording the document took in, with what a query derives from it built: the
+    /// rows are what the list is hit tested over, as a scroll, a clip or a transform moves what a point hits.
+    pub(crate) hit_test_list: Option<Arc<HitTestList>>,
 }
 
-/// What a document published for one recording to read: its rows, with its hit-test list, its
-/// paint damage and the paint state the recording reads.
+/// What a document published for one recording to read: its rows, its paint damage and the paint state the recording
+/// reads.
 #[derive(Default)]
 pub(crate) struct PublishedFrame {
     /// The rows, which the frame shares with every reader of the same publication.
     pub(super) rows: Arc<RowSnapshot>,
-    pub(super) hit_test_list: Option<Arc<HitTestList>>,
     /// Keeps the arena from reusing a slot this frame may name until the frame is dropped.
     _retired_slots: RetiredSlots,
     damage: FrameDamage,
@@ -107,8 +109,6 @@ pub(crate) struct PublishedPaintState {
     pub(crate) hit_test_list_generation: u64,
     /// How many items the document's hit-test list held, which the recording's list reserves.
     pub(crate) hit_test_item_capacity_hint: usize,
-    /// The row of the document's root element, whose background the canvas paints, or none.
-    pub(crate) root_element_row: NodeSlotId,
 }
 
 impl PublishedPaintState {
@@ -129,9 +129,6 @@ impl PublishedPaintState {
             selection_pseudo_styles: paint_state.selection_pseudo_styles.clone(),
             hit_test_list_generation: paint_state.hit_test_list_generation,
             hit_test_item_capacity_hint,
-            root_element_row: paint_state
-                .root_background_source
-                .map_or(NodeSlotId::INVALID, |source| source.root_layout_node),
         }
     }
 
@@ -175,14 +172,12 @@ const _: () = {
 impl PublishedFrame {
     pub(crate) fn new(
         rows: Arc<RowSnapshot>,
-        hit_test_list: Option<Arc<HitTestList>>,
         retired_slots: RetiredSlots,
         damage: FrameDamage,
         paint_state: PublishedPaintState,
     ) -> Self {
         Self {
             rows,
-            hit_test_list,
             _retired_slots: retired_slots,
             damage,
             paint_state,
