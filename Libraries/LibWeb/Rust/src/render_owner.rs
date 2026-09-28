@@ -310,7 +310,7 @@ impl RenderState {
                 ) as u64);
                 // SAFETY: The engine is the document's, and the document thread waits for the answer, keeping what
                 // the query borrows live.
-                unsafe { engine.reach_on_owner(|engine| query.answer(engine)) };
+                unsafe { engine.reach_on_owner(|engine| query.answer(engine, self.arena.arena())) };
                 Answer::Engine(EngineAnswered::Answered)
             }
             _ => Answer::of_state(query, &mut self.arena),
@@ -321,12 +321,6 @@ impl RenderState {
     /// document reach it through [`crate::css::style::StyleEngineHandle::reach_on_owner`].
     fn style_engine(&self) -> crate::css::style::StyleEngineHandle {
         self.arena.arena().style_engine_handle()
-    }
-
-    /// The handle of the state's arena, which names the document to what files work under it.
-    fn arena_handle(&mut self) -> *mut c_void {
-        self.apply_changes(EngineReach::Home);
-        std::ptr::from_mut::<ArenaHandle>(&mut self.arena).cast::<c_void>()
     }
 
     /// The state's arena and what lives beside it, which the owner hands the units the main thread waits for.
@@ -1410,9 +1404,9 @@ fn run_style_on_owner(
     document: DocumentId,
     transaction: Box<crate::css::style::bridge::OwnerStyleTransaction>,
 ) -> crate::css::style::bridge::OwnerStyleTransactionView {
-    let reached = with_state(document, |state| (state.style_engine(), state.arena_handle()))
-        .filter(|(engine, _)| !engine.is_null());
-    let Some((engine, arena)) = reached else {
+    let reached =
+        with_state(document, |state| (state.style_engine(), state.state())).filter(|(engine, _)| !engine.is_null());
+    let Some((engine, state)) = reached else {
         debug_assert!(
             false,
             "the owner runs the style transaction of a document with an engine"
@@ -1421,9 +1415,10 @@ fn run_style_on_owner(
     };
     // The faces the transaction wants are this document's, for its layout end to request, whichever document's update
     // the owner serves the transaction beside.
-    let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(arena as u64);
-    // SAFETY: The engine is the document's, and the document thread waits for the transaction.
-    unsafe { engine.reach_on_owner(|engine| transaction.run(engine)) }
+    let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(state as u64);
+    // SAFETY: The engine and the state are the document's, which only the owner reaches, and the document thread
+    // waits for the transaction.
+    unsafe { engine.reach_on_owner(|engine| transaction.run(engine, &mut *state)) }
 }
 
 /// Whether the style transactions of `document` run on the owner: a document the owner holds render state for, whose
