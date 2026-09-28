@@ -159,6 +159,22 @@ void Document::end_layout_frame_update(void* arena)
     render_inputs_for_write().style_engine().publish_inputs_waiting_for_layout_pass();
 }
 
+// Ends a layout update on the document side, whether or not it ran a frame: whatever the frames before it told the
+// document takes effect before the read that asked for the update.
+static void end_layout_update_on_document_side(Document& document)
+{
+    // Whatever the pass told the document takes effect before the read that joined for it. That includes the web font
+    // faces it reached while they wait on their load.
+    document.apply_commit_messages();
+
+    if (document.needs_scroll_container_resnap()) {
+        if (auto navigable = document.navigable(); navigable && navigable->active_document().ptr() == &document)
+            navigable->re_snap_scroll_containers_after_layout_change();
+    }
+
+    document.page().client().flush_pending_dom_mutations();
+}
+
 // Takes in what a layout frame left for the document once it is over, in the order the frame leaves it, and ends the
 // layout update on the document side.
 void Document::take_in_layout_frame_effects(Layout::RustFFI::FfiLayoutFrameEffects const& effects)
@@ -216,16 +232,7 @@ void Document::take_in_layout_frame_effects(Layout::RustFFI::FfiLayoutFrameEffec
     if (effects.end == Layout::RustFFI::FfiLayoutUpdateEnd::FrameTakenBack)
         return;
 
-    // Whatever the pass told the document takes effect before the read that joined for it. That includes the web font
-    // faces it reached while they wait on their load.
-    apply_commit_messages();
-
-    if (m_needs_scroll_container_resnap) {
-        if (auto navigable = this->navigable(); navigable && navigable->active_document().ptr() == this)
-            navigable->re_snap_scroll_containers_after_layout_change();
-    }
-
-    page().client().flush_pending_dom_mutations();
+    end_layout_update_on_document_side(*this);
 }
 
 void Document::update_layout(UpdateLayoutReason reason)
@@ -236,9 +243,15 @@ void Document::update_layout(UpdateLayoutReason reason)
 void Document::update_layout(UpdateLayoutReason reason, ThrottledAnimationSamplingScope animation_sampling_scope)
 {
     // Nothing was written to the render inputs of the document or of any document embedding it since they published
-    // their query snapshots: style and layout are what the snapshots say, and the update would find nothing to do.
-    if (query_view_for_clean_read().has_value() && !m_commit_messages->has_queued_navigable_container_viewport())
+    // their query snapshots: style and layout are what the snapshots say, and a frame would lay nothing out. Only a
+    // DevTools inspection lays out a clean document, to collect its layout data. What a frame taken back before the
+    // snapshot left for the document side is still taken in.
+    if (reason != UpdateLayoutReason::InspectDevToolsLayoutData
+        && query_view_for_clean_read().has_value()
+        && !m_commit_messages->has_queued_navigable_container_viewport()) {
+        end_layout_update_on_document_side(*this);
         return;
+    }
 
     HTML::MainThreadPhases::Scope phase { HTML::MainThreadPhases::layout_phase(*this) };
     JoinScope join_scope { *this, reason };
