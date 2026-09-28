@@ -1008,6 +1008,7 @@ void Document::visit_edges(Cell::Visitor& visitor)
 {
     Base::visit_edges(visitor);
     m_style_scope.visit_edges(visitor);
+    visitor.visit(m_elements_with_dirty_animation_timing_rows);
     for (auto const& import : m_pending_css_import_rules)
         import->visit_edges(visitor);
     visitor.visit(m_page);
@@ -7427,8 +7428,9 @@ static void publish_animation_timeline_samples(Document& document)
 
 // Whether an animation is relevant, and therefore whether the style stage has anything to sample,
 // is a question about the WAAPI timing model. Publish what answers it: the current time of every
-// timeline, and the timing of every animation. Script cannot run inside a style update, so this is
-// current for the whole of one; what the stage itself changes it republishes as it goes.
+// timeline, and the timing of the animations that moved since they were last published. Script
+// cannot run inside a style update, so this is current for the whole of one; what the stage itself
+// changes it republishes as it goes.
 void Document::publish_animation_environment_for_style_update()
 {
     // Resolving an animation's `@keyframes` is a lookup in what each style scope published, and a
@@ -7441,24 +7443,14 @@ void Document::publish_animation_environment_for_style_update()
     });
 
     publish_animation_timeline_samples(*this);
+    publish_dirty_animation_timing_rows();
+}
 
-    HashTable<GC::Ptr<DOM::Element>> targets;
-    for (auto& animation : m_associated_animations) {
-        auto effect = animation.effect();
-        if (!effect)
-            continue;
-        auto target = effect->target();
-        if (!target || &target->document() != this)
-            continue;
-        // The style stage styles no element outside the tree, and one that comes back is a target again at the
-        // next style update. An animation of a removed element stays associated with the document until it is
-        // collected, which on a page that removes animated elements is most of them.
-        if (!target->is_connected())
-            continue;
-        targets.set(target);
-    }
-    for (auto target : targets)
-        target->publish_animation_timing_rows();
+void Document::publish_dirty_animation_timing_rows()
+{
+    auto elements = move(m_elements_with_dirty_animation_timing_rows);
+    for (auto& element : elements)
+        element->publish_animation_timing_rows({});
 }
 
 void Document::associate_with_timeline(GC::Ref<Animations::AnimationTimeline> timeline)

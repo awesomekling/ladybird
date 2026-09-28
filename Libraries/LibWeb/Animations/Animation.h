@@ -231,9 +231,12 @@ public:
     virtual bool is_css_transition() const { return false; }
 
     Optional<DOM::AbstractElement> owning_element() const { return m_owning_element; }
-    void set_owning_element(Optional<DOM::AbstractElement>&& value) { m_owning_element = move(value); }
-    void schedule_disassociation_from_target() { m_disassociation_from_target_pending = true; }
+    void set_owning_element(Optional<DOM::AbstractElement>&&);
+    void schedule_disassociation_from_target();
     bool disassociation_from_target_pending() const { return m_disassociation_from_target_pending; }
+    // Everything style_timing_row() reads, and whether the target publishes a row for this animation at
+    // all, changes through here (see Animatable::invalidate_animation_timing_rows()).
+    void invalidate_style_timing_row();
     void disassociate_from_target_if_inert();
     void did_associate_with_target();
     void update_style_if_needed() const;

@@ -1,4 +1,4 @@
-rows published by 21 toggles: 180
+rows published by 21 toggles: 83
 relevant animations: 1
 transform after cancelling: none
 revived play state: paused

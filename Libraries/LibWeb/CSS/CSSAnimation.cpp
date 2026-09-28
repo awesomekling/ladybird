@@ -63,6 +63,7 @@ void CSSAnimation::set_animation_name_index(size_t index)
     if (m_animation_name_index == index)
         return;
     m_animation_name_index = index;
+    invalidate_style_timing_row();
     if (auto effect = this->effect(); effect && is<Animations::KeyframeEffect>(*effect)) {
         if (auto target = static_cast<Animations::KeyframeEffect&>(*effect).target())
             target->invalidate_associated_animation_composite_order();
@@ -230,8 +231,9 @@ AppliedAnimationDefinitionRow CSSAnimation::applied_definition_row() const
 
 void CSSAnimation::mark_script_play_state_override()
 {
-    if (!m_applying_css_play_state)
-        m_script_overrode_play_state = true;
+    if (m_applying_css_play_state || exchange(m_script_overrode_play_state, true))
+        return;
+    invalidate_style_timing_row();
 }
 
 void CSSAnimation::play_from_css()

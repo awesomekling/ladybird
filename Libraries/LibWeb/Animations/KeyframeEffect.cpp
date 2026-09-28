@@ -916,7 +916,7 @@ void KeyframeEffect::invalidate_animation_preparation()
         m_target_element->document().join_frame_before_style_drain_reads();
     ++m_animation_preparation_generation;
     if (m_target_element)
-        m_target_element->publish_animation_timing_rows();
+        m_target_element->invalidate_animation_timing_rows();
 }
 
 void KeyframeEffect::set_composite(Bindings::CompositeOperation value)

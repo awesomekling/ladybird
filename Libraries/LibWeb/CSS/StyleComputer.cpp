@@ -492,7 +492,8 @@ void StyleComputer::commit_transition_stabilization_epoch()
     m_provisional_transition_state_indices.clear();
     m_provisional_transition_state_indices_by_target.clear();
     for (auto& element : elements_with_provisional_rows)
-        element->publish_animation_timing_rows();
+        element->invalidate_animation_timing_rows();
+    document().publish_dirty_animation_timing_rows();
     // The before-change styles the epoch's drains pinned are released with the last of them.
     StyleEffectDrain::install(document(), release_transition_baselines);
 }
@@ -726,9 +727,9 @@ void StyleComputer::apply_animation_definitions(DOM::AbstractElement& abstract_e
 
     abstract_element.set_css_defined_animations(move(new_animations));
 
-    // The plan just created, retimed and cancelled animations of this element. Republish their
-    // timing so the rest of this style update reads what they are now, not what they were.
-    abstract_element.element().publish_animation_timing_rows();
+    // The plan just created, retimed and cancelled animations of this element. Publish what moved so
+    // the rest of this style update reads what they are now, not what they were.
+    document.publish_dirty_animation_timing_rows();
 }
 
 static void collect_dimension_attribute(Vector<StyleProperty>& properties, DOM::Element const& element, Utf16FlyString const& attribute_name, CSS::PropertyID property_id)
@@ -874,7 +875,7 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_inst
     start_needed_transitions(scope, *new_style, abstract_element, before_change_style_record, decided ? decided : engine_composition.present ? &engine_decided
                                                                                                                                              : nullptr);
     // Starting a transition associates a new animation with the element.
-    abstract_element.element().publish_animation_timing_rows();
+    m_document->publish_dirty_animation_timing_rows();
     // The row installed the composition the pass left for a step it decided.
     if (decided)
         return {};
@@ -1278,7 +1279,9 @@ void StyleComputer::start_needed_transitions(StyleDrainScope const& scope, Compu
     // The engine composes what the step starts and removes into the element's composition. The
     // transitions it started are provisional, so nothing has published their timing yet.
     if (!newly_started_transition_effects.is_empty()) {
-        abstract_element.element().publish_animation_timing_rows();
+        // The element's rows name its provisional transitions too.
+        abstract_element.element().invalidate_animation_timing_rows();
+        m_document->publish_dirty_animation_timing_rows();
         // NB: Construction does not invalidate animated style because the effects were just evaluated. Request the
         //     first animation frame directly so timeline updates can schedule subsequent animated style updates.
         m_document->page().client().request_frame();
