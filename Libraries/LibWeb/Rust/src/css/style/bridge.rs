@@ -236,6 +236,12 @@ pub struct FfiRecordDemandAnswer {
     /// Whether nothing answered the demand: the render owner panicked answering it, and may have
     /// left it half done in the engine, so nothing answers it again. Absent as well.
     pub unanswered: bool,
+    /// For a targeted demand of an element: what moving it from `damage_from`, the record the
+    /// engine assigned it before the demand, to the answered one damages, as the engine answers a
+    /// record's damage (with `FfiStyleInvalidationField::EngineComputed` set); zero where the
+    /// engine did not answer it.
+    pub damage_from: u64,
+    pub damage: u32,
 }
 
 impl FfiRecordDemandAnswer {
@@ -248,6 +254,8 @@ impl FfiRecordDemandAnswer {
             row_facts: 0,
             published_record: std::ptr::null(),
             unanswered: false,
+            damage_from: 0,
+            damage: 0,
         }
     }
 }
@@ -5653,7 +5661,12 @@ impl std::fmt::Debug for RecordDemandAnswer {
 impl RecordDemand {
     /// Answers the demand with `engine`, where the engine computes every other record.
     pub(crate) fn answer(self, engine: &mut StyleEngine) -> RecordDemandAnswer {
-        let ffi = answer_record_demand_for_host(
+        // What the host compares the answer with as it installs it for a targeted read of an
+        // element: the record it holds, which the engine assigned it.
+        let held = StyleNodeID::from_raw(self.node)
+            .filter(|_| self.targeted && self.pseudo_kind == u8::MAX)
+            .and_then(|node| Some((node, engine.assigned_style_record_of(node, None)?)));
+        let mut ffi = answer_record_demand_for_host(
             engine,
             self.node,
             self.pseudo_kind,
@@ -5662,6 +5675,15 @@ impl RecordDemand {
             self.read_only,
             self.parent_highlight,
         );
+        if let Some((node, held)) = held
+            && !ffi.is_absent
+            && held != ffi.record.style_record
+            && engine.computed_group_sets.style_record_view(held).is_some()
+        {
+            ffi.damage_from = held;
+            ffi.damage = engine.element_record_damage(node, false, held, ffi.record.style_record)
+                | FfiStyleInvalidationField::EngineComputed as u32;
+        }
         let record = (!ffi.is_absent)
             .then(|| engine.publish_style_record(ffi.record.style_record))
             .flatten();
@@ -5771,9 +5793,7 @@ fn answer_record_demand_for_host(
             },
             is_absent: false,
             is_provisional: answer.provisional,
-            row_facts: 0,
-            published_record: std::ptr::null(),
-            unanswered: false,
+            ..FfiRecordDemandAnswer::absent()
         },
         super::publication::RecordDemandAnswer::Absent => FfiRecordDemandAnswer::absent(),
     };

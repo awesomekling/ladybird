@@ -1656,8 +1656,12 @@ static Optional<RequiredInvalidationAfterStyleChange> install_targeted_record_de
     bool const samples_over_the_record = old_style
         && element.published_style_record()->is_animation_overlay()
         && !demand_answer.record->is_animation_overlay();
+    // The engine answered what the move from the record it assigned the element damages with the record.
+    Optional<DOM::Element::EngineRecordDamage> engine_record_damage;
+    if (answer.damage)
+        engine_record_damage = DOM::Element::EngineRecordDamage { StyleRecordID { answer.damage_from }, answer.damage };
     auto invalidation = element.apply_engine_computed_style_record(scope, StyleRecordID { answer.record.style_record }, pseudo_element_records, answer.record.uses_substitution, answer.row_facts, did_change_custom_properties,
-        samples_over_the_record ? DOM::Element::EngineRecordComparison::AfterSample : DOM::Element::EngineRecordComparison::AtInstallation);
+        samples_over_the_record ? DOM::Element::EngineRecordComparison::AfterSample : DOM::Element::EngineRecordComparison::AtInstallation, engine_record_damage);
     if (!!old_style_record && element.associated_shadow_host_pseudo_element().has_value())
         invalidation |= style_computer.run_transition_step_for_installed_record(scope, { element }, old_style_record);
     auto container_effects = StyleEngineFFI::style_engine_take_container_effects(scope, engine.rust_handle(), element.style_node_id().value());
