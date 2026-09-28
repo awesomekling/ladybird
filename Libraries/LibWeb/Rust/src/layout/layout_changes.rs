@@ -15,7 +15,7 @@ use super::partial_relayout::FfiPossibleBoundaryUpdate;
 use super::tree_builder::FfiRemovedBoxPlace;
 use super::used_values::FfiCssPixelPoint;
 use crate::css::style::tree::{NaturalSize, StyleNodeID};
-use crate::render_owner::{Answer, ArenaChange, ChangeSeq, Query, ScriptForcedRead};
+use crate::render_owner::{Answer, ArenaChange, ChangeSeq, Query};
 use std::ffi::c_void;
 
 /// One write of the main thread to a document's layout marks or layout facts, which the owner applies to the arena
@@ -527,7 +527,13 @@ impl LayoutWrite {
 /// `arena` must be a live arena handle on the document thread.
 pub(crate) unsafe fn write(arena: *mut c_void, write: LayoutWrite) -> HostPayment {
     // SAFETY: Guaranteed by the caller.
-    match unsafe { crate::render_owner::ask_about(arena, Query::Write(write), ScriptForcedRead::for_internal_hop()) } {
+    match unsafe {
+        crate::render_owner::ask_about(
+            arena,
+            Query::Write(write),
+            crate::render_owner::LockstepProof::host_pays_the_write(),
+        )
+    } {
         Answer::Payment(payment) => payment,
         _ => HostPayment::nothing(),
     }

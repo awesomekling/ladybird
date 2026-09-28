@@ -64,9 +64,10 @@ impl DocumentId {
 
 /// The capability to make the document thread wait for the owner, for one question. A script API that must return a
 /// current answer (getComputedStyle, an element's geometry, hit testing, innerText and the like) mints one at the host
-/// entry it calls, and every ask of the owner takes it by value: one ask per call of the API. Internal code (drains,
-/// style and layout updates, painting, event dispatch) holds none, so it cannot ask: it reads the rows the owner
-/// published and what it sent ahead of them.
+/// entry it calls, and every read current as of the changes sent takes it by value: one ask per call of the API.
+/// Internal code (drains, style and layout updates, painting, event dispatch) holds none, so it cannot ask: it reads
+/// the rows the owner published last ([`crate::layout::row_reads::FrameRows`]) and what it sent ahead of them, and waits
+/// for the owner otherwise only with a [`LockstepProof`].
 pub(crate) struct ScriptForcedRead {
     _not_send: std::marker::PhantomData<*const ()>,
 }
@@ -81,24 +82,63 @@ impl ScriptForcedRead {
             _not_send: std::marker::PhantomData,
         }
     }
+}
 
-    /// A question internal code still asks the owner, for want of it in what the owner publishes: each caller is a
-    /// round trip left to delete.
-    ///
-    /// # Safety
-    ///
-    /// As for [`Self::at_script_entry`], for a question no script API asks.
-    pub(crate) unsafe fn for_internal_hop() -> Self {
+/// The right of a main thread that cannot go on without the owner to wait for it outside a script's forced read: a
+/// write whose payment the host makes before it goes on, a user's input that reads the text it selects, a recording the
+/// main thread makes itself. Each has a constructor of its own, so the waits internal code makes are these and no
+/// others; everything else reads what the owner published ([`crate::layout::row_reads::FrameRows`]).
+pub(crate) struct LockstepProof {
+    _not_send: std::marker::PhantomData<*const ()>,
+}
+
+impl LockstepProof {
+    const fn new() -> Self {
         Self {
             _not_send: std::marker::PhantomData,
         }
     }
+
+    /// A layout write (a subtree dropped, a top layer element detached) whose payment the host makes before it goes
+    /// on.
+    pub(crate) const fn host_pays_the_write() -> Self {
+        Self::new()
+    }
+
+    /// A user's selection by word, which reads the text the owner shaped.
+    pub(crate) const fn input_selects_by_word() -> Self {
+        Self::new()
+    }
+
+    /// A recording the main thread makes itself, which predicts the vector images it paints from the damage only the
+    /// owner holds.
+    pub(crate) const fn recording_on_main() -> Self {
+        Self::new()
+    }
 }
+
+mod sealed_wait {
+    pub trait Sealed {}
+    impl Sealed for super::ScriptForcedRead {}
+    impl Sealed for super::LockstepProof {}
+}
+
+/// What lets the main thread wait for the owner: a script's forced read, or a [`LockstepProof`].
+pub(crate) trait OwnerWait: sealed_wait::Sealed {}
+impl OwnerWait for ScriptForcedRead {}
+impl OwnerWait for LockstepProof {}
 
 /// The number of a change within its document's stream. The first change a document sends is 1; 0 names the point
 /// before any change.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
 pub(crate) struct ChangeSeq(u64);
+
+#[cfg(test)]
+impl ChangeSeq {
+    pub(crate) const fn nth(n: u64) -> Self {
+        Self(n)
+    }
+}
 
 /// The changes a document thread sent for a document: the number of the last one, and of the last one that alters the
 /// rows the owner publishes.
@@ -1154,7 +1194,7 @@ pub(crate) fn recall_rendering_update(document: DocumentId) {
 /// # Safety
 ///
 /// `arena` must be the live arena of `document`, which no stage the document thread submitted owns.
-pub(crate) unsafe fn ask(document: DocumentId, arena: *mut c_void, query: Query, _read: ScriptForcedRead) -> Answer {
+pub(crate) unsafe fn ask(document: DocumentId, arena: *mut c_void, query: Query, _wait: impl OwnerWait) -> Answer {
     if !document.is_valid() {
         // The owner holds no state of an arena of no document (a unit test's): the thread that holds it answers.
         // SAFETY: Guaranteed by the caller.
@@ -1187,13 +1227,13 @@ pub(crate) unsafe fn ask(document: DocumentId, arena: *mut c_void, query: Query,
 /// # Safety
 ///
 /// `arena` must be a live handle on the document thread.
-pub(crate) unsafe fn ask_about(arena: *mut c_void, query: Query, read: ScriptForcedRead) -> Answer {
+pub(crate) unsafe fn ask_about(arena: *mut c_void, query: Query, wait: impl OwnerWait) -> Answer {
     assert!(!arena.is_null(), "layout node arena handle is null");
     crate::stage_thread::join_frame_in_flight(arena);
     // SAFETY: Guaranteed by the caller.
     let document = unsafe { ArenaHandle::document_of(arena) };
     // SAFETY: As above.
-    unsafe { ask(document, arena, query, read) }
+    unsafe { ask(document, arena, query, wait) }
 }
 
 /// Asks the owner the engine query `query` about `document` and waits for the answer, as of every change the calling
@@ -1222,7 +1262,7 @@ pub(crate) fn ask_engine(document: DocumentId, query: Query) -> Answer {
 
 /// Asks the owner `query` about `document` and waits for the answer, as [`ask`] does, for a document thread that
 /// names no arena: where the owner cannot answer it, the question is left to the host.
-pub(crate) fn ask_owner(document: DocumentId, query: Query, _read: ScriptForcedRead) -> Answer {
+pub(crate) fn ask_owner(document: DocumentId, query: Query, _wait: impl OwnerWait) -> Answer {
     let answer = crate::stage_thread::wait_for_owner(
         |reply| ToOwner::Ask { document, query, reply },
         |owner| {
@@ -1262,12 +1302,12 @@ fn join_frame_of(document: DocumentId) {
 
 /// Asks the owner `query` of the layout arena of `document`, once its frame in flight is taken back.
 #[track_caller]
-pub(crate) fn ask_arena(document: DocumentId, query: ArenaQuery, read: ScriptForcedRead) -> ArenaAnswer {
+pub(crate) fn ask_arena(document: DocumentId, query: ArenaQuery, wait: impl OwnerWait) -> ArenaAnswer {
     if !document.is_valid() {
         return query.left_to_host();
     }
     join_frame_of(document);
-    match ask_owner(document, Query::Arena(query), read) {
+    match ask_owner(document, Query::Arena(query), wait) {
         Answer::Arena(answer) => answer,
         _ => {
             debug_assert!(false, "an arena query is answered from the arena");
@@ -1282,9 +1322,9 @@ pub(crate) fn ask_arena(document: DocumentId, query: ArenaQuery, read: ScriptFor
 /// # Safety
 ///
 /// `arena` must be a live handle on the document thread.
-pub(crate) unsafe fn ask_arena_of(arena: *mut c_void, query: ArenaQuery, read: ScriptForcedRead) -> ArenaAnswer {
+pub(crate) unsafe fn ask_arena_of(arena: *mut c_void, query: ArenaQuery, wait: impl OwnerWait) -> ArenaAnswer {
     // SAFETY: Guaranteed by the caller.
-    match unsafe { ask_about(arena, Query::Arena(query), read) } {
+    match unsafe { ask_about(arena, Query::Arena(query), wait) } {
         Answer::Arena(answer) => answer,
         _ => {
             debug_assert!(false, "an arena query is answered from the arena");

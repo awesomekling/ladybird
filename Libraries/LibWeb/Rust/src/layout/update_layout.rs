@@ -754,7 +754,8 @@ unsafe fn run_job(
             (*frame).state = state;
             let answer = run(frame, job);
             (*frame).state = std::ptr::null_mut();
-            (*state).arena_mut().publish_rows();
+            // The rows go out as committed, their overflow measured, so a read of the layout asks nothing more.
+            (*state).arena_mut().publish_committed_rows();
             answer
         }
     };
@@ -2012,8 +2013,10 @@ impl LayoutPassJob {
         unsafe { frame.resolve_owed_host_halves() };
         // The document thread tells from these whether a recording made after the round stands, as it takes it back.
         frame.owner_end = Some(OwnerEndFacts::read(frame.arena()));
+        // The frame's layout goes out at once, as committed: a read beside the rest of the flight reads it without
+        // asking.
         // SAFETY: As above.
-        unsafe { &mut *frame.state() }.arena_mut().publish_rows();
+        unsafe { &mut *frame.state() }.arena_mut().publish_committed_rows();
         frame.state = std::ptr::null_mut();
         // SAFETY: As above.
         *ran.lock().expect("a frame that ran left itself") =
