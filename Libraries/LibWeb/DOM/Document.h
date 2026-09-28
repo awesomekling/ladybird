@@ -945,13 +945,15 @@ public:
 
     CSS::ScrollStateQueryContainers& scroll_state_query_containers() { return m_scroll_state_query_containers; }
 
-    // The handle the render side's entries name the document's layout arena by, made with the document's render state
-    // on the first ask.
+    // The arena of the document's render state, which the document's style engine is born linked to.
+    [[nodiscard]] void* render_state_arena(Badge<CSS::StyleComputer>) const { return m_render_document.handle.arena; }
+    // The handle the render side's entries name the document's layout arena by. The layout host hooks into the render
+    // state on the first ask.
     void* layout_arena();
     // The same, or null before the first ask.
-    [[nodiscard]] void* layout_arena_handle() const { return m_render_document.handle.arena; }
+    [[nodiscard]] void* layout_arena_handle() const { return m_render_document.hosts_layout ? m_render_document.handle.arena : nullptr; }
     // The name the render owner knows the document's render state by, which is invalid (0) before the first ask.
-    [[nodiscard]] Layout::RustFFI::DocumentId render_document_id() const { return m_render_document.handle.document; }
+    [[nodiscard]] Layout::RustFFI::DocumentId render_document_id() const { return m_render_document.hosts_layout ? m_render_document.handle.document : 0; }
     Painting::ChromeWidgetRegistry& chrome_widget_registry() { return *m_chrome_widget_registry; }
     Painting::ChromeWidgetRegistry const& chrome_widget_registry() const { return *m_chrome_widget_registry; }
 
@@ -1790,6 +1792,21 @@ private:
     WebIDL::ExceptionOr<RegistryAndIs> flatten_element_creation_options(ElementCreationOptions const&) const;
 
     GC::Ref<Page> m_page;
+    // The document's render state on the render owner, made before the style engine, which is born linked to it, and
+    // dropped with the document.
+    struct RenderDocument {
+        AK_MAKE_NONCOPYABLE(RenderDocument);
+        AK_MAKE_NONMOVABLE(RenderDocument);
+
+    public:
+        RenderDocument();
+        ~RenderDocument();
+
+        Layout::RustFFI::FfiRenderDocument handle;
+        // Whether the layout host has hooked into the state, which it does on the first ask for the layout arena.
+        bool hosts_layout { false };
+    };
+    RenderDocument m_render_document;
     GC::Ptr<CSS::StyleComputer> m_style_computer;
     GC::Ptr<CSS::FontComputer> m_font_computer;
     GC::Ptr<CSS::StyleSheetList> m_style_sheets;
@@ -1803,18 +1820,6 @@ private:
     GC::Ptr<HTML::Window> m_window;
     GC::Ref<DOM::EventTarget> m_relevant_global_event_target;
 
-    // The document's render state on the render owner, which drops it with the document.
-    struct RenderDocument {
-        AK_MAKE_NONCOPYABLE(RenderDocument);
-        AK_MAKE_NONMOVABLE(RenderDocument);
-
-    public:
-        RenderDocument() = default;
-        ~RenderDocument();
-
-        Layout::RustFFI::FfiRenderDocument handle {};
-    };
-    RenderDocument m_render_document;
     OwnPtr<Painting::DocumentPaintState> m_paint_state;
     NonnullRefPtr<Painting::ChromeWidgetRegistry> m_chrome_widget_registry;
     NonnullOwnPtr<InvalidationJournal> m_invalidation_journal;

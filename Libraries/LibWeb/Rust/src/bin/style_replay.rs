@@ -18,7 +18,6 @@ use std::process::ExitCode;
 use std::time::Duration;
 use std::time::Instant;
 
-use libweb_rust::css::style::StyleEngineHandle;
 use libweb_rust::css::style::bridge;
 use libweb_rust::css::style::bridge::FfiCascadeOrigin;
 use libweb_rust::css::style::bridge::FfiElementArrival;
@@ -53,6 +52,7 @@ use libweb_rust::css::style::record_replay::LogReader;
 use libweb_rust::css::style::record_replay::PayloadReader;
 use libweb_rust::css::style::record_replay::PayloadWriter;
 use libweb_rust::css::style::selector::SelectorProgram;
+use libweb_rust::css::style::{OwnedStyleEngine, StyleEngineHandle};
 
 struct ReplayCustomPropertyRegistry(*mut c_void);
 
@@ -102,7 +102,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         // Engine IDs and style-record tokens are sequential counters in the recorder, so lookups
         // that run once per event index dense arrays instead of hashing. Replay is short-lived;
         // the arrays are sized by the largest token seen and never shrink.
-        let mut live_engines = Vec::<Option<StyleEngineHandle>>::new();
+        let mut live_engines = Vec::<Option<OwnedStyleEngine>>::new();
         let mut match_answer_identity_mappings = Vec::<MatchAnswerIdentityMapping>::new();
         let mut engine_count = 0_u64;
         let mut event_count = 0_u64;
@@ -181,9 +181,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         return Err(format!("engine {engine_id} was created more than once").into());
                     }
                     let engine = bridge::style_engine_create_for_replay(bridge::FfiDeviceClass::ForegroundDesktop);
-                    unsafe { bridge::use_recording_memory_policy_for_replay(engine) };
+                    unsafe { bridge::use_recording_memory_policy_for_replay(engine.handle()) };
                     if live_engines.len() <= index {
-                        live_engines.resize(index + 1, None);
+                        live_engines.resize_with(index + 1, || None);
                         selector_program_sharing.resize_engines(index + 1);
                         match_answer_identity_mappings.resize_with(index + 1, MatchAnswerIdentityMapping::default);
                         computed_longhand_tables.resize_with(index + 1, Vec::new);
@@ -215,9 +215,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .ok_or_else(|| format!("engine {engine_id} was destroyed without being live"))?;
                     release_computed_longhand_tables(&mut computed_longhand_tables[engine_index]);
                     accumulate_memory_pressure(&mut memory_pressure, unsafe {
-                        bridge::replay_memory_pressure_snapshot(engine)
+                        bridge::replay_memory_pressure_snapshot(engine.handle())
                     });
-                    unsafe { bridge::style_engine_destroy(engine) };
                 }
                 EventKind::GrantStyleNodes => {
                     let engine = read_engine(&mut event.payload, &live_engines)?;
@@ -1196,9 +1195,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         for engine in live_engines.into_iter().flatten() {
             accumulate_memory_pressure(&mut memory_pressure, unsafe {
-                bridge::replay_memory_pressure_snapshot(engine)
+                bridge::replay_memory_pressure_snapshot(engine.handle())
             });
-            unsafe { bridge::style_engine_destroy(engine) };
         }
         println!(
             "replayed {} events and {} flushes for {} document engines in {:.3} ms ({} live at capture exit) from {}",
@@ -1973,11 +1971,15 @@ fn read_document_style_computation_inputs(
 #[inline]
 fn read_engine_indexed(
     payload: &mut PayloadReader,
-    live_engines: &[Option<StyleEngineHandle>],
+    live_engines: &[Option<OwnedStyleEngine>],
 ) -> Result<(usize, StyleEngineHandle), Box<dyn std::error::Error>> {
     let engine_id = payload.read_u64()?;
     let index = usize::try_from(engine_id)?;
-    let Some(pointer) = live_engines.get(index).copied().flatten() else {
+    let Some(pointer) = live_engines
+        .get(index)
+        .and_then(Option::as_ref)
+        .map(OwnedStyleEngine::handle)
+    else {
         return engine_not_live(engine_id);
     };
     Ok((index, pointer))
@@ -2003,12 +2005,13 @@ fn style_record_replay_index(style_record: u64) -> Result<usize, std::num::TryFr
 #[inline]
 fn read_engine(
     payload: &mut PayloadReader,
-    live_engines: &[Option<StyleEngineHandle>],
+    live_engines: &[Option<OwnedStyleEngine>],
 ) -> Result<StyleEngineHandle, Box<dyn std::error::Error>> {
     let engine_id = payload.read_u64()?;
     let Some(pointer) = usize::try_from(engine_id)
         .ok()
-        .and_then(|index| live_engines.get(index).copied().flatten())
+        .and_then(|index| live_engines.get(index)?.as_ref())
+        .map(OwnedStyleEngine::handle)
     else {
         return engine_not_live(engine_id);
     };

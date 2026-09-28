@@ -669,21 +669,24 @@ void Document::synchronize_dirty_style_attributes()
 
 void* Document::layout_arena()
 {
-    // Made on the first ask, so documents that never build a layout tree (e.g. temporary fragment-parsing documents)
-    // skip the render owner round-trip entirely.
-    if (!m_render_document.handle.arena) {
-        m_render_document.handle = Layout::RustFFI::render_owner_create_document();
-        VERIFY(m_render_document.handle.arena);
+    // Documents that never build a layout tree (e.g. temporary fragment-parsing documents) never hook the host in.
+    if (!m_render_document.hosts_layout) {
+        m_render_document.hosts_layout = true;
         Layout::RustFFI::layout_arena_set_layout_update_host_callbacks(m_render_document.handle.arena, layout_update_host_callbacks());
         Layout::register_layout_host(*this);
     }
     return m_render_document.handle.arena;
 }
 
+Document::RenderDocument::RenderDocument()
+    : handle(Layout::RustFFI::render_owner_create_document())
+{
+    VERIFY(handle.arena);
+}
+
 Document::RenderDocument::~RenderDocument()
 {
-    if (handle.arena)
-        Layout::RustFFI::render_owner_destroy_document(handle);
+    Layout::RustFFI::render_owner_destroy_document(handle);
 }
 
 void Document::reset_style_invalidation_counters() const

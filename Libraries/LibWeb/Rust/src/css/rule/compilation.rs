@@ -1540,9 +1540,9 @@ mod tests {
     fn compilation_publishes_shared_rules_without_allocating_mutable_owners() {
         use crate::css::declaration_block::DECLARATION_OWNER_ALLOCATIONS;
         use crate::css::rule::RULE_OWNER_ALLOCATIONS;
-        use crate::css::style::StyleEngine;
         use crate::css::style::memory::DeviceClass;
         use crate::css::style::program::{CascadeOrigin, StyleSheetObjectID};
+        use crate::css::style::{OwnedStyleEngine, StyleEngine};
         fn downloaded_sheet(source: &str) -> Rc<NativeStyleSheet> {
             let units: Vec<_> = source.encode_utf16().collect();
             let parsed = std::thread::spawn(move || {
@@ -1629,8 +1629,8 @@ mod tests {
         });
         drop(parsed_child);
         let child = loaded_child.unwrap();
-        let mut engine = StyleEngine::new(DeviceClass::ForegroundDesktop);
-        let compiled_sheet = engine.add_sheet(StyleSheetObjectID(1), CascadeOrigin::Author);
+        let mut engine = OwnedStyleEngine::new(Box::new(StyleEngine::new(DeviceClass::ForegroundDesktop)));
+        let compiled_sheet = engine.engine().add_sheet(StyleSheetObjectID(1), CascadeOrigin::Author);
         let compiled = std::cell::Cell::new(0_usize);
         let callbacks = NativeCompilationCallbacks {
             context: (&raw const compiled).cast(),
@@ -1639,7 +1639,7 @@ mod tests {
             visit_rule: visit,
         };
         let publication = NativeStylePublication {
-            engine: crate::css::style::StyleEngineHandle::for_test_engine(&raw mut engine),
+            engine: engine.handle(),
             sheet: compiled_sheet.0 + 1,
             before_rule: 0,
         };
@@ -1687,11 +1687,7 @@ mod tests {
         }
         assert_eq!(compiled.get(), 9);
         unsafe {
-            crate::css::style_sheet::rust_style_sheet_publish_conditions(
-                &source,
-                crate::css::style::StyleEngineInputHandle::for_test_engine(&raw mut engine),
-                environment,
-            );
+            crate::css::style_sheet::rust_style_sheet_publish_conditions(&source, engine.input_handle(), environment);
         }
         unsafe extern "C" fn prepare(_: *mut c_void) {}
         unsafe extern "C" fn record_layer(context: *mut c_void, name: *const u16, length: usize) {
@@ -1704,7 +1700,7 @@ mod tests {
             crate::css::style_sheet::rust_style_sheet_publish_layer_order(
                 sheets.as_ptr(),
                 sheets.len(),
-                crate::css::style::StyleEngineInputHandle::for_test_engine(&raw mut engine),
+                engine.input_handle(),
                 0,
                 false,
                 std::ptr::null_mut(),
@@ -1716,9 +1712,9 @@ mod tests {
         // The host's copy of the order ranks every named layer as the engine does.
         assert_eq!(recorded_layers, layers);
         for (rank, name) in recorded_layers.iter().enumerate() {
-            let layer = crate::css::style::bridge::intern_native_text(&mut engine, name);
+            let layer = crate::css::style::bridge::intern_native_text(engine.engine(), name);
             assert_eq!(
-                engine.layer_index(
+                engine.engine().layer_index(
                     crate::css::style::tree::TreeScopeID(0),
                     crate::css::style::program::CascadeLayerID(layer.0)
                 ) as usize,
@@ -1726,17 +1722,16 @@ mod tests {
             );
         }
         let next = crate::css::rule::mutation::successor(&source, import_identity, |identity| unsafe {
-            crate::css::style::bridge::style_engine_native_rule_id(
-                crate::css::style::StyleEngineHandle::for_test_engine((&raw const engine).cast_mut()),
-                identity,
-            )
+            crate::css::style::bridge::style_engine_native_rule_id(engine.handle(), identity)
         });
         assert_eq!(next, 2);
-        let mut imported_engine = StyleEngine::new(DeviceClass::ForegroundDesktop);
-        let imported_sheet = imported_engine.add_sheet(StyleSheetObjectID(1), CascadeOrigin::Author);
+        let mut imported_engine = OwnedStyleEngine::new(Box::new(StyleEngine::new(DeviceClass::ForegroundDesktop)));
+        let imported_sheet = imported_engine
+            .engine()
+            .add_sheet(StyleSheetObjectID(1), CascadeOrigin::Author);
         compiled.set(0);
         let imported_publication = NativeStylePublication {
-            engine: crate::css::style::StyleEngineHandle::for_test_engine(&raw mut imported_engine),
+            engine: imported_engine.handle(),
             sheet: imported_sheet.0 + 1,
             ..publication
         };
@@ -1877,10 +1872,12 @@ mod tests {
         assert!(source.rules().rules.borrow().is_none());
         assert!(layer.children.as_ref().unwrap().rules.borrow().is_none());
         assert!(style.children.as_ref().unwrap().rules.borrow().is_none());
-        let mut exposed_engine = StyleEngine::new(DeviceClass::ForegroundDesktop);
-        let exposed_sheet = exposed_engine.add_sheet(StyleSheetObjectID(1), CascadeOrigin::Author);
+        let mut exposed_engine = OwnedStyleEngine::new(Box::new(StyleEngine::new(DeviceClass::ForegroundDesktop)));
+        let exposed_sheet = exposed_engine
+            .engine()
+            .add_sheet(StyleSheetObjectID(1), CascadeOrigin::Author);
         let exposed_publication = NativeStylePublication {
-            engine: crate::css::style::StyleEngineHandle::for_test_engine(&raw mut exposed_engine),
+            engine: exposed_engine.handle(),
             sheet: exposed_sheet.0 + 1,
             ..publication
         };

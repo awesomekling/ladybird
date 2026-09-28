@@ -53,12 +53,6 @@ impl StyleEngineInputHandle {
     pub(crate) fn through_render_inputs(self) -> ThroughRenderInputs {
         ThroughRenderInputs(())
     }
-
-    /// A unit test stands in for the host as well, for an engine it owns.
-    #[cfg(test)]
-    pub(crate) fn for_test_engine(engine: *mut StyleEngine) -> Self {
-        Self(StyleEngineHandle::for_test_engine(engine))
-    }
 }
 
 /// That the document thread came through its render inputs' one entrance, which dropped the query snapshot its document
@@ -106,9 +100,9 @@ struct StyleEngineHome {
     /// Whom the engine is lent to, until the frame it went into is taken back.
     holder: Cell<Option<Holder>>,
     /// The layout arena of the engine's document, which the stages the engine is lent to run for.
-    arena: Cell<usize>,
+    arena: usize,
     /// The document whose render state's arena links the engine, whose render owner owns the engine.
-    document: Cell<crate::render_owner::DocumentId>,
+    document: crate::render_owner::DocumentId,
 }
 
 /// What the main thread owes the home of an engine it lent to a stage, once it has taken the stage
@@ -235,7 +229,7 @@ impl StyleEngineHome {
             return;
         };
         let received = if wait {
-            crate::stage_thread::release_holds_for_style_engine_wait(self.arena.get());
+            crate::stage_thread::release_holds_for_style_engine_wait(self.arena);
             MAIN_WAITS_FOR_ARRIVAL.store(true, Ordering::Release);
             let received = arrival.recv().map_err(|_| TryRecvError::Disconnected);
             MAIN_WAITS_FOR_ARRIVAL.store(false, Ordering::Release);
@@ -286,7 +280,7 @@ impl StyleEngineHome {
             }
             if !joined {
                 joined = true;
-                crate::stage_thread::join_frame_holding_style_engine(self.arena.get(), file, line);
+                crate::stage_thread::join_frame_holding_style_engine(self.arena, file, line);
                 continue;
             }
             // Nothing could take the frame in, as work a stage joined the main thread for, or a
@@ -318,31 +312,32 @@ impl StyleEngineHandle {
         self.0.is_null()
     }
 
-    /// Gives `engine` a home and returns the handle that names it. The handle holds
-    /// the home until [`Self::destroy`], and each lend's settlement until it is settled.
-    pub(crate) fn create(engine: Box<StyleEngine>) -> Self {
-        Self::with_home(NonNull::from(Box::leak(engine)))
-    }
-
-    fn with_home(engine: NonNull<StyleEngine>) -> Self {
+    /// Gives `engine` a home and returns the handle that names it, which `arena`, the arena of the render state of the
+    /// engine's document, links from here on: an engine is born with its owner, which links the arena as it takes the
+    /// change in. The handle holds the home until [`Self::destroy`], and each lend's settlement until it is settled.
+    ///
+    /// # Safety
+    ///
+    /// `arena` must be the arena of a live render state, on its document thread.
+    pub(crate) unsafe fn create(engine: Box<StyleEngine>, arena: *mut c_void) -> Self {
+        // SAFETY: Guaranteed by the caller.
+        let document = unsafe { crate::layout::ArenaHandle::document_of(arena) };
         let home = Rc::new(StyleEngineHome {
-            engine,
+            engine: NonNull::from(Box::leak(engine)),
             slot: UnsafeCell::new(Slot {
                 owed: Owed::Nothing,
                 away: None,
             }),
             holder: Cell::new(None),
-            arena: Cell::new(0),
-            document: Cell::new(crate::render_owner::DocumentId::default()),
+            arena: arena.addr(),
+            document,
         });
-        Self(Rc::into_raw(home).cast_mut().cast())
-    }
-
-    /// A home for an engine a unit test owns, which the handle names for as long as the engine
-    /// lives. The home stays behind.
-    #[cfg(test)]
-    pub(crate) fn for_test_engine(engine: *mut StyleEngine) -> Self {
-        Self::with_home(NonNull::new(engine).expect("a test engine is not null"))
+        let handle = Self(Rc::into_raw(home).cast_mut().cast());
+        crate::render_owner::send_arena_change(
+            document,
+            crate::render_owner::ArenaChange::LinkStyleEngine(crate::layout::StyleEngineLink::to(handle)),
+        );
+        handle
     }
 
     /// The handle as C++ holds it.
@@ -393,34 +388,9 @@ impl StyleEngineHandle {
         unsafe { reach_on_this_thread(self.address(), engine, run) }
     }
 
-    /// Runs `run` with an engine no document's render state links, which only the thread that holds its handle reaches
-    /// (a unit test's, the replay tool's): whatever `run` calls reaches it through the handle too.
-    ///
-    /// # Safety
-    ///
-    /// The handle must name a live engine no render state links, which nothing else reaches until this returns.
-    pub(crate) unsafe fn reach_alone<T>(self, run: impl FnOnce(&mut StyleEngine) -> T) -> T {
-        debug_assert!(
-            !self.document().is_valid() && self.is_home(),
-            "only an engine no render state links is reached alone"
-        );
-        let engine = self.home().engine.as_ptr();
-        // SAFETY: Guaranteed by the caller.
-        unsafe { reach_on_this_thread(self.address(), engine, run) }
-    }
-
-    /// Names the layout arena of the engine's document `document`, which the stages the engine is lent to run for.
-    pub(crate) fn link_arena(self, arena: usize, document: crate::render_owner::DocumentId) {
-        self.home().arena.set(arena);
-        self.home().document.set(document);
-    }
-
-    /// The document whose render state's arena links the engine, or the invalid document where none does.
+    /// The document whose render state's arena links the engine, whose render owner owns it.
     pub(crate) fn document(self) -> crate::render_owner::DocumentId {
-        if self.is_null() {
-            return crate::render_owner::DocumentId::default();
-        }
-        self.home().document.get()
+        self.home().document
     }
 
     /// Lends the engine to a stage of the `holder` kind, which sends it home owing no less than
@@ -537,7 +507,48 @@ impl StyleEngineHandle {
     /// borrow of the engine may be live while the returned one is used.
     pub unsafe fn for_replay<'a>(self) -> &'a mut StyleEngine {
         // SAFETY: Guaranteed by the caller.
-        unsafe { &mut *self.home().engine.as_ptr() }
+        unsafe { self.enter("style replay") }
+    }
+}
+
+/// A style engine together with the render state of a document of its own, both of which the thread that makes it
+/// holds as their document thread: a unit test's, or the style replay tool's. Like a document's, the engine is born
+/// with its owner, and goes with it.
+pub struct OwnedStyleEngine {
+    handle: StyleEngineHandle,
+    document: crate::render_owner::DocumentId,
+}
+
+impl OwnedStyleEngine {
+    pub(crate) fn new(engine: Box<StyleEngine>) -> Self {
+        let (document, arena) = crate::render_owner::create_document();
+        // SAFETY: The owner just created the arena, which it keeps until the document is destroyed, with this.
+        let handle = unsafe { StyleEngineHandle::create(engine, arena) };
+        Self { handle, document }
+    }
+
+    /// The handle that names the engine, as C++ would hold it.
+    pub fn handle(&self) -> StyleEngineHandle {
+        self.handle
+    }
+
+    /// The handle that names the engine, as C++ holds it to write the engine.
+    pub fn input_handle(&self) -> StyleEngineInputHandle {
+        StyleEngineInputHandle(self.handle)
+    }
+
+    /// The engine, once its owner has applied every change the thread sent it.
+    pub fn engine(&mut self) -> &mut StyleEngine {
+        // SAFETY: The engine is live while this is, and the borrow of this keeps any other out.
+        unsafe { self.handle.enter("owned style engine") }
+    }
+}
+
+impl Drop for OwnedStyleEngine {
+    fn drop(&mut self) {
+        crate::render_owner::destroy_document(self.document);
+        // SAFETY: The handle came from `StyleEngineHandle::create`, and goes with this.
+        unsafe { super::bridge::style_engine_destroy(self.handle) };
     }
 }
 
@@ -545,9 +556,11 @@ impl StyleEngineHandle {
 mod tests {
     use super::*;
 
-    fn test_engine() -> (Box<StyleEngine>, StyleEngineHandle) {
-        let mut engine = Box::new(StyleEngine::new(super::super::memory::DeviceClass::ForegroundDesktop));
-        let handle = StyleEngineHandle::for_test_engine(&raw mut *engine);
+    fn test_engine() -> (OwnedStyleEngine, StyleEngineHandle) {
+        let engine = OwnedStyleEngine::new(Box::new(StyleEngine::new(
+            super::super::memory::DeviceClass::ForegroundDesktop,
+        )));
+        let handle = engine.handle();
         (engine, handle)
     }
 
@@ -588,13 +601,10 @@ mod tests {
 
     #[test]
     fn a_lend_settles_after_its_engine_has_gone_away() {
-        let handle = StyleEngineHandle::create(Box::new(StyleEngine::new(
-            super::super::memory::DeviceClass::ForegroundDesktop,
-        )));
+        let (engine, handle) = test_engine();
         let (loan, settlement) = handle.lend(Holder::StylePass, Owed::TakeBack);
         loan.send_home(Owed::TakeBack);
-        // SAFETY: The handle came from `create`, and is not used again.
-        drop(unsafe { handle.destroy("test destroy") });
+        drop(engine);
         // The settlement kept the home, which goes away with it.
         assert_eq!(Rc::strong_count(&settlement.home), 1);
         settlement.settle();
@@ -609,7 +619,7 @@ mod tests {
         unsafe impl Send for HandleInCpp {}
 
         let (mut engine, handle) = test_engine();
-        let engine_address = &raw mut *engine;
+        let engine_address = std::ptr::from_mut(engine.engine());
         let (mut loan, settlement) = handle.lend(Holder::LayoutPass, Owed::Nothing);
         let handle_in_cpp = HandleInCpp(handle);
         let reached = std::thread::spawn(move || {

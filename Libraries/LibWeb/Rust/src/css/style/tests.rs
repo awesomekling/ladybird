@@ -11458,9 +11458,9 @@ fn replay_ffi_reclaims_the_non_empty_recorded_atom_set() {
     }
     let reclaimable = engine.intern_atom(0x1000);
     let recorded = [reclaimable.0];
-    let engine_pointer = crate::css::style::StyleEngineInputHandle::for_test_engine(&raw mut engine);
+    let mut engine = crate::css::style::OwnedStyleEngine::new(Box::new(engine));
     unsafe {
-        bridge::replay_set_reclaimed_style_atoms(engine_pointer.home(), recorded.as_ptr(), recorded.len());
+        bridge::replay_set_reclaimed_style_atoms(engine.handle(), recorded.as_ptr(), recorded.len());
     }
 
     let computation_inputs = bridge::FfiDocumentStyleComputationInputs {
@@ -11472,7 +11472,7 @@ fn replay_ffi_reclaims_the_non_empty_recorded_atom_set() {
     };
     let output = unsafe {
         bridge::style_engine_take_style_transaction(
-            engine_pointer,
+            engine.input_handle(),
             nodes[0].raw(),
             computation_inputs,
             std::ptr::null_mut(),
@@ -11492,6 +11492,7 @@ fn replay_ffi_reclaims_the_non_empty_recorded_atom_set() {
     };
 
     // Inputs that name no registry name the empty one the engine froze.
+    let engine = engine.engine();
     assert_eq!(
         engine.document_style_computation_inputs,
         bridge::FfiDocumentStyleComputationInputs {

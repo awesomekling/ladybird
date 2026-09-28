@@ -117,12 +117,8 @@ impl StyleEngine {
         registered
     }
 
-    /// Publish the names registration moved since the last publication to `arena`. Without an
-    /// arena they wait for one.
-    pub(crate) fn publish_anchor_names(&mut self, arena: Option<&LayoutNodeArena>) {
-        let Some(arena) = arena else {
-            return;
-        };
+    /// Publish the names registration moved since the last publication to `arena`.
+    pub(crate) fn publish_anchor_names(&mut self, arena: &LayoutNodeArena) {
         let mut moved = std::mem::take(&mut self.retained.anchor_names.unpublished);
         moved.sort_unstable();
         moved.dedup();
