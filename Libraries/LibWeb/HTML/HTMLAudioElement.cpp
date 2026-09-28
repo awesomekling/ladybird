@@ -10,7 +10,6 @@
 #include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
 #include <LibWeb/HTML/HTMLAudioElement.h>
 #include <LibWeb/HTML/Window.h>
-#include <LibWeb/Layout/Box.h>
 
 namespace Web::HTML {
 

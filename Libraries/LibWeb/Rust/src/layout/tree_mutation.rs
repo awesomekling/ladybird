@@ -109,9 +109,6 @@ impl LayoutNodeArena {
 #[cfg(test)]
 mod ffi_test_stubs {
     #[unsafe(no_mangle)]
-    extern "C" fn ladybird_layout_node_shell_destroy(_shell: *mut std::ffi::c_void) {}
-
-    #[unsafe(no_mangle)]
     extern "C" fn ladybird_layout_owned_image_provider_destroy(_provider: *mut std::ffi::c_void) {}
 
     #[unsafe(no_mangle)]

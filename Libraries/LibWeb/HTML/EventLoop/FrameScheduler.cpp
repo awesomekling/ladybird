@@ -956,8 +956,6 @@ bool FrameScheduler::publish_clock_lease_targets(ClockLeaseHold const& hold)
         auto target = effect->target();
         if (!target || style_nodes.contains_slow(target->style_node_id().value()))
             continue;
-        // The element's layout node is built while that record is live.
-        Layout::make_host_mirror_of_box(Painting::BoxSlot::bound_to(*target));
         style_nodes.append(target->style_node_id().value());
         style_records.append(DOM::AbstractElement { *target }.style_record_identity().value());
         // A tick derives no style of these from the element's, as it does for the text in its box.

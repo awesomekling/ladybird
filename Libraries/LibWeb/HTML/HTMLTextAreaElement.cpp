@@ -24,7 +24,6 @@
 #include <LibWeb/HTML/Numbers.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HighResolutionTime/TimeOrigin.h>
-#include <LibWeb/Layout/Box.h>
 #include <LibWeb/Namespace.h>
 #include <LibWeb/Selection/Selection.h>
 #include <LibWeb/UIEvents/InputEvent.h>

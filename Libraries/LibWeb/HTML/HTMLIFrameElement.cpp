@@ -25,7 +25,6 @@
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HighResolutionTime/TimeOrigin.h>
 #include <LibWeb/Infra/SerializedURL.h>
-#include <LibWeb/Layout/Box.h>
 #include <LibWeb/ResourceTiming/PerformanceResourceTiming.h>
 #include <LibWeb/TrustedTypes/RequireTrustedTypesForDirective.h>
 #include <LibWeb/TrustedTypes/TrustedTypePolicy.h>

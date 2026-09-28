@@ -14,7 +14,6 @@
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/HTML/DecodedImageData.h>
 #include <LibWeb/HTML/SupportedImageTypes.h>
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/Page/Page.h>
 
 namespace Web::CSS {

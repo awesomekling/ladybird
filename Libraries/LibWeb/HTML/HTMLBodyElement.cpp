@@ -18,7 +18,6 @@
 #include <LibWeb/HTML/Numbers.h>
 #include <LibWeb/HTML/Parser/HTMLParser.h>
 #include <LibWeb/HTML/Window.h>
-#include <LibWeb/Layout/Node.h>
 
 namespace Web::HTML {
 

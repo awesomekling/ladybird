@@ -25,7 +25,6 @@
 #include <LibWeb/HTML/SessionHistoryEntry.h>
 #include <LibWeb/HTML/SourceSnapshotParams.h>
 #include <LibWeb/HTML/Window.h>
-#include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Platform/EventLoopPlugin.h>
 #include <LibWebCommon/HTML/NavigationPopulationRequest.h>

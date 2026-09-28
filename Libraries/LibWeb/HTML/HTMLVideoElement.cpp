@@ -29,7 +29,6 @@
 #include <LibWeb/HTML/VideoTrack.h>
 #include <LibWeb/HTML/VideoTrackList.h>
 #include <LibWeb/HighResolutionTime/TimeOrigin.h>
-#include <LibWeb/Layout/Box.h>
 #include <LibWeb/Painting/PaintFacts.h>
 #include <LibWeb/Platform/ImageCodecPlugin.h>
 

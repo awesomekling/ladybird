@@ -573,7 +573,6 @@ static bool install_composition_sampled_in_pass(StyleDrainScope const& scope, DO
     if (!sample.overlay_is_empty && document.is_in_style_stabilization_epoch()
         && (document.style_stabilization_has_style_reactions() || sample.invalidation.requires_base_style_recomputation))
         document.style_computer().record_transition_stabilization_baseline(scope, abstract_element);
-    Layout::make_host_mirror_of_box(Painting::BoxSlot::bound_to(element));
     Animations::apply_published_animation_overlay(scope, abstract_element, sample.invalidation, StyleRecordID { sample.style_record }, sample_invalidation == SampleInvalidation::AppliedByCaller);
     return true;
 }

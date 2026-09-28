@@ -16,7 +16,7 @@
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/HTML/WindowProxy.h>
-#include <LibWeb/Layout/Node.h>
+#include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Page/Page.h>
 
 namespace Web::HTML {

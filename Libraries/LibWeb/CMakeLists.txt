@@ -765,15 +765,10 @@ set(SOURCES
     Internals/XRTest.cpp
     IntersectionObserver/IntersectionObserver.cpp
     IntersectionObserver/IntersectionObserverEntry.cpp
-    Layout/Box.cpp
     Layout/ImageProvider.cpp
     Layout/LayoutRustBridge.cpp
-    Layout/Node.cpp
-    Layout/NodeArena.cpp
-    Layout/TextNode.cpp
     Layout/TreeBuilder.cpp
     Layout/UpdateLayout.cpp
-    Layout/Viewport.cpp
     Loader/ContentBlocker.cpp
     Loader/FileRequest.cpp
     Loader/GeneratedPagesLoader.cpp

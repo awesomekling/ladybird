@@ -969,12 +969,6 @@ class IntersectionObserverEntry;
 namespace Web::Layout {
 
 class ImageProvider;
-class Box;
-class Node;
-class NodeWithStyle;
-class Row;
-class TextNode;
-class Viewport;
 
 }
 
