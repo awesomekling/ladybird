@@ -7,7 +7,6 @@
 #include <LibGfx/Path.h>
 #include <LibWeb/CSS/Parser/Parser.h>
 #include <LibWeb/CSS/PropertyID.h>
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/SVG/AttributeNames.h>
 #include <LibWeb/SVG/AttributeParsing.h>
 #include <LibWeb/SVG/SVGCircleElement.h>

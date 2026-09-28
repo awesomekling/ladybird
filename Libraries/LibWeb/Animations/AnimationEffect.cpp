@@ -26,7 +26,7 @@
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/ShadowRoot.h>
-#include <LibWeb/Layout/Node.h>
+#include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/SVG/SVGElement.h>
@@ -901,18 +901,18 @@ static void apply_animation_overlay(CSS::StyleDrainScope const& scope, DOM::Abst
 
     // NB: refresh_computed_style() already publishes the new record to the layout node. Only
     // inherited values and image resources require the additional C++ style side effects.
-    auto apply_layout_node_style_side_effects = [&](Layout::NodeWithStyle& layout_node, CSS::PublishedStyleRecord const* style_record) {
+    auto apply_box_style_side_effects = [&](Painting::BoxSlot const& box, CSS::PublishedStyleRecord const* style_record) {
+        if (!box)
+            return;
         if (animated_property_invalidation.requires_layout_node_style_application && style_record)
-            layout_node.apply_style(*style_record);
+            Layout::apply_style_to_box(box, *style_record);
         else if (animated_property_invalidation.requires_style_resource_update)
-            layout_node.attach_style_resources();
+            Layout::attach_style_resources_to_box(box);
     };
-    if (!element.pseudo_element().has_value()) {
-        if (auto* layout_node = target->unsafe_layout_node())
-            apply_layout_node_style_side_effects(*layout_node, target->published_style_record());
-    } else if (auto pseudo_element_node = target->pseudo_element_unsafe_layout_node(element.pseudo_element().value())) {
-        apply_layout_node_style_side_effects(*pseudo_element_node, target->published_style_record(element.pseudo_element()));
-    }
+    if (!element.pseudo_element().has_value())
+        apply_box_style_side_effects(Painting::BoxSlot::bound_to(*target), target->published_style_record());
+    else
+        apply_box_style_side_effects(Painting::BoxSlot::of_pseudo_element(*target, element.pseudo_element().value()), target->published_style_record(element.pseudo_element()));
 
     if (caller_applies_invalidation)
         return;
@@ -937,8 +937,8 @@ static void apply_animation_overlay(CSS::StyleDrainScope const& scope, DOM::Abst
         // NB: Element-reference pseudo elements (e.g. ::placeholder) are not synthetic, so schedule their
         //     layout node directly instead of going through the owning element.
         if (element.pseudo_element().has_value()) {
-            if (auto pseudo_element_node = target->pseudo_element_unsafe_layout_node(element.pseudo_element().value()))
-                element.document().schedule_accumulated_visual_context_update(*pseudo_element_node, scope);
+            if (auto pseudo_element_box = Painting::BoxSlot::of_pseudo_element(*target, element.pseudo_element().value()))
+                element.document().schedule_accumulated_visual_context_update(pseudo_element_box.slot(), scope);
         } else {
             element.document().schedule_accumulated_visual_context_update(target, scope);
         }
@@ -946,11 +946,11 @@ static void apply_animation_overlay(CSS::StyleDrainScope const& scope, DOM::Abst
 
     if (installed_in_arena == InstalledInArena::YesAndPresented)
         return;
-    auto* repaint_layout_node = element.pseudo_element().has_value()
-        ? target->pseudo_element_unsafe_layout_node(*element.pseudo_element())
-        : target->unsafe_layout_node();
-    if (repaint_layout_node && Painting::has_committed_box(*repaint_layout_node))
-        Painting::repaint_after_style_change(*repaint_layout_node, invalidation);
+    auto repaint_box = element.pseudo_element().has_value()
+        ? Painting::BoxSlot::of_pseudo_element(*target, *element.pseudo_element())
+        : Painting::BoxSlot::bound_to(*target);
+    if (Painting::has_committed_box(repaint_box))
+        Painting::repaint_after_style_change(repaint_box, invalidation);
 }
 
 void apply_published_animation_overlay(CSS::StyleDrainScope const& scope, DOM::AbstractElement element, CSS::StyleEngineFFI::FfiAnimationInvalidation const& animated_property_invalidation, CSS::StyleRecordID new_style_record, bool caller_applies_invalidation)
@@ -969,15 +969,15 @@ static bool install_animation_sample_in_arena(CSS::StyleDrainScope const& scope,
     if (invalidation.needs_layout_tree_rebuild())
         return false;
     GC::Ref<DOM::Element> target = element.element();
-    auto* layout_node_arena = target->document().layout_node_arena_if_created();
-    if (!layout_node_arena || !Layout::RustFFI::layout_arena_install_animation_sample(layout_node_arena->handle(), target->style_node_id().value(), new_style_record.value(), invalidation.needs_relayout()))
+    auto* layout_arena = Layout::document_layout_arena_if_created(target->document());
+    if (!layout_arena || !Layout::RustFFI::layout_arena_install_animation_sample(layout_arena, target->style_node_id().value(), new_style_record.value(), invalidation.needs_relayout()))
         return false;
     apply_animation_overlay(scope, element, animated_property_invalidation, new_style_record, caller_applies_invalidation, InstalledInArena::Yes);
     // The element's box adopted the record as the element published it. The log may still hold what clock ticks installed
     // over other boxes, whose entries their elements adopt in turn. One left over this box would put the host's old
     // record back over it at the next recall; the box and the element hold the record, so it is only dropped.
-    auto* layout_node = target->unsafe_layout_node();
-    [[maybe_unused]] bool const left_in_log = layout_node && Layout::RustFFI::layout_arena_take_animation_adoption(layout_node_arena->handle(), Layout::Node::slot_id(layout_node), new_style_record.value());
+    auto box = Painting::BoxSlot::bound_to(*target);
+    [[maybe_unused]] bool const left_in_log = box && Layout::RustFFI::layout_arena_take_animation_adoption(layout_arena, box.slot(), new_style_record.value());
     ASSERT(!left_in_log);
     return true;
 }
@@ -1029,10 +1029,9 @@ static bool install_engine_sample_of_installed_record(CSS::StyleDrainScope const
     // Publishing can replace the record the element's layout node would be built from on first
     // use, so it is built while that record is live.
     if (!element.pseudo_element().has_value())
-        (void)target->unsafe_layout_node();
-    auto* layout_node_arena = document.layout_node_arena_if_created();
+        Layout::make_host_mirror_of_box(Painting::BoxSlot::bound_to(*target));
     auto const sample = CSS::StyleEngineFFI::style_engine_sample_installed_record(scope.engine().rust_handle(), target->style_node_id().value(),
-        CSS::pseudo_element_to_ffi(element.pseudo_element()), data.style_record_before_update.value(), layout_node_arena ? layout_node_arena->handle() : nullptr);
+        CSS::pseudo_element_to_ffi(element.pseudo_element()), data.style_record_before_update.value(), Layout::document_layout_arena_if_created(document));
     if (!sample.present)
         return false;
     install_taken_engine_sample(scope, element, data.style_record_before_update, data.caller_applies_invalidation, sample, InstalledInArena::No);

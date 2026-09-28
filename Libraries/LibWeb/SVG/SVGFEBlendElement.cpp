@@ -6,8 +6,8 @@
 
 #include <LibWeb/CSS/Enums.h>
 #include <LibWeb/CSS/Parser/Parser.h>
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/Painting/Blending.h>
+#include <LibWeb/Painting/BoxSlot.h>
 #include <LibWeb/SVG/SVGAnimatedEnumeration.h>
 #include <LibWeb/SVG/SVGFEBlendElement.h>
 

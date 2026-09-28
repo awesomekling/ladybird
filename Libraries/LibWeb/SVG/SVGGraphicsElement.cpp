@@ -16,8 +16,6 @@
 #include <LibWeb/Geometry/DOMRect.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/Layout/LayoutRustBridge.h>
-#include <LibWeb/Layout/Node.h>
-#include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/SVG/AttributeNames.h>
@@ -87,38 +85,6 @@ GC::Ptr<DOM::Element> SVGGraphicsElement::resolve_fragment_identifier_to_element
     return {};
 }
 
-GC::Ptr<SVG::SVGMaskElement const> SVGGraphicsElement::mask(Layout::NodeWithStyle const& layout_node) const
-{
-    auto const& mask_reference = layout_node.mask();
-    if (!mask_reference.has_value())
-        return {};
-    return try_resolve_url_to<SVG::SVGMaskElement const>(mask_reference->url());
-}
-
-GC::Ptr<SVG::SVGClipPathElement const> SVGGraphicsElement::clip_path(Layout::NodeWithStyle const& layout_node) const
-{
-    auto const& clip_path = layout_node.clip_path();
-    if (!clip_path.has_value())
-        return {};
-    return try_resolve_url_to<SVG::SVGClipPathElement const>(*clip_path);
-}
-
-GC::Ptr<SVG::SVGPatternElement const> SVGGraphicsElement::fill_pattern(Layout::NodeWithStyle const& layout_node) const
-{
-    auto fill = layout_node.fill();
-    if (!fill.has_value() || !fill->is_url())
-        return {};
-    return try_resolve_url_to<SVG::SVGPatternElement const>(fill->as_url());
-}
-
-GC::Ptr<SVG::SVGPatternElement const> SVGGraphicsElement::stroke_pattern(Layout::NodeWithStyle const& layout_node) const
-{
-    auto stroke = layout_node.stroke();
-    if (!stroke.has_value() || !stroke->is_url())
-        return {};
-    return try_resolve_url_to<SVG::SVGPatternElement const>(stroke->as_url());
-}
-
 Gfx::AffineTransform transform_from_transform_list(ReadonlySpan<Transform> transform_list)
 {
     Gfx::AffineTransform affine_transform;
@@ -152,28 +118,6 @@ Gfx::AffineTransform transform_from_transform_list(ReadonlySpan<Transform> trans
     return affine_transform;
 }
 
-Optional<Gfx::Color> SVGGraphicsElement::stroke_color(Layout::NodeWithStyle const& layout_node) const
-{
-    auto paint = layout_node.stroke();
-    if (!paint.has_value())
-        return {};
-
-    if (paint->is_url())
-        return paint->fallback_color();
-
-    return paint->as_color();
-}
-
-float SVGGraphicsElement::visible_stroke_width(Layout::NodeWithStyle const& layout_node) const
-{
-    // NB: CSS geometry-effect metadata relies on this reading only stroke color and width.
-    //     If SVG bounds begin accounting for caps, joins, miter limits, or stroke opacity,
-    //     mark those properties as affecting layout geometry as well.
-    if (auto color = stroke_color(layout_node); color.has_value() && color->alpha() > 0)
-        return stroke_width(layout_node).value_or(0);
-    return 0;
-}
-
 CSSPixels SVGGraphicsElement::viewport_percentage_basis() const
 {
     // Resolved relative to the "Scaled viewport size": https://www.w3.org/TR/2017/WD-fill-stroke-3-20170413/#scaled-viewport-size
@@ -187,9 +131,9 @@ CSSPixels SVGGraphicsElement::viewport_percentage_basis() const
         if (view_box.has_value()) {
             viewport_width = CSSPixels::nearest_value_for(view_box->width);
             viewport_height = CSSPixels::nearest_value_for(view_box->height);
-        } else if (auto viewport_layout_node = viewport_element.unsafe_layout_node()) {
-            viewport_width = viewport_layout_node->width().to_px(0);
-            viewport_height = viewport_layout_node->height().to_px(0);
+        } else if (auto const* sizing = Painting::BoxSlot::bound_to(viewport_element).style_group<CSS::ComputedValues::SizingValues>()) {
+            viewport_width = CSS::Size::view(sizing->width).to_px(0);
+            viewport_height = CSS::Size::view(sizing->height).to_px(0);
         }
     };
     // <symbol> instances establish nested viewports; percentages inside one resolve against it,
@@ -207,14 +151,19 @@ CSSPixels SVGGraphicsElement::viewport_percentage_basis() const
     return (viewport_width + viewport_height) * CSSPixels(0.5);
 }
 
-float SVGGraphicsElement::resolve_relative_to_viewport_size(CSS::LengthPercentage const& length_percentage) const
+// The transform the box's style resolves to, followed by the element's additional transform.
+static Gfx::AffineTransform used_svg_element_transform(Painting::BoxSlot const& box)
 {
-    return length_percentage.to_px(viewport_percentage_basis()).to_double();
-}
-
-Optional<float> SVGGraphicsElement::stroke_width(Layout::NodeWithStyle const& layout_node) const
-{
-    return resolve_relative_to_viewport_size(layout_node.stroke_width());
+    auto matrix = Gfx::FloatMatrix4x4::identity();
+    if (auto const* transform_values = box.style_group<CSS::ComputedValues::TransformValues>()) {
+        transform_values->for_each_resolved_transform([&](auto const& transform) {
+            matrix = matrix * transform.to_matrix({}, {});
+        });
+    }
+    auto transform = Gfx::extract_2d_affine_transform(matrix);
+    if (auto const* graphics_element = as_if<SVGGraphicsElement>(box.dom_node().ptr()))
+        transform.multiply(graphics_element->additional_element_transform());
+    return transform;
 }
 
 // https://svgwg.org/svg2-draft/types.html#__svg__SVGGraphicsElement__getBBox
@@ -233,8 +182,8 @@ WebIDL::ExceptionOr<GC::Ref<Geometry::DOMRect>> SVGGraphicsElement::get_b_box(Bi
     //        calculate this from SVG geometry without a full layout tree (at least for simple cases).
     //        See: https://svgwg.org/svg2-draft/coords.html#BoundingBoxes
     document().update_layout_if_needed_for_node(*this, DOM::UpdateLayoutReason::SVGGraphicsElementGetBBox);
-    auto const* self_layout_node = layout_node();
-    if (!self_layout_node)
+    auto self_box = Painting::BoxSlot::bound_to(*this);
+    if (!self_box)
         return Geometry::DOMRect::create();
     auto owner_svg_element = this->owner_svg_element();
 
@@ -244,11 +193,11 @@ WebIDL::ExceptionOr<GC::Ref<Geometry::DOMRect>> SVGGraphicsElement::get_b_box(Bi
     if (!owner_svg_element) {
         if (!is<SVGSVGElement>(*this))
             return Geometry::DOMRect::create();
-        if (!Painting::has_committed_box(*self_layout_node))
+        if (!Painting::has_committed_box(self_box))
             return Geometry::DOMRect::create();
         Gfx::FloatRect united_rect;
-        for (auto const* child = self_layout_node->first_child_ptr(); child; child = child->next_sibling_ptr()) {
-            switch (child->kind()) {
+        for (auto child = self_box.first_child(); child; child = child.next_sibling()) {
+            switch (child.kind()) {
             case Layout::RustFFI::NodeKind::SVGMaskBox:
             case Layout::RustFFI::NodeKind::SVGClipBox:
             case Layout::RustFFI::NodeKind::SVGPatternBox:
@@ -256,9 +205,9 @@ WebIDL::ExceptionOr<GC::Ref<Geometry::DOMRect>> SVGGraphicsElement::get_b_box(Bi
             default:
                 break;
             }
-            if (!Painting::has_committed_box(*child))
+            if (!Painting::has_committed_box(child))
                 continue;
-            auto child_rect = as<Layout::NodeWithStyle>(*child).used_svg_element_transform().map(Painting::absolute_rect(*child).to_type<float>());
+            auto child_rect = used_svg_element_transform(child).map(Painting::absolute_rect(child).to_type<float>());
             united_rect.unite(child_rect);
         }
         if (united_rect.is_empty())
@@ -266,8 +215,7 @@ WebIDL::ExceptionOr<GC::Ref<Geometry::DOMRect>> SVGGraphicsElement::get_b_box(Bi
         return Geometry::DOMRect::create(united_rect);
     }
 
-    auto const* owner_layout_node = owner_svg_element->layout_node();
-    if (!owner_layout_node || !Painting::has_committed_box(*owner_layout_node) || !Painting::has_committed_box(*self_layout_node)) {
+    if (!Painting::has_committed_box(Painting::BoxSlot::bound_to(*owner_svg_element)) || !Painting::has_committed_box(self_box)) {
         // Throw only for non-rendered *graphics* elements where geometry isn't computable
         // (e.g. elements inside <marker>, <pattern>, etc.).
         if (is<SVGSVGElement>(*this))
@@ -279,10 +227,10 @@ WebIDL::ExceptionOr<GC::Ref<Geometry::DOMRect>> SVGGraphicsElement::get_b_box(Bi
 
     // A path-like element's bounding box covers its geometry alone; the committed content rect is
     // inflated by the visible stroke width, so take the unstroked path bounds directly.
-    if (auto const* committed_path = Painting::committed_svg_path(*self_layout_node))
+    if (auto const* committed_path = Painting::committed_svg_path(self_box))
         return Geometry::DOMRect::create(committed_path->bounding_box());
 
-    auto rect = Painting::absolute_rect(*self_layout_node).to_type<float>();
+    auto rect = Painting::absolute_rect(self_box).to_type<float>();
     // An element with a non-positive geometry dimension is not rendered and
     // therefore contributes an empty bounding box, regardless of its
     // positioning rectangle's origin.
@@ -313,8 +261,8 @@ GC::Ptr<Geometry::DOMMatrix> SVGGraphicsElement::get_screen_ctm()
     //
     // NB: We currently require committed box data connected to the document's visual-context tree to compute this matrix.
     //     This also excludes geometry in resource-only subtrees such as masks, clip paths, and patterns.
-    auto const* layout_node = this->layout_node();
-    if (!layout_node || !Painting::has_committed_box(*layout_node) || !document().has_committed_viewport_box())
+    auto box = Painting::BoxSlot::bound_to(*this);
+    if (!Painting::has_committed_box(box) || !document().has_committed_viewport_box())
         return {};
 
     // 3. Let ctm be a matrix that transforms the coordinate space of the current element (including its transform
@@ -324,12 +272,12 @@ GC::Ptr<Geometry::DOMMatrix> SVGGraphicsElement::get_screen_ctm()
     //     coordinate system recorded for its descendants. Other graphics elements use their own accumulated context so
     //     their transform property is included exactly once.
     auto visual_context_tree = document().visual_context_tree();
-    if (!Painting::has_accumulated_visual_context(*layout_node))
+    if (!Painting::has_accumulated_visual_context(box))
         return {};
 
-    auto visual_context = Painting::svg_viewport_transform(*layout_node).has_value()
-        ? Painting::accumulated_visual_context_for_descendants(*layout_node)
-        : Painting::accumulated_visual_context(*layout_node);
+    auto visual_context = Painting::svg_viewport_transform(box).has_value()
+        ? Painting::accumulated_visual_context_for_descendants(box)
+        : Painting::accumulated_visual_context(box);
     auto ctm = visual_context_tree.accumulated_matrix(
         visual_context.spatial,
         document().scroll_state_snapshot(),

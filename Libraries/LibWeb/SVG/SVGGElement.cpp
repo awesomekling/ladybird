@@ -8,7 +8,6 @@
 #include <LibGC/Heap.h>
 #include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/DOM/Document.h>
-#include <LibWeb/Layout/Box.h>
 #include <LibWeb/SVG/SVGGElement.h>
 
 namespace Web::SVG {

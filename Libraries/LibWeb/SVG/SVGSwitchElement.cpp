@@ -7,7 +7,6 @@
 #include <LibWeb/Bindings/Intrinsics.h>
 #include <LibWeb/Bindings/SVGSwitchElement.h>
 #include <LibWeb/CSS/StyleEngineInput.h>
-#include <LibWeb/Layout/Box.h>
 #include <LibWeb/SVG/SVGSwitchElement.h>
 
 namespace Web::SVG {

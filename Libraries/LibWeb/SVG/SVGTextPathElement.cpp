@@ -7,7 +7,6 @@
 #include <LibGC/Heap.h>
 #include <LibURL/URL.h>
 #include <LibWeb/CSS/StyleEngineInput.h>
-#include <LibWeb/Layout/Box.h>
 #include <LibWeb/SVG/AttributeNames.h>
 #include <LibWeb/SVG/SVGTextPathElement.h>
 

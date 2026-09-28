@@ -9,7 +9,6 @@
 #include <LibWeb/CSS/Invalidation/LinkInvalidator.h>
 #include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/DOM/DOMTokenList.h>
-#include <LibWeb/Layout/Box.h>
 #include <LibWeb/SVG/AttributeNames.h>
 #include <LibWeb/SVG/SVGAElement.h>
 

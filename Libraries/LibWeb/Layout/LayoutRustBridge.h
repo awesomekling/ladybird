@@ -50,6 +50,13 @@ bool attach_owed_generated_image(DOM::Document&, Compositing::RustFFI::NodeSlotI
 // Registers the document-side answers every layout pass needs on the document's arena, once it has one.
 WEB_API void register_layout_host(DOM::Document&);
 
+// What a style change does to a box beyond the record its row installs: re-deriving its values from the record, or,
+// for a change that only moves the images it names, loading and observing those.
+WEB_API void apply_style_to_box(Painting::BoxSlot const&, CSS::PublishedStyleRecord const&);
+WEB_API void attach_style_resources_to_box(Painting::BoxSlot const&);
+// Makes the host's mirror of the box now, from the record its row holds, if nothing has made it yet.
+WEB_API void make_host_mirror_of_box(Painting::BoxSlot const&);
+
 // Publishes what the SVG element's presentation attributes parse to, under its style node, and
 // retires that publication. An element's attributes are layout input that no pass can change, so
 // the document publishes them as they are written rather than answering for them while a pass runs.

@@ -6,7 +6,6 @@
 
 #pragma once
 
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/SVG/SVGGraphicsElement.h>
 
 namespace Web::SVG {

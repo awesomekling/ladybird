@@ -13,7 +13,6 @@
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/Window.h>
-#include <LibWeb/Layout/Box.h>
 #include <LibWeb/SVG/SVGGeometryElement.h>
 
 namespace Web::SVG {

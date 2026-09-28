@@ -16,7 +16,6 @@
 #include <LibWeb/DOM/StaticNodeList.h>
 #include <LibWeb/Geometry/DOMPoint.h>
 #include <LibWeb/HTML/Parser/HTMLParser.h>
-#include <LibWeb/Layout/Box.h>
 #include <LibWeb/SVG/AttributeNames.h>
 #include <LibWeb/SVG/FragmentIdentifier.h>
 #include <LibWeb/SVG/SVGAnimatedRect.h>
