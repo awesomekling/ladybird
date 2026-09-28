@@ -2331,55 +2331,6 @@ pub unsafe extern "C" fn style_engine_has_deferred_element_style_input(engine: S
     .is()
 }
 
-/// Folds the style input `node` owes into the reaction the host is about to apply to it, where the reaction covers it,
-/// and answers the merged reaction in the low byte and the merged inherited style groups in the next, or zero, as
-/// [`StyleEngine::absorb_element_style_input`] does. Answered from the engine's home where it knows.
-///
-/// # Safety
-/// `engine` must be live.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_absorb_element_style_input(
-    engine: StyleEngineInputHandle,
-    node: u32,
-    reaction: u8,
-    inherited_style_groups: u8,
-) -> u32 {
-    const ENTRY: &str = "style_engine_absorb_element_style_input";
-    let Some(style_node) = StyleNodeID::from_raw(node) else {
-        return 0;
-    };
-    engine.home().bring_home(ENTRY);
-    // SAFETY: The engine is home.
-    match unsafe { engine.home().answers() }
-        .deferred_inputs
-        .absorb(style_node, reaction, inherited_style_groups)
-    {
-        Some(0) => 0,
-        Some(absorbed) => {
-            crate::css::style::owner_calls::send(
-                engine,
-                ENTRY,
-                crate::css::style::owner_calls::EngineChange::ElementStyleInputAbsorbedByHost {
-                    node: style_node,
-                    reaction,
-                    inherited_style_groups,
-                },
-            );
-            absorbed
-        }
-        None => crate::css::style::owner_calls::ask(
-            engine.home(),
-            ENTRY,
-            crate::css::style::owner_calls::StyleQuery::Boundary(BoundaryRead::AbsorbElementStyleInput {
-                node,
-                reaction,
-                inherited_style_groups,
-            }),
-        )
-        .u32(),
-    }
-}
-
 /// Applies one flat style input transaction.
 ///
 /// # Safety
@@ -5057,20 +5008,15 @@ impl DeferredInputs {
         (self.exact && !self.applied_reactions_held).then(|| self.inputs.contains_key(&node))
     }
 
-    /// Folds the input `node` owes into the reaction the host is about to apply to it, as
-    /// [`StyleEngine::absorb_element_style_input`] does, where the copy knows.
-    fn absorb(&mut self, node: StyleNodeID, reaction: u8, inherited_style_groups: u8) -> Option<u32> {
-        if !self.exact {
-            return None;
+    /// Follows the host folding the input `node` owes into the reaction it applies to it, as
+    /// [`StyleEngine::absorb_element_style_input`] does: the input goes where the reaction covers it.
+    fn absorb(&mut self, node: StyleNodeID, reaction: u8, inherited_style_groups: u8) {
+        if let Some(&(owed_reaction, owed_groups)) = self.inputs.get(&node)
+            && owed_reaction & !reaction == 0
+            && owed_groups & !inherited_style_groups == 0
+        {
+            self.inputs.remove(&node);
         }
-        let Some(&(owed_reaction, owed_groups)) = self.inputs.get(&node) else {
-            return Some(0);
-        };
-        if owed_reaction & !reaction != 0 || owed_groups & !inherited_style_groups != 0 {
-            return Some(0);
-        }
-        self.inputs.remove(&node);
-        Some(u32::from(reaction | owed_reaction) | (u32::from(inherited_style_groups | owed_groups) << 8))
     }
 
     /// Whether the main thread follows what `change`, which may leave `leaves`, does to the deferred inputs: where it
@@ -5125,12 +5071,14 @@ impl DeferredInputs {
                 }
                 return;
             }
-            StyleChange::Engine(EngineChange::ElementStyleInputAbsorbedByHost {
+            StyleChange::Engine(EngineChange::Boundary(BoundaryWrite::AbsorbElementStyleInput {
                 node,
                 reaction,
                 inherited_style_groups,
-            }) => {
-                self.absorb(*node, *reaction, *inherited_style_groups);
+            })) => {
+                if let Some(node) = StyleNodeID::from_raw(*node) {
+                    self.absorb(node, *reaction, *inherited_style_groups);
+                }
                 return;
             }
             _ => {
