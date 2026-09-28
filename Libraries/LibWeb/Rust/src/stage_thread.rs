@@ -1408,10 +1408,10 @@ pub(crate) fn release_holds_for_style_engine_wait(arena: usize) {
 }
 
 /// The main thread takes in the frame that holds the style engine of the document whose arena is
-/// `arena` (or any frame, for an engine no arena links), for an entrance that `file`, `line` and
-/// `column` name (see `crate::css::style::engine_home`).
-pub(crate) fn join_frame_holding_style_engine(arena: usize, file: &'static str, line: u32, column: u32) {
-    join_frame_in_flight_for_stage(|stage| arena == 0 || stage.arena == arena, file, line, column);
+/// `arena` (or any frame, for an engine no arena links), for an entrance that `file` and `line`
+/// name (see `crate::css::style::engine_home`).
+pub(crate) fn join_frame_holding_style_engine(arena: usize, file: &'static str, line: u32) {
+    join_frame_in_flight_for_stage(|stage| arena == 0 || stage.arena == arena, file, line, 0);
 }
 
 /// Whether the frame in flight owns the arena `arena` with its layout pass or clock tick only,
