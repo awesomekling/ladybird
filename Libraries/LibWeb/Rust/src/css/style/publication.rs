@@ -5,7 +5,6 @@
  */
 
 mod drive;
-pub(super) mod pending;
 mod pseudo;
 mod winner_store;
 
@@ -4754,10 +4753,8 @@ impl StyleEngineState {
                 Ok(FullDrive::AwaitsRegisteredContext(_) | FullDrive::RootInputs(_)) => {
                     unreachable!("a complete drive without registered declarations finishes")
                 }
-                Err(Unanswered::Suspended(Suspension::RandomBases)) => self.refill_random_base_requests(),
-                Err(Unanswered::Suspended(Suspension::Font)) => {
-                    let request = scratch.font_drive.take_suspended_request();
-                    self.refill_font_requests(vec![(None, request)], counters);
+                Err(Unanswered::Suspended(suspension)) => {
+                    self.refill_suspension(suspension, None, &mut scratch.font_drive, counters);
                 }
             }
         };
@@ -5110,31 +5107,17 @@ impl StyleEngineState {
                     targeted_record_demand: targeted,
                     ..EngineComputedRecordScratch::default()
                 };
-                let mut suspended_memory = MemoryLease::new(MemoryCategory::BatchScratch);
-                let record = loop {
-                    match self.engine_computed_record_delta(
-                        node,
-                        complete,
-                        None,
-                        ParentInputsMoved {
-                            inherited_style: targeted,
-                            display: targeted,
-                        },
-                        &mut scratch,
-                        counters,
-                    ) {
-                        Err(Unanswered::Suspended(Suspension::RandomBases)) => self.refill_random_base_requests(),
-                        Err(Unanswered::Suspended(Suspension::Font)) => {
-                            let request = scratch.font_drive.take_suspended_request();
-                            suspended_memory.resize_required_to(&mut self.memory, scratch.font_drive.capacity_bytes());
-                            self.refill_font_requests(vec![(Some(node), request)], counters);
-                        }
-                        answer => break answer,
-                    }
-                };
-                let Ok((_, record)) = record else {
-                    unreachable!("a demand refills what its drive suspends on");
-                };
+                let (_, record) = self.settled_engine_computed_record_delta(
+                    node,
+                    complete,
+                    None,
+                    ParentInputsMoved {
+                        inherited_style: targeted,
+                        display: targeted,
+                    },
+                    &mut scratch,
+                    counters,
+                );
                 let mut result = RetriedEngineRecord {
                     style_record: record.raw(),
                     provisional,
@@ -5517,7 +5500,9 @@ pub(super) struct StateWrittenFacts {
 }
 
 #[derive(Default)]
-pub(super) struct EngineComputedRecordContinuation {
+pub(super) struct EngineComputedRecordScratch {
+    /// A scoped read can request the base record of a cold animation target.
+    pub(super) targeted_record_demand: bool,
     pub(super) font_drive: drive::FontDriveScratch,
     // NB: Preserve the root's existing remaining-phase context after preparing consumer inputs.
     root_element_inputs: Option<(StyleNodeID, RootFontInputs)>,
@@ -5540,24 +5525,6 @@ pub(super) struct EngineComputedRecordContinuation {
     pub(super) pseudo_deltas: Vec<PseudoRecordDelta>,
     /// The pseudo-element rules that flipped for the element being derived.
     pub(super) flipped_pseudo_rules: u64,
-}
-
-impl EngineComputedRecordContinuation {
-    fn capacity_bytes(&self) -> u64 {
-        capacity::capacity_bytes! {
-            shallow [self.pseudo_deltas, self.substitution_effects];
-            cached [self.font_drive.capacity_bytes()];
-            nested [];
-            skip [];
-        }
-    }
-}
-
-#[derive(Default)]
-pub(super) struct EngineComputedRecordScratch {
-    /// A scoped read can request the base record of a cold animation target.
-    pub(super) targeted_record_demand: bool,
-    pub(super) continuation: EngineComputedRecordContinuation,
     /// Whether this flush carries a document environment action. A record's winners can stand
     /// through one while the values they computed to do not, so such a record is driven again in
     /// full rather than kept - and rather than handed back to C++.
@@ -5596,20 +5563,6 @@ pub(super) struct EngineComputedRecordScratch {
     pub(super) pseudo_stores: HashMap<(u8, CascadeStateID, u64), std::sync::Arc<WinnerStore>>,
     /// The nodes whose custom-property environment this flush has brought up to date.
     current_custom_property_environments: HashMap<StyleNodeID, u64>,
-}
-
-impl std::ops::Deref for EngineComputedRecordScratch {
-    type Target = EngineComputedRecordContinuation;
-
-    fn deref(&self) -> &Self::Target {
-        &self.continuation
-    }
-}
-
-impl std::ops::DerefMut for EngineComputedRecordScratch {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.continuation
-    }
 }
 
 /// What one node tells its flat-tree children, decided where the node settles and read by the
@@ -5726,8 +5679,9 @@ impl EngineComputedRecordScratch {
     pub(super) fn capacity_bytes(&self) -> u64 {
         capacity::capacity_bytes! {
             shallow [self.cohorts, self.derived_child_inputs, self.cold_cohorts, self.stores,
-                self.substituted_states, self.pseudo_cohorts, self.pseudo_stores, self.current_custom_property_environments];
-            cached [self.store_capacity_bytes, self.continuation.capacity_bytes(),
+                self.substituted_states, self.pseudo_cohorts, self.pseudo_stores, self.current_custom_property_environments,
+                self.pseudo_deltas, self.substitution_effects];
+            cached [self.store_capacity_bytes, self.font_drive.capacity_bytes(),
                 self.prepared_root_font.as_ref().map_or(0, |(_, _, drive)| drive.capacity_bytes())];
             nested [];
             skip [];
@@ -6086,7 +6040,7 @@ fn value_reads_element_random(value: &StyleValueData) -> bool {
     })
 }
 
-/// Random bases are retained inputs, filled by the between-pass service before a drive resumes.
+/// Random bases are retained inputs, filled where a drive suspends on them before it resumes.
 fn value_computes_with_random_inputs(value: &StyleValueData, resources_are_known: bool) -> bool {
     if crate::css::style_compute::value_is_computationally_independent(value).is_none() {
         return false;
@@ -6382,24 +6336,67 @@ impl StyleEngineState {
 }
 
 impl StyleEngineState {
-    pub(super) fn refill_font_requests(
+    /// `engine_computed_record_delta` driven until the row settles. What a drive suspends on is
+    /// refilled where it suspends and the same row is driven again at once, so no row waits behind
+    /// another, and an element alike one before it finds the record that one computed.
+    pub(super) fn settled_engine_computed_record_delta(
         &mut self,
-        requests: Vec<(Option<StyleNodeID>, font_resolution::FontRequest)>,
+        node: StyleNodeID,
+        cascade_winners_are_complete: bool,
+        exact_flipped_rules: Option<FlippedRules>,
+        parent_inputs_moved: ParentInputsMoved,
+        scratch: &mut EngineComputedRecordScratch,
+        counters: &mut Counters,
+    ) -> RecordDelta {
+        loop {
+            match self.engine_computed_record_delta(
+                node,
+                cascade_winners_are_complete,
+                exact_flipped_rules,
+                parent_inputs_moved,
+                scratch,
+                counters,
+            ) {
+                Ok(delta) => return delta,
+                Err(Unanswered::Suspended(suspension)) => {
+                    self.refill_suspension(suspension, Some(node), &mut scratch.font_drive, counters);
+                }
+            }
+        }
+    }
+
+    /// Refill what a drive suspended on, so its caller can drive the same subject again: the
+    /// font its request names, or the random bases it asked for. Both are the owner's to answer
+    /// on the spot.
+    pub(super) fn refill_suspension(
+        &mut self,
+        suspension: Suspension,
+        node: Option<StyleNodeID>,
+        font_drive: &mut drive::FontDriveScratch,
         counters: &mut Counters,
     ) {
-        if requests.is_empty() {
-            return;
+        match suspension {
+            Suspension::Font => self.refill_font_request(node, font_drive.take_suspended_request(), counters),
+            Suspension::RandomBases => self.refill_random_base_requests(),
         }
+    }
+
+    pub(super) fn refill_font_request(
+        &mut self,
+        node: Option<StyleNodeID>,
+        request: font_resolution::FontRequest,
+        counters: &mut Counters,
+    ) {
         // NB: Use resident selector-tree depths for this diagnostic. They are not flat-tree
         //     dependency-span proofs and must not buy ancestor traversals just for counting.
-        counters.set(
-            Counter::FontRefillBlockedDepth,
-            requests
-                .iter()
-                .fold(counters.get(Counter::FontRefillBlockedDepth), |depth, (node, _)| {
-                    node.map_or(depth, |node| depth.max(u64::from(self.tree.depth(node)) + 1))
-                }),
-        );
+        if let Some(node) = node {
+            counters.set(
+                Counter::FontRefillBlockedDepth,
+                counters
+                    .get(Counter::FontRefillBlockedDepth)
+                    .max(u64::from(self.tree.depth(node)) + 1),
+            );
+        }
         let resolver = self.host.font_resolver.as_ref().expect("a request has a font resolver");
         let snapshot = self.retained.font_face_snapshot.clone();
         let memo = self
@@ -6412,15 +6409,9 @@ impl StyleEngineState {
             .font_resolution
             .as_mut()
             .expect("a request has a font resolution cache");
-        let request_count = resolver.refill(
-            memo,
-            snapshot.as_ref(),
-            resolutions,
-            requests.into_iter().map(|(_, request)| request).collect(),
-        );
-        if request_count != 0 {
+        if resolver.refill(memo, snapshot.as_ref(), resolutions, request) {
             counters.bump(Counter::FontRefillRounds);
-            counters.add(Counter::FontResolutionRequests, request_count as u64);
+            counters.bump(Counter::FontResolutionRequests);
         }
     }
 }
@@ -6467,9 +6458,9 @@ impl StyleEngineState {
         if let Err(Unanswered::Suspended(Suspension::Font)) = answer {
             let request = scratch.font_drive.take_suspended_request();
             self.root_font_request = Some(request.for_generation(inputs.font_environment_generation));
-            // This update computed a new root request after the begin boundary. Complete that
-            // exceptional miss through the shared between-pass service before consumers run.
-            self.refill_font_requests(vec![(Some(node), request)], counters);
+            // This update computed a new root request after the begin boundary. Resolve that
+            // exceptional miss before consumers run.
+            self.refill_font_request(Some(node), request, counters);
             answer = probe(self, scratch, counters);
         }
         let prepared = match answer {
@@ -6515,17 +6506,12 @@ impl StyleEngineState {
         counters.bump(Counter::RetryAfterAncestorCalls);
         let started_at = std::time::Instant::now();
         let mut scratch = EngineComputedRecordScratch {
-            continuation: EngineComputedRecordContinuation {
-                root_font_inputs_changed: pass_facts.root_font_inputs_changed,
-                ..EngineComputedRecordContinuation::default()
-            },
+            root_font_inputs_changed: pass_facts.root_font_inputs_changed,
             document_environment_moved: pass_facts.document_environment_moved,
             viewport_moved: pass_facts.viewport_moved,
             ..EngineComputedRecordScratch::default()
         };
-        let mut suspended_memory = MemoryLease::new(MemoryCategory::BatchScratch);
-        let style_record =
-            self.drive_record_over_installed_ancestors_loop(node, armed, &mut scratch, &mut suspended_memory, counters);
+        let style_record = self.drive_record_over_installed_ancestors_loop(node, armed, &mut scratch, counters);
         counters.add(
             Counter::RetryAfterAncestorMicroseconds,
             u64::try_from(started_at.elapsed().as_micros()).unwrap_or(u64::MAX),
@@ -6551,26 +6537,18 @@ impl StyleEngineState {
         node: StyleNodeID,
         armed: bool,
         scratch: &mut EngineComputedRecordScratch,
-        suspended_memory: &mut MemoryLease,
         counters: &mut Counters,
     ) -> u64 {
         loop {
-            let request = match self.drive_record_over_installed_ancestors_step(node, armed, scratch, counters) {
+            match self.drive_record_over_installed_ancestors_step(node, armed, scratch, counters) {
                 Ok(record) => {
                     counters.bump(Counter::RetryAfterAncestorSettled);
                     return record;
                 }
-                Err(Unanswered::Suspended(Suspension::RandomBases)) => {
-                    self.refill_random_base_requests();
-                    continue;
+                Err(Unanswered::Suspended(suspension)) => {
+                    self.refill_suspension(suspension, Some(node), &mut scratch.font_drive, counters);
                 }
-                Err(Unanswered::Suspended(Suspension::Font)) => scratch.font_drive.take_suspended_request(),
-            };
-            suspended_memory.resize_required_to(&mut self.memory, scratch.font_drive.capacity_bytes());
-            // C++ installs the earlier ancestor before making this retry, so requests from
-            // different retries cannot be known together. Use the shared batch service even
-            // though this dependency boundary limits the batch to one request.
-            self.refill_font_requests(vec![(Some(node), request)], counters);
+            }
         }
     }
 }

@@ -2477,278 +2477,212 @@ impl StyleEngineState {
             chain
         };
         let mut next_published_index = pass.next_index;
-        let mut record_deltas = None::<Vec<Option<Vec<PublishedStyleDeltaRecord>>>>;
         // The first row this wave stops before: it reads an ancestor the host has not
         // installed yet.
         let mut cut_at = None::<usize>;
-        let mut batching_start = None;
         // A hidden ancestor's unstyled descendants have an answer without a record in
         // this batch. Consumers needing their style use the scoped record demand, which
         // drives the unstyled inheritance chain when the read occurs.
-        // Resumptions share the transaction scratch above and complete in canonical order.
-        // Consume every serviced continuation in this pass; rescanning the whole tail for
-        // each one makes a cohort of markers waiting for a font take cubic work.
-        let mut ready_record = None::<publication::pending::ParkedEngineComputedRecord>;
-        let mut waiting_records = Vec::<publication::pending::ParkedEngineComputedRecord>::new();
-        // The subtree roots of the records this round parked, which each later row looks its
-        // ancestors up in: comparing every ancestor with every parked record made a round over
-        // a cohort of parked rows quadratic.
-        let mut parked_subtree_roots = HashSet::<StyleNodeID>::default();
         // The rows the host styles below a display:none ancestor all the same, found when a row
         // first asks.
         let mut required_in_hidden_subtrees = None::<HashSet<StyleNodeID>>;
-        while next_published_index < cut_at.unwrap_or(pass.published_nodes.len()) {
-            let settled_rows_before_round = settled_row_count(style_deltas, record_deltas.as_deref());
-            let mut resumed_records = std::mem::take(&mut waiting_records).into_iter();
-            let mut next_parked_records = Vec::<publication::pending::ParkedEngineComputedRecord>::new();
-            parked_subtree_roots.clear();
-            let mut carried_records = Vec::<publication::pending::ParkedEngineComputedRecord>::new();
-            for (published_index, node) in pass
-                .published_nodes
-                .iter()
-                .copied()
-                .enumerate()
-                .skip(next_published_index)
-            {
-                if cut_at.is_some_and(|cut| published_index >= cut) {
-                    break;
-                }
-                // A row below a parked record waits for it: its record is what the row inherits.
-                // A slotted row inherits from its slot, which is no DOM ancestor of it, so the
-                // flat tree is walked too.
-                if let Some(record_deltas) = &record_deltas
-                    && (record_deltas[published_index].is_some()
-                        || (!parked_subtree_roots.is_empty()
-                            && (std::iter::successors(Some(node), |&ancestor| self.tree.parent(ancestor))
-                                .any(|ancestor| parked_subtree_roots.contains(&ancestor))
-                                || std::iter::successors(self.tree.flat_tree_parent(node), |&ancestor| {
-                                    self.tree.flat_tree_parent(ancestor)
-                                })
-                                .any(|ancestor| parked_subtree_roots.contains(&ancestor)))))
-                {
-                    // A record this round would resume waits for the next one with its ancestor,
-                    // unless its row has settled, and the next record to resume is the one after it.
-                    if ready_record
-                        .as_ref()
-                        .is_some_and(|parked| parked.published_index == published_index)
-                    {
-                        let parked = ready_record.take();
-                        if record_deltas[published_index].is_none() {
-                            carried_records.extend(parked);
-                        }
-                        ready_record = resumed_records.next();
+        for (published_index, node) in pass
+            .published_nodes
+            .iter()
+            .copied()
+            .enumerate()
+            .skip(next_published_index)
+        {
+            let pseudo_inputs_may_have_changed = pass.pseudo_inputs_may_have_changed
+                || !pass.selector_truth_changes.refreshes_for(node).is_empty()
+                || pass
+                    .selector_truth_changes
+                    .deltas_for(node)
+                    .iter()
+                    .any(|delta| self.retained.programs.entry(delta.entry).1.pseudo_element.is_some());
+            // A demand the host made while it installed an earlier wave rematched the node
+            // and took its answer; the row is driven over its installed ancestors from a
+            // new match.
+            let (answer_cascade_input, answer_winners_are_complete, answer_was_taken) =
+                match pass.published_match_answers.lookup(node) {
+                    Some(answer) => (answer.cascade_input, answer.cascade_winners_are_complete, false),
+                    None => {
+                        assert!(
+                            pass.next_index > 0,
+                            "each accepted style reaction has a published match answer"
+                        );
+                        (None, false, true)
                     }
-                    continue;
-                }
-                let parked_parent_inputs = if ready_record
-                    .as_ref()
-                    .is_some_and(|parked| parked.published_index == published_index)
-                {
-                    let parked = ready_record.take().unwrap();
-                    ready_record = resumed_records.next();
-                    pass.scratch.continuation = parked.continuation;
-                    Some(parked.parent_inputs)
-                } else {
-                    None
                 };
-                let pseudo_inputs_may_have_changed = pass.pseudo_inputs_may_have_changed
-                    || !pass.selector_truth_changes.refreshes_for(node).is_empty()
-                    || pass
-                        .selector_truth_changes
-                        .deltas_for(node)
-                        .iter()
-                        .any(|delta| self.retained.programs.entry(delta.entry).1.pseudo_element.is_some());
-                // A demand the host made while it installed an earlier wave rematched the node
-                // and took its answer; the row is driven over its installed ancestors from a
-                // new match.
-                let (answer_cascade_input, answer_winners_are_complete, answer_was_taken) =
-                    match pass.published_match_answers.lookup(node) {
-                        Some(answer) => (answer.cascade_input, answer.cascade_winners_are_complete, false),
-                        None => {
-                            assert!(
-                                pass.next_index > 0,
-                                "each accepted style reaction has a published match answer"
-                            );
-                            (None, false, true)
-                        }
-                    };
-                let style_input_reaction_index = pass
-                    .style_input_reactions
-                    .binary_search_by_key(&node, |&(style_node, _, _)| style_node)
-                    .ok();
-                let (reaction, inherited_style_groups) = style_input_reaction_index
-                    .map_or((transaction::STYLE_REACTION_PUBLISHED_STYLE, 0), |index| {
-                        (pass.style_input_reactions[index].1, pass.style_input_reactions[index].2)
-                    });
-                let pseudo_inputs_may_have_changed =
-                    pseudo_inputs_may_have_changed || style_input_reaction_index.is_some();
-                let old_style_record = self
-                    .computed_group_sets
-                    .assigned_style_record(node)
-                    .map_or(0, |style_record| style_record.raw());
-                let required_in_hidden_subtree = old_style_record == 0
-                    && required_in_hidden_subtrees
-                        .get_or_insert_with(|| {
-                            self.required_in_hidden_subtrees(&pass.published_nodes[next_published_index..])
-                        })
-                        .contains(&node);
-                let skip_hidden = old_style_record == 0 && !required_in_hidden_subtree && {
-                    let mut ancestor = self.tree.inheritance_parent(node);
-                    let mut hidden = false;
-                    while let Some(current) = ancestor {
-                        // An ancestor C++ still has to settle may change visibility when
-                        // this batch applies it. Its old record cannot decide the skip.
-                        if row_of(&pass.scratch.derived_child_inputs, current).is_some_and(|row| !row.settled) {
-                            break;
-                        }
-                        if pass.skipped_hidden_nodes.contains(&current) {
-                            hidden = true;
-                            break;
-                        }
-                        // The host decides by the first ancestor that holds a style when it applies
-                        // the row: a row of the pass holds the record the pass settled for it, and
-                        // any other element the one the host installed, which is none below an
-                        // element that entered display:none, even where the engine kept a record.
-                        let record = if row_of(&pass.scratch.derived_child_inputs, current).is_some() {
-                            self.computed_group_sets
-                                .assigned_style_record(current)
-                                .map_or(0, |record| record.raw())
-                        } else {
-                            self.held_style_record_in_pass(current)
-                        };
-                        if record != 0 {
-                            hidden = self
-                                .computed_group_sets
-                                .style_record_dependency_flags(record)
-                                .is_some_and(|flags| flags & (1 << 2) != 0);
-                            break;
-                        }
-                        ancestor = self.tree.inheritance_parent(current);
-                    }
-                    hidden
-                };
-                if skip_hidden {
-                    pass.skipped_hidden_nodes.insert(node);
-                }
-                // A record computed from an answer declaring past its winners (custom properties,
-                // Custom properties alone leave an answer complete enough: the engine computes
-                // the environment they decide.
-                let answer_is_incomplete =
-                    !answer_winners_are_complete && !self.cascade_winners_are_complete_but_for_custom_properties(node);
-                self.retained
-                    .computed_group_sets
-                    .set_node_answer_incomplete(node, answer_is_incomplete);
-                let prepared_parent_inputs = if pass
-                    .scratch
-                    .prepared_root_font
-                    .as_ref()
-                    .is_some_and(|(root, _, _)| *root == node)
-                {
-                    let (_, parent_inputs, font_drive) = pass.scratch.prepared_root_font.take().unwrap();
-                    pass.scratch.font_drive = font_drive;
-                    Some(parent_inputs)
-                } else {
-                    None
-                };
-                let resuming_font = pass.scratch.font_drive.is_pending_for(node);
-                // A gated rule's container conditions read the containers the row's ancestors
-                // publish. One this wave publishes and only the host settles publishes them when the
-                // host installs it: the wave stops here, and the next one decides the conditions over
-                // the installed containers.
-                if !skip_hidden
-                    && !resuming_font
-                    && (self.retained.published_container_verdicts.contains_key(&node)
-                        || self.retained.container_gates_unheld.contains(&node))
-                    && self.retained.container_ancestor_is_unsettled(node, &pass.scratch)
-                {
-                    pass.rows_after_installed_ancestors.insert(node);
-                    cut_at = Some(published_index);
-                    break;
-                }
-                // The immediate parent's own unresolved fact, which the direct inherited-group
-                // path reads without asking about the chain above it.
-                // A node whose winners hold gated rules is derived where their conditions are
-                // decided again and what they read of the containers is handed to the host.
-                let direct_inherited_delta = (!skip_hidden
-                    && !answer_was_taken
-                    && reaction == transaction::STYLE_REACTION_INHERITED_STYLE
-                    && !resuming_font
-                    && !self.retained.published_container_verdicts.contains_key(&node))
-                .then(|| self.retained.tree.flat_tree_parent(node))
-                .flatten()
-                .filter(|parent| {
-                    !row_of(&pass.scratch.derived_child_inputs, *parent).is_some_and(|row| row.inheritance_unresolved)
-                })
-                .and_then(|parent| {
-                    self.computed_group_sets.replace_engine_resolvable_inherited_groups(
-                        node,
-                        parent,
-                        inherited_style_groups,
-                    )
+            let style_input_reaction_index = pass
+                .style_input_reactions
+                .binary_search_by_key(&node, |&(style_node, _, _)| style_node)
+                .ok();
+            let (reaction, inherited_style_groups) = style_input_reaction_index
+                .map_or((transaction::STYLE_REACTION_PUBLISHED_STYLE, 0), |index| {
+                    (pass.style_input_reactions[index].1, pass.style_input_reactions[index].2)
                 });
-                // A regular style reaction whose moved winners the engine can compute itself
-                // publishes its new record here, so C++ applies a record instead of running a
-                // style computation. A reaction that also carries a style input, or that may have
-                // moved a pseudo-element's inputs, still materializes in C++. An ancestor this
-                // flush already settled holds the record the node inherits from.
-                // The answer says whether the node relied on a settled ancestor, whose record it
-                // then inherits from in full. C++ closes its batch over the nodes between a
-                // published descendant and its published ancestor, and folds what the ancestor's
-                // application derives into each of them before the descendant, so the node's
-                // parent holds what it inherits from only when every node up to the settled
-                // ancestor is settled as well.
-                // A refreshed answer cannot say which entries moved, so the flag stays conservative
-                // for C++; the pseudo winner states themselves are current here and settle it.
-                // Every reaction is the engine's to settle, whether the engine derived it or the
-                // host recorded it as an input: a font-environment reaction resolves against the
-                // published `@font-face` table, a descendant recompute and an ancestor becoming
-                // visible are answered by a full recompute (see `recompute_in_full`), and a
-                // reaction saying the element's pseudo-element inputs may have changed is answered
-                // by the element's own record, whose installation recomputes the highlight
-                // pseudo-elements.
-                // Clearing styles below display:none records an input for an SVG resource so it
-                // remains usable while hidden. Once the parent record is installed in that hidden
-                // subtree, the resource's inherited style moved with it.
-                let hidden_svg_recompute = pass.style_input_nodes_for_cpp.contains(&node)
-                    && reaction
-                        == (transaction::STYLE_REACTION_PUBLISHED_STYLE | transaction::STYLE_REACTION_RECOMPUTE_STYLE)
-                    && self.retained.computed_group_sets.adjustment_facts(node)
-                        & bridge::element_adjustment_fact::IS_SVG_ELEMENT
-                        != 0
-                    && self.tree.inheritance_parent(node).is_some_and(|parent| {
-                        self.retained
+            let pseudo_inputs_may_have_changed = pseudo_inputs_may_have_changed || style_input_reaction_index.is_some();
+            let old_style_record = self
+                .computed_group_sets
+                .assigned_style_record(node)
+                .map_or(0, |style_record| style_record.raw());
+            let required_in_hidden_subtree = old_style_record == 0
+                && required_in_hidden_subtrees
+                    .get_or_insert_with(|| {
+                        self.required_in_hidden_subtrees(&pass.published_nodes[next_published_index..])
+                    })
+                    .contains(&node);
+            let skip_hidden = old_style_record == 0 && !required_in_hidden_subtree && {
+                let mut ancestor = self.tree.inheritance_parent(node);
+                let mut hidden = false;
+                while let Some(current) = ancestor {
+                    // An ancestor C++ still has to settle may change visibility when
+                    // this batch applies it. Its old record cannot decide the skip.
+                    if row_of(&pass.scratch.derived_child_inputs, current).is_some_and(|row| !row.settled) {
+                        break;
+                    }
+                    if pass.skipped_hidden_nodes.contains(&current) {
+                        hidden = true;
+                        break;
+                    }
+                    // The host decides by the first ancestor that holds a style when it applies
+                    // the row: a row of the pass holds the record the pass settled for it, and
+                    // any other element the one the host installed, which is none below an
+                    // element that entered display:none, even where the engine kept a record.
+                    let record = if row_of(&pass.scratch.derived_child_inputs, current).is_some() {
+                        self.computed_group_sets
+                            .assigned_style_record(current)
+                            .map_or(0, |record| record.raw())
+                    } else {
+                        self.held_style_record_in_pass(current)
+                    };
+                    if record != 0 {
+                        hidden = self
                             .computed_group_sets
-                            .assigned_style_record(parent)
-                            .and_then(|record| {
-                                self.retained
-                                    .computed_group_sets
-                                    .style_record_dependency_flags(record.raw())
-                            })
-                            .is_some_and(|flags| flags & (1 << 2) != 0)
-                    });
-                let mut parent_inputs_moved =
-                    parked_parent_inputs
-                        .or(prepared_parent_inputs)
-                        .unwrap_or(publication::ParentInputsMoved {
-                            inherited_style: reaction & transaction::STYLE_REACTION_INHERITED_STYLE != 0,
-                            // A slotted element's box-type parent moves with its slot's place in the
-                            // shadow tree, which no input of its own says.
-                            display: pass.parent_inputs_moved_nodes.contains(&node)
-                                || self.retained.tree.assigned_slot_of(node).is_some(),
-                        });
-                parent_inputs_moved.inherited_style |= hidden_svg_recompute;
-                parent_inputs_moved.display |= hidden_svg_recompute;
-                // A parent the host installed in an earlier wave moved what the row inherits as far
-                // as the row can tell: the row reads it as it now stands.
-                if self.tree.flat_tree_parent(node).is_some_and(|parent| {
-                    row_of(&pass.scratch.derived_child_inputs, parent).is_some_and(|row| row.installed)
-                }) {
-                    parent_inputs_moved.inherited_style = true;
-                    parent_inputs_moved.display = true;
+                            .style_record_dependency_flags(record)
+                            .is_some_and(|flags| flags & (1 << 2) != 0);
+                        break;
+                    }
+                    ancestor = self.tree.inheritance_parent(current);
                 }
-                let mut retry_after_ancestor = false;
-                let awaits_sampled_parent = self.tree.flat_tree_parent(node).is_some_and(|parent| {
-                    self.retained.engine_computed_records_pending.contains_key(&parent)
+                hidden
+            };
+            if skip_hidden {
+                pass.skipped_hidden_nodes.insert(node);
+            }
+            // A record computed from an answer declaring past its winners (custom properties,
+            // Custom properties alone leave an answer complete enough: the engine computes
+            // the environment they decide.
+            let answer_is_incomplete =
+                !answer_winners_are_complete && !self.cascade_winners_are_complete_but_for_custom_properties(node);
+            self.retained
+                .computed_group_sets
+                .set_node_answer_incomplete(node, answer_is_incomplete);
+            let prepared_parent_inputs = pass
+                .scratch
+                .prepared_root_font
+                .take_if(|(root, _, _)| *root == node)
+                .map(|(_, parent_inputs, font_drive)| {
+                    pass.scratch.font_drive = font_drive;
+                    parent_inputs
+                });
+            let resuming_font = pass.scratch.font_drive.is_pending_for(node);
+            // A gated rule's container conditions read the containers the row's ancestors
+            // publish. One this wave publishes and only the host settles publishes them when the
+            // host installs it: the wave stops here, and the next one decides the conditions over
+            // the installed containers.
+            if !skip_hidden
+                && !resuming_font
+                && (self.retained.published_container_verdicts.contains_key(&node)
+                    || self.retained.container_gates_unheld.contains(&node))
+                && self.retained.container_ancestor_is_unsettled(node, &pass.scratch)
+            {
+                pass.rows_after_installed_ancestors.insert(node);
+                cut_at = Some(published_index);
+                break;
+            }
+            // The immediate parent's own unresolved fact, which the direct inherited-group
+            // path reads without asking about the chain above it.
+            // A node whose winners hold gated rules is derived where their conditions are
+            // decided again and what they read of the containers is handed to the host.
+            let direct_inherited_delta = (!skip_hidden
+                && !answer_was_taken
+                && reaction == transaction::STYLE_REACTION_INHERITED_STYLE
+                && !resuming_font
+                && !self.retained.published_container_verdicts.contains_key(&node))
+            .then(|| self.retained.tree.flat_tree_parent(node))
+            .flatten()
+            .filter(|parent| {
+                !row_of(&pass.scratch.derived_child_inputs, *parent).is_some_and(|row| row.inheritance_unresolved)
+            })
+            .and_then(|parent| {
+                self.computed_group_sets.replace_engine_resolvable_inherited_groups(
+                    node,
+                    parent,
+                    inherited_style_groups,
+                )
+            });
+            // A regular style reaction whose moved winners the engine can compute itself
+            // publishes its new record here, so C++ applies a record instead of running a
+            // style computation. A reaction that also carries a style input, or that may have
+            // moved a pseudo-element's inputs, still materializes in C++. An ancestor this
+            // flush already settled holds the record the node inherits from.
+            // The answer says whether the node relied on a settled ancestor, whose record it
+            // then inherits from in full. C++ closes its batch over the nodes between a
+            // published descendant and its published ancestor, and folds what the ancestor's
+            // application derives into each of them before the descendant, so the node's
+            // parent holds what it inherits from only when every node up to the settled
+            // ancestor is settled as well.
+            // A refreshed answer cannot say which entries moved, so the flag stays conservative
+            // for C++; the pseudo winner states themselves are current here and settle it.
+            // Every reaction is the engine's to settle, whether the engine derived it or the
+            // host recorded it as an input: a font-environment reaction resolves against the
+            // published `@font-face` table, a descendant recompute and an ancestor becoming
+            // visible are answered by a full recompute (see `recompute_in_full`), and a
+            // reaction saying the element's pseudo-element inputs may have changed is answered
+            // by the element's own record, whose installation recomputes the highlight
+            // pseudo-elements.
+            // Clearing styles below display:none records an input for an SVG resource so it
+            // remains usable while hidden. Once the parent record is installed in that hidden
+            // subtree, the resource's inherited style moved with it.
+            let hidden_svg_recompute = pass.style_input_nodes_for_cpp.contains(&node)
+                && reaction
+                    == (transaction::STYLE_REACTION_PUBLISHED_STYLE | transaction::STYLE_REACTION_RECOMPUTE_STYLE)
+                && self.retained.computed_group_sets.adjustment_facts(node)
+                    & bridge::element_adjustment_fact::IS_SVG_ELEMENT
+                    != 0
+                && self.tree.inheritance_parent(node).is_some_and(|parent| {
+                    self.retained
+                        .computed_group_sets
+                        .assigned_style_record(parent)
+                        .and_then(|record| {
+                            self.retained
+                                .computed_group_sets
+                                .style_record_dependency_flags(record.raw())
+                        })
+                        .is_some_and(|flags| flags & (1 << 2) != 0)
+                });
+            let mut parent_inputs_moved = prepared_parent_inputs.unwrap_or(publication::ParentInputsMoved {
+                inherited_style: reaction & transaction::STYLE_REACTION_INHERITED_STYLE != 0,
+                // A slotted element's box-type parent moves with its slot's place in the
+                // shadow tree, which no input of its own says.
+                display: pass.parent_inputs_moved_nodes.contains(&node)
+                    || self.retained.tree.assigned_slot_of(node).is_some(),
+            });
+            parent_inputs_moved.inherited_style |= hidden_svg_recompute;
+            parent_inputs_moved.display |= hidden_svg_recompute;
+            // A parent the host installed in an earlier wave moved what the row inherits as far
+            // as the row can tell: the row reads it as it now stands.
+            if self.tree.flat_tree_parent(node).is_some_and(|parent| {
+                row_of(&pass.scratch.derived_child_inputs, parent).is_some_and(|row| row.installed)
+            }) {
+                parent_inputs_moved.inherited_style = true;
+                parent_inputs_moved.display = true;
+            }
+            let mut retry_after_ancestor = false;
+            let awaits_sampled_parent = self.tree.flat_tree_parent(node).is_some_and(|parent| {
+                self.retained.engine_computed_records_pending.contains_key(&parent)
                         && (self.retained.computed_group_sets.adjustment_facts(parent)
                                     & bridge::element_adjustment_fact::HAS_ANIMATIONS
                                     != 0
@@ -2766,711 +2700,683 @@ impl StyleEngineState {
                                     || self.retained.nodes_owing_an_animation_sample.contains(&parent))
                         // A parent whose animations this pass sampled holds its composition.
                         && !self.retained.rows_sampled_in_pass.contains_key(&parent)
-                });
-                // An inheritance parent without a record is one C++ does not style, unless the
-                // host settles it in this wave or a later one: then the wave stops before the row,
-                // and the next one drives it over the installed parent.
-                let awaits_installed_parent = self.tree.inheritance_parent(node).is_some_and(|parent| {
-                    self.retained
-                        .computed_group_sets
-                        .assigned_style_record(parent)
-                        .is_none()
-                        && std::iter::successors(self.tree.flat_tree_parent(node), |&ancestor| {
-                            self.tree.flat_tree_parent(ancestor)
-                        })
-                        .any(|ancestor| {
-                            row_of(&pass.scratch.derived_child_inputs, ancestor).is_some_and(|row| row.awaits_host)
-                        })
-                });
-                // A registration-only transition does not change the parent's composition.
-                // A child can attempt its record now, but an explicit inherit may still need
-                // the parent's installed record. Retry that declined drive at its apply point.
-                if !awaits_sampled_parent
-                    && self.tree.flat_tree_parent(node).is_some_and(|parent| {
-                        self.retained.engine_computed_records_pending.contains_key(&parent)
-                            && self.retained.nodes_owing_a_transition_registration.get(&parent) == Some(&true)
+            });
+            // An inheritance parent without a record is one C++ does not style, unless the
+            // host settles it in this wave or a later one: then the wave stops before the row,
+            // and the next one drives it over the installed parent.
+            let awaits_installed_parent = self.tree.inheritance_parent(node).is_some_and(|parent| {
+                self.retained
+                    .computed_group_sets
+                    .assigned_style_record(parent)
+                    .is_none()
+                    && std::iter::successors(self.tree.flat_tree_parent(node), |&ancestor| {
+                        self.tree.flat_tree_parent(ancestor)
                     })
+                    .any(|ancestor| {
+                        row_of(&pass.scratch.derived_child_inputs, ancestor).is_some_and(|row| row.awaits_host)
+                    })
+            });
+            // A registration-only transition does not change the parent's composition.
+            // A child can attempt its record now, but an explicit inherit may still need
+            // the parent's installed record. Retry that declined drive at its apply point.
+            if !awaits_sampled_parent
+                && self.tree.flat_tree_parent(node).is_some_and(|parent| {
+                    self.retained.engine_computed_records_pending.contains_key(&parent)
+                        && self.retained.nodes_owing_a_transition_registration.get(&parent) == Some(&true)
+                })
+            {
+                retry_after_ancestor |=
+                    answer_winners_are_complete || self.cascade_winners_are_complete_but_for_custom_properties(node);
+            }
+            // NB: Entry gates were already established for a suspended computation.
+            //     Its completed originating record must not change that decision.
+            let engine_computed_gate_passes = if skip_hidden {
+                false
+            } else if resuming_font {
+                true
+            } else if answer_was_taken || direct_inherited_delta.is_some() {
+                false
+            } else if reaction == transaction::STYLE_REACTION_INHERITED_CUSTOM_PROPERTIES
+                && !parent_inputs_moved.display
+                && !self.node_style_reads_custom_properties(node)
+                && self.holds_parent_environment_in_pass(node)
+            {
+                // The environment move already gave a non-consumer the moved environment and
+                // the record over it. There is no element record to recompute or compare
+                // against the parent's groups, so the row owes no record and declines nothing.
+                false
+            } else if awaits_sampled_parent || awaits_installed_parent {
+                // The parent's sample and transition step run when the host installs it.
+                // The wave stops here, and the next one drives this row over them.
+                pass.rows_after_installed_ancestors.insert(node);
+                cut_at = Some(published_index);
+                break;
+            } else {
+                match self
+                    .tree
+                    .flat_tree_parent(node)
+                    .map_or(publication::AncestorChain::ROOT, |parent| {
+                        ancestor_chain(
+                            self,
+                            &pass.published_match_answers,
+                            &pass.style_input_reactions,
+                            &mut pass.scratch.derived_child_inputs,
+                            &mut crossed_ancestors,
+                            parent,
+                        )
+                    })
+                    .ancestors_are_confined()
                 {
-                    retry_after_ancestor |= answer_winners_are_complete
-                        || self.cascade_winners_are_complete_but_for_custom_properties(node);
-                }
-                // NB: Entry gates were already established for a suspended computation.
-                //     Its completed originating record must not change that decision.
-                let engine_computed_gate_passes = if skip_hidden {
-                    false
-                } else if resuming_font {
-                    true
-                } else if answer_was_taken || direct_inherited_delta.is_some() {
-                    false
-                } else if reaction == transaction::STYLE_REACTION_INHERITED_CUSTOM_PROPERTIES
-                    && !parent_inputs_moved.display
-                    && !self.node_style_reads_custom_properties(node)
-                    && self.holds_parent_environment_in_pass(node)
-                {
-                    // The environment move already gave a non-consumer the moved environment and
-                    // the record over it. There is no element record to recompute or compare
-                    // against the parent's groups, so the row owes no record and declines nothing.
-                    false
-                } else if awaits_sampled_parent || awaits_installed_parent {
-                    // The parent's sample and transition step run when the host installs it.
-                    // The wave stops here, and the next one drives this row over them.
-                    pass.rows_after_installed_ancestors.insert(node);
-                    cut_at = Some(published_index);
-                    break;
-                } else {
-                    match self
-                        .tree
-                        .flat_tree_parent(node)
-                        .map_or(publication::AncestorChain::ROOT, |parent| {
-                            ancestor_chain(
-                                self,
-                                &pass.published_match_answers,
-                                &pass.style_input_reactions,
-                                &mut pass.scratch.derived_child_inputs,
-                                &mut crossed_ancestors,
-                                parent,
-                            )
-                        })
-                        .ancestors_are_confined()
-                    {
-                        None => {
-                            // An ancestor this wave publishes moves what the row inherits, and
-                            // what it moves is only in place once the host installs it. The wave
-                            // stops here; the next one drives this row over the installed
-                            // ancestor, an incomplete answer too.
-                            counters.bump(Counter::EngineComputedRecordGateAncestors);
-                            pass.rows_after_installed_ancestors.insert(node);
-                            cut_at = Some(published_index);
-                            break;
-                        }
-                        Some(relied_on_settled_ancestor) => {
-                            parent_inputs_moved.inherited_style |= relied_on_settled_ancestor;
-                            true
-                        }
-                    }
-                };
-                // An engine no document hosts computes no records.
-                let engine_record_answer =
-                    (engine_computed_gate_passes && self.retained.computes_records()).then(|| {
-                        // Unchanged winners stand for an unchanged record only when the reaction
-                        // is rules flipping for the node, every one of them known and declaring
-                        // nothing past its winners, or the node's answer is the one it had.
-                        let flipped_rules = pass.selector_truth_changes.deltas_for(node);
-                        let answer_is_unchanged = answer_cascade_input.is_some()
-                            && answer_cascade_input == pass.previous_cascade_inputs[published_index];
-                        let flipped: publication::FlippedRules = flipped_rules
-                            .iter()
-                            .map(|delta| {
-                                self.retained
-                                    .programs
-                                    .entry(delta.entry)
-                                    .1
-                                    .pseudo_element
-                                    .map(|pseudo| pseudo.kind.0)
-                            })
-                            .collect();
-                        // No rule flipped for the node and nothing refreshed its answer: the
-                        // state it holds is its cascade, unless the environment moved, which
-                        // reaches values the winners do not name.
-                        let nothing_flipped = flipped_rules.is_empty() && !pass.environment_changed;
-                        let winners_are_exact = !pass.rule_declarations_edited
-                            && pass.selector_truth_changes.refreshes_for(node).is_empty()
-                            && (answer_is_unchanged
-                                || nothing_flipped
-                                || (!flipped_rules.is_empty()
-                                    && flipped_rules
-                                        .iter()
-                                        .all(|delta| self.retained.program.declarations_are_complete_for(delta.rule))));
-                        pass.scratch.answer_or_declarations_moved = pass.rule_declarations_edited
-                            || !flipped_rules.is_empty()
-                            || !pass.selector_truth_changes.refreshes_for(node).is_empty();
-                        // The element's font environment moved: its record resolves a font
-                        // cascade out of the published `@font-face` table, and that table is
-                        // not the one the record holds.
-                        pass.scratch.font_environment_moved = pass.font_feature_values_moved
-                            || reaction & transaction::STYLE_REACTION_FONT_INPUTS_CHANGED != 0;
-                        // A descendant recompute stands for inputs no winner shows: the root's
-                        // font metrics, an ancestor's direction, writing mode or container type.
-                        // An ancestor becoming visible stands for a record whose style was cleared
-                        // on entry to display:none.
-                        pass.scratch.recompute_in_full = reaction
-                            & (transaction::STYLE_REACTION_RECOMPUTE_DESCENDANT_STYLES
-                                | transaction::STYLE_REACTION_ANCESTOR_BECAME_VISIBLE)
-                            != 0
-                            || (pass.counter_styles_moved && self.node_reads_counter_styles(node))
-                            || (pass.container_input_nodes.contains(&node)
-                                && self.container_input_requires_full_drive(node))
-                            || pass.tree_counting_input_nodes.contains(&node);
-                        pass.scratch.ancestor_became_visible =
-                            reaction & transaction::STYLE_REACTION_ANCESTOR_BECAME_VISIBLE != 0;
-                        let delta = self.engine_computed_record_delta(
-                            node,
-                            answer_winners_are_complete,
-                            winners_are_exact.then_some(flipped),
-                            parent_inputs_moved,
-                            &mut pass.scratch,
-                            counters,
-                        );
-                        pass.scratch.recompute_in_full = false;
-                        pass.scratch.ancestor_became_visible = false;
-                        delta
-                    });
-                let suspension = match engine_record_answer {
-                    Some(Err(publication::Unanswered::Suspended(suspension))) => Some(suspension),
-                    _ => None,
-                };
-                let engine_computed_delta = engine_record_answer.and_then(Result::ok);
-                if let Some(suspension) = suspension {
-                    let starts_batching = record_deltas.is_none();
-                    if starts_batching {
-                        record_deltas = Some((0..pass.published_nodes.len()).map(|_| None).collect());
-                        batching_start = Some(published_index);
-                    }
-                    parked_subtree_roots.insert(node);
-                    next_parked_records.push(publication::pending::ParkedEngineComputedRecord {
-                        published_index,
-                        parent_inputs: parent_inputs_moved,
-                        continuation: std::mem::take(&mut pass.scratch.continuation),
-                    });
-                    // Establish the first canonical request before speculative siblings can
-                    // observe or populate mutable host font-cascade state. Later passes can
-                    // collect independent misses because this first request is then stable.
-                    if starts_batching || suspension == publication::Suspension::RandomBases {
+                    None => {
+                        // An ancestor this wave publishes moves what the row inherits, and
+                        // what it moves is only in place once the host installs it. The wave
+                        // stops here; the next one drives this row over the installed
+                        // ancestor, an incomplete answer too.
+                        counters.bump(Counter::EngineComputedRecordGateAncestors);
+                        pass.rows_after_installed_ancestors.insert(node);
+                        cut_at = Some(published_index);
                         break;
                     }
-                    continue;
-                }
-                // A row declined above is driven again over its installed ancestors, as the host
-                // would compute it where it applies the row: one the checks above tie to its
-                // ancestors, and a recomputation the host would otherwise run itself. An
-                // ancestor this wave publishes and only the host settles is not installed yet,
-                // so the wave stops before such a row instead, and the next wave drives it. An
-                // animated row is driven too: the host samples it over the record it installs, and
-                // it no longer computes a row the pass leaves it.
-                const DRIVEN_AGAIN_REACTIONS: u8 = transaction::STYLE_REACTION_RECOMPUTE_STYLE
-                    | transaction::STYLE_REACTION_RECOMPUTE_DESCENDANT_STYLES
-                    | transaction::STYLE_REACTION_ANCESTOR_BECAME_VISIBLE
-                    | transaction::STYLE_REACTION_INHERITED_STYLE
-                    | transaction::STYLE_REACTION_INHERITED_CUSTOM_PROPERTIES;
-                let declined = !skip_hidden && engine_computed_delta.is_none() && direct_inherited_delta.is_none();
-                let armed =
-                    retry_after_ancestor || answer_was_taken || pass.rows_after_installed_ancestors.contains(&node);
-                let driven_again = declined && (armed || reaction & DRIVEN_AGAIN_REACTIONS != 0);
-                if driven_again && {
-                    let mut ancestor = self.tree.flat_tree_parent(node);
-                    loop {
-                        let Some(current) = ancestor else {
-                            break false;
-                        };
-                        if row_of(&pass.scratch.derived_child_inputs, current).is_some_and(|row| row.awaits_host) {
-                            break true;
-                        }
-                        ancestor = self.tree.flat_tree_parent(current);
-                    }
-                } {
-                    pass.rows_after_installed_ancestors.insert(node);
-                    cut_at = Some(published_index);
-                    break;
-                }
-                let retried = if driven_again {
-                    // The drive reads the answers this pass published as the host sees them.
-                    std::mem::swap(
-                        &mut pass.published_match_answers,
-                        &mut self.retained.published_match_answers,
-                    );
-                    let retried = self.drive_record_over_installed_ancestors(
-                        node,
-                        armed,
-                        publication::DriveOverInstalledAncestors {
-                            document_environment_moved: pass.scratch.document_environment_moved,
-                            root_font_inputs_changed: pass.scratch.root_font_inputs_changed,
-                            viewport_moved: pass.scratch.viewport_moved,
-                        },
-                        counters,
-                    );
-                    std::mem::swap(
-                        &mut pass.published_match_answers,
-                        &mut self.retained.published_match_answers,
-                    );
-                    (retried.style_record != 0).then_some(retried)
-                } else {
-                    None
-                };
-                let settled = skip_hidden
-                    || direct_inherited_delta.is_some()
-                    || engine_computed_delta.is_some()
-                    || retried.is_some();
-                let awaits_host = !settled
-                    || (self.retained.engine_computed_records_pending.contains_key(&node)
-                        && (self.retained.computed_group_sets.adjustment_facts(node)
-                            & bridge::element_adjustment_fact::HAS_ANIMATIONS
-                            != 0
-                            || self.retained.nodes_owing_a_transition_registration.contains_key(&node)
-                            || self
-                                .retained
-                                .nodes_owing_animation_definitions
-                                .contains_key(&(node, u8::MAX))
-                            || self.retained.nodes_owing_an_animation_sample.contains(&node)));
-                if let Some(index) = node.element_index() {
-                    pass.scratch.derived_child_inputs.insert(
-                        index as usize,
-                        publication::DerivedChildInputs {
-                            settled,
-                            awaits_host,
-                            installed: false,
-                            inheritance_unresolved: !settled && reaction == transaction::STYLE_REACTION_INHERITED_STYLE,
-                            // A child folds the chain when it asks; this node's own facts
-                            // are final from here on, so the fold it caches is kept.
-                            chain: None,
-                        },
-                    );
-                }
-                // A settled row that animates is sampled here, over the record the row settled and
-                // the effect stack its animation plan leaves, and the composition is published as
-                // the element's record: the rows after it read the sampled parent in this wave, and
-                // the host installs the composition after it applies the plan. The host runs a
-                // row's transition step after it installs the composition, as it does after its own
-                // sample.
-                // A row whose plan starts the element's first animations is sampled here too, over the
-                // effects the plan creates: the host creates them as it applies the plan, before it
-                // installs the composition, as it would before its own first sample.
-                let animated = self.retained.computed_group_sets.adjustment_facts(node)
-                    & bridge::element_adjustment_fact::HAS_ANIMATIONS
-                    != 0
-                    || self.retained.nodes_owing_an_animation_sample.contains(&node);
-                let starts_animating = !animated
-                    && self
-                        .retained
-                        .nodes_owing_animation_definitions
-                        .contains_key(&(node, u8::MAX));
-                let animates = engine_computed_delta.is_some()
-                    && self.retained.engine_computed_records_pending.contains_key(&node)
-                    && (animated || starts_animating);
-                if animates {
-                    // A document element this pass settled is not installed yet, and a `rem` the
-                    // row resolves reads the record it settled.
-                    let root = pass
-                        .scratch
-                        .root_element_inputs()
-                        .and_then(|root| self.retained.assigned_root_element_font_metrics(root));
-                    let published = crate::css::style_compute::sample_settled_row(
-                        self,
-                        node,
-                        None,
-                        true,
-                        None,
-                        root,
-                        committed_boxes,
-                        timeline_samples,
-                    )
-                    .and_then(|sample| {
-                        self.publish_settled_row_sample(node, None, sample, counters)
-                            .map_err(String::from)
-                    });
-                    // What the host's comparison of the move to the composition would ask for,
-                    // answered with the composition.
-                    if let Ok(published) = published {
-                        let damage = match engine_computed_delta {
-                            Some((old_style_record, _))
-                                if old_style_record.raw() != published.style_record
-                                    && self
-                                        .retained
-                                        .computed_group_sets
-                                        .style_record_view(old_style_record.raw())
-                                        .is_some() =>
-                            {
-                                self.retained.element_record_damage(
-                                    node,
-                                    false,
-                                    old_style_record.raw(),
-                                    published.style_record,
-                                ) | bridge::FfiStyleInvalidationField::EngineComputed as u32
-                            }
-                            _ => 0,
-                        };
-                        self.retained.rows_sampled_in_pass.insert(
-                            node,
-                            engine_sample::SettledRowPublication {
-                                damage,
-                                starts_animating,
-                                ..published
-                            },
-                        );
-                        // A keyframe-borne `inherit` on a non-inherited property marks the parent, as
-                        // the host's first sample records it.
-                        if starts_animating
-                            && published.keyframes_inherited_non_inherited_style_groups != 0
-                            && let Some(parent) = self.retained.tree.parent(node)
-                        {
-                            self.retained.note_children_explicitly_inherit(parent);
-                        }
+                    Some(relied_on_settled_ancestor) => {
+                        parent_inputs_moved.inherited_style |= relied_on_settled_ancestor;
+                        true
                     }
                 }
-                // A row that owes the whole transition step has it decided here, over the
-                // composition the row installs, which the host would decide it over. A row settled
-                // any other way, such as one driven again over its installed ancestors, has the
-                // host decide its step over the record it installs.
-                self.forget_transition_step_decided_in_pass(node);
-                if let Some((old_style_record, new_style_record)) = engine_computed_delta
-                    && self.retained.nodes_owing_a_transition_registration.get(&node) == Some(&false)
-                {
-                    // The host decides the step over its own sample of a row that animates or
-                    // starts to, where the pass did not sample it.
-                    let installed = match self.retained.rows_sampled_in_pass.get(&node) {
-                        Some(sampled) => Some(sampled.style_record),
-                        None => (!animates
-                            && !self
-                                .retained
-                                .nodes_owing_animation_definitions
-                                .contains_key(&(node, u8::MAX)))
-                        .then_some(new_style_record.raw()),
-                    };
-                    if let Some(installed) = installed {
-                        self.decide_settled_row_transition_step(
-                            node,
-                            old_style_record.raw(),
-                            new_style_record.raw(),
-                            installed,
-                            committed_boxes,
-                            timeline_samples,
-                            counters,
-                        );
-                    }
-                }
-                let (old_style_record, new_style_record, damage, gap) = if skip_hidden {
-                    (0, 0, FfiStyleDeltaDamage::None, FfiStyleDeltaGap::SkippedHidden)
-                } else {
-                    match (direct_inherited_delta, engine_computed_delta) {
-                        (Some((old_style_record, new_style_record)), _) => (
-                            old_style_record.raw(),
-                            new_style_record.raw(),
-                            FfiStyleDeltaDamage::Full,
-                            FfiStyleDeltaGap::None,
-                        ),
-                        // A row a wave stopped before reads the ancestors the host installed before it,
-                        // as they now stand.
-                        (None, Some((old_style_record, new_style_record))) => (
-                            old_style_record.raw(),
-                            new_style_record.raw(),
-                            FfiStyleDeltaDamage::Full,
-                            if pass.rows_after_installed_ancestors.contains(&node) {
-                                FfiStyleDeltaGap::RetriedAfterAncestors
-                            } else {
-                                FfiStyleDeltaGap::Computed
-                            },
-                        ),
-                        (None, None) => match &retried {
-                            Some(retried) => (
-                                old_style_record,
-                                retried.style_record,
-                                FfiStyleDeltaDamage::Full,
-                                if armed {
-                                    FfiStyleDeltaGap::RetriedAfterAncestors
-                                } else {
-                                    FfiStyleDeltaGap::RetriedMaterialization
-                                },
-                            ),
-                            // The host asks for the row where it applies it. A hosted engine
-                            // settles every row it is offered, so only an engine no document hosts
-                            // leaves one.
-                            None => {
-                                debug_assert!(
-                                    !self.retained.computes_records(),
-                                    "a hosted engine settles every row it is offered"
-                                );
-                                (
-                                    old_style_record,
-                                    0,
-                                    FfiStyleDeltaDamage::None,
-                                    FfiStyleDeltaGap::Materialize,
-                                )
-                            }
-                        },
-                    }
-                };
-                // The pseudo-element records the engine settled beside the element's record,
-                // which follow it for C++ to install with it.
-                let pseudo_rows: Vec<(u8, u64, u64)> = match (&retried, gap) {
-                    (None, FfiStyleDeltaGap::Computed | FfiStyleDeltaGap::RetriedAfterAncestors) => pass
-                        .scratch
-                        .pseudo_deltas
-                        .drain(..)
-                        .map(|pseudo| {
-                            (
-                                pseudo.kind,
-                                pseudo.old_style_record.raw(),
-                                pseudo.new_style_record.raw(),
-                            )
-                        })
-                        .collect(),
-                    (Some(retried), _) => (0..bridge::RETRY_PSEUDO_RECORD_SLOTS)
-                        .filter(|&kind| retried.pseudo_records_present & (1 << kind) != 0)
-                        .map(|kind| (kind as u8, 0, retried.pseudo_records[kind]))
-                        .collect(),
-                    _ => Vec::new(),
-                };
-                // A moved inherited environment the engine leaves to C++ reaches what the node's
-                // custom declarations and substitutions read: C++ recomputes such a node, which
-                // it cannot tell from an engine-computed record.
-                let reaction = if gap == FfiStyleDeltaGap::Materialize
-                    && reaction & transaction::STYLE_REACTION_INHERITED_CUSTOM_PROPERTIES != 0
-                    && reaction & transaction::STYLE_REACTION_RECOMPUTE_STYLE == 0
-                    && self.node_style_reads_custom_properties(node)
-                {
-                    reaction | transaction::STYLE_REACTION_RECOMPUTE_STYLE
-                } else {
-                    reaction
-                };
-                // What the element's move damages is answered with the record, from the two
-                // records and the element's facts.
-                let record_damage = if new_style_record != 0
-                    && old_style_record != 0
-                    && old_style_record != new_style_record
-                    && self
-                        .retained
-                        .computed_group_sets
-                        .style_record_view(old_style_record)
-                        .is_some()
-                {
-                    self.retained
-                        .element_record_damage(node, false, old_style_record, new_style_record)
-                        | bridge::FfiStyleInvalidationField::EngineComputed as u32
-                        | if self.retained.record_builds_no_counter_styles(old_style_record) {
-                            bridge::FfiStyleInvalidationField::DamageIsTotal as u32
-                        } else {
-                            0
-                        }
-                } else {
-                    0
-                };
-                // What each pseudo-element's move damages is answered with its record too, from the
-                // two records and the element's new one. The host's counter-style comparison is
-                // post-style work it adds itself.
-                let pseudo_rows: Vec<(u8, u64, u64, u32)> = pseudo_rows
-                    .into_iter()
-                    .map(|(kind, old_pseudo_record, new_pseudo_record)| {
-                        let is_live = |record: u64| {
-                            record == 0 || self.retained.computed_group_sets.style_record_view(record).is_some()
-                        };
-                        let pseudo_damage = if new_style_record != 0
-                            && is_live(new_style_record)
-                            && is_live(old_pseudo_record)
-                            && is_live(new_pseudo_record)
-                        {
-                            self.retained.pseudo_element_record_damage(
-                                node,
-                                kind,
-                                old_pseudo_record,
-                                new_pseudo_record,
-                                new_style_record,
-                                false,
-                            ) | bridge::FfiStyleInvalidationField::EngineComputed as u32
-                        } else {
-                            0
-                        };
-                        (kind, old_pseudo_record, new_pseudo_record, pseudo_damage)
+            };
+            // An engine no document hosts computes no records.
+            let engine_computed_delta = (engine_computed_gate_passes && self.retained.computes_records()).then(|| {
+                // Unchanged winners stand for an unchanged record only when the reaction
+                // is rules flipping for the node, every one of them known and declaring
+                // nothing past its winners, or the node's answer is the one it had.
+                let flipped_rules = pass.selector_truth_changes.deltas_for(node);
+                let answer_is_unchanged = answer_cascade_input.is_some()
+                    && answer_cascade_input == pass.previous_cascade_inputs[published_index];
+                let flipped: publication::FlippedRules = flipped_rules
+                    .iter()
+                    .map(|delta| {
+                        self.retained
+                            .programs
+                            .entry(delta.entry)
+                            .1
+                            .pseudo_element
+                            .map(|pseudo| pseudo.kind.0)
                     })
                     .collect();
-                let mut style_delta = PublishedStyleDeltaRecord {
-                    style_node: node.raw(),
-                    match_answer: answer_cascade_input.map_or(0, |cascade_input| cascade_input.0),
-                    old_style_record,
-                    new_style_record,
-                    damage,
-                    record_damage: record_damage
-                        | if pass.joined_by_derivation.contains(&node) {
-                            bridge::FfiStyleInvalidationField::JoinedByDerivation as u32
-                        } else {
-                            0
-                        },
-                    reaction: reaction
-                        | if pseudo_inputs_may_have_changed {
-                            transaction::STYLE_REACTION_PSEUDO_INPUTS_MAY_HAVE_CHANGED
-                        } else {
-                            0
-                        },
-                    inherited_style_groups,
-                    pseudo_kind: u8::MAX,
-                    gap,
-                    uses_substitution: match (&retried, gap) {
-                        (Some(_), _) => self.retained.nodes_with_substituted_records.contains(&node),
-                        (None, FfiStyleDeltaGap::Computed | FfiStyleDeltaGap::RetriedAfterAncestors) => {
-                            pass.scratch.element_uses_substitution
-                        }
-                        _ => false,
+                // No rule flipped for the node and nothing refreshed its answer: the
+                // state it holds is its cascade, unless the environment moved, which
+                // reaches values the winners do not name.
+                let nothing_flipped = flipped_rules.is_empty() && !pass.environment_changed;
+                let winners_are_exact = !pass.rule_declarations_edited
+                    && pass.selector_truth_changes.refreshes_for(node).is_empty()
+                    && (answer_is_unchanged
+                        || nothing_flipped
+                        || (!flipped_rules.is_empty()
+                            && flipped_rules
+                                .iter()
+                                .all(|delta| self.retained.program.declarations_are_complete_for(delta.rule))));
+                pass.scratch.answer_or_declarations_moved = pass.rule_declarations_edited
+                    || !flipped_rules.is_empty()
+                    || !pass.selector_truth_changes.refreshes_for(node).is_empty();
+                // The element's font environment moved: its record resolves a font
+                // cascade out of the published `@font-face` table, and that table is
+                // not the one the record holds.
+                pass.scratch.font_environment_moved =
+                    pass.font_feature_values_moved || reaction & transaction::STYLE_REACTION_FONT_INPUTS_CHANGED != 0;
+                // A descendant recompute stands for inputs no winner shows: the root's
+                // font metrics, an ancestor's direction, writing mode or container type.
+                // An ancestor becoming visible stands for a record whose style was cleared
+                // on entry to display:none.
+                pass.scratch.recompute_in_full = reaction
+                    & (transaction::STYLE_REACTION_RECOMPUTE_DESCENDANT_STYLES
+                        | transaction::STYLE_REACTION_ANCESTOR_BECAME_VISIBLE)
+                    != 0
+                    || (pass.counter_styles_moved && self.node_reads_counter_styles(node))
+                    || (pass.container_input_nodes.contains(&node) && self.container_input_requires_full_drive(node))
+                    || pass.tree_counting_input_nodes.contains(&node);
+                pass.scratch.ancestor_became_visible =
+                    reaction & transaction::STYLE_REACTION_ANCESTOR_BECAME_VISIBLE != 0;
+                let delta = self.settled_engine_computed_record_delta(
+                    node,
+                    answer_winners_are_complete,
+                    winners_are_exact.then_some(flipped),
+                    parent_inputs_moved,
+                    &mut pass.scratch,
+                    counters,
+                );
+                pass.scratch.recompute_in_full = false;
+                pass.scratch.ancestor_became_visible = false;
+                delta
+            });
+            // A row declined above is driven again over its installed ancestors, as the host
+            // would compute it where it applies the row: one the checks above tie to its
+            // ancestors, and a recomputation the host would otherwise run itself. An
+            // ancestor this wave publishes and only the host settles is not installed yet,
+            // so the wave stops before such a row instead, and the next wave drives it. An
+            // animated row is driven too: the host samples it over the record it installs, and
+            // it no longer computes a row the pass leaves it.
+            const DRIVEN_AGAIN_REACTIONS: u8 = transaction::STYLE_REACTION_RECOMPUTE_STYLE
+                | transaction::STYLE_REACTION_RECOMPUTE_DESCENDANT_STYLES
+                | transaction::STYLE_REACTION_ANCESTOR_BECAME_VISIBLE
+                | transaction::STYLE_REACTION_INHERITED_STYLE
+                | transaction::STYLE_REACTION_INHERITED_CUSTOM_PROPERTIES;
+            let declined = !skip_hidden && engine_computed_delta.is_none() && direct_inherited_delta.is_none();
+            let armed = retry_after_ancestor || answer_was_taken || pass.rows_after_installed_ancestors.contains(&node);
+            let driven_again = declined && (armed || reaction & DRIVEN_AGAIN_REACTIONS != 0);
+            if driven_again && {
+                let mut ancestor = self.tree.flat_tree_parent(node);
+                loop {
+                    let Some(current) = ancestor else {
+                        break false;
+                    };
+                    if row_of(&pass.scratch.derived_child_inputs, current).is_some_and(|row| row.awaits_host) {
+                        break true;
+                    }
+                    ancestor = self.tree.flat_tree_parent(current);
+                }
+            } {
+                pass.rows_after_installed_ancestors.insert(node);
+                cut_at = Some(published_index);
+                break;
+            }
+            let retried = if driven_again {
+                // The drive reads the answers this pass published as the host sees them.
+                std::mem::swap(
+                    &mut pass.published_match_answers,
+                    &mut self.retained.published_match_answers,
+                );
+                let retried = self.drive_record_over_installed_ancestors(
+                    node,
+                    armed,
+                    publication::DriveOverInstalledAncestors {
+                        document_environment_moved: pass.scratch.document_environment_moved,
+                        root_font_inputs_changed: pass.scratch.root_font_inputs_changed,
+                        viewport_moved: pass.scratch.viewport_moved,
                     },
+                    counters,
+                );
+                std::mem::swap(
+                    &mut pass.published_match_answers,
+                    &mut self.retained.published_match_answers,
+                );
+                (retried.style_record != 0).then_some(retried)
+            } else {
+                None
+            };
+            let settled =
+                skip_hidden || direct_inherited_delta.is_some() || engine_computed_delta.is_some() || retried.is_some();
+            let awaits_host = !settled
+                || (self.retained.engine_computed_records_pending.contains_key(&node)
+                    && (self.retained.computed_group_sets.adjustment_facts(node)
+                        & bridge::element_adjustment_fact::HAS_ANIMATIONS
+                        != 0
+                        || self.retained.nodes_owing_a_transition_registration.contains_key(&node)
+                        || self
+                            .retained
+                            .nodes_owing_animation_definitions
+                            .contains_key(&(node, u8::MAX))
+                        || self.retained.nodes_owing_an_animation_sample.contains(&node)));
+            if let Some(index) = node.element_index() {
+                pass.scratch.derived_child_inputs.insert(
+                    index as usize,
+                    publication::DerivedChildInputs {
+                        settled,
+                        awaits_host,
+                        installed: false,
+                        inheritance_unresolved: !settled && reaction == transaction::STYLE_REACTION_INHERITED_STYLE,
+                        // A child folds the chain when it asks; this node's own facts
+                        // are final from here on, so the fold it caches is kept.
+                        chain: None,
+                    },
+                );
+            }
+            // A settled row that animates is sampled here, over the record the row settled and
+            // the effect stack its animation plan leaves, and the composition is published as
+            // the element's record: the rows after it read the sampled parent in this wave, and
+            // the host installs the composition after it applies the plan. The host runs a
+            // row's transition step after it installs the composition, as it does after its own
+            // sample.
+            // A row whose plan starts the element's first animations is sampled here too, over the
+            // effects the plan creates: the host creates them as it applies the plan, before it
+            // installs the composition, as it would before its own first sample.
+            let animated = self.retained.computed_group_sets.adjustment_facts(node)
+                & bridge::element_adjustment_fact::HAS_ANIMATIONS
+                != 0
+                || self.retained.nodes_owing_an_animation_sample.contains(&node);
+            let starts_animating = !animated
+                && self
+                    .retained
+                    .nodes_owing_animation_definitions
+                    .contains_key(&(node, u8::MAX));
+            let animates = engine_computed_delta.is_some()
+                && self.retained.engine_computed_records_pending.contains_key(&node)
+                && (animated || starts_animating);
+            if animates {
+                // A document element this pass settled is not installed yet, and a `rem` the
+                // row resolves reads the record it settled.
+                let root = pass
+                    .scratch
+                    .root_element_inputs()
+                    .and_then(|root| self.retained.assigned_root_element_font_metrics(root));
+                let published = crate::css::style_compute::sample_settled_row(
+                    self,
+                    node,
+                    None,
+                    true,
+                    None,
+                    root,
+                    committed_boxes,
+                    timeline_samples,
+                )
+                .and_then(|sample| {
+                    self.publish_settled_row_sample(node, None, sample, counters)
+                        .map_err(String::from)
+                });
+                // What the host's comparison of the move to the composition would ask for,
+                // answered with the composition.
+                if let Ok(published) = published {
+                    let damage = match engine_computed_delta {
+                        Some((old_style_record, _))
+                            if old_style_record.raw() != published.style_record
+                                && self
+                                    .retained
+                                    .computed_group_sets
+                                    .style_record_view(old_style_record.raw())
+                                    .is_some() =>
+                        {
+                            self.retained.element_record_damage(
+                                node,
+                                false,
+                                old_style_record.raw(),
+                                published.style_record,
+                            ) | bridge::FfiStyleInvalidationField::EngineComputed as u32
+                        }
+                        _ => 0,
+                    };
+                    self.retained.rows_sampled_in_pass.insert(
+                        node,
+                        engine_sample::SettledRowPublication {
+                            damage,
+                            starts_animating,
+                            ..published
+                        },
+                    );
+                    // A keyframe-borne `inherit` on a non-inherited property marks the parent, as
+                    // the host's first sample records it.
+                    if starts_animating
+                        && published.keyframes_inherited_non_inherited_style_groups != 0
+                        && let Some(parent) = self.retained.tree.parent(node)
+                    {
+                        self.retained.note_children_explicitly_inherit(parent);
+                    }
+                }
+            }
+            // A row that owes the whole transition step has it decided here, over the
+            // composition the row installs, which the host would decide it over. A row settled
+            // any other way, such as one driven again over its installed ancestors, has the
+            // host decide its step over the record it installs.
+            self.forget_transition_step_decided_in_pass(node);
+            if let Some((old_style_record, new_style_record)) = engine_computed_delta
+                && self.retained.nodes_owing_a_transition_registration.get(&node) == Some(&false)
+            {
+                // The host decides the step over its own sample of a row that animates or
+                // starts to, where the pass did not sample it.
+                let installed = match self.retained.rows_sampled_in_pass.get(&node) {
+                    Some(sampled) => Some(sampled.style_record),
+                    None => (!animates
+                        && !self
+                            .retained
+                            .nodes_owing_animation_definitions
+                            .contains_key(&(node, u8::MAX)))
+                    .then_some(new_style_record.raw()),
+                };
+                if let Some(installed) = installed {
+                    self.decide_settled_row_transition_step(
+                        node,
+                        old_style_record.raw(),
+                        new_style_record.raw(),
+                        installed,
+                        committed_boxes,
+                        timeline_samples,
+                        counters,
+                    );
+                }
+            }
+            let (old_style_record, new_style_record, damage, gap) = if skip_hidden {
+                (0, 0, FfiStyleDeltaDamage::None, FfiStyleDeltaGap::SkippedHidden)
+            } else {
+                match (direct_inherited_delta, engine_computed_delta) {
+                    (Some((old_style_record, new_style_record)), _) => (
+                        old_style_record.raw(),
+                        new_style_record.raw(),
+                        FfiStyleDeltaDamage::Full,
+                        FfiStyleDeltaGap::None,
+                    ),
+                    // A row a wave stopped before reads the ancestors the host installed before it,
+                    // as they now stand.
+                    (None, Some((old_style_record, new_style_record))) => (
+                        old_style_record.raw(),
+                        new_style_record.raw(),
+                        FfiStyleDeltaDamage::Full,
+                        if pass.rows_after_installed_ancestors.contains(&node) {
+                            FfiStyleDeltaGap::RetriedAfterAncestors
+                        } else {
+                            FfiStyleDeltaGap::Computed
+                        },
+                    ),
+                    (None, None) => match &retried {
+                        Some(retried) => (
+                            old_style_record,
+                            retried.style_record,
+                            FfiStyleDeltaDamage::Full,
+                            if armed {
+                                FfiStyleDeltaGap::RetriedAfterAncestors
+                            } else {
+                                FfiStyleDeltaGap::RetriedMaterialization
+                            },
+                        ),
+                        // The host asks for the row where it applies it. A hosted engine
+                        // settles every row it is offered, so only an engine no document hosts
+                        // leaves one.
+                        None => {
+                            debug_assert!(
+                                !self.retained.computes_records(),
+                                "a hosted engine settles every row it is offered"
+                            );
+                            (
+                                old_style_record,
+                                0,
+                                FfiStyleDeltaDamage::None,
+                                FfiStyleDeltaGap::Materialize,
+                            )
+                        }
+                    },
+                }
+            };
+            // The pseudo-element records the engine settled beside the element's record,
+            // which follow it for C++ to install with it.
+            let pseudo_rows: Vec<(u8, u64, u64)> = match (&retried, gap) {
+                (None, FfiStyleDeltaGap::Computed | FfiStyleDeltaGap::RetriedAfterAncestors) => pass
+                    .scratch
+                    .pseudo_deltas
+                    .drain(..)
+                    .map(|pseudo| {
+                        (
+                            pseudo.kind,
+                            pseudo.old_style_record.raw(),
+                            pseudo.new_style_record.raw(),
+                        )
+                    })
+                    .collect(),
+                (Some(retried), _) => (0..bridge::RETRY_PSEUDO_RECORD_SLOTS)
+                    .filter(|&kind| retried.pseudo_records_present & (1 << kind) != 0)
+                    .map(|kind| (kind as u8, 0, retried.pseudo_records[kind]))
+                    .collect(),
+                _ => Vec::new(),
+            };
+            // A moved inherited environment the engine leaves to C++ reaches what the node's
+            // custom declarations and substitutions read: C++ recomputes such a node, which
+            // it cannot tell from an engine-computed record.
+            let reaction = if gap == FfiStyleDeltaGap::Materialize
+                && reaction & transaction::STYLE_REACTION_INHERITED_CUSTOM_PROPERTIES != 0
+                && reaction & transaction::STYLE_REACTION_RECOMPUTE_STYLE == 0
+                && self.node_style_reads_custom_properties(node)
+            {
+                reaction | transaction::STYLE_REACTION_RECOMPUTE_STYLE
+            } else {
+                reaction
+            };
+            // What the element's move damages is answered with the record, from the two
+            // records and the element's facts.
+            let record_damage = if new_style_record != 0
+                && old_style_record != 0
+                && old_style_record != new_style_record
+                && self
+                    .retained
+                    .computed_group_sets
+                    .style_record_view(old_style_record)
+                    .is_some()
+            {
+                self.retained
+                    .element_record_damage(node, false, old_style_record, new_style_record)
+                    | bridge::FfiStyleInvalidationField::EngineComputed as u32
+                    | if self.retained.record_builds_no_counter_styles(old_style_record) {
+                        bridge::FfiStyleInvalidationField::DamageIsTotal as u32
+                    } else {
+                        0
+                    }
+            } else {
+                0
+            };
+            // What each pseudo-element's move damages is answered with its record too, from the
+            // two records and the element's new one. The host's counter-style comparison is
+            // post-style work it adds itself.
+            let pseudo_rows: Vec<(u8, u64, u64, u32)> = pseudo_rows
+                .into_iter()
+                .map(|(kind, old_pseudo_record, new_pseudo_record)| {
+                    let is_live = |record: u64| {
+                        record == 0 || self.retained.computed_group_sets.style_record_view(record).is_some()
+                    };
+                    let pseudo_damage = if new_style_record != 0
+                        && is_live(new_style_record)
+                        && is_live(old_pseudo_record)
+                        && is_live(new_pseudo_record)
+                    {
+                        self.retained.pseudo_element_record_damage(
+                            node,
+                            kind,
+                            old_pseudo_record,
+                            new_pseudo_record,
+                            new_style_record,
+                            false,
+                        ) | bridge::FfiStyleInvalidationField::EngineComputed as u32
+                    } else {
+                        0
+                    };
+                    (kind, old_pseudo_record, new_pseudo_record, pseudo_damage)
+                })
+                .collect();
+            let mut style_delta = PublishedStyleDeltaRecord {
+                style_node: node.raw(),
+                match_answer: answer_cascade_input.map_or(0, |cascade_input| cascade_input.0),
+                old_style_record,
+                new_style_record,
+                damage,
+                record_damage: record_damage
+                    | if pass.joined_by_derivation.contains(&node) {
+                        bridge::FfiStyleInvalidationField::JoinedByDerivation as u32
+                    } else {
+                        0
+                    },
+                reaction: reaction
+                    | if pseudo_inputs_may_have_changed {
+                        transaction::STYLE_REACTION_PSEUDO_INPUTS_MAY_HAVE_CHANGED
+                    } else {
+                        0
+                    },
+                inherited_style_groups,
+                pseudo_kind: u8::MAX,
+                gap,
+                uses_substitution: match (&retried, gap) {
+                    (Some(_), _) => self.retained.nodes_with_substituted_records.contains(&node),
+                    (None, FfiStyleDeltaGap::Computed | FfiStyleDeltaGap::RetriedAfterAncestors) => {
+                        pass.scratch.element_uses_substitution
+                    }
+                    _ => false,
+                },
+                row_facts: 0,
+                explicit_inheritance_debt: 0,
+                row_effect_debt: 0,
+            };
+            // What the row's application moves for the children is the engine's to derive here,
+            // from the two records and their damage: a child that is a row still to come reads
+            // it before it settles, and one that is no row joins the pass. The host derives the
+            // children of a row whose effects it completes itself.
+            //
+            // The children read the row's move from what the element holds when the host
+            // applies it, which is no record when its style was cleared on entry to display:none
+            // while the engine kept the record.
+            let held_style_record = self.held_style_record_in_pass(node);
+            // Whether a row the host holds no style for keeps its style below a hidden ancestor
+            // is the engine's to say: the host sees only the rows of the wave it installs.
+            if held_style_record == 0
+                && required_in_hidden_subtrees
+                    .get_or_insert_with(|| {
+                        self.required_in_hidden_subtrees(&pass.published_nodes[next_published_index..])
+                    })
+                    .contains(&node)
+            {
+                style_delta.record_damage |= bridge::FfiStyleInvalidationField::KeptInHiddenSubtree as u32;
+            }
+            // A row whose custom-property environment moved moves its descendants' with it: the
+            // pass moves them here, and a descendant settled after it reads the moved one. Where
+            // the host walks below the row instead, once it installs it, a child settled before
+            // that reads the environment it had: the children of such a row stay the host's too.
+            let environment_moved = held_style_record != 0
+                && held_style_record != new_style_record
+                && self
+                    .retained
+                    .computed_group_sets
+                    .style_record_custom_property_environment(held_style_record)
+                    != self
+                        .retained
+                        .computed_group_sets
+                        .style_record_custom_property_environment(new_style_record);
+            let derives_children = !awaits_host
+                && new_style_record != 0
+                && (held_style_record == 0 || held_style_record == old_style_record)
+                && matches!(
+                    gap,
+                    FfiStyleDeltaGap::None
+                        | FfiStyleDeltaGap::Computed
+                        | FfiStyleDeltaGap::RetriedAfterAncestors
+                        | FfiStyleDeltaGap::RetriedMaterialization
+                )
+                && (old_style_record == 0 || old_style_record == new_style_record || record_damage != 0)
+                && pseudo_rows
+                    .iter()
+                    .all(|&(_, old_pseudo_record, new_pseudo_record, pseudo_damage)| {
+                        pseudo_damage != 0 || old_pseudo_record == new_pseudo_record
+                    });
+            let mut environment_move = environment_move::EnvironmentMoveInPass::default();
+            let moved_environment_in_pass = environment_moved
+                && derives_children
+                && self.move_custom_property_environment_in_pass(
+                    node,
+                    self.retained
+                        .computed_group_sets
+                        .style_record_custom_property_environment(new_style_record),
+                    &mut environment_move,
+                );
+            if derives_children && (!environment_moved || moved_environment_in_pass) {
+                let row_child_facts = child_reactions::EngineRowChildFacts {
+                    old_style_record: held_style_record,
+                    new_style_record,
+                    element_damage: record_damage,
+                    pseudo_damages: pseudo_rows
+                        .iter()
+                        .map(|&(kind, _, _, pseudo_damage)| (kind, pseudo_damage))
+                        .collect(),
+                    root_font_metrics_moved: held_style_record != 0
+                        && old_style_record != new_style_record
+                        && self.retained.computed_group_sets.adjustment_facts(node)
+                            & bridge::element_adjustment_fact::IS_DOCUMENT_ELEMENT
+                            != 0
+                        && self.retained.root_font_inputs_from_raw_record(old_style_record)
+                            != self.retained.root_font_inputs_from_raw_record(new_style_record),
+                };
+                derived.clear();
+                self.derive_engine_row_child_reactions(node, style_delta.reaction, &row_child_facts, &mut derived);
+                // A descendant whose style reads the moved environment computes again over it.
+                derived.extend(
+                    environment_move
+                        .recompute
+                        .iter()
+                        .map(|&descendant| (descendant, transaction::STYLE_REACTION_RECOMPUTE_STYLE, 0, false)),
+                );
+                if moved_environment_in_pass {
+                    style_delta.record_damage |= bridge::FfiStyleInvalidationField::EnvironmentMovedInPass as u32;
+                }
+                for &(child, child_reaction, groups, display_moved) in &derived {
+                    let later_row = row_positions.get(&child).map(|&position| position > published_index);
+                    if child_reaction == 0 {
+                        if display_moved {
+                            if later_row == Some(true) {
+                                pass.parent_inputs_moved_nodes.insert(child);
+                            } else {
+                                self.retained.parent_inputs_moved_nodes.insert(child);
+                            }
+                        }
+                        continue;
+                    }
+                    match later_row {
+                        Some(true) => {
+                            match pass
+                                .style_input_reactions
+                                .binary_search_by_key(&child, |&(style_node, _, _)| style_node)
+                            {
+                                Ok(index) => {
+                                    pass.style_input_reactions[index].1 |= child_reaction;
+                                    pass.style_input_reactions[index].2 |= groups;
+                                }
+                                Err(index) => pass.style_input_reactions.insert(
+                                    index,
+                                    (
+                                        child,
+                                        transaction::STYLE_REACTION_PUBLISHED_STYLE | child_reaction,
+                                        groups,
+                                    ),
+                                ),
+                            }
+                            if display_moved {
+                                pass.parent_inputs_moved_nodes.insert(child);
+                            }
+                        }
+                        // NB: Rows settle in tree order, so no child is a row settled before
+                        //     its parent; one would take its reaction in the next transaction.
+                        Some(false) => {
+                            pass.joined_by_derivation.insert(child);
+                            self.record_derived_element_style_input(child, child_reaction, groups);
+                            if display_moved {
+                                self.retained.parent_inputs_moved_nodes.insert(child);
+                            }
+                        }
+                        None => derived_children.push((child, child_reaction, groups, display_moved)),
+                    }
+                }
+                style_delta.record_damage |= if held_style_record == 0 {
+                    bridge::FfiStyleInvalidationField::ChildrenDerivedOverNoRecord as u32
+                } else {
+                    bridge::FfiStyleInvalidationField::ChildrenDerivedOverOldRecord as u32
+                };
+                self.retained.engine_row_child_facts.insert(node, row_child_facts);
+            }
+            // The host installs each record the environment move republished after the row, and
+            // before any row below it.
+            let environment_move_rows = environment_move
+                .republished
+                .iter()
+                .map(|&(element, held, republished)| PublishedStyleDeltaRecord {
+                    style_node: element.raw(),
+                    match_answer: 0,
+                    old_style_record: held,
+                    new_style_record: republished,
+                    damage: FfiStyleDeltaDamage::Full,
+                    reaction: 0,
+                    inherited_style_groups: 0,
+                    pseudo_kind: u8::MAX,
+                    gap: FfiStyleDeltaGap::EnvironmentMoved,
+                    uses_substitution: false,
+                    record_damage: 0,
                     row_facts: 0,
                     explicit_inheritance_debt: 0,
                     row_effect_debt: 0,
-                };
-                // What the row's application moves for the children is the engine's to derive here,
-                // from the two records and their damage: a child that is a row still to come reads
-                // it before it settles, and one that is no row joins the pass. The host derives the
-                // children of a row whose effects it completes itself.
-                //
-                // The children read the row's move from what the element holds when the host
-                // applies it, which is no record when its style was cleared on entry to display:none
-                // while the engine kept the record.
-                let held_style_record = self.held_style_record_in_pass(node);
-                // Whether a row the host holds no style for keeps its style below a hidden ancestor
-                // is the engine's to say: the host sees only the rows of the wave it installs.
-                if held_style_record == 0
-                    && required_in_hidden_subtrees
-                        .get_or_insert_with(|| {
-                            self.required_in_hidden_subtrees(&pass.published_nodes[next_published_index..])
-                        })
-                        .contains(&node)
-                {
-                    style_delta.record_damage |= bridge::FfiStyleInvalidationField::KeptInHiddenSubtree as u32;
-                }
-                // A row whose custom-property environment moved moves its descendants' with it: the
-                // pass moves them here, and a descendant settled after it reads the moved one. Where
-                // the host walks below the row instead, once it installs it, a child settled before
-                // that reads the environment it had: the children of such a row stay the host's too.
-                let environment_moved = held_style_record != 0
-                    && held_style_record != new_style_record
-                    && self
-                        .retained
-                        .computed_group_sets
-                        .style_record_custom_property_environment(held_style_record)
-                        != self
-                            .retained
-                            .computed_group_sets
-                            .style_record_custom_property_environment(new_style_record);
-                let derives_children = !awaits_host
-                    && new_style_record != 0
-                    && (held_style_record == 0 || held_style_record == old_style_record)
-                    && matches!(
-                        gap,
-                        FfiStyleDeltaGap::None
-                            | FfiStyleDeltaGap::Computed
-                            | FfiStyleDeltaGap::RetriedAfterAncestors
-                            | FfiStyleDeltaGap::RetriedMaterialization
-                    )
-                    && (old_style_record == 0 || old_style_record == new_style_record || record_damage != 0)
-                    && pseudo_rows
-                        .iter()
-                        .all(|&(_, old_pseudo_record, new_pseudo_record, pseudo_damage)| {
-                            pseudo_damage != 0 || old_pseudo_record == new_pseudo_record
-                        });
-                let mut environment_move = environment_move::EnvironmentMoveInPass::default();
-                let moved_environment_in_pass = environment_moved
-                    && derives_children
-                    && self.move_custom_property_environment_in_pass(
-                        node,
-                        self.retained
-                            .computed_group_sets
-                            .style_record_custom_property_environment(new_style_record),
-                        &mut environment_move,
-                    );
-                if derives_children && (!environment_moved || moved_environment_in_pass) {
-                    let row_child_facts = child_reactions::EngineRowChildFacts {
-                        old_style_record: held_style_record,
-                        new_style_record,
-                        element_damage: record_damage,
-                        pseudo_damages: pseudo_rows
-                            .iter()
-                            .map(|&(kind, _, _, pseudo_damage)| (kind, pseudo_damage))
-                            .collect(),
-                        root_font_metrics_moved: held_style_record != 0
-                            && old_style_record != new_style_record
-                            && self.retained.computed_group_sets.adjustment_facts(node)
-                                & bridge::element_adjustment_fact::IS_DOCUMENT_ELEMENT
-                                != 0
-                            && self.retained.root_font_inputs_from_raw_record(old_style_record)
-                                != self.retained.root_font_inputs_from_raw_record(new_style_record),
-                    };
-                    derived.clear();
-                    self.derive_engine_row_child_reactions(node, style_delta.reaction, &row_child_facts, &mut derived);
-                    // A descendant whose style reads the moved environment computes again over it.
-                    derived.extend(
-                        environment_move
-                            .recompute
-                            .iter()
-                            .map(|&descendant| (descendant, transaction::STYLE_REACTION_RECOMPUTE_STYLE, 0, false)),
-                    );
-                    if moved_environment_in_pass {
-                        style_delta.record_damage |= bridge::FfiStyleInvalidationField::EnvironmentMovedInPass as u32;
-                    }
-                    for &(child, child_reaction, groups, display_moved) in &derived {
-                        let later_row = row_positions.get(&child).map(|&position| position > published_index);
-                        if child_reaction == 0 {
-                            if display_moved {
-                                if later_row == Some(true) {
-                                    pass.parent_inputs_moved_nodes.insert(child);
-                                } else {
-                                    self.retained.parent_inputs_moved_nodes.insert(child);
-                                }
-                            }
-                            continue;
-                        }
-                        match later_row {
-                            Some(true) => {
-                                match pass
-                                    .style_input_reactions
-                                    .binary_search_by_key(&child, |&(style_node, _, _)| style_node)
-                                {
-                                    Ok(index) => {
-                                        pass.style_input_reactions[index].1 |= child_reaction;
-                                        pass.style_input_reactions[index].2 |= groups;
-                                    }
-                                    Err(index) => pass.style_input_reactions.insert(
-                                        index,
-                                        (
-                                            child,
-                                            transaction::STYLE_REACTION_PUBLISHED_STYLE | child_reaction,
-                                            groups,
-                                        ),
-                                    ),
-                                }
-                                if display_moved {
-                                    pass.parent_inputs_moved_nodes.insert(child);
-                                }
-                            }
-                            // NB: Rows settle in tree order, so no child is a row settled before
-                            //     its parent; one would take its reaction in the next transaction.
-                            Some(false) => {
-                                pass.joined_by_derivation.insert(child);
-                                self.record_derived_element_style_input(child, child_reaction, groups);
-                                if display_moved {
-                                    self.retained.parent_inputs_moved_nodes.insert(child);
-                                }
-                            }
-                            None => derived_children.push((child, child_reaction, groups, display_moved)),
-                        }
-                    }
-                    style_delta.record_damage |= if held_style_record == 0 {
-                        bridge::FfiStyleInvalidationField::ChildrenDerivedOverNoRecord as u32
-                    } else {
-                        bridge::FfiStyleInvalidationField::ChildrenDerivedOverOldRecord as u32
-                    };
-                    self.retained.engine_row_child_facts.insert(node, row_child_facts);
-                }
-                // The host installs each record the environment move republished after the row, and
-                // before any row below it.
-                let environment_move_rows = environment_move
-                    .republished
+                });
+            // The pseudo-element records settled beside the row follow it.
+            let pseudo_deltas =
+                pseudo_rows
                     .iter()
-                    .map(|&(element, held, republished)| PublishedStyleDeltaRecord {
-                        style_node: element.raw(),
-                        match_answer: 0,
-                        old_style_record: held,
-                        new_style_record: republished,
-                        damage: FfiStyleDeltaDamage::Full,
-                        reaction: 0,
-                        inherited_style_groups: 0,
-                        pseudo_kind: u8::MAX,
-                        gap: FfiStyleDeltaGap::EnvironmentMoved,
-                        uses_substitution: false,
-                        record_damage: 0,
-                        row_facts: 0,
-                        explicit_inheritance_debt: 0,
-                        row_effect_debt: 0,
-                    });
-                if let Some(record_deltas) = &mut record_deltas {
-                    let mut node_deltas = vec![style_delta];
-                    for &(kind, old_pseudo_record, new_pseudo_record, pseudo_damage) in &pseudo_rows {
-                        node_deltas.push(PublishedStyleDeltaRecord {
+                    .map(
+                        |&(kind, old_pseudo_record, new_pseudo_record, pseudo_damage)| PublishedStyleDeltaRecord {
                             style_node: node.raw(),
                             match_answer: style_delta.match_answer,
                             old_style_record: old_pseudo_record,
@@ -3485,164 +3391,25 @@ impl StyleEngineState {
                             row_facts: 0,
                             explicit_inheritance_debt: 0,
                             row_effect_debt: 0,
-                        });
-                    }
-                    node_deltas.extend(environment_move_rows);
-                    record_deltas[published_index] = Some(node_deltas);
-                } else {
-                    if style_deltas.len() == style_deltas.capacity() {
-                        style_deltas.reserve(1);
-                        style_delta_memory.resize_required_to(
-                            &mut self.retained.memory,
-                            capacity::ShallowCapacityBytes::shallow_capacity_bytes(&*style_deltas),
-                        );
-                    }
-                    style_deltas.push(style_delta);
-                    {
-                        for &(kind, old_pseudo_record, new_pseudo_record, pseudo_damage) in &pseudo_rows {
-                            if style_deltas.len() == style_deltas.capacity() {
-                                style_deltas.reserve(1);
-                                style_delta_memory.resize_required_to(
-                                    &mut self.retained.memory,
-                                    capacity::ShallowCapacityBytes::shallow_capacity_bytes(&*style_deltas),
-                                );
-                            }
-                            style_deltas.push(PublishedStyleDeltaRecord {
-                                style_node: node.raw(),
-                                match_answer: style_delta.match_answer,
-                                old_style_record: old_pseudo_record,
-                                new_style_record: new_pseudo_record,
-                                damage: FfiStyleDeltaDamage::Full,
-                                reaction: transaction::STYLE_REACTION_PUBLISHED_STYLE,
-                                inherited_style_groups: 0,
-                                pseudo_kind: kind,
-                                gap: FfiStyleDeltaGap::Computed,
-                                uses_substitution: false,
-                                record_damage: pseudo_damage,
-                                row_facts: 0,
-                                explicit_inheritance_debt: 0,
-                                row_effect_debt: 0,
-                            });
-                        }
-                        for environment_move_row in environment_move_rows {
-                            if style_deltas.len() == style_deltas.capacity() {
-                                style_deltas.reserve(1);
-                                style_delta_memory.resize_required_to(
-                                    &mut self.retained.memory,
-                                    capacity::ShallowCapacityBytes::shallow_capacity_bytes(&*style_deltas),
-                                );
-                            }
-                            style_deltas.push(environment_move_row);
-                        }
-                    }
-                }
-                next_published_index = published_index + 1;
-                // NB: Sample scratch coexistence without scanning its containers per element.
-                if (published_index + 1).is_multiple_of(256) {
-                    computation_scratch_memory
-                        .resize_required_to(&mut self.retained.memory, pass.scratch.capacity_bytes());
-                }
-            }
-            let Some(first_batched_index) = batching_start else {
-                continue;
-            };
-            let parked_this_round = !next_parked_records.is_empty();
-            // A record the scan stopped before it reached waits for the next round with the ones
-            // it parked, unless the wave stops before its row: every row after the cut is driven
-            // again in the wave that reaches it, and resuming a record there would restart the
-            // scan below the cut forever.
-            next_parked_records.extend(
-                ready_record
-                    .take()
-                    .into_iter()
-                    .chain(resumed_records)
-                    .chain(carried_records),
-            );
-            if let Some(cut) = cut_at {
-                next_parked_records.retain(|parked| parked.published_index < cut);
-            }
-            next_parked_records.sort_unstable_by_key(|parked| parked.published_index);
-            let requests = next_parked_records
-                .iter_mut()
-                .filter_map(|parked| {
-                    parked
-                        .continuation
-                        .font_drive
-                        .request
-                        .take()
-                        .map(|request| (Some(pass.published_nodes[parked.published_index]), request))
-                })
-                .collect();
-            self.refill_random_base_requests();
-            self.refill_font_requests(requests, counters);
-            if !next_parked_records.is_empty() {
-                ready_record = Some(next_parked_records.remove(0));
-            }
-            waiting_records = next_parked_records;
-            next_published_index = if ready_record.is_none() && waiting_records.is_empty() {
-                cut_at.unwrap_or(pass.published_nodes.len())
-            } else {
-                // A round that leaves records to resume refilled what one it parked asked for, or
-                // settled a row the next round no longer drives. A round that did neither would
-                // be repeated as it is, forever.
-                debug_assert!(
-                    parked_this_round
-                        || settled_row_count(style_deltas, record_deltas.as_deref()) > settled_rows_before_round,
-                    "a style pass round leaves records to resume without settling or parking a row"
-                );
-                first_batched_index
-            };
-        }
-        if let Some(record_deltas) = record_deltas {
-            // A row past the cut that a font drive settled early is settled again in the wave
-            // that reaches it; the record it holds now is not one the host installs. An
-            // engine-computed record goes back with the transaction's uninstalled records, but a
-            // direct inherited-groups delta moved the node's record as it was driven, and an
-            // environment move republished the records below it: they go back here, latest
-            // first, so the wave that reaches the row moves each node from the record the host
-            // holds.
-            if let Some(cut) = cut_at {
-                for delta in record_deltas.iter().skip(cut).flatten().flatten().rev() {
-                    if delta.pseudo_kind != u8::MAX {
-                        continue;
-                    }
-                    if delta.gap == FfiStyleDeltaGap::EnvironmentMoved {
-                        if let Some(node) = StyleNodeID::from_raw(delta.style_node) {
-                            self.unwind_environment_move(node, delta.new_style_record, delta.old_style_record);
-                        }
-                        continue;
-                    }
-                    if delta.gap != FfiStyleDeltaGap::None {
-                        continue;
-                    }
-                    let (Some(node), Some(derived), Some(previous)) = (
-                        StyleNodeID::from_raw(delta.style_node),
-                        computed::FinalStyleRecordID::from_raw(delta.new_style_record),
-                        computed::FinalStyleRecordID::from_raw(delta.old_style_record),
-                    ) else {
-                        continue;
-                    };
-                    if derived != previous {
-                        self.retained
-                            .computed_group_sets
-                            .revert_engine_computed_record(node, derived, previous);
-                    }
-                }
-            }
-            for deltas in record_deltas
-                .into_iter()
-                .take(cut_at.unwrap_or(pass.published_nodes.len()))
-                .skip(batching_start.unwrap())
-                .flatten()
+                        },
+                    );
+            for delta in std::iter::once(style_delta)
+                .chain(pseudo_deltas)
+                .chain(environment_move_rows)
             {
-                if style_deltas.len() + deltas.len() > style_deltas.capacity() {
-                    style_deltas.reserve(deltas.len());
+                if style_deltas.len() == style_deltas.capacity() {
+                    style_deltas.reserve(1);
                     style_delta_memory.resize_required_to(
                         &mut self.retained.memory,
                         capacity::ShallowCapacityBytes::shallow_capacity_bytes(&*style_deltas),
                     );
                 }
-                style_deltas.extend(deltas);
+                style_deltas.push(delta);
+            }
+            next_published_index = published_index + 1;
+            // NB: Sample scratch coexistence without scanning its containers per element.
+            if (published_index + 1).is_multiple_of(256) {
+                computation_scratch_memory.resize_required_to(&mut self.retained.memory, pass.scratch.capacity_bytes());
             }
         }
         pass.next_index = cut_at.unwrap_or(pass.published_nodes.len());
@@ -4061,13 +3828,4 @@ impl StyleEngineState {
             });
         }
     }
-}
-
-/// The rows a style pass has settled so far: the ones it published before it began parking rows,
-/// and the ones it settled among the parked rows since.
-fn settled_row_count(
-    style_deltas: &[PublishedStyleDeltaRecord],
-    record_deltas: Option<&[Option<Vec<PublishedStyleDeltaRecord>>]>,
-) -> usize {
-    style_deltas.len() + record_deltas.map_or(0, |deltas| deltas.iter().filter(|deltas| deltas.is_some()).count())
 }

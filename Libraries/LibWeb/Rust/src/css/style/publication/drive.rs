@@ -37,7 +37,7 @@ pub(super) enum MonospaceRecascade {
     /// The font size the recascade reaches, and whether reaching it read the viewport.
     Size(i32, bool),
     /// A length in the ancestor chain resolves against the monospace font at the size reached so
-    /// far, which the between-pass font service has not resolved yet.
+    /// far, which the font resolver has not resolved yet.
     AwaitsFont(bridge::FfiFontResolutionRequest),
 }
 

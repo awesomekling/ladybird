@@ -981,7 +981,7 @@ impl super::StyleEngineState {
             match payloads {
                 Some(payloads) => break payloads,
                 // A font the overlay asks for that nobody resolved yet is resolved between two
-                // complete builds, as a parked row's font is, and the overlay is built again.
+                // complete builds, as a suspended row's font is, and the overlay is built again.
                 None if font_unresolved.get() && !refilled_font && self.retained.font_resolution.is_some() => {
                     let request = font_resolution_inputs(
                         table,
@@ -990,10 +990,7 @@ impl super::StyleEngineState {
                         &self.retained.document_style_computation_inputs,
                     )
                     .request;
-                    self.refill_font_requests(
-                        vec![(Some(node), super::font_resolution::FontRequest::new(request))],
-                        counters,
-                    );
+                    self.refill_font_request(Some(node), super::font_resolution::FontRequest::new(request), counters);
                     refilled_font = true;
                 }
                 None if font_unresolved.get() => return Err("an overlay font nobody resolved yet"),

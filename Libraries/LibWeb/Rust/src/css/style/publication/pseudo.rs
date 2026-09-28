@@ -1324,10 +1324,8 @@ impl StyleEngineState {
                 cssom_read,
             ) {
                 Ok(()) => break,
-                Err(Unanswered::Suspended(Suspension::RandomBases)) => self.refill_random_base_requests(),
-                Err(Unanswered::Suspended(Suspension::Font)) => {
-                    let request = scratch.font_drive.take_suspended_request();
-                    self.refill_font_requests(vec![(Some(node), request)], counters);
+                Err(Unanswered::Suspended(suspension)) => {
+                    self.refill_suspension(suspension, Some(node), &mut scratch.font_drive, counters);
                 }
             }
         }
@@ -1432,7 +1430,6 @@ impl StyleEngineState {
             return (settled, false);
         }
         let mut scratch = EngineComputedRecordScratch::default();
-        let mut suspended_memory = MemoryLease::new(MemoryCategory::BatchScratch);
         let record = loop {
             let record = self.retained.settle_pseudo_records_after_host_record_step(
                 node,
@@ -1441,11 +1438,8 @@ impl StyleEngineState {
                 counters,
             );
             match record {
-                Err(Unanswered::Suspended(Suspension::RandomBases)) => self.refill_random_base_requests(),
-                Err(Unanswered::Suspended(Suspension::Font)) => {
-                    let request = scratch.font_drive.take_suspended_request();
-                    suspended_memory.resize_required_to(&mut self.memory, scratch.font_drive.capacity_bytes());
-                    self.refill_font_requests(vec![(Some(node), request)], counters);
+                Err(Unanswered::Suspended(suspension)) => {
+                    self.refill_suspension(suspension, Some(node), &mut scratch.font_drive, counters);
                 }
                 record => break record,
             }
