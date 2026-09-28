@@ -612,9 +612,6 @@ public:
 
     virtual bool is_child_allowed(Node const&) const override;
 
-    Layout::Viewport const* layout_node() const;
-    Layout::Viewport* layout_node();
-
     Layout::Viewport const* unsafe_layout_node() const;
     Layout::Viewport* unsafe_layout_node();
 
@@ -1386,7 +1383,6 @@ public:
     // The document's half of can_compute_client_rects_without_accumulated_visual_contexts_update().
     bool client_rects_need_no_accumulated_visual_contexts_update() const;
     void schedule_accumulated_visual_context_update(Element&, AccumulatedVisualContextUpdateScope);
-    void schedule_accumulated_visual_context_update(Layout::Row const&, AccumulatedVisualContextUpdateScope);
     // The same for a box no node identity names, a pseudo-element's for one.
     void schedule_accumulated_visual_context_update(Painting::BoxSlot const&, AccumulatedVisualContextUpdateScope);
 

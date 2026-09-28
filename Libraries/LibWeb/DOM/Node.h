@@ -411,9 +411,6 @@ public:
     virtual void adopted_from(Document&) { }
     virtual WebIDL::ExceptionOr<void> cloned(Node&, bool) const { return {}; }
 
-    Layout::Node const* layout_node() const;
-    Layout::Node* layout_node();
-
     Layout::Node const* unsafe_layout_node() const;
     Layout::Node* unsafe_layout_node() { return const_cast<Layout::Node*>(static_cast<Node const*>(this)->unsafe_layout_node()); }
 

@@ -3963,36 +3963,23 @@ size_t Node::length() const
     return child_count();
 }
 
-Layout::Node const* Node::layout_node() const
-{
-    auto const* layout_node = unsafe_layout_node();
-    if (layout_node)
-        VERIFY(document().layout_is_up_to_date());
-    return layout_node;
-}
-
-Layout::Node* Node::layout_node()
-{
-    return const_cast<Layout::Node*>(static_cast<Node const*>(this)->layout_node());
-}
-
 // A node's layout node is the row its StyleNodeID is bound to in the document's layout node arena.
 // The document has no identity; it is bound to a viewport row.
 Layout::Node const* Node::unsafe_layout_node() const
 {
-    auto* arena = m_document->layout_node_arena_if_created();
+    auto* arena = m_document->layout_arena_handle();
     Layout::Node const* layout_node = nullptr;
     if (arena) {
         // A node with no StyleNodeID has no row. It is not asked for, as the ask reaches the arena, which a frame in
         // flight may own.
         if (auto const* element = as_if<Element>(*this)) {
             if (element->style_node_id() != 0)
-                layout_node = static_cast<Layout::Node const*>(Layout::RustFFI::layout_arena_bound_shell(arena->handle(), element->style_node_id().value()));
+                layout_node = static_cast<Layout::Node const*>(Layout::RustFFI::layout_arena_bound_shell(arena, element->style_node_id().value()));
         } else if (auto const* text = as_if<Text>(*this)) {
             if (text->style_node_id() != 0)
-                layout_node = static_cast<Layout::Node const*>(Layout::RustFFI::layout_arena_bound_shell(arena->handle(), text->style_node_id().value()));
+                layout_node = static_cast<Layout::Node const*>(Layout::RustFFI::layout_arena_bound_shell(arena, text->style_node_id().value()));
         } else if (is_document())
-            layout_node = static_cast<Layout::Node const*>(Layout::RustFFI::layout_arena_bound_viewport_shell(arena->handle()));
+            layout_node = static_cast<Layout::Node const*>(Layout::RustFFI::layout_arena_bound_viewport_shell(arena));
     }
     return layout_node;
 }

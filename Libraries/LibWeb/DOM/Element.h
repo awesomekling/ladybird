@@ -373,14 +373,8 @@ public:
     Optional<CSS::PseudoElement> associated_shadow_host_pseudo_element() const;
     void set_associated_shadow_host_pseudo_element(CSS::PseudoElement pseudo_element);
 
-    Layout::NodeWithStyle* layout_node();
-    Layout::NodeWithStyle const* layout_node() const;
-
     // The box that CSSOM View geometry describes. For a table, this is the table wrapper box.
     Painting::BoxSlot principal_box() const;
-
-    Layout::NodeWithStyle* unsafe_layout_node();
-    Layout::NodeWithStyle const* unsafe_layout_node() const;
 
     [[nodiscard]] CSS::ComputedStyleRecordView computed_style(Optional<CSS::PseudoElement> = {}) const;
     [[nodiscard]] CSS::StyleRecordID style_record_identity(Optional<CSS::PseudoElement> = {}) const;
@@ -651,7 +645,6 @@ public:
     bool should_indicate_focus() const;
     virtual bool is_focusable() const override;
 
-    Layout::NodeWithStyle* pseudo_element_unsafe_layout_node(CSS::PseudoElement) const;
     // Whether a layout tree build gave the pseudo-element a box: the one the arena binds to this element's identity and
     // the pseudo-element's type, or the box of the element an element-backed pseudo-element stands in for.
     bool has_pseudo_element_box(CSS::PseudoElement) const;

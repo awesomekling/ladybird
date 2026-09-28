@@ -3281,23 +3281,6 @@ void Element::set_rendered_in_top_layer(bool rendered_in_top_layer)
     CSS::record_element_adjustment_facts(*this);
 }
 
-Layout::NodeWithStyle* Element::pseudo_element_unsafe_layout_node(CSS::PseudoElement pseudo_element) const
-{
-    // A synthetic pseudo-element's box is the row the arena binds to this element's identity and the
-    // pseudo-element's type. Ask the arena for it, rather than the DOM-side cell that only mirrors
-    // that binding. An element-reference pseudo-element has no box of its own and still has to be
-    // asked for the element it stands in for.
-    if (CSS::is_synthetic_pseudo_element(pseudo_element)) {
-        auto* arena = const_cast<Document&>(document()).layout_node_arena_if_created();
-        if (!arena)
-            return nullptr;
-        return static_cast<Layout::NodeWithStyle*>(Layout::RustFFI::layout_arena_bound_pseudo_element_shell(arena->handle(), style_node_id().value(), encode_generated_for(pseudo_element)));
-    }
-    if (auto element_data = get_pseudo_element(pseudo_element); element_data.has_value())
-        return element_data->unsafe_layout_node();
-    return nullptr;
-}
-
 bool Element::has_pseudo_element_box(CSS::PseudoElement pseudo_element) const
 {
     return !!Painting::BoxSlot::of_pseudo_element(*this, pseudo_element);
@@ -5076,16 +5059,6 @@ void Element::for_each_attribute(Function<void(QualifiedName, Utf16String)> call
     }
 }
 
-Layout::NodeWithStyle* Element::layout_node()
-{
-    return static_cast<Layout::NodeWithStyle*>(Node::layout_node());
-}
-
-Layout::NodeWithStyle const* Element::layout_node() const
-{
-    return static_cast<Layout::NodeWithStyle const*>(Node::layout_node());
-}
-
 // https://drafts.csswg.org/css-tables-3/#table-wrapper-box
 Painting::BoxSlot Element::principal_box() const
 {
@@ -5095,16 +5068,6 @@ Painting::BoxSlot Element::principal_box() const
         box_values && CSS::display_from_ffi_display(box_values->display).is_table_inside() && box.parent().kind() == Layout::RustFFI::NodeKind::TableWrapper)
         return box.parent();
     return box;
-}
-
-Layout::NodeWithStyle* Element::unsafe_layout_node()
-{
-    return static_cast<Layout::NodeWithStyle*>(Node::unsafe_layout_node());
-}
-
-Layout::NodeWithStyle const* Element::unsafe_layout_node() const
-{
-    return static_cast<Layout::NodeWithStyle const*>(Node::unsafe_layout_node());
 }
 
 bool Element::has_attributes() const
