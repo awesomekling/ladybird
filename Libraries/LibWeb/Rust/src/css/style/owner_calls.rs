@@ -401,10 +401,10 @@ pub(crate) enum StyleQuery {
         rule: u32,
         result: *mut FfiNativeRuleTarget,
     },
-    SampleInstalledRecord {
-        node: u32,
-        pseudo_kind: u8,
-        style_record: u64,
+    SampleInstalledRecords {
+        records: *const super::bridge::FfiInstalledRecord,
+        count: usize,
+        samples: *mut super::bridge::FfiRowSampledInPass,
         layout_arena: *mut c_void,
     },
     SampledCustomPropertyEnvironmentOwner {
@@ -741,20 +741,23 @@ impl StyleQuery {
             Self::NativeRuleTarget { rule, result } => {
                 StyleAnswer::Bool(unsafe { crate::css::style::bridge::owner_native_rule_target(engine, rule, result) })
             }
-            Self::SampleInstalledRecord {
-                node,
-                pseudo_kind,
-                style_record,
+            Self::SampleInstalledRecords {
+                records,
+                count,
+                samples,
                 layout_arena,
-            } => StyleAnswer::RowSampled(unsafe {
-                crate::css::style::bridge::owner_sample_installed_record(
-                    engine,
-                    node,
-                    pseudo_kind,
-                    style_record,
-                    layout_arena,
-                )
-            }),
+            } => {
+                unsafe {
+                    crate::css::style::bridge::owner_sample_installed_records(
+                        engine,
+                        records,
+                        count,
+                        samples,
+                        layout_arena,
+                    );
+                };
+                StyleAnswer::None
+            }
             Self::SampledCustomPropertyEnvironmentOwner {
                 environment,
                 node,
