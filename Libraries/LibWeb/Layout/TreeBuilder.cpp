@@ -36,14 +36,10 @@
 #include <LibWeb/Dump.h>
 #include <LibWeb/HTML/HTMLInputElement.h>
 #include <LibWeb/HTML/LocalNavigable.h>
-#include <LibWeb/Layout/Box.h>
+#include <LibWeb/Layout/ImageProvider.h>
 #include <LibWeb/Layout/LayoutRustBridge.h>
-#include <LibWeb/Layout/Node.h>
-#include <LibWeb/Layout/NodeArena.h>
-#include <LibWeb/Layout/TextNode.h>
 #include <LibWeb/Layout/TreeBuilder.h>
 #include <LibWeb/Layout/TreeBuilderRustFFI.h>
-#include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/SVG/SVGClipPathElement.h>
 #include <LibWeb/SVG/SVGMaskElement.h>
@@ -61,7 +57,7 @@ public:
     virtual void layout_node_was_detached() const override
     {
         m_image_client = nullptr;
-        m_layout_node = nullptr;
+        m_box = {};
     }
 
     static NonnullOwnPtr<GeneratedContentImageProvider> create(DOM::Document& document, NonnullRefPtr<CSS::AbstractImageStyleValue> image)
@@ -69,9 +65,9 @@ public:
         return adopt_own(*new GeneratedContentImageProvider(document, move(image)));
     }
 
-    void set_layout_node(Layout::Node& layout_node)
+    void set_box(Painting::BoxSlot const& box)
     {
-        m_layout_node = layout_node;
+        m_box = box;
         publish_natural_size();
     }
 
@@ -87,9 +83,7 @@ public:
     virtual Optional<CSSPixelFraction> intrinsic_aspect_ratio() const override { return natural_size().aspect_ratio; }
     virtual Painting::BoxSlot image_provider_box() const override
     {
-        if (!m_layout_node)
-            return {};
-        return Painting::BoxSlot::of(m_layout_node->document(), Node::slot_id(m_layout_node.ptr()));
+        return m_box;
     }
 
 private:
@@ -110,11 +104,11 @@ private:
 
         virtual void image_style_value_did_update(CSS::ImageStyleValue&) override
         {
-            if (!m_owner.m_layout_node)
+            if (!m_owner.m_box)
                 return;
             m_owner.publish_natural_size();
             m_owner.image_provider_contents_changed();
-            m_owner.m_layout_node->document().render_inputs_for_write().set_needs_layout_update(Node::slot_id(m_owner.m_layout_node), DOM::SetNeedsLayoutReason::GeneratedContentImageFinishedLoading);
+            m_owner.m_box.document().render_inputs_for_write().set_needs_layout_update(m_owner.m_box.slot(), DOM::SetNeedsLayoutReason::GeneratedContentImageFinishedLoading);
         }
 
     private:
@@ -143,7 +137,8 @@ private:
             facts.auto_content_aspect_ratio_numerator = natural_size.aspect_ratio->numerator();
             facts.auto_content_aspect_ratio_denominator = natural_size.aspect_ratio->denominator();
         }
-        m_layout_node->document().render_inputs_for_write().set_owned_image_natural_size(Node::slot_id(m_layout_node), facts);
+        if (m_box)
+            m_box.document().render_inputs_for_write().set_owned_image_natural_size(m_box.slot(), facts);
     }
 
     CSS::SizeWithAspectRatio natural_size() const
@@ -154,19 +149,30 @@ private:
         return m_image->natural_size(*decoded_image_data);
     }
 
-    mutable WeakPtr<Layout::Node> m_layout_node;
+    // The box the provider answers for, until it is detached.
+    mutable Painting::BoxSlot m_box;
     NonnullRefPtr<CSS::AbstractImageStyleValue> m_image;
     mutable OwnPtr<ImageClient> m_image_client;
 };
 
-static void attach_owned_image_provider(Box& image_box, CSS::AbstractImageStyleValue& image)
+// The provider a box owns belongs to the arena, which deletes it with the box's row.
+static void attach_owned_image_provider(Painting::BoxSlot const& image_box, CSS::AbstractImageStyleValue& image)
 {
+    ASSERT(image_box.kind() == RustFFI::NodeKind::ImageBox);
+    if (image_box.kind() != RustFFI::NodeKind::ImageBox)
+        return;
     auto& document = image_box.document();
     image.load_any_resources(document);
     auto image_provider = GeneratedContentImageProvider::create(document, image);
     auto& image_provider_ref = *image_provider;
-    image_box.set_owned_image_provider(move(image_provider));
-    image_provider_ref.set_layout_node(image_box);
+    RustFFI::layout_arena_set_owned_image_provider(image_box.arena(), image_box.slot(), image_provider.leak_ptr());
+    image_provider_ref.set_box(image_box);
+}
+
+static bool image_box_image_is_available(Painting::BoxSlot const& image_box)
+{
+    auto const* image_provider = image_provider_of_image_box(image_box);
+    return image_provider && image_provider->is_image_available();
 }
 
 static RefPtr<CSS::AbstractImageStyleValue const> content_replacement_image(CSS::StyleValue const& content)
@@ -181,11 +187,13 @@ static RefPtr<CSS::AbstractImageStyleValue const> content_replacement_image(CSS:
 
 // The image a box replaces its element's contents with, named by the record the box was stamped
 // from - the same record the retired construction path read it out of.
-static void attach_content_replacement_image(Box& image_box)
+static void attach_content_replacement_image(Painting::BoxSlot const& image_box)
 {
-    auto replacement_image = content_replacement_image(image_box.style_group<CSS::ComputedValues::ContentValues>().computed_content_value());
-    VERIFY(replacement_image);
-    attach_owned_image_provider(image_box, const_cast<CSS::AbstractImageStyleValue&>(*replacement_image));
+    auto const* content_values = image_box.style_group<CSS::ComputedValues::ContentValues>();
+    auto replacement_image = content_values ? content_replacement_image(content_values->computed_content_value()) : nullptr;
+    ASSERT(replacement_image);
+    if (replacement_image)
+        attach_owned_image_provider(image_box, const_cast<CSS::AbstractImageStyleValue&>(*replacement_image));
 }
 
 // The node an identity the walk carries names. The document is the build's root and is not in the
@@ -211,34 +219,24 @@ static CSS::PseudoElement css_pseudo_element(RustFFI::FfiPseudoElement pseudo_el
     VERIFY_NOT_REACHED();
 }
 
-// A box the build produced for a pseudo-element, named by its arena row. The build hands these
-// back by slot rather than keeping a pointer to them, so the frame carries no box of its own.
-static NodeWithStyle* pseudo_element_build_node(DOM::Document& document, Compositing::RustFFI::NodeSlotId slot)
-{
-    if (slot.index == Compositing::RustFFI::INVALID_NODE_SLOT_INDEX)
-        return nullptr;
-    auto* layout_node = static_cast<Node*>(RustFFI::layout_arena_node_shell_if_live(document.layout_node_arena().handle(), slot));
-    VERIFY(layout_node);
-    return &as<NodeWithStyle>(*layout_node);
-}
-
 bool attach_owed_style_resources(DOM::Document& document, Compositing::RustFFI::NodeSlotId slot, bool owns_content_replacement_image)
 {
-    auto* layout_node = static_cast<Node*>(RustFFI::layout_arena_node_shell_if_live(document.layout_node_arena().handle(), slot));
-    VERIFY(layout_node);
+    auto box = Painting::BoxSlot::of(document, slot);
+    ASSERT(box);
+    if (!box)
+        return false;
     // A box that replaces its element's contents with a single image owns the provider that
     // answers for it. The image is named by the same style record the box was stamped from,
     // and it loads before the resources the rest of that style asks for, as it did when the
     // box was built around it.
     bool image_was_available = false;
     if (owns_content_replacement_image) {
-        auto& image_box = as<Box>(*layout_node);
-        attach_content_replacement_image(image_box);
-        image_was_available = image_box.image_provider().is_image_available();
+        attach_content_replacement_image(box);
+        image_was_available = image_box_image_is_available(box);
         if (image_was_available)
-            document.render_inputs_for_write().set_needs_layout_update(Node::slot_id(&image_box), DOM::SetNeedsLayoutReason::GeneratedContentImageFinishedLoading);
+            document.render_inputs_for_write().set_needs_layout_update(box.slot(), DOM::SetNeedsLayoutReason::GeneratedContentImageFinishedLoading);
     }
-    as<NodeWithStyle>(*layout_node).attach_style_resources();
+    attach_style_resources_to_box(box);
     return image_was_available;
 }
 
@@ -250,24 +248,25 @@ bool attach_owed_generated_image(DOM::Document& document, Compositing::RustFFI::
     if (!generator)
         return false;
     auto& element = as<DOM::Element>(*generator);
-    auto& image_box = as<Box>(*pseudo_element_build_node(document, slot));
+    auto image_box = Painting::BoxSlot::of(document, slot);
     // The marker a list-item pseudo-element nests takes its content's style from itself.
-    auto& style_box = item.nested_marker.index != Compositing::RustFFI::INVALID_NODE_SLOT_INDEX
-        ? *pseudo_element_build_node(document, item.nested_marker)
-        : *pseudo_element_build_node(document, pseudo_element_box_slot);
+    auto style_box = Painting::BoxSlot::of(document, item.nested_marker.index != Compositing::RustFFI::INVALID_NODE_SLOT_INDEX ? item.nested_marker : pseudo_element_box_slot);
+    ASSERT(image_box && style_box);
+    if (!image_box || !style_box)
+        return false;
     auto image = [&] -> NonnullRefPtr<CSS::AbstractImageStyleValue const> {
         if (item.kind == RustFFI::FfiGeneratedContentItemKind::ListStyleImage)
-            return *style_box.list_style_image();
+            return *style_box.style_group<CSS::ComputedValues::InheritedListValues>()->list_style_image_value();
         auto const* payloads = DOM::AbstractElement { element, css_pseudo_element(ffi_pseudo) }.style_record_payloads();
         VERIFY(payloads);
         auto content = CSS::style_group_from_payloads<CSS::ComputedValues::ContentValues>(payloads)->computed_content_value();
         return content->as_content().content().values()[item.content_index]->as_abstract_image();
     }();
     attach_owned_image_provider(image_box, const_cast<CSS::AbstractImageStyleValue&>(*image));
-    bool image_was_available = image_box.image_provider().is_image_available();
+    bool image_was_available = image_box_image_is_available(image_box);
     if (image_was_available)
-        document.render_inputs_for_write().set_needs_layout_update(Node::slot_id(&image_box), DOM::SetNeedsLayoutReason::GeneratedContentImageFinishedLoading);
-    image_box.attach_style_resources();
+        document.render_inputs_for_write().set_needs_layout_update(image_box.slot(), DOM::SetNeedsLayoutReason::GeneratedContentImageFinishedLoading);
+    attach_style_resources_to_box(image_box);
     return image_was_available;
 }
 
@@ -286,7 +285,7 @@ RustFFI::FfiDocumentStyleForBuild document_style_for_build(DOM::Document& docume
 void detach_top_layer_element_layout_subtree(DOM::Element& element)
 {
     RustFFI::rust_detach_top_layer_element_layout_subtree(
-        element.document().layout_node_arena().handle(), element.style_node_id().value());
+        document_layout_arena(element.document()), element.style_node_id().value());
 }
 
 // https://drafts.csswg.org/css-tables-3/#fixup-algorithm
