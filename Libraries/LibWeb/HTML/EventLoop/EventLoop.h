@@ -340,6 +340,7 @@ private:
 
     // https://html.spec.whatwg.org/multipage/webappapis.html#last-render-opportunity-time
     double m_last_render_opportunity_time { 0 };
+    RenderingOpportunitySource m_last_render_opportunity_source { RenderingOpportunitySource::Compositor };
     // https://html.spec.whatwg.org/multipage/webappapis.html#last-idle-period-start-time
     double m_last_idle_period_start_time { 0 };
 
