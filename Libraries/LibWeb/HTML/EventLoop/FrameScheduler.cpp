@@ -871,6 +871,7 @@ void FrameScheduler::grant_clock_leases()
         Layout::RustFFI::rust_document_clock_set_scroll_timelines(document->layout_arena_handle(), scroll_timelines.data(), scroll_timelines.size());
         auto& hold = *m_clock_leases.find_if([&](auto const& hold) { return hold.document.ptr() == document.ptr(); });
         hold.timeline_time_of_last_update = timeline_time;
+        hold.granted_since_last_update = true;
         publish_clock_lease_targets(hold);
         update_render_clock(hold, context_id ? Optional<Compositing::CompositorContextId> { context_id } : OptionalNone {});
         // The render clock's ticks lay out what their samples leave in a frame of their own, and present it as the frame
@@ -904,9 +905,9 @@ void FrameScheduler::replace_render_clock_kit(ClockLeaseHold& hold, OwnPtr<Local
         else
             render_clock_kits().remove(arena);
     }
-    // The ticks present from the navigable's presenter until the main thread next needs it.
+    // The ticks present from the navigable's presenter until the main thread next needs it, after its frame in flight.
     if (kit)
-        kit->presentation->presenter->lend_to_render_clock();
+        kit->presentation->presenter->lend_to_render_clock([&](auto& presented) { return LocalNavigable::follow_presented_frame(*kit, presented); });
     else if (hold.render_clock_kit)
         (void)hold.render_clock_kit->presentation->presenter->take_back_from_render_clock();
     hold.render_clock_kit = move(kit);
@@ -1064,6 +1065,15 @@ void FrameScheduler::adopt_render_clock_frames_of(LocalNavigable& navigable)
     navigable.adopt_render_clock_frame_kit(*m_clock_leases[*held].render_clock_kit);
 }
 
+void FrameScheduler::did_present_frame_in_flight(Compositor::Presentation& presented)
+{
+    MutexLocker locker(render_clock_kits_mutex());
+    auto* kit = presented.recording ? render_clock_kits().get(presented.recording->arena).value_or(nullptr) : nullptr;
+    presented.presenter->did_present_frame_in_flight(presented, [&](auto& presented) {
+        return kit && kit->presentation->presenter == presented.presenter && LocalNavigable::follow_presented_frame(*kit, presented);
+    });
+}
+
 void FrameScheduler::set_render_clock_suspended(bool suspended)
 {
     m_render_clock_suspended = suspended;
@@ -1121,6 +1131,9 @@ void FrameScheduler::prepare_clock_ticks(ReadonlySpan<GC::Root<DOM::Document>> d
         // main thread rendering at every display frame. A render clock that falls behind, the rendering update ticks.
         auto& hold = m_clock_leases[index];
         hold.timeline_time_for_update.clear();
+        bool const granted_since_last_update = exchange(hold.granted_since_last_update, false);
+        bool const display_ticked = Layout::RustFFI::rust_document_clock_take_display_ticked(arena) && !granted_since_last_update;
+        hold.awaits_display_tick = !display_ticked && hold.render_clock_context.has_value();
         auto window = document->window();
         bool const has_frame_callbacks = window && window->has_animation_frame_callbacks();
         // The rendering update ticks a lease whose last tick sampled a scroll progress timeline elsewhere than where the
@@ -1142,8 +1155,9 @@ void FrameScheduler::prepare_clock_ticks(ReadonlySpan<GC::Root<DOM::Document>> d
         }
         hold.timeline_time_of_last_update = hold.timeline_time_for_update.value_or(time);
         // Animation frame callbacks read the effects as the rendering update samples them, before the update would
-        // tick the lease: where the render clock has not kept up, the update samples them itself.
-        if (!hold.timeline_time_for_update.has_value() && has_frame_callbacks)
+        // tick the lease: where the render clock has fallen behind, the update samples them itself. One that awaits its
+        // display tick has not fallen behind, and the update ticks the lease, as it does one without frame callbacks.
+        if (!hold.timeline_time_for_update.has_value() && has_frame_callbacks && !hold.awaits_display_tick)
             revoke_clock_lease(index);
     }
 }
@@ -1198,7 +1212,12 @@ bool FrameScheduler::submit_clock_tick(Vector<GC::Ref<DOM::Document>> const& doc
         // pending would have a later task's change merge into it as one style change.
         auto& style_engine = document->style_computer().style_engine();
         if (style_engine.has_pending_transaction() || style_engine.has_deferred_geometry_transaction()) {
-            revoke_clock_lease(*held);
+            // A render clock that awaits its display tick ticks the lease there instead, and the frame shows its last
+            // tick: ending the lease here would leave the tasks until the rendering update ends without one.
+            if (m_clock_leases[*held].awaits_display_tick)
+                m_clock_leases[*held].ticked = true;
+            else
+                revoke_clock_lease(*held);
             continue;
         }
         if (!Layout::RustFFI::rust_document_clock_submit_tick(document->render_inputs_for_write().style_engine().rust_handle(), arena, time->value)) {

@@ -179,7 +179,7 @@ public:
     void forget_compositor_display_list();
 
     // Main thread only: whether the frame in flight presents from this presenter, which it owns until the main thread
-    // takes the frame in.
+    // takes the frame in, or until it has presented and the render clock's ticks present after it.
     bool is_lent_to_frame_in_flight() const { return m_holder.load() == Holder::FrameInFlight; }
     void lend_to_frame_in_flight()
     {
@@ -188,17 +188,42 @@ public:
     }
     void take_back_from_frame_in_flight()
     {
-        VERIFY(m_holder.exchange(Holder::Main) == Holder::FrameInFlight);
+        MutexLocker locker(m_render_clock_mutex);
+        auto* presented = exchange(m_presented_frame_in_flight, nullptr);
+        auto expected = Holder::FrameInFlight;
+        // Once the frame presented, the render clock may have it, or have given it back.
+        if (!m_holder.compare_exchange_strong(expected, Holder::Main))
+            VERIFY(presented);
     }
-
-    // The main thread lends the presenter to the render clock's ticks until it next needs
-    // it. Taking it back waits for a tick that presents from it now, and returns whether it was lent.
-    void lend_to_render_clock()
+    // On the Rendering thread, as the frame in flight has presented `presented`, which lives until the main thread takes
+    // the frame in: where the main thread lent the presenter to the render clock, `follow` has its ticks present after
+    // the frame, and they have the presenter once it did.
+    template<typename Follow>
+    void did_present_frame_in_flight(Presentation& presented, Follow follow)
     {
         MutexLocker locker(m_render_clock_mutex);
-        auto expected = Holder::Main;
-        if (!m_holder.compare_exchange_strong(expected, Holder::RenderClock))
-            VERIFY(expected == Holder::RenderClock);
+        m_presented_frame_in_flight = &presented;
+        if (m_holder.load() == Holder::FrameInFlight && follow(presented))
+            m_holder.store(Holder::RenderClock);
+    }
+
+    // The main thread lends the presenter to the render clock's ticks until it next needs it. Beside a frame in flight,
+    // they have it once the frame has presented and `follow` had them present after it: now, if it has presented
+    // already, or as it presents (see did_present_frame_in_flight()). A frame that has presented may have handed the
+    // presenter to the ticks it followed before: `follow` has the ticks lent it now follow it too. Taking it back waits
+    // for a tick that presents from it now, and returns whether it was lent.
+    template<typename Follow>
+    void lend_to_render_clock(Follow follow)
+    {
+        MutexLocker locker(m_render_clock_mutex);
+        if (m_presented_frame_in_flight) {
+            if (follow(*m_presented_frame_in_flight))
+                m_holder.store(Holder::RenderClock);
+            return;
+        }
+        if (m_holder.load() == Holder::FrameInFlight)
+            return;
+        m_holder.store(Holder::RenderClock);
     }
     bool take_back_from_render_clock()
     {
@@ -255,6 +280,8 @@ private:
     };
     Atomic<Holder> m_holder { Holder::Main };
     Mutex m_render_clock_mutex;
+    // What the frame in flight presented, once it has, until the main thread takes the frame in. Guarded by the mutex.
+    Presentation* m_presented_frame_in_flight { nullptr };
     Atomic<u64> m_presented_scene_epoch { 0 };
     Atomic<u64> m_compositor_visual_animation_count { 0 };
     u64 m_adopted_scene_epoch { 0 };

@@ -364,6 +364,8 @@ private:
     bool m_running_rendering_task { false };
     bool m_running_synchronous_rendering_update { false };
     bool m_rendering_update_may_overlap { false };
+    // Whether the rendering update in progress granted the clock leases as its frame went in flight.
+    bool m_clock_leases_granted_in_flight { false };
     bool m_rendering_task_queued { false };
     // The queued rendering task ran while the previous rendering update's frame was in flight and held its rendering
     // opportunity: it counts as queued, and is queued again once that frame has been taken in.

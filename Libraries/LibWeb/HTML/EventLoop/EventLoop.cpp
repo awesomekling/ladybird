@@ -1198,7 +1198,14 @@ bool EventLoop::run_rendering_update_from_step_16(Vector<GC::Ref<DOM::Document>>
 
     after_step_16_phase.clear();
     after_step_16_phase.emplace(MainThreadPhases::Phase::RenderingSubmit);
-    return m_frame_scheduler->submit();
+    if (!m_frame_scheduler->submit())
+        return false;
+    // LIBWEB_RENDER_CLOCK_FRAMES: A document that has nothing but its animations to show gets its clock lease as the
+    // frame goes in flight, not once the rendering update ends after taking it back: its render clock ticks beside the
+    // tasks that run meanwhile, and presents after the frame.
+    m_frame_scheduler->grant_clock_leases();
+    m_clock_leases_granted_in_flight = true;
+    return true;
 }
 
 Optional<DOM::LayoutOverlapBlocker> EventLoop::layout_overlap_blocker_for_rendering_update(ReadonlySpan<GC::Root<DOM::Document>> docs) const
@@ -1274,7 +1281,8 @@ void EventLoop::end_rendering_update()
 
     // The next rendering update of a document that has nothing but its animations to show
     // ticks them under a clock lease.
-    m_frame_scheduler->grant_clock_leases();
+    if (!exchange(m_clock_leases_granted_in_flight, false))
+        m_frame_scheduler->grant_clock_leases();
 
     auto const& current = m_rendering_scheduler_counters;
     auto const& previous = m_rendering_scheduler_counters_at_last_update;

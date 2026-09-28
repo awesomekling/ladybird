@@ -132,6 +132,8 @@ pub(crate) struct ClockPublication {
     /// Whether the render side presented every tick the host has not adopted yet, so that adopting
     /// them repaints nothing.
     presented_since_adoption: AtomicBool,
+    /// Whether the render clock had a display tick of the clock since the host last asked.
+    display_ticked: AtomicBool,
     /// The progress (percent) at which the last tick sampled each scroll progress timeline, or the
     /// host held it at the start, by the timeline's style engine identity.
     scroll_progress: Mutex<Vec<(u32, f64)>>,
@@ -155,6 +157,7 @@ impl ClockPublication {
             time: AtomicU64::new(time.to_bits()),
             outcome: Mutex::default(),
             presented_since_adoption: AtomicBool::new(false),
+            display_ticked: AtomicBool::new(false),
             scroll_progress: Mutex::default(),
             adoption: Mutex::default(),
             layout_frame: Mutex::default(),
@@ -595,6 +598,9 @@ pub unsafe extern "C" fn rust_document_clock_start(
         });
         clock.running = true;
         let published = &clock.published;
+        // The ticks of the clock this one replaces may have run ahead of the host's timeline, beside a task: no tick
+        // samples before the last one again.
+        let time = published.time().max(time);
         published.time.store(time.to_bits(), Ordering::Release);
         published.presented_since_adoption.store(false, Ordering::Release);
         Arc::clone(published)
@@ -962,6 +968,13 @@ pub unsafe extern "C" fn rust_document_clock_drop_unadopted(arena: *mut c_void) 
     );
 }
 
+/// Whether the render clock had a display tick of the clock of the document whose layout arena is
+/// `arena` since the host last asked, as a rendering update of the document begins.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_document_clock_take_display_ticked(arena: *mut c_void) -> bool {
+    publication_of(arena).is_some_and(|published| published.display_ticked.swap(false, Ordering::AcqRel))
+}
+
 /// A message about the clocks of documents, which the owner handles in order with every other
 /// message it is sent ([`crate::render_owner::ToOwner::Clock`]).
 pub(crate) enum ClockMessage {
@@ -1175,6 +1188,7 @@ fn run_display_tick_on(
         return;
     }
     let published = Arc::clone(&clock.published);
+    published.display_ticked.store(true, Ordering::Release);
     let time = clock.timeline_time_at(frame_time_nanoseconds as f64 / 1.0e6);
     if time.partial_cmp(&published.time()) != Some(std::cmp::Ordering::Greater) {
         count(&COUNTERS.ticks_dropped_stale);
