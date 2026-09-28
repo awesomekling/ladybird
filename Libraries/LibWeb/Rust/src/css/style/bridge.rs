@@ -3804,6 +3804,35 @@ pub(crate) unsafe fn owner_publish_computed_groups(
     )
 }
 
+/// Interns the document's style the document thread made for a layout tree build, a style no node holds, and answers
+/// its record.
+///
+/// # Safety
+///
+/// `payloads` and `longhand_table` must be the live group payloads and frozen longhand table of one style.
+pub(crate) unsafe fn intern_document_style(
+    engine: &mut StyleEngine,
+    payloads: &[SharedPayload],
+    longhand_table: Option<&crate::css::computed_longhand_table::ComputedLonghandTable>,
+) -> u64 {
+    publish_computed_groups_from_inputs(
+        engine,
+        0,
+        u8::MAX,
+        payloads,
+        super::computed::ENGINE_INHERITED_GROUP_COUNT,
+        0,
+        false,
+        0,
+        0,
+        std::ptr::null(),
+        &[],
+        longhand_table,
+        std::ptr::null(),
+    )
+    .new_style_record
+}
+
 // Shared by host publication and native layout-style derivation. Recording stays at the
 // engine input boundary even when the producer and the style store both live in Rust.
 #[allow(clippy::too_many_arguments)]

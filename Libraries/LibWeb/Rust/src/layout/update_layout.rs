@@ -57,13 +57,34 @@ pub struct FfiLayoutUpdateHostCallbacks {
     pub start_round: unsafe extern "C" fn(*mut c_void, bool, *mut c_void),
 }
 
-/// The document's style for a tree build that may build the viewport, as the document thread made it: the record the
-/// style engine holds, and the scroll offset of the document's navigable.
-#[derive(Clone, Copy, Debug, Default)]
+/// The document's style for a tree build that may build the viewport, as the document thread made it: its group
+/// payloads and its longhand table, which the owner interns as the job the round starts begins, and the scroll offset of
+/// the document's navigable. The document keeps the style alive until it makes the next, and makes none while the job
+/// runs.
+#[derive(Clone, Copy)]
 #[repr(C)]
 pub struct FfiDocumentStyleForBuild {
-    pub record: u64,
+    pub payloads: super::node_data::FfiStylePayloads,
+    pub longhand_table: *const c_void,
     pub viewport_scroll_offset: super::FfiCssPixelPoint,
+}
+
+/// The document's style for a tree build (see [`FfiDocumentStyleForBuild`]), as the owner reads it.
+pub(crate) struct DocumentStyleForBuild {
+    pub(crate) payloads: [crate::css::host_shared::SharedPayload; super::node_data::STYLE_GROUP_COUNT],
+    pub(crate) longhand_table:
+        crate::css::host_shared::HostShared<crate::css::computed_longhand_table::ComputedLonghandTable>,
+    pub(crate) viewport_scroll_offset: super::FfiCssPixelPoint,
+}
+
+impl DocumentStyleForBuild {
+    fn from_ffi(style: &FfiDocumentStyleForBuild) -> Self {
+        Self {
+            payloads: style.payloads.groups.map(crate::css::host_shared::SharedPayload::new),
+            longhand_table: crate::css::host_shared::HostShared::new(style.longhand_table.cast()),
+            viewport_scroll_offset: style.viewport_scroll_offset,
+        }
+    }
 }
 
 /// Where a layout update ends.
@@ -234,7 +255,7 @@ struct LayoutRoundFacts {
     /// from, as nothing on the document thread changes the tree until the frame is over.
     selection: Option<SelectionSnapshot>,
     /// The document's style, for a tree build of the round that may build the viewport.
-    document_style: Option<FfiDocumentStyleForBuild>,
+    document_style: Option<DocumentStyleForBuild>,
 }
 
 impl LayoutRoundFacts {
@@ -247,7 +268,9 @@ impl LayoutRoundFacts {
             // SAFETY: Guaranteed by the caller.
             selection: unsafe { round.selection.as_ref() }
                 .map(|selection| unsafe { SelectionSnapshot::from_ffi(selection) }),
-            document_style: round.has_document_style.then_some(round.document_style),
+            document_style: round
+                .has_document_style
+                .then(|| DocumentStyleForBuild::from_ffi(&round.document_style)),
         }
     }
 }
@@ -1290,8 +1313,8 @@ impl LayoutFrame {
             readies_flight,
         } = input;
         if let Some(document_style) = document_style {
-            self.arena()
-                .publish_document_style(document_style.record, document_style.viewport_scroll_offset);
+            // SAFETY: The document thread keeps the style alive while it waits for the job.
+            unsafe { self.arena().publish_document_style(&document_style) };
         }
         // The commits of the rounds stamp the selection states of the boxes they build from the selection as it is
         // now, as nothing on the document thread changes the tree until the job is over.

@@ -64,7 +64,7 @@ pub(crate) const INHERITED_GROUP_SWAP_ELIGIBLE: u8 = 1 << 3;
 pub const HOLDS_IMAGE_VALUES: u8 = 1 << 4;
 
 /// The inherited style groups lead every group tuple; a node's inherited-group column names them.
-pub(super) const ENGINE_INHERITED_GROUP_COUNT: usize = 7;
+pub(crate) const ENGINE_INHERITED_GROUP_COUNT: usize = 7;
 
 /// Whether a record with this table may take an inherited-group swap: every property inherits
 /// the way its definition says, no marker is generated for it, and no transition runs on it.

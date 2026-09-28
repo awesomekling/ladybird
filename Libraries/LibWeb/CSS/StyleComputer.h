@@ -117,9 +117,6 @@ public:
     // Give a layout-only variant of an element or pseudo-element style an authoritative record
     // without replacing the StyleEngine assignment of its DOM target.
     [[nodiscard]] StyleRecordID intern_computed_style_inputs(DOM::AbstractElement, ComputedValues const&) const;
-    // Anonymous layout boxes have no style target, but their immutable group tuple is still an
-    // authoritative shared record rather than layout-owned complete computed values.
-    [[nodiscard]] StyleRecordID intern_anonymous_layout_style(ComputedValues const&) const;
 
     void pin_style_record(StyleRecordID) const;
     void unpin_style_record(StyleRecordID) const;

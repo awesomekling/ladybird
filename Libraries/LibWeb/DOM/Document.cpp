@@ -920,6 +920,11 @@ bool Document::needs_full_layout_tree_update() const
     return arena && Layout::RustFFI::layout_arena_needs_full_layout_tree_update(arena);
 }
 
+void Document::keep_style_for_layout_tree_build(NonnullRefPtr<CSS::ComputedValues const> style)
+{
+    m_style_for_layout_tree_build = move(style);
+}
+
 void Document::set_needs_full_layout_tree_update(bool value)
 {
     render_inputs_for_write().set_needs_full_layout_tree_update(value);
