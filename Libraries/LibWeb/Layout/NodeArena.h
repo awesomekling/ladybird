@@ -76,7 +76,6 @@ public:
     ~NodeArena();
 
     Compositing::RustFFI::NodeSlotId allocate(RustFFI::FfiNodeConstructionFacts const&);
-    void free_subtree(Compositing::RustFFI::NodeSlotId);
     Node* node_if_live(Compositing::RustFFI::NodeSlotId) const;
     // The row `slot` names, found without making a shell for it, if it is still live.
     Row row_if_live(Compositing::RustFFI::NodeSlotId) const;

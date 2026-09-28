@@ -30,11 +30,6 @@ Compositing::RustFFI::NodeSlotId NodeArena::allocate(RustFFI::FfiNodeConstructio
     return RustFFI::layout_arena_allocate(handle(), construction_facts);
 }
 
-void NodeArena::free_subtree(Compositing::RustFFI::NodeSlotId root)
-{
-    RustFFI::layout_arena_free_subtree(handle(), root);
-}
-
 Node* NodeArena::node_if_live(Compositing::RustFFI::NodeSlotId slot) const
 {
     return static_cast<Node*>(RustFFI::layout_arena_node_shell_if_live(handle(), slot));

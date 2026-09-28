@@ -275,35 +275,6 @@ void Node::pin_style_record_for_detachment()
         node_with_style->pin_style_record_for_cxx_consumers();
 }
 
-// Detachment must clean the rows being removed. A journal entry would instead resolve an identity
-// after a replacement row had been bound, so this apply-only path is intentional.
-void Node::prepare_for_detach_from_layout_tree()
-{
-    RustFFI::layout_arena_prepare_node_for_detach(arena_handle(), slot_id(this));
-}
-
-void Node::prepare_subtree_for_detach_from_layout_tree()
-{
-    RustFFI::layout_arena_prepare_subtree_for_detach(arena_handle(), slot_id(this));
-}
-
-Node* Node::topmost_layout_node_of_top_layer_placement()
-{
-    auto* direct_viewport_child_candidate = this;
-    while (direct_viewport_child_candidate->parent() && direct_viewport_child_candidate->parent()->is_anonymous())
-        direct_viewport_child_candidate = direct_viewport_child_candidate->parent();
-    if (!direct_viewport_child_candidate->parent() || !direct_viewport_child_candidate->parent()->is_viewport())
-        return nullptr;
-    return direct_viewport_child_candidate;
-}
-
-// The flag is set on the box a pseudo-element is bound to and cleared when that binding moves, so
-// it answers without resolving the generator on the DOM side.
-bool Node::is_pseudo_element_principal_box() const
-{
-    return has_flag(RustFFI::NodeFlag::IsPseudoElementPrincipalBox);
-}
-
 bool NodeWithStyle::establishes_an_absolute_positioning_containing_block() const
 {
     return RustFFI::layout_arena_node_establishes_an_absolute_positioning_containing_block(arena_handle(), Node::slot_id(this));
@@ -312,11 +283,6 @@ bool NodeWithStyle::establishes_an_absolute_positioning_containing_block() const
 bool NodeWithStyle::establishes_a_fixed_positioning_containing_block() const
 {
     return RustFFI::layout_arena_node_establishes_a_fixed_positioning_containing_block(arena_handle(), Node::slot_id(this));
-}
-
-bool NodeWithStyle::has_css_transform() const
-{
-    return RustFFI::layout_arena_node_has_css_transform(arena_handle(), Node::slot_id(this));
 }
 
 GC::Ptr<HTML::LocalNavigable> Node::navigable() const
@@ -331,23 +297,9 @@ Viewport& Node::root()
     return *document().unsafe_layout_node();
 }
 
-bool NodeWithStyle::is_floating() const
-{
-    // flex-items don't float.
-    if (is_flex_item())
-        return false;
-    return float_() != CSS::Float::None;
-}
-
 bool NodeWithStyle::is_positioned() const
 {
     return position() != CSS::Positioning::Static;
-}
-
-bool NodeWithStyle::is_absolutely_positioned() const
-{
-    auto position = this->position();
-    return position == CSS::Positioning::Absolute || position == CSS::Positioning::Fixed;
 }
 
 bool NodeWithStyle::is_fixed_position() const
@@ -418,24 +370,6 @@ void NodeWithStyle::initialize_from_style_record()
 bool NodeWithStyle::has_layout_derived_style() const
 {
     return RustFFI::layout_arena_node_has_derived_style(arena_handle(), slot_id(this));
-}
-
-NonnullRefPtr<CSS::ComputedValues const> NodeWithStyle::copy_computed_values() const
-{
-    auto record_view = computed_style_record_view();
-    VERIFY(record_view);
-    return CSS::ComputedValues::Builder { *record_view }.build();
-}
-
-CSS::ComputedStyleRecordView NodeWithStyle::computed_style_record_view() const
-{
-    VERIFY(m_style_record_identity);
-    return CSS::ComputedStyleRecordView { CSS::PublishedStyleRecord::adopt(RustFFI::layout_arena_node_published_style_record(arena_handle(), slot_id(this))) };
-}
-
-CSS::StyleRecordDependencyFlag NodeWithStyle::style_dependency_flags() const
-{
-    return static_cast<CSS::StyleRecordDependencyFlag>(RustFFI::layout_arena_node_style_dependency_flags(arena_handle(), slot_id(this)));
 }
 
 NodeWithStyle::~NodeWithStyle()
@@ -685,13 +619,6 @@ void NodeWithStyle::refresh_style_from_arena(CSS::StyleRecordID record, void con
         attach_style_resources();
 }
 
-bool Node::is_root_element() const
-{
-    if (is_anonymous())
-        return false;
-    return is<HTML::HTMLHtmlElement>(*dom_node());
-}
-
 String Node::debug_description() const
 {
     StringBuilder builder;
@@ -717,20 +644,9 @@ bool NodeWithStyle::is_inline_block() const
     return display.is_inline_outside() && display.is_flow_root_inside();
 }
 
-bool NodeWithStyle::is_inline_table() const
-{
-    auto display = this->display();
-    return display.is_inline_outside() && display.is_table_inside();
-}
-
 bool Node::is_atomic_inline() const
 {
     return RustFFI::layout_arena_node_is_atomic_inline(arena_handle(), slot_id(this));
-}
-
-bool Node::is_fragmented_inline() const
-{
-    return RustFFI::layout_arena_node_is_fragmented_inline(arena_handle(), slot_id(this));
 }
 
 // https://drafts.csswg.org/css-transforms-1/#transformable-element
@@ -845,18 +761,6 @@ void NodeWithStyle::release_pinned_style_record()
     RustFFI::layout_arena_release_node_style_record_pin_for_host(arena_handle(), slot_id(this));
 }
 
-void NodeWithStyle::bind_generated_style_record(CSS::PublishedStyleRecord const* target_style_record)
-{
-    VERIFY(is_generated_for_pseudo_element());
-    if (!has_layout_derived_style()) {
-        set_style_record(target_style_record);
-        return;
-    }
-    if (!target_style_record || m_style_record_identity != target_style_record->identity())
-        return;
-    publish_style_record_to_node_data();
-}
-
 void NodeWithStyle::publish_style_record_to_node_data()
 {
     RustFFI::layout_arena_set_node_style(arena_handle(), slot_id(this), m_style_record_identity.value());
@@ -938,11 +842,6 @@ bool NodeWithStyle::is_scroll_container() const
         || overflow_value_makes_box_a_scroll_container(overflow_y());
 }
 
-void Node::clear_committed_box()
-{
-    RustFFI::layout_arena_paintable_cleared_from_node(arena_handle(), slot_id(this));
-}
-
 DOM::Node const* Node::dom_node() const
 {
     return const_cast<Node*>(this)->dom_node();
@@ -985,19 +884,6 @@ DOM::NodeIdentity Node::pseudo_element_generator_identity() const
     VERIFY(is_generated_for_pseudo_element());
     // A stale row's StyleNodeID is 0 once its generator disconnects, so it names nothing.
     return DOM::NodeIdentity::of_style_node(style_node_id());
-}
-
-void Node::set_generated_for(CSS::PseudoElement type, DOM::Element& element)
-{
-    static_assert(encode_generated_for(CSS::PseudoElement::After) == RustFFI::GENERATED_FOR_AFTER);
-    static_assert(encode_generated_for(CSS::PseudoElement::Backdrop) == RustFFI::GENERATED_FOR_BACKDROP);
-    static_assert(encode_generated_for(CSS::PseudoElement::Before) == RustFFI::GENERATED_FOR_BEFORE);
-    static_assert(encode_generated_for(CSS::PseudoElement::FirstLetter) == RustFFI::GENERATED_FOR_FIRST_LETTER);
-    static_assert(encode_generated_for(CSS::PseudoElement::Marker) == RustFFI::GENERATED_FOR_MARKER);
-    RustFFI::layout_arena_set_node_generated_for(arena_handle(), slot_id(this), encode_generated_for(type), element.style_node_id().value());
-    publish_unique_node_id();
-    if (auto* node_with_style = as_if<NodeWithStyle>(*this))
-        node_with_style->bind_generated_style_record(element.published_style_record(type));
 }
 
 CSS::StyleNodeID Node::style_node_id() const
@@ -1087,25 +973,6 @@ i64 Node::dom_target_unique_node_id() const
     return 0;
 }
 
-void Node::publish_unique_node_id()
-{
-    RustFFI::layout_arena_publish_unique_node_id(m_arena->handle(), m_slot, dom_target_unique_node_id());
-}
-
-// The sweep reaches a node's rows through the one it is bound to, so an old row left over from a
-// rebuild was invisible to it. Every row built for the node answers for itself here.
-void Node::verify_published_scroll_offset() const
-{
-    RustFFI::layout_arena_for_each_row_built_for_same_node(m_arena->handle(), m_slot, nullptr,
-        [](void*, void* shell) { static_cast<Node const*>(shell)->verify_own_published_scroll_offset(); });
-}
-
-void Node::verify_own_published_scroll_offset() const
-{
-    VERIFY(has_flag(RustFFI::NodeFlag::HasScrollOffset) == dom_target_stores_scroll_offset());
-    VERIFY(RustFFI::layout_arena_published_scroll_offset(m_arena->handle(), m_slot) == dom_target_scroll_offset());
-}
-
 DOM::Document& Node::document()
 {
     VERIFY(m_arena->document());
@@ -1143,34 +1010,6 @@ CSS::UserSelect Node::user_select_used_value() const
         return parent_node->user_select_used_value();
 
     return CSS::UserSelect::Text;
-}
-
-// https://drafts.csswg.org/css-contain-2/#containment-size
-bool NodeWithStyle::has_size_containment() const
-{
-    // However, giving an element size containment has no effect if any of the following are true:
-
-    // - if the element does not generate a principal box (as is the case with 'display: contents' or 'display: none')
-    // Note: This is the principal box
-
-    // - if its inner display type is 'table'
-    if (display().is_table_inside())
-        return false;
-
-    // - if its principal box is an internal table box
-    if (display().is_internal_table())
-        return false;
-
-    // - if its principal box is an internal ruby box or a non-atomic inline-level box
-    // FIXME: Implement this.
-
-    if (contain().size_containment)
-        return true;
-
-    if (container_type().is_size_container)
-        return true;
-
-    return false;
 }
 
 }

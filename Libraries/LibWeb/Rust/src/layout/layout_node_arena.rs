@@ -6571,16 +6571,6 @@ impl LayoutNodeArena {
 }
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_node_link_slot(
-    arena: *mut c_void,
-    id: NodeSlotId,
-    link: FfiNodeLink,
-) -> NodeSlotId {
-    // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
-    unsafe { LayoutNodeArena::from_handle(arena) }.node_link_slot(id, link)
-}
-
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_node_flags(arena: *mut c_void, id: NodeSlotId) -> u32 {
     // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
     unsafe { LayoutNodeArena::from_handle(arena) }.node_flags(id)
@@ -6835,22 +6825,6 @@ pub unsafe extern "C" fn layout_arena_set_node_needs_compositor_animation_frame(
     let arena = unsafe { LayoutNodeArena::from_handle(arena) };
     arena.join_frame_for_main_side_write(LayoutNodeArena::COMPOSITOR_ELIGIBILITY_WRITER);
     arena.set_node_needs_compositor_animation_frame(id, kind, value);
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_set_node_generated_for(
-    arena: *mut c_void,
-    id: NodeSlotId,
-    generated_for: u8,
-    generator_style_node: u32,
-) {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }.set_node_generated_for(
-        id,
-        generated_for,
-        StyleNodeID::from_raw(generator_style_node),
-    );
 }
 
 #[unsafe(no_mangle)]

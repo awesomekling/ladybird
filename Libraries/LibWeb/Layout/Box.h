@@ -22,17 +22,6 @@ public:
     // when layout is invalidated somewhere inside its subtree.
     bool is_partial_relayout_boundary() const;
 
-    ImageProvider const& image_provider() const;
-    ImageProvider& image_provider()
-    {
-        return const_cast<ImageProvider&>(const_cast<Box const&>(*this).image_provider());
-    }
-    // The provider a box owns belongs to the arena, which deletes it with the box's row. Nothing
-    // outside the box asks for it by itself, so only the box names it.
-    void set_owned_image_provider(NonnullOwnPtr<ImageProvider>);
-
-    void set_replaced_box_can_have_children(bool value) { set_flag(RustFFI::HostNodeFlag::ReplacedBoxCanHaveChildren, value); }
-
     virtual ~Box() override;
 
     void notify_content_navigable_of_committed_viewport();
@@ -43,8 +32,6 @@ public:
 
 private:
     virtual bool is_box() const final { return true; }
-
-    ImageProvider* owned_image_provider() const;
 };
 
 template<>
