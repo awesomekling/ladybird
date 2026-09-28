@@ -1382,7 +1382,7 @@ public:
     void republish_inheriting_svg_pattern_attribute_facts();
     bool has_enrolled_svg_paint_resources() const;
     void schedule_full_accumulated_visual_context_rebuild(Layout::RustFFI::FfiVisualContextGlobalRebuildReason);
-    bool can_compute_client_rects_without_accumulated_visual_contexts_update(Layout::Node const&) const;
+    bool can_compute_client_rects_without_accumulated_visual_contexts_update(Painting::BoxSlot const&) const;
     // The document's half of can_compute_client_rects_without_accumulated_visual_contexts_update().
     bool client_rects_need_no_accumulated_visual_contexts_update() const;
     void schedule_accumulated_visual_context_update(Element&, AccumulatedVisualContextUpdateScope);

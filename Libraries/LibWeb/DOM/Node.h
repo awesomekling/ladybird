@@ -416,8 +416,6 @@ public:
 
     Layout::Node const* unsafe_layout_node() const;
     Layout::Node* unsafe_layout_node() { return const_cast<Layout::Node*>(static_cast<Node const*>(this)->unsafe_layout_node()); }
-    // The row unsafe_layout_node() is the shell of, found without making a shell for it.
-    Layout::Row layout_row() const;
 
     // What the render side last said about this node's boxes: whether a layout tree build gave it
     // one, and whether a layout pass committed geometry for it. Both are bits the render side

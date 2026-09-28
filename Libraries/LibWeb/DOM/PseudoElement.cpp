@@ -42,17 +42,6 @@ void SyntheticPseudoElement::visit_edges(JS::Cell::Visitor& visitor)
 
 // A pseudo-element's box is the row bound to its generator's identity and its type. The generated
 // content inside the box carries the same pair, so only this binding tells the box from its content.
-// Node::layout_node() verifies that a row it hands out describes up-to-date layout. The
-// pseudo-element path forwarded to the unchecked accessor instead, so nothing ever checked it.
-// Report a stale read rather than assert on one, until we know whether any caller performs one.
-Layout::NodeWithStyle* SyntheticPseudoElement::layout_node() const
-{
-    auto* layout_node = unsafe_layout_node();
-    if (layout_node && !m_originating_element->document().layout_is_up_to_date())
-        dbgln("FIXME: SyntheticPseudoElement::layout_node() read a layout row while layout was stale");
-    return layout_node;
-}
-
 Layout::NodeWithStyle* SyntheticPseudoElement::unsafe_layout_node() const
 {
     if (!m_originating_element)
@@ -128,11 +117,8 @@ void SyntheticPseudoElement::replace_style_record(RefPtr<CSS::PublishedStyleReco
     if (style_record_identity() == (style_record ? style_record->identity() : CSS::StyleRecordID {}))
         return;
     m_style_record = move(style_record);
-    auto* arena = m_originating_element->document().layout_node_arena_if_created();
-    if (!arena || m_originating_element->style_node_id() == 0)
-        return;
-    if (auto row = arena->bound_row(m_originating_element->style_node_id(), encode_generated_for(m_type)))
-        Layout::NodeWithStyle::set_style_record(row, m_style_record);
+    if (auto box = Painting::BoxSlot::of_pseudo_element(*m_originating_element, m_type))
+        Layout::set_style_record_of_box(box, m_style_record);
 }
 
 void SyntheticPseudoElement::set_computed_style(RefPtr<CSS::PublishedStyleRecord const> style_record)
@@ -146,11 +132,13 @@ void SyntheticPseudoElement::set_computed_style(RefPtr<CSS::PublishedStyleRecord
 
 void SyntheticPseudoElement::clear_computed_style(RefPtr<CSS::ComputedValues const> style_to_preserve_for_detachment)
 {
-    if (auto* layout_node = unsafe_layout_node()) {
-        if (style_to_preserve_for_detachment)
-            layout_node->set_computed_values(style_to_preserve_for_detachment.release_nonnull());
-        else
-            layout_node->pin_style_record_for_detachment();
+    if (auto box = m_originating_element ? Painting::BoxSlot::of_pseudo_element(*m_originating_element, m_type) : Painting::BoxSlot {}) {
+        if (style_to_preserve_for_detachment) {
+            auto style_record = box.document().style_computer().intern_computed_style_inputs({ *m_originating_element, m_type }, *style_to_preserve_for_detachment);
+            Layout::RustFFI::layout_arena_adopt_derived_node_style(box.arena(), box.slot(), style_record.value());
+        } else {
+            Layout::RustFFI::layout_arena_pin_bound_box_style_record_for_detachment(box.arena(), m_originating_element->style_node_id().value(), encode_generated_for(m_type));
+        }
     }
     m_style_record = nullptr;
 }
@@ -174,11 +162,6 @@ void SyntheticPseudoElementTreeNode::visit_edges(JS::Cell::Visitor& visitor)
 {
     Base::visit_edges(visitor);
     TreeNode::visit_edges(visitor);
-}
-
-Layout::NodeWithStyle* ElementReferencePseudoElement::layout_node() const
-{
-    return m_referenced_element->layout_node();
 }
 
 Layout::NodeWithStyle* ElementReferencePseudoElement::unsafe_layout_node() const

@@ -3281,19 +3281,6 @@ void Element::set_rendered_in_top_layer(bool rendered_in_top_layer)
     CSS::record_element_adjustment_facts(*this);
 }
 
-Layout::NodeWithStyle* Element::pseudo_element_layout_node(CSS::PseudoElement pseudo_element) const
-{
-    if (CSS::is_synthetic_pseudo_element(pseudo_element)) {
-        auto* layout_node = pseudo_element_unsafe_layout_node(pseudo_element);
-        if (layout_node && !document().layout_is_up_to_date())
-            dbgln("FIXME: Element::pseudo_element_layout_node() read a layout row while layout was stale");
-        return layout_node;
-    }
-    if (auto element_data = get_pseudo_element(pseudo_element); element_data.has_value())
-        return element_data->layout_node();
-    return nullptr;
-}
-
 Layout::NodeWithStyle* Element::pseudo_element_unsafe_layout_node(CSS::PseudoElement pseudo_element) const
 {
     // A synthetic pseudo-element's box is the row the arena binds to this element's identity and the
@@ -5100,17 +5087,6 @@ Layout::NodeWithStyle const* Element::layout_node() const
 }
 
 // https://drafts.csswg.org/css-tables-3/#table-wrapper-box
-Layout::NodeWithStyle const* Element::principal_layout_node() const
-{
-    // The table wrapper box is the principal box of a table, and contains its caption boxes.
-    auto const* layout_node = this->layout_node();
-    if (!layout_node || !layout_node->display().is_table_inside())
-        return layout_node;
-    if (auto const* parent = layout_node->parent(); parent && parent->is_table_wrapper())
-        return parent;
-    return layout_node;
-}
-
 Painting::BoxSlot Element::principal_box() const
 {
     // The table wrapper box is the principal box of a table, and contains its caption boxes.
@@ -5206,8 +5182,8 @@ void Element::replace_style_record(CSS::StyleDrainScope const& scope, CSS::Style
     // element's record resolves `rem`, for one.
     if (style_node_id() != 0)
         scope.engine().set_element_container_query_inputs(scope, style_node_id(), style_record_identity);
-    if (auto row = layout_row())
-        Layout::NodeWithStyle::set_style_record(row, m_style_record);
+    if (auto box = Painting::BoxSlot::bound_to(*this))
+        Layout::set_style_record_of_box(box, m_style_record);
 }
 
 // An element leaving the tree holds no style; the engine hears so between passes.

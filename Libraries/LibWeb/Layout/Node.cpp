@@ -464,6 +464,30 @@ void make_host_mirror_of_box(Painting::BoxSlot const& box)
         (void)row.shell();
 }
 
+void set_style_record_of_box(Painting::BoxSlot const& box, CSS::PublishedStyleRecord const* style_record)
+{
+    if (auto row = row_of_box(box))
+        NodeWithStyle::set_style_record(row, style_record);
+}
+
+void publish_scroll_offset_of_box(Painting::BoxSlot const& box)
+{
+    if (auto row = row_of_box(box))
+        row.shell().publish_scroll_offset();
+}
+
+bool synchronize_table_spans_of_box(Painting::BoxSlot const& box)
+{
+    auto row = row_of_box(box);
+    return row && as<NodeWithStyle>(row.shell()).synchronize_table_span_data();
+}
+
+bool update_empty_line_box_fragment_flag_of_box(Painting::BoxSlot const& text_box)
+{
+    auto row = row_of_box(text_box);
+    return row && as<TextNode>(row.shell()).update_produces_line_box_fragment_when_empty_flag();
+}
+
 void NodeWithStyle::apply_style(CSS::PublishedStyleRecord const& style_record)
 {
     auto const style_record_identity = style_record.identity();
