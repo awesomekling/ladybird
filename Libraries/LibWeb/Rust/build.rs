@@ -774,14 +774,10 @@ fn generate_style_engine_boundary(manifest_dir: &Path, out_dir: &Path) -> Result
         };
         // An operation that writes the engine takes the handle the document's render inputs give
         // out; one that reads it takes the handle C++ reads through.
-        let (engine_type, engine_binding, engine_entrance) = if receiver == "const" {
-            (
-                "crate::css::style::StyleEngineHandle",
-                "engine: &crate::css::style::StyleEngine",
-                "engine_read_entrance",
-            )
+        let engine_type = if receiver == "const" {
+            "crate::css::style::StyleEngineHandle"
         } else {
-            ("crate::css::style::StyleEngineInputHandle", "engine", "engine_entrance")
+            "crate::css::style::StyleEngineInputHandle"
         };
         let replay_engine_borrow = "engine.for_replay()";
         let owner = object.get("owner").and_then(serde_json::Value::as_str);
@@ -791,8 +787,8 @@ fn generate_style_engine_boundary(manifest_dir: &Path, out_dir: &Path) -> Result
             Some("query") if return_kind != "void" => {}
             Some(other) => return Err(format!("{event}: unknown or mismatched owner kind {other}").into()),
         }
-        if owner.is_some() && ffi.is_none() {
-            return Err(format!("{event}: only an FFI operation goes to the owner").into());
+        if owner.is_some() != ffi.is_some() {
+            return Err(format!("{event}: an FFI operation, and only one, goes to the owner").into());
         }
         if let Some(owner) = owner {
             let (enum_text, arms) = if owner == "change" {
@@ -909,30 +905,6 @@ fn generate_style_engine_boundary(manifest_dir: &Path, out_dir: &Path) -> Result
                     "        crate::css::style::owner_calls::ask({handle}, \"{ffi}\", crate::css::style::owner_calls::StyleQuery::Boundary(BoundaryRead::{variant})).{conversion}()\n    }})\n}}\n"
                 )?;
             }
-        } else if let Some(ffi) = ffi {
-            writeln!(
-                rust,
-                "/// Generated from the StyleEngine boundary specification.\n///\n/// # Safety\n/// `engine` and every borrowed argument must be live for this call.\n#[unsafe(no_mangle)]"
-            )?;
-            write!(rust, "pub unsafe extern \"C\" fn {ffi}(engine: {engine_type}")?;
-            for (name, kind, (rust_type, _, _, _)) in &parsed_arguments {
-                write!(rust, ", {name}: {rust_type}")?;
-                if kind.ends_with("_slice") {
-                    write!(rust, ", {name}_count: usize")?;
-                }
-            }
-            if return_kind != "void" {
-                writeln!(rust, ") -> {rust_return} {{")?;
-            } else {
-                rust.push_str(") {\n");
-            }
-            // A main-thread entrance waits for a frame in flight that reaches the engine before it
-            // borrows the engine, and the style seal counts every entry point the host calls while
-            // an update runs.
-            writeln!(
-                rust,
-                "    abort_on_panic(|| {{\n        let {engine_binding} = unsafe {{ crate::css::style::bridge::{engine_entrance}(engine, \"{ffi}\") }};"
-            )?;
         }
         let native_receiver = if receiver == "const" {
             "&StyleEngine"
@@ -949,12 +921,6 @@ fn generate_style_engine_boundary(manifest_dir: &Path, out_dir: &Path) -> Result
             if kind.ends_with("_slice") {
                 let element_type = rust_type.trim_start_matches("*const ");
                 write!(native, ", {name}: &[{element_type}]")?;
-                if ffi.is_some() && owner.is_none() {
-                    writeln!(
-                        rust,
-                        "        let {name}: &[{element_type}] = if {name}_count == 0 || {name}.is_null() {{ &[] }} else {{ unsafe {{ std::slice::from_raw_parts({name}, {name}_count) }} }};"
-                    )?;
-                }
             } else {
                 write!(native, ", {name}: {rust_type}")?;
             }
@@ -963,17 +929,6 @@ fn generate_style_engine_boundary(manifest_dir: &Path, out_dir: &Path) -> Result
             native.push_str(") {\n");
         } else {
             writeln!(native, ") -> {rust_return} {{")?;
-        }
-        if ffi.is_some() && owner.is_none() {
-            write!(rust, "        operations::{operation_name}(engine")?;
-            for (name, _, _) in &parsed_arguments {
-                write!(rust, ", {name}")?;
-            }
-            rust.push_str(if return_kind == "void" {
-                ");\n    });\n}\n\n"
-            } else {
-                ")\n    })\n}\n\n"
-            });
         }
         for (name, _, _) in &parsed_arguments {
             writeln!(native, "        let recorded_{name} = {name};")?;
