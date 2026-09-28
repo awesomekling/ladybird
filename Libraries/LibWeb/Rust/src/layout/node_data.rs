@@ -35,7 +35,8 @@ pub(crate) type StylePayloadsRef = crate::css::host_shared::HostShared<c_void>;
 pub(crate) struct ShellId(NonZeroUsize);
 
 impl ShellId {
-    /// The id of the shell the host passes, or `None` for no shell.
+    /// The id of the shell a test passes, or `None` for no shell.
+    #[cfg(test)]
     pub(crate) fn of_host_object(shell: *mut c_void) -> Option<Self> {
         NonZeroUsize::new(shell.expose_provenance()).map(Self)
     }

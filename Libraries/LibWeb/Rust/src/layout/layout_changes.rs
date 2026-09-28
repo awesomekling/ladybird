@@ -102,6 +102,18 @@ pub(crate) enum LayoutChange {
     RowOwnsImageProvider {
         node: NodeSlotId,
     },
+    /// Whether attaching the row's style resources loaded any image.
+    SetStyleImageResourcesAttached {
+        node: NodeSlotId,
+        attached: bool,
+    },
+    /// The table spans the element the row was built for asks for.
+    SetTableSpans {
+        node: NodeSlotId,
+        column_span: u16,
+        row_span: u16,
+        raw_column_span: u32,
+    },
 }
 
 impl LayoutChange {
@@ -191,6 +203,21 @@ impl LayoutChange {
                     arena.note_row_owns_image_provider(node);
                 }
             }
+            Self::SetStyleImageResourcesAttached { node, attached } => {
+                if arena.slot_is_live(node) {
+                    arena.note_style_image_resources_attached(node, attached);
+                }
+            }
+            Self::SetTableSpans {
+                node,
+                column_span,
+                row_span,
+                raw_column_span,
+            } => {
+                if arena.slot_is_live(node) {
+                    arena.set_table_spans(node, column_span, row_span, raw_column_span);
+                }
+            }
         }
     }
 
@@ -201,6 +228,7 @@ impl LayoutChange {
             Self::SetNeedsLayoutUpdate { .. }
                 | Self::EnrollTextAfterLanguageChange { .. }
                 | Self::SetNeedsFullLayoutTreeUpdate(true)
+                | Self::SetTableSpans { .. }
         )
     }
 }

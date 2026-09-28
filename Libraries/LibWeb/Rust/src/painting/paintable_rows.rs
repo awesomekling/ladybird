@@ -365,6 +365,11 @@ pub(crate) struct PaintableRowReset {
 }
 
 impl PaintableRowReset {
+    /// The row the reset is of, where the arena freed it.
+    pub(crate) fn freed_row(&self) -> Option<NodeSlotId> {
+        (self.kind == PaintableRowResetKind::Freed).then_some(self.slot)
+    }
+
     /// Tells the document about the reset, where `viewport_row` is the row its viewport is bound to
     /// now, which the arena knows without the document asking it once for every reset row.
     pub(crate) fn invoke_callback_on_main_thread(

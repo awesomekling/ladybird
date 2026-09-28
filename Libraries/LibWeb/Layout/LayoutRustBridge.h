@@ -77,7 +77,7 @@ void set_style_record_of_box(Painting::BoxSlot const&, CSS::PublishedStyleRecord
 // Publishes the scroll offset of the box's DOM target to every row built for it.
 void publish_scroll_offset_of_box(Painting::BoxSlot const&);
 // Takes the spans of the table cell or column the box was built for into the box: whether they moved.
-bool synchronize_table_spans_of_box(Painting::BoxSlot const&);
+void synchronize_table_spans_of_box(Painting::BoxSlot const&);
 // Whether the text box produces a line box fragment when empty, as its text's editing state says now: whether that
 // changed.
 bool update_empty_line_box_fragment_flag_of_box(Painting::BoxSlot const& text_box);

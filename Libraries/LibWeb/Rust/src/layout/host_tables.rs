@@ -11,7 +11,7 @@
 
 use super::LayoutNodeArena;
 use super::formatting_context::FfiLayoutHostCallbacks;
-use super::layout_node_arena::{BoxPresenceHost, ShellFactory, ShellStyleChangedHost};
+use super::layout_node_arena::{BoxPresenceHost, ShellStyleChangedHost};
 use super::node_data::NodeSlotId;
 use super::update_layout::LayoutUpdateHost;
 use crate::css::style::fast_hash::{FastMap as HashMap, FastSet as HashSet};
@@ -31,7 +31,6 @@ pub(crate) struct HostTables {
     /// The flight the document's layout update readied, until the document has sealed what its
     /// recording reads and submits it.
     pub(super) prepared_flight: RefCell<Option<super::update_layout::PreparedFlight>>,
-    pub(super) shell_factory: Cell<Option<ShellFactory>>,
     pub(super) box_presence_host: Cell<Option<BoxPresenceHost>>,
     pub(super) shell_style_changed_host: Cell<Option<ShellStyleChangedHost>>,
     pub(crate) geometry_host: Cell<Option<GeometryHostCallbacks>>,
@@ -42,6 +41,8 @@ pub(crate) struct HostTables {
     /// The image observer set the host gave each row that holds one, told to the owner and handed back as for
     /// [`Self::owned_image_providers`].
     pub(super) image_observer_sets: RefCell<HashMap<NodeSlotId, *mut c_void>>,
+    /// The compositor animation frames the rendering update gave each box, by kind, which only it chooses.
+    pub(super) compositor_animation_frames: RefCell<HashMap<NodeSlotId, u8>>,
     /// The image boxes the tree builds of the layout update in progress stamped to own their image's provider, which
     /// the host has not handed it yet: until the frame is over, such a box shows no image.
     pub(super) image_boxes_awaiting_owned_provider: RefCell<HashSet<NodeSlotId>>,
@@ -95,6 +96,27 @@ impl HostTables {
             sets.insert(slot, observers)
         };
         previous.unwrap_or(std::ptr::null_mut())
+    }
+
+    /// Notes whether the rendering update gave `row` the compositor animation frame of `kind`.
+    pub(crate) fn set_compositor_animation_frame(
+        &self,
+        row: NodeSlotId,
+        kind: super::node_data::CompositorAnimationFrameKind,
+        value: bool,
+    ) {
+        let mut frames = self.compositor_animation_frames.borrow_mut();
+        let kinds = frames.get(&row).copied().unwrap_or(0);
+        let kinds = if value {
+            kinds | kind as u8
+        } else {
+            kinds & !(kind as u8)
+        };
+        if kinds == 0 {
+            frames.remove(&row);
+        } else {
+            frames.insert(row, kinds);
+        }
     }
 
     /// Notes that the document's layout update is over.

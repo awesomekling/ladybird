@@ -468,6 +468,8 @@ pub(crate) enum ArenaQuery {
         case_sensitive: bool,
         excluded: LentSlice<NodeSlotId>,
     },
+    /// The style record a row holds, for tests.
+    NodeStyleRecord(NodeSlotId),
 }
 
 /// A slice the document thread lends the owner with a query it waits for the answer to.
@@ -504,6 +506,7 @@ pub(crate) enum ArenaAnswer {
     Range(crate::layout::rendered_text::FfiTextSourceRange),
     Rows(Vec<NodeSlotId>),
     TextRanges(Vec<crate::layout::text_queries::FfiDomTextRange>),
+    StyleRecord(u64),
 }
 
 impl ArenaQuery {
@@ -529,6 +532,7 @@ impl ArenaQuery {
             }
             ArenaQuery::SearchCandidates { .. } => ArenaAnswer::Rows(Vec::new()),
             ArenaQuery::FindText { .. } => ArenaAnswer::TextRanges(Vec::new()),
+            ArenaQuery::NodeStyleRecord(_) => ArenaAnswer::StyleRecord(0),
         }
     }
 
@@ -585,6 +589,11 @@ impl ArenaQuery {
                 // SAFETY: The document thread waits for the answer.
                 ArenaAnswer::TextRanges(arena.matching_text(unsafe { query.get() }, case_sensitive))
             }
+            ArenaQuery::NodeStyleRecord(row) => ArenaAnswer::StyleRecord(if arena.slot_is_live(row) {
+                arena.node_style_record(row)
+            } else {
+                0
+            }),
         }
     }
 }
