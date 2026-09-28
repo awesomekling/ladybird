@@ -209,18 +209,32 @@ String BoxSlot::debug_description() const
 {
     StringBuilder builder;
     builder.append(kind_name());
-    if (auto node = dom_node()) {
-        builder.appendff("<{}>", node->node_name());
-        if (auto const* element = as_if<DOM::Element>(*node)) {
-            if (element->id().has_value())
-                builder.appendff("#{}", element->id().value());
-            for (auto const& class_name : element->class_names())
-                builder.appendff(".{}", class_name);
-        }
-    } else {
-        builder.append("(anonymous)"sv);
-    }
+    append_dom_node_debug_description(builder, dom_node());
     return MUST(builder.to_string());
+}
+
+void append_dom_node_debug_description(StringBuilder& builder, GC::Ptr<DOM::Node const> node)
+{
+    if (!node) {
+        builder.append("(anonymous)"sv);
+        return;
+    }
+    builder.appendff("<{}>", node->node_name());
+    if (auto const* element = as_if<DOM::Element>(*node)) {
+        if (element->id().has_value())
+            builder.appendff("#{}", element->id().value());
+        for (auto const& class_name : element->class_names())
+            builder.appendff(".{}", class_name);
+    }
+}
+
+void describe_dom_node_for_debug(DOM::Document& document, u32 node, void* sink, void (*append)(void*, u8 const*, size_t))
+{
+    auto identity = node == 0 ? DOM::NodeIdentity::of_document() : DOM::NodeIdentity::of_style_node(CSS::StyleNodeID { node });
+    StringBuilder builder;
+    append_dom_node_debug_description(builder, identity.resolve(document));
+    auto bytes = builder.string_view().bytes();
+    append(sink, bytes.data(), bytes.size());
 }
 
 bool overflow_value_makes_box_a_scroll_container(CSS::Overflow overflow)

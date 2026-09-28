@@ -454,25 +454,6 @@ pub unsafe extern "C" fn layout_arena_invalidate_text_content(marks: LayoutUpdat
     }
 }
 
-/// # Safety
-///
-/// The arena must be exclusively available on the document thread, and `id`
-/// must name a live text node with a styled parent. Refresh may request source
-/// facts from the host. The returned view lasts until republication or freeing.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_text_for_rendering(arena: *mut c_void, id: NodeSlotId) -> FfiRenderedTextView {
-    // SAFETY: The caller lends the arena for refresh before borrowing its text.
-    unsafe { ensure_text_content(arena.cast(), id) };
-    // SAFETY: The host keeps the arena and its published text live during the read.
-    let content = unsafe { LayoutNodeArena::from_handle(arena) }
-        .text_content(id)
-        .expect("text must be published before borrowing its rendered view");
-    FfiRenderedTextView {
-        text: content.text.as_ptr(),
-        length_in_code_units: content.text.len(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

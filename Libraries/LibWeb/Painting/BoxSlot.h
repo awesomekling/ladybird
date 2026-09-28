@@ -103,6 +103,14 @@ private:
 };
 
 WEB_API StringView layout_node_kind_name(Layout::RustFFI::NodeKind);
+
+// What a box's debug description says of the DOM node it was built for: `<` its node name `>`, then its ID and
+// classes, or `(anonymous)` for none.
+WEB_API void append_dom_node_debug_description(StringBuilder&, GC::Ptr<DOM::Node const>);
+
+// Describes the DOM node a debug text the render owner wrote names (a style node, or 0 for the document) to `sink`
+// through `append`, as a box's debug description does.
+WEB_API void describe_dom_node_for_debug(DOM::Document&, u32 node, void* sink, void (*append)(void*, u8 const*, size_t));
 WEB_API bool overflow_value_makes_box_a_scroll_container(CSS::Overflow);
 
 }

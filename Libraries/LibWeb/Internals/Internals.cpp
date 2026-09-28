@@ -1028,9 +1028,8 @@ void Internals::begin_layout_trace()
 {
     auto& document = window().associated_document();
     Layout::RustFFI::layout_arena_begin_layout_trace(Layout::document_layout_arena(document), &document,
-        [](void* context, Compositing::RustFFI::NodeSlotId slot, void* sink, void (*append)(void*, u8 const*, size_t)) {
-            auto description = Painting::BoxSlot::of(*static_cast<DOM::Document const*>(context), slot).debug_description();
-            append(sink, description.bytes().data(), description.bytes().size());
+        [](void* context, u32 node, void* sink, void (*append)(void*, u8 const*, size_t)) {
+            Painting::describe_dom_node_for_debug(*static_cast<DOM::Document*>(context), node, sink, append);
         });
 }
 
