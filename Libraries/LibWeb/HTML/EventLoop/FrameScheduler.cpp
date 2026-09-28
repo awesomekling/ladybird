@@ -575,6 +575,9 @@ static bool take_in_clock_layout_frame(DOM::Document& document)
     auto* arena = document.layout_arena_handle();
     if (!arena || !Layout::RustFFI::layout_arena_clock_layout_frame_laid_out(arena))
         return false;
+    // The layout update begins once the document's frame in flight is back: unloading may take the frame in beside
+    // one.
+    document.join_frame_in_flight();
     // What the ticks laid out moved boxes that no input of the main thread's did.
     (void)document.render_inputs_for_write();
     // The ticks' rounds ran as the rest of a layout update, which begins and ends here, around their frame: its end is
@@ -601,8 +604,9 @@ struct ClockLeaseScrollTimeline {
 struct ClockLeasePlan {
     Vector<GC::Ref<Animations::KeyframeEffect>> effects;
     Vector<ClockLeaseScrollTimeline> scroll_timelines;
-    // The timeline time at which an effect changes its phase, which the main thread has to see: no tick samples at or
-    // past it. The events of a new iteration wait for the next rendering update, which sends them as ever.
+    // The timeline time at which the main thread has events of an effect to send (a phase change, or a new iteration
+    // someone listens for): no tick samples at or past it. The events of a new iteration nobody hears wait for the
+    // next rendering update, which sends them as ever.
     double deadline { AK::Infinity<double> };
 };
 
@@ -656,8 +660,9 @@ static Optional<ClockLeaseScrollTimeline> clock_lease_scroll_timeline(DOM::Docum
     return scroll_timeline;
 }
 
-// The next time, in the local time of `effect`, at which its phase changes.
-static Optional<double> next_phase_change_in_local_time(Animations::KeyframeEffect const& effect, double local_time)
+// The next time, in the local time of `effect`, at which the main thread has events of it to send: where its phase
+// changes, or where its next iteration starts if a listener hears its iteration events.
+static Optional<double> next_event_in_local_time(Animations::KeyframeEffect const& effect, double local_time)
 {
     if (effect.start_delay().type != Animations::TimeValue::Type::Milliseconds
         || effect.iteration_duration().type != Animations::TimeValue::Type::Milliseconds
@@ -670,7 +675,10 @@ static Optional<double> next_phase_change_in_local_time(Animations::KeyframeEffe
         return start_delay;
     if (!(iteration_duration > 0) || local_time >= active_end)
         return {};
-    return active_end;
+    if (!effect.css_animation_iteration_events_are_heard())
+        return active_end;
+    auto next_iteration_start = start_delay + (floor((local_time - start_delay) / iteration_duration) + 1) * iteration_duration;
+    return min(next_iteration_start, active_end);
 }
 
 // Whether a clock lease can tick the running animations of `document`, and which of their effects it ticks. The lease
@@ -791,10 +799,10 @@ static Optional<ClockLeasePlan> clock_lease_plan(DOM::Document& document)
             }
             if (!local_time.has_value() || local_time->type != Animations::TimeValue::Type::Milliseconds)
                 return {};
-            auto next_phase_change = next_phase_change_in_local_time(keyframe_effect, local_time->value);
-            if (!next_phase_change.has_value())
+            auto next_event = next_event_in_local_time(keyframe_effect, local_time->value);
+            if (!next_event.has_value())
                 return {};
-            plan.deadline = min(plan.deadline, timeline_time->value + (*next_phase_change - local_time->value) / animation.playback_rate());
+            plan.deadline = min(plan.deadline, timeline_time->value + (*next_event - local_time->value) / animation.playback_rate());
             if (!ticks_effect)
                 continue;
             if (intersections_are_observed && moves_boxes(keyframe_effect))
@@ -912,6 +920,10 @@ void FrameScheduler::grant_clock_leases()
         }
         replace_render_clock_kit(hold, move(kit));
     }
+    // Until a document adopts what a tick moved, its reads answer from what the rendering update laid out, and no tick
+    // that runs meanwhile shows in them.
+    for (auto& hold : m_clock_leases)
+        hold.document->publish_query_snapshot_after_read(Painting::QueryVisualContexts::UpToDate);
 }
 
 // Takes in what the ticks presented from the lease's kit, and has them present from `kit` from now on.
@@ -1146,13 +1158,10 @@ void FrameScheduler::prepare_clock_ticks(ReadonlySpan<GC::Root<DOM::Document>> d
         // main thread rendering at every display frame. A render clock that falls behind, the rendering update ticks.
         auto& hold = m_clock_leases[index];
         hold.timeline_time_for_update.clear();
-        // The main thread keeps up with the display while it renders the document at every frame (a page with
-        // animation frame callbacks does): the render clock goes on ticking the lease, and leaves the frames to it.
-        Layout::RustFFI::rust_document_clock_main_renders(arena);
         auto window = document->window();
         bool const has_frame_callbacks = window && window->has_animation_frame_callbacks();
-        // So does a render clock whose last tick sampled a scroll progress timeline elsewhere than where the main
-        // thread has scrolled to since: the render clock follows the compositor's scrolling only beside a task.
+        // The rendering update ticks a lease whose last tick sampled a scroll progress timeline elsewhere than where the
+        // main thread has scrolled to since: the render clock follows the compositor's scrolling only beside a task.
         bool const ticks_followed_scrolling = all_of(plan->scroll_timelines, [&](auto const& scroll_timeline) {
             auto progress = Layout::RustFFI::rust_document_clock_scroll_progress(arena, scroll_timeline.lease.identity);
             // NB: Scroll offsets are in 1/64 CSS pixels.
@@ -1245,9 +1254,11 @@ FrameScheduler::AdoptedClockTicks FrameScheduler::adopt_clock_tick(DOM::Document
     auto* arena = document.layout_arena_handle();
     if (!arena)
         return { AK::NaN<double>, {} };
-    // What the ticks left, the document adopts as the last of them left it.
-    auto adoption = Layout::RustFFI::rust_document_clock_take_adoption(arena);
-    AdoptedClockTicks adopted { adoption.time, Painting::QuerySnapshot::adopt(adoption.query_snapshot, Painting::QueryVisualContexts::Stale) };
+    // What the ticks left, the document adopts as the last of them left it. Their snapshot converts rects to viewport
+    // space as one the document published now would: the ticks move no visual context.
+    auto visual_contexts = document.accumulated_visual_contexts_are_up_to_date() ? Painting::QueryVisualContexts::UpToDate : Painting::QueryVisualContexts::Stale;
+    auto adoption = Layout::RustFFI::rust_document_clock_take_adoption(arena, Painting::QuerySnapshot::viewport_of(document, visual_contexts));
+    AdoptedClockTicks adopted { adoption.time, Painting::QuerySnapshot::adopt(adoption.query_snapshot, visual_contexts) };
     if (!adoption.has_samples)
         return adopted;
     // What the tick sampled is the document's style now, which no input of the main thread's installed.

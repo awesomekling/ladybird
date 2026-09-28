@@ -64,6 +64,9 @@ pub(crate) struct HostTables {
         RefCell<Vec<super::tree_update_marks::MarkWriteWaitingForFrame>>,
     /// Whether the document runs a layout update, between `layout_arena_begin_update_layout` and its end.
     layout_update_is_running: Cell<bool>,
+    /// The rows the document thread adopted from the display ticks of its clock, which it reads until the arena
+    /// publishes later ones (see [`super::row_reads::RowSnapshot::published`]).
+    pub(crate) adopted_rows: super::row_reads::RowSnapshotSlot,
     /// What each row of the style batch a flight applied marked of its element's layout nodes, by style node, packed
     /// as an `FfiStyleInvalidationField` word, with the record it installed, while the host installs the batch.
     flight_style_damages: RefCell<HashMap<crate::css::style::tree::StyleNodeID, (u32, u64)>>,

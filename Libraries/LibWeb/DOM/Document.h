@@ -476,6 +476,7 @@ public:
     Optional<Painting::FlightPaintDecline> flight_paint_blocker() const;
     // Hands the pending accumulated visual contexts update to the flight about to be submitted, which runs it.
     bool hand_accumulated_visual_contexts_update_to_flight() { return exchange(m_needs_accumulated_visual_contexts_update, false); }
+    [[nodiscard]] bool accumulated_visual_contexts_are_up_to_date() const { return !m_needs_accumulated_visual_contexts_update; }
     // Takes in what the document's flight prepared of its paint state. A flight that prepared nothing hands back the
     // accumulated visual contexts update it was handed.
     void take_in_flight_paint(bool handed_accumulated_visual_contexts_update);

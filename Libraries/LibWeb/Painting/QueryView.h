@@ -16,6 +16,7 @@
 #include <LibWeb/Export.h>
 #include <LibWeb/Forward.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
+#include <LibWeb/Painting/BoxModelMetrics.h>
 #include <LibWeb/PixelUnits.h>
 
 namespace Web::Painting {
@@ -36,6 +37,9 @@ public:
     static RefPtr<QuerySnapshot const> publish(DOM::Document const&, QueryVisualContexts);
     // Takes a snapshot the render side published (a null handle is none).
     static RefPtr<QuerySnapshot const> adopt(void const* handle, QueryVisualContexts);
+    // How a snapshot of the document converts rects to viewport space: with its scroll state as it holds it now. The
+    // scroll offsets it points at stay valid until the document's paint state changes.
+    static Layout::RustFFI::FfiQuerySnapshotViewport viewport_of(DOM::Document const&, QueryVisualContexts);
     ~QuerySnapshot();
 
     QueryVisualContexts visual_contexts() const { return m_visual_contexts; }
@@ -47,6 +51,13 @@ private:
 
     void const* m_handle { nullptr };
     QueryVisualContexts m_visual_contexts { QueryVisualContexts::Stale };
+};
+
+// The used geometry of a box that a computed style read reports.
+struct UsedBoxGeometry {
+    CSSPixelSize content_size;
+    CSSPixelRect absolute_border_box_rect;
+    BoxModelMetrics box_model;
 };
 
 // A box of a query snapshot. Only the snapshot's view takes it: it is not a layout node or an arena slot.
@@ -90,6 +101,7 @@ public:
     CSSPixelRect absolute_border_box_rect(QueryBox) const;
     CSSPixelRect absolute_padding_box_rect(QueryBox) const;
     CSSPixelRect absolute_rect(QueryBox) const;
+    UsedBoxGeometry used_box_geometry(QueryBox) const;
 
     // https://drafts.csswg.org/cssom-view/#dom-mouseevent-offsetx
     // The offset from the box of an event at the position, relative to the initial containing block. Empty if the

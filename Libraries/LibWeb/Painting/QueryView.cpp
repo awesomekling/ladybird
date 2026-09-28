@@ -19,9 +19,20 @@ RefPtr<QuerySnapshot const> QuerySnapshot::publish(DOM::Document const& document
     auto* arena = Layout::document_layout_arena_if_created(document);
     if (!arena)
         return nullptr;
+    auto const* handle = Layout::RustFFI::layout_arena_publish_query_snapshot(arena, viewport_of(document, visual_contexts));
+    if (!handle)
+        return nullptr;
+    return adopt_ref(*new QuerySnapshot(handle, visual_contexts));
+}
+
+Layout::RustFFI::FfiQuerySnapshotViewport QuerySnapshot::viewport_of(DOM::Document const& document, QueryVisualContexts visual_contexts)
+{
     auto navigable = document.navigable();
-    auto const& device_scroll_offsets = document.paint_state().scroll_state_snapshot().device_offsets();
-    Layout::RustFFI::FfiQuerySnapshotViewport viewport {
+    // A document that never painted has no scroll state yet, and no visual contexts to convert rects through.
+    ReadonlySpan<Gfx::FloatPoint> device_scroll_offsets;
+    if (document.has_paint_state())
+        device_scroll_offsets = document.paint_state().scroll_state_snapshot().device_offsets();
+    return {
         .has_committed_viewport_box = document.has_committed_viewport_box(),
         .visual_contexts_are_up_to_date = visual_contexts == QueryVisualContexts::UpToDate,
         .viewport_scroll_offset_is_zero = !navigable || navigable->viewport_scroll_offset().is_zero(),
@@ -29,10 +40,6 @@ RefPtr<QuerySnapshot const> QuerySnapshot::publish(DOM::Document const& document
         .device_scroll_offsets_len = device_scroll_offsets.size(),
         .device_pixels_per_css_pixel = static_cast<float>(document.page().client().device_pixels_per_css_pixel()),
     };
-    auto const* handle = Layout::RustFFI::layout_arena_publish_query_snapshot(arena, viewport);
-    if (!handle)
-        return nullptr;
-    return adopt_ref(*new QuerySnapshot(handle, visual_contexts));
 }
 
 RefPtr<QuerySnapshot const> QuerySnapshot::adopt(void const* handle, QueryVisualContexts visual_contexts)
@@ -111,6 +118,22 @@ CSSPixelRect QueryView::absolute_padding_box_rect(QueryBox box) const
 CSSPixelRect QueryView::absolute_rect(QueryBox box) const
 {
     return Layout::RustFFI::query_snapshot_absolute_rect(m_snapshot->m_handle, box.ffi);
+}
+
+UsedBoxGeometry QueryView::used_box_geometry(QueryBox box) const
+{
+    auto geometry = Layout::RustFFI::query_snapshot_used_box_geometry(m_snapshot->m_handle, box.ffi);
+    auto pixel_box = [](Layout::RustFFI::FfiPixelBox const& box) -> PixelBox { return { box.top, box.right, box.bottom, box.left }; };
+    return {
+        .content_size = geometry.content_size,
+        .absolute_border_box_rect = geometry.absolute_border_box_rect,
+        .box_model = {
+            .margin = pixel_box(geometry.box_model.margin),
+            .padding = pixel_box(geometry.box_model.padding),
+            .border = pixel_box(geometry.box_model.border),
+            .inset = pixel_box(geometry.box_model.inset),
+        },
+    };
 }
 
 Optional<CSSPixelPoint> QueryView::mouse_event_offset(QueryBox box, CSSPixelPoint position) const

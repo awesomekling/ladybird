@@ -49,6 +49,9 @@ pub(crate) struct RowSnapshot {
     pub(super) viewport_row: NodeSlotId,
     /// The last change of the document thread's the rows include.
     pub(super) changes_taken_in: ChangeSeq,
+    /// How many rows the arena published before these, which orders them against the rows the document thread adopted
+    /// from its display ticks.
+    pub(super) generation: u64,
     /// The paintable rows, and the columns read beside them.
     pub(crate) paintable: PublishedRows,
     /// What the rows paint from beside their styles.
@@ -77,9 +80,28 @@ impl RowSnapshot {
     pub(crate) unsafe fn published<'a>(handle: *mut c_void) -> &'a Self {
         assert!(!handle.is_null(), "layout node arena handle is null");
         crate::stage_thread::join_frame_in_flight(handle);
+        // SAFETY: Guaranteed by the caller.
+        unsafe { Self::read_slot(handle).latest() }
+    }
+
+    /// The slot the document thread reads the rows of the arena `handle` names from: the arena's, or the one of the
+    /// rows it adopted from display ticks, where those are later.
+    ///
+    /// # Safety
+    ///
+    /// As for [`Self::published`].
+    unsafe fn read_slot<'a>(handle: *mut c_void) -> &'a RowSnapshotSlot {
         // SAFETY: Guaranteed by the caller. A handle is also a pointer to its arena, and the projection borrows nothing
         // of the arena beside the slot, which only the arena's owner writes, in a unit the document thread is not in.
-        unsafe { (*std::ptr::addr_of!((*handle.cast::<LayoutNodeArena>()).published_rows)).latest() }
+        let published = unsafe { &*std::ptr::addr_of!((*handle.cast::<LayoutNodeArena>()).published_rows) };
+        // SAFETY: As above; only the document thread writes the rows it adopted, as it adopts them.
+        let adopted = unsafe { &HostTables::beside_frame(handle).adopted_rows };
+        // SAFETY: As above.
+        if unsafe { adopted.latest() }.generation > unsafe { published.latest() }.generation {
+            adopted
+        } else {
+            published
+        }
     }
 
     /// The rows the arena `handle` names published last, as of every change the document thread sent that alters them
@@ -128,7 +150,7 @@ impl RowSnapshot {
         // SAFETY: Guaranteed by the caller.
         unsafe { Self::current(handle) };
         // SAFETY: As above; the rows were just read, and nothing published since.
-        unsafe { (*std::ptr::addr_of!((*handle.cast::<LayoutNodeArena>()).published_rows)).shared() }
+        unsafe { Self::read_slot(handle) }.shared()
     }
 
     #[track_caller]
@@ -289,8 +311,9 @@ impl Drop for RowSnapshotSlot {
 }
 
 impl RowSnapshotSlot {
-    /// Replaces the rows the slot holds with `rows`, on the arena's owner.
-    pub(super) fn publish(&self, rows: Arc<RowSnapshot>) {
+    /// Replaces the rows the slot holds with `rows`, on the thread that writes the slot: the arena's owner, or the
+    /// document thread for the rows it adopted.
+    pub(crate) fn publish(&self, rows: Arc<RowSnapshot>) {
         let previous = self.0.swap(Arc::into_raw(rows).cast_mut(), Ordering::AcqRel);
         // SAFETY: The slot held the reference `previous` came from, and nothing borrows it: see the type.
         drop(unsafe { Arc::from_raw(previous) });

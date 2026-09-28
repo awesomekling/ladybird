@@ -42,6 +42,7 @@
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/BoxModelMetrics.h>
 #include <LibWeb/Painting/BoxViews.h>
+#include <LibWeb/Painting/QueryView.h>
 #include <LibWeb/StyleDrainScopedFFI.h>
 #include <LibWeb/StyleEngineRustFFI.h>
 #include <LibWebCommon/Infra/Strings.h>
@@ -1133,6 +1134,27 @@ static RefPtr<StyleValue const> resolve_color_style_value(StyleValue const& styl
     return ColorStyleValue::create_from_color(computed_color, ColorSyntax::Modern);
 }
 
+// The used geometry of the element's box. A clean read answers it from the document's query snapshot, as the document's
+// other geometry reads do: what the snapshot describes moves only as the document adopts what the render side laid out.
+static Optional<Painting::UsedBoxGeometry> used_box_geometry(DOM::AbstractElement abstract_element, Painting::BoxSlot const& box)
+{
+    if (!abstract_element.pseudo_element().has_value()) {
+        if (auto view = abstract_element.document().query_view_for_clean_read(); view.has_value()) {
+            auto query_box = view->box_of(abstract_element.element());
+            if (!query_box.has_value() || !view->facts(*query_box).has_committed_box)
+                return {};
+            return view->used_box_geometry(*query_box);
+        }
+    }
+    if (!Painting::has_committed_box(box))
+        return {};
+    return Painting::UsedBoxGeometry {
+        .content_size = Painting::content_size(box),
+        .absolute_border_box_rect = Painting::absolute_border_box_rect(box),
+        .box_model = Painting::box_model(box),
+    };
+}
+
 RefPtr<StyleValue const> CSSStyleProperties::style_value_for_computed_property(Painting::BoxSlot const& box, PropertyID property_id, ComputedValues const* transient_style) const
 {
     if (!owner_node().has_value()) {
@@ -1149,22 +1171,25 @@ RefPtr<StyleValue const> CSSStyleProperties::style_value_for_computed_property(P
     // The box holds the element's published record.
     auto const& box_style = *stored_style;
 
-    auto used_value_for_property = [&](Function<CSSPixels(Painting::BoxSlot const&)>&& used_value_getter) -> Optional<CSSPixels> {
+    auto used_value_for_property = [&](Function<CSSPixels(Painting::UsedBoxGeometry const&)>&& used_value_getter) -> Optional<CSSPixels> {
         auto display = box_style.display();
-        if (!display.is_none() && !display.is_contents() && Painting::has_committed_box(box))
-            return used_value_getter(box);
-        return {};
+        if (display.is_none() || display.is_contents())
+            return {};
+        auto used_box = used_box_geometry(*owner_node(), box);
+        if (!used_box.has_value())
+            return {};
+        return used_value_getter(*used_box);
     };
 
     auto used_size_for_property = [&]<typename ContentBoxGetter, typename BorderBoxGetter>(ContentBoxGetter content_box_getter, BorderBoxGetter border_box_getter) -> Optional<CSSPixels> {
-        return used_value_for_property([&](Painting::BoxSlot const& used_box) {
+        return used_value_for_property([&](Painting::UsedBoxGeometry const& used_box) {
             if (box_style.box_sizing() == BoxSizing::BorderBox)
                 return border_box_getter(used_box);
             return content_box_getter(used_box);
         });
     };
 
-    auto used_value_for_inset = [&](LengthPercentageOrAuto const& start_side, LengthPercentageOrAuto const& end_side, Function<CSSPixels(Painting::BoxSlot const&)>&& used_value_getter) -> Optional<CSSPixels> {
+    auto used_value_for_inset = [&](LengthPercentageOrAuto const& start_side, LengthPercentageOrAuto const& end_side, Function<CSSPixels(Painting::UsedBoxGeometry const&)>&& used_value_getter) -> Optional<CSSPixels> {
         if (box_style.position() == Positioning::Static)
             return {};
 
@@ -1289,48 +1314,48 @@ RefPtr<StyleValue const> CSSStyleProperties::style_value_for_computed_property(P
         // Otherwise the resolved value is the computed value.
     case PropertyID::Height: {
         auto maybe_used_height = used_size_for_property(
-            [](auto const& used_box) { return Painting::content_height(used_box); },
-            [](auto const& used_box) { return Painting::absolute_border_box_rect(used_box).height(); });
+            [](auto const& used_box) { return used_box.content_size.height(); },
+            [](auto const& used_box) { return used_box.absolute_border_box_rect.height(); });
         if (maybe_used_height.has_value())
             return style_value_for_size(Size::make_px(maybe_used_height.release_value()));
         return style_value_for_size(box_style.height());
     }
     case PropertyID::MarginBottom:
-        if (auto maybe_used_value = used_value_for_property([](auto const& used_box) { return Painting::box_model(used_box).margin.bottom; }); maybe_used_value.has_value())
+        if (auto maybe_used_value = used_value_for_property([](auto const& used_box) { return used_box.box_model.margin.bottom; }); maybe_used_value.has_value())
             return LengthStyleValue::create(Length::make_px(maybe_used_value.release_value()));
         return style_value_for_length_percentage_or_auto(box_style.margin().bottom());
     case PropertyID::MarginLeft:
-        if (auto maybe_used_value = used_value_for_property([](auto const& used_box) { return Painting::box_model(used_box).margin.left; }); maybe_used_value.has_value())
+        if (auto maybe_used_value = used_value_for_property([](auto const& used_box) { return used_box.box_model.margin.left; }); maybe_used_value.has_value())
             return LengthStyleValue::create(Length::make_px(maybe_used_value.release_value()));
         return style_value_for_length_percentage_or_auto(box_style.margin().left());
     case PropertyID::MarginRight:
-        if (auto maybe_used_value = used_value_for_property([](auto const& used_box) { return Painting::box_model(used_box).margin.right; }); maybe_used_value.has_value())
+        if (auto maybe_used_value = used_value_for_property([](auto const& used_box) { return used_box.box_model.margin.right; }); maybe_used_value.has_value())
             return LengthStyleValue::create(Length::make_px(maybe_used_value.release_value()));
         return style_value_for_length_percentage_or_auto(box_style.margin().right());
     case PropertyID::MarginTop:
-        if (auto maybe_used_value = used_value_for_property([](auto const& used_box) { return Painting::box_model(used_box).margin.top; }); maybe_used_value.has_value())
+        if (auto maybe_used_value = used_value_for_property([](auto const& used_box) { return used_box.box_model.margin.top; }); maybe_used_value.has_value())
             return LengthStyleValue::create(Length::make_px(maybe_used_value.release_value()));
         return style_value_for_length_percentage_or_auto(box_style.margin().top());
     case PropertyID::PaddingBottom:
-        if (auto maybe_used_value = used_value_for_property([](auto const& used_box) { return Painting::box_model(used_box).padding.bottom; }); maybe_used_value.has_value())
+        if (auto maybe_used_value = used_value_for_property([](auto const& used_box) { return used_box.box_model.padding.bottom; }); maybe_used_value.has_value())
             return LengthStyleValue::create(Length::make_px(maybe_used_value.release_value()));
         return style_value_for_length_percentage_or_auto(box_style.padding().bottom());
     case PropertyID::PaddingLeft:
-        if (auto maybe_used_value = used_value_for_property([](auto const& used_box) { return Painting::box_model(used_box).padding.left; }); maybe_used_value.has_value())
+        if (auto maybe_used_value = used_value_for_property([](auto const& used_box) { return used_box.box_model.padding.left; }); maybe_used_value.has_value())
             return LengthStyleValue::create(Length::make_px(maybe_used_value.release_value()));
         return style_value_for_length_percentage_or_auto(box_style.padding().left());
     case PropertyID::PaddingRight:
-        if (auto maybe_used_value = used_value_for_property([](auto const& used_box) { return Painting::box_model(used_box).padding.right; }); maybe_used_value.has_value())
+        if (auto maybe_used_value = used_value_for_property([](auto const& used_box) { return used_box.box_model.padding.right; }); maybe_used_value.has_value())
             return LengthStyleValue::create(Length::make_px(maybe_used_value.release_value()));
         return style_value_for_length_percentage_or_auto(box_style.padding().right());
     case PropertyID::PaddingTop:
-        if (auto maybe_used_value = used_value_for_property([](auto const& used_box) { return Painting::box_model(used_box).padding.top; }); maybe_used_value.has_value())
+        if (auto maybe_used_value = used_value_for_property([](auto const& used_box) { return used_box.box_model.padding.top; }); maybe_used_value.has_value())
             return LengthStyleValue::create(Length::make_px(maybe_used_value.release_value()));
         return style_value_for_length_percentage_or_auto(box_style.padding().top());
     case PropertyID::Width: {
         auto maybe_used_width = used_size_for_property(
-            [](auto const& used_box) { return Painting::content_width(used_box); },
-            [](auto const& used_box) { return Painting::absolute_border_box_rect(used_box).width(); });
+            [](auto const& used_box) { return used_box.content_size.width(); },
+            [](auto const& used_box) { return used_box.absolute_border_box_rect.width(); });
         if (maybe_used_width.has_value())
             return style_value_for_size(Size::make_px(maybe_used_width.release_value()));
         return style_value_for_size(box_style.width());
@@ -1350,27 +1375,27 @@ RefPtr<StyleValue const> CSSStyleProperties::style_value_for_computed_property(P
         //    Otherwise the resolved value is the computed value.
     case PropertyID::Bottom: {
         auto inset = box_style.inset();
-        if (auto maybe_used_value = used_value_for_inset(inset.bottom(), inset.top(), [](auto const& used_box) { return Painting::box_model(used_box).inset.bottom; }); maybe_used_value.has_value())
+        if (auto maybe_used_value = used_value_for_inset(inset.bottom(), inset.top(), [](auto const& used_box) { return used_box.box_model.inset.bottom; }); maybe_used_value.has_value())
             return LengthStyleValue::create(Length::make_px(maybe_used_value.release_value()));
 
         return style_value_for_length_percentage_or_auto(inset.bottom());
     }
     case PropertyID::Left: {
         auto inset = box_style.inset();
-        if (auto maybe_used_value = used_value_for_inset(inset.left(), inset.right(), [](auto const& used_box) { return Painting::box_model(used_box).inset.left; }); maybe_used_value.has_value())
+        if (auto maybe_used_value = used_value_for_inset(inset.left(), inset.right(), [](auto const& used_box) { return used_box.box_model.inset.left; }); maybe_used_value.has_value())
             return LengthStyleValue::create(Length::make_px(maybe_used_value.release_value()));
         return style_value_for_length_percentage_or_auto(inset.left());
     }
     case PropertyID::Right: {
         auto inset = box_style.inset();
-        if (auto maybe_used_value = used_value_for_inset(inset.right(), inset.left(), [](auto const& used_box) { return Painting::box_model(used_box).inset.right; }); maybe_used_value.has_value())
+        if (auto maybe_used_value = used_value_for_inset(inset.right(), inset.left(), [](auto const& used_box) { return used_box.box_model.inset.right; }); maybe_used_value.has_value())
             return LengthStyleValue::create(Length::make_px(maybe_used_value.release_value()));
 
         return style_value_for_length_percentage_or_auto(inset.right());
     }
     case PropertyID::Top: {
         auto inset = box_style.inset();
-        if (auto maybe_used_value = used_value_for_inset(inset.top(), inset.bottom(), [](auto const& used_box) { return Painting::box_model(used_box).inset.top; }); maybe_used_value.has_value())
+        if (auto maybe_used_value = used_value_for_inset(inset.top(), inset.bottom(), [](auto const& used_box) { return used_box.box_model.inset.top; }); maybe_used_value.has_value())
             return LengthStyleValue::create(Length::make_px(maybe_used_value.release_value()));
 
         return style_value_for_length_percentage_or_auto(inset.top());

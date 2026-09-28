@@ -693,6 +693,18 @@ pub struct FfiBoxModelMetrics {
     pub inset: crate::painting::paintable_data::FfiPixelBox,
 }
 
+impl FfiBoxModelMetrics {
+    /// The box model of the committed box in `slot`, which `rows` has populated.
+    pub(crate) fn of(rows: &impl crate::painting::geometry_read::GeometryRead, slot: NodeSlotId) -> Self {
+        Self {
+            margin: crate::painting::paintable_geometry::committed_margin(rows, slot),
+            padding: crate::painting::paintable_geometry::committed_padding(rows, slot),
+            border: crate::painting::paintable_geometry::committed_border(rows, slot),
+            inset: crate::painting::paintable_geometry::committed_inset(rows, slot),
+        }
+    }
+}
+
 /// # Safety
 ///
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
@@ -794,12 +806,7 @@ pub unsafe extern "C" fn layout_arena_paintable_box_model(arena: *mut c_void, sl
             if !paintable_rows.paintable_row_is_populated(slot) {
                 return FfiBoxModelMetrics::default();
             }
-            FfiBoxModelMetrics {
-                margin: crate::painting::paintable_geometry::committed_margin(paintable_rows, slot),
-                padding: crate::painting::paintable_geometry::committed_padding(paintable_rows, slot),
-                border: crate::painting::paintable_geometry::committed_border(paintable_rows, slot),
-                inset: crate::painting::paintable_geometry::committed_inset(paintable_rows, slot),
-            }
+            FfiBoxModelMetrics::of(paintable_rows, slot)
         })
     }
 }
