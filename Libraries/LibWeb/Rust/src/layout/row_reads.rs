@@ -24,7 +24,7 @@ use crate::css::style::fast_hash::FastMap as HashMap;
 use crate::css::style::published_record::PublishedStyleRecord;
 use crate::css::style::tree::StyleNodeID;
 use crate::painting::published_frame::{PaintStatus, PublishedPaintFacts, PublishedRows};
-use crate::render_owner::ChangeSeq;
+use crate::render_owner::{ChangeSeq, RowFact};
 use smallvec::SmallVec;
 use std::cell::Cell;
 use std::ffi::c_void;
@@ -105,7 +105,7 @@ impl RowSnapshot {
     }
 
     /// The rows the arena `handle` names published last, as of every change the document thread sent that alters them
-    /// ([`crate::render_owner::ArenaChange`] says which do): where the owner has not published rows that reflect those
+    /// ([`crate::render_owner::ArenaChange`] says which [`RowFact`] each alters): where the owner has not published rows that reflect those
     /// yet, the document thread asks it to.
     ///
     /// # Safety
@@ -114,7 +114,19 @@ impl RowSnapshot {
     #[track_caller]
     pub(crate) unsafe fn current<'a>(handle: *mut c_void) -> &'a Self {
         // SAFETY: Guaranteed by the caller.
-        unsafe { Self::published_as_of_sent_changes(handle, Freshness::Current) }
+        unsafe { Self::published_as_of_sent_changes(handle, Freshness::Current, RowFact::ALL) }
+    }
+
+    /// Like [`Self::current`], for a read of the rows' tree alone ([`RowFact::Tree`]): a change the thread sent to a
+    /// row's style or paint facts leaves it be.
+    ///
+    /// # Safety
+    ///
+    /// As for [`Self::published`].
+    #[track_caller]
+    pub(crate) unsafe fn current_tree<'a>(handle: *mut c_void) -> &'a Self {
+        // SAFETY: Guaranteed by the caller.
+        unsafe { Self::published_as_of_sent_changes(handle, Freshness::Current, &[RowFact::Tree]) }
     }
 
     /// Like [`Self::current`], with the rows as committed: once the scrollable overflow a commit or a writer left is
@@ -126,7 +138,7 @@ impl RowSnapshot {
     #[track_caller]
     pub(crate) unsafe fn committed<'a>(handle: *mut c_void) -> &'a Self {
         // SAFETY: Guaranteed by the caller.
-        unsafe { Self::published_as_of_sent_changes(handle, Freshness::Committed) }
+        unsafe { Self::published_as_of_sent_changes(handle, Freshness::Committed, RowFact::ALL) }
     }
 
     /// Like [`Self::current`], as of every change the document thread sent, for a test that reads what the owner counts
@@ -138,7 +150,7 @@ impl RowSnapshot {
     #[track_caller]
     pub(crate) unsafe fn settled<'a>(handle: *mut c_void) -> &'a Self {
         // SAFETY: Guaranteed by the caller.
-        unsafe { Self::published_as_of_sent_changes(handle, Freshness::Settled) }
+        unsafe { Self::published_as_of_sent_changes(handle, Freshness::Settled, RowFact::ALL) }
     }
 
     /// Like [`Self::current`], shared, so the rows outlive the next publication.
@@ -154,14 +166,18 @@ impl RowSnapshot {
     }
 
     #[track_caller]
-    unsafe fn published_as_of_sent_changes<'a>(handle: *mut c_void, freshness: Freshness) -> &'a Self {
+    unsafe fn published_as_of_sent_changes<'a>(
+        handle: *mut c_void,
+        freshness: Freshness,
+        reads: &[RowFact],
+    ) -> &'a Self {
         // SAFETY: Guaranteed by the caller.
         let rows = unsafe { Self::published(handle) };
         // SAFETY: As above.
         let document = unsafe { super::ArenaHandle::document_of(handle) };
         let changes_to_reflect = match freshness {
             Freshness::Settled => crate::render_owner::sent_through(document),
-            Freshness::Current | Freshness::Committed => crate::render_owner::sent_row_changes_through(document),
+            Freshness::Current | Freshness::Committed => crate::render_owner::sent_row_changes_through(document, reads),
         };
         // The owner holds no state of an arena of no document (a unit test's), which is written in place: the thread
         // that holds it publishes it.

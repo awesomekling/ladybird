@@ -68,12 +68,28 @@ impl DocumentId {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
 pub(crate) struct ChangeSeq(u64);
 
-/// The changes a document thread sent for a document: the number of the last one, and of the last one that alters the
-/// rows the owner publishes.
+/// What of the rows the owner publishes (see [`crate::layout::row_reads`]) a change alters, and a read of them reads: a
+/// read waits only for rows that reflect the changes the thread sent that alter what it reads.
+#[derive(Clone, Copy)]
+pub(crate) enum RowFact {
+    /// Which rows live and are populated, how they link, and which nodes they are bound to.
+    Tree,
+    /// The rows' styles, and what the arena derives of them.
+    Style,
+    /// What the rows paint from, and how far they have scrolled.
+    Paint,
+}
+
+impl RowFact {
+    pub(crate) const ALL: &[Self] = &[Self::Tree, Self::Style, Self::Paint];
+}
+
+/// The changes a document thread sent for a document: the number of the last one, and of the last one that alters each
+/// [`RowFact`].
 #[derive(Default)]
 struct SentChanges {
     through: ChangeSeq,
-    altering_rows_through: ChangeSeq,
+    altering_through: [ChangeSeq; RowFact::ALL.len()],
 }
 
 /// A write the main thread makes to a document's layout arena, as owned data the owner applies in the order the main
@@ -136,15 +152,15 @@ pub(crate) enum ArenaChange {
 }
 
 impl ArenaChange {
-    /// Whether applying the change can alter what the rows the owner publishes answer the document thread (see
-    /// [`crate::layout::row_reads`]), so that a read the thread makes after sending it waits for rows that reflect it.
-    /// What the next layout or paint reads, and what the arena keeps for the host, alter none.
-    fn alters_published_rows(&self) -> bool {
+    /// What of the rows the owner publishes applying the change can alter, so that a read of it the thread makes after
+    /// sending it waits for rows that reflect it. What the next layout or paint reads, and what the arena keeps for the
+    /// host, alter none.
+    fn alters(&self) -> Option<RowFact> {
         match self {
-            ArenaChange::Layout(change) => change.alters_published_rows(),
-            ArenaChange::Paint(change) => change.alters_published_rows(),
+            ArenaChange::Layout(change) => change.alters(),
+            ArenaChange::Paint(change) => change.alters(),
             // A row the install did not adopt the record of takes another style.
-            ArenaChange::FinishOwnerStyleHostHalf => true,
+            ArenaChange::FinishOwnerStyleHostHalf => Some(RowFact::Style),
             ArenaChange::DocumentIsDecodedSvg(_)
             | ArenaChange::StyleSnapshotScrollStates(_)
             | ArenaChange::OwnedProviderHandedOver(_)
@@ -160,7 +176,7 @@ impl ArenaChange {
             | ArenaChange::UnlinkStyleEngine
             | ArenaChange::SelectionPseudoStylePublished(_)
             | ArenaChange::PublishAnchorNames
-            | ArenaChange::CounterStyles { .. } => false,
+            | ArenaChange::CounterStyles { .. } => None,
         }
     }
 
@@ -1064,12 +1080,12 @@ pub(crate) fn destroy_document(document: DocumentId) {
 /// Sends the arena write `change` for `document`, which the owner applies before the next unit or query that reaches
 /// the arena.
 pub(crate) fn send_arena_change(document: DocumentId, change: ArenaChange) -> ChangeSeq {
-    let alters_published_rows = change.alters_published_rows();
+    let alters = change.alters();
     let seq = SENT_THROUGH.with_borrow_mut(|sent| {
         let sent = sent.entry(document).or_default();
         sent.through.0 += 1;
-        if alters_published_rows {
-            sent.altering_rows_through = sent.through;
+        if let Some(fact) = alters {
+            sent.altering_through[fact as usize] = sent.through;
         }
         sent.through
     });
@@ -1102,12 +1118,17 @@ pub(crate) fn sent_through(document: DocumentId) -> ChangeSeq {
     SENT_THROUGH.with_borrow(|sent| sent.get(&document).map_or_else(ChangeSeq::default, |sent| sent.through))
 }
 
-/// The number of the last change the calling document thread sent for `document` that alters the rows the owner
-/// publishes: rows that reflect it answer a read the thread makes now.
-pub(crate) fn sent_row_changes_through(document: DocumentId) -> ChangeSeq {
+/// The number of the last change the calling document thread sent for `document` that alters any of `facts` of the rows
+/// the owner publishes: rows that reflect it answer a read of those the thread makes now.
+pub(crate) fn sent_row_changes_through(document: DocumentId, facts: &[RowFact]) -> ChangeSeq {
     SENT_THROUGH.with_borrow(|sent| {
-        sent.get(&document)
-            .map_or_else(ChangeSeq::default, |sent| sent.altering_rows_through)
+        sent.get(&document).map_or_else(ChangeSeq::default, |sent| {
+            facts
+                .iter()
+                .map(|&fact| sent.altering_through[fact as usize])
+                .max()
+                .unwrap_or_default()
+        })
     })
 }
 
