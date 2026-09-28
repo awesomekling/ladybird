@@ -12,6 +12,7 @@ use crate::layout::node_data::{NodeFlag, NodeKind, NodeSlotId};
 use crate::layout::node_facts;
 use std::ffi::c_void;
 
+#[derive(Clone, Copy, Debug, Default)]
 #[repr(C)]
 pub struct FfiLayoutTreeUpdateClassification {
     pub marks_partial_relayout_boundary_self_only: bool,
@@ -720,8 +721,13 @@ impl LayoutNodeArena {
 /// in this arena.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_node_is_partial_relayout_boundary(arena: *mut c_void, node: NodeSlotId) -> bool {
-    // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
-    unsafe { LayoutNodeArena::from_handle(arena) }.node_is_partial_relayout_boundary(node)
+    // SAFETY: The C++ caller passes the live arena handle of its document.
+    unsafe {
+        super::layout_changes::ask_bool(
+            arena,
+            super::layout_changes::LayoutRead::NodeIsPartialRelayoutBoundary(node),
+        )
+    }
 }
 
 /// The facts that take an update off the partial relayout path: the style engine's pending container queries, and
@@ -737,8 +743,8 @@ pub(crate) struct FfiPartialRelayoutHostFacts {
 /// The arena must remain valid for the duration of the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_record_partial_relayout_escape(arena: *mut c_void) {
-    // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
-    unsafe { LayoutNodeArena::from_handle(arena) }.record_partial_relayout_escape();
+    // SAFETY: The C++ caller passes the live arena handle of its document.
+    unsafe { super::layout_changes::send(arena, super::layout_changes::LayoutChange::RecordPartialRelayoutEscape) };
 }
 
 /// # Safety
@@ -750,9 +756,13 @@ pub unsafe extern "C" fn layout_arena_reset_cached_intrinsic_sizes_of_self_and_a
     marks: LayoutUpdateMarksHandle,
     node: NodeSlotId,
 ) {
-    let arena = marks.arena;
-    // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
-    unsafe { LayoutNodeArena::from_handle(arena) }.reset_cached_intrinsic_sizes_of_self_and_ancestors(node);
+    // SAFETY: The render inputs hand out the marks of their document's live arena.
+    unsafe {
+        super::layout_changes::send_through_marks(
+            marks,
+            super::layout_changes::LayoutChange::ResetCachedIntrinsicSizesOfSelfAndAncestors { node },
+        );
+    }
 }
 
 /// # Safety
@@ -765,9 +775,15 @@ pub unsafe extern "C" fn layout_arena_classify_layout_tree_update(
     node: NodeSlotId,
     reason_is_structural_boundary_self_rebuild: bool,
 ) -> FfiLayoutTreeUpdateClassification {
-    // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
-    unsafe { LayoutNodeArena::from_handle(arena) }
-        .classify_layout_tree_update(node, reason_is_structural_boundary_self_rebuild)
+    let read = super::layout_changes::LayoutRead::ClassifyLayoutTreeUpdate {
+        node,
+        reason_is_structural_boundary_self_rebuild,
+    };
+    // SAFETY: The C++ caller passes the live arena handle of its document.
+    match unsafe { super::layout_changes::ask(arena, read) } {
+        super::layout_changes::LayoutReadAnswer::Classification(classification) => classification,
+        super::layout_changes::LayoutReadAnswer::Bool(_) => FfiLayoutTreeUpdateClassification::default(),
+    }
 }
 
 /// # Safety
@@ -779,9 +795,13 @@ pub unsafe extern "C" fn layout_arena_defer_child_list_insertion_layout_update(
     marks: LayoutUpdateMarksHandle,
     parent: NodeSlotId,
 ) {
-    let arena = marks.arena;
-    // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
-    unsafe { LayoutNodeArena::from_handle(arena) }.defer_child_list_insertion_layout_update(parent);
+    // SAFETY: The render inputs hand out the marks of their document's live arena.
+    unsafe {
+        super::layout_changes::send_through_marks(
+            marks,
+            super::layout_changes::LayoutChange::DeferChildListInsertionLayoutUpdate { parent },
+        );
+    }
 }
 
 /// # Safety
@@ -794,9 +814,16 @@ pub unsafe extern "C" fn layout_arena_set_needs_layout_update(
     node: NodeSlotId,
     propagate_through_ancestors: bool,
 ) {
-    let arena = marks.arena;
-    // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
-    unsafe { LayoutNodeArena::from_handle(arena) }.set_needs_layout_update(node, propagate_through_ancestors);
+    // SAFETY: The render inputs hand out the marks of their document's live arena.
+    unsafe {
+        super::layout_changes::send_through_marks(
+            marks,
+            super::layout_changes::LayoutChange::SetNeedsLayoutUpdate {
+                node,
+                propagate_through_ancestors,
+            },
+        );
+    }
 }
 
 #[cfg(test)]

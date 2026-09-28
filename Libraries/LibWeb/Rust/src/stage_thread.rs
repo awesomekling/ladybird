@@ -536,8 +536,10 @@ unsafe fn submit_to_owner(
 ) {
     let thread = stage_thread().expect("only a stage thread runs submitted stages");
     let (ticket, reply) = SubmittedRunTicket::new(thread, next_submitted_run(label, arena));
+    let message = message(ticket);
+    crate::render_owner::note_sending(&message);
     tsan::release(thread);
-    if thread.jobs.send(StageMessage::Owner(message(ticket))).is_err() {
+    if thread.jobs.send(StageMessage::Owner(message)).is_err() {
         // The stage thread only goes away if the process is going away.
         std::process::abort();
     }
@@ -1608,6 +1610,7 @@ pub(crate) unsafe fn call_site_file(file: *const u8, file_length: usize) -> &'st
 /// Sends `message` to the render owner, the Rendering thread. Hands it back where the calling thread is the owner:
 /// without a Rendering thread, or on it.
 pub(crate) fn send_to_owner(message: crate::render_owner::ToOwner) -> Result<(), crate::render_owner::ToOwner> {
+    crate::render_owner::note_sending(&message);
     let Some(thread) = stage_thread().filter(|thread| std::thread::current().id() != thread.id) else {
         return Err(message);
     };
@@ -1890,6 +1893,14 @@ impl<R> OwnerReplyTo<R> {
     }
 }
 
+/// Whether a thread that waits for the owner now does the owner's work itself: the owner holds a run for a test, which
+/// what the thread would wait for queues behind.
+pub(crate) fn owner_work_runs_here() -> bool {
+    stage_thread().is_some_and(|thread| std::thread::current().id() != thread.id)
+        && has_frame_in_flight()
+        && stage_thread_holds_run_for_queued_stage()
+}
+
 /// Sends the render owner the message `message` makes of where it answers, and waits for the answer. The owner joins
 /// the calling thread for nothing: the thread only waits. Where there is no owner to send it to (no Rendering thread,
 /// or the calling thread is it), or the message would queue behind a run a test holds, `here` answers right here.
@@ -1928,6 +1939,7 @@ fn send_and_wait<R>(
         style_update: Box::new(take_style_update_scope()),
         reply,
     });
+    crate::render_owner::note_sending(&message);
     tsan::release(thread);
     if thread.jobs.send(StageMessage::Owner(message)).is_err() {
         // The Rendering thread only goes away if the process is going away.

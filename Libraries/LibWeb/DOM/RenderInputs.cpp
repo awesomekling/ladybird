@@ -179,11 +179,13 @@ void RenderInputs::invalidate_text_content(Layout::Row const& row)
     Layout::RustFFI::layout_arena_invalidate_text_content(layout_update_marks(row.arena()), row.slot());
 }
 
-bool RenderInputs::enroll_text_after_language_change(Layout::Row const& row)
+void RenderInputs::enroll_text_after_language_change(Layout::Row const& row)
 {
-    if (!is_row_of(row, m_document))
-        return row.document().render_inputs_for_write().enroll_text_after_language_change(row);
-    return Layout::RustFFI::layout_arena_enroll_text_after_language_change(layout_update_marks(row.arena()), row.slot());
+    if (!is_row_of(row, m_document)) {
+        row.document().render_inputs_for_write().enroll_text_after_language_change(row);
+        return;
+    }
+    Layout::RustFFI::layout_arena_enroll_text_after_language_change(layout_update_marks(row.arena()), row.slot());
 }
 
 // The arena's layout tree update marks are written through here, and nowhere else.
