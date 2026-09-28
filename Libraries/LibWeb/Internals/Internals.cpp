@@ -165,8 +165,6 @@ static GC::Ptr<HTML::LocalNavigable> local_root_of(HTML::Window const& window)
 Internals::Internals(HTML::Window& window)
     : InternalsBase(window)
 {
-    // The rendering scheduler counters report the door passes.
-    Layout::RustFFI::layout_arena_count_door_passes();
 }
 
 Internals::~Internals() = default;
@@ -1774,25 +1772,6 @@ GC::Ref<JS::Object> Internals::get_rendering_scheduler_counters() const
     }
     object->define_direct_property("journalEntriesDuringFlight"_utf16_fly_string, journal_entries, JS::default_attributes);
 
-    // Door passes are counted by the Rust door itself, by writer.
-    struct DoorCounters {
-        Utf16FlyString writer;
-        Layout::RustFFI::FfiDoorCounters counters;
-    };
-    Vector<DoorCounters> door_counters;
-    Layout::RustFFI::layout_arena_for_each_door_counters(&door_counters, [](void* context, u8 const* name, size_t name_length, Layout::RustFFI::FfiDoorCounters counters) {
-        auto writer = Utf16FlyString::from_utf8(StringView { reinterpret_cast<char const*>(name), name_length });
-        static_cast<Vector<DoorCounters>*>(context)->append({ move(writer), counters });
-    });
-    auto doors = JS::Object::create(realm, nullptr);
-    for (auto const& [writer, counters_of_writer] : door_counters) {
-        auto door = JS::Object::create(realm, nullptr);
-        door->define_direct_property("passes"_utf16_fly_string, JS::Value(counters_of_writer.passes), JS::default_attributes);
-        door->define_direct_property("waits"_utf16_fly_string, JS::Value(counters_of_writer.waits), JS::default_attributes);
-        door->define_direct_property("waitNanoseconds"_utf16_fly_string, JS::Value(counters_of_writer.wait_nanoseconds), JS::default_attributes);
-        doors->define_direct_property(writer, door, JS::default_attributes);
-    }
-    object->define_direct_property("doors"_utf16_fly_string, doors, JS::default_attributes);
     object->define_direct_property("finishedFrameConsumerCalls"_utf16_fly_string, JS::Value(counters.finished_frame_consumer_calls), JS::default_attributes);
     object->define_direct_property("renderingTaskBlockedOnFrameNanoseconds"_utf16_fly_string, JS::Value(counters.rendering_task_blocked_on_frame_nanoseconds), JS::default_attributes);
     object->define_direct_property("renderingTasksHeld"_utf16_fly_string, JS::Value(counters.rendering_tasks_held), JS::default_attributes);

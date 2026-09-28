@@ -2061,13 +2061,8 @@ static void record_element_inline_style_properties(DOM::Element& element)
     auto* style_engine = style_engine_for(element);
     if (!style_engine || element.style_node_id() == no_style_node || has_pending_initial_features(element))
         return;
-    // The declarations cross with the next transaction. Like a DOM mutation, recording them waits
-    // for a frame in flight that reaches the style engine, so no transaction carrying them is
-    // applied beside one. A recording reaches none, and the declarations are recorded beside it.
-    // Beside a style pass they are recorded as they are, and wait for its drain. Beside a layout
-    // pass they are recorded as they are too: its frame applied every transaction before it.
-    if (!Layout::RustFFI::rust_stage_thread_style_pass_holds_style_engine(style_engine->rust_handle()) && !style_engine->layout_pass_is_in_flight())
-        element.document().join_frame_reaching_style_engine();
+    // The declarations cross with the next transaction. Beside a style pass they wait for its drain; a layout pass's
+    // frame applied every transaction before it.
     auto const inline_style = element.inline_style();
     // What the block holds now: an edit made before the transaction crosses records a write of its own.
     auto const* declarations = inline_style ? Parser::ValueParserFFI::rust_declaration_block_snapshot(inline_style->declaration_block().handle()) : nullptr;

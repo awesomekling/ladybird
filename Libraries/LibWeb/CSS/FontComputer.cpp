@@ -76,10 +76,9 @@ FontComputer::~FontComputer()
 // the table republished for it. Nothing else may touch m_environment_generation.
 void FontComputer::bump_environment_generation()
 {
-    // A font change republishes the `@font-face` table and then invalidates the elements that use
-    // it, in several calls into the style engine the layout frame reads, so it waits for a frame in
-    // flight that reaches the engine first. A recording reads none of it.
-    m_document->join_frame_reaching_style_engine();
+    // The style drain of a pass in flight resolves fonts against the table on the main thread, so it drains before
+    // the table changes.
+    m_document->join_frame_before_style_drain_reads();
     ++m_environment_generation;
     publish_font_faces();
     // A style update holds the table it was given for its whole length, so a change made while one

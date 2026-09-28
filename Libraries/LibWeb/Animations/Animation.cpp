@@ -62,12 +62,11 @@ void Animation::set_effect(GC::Ptr<AnimationEffect> new_effect, ShouldInvalidate
     if (new_effect == old_effect)
         return;
 
-    // NB: The old effect's element is recomputed and the new one's rows are published in several calls into the style
-    //     mirror the layout frame reads, so a change made beside a frame in flight that reaches the style engine waits
-    //     for it first. A recording reaches none.
+    // NB: The style drain of a pass in flight reads the effects the elements hold on the main thread, so it drains
+    //     before either element's effect changes.
     for (auto effect : { old_effect, new_effect }) {
         if (effect && effect->target())
-            effect->target()->document().join_frame_reaching_style_engine();
+            effect->target()->document().join_frame_before_style_drain_reads();
     }
 
     // 3. If animation has a pending pause task, reschedule that task to run as soon as animation is ready.

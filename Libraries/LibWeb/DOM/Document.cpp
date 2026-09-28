@@ -2245,16 +2245,9 @@ void Document::update_layout_if_needed_for_node(Node const& node, UpdateLayoutRe
 
 void Document::flush_deferred_style_change_event()
 {
-    // This is the first style engine entrance of most DOM and CSSOM mutations, so it is their door:
-    // a mutation made beside a frame in flight that reads this document's style engine waits for it
-    // before it changes anything. A style pass in flight is the exception: there is no deferred
-    // transaction to flush beside it, and the inputs the mutation records wait for its drain. So is
-    // a layout pass: its frame applied every transaction before submitting it, and what the mutation
-    // publishes waits for it to be taken back. What the mutation writes to the arena waits at the
-    // arena's doors.
+    // What a mutation made beside a frame in flight writes goes behind the frame: there is no deferred transaction to
+    // flush beside a style pass, and a layout pass's frame applied every transaction before it was submitted.
     auto const& engine = style_computer().style_engine();
-    if (!Layout::RustFFI::rust_stage_thread_style_pass_holds_style_engine(engine.rust_handle()) && !engine.layout_pass_is_in_flight())
-        join_frame_reaching_style_engine();
     if (!engine.has_deferred_geometry_transaction())
         return;
 
@@ -2348,20 +2341,13 @@ void Document::join_frame_in_flight(SourceLocation location) const
     }
 }
 
-void Document::join_frame_reaching_style_engine(SourceLocation location) const
+void Document::join_frame_before_style_drain_reads(SourceLocation location) const
 {
     // A document with no arena has no frame to be in flight.
     if (auto* arena = layout_arena_handle()) {
         HTML::MainThreadPhases::Scope phase { HTML::MainThreadPhases::Phase::FlightJoin };
-        Layout::RustFFI::layout_arena_join_frame_reaching_style_engine(arena, reinterpret_cast<u8 const*>(location.filename().characters_without_null_termination()), location.filename().length(), location.line_number());
+        Layout::RustFFI::layout_arena_join_frame_before_style_drain_reads(arena, reinterpret_cast<u8 const*>(location.filename().characters_without_null_termination()), location.filename().length(), location.line_number());
     }
-}
-
-void Document::join_frame_for_dom_tree_mutation() const
-{
-    // A document with no arena has no frame to be in flight.
-    if (auto* arena = layout_arena_handle())
-        Layout::RustFFI::layout_arena_join_frame_for_dom_tree_mutation(arena);
 }
 
 void Document::apply_commit_messages()
@@ -3813,11 +3799,6 @@ WebIDL::ExceptionOr<GC::Ref<Node>> Document::import_node(GC::Ref<Node> node, Var
 // https://dom.spec.whatwg.org/#concept-node-adopt
 void Document::adopt_node_steps(Node& node)
 {
-    // Adopting moves the style sheets the node's shadow trees hold between the documents' style
-    // engines, besides removing it, so both documents join the frames they have in flight.
-    node.document().join_frame_for_dom_tree_mutation();
-    join_frame_for_dom_tree_mutation();
-
     // 1. Let oldDocument be node’s node document.
     auto& old_document = node.document();
 
@@ -9609,9 +9590,6 @@ void Document::unregister_shadow_root(Badge<DOM::ShadowRoot>, DOM::ShadowRoot& s
 // https://drafts.csswg.org/css-position-4/#add-an-element-to-the-top-layer
 void Document::add_an_element_to_the_top_layer(GC::Ref<Element> element)
 {
-    // Top layer membership is a fact the style mirror keeps for the layout tree build.
-    join_frame_for_dom_tree_mutation();
-
     // 1. Let doc be el’s node document.
 
     // 2. If el is already contained in doc’s top layer:
@@ -9637,9 +9615,6 @@ void Document::add_an_element_to_the_top_layer(GC::Ref<Element> element)
 // https://drafts.csswg.org/css-position-4/#request-an-element-to-be-removed-from-the-top-layer
 void Document::request_an_element_to_be_remove_from_the_top_layer(GC::Ref<Element> element)
 {
-    // Top layer membership is a fact the style mirror keeps for the layout tree build.
-    join_frame_for_dom_tree_mutation();
-
     // 1. Let doc be el’s node document.
 
     // 2. If el is not contained doc’s top layer, or el is already contained in doc’s pending top layer removals, return.
@@ -9658,9 +9633,6 @@ void Document::request_an_element_to_be_remove_from_the_top_layer(GC::Ref<Elemen
 // https://drafts.csswg.org/css-position-4/#remove-an-element-from-the-top-layer-immediately
 void Document::remove_an_element_from_the_top_layer_immediately(GC::Ref<Element> element)
 {
-    // Top layer membership is a fact the style mirror keeps for the layout tree build.
-    join_frame_for_dom_tree_mutation();
-
     // 1. Let doc be el’s node document.
 
     // 2. Remove el from doc’s top layer and pending top layer removals.
@@ -9680,9 +9652,6 @@ void Document::process_top_layer_removals()
     // NB: Returning early keeps a recording in flight beside the steps that follow painting.
     if (m_top_layer_pending_removals.is_empty())
         return;
-
-    // Top layer membership is a fact the style mirror keeps for the layout tree build.
-    join_frame_for_dom_tree_mutation();
 
     // 1. For each element el in doc’s pending top layer removals: if el’s computed value of overlay is none, or el is
     //    not rendered, remove el from doc’s top layer and pending top layer removals.

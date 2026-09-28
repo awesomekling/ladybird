@@ -68,6 +68,8 @@ void StyleEngine::begin_holding_input_recorded_beside_pass()
 void StyleEngine::end_holding_input_recorded_beside_pass()
 {
     m_holds_input_recorded_beside_pass = false;
+    // What was sent to the engine beside the pass goes behind what its drain sent.
+    StyleEngineFFI::style_engine_release_changes_sent_beside_pass(rust_handle());
     publish_inputs_queued_during_pass();
 }
 
@@ -978,11 +980,6 @@ void StyleEngine::submit_recorded_input(RecordedInputGoesTo goes_to)
     // The recorded input is the next transaction's journal. While a pass is in flight it stays there.
     if (pass_is_in_flight() || m_holds_input_recorded_beside_pass)
         return;
-    // A layout pass reads what the engine holds, and whoever submits the recorded input goes on to ask the engine
-    // about it, which takes the pass back anyway: it is taken back first, and the recorded input goes in whole
-    // after what was published beside the pass.
-    if (m_style_computer && layout_pass_is_in_flight())
-        m_style_computer->document().join_frame_reaching_style_engine();
     if (m_style_computer) {
         take_in_pending_style_arrivals(m_style_computer->document());
         record_changed_node_lists(m_style_computer->document(), *this);

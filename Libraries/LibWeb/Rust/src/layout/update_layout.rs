@@ -2132,16 +2132,16 @@ pub unsafe extern "C" fn layout_arena_join_frame_in_flight(
     crate::stage_thread::join_document_frame_in_flight_at(arena, file, line, 0);
 }
 
-/// Brings the document's style engine home, as an entrance of the engine does (see
-/// `crate::css::style::engine_home`), for a main-side write to the engine. `file` and `line` name
-/// the C++ call site for the forced-join log.
+/// Brings the document's style engine home for a main-side change of what the style drain reads on the main thread:
+/// a style pass in flight is taken back and drained first. `file` and `line` name the C++ call site for the
+/// forced-join log.
 ///
 /// # Safety
 ///
 /// `arena` must be a live handle on the document thread. `file` and `file_length` must name a
 /// string that lives for the rest of the process, as a `SourceLocation`'s file name does.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_join_frame_reaching_style_engine(
+pub unsafe extern "C" fn layout_arena_join_frame_before_style_drain_reads(
     arena: *mut c_void,
     file: *const u8,
     file_length: usize,
@@ -2163,7 +2163,8 @@ pub unsafe extern "C" fn layout_arena_join_frame_reaching_style_engine(
 ///
 /// # Safety
 ///
-/// As for [`layout_arena_join_frame_reaching_style_engine`].
+/// `arena` must be a live handle on the document thread. `file` and `file_length` must name a
+/// string that lives for the rest of the process, as a `SourceLocation`'s file name does.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_join_frame_owning_arena(
     arena: *mut c_void,

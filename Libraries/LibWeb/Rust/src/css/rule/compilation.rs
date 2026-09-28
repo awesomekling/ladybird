@@ -356,7 +356,7 @@ pub unsafe extern "C" fn rust_style_sheet_compile(
             Some(&mut planner),
         );
     }
-    send_plan(publication.engine, "rust_style_sheet_compile", planner);
+    send_plan(publication.engine, planner);
 }
 
 /// Update the selectors of a style rule and its native descendants without materializing CSSOM.
@@ -389,15 +389,14 @@ pub unsafe extern "C" fn rust_style_sheet_replace_selectors(
             &holds,
         );
     }
-    send_plan(engine, "rust_style_sheet_replace_selectors", planner);
+    send_plan(engine, planner);
 }
 
 /// Sends the owner of `engine` what `planner` planned, if anything. `entry` names the door the main thread took.
-fn send_plan(engine: crate::css::style::StyleEngineInputHandle, entry: &'static str, planner: Planner) {
+fn send_plan(engine: crate::css::style::StyleEngineInputHandle, planner: Planner) {
     if let Some(compiled) = planner.into_compiled_rules() {
         crate::css::style::owner_calls::send(
             engine,
-            entry,
             crate::css::style::owner_calls::EngineChange::CompileRules(Box::new(compiled)),
         );
     }

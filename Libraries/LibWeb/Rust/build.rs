@@ -892,7 +892,7 @@ fn generate_style_engine_boundary(manifest_dir: &Path, out_dir: &Path) -> Result
             if owner == "change" {
                 writeln!(
                     rust,
-                    "        crate::css::style::owner_calls::send(engine, \"{ffi}\", crate::css::style::owner_calls::EngineChange::Boundary(BoundaryWrite::{variant}));\n    }});\n}}\n"
+                    "        crate::css::style::owner_calls::send(engine, crate::css::style::owner_calls::EngineChange::Boundary(BoundaryWrite::{variant}));\n    }});\n}}\n"
                 )?;
             } else {
                 let handle = if receiver == "const" { "engine" } else { "engine.home()" };

@@ -54,7 +54,6 @@ MAIN_THREAD_ONLY = "a thread_local the main thread keeps for itself; a stage thr
 PRESENTED_COUNTER = "process-wide atomic count of presented frames that tests read; nothing branches on it"
 REPLAY = "style replay capture; replay builds only, or off unless an environment variable turns it on"
 TEST_ONLY = "test only"
-MAIN_SIDE_COUNTER = "counter kept by the main side's doors, which a render stage never passes"
 GROW_ONLY = "process-wide behind a lock or atomic, and only grows; growing asks readers to keep more, never less"
 RENDER_OWNER = "the render owner's registry and protocol: state only the owner thread or only a document thread reaches, or shared by design behind a mutex or atomic"
 SUBMITTED_COUNT = "process-wide atomic count of live submitted stages for a document's arena or style engine; a thread counts its own before it asks, so zero means none of its own is in flight"
@@ -66,10 +65,6 @@ def render_stage_entries(reason, entries):
 
 
 RENDER_STAGE_ALLOWED = {
-    **render_stage_entries(
-        MAIN_SIDE_COUNTER,
-        ["layout/layout_node_arena.rs:DOOR_COUNTERS", "layout/layout_node_arena.rs:COUNTS_DOOR_PASSES"],
-    ),
     **render_stage_entries(
         MAIN_THREAD_ONLY,
         [

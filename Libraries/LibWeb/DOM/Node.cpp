@@ -1020,8 +1020,6 @@ static void run_post_connection_steps(Nodes const& nodes)
 
 void Node::insert_nodes_before(ReadonlySpan<GC::Ref<Node>> nodes, GC::Ptr<Node> child, bool suppress_observers, GC::Ref<Node> metadata_node, ChildrenChangedMetadata::AffectsElements affects_elements)
 {
-    document().join_frame_for_dom_tree_mutation();
-
     // 5. If child is non-null:
     if (child)
         adjust_live_ranges_for_insertion(*child, nodes.size());
@@ -1716,7 +1714,6 @@ void Node::remove(bool suppress_observers)
     // 2. Assert: parent is non-null.
     VERIFY(parent);
 
-    document().join_frame_for_dom_tree_mutation();
     document().flush_deferred_style_change_event();
     bool const was_connected = is_connected();
     bool const was_tracked_by_style_engine = is_tracked_by_style_engine();
@@ -1996,8 +1993,6 @@ WebIDL::ExceptionOr<void> Node::move_node(Node& new_parent, Node* child)
         if (new_parent.has_child_of_type<Element>() || is<DocumentType>(child) || (child && child->has_following_node_of_type_in_tree_order<DocumentType>()))
             return WebIDL::HierarchyRequestError::create("Invalid node type for insertion"_utf16);
     }
-
-    document().join_frame_for_dom_tree_mutation();
 
     // 7. Let oldParent be node’s parent.
     auto* old_parent = this->parent();
@@ -2418,9 +2413,6 @@ bool Node::recompute_editable_subtree_flag()
 
 void Node::recompute_editable_subtree_flags_and_repaint()
 {
-    // The walk moves the construction facts the style mirror keeps of every element it reaches.
-    document().join_frame_for_dom_tree_mutation();
-
     // An <area> is never rendered, so its editability rides on the areas its image publishes
     // rather than on a row of its own. This walk is where that fact can flip without the map or
     // the image being touched, so it is also where the areas have to be published again.
@@ -3031,7 +3023,6 @@ void Node::remove_all_children(bool suppress_observers)
     if (auto history = document().editing_history_if_exists())
         history->notify_dom_mutation();
 
-    document().join_frame_for_dom_tree_mutation();
     document().flush_deferred_style_change_event();
     bool const was_connected = is_connected();
     bool const was_tracked_by_style_engine = is_tracked_by_style_engine();
