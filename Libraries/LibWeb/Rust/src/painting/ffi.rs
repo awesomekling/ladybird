@@ -3474,32 +3474,6 @@ pub struct FfiOptionalCssPixelRect {
 
 /// # Safety
 ///
-/// `arena` must be a live handle from `layout_arena_create`, used on the document thread;
-/// `consume` copies the byte span synchronously.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_stacking_context_structure_verification_report(
-    arena: *mut c_void,
-    viewport: NodeSlotId,
-    context: *mut c_void,
-    consume: unsafe extern "C" fn(*mut c_void, *const u8, usize),
-) {
-    // SAFETY: Guaranteed by the caller.
-    let crate::render_owner::ArenaAnswer::Report(report) = (unsafe {
-        crate::render_owner::ask_arena_of(
-            arena,
-            crate::render_owner::ArenaQuery::StackingContextVerification { viewport },
-        )
-    }) else {
-        return;
-    };
-    if !report.is_empty() {
-        // SAFETY: The consumer copies the byte span synchronously.
-        unsafe { consume(context, report.as_ptr(), report.len()) };
-    }
-}
-
-/// # Safety
-///
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_paintable_grid_layout_json(

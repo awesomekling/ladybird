@@ -2241,54 +2241,6 @@ pub unsafe extern "C" fn layout_arena_begin_update_layout(arena: *mut c_void) {
     host_tables.begin_layout_update();
 }
 
-/// How many layout passes and tree builds the layout of the document the arena `arena` names has run, which the
-/// owner answers once the frame in flight that owns the arena, if any, has been taken back.
-///
-/// # Safety
-///
-/// `arena` must be a live handle on the document thread.
-unsafe fn layout_counts(arena: *mut c_void) -> crate::render_owner::LayoutCounts {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    crate::stage_thread::join_frame_in_flight(arena);
-    // SAFETY: Guaranteed by the caller.
-    let document = unsafe { ArenaHandle::document_of(arena) };
-    // SAFETY: As above.
-    match unsafe { crate::render_owner::ask(document, arena, crate::render_owner::Query::LayoutCounts) } {
-        crate::render_owner::Answer::LayoutCounts(counts) => counts,
-        _ => {
-            debug_assert!(false, "layout counts are answered with counts");
-            crate::render_owner::LayoutCounts::default()
-        }
-    }
-}
-
-/// # Safety
-///
-/// `arena` must be a live handle on the document thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_partial_layout_count(arena: *mut c_void) -> u64 {
-    // SAFETY: As above.
-    unsafe { layout_counts(arena) }.partial_layouts
-}
-
-/// # Safety
-///
-/// `arena` must be a live handle on the document thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_full_layout_count(arena: *mut c_void) -> u64 {
-    // SAFETY: As above.
-    unsafe { layout_counts(arena) }.full_layouts
-}
-
-/// # Safety
-///
-/// `arena` must be a live handle on the document thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_layout_tree_build_stats(arena: *mut c_void) -> FfiLayoutTreeBuildStats {
-    // SAFETY: As above.
-    unsafe { layout_counts(arena) }.tree_builds
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

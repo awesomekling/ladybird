@@ -6796,20 +6796,6 @@ pub unsafe extern "C" fn layout_arena_style_node_changed(arena: *mut c_void, old
     unsafe { super::tree_update_marks::with_document_marks(arena, |marks| marks.clear(old)) };
 }
 
-/// The style record a row holds, for tests.
-///
-/// # Safety
-///
-/// `arena` must be a live handle on the document thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_node_style_record(arena: *mut c_void, id: NodeSlotId) -> u64 {
-    // SAFETY: Guaranteed by the caller.
-    match unsafe { crate::render_owner::ask_arena_of(arena, crate::render_owner::ArenaQuery::NodeStyleRecord(id)) } {
-        crate::render_owner::ArenaAnswer::StyleRecord(record) => record,
-        _ => 0,
-    }
-}
-
 /// # Safety
 ///
 /// `arena` must be a live handle on the document thread. The host must stay registered only while

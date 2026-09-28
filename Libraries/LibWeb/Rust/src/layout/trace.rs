@@ -8,7 +8,7 @@ use super::LayoutNodeArena;
 use super::debug_text::{AppendBytes, DebugText, DescribeDomNode};
 use super::formatting_context::{FormattingContextType, LayoutMode, LayoutPurpose};
 use super::node_data::{NodeFlag, NodeKind, NodeSlotId};
-use crate::render_owner::{ArenaAnswer, ArenaChange, ArenaQuery};
+use crate::render_owner::ArenaChange;
 use std::cell::RefCell;
 use std::ffi::c_void;
 
@@ -228,28 +228,27 @@ pub unsafe extern "C" fn layout_arena_begin_layout_trace(
     crate::render_owner::send_arena_change(document, ArenaChange::BeginLayoutTrace);
 }
 
-/// Ends tracing the layout of the document whose arena `arena` names, and hands `append_text` what was traced.
+/// Ends tracing the layout of the document whose arena `arena` names, and hands `append_text` the `text` the owner
+/// traced, if it traced any.
 ///
 /// # Safety
 ///
 /// `arena` must be a live arena handle on the document thread, and `append_text` must be callable with `context` for
 /// the duration of this call.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_take_layout_trace(
+pub(crate) unsafe fn end_and_hand_over(
     arena: *mut c_void,
+    text: Option<DebugText>,
     context: *mut c_void,
     append_text: AppendBytes,
 ) {
     // SAFETY: Guaranteed by the caller.
-    let answer = unsafe { crate::render_owner::ask_arena_of(arena, ArenaQuery::LayoutTrace) };
-    // SAFETY: As above.
     let document = unsafe { super::ArenaHandle::document_of(arena) };
     crate::render_owner::send_arena_change(document, ArenaChange::EndLayoutTrace);
     // SAFETY: As above.
     let trace_names = unsafe { super::HostTables::from_handle(arena) }
         .layout_trace_names
         .take();
-    let (ArenaAnswer::DebugText(text), Some(trace_names)) = (answer, trace_names) else {
+    let (Some(text), Some(trace_names)) = (text, trace_names) else {
         return;
     };
     // A node no commit named is named now, if it is still live.
