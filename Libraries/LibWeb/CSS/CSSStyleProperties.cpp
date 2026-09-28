@@ -868,8 +868,12 @@ Optional<StyleProperty> CSSStyleProperties::get_direct_property(PropertyNameAndI
         // FIXME: Somehow get custom properties if there's no layout node.
         if (property_name_and_id.is_custom_property()) {
             // CSSOM can read a pseudo with no generated box. Its private record still
-            // carries the custom-property environment cascaded from its own rules.
-            if (auto pseudo = abstract_element.pseudo_element(); pseudo.has_value()
+            // carries the custom-property environment cascaded from its own rules. That record is
+            // not animated, so a pseudo whose installed environment is its animation overlay is read
+            // from that instead.
+            auto installed_data = abstract_element.custom_property_data();
+            bool const has_animated_custom_properties = installed_data && installed_data->is_animation_overlay_for(abstract_element);
+            if (auto pseudo = abstract_element.pseudo_element(); !has_animated_custom_properties && pseudo.has_value()
                 && first_is_one_of(*pseudo, PseudoElement::Before, PseudoElement::After, PseudoElement::FirstLetter, PseudoElement::Marker, PseudoElement::Backdrop)) {
                 auto& style_computer = abstract_element.document().style_computer();
                 DOM::Document::JoinScope join { abstract_element.document(), DOM::UpdateLayoutReason::ResolvedCSSStyleDeclarationProperty };
