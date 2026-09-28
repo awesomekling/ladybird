@@ -13,6 +13,7 @@ use crate::painting::ffi::ScrollDirection;
 use crate::painting::paintable_data::PaintableFlag;
 use crate::painting::record::damage::PaintDamage;
 use crate::painting::visual_context::dirty::{VisualContextBoxDirtyKind, VisualContextGlobalRebuildReason};
+use crate::render_owner::RowFact;
 use std::ffi::c_void;
 
 /// A write the main thread makes to a document's paint state.
@@ -91,18 +92,18 @@ pub(crate) enum PaintChange {
 }
 
 impl PaintChange {
-    /// Whether applying the change can alter what the rows the owner publishes answer the document thread: the
-    /// paintable rows, the scroll offsets and image map areas beside them, and the navigable a container box hosts.
-    /// Damage, marks for the next visual context update and what only the next recording reads alter none.
-    pub(crate) fn alters_published_rows(&self) -> bool {
+    /// What of the rows the owner publishes applying the change can alter: what the paintable rows paint from, the
+    /// scroll offsets and image map areas beside them, and the navigable a container box hosts. Damage, marks for the next visual context update and what only the next recording reads alter none.
+    pub(crate) fn alters(&self) -> Option<RowFact> {
         match self {
-            Self::ScrollbarEnlarged { .. } | Self::ImageMapAreas { .. } | Self::ScrollOffset { .. } => true,
-            Self::ReplacedPaintFacts { facts, .. } => {
-                matches!(
-                    facts,
-                    crate::painting::replaced_paint_facts::ReplacedPaintFacts::NavigableContainer(_)
-                )
+            Self::ScrollbarEnlarged { .. } | Self::ImageMapAreas { .. } | Self::ScrollOffset { .. } => {
+                Some(RowFact::Paint)
             }
+            Self::ReplacedPaintFacts { facts, .. } => matches!(
+                facts,
+                crate::painting::replaced_paint_facts::ReplacedPaintFacts::NavigableContainer(_)
+            )
+            .then_some(RowFact::Paint),
             Self::ChromeStateListens(_)
             | Self::NearestSelfPaintingInlineRepaint(_)
             | Self::Selection(_)
@@ -121,7 +122,7 @@ impl PaintChange {
             | Self::SvgPaintResourcesChanged
             | Self::CompositorAnimationUpdateBegun
             | Self::VectorImageDisplayLists(_)
-            | Self::CompositorAnimations(_) => false,
+            | Self::CompositorAnimations(_) => None,
         }
     }
 

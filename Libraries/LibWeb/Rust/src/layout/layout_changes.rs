@@ -15,7 +15,7 @@ use super::partial_relayout::FfiPossibleBoundaryUpdate;
 use super::tree_builder::FfiRemovedBoxPlace;
 use super::used_values::FfiCssPixelPoint;
 use crate::css::style::tree::{NaturalSize, StyleNodeID};
-use crate::render_owner::{Answer, ArenaChange, ChangeSeq, Query};
+use crate::render_owner::{Answer, ArenaChange, ChangeSeq, Query, RowFact};
 use std::ffi::c_void;
 
 /// One write of the main thread to a document's layout marks or layout facts, which the owner applies to the arena
@@ -337,20 +337,20 @@ impl LayoutChange {
         }
     }
 
-    /// Whether applying the change can alter what the rows the owner publishes answer the document thread: the rows
-    /// themselves, their DOM facts, identities and styles. Marks for the next layout, the flags it reads, and what the
+    /// What of the rows the owner publishes applying the change can alter: the rows themselves and their identities,
+    /// their styles, or their DOM paint facts. Marks for the next layout, the flags it reads, and what the
     /// arena keeps for the host (the document thread keeps its own copy of the compositor animation frames) alter
     /// none.
-    pub(crate) fn alters_published_rows(&self) -> bool {
+    pub(crate) fn alters(&self) -> Option<RowFact> {
         match self {
-            Self::SetNodeDomPaintFacts { .. }
-            | Self::DetachRemainingRowsForRemoval { .. }
+            Self::DetachRemainingRowsForRemoval { .. }
             | Self::DetachRemovedBoxInPlace { .. }
-            | Self::StyleNodeChanged { .. }
-            | Self::InstallRowStyle { .. }
+            | Self::StyleNodeChanged { .. } => Some(RowFact::Tree),
+            Self::InstallRowStyle { .. }
             | Self::ReplaceRowStyleRecord { .. }
             | Self::AdoptDerivedNodeStyle { .. }
-            | Self::InstallAnimationSample { .. } => true,
+            | Self::InstallAnimationSample { .. } => Some(RowFact::Style),
+            Self::SetNodeDomPaintFacts { .. } => Some(RowFact::Paint),
             Self::SetNodeFlag { .. }
             | Self::SetNeedsLayoutUpdateOfPossibleBoundary { .. }
             | Self::SetNodeNeedsCompositorAnimationFrame { .. }
@@ -370,7 +370,7 @@ impl LayoutChange {
             | Self::RowOwnsImageProvider { .. }
             | Self::SetStyleImageResourcesAttached { .. }
             | Self::PinBoundBoxStyleRecordForDetachment { .. }
-            | Self::SetTableSpans { .. } => false,
+            | Self::SetTableSpans { .. } => None,
         }
     }
 

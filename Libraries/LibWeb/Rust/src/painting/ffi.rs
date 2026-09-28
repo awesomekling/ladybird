@@ -439,9 +439,8 @@ pub struct FfiCommittedRow {
 }
 
 /// Whether `slot` has a committed box, which is all most main-side callers ask before they touch
-/// its row. Publishing the rows, and measuring the overflow they are published with, changes no
-/// row's population, so the live rows answer this without the publication
-/// [`layout_arena_committed_row`] makes.
+/// its row. It reads the rows' tree alone: a style or paint change the document thread sent, as
+/// its style drain does per element, leaves the rows it reads current.
 ///
 /// # Safety
 ///
@@ -449,7 +448,9 @@ pub struct FfiCommittedRow {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_has_committed_box(arena: *mut c_void, slot: NodeSlotId) -> bool {
     // SAFETY: Guaranteed by the caller.
-    unsafe { read_current(arena, |rows| rows.paintable_row_is_populated(slot)) }
+    unsafe { RowSnapshot::current_tree(arena) }
+        .paintable
+        .paintable_row_is_populated(slot)
 }
 
 /// # Safety
