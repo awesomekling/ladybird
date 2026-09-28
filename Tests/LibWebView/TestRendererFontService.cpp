@@ -159,14 +159,12 @@ TEST_CASE(a_cold_family_lookup_from_another_thread_is_answered_while_the_main_th
 
     IGNORE_USE_IN_ESCAPING_LAMBDA auto render_side_provider = make_provider();
     IGNORE_USE_IN_ESCAPING_LAMBDA Atomic<u32> typefaces_seen { 0 };
-    IGNORE_USE_IN_ESCAPING_LAMBDA Atomic<u64> questions_the_scope_counted { 0 };
 
     auto worker = Threading::Thread::construct("RenderSideFamilyMatch"sv, [&] {
         Gfx::RenderSideFontScope scope;
         render_side_provider->for_each_typeface_with_family_name(*family, [&](Gfx::Typeface const&) {
             typefaces_seen.fetch_add(1);
         });
-        questions_the_scope_counted.store(scope.questions_that_reached_the_document_thread());
         return 0;
     });
     worker->start();
@@ -176,7 +174,6 @@ TEST_CASE(a_cold_family_lookup_from_another_thread_is_answered_while_the_main_th
     // and every file it needed was opened without the main thread pumping anything.
     EXPECT(typefaces_seen.load() > 0u);
     EXPECT_EQ(questions_on_the_document_connection.load(), 0u);
-    EXPECT_EQ(questions_the_scope_counted.load(), 0u);
 
     // The control: the same cold lookup outside a render-side scope still takes the callbacks, so
     // the count above is zero because the broker answered, not because nothing was asked.

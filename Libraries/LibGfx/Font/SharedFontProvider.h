@@ -73,13 +73,6 @@ class RenderSideFontScope {
 public:
     RenderSideFontScope();
     ~RenderSideFontScope();
-
-    // How many questions this scope had to ask on the document thread's connection after all,
-    // because no broker was installed. The stage seals report that; nothing else needs it.
-    [[nodiscard]] u64 questions_that_reached_the_document_thread() const;
-
-private:
-    u64 m_questions_at_entry { 0 };
 };
 
 struct SharedFontProviderCallbacks {

@@ -48,7 +48,6 @@ pub(crate) fn publish_to_host(
         missed_vector_images,
         ..
     } = resources;
-    let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::RecordingPublish);
     for font in fonts.values() {
         publish.add_font(main_thread, font);
     }

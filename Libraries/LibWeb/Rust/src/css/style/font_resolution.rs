@@ -18,21 +18,6 @@ use std::hash::{Hash, Hasher};
 pub type ResolveFontsCallback =
     unsafe extern "C" fn(usize, *const c_void, *const FfiFontResolutionRequest, *mut FfiResolvedFont, usize);
 
-#[derive(Clone, Copy)]
-pub(super) enum FontService {
-    ParkedBatch,
-    RootPreparation,
-}
-
-impl FontService {
-    fn name(self) -> &'static str {
-        match self {
-            Self::ParkedBatch => "resolve_font",
-            Self::RootPreparation => "resolve_font_root",
-        }
-    }
-}
-
 struct FontResolutionKey {
     font_family: RetainedStyleValueData,
     tree_scope: u32,
@@ -230,7 +215,6 @@ impl FontResolverHost {
         snapshot: Option<&std::sync::Arc<FontFaceSnapshot>>,
         cache: &mut FontResolutionCache,
         mut requests: Vec<FontRequest>,
-        service: FontService,
     ) -> usize {
         let Some(first) = requests.first() else {
             return 0;
@@ -252,7 +236,8 @@ impl FontResolverHost {
         let ffi_requests = requests.iter().map(|request| request.ffi).collect::<Vec<_>>();
         let mut resolved = vec![FfiResolvedFont::default(); requests.len()];
         let table = snapshot.map_or(std::ptr::null(), super::font_faces::as_pointer);
-        super::seal::between_pass_input_batch(service.name(), requests.len() as u64, || unsafe {
+        // SAFETY: The requests and answers are live for the call, one answer per request.
+        unsafe {
             (self.resolve)(
                 memo,
                 table,
@@ -260,7 +245,7 @@ impl FontResolverHost {
                 resolved.as_mut_ptr(),
                 requests.len(),
             );
-        });
+        }
         let count = requests.len();
         for (request, resolved) in requests.into_iter().zip(resolved) {
             cache.insert(request, resolved);
@@ -339,13 +324,7 @@ mod tests {
         resolver.prepare(1);
         assert!(resolver.lookup(request).is_none());
         assert_eq!(RESOLVES.load(Ordering::Relaxed), 0);
-        host.refill(
-            0,
-            None,
-            &mut resolver,
-            vec![FontRequest::new(request)],
-            FontService::ParkedBatch,
-        );
+        host.refill(0, None, &mut resolver, vec![FontRequest::new(request)]);
         let first = resolver.lookup(request).unwrap();
         assert!(
             resolver
@@ -378,13 +357,7 @@ mod tests {
         assert!(resolver.lookup(request).is_none());
         resolver.prepare(2);
         assert_eq!(font_cascade_list_unref_count(), unrefs_before + 1);
-        host.refill(
-            0,
-            None,
-            &mut resolver,
-            vec![FontRequest::new(request)],
-            FontService::ParkedBatch,
-        );
+        host.refill(0, None, &mut resolver, vec![FontRequest::new(request)]);
         resolver.lookup(request).unwrap();
         assert_eq!(RESOLVES.load(Ordering::Relaxed), 2);
         assert_eq!(font_cascade_list_unref_count(), unrefs_before + 1);

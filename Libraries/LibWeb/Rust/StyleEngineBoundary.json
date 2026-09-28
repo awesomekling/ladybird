@@ -129,7 +129,6 @@
     [150, "EnsureRandomBaseValue"],
     [151, "SetElementAssociatedPseudoKind"],
     [152, "BoxTypeParentDisplay"],
-    [153, "NoteHostEntry"],
     [155, "SetCounterStyleEnvironmentIdentity"],
     [156, "AnswerRecordDemand"],
     [160, "SetTextData"],
@@ -153,7 +152,6 @@
   "operations": [
     { "event": "SettlePseudoElementsInNextPass", "name": "settle_pseudo_elements_in_next_pass", "return": "void", "args": [["node", "style_node"], ["old_is_list_item", "bool"], ["held_pseudo_records", "u64_slice"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.settle_pseudo_elements_in_next_pass(node, old_is_list_item, held_pseudo_records);" },
     { "event": "RecordContainerQueryInput", "ffi": "style_engine_record_container_query_input", "owner": "change", "cpp": "record_container_query_input", "return": "void", "args": [["node", "style_node"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.record_container_query_input(node);" },
-    { "event": "NoteHostEntry", "ffi": "style_engine_note_host_entry", "owner": "change", "cpp": "note_host_entry", "return": "void", "args": [["node", "style_node"], ["kind", "u8"], ["row_kinds", "u8"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.note_host_entry(node, kind, row_kinds);" },
     { "event": "SetPseudoElementStyleDeferred", "ffi": "style_engine_set_pseudo_element_style_deferred", "owner": "change", "cpp": "set_pseudo_element_style_deferred", "return": "void", "args": [["kind", "u8"], ["deferred", "bool"]], "body": "engine.set_pseudo_element_style_deferred(crate::css::style::tree::PseudoElementKind(u16::from(kind)), deferred);" },
     { "event": "MakeDeferredPseudoElementStyleObservable", "ffi": "style_engine_make_deferred_pseudo_element_style_observable", "owner": "change", "cpp": "make_deferred_pseudo_element_style_observable", "return": "void", "args": [["node", "style_node"]], "body": "let Some(node) = StyleNodeID::from_raw(node) else { return; }; engine.make_deferred_pseudo_element_style_observable(node);" },
     { "event": "SetFoldIdAndClassNameCase", "ffi": "style_engine_set_fold_id_and_class_name_case", "owner": "change", "cpp": "set_fold_id_and_class_name_case", "return": "void", "args": [["fold", "bool"]], "body": "engine.set_fold_id_and_class_name_case(fold);" },

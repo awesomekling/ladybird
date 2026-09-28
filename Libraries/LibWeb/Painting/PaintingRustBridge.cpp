@@ -399,12 +399,11 @@ void rust_update_visual_viewport_transform(DOM::Document& document)
     Layout::RustFFI::layout_arena_update_visual_viewport_transform(layout_arena_handle(document));
 }
 
-bool rust_refresh_scroll_state(DOM::Document& document, Compositing::ScrollStateSnapshot& snapshot, ForceScrollStateRefresh force)
+void rust_refresh_scroll_state(DOM::Document& document, Compositing::ScrollStateSnapshot& snapshot)
 {
     publish_visual_context_tree_inputs(document);
-    return Layout::RustFFI::layout_arena_refresh_scroll_state(
-        layout_arena_handle(document), force == ForceScrollStateRefresh::Yes,
-        &snapshot, [](void* sink, Gfx::FloatPoint const* offsets, size_t count) {
+    Layout::RustFFI::layout_arena_refresh_scroll_state(
+        layout_arena_handle(document), &snapshot, [](void* sink, Gfx::FloatPoint const* offsets, size_t count) {
             static_cast<Compositing::ScrollStateSnapshot*>(sink)->assign_device_offsets({ offsets, count });
         });
 }

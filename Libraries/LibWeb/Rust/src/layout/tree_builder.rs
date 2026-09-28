@@ -3399,7 +3399,6 @@ impl TreeBuildPayment {
     pub(crate) fn pay(self, main_thread: &crate::stage::MainThread) {
         self.payment.pay(main_thread);
         if !self.reports.is_empty() {
-            super::tree_build_seal::note_host_call("deliver_commit_messages");
             // SAFETY: The document outlives the build, and no arena borrow is held here.
             unsafe {
                 crate::layout::LayoutHost::of(main_thread).deliver_commit_messages(main_thread, &self.reports);
@@ -3456,7 +3455,6 @@ pub(crate) unsafe fn walk_layout_tree_build(
 /// nothing it calls can reach the host; what it owes the host it queues on the arena for its
 /// entry to pay once it returns.
 fn run_tree_build_stage(host: &DomTreeBuilderHost, document_style_node: u32) -> TreeBuildStageOutput {
-    super::tree_build_seal::begin_build();
     host.layout().arena().begin_tree_build_handbacks();
     let mut state = TreeBuilderState::default();
     let mut context = TreeBuilderContext {
@@ -3598,7 +3596,6 @@ fn run_tree_build_stage(host: &DomTreeBuilderHost, document_style_node: u32) -> 
     // SAFETY: The stage holds the arena alone, and no borrow above outlives the free.
     let arena = unsafe { &*host.arena };
     let handbacks = arena.take_tree_build_handbacks();
-    super::tree_build_seal::end_build();
     TreeBuildStageOutput {
         outcome: FfiLayoutTreeBuildOutcome {
             viewport,

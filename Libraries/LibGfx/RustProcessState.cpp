@@ -20,8 +20,6 @@ extern "C" {
 void* ladybird_gfx_decoded_image_frame_retain(void const*, Gfx::FFI::FfiImageFrameSnapshot*);
 void ladybird_gfx_decoded_image_frame_release(void*);
 
-void ladybird_gfx_process_note_host_reaching_call(u8 const* name, size_t length);
-void ladybird_gfx_process_set_host_reaching_call_hook(void (*hook)(u8 const*, size_t));
 void ladybird_gfx_process_note_wanted_pending_face(u64 face_id);
 u64 ladybird_gfx_process_set_wanted_face_owner(u64 owner);
 void ladybird_gfx_process_take_wanted_pending_faces(u64 owner, void* context, void (*visit)(void*, u64, bool));
@@ -39,10 +37,6 @@ namespace {
 
 struct ProcessState {
     Mutex mutex;
-
-    // The trampoline LibWeb installs, which it calls its own seals through. LibGfx holds it
-    // because both copies of the crate report through it and there has to be one of it.
-    void (*host_reaching_call_trampoline)(u8 const*, size_t) { nullptr };
 
     // A face a completed cascade wanted. A want that the document thread could not turn into a
     // load is kept for one more drain: the face may simply not have been reachable yet, and a
@@ -85,25 +79,6 @@ size_t rust_crate_copies_seen()
     auto& state = process_state();
     MutexLocker locker(state.mutex);
     return state.crate_copies.size();
-}
-
-extern "C" void ladybird_gfx_process_set_host_reaching_call_hook(void (*hook)(u8 const*, size_t))
-{
-    auto& state = process_state();
-    MutexLocker locker(state.mutex);
-    state.host_reaching_call_trampoline = hook;
-}
-
-extern "C" void ladybird_gfx_process_note_host_reaching_call(u8 const* name, size_t length)
-{
-    auto& state = process_state();
-    void (*trampoline)(u8 const*, size_t) = nullptr;
-    {
-        MutexLocker locker(state.mutex);
-        trampoline = state.host_reaching_call_trampoline;
-    }
-    if (trampoline)
-        trampoline(name, length);
 }
 
 extern "C" void ladybird_gfx_process_note_wanted_pending_face(u64 face_id)

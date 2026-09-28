@@ -43,12 +43,11 @@ ALLOWED = {
 RENDER_STAGE_CRATE = "Libraries/LibWeb/Rust"
 
 SCRATCH = "per-thread allocation pool or scratch; a thread without one only allocates more"
-DIAGNOSTIC = "seal, census or counter diagnostics; off unless an environment variable turns them on"
+DIAGNOSTIC = "census or counter diagnostics; off unless an environment variable turns them on"
 ENVIRONMENT_SWITCH = "read-once environment switch; every thread sees the same answer"
 IDENTITY = "process-wide atomic counter handing out unique identities"
 BUILT_ONCE = "built once and read-only after; every thread shares the same table"
 STAGE_THREAD = "the stage thread itself, and the caller waiting on it"
-STYLE_UPDATE_SCOPE = "the document thread's open style update; a stage run carries it to the stage thread and back"
 LOCKED = "process-wide and behind a mutex"
 CLOCK_HANDOFF = "the clock ticks' handoff between the RenderClock, Rendering and main threads: shared by design, behind a mutex, condvar or atomic"
 MAIN_THREAD_ONLY = "a thread_local the main thread keeps for itself; a stage thread never reads or writes it"
@@ -125,21 +124,7 @@ RENDER_STAGE_ALLOWED = {
             "css/ffi_stats.rs:CPP_CALLBACK_COUNT",
             "css/ffi_stats.rs:REGISTRY",
             "css/ffi_stats.rs:THREAD_UNSAFE_CPP_CALLBACK_COUNT",
-            "css/style/engine_sample_check.rs:LOG",
-            "css/style/engine_sample_check.rs:MODE",
-            "css/style/seal.rs:MODE",
-            "font_seal.rs:INSTALLED",
-            "layout/seal.rs:MODE",
-            "layout/seal.rs:PASS_DEPTH",
-            "layout/seal.rs:REPORTED",
-            "layout/tree_build_seal.rs:BUILD_DEPTH",
-            "layout/tree_build_seal.rs:COUNTS",
-            "layout/tree_build_seal.rs:MODE",
-            "layout/tree_build_seal.rs:REPORTED",
             "painting/record/verify.rs:ENABLED",
-            "painting/seal.rs:CURRENT_PASS",
-            "painting/seal.rs:MODE",
-            "painting/seal.rs:REPORTED",
         ],
     ),
     **render_stage_entries(
@@ -147,12 +132,6 @@ RENDER_STAGE_ALLOWED = {
         [
             "stage_thread.rs:LOGS",
             "clock_frames.rs:ENABLED",
-            "css/style/mod.rs:CASCADE_WINNERS",
-            "css/style/mod.rs:PREFIX_RELATION",
-            "css/style/mod.rs:PUBLISHED_STYLE_TRANSACTION",
-            "css/style/mod.rs:SELECTOR_TRUTH_DERIVATION",
-            "css/style/mod.rs:STYLE_ANSWER_PATCH",
-            "css/style/mod.rs:STYLE_PLAN_PROVENANCE",
             "layout/fc_run_cache.rs:MODE",
         ],
     ),
@@ -183,12 +162,6 @@ RENDER_STAGE_ALLOWED = {
             "css/style_compute.rs:LONGHANDS",
             "css/style_compute.rs:PHASE_BOUNDARIES",
             "css/style_compute.rs:PX",
-        ],
-    ),
-    **render_stage_entries(
-        STYLE_UPDATE_SCOPE,
-        [
-            "css/style/seal.rs:STATE",
         ],
     ),
     **render_stage_entries(
@@ -272,7 +245,6 @@ RENDER_STAGE_ALLOWED = {
             "css/rule.rs:RULE_OWNER_ALLOCATIONS",
             "css/style/atoms.rs:GLOBAL_ATOM_TEST_LOCK",
             "css/style/font_resolution.rs:RESOLVES",
-            "css/style/mod.rs:SELECTOR_TRUTH_DERIVATION_OVERRIDE",
             "css/style_compute.rs:FLY_STRINGS",
             "css/style_compute.rs:FONT_CASCADE_LIST_UNREFS",
             "layout/layout_node_arena.rs:TOLD_BOX_PRESENCE",

@@ -97,11 +97,9 @@ impl CommitNotifications {
         viewport_row: NodeSlotId,
     ) {
         for reset in self.row_resets {
-            super::tree_build_seal::note_host_call("paintable_row_reset");
             reset.invoke_callback_on_main_thread(main_thread, viewport_row);
         }
         if !self.messages.is_empty() {
-            super::tree_build_seal::note_host_call("deliver_commit_messages");
             unsafe { host.deliver_commit_messages(main_thread, &self.messages) };
         }
     }

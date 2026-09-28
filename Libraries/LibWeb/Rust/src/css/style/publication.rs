@@ -348,18 +348,13 @@ impl RetainedState {
 
     /// A driven element that holds no winners even after matching again has nothing to compute
     /// a record from. None does: a rematch publishes its row whatever the memory budget. Should
-    /// one, the seal reports it, and the element keeps the record it has.
+    /// one, the element keeps the record it has.
     fn driven_element_without_winners(&self, node: StyleNodeID) -> RecordDelta {
         debug_assert!(false, "a driven element holds no winners after matching again");
         let record = self
             .computed_group_sets
             .assigned_style_record(node)
             .unwrap_or(computed::FinalStyleRecordID::NONE);
-        seal::note_host_entry(
-            "DrivenRowWithoutWinners",
-            seal::HostEntryKind::Refused,
-            record == computed::FinalStyleRecordID::NONE,
-        );
         (record, record)
     }
 
@@ -4382,91 +4377,6 @@ impl RetainedState {
                 source: WinnerSource::ExactCascade,
             }));
         }
-        verify_cascade_winners(self, |verifier| {
-            let Some(lower_bound_state) = lower_bound_state else {
-                return;
-            };
-            if !verifier
-                .current_published_answer(target.node())
-                .is_some_and(|answer| answer.cascade_winners_are_complete)
-            {
-                return;
-            }
-            let retained = Arc::clone(
-                verifier
-                    .retained_match_answer(target.node())
-                    .sparse()
-                    .expect("a complete published answer retains its exact input"),
-            );
-            for &(property, exact_key) in exact_winners {
-                let Some(maintained_winner) = self.winner_groups.winner_in_state(lower_bound_state, property) else {
-                    continue;
-                };
-                let resolved_winner = self.winner_groups.resolved_winner(maintained_winner);
-                if resolved_winner.is_some_and(|winner| {
-                    winner.key == exact_key || verifier.winner_is_written_with_substitution(target.node(), &winner)
-                }) {
-                    continue;
-                }
-                if matches!(
-                    maintained_winner.key.operator,
-                    CascadeOperator::Revert | CascadeOperator::RevertLayer
-                ) && maintained_winner.key.continuation != cascade::CascadeContinuationID::default()
-                    && resolved_winner.is_none()
-                    && matches!(exact_key.operator, CascadeOperator::Initial | CascadeOperator::Inherit)
-                {
-                    continue;
-                }
-                let mut saw_declaration = false;
-                let mut declarations_are_unanimous = true;
-                let mut inspect = |declared: &DeclaredProperty| {
-                    if declared.property == property {
-                        saw_declaration = true;
-                        declarations_are_unanimous &=
-                            declared.value == exact_key.value && declared.operator == exact_key.operator;
-                    }
-                };
-                for matched in retained.iter().filter(|matched| {
-                    verifier
-                        .programs
-                        .get(matched.program)
-                        .entries()
-                        .get(matched.entry as usize)
-                        .is_some_and(|entry| entry.pseudo_element == target.pseudo_element_target())
-                }) {
-                    verifier
-                        .program
-                        .declared_properties_of(matched.rule)
-                        .iter()
-                        .for_each(&mut inspect);
-                }
-                if !target.is_pseudo() {
-                    for kind in ElementDeclarationKind::ALL {
-                        verifier
-                            .facts
-                            .element_declared_properties(target.node(), kind)
-                            .0
-                            .iter()
-                            .for_each(&mut inspect);
-                    }
-                }
-                let unresolved_continuation = matches!(
-                    maintained_winner.key.operator,
-                    CascadeOperator::Revert | CascadeOperator::RevertLayer
-                ) && maintained_winner.key.continuation
-                    == cascade::CascadeContinuationID::default();
-                let unanimous_declared_mismatch = saw_declaration
-                    && declarations_are_unanimous
-                    && resolved_winner.is_some_and(|winner| winner.key.operator == CascadeOperator::Declared);
-                if !unresolved_continuation && !unanimous_declared_mismatch {
-                    continue;
-                }
-                panic!(
-                    "maintained cascade winner {maintained_winner:?}, resolved as {resolved_winner:?}, differs from exact legacy input {exact_key:?} for {target:?}, property {property}; retained input has {} rules",
-                    retained.len()
-                );
-            }
-        });
         let state = self.intern_cascade_state(&winners, previous, counters);
         self.winner_groups.settle_memory(&mut self.memory);
         let generation = self.winner_groups.generation();
@@ -4616,17 +4526,6 @@ impl RetainedState {
         if retained.0 != self.winner_groups.generation() {
             return;
         }
-        verify_cascade_winners(self, |engine| {
-            if let Lookup::Known(current) = engine
-                .current_winner_groups()
-                .token_for(WinnerGroupKey::current(node, engine.program.version()))
-            {
-                assert_eq!(
-                    current, retained,
-                    "a reused style must keep the winner state its cascade bound"
-                );
-            }
-        });
         self.computed_group_sets.set_pending_cascade_state(target, retained);
     }
 
@@ -4880,8 +4779,8 @@ impl StyleEngineState {
     }
 
     /// A demand the engine declined still answers. None does: each decline is an input the
-    /// demand's caller owes first. Should one happen, the seal reports it, and the row keeps the
-    /// record it has; an element without one takes the initial values.
+    /// demand's caller owes first. Should one happen, the row keeps the record it has; an element
+    /// without one takes the initial values.
     fn declined_record_demand_fallback(
         &mut self,
         node: StyleNodeID,
@@ -4895,7 +4794,6 @@ impl StyleEngineState {
             Some(kind) => self.computed_group_sets.pseudo_style_record(node, kind),
             None => self.computed_group_sets.assigned_style_record(node),
         };
-        seal::note_host_entry(cause, seal::HostEntryKind::Refused, installed.is_none());
         let answer = |record: computed::FinalStyleRecordID| {
             RecordDemandAnswer::Record(RetriedEngineRecord {
                 style_record: record.raw(),
@@ -6464,15 +6362,6 @@ impl StyleEngineState {
         requests: Vec<(Option<StyleNodeID>, font_resolution::FontRequest)>,
         counters: &mut Counters,
     ) {
-        self.refill_font_requests_for_service(requests, font_resolution::FontService::ParkedBatch, counters);
-    }
-
-    fn refill_font_requests_for_service(
-        &mut self,
-        requests: Vec<(Option<StyleNodeID>, font_resolution::FontRequest)>,
-        service: font_resolution::FontService,
-        counters: &mut Counters,
-    ) {
         if requests.is_empty() {
             return;
         }
@@ -6503,7 +6392,6 @@ impl StyleEngineState {
             snapshot.as_ref(),
             resolutions,
             requests.into_iter().map(|(_, request)| request).collect(),
-            service,
         );
         if request_count != 0 {
             counters.bump(Counter::FontRefillRounds);
@@ -6576,44 +6464,6 @@ impl StyleEngineState {
             scratch.prepared_root_font = Some((node, parent_inputs_moved, std::mem::take(&mut scratch.font_drive)));
         }
         self.apply_substitution_effects(scratch);
-    }
-
-    /// Retry a record after C++ has installed earlier records in the same preorder batch. A record
-    /// rejected while the batch was planned may become computable once its inheritance parent is
-    /// authoritative.
-    /// Record one way the host entered the engine for one element, under the reason the engine
-    /// sent it there. The engine knows the reason; the host knows when the entry happens, so the
-    /// two halves meet here. `row_kinds` is what the host's own row census already carries.
-    pub(crate) fn note_host_entry(&mut self, node: StyleNodeID, kind: u8, row_kinds: u8) {
-        if !seal::is_reporting() {
-            return;
-        }
-        let kind = match kind {
-            1 => seal::HostEntryKind::Refused,
-            2 => seal::HostEntryKind::Sampled,
-            _ => seal::HostEntryKind::Row,
-        };
-        let recorded = self.retained.host_entry_causes.get(&node).copied();
-        let (cause, cold) = recorded.unwrap_or_else(|| {
-            // The record loop was never offered this element, so no gate declined it. Name the
-            // way in instead: this population has never been ranked beside the declines.
-            let cause = if row_kinds & (1 << 1) != 0 {
-                "NotOfferedPseudoElement"
-            } else if row_kinds & (1 << 3) != 0 {
-                "NotOfferedHighlightParent"
-            } else if row_kinds & (1 << 4) != 0 {
-                "NotOfferedLonghandDriveOnly"
-            } else if row_kinds & (1 << 0) != 0 {
-                "InBatchWithoutDecline"
-            } else {
-                "NotOfferedOutOfBatch"
-            };
-            (
-                cause,
-                self.retained.computed_group_sets.assigned_style_record(node).is_none(),
-            )
-        });
-        seal::note_host_entry(cause, kind, cold);
     }
 
     /// Drive a row the pass declined over the ancestors the host installed before it, as the
@@ -6715,10 +6565,8 @@ impl StyleEngineState {
         if requests.is_empty() {
             return;
         }
-        super::seal::between_pass_input_batch("random_base", requests.len() as u64, || {
-            for (node, name, shared) in requests {
-                self.ensure_random_base_value(node, &name, shared);
-            }
-        });
+        for (node, name, shared) in requests {
+            self.ensure_random_base_value(node, &name, shared);
+        }
     }
 }

@@ -40,13 +40,8 @@ WEB_API Layout::RustFFI::FfiPhysicalOverflowDirections rust_physical_overflow_di
 WEB_API void register_geometry_host(DOM::Document&);
 WEB_API Layout::RustFFI::FfiRenderingPreparationOutcome rust_prepare_for_rendering(DOM::Document&, bool visual_context_update_pending);
 WEB_API void rust_update_visual_viewport_transform(DOM::Document&);
-enum class ForceScrollStateRefresh {
-    No,
-    Yes,
-};
-// Refreshes the snapshot from the Rust scroll state; false when nothing had invalidated it and
-// the refresh was not forced.
-WEB_API bool rust_refresh_scroll_state(DOM::Document&, Compositing::ScrollStateSnapshot&, ForceScrollStateRefresh = ForceScrollStateRefresh::No);
+// Refreshes the snapshot from the Rust scroll state, unless nothing has invalidated it.
+WEB_API void rust_refresh_scroll_state(DOM::Document&, Compositing::ScrollStateSnapshot&);
 WEB_API void rust_invalidate_scroll_state(DOM::Document&);
 struct InspectorOverlayInputs {
     BoxSlot highlighted_box;

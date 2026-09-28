@@ -1507,7 +1507,7 @@ impl StyleEngineState {
                 let custom_states = custom_states.iter().copied().map(StyleAtomID).collect::<Vec<_>>();
                 self.record_element_arrival(node, arrival, &custom_states, node_is_arriving(node), counters);
             }
-            self.settle_batched_inputs(counters);
+            self.settle_batched_inputs();
         }
 
         for delta in local_feature_deltas {
@@ -1522,7 +1522,7 @@ impl StyleEngineState {
                 counters,
             );
         }
-        self.settle_batched_inputs(counters);
+        self.settle_batched_inputs();
 
         for delta in state_deltas {
             let Some(node) = StyleNodeID::from_raw(delta.node) else {
@@ -1536,7 +1536,7 @@ impl StyleEngineState {
                 counters,
             );
         }
-        self.settle_batched_inputs(counters);
+        self.settle_batched_inputs();
 
         for delta in element_declaration_deltas {
             let Some(node) = StyleNodeID::from_raw(delta.node) else {
@@ -1595,7 +1595,6 @@ pub unsafe extern "C" fn style_engine_create(
     >,
     recording_stream: *mut u64,
 ) -> *mut c_void {
-    super::seal::note_engine_call("style_engine_create");
     let device_class = device_class.decode();
     let mut engine = Box::new(StyleEngine::new(device_class));
     engine.begin_recording(device_class);
@@ -1762,13 +1761,7 @@ pub(crate) unsafe fn owner_prepare_root_font_resolution(engine: &mut crate::css:
         .font_resolution
         .as_mut()
         .expect("a root request has a font resolution cache");
-    resolver.refill(
-        memo,
-        snapshot.as_ref(),
-        cache,
-        vec![request],
-        super::font_resolution::FontService::RootPreparation,
-    );
+    resolver.refill(memo, snapshot.as_ref(), cache, vec![request]);
 }
 
 /// Creates a replay engine whose atom keys are opaque capture tokens rather than live fly strings.
@@ -1783,12 +1776,6 @@ pub fn style_engine_create_for_replay(device_class: FfiDeviceClass) -> super::Ow
 pub unsafe fn use_recording_memory_policy_for_replay(engine: StyleEngineHandle) {
     // SAFETY: Guaranteed by the caller.
     unsafe { engine.for_replay() }.memory.enable_recording_policy();
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn style_engine_verification_gate_bits() -> u8 {
-    super::seal::note_engine_call("style_engine_verification_gate_bits");
-    super::verification_gate_bits()
 }
 
 /// Publishes the `@keyframes` one style scope defines, by name, with the host's keyframe set for
@@ -2181,7 +2168,6 @@ pub unsafe extern "C" fn layout_arena_committed_transform_reference_box(
     arena: *mut c_void,
     node: u32,
 ) -> FfiCommittedTransformReferenceBox {
-    super::seal::note_engine_call("layout_arena_committed_transform_reference_box");
     let committed = StyleNodeID::from_raw(node)
         .filter(|_| !arena.is_null())
         .and_then(|node| {
@@ -2206,9 +2192,6 @@ pub unsafe extern "C" fn layout_arena_committed_transform_reference_box(
 pub unsafe extern "C" fn style_engine_destroy(engine: StyleEngineHandle) {
     // SAFETY: Guaranteed by the caller.
     let mut engine = unsafe { engine.destroy("style_engine_destroy") };
-    super::seal::note_engine_call("style_engine_destroy");
-    super::seal::flush_engine_decline_census(engine.counters().iter());
-    super::seal::flush_census();
     engine.end_recording();
 }
 
@@ -2406,7 +2389,6 @@ pub unsafe extern "C" fn style_engine_apply_transaction(
     // SAFETY: Guaranteed by the caller.
     let input = unsafe { InputForPass::take_from(transaction) };
     handle.bring_home("style_engine_apply_transaction");
-    super::seal::note_engine_call("style_engine_apply_transaction");
     engine.send(StyleChange::Inputs(input));
     if !grant.is_empty() {
         crate::css::style::owner_calls::ask(
@@ -4508,14 +4490,9 @@ fn sample_installed_record(
             timeline_samples,
         ),
     };
-    let published = match sampled {
-        Ok(published) => published,
-        Err(reason) => {
-            super::engine_sample_check::note_declined(&format!("installed record: {reason}"));
-            return FfiRowSampledInPass::absent();
-        }
+    let Ok(published) = sampled else {
+        return FfiRowSampledInPass::absent();
     };
-    super::engine_sample_check::note_taken("installed record sample");
     let mut sample = row_sampled_in_pass(engine, Some(published));
     // What the host's comparison would ask for, answered with the sample.
     if compared_with != 0 && compared_with != sample.style_record && pseudo.is_none() {
@@ -4549,16 +4526,10 @@ pub(crate) unsafe fn sample_installed_record_for_clock_tick(
     }
     // SAFETY: Guaranteed by the caller.
     let layout_arena = unsafe { super::animations::CommittedTransformReferenceBoxes::lend(layout_arena) };
-    match engine.sample_installed_record(node, None, style_record, layout_arena, timeline_samples) {
-        Ok(published) => {
-            super::engine_sample_check::note_taken("clock tick sample");
-            Some(row_sampled_in_pass(engine, Some(published)))
-        }
-        Err(reason) => {
-            super::engine_sample_check::note_declined(&format!("clock tick: {reason}"));
-            None
-        }
-    }
+    let published = engine
+        .sample_installed_record(node, None, style_record, layout_arena, timeline_samples)
+        .ok()?;
+    Some(row_sampled_in_pass(engine, Some(published)))
 }
 
 /// Takes the next sample of what the clock ticks of a document left for the host to adopt, as the
@@ -4760,7 +4731,6 @@ pub(crate) unsafe fn owner_decide_transition_step_for_installed_record(
             &timeline_samples,
         ) {
             Ok(published) => {
-                super::engine_sample_check::note_taken("installed record transition step");
                 let mut answer = row_sampled_in_pass(engine, published);
                 if !answer.present {
                     answer.present = true;
@@ -4768,10 +4738,7 @@ pub(crate) unsafe fn owner_decide_transition_step_for_installed_record(
                 }
                 answer
             }
-            Err(reason) => {
-                super::engine_sample_check::note_declined(&format!("installed record transition step: {reason}"));
-                row_sampled_in_pass(engine, None)
-            }
+            Err(_) => row_sampled_in_pass(engine, None),
         }
     })
 }
@@ -6104,7 +6071,6 @@ struct ContainerEffects {
 ///
 /// `effects` is null or a live handle returned by `style_engine_native_rule_matches_containers`.
 pub unsafe extern "C" fn style_engine_native_container_effect_count(effects: *const c_void) -> usize {
-    super::seal::note_engine_call("style_engine_native_container_effect_count");
     unsafe { effects.cast::<ContainerEffects>().as_ref() }.map_or(0, |effects| effects.effects.len())
 }
 
@@ -6117,7 +6083,6 @@ pub unsafe extern "C" fn style_engine_native_container_effect(
     effects: *const c_void,
     index: usize,
 ) -> FfiContainerEffect {
-    super::seal::note_engine_call("style_engine_native_container_effect");
     let (style_node, kind, name) = &unsafe { &*effects.cast::<ContainerEffects>() }.effects[index];
     FfiContainerEffect {
         style_node: *style_node,
@@ -6133,7 +6098,6 @@ pub unsafe extern "C" fn style_engine_native_container_effect(
 /// `effects` is null or a live handle returned by `style_engine_native_rule_matches_containers`
 /// that has not already been released.
 pub unsafe extern "C" fn style_engine_native_container_effects_release(effects: *mut c_void) {
-    super::seal::note_engine_call("style_engine_native_container_effects_release");
     if !effects.is_null() {
         drop(unsafe { Box::from_raw(effects.cast::<ContainerEffects>()) });
     }
@@ -6279,7 +6243,6 @@ pub unsafe extern "C" fn style_engine_native_rule_declarations_changed(
         return false;
     }
     // The host's notification reaches no engine: it moves the document's style environment version on.
-    super::seal::note_host_call("native_rule_declarations_changed.notify");
     unsafe { notify(context) };
     declares_transitions
 }
@@ -6367,10 +6330,8 @@ pub unsafe extern "C" fn style_engine_remove_native_rule(
                 .collect(),
         ),
     );
-    super::seal::note_host_call("remove_native_rule.begin");
     unsafe { begin(context, changes_environment, has_counter_style) };
     for rule in &removed {
-        super::seal::note_host_call("remove_native_rule.notify");
         unsafe { notify(context, mutation::declares_layer(rule)) };
     }
 }
@@ -6572,7 +6533,6 @@ pub unsafe extern "C" fn style_engine_register_anchor_names(
 /// Engine must be live.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_publish_anchor_names(engine: StyleEngineInputHandle) {
-    super::seal::note_engine_call("style_engine_publish_anchor_names");
     crate::render_owner::send_arena_change(
         engine.home().document(),
         crate::render_owner::ArenaChange::PublishAnchorNames,
@@ -6699,7 +6659,6 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
     // finishes it, and the host reads the answers it left. This thread only brings the engine home, so
     // that no stage holds the engine meanwhile.
     engine.home().bring_home("style_engine_take_style_transaction");
-    super::seal::note_engine_call("style_engine_take_style_transaction");
     let Some(root) = StyleNodeID::from_raw(root) else {
         return FfiStyleTransactionView::default();
     };
@@ -7250,7 +7209,6 @@ pub unsafe extern "C" fn style_engine_finish_submitted_style_transaction(
     engine
         .home()
         .bring_home("style_engine_finish_submitted_style_transaction");
-    super::seal::note_engine_call("style_engine_finish_submitted_style_transaction");
     let transaction = OwnerStyleTransaction::FinishSubmitted {
         host_named_atoms_beside_pass,
     };
@@ -8616,41 +8574,4 @@ pub(crate) unsafe fn owner_record_size_container_query_dependents(
         return;
     };
     engine.size_container_content_size_changed(node);
-}
-
-/// A step the host takes for a style pass between its engine calls, which the style seal counts.
-/// NB: It crosses the FFI by value at full register width. The x86-64 ABI leaves the upper bits of
-///     a byte-sized argument undefined, and GCC-built callers leave them set, while the Rust side
-///     assumes they are clear and indexes its name table with the whole register.
-#[derive(Clone, Copy)]
-#[repr(u32)]
-pub enum FfiStyleHostStep {
-    /// Another style transaction taken within the same update.
-    Wave,
-    /// A row of a published batch the host applies.
-    Row,
-    RetriedAfterAncestors,
-    RetriedMaterialization,
-    DeclinedRow,
-    InheritedCustomPropertyRefresh,
-}
-
-impl FfiStyleHostStep {
-    pub(super) fn name(self) -> &'static str {
-        match self {
-            Self::Wave => "host:wave",
-            Self::Row => "host:row",
-            Self::RetriedAfterAncestors => "host:retried_after_ancestors",
-            Self::RetriedMaterialization => "host:retried_materialization",
-            Self::DeclinedRow => "host:declined_row",
-            Self::InheritedCustomPropertyRefresh => "host:inherited_custom_property_refresh",
-        }
-    }
-}
-
-/// Counts one step the host takes for a style pass between its engine calls, by the reason it
-/// takes it, as the style seal counts the engine calls.
-#[unsafe(no_mangle)]
-pub extern "C" fn style_engine_note_host_step(step: FfiStyleHostStep) {
-    super::seal::note_engine_call(step.name());
 }

@@ -554,7 +554,6 @@ impl FfiVectorImageCallbacks {
         _: &crate::stage::MainThread,
         request: &FfiVectorImageRenderRequest,
     ) -> u64 {
-        crate::painting::seal::note_host_call("resolve_vector_image_display_list");
         // SAFETY: The C++ host records the image's display list synchronously and reads the
         // request only for the duration of the call.
         unsafe { (self.resolve_vector_image_display_list)(self.context, request) }

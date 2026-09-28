@@ -57,7 +57,6 @@ impl<'a> HitTestSnapshot<'a> {
             return default;
         }
         let absolute_rects = RefCell::default();
-        let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::HitTest);
         query(list, tree, &PaintSource::of_rows(self.rows, &absolute_rects))
     }
 

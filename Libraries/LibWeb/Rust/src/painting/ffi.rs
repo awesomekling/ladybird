@@ -606,7 +606,6 @@ pub(crate) fn prepare_root_background_and_overflow(
     root_background_source: crate::painting::host::FfiRootBackgroundSource,
 ) -> (bool, Vec<(NodeSlotId, CssPixelPoint)>) {
     let background_source_changed = {
-        let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::VisualContextUpdate);
         arena
             .paint_state()
             .borrow_mut()
@@ -631,7 +630,6 @@ pub(crate) fn finish_rendering_preparation(
     background_source_changed: bool,
     visual_context_update_pending: bool,
 ) -> FfiRenderingPreparationOutcome {
-    let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::VisualContextUpdate);
     let changed = arena.scrollable_overflow.geometry_changed.replace(false);
     let flipped = arena.scrollable_overflow.scrollability_changed.replace(false);
     let mut visual_context_values_changed = false;
@@ -1181,7 +1179,6 @@ fn update_accumulated_visual_contexts_stage(
         IncrementalUpdateResult, debug_assert_every_live_node_is_owned, update_visual_context_tree,
     };
     arena.release_published_paintable_rows();
-    let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::VisualContextUpdate);
     let inputs = arena.visual_context_tree_inputs();
     let mut state = std::mem::take(&mut arena.paint_state().borrow_mut().visual_context);
     state.release_quarantined_slots_while_no_handle_is_retained();
@@ -1323,7 +1320,6 @@ pub unsafe extern "C" fn layout_arena_update_visual_viewport_transform(arena: *m
 
 /// Updates the visual viewport transform of the arena's visual context tree, and answers whether it has a tree.
 fn update_visual_viewport_transform_stage(arena: &mut LayoutNodeArena) -> bool {
-    let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::VisualContextUpdate);
     let mut paint_state = arena.paint_state().borrow_mut();
     let Some(tree) = &mut paint_state.visual_context.tree else {
         return false;
@@ -1382,8 +1378,7 @@ pub unsafe extern "C" fn layout_arena_sticky_spatial_node_index(arena: *mut c_vo
 
 /// Re-reads the scroll containers' offsets when something invalidated them since the last
 /// refresh, resolves the sticky nodes' offsets on top of them, and hands the dense device-pixel
-/// snapshot to `publish`. Returns whether that happened, so the caller keeps its copy otherwise;
-/// `force` re-derives the snapshot even when nothing invalidated it, for verification.
+/// snapshot to `publish`. Otherwise the caller keeps its copy.
 ///
 /// # Safety
 ///
@@ -1393,35 +1388,32 @@ pub unsafe extern "C" fn layout_arena_sticky_spatial_node_index(arena: *mut c_vo
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_refresh_scroll_state(
     arena: *mut c_void,
-    force: bool,
     sink: *mut c_void,
     publish: unsafe extern "C" fn(*mut c_void, *const libgfx_rust::FloatPoint, usize),
-) -> bool {
+) {
     // SAFETY: Guaranteed by the caller.
     let refresh = unsafe {
         crate::painting::owner_pass::run_paint_pass_of(
             arena,
             crate::painting::owner_pass::PaintPass::ScrollState,
             refresh_scroll_state_stage,
-            force,
+            (),
         )
     };
     let Some(snapshot) = refresh else {
-        return false;
+        return;
     };
     // SAFETY: The C++ sink copies the offsets synchronously.
     unsafe { publish(sink, snapshot.as_ptr(), snapshot.len()) };
-    true
 }
 
-/// Refreshes the arena's scroll state where something invalidated it or `force` asks, and answers with its dense
-/// device-pixel snapshot, the sticky nodes' offsets resolved.
-fn refresh_scroll_state_stage(arena: &mut LayoutNodeArena, force: bool) -> Option<Vec<libgfx_rust::FloatPoint>> {
-    let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::ScrollStateRefresh);
+/// Refreshes the arena's scroll state where something invalidated it, and answers with its dense device-pixel
+/// snapshot, the sticky nodes' offsets resolved.
+fn refresh_scroll_state_stage(arena: &mut LayoutNodeArena, (): ()) -> Option<Vec<libgfx_rust::FloatPoint>> {
     let paintable_rows = arena.paintable_rows();
     let mut paint_state = arena.paint_state().borrow_mut();
     let state = &mut paint_state.visual_context;
-    if !force && !state.needs_to_refresh_scroll_state {
+    if !state.needs_to_refresh_scroll_state {
         return None;
     }
     state.needs_to_refresh_scroll_state = false;
@@ -1967,7 +1959,6 @@ pub unsafe extern "C" fn layout_arena_clock_tick_scroll_state_snapshot(
     // SAFETY: Guaranteed by the caller: the tick that calls this runs on the owner, and holds the arena.
     let arena = unsafe { arena_of_owner_unit(arena_handle) };
     let snapshot = {
-        let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::ScrollStateRefresh);
         let paintable_rows = arena.paintable_rows();
         let mut paint_state = arena.paint_state().borrow_mut();
         let state = &mut paint_state.visual_context;
@@ -2139,7 +2130,6 @@ pub(crate) unsafe fn paint_in_flight(
     }
     let visual_context_update = update_accumulated_visual_contexts_stage(arena, viewport);
     let scroll_state_snapshot = {
-        let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::ScrollStateRefresh);
         let paintable_rows = arena.paintable_rows();
         let mut paint_state = arena.paint_state().borrow_mut();
         let state = &mut paint_state.visual_context;

@@ -57,7 +57,6 @@ bool deferring_engine_pseudo_installation()
 using StyleUpdateMode = DOM::Document::StyleUpdateMode;
 
 extern "C" void ladybird_utf16_fly_string_unref(size_t);
-extern "C" void rust_style_seal_set_in_effect_drain(bool);
 
 }
 
@@ -213,9 +212,6 @@ static void apply_layout_tree_rebuild_after_style_change(DOM::Element& element, 
 
 void StyleEffectDrain::install(DOM::Document& document, Function<void(StyleDrainScope const&)> const& install)
 {
-    // What the drain asks of the engine is the pass's output being installed and applied, which the
-    // style seal counts apart from the pass's round trips.
-    rust_style_seal_set_in_effect_drain(true);
     auto& style_engine = document.render_inputs_for_write().style_engine();
     // Declared first, so the install's marks are written through once the rest of the drain has ended.
     DOM::InvalidationJournal::WriteThroughDeferral const write_through_deferral { document.invalidation_journal() };
@@ -225,7 +221,6 @@ void StyleEffectDrain::install(DOM::Document& document, Function<void(StyleDrain
         style_engine.leave_effect_drain();
         // Once a batch is drained, nothing the pass published waits for the host.
         style_engine.set_published_batch_waits(false);
-        rust_style_seal_set_in_effect_drain(false);
     };
     install(scope);
 }
@@ -862,7 +857,6 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                 || reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::RetriedMaterialization) {
                 // The engine computed this row over the rows installed before it, the way the host
                 // would have computed it here.
-                StyleEngineFFI::style_engine_note_host_step(reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::RetriedAfterAncestors ? StyleEngineFFI::FfiStyleHostStep::RetriedAfterAncestors : StyleEngineFFI::FfiStyleHostStep::RetriedMaterialization);
                 retried_unstyled_materialization = reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::RetriedMaterialization && !element->has_style();
                 retried_after_installed_ancestors = reaction.gap == StyleEngineFFI::FfiStyleDeltaGap::RetriedAfterAncestors;
                 reaction.gap = StyleEngineFFI::FfiStyleDeltaGap::Computed;
@@ -895,7 +889,6 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
 
             // What the element holds now is what the row moves it from: the engine reads the row's
             // facts for the children from that and from what the element holds when it is noted.
-            StyleEngineFFI::style_engine_note_host_step(StyleEngineFFI::FfiStyleHostStep::Row);
             // The engine derived the children's reactions from the row's move away from what the
             // element holds, when nothing the host absorbed into the row asks for more.
             bool const engine_derived_children = [&] {
@@ -1005,7 +998,6 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                     ASSERT(!rows_declined_by_previous_wave.contains(StyleNodeID { reaction.style_node }));
                     if (rows_declined_by_previous_wave.contains(StyleNodeID { reaction.style_node }))
                         declined_a_row_again = true;
-                    StyleEngineFFI::style_engine_note_host_step(StyleEngineFFI::FfiStyleHostStep::DeclinedRow);
                     declined_rows.set(StyleNodeID { reaction.style_node });
                     row_effects.append(StyleEffectDrain::DiscardContainerQueryEffects { StyleNodeID { reaction.style_node } });
                     for (size_t kind = 0; kind < pseudo_element_records.size(); ++kind) {
@@ -1426,7 +1418,6 @@ void StyleUpdate::finish(StyleEngineTransaction style_engine_transaction)
     auto transaction_only_derived_child_reactions = style_engine_transaction.only_derived_child_reactions;
     if (style_engine_reactions.is_empty()
         && document.style_computer().style_engine().has_pending_transaction()) {
-        StyleEngineFFI::style_engine_note_host_step(StyleEngineFFI::FfiStyleHostStep::Wave);
         auto feedback_transaction = take_style_engine_transaction(document);
         style_engine_reactions = move(feedback_transaction.reactions);
         transaction_only_derived_child_reactions = feedback_transaction.only_derived_child_reactions;
@@ -1499,7 +1490,6 @@ void StyleUpdate::finish(StyleEngineTransaction style_engine_transaction)
         // stabilization epoch. Take it only after consuming the current published answers, since
         // a new transaction retires their scratch.
         if (document.style_computer().style_engine().has_pending_transaction()) {
-            StyleEngineFFI::style_engine_note_host_step(StyleEngineFFI::FfiStyleHostStep::Wave);
             auto next_transaction = take_style_engine_transaction(document);
             style_engine_reactions = move(next_transaction.reactions);
             transaction_only_derived_child_reactions = next_transaction.only_derived_child_reactions;
@@ -1632,16 +1622,13 @@ static Optional<RequiredInvalidationAfterStyleChange> install_targeted_record_de
 
     // The engine answers every element of the document it hosts, over the custom-property
     // environment its installed ancestors hold. Should an answer not install, the element keeps
-    // the record it has, and the style stage seal reports the row.
+    // the record it has.
     bool environment_is_installable = false;
     if (demand_answer.record)
         (void)element.custom_property_environment_of_engine_record(*demand_answer.record, environment_is_installable);
     ASSERT(environment_is_installable);
-    if (!environment_is_installable) {
-        static constexpr u8 refused_host_entry = 1;
-        engine.note_host_entry(element.style_node_id(), refused_host_entry, element.has_style() ? 0 : 1 << 2);
+    if (!environment_is_installable)
         return {};
-    }
 
     DOM::Element::EnginePseudoElementRecords pseudo_element_records {};
     for (size_t kind = 0; kind < array_size(answer.record.pseudo_records); ++kind) {

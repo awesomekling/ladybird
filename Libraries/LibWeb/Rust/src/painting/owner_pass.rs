@@ -28,7 +28,7 @@ pub(crate) enum PaintPass {
     VisualViewportTransform(Pass<(), bool>),
     /// Refreshes the scroll state, where something invalidated it or the pass is forced, and answers with its
     /// snapshot.
-    ScrollState(Pass<bool, Option<Vec<libgfx_rust::FloatPoint>>>),
+    ScrollState(Pass<(), Option<Vec<libgfx_rust::FloatPoint>>>),
     /// Measures the scrollable overflow a commit or a writer left unmeasured.
     ScrollableOverflow(Pass<(), ()>),
     /// Runs the function a pass on the waiting thread's stack holds ([`run_held_pass`]), and leaves its answer there.

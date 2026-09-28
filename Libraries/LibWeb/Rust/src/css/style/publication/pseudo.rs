@@ -1452,11 +1452,10 @@ impl StyleEngineState {
         };
         let Ok(record) = record else {
             // The settle reads the record the host just installed and the published winner
-            // states, all current. Should it decline, the seal reports it and every
-            // pseudo-element keeps the record it has.
+            // states, all current. Should it decline, every pseudo-element keeps the record it
+            // has.
             debug_assert!(false, "the pseudo settle declined an element the host installed");
             counters.bump(Counter::EngineComputedRecordHostPseudoDeclines);
-            seal::note_host_entry("PseudoSettleDeclined", seal::HostEntryKind::Refused, false);
             settled.style_record = self
                 .retained
                 .computed_group_sets
@@ -1557,7 +1556,6 @@ impl StyleEngineState {
                     self.name_settled_pseudo_element_environment(node, kind as u8, record);
                 }
             }
-            super::engine_sample_check::note_taken("pseudo-elements settled in the pass");
             let explicit_inheritance_debt = self.retained.take_explicit_inheritance_debt(node);
             if settled.pseudo_records_present == 0 && explicit_inheritance_debt == 0 {
                 continue;

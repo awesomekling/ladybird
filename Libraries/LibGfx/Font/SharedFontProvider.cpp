@@ -165,7 +165,6 @@ static RenderSideFontBroker* s_render_side_font_broker { nullptr };
 
 // Per thread: the stage carries its scope with it when it moves off the document thread.
 static thread_local u32 s_render_side_font_scope_depth { 0 };
-static thread_local u64 s_questions_that_reached_the_document_thread { 0 };
 
 void install_render_side_font_broker(RenderSideFontBroker& broker)
 {
@@ -179,7 +178,6 @@ bool has_render_side_font_broker()
 }
 
 RenderSideFontScope::RenderSideFontScope()
-    : m_questions_at_entry(s_questions_that_reached_the_document_thread)
 {
     ++s_render_side_font_scope_depth;
 }
@@ -188,11 +186,6 @@ RenderSideFontScope::~RenderSideFontScope()
 {
     VERIFY(s_render_side_font_scope_depth > 0);
     --s_render_side_font_scope_depth;
-}
-
-u64 RenderSideFontScope::questions_that_reached_the_document_thread() const
-{
-    return s_questions_that_reached_the_document_thread - m_questions_at_entry;
 }
 
 static void report_font_match(StringView question, StringView family, bool served_by_the_render_side)
@@ -206,8 +199,7 @@ static void report_font_match(StringView question, StringView family, bool serve
 
 // The way out of the process this question has to take. Outside a render-side scope that is the
 // document thread's connection, as it always was. Inside one it is the installed broker; when
-// there is none the question goes out on the document thread's connection anyway, and is counted
-// so that the seals can say so rather than have it pass unnoticed.
+// there is none the question goes out on the document thread's connection anyway.
 static RenderSideFontBroker* broker_for_this_question(StringView question, StringView family)
 {
     if (s_render_side_font_scope_depth == 0)
@@ -216,7 +208,6 @@ static RenderSideFontBroker* broker_for_this_question(StringView question, Strin
         report_font_match(question, family, true);
         return s_render_side_font_broker;
     }
-    ++s_questions_that_reached_the_document_thread;
     report_font_match(question, family, false);
     return nullptr;
 }

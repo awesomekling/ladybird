@@ -59,10 +59,6 @@ mod process_state_test_stubs {
     use std::ffi::c_void;
 
     #[unsafe(no_mangle)]
-    extern "C" fn ladybird_gfx_process_set_host_reaching_call_hook(_hook: extern "C" fn(*const u8, usize)) {}
-    #[unsafe(no_mangle)]
-    extern "C" fn ladybird_gfx_process_note_host_reaching_call(_name: *const u8, _length: usize) {}
-    #[unsafe(no_mangle)]
     extern "C" fn ladybird_gfx_process_note_wanted_pending_face(face_id: u64) {
         WANTED.lock().unwrap().push((face_id, false));
     }

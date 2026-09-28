@@ -9,7 +9,7 @@ use super::*;
 /// The arena inputs borrowed while computing a layout result. The pass ends before commit takes a
 /// mutable arena borrow, so its text and style views cannot survive commit.
 ///
-/// It holds no host table: a running pass asks the document nothing. See `super::seal`.
+/// It holds no host table: a running pass asks the document nothing.
 #[derive(Clone, Copy)]
 pub(crate) struct LayoutPass<'arena> {
     arena: &'arena LayoutNodeArena,

@@ -36,7 +36,6 @@
 
 namespace Web::CSS {
 
-extern "C" void rust_style_seal_note_font_match_reached_document_thread();
 extern "C" void rust_font_face_snapshot_view(void const*, FontFaceSnapshotView*);
 
 bool StyleEngine::layout_pass_is_in_flight() const
@@ -152,8 +151,6 @@ static void resolve_fonts(uintptr_t font_cascade_memo, void const* font_face_sna
     Gfx::PublishedPendingFaceScope published_pending_face_scope;
     for (size_t index = 0; index < count; ++index)
         resolved_fonts[index] = resolve_font(memo, font_faces, requests[index]);
-    for (u64 question = 0; question < render_side_font_scope.questions_that_reached_the_document_thread(); ++question)
-        rust_style_seal_note_font_match_reached_document_thread();
 }
 
 static_assert(StyleEngineFFI::LAST_SYNTHETIC_PSEUDO_ELEMENT_KIND == to_underlying(last_synthetic_pseudo_element));

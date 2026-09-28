@@ -23,7 +23,6 @@ pub(crate) fn destroy_owned_image_provider(_: &crate::stage::MainThread, provide
     }
     // SAFETY: The arena has already freed the provider's row, and deleting a provider never
     // re-enters the arena.
-    crate::layout::tree_build_seal::note_host_call("owned_image_provider_destroy");
     unsafe { ladybird_layout_owned_image_provider_destroy(provider) };
 }
 
@@ -34,7 +33,6 @@ pub(crate) fn destroy_image_observers(_: &crate::stage::MainThread, observers: *
     }
     // SAFETY: The arena has already freed the set's row, and deleting a set never re-enters the
     // arena.
-    crate::layout::tree_build_seal::note_host_call("image_observers_destroy");
     unsafe { ladybird_layout_image_observers_destroy(observers) };
 }
 
@@ -45,6 +43,5 @@ pub(crate) fn notify_owned_image_provider_of_detach(_: &crate::stage::MainThread
         return;
     }
     // SAFETY: The provider belongs to a live row and the notification does not re-enter the arena.
-    crate::layout::tree_build_seal::note_host_call("owned_image_provider_notify_detach");
     unsafe { ladybird_layout_owned_image_provider_notify_detach(provider) };
 }

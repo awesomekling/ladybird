@@ -11,7 +11,7 @@ use super::bridge::element_adjustment_fact;
 use super::computed;
 use super::publication::drive_font_metric;
 use super::tree::StyleNodeID;
-use super::{RetainedState, bridge, custom_property_environments, engine_sample_check, inputs};
+use super::{RetainedState, bridge, custom_property_environments, inputs};
 use crate::css::animated_overlay::AnimatedOverlay;
 use crate::css::computed_longhand_table::ComputedLonghandTable;
 use crate::css::computed_value_types::{FontValues, STYLE_GROUP_INDEX_FONT, STYLE_GROUP_INDEX_INHERITED_BOX};
@@ -1147,7 +1147,6 @@ impl super::StyleEngineState {
                 continue;
             }
             if self.assigned_style_record_of(node, Some(pseudo_kind)) != Some(record) {
-                engine_sample_check::note_declined("pseudo-element: a record the engine has not assigned");
                 continue;
             }
             let slot = crate::css::style_compute::animation_slot(pseudo_kind);
@@ -1171,16 +1170,10 @@ impl super::StyleEngineState {
                         self.publish_settled_row_sample(node, Some(pseudo_kind), sample, counters)
                             .map_err(String::from)
                     });
-                    match published {
-                        Ok(published) => {
-                            engine_sample_check::note_taken("pseudo-element sample");
-                            published.style_record
-                        }
-                        Err(reason) => {
-                            engine_sample_check::note_declined(&format!("pseudo-element: {reason}"));
-                            continue;
-                        }
-                    }
+                    let Ok(published) = published else {
+                        continue;
+                    };
+                    published.style_record
                 }
             };
             sampled |= 1 << kind;
@@ -1310,13 +1303,10 @@ impl super::StyleEngineState {
         pseudo_kind: u8,
         style_record: u64,
     ) {
-        match self.settled_pseudo_element_environment(node, pseudo_kind, style_record) {
-            Some(named) => {
-                self.retained
-                    .pseudo_element_environments_named_in_settle
-                    .insert((node, pseudo_kind), named);
-            }
-            None => engine_sample_check::note_declined("pseudo-element environment: named by the host"),
+        if let Some(named) = self.settled_pseudo_element_environment(node, pseudo_kind, style_record) {
+            self.retained
+                .pseudo_element_environments_named_in_settle
+                .insert((node, pseudo_kind), named);
         }
     }
 
@@ -1482,11 +1472,6 @@ impl super::StyleEngineState {
         self.host
             .retired_custom_property_data
             .extend(retired.and_then(|held| held.data));
-        engine_sample_check::note_taken(match (named.from_sample, named.animation_base.is_some()) {
-            (true, true) => "pseudo-element environment named in settle: sampled overlay",
-            (true, false) => "pseudo-element environment named in settle: sample cleared the overlay",
-            (false, _) => "pseudo-element environment named in settle: record environment",
-        });
         true
     }
 
@@ -1513,7 +1498,6 @@ impl super::StyleEngineState {
             Some(held) => (held.identity, held.declares),
         };
         if base != 0 && base & custom_property_environments::ENGINE_ENVIRONMENT_IDENTITY_BIT == 0 {
-            engine_sample_check::note_declined("pseudo-element sampled environment: over a host environment");
             return false;
         }
         let retired = match (sampled, base) {
@@ -1549,7 +1533,6 @@ impl super::StyleEngineState {
         self.host
             .retired_custom_property_data
             .extend(retired.and_then(|held| held.data));
-        engine_sample_check::note_taken("pseudo-element sampled environment installed by the engine");
         true
     }
 
@@ -1570,7 +1553,6 @@ impl super::StyleEngineState {
             Some(held) => (held.identity, held.declares),
         };
         if base != 0 && base & custom_property_environments::ENGINE_ENVIRONMENT_IDENTITY_BIT == 0 {
-            engine_sample_check::note_declined("element sampled environment: over a host environment");
             return false;
         }
         let held = match (sampled, base) {
@@ -1609,7 +1591,6 @@ impl super::StyleEngineState {
         self.host
             .retired_custom_property_data
             .extend(retired.and_then(|held| held.data));
-        engine_sample_check::note_taken("element sampled environment installed by the engine");
         true
     }
 

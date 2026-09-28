@@ -72,7 +72,6 @@ mod differential_tests;
 pub(crate) mod drain_table;
 pub(crate) mod engine_home;
 pub(crate) mod engine_sample;
-pub(crate) mod engine_sample_check;
 mod environment_move;
 pub mod exact_matcher;
 pub use crate::fast_hash;
@@ -107,7 +106,6 @@ pub(crate) mod record_payloads;
 pub mod record_replay;
 mod resource_contexts;
 mod routing;
-pub(crate) mod seal;
 mod sorted_merge;
 pub(crate) mod style_invalidation;
 mod transition_baselines;
@@ -364,163 +362,6 @@ const RETAINED_WITNESS_SIBLING_STEPS: usize = 64;
 /// How much of a sibling sequence the first fact batch asks for. A scan that stops early wastes at
 /// most this many rows, which is cheaper than the restart a smaller window would cost.
 const INITIAL_SIBLING_FACT_WINDOW: usize = 8;
-
-mod verification {
-    use super::Counters;
-    use super::MatchAnswerID;
-    use super::RetainedState;
-    use super::RuleMatch;
-    use super::StyleNodeID;
-    #[cfg(test)]
-    use std::cell::Cell;
-    use std::sync::OnceLock;
-
-    static STYLE_ANSWER_PATCH: OnceLock<bool> = OnceLock::new();
-    static SELECTOR_TRUTH_DERIVATION: OnceLock<bool> = OnceLock::new();
-    static CASCADE_WINNERS: OnceLock<bool> = OnceLock::new();
-    static STYLE_PLAN_PROVENANCE: OnceLock<bool> = OnceLock::new();
-    static PUBLISHED_STYLE_TRANSACTION: OnceLock<bool> = OnceLock::new();
-    static PREFIX_RELATION: OnceLock<bool> = OnceLock::new();
-
-    #[cfg(test)]
-    thread_local! {
-        static SELECTOR_TRUTH_DERIVATION_OVERRIDE: Cell<bool> = const { Cell::new(false) };
-    }
-
-    fn enabled(gate: &OnceLock<bool>, variable: &str) -> bool {
-        *gate.get_or_init(|| std::env::var_os(variable).is_some())
-    }
-
-    pub(super) struct StyleAnswerVerifier<'a> {
-        engine: &'a mut RetainedState,
-        counters: &'a mut Counters,
-    }
-
-    impl StyleAnswerVerifier<'_> {
-        pub(super) fn verify_match_answer(&mut self, answer: &[RuleMatch], node: StyleNodeID, description: &str) {
-            let cold = self
-                .engine
-                .exact_match_answer_for_verification(node, self.counters)
-                .expect("cold matching must answer wherever a retained answer did");
-            assert_eq!(answer, cold, "{description} differs from cold matching for {node:?}");
-        }
-
-        pub(super) fn verify_cascade_answer(&mut self, answer: &[RuleMatch], node: StyleNodeID, description: &str) {
-            let (cold, _) = self
-                .engine
-                .exact_cascade_answer_for_verification(node, self.counters)
-                .expect("cold matching must answer wherever a retained answer did");
-            assert_eq!(answer, cold, "{description} differs from cold matching for {node:?}");
-        }
-
-        pub(super) fn verify_retained_cascade_input(
-            &mut self,
-            effects: &super::AnswerEffects,
-            node: StyleNodeID,
-            cascade_input: MatchAnswerID,
-        ) {
-            self.engine
-                .verify_retained_cascade_input(effects, node, cascade_input, self.counters);
-        }
-    }
-
-    /// Re-derive every patched or reused retained answer cold and compare it. The callback receives
-    /// only the verifier capability, so it cannot publish through or otherwise mutate the engine.
-    pub(super) fn style_answer_patch(
-        engine: &mut RetainedState,
-        counters: &mut Counters,
-        check: impl FnOnce(&mut StyleAnswerVerifier<'_>),
-    ) {
-        if enabled(&STYLE_ANSWER_PATCH, "LIBWEB_VERIFY_STYLE_ANSWER_PATCH") {
-            check(&mut StyleAnswerVerifier { engine, counters });
-        }
-    }
-
-    pub(super) fn selector_truth_derivation_is_enabled() -> bool {
-        #[cfg(test)]
-        if SELECTOR_TRUTH_DERIVATION_OVERRIDE.get() {
-            return true;
-        }
-        *SELECTOR_TRUTH_DERIVATION.get_or_init(|| {
-            std::env::var_os("LIBWEB_VERIFY_STYLE_ANSWER_PATCH").is_some()
-                || std::env::var_os("LIBWEB_VERIFY_SELECTOR_TRUTH_DERIVATION").is_some()
-        })
-    }
-
-    #[cfg(test)]
-    pub(super) fn with_selector_truth_derivation_enabled<T>(run: impl FnOnce() -> T) -> T {
-        struct RestoreOverride<'a> {
-            value: &'a Cell<bool>,
-            previous: bool,
-        }
-
-        impl Drop for RestoreOverride<'_> {
-            fn drop(&mut self) {
-                self.value.set(self.previous);
-            }
-        }
-
-        SELECTOR_TRUTH_DERIVATION_OVERRIDE.with(|value| {
-            let restore = RestoreOverride {
-                previous: value.replace(true),
-                value,
-            };
-            let result = run();
-            drop(restore);
-            result
-        })
-    }
-
-    /// Compare complete retained cascade winners with the legacy cascade output.
-    pub(super) fn cascade_winners(engine: &RetainedState, check: impl FnOnce(&RetainedState)) {
-        if enabled(&CASCADE_WINNERS, "LIBWEB_VERIFY_CASCADE_WINNERS") {
-            check(engine);
-        }
-    }
-
-    /// Require every scoped style transaction output to name semantic provenance.
-    pub(super) fn style_plan_provenance(engine: &RetainedState, check: impl FnOnce(&RetainedState)) {
-        if enabled(&STYLE_PLAN_PROVENANCE, "LIBWEB_VERIFY_STYLE_PLAN_PROVENANCE") {
-            check(engine);
-        }
-    }
-
-    /// Require a published style transaction to complete without another selector query.
-    pub(super) fn published_style_transaction(engine: &RetainedState, check: impl FnOnce(&RetainedState)) {
-        if enabled(
-            &PUBLISHED_STYLE_TRANSACTION,
-            "LIBWEB_VERIFY_PUBLISHED_STYLE_TRANSACTION",
-        ) {
-            check(engine);
-        }
-    }
-
-    pub(super) fn prefix_relation_is_enabled() -> bool {
-        enabled(&PREFIX_RELATION, "LIBWEB_VERIFY_PREFIX_RELATION")
-    }
-
-    pub(super) fn gate_bits() -> u8 {
-        u8::from(enabled(&STYLE_ANSWER_PATCH, "LIBWEB_VERIFY_STYLE_ANSWER_PATCH"))
-            | (u8::from(enabled(&CASCADE_WINNERS, "LIBWEB_VERIFY_CASCADE_WINNERS")) << 1)
-            | (u8::from(enabled(&STYLE_PLAN_PROVENANCE, "LIBWEB_VERIFY_STYLE_PLAN_PROVENANCE")) << 2)
-            | (u8::from(enabled(
-                &PUBLISHED_STYLE_TRANSACTION,
-                "LIBWEB_VERIFY_PUBLISHED_STYLE_TRANSACTION",
-            )) << 3)
-            | (u8::from(selector_truth_derivation_is_enabled()) << 4)
-            | (u8::from(prefix_relation_is_enabled()) << 5)
-    }
-}
-
-use verification::{
-    cascade_winners as verify_cascade_winners, published_style_transaction as verify_published_style_transaction,
-    selector_truth_derivation_is_enabled as verify_selector_truth_derivation_is_enabled,
-    style_answer_patch as verify_style_answer_patch, style_plan_provenance as verify_style_plan_provenance,
-};
-
-fn verification_gate_bits() -> u8 {
-    verification::gate_bits()
-}
 
 fn exact_tree_routing_is_selective(changed_nodes: usize, document_nodes: usize) -> bool {
     changed_nodes <= SMALL_CANDIDATE_SOURCE
@@ -1070,7 +911,6 @@ pub struct RetainedState {
     /// exists inside one answers the pages that need it least. An id is never reused for a
     /// different answer, so a consumer holding one across a flush is never told the wrong thing.
     match_answers: MatchAnswerCatalog,
-    selector_truth_sets: SelectorTruthSetCatalog,
     retained_match_answers: RetainedMatchAnswers,
     retained_selector_incidences: RetainedSelectorIncidences,
     /// Whether the current transaction changes activation without changing selector inputs.
@@ -1104,9 +944,6 @@ pub struct RetainedState {
     /// Complete compact answers owned by the scoped style transaction which the next traversal
     /// consumes. This is required Tier-4 scratch, not a persistent inverse match relation.
     published_match_answers: PublishedMatchAnswers,
-    /// Why the engine sent each element to the host this update, for the seal's census. Written
-    /// only while the seal reports, and read when the host enters the engine for that element.
-    host_entry_causes: HashMap<StyleNodeID, (&'static str, bool)>,
     transaction_fact_view: Option<TransactionFactView>,
     facts: ElementFactStore,
     programs: SelectorPrograms,

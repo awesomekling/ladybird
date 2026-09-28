@@ -18,7 +18,7 @@ use super::super::selector::RoutingKey;
 use super::super::tree::TreeScopeID;
 use super::{
     Column, Counter, Counters, DispatchKey, EntryID, HashMap, PrefixAutomaton, PrefixEvaluation, PrefixOutputKind,
-    PrefixPredicate, PrefixStates, PrefixStepID, PrefixTransitionLookup, StyleNodeID, StyleNodeTree, matches_feature,
+    PrefixPredicate, PrefixStates, PrefixStepID, StyleNodeID, StyleNodeTree, matches_feature,
 };
 
 // This is derived only from the immutable automaton. Memberships and pending edits stay in
@@ -155,10 +155,10 @@ pub(in crate::css::style) struct PrefixRelation {
 }
 
 impl PrefixRelation {
+    /// Unit tests check every maintained answer against scalar prefix matching.
+    #[cfg(test)]
     fn verify_answers(&self, evaluation: &mut PrefixEvaluation<'_, '_>) {
-        if !cfg!(test) && !super::super::verification::prefix_relation_is_enabled() {
-            return;
-        }
+        use super::PrefixTransitionLookup;
         assert_eq!(self.nested_capacity_bytes, self.measure_nested_capacity_bytes());
         let mut scalar = PrefixStates::new();
         let mut counters = Counters::default();
@@ -985,6 +985,7 @@ impl PrefixRelation {
         self.old_previous.clear();
         self.walk_truth = walk_truth;
         self.refresh_capacity_bytes();
+        #[cfg(test)]
         self.verify_answers(evaluation);
     }
 }
@@ -1325,6 +1326,7 @@ impl PrefixAutomaton {
         };
         relation.nested_capacity_bytes = relation.measure_nested_capacity_bytes();
         relation.refresh_capacity_bytes();
+        #[cfg(test)]
         relation.verify_answers(evaluation);
         relation
     }

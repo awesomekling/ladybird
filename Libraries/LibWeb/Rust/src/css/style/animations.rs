@@ -2367,7 +2367,6 @@ pub unsafe extern "C" fn style_engine_unpublish_tree_scope_animation_keyframes(
 ) {
     super::owner_calls::unpublish_tree_scope_keyframes_from_finalizer(
         engine,
-        "style_engine_unpublish_tree_scope_animation_keyframes",
         TreeScopeID(tree_scope),
         shadow_root_identity,
     );

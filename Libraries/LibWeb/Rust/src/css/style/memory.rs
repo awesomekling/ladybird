@@ -510,25 +510,6 @@ impl MemoryController {
         }
     }
 
-    pub(crate) fn verification_copy(&self) -> Self {
-        Self {
-            inputs: self.inputs,
-            charges: Arc::new(Mutex::new(ChargeLedger::default())),
-            refusals: [0; MEMORY_CATEGORY_COUNT],
-            benefit_hits: [0; MEMORY_CATEGORY_COUNT],
-            benefit_observations: [0; MEMORY_CATEGORY_COUNT],
-            observed_hit_totals: [0; MEMORY_CATEGORY_COUNT],
-            observed_miss_totals: [0; MEMORY_CATEGORY_COUNT],
-            last_refused_bytes: [0; MEMORY_CATEGORY_COUNT],
-            tier3_period_start_bytes: [0; TIER3_CATEGORY_COUNT],
-            tier3_admitting: [true; MEMORY_CATEGORY_COUNT],
-            tier3_quota_period_active: false,
-            recording_policy_enabled: self.recording_policy_enabled,
-            #[cfg(test)]
-            tier3_limit_override: self.tier3_limit_override,
-        }
-    }
-
     #[cfg(test)]
     pub fn set_tier3_limit_for_test(&mut self, limit: u64) {
         self.tier3_limit_override = Some(limit);
