@@ -9,22 +9,16 @@
 <div id="text">before</div>
 <script>
     // The input a page records before a rendering update submits its style pass (inserted elements with inline style,
-    // changed text) goes to the engine as the pass's first step, beside the document thread, and not on the document
-    // thread before the pass is submitted. The next style update sees all of it.
+    // changed text) goes to the engine as the pass's first step. The next style update sees all of it.
     asyncTest(async done => {
-        let before;
         const frame = await whileStyleInFlight("before-run", () => {
-            before = internals.styleEngineCounters().inputTransactionsAppliedOnDocumentThread;
             let html = "";
             for (let i = 0; i < 20; i++)
                 html += `<div class="item" style="width: ${i + 1}px">item ${i}</div>`;
             list.innerHTML = html;
             text.firstChild.data = "after";
         }, frame => frame);
-        // Before anything else records input: the output below does.
-        const applied = internals.styleEngineCounters().inputTransactionsAppliedOnDocumentThread - before;
         println(`held as armed: ${styleHeldAsArmed(frame, "before-run")}`);
-        println(`input applied on the document thread for the submitted pass: ${frame.heldAt ? applied : 0}`);
         await twoFrames();
         const last = list.lastElementChild;
         println(`items: ${list.children.length}, last: ${last.offsetWidth}x${last.offsetHeight} ${getComputedStyle(last).color}`);

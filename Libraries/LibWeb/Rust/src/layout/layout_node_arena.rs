@@ -1118,6 +1118,11 @@ pub(crate) struct StaleWalkFacts {
 pub(crate) struct StyleEngineLink(crate::css::style::StyleEngineHandle);
 
 impl StyleEngineLink {
+    /// The link of an arena to the style engine `engine` names, which the engine's home makes as the engine is born.
+    pub(crate) fn to(engine: crate::css::style::StyleEngineHandle) -> Self {
+        Self(engine)
+    }
+
     pub(crate) fn handle(self) -> crate::css::style::StyleEngineHandle {
         self.0
     }
@@ -7190,8 +7195,8 @@ pub unsafe extern "C" fn layout_arena_attach_shell(arena: *mut c_void, id: NodeS
     unsafe { LayoutNodeArena::from_handle(arena) }.attach_shell(id, shell);
 }
 
-/// Registers the host's style record callbacks, and links the document's render state to its style engine: the
-/// owner links the arena as it takes the change in.
+/// Registers the host's style record callbacks with the document's render state, which links the document's style
+/// engine since the two were created together.
 ///
 /// # Safety
 ///
@@ -7208,12 +7213,11 @@ pub unsafe extern "C" fn layout_arena_set_style_record_host_callbacks(
         .shell_style_changed_host
         .set(Some((callbacks.context, callbacks.shell_style_changed)));
     host_tables.style_engine.set(Some(callbacks.style_engine));
-    // SAFETY: As above.
-    let document = unsafe { super::ArenaHandle::document_of(arena) };
-    // The stages that take the engine's token run for this arena, and its owner is the document's.
-    callbacks.style_engine.link_arena(arena.addr(), document);
-    let link = StyleEngineLink(callbacks.style_engine);
-    crate::render_owner::send_arena_change(document, crate::render_owner::ArenaChange::LinkStyleEngine(link));
+    debug_assert!(
+        // SAFETY: As above.
+        callbacks.style_engine.document() == unsafe { super::ArenaHandle::document_of(arena) },
+        "a document's host registers with the render state of its own style engine"
+    );
 }
 
 /// # Safety

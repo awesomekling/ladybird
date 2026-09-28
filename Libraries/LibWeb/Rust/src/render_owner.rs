@@ -1576,8 +1576,12 @@ fn run_style_on_owner(
     document: DocumentId,
     transaction: Box<crate::css::style::bridge::OwnerStyleTransaction>,
 ) -> crate::css::style::bridge::OwnerStyleTransactionView {
-    let reached =
-        with_state(document, |state| (state.style_engine(), state.state())).filter(|(engine, _)| !engine.is_null());
+    // The state's changes, the link to its engine among them, go in before the engine is read.
+    let reached = with_state(document, |state| {
+        let state_handle = state.state();
+        (state.style_engine(), state_handle)
+    })
+    .filter(|(engine, _)| !engine.is_null());
     let Some((engine, state)) = reached else {
         debug_assert!(
             false,
@@ -1591,14 +1595,6 @@ fn run_style_on_owner(
     // SAFETY: The engine and the state are the document's, which only the owner reaches, and the document thread
     // waits for the transaction.
     unsafe { engine.reach_on_owner(|engine| transaction.run(engine, &mut *state)) }
-}
-
-/// Whether the style transactions of `document` run on the owner: a document the owner holds render state for, whose
-/// transactions a document thread waits for. The style update around each transaction stays the document thread's
-/// (its host steps freeze the transaction's inputs and install the answers it published), but the transaction, the
-/// style computation, is the owner's.
-pub(crate) fn runs_style_of(document: DocumentId) -> bool {
-    document.is_valid()
 }
 
 thread_local! {

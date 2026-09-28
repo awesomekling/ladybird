@@ -15,9 +15,30 @@
 #include <LibWeb/CSS/RustRule.h>
 #include <LibWeb/CSS/StyleEngineBridge.h>
 #include <LibWeb/CSS/StyleSheetImport.h>
+#include <LibWeb/Layout/LayoutRustFFI.h>
 #include <LibWeb/SelectorRustFFI.h>
 #include <LibWeb/StyleValueRustFFI.h>
 #include <LibWeb/ValueParserRustFFI.h>
+
+// A test's style engine, born with a render state of its own as a document's is born with its document's.
+struct TestRenderState {
+    TestRenderState()
+        : handle(Web::Layout::RustFFI::render_owner_create_document())
+    {
+    }
+    ~TestRenderState() { Web::Layout::RustFFI::render_owner_destroy_document(handle); }
+
+    Web::Layout::RustFFI::FfiRenderDocument handle;
+};
+
+struct OwnedStyleEngine
+    : TestRenderState
+    , Web::CSS::StyleEngine {
+    OwnedStyleEngine()
+        : Web::CSS::StyleEngine(handle.arena, Web::CSS::StyleEngine::DeviceClass::ForegroundDesktop)
+    {
+    }
+};
 
 namespace Web::CSS::Parser {
 
@@ -371,7 +392,7 @@ static void record_inline_style_properties(Web::CSS::StyleEngine& engine, Web::C
 
 TEST_CASE(style_engine_consumes_native_inline_declaration_blocks)
 {
-    StyleEngine engine(StyleEngine::DeviceClass::ForegroundDesktop);
+    OwnedStyleEngine engine;
     auto node = engine.mint_style_node();
     auto declarations = parse_native_declaration_block(u"color: rgb(20, 24, 28); margin: var(--gap); --gap: 13px"sv);
     auto shared = declarations.share();
@@ -395,7 +416,7 @@ TEST_CASE(style_engine_consumes_native_inline_declaration_blocks)
 
 TEST_CASE(style_engine_expands_presentation_hint_shorthands_in_rust)
 {
-    StyleEngine engine(StyleEngine::DeviceClass::ForegroundDesktop);
+    OwnedStyleEngine engine;
     auto node = engine.mint_style_node();
     auto inherited = parse_native_declaration_block(u"color: inherit"sv);
     Vector<StyleProperty> hints { StyleProperty { Important::No, PropertyID::Border, inherited.properties()[0].value } };

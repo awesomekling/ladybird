@@ -282,8 +282,8 @@ private:
 
     public:
         // The engine starts out with the root element's font metrics the style computer starts out with.
-        StyleEngineCell(StyleEngine::DeviceClass device_class, StyleComputer* style_computer, ReadonlySpan<u64> root_element_font_metrics, bool root_element_font_metrics_depend_on_viewport_metrics)
-            : m_engine(device_class, style_computer)
+        StyleEngineCell(void* render_state_arena, StyleEngine::DeviceClass device_class, StyleComputer* style_computer, ReadonlySpan<u64> root_element_font_metrics, bool root_element_font_metrics_depend_on_viewport_metrics)
+            : m_engine(render_state_arena, device_class, style_computer)
         {
             m_engine.set_root_element_font_metrics(root_element_font_metrics, root_element_font_metrics_depend_on_viewport_metrics);
         }

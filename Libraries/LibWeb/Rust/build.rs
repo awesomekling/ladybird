@@ -672,7 +672,7 @@ fn generate_style_engine_boundary(manifest_dir: &Path, out_dir: &Path) -> Result
          fn replay_generated_boundary_event(\n\
              kind: EventKind,\n\
              payload: &mut PayloadReader<'_>,\n\
-             live_engines: &[Option<StyleEngineHandle>],\n\
+             live_engines: &[Option<OwnedStyleEngine>],\n\
          ) -> Result<bool, Box<dyn std::error::Error>> {\n\
              match kind {\n",
     );

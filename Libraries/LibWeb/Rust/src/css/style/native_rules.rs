@@ -191,10 +191,10 @@ mod tests {
     use crate::css::parser::syntax_parser::parse_shared_stylesheet;
     use crate::css::parser::value_parser::ParseContext;
     use crate::css::rule::{rust_rule_identity, rust_rule_list_at, rust_rule_list_clear, rust_rule_retain};
-    use crate::css::style::StyleEngine;
     use crate::css::style::bridge::style_engine_native_rule_id;
     use crate::css::style::memory::DeviceClass;
     use crate::css::style::program::{CascadeOrigin, RuleKind, StyleSheetObjectID};
+    use crate::css::style::{OwnedStyleEngine, StyleEngine};
     use crate::css::style_sheet::NativeStyleSheet;
     use std::rc::Rc;
 
@@ -217,12 +217,12 @@ mod tests {
         let source_weak = Rc::downgrade(&source);
         let source_identity = source.identity();
         let rule_weak = Rc::downgrade(&rule);
-        let mut engines = [
-            StyleEngine::new(DeviceClass::ForegroundDesktop),
-            StyleEngine::new(DeviceClass::ForegroundDesktop),
-        ];
+        let mut engines =
+            [(); 2].map(|()| OwnedStyleEngine::new(Box::new(StyleEngine::new(DeviceClass::ForegroundDesktop))));
         let mut ids = Vec::new();
-        for (index, engine) in engines.iter_mut().enumerate() {
+        for (index, owned) in engines.iter_mut().enumerate() {
+            let handle = owned.handle();
+            let engine = owned.engine();
             let sheet = engine.add_sheet(StyleSheetObjectID(1), CascadeOrigin::Author);
             for _ in 0..index {
                 engine.add_non_matching_rule(sheet, None, RuleKind::Function);
@@ -231,18 +231,10 @@ mod tests {
             unsafe {
                 engine.register_native_rule(id, identity, rule.cascade_declarations(), source.identity(), &[], &[])
             };
-            assert_eq!(
-                unsafe {
-                    style_engine_native_rule_id(
-                        crate::css::style::StyleEngineHandle::for_test_engine(std::ptr::from_ref(engine).cast_mut()),
-                        identity,
-                    )
-                },
-                id.0 + 1
-            );
+            assert_eq!(unsafe { style_engine_native_rule_id(handle, identity) }, id.0 + 1);
             ids.push(id);
             assert_eq!(
-                engine.native_rules.targets.get(&id).unwrap().source_identity,
+                owned.engine().native_rules.targets.get(&id).unwrap().source_identity,
                 source_identity
             );
         }
@@ -254,16 +246,22 @@ mod tests {
         let replacement = self::source();
         assert_ne!(replacement.identity(), source_identity);
         assert_eq!(
-            engines[1].native_rules.targets.get(&ids[1]).unwrap().source_identity,
+            engines[1]
+                .engine()
+                .native_rules
+                .targets
+                .get(&ids[1])
+                .unwrap()
+                .source_identity,
             source_identity
         );
-        engines[0].remove_style_rule(ids[0]);
-        assert!(engines[0].native_rules.identities.is_empty());
+        engines[0].engine().remove_style_rule(ids[0]);
+        assert!(engines[0].engine().native_rules.identities.is_empty());
         assert!(rule_weak.upgrade().is_none());
         assert!(source_weak.upgrade().is_none());
-        assert_eq!(engines[1].native_rules.identities.get(&identity), Some(ids[1]));
-        engines[1].remove_style_rule(ids[1]);
-        assert!(engines[1].native_rules.identities.is_empty());
+        assert_eq!(engines[1].engine().native_rules.identities.get(&identity), Some(ids[1]));
+        engines[1].engine().remove_style_rule(ids[1]);
+        assert!(engines[1].engine().native_rules.identities.is_empty());
         assert!(rule_weak.upgrade().is_none());
         assert!(source_weak.upgrade().is_none());
     }
@@ -276,11 +274,11 @@ mod tests {
         let rule = unsafe { &*rust_rule_list_at(source.rules(), 0) };
         let children = unsafe { &*rust_rule_children(rule) };
         let child = unsafe { Rc::from_raw(rust_rule_retain(rust_rule_list_at(children, 0))) };
-        let mut engine = StyleEngine::new(DeviceClass::ForegroundDesktop);
-        let sheet = engine.add_sheet(StyleSheetObjectID(1), CascadeOrigin::Author);
-        let id = engine.add_non_matching_rule(sheet, None, RuleKind::Function);
+        let mut engine = OwnedStyleEngine::new(Box::new(StyleEngine::new(DeviceClass::ForegroundDesktop)));
+        let sheet = engine.engine().add_sheet(StyleSheetObjectID(1), CascadeOrigin::Author);
+        let id = engine.engine().add_non_matching_rule(sheet, None, RuleKind::Function);
         unsafe {
-            engine.register_native_rule(
+            engine.engine().register_native_rule(
                 id,
                 rust_rule_identity(rule),
                 rule.cascade_declarations(),
@@ -293,40 +291,40 @@ mod tests {
         unsafe extern "C" fn notify(context: *mut std::ffi::c_void, rule: u32) {
             unsafe { &mut *context.cast::<Vec<u32>>() }.push(rule);
         }
-        let initial = engine.current_rule_version(id).declaration_block;
+        let initial = engine.engine().current_rule_version(id).declaration_block;
         unsafe {
             style_engine_native_rule_declarations_changed(
-                crate::css::style::StyleEngineInputHandle::for_test_engine(&raw mut engine),
+                engine.input_handle(),
                 Rc::as_ptr(&child).cast(),
                 (&raw mut notifications).cast(),
                 notify,
             );
         }
-        let first = engine.current_rule_version(id).declaration_block;
+        let first = engine.engine().current_rule_version(id).declaration_block;
         assert_ne!(initial, first);
         // Inline declarations and whole-sheet replacement use the same revision issuer.
-        engine.next_declaration_block_version();
+        engine.engine().next_declaration_block_version();
         unsafe {
             style_engine_native_rule_declarations_changed(
-                crate::css::style::StyleEngineInputHandle::for_test_engine(&raw mut engine),
+                engine.input_handle(),
                 Rc::as_ptr(&child).cast(),
                 (&raw mut notifications).cast(),
                 notify,
             );
         }
-        let second = engine.current_rule_version(id).declaration_block;
+        let second = engine.engine().current_rule_version(id).declaration_block;
         assert_ne!(first, second);
         assert_eq!(notifications, [id.0 + 1, id.0 + 1]);
         rust_rule_list_clear(children);
         unsafe {
             style_engine_native_rule_declarations_changed(
-                crate::css::style::StyleEngineInputHandle::for_test_engine(&raw mut engine),
+                engine.input_handle(),
                 Rc::as_ptr(&child).cast(),
                 (&raw mut notifications).cast(),
                 notify,
             );
         }
-        assert_eq!(engine.current_rule_version(id).declaration_block, second);
+        assert_eq!(engine.engine().current_rule_version(id).declaration_block, second);
         assert_eq!(notifications.len(), 2);
     }
 

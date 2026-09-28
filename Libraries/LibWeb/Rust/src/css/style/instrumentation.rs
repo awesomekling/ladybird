@@ -65,8 +65,6 @@ define_counters! {
     LanguageTextsPublished => "languageTextsPublished",
     CustomPropertyNamesPublished => "customPropertyNamesPublished",
     CustomPropertyNameSetsLookedUp => "customPropertyNameSetsLookedUp",
-    // Input transactions the document thread applied to the engine itself, rather than a style pass as its first step.
-    InputTransactionsAppliedOnDocumentThread => "inputTransactionsAppliedOnDocumentThread",
 
     // Exclusive transaction intervals. Fused stages retain one name until execution splits.
     TransactionMicroseconds => "transactionMicroseconds",

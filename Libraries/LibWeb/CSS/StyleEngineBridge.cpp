@@ -162,13 +162,13 @@ static_assert(!IsMoveAssignable<StyleEngine>);
 
 #include <LibWeb/StyleEngineBridgeGenerated.inc>
 
-StyleEngine::StyleEngine(DeviceClass device_class, StyleComputer* style_computer)
+StyleEngine::StyleEngine(void* render_state_arena, DeviceClass device_class, StyleComputer* style_computer)
     : m_host_style_record_pins(StyleEngineFFI::style_record_host_pins_create())
     , m_style_computer(style_computer)
 {
-    // The engine is born with the pin table lent to it and, for a document that computes style, the font resolver
-    // installed, and answers the recording stream it records under.
-    m_impl = StyleEngineFFI::style_engine_create(device_class, m_host_style_record_pins, m_style_computer ? resolve_fonts : nullptr, &m_recording_stream);
+    // The engine is born linked to its document's render state, with the pin table lent to it and, for a document that
+    // computes style, the font resolver installed, and answers the recording stream it records under.
+    m_impl = StyleEngineFFI::style_engine_create(render_state_arena, device_class, m_host_style_record_pins, m_style_computer ? resolve_fonts : nullptr, &m_recording_stream);
     if (m_style_computer)
         set_pseudo_element_style_deferred(to_underlying(PseudoElement::Selection), true);
 }
@@ -209,8 +209,7 @@ StyleEngine::~StyleEngine()
         else if (write.kind == StyleEngineFFI::FfiHostFactKind::AdoptQualifiedAtom)
             StyleEngineFFI::style_engine_release_host_qualified_atom(write.node, write.parent, write.facts);
     }
-    if (rust_handle())
-        StyleEngineFFI::style_engine_destroy(rust_handle());
+    StyleEngineFFI::style_engine_destroy(rust_handle());
     StyleEngineFFI::style_record_host_pins_destroy(m_host_style_record_pins);
     for (auto const& atom : m_atoms)
         Utf16FlyString::unref_raw(atom.key);

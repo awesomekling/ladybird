@@ -81,7 +81,8 @@ class WEB_API StyleEngine {
 
 public:
     using DeviceClass = StyleEngineFFI::FfiDeviceClass;
-    explicit StyleEngine(DeviceClass, StyleComputer* = nullptr);
+    // The engine is born linked to the render state of its document, whose arena `render_state_arena` is.
+    StyleEngine(void* render_state_arena, DeviceClass, StyleComputer* = nullptr);
     ~StyleEngine();
 
     void visit_edges(GC::Cell::Visitor&);

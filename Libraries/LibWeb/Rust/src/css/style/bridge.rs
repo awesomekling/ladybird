@@ -1565,15 +1565,18 @@ impl StyleEngineState {
     }
 }
 
-/// Creates one document's style engine, with the document thread's pin table lent to it (see
-/// [`super::host_pins`]) and, for a document that computes style, `resolve` installed as its font
-/// resolver. Writes the recording stream the engine records under, or zero, to `recording_stream`.
+/// Creates one document's style engine, which the arena `arena` of the document's render state links from the start,
+/// with the document thread's pin table lent to it (see [`super::host_pins`]) and, for a document that computes style,
+/// `resolve` installed as its font resolver. Writes the recording stream the engine records under, or zero, to
+/// `recording_stream`.
 ///
 /// # Safety
-/// `pins` must come from [`style_record_host_pins_create`] and outlive the engine, and
-/// `recording_stream` must be valid for a write.
+/// `arena` must be the arena of a render state the owner just created, which links no engine and outlives this one,
+/// `pins` must come from [`style_record_host_pins_create`] and outlive the engine, and `recording_stream` must be
+/// valid for a write.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_create(
+    arena: *mut c_void,
     device_class: FfiDeviceClass,
     pins: *mut c_void,
     resolve: Option<
@@ -1605,7 +1608,8 @@ pub unsafe extern "C" fn style_engine_create(
     }
     // SAFETY: Guaranteed by the caller.
     unsafe { recording_stream.write(engine.recording_id().unwrap_or(0)) };
-    StyleEngineHandle::create(engine).into_ffi()
+    // SAFETY: Guaranteed by the caller.
+    unsafe { StyleEngineHandle::create(engine, arena) }.into_ffi()
 }
 
 /// Creates the document thread's style-record pin table. See [`super::host_pins`].
@@ -1765,8 +1769,8 @@ pub(crate) unsafe fn owner_prepare_root_font_resolution(engine: &mut crate::css:
 }
 
 /// Creates a replay engine whose atom keys are opaque capture tokens rather than live fly strings.
-pub fn style_engine_create_for_replay(device_class: FfiDeviceClass) -> StyleEngineHandle {
-    abort_on_panic(|| StyleEngineHandle::create(Box::new(StyleEngine::new_for_replay(device_class.decode()))))
+pub fn style_engine_create_for_replay(device_class: FfiDeviceClass) -> super::OwnedStyleEngine {
+    abort_on_panic(|| super::OwnedStyleEngine::new(Box::new(StyleEngine::new_for_replay(device_class.decode()))))
 }
 
 /// Applies the memory policy used while producing a replay recording to an engine that runs only for a replay.
@@ -2427,24 +2431,17 @@ pub unsafe extern "C" fn style_engine_apply_transaction(
     transaction: &FfiStyleInputTransaction,
 ) {
     let handle = engine.home();
-    let Some(document) = crate::css::style::owner_calls::owning_document(handle) else {
-        // SAFETY: Guaranteed by the caller.
-        crate::css::style::owner_calls::without_owner(handle, "style_engine_apply_transaction", |engine| unsafe {
-            apply_input_transaction_on_document_thread(engine, transaction);
-        });
-        return;
-    };
     // The input goes to the owner as a change, which it applies before the next unit or query that reaches the
     // engine. The grant answers the host now: the owner grants the identities after the input, which names none of
     // them.
-    // SAFETY: Guaranteed by the caller.
     let grant = StyleNodeGrant::of(transaction);
+    // SAFETY: Guaranteed by the caller.
     let input = unsafe { InputForPass::take_from(transaction) };
     handle.bring_home("style_engine_apply_transaction");
     super::seal::note_engine_call("style_engine_apply_transaction");
     crate::render_owner::send_change(
         engine.through_render_inputs(),
-        document,
+        handle.document(),
         crate::render_owner::Change::StyleInputs(input),
     );
     if !grant.is_empty() {
@@ -2459,33 +2456,6 @@ pub unsafe extern "C" fn style_engine_apply_transaction(
             },
         );
     }
-}
-
-/// Applies `transaction` to `engine` on the document thread, grant and all, as
-/// [`style_engine_apply_transaction`] does.
-///
-/// # Safety
-/// As for [`style_engine_apply_transaction`].
-unsafe fn apply_input_transaction_on_document_thread(engine: &mut StyleEngine, transaction: &FfiStyleInputTransaction) {
-    engine
-        .counters
-        .bump(super::instrumentation::Counter::InputTransactionsAppliedOnDocumentThread);
-    // SAFETY: the caller vouches that each pointer covers its stated count for this call.
-    let rows = unsafe { InputRows::borrow_from(transaction) };
-    // The host made these writes before it recorded any of the batch's inputs that came after them,
-    // and the batch reads the facts they write.
-    unsafe { apply_host_fact_writes(engine, rows.host_fact_writes) };
-    // SAFETY: the caller vouches that each grant pointer covers its stated count for this call.
-    let element_identity_grant = unsafe {
-        borrow_mut(
-            transaction.element_identity_grant,
-            transaction.element_identity_grant_count,
-        )
-    };
-    let text_identity_grant =
-        unsafe { borrow_mut(transaction.text_identity_grant, transaction.text_identity_grant_count) };
-    grant_style_nodes(engine, element_identity_grant, text_identity_grant);
-    apply_input_batch(engine, &rows);
 }
 
 /// The rows of a style input transaction.
@@ -6152,76 +6122,50 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
 ) -> FfiStyleTransactionView {
     // SAFETY: Guaranteed by the caller.
     let install_feedback = unsafe { install_feedback.borrow() };
-    // The document whose render state links the engine, which the arena the host passes, if any, is the arena of.
-    let document = crate::css::style::owner_calls::owning_document(engine.home());
-    if let Some(document) = document {
-        // The owner takes the whole transaction: it begins it with the inputs the host froze, runs its pass and
-        // finishes it, and the host reads the answers it left. This thread only brings the engine home, so
-        // that no stage holds the engine meanwhile.
-        engine.home().bring_home("style_engine_take_style_transaction");
-        super::seal::note_engine_call("style_engine_take_style_transaction");
-        let Some(root) = StyleNodeID::from_raw(root) else {
-            return FfiStyleTransactionView::default();
-        };
-        // SAFETY: Guaranteed by the caller.
-        let grant = unsafe { input.as_ref() }.map_or_else(StyleNodeGrant::default, StyleNodeGrant::of);
-        // SAFETY: As above.
-        let input = unsafe { InputForPass::handed_over(input, install_feedback) }.map_or(PassInput::None, |input| {
-            PassInput::Here(Box::new(input), engine.through_render_inputs())
-        });
-        // SAFETY: Guaranteed by the caller.
-        let render_half = render_half.applies.then(|| unsafe {
-            borrow(
-                render_half.viewport_propagation_sources,
-                render_half.viewport_propagation_source_count,
-            )
-            .iter()
-            .filter_map(|&node| StyleNodeID::from_raw(node))
-            .collect()
-        });
-        let transaction = OwnerStyleTransaction::Whole {
-            root,
-            computation_inputs,
-            input,
-            grant,
-            render_half,
-        };
-        // This thread reaches the engine again only once the owner has finished the transaction.
-        let OwnerStyleTransactionView(view, retired, applied) =
-            crate::render_owner::run_style_transaction(document, transaction);
-        // Font cascade lists and custom-property data are the document thread's to give up.
-        crate::css::ffi_stats::release_deferred_font_cascade_lists();
-        drop(retired);
-        // What the owner handed back of applying the batch is paid, and what its rows marked held for the install,
-        // before the host installs the batch, which reads both.
-        if let Some(applied) = applied {
-            // SAFETY: This is the document thread's FFI entry, and the arena is the one the owner applied the batch to.
-            unsafe { applied.hand_to_host(layout_arena) };
-        }
-        return view;
+    // The owner takes the whole transaction: it begins it with the inputs the host froze, runs its pass and
+    // finishes it, and the host reads the answers it left. This thread only brings the engine home, so
+    // that no stage holds the engine meanwhile.
+    engine.home().bring_home("style_engine_take_style_transaction");
+    super::seal::note_engine_call("style_engine_take_style_transaction");
+    let Some(root) = StyleNodeID::from_raw(root) else {
+        return FfiStyleTransactionView::default();
+    };
+    // SAFETY: Guaranteed by the caller.
+    let grant = unsafe { input.as_ref() }.map_or_else(StyleNodeGrant::default, StyleNodeGrant::of);
+    // SAFETY: As above.
+    let input = unsafe { InputForPass::handed_over(input, install_feedback) }.map_or(PassInput::None, |input| {
+        PassInput::Here(Box::new(input), engine.through_render_inputs())
+    });
+    // SAFETY: Guaranteed by the caller.
+    let render_half = render_half.applies.then(|| unsafe {
+        borrow(
+            render_half.viewport_propagation_sources,
+            render_half.viewport_propagation_source_count,
+        )
+        .iter()
+        .filter_map(|&node| StyleNodeID::from_raw(node))
+        .collect()
+    });
+    let transaction = OwnerStyleTransaction::Whole {
+        root,
+        computation_inputs,
+        input,
+        grant,
+        render_half,
+    };
+    // This thread reaches the engine again only once the owner has finished the transaction.
+    let OwnerStyleTransactionView(view, retired, applied) =
+        crate::render_owner::run_style_transaction(engine.home().document(), transaction);
+    // Font cascade lists and custom-property data are the document thread's to give up.
+    crate::css::ffi_stats::release_deferred_font_cascade_lists();
+    drop(retired);
+    // What the owner handed back of applying the batch is paid, and what its rows marked held for the install,
+    // before the host installs the batch, which reads both.
+    if let Some(applied) = applied {
+        // SAFETY: This is the document thread's FFI entry, and the arena is the one the owner applied the batch to.
+        unsafe { applied.hand_to_host(layout_arena) };
     }
-    // An engine of no document's render state (one a document never made, as a unit test's) runs its transaction
-    // right here: no owner holds it.
-    crate::css::style::owner_calls::without_owner(engine.home(), "style_engine_take_style_transaction", |engine| {
-        settle_pseudo_elements_in_next_pass(engine, install_feedback.pseudo_element_settles);
-        // SAFETY: Guaranteed by the caller.
-        if let Some(input) = unsafe { input.as_ref() } {
-            // SAFETY: As above.
-            unsafe { apply_input_transaction_on_document_thread(engine, input) };
-        }
-        record_applied_style_reactions(engine, install_feedback.applied_style_reactions);
-        let Some(root) = StyleNodeID::from_raw(root) else {
-            return FfiStyleTransactionView::default();
-        };
-        // SAFETY: Guaranteed by the caller.
-        unsafe { begin_style_transaction(engine, computation_inputs) };
-        // SAFETY: The host passes its document's live layout arena, or null.
-        let committed_boxes = unsafe { super::animations::CommittedTransformReferenceBoxes::lend(layout_arena) };
-        // The pass samples at the times the host published for this update.
-        let timeline_samples = engine.animation_timeline_samples().clone();
-        let output = run_style_pass(engine, root, committed_boxes, &timeline_samples);
-        finish_style_transaction(engine, root, output).0
-    })
+    view
 }
 
 /// A style transaction the render owner runs with the style engine of the document's render state while the document
@@ -6743,13 +6687,6 @@ pub unsafe extern "C" fn style_engine_finish_submitted_style_transaction(
         !layout_arena.is_null(),
         "a submitted style pass is submitted for its document's layout arena"
     );
-    let Some(document) = crate::css::style::owner_calls::owning_document(engine.home()) else {
-        return crate::css::style::owner_calls::without_owner(
-            engine.home(),
-            "style_engine_finish_submitted_style_transaction",
-            |engine| finish_submitted_style_transaction(engine, host_named_atoms_beside_pass).0,
-        );
-    };
     engine
         .home()
         .bring_home("style_engine_finish_submitted_style_transaction");
@@ -6759,7 +6696,7 @@ pub unsafe extern "C" fn style_engine_finish_submitted_style_transaction(
     };
     // This thread reaches the engine again only once the owner has finished the transaction.
     let OwnerStyleTransactionView(view, retired, applied) =
-        crate::render_owner::run_style_transaction(document, transaction);
+        crate::render_owner::run_style_transaction(engine.home().document(), transaction);
     debug_assert!(
         applied.is_none(),
         "finishing a submitted transaction applies no batch on the owner"
