@@ -746,6 +746,16 @@ impl HostPayment {
         Self(Vec::new())
     }
 
+    /// Whether the payment pays nothing.
+    pub(crate) fn is_nothing(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Pays `later` after what this pays.
+    pub(crate) fn append(&mut self, mut later: HostPayment) {
+        self.0.append(&mut later.0);
+    }
+
     /// Pays the host, in order.
     pub(crate) fn pay(self, main_thread: &crate::stage::MainThread) {
         use crate::layout::tree_mutation::{
@@ -1136,6 +1146,9 @@ pub(crate) struct LayoutNodeArena {
     /// The records a flight installed over rows ahead of the host, for the host to adopt as it
     /// installs the style batch the flight applied, pinned until it does.
     flight_style_adoptions: RefCell<Vec<AnimationAdoption>>,
+    /// What putting back the rows the host's install of an owner-applied style update left owes the host, which goes
+    /// with the next payment the owner hands it.
+    style_install_leftover: RefCell<HostPayment>,
     /// What each row of the style batch a flight applied marked of its element's layout nodes, by
     /// style node, packed as an `FfiStyleInvalidationField` word, with the record it installed,
     /// until the host installs the row.
@@ -1379,6 +1392,7 @@ impl LayoutNodeArena {
             style_records_pinned_by_host: Vec::new(),
             animation_adoption_log: RefCell::new(Vec::new()),
             flight_style_adoptions: RefCell::new(Vec::new()),
+            style_install_leftover: RefCell::new(HostPayment::nothing()),
             flight_style_damages: RefCell::new(HashMap::default()),
             flight_style_handbacks: RefCell::new(None),
             flight_style_applied: Cell::new(false),
@@ -2595,6 +2609,20 @@ impl LayoutNodeArena {
             "the style half's handbacks are paid ahead of the install"
         );
         (restored, self.resolve_host_handbacks(handbacks))
+    }
+
+    /// Ends the host half of the batches the owner applied as the host took a style update's transactions, once the
+    /// host has installed them (see [`Self::finish_flight_style_host_half`]). What that owes the host waits for
+    /// [`Self::take_style_install_leftover`].
+    pub(crate) fn finish_owner_style_host_half(&self) {
+        let (_, payment) = self.finish_flight_style_host_half();
+        self.style_install_leftover.borrow_mut().append(payment);
+    }
+
+    /// Takes what ending the host half of owner-applied style updates owes the host, which the host pays before
+    /// anything the owner hands it with it.
+    pub(crate) fn take_style_install_leftover(&self) -> HostPayment {
+        std::mem::replace(&mut *self.style_install_leftover.borrow_mut(), HostPayment::nothing())
     }
 
     /// Install the record an animation sample published for `style_node` over the row its box is
@@ -6350,12 +6378,35 @@ impl LayoutNodeArena {
         }
     }
 
-    /// The scroll containers finished builds gave a style, each with whether it was a scroll snap
-    /// container then. A later build can still free a row, so only the live ones are handed out.
-    pub(crate) fn take_built_scroll_snap_containers(&self) -> Vec<(NodeSlotId, bool)> {
-        let mut built = std::mem::take(&mut *self.built_scroll_snap_containers_for_host.borrow_mut()).rows;
-        built.retain(|&(row, _)| self.slot_is_live(row));
-        built
+    /// The scroll containers finished builds gave a style that the host has not taken, each with
+    /// whether it was a scroll snap container then. A later build can still free a row, so only the
+    /// live ones are handed out.
+    pub(crate) fn built_scroll_snap_containers(&self) -> Vec<(NodeSlotId, bool)> {
+        self.built_scroll_snap_containers_for_host
+            .borrow()
+            .rows
+            .iter()
+            .copied()
+            .filter(|&(row, _)| self.slot_is_live(row))
+            .collect()
+    }
+
+    /// Drops the scroll containers the host took of [`Self::built_scroll_snap_containers`], and the
+    /// rows later builds freed.
+    pub(crate) fn drop_built_scroll_snap_containers(&self, taken: &[NodeSlotId]) {
+        let taken: std::collections::HashSet<NodeSlotId> = taken.iter().copied().collect();
+        let mut settled = self.built_scroll_snap_containers_for_host.borrow_mut();
+        settled
+            .rows
+            .retain(|&(row, _)| !taken.contains(&row) && self.slot_is_live(row));
+        let positions = settled
+            .rows
+            .iter()
+            .enumerate()
+            .map(|(position, &(row, _))| (row, position))
+            .collect();
+        settled.positions = positions;
+        settled.rows_after_last_prune = settled.rows.len();
     }
 
     /// The image resources the finished builds owe the host, in the order they came to owe them.

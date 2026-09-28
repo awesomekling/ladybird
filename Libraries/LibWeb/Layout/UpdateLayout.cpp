@@ -186,15 +186,13 @@ void Document::take_in_layout_frame_effects(Layout::RustFFI::FfiLayoutFrameEffec
         switch (owed.tag) {
         case Layout::RustFFI::FfiOwedImageResources::Tag::StyleResources: {
             auto const& resources = owed.style_resources;
-            if (!Layout::RustFFI::layout_arena_hand_over_owed_image_resources(arena, resources.row))
-                continue;
+            Layout::RustFFI::layout_arena_hand_over_owed_image_resources(arena, resources.row);
             image_was_available = Layout::attach_owed_style_resources(*this, resources.row, resources.owns_content_replacement_image);
             break;
         }
         case Layout::RustFFI::FfiOwedImageResources::Tag::GeneratedImage: {
             auto const& image = owed.generated_image;
-            if (!Layout::RustFFI::layout_arena_hand_over_owed_image_resources(arena, image.row))
-                continue;
+            Layout::RustFFI::layout_arena_hand_over_owed_image_resources(arena, image.row);
             image_was_available = Layout::attach_owed_generated_image(*this, image.row, image.generator, image.pseudo_element, image.item, image.pseudo_element_box);
             break;
         }

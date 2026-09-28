@@ -318,17 +318,11 @@ void StyleEffectDrain::apply_layout_node_style(StyleDrainScope const& scope, DOM
 
     if (invalidation.repaint_selection) {
         Layout::RustFFI::layout_arena_sync_selection_pseudo_style(arena->handle(), style_node.value());
-        // NB: A display:contents element has no box of its own. Invalidate the nearest painted ancestor's subtree so
-        //     cached text commands take the new highlight. The ancestry is the one the layout tree was built from.
-        Layout::Row painted_ancestor;
-        for (auto ancestor = style_node.value(); ancestor != 0 && !painted_ancestor; ancestor = Layout::RustFFI::layout_arena_shadow_including_parent_element(arena->handle(), ancestor)) {
-            if (auto ancestor_row = arena->bound_row(StyleNodeID { ancestor }); ancestor_row && Painting::has_committed_box(ancestor_row))
-                painted_ancestor = ancestor_row;
-        }
-        if (auto viewport = arena->bound_viewport_row(); !painted_ancestor && viewport && Painting::has_committed_box(viewport))
-            painted_ancestor = viewport;
-        if (painted_ancestor)
-            Painting::set_needs_repaint_in_subtree(painted_ancestor);
+        // NB: A display:contents element has no box of its own. The render owner repaints the subtree of the nearest
+        //     painted ancestor in the ancestry the layout tree was built from, so cached text commands take the new
+        //     highlight, and the document paints again.
+        Layout::RustFFI::layout_arena_repaint_after_selection_style_change(arena->handle(), style_node.value());
+        Painting::repaint_document_after_owner_style_change(document, InvalidateDisplayList::PaintCommandsAndHitTestList);
     }
 
     for (size_t index = 0; index < pseudo_element_style_records.size(); ++index) {

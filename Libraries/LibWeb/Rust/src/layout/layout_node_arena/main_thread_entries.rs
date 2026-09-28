@@ -141,16 +141,26 @@ unsafe extern "C" fn layout_arena_bound_shell(arena: *mut c_void, style_node: u3
     arena.node_shell(&main_thread, row)
 }
 
-/// The element the tree build last saw as the shadow-including parent of the element with
-/// `style_node`, which is the host when the element's parent is a shadow root, or 0 for none.
+/// Tells the render owner that the `::selection` style of the element with `style_node` changed:
+/// the owner has the subtree of its nearest painted ancestor paint again. Nothing waits for it.
+///
+/// # Safety
+///
+/// The arena must be live on the document thread.
 #[unsafe(no_mangle)]
-unsafe extern "C" fn layout_arena_shadow_including_parent_element(arena: *mut c_void, style_node: u32) -> u32 {
-    let Some(node) = StyleNodeID::from_raw(style_node) else {
-        return 0;
+unsafe extern "C" fn layout_arena_repaint_after_selection_style_change(arena: *mut c_void, style_node: u32) {
+    assert!(!arena.is_null(), "layout node arena handle is null");
+    let Some(element) = StyleNodeID::from_raw(style_node) else {
+        return;
     };
-    // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
-    unsafe { crate::render_owner::ask_about(arena, crate::render_owner::Query::ShadowIncludingParentElement { node }) }
-        .element()
+    // SAFETY: Guaranteed by the caller.
+    let document = unsafe { crate::layout::ArenaHandle::document_of(arena) };
+    if document.is_valid() {
+        crate::render_owner::send_arena_change(
+            document,
+            crate::render_owner::ArenaChange::SelectionStyleChanged(element),
+        );
+    }
 }
 
 /// The shell of the row the pseudo-element of kind `generated_for` on the element with
@@ -561,8 +571,18 @@ pub(crate) struct OwnerAppliedStyle {
 impl OwnerAppliedStyle {
     /// Takes what applying a batch left in `arena`, on the render owner, which applied it just now.
     pub(crate) fn take_from(arena: &LayoutNodeArena) -> Self {
+        // What ending the host half of earlier updates owes the host comes first.
+        let mut handed_back = arena.take_style_install_leftover();
+        let applied = arena.resolve_flight_style_handbacks();
+        let handed_back = match applied {
+            Some(applied) => {
+                handed_back.append(applied);
+                Some(handed_back)
+            }
+            None => (!handed_back.is_nothing()).then_some(handed_back),
+        };
         Self {
-            handed_back: arena.resolve_flight_style_handbacks(),
+            handed_back,
             damages: arena.take_flight_style_damages(),
         }
     }
@@ -589,8 +609,9 @@ impl OwnerAppliedStyle {
 }
 
 /// Ends the host half of the batches the render owner applied to the layout nodes as the host took a
-/// style update's transactions, once the update has installed them: a row the install did not adopt
-/// the record of is put back with the record its element holds.
+/// style update's transactions, once the update has installed them: the owner puts back a row the
+/// install did not adopt the record of with the record its element holds, before its next unit, and
+/// hands what that owes the host with the next payment. Nothing waits for it.
 ///
 /// # Safety
 ///
@@ -605,8 +626,7 @@ unsafe extern "C" fn layout_arena_finish_owner_style_host_half(arena: *mut c_voi
     }
     // SAFETY: Guaranteed by the caller.
     let document = unsafe { crate::layout::ArenaHandle::document_of(arena) };
-    // SAFETY: As above.
-    unsafe { crate::render_owner::ask(document, arena, crate::render_owner::Query::FinishOwnerStyleHostHalf) }
-        .payment()
-        .pay(&main_thread);
+    if document.is_valid() {
+        crate::render_owner::send_arena_change(document, crate::render_owner::ArenaChange::FinishOwnerStyleHostHalf);
+    }
 }

@@ -63,7 +63,6 @@ mod viewport_propagation;
 
 use crate::css::style::fast_hash::FastMap as HashMap;
 use crate::css::style::fast_hash::FastSet as HashSet;
-pub(crate) use crate::layout::layout_node_arena::HostPayment;
 use crate::layout::layout_node_arena::IntrinsicBlockSizeMeasurement;
 use crate::layout::layout_node_arena::IntrinsicInlineSizeMeasurement;
 use crate::layout::layout_node_arena::IntrinsicSizeCacheKey;

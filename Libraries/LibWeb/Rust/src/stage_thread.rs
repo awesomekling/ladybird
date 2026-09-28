@@ -1622,6 +1622,12 @@ pub(crate) fn send_to_owner(message: crate::render_owner::ToOwner) -> Result<(),
     Ok(())
 }
 
+/// Whether the render owner runs on a Rendering thread of its own. Without one, the owner's messages are handled on
+/// the thread that sends them.
+pub(crate) fn has_owner_thread() -> bool {
+    stage_thread().is_some()
+}
+
 /// Tells TSan about the ordering a reply from the render owner gave the calling thread.
 pub(crate) fn acquire_owner() {
     if let Some(thread) = stage_thread() {

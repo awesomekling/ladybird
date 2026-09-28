@@ -580,6 +580,8 @@ enum HostHalfPayment {
     /// the style update, which come before what the round's layout owes, with what the flight left
     /// of applying the batch, if it applied it.
     StyleInstall(Option<AppliedFlightStyle>),
+    /// What ending the host half of an owner-applied style update owed the host.
+    StyleInstallLeft(HostPayment),
     TreeBuild(TreeBuildPayment),
     Commit(CommitPayment),
 }
@@ -987,6 +989,7 @@ impl LayoutFrame {
                     }
                     restored_style |= self.finish_flight_style_host_half(main_thread);
                 }
+                HostHalfPayment::StyleInstallLeft(payment) => payment.pay(main_thread),
                 HostHalfPayment::TreeBuild(payment) => payment.pay(main_thread),
                 HostHalfPayment::Commit(payment) => {
                     // SAFETY: Guaranteed by the caller.
@@ -1036,6 +1039,18 @@ impl LayoutFrame {
     ///
     /// On the thread that owns the arena, with nothing else reaching it.
     unsafe fn resolve_owed_host_halves(&mut self) {
+        // What ending the host half of an owner-applied style update owed the host goes before all the frame owes.
+        let leftover = self.arena().take_style_install_leftover();
+        if !leftover.is_nothing() {
+            self.host_payments
+                .insert(0, HostHalfPayment::StyleInstallLeft(leftover));
+        }
+        // A later build of the frame may have freed a row an earlier one owed image resources.
+        // SAFETY: Guaranteed by the caller.
+        let arena = unsafe { &*self.state() }.arena();
+        self.messages
+            .owed_image_resources
+            .retain(|(row, _)| arena.slot_is_live(*row));
         for owed in self.owed_host_halves.take() {
             let payment = match owed {
                 OwedHostHalf::TreeBuild(owed) => HostHalfPayment::TreeBuild(owed.resolve(self.arena())),
@@ -1502,9 +1517,12 @@ impl LayoutFrame {
         };
         // SAFETY: The job runs with the state the owner handed the frame, which nothing else reaches.
         unsafe { self.resolve_owed_host_halves() };
-        // SAFETY: As above.
-        let answer =
-            query.map(|query| crate::render_owner::Answer::of(query, unsafe { &mut *self.state() }.arena_mut()));
+        let answer = query.map(|query| {
+            // SAFETY: As above.
+            let arena = unsafe { &mut *self.state() }.arena_mut();
+            crate::render_owner::Answer::prepare(query, arena);
+            crate::render_owner::Answer::of(query, arena)
+        });
         FrameOutput { end, answer }
     }
 
@@ -2530,24 +2548,17 @@ pub unsafe extern "C" fn layout_arena_join_frame_owning_arena(
 }
 
 /// Hands `row` the image resources a finished layout frame owed it (see
-/// [`FfiLayoutFrameEffects::owed_image_resources`]), if a later build in the frame did not free it:
-/// the image box stops waiting for the provider it owns, which the document attaches next. Answers
-/// whether the row is live.
+/// [`FfiLayoutFrameEffects::owed_image_resources`], which lists the rows live as the frame ended):
+/// the image box stops waiting for the provider it owns, which the document attaches next.
 ///
 /// # Safety
 ///
 /// `arena` must be a live handle on the document thread, which is taking in the frame's effects.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_hand_over_owed_image_resources(arena: *mut c_void, row: NodeSlotId) -> bool {
+pub unsafe extern "C" fn layout_arena_hand_over_owed_image_resources(arena: *mut c_void, row: NodeSlotId) {
     // SAFETY: As above.
     let document = unsafe { ArenaHandle::document_of(arena) };
-    // The frame is the document thread's again, so this asks without joining it.
-    // SAFETY: As above.
-    if !unsafe { crate::render_owner::ask(document, arena, crate::render_owner::Query::RowIsLive { row }) }.is() {
-        return false;
-    }
     crate::render_owner::send_arena_change(document, crate::render_owner::ArenaChange::OwnedProviderHandedOver(row));
-    true
 }
 
 /// # Safety
