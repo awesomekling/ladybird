@@ -2162,34 +2162,33 @@ pub unsafe extern "C" fn style_engine_take_pseudo_element_transition_step_decide
 }
 
 /// The transform reference box the last committed layout left for `node`, which the animation
-/// stage resolves percentage translations against. An element with no committed box, and every
-/// element while the document has no layout arena, has none.
+/// stage resolves percentage translations against, read from the rows the render owner published.
+/// An element with no committed box, and every element while the document has no layout arena,
+/// has none.
 ///
 /// # Safety
-/// `arena` must be the document's live layout arena, or null.
+/// `arena` must be the document's live layout arena handle, on the document thread, or null.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_committed_transform_reference_box(
     arena: *mut c_void,
     node: u32,
 ) -> FfiCommittedTransformReferenceBox {
     super::seal::note_engine_call("layout_arena_committed_transform_reference_box");
-    let none = FfiCommittedTransformReferenceBox {
-        has_box: false,
-        width: 0.0,
-        height: 0.0,
-    };
-    let Some(node) = StyleNodeID::from_raw(node) else {
-        return none;
-    };
-    // SAFETY: The caller passes a live arena or null, and this reads its committed paintable rows
-    // without touching the engine it can reach back into.
-    match unsafe { super::animations::committed_transform_reference_box(arena, node) } {
-        Some((width, height)) => FfiCommittedTransformReferenceBox {
-            has_box: true,
-            width,
-            height,
-        },
-        None => none,
+    let committed = StyleNodeID::from_raw(node)
+        .filter(|_| !arena.is_null())
+        .and_then(|node| {
+            // SAFETY: Guaranteed by the caller; the read calls nothing of the host.
+            unsafe {
+                crate::painting::ffi::read_current(arena, |rows| {
+                    super::animations::committed_transform_reference_box(rows, rows.rows().bound_row(node))
+                })
+            }
+        });
+    let (width, height) = committed.unwrap_or_default();
+    FfiCommittedTransformReferenceBox {
+        has_box: committed.is_some(),
+        width,
+        height,
     }
 }
 
