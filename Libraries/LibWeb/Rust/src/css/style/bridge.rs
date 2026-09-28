@@ -2670,15 +2670,11 @@ impl Drop for InputForPass {
     }
 }
 
-/// The writes of the node list that starts `run`: its first write and the ones after it that go on
-/// with it, for the same slot where `per_slot`.
-fn node_list_run(run: &[FfiHostFactWrite], per_slot: bool) -> &[FfiHostFactWrite] {
-    debug_assert_eq!(run[0].value, 1, "a node list starts with a write that says so");
-    let length = 1 + run[1..]
-        .iter()
-        .take_while(|member| member.value == 0 && (!per_slot || member.node == run[0].node))
-        .count();
-    &run[..length]
+/// The node lists of `run`: each a write that starts it and the ones after it that go on with it,
+/// for the same slot where `per_slot`.
+fn node_lists(run: &[FfiHostFactWrite], per_slot: bool) -> impl Iterator<Item = &[FfiHostFactWrite]> {
+    run.chunk_by(move |member, next| next.value == 0 && (!per_slot || next.node == member.node))
+        .inspect(|list| debug_assert_eq!(list[0].value, 1, "a node list starts with a write that says so"))
 }
 
 /// Apply the host's fact writes in the order it made them. Each is recorded as the boundary call
@@ -2694,251 +2690,259 @@ unsafe fn apply_host_fact_writes(engine: &mut StyleEngine, writes: &[FfiHostFact
     // list that shows its footer again for every item it adds) would otherwise have the engine repair the node's
     // cascade winners for every edit, so a node's last write stands for all of them.
     let mut last_inline_style_write = super::HashMap::default();
-    for (index, write) in writes.iter().enumerate() {
+    for write in writes {
         if write.kind == FfiHostFactKind::ElementInlineStyleProperties {
-            last_inline_style_write.insert(write.node, index);
+            last_inline_style_write.insert(write.node, std::ptr::from_ref(write));
         }
     }
-    let mut index = 0;
-    while index < writes.len() {
-        let write = &writes[index];
-        // Links and retirements arrive a subtree at a time, so a run of them crosses as one call.
-        let run_length = writes[index..]
-            .iter()
-            .take_while(|next| next.kind == write.kind)
-            .count();
-        match write.kind {
+    // Links and retirements arrive a subtree at a time, so a run of them crosses as one call.
+    for run in writes.chunk_by(|write, next| write.kind == next.kind) {
+        match run[0].kind {
             FfiHostFactKind::LinkInDomOrder => {
-                let links: Vec<u32> = writes[index..index + run_length]
+                let links: Vec<u32> = run
                     .iter()
                     .flat_map(|link| [link.node, link.parent, link.previous_sibling])
                     .collect();
                 operations::link_style_nodes_in_dom_order(engine, &links);
-                index += run_length;
-                continue;
             }
             FfiHostFactKind::MintElement => {
-                let nodes: Vec<u32> = writes[index..index + run_length].iter().map(|mint| mint.node).collect();
+                let nodes: Vec<u32> = run.iter().map(|mint| mint.node).collect();
                 mint_style_nodes(engine, &nodes);
-                for mint in &writes[index..index + run_length] {
+                for mint in run {
                     if mint.value != 0 {
                         operations::mark_relation_only_style_node(engine, mint.node);
                     }
                 }
-                index += run_length;
-                continue;
             }
             FfiHostFactKind::MintText => {
-                let nodes: Vec<u32> = writes[index..index + run_length].iter().map(|mint| mint.node).collect();
+                let nodes: Vec<u32> = run.iter().map(|mint| mint.node).collect();
                 mint_text_style_nodes(engine, &nodes);
-                index += run_length;
-                continue;
             }
             FfiHostFactKind::RetireText => {
-                let nodes: Vec<u32> = writes[index..index + run_length]
-                    .iter()
-                    .map(|retirement| retirement.node)
-                    .collect();
+                let nodes: Vec<u32> = run.iter().map(|retirement| retirement.node).collect();
                 operations::retire_text_style_nodes(engine, &nodes);
-                index += run_length;
-                continue;
             }
             FfiHostFactKind::SlotAssignedNode => {
-                let list = node_list_run(&writes[index..index + run_length], true);
-                let assigned: Vec<u32> = list.iter().map(|member| member.parent).collect();
-                operations::set_slot_assigned_nodes(engine, write.node, &assigned);
-                index += list.len();
-                continue;
+                for list in node_lists(run, true) {
+                    let assigned: Vec<u32> = list.iter().map(|member| member.parent).collect();
+                    operations::set_slot_assigned_nodes(engine, list[0].node, &assigned);
+                }
             }
             FfiHostFactKind::ElementParts => {
-                let list = node_list_run(&writes[index..index + run_length], true);
-                if let Some(node) = StyleNodeID::from_raw(write.node) {
-                    let pairs = list
-                        .iter()
-                        .filter_map(|member| {
-                            StyleNodeID::from_raw(member.parent).map(|host| (StyleAtomID(member.facts), host))
-                        })
-                        .collect::<Vec<_>>();
-                    set_element_parts(engine, node, &pairs);
-                }
-                index += list.len();
-                continue;
-            }
-            FfiHostFactKind::ElementCustomState => {
-                let list = node_list_run(&writes[index..index + run_length], true);
-                let states: Vec<u32> = list
-                    .iter()
-                    .filter(|member| member.facts != 0)
-                    .map(|member| member.facts)
-                    .collect();
-                operations::set_element_custom_states(engine, write.node, &states);
-                index += list.len();
-                continue;
-            }
-            FfiHostFactKind::TopLayerElement => {
-                let list = node_list_run(&writes[index..index + run_length], false);
-                let elements: Vec<u32> = list.iter().map(|member| member.node).collect();
-                operations::set_top_layer_elements(engine, &elements);
-                index += list.len();
-                continue;
-            }
-            FfiHostFactKind::UnlinkFromDomOrder => {
-                operations::unlink_style_node_from_dom_order(engine, write.node, write.parent);
-            }
-            FfiHostFactKind::TextIsAsciiWhitespace => {
-                operations::set_text_is_ascii_whitespace(engine, write.node, write.value != 0);
-            }
-            FfiHostFactKind::TextIsInUserAgentShadowTree => {
-                operations::set_text_is_in_user_agent_shadow_tree(engine, write.node, write.value != 0);
-            }
-            FfiHostFactKind::TextIsPasswordInput => {
-                operations::set_text_is_password_input(engine, write.node, write.value != 0);
-            }
-            FfiHostFactKind::TextData => {
-                // SAFETY: The caller vouches that the write transfers one reference to a live string.
-                let data = unsafe { ak::Utf16String::from_raw_owned(write.data) };
-                set_text_data(engine, write.node, data);
-            }
-            FfiHostFactKind::RuleConditionsHold => {
-                if let Some(rule) = engine.native_rule_id(write.data as u64) {
-                    operations::set_rule_conditions_hold(engine, rule.0 + 1, write.value != 0);
-                }
-            }
-            FfiHostFactKind::ElementLanguage => {
-                // SAFETY: As for `TextData`.
-                let text = unsafe { ak::Utf16String::from_raw_owned(write.data) };
-                set_element_language(engine, write.node, write.facts, &text.to_utf16());
-            }
-            FfiHostFactKind::ElementIdName => {
-                operations::set_element_id_name(engine, write.node, write.facts);
-            }
-            FfiHostFactKind::ElementDirectionality => {
-                operations::set_element_directionality(engine, write.node, write.facts);
-            }
-            FfiHostFactKind::ElementHeadingLevel => {
-                operations::set_element_heading_level(engine, write.node, write.value);
-            }
-            FfiHostFactKind::ElementPartExposure => {
-                operations::set_element_part_exposure(engine, write.node, write.parent);
-            }
-            FfiHostFactKind::ElementAdjustmentFacts => {
-                operations::set_element_adjustment_facts(engine, write.node, write.facts);
-            }
-            FfiHostFactKind::ElementUniqueNodeId => {
-                operations::set_element_unique_node_id(engine, write.node, write.data as u64);
-            }
-            FfiHostFactKind::NodeDomPaintFacts => {
-                operations::set_node_dom_paint_facts(engine, write.node, write.value);
-            }
-            FfiHostFactKind::ElementTableSpans => {
-                operations::set_element_table_spans(
-                    engine,
-                    write.node,
-                    write.facts & 0xffff,
-                    write.facts >> 16,
-                    write.parent,
-                );
-            }
-            FfiHostFactKind::ShadowRoot => {
-                operations::set_shadow_root(engine, write.node, write.parent);
-            }
-            FfiHostFactKind::TreeScopeRoot => {
-                operations::set_tree_scope_root(engine, write.facts, write.node);
-            }
-            FfiHostFactKind::TreeScopeUsesDocumentSheets => {
-                operations::set_tree_scope_uses_document_sheets(engine, write.facts);
-            }
-            FfiHostFactKind::SizeQueryContainer => {
-                if let Some(node) = StyleNodeID::from_raw(write.node) {
-                    engine.note_size_query_container(node);
-                }
-            }
-            FfiHostFactKind::StyleDependsOnSizeContainerQuery => {
-                if let Some(node) = StyleNodeID::from_raw(write.node) {
-                    engine.note_style_depends_on_size_container_query(node);
-                }
-            }
-            FfiHostFactKind::RecomputesOnEnvironmentMove => {
-                if let Some(node) = StyleNodeID::from_raw(write.node) {
-                    engine.note_element_recomputes_on_environment_move(node);
-                }
-            }
-            FfiHostFactKind::SizeContainerNeedsEvaluationAfterLayout => {
-                if let Some(node) = StyleNodeID::from_raw(write.node) {
-                    engine.note_size_container_needs_evaluation_after_layout(node);
-                }
-            }
-            FfiHostFactKind::ChildrenExplicitlyInherit => {
-                if let Some(node) = StyleNodeID::from_raw(write.node) {
-                    engine.note_children_explicitly_inherit(node);
-                }
-            }
-            FfiHostFactKind::ViewportDependentStyleInputs => {
-                for node in engine.computed_group_sets.viewport_dependent_nodes() {
-                    if let Some(node) = StyleNodeID::from_raw(node) {
-                        engine.record_derived_element_style_input(node, write.value, 0);
+                for list in node_lists(run, true) {
+                    if let Some(node) = StyleNodeID::from_raw(list[0].node) {
+                        let pairs = list
+                            .iter()
+                            .filter_map(|member| {
+                                StyleNodeID::from_raw(member.parent).map(|host| (StyleAtomID(member.facts), host))
+                            })
+                            .collect::<Vec<_>>();
+                        set_element_parts(engine, node, &pairs);
                     }
                 }
             }
-            FfiHostFactKind::ElementAssociatedPseudoKind => {
-                operations::set_element_associated_pseudo_kind(engine, write.node, write.value);
+            FfiHostFactKind::ElementCustomState => {
+                for list in node_lists(run, true) {
+                    let states: Vec<u32> = list
+                        .iter()
+                        .filter(|member| member.facts != 0)
+                        .map(|member| member.facts)
+                        .collect();
+                    operations::set_element_custom_states(engine, list[0].node, &states);
+                }
             }
-            FfiHostFactKind::ElementConstructionFacts => {
-                operations::set_element_construction_facts(engine, write.node, write.facts, write.value);
-            }
-            FfiHostFactKind::ElementReplacedContentInput => {
-                // SAFETY: The caller vouches that the write points at an input that outlives the call.
-                let input = unsafe { &*(write.data as *const FfiReplacedContentInput) };
-                operations::set_element_replaced_content_input(
-                    engine,
-                    write.node,
-                    input.kind as u8,
-                    input.present,
-                    input.first,
-                    input.second,
-                    input.third,
-                    input.fourth,
-                );
-            }
-            FfiHostFactKind::AdoptAtom => engine.adopt_atom(write.data, StyleAtomID(write.facts)),
-            FfiHostFactKind::AdoptQualifiedAtom => engine.adopt_qualified_atom(
-                StyleAtomID(write.node),
-                StyleAtomID(write.parent),
-                StyleAtomID(write.facts),
-            ),
-            FfiHostFactKind::ElementPresentationalHints => {
-                // SAFETY: The write transfers one reference to the snapshot.
-                let data = unsafe {
-                    std::sync::Arc::from_raw(write.data as *const crate::css::declaration_block::DeclarationBlockData)
-                };
-                if let Some(node) = StyleNodeID::from_raw(write.node) {
-                    let kind = match write.value {
-                        0 => FfiElementDeclarationKind::InlineStyle,
-                        1 => FfiElementDeclarationKind::PresentationalHint,
-                        _ => FfiElementDeclarationKind::SvgPresentationAttribute,
-                    };
-                    register_element_declared_properties(engine, node, kind, &data.properties, &[]);
+            FfiHostFactKind::TopLayerElement => {
+                for list in node_lists(run, false) {
+                    let elements: Vec<u32> = list.iter().map(|member| member.node).collect();
+                    operations::set_top_layer_elements(engine, &elements);
                 }
             }
             FfiHostFactKind::ElementInlineStyleProperties => {
-                // SAFETY: The caller vouches that the write transfers one reference to the snapshot.
-                let data = (write.data != 0).then(|| unsafe {
-                    std::sync::Arc::from_raw(write.data as *const crate::css::declaration_block::DeclarationBlockData)
-                });
-                if last_inline_style_write.get(&write.node) == Some(&index)
-                    && let Some(node) = StyleNodeID::from_raw(write.node)
-                {
-                    register_element_declared_properties(
-                        engine,
-                        node,
-                        FfiElementDeclarationKind::InlineStyle,
-                        data.as_ref().map_or(&[], |data| data.properties.as_slice()),
-                        data.as_ref().map_or(&[], |data| data.custom_properties.as_slice()),
-                    );
+                for write in run {
+                    // SAFETY: The caller vouches that the write transfers one reference to the snapshot.
+                    let data = (write.data != 0).then(|| unsafe {
+                        std::sync::Arc::from_raw(
+                            write.data as *const crate::css::declaration_block::DeclarationBlockData,
+                        )
+                    });
+                    if last_inline_style_write.get(&write.node) == Some(&std::ptr::from_ref(write))
+                        && let Some(node) = StyleNodeID::from_raw(write.node)
+                    {
+                        register_element_declared_properties(
+                            engine,
+                            node,
+                            FfiElementDeclarationKind::InlineStyle,
+                            data.as_ref().map_or(&[], |data| data.properties.as_slice()),
+                            data.as_ref().map_or(&[], |data| data.custom_properties.as_slice()),
+                        );
+                    }
+                }
+            }
+            _ => {
+                for write in run {
+                    // SAFETY: Guaranteed by the caller.
+                    unsafe { apply_host_fact_write(engine, write) };
                 }
             }
         }
-        index += 1;
+    }
+}
+
+/// Applies one write of a kind that [`apply_host_fact_writes`] does not apply a run of at a time.
+///
+/// # Safety
+/// As for [`apply_host_fact_writes`].
+unsafe fn apply_host_fact_write(engine: &mut StyleEngine, write: &FfiHostFactWrite) {
+    match write.kind {
+        FfiHostFactKind::LinkInDomOrder
+        | FfiHostFactKind::MintElement
+        | FfiHostFactKind::MintText
+        | FfiHostFactKind::RetireText
+        | FfiHostFactKind::SlotAssignedNode
+        | FfiHostFactKind::ElementParts
+        | FfiHostFactKind::ElementCustomState
+        | FfiHostFactKind::TopLayerElement
+        | FfiHostFactKind::ElementInlineStyleProperties => {
+            // Applied as runs, by `apply_host_fact_writes`.
+        }
+        FfiHostFactKind::UnlinkFromDomOrder => {
+            operations::unlink_style_node_from_dom_order(engine, write.node, write.parent);
+        }
+        FfiHostFactKind::TextIsAsciiWhitespace => {
+            operations::set_text_is_ascii_whitespace(engine, write.node, write.value != 0);
+        }
+        FfiHostFactKind::TextIsInUserAgentShadowTree => {
+            operations::set_text_is_in_user_agent_shadow_tree(engine, write.node, write.value != 0);
+        }
+        FfiHostFactKind::TextIsPasswordInput => {
+            operations::set_text_is_password_input(engine, write.node, write.value != 0);
+        }
+        FfiHostFactKind::TextData => {
+            // SAFETY: The caller vouches that the write transfers one reference to a live string.
+            let data = unsafe { ak::Utf16String::from_raw_owned(write.data) };
+            set_text_data(engine, write.node, data);
+        }
+        FfiHostFactKind::RuleConditionsHold => {
+            if let Some(rule) = engine.native_rule_id(write.data as u64) {
+                operations::set_rule_conditions_hold(engine, rule.0 + 1, write.value != 0);
+            }
+        }
+        FfiHostFactKind::ElementLanguage => {
+            // SAFETY: As for `TextData`.
+            let text = unsafe { ak::Utf16String::from_raw_owned(write.data) };
+            set_element_language(engine, write.node, write.facts, &text.to_utf16());
+        }
+        FfiHostFactKind::ElementIdName => {
+            operations::set_element_id_name(engine, write.node, write.facts);
+        }
+        FfiHostFactKind::ElementDirectionality => {
+            operations::set_element_directionality(engine, write.node, write.facts);
+        }
+        FfiHostFactKind::ElementHeadingLevel => {
+            operations::set_element_heading_level(engine, write.node, write.value);
+        }
+        FfiHostFactKind::ElementPartExposure => {
+            operations::set_element_part_exposure(engine, write.node, write.parent);
+        }
+        FfiHostFactKind::ElementAdjustmentFacts => {
+            operations::set_element_adjustment_facts(engine, write.node, write.facts);
+        }
+        FfiHostFactKind::ElementUniqueNodeId => {
+            operations::set_element_unique_node_id(engine, write.node, write.data as u64);
+        }
+        FfiHostFactKind::NodeDomPaintFacts => {
+            operations::set_node_dom_paint_facts(engine, write.node, write.value);
+        }
+        FfiHostFactKind::ElementTableSpans => {
+            operations::set_element_table_spans(
+                engine,
+                write.node,
+                write.facts & 0xffff,
+                write.facts >> 16,
+                write.parent,
+            );
+        }
+        FfiHostFactKind::ShadowRoot => {
+            operations::set_shadow_root(engine, write.node, write.parent);
+        }
+        FfiHostFactKind::TreeScopeRoot => {
+            operations::set_tree_scope_root(engine, write.facts, write.node);
+        }
+        FfiHostFactKind::TreeScopeUsesDocumentSheets => {
+            operations::set_tree_scope_uses_document_sheets(engine, write.facts);
+        }
+        FfiHostFactKind::SizeQueryContainer => {
+            if let Some(node) = StyleNodeID::from_raw(write.node) {
+                engine.note_size_query_container(node);
+            }
+        }
+        FfiHostFactKind::StyleDependsOnSizeContainerQuery => {
+            if let Some(node) = StyleNodeID::from_raw(write.node) {
+                engine.note_style_depends_on_size_container_query(node);
+            }
+        }
+        FfiHostFactKind::RecomputesOnEnvironmentMove => {
+            if let Some(node) = StyleNodeID::from_raw(write.node) {
+                engine.note_element_recomputes_on_environment_move(node);
+            }
+        }
+        FfiHostFactKind::SizeContainerNeedsEvaluationAfterLayout => {
+            if let Some(node) = StyleNodeID::from_raw(write.node) {
+                engine.note_size_container_needs_evaluation_after_layout(node);
+            }
+        }
+        FfiHostFactKind::ChildrenExplicitlyInherit => {
+            if let Some(node) = StyleNodeID::from_raw(write.node) {
+                engine.note_children_explicitly_inherit(node);
+            }
+        }
+        FfiHostFactKind::ViewportDependentStyleInputs => {
+            for node in engine.computed_group_sets.viewport_dependent_nodes() {
+                if let Some(node) = StyleNodeID::from_raw(node) {
+                    engine.record_derived_element_style_input(node, write.value, 0);
+                }
+            }
+        }
+        FfiHostFactKind::ElementAssociatedPseudoKind => {
+            operations::set_element_associated_pseudo_kind(engine, write.node, write.value);
+        }
+        FfiHostFactKind::ElementConstructionFacts => {
+            operations::set_element_construction_facts(engine, write.node, write.facts, write.value);
+        }
+        FfiHostFactKind::ElementReplacedContentInput => {
+            // SAFETY: The caller vouches that the write points at an input that outlives the call.
+            let input = unsafe { &*(write.data as *const FfiReplacedContentInput) };
+            operations::set_element_replaced_content_input(
+                engine,
+                write.node,
+                input.kind as u8,
+                input.present,
+                input.first,
+                input.second,
+                input.third,
+                input.fourth,
+            );
+        }
+        FfiHostFactKind::AdoptAtom => engine.adopt_atom(write.data, StyleAtomID(write.facts)),
+        FfiHostFactKind::AdoptQualifiedAtom => engine.adopt_qualified_atom(
+            StyleAtomID(write.node),
+            StyleAtomID(write.parent),
+            StyleAtomID(write.facts),
+        ),
+        FfiHostFactKind::ElementPresentationalHints => {
+            // SAFETY: The write transfers one reference to the snapshot.
+            let data = unsafe {
+                std::sync::Arc::from_raw(write.data as *const crate::css::declaration_block::DeclarationBlockData)
+            };
+            if let Some(node) = StyleNodeID::from_raw(write.node) {
+                let kind = match write.value {
+                    0 => FfiElementDeclarationKind::InlineStyle,
+                    1 => FfiElementDeclarationKind::PresentationalHint,
+                    _ => FfiElementDeclarationKind::SvgPresentationAttribute,
+                };
+                register_element_declared_properties(engine, node, kind, &data.properties, &[]);
+            }
+        }
     }
 }
 
