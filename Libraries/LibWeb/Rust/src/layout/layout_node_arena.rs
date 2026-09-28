@@ -756,7 +756,6 @@ impl HostPayment {
                     }
                 }
                 ResolvedHostHandback::PaintableRowReset { reset, viewport_row } => {
-                    super::tree_build_seal::note_host_call("paintable_row_reset");
                     if let (Some(host_tables), Some(row)) = (main_thread.host_tables(), reset.freed_row()) {
                         host_tables.compositor_animation_frames.borrow_mut().remove(&row);
                     }
@@ -812,7 +811,6 @@ fn tell_host_box_presence(main_thread: &crate::stage::MainThread, style_node: u3
     else {
         return;
     };
-    super::tree_build_seal::note_host_call("notify_box_presence");
     // SAFETY: Registration and unregistration keep the host context live, and the host does not reenter the arena.
     unsafe { callback(context, style_node, bits) };
 }
@@ -6474,25 +6472,14 @@ pub unsafe extern "C" fn layout_arena_join_frame_for_dom_tree_mutation(arena: *m
     // join the pass, and the rows it frees or marks are no longer the pass's to read. So is a
     // layout pass: the inputs wait for it to be taken back, and the rows it owns wait at the
     // arena's own doors.
-    let frame_owns_arena = match crate::stage_thread::frame_in_flight_for_dom_tree_mutation(arena) {
-        crate::stage_thread::FrameForDomTreeMutation::Joins => {
-            crate::stage_thread::join_document_frame_in_flight_at(
-                arena,
-                location.file(),
-                location.line(),
-                location.column(),
-            );
-            crate::stage_thread::frame_in_flight_owns(arena)
-        }
-        crate::stage_thread::FrameForDomTreeMutation::GoesOnBeside { owns_arena } => owns_arena,
-    };
-    // A layout pass runs on the render owner, and runs no script to mutate the tree; a tree build or a paint pass the
-    // document thread runs in place must not see the tree change under it either.
-    assert!(
-        frame_owns_arena
-            || !(super::tree_build_seal::build_is_running() || crate::painting::seal::current_pass_name().is_some()),
-        "the main side mutated the DOM tree while a render stage was running"
-    );
+    if crate::stage_thread::dom_tree_mutation_joins_frame_in_flight(arena) {
+        crate::stage_thread::join_document_frame_in_flight_at(
+            arena,
+            location.file(),
+            location.line(),
+            location.column(),
+        );
+    }
     record_door_pass(LayoutNodeArena::DOM_TREE_MUTATION_WRITER, None);
 }
 

@@ -821,7 +821,6 @@ impl LayoutNodeArena {
         if !self.paintable_row_is_populated(viewport) || self.scrollable_overflow.rows_to_measure.borrow().is_empty() {
             return;
         }
-        let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::ScrollableOverflow);
         let rows = std::mem::take(&mut *self.scrollable_overflow.rows_to_measure.borrow_mut());
         for slot in rows {
             if self.slot_is_live(slot) && self.paintable_row_is_populated(slot) {
@@ -861,7 +860,6 @@ impl LayoutNodeArena {
         if (pending_boxes.is_empty() && !needs_full_recalculation) || !arena.paintable_row_is_populated(viewport) {
             return;
         }
-        let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::ScrollableOverflow);
         arena
             .scrollable_overflow
             .recalculations
@@ -961,7 +959,6 @@ pub(crate) fn measure_and_find_scroll_offsets_to_clamp(arena: &LayoutNodeArena) 
     if settled.is_empty() {
         return Vec::new();
     }
-    let pass = crate::painting::seal::enter(crate::painting::seal::Pass::ScrollableOverflow);
     // The new overflow can leave a stored scroll offset outside the range the box now allows.
     // Decide that here, where the measurement is, and leave the writes for after the pass: the
     // store is the document's, and the document is told what to put in it rather than asked
@@ -989,7 +986,6 @@ pub(crate) fn measure_and_find_scroll_offsets_to_clamp(arena: &LayoutNodeArena) 
             clamped.push((slot, offset_in_range));
         }
     }
-    drop(pass);
     clamped
 }
 

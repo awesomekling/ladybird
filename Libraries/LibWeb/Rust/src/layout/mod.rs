@@ -44,7 +44,6 @@ pub(crate) mod rendered_text;
 mod replaced_with_children_formatting_context;
 pub(crate) mod row_reads;
 pub(crate) mod run_records;
-pub(crate) mod seal;
 pub(crate) mod sizing_context;
 pub mod style_snapshot;
 pub(crate) mod style_values;
@@ -54,7 +53,6 @@ pub(crate) mod text_chunker;
 pub(crate) mod text_queries;
 mod text_transform;
 pub(crate) mod trace;
-mod tree_build_seal;
 mod tree_builder;
 mod tree_mutation;
 pub(crate) mod tree_shape;
@@ -110,6 +108,4 @@ pub(crate) use update_layout::MainThreadFfiEntry as UpdateMainThreadFfiEntry;
 pub(crate) use used_values::{FfiCssPixelPoint, FfiCssPixelRect, FfiCssPixelSize, SizeConstraint, UsedValues};
 
 /// Flushes what the document thread counted about its arenas, as a document's render state goes away.
-pub(crate) fn flush_arena_censuses() {
-    tree_build_seal::flush_census();
-}
+pub(crate) fn flush_arena_censuses() {}

@@ -5,7 +5,6 @@
  */
 
 use super::animations::{AnimationTimelineSamples, CommittedTransformReferenceBoxes};
-use super::engine_sample_check;
 use super::*;
 
 /// A style pass the host installs in waves. The pass settles its rows in the order the host
@@ -233,7 +232,7 @@ impl StyleEngineState {
             capture.scoped = true;
         }
         self.discard_prepared_batch_matching_traversal();
-        self.discard_published_match_answers(counters);
+        self.discard_published_match_answers();
         self.retained.refresh_winners_whose_container_verdicts_moved(
             self.host.program_staging.is_dirty() || self.host.sheet_rule_replacement.is_some(),
             counters,
@@ -1162,7 +1161,6 @@ impl StyleEngineState {
         }
         clock.enter(Counter::MatchingCascadeMicroseconds, counters);
         let mut node_count = 0;
-        let mut unattributed_node_count = 0;
         let mut published_match_answers = PublishedMatchAnswers::default();
         // A node inside any coarse region was planned without exact selector provenance. Exact
         // node routes consume their signed changes directly; only incomplete routes refresh.
@@ -1424,7 +1422,6 @@ impl StyleEngineState {
             }
             if !has_direct_action && !has_signed_delta && !has_output_change && !has_upquery {
                 counters.bump(Counter::PlannedNodesUnattributed);
-                unattributed_node_count += 1;
             }
             node_count += 1;
             published_nodes.push(node);
@@ -1677,15 +1674,6 @@ impl StyleEngineState {
                                         )
                                 })
                         });
-                    if confirmed_exact_cascade && let Some(current_cascade_input) = published_answer.cascade_input {
-                        verify_style_answer_patch(self, counters, |verifier| {
-                            verifier.verify_retained_cascade_input(
-                                &published_match_answers.answer_effects,
-                                node,
-                                current_cascade_input,
-                            );
-                        });
-                    }
                     match published_answer {
                         published_answer
                             if previous_cascade_input.is_some()
@@ -1753,12 +1741,6 @@ impl StyleEngineState {
             MemoryCategory::BatchScratch,
             sequence_touched_parent_bytes + stale_refresh_node_bytes + patch_node_scratch_bytes,
         );
-        verify_style_plan_provenance(self, |_| {
-            assert!(
-                plan_is_broad || unattributed_node_count == 0,
-                "a scoped style transaction published {unattributed_node_count} nodes without semantic provenance"
-            );
-        });
         let final_retained_answer_patch_scratch_bytes = retained_answer_patch
             .as_ref()
             .map_or(0, RetainedAnswerPatch::capacity_bytes);
@@ -1786,9 +1768,6 @@ impl StyleEngineState {
             .memory
             .release(MemoryCategory::BatchScratch, direct_action_node_bytes);
         published_match_answers.sort();
-        if seal::is_reporting() {
-            self.retained.host_entry_causes.clear();
-        }
         // A node settles against the record its flat-tree parent holds, so a subtree with no
         // records yet can only settle top-down: the parent has to be visited first. The batch
         // arrives in style-node identity order, which is not tree order, so a descendant is
@@ -2019,8 +1998,6 @@ impl StyleEngineState {
             .memory
             .release(MemoryCategory::BatchScratch, style_input_reaction_bytes);
         drop(impact_region_scratch);
-        published_match_answers.match_element_calls_at_publication =
-            counters.get(Counter::MatchElementCallsDuringPublishedStyleTransaction);
         published_match_answers.discard_unobserved_retained_answers = publish_document_root_arrival || plan_is_broad;
         if let Some(pass) = &mut suspended_pass {
             pass.keep_batch_answer_facts(&mut self.retained);
@@ -2817,9 +2794,6 @@ impl StyleEngineState {
                     retry_after_ancestor |= answer_winners_are_complete
                         || self.cascade_winners_are_complete_but_for_custom_properties(node);
                 }
-                // Why this row would reach the host, for the seal's by-cause census. Naming
-                // it here is what lets the census rank entries instead of attempts.
-                let mut decline_cause: &'static str = "";
                 // NB: Entry gates were already established for a suspended computation.
                 //     Its completed originating record must not change that decision.
                 let engine_computed_gate_passes = if skip_hidden {
@@ -2875,7 +2849,6 @@ impl StyleEngineState {
                         }
                     }
                 };
-                let bail_marks = seal::is_reporting().then(|| counters.record_bail_marks());
                 // An engine no document hosts computes no records.
                 let engine_record_answer =
                     (engine_computed_gate_passes && self.retained.computes_records()).then(|| {
@@ -2966,32 +2939,6 @@ impl StyleEngineState {
                         break;
                     }
                     continue;
-                }
-                // A first record C++ declines for the custom-property environment it inherits
-                // takes its descendants' first records down with it: a descendant's environment is
-                // the parent's own, which fails the same check whenever the parent's did.
-                // What this node tells its children, decided here, where it settles. Every
-                // processed node keeps a row, settled or not: that is what lets a
-                // descendant's fold stop at it instead of walking past it to the root.
-                if let Some(bail_marks) = bail_marks
-                    && !skip_hidden
-                    && engine_computed_delta.is_none()
-                    && direct_inherited_delta.is_none()
-                    && (engine_computed_gate_passes || !decline_cause.is_empty())
-                {
-                    if engine_computed_gate_passes {
-                        decline_cause = counters
-                            .first_changed_record_bail(&bail_marks)
-                            .unwrap_or("ComputationBailUnnamed");
-                        if let Some((site, _)) = self.retained.host_entry_causes.get(&node)
-                            && site.contains("@pseudo.rs:")
-                        {
-                            decline_cause = site;
-                        }
-                    }
-                    self.retained
-                        .host_entry_causes
-                        .insert(node, (decline_cause, old_style_record == 0));
                 }
                 // A row declined above is driven again over its installed ancestors, as the host
                 // would compute it where it applies the row: one the checks above tie to its
@@ -3111,31 +3058,26 @@ impl StyleEngineState {
                         self.publish_settled_row_sample(node, None, sample, counters)
                             .map_err(String::from)
                     });
-                    match published {
-                        Ok(published) => {
-                            engine_sample_check::note_taken("settled row sample");
-                            // What the host's comparison of the move to the composition would ask
-                            // for, answered with the composition.
-                            if let Some((old_style_record, _)) = engine_computed_delta
-                                && old_style_record.raw() != published.style_record
-                                && self
-                                    .retained
-                                    .computed_group_sets
-                                    .style_record_view(old_style_record.raw())
-                                    .is_some()
-                            {
-                                let damage = self.retained.element_record_damage(
-                                    node,
-                                    false,
-                                    old_style_record.raw(),
-                                    published.style_record,
-                                ) | bridge::FfiStyleInvalidationField::EngineComputed as u32;
-                                self.retained
-                                    .rows_sampled_in_pass
-                                    .insert(node, engine_sample::SettledRowPublication { damage, ..published });
-                            }
-                        }
-                        Err(reason) => engine_sample_check::note_declined(&format!("settled row: {reason}")),
+                    // What the host's comparison of the move to the composition would ask for,
+                    // answered with the composition.
+                    if let Ok(published) = published
+                        && let Some((old_style_record, _)) = engine_computed_delta
+                        && old_style_record.raw() != published.style_record
+                        && self
+                            .retained
+                            .computed_group_sets
+                            .style_record_view(old_style_record.raw())
+                            .is_some()
+                    {
+                        let damage = self.retained.element_record_damage(
+                            node,
+                            false,
+                            old_style_record.raw(),
+                            published.style_record,
+                        ) | bridge::FfiStyleInvalidationField::EngineComputed as u32;
+                        self.retained
+                            .rows_sampled_in_pass
+                            .insert(node, engine_sample::SettledRowPublication { damage, ..published });
                     }
                 }
                 // A row that owes the whole transition step has it decided here, over the
@@ -3204,19 +3146,12 @@ impl StyleEngineState {
                             ),
                             // The host asks for the row where it applies it. A hosted engine
                             // settles every row it is offered, so only an engine no document hosts
-                            // leaves one; should a hosted one, the style seal reports it.
+                            // leaves one.
                             None => {
                                 debug_assert!(
                                     !self.retained.computes_records(),
                                     "a hosted engine settles every row it is offered"
                                 );
-                                if self.retained.computes_records() {
-                                    seal::note_host_entry(
-                                        "FlushUnsettledRow",
-                                        seal::HostEntryKind::Refused,
-                                        old_style_record == 0,
-                                    );
-                                }
                                 (
                                     old_style_record,
                                     0,

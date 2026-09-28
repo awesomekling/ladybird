@@ -219,23 +219,6 @@ pub struct FontCascadeListHandle {
     pointer: *const c_void,
 }
 
-/// Reports a LibGfx call that can reach the document. The render pipeline's seals live in LibWeb
-/// and count only calls through its own host tables, so they cannot see one made through here;
-/// LibWeb installs a hook that gives them the call's name.
-///
-/// The hook is held by LibGfx's C++ side rather than by a `static` here: this crate is compiled
-/// into two libraries, and on a linker with two-level namespaces each of them would install into
-/// a hook of its own. See `LibGfx/RustProcessState.cpp`.
-pub fn set_host_reaching_call_hook(hook: extern "C" fn(*const u8, usize)) {
-    // SAFETY: The hook is a plain function pointer, and LibGfx only calls it back.
-    unsafe { ladybird_gfx_process_set_host_reaching_call_hook(hook) };
-}
-
-fn note_host_reaching_call(callback: &'static str) {
-    // SAFETY: A string literal's bytes outlive the process.
-    unsafe { ladybird_gfx_process_note_host_reaching_call(callback.as_ptr(), callback.len()) };
-}
-
 impl FontCascadeListHandle {
     pub const fn null() -> Self {
         Self {
@@ -293,11 +276,6 @@ impl FontCascadeListHandle {
         font_hint: Option<&FontHandle>,
     ) -> FontHandle {
         assert!(!self.pointer.is_null(), "Gfx::FontCascadeList pointer must not be null");
-        // This is the document's own cascade, not a frozen snapshot: the lookup writes four
-        // unsynchronized caches, and it can resolve a pending face, which starts a fetch and arms
-        // an event-loop timer. A render stage reaching it is a regression, and the seals cannot
-        // see a LibGfx call on their own, so the hook below tells them.
-        note_host_reaching_call("FontCascadeList::font_for_code_point");
         // SAFETY: This handle keeps the list live, and the list owns every
         // font it resolves.
         let raw = unsafe {
@@ -375,13 +353,10 @@ unsafe extern "C" {
         slope: u8,
         prefer_color_emoji: bool,
         point_size: f32,
-        out_reached_document_thread: *mut bool,
     ) -> *const c_void;
     fn ladybird_gfx_font_invisible_variant(font: *const c_void) -> *const c_void;
 
     // The process-wide state this crate is not allowed to hold; see `LibGfx/RustProcessState.cpp`.
-    fn ladybird_gfx_process_set_host_reaching_call_hook(hook: extern "C" fn(*const u8, usize));
-    fn ladybird_gfx_process_note_host_reaching_call(name: *const u8, length: usize);
     fn ladybird_gfx_process_note_wanted_pending_face(face_id: u64);
     fn ladybird_gfx_process_requeue_wanted_pending_face(face_id: u64);
     fn ladybird_gfx_process_set_wanted_face_owner(owner: u64) -> u64;
@@ -530,8 +505,9 @@ impl FrozenEntry {
 /// the fetch and the display-period timer. `owner` names a document the way the stages that run
 /// for it do (see [`WantedFaceOwner`]).
 ///
-/// The list itself is LibGfx's, for the reason `set_host_reaching_call_hook` gives: a list this
-/// crate pushed to would not be the list the other copy of it drains.
+/// The list itself is LibGfx's C++ side's rather than a `static` here: this crate is compiled into two
+/// libraries, and on a linker with two-level namespaces a list one copy pushed to would not be the
+/// list the other copy drains. See `LibGfx/RustProcessState.cpp`.
 pub fn take_wanted_pending_faces(owner: u64) -> Vec<(u64, bool)> {
     extern "C" fn visit(context: *mut c_void, face_id: u64, has_been_retried: bool) {
         // SAFETY: The context is the vector below, alive for the call.
@@ -712,7 +688,6 @@ impl FrozenFontList {
 
     fn system_fallback_font(&self, code_point: u32, presentation: EmojiPresentation) -> Option<FontHandle> {
         let style = self.system_fallback?;
-        let mut reached_document_thread = false;
         // SAFETY: The service answers from a process-wide memo that keeps every font it hands back
         // live for the life of the process.
         let raw = unsafe {
@@ -723,15 +698,8 @@ impl FrozenFontList {
                 style.slope,
                 presentation.is_emoji,
                 style.point_size,
-                &mut reached_document_thread,
             )
         };
-        if reached_document_thread {
-            // A memo hit is thread-safe wherever it is asked for, but this one missed, and matching
-            // a code point leaves the process. Without a font service the render side owns, that
-            // leaves it on the connection the document thread owns and pumps.
-            note_host_reaching_call("WebContentClient::match_system_font_for_code_point");
-        }
         // SAFETY: A non-null answer names a font the memo keeps live.
         (!raw.is_null()).then(|| unsafe { FontHandle::intern(raw) })
     }

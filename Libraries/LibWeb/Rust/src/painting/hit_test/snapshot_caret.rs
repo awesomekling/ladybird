@@ -104,7 +104,6 @@ pub unsafe extern "C" fn hit_test_snapshot_caret_line_for_position(
     affinity_is_downstream: bool,
 ) -> FfiCaretLineForPosition {
     unsafe { snapshot_from_handle(snapshot) }.read_caret_lines(Default::default(), |list, rows| {
-        let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::HitTest);
         match list.caret_line_for_position(rows, &query, offset, affinity_is_downstream) {
             Some(line_index) => FfiCaretLineForPosition {
                 has_line: true,
@@ -256,7 +255,6 @@ pub unsafe extern "C" fn hit_test_snapshot_adjacent_line(
         if !HitTestSnapshot::has_caret_line(list, current_line_index) {
             return Default::default();
         }
-        let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::HitTest);
         match list.adjacent_line(
             &callbacks,
             current_line_index,

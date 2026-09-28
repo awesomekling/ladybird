@@ -186,25 +186,6 @@ fn complete_style_update_state() -> std::sync::MutexGuard<'static, CompleteStyle
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// The style update state of one document thread, moved to the stage thread for a stage run and
-/// back once it has finished. An update the document thread has open is then open for the stage
-/// too: the seal checks and counts the stage's calls as the update's.
-pub(crate) struct StyleUpdateScope {
-    seal: crate::css::style::seal::SealState,
-}
-
-/// Take this thread's style update state, for a stage run to carry to the stage thread.
-pub(crate) fn take_style_update_scope() -> StyleUpdateScope {
-    StyleUpdateScope {
-        seal: crate::css::style::seal::take_state(),
-    }
-}
-
-/// Install style update state a stage run carried here.
-pub(crate) fn install_style_update_scope(scope: StyleUpdateScope) {
-    crate::css::style::seal::install_state(scope.seal);
-}
-
 #[derive(Default)]
 struct DeferredCppReleases {
     fly_strings: Vec<usize>,
@@ -360,7 +341,6 @@ pub(crate) fn release_deferred_font_cascade_lists() {
 /// through consumption of every published style reaction.
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_style_ffi_complete_style_update_begin() {
-    crate::css::style::seal::begin_update();
     let mut state = complete_style_update_state();
     assert!(
         !state.has_outstanding_view,
@@ -394,7 +374,6 @@ pub extern "C" fn rust_style_ffi_complete_style_update_end() -> FfiDeferredCppRe
             }
         }
     };
-    crate::css::style::seal::end_update();
     release_deferred_font_cascade_lists();
     releases
 }

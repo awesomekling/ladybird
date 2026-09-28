@@ -129,8 +129,7 @@ impl EngineChange {
             // What only keeps the host's rows, indexes and publications beside the engine's state, or takes an input
             // away.
             Self::Boundary(
-                Write::NoteHostEntry { .. }
-                | Write::SetFoldIdAndClassNameCase { .. }
+                Write::SetFoldIdAndClassNameCase { .. }
                 | Write::SetHtmlElementNamespace { .. }
                 | Write::SetCounterStyleEnvironmentIdentity { .. }
                 | Write::RestoreRowDebts { .. }
@@ -1011,33 +1010,28 @@ impl StyleQueryRef {
     }
 }
 
-/// Leaves `change` for whoever reaches `engine` next to apply first. `entry` names the door the main thread took, for
-/// the style seal.
+/// Leaves `change` for whoever reaches `engine` next to apply first. `entry` names the door the main thread took.
 pub(crate) fn send(engine: StyleEngineInputHandle, entry: &'static str, change: EngineChange) {
     engine.home().bring_home(entry);
-    super::seal::note_engine_call(entry);
     engine.send(StyleChange::Engine(change));
 }
 
 /// Asks the owner of `engine`'s document `query`, and waits for the answer, which comes after every change the thread
-/// sent before. `entry` names the door the main thread took, for the style seal.
+/// sent before. `entry` names the door the main thread took.
 pub(crate) fn ask(engine: StyleEngineHandle, entry: &'static str, query: StyleQuery) -> StyleAnswer {
     engine.bring_home(entry);
-    super::seal::note_engine_call(entry);
     ask_document(engine.document(), entry, query)
 }
 
 /// Leaves the change that gives up the `@keyframes` row of a shadow root's scope, from a garbage collection's
 /// finalizer, which must not wait for the engine (the main thread may hold the loan that would send it home) and must
 /// not borrow the home's answers (the collection may run while the main thread does). The change leaves nothing the
-/// answers follow. `entry` names the door the main thread took, for the style seal.
+/// answers follow.
 pub(crate) fn unpublish_tree_scope_keyframes_from_finalizer(
     engine: StyleEngineInputHandle,
-    entry: &'static str,
     tree_scope: super::tree::TreeScopeID,
     shadow_root_identity: usize,
 ) {
-    super::seal::note_engine_call(entry);
     engine.send_unfollowed(StyleChange::Engine(EngineChange::SetTreeScopeAnimationKeyframes {
         tree_scope,
         shadow_root_identity,
@@ -1049,7 +1043,6 @@ pub(crate) fn unpublish_tree_scope_keyframes_from_finalizer(
 /// stage published is still owed.
 pub(crate) fn ask_records(engine: StyleEngineHandle, entry: &'static str, query: StyleQuery) -> StyleAnswer {
     engine.bring_home_to_read_records(entry);
-    super::seal::note_engine_call(entry);
     ask_document(engine.document(), entry, query)
 }
 

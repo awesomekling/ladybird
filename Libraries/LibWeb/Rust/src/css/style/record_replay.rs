@@ -503,7 +503,6 @@ pub(super) fn begin_recording_stream(device_class: u8) -> Option<u64> {
     let mut payload = PayloadWriter::default();
     payload.write_u64(engine_id);
     payload.write_u8(device_class);
-    payload.write_u8(super::verification_gate_bits());
     capture
         .writer
         .write_event(EventKind::CreateGraph, &payload)

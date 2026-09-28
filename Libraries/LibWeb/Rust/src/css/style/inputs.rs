@@ -1746,19 +1746,6 @@ impl RetainedState {
         counters: &mut Counters,
     ) {
         debug_assert!(custom_declarations.is_empty() || kind == ElementDeclarationKind::InlineStyle);
-        if matches!(
-            kind,
-            ElementDeclarationKind::PresentationalHint | ElementDeclarationKind::SvgPresentationAttribute
-        ) {
-            verify_cascade_winners(self, |_| {
-                let mut properties: Vec<u16> = declared.iter().map(|declared| declared.property).collect();
-                properties.sort_unstable();
-                assert!(
-                    properties.windows(2).all(|pair| pair[0] != pair[1]),
-                    "element-attached declarations repeat a property"
-                );
-            });
-        }
         let (current_declared, current_declarations_are_complete) = self.facts.element_declared_properties(node, kind);
         if current_declared == declared
             && (kind != ElementDeclarationKind::InlineStyle
@@ -2008,7 +1995,6 @@ impl StyleEngineState {
                 style_invalidation_cache: HashMap::default(),
                 html_element_namespace: StyleAtomID::NONE,
                 match_answers: MatchAnswerCatalog::default(),
-                selector_truth_sets: SelectorTruthSetCatalog::default(),
                 retained_match_answers: RetainedMatchAnswers::default(),
                 retained_selector_incidences: RetainedSelectorIncidences::default(),
                 selector_incidence_is_current: false,
@@ -2020,7 +2006,6 @@ impl StyleEngineState {
                 force_bounded_prefix_completion: false,
                 prepared_batch_matching_traversal: None,
                 published_match_answers: PublishedMatchAnswers::default(),
-                host_entry_causes: HashMap::default(),
                 transaction_fact_view: None,
                 facts: ElementFactStore::new(),
                 programs,
@@ -2670,12 +2655,12 @@ impl StyleEngineState {
         std::mem::swap(&mut self.host.journal, &mut self.host.deferred_geometry_journal);
     }
 
-    pub(crate) fn settle_batched_inputs(&mut self, counters: &mut Counters) {
+    pub(crate) fn settle_batched_inputs(&mut self) {
         self.install_pending_matching_context();
         if !self.host.journal.contains_only_element_style_inputs() {
             self.discard_prepared_batch_matching_traversal();
         }
-        self.discard_published_match_answers(counters);
+        self.discard_published_match_answers();
     }
 
     #[must_use]

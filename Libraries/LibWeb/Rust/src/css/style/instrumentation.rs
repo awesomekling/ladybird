@@ -176,11 +176,6 @@ define_counters! {
     Tier3RefusalRetainedMatchAnswerBytes => "tier3RefusalRetainedMatchAnswerBytes",
     MatchAnswerSignatures => "matchAnswerSignatures",
     MatchAnswerSignatureReuses => "matchAnswerSignatureReuses",
-    SelectorTruthSetMisses => "selectorTruthSetMisses",
-    SelectorTruthSetHits => "selectorTruthSetHits",
-    SelectorTruthSetRows => "selectorTruthSetRows",
-    SelectorTruthDerivedAnswerMisses => "selectorTruthDerivedAnswerMisses",
-    SelectorTruthDerivedAnswerHits => "selectorTruthDerivedAnswerHits",
     RetainedMatchAnswerReuses => "retainedMatchAnswerReuses",
     RetainedSelectorIncidenceBatchPrograms => "retainedSelectorIncidenceBatchPrograms",
     RetainedSelectorIncidenceBatchRows => "retainedSelectorIncidenceBatchRows",
@@ -309,10 +304,6 @@ define_counters! {
     AnimationKeyframeScopes => "animationKeyframeScopes",
 }
 
-const RECORD_BAIL_FIRST: usize = Counter::EngineComputedRecordDeltas as usize;
-const RECORD_BAIL_LAST: usize = Counter::EngineComputedRecordBailDriveTreeCounting as usize;
-const RECORD_BAIL_COUNT: usize = RECORD_BAIL_LAST - RECORD_BAIL_FIRST + 1;
-
 /// The counter set for one document.
 #[derive(Clone, Debug)]
 pub struct Counters {
@@ -348,33 +339,6 @@ impl Counters {
     #[must_use]
     pub fn get(&self, counter: Counter) -> u64 {
         self.values[counter as usize]
-    }
-
-    /// The counters a record computation bails with, as one contiguous window. The census reads
-    /// this window around a row to name the bail that declined it, which costs nothing when the
-    /// seal is off because nobody reads it then.
-    #[must_use]
-    pub fn record_bail_marks(&self) -> [u64; RECORD_BAIL_COUNT] {
-        self.values[RECORD_BAIL_FIRST..=RECORD_BAIL_LAST]
-            .try_into()
-            .expect("the record-bail window has a fixed width")
-    }
-
-    /// The first counter in that window naming a way the computation ended without a record,
-    /// moved since `before`. A record it abandoned after building is as much a decline as one it
-    /// bailed out of, and the census must not leave that population unnamed.
-    #[must_use]
-    pub fn first_changed_record_bail(&self, before: &[u64; RECORD_BAIL_COUNT]) -> Option<&'static str> {
-        let moved = |index: usize| self.values[index] != before[index - RECORD_BAIL_FIRST];
-        let named = |wanted: fn(&str) -> bool| {
-            (RECORD_BAIL_FIRST..=RECORD_BAIL_LAST)
-                .find(|&index| moved(index) && wanted(COUNTER_NAMES[index]))
-                .map(|index| COUNTER_NAMES[index])
-        };
-        // A bail names the reason; abandoning names only what happened to the half-built record
-        // afterwards, so it answers for the rows no bail claimed rather than shadowing them.
-        named(|name| name.contains("Bail"))
-            .or_else(|| named(|name| name.contains("Abandoned") || name.contains("Declines")))
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&'static str, u64)> {

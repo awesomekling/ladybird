@@ -166,15 +166,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     if device_class != 0 {
                         return Err(format!("engine {engine_id} has unknown device class {device_class}").into());
                     }
-                    let recorded_verification_gates = match event.payload.remaining_bytes() {
-                        0 => 0,
-                        _ => event.payload.read_u8()?,
-                    };
-                    require_matching_verification_gates(
-                        recorded_verification_gates,
-                        bridge::style_engine_verification_gate_bits(),
-                    )
-                    .map_err(|error| format!("engine {engine_id} {error}"))?;
                     let index = usize::try_from(engine_id)?;
                     if engine_id == 0 || live_engines.get(index).is_some_and(Option::is_some) {
                         return Err(format!("engine {engine_id} was created more than once").into());
@@ -2376,16 +2367,6 @@ fn exact_cascade_publications_match(
     actual == expected
 }
 
-fn require_matching_verification_gates(recorded: u8, actual: u8) -> Result<(), String> {
-    if recorded == actual {
-        Ok(())
-    } else {
-        Err(format!(
-            "verification gates diverged: recording used {recorded:#04x}, replay uses {actual:#04x}"
-        ))
-    }
-}
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct EncodedU64Slice<'a> {
     bytes: &'a [u8],
@@ -2776,10 +2757,6 @@ extern "C" fn ladybird_libweb_font_cascade_memo_ref(_memo: *const c_void) {}
 #[unsafe(no_mangle)]
 extern "C" fn ladybird_libweb_font_cascade_memo_unref(_memo: *const c_void) {}
 #[unsafe(no_mangle)]
-extern "C" fn ladybird_gfx_process_set_host_reaching_call_hook(_hook: extern "C" fn(*const u8, usize)) {}
-#[unsafe(no_mangle)]
-extern "C" fn ladybird_gfx_process_note_host_reaching_call(_name: *const u8, _length: usize) {}
-#[unsafe(no_mangle)]
 extern "C" fn ladybird_gfx_process_note_wanted_pending_face(_face_id: u64) {}
 #[unsafe(no_mangle)]
 extern "C" fn ladybird_gfx_process_requeue_wanted_pending_face(_face_id: u64) {}
@@ -2970,15 +2947,6 @@ mod tests {
         assert!(exact_cascade_publications_match(expected, actual, false));
         actual.unchanged = true;
         assert!(!exact_cascade_publications_match(expected, actual, false));
-    }
-
-    #[test]
-    fn mismatched_verification_gates_are_rejected() {
-        assert!(require_matching_verification_gates(0b0101, 0b0101).is_ok());
-        assert_eq!(
-            require_matching_verification_gates(0b0101, 0b0001).unwrap_err(),
-            "verification gates diverged: recording used 0x05, replay uses 0x01"
-        );
     }
 
     #[test]

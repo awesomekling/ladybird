@@ -1046,9 +1046,6 @@ impl RetainedState {
                 || self.program.rule_is_gated_by_container_query(entry.rule)
                 || rules.binary_search(&entry.rule).is_ok()
         });
-        verify_style_answer_patch(self, counters, |verifier| {
-            verifier.verify_cascade_answer(all, node, "compaction from updated winners");
-        });
         true
     }
 
@@ -1134,12 +1131,10 @@ impl RetainedState {
         });
         self.memory.release(MemoryCategory::BatchScratch, scratch_bytes);
         drop(pseudo_rules);
-        verify_style_answer_patch(self, counters, |verifier| {
-            verifier.verify_cascade_answer(all, node, "pseudo compaction from updated winners");
-        });
         true
     }
 
+    #[cfg(test)]
     pub(super) fn matches_for_cascade_immediately(
         &mut self,
         all: Vec<RuleMatch>,

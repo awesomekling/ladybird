@@ -76,7 +76,6 @@ impl GeometryHostCallbacks {
         layout_node: crate::layout::node_data::NodeSlotId,
         offset: crate::layout::used_values::FfiCssPixelPoint,
     ) {
-        crate::painting::seal::note_host_call("set_scroll_offset");
         // SAFETY: The caller guarantees the row is live and no borrow is held.
         unsafe { (self.set_scroll_offset)(self.context, layout_node, offset) };
     }

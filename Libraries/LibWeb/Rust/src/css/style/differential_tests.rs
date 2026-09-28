@@ -720,10 +720,7 @@ fn incomplete_answer_batches_preserve_pending_lookups_and_release_ownership() {
             ));
         }
         if discard {
-            workload
-                .engine
-                .state
-                .discard_published_match_answers(&mut workload.engine.counters);
+            workload.engine.state.discard_published_match_answers();
             assert_eq!(workload.engine.match_answers.pending_reference_count(), 0);
             assert_eq!(workload.engine.winner_groups.pending_reference_count(), 0);
             for &node in &nodes[..2] {

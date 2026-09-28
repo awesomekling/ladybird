@@ -29,7 +29,6 @@
 //! per call site). Either way the main thread blocks on the stage's reply and never spins its event
 //! loop inside a stage run, and the scheduler's consume-commit runs before the access goes on.
 
-use crate::css::ffi_stats::{StyleUpdateScope, install_style_update_scope, take_style_update_scope};
 use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
@@ -673,9 +672,6 @@ impl SubmittedRunTicket {
         let wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(run.arena as u64);
         let outcome = std::panic::catch_unwind(AssertUnwindSafe(stage));
         drop(wanted_face_owner);
-        // A submitted stage runs outside any style update of the caller's; whatever it left in
-        // the stage thread's style update state goes with it.
-        drop(take_style_update_scope());
         WAITING_CALLER.with(|waiting| waiting.set(waiting_caller));
         tsan::release(thread);
         hold_here(FfiStageHoldPoint::BeforeCompletion);
@@ -695,8 +691,6 @@ pub(crate) fn run_detached_for(caller: ThreadId, arena: usize, work: impl FnOnce
     let wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(arena as u64);
     work();
     drop(wanted_face_owner);
-    // Whatever the work left in the stage thread's style update state goes with it.
-    drop(take_style_update_scope());
     WAITING_CALLER.with(|waiting| waiting.set(waiting_caller));
 }
 
@@ -1426,41 +1420,18 @@ pub extern "C" fn rust_stage_thread_arena_changes_wait_for_frame(arena: *mut c_v
         })
 }
 
-/// What a DOM tree mutation of the document the arena `arena` belongs to does about the frame in flight.
-pub(crate) enum FrameForDomTreeMutation {
-    /// A stage of the frame reaches the style engine, and nothing lets the mutation go on beside it.
-    Joins,
-    /// The mutation goes on beside the frame, which may own the arena.
-    GoesOnBeside { owns_arena: bool },
-}
-
-/// Answers, in one look at the frame in flight and the document's style engine, whether a DOM
-/// tree mutation's door joins it (as the engine's entrances would) and otherwise whether it owns the
-/// arena (as [`frame_in_flight_owns`] answers). A style pass alone in flight, or a layout pass (see
-/// [`rust_stage_thread_layout_pass_in_flight_for`]), lets the mutation go on beside it. Every DOM
-/// tree mutation passes the door, a parser for each node it inserts, so no frame in flight is
-/// answered first.
-pub(crate) fn frame_in_flight_for_dom_tree_mutation(arena: *mut c_void) -> FrameForDomTreeMutation {
+/// Whether a DOM tree mutation of the document whose arena is `arena` joins the frame in flight first, as the
+/// engine's entrances would: where a stage of it reaches the document's style engine. A style pass alone in flight,
+/// or a layout pass (see [`rust_stage_thread_layout_pass_in_flight_for`]), lets the mutation go on beside it. Every DOM
+/// tree mutation passes the door, a parser for each node it inserts, so no frame in flight is answered first.
+pub(crate) fn dom_tree_mutation_joins_frame_in_flight(arena: *mut c_void) -> bool {
     use crate::css::style::engine_home::Holder;
-    if no_stage_is_submitted() {
-        return FrameForDomTreeMutation::GoesOnBeside { owns_arena: false };
+    if no_stage_is_submitted() || SUBMITTED.with_borrow(Vec::is_empty) {
+        return false;
     }
     // SAFETY: The caller passes a live arena, whose host tables hold the document's style engine.
     let engine = unsafe { crate::layout::HostTables::beside_frame(arena) }.style_engine();
-    let holder = engine.holder();
-    let reaches_style_engine = !engine.is_home();
-    SUBMITTED.with_borrow(|submitted| {
-        if submitted.is_empty() {
-            return FrameForDomTreeMutation::GoesOnBeside { owns_arena: false };
-        }
-        let arena = arena as usize;
-        if !matches!(holder, Some(Holder::StylePass | Holder::LayoutPass)) && reaches_style_engine {
-            return FrameForDomTreeMutation::Joins;
-        }
-        FrameForDomTreeMutation::GoesOnBeside {
-            owns_arena: submitted.iter().any(|stage| stage.owns_arena() && stage.arena == arena),
-        }
-    })
+    !engine.is_home() && !matches!(engine.holder(), Some(Holder::StylePass | Holder::LayoutPass))
 }
 
 /// Counts a forced join against the label of each stage of the frame in flight it takes in.
@@ -1812,23 +1783,18 @@ unsafe fn run_stage_on<R: Send>(thread: &'static StageThread, stage: impl FnOnce
         return stage();
     }
 
-    let (to_caller, from_stage) = channel::<StyleUpdateScope>();
+    let (to_caller, from_stage) = channel::<()>();
     let mut outcome: Option<Result<R, Box<dyn Any + Send>>> = None;
     let slot = &mut outcome;
     let caller = std::thread::current().id();
-    // The stage runs inside whatever style update the caller has open, so it takes that update's
-    // state along and hands it back with its result.
-    let style_update = take_style_update_scope();
     let job: Box<dyn FnOnce() + Send + '_> = Box::new(move || {
         tsan::acquire(thread);
         let waiting_caller = WAITING_CALLER.with(|waiting| waiting.replace(Some(caller)));
-        install_style_update_scope(style_update);
         *slot = Some(std::panic::catch_unwind(AssertUnwindSafe(stage)));
-        let style_update = take_style_update_scope();
         WAITING_CALLER.with(|waiting| waiting.set(waiting_caller));
         tsan::release(thread);
         // The calling thread is waiting on this reply, so it cannot have gone away.
-        let _ = to_caller.send(style_update);
+        let _ = to_caller.send(());
     });
     // SAFETY: The job borrows from the calling thread's frame. It drops everything it captured
     // before it replies, and this function does not return before the reply arrives.
@@ -1840,43 +1806,33 @@ unsafe fn run_stage_on<R: Send>(thread: &'static StageThread, stage: impl FnOnce
     }
     // A stage submitted earlier runs first; this stage queues behind it and does not reach what it
     // owns, so the caller waits for this stage's reply only.
-    let style_update = from_stage.recv().unwrap_or_else(|_| std::process::abort());
+    from_stage.recv().unwrap_or_else(|_| std::process::abort());
     tsan::acquire(thread);
-    install_style_update_scope(style_update);
     match outcome.expect("a finished stage leaves its outcome") {
         Ok(value) => value,
         Err(payload) => std::panic::resume_unwind(payload),
     }
 }
 
-/// Where the render owner answers a main thread that waits for it, and what it acts for meanwhile: the unit it runs
-/// for the waiting thread runs inside that thread's open style update, as a stage the thread waits for does.
+/// Where the render owner answers a main thread that waits for it, and which thread it acts for meanwhile.
 pub(crate) struct OwnerReplyTo<R> {
     thread: &'static StageThread,
     caller: ThreadId,
-    style_update: Box<StyleUpdateScope>,
-    reply: Sender<(std::thread::Result<R>, Box<StyleUpdateScope>)>,
+    reply: Sender<std::thread::Result<R>>,
 }
 
 impl<R> OwnerReplyTo<R> {
     /// On the owner: answers with what `unit` answers, acting for the waiting thread. A panic in `unit` goes to the
     /// waiting thread as its answer, and the owner goes on.
     pub(crate) fn answer(self, unit: impl FnOnce() -> R) {
-        let Self {
-            thread,
-            caller,
-            style_update,
-            reply,
-        } = self;
+        let Self { thread, caller, reply } = self;
         tsan::acquire(thread);
         let waiting_caller = WAITING_CALLER.with(|waiting| waiting.replace(Some(caller)));
-        install_style_update_scope(*style_update);
         let outcome = std::panic::catch_unwind(AssertUnwindSafe(unit));
-        let style_update = Box::new(take_style_update_scope());
         WAITING_CALLER.with(|waiting| waiting.set(waiting_caller));
         tsan::release(thread);
         // The waiting thread keeps the receiver until it has the answer.
-        let _ = reply.send((outcome, style_update));
+        let _ = reply.send(outcome);
     }
 }
 
@@ -1924,7 +1880,6 @@ fn send_and_wait<R>(
     let message = message(OwnerReplyTo {
         thread,
         caller: std::thread::current().id(),
-        style_update: Box::new(take_style_update_scope()),
         reply,
     });
     crate::render_owner::note_sending(&message);
@@ -1933,9 +1888,8 @@ fn send_and_wait<R>(
         // The Rendering thread only goes away if the process is going away.
         std::process::abort();
     }
-    let (outcome, style_update) = answered.recv().unwrap_or_else(|_| std::process::abort());
+    let outcome = answered.recv().unwrap_or_else(|_| std::process::abort());
     tsan::acquire(thread);
-    install_style_update_scope(*style_update);
     outcome
 }
 
@@ -1946,13 +1900,11 @@ pub(crate) fn owner_reply_for_test<R>() -> (OwnerReplyTo<R>, impl FnOnce() -> st
     let reply = OwnerReplyTo {
         thread: tests::test_thread(),
         caller: std::thread::current().id(),
-        style_update: Box::new(take_style_update_scope()),
         reply,
     };
+    // A reply dropped unanswered is the answer's error.
     (reply, move || {
-        let (outcome, style_update) = answered.recv().expect("the owner answers");
-        install_style_update_scope(*style_update);
-        outcome
+        answered.recv().unwrap_or_else(|error| Err(Box::new(error)))
     })
 }
 
@@ -1990,12 +1942,10 @@ mod tests {
         let unit = OwnerReplyTo::<u32> {
             thread: test_thread(),
             caller: std::thread::current().id(),
-            style_update: Box::new(take_style_update_scope()),
             reply,
         };
         run_stage_for_test(move || unit.answer(|| panic!("unit failed")));
-        let (outcome, style_update) = answered.recv().expect("a unit that panicked answers");
-        install_style_update_scope(*style_update);
+        let outcome = answered.recv().unwrap_or_else(|error| Err(Box::new(error)));
         let payload = outcome.expect_err("the panic is the answer");
         assert_eq!(payload.downcast_ref::<&str>(), Some(&"unit failed"));
         assert_eq!(run_stage_for_test(|| 7), 7);

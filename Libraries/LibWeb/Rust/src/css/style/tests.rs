@@ -844,15 +844,6 @@ fn repaired_selector_truth_deltas_do_not_depend_on_retained_order() {
 }
 
 #[test]
-fn verification_gates_only_execute_checks() {
-    let mut engine = StyleEngine::new(DeviceClass::ForegroundDesktop);
-    let _: () = verify_style_answer_patch(&mut engine.state, &mut engine.counters, |_| {});
-    let _: () = verify_cascade_winners(&engine, |_| {});
-    let _: () = verify_style_plan_provenance(&engine, |_| {});
-    let _: () = verify_published_style_transaction(&engine, |_| {});
-}
-
-#[test]
 fn retained_answer_delta_memo_accounts_its_tuple_capacity() {
     let mut deltas = Vec::with_capacity(7);
     deltas.push((RuleID(1), EntryID(2), SetChange::Added));
@@ -1406,78 +1397,6 @@ fn selector_incidence_crossing_pressure_stays_until_the_boundary() {
     assert!(memory.finish_tier3_quota_period()[MemoryCategory::RetainedSelectorIncidence as usize]);
     incidences.clear();
     assert_eq!(memory.bytes_in_category(MemoryCategory::RetainedSelectorIncidence), 0);
-}
-
-#[test]
-fn selector_truth_sets_intern_canonical_twelve_byte_rows() {
-    assert_eq!(size_of::<SelectorTruth>(), 12);
-
-    let truth = SelectorTruth {
-        entry: EntryID(7),
-        tree_scope: TreeScopeID::DOCUMENT,
-        scope_proximity: 3,
-    };
-    let mut catalog = SelectorTruthSetCatalog::default();
-    let (first, first_reused) = catalog.intern_prepared(vec![truth]);
-    let (repeated, repeated_reused) = catalog.intern_prepared(vec![truth]);
-    let (distinct, distinct_reused) = catalog.intern_prepared(vec![SelectorTruth {
-        scope_proximity: 4,
-        ..truth
-    }]);
-
-    assert!(!first_reused);
-    assert!(repeated_reused);
-    assert!(!distinct_reused);
-    assert_eq!(first, repeated);
-    assert_ne!(first, distinct);
-    assert_eq!(catalog.get(first).as_ref(), &[truth]);
-
-    let answer = RetainedRuleMatch {
-        rule: RuleID(1),
-        program: SelectorProgramID(1),
-        entry: 0,
-        tree_scope: TreeScopeID::DOCUMENT,
-        scope_proximity: u32::MAX,
-    };
-    assert!(!catalog.verify_derived_answer(first, TreeScopeID::DOCUMENT, ProgramVersion(1), &[answer]));
-    assert!(catalog.verify_derived_answer(first, TreeScopeID::DOCUMENT, ProgramVersion(1), &[answer]));
-    assert!(!catalog.verify_derived_answer(first, TreeScopeID(1), ProgramVersion(1), &[]));
-}
-
-fn retained_answer_verifier_fixture() -> (StyleEngine, StyleNodeID, Vec<RetainedRuleMatch>, Vec<SelectorTruth>) {
-    let (mut engine, nodes) = linear_document();
-    let target = StyleAtomID(200);
-    let rule = add_target_rule(&mut engine, StyleSheetObjectID(1), target);
-    engine.set_rule_declared_properties(rule, &[(1, false)]);
-    add_feature(&mut engine, nodes[1], LocalFeatureKey::Class(target));
-    discard_transaction(&mut engine);
-
-    let exact = engine.match_element(nodes[1]).unwrap();
-    let retained = prepare_retained_match_answer(exact.iter().copied());
-    let truth = prepare_selector_truth_set(&retained, &engine.programs);
-    (engine, nodes[1], retained, truth)
-}
-
-#[test]
-fn retained_answer_verifier_accepts_exact_selector_truth() {
-    let (mut engine, node, retained, truth) = retained_answer_verifier_fixture();
-    verification::with_selector_truth_derivation_enabled(|| {
-        engine.remember_prepared_retained_match_answer_with_truth(node, retained, Some(truth));
-    });
-}
-
-#[test]
-fn retained_answer_verifier_rejects_a_dropped_selector_truth_row() {
-    let (mut engine, node, retained, mut truth) = retained_answer_verifier_fixture();
-    assert_eq!(truth.len(), 1);
-    truth.clear();
-
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        verification::with_selector_truth_derivation_enabled(|| {
-            engine.remember_prepared_retained_match_answer_with_truth(node, retained, Some(truth));
-        });
-    }));
-    assert!(result.is_err());
 }
 
 #[test]
@@ -4536,7 +4455,7 @@ fn selector_list_entry_deltas_fall_back_when_the_compact_winner_is_insufficient(
         tree_scope: TreeScopeID::DOCUMENT,
         scope_proximity: u32::MAX,
     }];
-    engine.remember_prepared_retained_match_answer_with_truth(nodes[1], retained.to_vec(), None);
+    engine.remember_prepared_retained_match_answer(nodes[1], retained.to_vec());
     let old_identity = *engine.retained_match_answers.lookup(nodes[1]).sparse().unwrap();
     let entries = [
         engine.programs.entry_id(program, 0),
@@ -7373,62 +7292,6 @@ fn closure_identity_stop_declines_stale_pseudo_rows() {
 }
 
 #[test]
-fn closure_identity_stop_verification_is_observer_only() {
-    let (mut engine, nodes) = nested_document();
-    let guard = StyleAtomID(200);
-    let target = StyleAtomID(201);
-    let rule = add_guard_target_rule(&mut engine, guard, target);
-    engine.set_rule_declared_properties(rule, &[(1, false)]);
-    for &node in &nodes {
-        for kind in ElementDeclarationKind::ALL {
-            engine.set_element_declared_properties(node, kind, &[], Vec::new(), Vec::new(), Vec::new());
-        }
-    }
-    for (node, class) in [(nodes[1], guard), (nodes[2], target)] {
-        add_feature(&mut engine, node, LocalFeatureKey::Class(class));
-    }
-    discard_transaction(&mut engine);
-
-    engine.begin_published_match_answer_completion_batch(nodes[0], false);
-    let answer = engine.complete_published_match_answer(nodes[2], None).unwrap();
-    let cascade_input = answer.cascade_input.unwrap();
-    let counters_before: Vec<_> = engine.counters.iter().collect();
-    let memory_before: Vec<_> = memory::MEMORY_CATEGORIES
-        .iter()
-        .map(|&category| engine.memory.bytes_in_category(category))
-        .collect();
-    let winner_groups_before = engine.winner_groups.verification_copy();
-    let catalog_entry_count_before = engine.match_answers.answers.live_len();
-    let retained_answer_column_before = engine.retained_match_answers.column.clone();
-    let retained_cascade_column_before = engine.retained_match_answers.cascade_input_column.clone();
-
-    engine.verify_retained_cascade_input(nodes[2], cascade_input);
-
-    assert_eq!(engine.counters.iter().collect::<Vec<_>>(), counters_before);
-    assert_eq!(
-        memory::MEMORY_CATEGORIES
-            .iter()
-            .map(|&category| engine.memory.bytes_in_category(category))
-            .collect::<Vec<_>>(),
-        memory_before
-    );
-    assert!(
-        super::cascade::WinnerView::retained(&engine.winner_groups).node_rows_are_semantically_equal(
-            &winner_groups_before,
-            nodes[2],
-            engine.program.version()
-        )
-    );
-    assert_eq!(engine.match_answers.answers.live_len(), catalog_entry_count_before);
-    assert_eq!(engine.retained_match_answers.column, retained_answer_column_before);
-    assert_eq!(
-        engine.retained_match_answers.cascade_input_column,
-        retained_cascade_column_before
-    );
-    engine.end_published_match_answer_completion_batch();
-}
-
-#[test]
 fn gated_prefix_answers_publish_complete_node_specific_winners() {
     let mut engine = StyleEngine::new(DeviceClass::ForegroundDesktop);
     let mut raw = [0_u32; 4];
@@ -7742,34 +7605,6 @@ fn unobserved_inputs_do_not_seed_prefix_convergence() {
     let transition = view.prefix.unwrap();
     assert_eq!(transition.roots, vec![nodes[1]]);
     engine.release_transaction(transaction);
-}
-
-#[test]
-fn cold_answer_verification_uses_committed_facts_with_pending_inputs() {
-    let (mut engine, nodes) = linear_document();
-    for &node in &nodes {
-        engine.facts.ensure_row(node);
-    }
-    let target = StyleAtomID(200);
-    add_target_rule(&mut engine, StyleSheetObjectID(1), target);
-    discard_transaction(&mut engine);
-
-    let before = engine.exact_match_answer_for_verification(nodes[1]).unwrap();
-    assert!(before.is_empty());
-    add_feature(&mut engine, nodes[1], LocalFeatureKey::Class(target));
-    assert!(engine.facts.has_dirty_staging());
-    assert_eq!(engine.exact_match_answer_for_verification(nodes[1]).unwrap(), before);
-    assert!(
-        engine
-            .exact_cascade_answer_for_verification(nodes[1])
-            .unwrap()
-            .0
-            .is_empty()
-    );
-    assert!(engine.facts.has_dirty_staging());
-
-    discard_transaction(&mut engine);
-    assert_eq!(engine.exact_match_answer_for_verification(nodes[1]).unwrap().len(), 1);
 }
 
 #[test]

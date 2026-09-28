@@ -2383,7 +2383,6 @@ unsafe fn arena_and_scratch_for_stage<'a>(state: *mut ArenaHandle) -> (&'a mut L
 /// The host-free full layout stage. Host callbacks require a `MainThread` capability, which this
 /// function neither receives nor stores in its input.
 fn run_root_layout_stage(stage: LayoutStageInput<'_>, scratch: &LayoutScratch) -> LayoutStageOutput {
-    let _pass = seal::enter_pass();
     let LayoutStageInput {
         arena,
         root,
@@ -2742,7 +2741,6 @@ unsafe fn commit_entry_pass_to_arena(
 
 /// The host-free partial layout stage. Its input carries no host table or main-thread capability.
 fn compute_subtree_layout_stage(stage: LayoutStageInput<'_>, scratch: &LayoutScratch) -> LayoutStageOutput {
-    let _pass = seal::enter_pass();
     let LayoutStageInput {
         arena,
         root,

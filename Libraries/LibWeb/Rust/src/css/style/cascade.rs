@@ -1290,40 +1290,6 @@ impl<'a> WinnerView<'a> {
         self.groups.row_stamp(node)
     }
 
-    pub(super) fn node_rows_are_semantically_equal(
-        &self,
-        other: &WinnerGroups,
-        node: StyleNodeID,
-        program_version: ProgramVersion,
-    ) -> bool {
-        let key = WinnerGroupKey::current(node, program_version);
-        let current_rows_are_equal = match (self.token_for(key), other.token_for(key)) {
-            (Lookup::Known((_, left)), Lookup::Known((_, right))) => other.states_are_semantically_equal(left, right),
-            (Lookup::Missing(_), Lookup::Missing(_)) => true,
-            (Lookup::Known(_), Lookup::Missing(_)) | (Lookup::Missing(_), Lookup::Known(_)) => false,
-            (Lookup::KnownAbsent, _) | (_, Lookup::KnownAbsent) => unreachable!("winner groups are sparse"),
-        };
-        if !current_rows_are_equal {
-            return false;
-        }
-
-        let mut left: Vec<_> = self.pseudo_states(node).collect();
-        let mut right: Vec<_> = other.pseudo_states(node).collect();
-        // NB: Exact verification can materialize pseudo rows missing from the sparse retained
-        //     cache. Compare the retained rows; additional recomputed rows do not imply a change.
-        left.sort_unstable_by_key(|row| row.0);
-        right.sort_unstable_by_key(|row| row.0);
-        left.iter().all(|&(left_pseudo, _, left_state, left_current)| {
-            right
-                .binary_search_by_key(&left_pseudo, |row| row.0)
-                .ok()
-                .is_some_and(|index| {
-                    let (_, _, right_state, right_current) = right[index];
-                    left_current == right_current && other.states_are_semantically_equal(left_state, right_state)
-                })
-        })
-    }
-
     pub(super) fn retained(groups: &'a WinnerGroups) -> Self {
         Self { groups, effects: None }
     }
@@ -1561,47 +1527,6 @@ impl WinnerGroups {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
-    }
-
-    pub(super) fn verification_copy(&self) -> Self {
-        let pseudo_rows_by_node = self.pseudo_rows_by_node.clone();
-        let pseudo_row_capacity_bytes = pseudo_rows_by_node
-            .iter()
-            .map(|rows| rows.capacity() * size_of::<PseudoWinnerRow>())
-            .sum::<usize>() as u64;
-        Self {
-            states: self.states.clone(),
-            state_custom_declarations: self.state_custom_declarations.clone(),
-            custom_declaration_lists: self.custom_declaration_lists.clone(),
-            custom_declaration_list_ids: self.custom_declaration_list_ids.clone(),
-            state_reference_counts: self.state_reference_counts.clone(),
-            state_pending_reference_counts: self.state_pending_reference_counts.clone(),
-            state_winning_rules: self.state_winning_rules.clone(),
-            state_has_element_winners: self.state_has_element_winners.clone(),
-            groups: self.groups.clone(),
-            provenance_groups: self.provenance_groups.clone(),
-            priorities: self.priorities.clone(),
-            continuations: self.continuations.clone(),
-            winner_entry_count: self.winner_entry_count,
-            winner_rule_references: self.winner_rule_references.clone(),
-            column: self.column.clone(),
-            stamp: self.stamp,
-            element_row_stamps: self.element_row_stamps.clone(),
-            pseudo_rows_by_node,
-            pseudo_row_capacity_bytes,
-            pseudo_row_count: self.pseudo_row_count,
-            priority_current: self.priority_current.clone(),
-            row_count: self.row_count,
-            priority_current_row_count: self.priority_current_row_count,
-            newest_program_version: self.newest_program_version,
-            newest_version_row_count: self.newest_version_row_count,
-            generation: self.generation,
-            admitting: self.admitting,
-            residency: MemoryLease::new(MemoryCategory::CascadeWinnerGroup),
-            nested_residency: MemoryLease::new(MemoryCategory::CascadeWinnerGroup),
-            #[cfg(test)]
-            group_hash_computations: self.group_hash_computations,
-        }
     }
 
     /// Resolve one property's ordered contenders and intern only the continuation payloads needed

@@ -17,7 +17,7 @@ use super::animations::{
 use super::bridge::FfiPublishedTransition;
 use super::bridge::FfiTransitionStepAction;
 use super::tree::StyleNodeID;
-use super::{RetainedState, StyleEngineState, engine_sample_check};
+use super::{RetainedState, StyleEngineState};
 use crate::css::animated_overlay::{AnimatedOverlay, overlay_wins};
 use crate::css::computed_longhand_table::ComputedLonghandTable;
 use crate::css::computed_value_views::ComputedValuesView;
@@ -484,7 +484,7 @@ impl StyleEngineState {
         timeline_samples: &super::animations::AnimationTimelineSamples,
         counters: &mut super::Counters,
     ) {
-        match self.decide_and_compose_transition_step(
+        if let Ok((step, _)) = self.decide_and_compose_transition_step(
             node,
             None,
             old_style_record,
@@ -494,13 +494,9 @@ impl StyleEngineState {
             timeline_samples,
             counters,
         ) {
-            Ok((step, _)) => {
-                engine_sample_check::note_taken("transition step");
-                self.retained
-                    .transition_steps_decided_in_pass
-                    .insert(node, std::sync::Arc::new(step));
-            }
-            Err(reason) => engine_sample_check::note_declined(&format!("transition step: {reason}")),
+            self.retained
+                .transition_steps_decided_in_pass
+                .insert(node, std::sync::Arc::new(step));
         }
     }
 
@@ -541,16 +537,12 @@ impl StyleEngineState {
             counters,
         ) {
             Ok((step, composition)) => {
-                engine_sample_check::note_taken("pseudo-element transition step");
                 self.retained
                     .pseudo_element_transition_steps_decided_in_pass
                     .insert((node, pseudo_kind), std::sync::Arc::new(step));
                 Some(composition.unwrap_or(installed_style_record))
             }
-            Err(reason) => {
-                engine_sample_check::note_declined(&format!("pseudo-element transition step: {reason}"));
-                None
-            }
+            Err(_) => None,
         }
     }
 

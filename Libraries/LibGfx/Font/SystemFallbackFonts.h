@@ -52,11 +52,6 @@ RefPtr<Font const> system_fallback_font(SystemFallbackFontKey const&);
 // service when one is installed, so that it never reaches the document thread's connection.
 RefPtr<Font const> system_fallback_font_from_render_side(SystemFallbackFontKey const&);
 
-// `reached_document_thread` says whether the miss had to be matched through the process's system
-// font provider after all, which in a renderer means the connection the calling thread owns. The
-// stage seals report that; nothing else needs the overload.
-RefPtr<Font const> system_fallback_font_from_render_side(SystemFallbackFontKey const&, bool& reached_document_thread);
-
 // Drops every memoized answer. Call this whenever the installed font set changes.
 void clear_system_fallback_font_cache();
 

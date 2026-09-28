@@ -213,10 +213,9 @@ impl StyleInvalidation {
 }
 
 /// What a move damages when the engine cannot read one of its records, or the host names no style
-/// node for it: everything. A debug build asserts; the seal reports the site.
+/// node for it: everything. A debug build asserts.
 pub(crate) fn unreadable_record_damage(site: &'static str) -> u32 {
     debug_assert!(false, "record damage without a readable record ({site})");
-    super::seal::note_broken_assumption(site);
     let mut damage = StyleInvalidation::full();
     damage.any_computed_value_changed = true;
     damage.pack()

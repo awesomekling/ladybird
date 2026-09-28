@@ -17,7 +17,6 @@ mod rust_panic;
 pub mod clock_frames;
 mod encoding_detection;
 pub mod flight;
-mod font_seal;
 pub use libcompositing_rust::fast_hash;
 
 pub(crate) mod cow_column;
@@ -52,10 +51,6 @@ unsafe fn bytes_from_raw<'a>(bytes: *const u8, len: usize) -> Option<&'a [u8]> {
 mod process_state_test_stubs {
     use std::ffi::c_void;
 
-    #[unsafe(no_mangle)]
-    extern "C" fn ladybird_gfx_process_set_host_reaching_call_hook(_hook: extern "C" fn(*const u8, usize)) {}
-    #[unsafe(no_mangle)]
-    extern "C" fn ladybird_gfx_process_note_host_reaching_call(_name: *const u8, _length: usize) {}
     #[unsafe(no_mangle)]
     extern "C" fn ladybird_gfx_process_note_wanted_pending_face(face_id: u64) {
         WANTED.lock().unwrap().push((face_id, false));
