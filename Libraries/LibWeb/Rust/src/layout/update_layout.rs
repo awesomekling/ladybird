@@ -850,6 +850,7 @@ pub(crate) struct OwnerFrameJob {
 /// Nothing but the thread running the job reaches the frame, its arena and the style engine the arena links until this
 /// returns.
 unsafe fn run_job(
+    owner: &crate::render_owner::Owner,
     run: unsafe fn(*mut LayoutFrame, FrameJob) -> FrameJobAnswer,
     frame: *mut LayoutFrame,
     job: FrameJob,
@@ -865,14 +866,14 @@ unsafe fn run_job(
             answer
         }
     };
-    // The rounds reach the style engine the arena links as a unit its document thread waits for, with the engine home:
-    // what waits for the engine goes in first, and what the rounds leave in it is the home's to read once they are done.
+    // The rounds reach the style engine the arena links as the owner: what the main thread sent the engine goes in
+    // first, and what the rounds leave in it goes to the main thread once they are done.
     // SAFETY: Guaranteed by the caller.
     let engine = unsafe { &*state }.arena().style_engine_handle();
     match engine.is_null() {
         true => run_in_state(),
         // SAFETY: As above.
-        false => unsafe { engine.reach_on_owner(|_| run_in_state()) },
+        false => unsafe { engine.reach_on_owner(owner, |_| run_in_state()) },
     }
 }
 
@@ -883,7 +884,7 @@ impl OwnerFrameJob {
     /// Runs the job on the owner, with the arena of the render state it holds for the job's document, and answers the
     /// waiting document thread. Where the owner holds none (a bug of the sender's), the job runs with the arena its
     /// frame names.
-    pub(crate) fn run(self, arena: impl FnOnce() -> Option<*mut ArenaHandle>) {
+    pub(crate) fn run(self, owner: &crate::render_owner::Owner, arena: impl FnOnce() -> Option<*mut ArenaHandle>) {
         let Self { frame, job, reply, run } = self;
         let frame = frame.into_inner();
         reply.answer(|| {
@@ -900,7 +901,7 @@ impl OwnerFrameJob {
             // The faces the rounds want are their document's, for that document's layout end to request.
             let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(state as u64);
             // SAFETY: As above.
-            let answer = unsafe { run_job(run, frame, job, state) };
+            let answer = unsafe { run_job(owner, run, frame, job, state) };
             // SAFETY: The answer goes back to the document thread, which waits for it.
             OwnerFrameJobAnswer(unsafe { crate::stage_thread::CallerWaits::new(answer) })
         });
@@ -1461,9 +1462,11 @@ impl LayoutFrame {
                 // nothing.
                 let state = unsafe { ArenaHandle::held_by_waiting_thread((*frame).inputs.arena_handle) };
                 let job = job.take().expect("a job runs once");
-                // SAFETY: As above.
-                OwnerFrameJobAnswer(unsafe {
-                    crate::stage_thread::CallerWaits::new(run_job(Self::run_job_in_state, frame, job, state))
+                crate::render_owner::do_owner_work_here(|owner| {
+                    // SAFETY: As above.
+                    OwnerFrameJobAnswer(unsafe {
+                        crate::stage_thread::CallerWaits::new(run_job(owner, Self::run_job_in_state, frame, job, state))
+                    })
                 })
             },
         );

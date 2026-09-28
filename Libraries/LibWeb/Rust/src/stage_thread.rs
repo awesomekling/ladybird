@@ -712,11 +712,6 @@ pub(crate) fn running_inside_stage() -> bool {
     RUNNING_SUBMITTED_RUN.with(Cell::get).is_some() || WAITING_CALLER.with(Cell::get).is_some()
 }
 
-/// Whether the stage thread runs a stage the main thread submitted, rather than one it waits for.
-pub(crate) fn running_submitted_stage() -> bool {
-    RUNNING_SUBMITTED_RUN.with(Cell::get).is_some()
-}
-
 /// The label of the stage that presents a navigable's frame at the end of the frame in flight.
 const PRESENTATION_STAGE: &str = "present";
 

@@ -1044,7 +1044,7 @@ impl ClockMessage {
 /// How the owner runs a display tick for a compositor context at a frame time. The owner reaches what a tick runs (the
 /// sampling, the layout, the recording) only through the ticks it is sent, so what reaches the owner without it (the
 /// unit tests' stage threads) links without it.
-pub(crate) type RunDisplayTick = fn(u64, i64);
+pub(crate) type RunDisplayTick = fn(&crate::render_owner::Owner, u64, i64);
 
 /// A tick a rendering update submitted: at timeline time `time`, with the style engine the update
 /// lent it, publishing to `published`, which the main thread reads once it has taken the tick back.
@@ -1053,15 +1053,15 @@ pub(crate) struct SubmittedTick {
     time: f64,
     style_engine: Option<StyleEngineLoan>,
     published: Arc<ClockPublication>,
-    run: fn(DocumentId, SubmittedTick),
+    run: fn(&crate::render_owner::Owner, DocumentId, SubmittedTick),
 }
 
 /// Handles `message` on the owner.
-pub(crate) fn handle_on_owner(message: ClockMessage) {
+pub(crate) fn handle_on_owner(owner: &crate::render_owner::Owner, message: ClockMessage) {
     match message {
         ClockMessage::Start { document, clock } => {
             let published = Arc::clone(&clock.published);
-            crate::render_owner::with_clock(document, |slot, arena| {
+            crate::render_owner::with_clock(owner, document, |slot, arena| {
                 *slot = Some(*clock);
                 // A clock starts where a rendering update ended: until a tick moves something, the host's reads answer
                 // from what that update laid out, and no tick that runs meanwhile shows in them.
@@ -1105,7 +1105,7 @@ pub(crate) fn handle_on_owner(message: ClockMessage) {
             // slot free and posts a tick of its own, or the time it stored is the one read here.
             slot.queued.swap(false, Ordering::AcqRel);
             let frame_time_nanoseconds = slot.frame_time_nanoseconds.load(Ordering::Acquire);
-            run(context, frame_time_nanoseconds);
+            run(owner, context, frame_time_nanoseconds);
         }
         ClockMessage::InjectedTick {
             context,
@@ -1120,17 +1120,17 @@ pub(crate) fn handle_on_owner(message: ClockMessage) {
                     }
                 });
             }
-            run(context, frame_time_nanoseconds);
+            run(owner, context, frame_time_nanoseconds);
             adopt_on_main(true);
         }
-        ClockMessage::SubmittedTick { document, tick, ticket } => ticket.run(|| (tick.run)(document, *tick)),
+        ClockMessage::SubmittedTick { document, tick, ticket } => ticket.run(|| (tick.run)(owner, document, *tick)),
     }
 }
 
 /// Takes the clock of `document` out of its render state, with the arena it ticks, for a tick that
 /// may reach other documents' state while it runs. [`put_clock_back`] puts it back.
-fn take_clock(document: DocumentId) -> Option<(DocumentClock, *mut ArenaHandle)> {
-    crate::render_owner::with_clock(document, |slot, arena| slot.take().map(|clock| (clock, arena))).flatten()
+fn take_clock(owner: &crate::render_owner::Owner, document: DocumentId) -> Option<(DocumentClock, *mut ArenaHandle)> {
+    crate::render_owner::with_clock(owner, document, |slot, arena| slot.take().map(|clock| (clock, arena))).flatten()
 }
 
 fn put_clock_back(document: DocumentId, clock: DocumentClock) {
@@ -1141,7 +1141,7 @@ fn put_clock_back(document: DocumentId, clock: DocumentClock) {
 }
 
 /// Runs the tick a rendering update of `document` submitted, on the owner inside its run.
-fn run_submitted_tick(document: DocumentId, tick: SubmittedTick) {
+fn run_submitted_tick(owner: &crate::render_owner::Owner, document: DocumentId, tick: SubmittedTick) {
     let SubmittedTick {
         time,
         style_engine,
@@ -1150,7 +1150,7 @@ fn run_submitted_tick(document: DocumentId, tick: SubmittedTick) {
     } = tick;
     // Taking the clock applies the arena's pending changes, which may reach the engine: inside the loan.
     let run = |engine: Option<&mut StyleEngine>| {
-        let Some((mut clock, arena)) = take_clock(document) else {
+        let Some((mut clock, arena)) = take_clock(owner, document) else {
             published.set_outcome(FfiClockTickOutcome::Stopped);
             return;
         };
@@ -1175,7 +1175,7 @@ fn run_submitted_tick(document: DocumentId, tick: SubmittedTick) {
 
 /// Runs the display tick at `frame_time_nanoseconds` for the clock that ticks at the compositor
 /// context `context`, on the owner, whatever the main thread is doing.
-fn run_display_tick(context: u64, frame_time_nanoseconds: i64) {
+fn run_display_tick(owner: &crate::render_owner::Owner, context: u64, frame_time_nanoseconds: i64) {
     count(&COUNTERS.ticks_run);
     let Some(document) = crate::render_owner::document_with_clock_at(context) else {
         count(&COUNTERS.ticks_dropped_without_clock);
@@ -1184,19 +1184,25 @@ fn run_display_tick(context: u64, frame_time_nanoseconds: i64) {
     // Taking the clock applies the arena's pending changes, which may reach the engine.
     let taken = match crate::render_owner::style_engine_of(document) {
         // SAFETY: The owner holds the document's render state, and the engine with it.
-        Some(engine) if !engine.is_null() => unsafe { engine.reach_on_owner(|_| take_clock(document)) },
-        _ => take_clock(document),
+        Some(engine) if !engine.is_null() => unsafe { engine.reach_on_owner(owner, |_| take_clock(owner, document)) },
+        _ => take_clock(owner, document),
     };
     let Some((mut clock, arena)) = taken else {
         count(&COUNTERS.ticks_dropped_without_clock);
         return;
     };
-    run_display_tick_on(&mut clock, arena, context, frame_time_nanoseconds);
+    run_display_tick_on(owner, &mut clock, arena, context, frame_time_nanoseconds);
     put_clock_back(document, clock);
 }
 
 /// Runs a display tick of `clock`, whose document's arena is `arena`.
-fn run_display_tick_on(clock: &mut DocumentClock, arena: *mut ArenaHandle, context: u64, frame_time_nanoseconds: i64) {
+fn run_display_tick_on(
+    owner: &crate::render_owner::Owner,
+    clock: &mut DocumentClock,
+    arena: *mut ArenaHandle,
+    context: u64,
+    frame_time_nanoseconds: i64,
+) {
     if clock.paused {
         count(&COUNTERS.ticks_dropped_paused);
         return;
@@ -1275,7 +1281,7 @@ fn run_display_tick_on(clock: &mut DocumentClock, arena: *mut ArenaHandle, conte
                 return run_tick(None);
             }
             // SAFETY: As above.
-            unsafe { engine.reach_on_owner(|engine| run_tick(Some(engine))) }
+            unsafe { engine.reach_on_owner(owner, |engine| run_tick(Some(engine))) }
         };
         tick = Some(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
             reach_and_run_tick,

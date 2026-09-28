@@ -13,19 +13,20 @@
 //! The main thread settles the lend once it has taken the stage back ([`StyleEngineSettlement`]),
 //! which keeps the home until then, even where the engine has gone away first.
 //!
-//! The main thread still enters the engine through the home where the layout arena reaches it (a
-//! style install, a record pin), and waits for the engine before what it sends the render owner.
-//! With the engine home it goes on at once. With the engine lent it waits for the stage that holds
-//! it and nothing else, unless what the stage will still owe the frame it runs in (the install of its
-//! style batch, or the frame's take-back) keeps the entrance out: then it takes that frame in, as a
+//! The engine is reached by the render owner, which holds the document's render state
+//! ([`StyleEngineHandle::reach_on_owner`], which only the owner's [`crate::render_owner::Owner`] can call), by a stage
+//! it is lent to, or by the thread that owns it with its render state ([`OwnedStyleEngine`]). The main thread waits for
+//! the engine before what it sends the render owner. With the engine home it goes on at once. With the engine lent it
+//! waits for the stage that holds it and nothing else, unless what the stage will still owe the frame it runs in (the
+//! install of its style batch, or the frame's take-back) keeps the entrance out: then it takes that frame in, as a
 //! forced join does.
 //!
 //! Whoever reaches the engine may run beside the main thread (a display tick does), so the two share nothing but the
 //! home's [`Exchange`], which a lock guards. What the main thread writes to the engine waits there
-//! ([`StyleEngineInputHandle::send`]), and whoever reaches the engine next applies it first: the render owner, a stage
-//! the engine is lent to, or the main thread at an entrance of its own. Whoever reaches the engine leaves the main
-//! thread [`EngineNews`] of what the engine holds as it is done, moved into the exchange. The main thread reads only
-//! its own [`HomeAnswers`]: the news it adopted last, with what each change it sent since leaves.
+//! ([`StyleEngineInputHandle::send`]), and whoever reaches the engine next applies it first. Whoever reaches the
+//! engine leaves the main thread [`EngineNews`] of what the engine holds as it is done, moved into the exchange. The
+//! main thread reads only its own [`HomeAnswers`]: the news it adopted last, with what each change it sent since
+//! leaves.
 
 use super::StyleEngine;
 use super::bridge::{EngineNews, HomeAnswers};
@@ -505,18 +506,22 @@ impl StyleEngineHandle {
         unsafe { Box::from_raw(home.engine.as_ptr()) }
     }
 
-    /// On the render owner, in a unit it runs with the render state of the engine's document: runs `run` with the
+    /// As the render `owner`, in a unit it runs with the render state of the engine's document: runs `run` with the
     /// engine, which whatever `run` calls reaches through the handle too. The owner takes no loan: it holds the
-    /// document's render state, and the main thread waits for the unit.
+    /// document's render state. The main thread may run meanwhile: it only sends the engine changes and adopts what
+    /// the reach leaves it, through the home's exchange.
     ///
     /// # Safety
     ///
-    /// The handle must name a live engine that is home, and the main thread must wait for the unit, reaching
-    /// nothing of the engine, until this returns.
-    pub(crate) unsafe fn reach_on_owner<T>(self, run: impl FnOnce(&mut StyleEngine) -> T) -> T {
-        // Only the engine's address is read of the home, which the main thread does not write while it waits.
+    /// The handle must name a live engine of a document whose render state the owner holds.
+    pub(crate) unsafe fn reach_on_owner<T>(
+        self,
+        _owner: &crate::render_owner::Owner,
+        run: impl FnOnce(&mut StyleEngine) -> T,
+    ) -> T {
         let engine = self.home().engine.as_ptr();
-        // SAFETY: Guaranteed by the caller.
+        // SAFETY: Guaranteed by the caller; the owner runs one unit at a time, so nothing else on its thread reaches
+        // the engine.
         unsafe { reach_on_this_thread(self.address(), engine, run) }
     }
 
@@ -605,33 +610,22 @@ impl StyleEngineHandle {
         self.is_null() || self.home().state() == (true, Owed::Nothing)
     }
 
-    /// The engine, for whoever may reach it: a stage it is lent to, on the thread the stage lent it
-    /// to, or the main thread, which brings the engine home first for an entrance at `entry`.
+    /// The engine of an engine the calling thread owns with its render state ([`OwnedStyleEngine`]: a unit test's, or
+    /// the replay tool's), which no owner job runs beside, or on the thread a stage lent it to.
     ///
     /// # Safety
     ///
     /// The handle must name a live engine, and no other borrow of the engine may be live while the
     /// returned one is used.
-    pub(crate) unsafe fn enter<'a>(self, entry: &'static str) -> &'a mut StyleEngine {
+    unsafe fn enter<'a>(self, entry: &'static str) -> &'a mut StyleEngine {
         let engine = self.home().engine.as_ptr();
         if LENT_TO_THIS_THREAD.get() == self.address() {
             // SAFETY: The stage that holds the loan lent the engine to this thread; guaranteed by the
             // caller.
             return unsafe { &mut *engine };
         }
-        // An engine is lent only to a submitted stage, so with none submitted every engine is home.
-        if !crate::stage_thread::no_stage_is_submitted() && crate::stage_thread::running_inside_stage() {
-            debug_assert!(
-                !crate::stage_thread::running_submitted_stage(),
-                "a submitted stage reaches a style engine it holds no loan of"
-            );
-            // A stage the main thread waits for reaches the engine as the main thread would, which
-            // brought the engine home before it waited.
-        } else {
-            self.bring_home(entry);
-        }
-        // SAFETY: The engine is home, or the stage that holds it is done with it, and the main thread
-        // reaches it or waits; guaranteed by the caller.
+        self.bring_home(entry);
+        // SAFETY: The engine is home; guaranteed by the caller.
         let engine = unsafe { &mut *engine };
         // What the main thread wrote to the engine goes in before anything reaches it.
         self.home().catch_up(engine);
