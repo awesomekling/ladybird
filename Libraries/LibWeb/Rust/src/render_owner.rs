@@ -112,12 +112,6 @@ pub(crate) enum ArenaChange {
 }
 
 impl ArenaChange {
-    /// Whether applying the change reaches the document's style engine, which the owner reaches only in a unit the
-    /// main thread waits for.
-    fn reaches_engine(&self) -> bool {
-        matches!(self, ArenaChange::FinishOwnerStyleHostHalf)
-    }
-
     fn apply(self, arena: &mut LayoutNodeArena) {
         match self {
             ArenaChange::DocumentIsDecodedSvg(is_decoded_svg) => arena.set_document_is_decoded_svg(is_decoded_svg),
@@ -157,9 +151,27 @@ impl Change {
     fn writes_arena(&self) -> bool {
         matches!(self, Change::Arena(_))
     }
+}
 
-    fn writes_arena_without_engine(&self) -> bool {
-        matches!(self, Change::Arena(change) if !change.reaches_engine())
+/// How a unit that applies a document's changes reaches its style engine.
+enum EngineReach<'a> {
+    /// The main thread waits for the unit, with the engine's token home.
+    Home,
+    /// The unit runs beside the main thread, which lent it the token.
+    Lent(&'a mut crate::css::style::engine_home::StyleEngineLoan),
+}
+
+impl EngineReach<'_> {
+    fn reach<T>(
+        &mut self,
+        engine: crate::css::style::StyleEngineHandle,
+        run: impl FnOnce(&mut crate::css::style::StyleEngine) -> T,
+    ) -> T {
+        match self {
+            // SAFETY: The engine is the document's, and the main thread waits for the unit with the token home.
+            Self::Home => unsafe { engine.reach_on_owner(run) },
+            Self::Lent(loan) => loan.lend_to_this_thread(run),
+        }
     }
 }
 
@@ -220,17 +232,16 @@ pub(crate) struct RenderState {
 }
 
 impl RenderState {
+    /// Applies the changes the owner has received, which every unit and query comes after.
+    fn apply_changes(&mut self, mut reach: EngineReach<'_>) {
+        self.apply_arena_changes(&mut reach);
+        self.apply_style_changes(&mut reach);
+    }
+
     /// Applies the arena changes the owner has received, which every unit and query that reaches the arena comes after.
-    /// A unit the main thread waits for applies them all; one that runs beside the main thread (a rendering update)
-    /// leaves those that reach the style engine to the next unit the main thread waits for.
-    fn apply_arena_changes(&mut self, main_thread_waits: bool) {
+    fn apply_arena_changes(&mut self, reach: &mut EngineReach<'_>) {
         let received = self.changes.received_through;
-        let wanted = if main_thread_waits {
-            Change::writes_arena
-        } else {
-            Change::writes_arena_without_engine
-        };
-        let changes = self.changes.take_through(received, wanted);
+        let changes = self.changes.take_through(received, Change::writes_arena);
         if changes.is_empty() {
             return;
         }
@@ -243,19 +254,19 @@ impl RenderState {
                 }
             }
         };
-        if !main_thread_waits || engine.is_null() {
+        if engine.is_null() {
             apply(arena);
             return;
         }
-        // SAFETY: The engine is the document's, and the main thread waits for the unit with the engine's token home.
-        unsafe { engine.reach_on_owner(|_| apply(arena)) };
+        // Putting back the rows a style install did not adopt reaches the engine through the arena.
+        reach.reach(engine, |_| apply(arena));
     }
 
     /// Applies the changes to the style engine the owner has received, in order, which every unit and query that
     /// reaches the engine comes after, as it came after the main thread's writes when the main thread made them
     /// directly. The owner reaches the engine only while the main thread waits for it or has lent it a stage, so
     /// nothing reads the engine beside them.
-    fn apply_style_changes(&mut self) {
+    fn apply_style_changes(&mut self, reach: &mut EngineReach<'_>) {
         if self.changes.pending.is_empty() {
             return;
         }
@@ -272,22 +283,17 @@ impl RenderState {
         // The faces applying them wants are this document's, whichever document's unit the owner serves them beside.
         let _wanted_face_owner =
             libgfx_rust::font::WantedFaceOwner::enter(std::ptr::from_mut::<ArenaHandle>(&mut self.arena) as u64);
-        // SAFETY: The engine is the document's, and the document thread reaches it only through the owner, or once it
-        // has taken back the stage it lent it.
-        unsafe {
-            engine.reach_on_owner(|engine| {
-                let mut target = ChangeTarget { style_engine: engine };
-                for change in changes {
-                    change.apply(&mut target);
-                }
-            });
-        }
+        reach.reach(engine, |engine| {
+            let mut target = ChangeTarget { style_engine: engine };
+            for change in changes {
+                change.apply(&mut target);
+            }
+        });
     }
 
     /// Answers `query` from the state as the units before it left it.
     fn answer(&mut self, query: Query) -> Answer {
-        self.apply_arena_changes(true);
-        self.apply_style_changes();
+        self.apply_changes(EngineReach::Home);
         match query {
             Query::Engine(query) => {
                 let engine = self.style_engine();
@@ -319,22 +325,29 @@ impl RenderState {
 
     /// The handle of the state's arena, which names the document to what files work under it.
     fn arena_handle(&mut self) -> *mut c_void {
-        self.apply_arena_changes(true);
-        self.apply_style_changes();
+        self.apply_changes(EngineReach::Home);
         std::ptr::from_mut::<ArenaHandle>(&mut self.arena).cast::<c_void>()
     }
 
     /// The state's arena and what lives beside it, which the owner hands the units the main thread waits for.
     fn state(&mut self) -> *mut ArenaHandle {
-        self.apply_arena_changes(true);
-        self.apply_style_changes();
+        self.apply_changes(EngineReach::Home);
         std::ptr::from_mut::<ArenaHandle>(&mut self.arena)
     }
 
-    /// The state's arena and what lives beside it, for a rendering update, which runs beside the main thread.
-    fn state_beside_main_thread(&mut self) -> *mut ArenaHandle {
-        self.apply_arena_changes(false);
-        self.apply_style_changes();
+    /// The state's arena and what lives beside it, for a rendering update, which runs beside the main thread with the
+    /// style engine's token lent to it as `style_engine`.
+    fn state_beside_main_thread(
+        &mut self,
+        style_engine: Option<&mut crate::css::style::engine_home::StyleEngineLoan>,
+    ) -> *mut ArenaHandle {
+        match style_engine {
+            Some(loan) => self.apply_changes(EngineReach::Lent(loan)),
+            // Only an update of a document with no engine is lent none, and its changes reach no engine.
+            None if self.style_engine().is_null() => self.apply_changes(EngineReach::Home),
+            // The changes wait for the next unit the main thread waits for.
+            None => debug_assert!(false, "a rendering update is lent its document's style engine"),
+        }
         std::ptr::from_mut::<ArenaHandle>(&mut self.arena)
     }
 
@@ -823,7 +836,7 @@ fn handle_message(message: ToOwner) {
         }
         ToOwner::RenderingUpdate {
             document,
-            update,
+            mut update,
             ticket,
         } => {
             debug_assert!(
@@ -831,8 +844,11 @@ fn handle_message(message: ToOwner) {
                 "a rendering update of a document with no render state"
             );
             // A test's update of no document runs with the arena its flight names.
-            let state =
-                STATES.with_borrow_mut(|states| states.get_mut(&document).map(RenderState::state_beside_main_thread));
+            let state = STATES.with_borrow_mut(|states| {
+                states
+                    .get_mut(&document)
+                    .map(|state| state.state_beside_main_thread(update.style_engine.as_mut()))
+            });
             ticket.run(|| update.run(state));
         }
         ToOwner::Style {
@@ -856,8 +872,7 @@ fn handle_message(message: ToOwner) {
             reply,
         } => reply.answer(|| {
             with_state(document, |state| {
-                state.apply_arena_changes(true);
-                state.apply_style_changes();
+                state.apply_changes(EngineReach::Home);
                 debug_assert!(
                     state.changes.pending.front().is_none_or(|(seq, _)| *seq > through),
                     "a query is answered after the changes sent before it"
@@ -966,7 +981,7 @@ pub(crate) fn send(message: ToOwner) {
         // Without a Rendering thread, the thread that sends a change is the owner, and runs nothing beside it: the
         // change applies to the arena as it is sent.
         if let Some(document) = changes_of.filter(|_| !crate::stage_thread::has_owner_thread()) {
-            with_state(document, |state| state.apply_arena_changes(true));
+            with_state(document, |state| state.apply_arena_changes(&mut EngineReach::Home));
         }
     }
 }
