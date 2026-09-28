@@ -2005,40 +2005,13 @@ impl AnimationEffectDescriptions {
         self.rows.keys().map(|(node, _)| *node)
     }
 
-    /// Replace one list from the flat buffers the host packs it into. An empty list drops the row.
-    ///
-    /// # Safety
-    /// Every declaration's `value` must be a live style value the host holds a reference to for the
-    /// duration of the call.
-    pub(crate) unsafe fn set(
-        &mut self,
-        node: StyleNodeID,
-        slot: AnimationSlot,
-        published_buffers: PublishedEffectBuffers<'_>,
-    ) {
-        let PublishedEffectBuffers {
-            effects,
-            keyframes,
-            declarations,
-            custom_declarations,
-            linear_points,
-            base_url_bytes,
-        } = published_buffers;
+    /// Replace one list of an element's effects. An empty list drops the row.
+    pub(crate) fn set(&mut self, node: StyleNodeID, slot: AnimationSlot, effects: Vec<PublishedEffect>) {
         if effects.is_empty() {
             self.rows.remove(&(node, slot));
             return;
         }
-        let published = unsafe {
-            build_published_effects(PublishedEffectBuffers {
-                effects,
-                keyframes,
-                declarations,
-                custom_declarations,
-                linear_points,
-                base_url_bytes,
-            })
-        };
-        self.rows.insert((node, slot), published.into_boxed_slice());
+        self.rows.insert((node, slot), effects.into_boxed_slice());
     }
 
     /// Lend one list out, for a caller that samples the effects while it substitutes against the
@@ -2071,7 +2044,7 @@ impl AnimationEffectDescriptions {
 /// # Safety
 /// Every declaration's `value` must be a live style value the host holds a reference to for the
 /// duration of the call.
-unsafe fn build_published_effects(published_buffers: PublishedEffectBuffers<'_>) -> Vec<PublishedEffect> {
+pub(crate) unsafe fn build_published_effects(published_buffers: PublishedEffectBuffers<'_>) -> Vec<PublishedEffect> {
     let PublishedEffectBuffers {
         effects,
         keyframes,

@@ -1487,18 +1487,13 @@ impl RetainedState {
     /// Describe the effects the host holds for one of an element's animation lists, in composite
     /// order, so the animation stage can build its own batch instead of walking the host's keyframe
     /// sets. Published beside the timing rows, at the same funnels.
-    ///
-    /// # Safety
-    /// Every declaration's value must be a live style value for the duration of the call.
-    pub unsafe fn set_element_animation_effect_descriptions(
+    pub(crate) fn set_element_animation_effect_descriptions(
         &mut self,
         node: StyleNodeID,
         slot: animations::AnimationSlot,
-        published_buffers: animations::PublishedEffectBuffers<'_>,
+        effects: Vec<animations::PublishedEffect>,
     ) {
-        unsafe {
-            self.animation_effect_descriptions.set(node, slot, published_buffers);
-        }
+        self.animation_effect_descriptions.set(node, slot, effects);
     }
 
     /// Lend out the effects the host described for one of an element's animation lists; see
