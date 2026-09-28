@@ -16,7 +16,6 @@ namespace Web::Painting {
 
 WEB_API Compositing::RustFFI::NodeSlotId committed_row_slot(Layout::Node const&);
 WEB_API bool has_committed_box(Layout::Row const&);
-WEB_API u64 committed_row_reset_version(Layout::NodeArena&, Compositing::RustFFI::NodeSlotId);
 WEB_API CSSPixelRect absolute_rect(Layout::Node const&);
 WEB_API CSSPixelRect absolute_padding_box_rect(Layout::Node const&);
 WEB_API CSSPixelRect absolute_border_box_rect(Layout::Node const&);
@@ -34,13 +33,10 @@ WEB_API bool is_navigable_container_viewport_paintable(Layout::Node const&);
 WEB_API CSSPixelRect transform_rect_to_viewport(Layout::Node const&, CSSPixelRect const&, Compositing::AccumulatedVisualContextTree::IncludeVisualViewportTransform = Compositing::AccumulatedVisualContextTree::IncludeVisualViewportTransform::Yes);
 WEB_API CSSPixelPoint inverse_transform_point(Layout::Node const&, CSSPixelPoint);
 WEB_API CSSPixelPoint transform_to_local_coordinates(Layout::Node const&, CSSPixelPoint);
-WEB_API Compositing::SpatialNodeIndex own_scroll_node_index(Layout::Node const&);
 WEB_API CSS::RustStyleValueHandle used_value_for_grid_template(Layout::Node const&, CSS::PropertyID);
 WEB_API CSSPixelPoint box_type_agnostic_position(Layout::Node const&);
-WEB_API CSSPixelRect caret_rect_for_child_offset(Layout::Node const&, size_t offset);
 WEB_API void set_needs_repaint(Layout::Row const&, InvalidateDisplayList = InvalidateDisplayList::PaintCommandsAndHitTestList);
 WEB_API void set_needs_repaint_in_subtree(Layout::Row const&);
-WEB_API void invalidate_propagated_text_decoration_caches(Layout::Row const&);
 WEB_API void apply_paint_cache_invalidation(Layout::Row const&, PaintCacheInvalidation);
 WEB_API void apply_repaint_damage(Layout::Row const&, InvalidateDisplayList);
 WEB_API void apply_repaint_damage(Layout::TextNode const&, InvalidateDisplayList);
