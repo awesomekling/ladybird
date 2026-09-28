@@ -665,6 +665,8 @@ pub(crate) struct SettledRowPublication {
     /// What moving the element from the record it held before the pass to this one damages, where
     /// the pass answered it: [`bridge::FfiRowSampledInPass::damage`].
     pub(crate) damage: u32,
+    /// [`bridge::FfiRowSampledInPass::starts_animating`].
+    pub(crate) starts_animating: bool,
 }
 
 /// The environment an element's animations composed its animated custom properties into, which the
@@ -1098,6 +1100,7 @@ impl super::StyleEngineState {
             uses_tree_counting_function: sample.uses_tree_counting_function,
             rebuilt_every_group,
             damage: 0,
+            starts_animating: false,
         };
         match pseudo {
             None => {
@@ -1254,6 +1257,7 @@ impl super::StyleEngineState {
                 uses_tree_counting_function: sample.uses_tree_counting_function,
                 rebuilt_every_group: false,
                 damage: 0,
+                starts_animating: false,
             });
         }
         let published = self.publish_settled_row_sample(node, pseudo, sample, counters)?;

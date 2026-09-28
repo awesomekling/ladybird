@@ -551,6 +551,13 @@ static bool install_composition_sampled_in_pass(StyleDrainScope const& scope, DO
     }
     if (abstract_element.style_record_identity().value() == sample.style_record)
         return true;
+    // The first sample of an element's animations builds the composition the host's own first sample would have.
+    if (sample.starts_animating) {
+        if (sample.rebuilt_every_group)
+            document.style_invalidation_counters().animated_style_full_builds++;
+        else
+            document.style_invalidation_counters().animated_style_overlay_builds++;
+    }
     if (!sample.overlay_is_empty && document.is_in_style_stabilization_epoch()
         && (document.style_stabilization_has_style_reactions() || sample.invalidation.requires_base_style_recomputation))
         document.style_computer().record_transition_stabilization_baseline(scope, abstract_element);
@@ -995,9 +1002,11 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                     DOM::AbstractElement settled { *element };
                     // A row the pass sampled over the stack its plan leaves leaves the plan to the
                     // drain once the composition installs; the host's own sample reads the
-                    // animations the plan applies.
+                    // animations the plan applies. A plan that starts the element's first
+                    // animations creates them here, ahead of its pseudo-elements', as it does
+                    // ahead of the host's own first sample.
                     Optional<StyleComputer::SettledAnimationPlan> plan_after_pass_sample;
-                    if (animation_plan.has_value() && row_sampled_in_pass.present) {
+                    if (animation_plan.has_value() && row_sampled_in_pass.present && !row_sampled_in_pass.starts_animating) {
                         plan_after_pass_sample = move(*animation_plan);
                     } else if (animation_plan.has_value()) {
                         document.style_computer().apply_settled_animation_plan(settled, *animation_plan);
