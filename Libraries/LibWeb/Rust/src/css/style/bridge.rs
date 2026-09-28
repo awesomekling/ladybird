@@ -4775,6 +4775,8 @@ pub(crate) struct HomeAnswers {
     pub(crate) pending: PendingFacts,
     /// The records the transaction's answer names, by record.
     records: Vec<(u64, std::sync::Arc<super::published_record::PublishedStyleRecord>)>,
+    /// The records the owner named the host since, by record, as the last news that named any left them.
+    records_named: Vec<(u64, std::sync::Arc<super::published_record::PublishedStyleRecord>)>,
     /// What each row's container conditions read of its containers.
     container_effects: HashMap<StyleNodeID, super::container_queries::ContainerVerdict>,
     /// What the pass published for each row whose animations it sampled.
@@ -4805,6 +4807,7 @@ pub(crate) struct HomeAnswers {
 pub(crate) struct EngineNews {
     pending: PendingFacts,
     records: Option<Vec<(u64, std::sync::Arc<super::published_record::PublishedStyleRecord>)>>,
+    records_named: Vec<(u64, std::sync::Arc<super::published_record::PublishedStyleRecord>)>,
     container_effects: Option<HashMap<StyleNodeID, super::container_queries::ContainerVerdict>>,
     rows_sampled: Option<HashMap<StyleNodeID, FfiRowSampledInPass>>,
     content_counter_style_verdicts: Option<HashMap<(StyleNodeID, u8), (u64, u8)>>,
@@ -4861,15 +4864,19 @@ impl EngineNews {
             self.content_counter_style_verdicts = Some((*engine.host.content_counter_style_verdicts).clone());
         }
         if engine.retained.rows_sampled_in_pass.take_moved() {
+            let rows: Vec<_> = engine
+                .retained
+                .rows_sampled_in_pass
+                .iter()
+                .map(|(&node, &published)| (node, published))
+                .collect();
             self.rows_sampled = Some(
-                engine
-                    .retained
-                    .rows_sampled_in_pass
-                    .iter()
-                    .map(|(&node, &published)| (node, row_sampled_in_pass(engine, Some(published))))
+                rows.into_iter()
+                    .map(|(node, published)| (node, row_sampled_in_pass(engine, Some(published))))
                     .collect(),
             );
         }
+        self.records_named.append(&mut engine.host.records_named);
         if let Some(steps) = engine.transition_steps_moved() {
             self.transition_steps = Some(steps);
         }
@@ -5165,6 +5172,12 @@ impl HomeAnswers {
         if let Some(records) = news.records {
             self.records = records;
         }
+        if !news.records_named.is_empty() {
+            let mut named = news.records_named;
+            named.sort_unstable_by_key(|(style_record, _)| *style_record);
+            named.dedup_by_key(|(style_record, _)| *style_record);
+            self.records_named = named;
+        }
         if let Some(container_effects) = news.container_effects {
             self.container_effects = container_effects;
         }
@@ -5229,11 +5242,13 @@ impl HomeAnswers {
         &self,
         style_record: u64,
     ) -> Option<std::sync::Arc<super::published_record::PublishedStyleRecord>> {
-        let index = self
-            .records
-            .binary_search_by_key(&style_record, |(record, _)| *record)
-            .ok()?;
-        Some(std::sync::Arc::clone(&self.records[index].1))
+        let find = |records: &[(u64, std::sync::Arc<super::published_record::PublishedStyleRecord>)]| {
+            let index = records
+                .binary_search_by_key(&style_record, |(record, _)| *record)
+                .ok()?;
+            Some(std::sync::Arc::clone(&records[index].1))
+        };
+        find(&self.records).or_else(|| find(&self.records_named))
     }
 
     fn take_container_effects(&mut self, node: StyleNodeID) -> Option<super::container_queries::ContainerVerdict> {
@@ -5254,9 +5269,12 @@ impl HomeAnswers {
 }
 
 fn row_sampled_in_pass(
-    engine: &StyleEngine,
+    engine: &mut StyleEngine,
     published: Option<super::engine_sample::SettledRowPublication>,
 ) -> FfiRowSampledInPass {
+    if let Some(published) = &published {
+        engine.name_record_for_host(published.style_record);
+    }
     match published {
         None => FfiRowSampledInPass::absent(),
         Some(published) => FfiRowSampledInPass {
@@ -5280,6 +5298,16 @@ fn row_sampled_in_pass(
             rebuilt_every_group: published.rebuilt_every_group,
             damage: published.damage,
         },
+    }
+}
+
+impl StyleEngine {
+    /// Publishes `style_record`, which an answer names the host, for the host to take with the news rather than ask
+    /// the owner for.
+    pub(crate) fn name_record_for_host(&mut self, style_record: u64) {
+        if let Some(record) = self.publish_style_record(style_record) {
+            self.host.records_named.push((style_record, record));
+        }
     }
 }
 
@@ -5669,6 +5697,14 @@ impl RecordDemand {
         let record = (!ffi.is_absent)
             .then(|| engine.publish_style_record(ffi.record.style_record))
             .flatten();
+        if !ffi.is_absent {
+            engine.name_record_for_host(ffi.record.style_record);
+            for (kind, &pseudo_record) in ffi.record.pseudo_records.iter().enumerate() {
+                if ffi.record.pseudo_records_present & (1 << kind) != 0 {
+                    engine.name_record_for_host(pseudo_record);
+                }
+            }
+        }
         RecordDemandAnswer { ffi, record }
     }
 }
@@ -7462,7 +7498,7 @@ fn finish_style_transaction(
         engine.forget_recording_atom_mappings(output.reclaimed_style_atoms.iter().map(|reclaimed| reclaimed.atom));
     }
     engine.install_ffi_style_transaction_output(output);
-    // The drain reads the record each row names: they travel with the answer. A recording records the host's reads of
+    // The drain reads the records each row names: they travel with the answer. A recording records the host's reads of
     // them as it makes them.
     if engine.recording_id().is_none() {
         let mut records: Vec<_> = engine
@@ -7470,12 +7506,8 @@ fn finish_style_transaction(
             .ffi_style_transaction_output
             .answers
             .iter()
-            .filter_map(|answer| {
-                Some((
-                    answer.new_style_record,
-                    engine.publish_style_record(answer.new_style_record)?,
-                ))
-            })
+            .flat_map(|answer| [answer.new_style_record, answer.old_style_record])
+            .filter_map(|style_record| Some((style_record, engine.publish_style_record(style_record)?)))
             .collect();
         records.sort_unstable_by_key(|(style_record, _)| *style_record);
         records.dedup_by_key(|(style_record, _)| *style_record);

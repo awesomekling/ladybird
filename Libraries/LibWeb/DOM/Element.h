@@ -366,7 +366,7 @@ public:
     void settle_pseudo_elements_in_next_pass(CSS::StyleDrainScope const&, bool old_is_list_item);
     void settle_pseudo_elements_over_moved_composition(CSS::StyleDrainScope const&);
     CSS::RequiredInvalidationAfterStyleChange install_engine_pseudo_element_records_after_sample(CSS::StyleDrainScope const&, bool& did_change_custom_properties, bool old_is_list_item, EnginePseudoElementRecords const*, CSS::StyleEffectDrain* = nullptr);
-    void apply_computed_style_to_layout_node_if_needed(CSS::StyleDrainScope const&, CSS::RequiredInvalidationAfterStyleChange const&);
+    void apply_computed_style_to_layout_node_if_needed(CSS::RequiredInvalidationAfterStyleChange const&);
 
     void set_needs_layout_tree_rebuild(SetNeedsLayoutTreeUpdateReason, CSS::LayoutTreeRebuildRoot);
     bool apply_box_presence_change_in_place(SetNeedsLayoutTreeUpdateReason);
