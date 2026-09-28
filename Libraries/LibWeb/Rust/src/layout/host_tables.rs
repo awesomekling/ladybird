@@ -47,6 +47,9 @@ pub(crate) struct HostTables {
     pub(super) image_boxes_awaiting_owned_provider: RefCell<HashSet<NodeSlotId>>,
     /// The number of the last change the document thread sent the owner that lays a node out again.
     pub(super) last_relayout_change_sent: Cell<Option<crate::render_owner::ChangeSeq>>,
+    /// The number of the last change the document thread sent the owner to build the whole layout tree again, or not,
+    /// and which.
+    pub(super) full_layout_tree_update_sent: Cell<Option<(crate::render_owner::ChangeSeq, bool)>>,
     /// The generation of the document's render state, which retiring it moves on. See
     /// [`super::frame_retirement`].
     pub(super) frame_generation: Cell<u64>,

@@ -175,6 +175,8 @@ impl LayoutNodeArena {
             return;
         }
         roots.push(node);
+        drop(roots);
+        self.publish_layout_tree_state();
     }
 
     /// Counts stale entries for freed nodes on purpose: the C++ side treats a nonempty
@@ -185,7 +187,9 @@ impl LayoutNodeArena {
     }
 
     pub(crate) fn take_partial_relayout_boundary_roots(&self) -> Vec<NodeSlotId> {
-        std::mem::take(&mut *self.partial_relayout_boundary_roots.borrow_mut())
+        let roots = std::mem::take(&mut *self.partial_relayout_boundary_roots.borrow_mut());
+        self.publish_layout_tree_state();
+        roots
     }
 
     pub(crate) fn record_partial_relayout_escape(&self) {
