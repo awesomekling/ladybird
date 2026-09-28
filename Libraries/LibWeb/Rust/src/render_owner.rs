@@ -256,7 +256,7 @@ impl RenderState {
             let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(face_owner);
             reach.reach(engine, |engine| apply(arena, Some(engine)));
         }
-        arena.publish_rows();
+        arena.note_changes_taken_in(self.changes.received_through);
     }
 
     /// Answers `query` from the state as the units before it left it.

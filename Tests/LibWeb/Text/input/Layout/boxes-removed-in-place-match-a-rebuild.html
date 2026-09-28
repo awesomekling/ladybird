@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<script src="../include.js"></script>
+<style>
+    .c { width: 400px; }
+    .ib { display: inline-block; width: 30px; height: 10px; }
+    .abs { position: absolute; top: 0; left: 0; width: 5px; height: 5px; }
+    .flex { display: flex; }
+    p { margin: 2px; height: 7px; }
+</style>
+<div id="host"></div>
+<script>
+    // Nodes removed one after another with no layout in between have their boxes taken out of the parent's box in
+    // place where the layout tree lets them go, each decided from the boxes as the removals before it left them. The
+    // boxes that stay are laid out as they would be in a tree built without the removed nodes.
+    const patterns = [
+        "t p p p t",
+        "p p p p p",
+        "t p t p t",
+        "p ib t ib p",
+        "abs p abs p",
+        "t ib ib t",
+    ];
+    function make(kind, i) {
+        if (kind === "t")
+            return document.createTextNode("text" + i + " ");
+        const e = document.createElement(kind === "p" ? "p" : "span");
+        if (kind === "ib") e.className = "ib";
+        if (kind === "abs") e.className = "abs";
+        if (kind === "p") e.textContent = "p" + i;
+        e.dataset.i = i;
+        return e;
+    }
+    function build(kinds, keep, flex) {
+        const c = document.createElement("div");
+        c.className = flex ? "c flex" : "c";
+        kinds.forEach((kind, i) => { if (!keep || keep.includes(i)) c.appendChild(make(kind, i)); });
+        return c;
+    }
+    function describe(c) {
+        const base = c.getBoundingClientRect();
+        const parts = [Math.round(base.height)];
+        for (const e of c.querySelectorAll("[data-i]")) {
+            const r = e.getBoundingClientRect();
+            parts.push(e.dataset.i + ":" + Math.round(r.left - base.left) + "," + Math.round(r.top - base.top) + "," + Math.round(r.width) + "," + Math.round(r.height));
+        }
+        return parts.join(" ");
+    }
+    test(() => {
+        const host = document.getElementById("host");
+        let failures = 0, cases = 0;
+        for (const flex of [false, true]) {
+            for (const pattern of patterns) {
+                const kinds = pattern.split(" ");
+                const n = kinds.length;
+                // Every order of removing up to three children, one at a time, with no layout in between.
+                const orders = [];
+                for (let a = 0; a < n; ++a) {
+                    orders.push([a]);
+                    for (let b = 0; b < n; ++b) {
+                        if (b === a) continue;
+                        orders.push([a, b]);
+                        for (let c = 0; c < n; ++c)
+                            if (c !== a && c !== b) orders.push([a, b, c]);
+                    }
+                }
+                for (const order of orders) {
+                    const c = build(kinds, null, flex);
+                    host.appendChild(c);
+                    c.offsetHeight;
+                    const children = Array.from(c.childNodes);
+                    for (const i of order) children[i].remove();
+                    const got = describe(c);
+                    c.remove();
+                    const keep = kinds.map((_, i) => i).filter(i => !order.includes(i));
+                    const fresh = build(kinds, keep, flex);
+                    host.appendChild(fresh);
+                    const want = describe(fresh);
+                    fresh.remove();
+                    ++cases;
+                    if (got !== want) {
+                        ++failures;
+                        if (failures < 10)
+                            println("MISMATCH " + (flex ? "flex " : "") + pattern + " remove " + order.join(",") + ": " + got + " vs " + want);
+                    }
+                }
+            }
+        }
+        println("cases " + cases + " failures " + failures);
+    });
+</script>

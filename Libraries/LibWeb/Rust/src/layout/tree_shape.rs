@@ -143,6 +143,10 @@ impl ShapeWriter<'_> {
         self.write(&self.data.first_child, child);
     }
 
+    pub(crate) fn set_previous_sibling(&self, sibling: NodeSlotId) {
+        self.write(&self.data.previous_sibling, sibling);
+    }
+
     pub(crate) fn set_next_sibling(&self, sibling: NodeSlotId) {
         self.write(&self.data.next_sibling, sibling);
     }

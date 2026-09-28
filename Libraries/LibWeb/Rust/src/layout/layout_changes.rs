@@ -12,6 +12,7 @@ use super::LayoutNodeArena;
 use super::layout_node_arena::{HostPayment, LayoutUpdateMarksHandle};
 use super::node_data::{CompositorAnimationFrameKind, NodeFlag, NodeSlotId};
 use super::partial_relayout::FfiPossibleBoundaryUpdate;
+use super::tree_builder::FfiRemovedBoxPlace;
 use super::used_values::FfiCssPixelPoint;
 use crate::css::style::tree::{NaturalSize, StyleNodeID};
 use crate::render_owner::{Answer, ArenaChange, ChangeSeq, Query};
@@ -82,6 +83,19 @@ pub(crate) enum LayoutChange {
         generator: StyleNodeID,
         pseudo_kind: u8,
         offset: FfiCssPixelPoint,
+    },
+    /// The nodes `nodes` names leave the document: what is left of their boxes is detached while their identities still
+    /// name them (see [`super::tree_builder::detach_remaining_layout_rows_for_removal`]), and what that owes the host goes
+    /// with the next payment.
+    DetachRemainingRowsForRemoval {
+        nodes: Box<[StyleNodeID]>,
+    },
+    /// The box of the node `place` names leaves its parent's box in place, which the rows the document thread read
+    /// allowed as `layout_node` and `parent`: see [`super::tree_builder::rust_detach_removed_box_in_place`].
+    DetachRemovedBoxInPlace {
+        place: FfiRemovedBoxPlace,
+        layout_node: NodeSlotId,
+        parent: NodeSlotId,
     },
     /// The DOM node with `old` took `new`, or none: see [`LayoutNodeArena::change_style_node`].
     StyleNodeChanged {
@@ -236,6 +250,31 @@ impl LayoutChange {
                 pseudo_kind,
                 offset,
             } => arena.set_pseudo_element_scroll_offset(generator, pseudo_kind, offset),
+            Self::DetachRemainingRowsForRemoval { nodes } => {
+                let payment = arena.owed_for(|arena| {
+                    for &node in &nodes {
+                        super::tree_builder::detach_remaining_layout_rows_for_removal(arena, node);
+                    }
+                });
+                arena.append_leftover_payment(payment);
+            }
+            Self::DetachRemovedBoxInPlace {
+                place,
+                layout_node,
+                parent,
+            } => {
+                if super::tree_builder::removed_box_detachable_in_place(arena, &place) == Some((layout_node, parent)) {
+                    arena.release_published_paintable_rows();
+                    let payment = arena.owed_for(|arena| {
+                        super::tree_builder::detach_removed_box_in_place(arena, layout_node, parent);
+                    });
+                    arena.append_leftover_payment(payment);
+                } else {
+                    // The rows changed under what the document thread read of them: the tree is built again, without
+                    // the box.
+                    arena.set_needs_full_layout_tree_update(true);
+                }
+            }
             Self::StyleNodeChanged { old, new } => arena.change_style_node(old, new),
             Self::InstallRowStyle { node, style_record } => {
                 if arena.slot_is_live(node) {
@@ -403,25 +442,49 @@ pub(super) unsafe fn send_through_marks(marks: LayoutUpdateMarksHandle, change: 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum LayoutWrite {
     /// Takes the layout subtree `root` heads out of the tree, and frees it: every row in it is prepared for leaving the
-    /// tree, and the subtree is detached from its parent, if it has one.
-    DropSubtree(NodeSlotId),
+    /// tree, and the subtree is detached from its parent, if it has one. Where `clears_committed_boxes`, the committed
+    /// boxes of its rows are cleared first, as for a box that leaves a tree that stays.
+    DropSubtree {
+        root: NodeSlotId,
+        clears_committed_boxes: bool,
+    },
+    /// Detaches the layout placement of the top layer element `element` and clears every stale projected subtree of
+    /// it, with the document's layout tree update marks lent to the write.
+    DetachTopLayerElement(StyleNodeID),
 }
 
 impl LayoutWrite {
-    /// Makes the write, and answers what it owes the host.
+    /// Makes the write, and answers what it owes the host, after what the owner's changes owed it before.
     pub(crate) fn apply(self, arena: &mut LayoutNodeArena) -> HostPayment {
-        match self {
-            Self::DropSubtree(root) => {
+        let written = match self {
+            Self::DropSubtree {
+                root,
+                clears_committed_boxes,
+            } => {
                 if !arena.slot_is_live(root) {
-                    return HostPayment::nothing();
+                    return arena.take_leftover_payment();
                 }
                 arena.release_published_paintable_rows();
                 arena.owed_for(|arena| {
+                    if clears_committed_boxes {
+                        let mut rows = Vec::new();
+                        arena.for_each_node_in_layout_subtree_in_pre_order(root, |row| rows.push(row));
+                        for row in rows {
+                            // SAFETY: Nothing borrows the arena across the clear.
+                            unsafe { crate::painting::ffi::clear_paintable_row_of_node(arena, row) };
+                        }
+                    }
                     super::layout_node_arena::prepare_subtree_for_detach(arena, root);
                     super::layout_node_arena::detach_and_free_subtree(arena, root);
                 })
             }
-        }
+            Self::DetachTopLayerElement(element) => arena.owed_for(|arena| {
+                super::tree_builder::detach_top_layer_element_layout_subtree(arena, element);
+            }),
+        };
+        let mut payment = arena.take_leftover_payment();
+        payment.append(written);
+        payment
     }
 }
 

@@ -19,17 +19,22 @@ const MAIN_THREAD_FFI_ENTRY: MainThreadFfiEntry = MainThreadFfiEntry { _private:
 
 /// Takes the layout subtree `root` heads out of the tree, and frees it: every row in it is prepared
 /// for leaving the tree, the subtree is detached from its parent, if it has one, and what the rows
-/// held is handed back to the host before this returns.
+/// held is handed back to the host before this returns. Where `clears_committed_boxes`, the
+/// committed boxes of its rows are cleared first, as for a box that leaves a tree that stays.
 ///
 /// # Safety
 ///
 /// `arena` must be a live handle on the document thread.
 #[unsafe(no_mangle)]
-unsafe extern "C" fn layout_arena_drop_subtree(arena: *mut c_void, root: NodeSlotId) {
+unsafe extern "C" fn layout_arena_drop_subtree(arena: *mut c_void, root: NodeSlotId, clears_committed_boxes: bool) {
     // SAFETY: Guaranteed by the caller.
     let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
+    let write = layout_changes::LayoutWrite::DropSubtree {
+        root,
+        clears_committed_boxes,
+    };
     // SAFETY: As above.
-    unsafe { layout_changes::write(arena, layout_changes::LayoutWrite::DropSubtree(root)) }.pay(&main_thread);
+    unsafe { layout_changes::write(arena, write) }.pay(&main_thread);
 }
 
 /// What the render owner left of applying the batch of a style transaction to the layout nodes of

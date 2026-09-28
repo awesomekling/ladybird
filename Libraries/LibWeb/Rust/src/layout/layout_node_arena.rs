@@ -1161,6 +1161,8 @@ pub(crate) struct LayoutNodeArena {
     /// The rows as the document thread reads them, without reaching the arena (see
     /// [`super::row_reads`]).
     pub(super) published_rows: super::row_reads::RowSnapshotSlot,
+    /// The last change of the document thread's the arena took in, which the rows it publishes include.
+    changes_taken_in: crate::render_owner::ChangeSeq,
     /// The subtree roots the last layout tree build rebuilt, waiting for the partial relayout
     /// plan that follows it. A full layout pass covers every one of them, so its commit clears
     /// them.
@@ -1335,6 +1337,7 @@ impl LayoutNodeArena {
             layout_root: Cell::new(NodeSlotId::INVALID),
             published_layout_tree_state: AtomicU64::new(LayoutTreeState::default().pack()),
             published_rows: Default::default(),
+            changes_taken_in: Default::default(),
             pending_rebuilt_subtree_roots: RefCell::new(Vec::new()),
             pending_layout_tree_update_escaped_rebuild_roots: Cell::new(false),
             stale_list_item_counter_rendered: Cell::new(false),
@@ -1898,6 +1901,11 @@ impl LayoutNodeArena {
         self.bound_rows_by_style_node.borrow().head(style_node)
     }
 
+    /// Notes that the arena took in the document thread's changes through `through`.
+    pub(crate) fn note_changes_taken_in(&mut self, through: crate::render_owner::ChangeSeq) {
+        self.changes_taken_in = through;
+    }
+
     /// Publishes the rows the document thread reads (see [`super::row_reads`]) where it reads them,
     /// in place of the ones published before.
     pub(crate) fn publish_rows(&mut self) {
@@ -1910,6 +1918,7 @@ impl LayoutNodeArena {
             text_rows: bound_rows.texts.publish(),
             pseudo_element_rows: self.bound_pseudo_element_rows.get_mut().clone(),
             viewport_row: self.bound_viewport_row.get(),
+            changes_taken_in: self.changes_taken_in,
         };
         self.published_rows.publish(Arc::new(rows));
     }
@@ -2526,15 +2535,20 @@ impl LayoutNodeArena {
     /// Ends the host half of the batches the owner applied as the host took a style update's transactions, once the
     /// host has installed them (see [`Self::finish_flight_style_host_half`]). What that owes the host waits for
     /// [`Self::take_leftover_payment`].
-    pub(crate) fn finish_owner_style_host_half(&self) {
+    pub(crate) fn finish_owner_style_host_half(&mut self) {
         let (_, payment) = self.finish_flight_style_host_half();
-        self.leftover_payment.borrow_mut().append(payment);
+        self.append_leftover_payment(payment);
     }
 
     /// Takes what the changes the owner applied owe the host, which the host pays before anything the owner hands it
     /// with it.
     pub(crate) fn take_leftover_payment(&self) -> HostPayment {
         std::mem::replace(&mut *self.leftover_payment.borrow_mut(), HostPayment::nothing())
+    }
+
+    /// Leaves what a change the owner applied owes the host with the next payment it hands it.
+    pub(crate) fn append_leftover_payment(&mut self, payment: HostPayment) {
+        self.leftover_payment.get_mut().append(payment);
     }
 
     /// Runs `write`, a change the owner makes for the document thread, in a handback span of its own, and answers
@@ -2569,7 +2583,7 @@ impl LayoutNodeArena {
             }
             arena.forget_style_node(old);
         });
-        self.leftover_payment.get_mut().append(payment);
+        self.append_leftover_payment(payment);
     }
 
     /// Applies the style of the record `style_record` to a row, taking a style that holds no images: the host's pin
@@ -4066,18 +4080,6 @@ impl LayoutNodeArena {
         self.hand_back(HostHandback::BoxPresence(style_node));
     }
 
-    /// Opens a span of work whose handbacks the main thread pays once the span is over. Every
-    /// handback is made inside one, so none waits for a payer that is not coming.
-    pub(crate) fn begin_paying_host_handbacks(&self, _: &crate::stage::MainThread) {
-        self.open_host_handback_span();
-    }
-
-    /// Closes the span [`Self::begin_paying_host_handbacks`] opened, and pays what is owed.
-    pub(crate) fn finish_paying_host_handbacks(&self, main_thread: &crate::stage::MainThread) {
-        self.pay_host_handbacks(main_thread);
-        self.close_host_handback_span();
-    }
-
     /// Takes what the arena owes the host so far, for a commit whose host half is paid later.
     pub(crate) fn take_host_handbacks_ahead_of_payment(&self) -> HostHandbacks {
         std::mem::take(&mut *self.host_handbacks.borrow_mut())
@@ -4136,22 +4138,6 @@ impl LayoutNodeArena {
     fn close_host_handback_span(&self) {
         let spans = &self.host_handback_spans;
         spans.set(spans.get().checked_sub(1).expect("unbalanced host handback span"));
-    }
-
-    /// Pays what the arena owes the host, in the order it was handed back.
-    pub(crate) fn pay_host_handbacks(&self, main_thread: &crate::stage::MainThread) {
-        loop {
-            let handbacks = std::mem::take(&mut *self.host_handbacks.borrow_mut());
-            if handbacks.handbacks.is_empty() {
-                return;
-            }
-            self.pay_tree_build_handbacks(main_thread, handbacks);
-        }
-    }
-
-    /// Pays what a finished tree build owes the host, in the order the build let go of it.
-    pub(crate) fn pay_tree_build_handbacks(&self, main_thread: &crate::stage::MainThread, handbacks: HostHandbacks) {
-        self.resolve_host_handbacks(handbacks).pay(main_thread);
     }
 
     /// Resolves what the arena let go of in `handbacks` into what paying it hands the host, as the arena stands now,
@@ -5777,7 +5763,7 @@ impl LayoutNodeArena {
         };
 
         child_data.set_parent(parent);
-        child_data.previous_sibling.set(previous);
+        child_data.set_previous_sibling(previous);
         child_data.set_next_sibling(before);
         if previous.is_invalid() {
             parent_data.set_first_child(child);
@@ -5787,7 +5773,7 @@ impl LayoutNodeArena {
         if before.is_invalid() {
             parent_data.last_child.set(child);
         } else {
-            self.data(before).previous_sibling.set(child);
+            self.write_shape(before).set_previous_sibling(child);
         }
 
         self.assign_pre_order_labels_to_inserted_subtree(parent, child);
@@ -5833,17 +5819,17 @@ impl LayoutNodeArena {
             assert_eq!(last_child, child, "layout node child list lost its last child");
             parent_data.last_child.set(previous);
         } else {
-            let next_data = self.data(next);
+            let next_data = self.write_shape(next);
             let next_previous_sibling = next_data.previous_sibling.get();
             assert_eq!(
                 next_previous_sibling, child,
                 "layout node sibling chain is inconsistent"
             );
-            next_data.previous_sibling.set(previous);
+            next_data.set_previous_sibling(previous);
         }
 
         child_data.set_parent(NodeSlotId::INVALID);
-        child_data.previous_sibling.set(NodeSlotId::INVALID);
+        child_data.set_previous_sibling(NodeSlotId::INVALID);
         child_data.set_next_sibling(NodeSlotId::INVALID);
     }
 
@@ -6343,31 +6329,6 @@ pub(crate) fn detach_and_free_subtree(arena: *mut LayoutNodeArena, node: NodeSlo
     let was_attached = unsafe { &*arena }.detach_from_parent(node);
     crate::layout::tree_mutation::free_subtree_and_hand_back(arena, node);
     was_attached
-}
-
-/// Runs `operation`, an arena change a main-thread entry makes, publishes the rows it changed, and
-/// pays what it hands back once it returns, which is where the host heard about it when the arena
-/// called the host directly.
-///
-/// # Safety
-///
-/// `arena` must be a live handle from `layout_arena_create`, used on the document thread, and no
-/// borrow of it may be live across this call other than the ones `operation` takes.
-#[track_caller]
-pub(crate) unsafe fn paying_host_handbacks<R>(
-    main_thread: &crate::stage::MainThread,
-    arena: *mut c_void,
-    operation: impl FnOnce() -> R,
-) -> R {
-    // SAFETY: Guaranteed by the caller; each borrow here ends before `operation` runs or after it
-    // has returned.
-    unsafe { &*arena.cast::<LayoutNodeArena>() }.begin_paying_host_handbacks(main_thread);
-    let result = operation();
-    // SAFETY: As above.
-    let arena = unsafe { &mut *arena.cast::<LayoutNodeArena>() };
-    arena.publish_rows();
-    arena.finish_paying_host_handbacks(main_thread);
-    result
 }
 
 pub const CONTENT_COUNTER_STYLES_NOT_RECORDED: u8 = 0;
@@ -7543,7 +7504,7 @@ mod tests {
         assert!(host_tables.replace_image_observers(row, first).is_null());
 
         // The row lets go of its set, and the host replaces it, deleting it, before the handback is paid.
-        arena.begin_paying_host_handbacks(&main_thread);
+        arena.open_host_handback_span();
         let set = arena.rows_with_image_observers.borrow_mut().remove(&row);
         assert_eq!(set, Some(first.addr()));
         arena.hand_back(super::HostHandback::ImageObservers { row, set: first.addr() });
@@ -7583,10 +7544,13 @@ mod tests {
             ..test_construction_facts()
         };
         let main_thread = crate::stage::MainThread::for_test_with_host(&host_tables);
-        arena.begin_paying_host_handbacks(&main_thread);
-        let old_row = arena.allocate(facts(first));
-        arena.bind_row(old_row);
-        arena.finish_paying_host_handbacks(&main_thread);
+        let mut old_row = NodeSlotId::INVALID;
+        arena
+            .owed_for(|arena| {
+                old_row = arena.allocate(facts(first));
+                arena.bind_row(old_row);
+            })
+            .pay(&main_thread);
         TOLD_BOX_PRESENCE.with(|told| told.borrow_mut().clear());
 
         arena.begin_tree_build_handbacks();
@@ -7600,16 +7564,14 @@ mod tests {
         assert!(TOLD_BOX_PRESENCE.with(|told| told.borrow().is_empty()));
 
         // Each node is told once, with what it has once the build is over.
-        arena.pay_tree_build_handbacks(&main_thread, handbacks);
+        arena.resolve_host_handbacks(handbacks).pay(&main_thread);
         assert_eq!(
             TOLD_BOX_PRESENCE.with(|told| std::mem::take(&mut *told.borrow_mut())),
             vec![(first.raw(), BOX_PRESENCE_HAS_LAYOUT_BOX), (second.raw(), 0)]
         );
 
         // Outside a build the host hears as the change's payer returns.
-        arena.begin_paying_host_handbacks(&main_thread);
-        arena.bind_row(other_row);
-        arena.finish_paying_host_handbacks(&main_thread);
+        arena.owed_for(|arena| arena.bind_row(other_row)).pay(&main_thread);
         assert_eq!(
             TOLD_BOX_PRESENCE.with(|told| std::mem::take(&mut *told.borrow_mut())),
             vec![(second.raw(), BOX_PRESENCE_HAS_LAYOUT_BOX)]
@@ -8132,14 +8094,12 @@ mod tests {
             Some(inputs)
         );
 
-        // SAFETY: arena is a live handle on this thread, and allocation names
-        // a live slot in it.
-        unsafe {
-            let handle = std::ptr::from_mut(&mut arena).cast();
-            crate::layout::paying_host_handbacks(&crate::stage::MainThread::for_test(), handle, || {
-                crate::painting::ffi::clear_paintable_row_of_node(handle.cast(), allocation.slot);
-            });
-        }
+        arena
+            .owed_for(|arena| {
+                // SAFETY: Nothing borrows the arena across the clear.
+                unsafe { crate::painting::ffi::clear_paintable_row_of_node(arena, allocation.slot) };
+            })
+            .pay(&crate::stage::MainThread::for_test());
 
         assert!(arena.committed_fragment_link(arena.data(allocation.slot)).is_none());
         assert_eq!(arena.saved_abspos_layout_inputs(arena.data(allocation.slot)), None);

@@ -18,12 +18,12 @@ use super::tree_shape::PublishedStyle;
 use super::{HostTables, LayoutNodeArena};
 use crate::cow_column::ColumnSnapshot;
 use crate::css::computed_value_views::ComputedValuesView;
-use crate::css::css_enums::positioning;
 use crate::css::style::fast_hash::FastMap as HashMap;
 use crate::css::style::published_record::PublishedStyleRecord;
 use crate::css::style::tree::StyleNodeID;
 use crate::render_owner::ChangeSeq;
 use smallvec::SmallVec;
+use std::cell::Cell;
 use std::ffi::c_void;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicPtr, Ordering};
@@ -42,6 +42,8 @@ pub(crate) struct RowSnapshot {
     pub(super) pseudo_element_rows: Arc<PseudoElementRows>,
     /// The row the document is bound to: the viewport's.
     pub(super) viewport_row: NodeSlotId,
+    /// The last change of the document thread's the rows include.
+    pub(super) changes_taken_in: ChangeSeq,
 }
 
 // A snapshot is read on the document thread while the arena is written wherever its owner runs: it holds no cell, no
@@ -58,7 +60,7 @@ impl RowSnapshot {
     /// # Safety
     ///
     /// `handle` must be a live handle on the document thread, and the borrow must end before the document thread
-    /// waits for the owner or lets it run a unit of the document.
+    /// waits for the owner, lets it run a unit of the document, or sends it a change it may take in right away.
     #[track_caller]
     pub(crate) unsafe fn published<'a>(handle: *mut c_void) -> &'a Self {
         assert!(!handle.is_null(), "layout node arena handle is null");
@@ -105,6 +107,11 @@ impl RowSnapshot {
             .filter(|row| self.node(*row).is_some())
     }
 
+    /// Whether any pseudo-element is bound to a row.
+    pub(crate) fn has_pseudo_element_rows(&self) -> bool {
+        !self.pseudo_element_rows.is_empty()
+    }
+
     /// The row the document is bound to: the viewport.
     pub(crate) fn viewport_row(&self) -> Option<NodeSlotId> {
         self.node(self.viewport_row).is_some().then_some(self.viewport_row)
@@ -115,38 +122,9 @@ impl RowSnapshot {
         (!parent.is_invalid()).then_some(parent)
     }
 
-    /// The box whose content box the row in `id` is laid out against, found by walking its ancestors as the arena's
-    /// own walk does.
+    /// The box whose content box the row in `id` is laid out against.
     pub(crate) fn containing_block(&self, id: NodeSlotId) -> Option<NodeSlotId> {
-        let node = self.node(id)?;
-        let position = if node_facts::kind_is_text(node.kind) {
-            positioning::STATIC
-        } else {
-            node_facts::node_position(self.style(id))
-        };
-        if position != positioning::ABSOLUTE && position != positioning::FIXED {
-            let mut ancestor = self.parent(id);
-            while let Some(candidate) = ancestor {
-                if node_facts::node_forms_containing_block_for_children(self.node(candidate)?, self.style(candidate)) {
-                    return Some(candidate);
-                }
-                ancestor = self.parent(candidate);
-            }
-            return None;
-        }
-        let is_fixed_position = position == positioning::FIXED;
-        let establishes_containing_block = node_facts::containing_block_establishment_flag(is_fixed_position);
-        let mut current = id;
-        while let Some(ancestor) = self.parent(current) {
-            current = ancestor;
-            if self.node(current).is_some_and(|node| {
-                node_facts::kind_is_box(node.kind) && node_facts::has_flag(node, establishes_containing_block)
-            }) {
-                return Some(current);
-            }
-        }
-        // A fixed-position box with no ancestor establishing its containing block is laid out against the root.
-        is_fixed_position.then_some(current)
+        super::tree_builder::RemovedBoxRows::containing_block(self, id)
     }
 
     /// The rows built for the same DOM node as the row in `id`, that row first.
@@ -169,6 +147,24 @@ impl RowSnapshot {
     fn row(&self, id: Option<NodeSlotId>) -> FfiBoundRow {
         id.and_then(|id| Some((id, self.node(id)?.kind)))
             .map_or(FfiBoundRow::NONE, |(slot, kind)| FfiBoundRow { slot, kind })
+    }
+}
+
+impl super::tree_builder::RemovedBoxRows for RowSnapshot {
+    fn node(&self, id: NodeSlotId) -> Option<PaintNode> {
+        RowSnapshot::node(self, id).copied()
+    }
+
+    fn style(&self, id: NodeSlotId) -> Option<ComputedValuesView<'_>> {
+        RowSnapshot::style(self, id)
+    }
+
+    fn bound_row(&self, style_node: StyleNodeID) -> Option<NodeSlotId> {
+        RowSnapshot::bound_row(self, style_node)
+    }
+
+    fn viewport_row(&self) -> Option<NodeSlotId> {
+        RowSnapshot::viewport_row(self)
     }
 }
 
@@ -217,71 +213,191 @@ impl RowSnapshotSlot {
     }
 }
 
-/// The styles the document thread applied to rows that the owner has not taken in yet. A read of a row's style answers
-/// them ahead of the snapshot, as the rows will once the owner has published them: a record, or none where the arena
-/// derives the row's style from now on.
+/// What the document thread wrote to rows that the rows it last read do not include yet, each with the change that
+/// wrote it: the styles it applied to rows (a record, or none where the arena derives the row's style from now on), and
+/// the boxes it took out of their parents in place, with the links that closed over them. Its reads answer them over
+/// the snapshot, as the rows will read once the owner has published them.
 #[derive(Default)]
-pub(crate) struct StylesSentAhead {
-    styles: HashMap<NodeSlotId, Option<Arc<PublishedStyleRecord>>>,
-    /// The change that sent the latest of them: the owner takes it in with all of them.
-    latest: Option<ChangeSeq>,
+pub(crate) struct RowsSentAhead {
+    styles: HashMap<NodeSlotId, (ChangeSeq, Option<Arc<PublishedStyleRecord>>)>,
+    detached: HashMap<NodeSlotId, ChangeSeq>,
+    links: HashMap<NodeSlotId, LinksSentAhead>,
+    /// The change that wrote the latest of them.
+    latest: ChangeSeq,
 }
 
-impl StylesSentAhead {
-    /// Notes that the change `sent` gave the row `row` the style `style`. A change the owner took in as it was sent
-    /// is in the rows already.
-    fn note(&mut self, row: NodeSlotId, style: Option<Arc<PublishedStyleRecord>>, sent: Option<ChangeSeq>) {
-        match sent {
-            Some(sent) => {
-                self.styles.insert(row, style);
-                self.latest = Some(sent);
+/// The links of a row that the boxes the document thread took out of the tree changed, each with the change that did.
+#[derive(Default)]
+struct LinksSentAhead {
+    first_child: Option<(ChangeSeq, NodeSlotId)>,
+    previous_sibling: Option<(ChangeSeq, NodeSlotId)>,
+    next_sibling: Option<(ChangeSeq, NodeSlotId)>,
+}
+
+impl RowsSentAhead {
+    /// Forgets what the rows `rows` include.
+    fn forget_taken_in(&mut self, rows: &RowSnapshot) {
+        let through = rows.changes_taken_in;
+        if self.latest <= through {
+            if self.latest != ChangeSeq::default() {
+                *self = Self::default();
             }
-            None => {
-                self.styles.remove(&row);
+            return;
+        }
+        let ahead = |seq: &ChangeSeq| *seq > through;
+        self.styles.retain(|_, (seq, _)| ahead(seq));
+        self.detached.retain(|_, seq| ahead(seq));
+        self.links.retain(|_, links| {
+            for link in [
+                &mut links.first_child,
+                &mut links.previous_sibling,
+                &mut links.next_sibling,
+            ] {
+                if link.is_some_and(|(seq, _)| !ahead(&seq)) {
+                    *link = None;
+                }
             }
+            links.first_child.is_some() || links.previous_sibling.is_some() || links.next_sibling.is_some()
+        });
+    }
+
+    /// Notes that the change `sent` gave the row `row` the style `style`. A change the owner took in as it was sent is
+    /// in the rows already.
+    fn note_style(&mut self, sent: Option<ChangeSeq>, row: NodeSlotId, style: Option<Arc<PublishedStyleRecord>>) {
+        if let Some(sent) = sent {
+            self.styles.insert(row, (sent, style));
+            self.latest = sent;
         }
     }
 
-    /// The style the document thread sent ahead for `row` of the arena `arena` names, if the owner has not taken it in.
-    ///
-    /// # Safety
-    ///
-    /// `arena` must be a live handle on the document thread.
-    unsafe fn get(&mut self, arena: *mut c_void, row: NodeSlotId) -> Option<&Option<Arc<PublishedStyleRecord>>> {
-        let latest = self.latest?;
-        // SAFETY: Guaranteed by the caller.
-        if !unsafe { super::layout_changes::not_taken_in(arena, latest) } {
-            self.styles.clear();
-            self.latest = None;
+    /// Notes that the change `sent` took the box `row`, which read as `removed`, out of its parent `parent`.
+    pub(crate) fn note_detached(
+        &mut self,
+        sent: Option<ChangeSeq>,
+        row: NodeSlotId,
+        parent: NodeSlotId,
+        removed: &PaintNode,
+    ) {
+        let Some(sent) = sent else {
+            return;
+        };
+        self.detached.insert(row, sent);
+        let (previous, next) = (removed.previous_sibling, removed.next_sibling);
+        if previous.is_invalid() {
+            self.links.entry(parent).or_default().first_child = Some((sent, next));
+        } else {
+            self.links.entry(previous).or_default().next_sibling = Some((sent, next));
+        }
+        if !next.is_invalid() {
+            self.links.entry(next).or_default().previous_sibling = Some((sent, previous));
+        }
+        self.latest = sent;
+    }
+}
+
+/// The rows as the document thread last wrote them: the snapshot, with what it sent the owner since that the owner has
+/// not taken in.
+pub(crate) struct RowsAsSent<'a> {
+    rows: &'a RowSnapshot,
+    sent: &'a RowsSentAhead,
+    /// Whether a read reached a row whose style the owner has not taken in: what the arena derives of the style (the
+    /// row's flags, those of its children) is the owner's to know.
+    read_style_sent_ahead: Cell<bool>,
+}
+
+impl<'a> RowsAsSent<'a> {
+    pub(crate) fn new(rows: &'a RowSnapshot, sent: &'a RowsSentAhead) -> Self {
+        Self {
+            rows,
+            sent,
+            read_style_sent_ahead: Cell::new(false),
+        }
+    }
+
+    /// Whether a read reached a row whose style the owner has not taken in, which leaves what the arena derives of it
+    /// unknown here.
+    pub(crate) fn read_style_sent_ahead(&self) -> bool {
+        self.read_style_sent_ahead.get()
+    }
+
+    /// The style record of the row in `id`. What the arena derives for a row is its to make: until it has, the row
+    /// reads as published.
+    pub(crate) fn style_record(&self, id: NodeSlotId) -> Option<&'a PublishedStyleRecord> {
+        match self.sent.styles.get(&id) {
+            Some((_, Some(record))) => Some(record),
+            _ => self.rows.style_record(id),
+        }
+    }
+
+    /// Whether the row's style is one the arena derives for it.
+    fn holds_derived_style(&self, id: NodeSlotId) -> bool {
+        match self.sent.styles.get(&id) {
+            Some((_, style)) => style.is_none(),
+            None => self.rows.node(id).is_none_or(|row| row.holds_derived_style),
+        }
+    }
+}
+
+impl super::tree_builder::RemovedBoxRows for RowsAsSent<'_> {
+    fn node(&self, id: NodeSlotId) -> Option<PaintNode> {
+        if self.sent.detached.contains_key(&id) {
             return None;
         }
-        self.styles.get(&row)
+        if self.sent.styles.contains_key(&id) {
+            self.read_style_sent_ahead.set(true);
+        }
+        let mut node = *self.rows.node(id)?;
+        let Some(links) = self.sent.links.get(&id) else {
+            return Some(node);
+        };
+        if let Some((_, first_child)) = links.first_child {
+            node.first_child = first_child;
+            // A box whose last child the owner takes out has no inline children left.
+            if first_child.is_invalid() {
+                node.flags &= !(super::node_data::NodeFlag::ChildrenAreInline as u32);
+            }
+        }
+        node.previous_sibling = links.previous_sibling.map_or(node.previous_sibling, |(_, row)| row);
+        node.next_sibling = links.next_sibling.map_or(node.next_sibling, |(_, row)| row);
+        Some(node)
+    }
+
+    fn style(&self, id: NodeSlotId) -> Option<ComputedValuesView<'_>> {
+        if self.sent.styles.contains_key(&id) {
+            self.read_style_sent_ahead.set(true);
+        }
+        let record = self.style_record(id)?;
+        Some(ComputedValuesView::new(&record.payloads.as_ffi().groups))
+    }
+
+    fn bound_row(&self, style_node: StyleNodeID) -> Option<NodeSlotId> {
+        self.rows
+            .bound_row(style_node)
+            .filter(|row| !self.sent.detached.contains_key(row))
+    }
+
+    fn viewport_row(&self) -> Option<NodeSlotId> {
+        self.rows.viewport_row()
     }
 }
 
-/// Runs `read` with the style record of the row in `id`, as the document thread last applied it.
+/// The rows the arena `arena` names published last, and what the document thread wrote to them that they do not
+/// include yet.
 ///
 /// # Safety
 ///
-/// `arena` must be a live handle on the document thread.
+/// `arena` must be a live handle on the document thread, and the rows must be let go of as [`RowSnapshot::published`]
+/// requires.
 #[track_caller]
-unsafe fn read_row_style<R>(
+pub(crate) unsafe fn rows_and_sent_ahead<'a>(
     arena: *mut c_void,
-    id: NodeSlotId,
-    read: impl FnOnce(Option<&PublishedStyleRecord>) -> R,
-) -> R {
+) -> (&'a RowSnapshot, std::cell::RefMut<'a, RowsSentAhead>) {
     // SAFETY: Guaranteed by the caller.
     let rows = unsafe { RowSnapshot::published(arena) };
     // SAFETY: As above.
-    let mut sent = unsafe { HostTables::beside_frame(arena) }
-        .styles_sent_ahead
-        .borrow_mut();
-    // SAFETY: As above.
-    match unsafe { sent.get(arena, id) } {
-        Some(Some(record)) => read(Some(record)),
-        // What the arena derives for the row is its to make: until it has, the row reads as published.
-        _ => read(rows.style_record(id)),
-    }
+    let mut sent = unsafe { HostTables::beside_frame(arena) }.rows_sent_ahead.borrow_mut();
+    sent.forget_taken_in(rows);
+    (rows, sent)
 }
 
 /// A row the host names by its slot.
@@ -446,11 +562,10 @@ pub unsafe extern "C" fn layout_arena_node_style_node(arena: *mut c_void, id: No
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_node_style_payloads(arena: *mut c_void, id: NodeSlotId) -> *const c_void {
     // SAFETY: Guaranteed by the caller.
-    unsafe {
-        read_row_style(arena, id, |record| {
-            record.map_or(std::ptr::null(), |record| record.payloads.as_ptr())
-        })
-    }
+    let (rows, sent) = unsafe { rows_and_sent_ahead(arena) };
+    RowsAsSent::new(rows, &sent)
+        .style_record(id)
+        .map_or(std::ptr::null(), |record| record.payloads.as_ptr())
 }
 
 /// The dependency flags of the row's style record, or zero for a row without style.
@@ -461,7 +576,10 @@ pub unsafe extern "C" fn layout_arena_node_style_payloads(arena: *mut c_void, id
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_node_style_dependency_flags(arena: *mut c_void, id: NodeSlotId) -> u8 {
     // SAFETY: Guaranteed by the caller.
-    unsafe { read_row_style(arena, id, |record| record.map_or(0, |record| record.dependency_flags)) }
+    let (rows, sent) = unsafe { rows_and_sent_ahead(arena) };
+    RowsAsSent::new(rows, &sent)
+        .style_record(id)
+        .map_or(0, |record| record.dependency_flags)
 }
 
 /// Applies the style of the published record `style_record` names to the row `node`, taking a style that holds no
@@ -481,18 +599,17 @@ pub unsafe extern "C" fn layout_arena_install_row_style(
     // SAFETY: Guaranteed by the caller.
     let record = unsafe { crate::css::style::published_record::shared_from_handle(style_record) };
     // SAFETY: As above.
-    let host_tables = unsafe { HostTables::from_handle(arena) };
-    let old_image_observers = host_tables.replace_image_observers(node, std::ptr::null_mut());
+    let old_image_observers =
+        unsafe { HostTables::from_handle(arena) }.replace_image_observers(node, std::ptr::null_mut());
+    // SAFETY: As above.
+    let (_, mut sent_ahead) = unsafe { rows_and_sent_ahead(arena) };
     let change = LayoutChange::InstallRowStyle {
         node,
         style_record: record.style_record,
     };
     // SAFETY: As above.
     let sent = unsafe { super::layout_changes::send(arena, change) };
-    host_tables
-        .styles_sent_ahead
-        .borrow_mut()
-        .note(node, Some(record), sent);
+    sent_ahead.note_style(sent, node, Some(record));
     old_image_observers
 }
 
@@ -510,17 +627,8 @@ pub unsafe extern "C" fn layout_arena_replace_row_style_record(
     style_record: *const c_void,
 ) -> bool {
     // SAFETY: Guaranteed by the caller.
-    let host_tables = unsafe { HostTables::from_handle(arena) };
-    let mut sent_ahead = host_tables.styles_sent_ahead.borrow_mut();
-    // SAFETY: As above.
-    let holds_derived_style = match unsafe { sent_ahead.get(arena, node) } {
-        Some(style) => style.is_none(),
-        // SAFETY: As above.
-        None => unsafe { RowSnapshot::published(arena) }
-            .node(node)
-            .is_none_or(|row| row.holds_derived_style),
-    };
-    if holds_derived_style {
+    let (rows, mut sent_ahead) = unsafe { rows_and_sent_ahead(arena) };
+    if RowsAsSent::new(rows, &sent_ahead).holds_derived_style(node) {
         return false;
     }
     // SAFETY: As above.
@@ -531,7 +639,7 @@ pub unsafe extern "C" fn layout_arena_replace_row_style_record(
     };
     // SAFETY: As above.
     let sent = unsafe { super::layout_changes::send(arena, change) };
-    sent_ahead.note(node, Some(record), sent);
+    sent_ahead.note_style(sent, node, Some(record));
     true
 }
 
@@ -543,12 +651,10 @@ pub unsafe extern "C" fn layout_arena_replace_row_style_record(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_adopt_derived_node_style(arena: *mut c_void, node: NodeSlotId, record: u64) {
     // SAFETY: Guaranteed by the caller.
-    let sent = unsafe { super::layout_changes::send(arena, LayoutChange::AdoptDerivedNodeStyle { node, record }) };
+    let (_, mut sent_ahead) = unsafe { rows_and_sent_ahead(arena) };
     // SAFETY: As above.
-    unsafe { HostTables::beside_frame(arena) }
-        .styles_sent_ahead
-        .borrow_mut()
-        .note(node, None, sent);
+    let sent = unsafe { super::layout_changes::send(arena, LayoutChange::AdoptDerivedNodeStyle { node, record }) };
+    sent_ahead.note_style(sent, node, None);
 }
 
 /// # Safety

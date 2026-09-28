@@ -1754,7 +1754,7 @@ void Document::tear_down_layout_tree()
     m_hit_test_display_list = nullptr;
     m_chrome_widget_registry->clear();
     if (auto layout_root = Painting::BoxSlot::of(*this, layout_root_slot()))
-        Layout::RustFFI::layout_arena_drop_subtree(layout_root.arena(), layout_root.slot());
+        Layout::RustFFI::layout_arena_drop_subtree(layout_root.arena(), layout_root.slot(), false);
     m_paint_state = nullptr;
     set_needs_full_layout_tree_update(true);
 }
