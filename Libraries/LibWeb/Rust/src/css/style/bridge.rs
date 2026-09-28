@@ -1810,7 +1810,59 @@ pub unsafe extern "C" fn style_engine_set_tree_scope_animation_keyframes(
     base_url_bytes: *const u8,
     base_url_byte_count: usize,
 ) {
-    let engine = unsafe { engine_entrance(engine, "style_engine_set_tree_scope_animation_keyframes") };
+    crate::css::style::owner_calls::ask(
+        engine.home(),
+        "style_engine_set_tree_scope_animation_keyframes",
+        crate::css::style::owner_calls::StyleQuery::SetTreeScopeAnimationKeyframes {
+            tree_scope,
+            shadow_root_identity,
+            name_lengths,
+            name_units,
+            name_unit_count,
+            count,
+            descriptions,
+            description_count,
+            keyframes,
+            keyframe_count,
+            declarations,
+            declaration_count,
+            custom_declarations,
+            custom_declaration_count,
+            linear_points,
+            linear_point_count,
+            base_url_bytes,
+            base_url_byte_count,
+        },
+    );
+}
+
+/// Answers [`style_engine_set_tree_scope_animation_keyframes`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_set_tree_scope_animation_keyframes`].
+#[allow(clippy::too_many_arguments)]
+pub(crate) unsafe fn owner_set_tree_scope_animation_keyframes(
+    engine: &mut crate::css::style::StyleEngine,
+    tree_scope: u32,
+    shadow_root_identity: usize,
+    name_lengths: *const u32,
+    name_units: *const u16,
+    name_unit_count: usize,
+    count: usize,
+    descriptions: *const FfiPublishedAnimationEffect,
+    description_count: usize,
+    keyframes: *const FfiPublishedAnimationKeyframe,
+    keyframe_count: usize,
+    declarations: *const FfiPublishedAnimationDeclaration,
+    declaration_count: usize,
+    custom_declarations: *const FfiPublishedAnimationCustomDeclaration,
+    custom_declaration_count: usize,
+    linear_points: *const FfiPublishedLinearEasingPoint,
+    linear_point_count: usize,
+    base_url_bytes: *const u8,
+    base_url_byte_count: usize,
+) {
     let name_lengths = match count {
         0 => &[][..],
         _ => unsafe { std::slice::from_raw_parts(name_lengths, count) },
@@ -1944,7 +1996,51 @@ pub unsafe extern "C" fn style_engine_set_element_animation_effect_descriptions(
     base_url_bytes: *const u8,
     base_url_byte_count: usize,
 ) {
-    let engine = unsafe { engine_entrance(engine, "style_engine_set_element_animation_effect_descriptions") };
+    crate::css::style::owner_calls::ask(
+        engine.home(),
+        "style_engine_set_element_animation_effect_descriptions",
+        crate::css::style::owner_calls::StyleQuery::SetElementAnimationEffectDescriptions {
+            node,
+            slot,
+            effects,
+            effect_count,
+            keyframes,
+            keyframe_count,
+            declarations,
+            declaration_count,
+            custom_declarations,
+            custom_declaration_count,
+            linear_points,
+            linear_point_count,
+            base_url_bytes,
+            base_url_byte_count,
+        },
+    );
+}
+
+/// Answers [`style_engine_set_element_animation_effect_descriptions`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_set_element_animation_effect_descriptions`].
+#[allow(clippy::too_many_arguments)]
+pub(crate) unsafe fn owner_set_element_animation_effect_descriptions(
+    engine: &mut crate::css::style::StyleEngine,
+    node: u32,
+    slot: u8,
+    effects: *const FfiPublishedAnimationEffect,
+    effect_count: usize,
+    keyframes: *const FfiPublishedAnimationKeyframe,
+    keyframe_count: usize,
+    declarations: *const FfiPublishedAnimationDeclaration,
+    declaration_count: usize,
+    custom_declarations: *const FfiPublishedAnimationCustomDeclaration,
+    custom_declaration_count: usize,
+    linear_points: *const FfiPublishedLinearEasingPoint,
+    linear_point_count: usize,
+    base_url_bytes: *const u8,
+    base_url_byte_count: usize,
+) {
     let Some(node) = StyleNodeID::from_raw(node) else {
         return;
     };
@@ -2047,7 +2143,30 @@ pub unsafe extern "C" fn style_engine_set_element_transitions(
     transitions: *const FfiPublishedTransition,
     count: usize,
 ) {
-    let engine = unsafe { engine_entrance(engine, "style_engine_set_element_transitions") };
+    crate::css::style::owner_calls::ask(
+        engine.home(),
+        "style_engine_set_element_transitions",
+        crate::css::style::owner_calls::StyleQuery::SetElementTransitions {
+            node,
+            slot,
+            transitions,
+            count,
+        },
+    );
+}
+
+/// Answers [`style_engine_set_element_transitions`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_set_element_transitions`].
+pub(crate) unsafe fn owner_set_element_transitions(
+    engine: &mut crate::css::style::StyleEngine,
+    node: u32,
+    slot: u8,
+    transitions: *const FfiPublishedTransition,
+    count: usize,
+) {
     let Some(node) = StyleNodeID::from_raw(node) else {
         return;
     };
@@ -2228,7 +2347,30 @@ pub unsafe extern "C" fn style_engine_grant_style_nodes(
     texts: *mut u32,
     text_count: usize,
 ) {
-    let engine = unsafe { engine_entrance(engine, "style_engine_grant_style_nodes") };
+    crate::css::style::owner_calls::ask(
+        engine.home(),
+        "style_engine_grant_style_nodes",
+        crate::css::style::owner_calls::StyleQuery::GrantStyleNodes {
+            elements,
+            element_count,
+            texts,
+            text_count,
+        },
+    );
+}
+
+/// Answers [`style_engine_grant_style_nodes`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_grant_style_nodes`].
+pub(crate) unsafe fn owner_grant_style_nodes(
+    engine: &mut crate::css::style::StyleEngine,
+    elements: *mut u32,
+    element_count: usize,
+    texts: *mut u32,
+    text_count: usize,
+) {
     // SAFETY: the caller vouches that each pointer covers its stated count for this call.
     let elements = unsafe { borrow_mut(elements, element_count) };
     let texts = unsafe { borrow_mut(texts, text_count) };
@@ -2509,7 +2651,25 @@ pub unsafe extern "C" fn style_engine_applied_style_reactions_derive_input(
     applied: *const FfiAppliedStyleReaction,
     count: usize,
 ) -> bool {
-    let engine = unsafe { engine_read_entrance(engine, "style_engine_applied_style_reactions_derive_input") };
+    crate::css::style::owner_calls::ask(
+        engine,
+        "style_engine_applied_style_reactions_derive_input",
+        crate::css::style::owner_calls::StyleQuery::AppliedStyleReactionsDeriveInput { node, applied, count },
+    )
+    .is()
+}
+
+/// Answers [`style_engine_applied_style_reactions_derive_input`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_applied_style_reactions_derive_input`].
+pub(crate) unsafe fn owner_applied_style_reactions_derive_input(
+    engine: &crate::css::style::StyleEngine,
+    node: u32,
+    applied: *const FfiAppliedStyleReaction,
+    count: usize,
+) -> bool {
     let Some(node) = StyleNodeID::from_raw(node) else {
         return false;
     };
@@ -3779,7 +3939,52 @@ pub unsafe extern "C" fn style_engine_publish_computed_groups(
     longhand_table: *const c_void,
     custom_property_store: *const c_void,
 ) -> FfiStyleRecordDelta {
-    let engine = unsafe { engine_entrance(engine, "style_engine_publish_computed_groups") };
+    crate::css::style::owner_calls::ask(
+        engine.home(),
+        "style_engine_publish_computed_groups",
+        crate::css::style::owner_calls::StyleQuery::PublishComputedGroups {
+            node,
+            pseudo_kind,
+            payloads,
+            count,
+            inherited_group_count,
+            custom_property_environment,
+            inherited_group_swap_candidate,
+            counter_style_environment_identity,
+            animation_overlay_identity,
+            animated_overlay,
+            animation_overlay_payloads,
+            animation_overlay_payload_count,
+            longhand_table,
+            custom_property_store,
+        },
+    )
+    .record_delta()
+}
+
+/// Answers [`style_engine_publish_computed_groups`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_publish_computed_groups`].
+#[allow(clippy::too_many_arguments)]
+pub(crate) unsafe fn owner_publish_computed_groups(
+    engine: &mut crate::css::style::StyleEngine,
+    node: u32,
+    pseudo_kind: u8,
+    payloads: *const *const c_void,
+    count: usize,
+    inherited_group_count: usize,
+    custom_property_environment: u64,
+    inherited_group_swap_candidate: bool,
+    counter_style_environment_identity: u64,
+    animation_overlay_identity: u64,
+    animated_overlay: *const c_void,
+    animation_overlay_payloads: *const *const c_void,
+    animation_overlay_payload_count: usize,
+    longhand_table: *const c_void,
+    custom_property_store: *const c_void,
+) -> FfiStyleRecordDelta {
     if count != 0 && payloads.is_null() {
         return FfiStyleRecordDelta::default();
     }
@@ -4280,7 +4485,29 @@ pub unsafe extern "C" fn style_engine_install_sampled_custom_property_environmen
     pseudo_kind: u8,
     environment: u64,
 ) -> bool {
-    let engine = unsafe { engine_entrance(engine, "style_engine_install_sampled_custom_property_environment") };
+    crate::css::style::owner_calls::ask(
+        engine.home(),
+        "style_engine_install_sampled_custom_property_environment",
+        crate::css::style::owner_calls::StyleQuery::InstallSampledCustomPropertyEnvironment {
+            node,
+            pseudo_kind,
+            environment,
+        },
+    )
+    .is()
+}
+
+/// Answers [`style_engine_install_sampled_custom_property_environment`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_install_sampled_custom_property_environment`].
+pub(crate) unsafe fn owner_install_sampled_custom_property_environment(
+    engine: &mut crate::css::style::StyleEngine,
+    node: u32,
+    pseudo_kind: u8,
+    environment: u64,
+) -> bool {
     let Some(node) = StyleNodeID::from_raw(node) else {
         return false;
     };
@@ -4616,7 +4843,33 @@ pub unsafe extern "C" fn style_engine_decide_transition_step_for_installed_recor
     installed_style_record: u64,
     layout_arena: *mut c_void,
 ) -> FfiRowSampledInPass {
-    let engine = unsafe { engine_entrance(engine, "style_engine_decide_transition_step_for_installed_record") };
+    crate::css::style::owner_calls::ask(
+        engine.home(),
+        "style_engine_decide_transition_step_for_installed_record",
+        crate::css::style::owner_calls::StyleQuery::DecideTransitionStepForInstalledRecord {
+            node,
+            pseudo_kind,
+            before_change_style_record,
+            installed_style_record,
+            layout_arena,
+        },
+    )
+    .row_sampled()
+}
+
+/// Answers [`style_engine_decide_transition_step_for_installed_record`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_decide_transition_step_for_installed_record`].
+pub(crate) unsafe fn owner_decide_transition_step_for_installed_record(
+    engine: &mut crate::css::style::StyleEngine,
+    node: u32,
+    pseudo_kind: u8,
+    before_change_style_record: u64,
+    installed_style_record: u64,
+    layout_arena: *mut c_void,
+) -> FfiRowSampledInPass {
     abort_on_panic(|| {
         let Some(style_node) = StyleNodeID::from_raw(node) else {
             return row_sampled_in_pass(engine, None);
@@ -4906,7 +5159,24 @@ pub unsafe extern "C" fn style_engine_remove_computed_pseudo(
     node: u32,
     pseudo_kind: u8,
 ) -> FfiStyleRecordDelta {
-    let engine = unsafe { engine_entrance(engine, "style_engine_remove_computed_pseudo") };
+    crate::css::style::owner_calls::ask(
+        engine.home(),
+        "style_engine_remove_computed_pseudo",
+        crate::css::style::owner_calls::StyleQuery::RemoveComputedPseudo { node, pseudo_kind },
+    )
+    .record_delta()
+}
+
+/// Answers [`style_engine_remove_computed_pseudo`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_remove_computed_pseudo`].
+pub(crate) unsafe fn owner_remove_computed_pseudo(
+    engine: &mut crate::css::style::StyleEngine,
+    node: u32,
+    pseudo_kind: u8,
+) -> FfiStyleRecordDelta {
     let Some(node) = StyleNodeID::from_raw(node) else {
         return FfiStyleRecordDelta::default();
     };
@@ -6894,13 +7164,53 @@ pub unsafe extern "C" fn style_engine_set_element_custom_property_data(
     animation_base_store: *const c_void,
     animation_base_environment: u64,
 ) {
-    let engine = unsafe { engine_entrance(engine, "style_engine_set_element_custom_property_data") };
+    crate::css::style::owner_calls::ask(
+        engine.home(),
+        "style_engine_set_element_custom_property_data",
+        crate::css::style::owner_calls::StyleQuery::SetElementCustomPropertyData {
+            node,
+            data,
+            store,
+            environment,
+            is_animation_overlay,
+            declares,
+            animation_base,
+            animation_base_store,
+            animation_base_environment,
+        },
+    );
+}
+
+/// Answers [`style_engine_set_element_custom_property_data`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_set_element_custom_property_data`].
+#[allow(clippy::too_many_arguments)]
+pub(crate) unsafe fn owner_set_element_custom_property_data(
+    engine: &mut crate::css::style::StyleEngine,
+    node: u32,
+    data: *const c_void,
+    store: *const c_void,
+    environment: u64,
+    is_animation_overlay: bool,
+    declares: bool,
+    animation_base: *const c_void,
+    animation_base_store: *const c_void,
+    animation_base_environment: u64,
+) {
     let Some(node) = StyleNodeID::from_raw(node) else {
         return;
     };
     let animation_base =
         is_animation_overlay.then_some((animation_base_environment, animation_base_store, animation_base));
-    unsafe { engine.set_element_custom_property_data(node, data, store, environment, declares, animation_base) };
+    // What the element held before is the document thread's to release.
+    let retired =
+        unsafe { engine.set_element_custom_property_data(node, data, store, environment, declares, animation_base) };
+    engine
+        .host
+        .retired_custom_property_data
+        .extend(retired.and_then(|held| held.data));
 }
 
 /// The custom-property environment an element holds: the host's object for it, or null with the
@@ -6959,13 +7269,50 @@ pub unsafe extern "C" fn style_engine_set_pseudo_element_custom_property_data(
     animation_base_store: *const c_void,
     animation_base_environment: u64,
 ) {
-    let engine = unsafe { engine_entrance(engine, "style_engine_set_pseudo_element_custom_property_data") };
+    crate::css::style::owner_calls::ask(
+        engine.home(),
+        "style_engine_set_pseudo_element_custom_property_data",
+        crate::css::style::owner_calls::StyleQuery::SetPseudoElementCustomPropertyData {
+            node,
+            pseudo,
+            data,
+            store,
+            environment,
+            is_animation_overlay,
+            declares_own,
+            animation_base,
+            animation_base_store,
+            animation_base_environment,
+        },
+    );
+}
+
+/// Answers [`style_engine_set_pseudo_element_custom_property_data`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_set_pseudo_element_custom_property_data`].
+#[allow(clippy::too_many_arguments)]
+pub(crate) unsafe fn owner_set_pseudo_element_custom_property_data(
+    engine: &mut crate::css::style::StyleEngine,
+    node: u32,
+    pseudo: u8,
+    data: *const c_void,
+    store: *const c_void,
+    environment: u64,
+    is_animation_overlay: bool,
+    declares_own: bool,
+    animation_base: *const c_void,
+    animation_base_store: *const c_void,
+    animation_base_environment: u64,
+) {
     let Some(node) = StyleNodeID::from_raw(node) else {
         return;
     };
     let animation_base =
         is_animation_overlay.then_some((animation_base_environment, animation_base_store, animation_base));
-    unsafe {
+    // What the pseudo-element held before is the document thread's to release.
+    let retired = unsafe {
         engine.set_pseudo_element_custom_property_data(
             node,
             pseudo,
@@ -6974,8 +7321,12 @@ pub unsafe extern "C" fn style_engine_set_pseudo_element_custom_property_data(
             environment,
             declares_own,
             animation_base,
-        );
-    }
+        )
+    };
+    engine
+        .host
+        .retired_custom_property_data
+        .extend(retired.and_then(|held| held.data));
 }
 
 /// The custom-property environment one of an element's synthetic pseudo-elements holds, as
@@ -7126,7 +7477,25 @@ pub unsafe extern "C" fn style_engine_record_benchmark_marker(
     length: usize,
     is_ascii: bool,
 ) {
-    let engine: &StyleEngine = unsafe { engine_read_entrance(engine, "style_engine_record_benchmark_marker") };
+    crate::css::style::owner_calls::ask(
+        engine,
+        "style_engine_record_benchmark_marker",
+        crate::css::style::owner_calls::StyleQuery::BenchmarkMarker { name, length, is_ascii },
+    );
+}
+
+/// Answers [`style_engine_record_benchmark_marker`] with `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_record_benchmark_marker`].
+#[cfg(feature = "style-recording")]
+pub(crate) unsafe fn owner_record_benchmark_marker(
+    engine: &StyleEngine,
+    name: *const c_void,
+    length: usize,
+    is_ascii: bool,
+) {
     if engine.recording_id().is_none() {
         return;
     }
@@ -7801,7 +8170,22 @@ pub unsafe extern "C" fn style_engine_record_size_container_query_dependents(
     engine: StyleEngineInputHandle,
     node: u32,
 ) {
-    let engine = unsafe { engine_entrance(engine, "style_engine_record_size_container_query_dependents") };
+    crate::css::style::owner_calls::send(
+        engine,
+        "style_engine_record_size_container_query_dependents",
+        crate::css::style::owner_calls::EngineChange::RecordSizeContainerQueryDependents { node },
+    );
+}
+
+/// Answers [`style_engine_record_size_container_query_dependents`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_record_size_container_query_dependents`].
+pub(crate) unsafe fn owner_record_size_container_query_dependents(
+    engine: &mut crate::css::style::StyleEngine,
+    node: u32,
+) {
     let Some(node) = StyleNodeID::from_raw(node) else {
         return;
     };

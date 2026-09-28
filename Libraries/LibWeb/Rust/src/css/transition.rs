@@ -358,19 +358,40 @@ pub unsafe extern "C" fn rust_decide_transitions(
     input: *mut FfiTransitionInput,
     actions: *mut FfiTransitionAction,
 ) {
-    style_engine.bring_home("rust_decide_transitions");
     crate::css::ffi_stats::rust_style_ffi_note_transition_decision();
-    let input = unsafe { &mut *input };
-    let properties = if input.property_count == 0 {
-        &mut []
-    } else {
-        unsafe { std::slice::from_raw_parts_mut(input.properties, input.property_count) }
-    };
-    if properties.is_empty() {
+    // SAFETY: Guaranteed by the caller.
+    if unsafe { (*input).property_count } == 0 {
         return;
     }
     assert!(!style_engine.is_null(), "transition decisions require a style engine");
-    let style_engine: &crate::css::style::StyleEngine = unsafe { style_engine.enter("rust_decide_transitions") };
+    crate::css::style::owner_calls::ask(
+        style_engine,
+        "rust_decide_transitions",
+        crate::css::style::owner_calls::StyleQuery::DecideTransitions {
+            before_style_record,
+            after_longhand_table,
+            after_animated_overlay,
+            input,
+            actions,
+        },
+    );
+}
+
+/// Answers [`rust_decide_transitions`] from `style_engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`rust_decide_transitions`], with properties to decide.
+pub(crate) unsafe fn owner_decide_transitions(
+    style_engine: &crate::css::style::StyleEngine,
+    before_style_record: u64,
+    after_longhand_table: *const std::ffi::c_void,
+    after_animated_overlay: *const std::ffi::c_void,
+    input: *mut FfiTransitionInput,
+    actions: *mut FfiTransitionAction,
+) {
+    let input = unsafe { &mut *input };
+    let properties = unsafe { std::slice::from_raw_parts_mut(input.properties, input.property_count) };
     let after_table = unsafe {
         after_longhand_table
             .cast::<crate::css::computed_longhand_table::ComputedLonghandTable>()
