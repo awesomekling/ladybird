@@ -4,18 +4,17 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-//! What the main thread writes of a document's layout, and what it asks of it, as the typed changes and questions the
-//! render owner applies and answers with the document's arena. The main thread names a node by its slot and sends; it
-//! never reaches the arena itself.
+//! What the main thread writes of a document's layout, as the typed changes the render owner applies with the document's
+//! arena. The main thread names a node by its slot and sends; it never reaches the arena itself. What it reads of the
+//! layout tree, it reads from the rows the owner publishes (see [`super::row_reads`]).
 
 use super::LayoutNodeArena;
 use super::layout_node_arena::{HostPayment, LayoutUpdateMarksHandle};
 use super::node_data::{CompositorAnimationFrameKind, NodeFlag, NodeSlotId};
-use super::partial_relayout::FfiLayoutTreeUpdateClassification;
-use super::tree_builder::FfiRemovedBoxPlace;
+use super::partial_relayout::FfiPossibleBoundaryUpdate;
 use super::used_values::FfiCssPixelPoint;
 use crate::css::style::tree::{NaturalSize, StyleNodeID};
-use crate::render_owner::{Answer, ArenaChange, ChangeSeq, DocumentId, Query};
+use crate::render_owner::{Answer, ArenaChange, ChangeSeq, Query};
 use std::ffi::c_void;
 
 /// One write of the main thread to a document's layout marks or layout facts, which the owner applies to the arena
@@ -27,6 +26,12 @@ pub(crate) enum LayoutChange {
     },
     SetNeedsOwnGeometryUpdate {
         node: NodeSlotId,
+    },
+    /// The box may be a partial relayout boundary, which the owner decides as it takes the change in: a boundary lays
+    /// out alone, as `update` says.
+    SetNeedsLayoutUpdateOfPossibleBoundary {
+        node: NodeSlotId,
+        update: FfiPossibleBoundaryUpdate,
     },
     SetNeedsFullLayoutTreeUpdate(bool),
     /// What the node's content is sized from changed: its fragment caches and intrinsic sizes, and those of its
@@ -161,6 +166,21 @@ impl LayoutChange {
                     arena.set_node_flag(node, NodeFlag::NeedsOwnGeometryUpdate, true);
                 }
             }
+            Self::SetNeedsLayoutUpdateOfPossibleBoundary { node, update } => {
+                if !arena.slot_is_live(node) {
+                    return;
+                }
+                if arena.node_is_partial_relayout_boundary(node) {
+                    if update == FfiPossibleBoundaryUpdate::StyleChange {
+                        arena.set_node_flag(node, NodeFlag::NeedsOwnGeometryUpdate, true);
+                    }
+                    arena.set_needs_layout_update(node, false);
+                } else if update == FfiPossibleBoundaryUpdate::ChildListInsertion {
+                    arena.defer_child_list_insertion_layout_update(node);
+                } else {
+                    arena.set_needs_layout_update(node, true);
+                }
+            }
             Self::SetNeedsFullLayoutTreeUpdate(value) => arena.set_needs_full_layout_tree_update(value),
             Self::ResetCachedIntrinsicSizesOfSelfAndAncestors { node } => {
                 if arena.slot_is_live(node) {
@@ -175,6 +195,12 @@ impl LayoutChange {
             }
             Self::InvalidateTextContent { node } => {
                 if arena.slot_is_live(node) {
+                    // The document reads from the rows it was published whether a text renders a slice of its data,
+                    // and has the build slice it again instead of sending this.
+                    debug_assert!(
+                        !arena.text_has_source_range(node),
+                        "a text sliced by its first letter is rebuilt, not invalidated in place"
+                    );
                     arena.invalidate_text_content(node);
                 }
             }
@@ -285,6 +311,7 @@ impl LayoutChange {
         matches!(
             self,
             Self::SetNeedsLayoutUpdate { .. }
+                | Self::SetNeedsLayoutUpdateOfPossibleBoundary { .. }
                 | Self::EnrollTextAfterLanguageChange { .. }
                 | Self::SetNeedsFullLayoutTreeUpdate(true)
                 | Self::SetTableSpans { .. }
@@ -409,111 +436,5 @@ pub(crate) unsafe fn write(arena: *mut c_void, write: LayoutWrite) -> HostPaymen
     match unsafe { crate::render_owner::ask_about(arena, Query::Write(write)) } {
         Answer::Payment(payment) => payment,
         _ => HostPayment::nothing(),
-    }
-}
-
-/// A question the main thread asks about a document's layout tree.
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum LayoutRead {
-    ClassifyLayoutTreeUpdate {
-        node: NodeSlotId,
-        reason_is_structural_boundary_self_rebuild: bool,
-    },
-    RemovedBoxDetachableInPlace(FfiRemovedBoxPlace),
-    TextHasSourceRange(NodeSlotId),
-    NodeIsPartialRelayoutBoundary(NodeSlotId),
-    NodeIsAtomicInline(NodeSlotId),
-    NodeIsFragmentedInline(NodeSlotId),
-}
-
-/// The answer to a [`LayoutRead`], of the variant it asked for.
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum LayoutReadAnswer {
-    Classification(FfiLayoutTreeUpdateClassification),
-    Bool(bool),
-}
-
-impl LayoutRead {
-    /// Answers the question from `arena`, as the units before it left it.
-    pub(crate) fn answer(self, arena: &LayoutNodeArena) -> LayoutReadAnswer {
-        match self {
-            Self::ClassifyLayoutTreeUpdate {
-                node,
-                reason_is_structural_boundary_self_rebuild,
-            } => LayoutReadAnswer::Classification(if arena.slot_is_live(node) {
-                arena.classify_layout_tree_update(node, reason_is_structural_boundary_self_rebuild)
-            } else {
-                FfiLayoutTreeUpdateClassification::default()
-            }),
-            Self::RemovedBoxDetachableInPlace(place) => {
-                LayoutReadAnswer::Bool(super::tree_builder::removed_box_detachable_in_place(arena, &place).is_some())
-            }
-            Self::TextHasSourceRange(node) => {
-                LayoutReadAnswer::Bool(arena.slot_is_live(node) && arena.text_has_source_range(node))
-            }
-            Self::NodeIsPartialRelayoutBoundary(node) => {
-                LayoutReadAnswer::Bool(arena.slot_is_live(node) && arena.node_is_partial_relayout_boundary(node))
-            }
-            Self::NodeIsAtomicInline(node) => LayoutReadAnswer::Bool(
-                arena.slot_is_live(node) && {
-                    let data = arena.data(node);
-                    super::node_facts::node_is_atomic_inline(data, super::node_facts::node_style_view(data))
-                },
-            ),
-            Self::NodeIsFragmentedInline(node) => LayoutReadAnswer::Bool(
-                arena.slot_is_live(node) && {
-                    let data = arena.data(node);
-                    super::node_facts::node_is_fragmented_inline(data, super::node_facts::node_style_view(data))
-                },
-            ),
-        }
-    }
-
-    /// The answer where the owner answered nothing.
-    pub(crate) fn unanswered(self) -> LayoutReadAnswer {
-        match self {
-            Self::ClassifyLayoutTreeUpdate { .. } => {
-                LayoutReadAnswer::Classification(FfiLayoutTreeUpdateClassification::default())
-            }
-            Self::RemovedBoxDetachableInPlace(_)
-            | Self::TextHasSourceRange(_)
-            | Self::NodeIsPartialRelayoutBoundary(_)
-            | Self::NodeIsAtomicInline(_)
-            | Self::NodeIsFragmentedInline(_) => LayoutReadAnswer::Bool(false),
-        }
-    }
-}
-
-/// Asks the owner of the document whose arena `arena` names `read`, and waits for the answer.
-///
-/// # Safety
-///
-/// `arena` must be a live arena handle on the document thread.
-pub(super) unsafe fn ask(arena: *mut c_void, read: LayoutRead) -> LayoutReadAnswer {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    crate::stage_thread::join_frame_in_flight(arena);
-    // SAFETY: Guaranteed by the caller.
-    let document: DocumentId = unsafe { super::ArenaHandle::document_of(arena) };
-    // SAFETY: As above.
-    match unsafe { crate::render_owner::ask(document, arena, Query::Layout(read)) } {
-        Answer::Layout(answer) => answer,
-        _ => {
-            debug_assert!(false, "a layout read is answered with a layout answer");
-            read.unanswered()
-        }
-    }
-}
-
-/// # Safety
-///
-/// `arena` must be a live arena handle on the document thread.
-pub(super) unsafe fn ask_bool(arena: *mut c_void, read: LayoutRead) -> bool {
-    // SAFETY: Guaranteed by the caller.
-    match unsafe { ask(arena, read) } {
-        LayoutReadAnswer::Bool(value) => value,
-        LayoutReadAnswer::Classification(_) => {
-            debug_assert!(false, "a yes-or-no layout read is answered yes or no");
-            false
-        }
     }
 }

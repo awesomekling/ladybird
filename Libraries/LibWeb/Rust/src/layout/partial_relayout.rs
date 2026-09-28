@@ -4,81 +4,149 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+use crate::css::computed_value_views::ComputedValuesView;
 use crate::layout::LayoutNodeArena;
 use crate::layout::abspos_inputs::AbsposLayoutInputs;
 use crate::layout::formatting_context::{FormattingContextType, formatting_context_type_created_by_node_data};
 use crate::layout::layout_node_arena::LayoutUpdateMarksHandle;
-use crate::layout::node_data::{NodeFlag, NodeKind, NodeSlotId};
+use crate::layout::node_data::{NodeFlag, NodeKind, NodeSlotId, PaintNode};
 use crate::layout::node_facts;
+use crate::layout::row_reads::RowSnapshot;
 use std::ffi::c_void;
 
 #[derive(Clone, Copy, Debug, Default)]
 #[repr(C)]
 pub struct FfiLayoutTreeUpdateClassification {
-    pub marks_partial_relayout_boundary_self_only: bool,
+    /// Whether a structural self-rebuild of the box is left to the render owner, which confines it to the box where
+    /// the box is a partial relayout boundary as the owner takes the mark in.
+    pub may_be_partial_relayout_boundary: bool,
     /// Whether the rebuild escalates past anonymous parents, and the node it escalates to, named
     /// by its style node with 0 for the document.
     pub escalates_past_anonymous_parents: bool,
     pub escalation_target_style_node: u32,
 }
 
-impl LayoutNodeArena {
-    /// Classifies how a layout tree update on this node reaches layout: a detached node
-    /// escapes partial relayout; a structural self-rebuild on a partial relayout boundary
-    /// marks the boundary alone, and a child-list mutation cannot change the boundary's own
-    /// box kind, so replacing its box in place cannot require restructuring the surrounding
-    /// anonymous siblings; otherwise a node under an anonymous parent escalates the rebuild
-    /// to the nearest non-anonymous ancestor.
-    pub(crate) fn classify_layout_tree_update(
-        &self,
-        node: NodeSlotId,
-        reason_is_structural_boundary_self_rebuild: bool,
-    ) -> FfiLayoutTreeUpdateClassification {
-        let data = self.data(node);
-        let (kind, parent) = (data.kind.get(), data.parent.get());
+/// What moved a box that may be a partial relayout boundary.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(u8)]
+// NB: C++ names the kinds.
+#[allow(dead_code)]
+pub enum FfiPossibleBoundaryUpdate {
+    /// Its style: a boundary lays out its own geometry alone.
+    StyleChange,
+    /// Its child list: a boundary rebuilds alone.
+    ChildListChange,
+    /// A child inserted into it: a boundary rebuilds alone, and what anything else lays out again waits for the boxes
+    /// the build attaches.
+    ChildListInsertion,
+}
 
-        // A dirty DOM node whose box is outside the layout tree cannot attribute its update to
-        // any boundary.
-        if parent.is_invalid() && kind != NodeKind::Viewport {
-            self.record_partial_relayout_escape();
-        }
+/// Classifies how a layout tree update on the box `node` reaches layout, from the rows its owner published, and answers
+/// whether the box is outside the layout tree: a dirty DOM node whose box is detached cannot attribute its update to
+/// any boundary. A structural self-rebuild on a box that may be a partial relayout boundary is left to the owner, which
+/// marks the boundary alone; otherwise a node under an anonymous parent escalates the rebuild to the nearest
+/// non-anonymous ancestor.
+///
+/// NB: A box that may be a boundary never escalates. It establishes a formatting context of its own and is out of flow
+///     or an SVG viewport, so a child-list mutation cannot change its own box kind, and replacing its box in place
+///     cannot require restructuring the surrounding anonymous siblings, whether or not its layout left what a boundary
+///     relays out from.
+fn classify_layout_tree_update(
+    rows: &RowSnapshot,
+    node: NodeSlotId,
+    reason_is_structural_boundary_self_rebuild: bool,
+) -> (FfiLayoutTreeUpdateClassification, bool) {
+    let Some(row) = rows.node(node) else {
+        return Default::default();
+    };
+    let parent = rows.parent(node);
+    let escapes_partial_relayout = parent.is_none() && row.kind != NodeKind::Viewport;
+    let may_be_boundary = reason_is_structural_boundary_self_rebuild
+        && node_facts::kind_is_box(row.kind)
+        && box_may_be_partial_relayout_boundary(row, rows.style(node), parent.and_then(|parent| rows.style(parent)));
 
-        let marks_boundary_self_only = node_facts::kind_is_box(kind)
-            && reason_is_structural_boundary_self_rebuild
-            && self.node_is_partial_relayout_boundary(node);
-
-        let mut nearest_non_anonymous_ancestor = NodeSlotId::INVALID;
-        if !marks_boundary_self_only && !parent.is_invalid() {
-            let mut ancestor = parent;
-            let mut ancestor_is_first = true;
-            while !ancestor.is_invalid() {
-                let (ancestor_flags, ancestor_parent) = {
-                    let ancestor_data = self.data(ancestor);
-                    (ancestor_data.flags.get(), ancestor_data.parent.get())
+    let is_anonymous = |row: &PaintNode| node_facts::has_flag(row, NodeFlag::Anonymous);
+    let mut escalation_target = None;
+    if !may_be_boundary && parent.and_then(|parent| rows.node(parent)).is_some_and(is_anonymous) {
+        let mut ancestor = parent.and_then(|parent| rows.parent(parent));
+        while let Some(ancestor_row) = ancestor.and_then(|ancestor| rows.node(ancestor)) {
+            if !is_anonymous(ancestor_row) {
+                escalation_target = match ancestor_row.style_node {
+                    Some(style_node) => Some(style_node.raw()),
+                    None => (ancestor_row.kind == NodeKind::Viewport).then_some(0),
                 };
-                if ancestor_flags & NodeFlag::Anonymous as u32 == 0 {
-                    if !ancestor_is_first {
-                        nearest_non_anonymous_ancestor = ancestor;
-                    }
-                    break;
-                }
-                ancestor = ancestor_parent;
-                ancestor_is_first = false;
+                break;
             }
-        }
-
-        let escalation_target = if nearest_non_anonymous_ancestor.is_invalid() {
-            None
-        } else {
-            self.commit_message_style_node(nearest_non_anonymous_ancestor)
-        };
-        FfiLayoutTreeUpdateClassification {
-            marks_partial_relayout_boundary_self_only: marks_boundary_self_only,
-            escalates_past_anonymous_parents: escalation_target.is_some(),
-            escalation_target_style_node: escalation_target.unwrap_or(0),
+            ancestor = ancestor.and_then(|ancestor| rows.parent(ancestor));
         }
     }
+    let classification = FfiLayoutTreeUpdateClassification {
+        may_be_partial_relayout_boundary: may_be_boundary,
+        escalates_past_anonymous_parents: escalation_target.is_some(),
+        escalation_target_style_node: escalation_target.unwrap_or(0),
+    };
+    (classification, escapes_partial_relayout)
+}
 
+/// Whether a box of this shape and style is a partial relayout boundary wherever its layout left what a boundary
+/// relays out from: its committed placement, and for an absolutely positioned box its saved layout inputs.
+fn box_may_be_partial_relayout_boundary(
+    node: &impl node_facts::NodeShape,
+    style: Option<ComputedValuesView<'_>>,
+    parent_style: Option<ComputedValuesView<'_>>,
+) -> bool {
+    // An absolutely or fixed positioned descendant whose containing block is outside this
+    // box's subtree is laid out by a formatting context outside it, which makes subtree
+    // isolation impossible for any kind of boundary.
+    if node_facts::has_flag(node, NodeFlag::AbsposDescendantEscapes) {
+        return false;
+    }
+
+    let style_is_absolutely_positioned = style.is_some_and(|style| style.is_absolutely_positioned());
+
+    // An in-flow SVG viewport's used size is determined solely by its own attributes and outer
+    // context, never by its children, so its size and position from the previous layout can be
+    // reused - provided a commit has actually saved them; its content lays out in the viewport's
+    // own user units, so a nested <svg> is just as reproducible from its own root as the
+    // outermost one. An absolutely positioned SVG root's placement is not frozen, so it must
+    // qualify through the saved-inputs replay path instead.
+    if node.kind() == NodeKind::SVGSVGBox && !style_is_absolutely_positioned {
+        return node_facts::has_flag(node, NodeFlag::HasCommittedFragmentLink);
+    }
+
+    if !style_is_absolutely_positioned
+        || node_facts::has_flag(node, NodeFlag::Anonymous)
+        || node_facts::has_flag(node, NodeFlag::IsDocumentElement)
+    {
+        return false;
+    }
+
+    // Only a full layout pass resolves anchor() functions in the inset properties to plain
+    // values; a replay from saved inputs cannot.
+    if node_facts::has_flag(node, NodeFlag::InsetsUseAnchorFunctions) {
+        return false;
+    }
+
+    // NOTE: Content-dependent sizing (shrink-to-fit, intrinsic constraints, aspect-ratio) does
+    //       not disqualify a boundary: replay re-solves the boundary's own size, and a resized
+    //       boundary triggers ancestor scrollable overflow recomputation after commit.
+
+    matches!(
+        formatting_context_type_created_by_node_data(
+            node,
+            style,
+            node_facts::node_is_flex_or_grid_container(parent_style)
+        ),
+        Some(
+            FormattingContextType::Block
+                | FormattingContextType::Flex
+                | FormattingContextType::Grid
+                | FormattingContextType::Svg
+        )
+    )
+}
+
+impl LayoutNodeArena {
     fn commit_splice_position_is_derivable_from_layout_ancestors(&self, node: NodeSlotId) -> bool {
         let paintable_rows = self.paintable_rows();
         let mut ancestor = self.data(node).parent.get();
@@ -97,73 +165,17 @@ impl LayoutNodeArena {
 
     pub(crate) fn node_is_partial_relayout_boundary(&self, node: NodeSlotId) -> bool {
         let data = self.data(node);
-
-        // An absolutely or fixed positioned descendant whose containing block is outside this
-        // box's subtree is laid out by a formatting context outside it, which makes subtree
-        // isolation impossible for any kind of boundary.
-        if node_facts::has_flag(data, NodeFlag::AbsposDescendantEscapes) {
-            return false;
-        }
-
-        if !self.paintable_rows().paintable_row_is_populated(node)
-            && !self.commit_splice_position_is_derivable_from_layout_ancestors(node)
-        {
-            return false;
-        }
-
         let style = node_facts::node_style_view(data);
-        let style_is_absolutely_positioned = style.is_some_and(|style| style.is_absolutely_positioned());
-
-        // An in-flow SVG viewport's used size is determined solely by its own attributes and outer
-        // context, never by its children, so its size and position from the previous layout can be
-        // reused - provided a commit has actually saved them; its content lays out in the viewport's
-        // own user units, so a nested <svg> is just as reproducible from its own root as the
-        // outermost one. An absolutely positioned SVG root's placement is not frozen, so it must
-        // qualify through the saved-inputs replay path below instead.
-        if data.kind.get() == NodeKind::SVGSVGBox && !style_is_absolutely_positioned {
-            return node_facts::has_flag(data, NodeFlag::HasCommittedFragmentLink);
-        }
-
-        if !style_is_absolutely_positioned {
-            return false;
-        }
-        if node_facts::has_flag(data, NodeFlag::Anonymous) {
-            return false;
-        }
-        if node_facts::has_flag(data, NodeFlag::IsDocumentElement) {
-            return false;
-        }
-        if self.saved_abspos_layout_inputs(data).is_none() {
-            return false;
-        }
-
-        // Only a full layout pass resolves anchor() functions in the inset properties to plain
-        // values; a replay from saved inputs cannot.
-        if node_facts::has_flag(data, NodeFlag::InsetsUseAnchorFunctions) {
-            return false;
-        }
-
-        // NOTE: Content-dependent sizing (shrink-to-fit, intrinsic constraints, aspect-ratio) does
-        //       not disqualify a boundary: replay re-solves the boundary's own size, and a resized
-        //       boundary triggers ancestor scrollable overflow recomputation after commit.
-
-        let parent_style = (!data.parent.get().is_invalid())
-            .then(|| self.style_payloads(data.parent.get()))
+        let parent = data.parent.get();
+        let parent_style = (!parent.is_invalid())
+            .then(|| self.style_payloads(parent))
             .flatten()
-            .map(|payloads| crate::css::computed_value_views::ComputedValuesView::new(&payloads.groups));
-        matches!(
-            formatting_context_type_created_by_node_data(
-                data,
-                style,
-                node_facts::node_is_flex_or_grid_container(parent_style)
-            ),
-            Some(
-                FormattingContextType::Block
-                    | FormattingContextType::Flex
-                    | FormattingContextType::Grid
-                    | FormattingContextType::Svg
-            )
-        )
+            .map(|payloads| ComputedValuesView::new(&payloads.groups));
+        box_may_be_partial_relayout_boundary(data, style, parent_style)
+            && (self.paintable_rows().paintable_row_is_populated(node)
+                || self.commit_splice_position_is_derivable_from_layout_ancestors(node))
+            && (!style.is_some_and(|style| style.is_absolutely_positioned())
+                || self.saved_abspos_layout_inputs(data).is_some())
     }
 
     pub(crate) fn register_partial_relayout_boundary_root(&self, node: NodeSlotId) {
@@ -719,21 +731,6 @@ impl LayoutNodeArena {
     }
 }
 
-/// # Safety
-///
-/// The arena must remain valid for the duration of the call, and `node` must name a live node
-/// in this arena.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_node_is_partial_relayout_boundary(arena: *mut c_void, node: NodeSlotId) -> bool {
-    // SAFETY: The C++ caller passes the live arena handle of its document.
-    unsafe {
-        super::layout_changes::ask_bool(
-            arena,
-            super::layout_changes::LayoutRead::NodeIsPartialRelayoutBoundary(node),
-        )
-    }
-}
-
 /// The facts that take an update off the partial relayout path: the style engine's pending container queries, and
 /// the host's devtools collection.
 #[derive(Clone, Copy)]
@@ -769,25 +766,27 @@ pub unsafe extern "C" fn layout_arena_reset_cached_intrinsic_sizes_of_self_and_a
     }
 }
 
+/// Classifies a layout tree update on the box `node` from the rows the render owner published, and tells the owner
+/// where the box is outside the layout tree.
+///
 /// # Safety
 ///
-/// The arena must remain valid for the duration of the call, and `node` must name a live node
-/// in this arena.
+/// `arena` must be a live handle on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_classify_layout_tree_update(
     arena: *mut c_void,
     node: NodeSlotId,
     reason_is_structural_boundary_self_rebuild: bool,
 ) -> FfiLayoutTreeUpdateClassification {
-    let read = super::layout_changes::LayoutRead::ClassifyLayoutTreeUpdate {
-        node,
-        reason_is_structural_boundary_self_rebuild,
-    };
-    // SAFETY: The C++ caller passes the live arena handle of its document.
-    match unsafe { super::layout_changes::ask(arena, read) } {
-        super::layout_changes::LayoutReadAnswer::Classification(classification) => classification,
-        super::layout_changes::LayoutReadAnswer::Bool(_) => FfiLayoutTreeUpdateClassification::default(),
+    // SAFETY: Guaranteed by the caller.
+    let rows = unsafe { RowSnapshot::published(arena) };
+    let (classification, escapes_partial_relayout) =
+        classify_layout_tree_update(rows, node, reason_is_structural_boundary_self_rebuild);
+    if escapes_partial_relayout {
+        // SAFETY: As above; nothing borrows the rows any more.
+        unsafe { super::layout_changes::send(arena, super::layout_changes::LayoutChange::RecordPartialRelayoutEscape) };
     }
+    classification
 }
 
 /// # Safety
@@ -826,6 +825,27 @@ pub unsafe extern "C" fn layout_arena_set_needs_layout_update(
                 node,
                 propagate_through_ancestors,
             },
+        );
+    }
+}
+
+/// Marks the box `node`, which may be a partial relayout boundary, for layout as `update` moved it, which the render
+/// owner decides as it takes the mark in.
+///
+/// # Safety
+///
+/// The arena must remain valid for the duration of the call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_set_needs_layout_update_of_possible_boundary(
+    marks: LayoutUpdateMarksHandle,
+    node: NodeSlotId,
+    update: FfiPossibleBoundaryUpdate,
+) {
+    // SAFETY: The render inputs hand out the marks of their document's live arena.
+    unsafe {
+        super::layout_changes::send_through_marks(
+            marks,
+            super::layout_changes::LayoutChange::SetNeedsLayoutUpdateOfPossibleBoundary { node, update },
         );
     }
 }
@@ -1013,17 +1033,20 @@ mod tests {
         arena.insert_child(anonymous_parent.slot, child.slot, NodeSlotId::INVALID);
         arena.set_style_node_for_test(grandparent.slot, StyleNodeID::from_raw(7));
 
-        let classification = arena.classify_layout_tree_update(child.slot, false);
-        assert!(!arena.pending_updates_escape_partial_relayout.get());
-        assert!(!classification.marks_partial_relayout_boundary_self_only);
+        arena.publish_rows();
+        let rows = arena.published_rows();
+
+        let (classification, escapes) = super::classify_layout_tree_update(&rows, child.slot, false);
+        assert!(!escapes);
+        assert!(!classification.may_be_partial_relayout_boundary);
         assert!(classification.escalates_past_anonymous_parents);
         assert_eq!(classification.escalation_target_style_node, 7);
 
-        let parent_classification = arena.classify_layout_tree_update(anonymous_parent.slot, false);
+        let (parent_classification, _) = super::classify_layout_tree_update(&rows, anonymous_parent.slot, false);
         assert!(!parent_classification.escalates_past_anonymous_parents);
 
-        arena.classify_layout_tree_update(grandparent.slot, false);
-        assert!(arena.pending_updates_escape_partial_relayout.get());
+        let (_, grandparent_escapes) = super::classify_layout_tree_update(&rows, grandparent.slot, false);
+        assert!(grandparent_escapes);
         free_node(&mut arena, &grandparent);
     }
 

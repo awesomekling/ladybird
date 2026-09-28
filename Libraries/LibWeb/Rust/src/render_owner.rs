@@ -342,8 +342,6 @@ pub(crate) enum Query {
     Arena(ArenaQuery),
     /// A read of the document's style engine, which the owner answers into the query the main thread holds.
     Engine(crate::css::style::owner_calls::StyleQueryRef),
-    /// A question about the document's layout tree.
-    Layout(crate::layout::layout_changes::LayoutRead),
     /// A write to the document's layout tree the main thread waits for, answered with what it owes the host.
     Write(crate::layout::layout_changes::LayoutWrite),
 }
@@ -527,7 +525,6 @@ pub(crate) enum Answer {
     Arena(ArenaAnswer),
     Count(u64),
     Engine(EngineAnswered),
-    Layout(crate::layout::layout_changes::LayoutReadAnswer),
     Payment(crate::layout::HostPayment),
 }
 
@@ -586,7 +583,6 @@ impl Answer {
             Query::PreOrderLabelViolations { .. } => Self::Count(0),
             Query::Arena(query) => Self::Arena(query.left_to_host()),
             Query::Engine(_) => Self::Engine(EngineAnswered::LeftToHost),
-            Query::Layout(read) => Self::Layout(read.unanswered()),
             Query::Write(_) => Self::Payment(crate::layout::HostPayment::nothing()),
         }
     }
@@ -667,7 +663,6 @@ impl Answer {
             Query::PreOrderLabelViolations { root } => Self::Count(pre_order_label_violations(arena, root)),
             Query::Arena(query) => Self::Arena(query.answer(arena)),
             Query::Engine(_) => Self::left_to_host(query),
-            Query::Layout(read) => Self::Layout(read.answer(arena)),
             Query::Write(_) => {
                 debug_assert!(false, "a write is made with the state, not answered from the arena");
                 Self::left_to_host(query)

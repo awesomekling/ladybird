@@ -71,9 +71,9 @@ public:
     // next layout lays it out from: the row's intrinsic size and fragment caches, and the natural size of the image
     // its box owns. Nothing else writes them.
     void set_needs_layout_update(Compositing::RustFFI::NodeSlotId, SetNeedsLayoutReason, Layout::LayoutUpdatePropagation = Layout::LayoutUpdatePropagation::ThroughAncestors);
-    // A style change that altered what sizes or places the row itself: a partial relayout re-resolves its own size
-    // and position instead of reusing them.
-    void set_needs_own_geometry_update(Compositing::RustFFI::NodeSlotId);
+    // The row may be a partial relayout boundary, which the render owner decides as it takes the mark in: a boundary
+    // lays out alone, as the update says.
+    void set_needs_layout_update_of_possible_boundary(Compositing::RustFFI::NodeSlotId, Layout::RustFFI::FfiPossibleBoundaryUpdate);
     void reset_intrinsic_size_caches_of_self_and_ancestors(Compositing::RustFFI::NodeSlotId);
     void set_owned_image_natural_size(Compositing::RustFFI::NodeSlotId, Layout::RustFFI::FfiReplacedContentFacts const&);
     // Takes a removed node's box out of its parent's in place, marking what that lays out again, if the layout tree

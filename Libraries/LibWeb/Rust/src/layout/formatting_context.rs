@@ -1059,14 +1059,14 @@ enum FormattingContextImplementation<'pass> {
 }
 
 pub(crate) fn formatting_context_type_created_by_node_data(
-    data: &NodeData,
+    data: &impl node_facts::NodeShape,
     style: Option<ComputedValuesView<'_>>,
     parent_is_flex_or_grid_container: bool,
 ) -> Option<FormattingContextType> {
-    if data.kind.get() == crate::layout::node_data::NodeKind::SVGSVGBox {
+    if data.kind() == crate::layout::node_data::NodeKind::SVGSVGBox {
         return Some(FormattingContextType::Svg);
     }
-    let is_replaced_box = node_facts::kind_is_replaced_box(data.kind.get());
+    let is_replaced_box = node_facts::kind_is_replaced_box(data.kind());
     let can_have_children = node_facts::node_can_have_children(data);
     if is_replaced_box && can_have_children {
         return Some(FormattingContextType::ReplacedWithChildren);
@@ -1083,7 +1083,7 @@ pub(crate) fn formatting_context_type_created_by_node_data(
             display.is_table_inside() || display.is_internal_table() || display.is_table_caption()
         })
     {
-        return Some(if node_facts::kind_is_block_container(data.kind.get()) {
+        return Some(if node_facts::kind_is_block_container(data.kind()) {
             FormattingContextType::Block
         } else {
             FormattingContextType::InternalReplaced
@@ -1092,7 +1092,7 @@ pub(crate) fn formatting_context_type_created_by_node_data(
     let display = style.map(|style| style.display());
     // NB: A flex fieldset lays out its legend and anonymous content box in a block formatting context.
     //     Flex layout applies only to the anonymous content box.
-    if data.kind.get() == crate::layout::node_data::NodeKind::FieldSetBox
+    if data.kind() == crate::layout::node_data::NodeKind::FieldSetBox
         && display.is_some_and(|display| display.is_flex_inside())
     {
         return Some(FormattingContextType::Block);
