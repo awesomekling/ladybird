@@ -235,12 +235,13 @@ impl RenderState {
         };
         if engine.is_null() {
             apply(arena, None);
-            return;
+        } else {
+            // The faces what the main thread wrote to the engine wants are this document's, whichever document's unit
+            // the owner serves the changes beside.
+            let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(face_owner);
+            reach.reach(engine, |engine| apply(arena, Some(engine)));
         }
-        // The faces what the main thread wrote to the engine wants are this document's, whichever document's unit the
-        // owner serves the changes beside.
-        let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(face_owner);
-        reach.reach(engine, |engine| apply(arena, Some(engine)));
+        arena.publish_rows();
     }
 
     /// Answers `query` from the state as the units before it left it.
@@ -1422,7 +1423,10 @@ fn run_style_on_owner(
     let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(state as u64);
     // SAFETY: The engine and the state are the document's, which only the owner reaches, and the document thread
     // waits for the transaction.
-    unsafe { engine.reach_on_owner(|engine| transaction.run(engine, &mut *state)) }
+    let view = unsafe { engine.reach_on_owner(|engine| transaction.run(engine, &mut *state)) };
+    // SAFETY: As above.
+    unsafe { &mut *state }.arena_mut().publish_rows();
+    view
 }
 
 thread_local! {

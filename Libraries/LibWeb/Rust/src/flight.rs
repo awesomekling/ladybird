@@ -392,6 +392,8 @@ impl Flight {
                 FfiFlightStage::StyleRenderHalf | FfiFlightStage::Record => Some(FfiFlightEndReason::StageRunsOnMain),
             };
             if let Some(end) = end {
+                // SAFETY: The frame in flight owns the arena, and nothing borrows it between stages.
+                unsafe { &mut *state }.arena_mut().publish_rows();
                 if reached >= FfiFlightStage::Rounds {
                     crate::stage_thread::hold_before_flight_completion("flight:laid-out");
                 }

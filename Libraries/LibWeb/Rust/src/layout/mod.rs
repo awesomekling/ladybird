@@ -42,7 +42,7 @@ mod partial_relayout;
 mod read_scope;
 pub(crate) mod rendered_text;
 mod replaced_with_children_formatting_context;
-mod row_reads;
+pub(crate) mod row_reads;
 pub(crate) mod run_records;
 pub(crate) mod seal;
 pub(crate) mod sizing_context;
@@ -73,7 +73,7 @@ pub(crate) use crate::layout::layout_node_arena::MainThreadFfiEntry as ArenaMain
 pub(crate) use crate::layout::layout_node_arena::OwnerAppliedStyle;
 pub(crate) use crate::layout::layout_node_arena::StyleEngineLink;
 pub(crate) use crate::layout::layout_node_arena::paying_host_handbacks;
-pub(crate) use crate::layout::layout_node_arena::{BOUND_ELEMENT_ROWS_PER_CHUNK, LayoutNodeArena, SLOTS_PER_CHUNK};
+pub(crate) use crate::layout::layout_node_arena::{LayoutNodeArena, SLOTS_PER_CHUNK};
 use crate::layout::layout_node_arena::{TableCellMeasurement, TableCellMeasurementKey};
 use crate::layout::node_data::AncestorFact;
 pub use crate::layout::node_data::FfiReplacedContentFacts;

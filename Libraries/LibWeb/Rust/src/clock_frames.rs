@@ -258,6 +258,8 @@ impl DocumentClock {
         } else {
             FfiClockTickOutcome::NeedsMain
         };
+        // SAFETY: Guaranteed by the caller; nothing borrows the arena once the tick has run.
+        unsafe { &mut *state }.arena_mut().publish_rows();
         if outcome == FfiClockTickOutcome::Presented {
             let previous = self.published.time();
             self.published

@@ -80,9 +80,10 @@ unsafe extern "C" fn layout_arena_style_node_changed(arena: *mut c_void, old_sty
 /// The arena and record must be live on the document thread.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn layout_arena_adopt_derived_node_style(arena: *mut c_void, node: NodeSlotId, record: u64) {
-    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
+    let arena = unsafe { LayoutNodeArena::from_handle_mut(arena) };
     let derived = arena.with_style_engine(|engine| engine.pin_derived_style_record(record));
     arena.apply_reinherited_style_record(node, derived);
+    arena.publish_rows();
 }
 
 /// Applies a style to a row, taking a style that holds no images, in one call: the host's pin
@@ -104,7 +105,7 @@ unsafe extern "C" fn layout_arena_install_row_style(
     // SAFETY: As above.
     let host_tables = unsafe { crate::layout::HostTables::from_handle(arena) };
     // SAFETY: As above.
-    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
+    let arena = unsafe { LayoutNodeArena::from_handle_mut(arena) };
     if style_record != arena.node_style_record(node) {
         arena.release_node_style_record_pin_for_host(node);
     }
@@ -124,6 +125,7 @@ unsafe extern "C" fn layout_arena_install_row_style(
     if arena.node_generated_for(node) != 0 {
         arena.pin_node_style_record_for_host(node, style_record);
     }
+    arena.publish_rows();
     old_image_observers
 }
 
@@ -144,7 +146,7 @@ unsafe extern "C" fn layout_arena_replace_row_style_record(
     style_record: u64,
 ) -> bool {
     // SAFETY: As above.
-    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
+    let arena = unsafe { LayoutNodeArena::from_handle_mut(arena) };
     if arena.node_style_record_is_pinned_by_arena(node) {
         return false;
     }
@@ -177,6 +179,7 @@ unsafe extern "C" fn layout_arena_replace_row_style_record(
     if pinned_by_host != 0 {
         arena.pin_node_style_record_for_host(node, style_record);
     }
+    arena.publish_rows();
     true
 }
 
