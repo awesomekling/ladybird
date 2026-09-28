@@ -791,8 +791,8 @@ void Document::reset_style_invalidation_counters() const
 {
     m_style_invalidation_counters = {};
     (void)CSS::StyleEngineFFI::style_engine_size_query_container_scan_visits(const_cast<CSS::StyleEngine&>(style_computer().style_engine()).rust_handle(), true);
-    if (m_layout_node_arena)
-        Layout::RustFFI::layout_arena_scrollable_overflow_recalculation_count(m_layout_node_arena->handle(), true);
+    if (auto* arena = layout_arena_handle())
+        Layout::RustFFI::layout_arena_scrollable_overflow_recalculation_count(arena, true);
     CSS::reset_longhand_wrappers_minted();
 }
 
@@ -850,7 +850,7 @@ Optional<Painting::QueryView> Document::query_view_for_clean_read() const
 bool Document::may_publish_query_snapshot() const
 {
     auto navigable = this->navigable();
-    if (!m_layout_node_arena || !navigable || navigable->active_document().ptr() != this)
+    if (!layout_arena_handle() || !navigable || navigable->active_document().ptr() != this)
         return false;
     // An animation that skipped a per-frame style update catches up on the next read of its target.
     if (render_inputs().has_throttled_animation_style_update())
@@ -892,9 +892,8 @@ void Document::publish_query_snapshot_after_read(Painting::QueryVisualContexts v
 
 u64 Document::layout_commit_generation() const
 {
-    if (!m_layout_node_arena)
-        return 0;
-    return Layout::RustFFI::layout_arena_layout_commit_generation(m_layout_node_arena->handle());
+    auto* arena = layout_arena_handle();
+    return arena ? Layout::RustFFI::layout_arena_layout_commit_generation(arena) : 0;
 }
 
 Document::JoinScope::JoinScope(Document& document, UpdateLayoutReason reason)
@@ -1002,7 +1001,8 @@ void Document::dump_join_counters() const
 
 bool Document::needs_full_layout_tree_update() const
 {
-    return m_layout_node_arena && Layout::RustFFI::layout_arena_needs_full_layout_tree_update(m_layout_node_arena->handle());
+    auto* arena = layout_arena_handle();
+    return arena && Layout::RustFFI::layout_arena_needs_full_layout_tree_update(arena);
 }
 
 void Document::set_needs_full_layout_tree_update(bool value)
@@ -1012,33 +1012,37 @@ void Document::set_needs_full_layout_tree_update(bool value)
 
 bool Document::is_running_update_layout() const
 {
-    return m_layout_node_arena && Layout::RustFFI::layout_arena_frame_state(m_layout_node_arena->handle()) == Layout::RustFFI::FfiLayoutFrameState::MainInsideJoin;
+    auto* arena = layout_arena_handle();
+    return arena && Layout::RustFFI::layout_arena_frame_state(arena) == Layout::RustFFI::FfiLayoutFrameState::MainInsideJoin;
 }
 
 u64 Document::partial_layout_count() const
 {
-    return m_layout_node_arena ? Layout::RustFFI::layout_arena_partial_layout_count(m_layout_node_arena->handle()) : 0;
+    auto* arena = layout_arena_handle();
+    return arena ? Layout::RustFFI::layout_arena_partial_layout_count(arena) : 0;
 }
 
 u64 Document::full_layout_count() const
 {
-    return m_layout_node_arena ? Layout::RustFFI::layout_arena_full_layout_count(m_layout_node_arena->handle()) : 0;
+    auto* arena = layout_arena_handle();
+    return arena ? Layout::RustFFI::layout_arena_full_layout_count(arena) : 0;
 }
 
 Layout::RustFFI::FfiLayoutTreeBuildStats Document::layout_tree_build_stats() const
 {
-    return m_layout_node_arena ? Layout::RustFFI::layout_arena_layout_tree_build_stats(m_layout_node_arena->handle()) : Layout::RustFFI::FfiLayoutTreeBuildStats {};
+    auto* arena = layout_arena_handle();
+    return arena ? Layout::RustFFI::layout_arena_layout_tree_build_stats(arena) : Layout::RustFFI::FfiLayoutTreeBuildStats {};
 }
 
 // A frame in flight may hold the render state a document is about to tear down. Retiring it waits for
 // that frame, and nothing the frame made for the old render state is published, or applied to it as it is taken in.
 void Document::retire_render_state(Layout::RustFFI::FfiRenderStateRetirement reason)
 {
-    auto* arena = layout_node_arena_if_created();
+    auto* arena = layout_arena_handle();
     if (!arena)
         return;
     TemporaryChange retiring { m_retiring_render_state, true };
-    Layout::RustFFI::layout_arena_retire_render_state(arena->handle(), reason);
+    Layout::RustFFI::layout_arena_retire_render_state(arena, reason);
 }
 
 void Document::finalize()
@@ -1836,20 +1840,21 @@ WebIDL::ExceptionOr<void> Document::set_title(Utf16View title)
 
 Compositing::RustFFI::NodeSlotId Document::layout_root_slot() const
 {
-    if (!m_layout_node_arena)
-        return Compositing::RustFFI::NodeSlotId_INVALID;
-    return Layout::RustFFI::layout_arena_layout_root(m_layout_node_arena->handle());
+    auto* arena = layout_arena_handle();
+    return arena ? Layout::RustFFI::layout_arena_layout_root(arena) : Compositing::RustFFI::NodeSlotId_INVALID;
 }
 
 void Document::tear_down_layout_tree()
 {
-    auto* layout_root = m_layout_node_arena ? layout_node_arena().node_if_live(layout_root_slot()) : nullptr;
-    if (layout_root)
-        layout_root->prepare_subtree_for_detach_from_layout_tree();
+    auto* arena = layout_arena_handle();
+    auto layout_root = arena ? Layout::RustFFI::layout_arena_row_if_live(arena, layout_root_slot()).slot : Compositing::RustFFI::NodeSlotId_INVALID;
+    bool has_layout_root = layout_root.index != Compositing::RustFFI::INVALID_NODE_SLOT_INDEX;
+    if (has_layout_root)
+        Layout::RustFFI::layout_arena_prepare_subtree_for_detach(arena, layout_root);
     m_hit_test_display_list = nullptr;
     m_chrome_widget_registry->clear();
-    if (layout_root)
-        layout_node_arena().free_subtree(Layout::Node::slot_id(layout_root));
+    if (has_layout_root)
+        Layout::RustFFI::layout_arena_free_subtree(arena, layout_root);
     m_paint_state = nullptr;
     set_needs_full_layout_tree_update(true);
 }
@@ -2160,8 +2165,8 @@ void Document::record_partial_relayout_escape(PartialRelayoutEscapeReason reason
     dbgln_if(UPDATE_LAYOUT_DEBUG, "Pending updates escape partial relayout boundaries ({})", to_string(reason));
     // A document without an arena has no layout root either, and the full pass that builds one
     // clears the bit before any boundary can be registered.
-    if (m_layout_node_arena)
-        Layout::RustFFI::layout_arena_record_partial_relayout_escape(m_layout_node_arena->handle());
+    if (auto* arena = layout_arena_handle())
+        Layout::RustFFI::layout_arena_record_partial_relayout_escape(arena);
 }
 
 // The style engine keeps the containers, and records their dependents once a full layout has
@@ -2248,17 +2253,12 @@ void Document::apply_layout_commit_effects(Layout::RustFFI::FfiLayoutCommitEffec
     }
     // The frame's rendering preparation clamped these offsets to what the committed overflow allows. Storing one
     // clamps it again, against the box its node has now.
-    auto& arena = layout_node_arena();
     for (auto const& clamped : ReadonlySpan<Layout::RustFFI::FfiClampedScrollOffset> { effects.clamped_scroll_offsets, effects.clamped_scroll_offsets_count }) {
-        Layout::Node* box = nullptr;
-        if (clamped.generated_for != 0)
-            box = static_cast<Layout::Node*>(Layout::RustFFI::layout_arena_bound_pseudo_element_shell(arena.handle(), clamped.style_node, clamped.generated_for));
-        else if (clamped.style_node != 0)
-            box = NodeIdentity::of_style_node(CSS::StyleNodeID { clamped.style_node }).bound_layout_node(arena);
-        else
-            box = NodeIdentity::of_document().bound_layout_node(arena);
-        if (box)
-            Painting::set_scroll_offset(*box, clamped.offset);
+        // The document has no style node of its own; it is named by 0.
+        auto identity = clamped.style_node != 0 ? NodeIdentity::of_style_node(CSS::StyleNodeID { clamped.style_node }) : NodeIdentity::of_document();
+        auto pseudo_element = clamped.generated_for != 0 ? Optional<CSS::PseudoElement> { static_cast<CSS::PseudoElement>(clamped.generated_for - 1) } : OptionalNone {};
+        if (auto box = Painting::BoxSlot::bound_to(*this, identity, pseudo_element))
+            Painting::set_scroll_offset(box, clamped.offset);
     }
     // What a render clock's ticks laid out, they showed already: their visual contexts are up to date, and the frame
     // they presented holds the display list.
@@ -2426,7 +2426,7 @@ InvalidationJournal& Document::invalidation_journal()
     m_render_inputs.note_invalidation_journal_mark();
     // NB: A drain inside the frame would hand the frame what changed beside it halfway through, so what
     //     is marked beside the frame waits in a journal of its own for the frame to be over.
-    if (m_layout_node_arena && Layout::RustFFI::layout_arena_frame_state(m_layout_node_arena->handle()) == Layout::RustFFI::FfiLayoutFrameState::InFlight)
+    if (auto* arena = layout_arena_handle(); arena && Layout::RustFFI::layout_arena_frame_state(arena) == Layout::RustFFI::FfiLayoutFrameState::InFlight)
         return *m_held_invalidation_journal;
     return *m_invalidation_journal;
 }
@@ -2454,26 +2454,26 @@ void Document::drain_invalidation_journal() const
 void Document::join_frame_in_flight(SourceLocation location) const
 {
     // A document with no arena has no frame to be in flight.
-    if (m_layout_node_arena) {
+    if (auto* arena = layout_arena_handle()) {
         HTML::MainThreadPhases::Scope phase { HTML::MainThreadPhases::Phase::FlightJoin };
-        Layout::RustFFI::layout_arena_join_frame_in_flight(m_layout_node_arena->handle(), reinterpret_cast<u8 const*>(location.filename().characters_without_null_termination()), location.filename().length(), location.line_number());
+        Layout::RustFFI::layout_arena_join_frame_in_flight(arena, reinterpret_cast<u8 const*>(location.filename().characters_without_null_termination()), location.filename().length(), location.line_number());
     }
 }
 
 void Document::join_frame_reaching_style_engine(SourceLocation location) const
 {
     // A document with no arena has no frame to be in flight.
-    if (m_layout_node_arena) {
+    if (auto* arena = layout_arena_handle()) {
         HTML::MainThreadPhases::Scope phase { HTML::MainThreadPhases::Phase::FlightJoin };
-        Layout::RustFFI::layout_arena_join_frame_reaching_style_engine(m_layout_node_arena->handle(), reinterpret_cast<u8 const*>(location.filename().characters_without_null_termination()), location.filename().length(), location.line_number());
+        Layout::RustFFI::layout_arena_join_frame_reaching_style_engine(arena, reinterpret_cast<u8 const*>(location.filename().characters_without_null_termination()), location.filename().length(), location.line_number());
     }
 }
 
 void Document::join_frame_for_dom_tree_mutation() const
 {
     // A document with no arena has no frame to be in flight.
-    if (m_layout_node_arena)
-        Layout::RustFFI::layout_arena_join_frame_for_dom_tree_mutation(m_layout_node_arena->handle());
+    if (auto* arena = layout_arena_handle())
+        Layout::RustFFI::layout_arena_join_frame_for_dom_tree_mutation(arena);
 }
 
 void Document::apply_commit_messages()
@@ -2493,9 +2493,10 @@ bool Document::layout_is_up_to_date() const
     if (!navigable() || navigable()->active_document().ptr() != this)
         return true;
     // Without an arena there is no layout root either, so there is a tree to build.
-    if (!m_layout_node_arena)
+    auto* arena = layout_arena_handle();
+    if (!arena)
         return false;
-    return Layout::RustFFI::layout_arena_layout_is_up_to_date(m_layout_node_arena->handle(),
+    return Layout::RustFFI::layout_arena_layout_is_up_to_date(arena,
         needs_layout_tree_update() || child_needs_layout_tree_update());
 }
 
@@ -2848,7 +2849,7 @@ void Document::finish_animated_style_update()
 
 void Document::prepare_for_rendering()
 {
-    if (!m_layout_node_arena)
+    if (!layout_arena_handle())
         return;
 
     auto outcome = Painting::rust_prepare_for_rendering(*this, m_needs_accumulated_visual_contexts_update);
@@ -2890,7 +2891,7 @@ Optional<Painting::FlightPaintDecline> Document::flight_paint_blocker() const
 {
     using Painting::FlightPaintDecline;
     // What only the main thread paints.
-    if (highlighted_layout_node() || !m_flexbox_highlights.is_empty() || !m_grid_highlights.is_empty())
+    if (highlighted_box() || !m_flexbox_highlights.is_empty() || !m_grid_highlights.is_empty())
         return FlightPaintDecline::InspectorOverlay;
     // A caret reads the layout it paints over, which the flight has yet to run.
     if (cursor_position())
@@ -3147,14 +3148,12 @@ void Document::set_highlighted_node(GC::Ptr<Node> node, Optional<CSS::PseudoElem
     if (m_highlighted_node == node && m_highlighted_pseudo_element == pseudo_element)
         return;
 
-    if (auto layout_node = highlighted_layout_node(); layout_node && Painting::has_committed_box(*layout_node))
-        Painting::set_needs_repaint(*layout_node, InvalidateDisplayList::PaintCommands);
+    Painting::set_needs_repaint(highlighted_box(), InvalidateDisplayList::PaintCommands);
 
     m_highlighted_node = node;
     m_highlighted_pseudo_element = pseudo_element;
 
-    if (auto layout_node = highlighted_layout_node(); layout_node && Painting::has_committed_box(*layout_node))
-        Painting::set_needs_repaint(*layout_node, InvalidateDisplayList::PaintCommands);
+    Painting::set_needs_repaint(highlighted_box(), InvalidateDisplayList::PaintCommands);
 }
 
 void Document::set_grid_highlighted_node(GC::Ptr<Node> node, Painting::GridInspectorOverlayOptions options)
@@ -3233,17 +3232,15 @@ void Document::clear_grid_highlighted_node(GC::Ptr<Node> node)
         node->set_needs_repaint(InvalidateDisplayList::PaintCommands);
 }
 
-Layout::Node* Document::highlighted_layout_node()
+Painting::BoxSlot Document::highlighted_box() const
 {
     if (!m_highlighted_node)
-        return nullptr;
+        return {};
 
     // NB: Called during painting inside update_layout().
     if (!m_highlighted_pseudo_element.has_value() || !m_highlighted_node->is_element())
-        return m_highlighted_node->unsafe_layout_node();
-
-    auto const& element = static_cast<Element const&>(*m_highlighted_node);
-    return element.pseudo_element_unsafe_layout_node(m_highlighted_pseudo_element.value());
+        return Painting::BoxSlot::bound_to(*m_highlighted_node);
+    return Painting::BoxSlot::of_pseudo_element(static_cast<Element const&>(*m_highlighted_node), *m_highlighted_pseudo_element);
 }
 
 static Node* find_common_ancestor(Node* a, Node* b)
@@ -7679,6 +7676,68 @@ static Painting::CompositorAnimationKeyframes const& compositor_animation_keyfra
 // Builds the compositor animation of one target kind for an effect the compositor could drive, and
 // keeps it pending with the effect. The checks here are the ones that read the animation objects; the
 // builder in Rust lowers and validates the keyframes.
+// The box an animation target is bound to: the element's, its pseudo-element's, or that of the element an
+// element-backed pseudo-element stands in for. Found by the arena's bindings, without making a shell for it.
+static Painting::BoxSlot box_of_animation_target(AbstractElement const& target)
+{
+    if (auto pseudo_element = target.pseudo_element(); pseudo_element.has_value())
+        return Painting::BoxSlot::of_pseudo_element(target.element(), *pseudo_element);
+    return Painting::BoxSlot::bound_to(target.element());
+}
+
+// Whether a box of this kind is a block-level or atomic box, rather than an inline box, a line break or text.
+static bool box_kind_is_box(Layout::RustFFI::NodeKind kind)
+{
+    return !first_is_one_of(kind, Layout::RustFFI::NodeKind::Unset, Layout::RustFFI::NodeKind::BreakNode, Layout::RustFFI::NodeKind::InlineNode,
+        Layout::RustFFI::NodeKind::Node, Layout::RustFFI::NodeKind::NodeWithStyle, Layout::RustFFI::NodeKind::TextNode, Layout::RustFFI::NodeKind::GeneratedTextNode);
+}
+
+static CSS::Positioning box_position(Painting::BoxSlot const& box)
+{
+    auto const* box_values = box.style_group<CSS::ComputedValues::BoxValues>();
+    return box_values ? static_cast<CSS::Positioning>(box_values->position) : CSS::Positioning::Static;
+}
+
+static bool box_has_compositor_animation_frame(Painting::BoxSlot const& box, Layout::RustFFI::CompositorAnimationFrameKind kind)
+{
+    return box && Layout::RustFFI::layout_arena_node_has_compositor_animation_frame(box.arena(), box.slot(), kind);
+}
+
+// The box gains or loses the frame the compositor animates its opacity, filter or background color through: its visual
+// contexts are built again, and it repaints.
+static void set_box_needs_compositor_animation_frame(Document& document, Painting::BoxSlot const& box, Layout::RustFFI::CompositorAnimationFrameKind kind, bool value)
+{
+    Layout::RustFFI::layout_arena_set_node_needs_compositor_animation_frame(box.arena(), box.slot(), kind, value);
+    document.schedule_accumulated_visual_context_update(box, Document::AccumulatedVisualContextUpdateScope::Structure);
+    CSS::RequiredInvalidationAfterStyleChange invalidation;
+    invalidation.ensure_at_least(CSS::InvalidationLevel::Repaint);
+    Painting::repaint_after_style_change(box, invalidation);
+}
+
+static bool box_has_css_transform(Painting::BoxSlot const& box)
+{
+    return box && Layout::RustFFI::layout_arena_node_has_css_transform(box.arena(), box.slot());
+}
+
+// Calls the callback for every box of the layout subtree the root heads, in pre-order, the root first.
+template<typename Callback>
+static void for_each_box_in_inclusive_subtree(Painting::BoxSlot const& root, Callback callback)
+{
+    for (auto box = root; box;) {
+        if (callback(box) == TraversalDecision::Break)
+            return;
+        if (auto child = box.first_child()) {
+            box = child;
+            continue;
+        }
+        while (box != root && !box.next_sibling())
+            box = box.parent();
+        if (box == root)
+            return;
+        box = box.next_sibling();
+    }
+}
+
 static Painting::CompositorAnimationEffectState::BuildOutcome build_compositor_animation(Animations::KeyframeEffect& effect, Compositing::RustFFI::FfiVisualAnimationTargetKind target_kind, CompositorAnimationKeyframesByEffect& keyframes_by_effect)
 {
     auto animation = effect.associated_animation();
@@ -7726,9 +7785,9 @@ static Painting::CompositorAnimationEffectState::BuildOutcome build_compositor_a
     if (target->element().namespace_uri() == Namespace::SVG) {
         // NB: An outer SVG viewport embedded in HTML uses the CSS box transform independently of its SVG
         //     contents. Internal SVG transforms also affect SVG geometry and must remain on the main thread.
-        auto const* layout_node = target->unsafe_layout_node();
+        auto box = box_of_animation_target(*target);
         auto parent = target->element().parent_element();
-        if (!targets_transform || !layout_node || layout_node->kind() != Layout::RustFFI::NodeKind::SVGSVGBox
+        if (!targets_transform || !box || box.kind() != Layout::RustFFI::NodeKind::SVGSVGBox
             || !parent || parent->namespace_uri() != Namespace::HTML)
             return {};
     }
@@ -7756,18 +7815,19 @@ static Painting::CompositorAnimationEffectState::BuildOutcome build_compositor_a
     }();
     if (!monotonic_time_at_anchor_ms.has_value())
         return {};
-    auto const* layout_node = target->unsafe_layout_node();
-    if (!layout_node)
+    auto box = box_of_animation_target(*target);
+    auto const* box_transform = box.style_group<CSS::ComputedValues::TransformValues>();
+    if (!box_transform)
         return {};
     if (targets_transform) {
-        if ((!effect.target_properties().contains(CSS::PropertyNameAndID::from_id(CSS::PropertyID::Translate)) && layout_node->has_translate())
-            || (!effect.target_properties().contains(CSS::PropertyNameAndID::from_id(CSS::PropertyID::Rotate)) && layout_node->has_rotate())
-            || (!effect.target_properties().contains(CSS::PropertyNameAndID::from_id(CSS::PropertyID::Scale)) && layout_node->has_scale())
-            || (!effect.target_properties().contains(CSS::PropertyNameAndID::from_id(CSS::PropertyID::Transform)) && layout_node->has_transformations())
-            || layout_node->transform_origin().z.to_px(CSSPixels { 0 }) != CSSPixels { 0 })
+        if ((!effect.target_properties().contains(CSS::PropertyNameAndID::from_id(CSS::PropertyID::Translate)) && box_transform->translate_value())
+            || (!effect.target_properties().contains(CSS::PropertyNameAndID::from_id(CSS::PropertyID::Rotate)) && box_transform->rotate_value())
+            || (!effect.target_properties().contains(CSS::PropertyNameAndID::from_id(CSS::PropertyID::Scale)) && box_transform->scale_value())
+            || (!effect.target_properties().contains(CSS::PropertyNameAndID::from_id(CSS::PropertyID::Transform)) && box_transform->has_transformations())
+            || box_transform->transform_origin_value().z.to_px(CSSPixels { 0 }) != CSSPixels { 0 })
             return {};
     }
-    if (!Painting::has_committed_box(*layout_node))
+    if (!Painting::has_committed_box(box))
         return {};
 
     auto const* key_frame_set = effect.key_frame_set();
@@ -7779,7 +7839,7 @@ static Painting::CompositorAnimationEffectState::BuildOutcome build_compositor_a
         .monotonic_time_ms = *monotonic_time_at_anchor_ms,
         .local_time_ms = current_time->value,
     };
-    return effect.compositor_animation_state().build(keyframes, *layout_node, target_kind, timing_anchor);
+    return effect.compositor_animation_state().build(keyframes, box, target_kind, timing_anchor);
 }
 
 static Optional<double> next_throttled_animation_iteration_event_time(Animations::Animation const& animation, Animations::KeyframeEffect const& effect)
@@ -7915,8 +7975,13 @@ void Document::update_compositor_animations()
 
     Optional<Compositing::AccumulatedVisualContextTree> visual_context_tree = paint_state().visual_context_tree(*this);
     paint_state().begin_compositor_animation_update(*this);
-    GC::RootHashMap<GC::Ref<Layout::Node>, bool> previous_content_retention;
-    GC::RootHashTable<GC::Ref<Layout::Node>> retained_this_pass;
+    // Whether each target's box retained its compositor animated content before this pass, by the box's slot.
+    struct ContentRetention {
+        Painting::BoxSlot box;
+        bool retained_before { false };
+    };
+    HashMap<u32, ContentRetention> previous_content_retention;
+    HashTable<u32> retained_this_pass;
     GC::RootHashTable<GC::Ref<Animations::KeyframeEffect>> previously_compositor_driven_effects;
     GC::RootHashTable<GC::Ref<Animations::KeyframeEffect>> previously_compositor_replaced_effects;
     GC::RootHashTable<GC::Ref<Animations::KeyframeEffect>> previously_published_effects;
@@ -7952,19 +8017,33 @@ void Document::update_compositor_animations()
         }
     }
 
-    auto transform_preserves_horizontal_axis = [](Layout::NodeWithStyle const& layout_node) {
-        if (layout_node.perspective().has_value())
+    auto transform_preserves_horizontal_axis = [](Painting::BoxSlot const& box) {
+        auto const* transform = box.style_group<CSS::ComputedValues::TransformValues>();
+        if (!transform)
+            return true;
+        if (transform->perspective_value().has_value())
+            return false;
+
+        // NB: A translation moves no axis, unless a perspective or a 3D matrix after it maps its offset onto one. The
+        //     matrices are resolved without a reference box, so a transform list that has either is not proven to
+        //     preserve the axis.
+        bool translation_can_move_an_axis = false;
+        transform->for_each_transformation([&](auto const& transformation) {
+            if (first_is_one_of(transformation.transform_function(), CSS::TransformFunction::Perspective, CSS::TransformFunction::Matrix3d))
+                translation_can_move_an_axis = true;
+        });
+        if (translation_can_move_an_axis)
             return false;
 
         auto matrix = Gfx::FloatMatrix4x4::identity();
-        if (auto translate = layout_node.translate())
-            matrix = matrix * translate->to_matrix(&layout_node);
-        if (auto rotate = layout_node.rotate())
-            matrix = matrix * rotate->to_matrix(&layout_node);
-        if (auto scale = layout_node.scale())
-            matrix = matrix * scale->to_matrix(&layout_node);
-        layout_node.for_each_transformation([&](auto const& transformation) {
-            matrix = matrix * transformation.to_matrix(&layout_node);
+        if (auto translate = transform->translate_value())
+            matrix = matrix * translate->to_matrix(nullptr);
+        if (auto rotate = transform->rotate_value())
+            matrix = matrix * rotate->to_matrix(nullptr);
+        if (auto scale = transform->scale_value())
+            matrix = matrix * scale->to_matrix(nullptr);
+        transform->for_each_transformation([&](auto const& transformation) {
+            matrix = matrix * transformation.to_matrix(nullptr);
         });
 
         constexpr auto epsilon = AK::NumericLimits<float>::epsilon();
@@ -7973,7 +8052,7 @@ void Document::update_compositor_animations()
             && abs(matrix[3, 0]) <= epsilon;
     };
 
-    auto animated_transform_preserves_axes = [&](Animations::KeyframeEffect& effect, Layout::Node const& layout_node) {
+    auto animated_transform_preserves_axes = [&](Animations::KeyframeEffect& effect, Painting::BoxSlot const& box) {
         return animated_transform_preserves_axes_cache.ensure(effect, [&] {
             if (effect.target_properties().contains(CSS::PropertyNameAndID::from_id(CSS::PropertyID::Rotate)))
                 return false;
@@ -7983,37 +8062,38 @@ void Document::update_compositor_animations()
             auto target = effect.target_abstract_element();
             if (!animation || !target.has_value() || !effect.key_frame_set())
                 return false;
-            return compositor_animation_keyframes(keyframes_by_effect, effect, *animation, *target).transform_preserves_axes(layout_node);
+            return compositor_animation_keyframes(keyframes_by_effect, effect, *animation, *target).transform_preserves_axes(box);
         });
     };
 
     auto ancestor_transform_can_map_horizontal_motion_to_vertical = [&](Element const& animated_target, Node const& observation_root) {
-        auto const* layout_node = animated_target.unsafe_layout_node();
-        if (!layout_node)
+        auto box = Painting::BoxSlot::bound_to(animated_target);
+        if (!box)
             return true;
-        for (auto const* ancestor = layout_node->parent(); ancestor; ancestor = ancestor->parent()) {
-            if (ancestor->has_css_transform() && !transform_preserves_horizontal_axis(*ancestor))
+        for (auto ancestor = box.parent(); ancestor; ancestor = ancestor.parent()) {
+            if (box_has_css_transform(ancestor) && !transform_preserves_horizontal_axis(ancestor))
                 return true;
-            if (auto* ancestor_element = as_if<Element>(ancestor->dom_node())) {
+            auto ancestor_node = ancestor.dom_node();
+            if (auto* ancestor_element = as_if<Element>(ancestor_node.ptr())) {
                 if (auto effects = in_effect_transform_effects_by_target.find(ancestor_element); effects != in_effect_transform_effects_by_target.end()) {
                     for (auto effect : effects->value) {
-                        if (!animated_transform_preserves_axes(*effect, *ancestor))
+                        if (!animated_transform_preserves_axes(*effect, ancestor))
                             return true;
                     }
                 }
             }
-            if (ancestor->dom_node() == &observation_root)
+            if (ancestor_node.ptr() == &observation_root)
                 break;
         }
         return false;
     };
 
     auto transform_subtree_is_clipped_outside = [this, &visual_context_tree](Element const& animated_target, CSSPixelRect const& root_bounds) {
-        auto const* layout_node = animated_target.unsafe_layout_node();
-        if (!layout_node)
+        auto box = Painting::BoxSlot::bound_to(animated_target);
+        if (!box)
             return false;
         return Layout::RustFFI::layout_arena_transform_subtree_is_clipped_outside(
-            layout_node->arena_handle(), Layout::Node::slot_id(layout_node), root_bounds,
+            box.arena(), box.slot(), root_bounds,
             Painting::rect_to_viewport_transform(*this, *visual_context_tree));
     };
 
@@ -8070,8 +8150,8 @@ void Document::update_compositor_animations()
             }
         }
 
-        auto const* layout_node = abstract_target.unsafe_layout_node();
-        if (!layout_node || !layout_node->is_box())
+        auto box = box_of_animation_target(abstract_target);
+        if (!box || !box_kind_is_box(box.kind()))
             return false;
 
         // NB: SVG resources and referenced subtrees can be painted outside their own ancestor clips.
@@ -8087,7 +8167,7 @@ void Document::update_compositor_animations()
             if (element && svg_element_can_be_painted_elsewhere(*element))
                 return false;
         }
-        if (is_svg_target && layout_node->has_children())
+        if (is_svg_target && box.first_child())
             return false;
 
         // NB: A descendant can explicitly inherit even a normally non-inherited paint property. Reject
@@ -8096,16 +8176,21 @@ void Document::update_compositor_animations()
             return first_is_one_of(property.id(), CSS::PropertyID::Opacity, CSS::PropertyID::Filter);
         });
         bool subtree_can_escape = false;
-        layout_node->for_each_in_inclusive_subtree_of_type<Layout::NodeWithStyle>([&](auto const& descendant) {
+        for_each_box_in_inclusive_subtree(box, [&](Painting::BoxSlot const& descendant) {
+            // Only a box with style of its own can escape; text runs where its parent does.
+            if (descendant.is_text())
+                return TraversalDecision::Continue;
             if (descendant.is_svg_box()) {
-                auto const* element = as_if<SVG::SVGElement>(descendant.dom_node());
+                auto descendant_node = descendant.dom_node();
+                auto const* element = as_if<SVG::SVGElement>(descendant_node.ptr());
                 if (!can_include_svg_descendants || !element || svg_element_can_be_painted_elsewhere(*element)) {
                     subtree_can_escape = true;
                     return TraversalDecision::Break;
                 }
             }
-            if (descendant.is_fixed_position()
-                || (&descendant != layout_node && descendant.is_absolutely_positioned())) {
+            auto position = box_position(descendant);
+            if (position == CSS::Positioning::Fixed
+                || (descendant != box && position == CSS::Positioning::Absolute)) {
                 subtree_can_escape = true;
                 return TraversalDecision::Break;
             }
@@ -8116,19 +8201,21 @@ void Document::update_compositor_animations()
 
         auto viewport_bounds = CSSPixelRect { { 0, 0 }, viewport_rect().size() };
         auto rect_to_viewport_transform = Painting::rect_to_viewport_transform(*this, *visual_context_tree);
-        auto bounds_in_viewport = [&](Layout::Node const& node) -> CSSPixelRect {
-            return Layout::RustFFI::layout_arena_bounding_client_rect(
-                node.arena_handle(), Layout::Node::slot_id(&node), rect_to_viewport_transform);
+        auto bounds_in_viewport = [&](Painting::BoxSlot const& node) -> CSSPixelRect {
+            return Painting::bounding_client_rect(node, rect_to_viewport_transform);
         };
-        HashTable<Layout::Node const*> containing_blocks;
-        for (auto const* container = layout_node->containing_block(); container; container = container->containing_block())
-            containing_blocks.set(container);
+        HashTable<u32> containing_blocks;
+        for (auto container = box.containing_block(); container; container = container.containing_block())
+            containing_blocks.set(container.slot().index);
 
         auto visible_bounds = viewport_bounds;
-        for (auto const* ancestor = layout_node; ancestor; ancestor = ancestor->parent()) {
-            bool can_move_or_expand_paint = ancestor->has_css_transform() || ancestor->perspective().has_value()
-                || ancestor->is_sticky_position() || ancestor->filter().has_filters();
-            if (auto const* element = as_if<Element>(ancestor->dom_node())) {
+        for (auto ancestor = box; ancestor; ancestor = ancestor.parent()) {
+            auto const* ancestor_transform = ancestor.style_group<CSS::ComputedValues::TransformValues>();
+            auto const* ancestor_effects = ancestor.style_group<CSS::ComputedValues::EffectsValues>();
+            bool can_move_or_expand_paint = box_has_css_transform(ancestor) || (ancestor_transform && ancestor_transform->perspective_value().has_value())
+                || box_position(ancestor) == CSS::Positioning::Sticky || (ancestor_effects && ancestor_effects->filter_value().has_filters());
+            auto ancestor_node = ancestor.dom_node();
+            if (auto const* element = as_if<Element>(ancestor_node.ptr())) {
                 can_move_or_expand_paint |= in_effect_transform_effects_by_target.contains(element);
                 if (auto effects = competing_effects.get(*element); effects.has_value() && effects->filter.winner)
                     can_move_or_expand_paint = true;
@@ -8140,23 +8227,28 @@ void Document::update_compositor_animations()
                 paint_stays_within_border_box = false;
                 continue;
             }
-            if (!containing_blocks.contains(ancestor) || ancestor->is_svg_box())
+            if (!containing_blocks.contains(ancestor.slot().index) || ancestor.is_svg_box())
                 continue;
-            if (ancestor->overflow_x() == CSS::Overflow::Visible || ancestor->overflow_y() == CSS::Overflow::Visible)
+            auto const* ancestor_box_values = ancestor.style_group<CSS::ComputedValues::BoxValues>();
+            if (!ancestor_box_values)
                 continue;
-            if (ancestor->overflow_x() == CSS::Overflow::Clip || ancestor->overflow_y() == CSS::Overflow::Clip) {
-                auto const& margin = ancestor->style_group<CSS::ComputedValues::MiscResetValues>().overflow_clip_margin;
+            auto overflow_x = static_cast<CSS::Overflow>(ancestor_box_values->overflow_x);
+            auto overflow_y = static_cast<CSS::Overflow>(ancestor_box_values->overflow_y);
+            if (overflow_x == CSS::Overflow::Visible || overflow_y == CSS::Overflow::Visible)
+                continue;
+            if (overflow_x == CSS::Overflow::Clip || overflow_y == CSS::Overflow::Clip) {
+                auto const& margin = ancestor.style_group<CSS::ComputedValues::MiscResetValues>()->overflow_clip_margin;
                 if (margin.top.offset != 0 || margin.right.offset != 0 || margin.bottom.offset != 0 || margin.left.offset != 0)
                     continue;
             }
-            visible_bounds = visible_bounds.intersected(bounds_in_viewport(*ancestor));
+            visible_bounds = visible_bounds.intersected(bounds_in_viewport(ancestor));
         }
         if (visible_bounds.is_empty())
             return true;
 
         // NB: Otherwise, only a leaf box with bounded paint can be proven invisible from its own bounds.
-        return paint_stays_within_border_box && !layout_node->has_children()
-            && !bounds_in_viewport(*layout_node).intersects(visible_bounds);
+        return paint_stays_within_border_box && !box.first_child()
+            && !bounds_in_viewport(box).intersects(visible_bounds);
     };
 
     auto observation_has_another_transform_animation = [&](Element const& animated_target, Element const& observation_target, Animations::KeyframeEffect const& current_effect) {
@@ -8225,8 +8317,10 @@ void Document::update_compositor_animations()
         if (effect.is_offscreen_throttled())
             previously_offscreen_throttled_effects.set(effect);
         if (auto target = effect.target_abstract_element(); target.has_value()) {
-            if (auto* layout_node = target->unsafe_layout_node()) {
-                previous_content_retention.ensure(*layout_node, [&] { return layout_node->retains_compositor_animated_content(); });
+            if (auto box = box_of_animation_target(*target)) {
+                previous_content_retention.ensure(box.slot().index, [&] {
+                    return ContentRetention { box, box.has_flag(Layout::RustFFI::NodeFlag::HasAnimatedOpacityOrTransform) };
+                });
             }
         }
         effect.set_is_compositor_driven(false);
@@ -8300,22 +8394,18 @@ void Document::update_compositor_animations()
             continue;
 
         bool missing_visual_context_node = build_compositor_animation(*effect, Compositing::RustFFI::FfiVisualAnimationTargetKind::Opacity, keyframes_by_effect).missing_visual_context_node;
-        auto* layout_node = target.unsafe_layout_node();
-        if (!layout_node)
+        auto box = box_of_animation_target(target);
+        if (!box)
             continue;
-        auto layout_node_slot = Layout::Node::slot_id(layout_node);
+        auto layout_node_slot = box.slot();
         bool already_forced_effects_layer = any_of(layout_nodes_with_stale_forced_effects_layer, [&](auto stale_slot) {
             return stale_slot.index == layout_node_slot.index;
         });
         if (!missing_visual_context_node && !already_forced_effects_layer)
             continue;
 
-        if (missing_visual_context_node && !layout_node->needs_compositor_effects_layer()) {
-            layout_node->set_needs_compositor_effects_layer(true);
-            schedule_accumulated_visual_context_update(*layout_node, AccumulatedVisualContextUpdateScope::Structure);
-            CSS::RequiredInvalidationAfterStyleChange invalidation;
-            invalidation.ensure_at_least(CSS::InvalidationLevel::Repaint);
-            Painting::repaint_after_style_change(*layout_node, invalidation);
+        if (missing_visual_context_node && !box_has_compositor_animation_frame(box, Layout::RustFFI::CompositorAnimationFrameKind::Opacity)) {
+            set_box_needs_compositor_animation_frame(*this, box, Layout::RustFFI::CompositorAnimationFrameKind::Opacity, true);
             forced_opacity_effects_layer = true;
         }
         if (!any_of(m_layout_nodes_with_forced_compositor_effects_layer, [&](auto forced_slot) { return forced_slot.index == layout_node_slot.index; }))
@@ -8414,49 +8504,39 @@ void Document::update_compositor_animations()
         // Background colors are display-list content, so associate their fill commands with a dedicated metadata
         // frame. Validate the descriptor before forcing that frame, which requires one repaint before the animation
         // can move to the compositor.
-        Layout::Node* background_color_layout_node = nullptr;
+        Painting::BoxSlot background_color_box;
         bool background_color_animation_was_built = false;
         bool background_color_animation_is_valid = false;
         if (selected_for_background_color) {
-            if (auto* layout_node = abstract_target->unsafe_layout_node()) {
-                if (!force_dark_applies && Painting::rust_background_color_can_be_compositor_animated(*layout_node)) {
-                    background_color_layout_node = layout_node;
+            if (auto box = box_of_animation_target(*abstract_target)) {
+                if (!force_dark_applies && Painting::rust_background_color_can_be_compositor_animated(box)) {
+                    background_color_box = box;
                     auto build = build_compositor_animation(effect, Compositing::RustFFI::FfiVisualAnimationTargetKind::BackgroundColor, keyframes_by_effect);
                     background_color_animation_was_built = build.built;
                     background_color_animation_is_valid = build.built || build.missing_visual_context_node;
-                    if (!background_color_animation_is_valid) {
-                        background_color_layout_node = nullptr;
-                    } else if (build.missing_visual_context_node && !layout_node->needs_compositor_background_color_frame()) {
-                        layout_node->set_needs_compositor_background_color_frame(true);
-                        schedule_accumulated_visual_context_update(*layout_node, AccumulatedVisualContextUpdateScope::Structure);
-                        CSS::RequiredInvalidationAfterStyleChange invalidation;
-                        invalidation.ensure_at_least(CSS::InvalidationLevel::Repaint);
-                        Painting::repaint_after_style_change(*layout_node, invalidation);
-                    }
+                    if (!background_color_animation_is_valid)
+                        background_color_box = {};
+                    else if (build.missing_visual_context_node && !box_has_compositor_animation_frame(box, Layout::RustFFI::CompositorAnimationFrameKind::BackgroundColor))
+                        set_box_needs_compositor_animation_frame(*this, box, Layout::RustFFI::CompositorAnimationFrameKind::BackgroundColor, true);
                 }
             }
         }
 
         // Filters need an effects frame whose filter payload can be replaced. Validate the descriptor before forcing
         // that frame, which requires one repaint before the animation can move to the compositor.
-        Layout::Node* filter_layout_node = nullptr;
+        Painting::BoxSlot filter_box;
         bool filter_animation_was_built = false;
         bool filter_animation_is_valid = false;
         if (selected_for_filter) {
-            if (auto* layout_node = abstract_target->unsafe_layout_node()) {
-                filter_layout_node = layout_node;
+            if (auto box = box_of_animation_target(*abstract_target)) {
+                filter_box = box;
                 auto build = build_compositor_animation(effect, Compositing::RustFFI::FfiVisualAnimationTargetKind::Filter, keyframes_by_effect);
                 filter_animation_was_built = build.built;
                 filter_animation_is_valid = build.built || build.missing_visual_context_node;
-                if (!filter_animation_is_valid) {
-                    filter_layout_node = nullptr;
-                } else if (build.missing_visual_context_node && !layout_node->needs_compositor_effects_layer()) {
-                    layout_node->set_needs_compositor_effects_layer(true);
-                    schedule_accumulated_visual_context_update(*layout_node, AccumulatedVisualContextUpdateScope::Structure);
-                    CSS::RequiredInvalidationAfterStyleChange invalidation;
-                    invalidation.ensure_at_least(CSS::InvalidationLevel::Repaint);
-                    Painting::repaint_after_style_change(*layout_node, invalidation);
-                }
+                if (!filter_animation_is_valid)
+                    filter_box = {};
+                else if (build.missing_visual_context_node && !box_has_compositor_animation_frame(box, Layout::RustFFI::CompositorAnimationFrameKind::Opacity))
+                    set_box_needs_compositor_animation_frame(*this, box, Layout::RustFFI::CompositorAnimationFrameKind::Opacity, true);
             }
         }
 
@@ -8483,8 +8563,8 @@ void Document::update_compositor_animations()
         bool background_color_was_handed_off = !selected_for_background_color;
         if (background_color_animation_was_built)
             background_color_was_handed_off = true;
-        if (background_color_layout_node && background_color_animation_is_valid) {
-            auto background_color_layout_node_slot = Layout::Node::slot_id(background_color_layout_node);
+        if (background_color_box && background_color_animation_is_valid) {
+            auto background_color_layout_node_slot = background_color_box.slot();
             if (!any_of(m_layout_nodes_with_forced_compositor_background_color_frame, [&](auto forced_slot) { return forced_slot.index == background_color_layout_node_slot.index; }))
                 m_layout_nodes_with_forced_compositor_background_color_frame.append(background_color_layout_node_slot);
             layout_nodes_with_stale_forced_background_color_frame.remove_first_matching([&](auto stale_slot) {
@@ -8494,8 +8574,8 @@ void Document::update_compositor_animations()
         bool filter_was_handed_off = !selected_for_filter;
         if (filter_animation_was_built)
             filter_was_handed_off = true;
-        if (filter_layout_node && filter_animation_is_valid) {
-            auto filter_layout_node_slot = Layout::Node::slot_id(filter_layout_node);
+        if (filter_box && filter_animation_is_valid) {
+            auto filter_layout_node_slot = filter_box.slot();
             if (!any_of(m_layout_nodes_with_forced_compositor_effects_layer, [&](auto forced_slot) { return forced_slot.index == filter_layout_node_slot.index; }))
                 m_layout_nodes_with_forced_compositor_effects_layer.append(filter_layout_node_slot);
             layout_nodes_with_stale_forced_effects_layer.remove_first_matching([&](auto stale_slot) {
@@ -8519,10 +8599,10 @@ void Document::update_compositor_animations()
         bool requires_main_thread_observation_sampling = false;
         if (selected_for_transform) {
             auto only_translates_horizontally = only_translates_horizontally_cache.ensure(effect, [&] {
-                auto const* layout_node = abstract_target->unsafe_layout_node();
-                if (!layout_node || !effect.key_frame_set())
+                auto box = box_of_animation_target(*abstract_target);
+                if (!box || !effect.key_frame_set())
                     return false;
-                return compositor_animation_keyframes(keyframes_by_effect, effect, animation, *abstract_target).only_translates_horizontally(*layout_node);
+                return compositor_animation_keyframes(keyframes_by_effect, effect, animation, *abstract_target).only_translates_horizontally(box);
             });
             transform_affects_observation = transform_affects_intersection_observation(target, effect, only_translates_horizontally, requires_main_thread_observation_sampling);
         }
@@ -8548,41 +8628,29 @@ void Document::update_compositor_animations()
             previously_published_effects.contains(GC::Ref { effect })
                 ? Painting::CompositorAnimationEffectState::ReuseRetainedTimingAnchors::Yes
                 : Painting::CompositorAnimationEffectState::ReuseRetainedTimingAnchors::No);
-        if (auto* layout_node = abstract_target->unsafe_layout_node())
-            retained_this_pass.set(*layout_node);
+        if (auto box = box_of_animation_target(*abstract_target))
+            retained_this_pass.set(box.slot().index);
         published_compositor_animation = true;
     }
 
     // Retention changes whether zero-opacity or singular-transform content is recorded. The
     // flag is written once the pass is complete, so an animation that stays on the compositor
     // changes nothing.
-    for (auto const& [layout_node, retained_before] : previous_content_retention) {
-        bool const retained_now = retained_this_pass.contains(layout_node);
-        if (retained_now == retained_before)
+    for (auto const& [slot, retention] : previous_content_retention) {
+        bool const retained_now = retained_this_pass.contains(slot);
+        if (retained_now == retention.retained_before || !retention.box.is_live())
             continue;
-        layout_node->set_retains_compositor_animated_content(retained_now);
-        Painting::set_needs_repaint(*layout_node, InvalidateDisplayList::PaintCommandsAndHitTestList);
+        Layout::RustFFI::layout_arena_set_node_retains_compositor_animated_content(retention.box.arena(), retention.box.slot(), retained_now);
+        Painting::set_needs_repaint(retention.box, InvalidateDisplayList::PaintCommandsAndHitTestList);
     }
 
     for (auto stale_slot : layout_nodes_with_stale_forced_effects_layer) {
-        auto* layout_node = layout_node_arena().node_if_live(stale_slot);
-        if (!layout_node)
-            continue;
-        layout_node->set_needs_compositor_effects_layer(false);
-        schedule_accumulated_visual_context_update(*layout_node, AccumulatedVisualContextUpdateScope::Structure);
-        CSS::RequiredInvalidationAfterStyleChange invalidation;
-        invalidation.ensure_at_least(CSS::InvalidationLevel::Repaint);
-        Painting::repaint_after_style_change(*layout_node, invalidation);
+        if (auto box = Painting::BoxSlot::of(*this, stale_slot))
+            set_box_needs_compositor_animation_frame(*this, box, Layout::RustFFI::CompositorAnimationFrameKind::Opacity, false);
     }
     for (auto stale_slot : layout_nodes_with_stale_forced_background_color_frame) {
-        auto* layout_node = layout_node_arena().node_if_live(stale_slot);
-        if (!layout_node)
-            continue;
-        layout_node->set_needs_compositor_background_color_frame(false);
-        schedule_accumulated_visual_context_update(*layout_node, AccumulatedVisualContextUpdateScope::Structure);
-        CSS::RequiredInvalidationAfterStyleChange invalidation;
-        invalidation.ensure_at_least(CSS::InvalidationLevel::Repaint);
-        Painting::repaint_after_style_change(*layout_node, invalidation);
+        if (auto box = Painting::BoxSlot::of(*this, stale_slot))
+            set_box_needs_compositor_animation_frame(*this, box, Layout::RustFFI::CompositorAnimationFrameKind::BackgroundColor, false);
     }
 
     if (m_force_visual_context_tree_rebuild_on_next_compositor_animation_update_for_testing) {
@@ -9804,8 +9872,7 @@ void Document::process_pending_top_layer_layout_changes()
             // anonymous wrappers and inline fragments behind; the parent subtree rebuild heals
             // that structure, while the top layer pass rebuilds the element itself.
             // NB: Called during top layer processing, outside layout tree construction.
-            auto placement = element->box_placement();
-            bool element_has_box_at_normal_position = (placement & Layout::RustFFI::BOX_PLACEMENT_HAS_PARENT) && !(placement & Layout::RustFFI::BOX_PLACEMENT_IN_TOP_LAYER);
+            bool element_has_box_at_normal_position = Painting::BoxSlot::bound_to(*element).parent() && !element->box_is_placed_in_top_layer();
             if (element_has_box_at_normal_position) {
                 if (auto* flat_tree_parent = element->flat_tree_parent(); flat_tree_parent && !flat_tree_parent->is_document())
                     flat_tree_parent->set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::TopLayerMembershipChange);
@@ -10322,8 +10389,8 @@ Optional<CSSPixelRect> Document::current_caret_rect()
 
     update_layout(UpdateLayoutReason::InputCaretRect);
 
-    auto* layout_node = dom_node.layout_node();
-    if (!layout_node)
+    auto box = Painting::BoxSlot::bound_to(dom_node);
+    if (!box)
         return {};
 
     // The caret rects computed here are document-relative (absolute). Platform IME overlays are positioned relative to
@@ -10338,18 +10405,15 @@ Optional<CSSPixelRect> Document::current_caret_rect()
     };
 
     if (is<DOM::Text>(dom_node)) {
-        auto result = Layout::RustFFI::layout_arena_text_caret_rect_in_dom_range(
-            layout_node->arena_handle(), Layout::Node::slot_id(layout_node), position->offset());
+        auto result = Layout::RustFFI::layout_arena_text_caret_rect_in_dom_range(box.arena(), box.slot(), position->offset());
         if (result.has_value)
             return to_viewport_rect(result.rect);
     }
 
     // Empty editable elements have no fragments; use the same child-offset position and font metrics as caret
     // painting, including empty lines rendered by <br>.
-    if (auto* node_with_style = as_if<Layout::NodeWithStyle>(*layout_node)) {
-        if (Painting::has_committed_box(*node_with_style))
-            return to_viewport_rect(Painting::caret_rect_for_child_offset(*node_with_style, position->offset()));
-    }
+    if (!box.is_text() && Painting::has_committed_box(box))
+        return to_viewport_rect(Painting::caret_rect_for_child_offset(box, position->offset()));
     return {};
 }
 
@@ -10496,13 +10560,14 @@ void Document::republish_inheriting_svg_pattern_attribute_facts()
 
 void Document::note_svg_paint_resources_changed()
 {
-    if (m_layout_node_arena)
+    if (layout_arena_handle())
         render_inputs_for_write().note_svg_paint_resources_changed();
 }
 
 bool Document::has_enrolled_svg_paint_resources() const
 {
-    return m_layout_node_arena && Layout::RustFFI::layout_arena_has_enrolled_svg_paint_resources(m_layout_node_arena->handle());
+    auto* arena = layout_arena_handle();
+    return arena && Layout::RustFFI::layout_arena_has_enrolled_svg_paint_resources(arena);
 }
 
 void Document::schedule_full_accumulated_visual_context_rebuild(Layout::RustFFI::FfiVisualContextGlobalRebuildReason reason)
@@ -10513,16 +10578,15 @@ void Document::schedule_full_accumulated_visual_context_rebuild(Layout::RustFFI:
 
 void Document::schedule_accumulated_visual_context_update(Layout::Row const& row, AccumulatedVisualContextUpdateScope scope)
 {
-    schedule_accumulated_visual_context_update(row.slot(), scope);
+    schedule_accumulated_visual_context_update(Painting::BoxSlot::of(*this, row.slot()), scope);
 }
 
-void Document::schedule_accumulated_visual_context_update(Compositing::RustFFI::NodeSlotId slot, AccumulatedVisualContextUpdateScope scope)
+void Document::schedule_accumulated_visual_context_update(Painting::BoxSlot const& box, AccumulatedVisualContextUpdateScope scope)
 {
-    auto* arena = layout_arena_handle();
-    if (!arena || slot.index == Compositing::RustFFI::INVALID_NODE_SLOT_INDEX || !Layout::RustFFI::layout_arena_has_committed_box(arena, slot))
+    if (!Painting::has_committed_box(box))
         return;
     render_inputs_for_write().note_visual_context_box_dirty(
-        slot,
+        box.slot(),
         scope == AccumulatedVisualContextUpdateScope::Values
             ? Layout::RustFFI::FfiVisualContextBoxDirtyKind::StyleValueChange
             : Layout::RustFFI::FfiVisualContextBoxDirtyKind::StyleStructuralChange);
@@ -10532,12 +10596,9 @@ void Document::schedule_accumulated_visual_context_update(Compositing::RustFFI::
 
 void Document::schedule_accumulated_visual_context_update(Element& element, AccumulatedVisualContextUpdateScope scope)
 {
-    schedule_accumulated_visual_context_update(Painting::committed_row_slot(*this, NodeIdentity::of(element)), scope);
-    auto* arena = layout_arena_handle();
-    if (!arena || element.style_node_id() == 0)
-        return;
+    schedule_accumulated_visual_context_update(Painting::BoxSlot::bound_to(element), scope);
     element.for_each_synthetic_pseudo_element([&](CSS::PseudoElement type, SyntheticPseudoElement const&) {
-        schedule_accumulated_visual_context_update(Layout::RustFFI::layout_arena_bound_row_of(arena, element.style_node_id().value(), encode_generated_for(type)).slot, scope);
+        schedule_accumulated_visual_context_update(Painting::BoxSlot::of_pseudo_element(element, type), scope);
     });
 }
 
@@ -10583,13 +10644,13 @@ Vector<Compositing::RustFFI::NodeSlotId> Document::collect_scroll_snap_container
 
     // A registered box whose layout node a style or layout update dropped is no longer a box of this document.
     m_scroll_snap_containers.remove_all_matching([&](auto registered_slot) {
-        return !layout_node_arena().node_if_live(registered_slot);
+        return !Painting::BoxSlot::of(*this, registered_slot);
     });
 
     Vector<Compositing::RustFFI::NodeSlotId> snap_containers;
     snap_containers.ensure_capacity(m_scroll_snap_containers.size());
     for (auto registered_slot : m_scroll_snap_containers) {
-        auto const& registered = *layout_node_arena().node_if_live(registered_slot);
+        auto registered = Painting::BoxSlot::of(*this, registered_slot);
         // The scroll snap properties of a registered box can stop making it a snap container without its layout node
         // being rebuilt, and a registered box the latest commit left out has no committed box to snap with.
         if (Painting::has_committed_box(registered) && Painting::is_scroll_snap_container(registered))
@@ -10643,13 +10704,8 @@ Optional<Painting::PendingDisplayListRecording> Document::begin_display_list_rec
     }
 
     Painting::InspectorOverlayInputs overlay_inputs;
-    if (m_highlighted_node) {
-        auto highlighted_box = m_highlighted_pseudo_element.has_value() && m_highlighted_node->is_element()
-            ? Painting::BoxSlot::of_pseudo_element(static_cast<Element const&>(*m_highlighted_node), *m_highlighted_pseudo_element)
-            : Painting::BoxSlot::bound_to(*m_highlighted_node);
-        if (Painting::has_committed_box(highlighted_box))
-            overlay_inputs.highlighted_box = highlighted_box;
-    }
+    if (auto highlighted_box = this->highlighted_box(); Painting::has_committed_box(highlighted_box))
+        overlay_inputs.highlighted_box = highlighted_box;
     auto const& palette = page().palette();
     overlay_inputs.tooltip_color = palette.color(Gfx::ColorRole::Tooltip);
     overlay_inputs.tooltip_text_color = palette.color(Gfx::ColorRole::TooltipText);

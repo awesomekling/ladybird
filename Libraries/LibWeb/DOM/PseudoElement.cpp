@@ -12,7 +12,7 @@
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/PseudoElement.h>
 #include <LibWeb/Layout/Node.h>
-#include <LibWeb/Painting/BoxViews.h>
+#include <LibWeb/Painting/BoxSlot.h>
 
 namespace Web::DOM {
 
@@ -65,13 +65,7 @@ Layout::NodeWithStyle* SyntheticPseudoElement::unsafe_layout_node() const
 
 bool SyntheticPseudoElement::has_box() const
 {
-    if (!m_originating_element || m_originating_element->style_node_id() == 0)
-        return false;
-    auto* arena = m_originating_element->document().layout_arena_handle();
-    if (!arena)
-        return false;
-    auto row = Layout::RustFFI::layout_arena_bound_row_of(arena, m_originating_element->style_node_id().value(), encode_generated_for(m_type));
-    return row.slot.index != Compositing::RustFFI::INVALID_NODE_SLOT_INDEX;
+    return m_originating_element && Painting::BoxSlot::of_pseudo_element(*m_originating_element, m_type);
 }
 
 CSSPixelPoint SyntheticPseudoElement::scroll_offset() const
@@ -90,31 +84,28 @@ CSSPixelPoint SyntheticPseudoElement::scroll_offset() const
 void SyntheticPseudoElement::set_scroll_offset(CSSPixelPoint value)
 {
     VERIFY(m_originating_element);
-    auto* arena = m_originating_element->document().layout_node_arena_if_created();
+    auto* arena = m_originating_element->document().layout_arena_handle();
     // Nothing has scrolled anything before a layout tree exists, so there is no offset to forget.
     if (!arena) {
         if (value.is_zero())
             return;
-        arena = &m_originating_element->document().layout_node_arena();
+        arena = m_originating_element->document().layout_node_arena().handle();
     }
-    Layout::RustFFI::layout_arena_set_pseudo_element_scroll_offset(arena->handle(),
+    Layout::RustFFI::layout_arena_set_pseudo_element_scroll_offset(arena,
         m_originating_element->style_node_id().value(), encode_generated_for(m_type), value);
 }
 
-void SyntheticPseudoElement::set_layout_node(Layout::NodeWithStyle* value)
+void SyntheticPseudoElement::unbind_box()
 {
-    auto* bound_row = unsafe_layout_node();
-    if (bound_row && bound_row != value) {
-        bound_row->pin_style_record_for_detachment();
-        Layout::RustFFI::layout_arena_set_node_flag(bound_row->arena_handle(), Layout::Node::slot_id(bound_row), Layout::RustFFI::HostNodeFlag::IsPseudoElementPrincipalBox, false);
-        Layout::RustFFI::layout_arena_unbind_row(bound_row->arena_handle(), Layout::Node::slot_id(bound_row));
-    }
-    // The box becomes the pseudo-element's box here, which is when it starts holding its scroll offset.
-    if (value) {
-        Layout::RustFFI::layout_arena_set_node_flag(value->arena_handle(), Layout::Node::slot_id(value), Layout::RustFFI::HostNodeFlag::IsPseudoElementPrincipalBox, true);
-        Layout::RustFFI::layout_arena_bind_row(value->arena_handle(), Layout::Node::slot_id(value));
-        value->publish_scroll_offset();
-    }
+    if (!m_originating_element)
+        return;
+    auto box = Painting::BoxSlot::of_pseudo_element(*m_originating_element, m_type);
+    if (!box)
+        return;
+    // The box is read until it is detached, so its style record stays pinned until then.
+    Layout::RustFFI::layout_arena_pin_bound_box_style_record_for_detachment(box.arena(), m_originating_element->style_node_id().value(), encode_generated_for(m_type));
+    Layout::RustFFI::layout_arena_set_node_flag(box.arena(), box.slot(), Layout::RustFFI::HostNodeFlag::IsPseudoElementPrincipalBox, false);
+    Layout::RustFFI::layout_arena_unbind_row(box.arena(), box.slot());
 }
 
 Node& SyntheticPseudoElement::root() const
@@ -196,7 +187,7 @@ Layout::NodeWithStyle* ElementReferencePseudoElement::unsafe_layout_node() const
 
 bool ElementReferencePseudoElement::has_box() const
 {
-    return Painting::bound_row_kind(m_referenced_element->document(), NodeIdentity::of(*m_referenced_element)).has_value();
+    return !!Painting::BoxSlot::bound_to(*m_referenced_element);
 }
 
 Node& ElementReferencePseudoElement::root() const

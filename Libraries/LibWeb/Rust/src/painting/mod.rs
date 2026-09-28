@@ -12,7 +12,6 @@ pub(crate) mod content_visibility;
 pub(crate) mod css_filter;
 mod devtools_layout;
 pub mod display_list;
-mod dom_box_reads;
 mod dump;
 pub mod ffi;
 pub mod fragment_ownership;

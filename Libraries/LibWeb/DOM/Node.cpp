@@ -97,6 +97,7 @@
 #include <LibWeb/MathML/MathMLElement.h>
 #include <LibWeb/Namespace.h>
 #include <LibWeb/Page/Page.h>
+#include <LibWeb/Painting/BoxSlot.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/Painting/PaintFacts.h>
 #include <LibWeb/SVG/SVGElement.h>
@@ -122,15 +123,13 @@ static bool final_direct_list_item_does_not_renumber_existing_content(Element co
 // The text the text node's box renders, whitespace as it is in the text: nothing for a text node without a box.
 static Utf16String rendered_text_of_text_box(Text const& text)
 {
-    auto& document = text.document();
-    auto* arena = document.layout_arena_handle();
-    auto box = Painting::committed_row_slot(document, NodeIdentity::of(text));
-    if (!arena || box.index == Compositing::RustFFI::INVALID_NODE_SLOT_INDEX)
+    auto box = Painting::BoxSlot::bound_to(text);
+    if (!box)
         return {};
     // The rendered text is refreshed from the data the mirror holds, so data the journal still holds goes through first.
-    document.drain_invalidation_journal();
+    text.document().drain_invalidation_journal();
     Utf16String rendered_text;
-    Layout::RustFFI::layout_arena_collect_rendered_text(arena, box, false, &rendered_text,
+    Layout::RustFFI::layout_arena_collect_rendered_text(box.arena(), box.slot(), false, &rendered_text,
         [](void* context, Layout::RustFFI::FfiRenderedTextView view) {
             *static_cast<Utf16String*>(context) = Utf16String::from_utf16({ reinterpret_cast<char16_t const*>(view.text), view.length_in_code_units });
         });
@@ -2940,28 +2939,11 @@ bool Node::update_inside_blocking_wheel_event_handler_state()
     return flipped;
 }
 
-// Damages the box of the element's pseudo-element and everything in it for a repaint. The invalidation journal names no
-// pseudo-element box, so its damage is applied now, as it is for any box the journal cannot name, and the caller has
-// the document repaint. Whether there was a box to damage.
-static bool damage_pseudo_element_box_subtree_for_repaint(Element& element, CSS::PseudoElement pseudo_element)
-{
-    auto* arena = element.document().layout_arena_handle();
-    if (!arena || element.style_node_id() == 0)
-        return false;
-    auto box = Layout::RustFFI::layout_arena_bound_row_of(arena, element.style_node_id().value(), encode_generated_for(pseudo_element)).slot;
-    if (box.index == Compositing::RustFFI::INVALID_NODE_SLOT_INDEX || !Layout::RustFFI::layout_arena_has_committed_box(arena, box))
-        return false;
-    Layout::RustFFI::layout_arena_paintable_invalidate_subtree_for_repaint(arena, box);
-    Layout::RustFFI::layout_arena_paintable_invalidate_for_repaint(arena, box, true);
-    return true;
-}
-
-// Whether the document has to repaint for a box that was damaged here.
-[[nodiscard]] static bool set_needs_repaint_of_top_layer_boxes(Element& element, NodeIdentity box_repainted_by_caller)
+static void set_needs_repaint_of_top_layer_boxes(Element& element, NodeIdentity box_repainted_by_caller)
 {
     if (auto identity = NodeIdentity::of(element); identity != box_repainted_by_caller)
         Painting::set_needs_repaint_in_subtree(element.document(), identity);
-    return damage_pseudo_element_box_subtree_for_repaint(element, CSS::PseudoElement::Backdrop);
+    Painting::set_needs_repaint_in_subtree(Painting::BoxSlot::of_pseudo_element(element, CSS::PseudoElement::Backdrop));
 }
 
 void Node::update_inside_blocking_wheel_event_handler_state_for_subtree()
@@ -2972,16 +2954,15 @@ void Node::update_inside_blocking_wheel_event_handler_state_for_subtree()
     }
 
     // The subtree's own box is repainted with everything in it, and a node without one repaints its own box.
-    auto subtree_box = Painting::bound_row_kind(document(), NodeIdentity::of(*this)).has_value() ? NodeIdentity::of(*this) : NodeIdentity {};
+    auto subtree_box = Painting::BoxSlot::bound_to(*this) ? NodeIdentity::of(*this) : NodeIdentity {};
     bool any_descendant_flipped_blocking_wheel_state = false;
     for_each_shadow_including_inclusive_descendant([&](Node& node) {
         if (!node.update_inside_blocking_wheel_event_handler_state())
             return TraversalDecision::Continue;
         any_descendant_flipped_blocking_wheel_state = true;
-        if (auto* element = as_if<Element>(node); element && element->rendered_in_top_layer()) {
-            if (set_needs_repaint_of_top_layer_boxes(*element, subtree_box))
-                document().set_needs_repaint(Badge<Node> {}, InvalidateDisplayList::PaintCommandsAndHitTestList);
-        } else if (!subtree_box)
+        if (auto* element = as_if<Element>(node); element && element->rendered_in_top_layer())
+            set_needs_repaint_of_top_layer_boxes(*element, subtree_box);
+        else if (!subtree_box)
             node.set_needs_repaint();
         return TraversalDecision::Continue;
     });
@@ -3318,9 +3299,10 @@ bool Node::is_uninteresting_whitespace_node() const
         return false;
     if (!static_cast<Text const&>(*this).data().is_ascii_whitespace())
         return false;
-    if (!Painting::bound_row_kind(document(), NodeIdentity::of(*this)).has_value())
+    auto box = Painting::BoxSlot::bound_to(*this);
+    if (!box)
         return true;
-    return box_placement() & Layout::RustFFI::BOX_PLACEMENT_PARENT_IS_ANONYMOUS;
+    return box.parent().is_anonymous();
 }
 
 IterationDecision Node::serialize_child_as_json(JsonArraySerializer<Utf16StringBuilder>& children_array, Node const& child) const
@@ -3392,7 +3374,7 @@ void Node::serialize_tree_as_json(JsonObjectSerializer<Utf16StringBuilder>& obje
         MUST(object.add("mode"sv, static_cast<DOM::ShadowRoot const&>(*this).mode() == ShadowRootMode::Open ? "open"sv : "closed"sv));
     }
 
-    MUST((object.add("visible"sv, Painting::bound_row_kind(document(), NodeIdentity::of(*this)).has_value())));
+    MUST((object.add("visible"sv, !!Painting::BoxSlot::bound_to(*this))));
 
     if (auto const* element = as_if<Element>(this)) {
         element->serialize_children_as_json(object);
@@ -4047,31 +4029,12 @@ Layout::Row Node::layout_row() const
     return {};
 }
 
-// The row the node's identity is bound to in its document's layout arena, found without making a shell for it.
-static Compositing::RustFFI::NodeSlotId bound_box_slot(Node const& node)
+bool Node::box_is_placed_in_top_layer() const
 {
-    return Painting::committed_row_slot(node.document(), NodeIdentity::of(node));
-}
-
-u8 Node::box_placement() const
-{
-    auto* arena = document().layout_arena_handle();
-    auto slot = bound_box_slot(*this);
-    if (!arena || slot.index == Compositing::RustFFI::INVALID_NODE_SLOT_INDEX)
-        return 0;
-    return Layout::RustFFI::layout_arena_box_placement(arena, slot);
-}
-
-Optional<CSS::Display> Node::box_display() const
-{
-    auto* arena = document().layout_arena_handle();
-    auto slot = bound_box_slot(*this);
-    if (!arena || slot.index == Compositing::RustFFI::INVALID_NODE_SLOT_INDEX)
-        return {};
-    auto const* box_values = CSS::style_group_from_payloads<CSS::ComputedValues::BoxValues>(Layout::RustFFI::layout_arena_node_style_payloads(arena, slot));
-    if (!box_values)
-        return {};
-    return CSS::display_from_ffi_display(box_values->display);
+    auto box = Painting::BoxSlot::bound_to(*this);
+    while (box.parent() && box.parent().is_anonymous())
+        box = box.parent();
+    return box.parent().is_viewport();
 }
 
 void Node::set_needs_repaint(InvalidateDisplayList should_invalidate_display_list)
@@ -4634,11 +4597,11 @@ ErrorOr<Utf16String> Node::name_or_description(NameOrDescription target, Documen
                     continue;
                 bool should_add_space = true;
                 const_cast<DOM::Document&>(document).update_layout(DOM::UpdateLayoutReason::NodeNameOrDescription);
-                if (auto box_kind = Painting::bound_row_kind(document, NodeIdentity::of(*child_node)); box_kind.has_value()) {
+                if (auto box = Painting::BoxSlot::bound_to(*child_node)) {
                     // A text box has no style of its own, and runs inline.
-                    auto is_text_box = first_is_one_of(*box_kind, Layout::RustFFI::NodeKind::TextNode, Layout::RustFFI::NodeKind::GeneratedTextNode);
-                    auto display = is_text_box ? Optional<CSS::Display> {} : child_node->box_display();
-                    if (is_text_box || (display.has_value() && display->is_inline_outside() && display->is_flow_inside()))
+                    auto const* box_values = box.is_text() ? nullptr : box.style_group<CSS::ComputedValues::BoxValues>();
+                    auto display = box_values ? CSS::display_from_ffi_display(box_values->display) : CSS::Display {};
+                    if (box.is_text() || (box_values && display.is_inline_outside() && display.is_flow_inside()))
                         should_add_space = false;
                 }
                 if (visited_nodes.contains(child_node->unique_id()))
@@ -4800,23 +4763,24 @@ Element const* Node::first_letter_owner_for_layout_subtree_from(Node const& incl
 {
     // NB: The boxes are looked up only once an ancestor has ::first-letter style, which is a question for the style
     //     side: a mutation beside a frame in flight that holds the boxes asks the frame for them only then.
-    Optional<Compositing::RustFFI::NodeSlotId> layout_subtree_root;
+    Optional<Painting::BoxSlot> layout_subtree_root;
     for (auto const* ancestor = &inclusive_ancestor; ancestor; ancestor = ancestor->parent_or_shadow_host_node()) {
         auto const* element = as_if<Element>(*ancestor);
         if (!element || !element->has_style(CSS::PseudoElement::FirstLetter))
             continue;
 
-        auto* arena = document().layout_arena_handle();
         if (!layout_subtree_root.has_value())
-            layout_subtree_root = bound_box_slot(*this);
-        if (!arena || layout_subtree_root->index == Compositing::RustFFI::INVALID_NODE_SLOT_INDEX)
+            layout_subtree_root = Painting::BoxSlot::bound_to(*this);
+        if (!*layout_subtree_root)
             return nullptr;
 
-        auto first_letter_box = Layout::RustFFI::layout_arena_bound_row_of(arena, element->style_node_id().value(), encode_generated_for(CSS::PseudoElement::FirstLetter)).slot;
-        if (first_letter_box.index == Compositing::RustFFI::INVALID_NODE_SLOT_INDEX)
+        auto first_letter_box = Painting::BoxSlot::of_pseudo_element(*element, CSS::PseudoElement::FirstLetter);
+        if (!first_letter_box)
             return element;
-        if (Layout::RustFFI::layout_arena_box_is_inclusive_ancestor_of(arena, *layout_subtree_root, first_letter_box))
-            return element;
+        for (auto box = first_letter_box; box; box = box.parent()) {
+            if (box == *layout_subtree_root)
+                return element;
+        }
     }
     return nullptr;
 }

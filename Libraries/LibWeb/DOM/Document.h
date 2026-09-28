@@ -403,8 +403,8 @@ public:
 
     void set_highlighted_node(GC::Ptr<Node>, Optional<CSS::PseudoElement>);
     GC::Ptr<Node const> highlighted_node() const { return m_highlighted_node; }
-    Layout::Node* highlighted_layout_node();
-    Layout::Node const* highlighted_layout_node() const { return const_cast<Document*>(this)->highlighted_layout_node(); }
+    // The box of the highlighted node, or of its highlighted pseudo-element.
+    Painting::BoxSlot highlighted_box() const;
     void set_flexbox_highlighted_node(GC::Ptr<Node>, Painting::FlexboxInspectorOverlayOptions);
     void clear_flexbox_highlighted_node(GC::Ptr<Node>);
     void set_grid_highlighted_node(GC::Ptr<Node>, Painting::GridInspectorOverlayOptions);
@@ -1387,8 +1387,8 @@ public:
     bool client_rects_need_no_accumulated_visual_contexts_update() const;
     void schedule_accumulated_visual_context_update(Element&, AccumulatedVisualContextUpdateScope);
     void schedule_accumulated_visual_context_update(Layout::Row const&, AccumulatedVisualContextUpdateScope);
-    // The same for the box in `slot` of the document's layout arena, which may be one no node identity names.
-    void schedule_accumulated_visual_context_update(Compositing::RustFFI::NodeSlotId, AccumulatedVisualContextUpdateScope);
+    // The same for a box no node identity names, a pseudo-element's for one.
+    void schedule_accumulated_visual_context_update(Painting::BoxSlot const&, AccumulatedVisualContextUpdateScope);
 
     Compositing::SnappedAreas const& snapped_areas_of_scroll_container(Compositing::AsyncScrollNodeStableID const&) const;
     void set_snapped_areas_of_scroll_container(Compositing::AsyncScrollNodeStableID const&, Compositing::SnappedAreas);

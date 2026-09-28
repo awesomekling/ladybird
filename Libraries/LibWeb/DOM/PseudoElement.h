@@ -64,7 +64,8 @@ public:
     Layout::NodeWithStyle* layout_node() const override;
     Layout::NodeWithStyle* unsafe_layout_node() const override;
     bool has_box() const override;
-    void set_layout_node(Layout::NodeWithStyle*);
+    // The pseudo-element's box stops being bound to it, and holds its style record until it is detached.
+    void unbind_box();
 
     virtual Node& root() const override;
 
