@@ -1196,6 +1196,9 @@ pub struct HostState {
     flushing_deferred_geometry_journal: bool,
     /// Exact element reactions retained across rootless flushes until a style root can consume them.
     deferred_element_style_inputs: Vec<NormalizedInput>,
+    /// Whether the deferred element style inputs moved other than as the host's copy of them in the engine's home
+    /// follows by itself, which a new copy then follows.
+    deferred_element_style_inputs_moved: bool,
     /// Pseudo-only reactions held until their otherwise deferred pseudo becomes observable on the
     /// node. Unlike rootless inputs, these do not keep the document's style update unsettled.
     latent_deferred_pseudo_element_style_inputs: Vec<NormalizedInput>,

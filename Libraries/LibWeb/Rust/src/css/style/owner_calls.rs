@@ -52,6 +52,13 @@ pub(crate) enum EngineChange {
     /// The host took what the container conditions of an element's row read of its containers, which the engine
     /// records.
     ContainerEffectsTakenByHost(StyleNodeID),
+    /// The host folded the style input an element owes into the reaction it applies to it, as
+    /// [`StyleEngine::absorb_element_style_input`] does.
+    ElementStyleInputAbsorbedByHost {
+        node: StyleNodeID,
+        reaction: u8,
+        inherited_style_groups: u8,
+    },
 }
 
 impl EngineChange {
@@ -97,7 +104,8 @@ impl EngineChange {
             | Self::PrepareRootFontResolution { .. }
             | Self::PublishFontFaceSnapshot { .. }
             | Self::RowSampledTakenByHost(_)
-            | Self::ContainerEffectsTakenByHost(_) => PendingFacts::NONE,
+            | Self::ContainerEffectsTakenByHost(_)
+            | Self::ElementStyleInputAbsorbedByHost { .. } => PendingFacts::NONE,
             // Only an element that loses its record may owe its resources an input.
             Self::Boundary(Write::SetElementContainerQueryInputs { record, .. }) if *record != 0 => PendingFacts::NONE,
             Self::Boundary(
@@ -129,6 +137,24 @@ impl EngineChange {
     }
 
     fn apply_to(self, engine: &mut StyleEngine) {
+        // The host's copy of the deferred element style inputs followed a write it knows the input of by itself.
+        let deferred_inputs_moved = engine.host.deferred_element_style_inputs_moved;
+        let followed_by_host = matches!(
+            self,
+            Self::Boundary(
+                BoundaryWrite::RecordElementStyleInput { .. }
+                    | BoundaryWrite::RecordDerivedElementStyleInput { .. }
+                    | BoundaryWrite::RecordTreeCountingStyleInput { .. }
+                    | BoundaryWrite::RecordContainerQueryInput { .. }
+            )
+        );
+        self.apply_write(engine);
+        if followed_by_host {
+            engine.host.deferred_element_style_inputs_moved = deferred_inputs_moved;
+        }
+    }
+
+    fn apply_write(self, engine: &mut StyleEngine) {
         match self {
             Self::Boundary(write) => write.apply(engine),
             Self::RecordSizeContainerQueryDependents { node } => unsafe {
@@ -168,6 +194,13 @@ impl EngineChange {
             }
             Self::ContainerEffectsTakenByHost(node) => {
                 engine.take_and_record_container_effects(node);
+            }
+            Self::ElementStyleInputAbsorbedByHost {
+                node,
+                reaction,
+                inherited_style_groups,
+            } => {
+                engine.absorb_element_style_input(node, reaction, inherited_style_groups, false);
             }
         }
     }

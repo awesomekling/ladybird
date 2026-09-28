@@ -2122,6 +2122,7 @@ impl StyleEngineState {
                 deferred_geometry_journal: NormalizationJournal::new(),
                 flushing_deferred_geometry_journal: false,
                 deferred_element_style_inputs: Vec::new(),
+                deferred_element_style_inputs_moved: false,
                 latent_deferred_pseudo_element_style_inputs: Vec::new(),
                 deferred_element_style_inputs_are_pending: false,
                 applied_style_reactions: Vec::new(),
@@ -2544,21 +2545,23 @@ impl StyleEngineState {
     /// ancestor becoming visible reveals children that were never styled, and a descendant
     /// recomputation reaches past the element. That part stays owed, so that the element's next
     /// reaction carries it on to its children.
+    /// The reactions of an element's deferred input consuming it leaves owed: they are its children's.
+    pub(crate) const CHILD_DIRECTED_REACTIONS: u8 =
+        transaction::STYLE_REACTION_ANCESTOR_BECAME_VISIBLE | transaction::STYLE_REACTION_RECOMPUTE_DESCENDANT_STYLES;
+
     pub fn consume_element_style_input(&mut self, node: StyleNodeID) {
         if let Ok(index) = self
             .host
             .deferred_element_style_inputs
             .binary_search_by_key(&InputKey::ElementStyleInput(node), |pending| pending.key)
         {
-            const CHILD_DIRECTED_REACTIONS: u8 = transaction::STYLE_REACTION_ANCESTOR_BECAME_VISIBLE
-                | transaction::STYLE_REACTION_RECOMPUTE_DESCENDANT_STYLES;
             let pending = &mut self.host.deferred_element_style_inputs[index];
             let InputValue::ElementStyleInput { reaction, .. } = pending.new else {
                 unreachable!();
             };
-            if reaction & CHILD_DIRECTED_REACTIONS != 0 {
+            if reaction & Self::CHILD_DIRECTED_REACTIONS != 0 {
                 pending.new = InputValue::ElementStyleInput {
-                    reaction: reaction & CHILD_DIRECTED_REACTIONS,
+                    reaction: reaction & Self::CHILD_DIRECTED_REACTIONS,
                     inherited_style_groups: 0,
                 };
             } else {

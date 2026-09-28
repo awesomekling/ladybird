@@ -683,7 +683,9 @@ fn generate_style_engine_boundary(manifest_dir: &Path, out_dir: &Path) -> Result
     let mut ffi_names = std::collections::HashSet::new();
     let mut operation_events = std::collections::HashSet::new();
     // The operations the main thread hands the render owner instead of entering the engine: a write it sends as a
-    // change, a read it asks as a query, each a variant of its own.
+    // change, a read it asks as a query, each a variant of its own. A read the main thread answers from what the engine
+    // left in its home ("owner": "home") has a hand-written entry, which asks the query only where the home cannot
+    // answer.
     let mut owner_writes = String::from(
         "/// A generated boundary write the main thread sends the render owner as a change, which the owner applies to the \
          document's engine.\n#[derive(Debug)]\npub(crate) enum BoundaryWrite {\n",
@@ -784,7 +786,7 @@ fn generate_style_engine_boundary(manifest_dir: &Path, out_dir: &Path) -> Result
         match owner {
             None => {}
             Some("change") if return_kind == "void" && receiver != "const" => {}
-            Some("query") if return_kind != "void" => {}
+            Some("query" | "home") if return_kind != "void" => {}
             Some(other) => return Err(format!("{event}: unknown or mismatched owner kind {other}").into()),
         }
         if owner.is_some() != ffi.is_some() {
@@ -848,7 +850,7 @@ fn generate_style_engine_boundary(manifest_dir: &Path, out_dir: &Path) -> Result
         }
 
         if let Some(ffi) = ffi
-            && let Some(owner) = owner
+            && let Some(owner) = owner.filter(|owner| *owner != "home")
         {
             writeln!(
                 rust,

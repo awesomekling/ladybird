@@ -2442,6 +2442,78 @@ pub unsafe extern "C" fn style_engine_pending_facts(engine: StyleEngineHandle) -
     }
 }
 
+/// Whether `node` owes a style input its next transaction takes: one the engine defers for it, or one a reaction the
+/// host applied derives for it. Answered from the engine's home where it knows.
+///
+/// # Safety
+/// `engine` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_has_deferred_element_style_input(engine: StyleEngineHandle, node: u32) -> bool {
+    const ENTRY: &str = "style_engine_has_deferred_element_style_input";
+    engine.bring_home(ENTRY);
+    // SAFETY: The engine is home.
+    if let Some(owes) = StyleNodeID::from_raw(node).map_or(Some(false), |node| {
+        unsafe { engine.drain_answers() }.deferred_inputs.owes(node)
+    }) {
+        return owes;
+    }
+    crate::css::style::owner_calls::ask(
+        engine,
+        ENTRY,
+        crate::css::style::owner_calls::StyleQuery::Boundary(BoundaryRead::HasDeferredElementStyleInput { node }),
+    )
+    .is()
+}
+
+/// Folds the style input `node` owes into the reaction the host is about to apply to it, where the reaction covers it,
+/// and answers the merged reaction in the low byte and the merged inherited style groups in the next, or zero, as
+/// [`StyleEngine::absorb_element_style_input`] does. Answered from the engine's home where it knows.
+///
+/// # Safety
+/// `engine` must be live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_absorb_element_style_input(
+    engine: StyleEngineInputHandle,
+    node: u32,
+    reaction: u8,
+    inherited_style_groups: u8,
+) -> u32 {
+    const ENTRY: &str = "style_engine_absorb_element_style_input";
+    let Some(style_node) = StyleNodeID::from_raw(node) else {
+        return 0;
+    };
+    engine.home().bring_home(ENTRY);
+    // SAFETY: The engine is home.
+    match unsafe { engine.home().drain_answers() }
+        .deferred_inputs
+        .absorb(style_node, reaction, inherited_style_groups)
+    {
+        Some(0) => 0,
+        Some(absorbed) => {
+            crate::css::style::owner_calls::send(
+                engine,
+                ENTRY,
+                crate::css::style::owner_calls::EngineChange::ElementStyleInputAbsorbedByHost {
+                    node: style_node,
+                    reaction,
+                    inherited_style_groups,
+                },
+            );
+            absorbed
+        }
+        None => crate::css::style::owner_calls::ask(
+            engine.home(),
+            ENTRY,
+            crate::css::style::owner_calls::StyleQuery::Boundary(BoundaryRead::AbsorbElementStyleInput {
+                node,
+                reaction,
+                inherited_style_groups,
+            }),
+        )
+        .u32(),
+    }
+}
+
 /// Applies one flat style input transaction.
 ///
 /// # Safety
@@ -4807,6 +4879,119 @@ pub(crate) struct DrainAnswers {
     container_effects: HashMap<StyleNodeID, super::container_queries::ContainerVerdict>,
     /// What the pass published for each row whose animations it sampled.
     rows_sampled: HashMap<StyleNodeID, FfiRowSampledInPass>,
+    pub(crate) deferred_inputs: DeferredInputs,
+}
+
+/// The element style inputs the engine defers, by element, with what each owes: its reactions and inherited style
+/// groups. The main thread keeps them exact across what it sends as it follows each change it sends that may defer
+/// one, or knows they are not where it cannot say what the change defers.
+#[derive(Default)]
+pub(crate) struct DeferredInputs {
+    exact: bool,
+    /// Whether the engine holds reactions the host applied, whose children's inputs it derives only as it takes them.
+    applied_reactions_held: bool,
+    inputs: HashMap<StyleNodeID, (u8, u8)>,
+}
+
+impl DeferredInputs {
+    /// Whether `node` owes a style input, where the copy knows.
+    fn owes(&self, node: StyleNodeID) -> Option<bool> {
+        (self.exact && !self.applied_reactions_held).then(|| self.inputs.contains_key(&node))
+    }
+
+    /// Folds the input `node` owes into the reaction the host is about to apply to it, as
+    /// [`StyleEngine::absorb_element_style_input`] does, where the copy knows.
+    fn absorb(&mut self, node: StyleNodeID, reaction: u8, inherited_style_groups: u8) -> Option<u32> {
+        if !self.exact {
+            return None;
+        }
+        let Some(&(owed_reaction, owed_groups)) = self.inputs.get(&node) else {
+            return Some(0);
+        };
+        if owed_reaction & !reaction != 0 || owed_groups & !inherited_style_groups != 0 {
+            return Some(0);
+        }
+        self.inputs.remove(&node);
+        Some(u32::from(reaction | owed_reaction) | (u32::from(inherited_style_groups | owed_groups) << 8))
+    }
+
+    /// Follows a change the main thread sends, which may leave `leaves`.
+    pub(crate) fn follow_sent(&mut self, change: &crate::css::style::owner_calls::StyleChange, leaves: PendingFacts) {
+        use super::owner_calls::{EngineChange, StyleChange};
+        let recomputes =
+            super::transaction::STYLE_REACTION_PUBLISHED_STYLE | super::transaction::STYLE_REACTION_RECOMPUTE_STYLE;
+        let (node, reaction, groups) = match change {
+            StyleChange::Engine(EngineChange::Boundary(
+                BoundaryWrite::RecordElementStyleInput {
+                    node,
+                    reaction,
+                    inherited_style_groups,
+                }
+                | BoundaryWrite::RecordDerivedElementStyleInput {
+                    node,
+                    reaction,
+                    inherited_style_groups,
+                },
+            )) => (*node, *reaction, *inherited_style_groups),
+            StyleChange::Engine(EngineChange::Boundary(
+                BoundaryWrite::RecordTreeCountingStyleInput { node }
+                | BoundaryWrite::RecordContainerQueryInput { node },
+            )) => (*node, recomputes, 0),
+            StyleChange::Engine(EngineChange::Boundary(BoundaryWrite::ConsumeElementStyleInput { node })) => {
+                if let Some(node) = StyleNodeID::from_raw(*node)
+                    && let Some((owed_reaction, owed_groups)) = self.inputs.get_mut(&node)
+                {
+                    if *owed_reaction & StyleEngineState::CHILD_DIRECTED_REACTIONS != 0 {
+                        *owed_reaction &= StyleEngineState::CHILD_DIRECTED_REACTIONS;
+                        *owed_groups = 0;
+                    } else {
+                        self.inputs.remove(&node);
+                    }
+                }
+                return;
+            }
+            _ => {
+                self.exact &= !leaves.contains(PendingFacts::DEFERRED_ELEMENT_INPUTS);
+                return;
+            }
+        };
+        if let Some(node) = StyleNodeID::from_raw(node)
+            && reaction != 0
+        {
+            let (owed_reaction, owed_groups) = self.inputs.entry(node).or_default();
+            *owed_reaction |= reaction;
+            *owed_groups |= groups;
+        }
+    }
+
+    fn follow(&mut self, engine: &mut StyleEngine) {
+        self.applied_reactions_held = engine.has_applied_style_reactions();
+        if !std::mem::take(&mut engine.host.deferred_element_style_inputs_moved) && self.exact {
+            debug_assert!(
+                self.inputs.len() == engine.host.deferred_element_style_inputs.len()
+                    && Self::owed(engine).all(|(node, owed)| self.inputs.get(&node) == Some(&owed)),
+                "the host's copy of the deferred element style inputs follows the engine's"
+            );
+            return;
+        }
+        self.inputs.clear();
+        self.inputs.extend(Self::owed(engine));
+        self.exact = true;
+    }
+
+    /// What each element owes of the engine's deferred inputs.
+    fn owed(engine: &StyleEngine) -> impl Iterator<Item = (StyleNodeID, (u8, u8))> + '_ {
+        engine.host.deferred_element_style_inputs.iter().filter_map(|input| {
+            let InputValue::ElementStyleInput {
+                reaction,
+                inherited_style_groups,
+            } = input.new
+            else {
+                return None;
+            };
+            Some((input.key.style_node()?, (reaction, inherited_style_groups)))
+        })
+    }
 }
 
 impl DrainAnswers {
@@ -4815,6 +5000,7 @@ impl DrainAnswers {
         if let Some(records) = engine.host.records_for_drain.take() {
             self.records = records;
         }
+        self.deferred_inputs.follow(engine);
         if engine.retained.container_effects_for_host.take_moved() {
             self.container_effects
                 .clone_from(&engine.retained.container_effects_for_host);

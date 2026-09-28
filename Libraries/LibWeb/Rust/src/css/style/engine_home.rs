@@ -61,9 +61,13 @@ impl StyleEngineInputHandle {
     /// with the engine home.
     pub(crate) fn send(self, change: StyleChange) {
         let home = self.0.home();
-        home.pending
-            .fetch_or(change.leaves(self.0.pending_facts()).0, Ordering::Relaxed);
-        // SAFETY: On the main thread, with the engine home: nothing reaches the engine, or what waits for it.
+        let leaves = change.leaves(self.0.pending_facts());
+        home.pending.fetch_or(leaves.0, Ordering::Relaxed);
+        // SAFETY: On the main thread, with the engine home: nothing reaches the engine, or what the home keeps for it.
+        unsafe { &mut *home.drain.get() }
+            .deferred_inputs
+            .follow_sent(&change, leaves);
+        // SAFETY: As above.
         unsafe { &mut *home.unapplied.get() }.push(change);
     }
 }
