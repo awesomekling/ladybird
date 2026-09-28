@@ -2254,23 +2254,35 @@ impl RetainedState {
                 let Some((_, value, checks)) = self.written_winner_value(node, &winner) else {
                     continue;
                 };
-                let longhand = winner.property >= crate::css::property_metadata::FIRST_LONGHAND_PROPERTY_ID;
-                let (random, tree_counting) = match checks.substitution {
-                    WrittenSubstitution::None => (checks.reads_element_random, false),
-                    WrittenSubstitution::PendingShorthand => (true, longhand),
-                    WrittenSubstitution::Unresolved => self
-                        .custom_property_environments
-                        .substitution(value, winner.property, environment)
-                        .map_or((true, longhand), |value| {
-                            let reads = crate::css::style_compute::collect_external_value_dependencies(value.data());
-                            (
-                                reads.has_unfixed_random_sharing,
-                                longhand && reads.uses_tree_counting_function,
-                            )
-                        }),
+                let substituted = match checks.substitution {
+                    WrittenSubstitution::None => {
+                        reads_random |= checks.reads_element_random;
+                        continue;
+                    }
+                    WrittenSubstitution::Unresolved => {
+                        self.custom_property_environments
+                            .substitution(value, winner.property, environment)
+                    }
+                    // A longhand pending its shorthand's substitution reads what the shorthand's does.
+                    WrittenSubstitution::PendingShorthand => match value.data() {
+                        crate::css::style_value::StyleValueData::PendingSubstitution {
+                            original_shorthand_value,
+                        } => self
+                            .shorthand_declaration_written_as(node, winner.source, original_shorthand_value.pointer())
+                            .and_then(|(shorthand, written)| {
+                                self.custom_property_environments
+                                    .substitution(&written, shorthand, environment)
+                            }),
+                        _ => None,
+                    },
                 };
+                let longhand = winner.property >= crate::css::property_metadata::FIRST_LONGHAND_PROPERTY_ID;
+                let (random, tree_counting) = substituted.map_or((true, true), |value| {
+                    let reads = crate::css::style_compute::collect_external_value_dependencies(value.data());
+                    (reads.has_unfixed_random_sharing, reads.uses_tree_counting_function)
+                });
                 reads_random |= random;
-                reads_tree_counting |= tree_counting;
+                reads_tree_counting |= longhand && tree_counting;
             }
         }
         let attributes = if reads_random || written.reads_attributes {
