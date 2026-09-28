@@ -1765,7 +1765,7 @@ pub(crate) unsafe fn owner_prepare_root_font_resolution(engine: &mut crate::css:
         .font_resolution
         .as_mut()
         .expect("a root request has a font resolution cache");
-    resolver.refill(memo, snapshot.as_ref(), cache, vec![request]);
+    resolver.refill(memo, snapshot.as_ref(), cache, request);
 }
 
 /// Creates a replay engine whose atom keys are opaque capture tokens rather than live fly strings.

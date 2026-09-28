@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+use super::HashMap;
 use super::bridge::{FONT_RESOLUTION_FEATURE_INPUT_COUNT, FfiFontResolutionRequest, FfiResolvedFont};
 use super::font_faces::FontFaceSnapshot;
-use super::{HashMap, HashSet};
 use crate::css::ffi_stats::HostFontCascadeList;
 use crate::css::style_value::{RetainedStyleValueData, retain_style_value, style_value_content_hash};
 use libgfx_rust::font::FontCascadeListHandle;
@@ -207,50 +207,28 @@ impl FontResolverHost {
         Self { resolve }
     }
 
-    /// Resolve the requests one pass collected, in one round between evaluation passes. Pending
-    /// web faces remain in the returned cascades, and wanting one is a message the host drains.
+    /// Resolve the request a drive suspended on, unless the cache already answers it, and keep the
+    /// answer. Whether it resolved anything. Pending web faces remain in the returned cascade, and
+    /// wanting one is a message the host drains.
     pub fn refill(
         &self,
         memo: usize,
         snapshot: Option<&std::sync::Arc<FontFaceSnapshot>>,
         cache: &mut FontResolutionCache,
-        mut requests: Vec<FontRequest>,
-    ) -> usize {
-        let Some(first) = requests.first() else {
-            return 0;
-        };
-        let generation = first.ffi.font_environment_generation;
-        debug_assert!(
-            requests
-                .iter()
-                .all(|request| request.ffi.font_environment_generation == generation)
-        );
-        cache.prepare(generation);
-        let mut unique = HashSet::default();
-        requests.retain(|request| {
-            cache.lookup(request.ffi).is_none() && unique.insert(FontResolutionKey::new(request.ffi))
-        });
-        if requests.is_empty() {
-            return 0;
+        request: FontRequest,
+    ) -> bool {
+        cache.prepare(request.ffi.font_environment_generation);
+        if cache.lookup(request.ffi).is_some() {
+            return false;
         }
-        let ffi_requests = requests.iter().map(|request| request.ffi).collect::<Vec<_>>();
-        let mut resolved = vec![FfiResolvedFont::default(); requests.len()];
+        let mut resolved = FfiResolvedFont::default();
         let table = snapshot.map_or(std::ptr::null(), super::font_faces::as_pointer);
-        // SAFETY: The requests and answers are live for the call, one answer per request.
+        // SAFETY: The request and its answer are live for the call.
         unsafe {
-            (self.resolve)(
-                memo,
-                table,
-                ffi_requests.as_ptr(),
-                resolved.as_mut_ptr(),
-                requests.len(),
-            );
+            (self.resolve)(memo, table, &raw const request.ffi, &raw mut resolved, 1);
         }
-        let count = requests.len();
-        for (request, resolved) in requests.into_iter().zip(resolved) {
-            cache.insert(request, resolved);
-        }
-        count
+        cache.insert(request, resolved);
+        true
     }
 }
 
@@ -324,7 +302,7 @@ mod tests {
         resolver.prepare(1);
         assert!(resolver.lookup(request).is_none());
         assert_eq!(RESOLVES.load(Ordering::Relaxed), 0);
-        host.refill(0, None, &mut resolver, vec![FontRequest::new(request)]);
+        host.refill(0, None, &mut resolver, FontRequest::new(request));
         let first = resolver.lookup(request).unwrap();
         assert!(
             resolver
@@ -357,7 +335,7 @@ mod tests {
         assert!(resolver.lookup(request).is_none());
         resolver.prepare(2);
         assert_eq!(font_cascade_list_unref_count(), unrefs_before + 1);
-        host.refill(0, None, &mut resolver, vec![FontRequest::new(request)]);
+        host.refill(0, None, &mut resolver, FontRequest::new(request));
         resolver.lookup(request).unwrap();
         assert_eq!(RESOLVES.load(Ordering::Relaxed), 2);
         assert_eq!(font_cascade_list_unref_count(), unrefs_before + 1);

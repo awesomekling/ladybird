@@ -24,9 +24,6 @@ pub(crate) struct EnvironmentMoveInFlight {
     held_style_record: u64,
     /// The record the pass republished over the moved environment.
     style_record: u64,
-    /// The moves an ancestor made earlier in the pass, which this one took over: the parent, the
-    /// environment and the record of each, oldest first.
-    earlier: Vec<(StyleNodeID, u64, u64)>,
 }
 
 /// What a style pass's walk below a settled row whose environment moved leaves for the pass.
@@ -374,22 +371,20 @@ impl StyleEngineState {
             moved.recompute.push(element);
             return;
         };
-        let (original_held_record, earlier) = match self.host.environment_moves_in_flight.remove(&element) {
-            Some(earlier_move) => {
-                let mut earlier = earlier_move.earlier;
-                earlier.push((earlier_move.parent, earlier_move.environment, earlier_move.style_record));
-                (earlier_move.held_style_record, earlier)
-            }
-            None => (held_record, Vec::new()),
-        };
+        // A move an ancestor made of the element earlier in the pass leaves the record the host
+        // held before it.
+        let held_style_record = self
+            .host
+            .environment_moves_in_flight
+            .get(&element)
+            .map_or(held_record, |earlier| earlier.held_style_record);
         self.host.environment_moves_in_flight.insert(
             element,
             EnvironmentMoveInFlight {
                 parent,
                 environment: new_parent_inheritable,
-                held_style_record: original_held_record,
+                held_style_record,
                 style_record,
-                earlier,
             },
         );
         moved.republished.push((element, held_record, style_record));
@@ -452,37 +447,6 @@ impl StyleEngineState {
             .retired_custom_property_data
             .extend(retired.and_then(|held| held.data));
         style_record
-    }
-
-    /// A row the pass settled past the cut of its wave is driven again in the wave that reaches it,
-    /// and the move it made of `node` from `previous` to `republished` goes back with it: the move
-    /// the host installs, if any, is the one before it. Otherwise the row, driven again, would read
-    /// the move as one the host holds, and the host would never install it.
-    pub(super) fn unwind_environment_move(&mut self, node: StyleNodeID, republished: u64, previous: u64) {
-        let Some(environment_move) = self.host.environment_moves_in_flight.get_mut(&node) else {
-            return;
-        };
-        if environment_move.style_record != republished {
-            return;
-        }
-        match environment_move.earlier.pop() {
-            Some((parent, environment, style_record)) => {
-                environment_move.parent = parent;
-                environment_move.environment = environment;
-                environment_move.style_record = style_record;
-            }
-            None => {
-                self.host.environment_moves_in_flight.remove(&node);
-            }
-        }
-        if let (Some(republished), Some(previous)) = (
-            FinalStyleRecordID::from_raw(republished),
-            FinalStyleRecordID::from_raw(previous),
-        ) {
-            self.retained
-                .computed_group_sets
-                .revert_engine_computed_record(node, republished, previous);
-        }
     }
 
     /// The host gave up on the batch: every element whose republished record it did not install
