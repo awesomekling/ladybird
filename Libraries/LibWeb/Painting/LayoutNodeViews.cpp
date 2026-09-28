@@ -84,11 +84,6 @@ CSSPixelRect transform_reference_box(Layout::Node const& node)
     return transform_reference_box(box_slot(node));
 }
 
-Compositing::SpatialNodeIndex own_scroll_node_index(Layout::Node const& node)
-{
-    return own_scroll_node_index(box_slot(node));
-}
-
 CSSPixelRect transform_rect_to_viewport(Layout::Node const& node, CSSPixelRect const& rect, Compositing::AccumulatedVisualContextTree::IncludeVisualViewportTransform include_visual_viewport_transform)
 {
     return transform_rect_to_viewport(box_slot(node), rect, include_visual_viewport_transform);
@@ -134,19 +129,9 @@ CSS::Display display(Layout::Node const& node)
     return display(box_slot(node));
 }
 
-CSSPixelRect caret_rect_for_child_offset(Layout::Node const& block, size_t offset)
-{
-    return caret_rect_for_child_offset(box_slot(block), offset);
-}
-
 bool has_committed_box(Layout::Row const& row)
 {
     return has_committed_box(box_slot(row));
-}
-
-u64 committed_row_reset_version(Layout::NodeArena& arena, Compositing::RustFFI::NodeSlotId slot)
-{
-    return Layout::RustFFI::layout_arena_paintable_row_reset_version(arena.handle(), slot);
 }
 
 void set_needs_repaint(Layout::Row const& row, InvalidateDisplayList should_invalidate_display_list)
@@ -157,11 +142,6 @@ void set_needs_repaint(Layout::Row const& row, InvalidateDisplayList should_inva
 void set_needs_repaint_in_subtree(Layout::Row const& row)
 {
     set_needs_repaint_in_subtree(box_slot(row));
-}
-
-void invalidate_propagated_text_decoration_caches(Layout::Row const& row)
-{
-    invalidate_propagated_text_decoration_caches(box_slot(row));
 }
 
 void apply_paint_cache_invalidation(Layout::Row const& row, PaintCacheInvalidation invalidation)

@@ -1125,16 +1125,6 @@ static BoxSlot box_slot(Layout::Node const& node)
     return BoxSlot::of(node.document(), Layout::Node::slot_id(&node));
 }
 
-void dump_layout_tree(StringBuilder& builder, Layout::Node const& root, bool interactive)
-{
-    dump_layout_tree(builder, box_slot(root), interactive);
-}
-
-bool rust_background_color_can_be_compositor_animated(Layout::Node const& layout_node)
-{
-    return rust_background_color_can_be_compositor_animated(box_slot(layout_node));
-}
-
 Layout::RustFFI::FfiPhysicalOverflowDirections rust_physical_overflow_directions(Layout::Node const& box)
 {
     return rust_physical_overflow_directions(box_slot(box));
