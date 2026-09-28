@@ -61,7 +61,7 @@ pub(crate) struct HostTables {
     /// What each row of the style batch a flight applied marked of its element's layout nodes, by style node, packed
     /// as an `FfiStyleInvalidationField` word, with the record it installed, while the host installs the batch.
     flight_style_damages: RefCell<HashMap<crate::css::style::tree::StyleNodeID, (u32, u64)>>,
-    /// The document's style engine, which the host linked the arena to, for the document thread to lend its token
+    /// The document's style engine, which the host linked the arena to, for the document thread to lend
     /// and ask where it is without reaching the arena.
     pub(super) style_engine: Cell<Option<crate::css::style::StyleEngineHandle>>,
 }

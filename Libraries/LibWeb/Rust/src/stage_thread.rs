@@ -431,7 +431,7 @@ fn stage_overlaps(label: &str) -> bool {
 /// submission order. The stage owns the arena `arena` until the main thread takes the frame back:
 /// the frame scheduler does at the top of its event loop once the stage has finished, and a
 /// main-thread access to the arena does before it goes on ([`join_frame_in_flight`]). A style pass
-/// reaches only its document's style engine, whose token it takes along
+/// reaches only its document's style engine, which it takes along
 /// (`crate::css::style::engine_home`).
 ///
 /// # Safety
@@ -1399,7 +1399,7 @@ pub extern "C" fn rust_stage_thread_layout_pass_in_flight_for(engine: crate::css
 }
 
 /// The main thread is about to wait for a stage of the frame that runs for the arena `arena` (or of
-/// any frame, for 0) to send a style engine's token home. A held stage would never send it, so the
+/// any frame, for 0) to send a style engine home. A held stage would never send it, so the
 /// wait releases a test's hold on the stages it may wait for, as a join does.
 pub(crate) fn release_holds_for_style_engine_wait(arena: usize) {
     SUBMITTED.with_borrow_mut(|submitted| {
@@ -1508,12 +1508,12 @@ pub unsafe extern "C" fn rust_stage_thread_forced_joins(label: *const u8, label_
 }
 
 /// Whether the calling thread's style engine entrances only wait for the stage that holds their
-/// engine's token (see [`rust_stage_thread_begin_style_engine_entrances_that_only_wait`]).
+/// engine (see [`rust_stage_thread_begin_style_engine_entrances_that_only_wait`]).
 pub(crate) fn style_engine_entrances_only_wait() -> bool {
     STYLE_ENGINE_ENTRANCES_ONLY_WAIT.with(Cell::get) != 0
 }
 
-/// Orders what the calling thread wrote before it hands a token over (the main thread to a stage,
+/// Orders what the calling thread wrote before it hands a style engine over (the main thread to a stage,
 /// or a stage back home) before what the thread that takes it reads after [`acquire_handoff`].
 pub(crate) fn release_handoff() {
     if let Some(thread) = stage_thread() {
@@ -1529,7 +1529,7 @@ pub(crate) fn acquire_handoff() {
 }
 
 /// Makes the calling thread's style engine entrances only wait for the stage that holds their
-/// engine's token, until the matching [`rust_stage_thread_end_style_engine_entrances_that_only_wait`].
+/// engine, until the matching [`rust_stage_thread_end_style_engine_entrances_that_only_wait`].
 /// For code that must not take in a frame: its consume runs script and allocates, which a garbage
 /// collector's finalizer must not do. The stage has finished once such an entrance returns, so the
 /// entrance does not race it, and the frame waits for its consume at the top of the event loop.

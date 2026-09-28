@@ -206,7 +206,7 @@ impl Flight {
         if self.layout.is_some() { "layout" } else { "style" }
     }
 
-    /// Lends the flight the token of its document's style engine `style_engine`: as to a layout
+    /// Lends the flight its document's style engine `style_engine`: as to a layout
     /// pass, which may send it home as soon as its rounds have run, or to a style pass alone. On the
     /// document thread.
     fn lend_style_engine(&self, style_engine: StyleEngineHandle) -> Option<(StyleEngineLoan, StyleEngineSettlement)> {
@@ -226,8 +226,8 @@ impl Flight {
         }
     }
 
-    /// Runs the flight's stages, on the stage thread, with the style engine's token lent to it as
-    /// `style_engine`. The flight sends the token home once its layout rounds have run, and the
+    /// Runs the flight's stages, on the stage thread, with the style engine lent to it as
+    /// `style_engine`. The flight sends the engine home once its layout rounds have run, and the
     /// stages after them reach no style engine.
     pub(crate) fn run(
         mut self,
@@ -283,7 +283,7 @@ impl Flight {
                     };
                     may_be_presented = round.may_be_presented;
                     // What the flight runs after its layout reads nothing of the style engine, so
-                    // it sends the token home. The main thread's writes may go on beside it only if
+                    // it sends the engine home. The main thread's writes may go on beside it only if
                     // what the round owes the document thread reaches no node they could change: no
                     // tree build or image to pay for, no rebuild to ask for. A flight that ran the
                     // round's style still owes the document thread the install of the batch it
@@ -305,7 +305,7 @@ impl Flight {
                         recalled
                     } || (owed == Owed::TakeBack && crate::css::style::engine_home::main_waits_for_arrival())
                     {
-                        // The main thread waits for the token, which comes home owing the
+                        // The main thread waits for the engine, which comes home owing the
                         // take-back: it takes the flight in next.
                         Some(FfiFlightEndReason::Preempted)
                     } else if !round.may_be_painted {

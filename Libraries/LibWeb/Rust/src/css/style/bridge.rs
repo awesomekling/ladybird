@@ -6167,7 +6167,7 @@ pub unsafe extern "C" fn style_engine_take_style_transaction(
     let document = crate::css::style::owner_calls::owning_document(engine.home());
     if let Some(document) = document {
         // The owner takes the whole transaction: it begins it with the inputs the host froze, runs its pass and
-        // finishes it, and the host reads the answers it left. This thread only brings the engine's token home, so
+        // finishes it, and the host reads the answers it left. This thread only brings the engine home, so
         // that no stage holds the engine meanwhile.
         engine.home().bring_home("style_engine_take_style_transaction");
         super::seal::note_engine_call("style_engine_take_style_transaction");
@@ -6470,7 +6470,7 @@ struct OwnerRenderHalfEffects {
 
 /// Takes the pending style transaction as [`style_engine_take_style_transaction`] does, and hands
 /// its pass to the stage thread instead of waiting for it: the pass runs beside the main thread
-/// with the engine's token, which it sends home once it has run. It does not own the layout arena
+/// with the engine, which it sends home once it has run. It does not own the layout arena
 /// `layout_arena`, which it never reaches.
 /// [`style_engine_finish_submitted_style_transaction`] then returns its answers. The host hands
 /// over the input it recorded since the last transaction as `input` (or null for none), which the
@@ -6516,7 +6516,7 @@ pub unsafe extern "C" fn style_engine_submit_style_transaction(
         unsafe { crate::flight::submit(layout_arena, crate::flight::Flight::from_style_pass(layout_arena, pass)) };
         return;
     }
-    // The pass takes the engine's token along, and sends it home once it has run.
+    // The pass takes the engine along, and sends it home once it has run.
     let (loan, settlement) = engine.lend(Holder::StylePass, Owed::TakeBack);
     // SAFETY: As above.
     unsafe {
@@ -6554,7 +6554,7 @@ pub(crate) fn take_style_pass_collected_for_flight() -> Option<StylePassJob> {
 }
 
 /// A style pass the main thread has prepared to run beside it, with what it takes along from the
-/// main thread. The stage that runs it holds its engine's token. Running it leaves its output in
+/// main thread. The stage that runs it holds its engine's loan. Running it leaves its output in
 /// the engine, for [`style_engine_finish_submitted_style_transaction`].
 pub(crate) struct StylePassJob {
     root: StyleNodeID,
@@ -6621,7 +6621,7 @@ impl StylePassJob {
         self.input.send_to_owner(document);
     }
 
-    /// Runs the pass, on the stage the engine's token is lent to as `loan`.
+    /// Runs the pass, on the stage the engine is lent to as `loan`.
     pub(crate) fn run(self, loan: &mut StyleEngineLoan) {
         let Self {
             root,
@@ -6659,7 +6659,7 @@ impl StylePassJob {
 ///
 /// # Safety
 /// As for [`style_engine_submit_style_transaction`]: the pass returned has to run on a stage that
-/// holds the engine's token.
+/// holds the engine's loan.
 pub(crate) unsafe fn prepare_style_pass(
     engine: StyleEngineInputHandle,
     root: u32,

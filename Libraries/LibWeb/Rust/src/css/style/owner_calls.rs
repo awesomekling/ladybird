@@ -1168,7 +1168,7 @@ pub(crate) fn ask(engine: StyleEngineHandle, entry: &'static str, query: StyleQu
     ask_document(document, entry, query)
 }
 
-/// Like [`ask`], for a garbage collection's finalizer, which must not wait for the engine's token: the main thread may
+/// Like [`ask`], for a garbage collection's finalizer, which must not wait for the engine: the main thread may
 /// hold the loan that would send it home. The owner, which answers, never waits for the main thread.
 pub(crate) fn ask_from_finalizer(engine: StyleEngineHandle, entry: &'static str, query: StyleQuery) -> StyleAnswer {
     let Some(document) = owning_document(engine) else {
