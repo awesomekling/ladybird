@@ -1,0 +1,3 @@
+the frame was in flight as the task began: true
+the height grows while the task runs: true
+the render side presents while the task runs: false
