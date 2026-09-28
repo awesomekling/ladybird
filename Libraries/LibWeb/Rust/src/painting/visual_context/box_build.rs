@@ -10,7 +10,7 @@ use super::*;
 use crate::layout::node_data::{NodeFlag, NodeSlotId};
 use crate::painting::paintable_data::*;
 use crate::painting::paintable_geometry;
-use crate::painting::paintable_rows::{PaintableRowsRead, PaintableRowsWrite};
+use crate::painting::paintable_rows::{ArenaRowsRead, PaintableRowsWrite};
 use libgfx_rust::FloatPoint;
 
 pub(crate) struct BoxBuildEnvironment<'a, Arena> {
@@ -133,7 +133,7 @@ fn scroll_registry_chain_to_viewport(
 //     anchor box. When the anchor is itself an anchor-positioned box, its layout position does not include
 //     its own paint-time shift, so each chained anchor's shift is emitted as well, masked to the axes that
 //     every link below it compensates in. The visited set and depth cap guard against malformed anchor chains.
-fn append_anchor_scroll_shift_nodes<Arena: PaintableRowsRead, Sink: VisualContextNodeSink>(
+fn append_anchor_scroll_shift_nodes<Arena: ArenaRowsRead, Sink: VisualContextNodeSink>(
     env: &BoxBuildEnvironment<'_, Arena>,
     sink: &mut Sink,
     resolver: &dyn AnchorScrollShiftResolver,
@@ -228,7 +228,7 @@ fn append_clip_to_positioned_chain<Sink: VisualContextNodeSink>(
     PositioningContext { clip, ..chain }
 }
 
-pub(crate) fn build_box_visual_context_nodes<Arena: PaintableRowsRead>(
+pub(crate) fn build_box_visual_context_nodes<Arena: ArenaRowsRead>(
     env: &BoxBuildEnvironment<'_, Arena>,
     sink: &mut BoxNodeWriter<'_>,
     slot: NodeSlotId,

@@ -7041,7 +7041,7 @@ void LocalNavigable::present_render_clock_frame(RenderClockFrameKit& kit)
     auto& presentation = *kit.presentation;
     // What the tick's layout moved of the visual contexts, a clip or a transform, goes to the compositor with the tree:
     // with the display list the tick recorded, or on its own where the recording is the same.
-    if (auto const* tree = Layout::RustFFI::layout_arena_main_visual_context_tree_retain(kit.recording->arena)) {
+    if (auto const* tree = Layout::RustFFI::layout_arena_clock_tick_visual_context_tree_retain(kit.recording->arena)) {
         auto visual_context_tree = Compositing::AccumulatedVisualContextTree::adopt_rust_handle(tree);
         bool const changed = visual_context_tree.rust_handle() != kit.recording->visual_context_tree.rust_handle();
         // A tree of another structure (a scroll container that went away, say) goes only with a display list recorded

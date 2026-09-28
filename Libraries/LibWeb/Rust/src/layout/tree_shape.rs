@@ -291,12 +291,23 @@ impl TreeShape {
     /// Brings the rows of every node written since the last publication up to date and publishes
     /// the column. Slots freed from now on are retired until the returned [`RetiredSlots`] is
     /// dropped.
+    #[cfg(test)]
     pub(crate) fn publish(
         &mut self,
         chunks: &[Box<Chunk>],
         style_nodes: &[Cell<Option<StyleNodeID>>],
     ) -> PublishedShape {
         let (nodes, styles) = self.publish_columns(chunks, style_nodes);
+        PublishedShape {
+            nodes,
+            styles,
+            retired_slots: self.retire_freed_slots(),
+        }
+    }
+
+    /// Retires the slots freed from now on until the returned [`RetiredSlots`] is dropped, for a publication that names
+    /// slots to its readers.
+    pub(crate) fn retire_freed_slots(&mut self) -> RetiredSlots {
         let epoch = Arc::new(RetireEpoch {
             slots: Mutex::default(),
             later: OnceLock::new(),
@@ -307,11 +318,7 @@ impl TreeShape {
             debug_assert!(chained.is_ok(), "only the latest epoch is chained to");
         }
         self.latest_epoch = Arc::downgrade(&epoch);
-        PublishedShape {
-            nodes,
-            styles,
-            retired_slots: RetiredSlots { _epoch: epoch },
-        }
+        RetiredSlots { _epoch: Some(epoch) }
     }
 
     /// Brings the rows of every node written since the last publication up to date and publishes
@@ -379,15 +386,17 @@ impl TreeShape {
 
 /// What one publication of the tree's shape holds: every node's row, the style each row names, and
 /// the slots freed since, which are not reused while it is alive.
+#[cfg(test)]
 pub(crate) struct PublishedShape {
     pub(crate) nodes: ColumnSnapshot<PaintNode, SLOTS_PER_CHUNK>,
     pub(crate) styles: ColumnSnapshot<PublishedStyle, SLOTS_PER_CHUNK>,
     pub(crate) retired_slots: RetiredSlots,
 }
 
-/// Keeps the slots freed after a publication from being reused while it is alive.
+/// Keeps the slots freed after a publication from being reused while it is alive. One of no publication keeps none.
+#[derive(Default)]
 pub(crate) struct RetiredSlots {
-    _epoch: Arc<RetireEpoch>,
+    _epoch: Option<Arc<RetireEpoch>>,
 }
 
 /// The slots freed after one publication and before the next. The publication holds it, and so does

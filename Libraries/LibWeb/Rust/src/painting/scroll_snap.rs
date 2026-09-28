@@ -15,7 +15,6 @@ use crate::css::css_enums::{
     scroll_snap_align, scroll_snap_axis, scroll_snap_stop, scroll_snap_strictness, writing_mode,
 };
 use crate::css::css_pixels::{CssPixelRect, CssPixels};
-use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::{NodeFlag, NodeKind, NodeSlotId};
 use crate::layout::node_facts;
 use crate::painting::chrome_geometry::{maximum_scroll_offset, minimum_scroll_offset};
@@ -41,7 +40,7 @@ fn snap_style(arena: &impl PaintRead, snap_container: NodeSlotId) -> Option<Comp
 }
 
 // https://drafts.csswg.org/css-scroll-snap-1/#snap-axis
-pub(crate) fn snap_axes_of_scroll_container(arena: &LayoutNodeArena, snap_container: NodeSlotId) -> FfiSnapAxes {
+pub(crate) fn snap_axes_of_scroll_container(arena: &impl PaintRead, snap_container: NodeSlotId) -> FfiSnapAxes {
     snap_style(arena, snap_container).map_or_else(FfiSnapAxes::default, snap_axes_of_style)
 }
 
@@ -88,7 +87,7 @@ fn document_element_box_under(arena: &impl PaintRead, parent: NodeSlotId) -> Opt
 // scrollport that is used as the alignment container for the scroll snap areas when calculating
 // snap positions.
 pub(crate) fn scroll_snapport_rect(
-    arena: &LayoutNodeArena,
+    arena: &impl PaintRead,
     snap_container: NodeSlotId,
     scrollport: CssPixelRect,
 ) -> CssPixelRect {

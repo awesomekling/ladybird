@@ -138,10 +138,8 @@ RENDER_STAGE_ALLOWED = {
             "layout/tree_build_seal.rs:REPORTED",
             "painting/record/verify.rs:ENABLED",
             "painting/seal.rs:CURRENT_PASS",
-            "painting/seal.rs:ENABLED",
             "painting/seal.rs:MODE",
             "painting/seal.rs:REPORTED",
-            "painting/seal.rs:REPORTED_MAIN_SIDE_READS",
         ],
     ),
     **render_stage_entries(

@@ -12,16 +12,16 @@ use crate::painting::record::resources::RecordingResourceManifest;
 use crate::painting::record::{RecordingOutput, RecordingResult};
 
 /// Publishes a pending recording from the document: hands its resources to the host and takes
-/// its output in. Returns the generation of the document's hit-test list.
+/// its output in.
 pub(crate) fn publish_recording(
     arena: &LayoutNodeArena,
     pending: PendingRecording,
     main_thread: &impl PublishesToHost,
     publish: &RecordingPublishHost,
-) -> u64 {
+) {
     let publishes_recording = pending.publishes_recording;
     let output = publish_to_host(pending, arena.recording().recorder(), main_thread, publish);
-    take_in_published_output(arena, output, publishes_recording)
+    take_in_published_output(arena, output, publishes_recording);
 }
 
 /// Hands a recording's resources to the host and makes its output, reading nothing but the

@@ -20,14 +20,14 @@ pub(crate) fn can_compute_client_rects_without_visual_context_update(
     viewport_scroll_offset_is_zero: bool,
 ) -> bool {
     let mut node = layout_node;
-    while let Some(data) = arena.node_data_if_live(node) {
-        let kind = data.kind.get();
+    while let Some(kind) = arena.node_kind_if_live(node) {
         if node_facts::kind_is_svg_box(kind) || kind == NodeKind::SVGSVGBox || kind == NodeKind::SVGForeignObjectBox {
             return false;
         }
-
-        if !node_facts::has_flag(data, NodeFlag::HasStyle) {
-            node = data.parent.get();
+        let shape = (kind, arena.node_flags_if_live(node));
+        let parent = arena.node_parent_if_live(node).unwrap_or(NodeSlotId::INVALID);
+        if !node_facts::has_flag(&shape, NodeFlag::HasStyle) {
+            node = parent;
             continue;
         }
         if let Some(style) = arena.node_style_if_live(node)
@@ -39,7 +39,7 @@ pub(crate) fn can_compute_client_rects_without_visual_context_update(
         }
         let compensates_for_scroll =
             NodeFlag::CompensatesForHorizontalScroll as u32 | NodeFlag::CompensatesForVerticalScroll as u32;
-        if data.flags.get() & compensates_for_scroll != 0 {
+        if shape.1 & compensates_for_scroll != 0 {
             return false;
         }
         // A scroll container's contents move, but its own border box does not.
@@ -47,13 +47,13 @@ pub(crate) fn can_compute_client_rects_without_visual_context_update(
             let scroll_offset_is_zero = if kind == NodeKind::Viewport {
                 viewport_scroll_offset_is_zero
             } else {
-                !node_facts::has_flag(data, NodeFlag::HasScrollOffset)
+                !node_facts::has_flag(&shape, NodeFlag::HasScrollOffset)
             };
             if !scroll_offset_is_zero && arena.paintable_row_is_populated(node) {
                 return false;
             }
         }
-        node = data.parent.get();
+        node = parent;
     }
     true
 }

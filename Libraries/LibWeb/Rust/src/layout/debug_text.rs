@@ -59,6 +59,14 @@ impl DebugText {
         self.nodes.push((self.text.len(), node));
     }
 
+    /// Writes `other` after this text.
+    pub(crate) fn append(&mut self, other: DebugText) {
+        let offset = self.text.len();
+        self.text.push_str(&other.text);
+        self.nodes
+            .extend(other.nodes.into_iter().map(|(at, node)| (offset + at, node)));
+    }
+
     /// How many DOM nodes the text names.
     pub(crate) fn node_count(&self) -> usize {
         self.nodes.len()

@@ -76,8 +76,10 @@ pub(crate) fn intersection_rect(
                     content_clip_rect_in_viewport_space(arena, container_slot, style, rect_to_viewport_transform)
             {
                 // Apply scroll margin to expand the scrollport for scroll containers.
-                let container_kind = arena.data(container_slot).kind.get();
-                if node_facts::kind_and_style_make_scroll_container(container_kind, Some(style)) {
+                if arena
+                    .node_kind_if_live(container_slot)
+                    .is_some_and(|kind| node_facts::kind_and_style_make_scroll_container(kind, Some(style)))
+                {
                     clip_rect = inflate_scroll_container_clip_rect_by_scroll_margin(clip_rect);
                 }
 
@@ -107,19 +109,18 @@ pub(crate) fn transform_subtree_is_clipped_outside(
     if !arena.paintable_row_is_populated(target) || root_bounds.is_empty() {
         return false;
     }
-    let target_data = arena.data(target);
-    if node_facts::kind_is_box(target_data.kind.get())
+    if arena.node_kind_if_live(target).is_some_and(node_facts::kind_is_box)
         && (style_queries::is_fixed_position(arena, target)
-            || node_facts::has_flag(target_data, NodeFlag::AbsposDescendantEscapes))
+            || arena.node_flags_if_live(target) & NodeFlag::AbsposDescendantEscapes as u32 != 0)
     {
         return false;
     }
 
     let mut has_disjoint_clip = false;
-    let mut ancestor = target_data.parent.get();
-    while let Some(ancestor_data) = arena.node_data_if_live(ancestor) {
-        let parent = ancestor_data.parent.get();
-        if node_facts::kind_is_box(ancestor_data.kind.get()) {
+    let mut ancestor = arena.node_parent_if_live(target).unwrap_or(NodeSlotId::INVALID);
+    while let Some(kind) = arena.node_kind_if_live(ancestor) {
+        let parent = arena.node_parent_if_live(ancestor).unwrap_or(NodeSlotId::INVALID);
+        if node_facts::kind_is_box(kind) {
             if !arena.paintable_row_is_populated(ancestor) {
                 return false;
             }

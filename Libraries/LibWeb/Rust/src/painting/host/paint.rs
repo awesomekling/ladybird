@@ -613,6 +613,25 @@ impl FramePresentation {
 
 impl PublishesToHost for FramePresentation {}
 
+/// A publication the owner runs in a pass the document thread waits for, which lends it the resource storage the
+/// publication adds to.
+pub(crate) struct WaitedPublication {
+    not_send_or_sync: std::marker::PhantomData<*const ()>,
+}
+
+impl WaitedPublication {
+    /// # Safety
+    ///
+    /// Only a paint pass the document thread waits for may mint this, while it runs.
+    pub(crate) unsafe fn new() -> Self {
+        Self {
+            not_send_or_sync: std::marker::PhantomData,
+        }
+    }
+}
+
+impl PublishesToHost for WaitedPublication {}
+
 impl RecordingPublishHost {
     pub(crate) fn add_font(&self, _: &impl PublishesToHost, font: &libgfx_rust::font::FontHandle) {
         // SAFETY: The C++ host registers the live font synchronously.

@@ -538,7 +538,7 @@ pub(crate) fn mix_blend_mode_to_compositing_and_blending_operator(
 // The bounds size the transparent fill that triggers a content-generating SVG filter, which
 // the stacking-context preamble records.
 fn set_svg_filter_bounds(
-    layout_arena: &impl crate::painting::paintable_rows::PaintableRowsRead,
+    layout_arena: &impl crate::painting::paintable_rows::ArenaRowsRead,
     slot: NodeSlotId,
     bounds: Option<crate::layout::used_values::FfiCssPixelRect>,
 ) {
@@ -608,7 +608,7 @@ fn published_svg_filter(
 }
 
 pub(crate) fn compute_effects_data(
-    layout_arena: &impl crate::painting::paintable_rows::PaintableRowsRead,
+    layout_arena: &impl crate::painting::paintable_rows::ArenaRowsRead,
     slot: NodeSlotId,
     device_pixels_per_css_pixel: f64,
 ) -> Option<EffectsData> {

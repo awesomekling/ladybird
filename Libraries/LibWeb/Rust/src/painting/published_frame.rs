@@ -7,11 +7,12 @@
 //! What a document publishes for the paint side to read, and the one trait the paint side reads it
 //! through.
 //!
-//! A [`PublishedFrame`] is immutable: every column in it is a [`ColumnSnapshot`] or an `Arc` the
-//! document shares with it, so the document writes its live columns (copying a chunk a frame still
-//! shares) while a frame is read. [`PaintRead`] names every read the display list recording makes
-//! of a document, so the recording is written against the trait rather than against the live
-//! [`LayoutNodeArena`], and the compiler lists what a frame still has to answer.
+//! The paint side reads the rows the document published last ([`RowSnapshot`]), which carry its paintable rows and
+//! paint facts beside the layout rows. A [`PublishedFrame`] is such rows with what one recording reads besides. Both
+//! are immutable: every column in them is a [`ColumnSnapshot`] or an `Arc` the document shares with them, so the
+//! document writes its live columns (copying a chunk they still share) while they are read. [`PaintRead`] names every
+//! read the display list recording makes of a document, so the recording is written against the trait rather than
+//! against the live [`LayoutNodeArena`], and the compiler lists what the published rows still have to answer.
 
 use crate::cow_column::ColumnSnapshot;
 use crate::css::computed_value_views::ComputedValuesView;
@@ -22,8 +23,9 @@ use crate::layout::SLOTS_PER_CHUNK;
 use crate::layout::fragment_tree::FragmentLink;
 use crate::layout::node_data::{CompositorAnimationFrameKind, DomPaintFact, NodeFlag, NodeKind, NodeSlotId, PaintNode};
 use crate::layout::node_facts;
+use crate::layout::row_reads::RowSnapshot;
 use crate::layout::text_chunker::GraphemeSegmenter;
-use crate::layout::tree_shape::{PublishedShape, PublishedStyle, RetiredSlots};
+use crate::layout::tree_shape::RetiredSlots;
 use crate::layout::used_values::FfiCssPixelRect;
 use crate::layout::{RenderedText, RenderedTextBoundary, TextFragments};
 use crate::painting::fragment_ownership::FragmentOwnershipFilter;
@@ -35,7 +37,9 @@ use crate::painting::layer_image_paint_facts::{LayerImagePaintFacts, LayerImageP
 use crate::painting::paint_order_plan::PaintOrderInputs;
 use crate::painting::paint_state::{PaintState, SelectionPseudoStyles};
 use crate::painting::paintable_data::{CommittedSideData, PaintableData};
-use crate::painting::paintable_rows::{CommittedFragmentLinkSlot, CommittedSideDataRef, PAINTABLE_SLOTS_PER_CHUNK};
+use crate::painting::paintable_rows::{
+    CommittedFragmentLinkSlot, CommittedSideDataRef, PAINTABLE_SLOTS_PER_CHUNK, PaintableRowsRead,
+};
 use crate::painting::record::damage::{FrameDamage, PaintDamage};
 use crate::painting::record::recorder_state::AbsoluteRectMemo;
 use crate::painting::replaced_paint_facts::{ReplacedPaintFacts, ReplacedPaintFactsTable};
@@ -52,41 +56,38 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 /// One published generation of a document's paintable rows and of the columns read beside them.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub(crate) struct PublishedRows {
     pub(super) rows: ColumnSnapshot<PaintableData, PAINTABLE_SLOTS_PER_CHUNK>,
     pub(super) fragment_links: ColumnSnapshot<CommittedFragmentLinkSlot, PAINTABLE_SLOTS_PER_CHUNK>,
     pub(super) side_data: ColumnSnapshot<CommittedSideData, PAINTABLE_SLOTS_PER_CHUNK>,
     pub(super) unique_node_ids: ColumnSnapshot<(NodeSlotId, i64), PAINTABLE_SLOTS_PER_CHUNK>,
+    /// How many times each row was reset, which a reader holding a row notices a reset by.
+    pub(super) row_reset_versions: ColumnSnapshot<u64, PAINTABLE_SLOTS_PER_CHUNK>,
     pub(super) stacking_context_entries: ColumnSnapshot<Option<Arc<StackingContextEntries>>, PAINTABLE_SLOTS_PER_CHUNK>,
     pub(super) visual_context_node_handles:
         ColumnSnapshot<Option<Arc<BoxVisualContextNodeHandles>>, PAINTABLE_SLOTS_PER_CHUNK>,
     pub(super) scroll_offsets: Arc<ScrollOffsets>,
     pub(super) image_map_areas: Arc<ImageMapAreas>,
-    pub(super) hit_test_list: Option<Arc<HitTestList>>,
     pub(super) visual_context_tree: Option<Arc<VisualContextTree>>,
 }
 
-/// What a document published for one recording to read: its rows, and what the paint side reads of
-/// its layout nodes.
+/// What a document published for one recording to read: its rows, with its hit-test list, its
+/// paint damage and the paint state the recording reads.
+#[derive(Default)]
 pub(crate) struct PublishedFrame {
-    pub(super) rows: PublishedRows,
-    nodes: ColumnSnapshot<PaintNode, SLOTS_PER_CHUNK>,
-    /// Each node's style, owned: the frame holds a reference on every style record's payloads it
-    /// reads, so what the document's style engine reclaims meanwhile does not reach it.
-    styles: ColumnSnapshot<PublishedStyle, SLOTS_PER_CHUNK>,
+    /// The rows, which the frame shares with every reader of the same publication.
+    pub(super) rows: Arc<RowSnapshot>,
+    pub(super) hit_test_list: Option<Arc<HitTestList>>,
     /// Keeps the arena from reusing a slot this frame may name until the frame is dropped.
     _retired_slots: RetiredSlots,
     damage: FrameDamage,
     paint_state: PublishedPaintState,
-    facts: PublishedPaintFacts,
-    /// The document's absolute rect memo epoch when the frame was published: a rect computed from a
-    /// frame with the same epoch holds for this one.
-    geometry_epoch: u64,
 }
 
 /// The document's text rows and its replaced, layer image and SVG paint resource tables, as they
-/// were when the frame was published.
+/// were when the rows were published.
+#[derive(Clone, Default)]
 pub(crate) struct PublishedPaintFacts {
     pub(crate) text: ColumnSnapshot<PublishedTextSlot, SLOTS_PER_CHUNK>,
     pub(crate) replaced: Arc<ReplacedPaintFactsTable>,
@@ -95,6 +96,7 @@ pub(crate) struct PublishedPaintFacts {
 }
 
 /// What a recording reads of the document's paint state, as it was when the frame was published.
+#[derive(Default)]
 pub(crate) struct PublishedPaintState {
     pub(crate) visual_context_tree: Option<Arc<VisualContextTree>>,
     /// Each scroll state slot's own scroll offset.
@@ -146,6 +148,23 @@ impl PublishedPaintState {
     }
 }
 
+/// What the document thread reads of a document's paint state beside its rows, as the rows were published.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct PaintStatus {
+    /// Whether scrollable overflow a commit or a writer left is still to be measured: the committed rows are the
+    /// rows once it is.
+    pub(crate) scrollable_overflow_unmeasured: bool,
+    /// How many scrollable overflow recalculations the document ran, for tests.
+    pub(crate) scrollable_overflow_recalculations: u64,
+    /// How many boxes a visual context update has yet to update, for tests.
+    pub(crate) visual_context_dirty_boxes: usize,
+    pub(crate) layout_commit_generation: u64,
+    /// Whether the last recording painted an SVG-as-image render the main thread had not resolved as an empty image.
+    pub(crate) last_recording_missed_vector_images: bool,
+    /// The boxes the canvas background is painted from, as the last preparation for rendering found them.
+    pub(crate) root_background_source: crate::painting::host::FfiRootBackgroundSource,
+}
+
 // A frame is read on whichever thread paints it while the document writes its live columns: it
 // holds no cell, no raw pointer and no borrow of the document, and owns everything it reads.
 const _: () = {
@@ -155,42 +174,29 @@ const _: () = {
 
 impl PublishedFrame {
     pub(crate) fn new(
-        rows: PublishedRows,
-        shape: PublishedShape,
+        rows: Arc<RowSnapshot>,
+        hit_test_list: Option<Arc<HitTestList>>,
+        retired_slots: RetiredSlots,
         damage: FrameDamage,
         paint_state: PublishedPaintState,
-        facts: PublishedPaintFacts,
-        geometry_epoch: u64,
     ) -> Self {
         Self {
             rows,
-            nodes: shape.nodes,
-            styles: shape.styles,
-            _retired_slots: shape.retired_slots,
+            hit_test_list,
+            _retired_slots: retired_slots,
             damage,
             paint_state,
-            facts,
-            geometry_epoch,
         }
-    }
-
-    /// What the frame published of a live text row.
-    fn text(&self, id: NodeSlotId) -> Option<&PublishedTextSlot> {
-        self.node(id)?;
-        self.facts
-            .text
-            .get(id.slot_index() as usize)
-            .filter(|text| text.generation == id.generation())
     }
 
     /// The SVG paint resources the frame was published with.
     pub(crate) fn svg_paint_resources(&self) -> &Arc<SvgPaintResourceRows> {
-        &self.facts.svg_paint_resources
+        &self.rows.paint_facts.svg_paint_resources
     }
 
     /// How many paintable rows the frame has room for.
     pub(crate) fn paintable_row_capacity(&self) -> usize {
-        self.rows.rows.slot_capacity()
+        self.rows.paintable.row_capacity()
     }
 
     /// What the frame's recording reads of the document's paint state.
@@ -202,28 +208,21 @@ impl PublishedFrame {
     pub(crate) fn damage(&self) -> &FrameDamage {
         &self.damage
     }
+}
 
-    /// The node in a live slot, as the frame published it.
-    #[inline]
-    fn node(&self, id: NodeSlotId) -> Option<&PaintNode> {
-        if id.is_invalid() {
-            return None;
-        }
-        self.nodes
+impl RowSnapshot {
+    /// What the rows published of a live text row.
+    fn text(&self, id: NodeSlotId) -> Option<&PublishedTextSlot> {
+        self.node(id)?;
+        self.paint_facts
+            .text
             .get(id.slot_index() as usize)
-            .filter(|node| node.generation != 0 && node.generation == id.generation())
+            .filter(|text| text.generation == id.generation())
     }
 
     fn node_and_style(&self, id: NodeSlotId) -> Option<(&PaintNode, Option<ComputedValuesView<'_>>)> {
         let node = self.node(id)?;
-        Some((node, self.style_at(id)))
-    }
-
-    /// The style of the node in a slot the caller has found live.
-    #[inline]
-    fn style_at(&self, id: NodeSlotId) -> Option<ComputedValuesView<'_>> {
-        let record = self.styles.get(id.slot_index() as usize)?.0.as_deref()?;
-        Some(ComputedValuesView::new(&record.payloads.as_ffi().groups))
+        Some((node, self.style(id)))
     }
 
     /// The node in a slot a read requires to be live.
@@ -232,13 +231,26 @@ impl PublishedFrame {
         assert!(!id.is_invalid(), "invalid layout node arena slot ID");
         self.node(id).expect("layout node arena read a stale or unused slot")
     }
+}
 
-    fn link(node: NodeSlotId) -> Option<NodeSlotId> {
-        (!node.is_invalid()).then_some(node)
-    }
+fn link(node: NodeSlotId) -> Option<NodeSlotId> {
+    (!node.is_invalid()).then_some(node)
 }
 
 impl PublishedRows {
+    /// How many rows the generation has room for.
+    pub(crate) fn row_capacity(&self) -> usize {
+        self.rows.slot_capacity()
+    }
+
+    /// How many times the row in slot `id` was reset.
+    pub(crate) fn row_reset_version(&self, id: NodeSlotId) -> u64 {
+        self.row_reset_versions
+            .get(id.slot_index() as usize)
+            .copied()
+            .unwrap_or_default()
+    }
+
     pub(crate) fn paintable_data(&self, id: NodeSlotId) -> &PaintableData {
         assert!(!id.is_invalid(), "invalid paintable arena slot ID");
         let data = self
@@ -299,43 +311,6 @@ impl PublishedRows {
             .get(id.slot_index() as usize)
             .expect("a populated row has published side data")
     }
-}
-
-/// The box whose content box a node is laid out against, found by walking its ancestors as the
-/// arena's own walk does (`containing_block_by_walking_ancestors`), from what a [`PaintRead`] reads.
-fn containing_block_by_walking_ancestors(read: &impl PaintRead, node: NodeSlotId) -> Option<NodeSlotId> {
-    use crate::css::css_enums::positioning;
-    let kind = read.node_kind_if_live(node)?;
-    let position = if node_facts::kind_is_text(kind) {
-        positioning::STATIC
-    } else {
-        crate::painting::style_queries::position(read, node)
-    };
-    if position != positioning::ABSOLUTE && position != positioning::FIXED {
-        let mut ancestor = read.node_parent_if_live(node);
-        while let Some(candidate) = ancestor {
-            let shape = (read.node_kind_if_live(candidate)?, read.node_flags_if_live(candidate));
-            if node_facts::node_forms_containing_block_for_children(&shape, read.node_style_if_live(candidate)) {
-                return Some(candidate);
-            }
-            ancestor = read.node_parent_if_live(candidate);
-        }
-        return None;
-    }
-    let is_fixed_position = position == positioning::FIXED;
-    let establishes_containing_block = node_facts::containing_block_establishment_flag(is_fixed_position) as u32;
-    let mut current = node;
-    while let Some(ancestor) = read.node_parent_if_live(current) {
-        current = ancestor;
-        if read.node_kind_if_live(current).is_some_and(node_facts::kind_is_box)
-            && read.node_flags_if_live(current) & establishes_containing_block != 0
-        {
-            return Some(current);
-        }
-    }
-    // A fixed-position box with no ancestor establishing its containing block is laid out against
-    // the root.
-    is_fixed_position.then_some(current)
 }
 
 /// The reads the display list recording makes of a document. The live arena answers them from the
@@ -732,62 +707,82 @@ impl PaintRead for LayoutNodeArena {
     read_live_arena!(std::convert::identity);
 }
 
-/// What a display list recording reads its document through: [`PaintRead`] over the frame it
-/// records, and nothing else. It holds no arena, so the recording names no read the frame does not
-/// answer.
+static NO_DAMAGE: FrameDamage = FrameDamage::NONE;
+
+/// What the paint side reads a document through: [`PaintRead`] over the rows the document published, and nothing
+/// else. It holds no arena, so a read names nothing the rows do not answer.
 pub(crate) struct PaintSource<'a> {
-    frame: &'a PublishedFrame,
-    // The recorder's absolute rects, which hold for this frame where they carry its geometry epoch.
+    rows: &'a RowSnapshot,
+    /// The damage of the frame a recording records; a read outside a frame reads none.
+    damage: &'a FrameDamage,
+    // The reader's absolute rects, which hold for these rows where they carry their geometry epoch.
     absolute_rects: &'a RefCell<AbsoluteRectMemo>,
 }
 
 impl<'a> PaintSource<'a> {
+    /// The frame a recording records.
     pub(crate) fn new(frame: &'a PublishedFrame, absolute_rects: &'a RefCell<AbsoluteRectMemo>) -> Self {
-        Self { frame, absolute_rects }
+        Self {
+            rows: &frame.rows,
+            damage: &frame.damage,
+            absolute_rects,
+        }
+    }
+
+    /// The rows the document published, outside any frame.
+    pub(crate) fn of_rows(rows: &'a RowSnapshot, absolute_rects: &'a RefCell<AbsoluteRectMemo>) -> Self {
+        Self {
+            rows,
+            damage: &NO_DAMAGE,
+            absolute_rects,
+        }
+    }
+
+    /// The rows read.
+    pub(crate) fn rows(&self) -> &'a RowSnapshot {
+        self.rows
     }
 }
 
 impl GeometryRead for PaintSource<'_> {
     fn paintable_data(&self, id: NodeSlotId) -> &PaintableData {
-        self.frame.rows.paintable_data(id)
+        self.rows.paintable.paintable_data(id)
     }
 
     fn paintable_row_is_populated(&self, id: NodeSlotId) -> bool {
-        self.frame.rows.paintable_row_is_populated(id)
+        self.rows.paintable.paintable_row_is_populated(id)
     }
 
     fn with_committed_fragment_link<R>(&self, id: NodeSlotId, read: impl FnOnce(Option<&FragmentLink>) -> R) -> R {
-        self.frame.rows.with_committed_fragment_link(id, read)
+        self.rows.paintable.with_committed_fragment_link(id, read)
     }
 
     fn committed_side_data(&self, id: NodeSlotId) -> CommittedSideDataRef<'_> {
-        CommittedSideDataRef::Published(self.frame.rows.committed_side_data(id))
+        CommittedSideDataRef::Published(self.rows.paintable.committed_side_data(id))
     }
 
     fn memoized_absolute_rect(&self, id: NodeSlotId) -> Option<CssPixelRect> {
-        self.absolute_rects.borrow().get(id, self.frame.geometry_epoch)
+        self.absolute_rects.borrow().get(id, self.rows.geometry_epoch)
     }
 
     fn memoize_absolute_rect(&self, id: NodeSlotId, rect: CssPixelRect) {
-        self.absolute_rects
-            .borrow_mut()
-            .set(id, self.frame.geometry_epoch, rect);
+        self.absolute_rects.borrow_mut().set(id, self.rows.geometry_epoch, rect);
     }
 
     fn node_kind_if_live(&self, id: NodeSlotId) -> Option<NodeKind> {
-        self.frame.node(id).map(|node| node.kind)
+        self.rows.node(id).map(|node| node.kind)
     }
 
     fn node_flags_if_live(&self, id: NodeSlotId) -> u32 {
-        self.frame.node(id).map_or(0, |node| node.flags)
+        self.rows.node(id).map_or(0, |node| node.flags)
     }
 
     fn node_parent_if_live(&self, id: NodeSlotId) -> Option<NodeSlotId> {
-        PublishedFrame::link(self.frame.node(id)?.parent)
+        self.rows.parent(id)
     }
 
     fn node_is_fragmented_inline(&self, id: NodeSlotId) -> bool {
-        self.frame
+        self.rows
             .node_and_style(id)
             .is_some_and(|(node, style)| node_facts::node_is_fragmented_inline(node, style))
     }
@@ -795,33 +790,33 @@ impl GeometryRead for PaintSource<'_> {
 
 impl PaintRead for PaintSource<'_> {
     fn slot_is_live(&self, id: NodeSlotId) -> bool {
-        self.frame.node(id).is_some()
+        self.rows.node(id).is_some()
     }
 
     fn node_first_child_if_live(&self, id: NodeSlotId) -> Option<NodeSlotId> {
-        PublishedFrame::link(self.frame.node(id)?.first_child)
+        link(self.rows.node(id)?.first_child)
     }
 
     fn node_next_sibling_if_live(&self, id: NodeSlotId) -> Option<NodeSlotId> {
-        PublishedFrame::link(self.frame.node(id)?.next_sibling)
+        link(self.rows.node(id)?.next_sibling)
     }
 
     fn node_generated_for(&self, id: NodeSlotId) -> u8 {
-        self.frame.live_node(id).generated_for
+        self.rows.live_node(id).generated_for
     }
 
     fn node_style_node(&self, id: NodeSlotId) -> Option<crate::css::style::tree::StyleNodeID> {
-        self.frame.node(id)?.style_node
+        self.rows.node(id)?.style_node
     }
 
     fn node_is_generated_for_pseudo_element(&self, id: NodeSlotId) -> bool {
-        self.frame.node(id).is_some_and(|node| node.generated_for != 0)
+        self.rows.node(id).is_some_and(|node| node.generated_for != 0)
     }
 
     fn node_is_dom_backed(&self, id: NodeSlotId) -> bool {
         // A slot that has not been given a shell yet stands for nothing at all, and its flags do
         // not say so.
-        self.frame
+        self.rows
             .node(id)
             .is_some_and(|node| node.kind != NodeKind::Unset && !node_facts::has_flag(node, NodeFlag::Anonymous))
     }
@@ -829,59 +824,58 @@ impl PaintRead for PaintSource<'_> {
     fn node_is_element_backed(&self, id: NodeSlotId) -> bool {
         self.node_is_dom_backed(id)
             && self
-                .frame
+                .rows
                 .node(id)
                 .is_some_and(|node| node.kind != NodeKind::Viewport && !node_facts::kind_is_text(node.kind))
     }
 
     fn node_is_out_of_flow_if_live(&self, id: NodeSlotId) -> bool {
-        self.frame
+        self.rows
             .node_and_style(id)
             .is_some_and(|(node, style)| node_facts::node_is_out_of_flow(node, style))
     }
 
     fn node_is_atomic_inline(&self, id: NodeSlotId) -> bool {
-        self.frame
+        self.rows
             .node_and_style(id)
             .is_some_and(|(node, style)| node_facts::node_is_atomic_inline(node, style))
     }
 
     fn node_is_positioned(&self, id: NodeSlotId) -> bool {
-        self.frame
+        self.rows
             .node_and_style(id)
             .is_some_and(|(node, style)| node_facts::node_is_positioned(node, style))
     }
 
     fn node_is_floating(&self, id: NodeSlotId) -> bool {
-        self.frame
+        self.rows
             .node_and_style(id)
             .is_some_and(|(node, style)| node_facts::node_is_floating(node, style))
     }
 
     fn node_has_dom_paint_fact(&self, id: NodeSlotId, fact: DomPaintFact) -> bool {
-        self.frame.live_node(id).dom_paint_facts & fact as u8 != 0
+        self.rows.live_node(id).dom_paint_facts & fact as u8 != 0
     }
 
     fn node_has_compositor_animation_frame(&self, id: NodeSlotId, kind: CompositorAnimationFrameKind) -> bool {
-        self.frame.live_node(id).compositor_animation_frame_kinds & kind as u8 != 0
+        self.rows.live_node(id).compositor_animation_frame_kinds & kind as u8 != 0
     }
 
     fn node_style_if_live(&self, id: NodeSlotId) -> Option<ComputedValuesView<'_>> {
-        self.frame.node(id)?;
-        self.frame.style_at(id)
+        self.rows.style(id)
     }
 
     fn node_containing_block_if_live(&self, id: NodeSlotId) -> Option<NodeSlotId> {
-        containing_block_by_walking_ancestors(self, id)
+        self.rows.containing_block(id)
     }
 
     fn svg_filter_bounds(&self, id: NodeSlotId) -> Option<FfiCssPixelRect> {
-        self.frame.rows.committed_side_data(id).svg_filter_bounds
+        self.rows.paintable.committed_side_data(id).svg_filter_bounds
     }
 
     fn fragment_ownership_filter(&self, id: NodeSlotId) -> Option<FragmentOwnershipFilter> {
-        self.frame
-            .rows
+        self.rows
+            .paintable
             .committed_side_data(id)
             .fragment_ownership
             .as_deref()
@@ -889,15 +883,15 @@ impl PaintRead for PaintSource<'_> {
     }
 
     fn paint_damage_of_row(&self, row: NodeSlotId) -> PaintDamage {
-        self.frame.damage.of_row(row)
+        self.damage.of_row(row)
     }
 
     fn damaged_paint_rows(&self) -> Vec<NodeSlotId> {
-        self.frame.damage.rows()
+        self.damage.rows()
     }
 
     fn stacking_context_entries(&self, root: NodeSlotId) -> Option<impl Deref<Target = StackingContextEntries> + '_> {
-        self.frame.rows.stacking_context_entries(root)
+        self.rows.paintable.stacking_context_entries(root)
     }
 
     fn with_paintable_visual_context_node_handles<R>(
@@ -905,11 +899,11 @@ impl PaintRead for PaintSource<'_> {
         id: NodeSlotId,
         read: impl FnOnce(&BoxVisualContextNodeHandles) -> R,
     ) -> R {
-        read(self.frame.rows.visual_context_node_handles(id))
+        read(self.rows.paintable.visual_context_node_handles(id))
     }
 
     fn published_svg_filter(&self, slot: NodeSlotId, kind: SvgPaintResourceKind) -> Option<Arc<PublishedSvgFilter>> {
-        published_filter_in(&self.frame.facts.svg_paint_resources, slot, kind)
+        published_filter_in(&self.rows.paint_facts.svg_paint_resources, slot, kind)
     }
 
     fn published_svg_paint_server(
@@ -917,11 +911,11 @@ impl PaintRead for PaintSource<'_> {
         slot: NodeSlotId,
         kind: SvgPaintResourceKind,
     ) -> Option<Arc<PublishedSvgPaintServer>> {
-        published_paint_server_in(&self.frame.facts.svg_paint_resources, slot, kind)
+        published_paint_server_in(&self.rows.paint_facts.svg_paint_resources, slot, kind)
     }
 
     fn replaced_paint_facts(&self, id: NodeSlotId) -> Option<ReplacedPaintFacts> {
-        self.frame.facts.replaced.get(&id).cloned()
+        self.rows.paint_facts.replaced.get(&id).cloned()
     }
 
     fn layer_image_paint_facts(
@@ -930,8 +924,8 @@ impl PaintRead for PaintSource<'_> {
         list: FfiLayerImageList,
         computed_index: u32,
     ) -> Option<LayerImagePaintFacts> {
-        self.frame
-            .facts
+        self.rows
+            .paint_facts
             .layer_images
             .get(&id)?
             .iter()
@@ -940,7 +934,7 @@ impl PaintRead for PaintSource<'_> {
     }
 
     fn rendered_text(&self, id: NodeSlotId) -> Option<&RenderedText> {
-        self.frame.text(id)?.rendered.as_deref()
+        self.rows.text(id)?.rendered.as_deref()
     }
 
     fn with_grapheme_segmenter<R>(&self, id: NodeSlotId, read: impl FnOnce(&GraphemeSegmenter) -> R) -> Option<R> {
@@ -956,7 +950,7 @@ impl PaintRead for PaintSource<'_> {
         if !self.node_kind_if_live(primary).is_some_and(node_facts::kind_is_text) {
             return fragments;
         }
-        if let Some(text) = self.frame.text(primary)
+        if let Some(text) = self.rows.text(primary)
             && self.slot_is_live(text.first_letter)
         {
             fragments.nodes[0] = text.first_letter;
@@ -965,5 +959,19 @@ impl PaintRead for PaintSource<'_> {
         fragments.nodes[fragments.length] = primary;
         fragments.length += 1;
         fragments
+    }
+}
+
+impl PaintableRowsRead for PaintSource<'_> {
+    fn scroll_offset(&self, id: NodeSlotId) -> CssPixelPoint {
+        self.rows.paintable.scroll_offsets.offset(id)
+    }
+
+    fn unique_node_id(&self, id: NodeSlotId) -> i64 {
+        self.rows.paintable.unique_node_id(id)
+    }
+
+    fn with_image_map_areas<R>(&self, read: impl FnOnce(&ImageMapAreas) -> R) -> R {
+        read(&self.rows.paintable.image_map_areas)
     }
 }

@@ -1754,6 +1754,7 @@ impl LayoutNodeArena {
     /// Publishes what the paint side reads of every node. A chunk whose nodes are unchanged since
     /// the last publication is shared with it, and a changed one is copied only while an earlier
     /// publication still holds it.
+    #[cfg(test)]
     pub(crate) fn publish_paint_tree(&mut self) -> super::tree_shape::PublishedShape {
         self.tree_shape.publish(&self.chunks, &self.style_nodes)
     }
@@ -1913,6 +1914,14 @@ impl LayoutNodeArena {
     /// in place of the ones published before.
     pub(crate) fn publish_rows(&mut self) {
         let (nodes, styles) = self.tree_shape.publish_columns(&self.chunks, &self.style_nodes);
+        let paintable = self.publish_paintable_rows();
+        let (replaced, layer_images) = self.publish_paint_fact_tables();
+        let paint_facts = crate::painting::published_frame::PublishedPaintFacts {
+            text: self.publish_text(),
+            replaced,
+            layer_images,
+            svg_paint_resources: self.svg_paint_resources().publish(),
+        };
         let bound_rows = self.bound_rows_by_style_node.get_mut();
         let rows = super::row_reads::RowSnapshot {
             nodes,
@@ -1921,9 +1930,32 @@ impl LayoutNodeArena {
             text_rows: bound_rows.texts.publish(),
             pseudo_element_rows: self.bound_pseudo_element_rows.get_mut().clone(),
             viewport_row: self.bound_viewport_row.get(),
+            paintable,
+            paint_facts,
+            geometry_epoch: self.absolute_rect_memo_epoch(),
+            paint_status: self.paint_status(),
             changes_taken_in: self.changes_taken_in,
         };
         self.published_rows.publish(Arc::new(rows));
+    }
+
+    /// Republishes the rows published last without their paintable rows, which lets a writer that runs while nothing
+    /// reads them write the chunks they shared in place.
+    pub(crate) fn release_published_paintable_rows_of_row_snapshot(&mut self) {
+        let rows = self.published_rows();
+        if rows.paintable.row_capacity() == 0 {
+            return;
+        }
+        let mut released = super::row_reads::RowSnapshot::clone(&rows);
+        drop(rows);
+        released.paintable = Default::default();
+        self.published_rows.publish(Arc::new(released));
+    }
+
+    /// Keeps a slot freed from now on from being reused until the returned pin is dropped: a frame that names slots to
+    /// its readers holds it.
+    pub(crate) fn retire_freed_slots_while_frame_lives(&mut self) -> super::tree_shape::RetiredSlots {
+        self.tree_shape.retire_freed_slots()
     }
 
     /// The rows the arena published last, for a snapshot of its own to share.
@@ -2898,45 +2930,8 @@ impl LayoutNodeArena {
         self.active_layout_pass_depth.get() > 0
     }
 
-    /// True while a render stage is on the stack: a layout pass, a layout tree build, or a paint
-    /// pass. A host call made in that window is part of the stage, not a main-side read between
-    /// stages.
-    pub(crate) fn a_stage_is_running(&self) -> bool {
-        self.layout_pass_is_running()
-            || super::tree_build_seal::build_is_running()
-            || crate::painting::seal::current_pass_name().is_some()
-    }
-
-    /// The writer the main side's scroll offset writes are attributed to.
-    pub(crate) const SCROLL_OFFSETS_WRITER: &str = "scroll offsets";
-    /// The writer the main side's selection state writes are attributed to.
-    pub(crate) const SELECTION_WRITER: &str = "selection state";
     /// The writer a DOM tree mutation's writes to the style mirror and the arena are attributed to.
     pub(crate) const DOM_TREE_MUTATION_WRITER: &str = "DOM tree mutation";
-
-    /// The one door a main-side writer of render-owned state goes through. A write joins the
-    /// frame in flight and lands after it, the way a main-side read of render state waits for it:
-    /// a frame never sees half of a write, and nothing writes under a frame that is reading. The
-    /// wait happens as the writer borrows the arena ([`Self::from_handle`] joins an overlapping
-    /// stage), and the frame's end has been taken in by the time it returns. What is left
-    /// to check here is where waiting is impossible: a writer inside the frame itself, in a join
-    /// or with the stages in lockstep, must not write while a stage is on the stack.
-    #[track_caller]
-    pub(crate) fn join_frame_for_main_side_write(&self, writer: &'static str) {
-        self.pass_main_side_door(writer);
-    }
-
-    /// Like [`Self::join_frame_for_main_side_write`], for a writer that goes on to write through
-    /// doors of its own.
-    fn pass_main_side_door(&self, writer: &'static str) {
-        assert!(
-            !self.a_stage_is_running(),
-            "{writer} were written by the main side while a render stage was running"
-        );
-        // FIXME: The wait for an overlapping stage happens as the writer borrows the arena, before the door is
-        //        counted. Once the door itself waits for the frame in flight, pass the wait here.
-        record_door_pass(writer, None);
-    }
 
     pub(crate) fn begin_active_layout_pass(&self) {
         let depth = self.active_layout_pass_depth.get();
@@ -6247,24 +6242,6 @@ impl LayoutNodeArena {
             .dom_offset_for_rendered_text_offset(offset, boundary)
     }
 
-    #[track_caller]
-    pub(crate) unsafe fn from_handle<'a>(arena: *mut c_void) -> &'a Self {
-        assert!(!arena.is_null(), "layout node arena handle is null");
-        crate::stage_thread::join_frame_in_flight(arena);
-        // SAFETY: Layout passes borrow the document's arena synchronously,
-        // and the document keeps it alive for the duration of the pass.
-        unsafe { &*arena.cast::<Self>() }
-    }
-
-    #[track_caller]
-    pub(crate) unsafe fn from_handle_mut<'a>(arena: *mut c_void) -> &'a mut Self {
-        assert!(!arena.is_null(), "layout node arena handle is null");
-        crate::stage_thread::join_frame_in_flight(arena);
-        // SAFETY: The caller guarantees exclusive access to the arena for the
-        // duration of the returned borrow.
-        unsafe { &mut *arena.cast::<Self>() }
-    }
-
     fn data_mut(&mut self, index: u32) -> &mut NodeData {
         let index = index as usize;
         let chunk = self
@@ -6514,9 +6491,9 @@ pub extern "C" fn layout_arena_reset_door_counters() {
 /// The door of a DOM tree mutation. The mutation splices the style mirror as it goes, so it joins
 /// a frame in flight with a stage that reads the mirror (a style or layout pass) before it starts.
 /// A recording reads nothing of the mirror and goes on beside the mutation. What the mutation
-/// writes to the arena, the rows it frees or marks as it goes, waits for the recording at the
-/// arena's own doors ([`LayoutNodeArena::from_handle`], [`super::HostTables::from_handle`]), and
-/// its layout tree marks go to the invalidation journal.
+/// writes to the arena, the rows it frees or marks as it goes, goes to the arena's owner as
+/// changes or waits for the recording at the host tables' door ([`super::HostTables::from_handle`]),
+/// and its layout tree marks go to the invalidation journal.
 ///
 /// # Safety
 ///
@@ -8162,26 +8139,12 @@ mod tests {
             Some(CssPixels::from_integer(20))
         );
         assert_eq!(
-            arena
-                .committed_paintable_rows()
-                .with_committed_fragment_link(node, |link| link.map(|link| link.inset_left)),
+            arena.with_committed_rows(|rows| {
+                rows.with_committed_fragment_link(node, |link| link.map(|link| link.inset_left))
+            }),
             Some(CssPixels::from_integer(20))
         );
         arena.free_subtree(node).invoke_callbacks();
-    }
-
-    #[test]
-    fn main_side_scroll_offset_write_joins_the_frame() {
-        let arena = LayoutNodeArena::new();
-        arena.join_frame_for_main_side_write(LayoutNodeArena::SCROLL_OFFSETS_WRITER);
-        let _pass = crate::painting::seal::enter(crate::painting::seal::Pass::VisualContextUpdate);
-        let write = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            arena.join_frame_for_main_side_write(LayoutNodeArena::SCROLL_OFFSETS_WRITER);
-        }));
-        assert!(
-            write.is_err(),
-            "a write made while a render stage runs must not pass the join"
-        );
     }
 
     #[test]

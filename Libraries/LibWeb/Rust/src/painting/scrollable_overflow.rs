@@ -11,7 +11,8 @@ use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::{NodeFlag, NodeKind, NodeSlotId};
 use crate::layout::node_facts;
 use crate::painting::paintable_data::FfiOverflowData;
-use crate::painting::paintable_rows::PaintableRowsRead;
+use crate::painting::paintable_rows::{ArenaRowsRead, PaintableRowsRead};
+use crate::painting::published_frame::PaintRead;
 use crate::painting::visual_context::dirty::VisualContextBoxDirtyKind;
 use crate::painting::visual_context::node_values;
 use crate::painting::{paintable_geometry, style_queries, text_fragment};
@@ -82,7 +83,7 @@ struct AxisDirection {
 
 // https://drafts.csswg.org/cssom-view/#overflow-directions
 pub(crate) fn physical_overflow_directions(
-    layout_arena: &LayoutNodeArena,
+    layout_arena: &impl PaintRead,
     node: NodeSlotId,
 ) -> PhysicalOverflowDirections {
     // A scrolling box of a viewport or element has two overflow directions, which are the block-end and inline-end
@@ -226,7 +227,7 @@ fn apply_css_transform_to_scrollable_overflow_rect(
 }
 
 fn padding_inflated_scrollable_overflow(
-    layout_arena: &impl PaintableRowsRead,
+    layout_arena: &impl ArenaRowsRead,
     box_paintable: NodeSlotId,
     box_node: NodeSlotId,
     in_flow_and_floated_content_bounds: CssPixelRect,
@@ -275,7 +276,7 @@ pub(crate) struct OverflowAssignment {
 }
 
 impl OverflowAssignment {
-    pub(crate) fn apply(self, layout_arena: &impl PaintableRowsRead) {
+    pub(crate) fn apply(self, layout_arena: &impl ArenaRowsRead) {
         let previously_measured = layout_arena
             .paintable_side_data(self.box_paintable)
             .overflow_measured_this_commit
@@ -350,7 +351,7 @@ fn store_overflow_data(
 
 // https://drafts.csswg.org/css-overflow-3/#scrollable-overflow-calculation
 pub(crate) fn measure_scrollable_overflow(
-    layout_arena: &impl PaintableRowsRead,
+    layout_arena: &impl ArenaRowsRead,
     non_child_boxes_by_containing_block: &HashMap<NodeSlotId, Vec<NodeSlotId>>,
     box_paintable: NodeSlotId,
 ) -> Vec<OverflowAssignment> {
@@ -367,7 +368,7 @@ pub(crate) fn measure_scrollable_overflow(
 }
 
 fn measure_scrollable_overflow_impl(
-    layout_arena: &impl PaintableRowsRead,
+    layout_arena: &impl ArenaRowsRead,
     non_child_boxes_by_containing_block: &HashMap<NodeSlotId, Vec<NodeSlotId>>,
     box_paintable: NodeSlotId,
     assignments: &mut Vec<OverflowAssignment>,
@@ -932,7 +933,6 @@ impl LayoutNodeArena {
 /// Hands the document the in-range scroll offsets [`measure_and_find_scroll_offsets_to_clamp`]
 /// decided on, for it to store.
 pub(crate) fn hand_over_clamped_scroll_offsets(
-    arena: &LayoutNodeArena,
     main_thread: &crate::stage::MainThread,
     clamped: Vec<(NodeSlotId, CssPixelPoint)>,
 ) {
@@ -945,12 +945,11 @@ pub(crate) fn hand_over_clamped_scroll_offsets(
     else {
         return;
     };
+    // The measurement found the rows live, and nothing has run on the owner since.
     for (slot, offset) in clamped {
-        if arena.slot_is_live(slot) {
-            // SAFETY: The registered host receives a live row. No mutable arena or cache borrow
-            // is held while it re-enters geometry queries to store the offset.
-            unsafe { host.set_scroll_offset(main_thread, slot, offset.into()) };
-        }
+        // SAFETY: The registered host receives a live row, and no arena borrow is held while it re-enters geometry
+        // queries to store the offset.
+        unsafe { host.set_scroll_offset(main_thread, slot, offset.into()) };
     }
 }
 

@@ -60,6 +60,46 @@ pub(crate) fn image_color_scheme(
         })
 }
 
+/// The SVG-as-image renders the next recording is predicted to paint: the ones the last recording painted, whether it
+/// recorded them or copied them, and the ones it missed, whose producers record again, then the first paints
+/// [`predict_first_paint_renders`] predicts, last and in their order, since a document images share keeps the layout of
+/// its last render.
+pub(crate) fn painted_vector_images(
+    layout_arena: &LayoutNodeArena,
+    css_viewport_rect: crate::layout::used_values::FfiCssPixelRect,
+    document_declares_light_or_dark_color_scheme: bool,
+    image_color_scheme_fallback: u8,
+) -> Vec<VectorImageRenderRequest> {
+    let mut last_painted = std::collections::HashSet::new();
+    let prediction_inputs = {
+        let paint_state = layout_arena.paint_state().borrow();
+        if let Some(recording) = paint_state.last_recording.as_ref() {
+            last_painted.extend(recording.vector_images.values().copied());
+            last_painted.extend(recording.missed_vector_images.iter().copied());
+        }
+        paint_state
+            .visual_context
+            .last_tree_inputs
+            .map(|tree_inputs| FirstPaintPredictionInputs {
+                device_pixels_per_css_pixel: tree_inputs.device_pixels_per_css_pixel,
+                root_background_source: paint_state.root_background_source,
+                css_viewport_rect: css_viewport_rect.into(),
+                document_declares_light_or_dark_color_scheme,
+                image_color_scheme_fallback,
+            })
+    };
+    let predicted = prediction_inputs
+        .map(|prediction_inputs| predict_first_paint_renders(layout_arena, &prediction_inputs))
+        .unwrap_or_default();
+    let predicted_set: std::collections::HashSet<_> = predicted.iter().copied().collect();
+    let mut painted: Vec<_> = last_painted
+        .into_iter()
+        .filter(|request| !predicted_set.contains(request))
+        .collect();
+    painted.extend(predicted);
+    painted
+}
+
 /// What predicting the renders of a recording's first paints reads from its inputs.
 pub(crate) struct FirstPaintPredictionInputs {
     pub device_pixels_per_css_pixel: f64,

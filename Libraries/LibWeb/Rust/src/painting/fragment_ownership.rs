@@ -7,7 +7,7 @@
 use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::NodeSlotId;
 use crate::painting::node_painting;
-use crate::painting::paintable_rows::PaintableRowsRead;
+use crate::painting::paintable_rows::{ArenaRowsRead, PaintableRowsRead};
 use crate::painting::published_frame::PaintRead;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -103,7 +103,7 @@ pub(crate) fn nearest_self_painting_inline_box(layout_arena: &impl PaintRead, no
     None
 }
 
-pub(crate) fn assign_fragment_ownership(layout_arena: &impl PaintableRowsRead, viewport: NodeSlotId) {
+pub(crate) fn assign_fragment_ownership(layout_arena: &impl ArenaRowsRead, viewport: NodeSlotId) {
     let mut stack = vec![viewport];
     while let Some(current) = stack.pop() {
         if let Some(next) = crate::painting::paint_order::next_paint_sibling(layout_arena, current)
@@ -140,7 +140,7 @@ pub(crate) fn assign_fragment_ownership_for_pending_line_roots(layout_arena: &La
     }
 }
 
-fn piece_paintable_of(layout_arena: &impl PaintableRowsRead, node: NodeSlotId) -> Option<NodeSlotId> {
+fn piece_paintable_of(layout_arena: &impl PaintRead, node: NodeSlotId) -> Option<NodeSlotId> {
     if node.is_invalid() || !layout_arena.slot_is_live(node) {
         return None;
     }
@@ -201,7 +201,7 @@ pub(crate) fn compute_fragment_ownership_for_block(
     owners_with_filters
 }
 
-fn assign_for_block(layout_arena: &impl PaintableRowsRead, block: NodeSlotId) {
+fn assign_for_block(layout_arena: &impl ArenaRowsRead, block: NodeSlotId) {
     use crate::painting::record::damage::PaintDamage;
     let owners_with_filters = compute_fragment_ownership_for_block(layout_arena, block);
     // Start every piece's box from a clean slate. A box whose filter changes paints a

@@ -13,7 +13,7 @@ use crate::painting::geometry_read::{GeometryRead, read_live_geometry};
 use crate::painting::image_map_areas::{ImageMapAreaColumn, ImageMapAreas};
 use crate::painting::node_painting;
 use crate::painting::paintable_data::*;
-use crate::painting::published_frame::{PaintRead, PublishedFrame, PublishedRows, read_live_arena};
+use crate::painting::published_frame::{PaintRead, PaintStatus, PublishedFrame, PublishedRows, read_live_arena};
 use crate::painting::record::damage::{DamageSet, PaintDamage, RowPaintState};
 use crate::painting::visual_context::dirty::{
     RemovedBoxBlocks, VisualContextBoxDirtyKind, VisualContextGlobalRebuildReason,
@@ -56,7 +56,7 @@ mod tests {
         };
         assert_eq!(published_offset(&published), CssPixels::from_integer(10).into());
         assert_eq!(
-            arena.committed_paintable_rows().paintable_data(node).offset.x,
+            arena.with_committed_rows(|rows| rows.paintable_data(node).offset.x),
             CssPixels::from_integer(20).into()
         );
         assert_eq!(published_offset(&published), CssPixels::from_integer(10).into());
@@ -98,13 +98,12 @@ mod tests {
             )
         };
         assert_eq!(published_state(), (offset(10), 1, 0));
-        let committed = arena.committed_paintable_rows();
         assert_eq!(
-            (
+            arena.with_committed_rows(|committed| (
                 committed.scroll_offset(node),
                 committed.unique_node_id(node),
                 committed.with_image_map_areas(|areas| areas.area_editability(node, 1)),
-            ),
+            )),
             (offset(20), 2, -1)
         );
         assert_eq!(published_state(), (offset(10), 1, 0));
@@ -152,13 +151,15 @@ mod tests {
             (2, 0, false)
         );
         drop(live);
-        let committed = arena.committed_paintable_rows();
-        assert_eq!(committed.committed_side_data(node).lines().len(), 2);
+        assert_eq!(
+            arena.with_committed_rows(|committed| committed.committed_side_data(node).lines().len()),
+            2
+        );
         assert_eq!(published_state(), (1, 1, true));
     }
 
     #[test]
-    fn hit_test_list_and_visual_context_tree_are_published_with_the_rows() {
+    fn a_frame_holds_the_hit_test_list_and_the_rows_the_visual_context_tree() {
         use crate::painting::hit_test::HitTestList;
         use crate::painting::visual_context::{TransformData, TransformDataRole, VisualContextTree};
         use std::sync::Arc;
@@ -184,14 +185,14 @@ mod tests {
         *arena.hit_test_list.get_mut() = list(1);
         let published_tree = tree();
         arena.paint_state().borrow_mut().visual_context.tree = published_tree.clone();
-        arena.publish_paintable_rows();
+        let frame = arena.freeze_frame_without_damage();
         *arena.hit_test_list.get_mut() = list(2);
         arena.paint_state().borrow_mut().visual_context.tree = tree();
+        arena.publish_rows();
 
-        let published = arena.paintable_rows.published.as_ref().unwrap();
-        assert_eq!(published.hit_test_list.as_ref().map(|list| list.generation), Some(1));
+        assert_eq!(frame.hit_test_list.as_ref().map(|list| list.generation), Some(1));
         assert!(Arc::ptr_eq(
-            published.visual_context_tree.as_ref().unwrap(),
+            frame.rows.paintable.visual_context_tree.as_ref().unwrap(),
             published_tree.as_ref().unwrap()
         ));
     }
@@ -409,6 +410,13 @@ fn unique_node_id_of(entry: Option<&(NodeSlotId, i64)>, slot: NodeSlotId) -> i64
     }
 }
 
+impl PublishedRows {
+    /// The unique node id the document published for what a box is the box of, or zero.
+    pub(crate) fn unique_node_id(&self, slot: NodeSlotId) -> i64 {
+        unique_node_id_of(self.unique_node_ids.get(slot.slot_index() as usize), slot)
+    }
+}
+
 impl UniqueNodeIdColumn {
     pub(crate) fn id(&self, slot: NodeSlotId) -> i64 {
         unique_node_id_of(self.ids.borrow().get(slot.slot_index() as usize), slot)
@@ -478,7 +486,7 @@ pub(crate) struct PaintableRowStore {
     published: Option<PublishedRows>,
     side_data: RefCell<Vec<PaintableSideData>>,
     committed_side_data: RefCell<CowColumn<CommittedSideData, PAINTABLE_SLOTS_PER_CHUNK>>,
-    row_reset_versions: Vec<u64>,
+    row_reset_versions: RefCell<CowColumn<u64, PAINTABLE_SLOTS_PER_CHUNK>>,
     pub(crate) row_paint_states: RefCell<Vec<RowPaintState>>,
     pub(crate) damage: DamageSet,
     visual_context_records: RefCell<Vec<Option<PaintableVisualContextRecord>>>,
@@ -535,7 +543,13 @@ impl Clone for PaintableRowsRef<'_> {
     }
 }
 
-pub(crate) trait PaintableRowsRead: PaintRead + Deref<Target = LayoutNodeArena> {
+/// [`PaintableRowsRead`] of the rows the arena holds, for the owner's passes over the paint state, which read the arena
+/// beside them.
+pub(crate) trait ArenaRowsRead: PaintableRowsRead + Deref<Target = LayoutNodeArena> {}
+
+impl<Rows: PaintableRowsRead + Deref<Target = LayoutNodeArena>> ArenaRowsRead for Rows {}
+
+pub(crate) trait PaintableRowsRead: PaintRead {
     /// The scroll offset the document published for a box, or zero.
     fn scroll_offset(&self, id: NodeSlotId) -> CssPixelPoint;
     /// The unique node id the document published for what a box is the box of, or zero.
@@ -572,7 +586,7 @@ pub(crate) type CommittedSideDataMut<'a> = RowMut<
     PAINTABLE_SLOTS_PER_CHUNK,
 >;
 
-pub(crate) trait PaintableRowsWrite: PaintableRowsRead {
+pub(crate) trait PaintableRowsWrite: ArenaRowsRead {
     fn paintable_data_mut(&mut self, id: NodeSlotId) -> PaintableDataMut<'_>;
 }
 
@@ -620,8 +634,15 @@ where
 
     /// Identifies the version of the physical row slot. Unlike `NodeSlotId::generation()`, this
     /// changes when the same node's row is recommitted or cleared as well as when it is freed.
+    #[cfg(test)]
     pub(crate) fn paintable_row_reset_version(&self, id: NodeSlotId) -> u64 {
-        self.arena.paintable_rows.row_reset_versions[id.slot_index() as usize]
+        *self
+            .arena
+            .paintable_rows
+            .row_reset_versions
+            .borrow()
+            .get(id.slot_index() as usize)
+            .unwrap()
     }
 
     pub(crate) fn clear_cached_overflow_data(&self, id: NodeSlotId) {
@@ -746,177 +767,6 @@ where
                     .paintable_side_data_mut(id)
                     .fragment_ownership_before_recommit = Some(filter);
             }
-        }
-    }
-}
-
-/// The paintable rows as last published, for the main side. What is not a row is read from the
-/// arena.
-pub(crate) struct CommittedPaintableRows<'a> {
-    arena: &'a LayoutNodeArena,
-}
-
-impl Deref for CommittedPaintableRows<'_> {
-    type Target = LayoutNodeArena;
-
-    fn deref(&self) -> &Self::Target {
-        self.arena
-    }
-}
-
-impl CommittedPaintableRows<'_> {
-    fn published(&self) -> &PublishedRows {
-        self.arena
-            .paintable_rows
-            .published
-            .as_ref()
-            .expect("committed rows are published before they are read")
-    }
-}
-
-impl GeometryRead for CommittedPaintableRows<'_> {
-    fn paintable_data(&self, id: NodeSlotId) -> &PaintableData {
-        self.published().paintable_data(id)
-    }
-
-    fn paintable_row_is_populated(&self, id: NodeSlotId) -> bool {
-        self.published().paintable_row_is_populated(id)
-    }
-
-    fn with_committed_fragment_link<R>(
-        &self,
-        id: NodeSlotId,
-        read: impl FnOnce(Option<&fragment_tree::FragmentLink>) -> R,
-    ) -> R {
-        self.published().with_committed_fragment_link(id, read)
-    }
-
-    fn committed_side_data(&self, id: NodeSlotId) -> CommittedSideDataRef<'_> {
-        CommittedSideDataRef::Published(self.published().committed_side_data(id))
-    }
-
-    read_live_geometry!(std::ops::Deref::deref);
-
-    fn memoized_absolute_rect(&self, id: NodeSlotId) -> Option<crate::css::css_pixels::CssPixelRect> {
-        self.arena.memoized_absolute_rect(id)
-    }
-
-    fn memoize_absolute_rect(&self, id: NodeSlotId, rect: crate::css::css_pixels::CssPixelRect) {
-        self.arena.memoize_absolute_rect(id, rect);
-    }
-}
-
-impl PaintRead for CommittedPaintableRows<'_> {
-    read_live_arena!(std::ops::Deref::deref);
-}
-
-impl PaintableRowsRead for CommittedPaintableRows<'_> {
-    fn scroll_offset(&self, id: NodeSlotId) -> CssPixelPoint {
-        self.published().scroll_offsets.offset(id)
-    }
-
-    fn unique_node_id(&self, id: NodeSlotId) -> i64 {
-        unique_node_id_of(self.published().unique_node_ids.get(id.slot_index() as usize), id)
-    }
-
-    fn with_image_map_areas<R>(&self, read: impl FnOnce(&ImageMapAreas) -> R) -> R {
-        read(&self.published().image_map_areas)
-    }
-}
-
-/// The paintable rows as a main-side read sees them, from [`crate::painting::ffi`]'s one door
-/// to them. The view holds the arena for as long as it lives, so every read through it agrees.
-pub(crate) enum MainSidePaintableRows<'a> {
-    /// A read between stages: the rows as last committed.
-    Committed(CommittedPaintableRows<'a>),
-    /// A host call made while a stage runs: the rows as that stage is writing them.
-    DuringStage(PaintableRowsRef<'a>),
-}
-
-impl Deref for MainSidePaintableRows<'_> {
-    type Target = LayoutNodeArena;
-
-    fn deref(&self) -> &Self::Target {
-        match self {
-            Self::Committed(rows) => rows,
-            Self::DuringStage(rows) => rows,
-        }
-    }
-}
-
-impl GeometryRead for MainSidePaintableRows<'_> {
-    fn paintable_data(&self, id: NodeSlotId) -> &PaintableData {
-        match self {
-            Self::Committed(rows) => rows.paintable_data(id),
-            Self::DuringStage(rows) => rows.paintable_data(id),
-        }
-    }
-
-    fn paintable_row_is_populated(&self, id: NodeSlotId) -> bool {
-        match self {
-            Self::Committed(rows) => rows.paintable_row_is_populated(id),
-            Self::DuringStage(rows) => rows.paintable_row_is_populated(id),
-        }
-    }
-
-    fn with_committed_fragment_link<R>(
-        &self,
-        id: NodeSlotId,
-        read: impl FnOnce(Option<&fragment_tree::FragmentLink>) -> R,
-    ) -> R {
-        match self {
-            Self::Committed(rows) => rows.with_committed_fragment_link(id, read),
-            Self::DuringStage(rows) => rows.with_committed_fragment_link(id, read),
-        }
-    }
-
-    fn committed_side_data(&self, id: NodeSlotId) -> CommittedSideDataRef<'_> {
-        match self {
-            Self::Committed(rows) => rows.committed_side_data(id),
-            Self::DuringStage(rows) => rows.committed_side_data(id),
-        }
-    }
-
-    read_live_geometry!(std::ops::Deref::deref);
-
-    fn memoized_absolute_rect(&self, id: NodeSlotId) -> Option<crate::css::css_pixels::CssPixelRect> {
-        match self {
-            Self::Committed(rows) => GeometryRead::memoized_absolute_rect(rows, id),
-            Self::DuringStage(rows) => GeometryRead::memoized_absolute_rect(rows, id),
-        }
-    }
-
-    fn memoize_absolute_rect(&self, id: NodeSlotId, rect: crate::css::css_pixels::CssPixelRect) {
-        match self {
-            Self::Committed(rows) => GeometryRead::memoize_absolute_rect(rows, id, rect),
-            Self::DuringStage(rows) => GeometryRead::memoize_absolute_rect(rows, id, rect),
-        }
-    }
-}
-
-impl PaintRead for MainSidePaintableRows<'_> {
-    read_live_arena!(std::ops::Deref::deref);
-}
-
-impl PaintableRowsRead for MainSidePaintableRows<'_> {
-    fn scroll_offset(&self, id: NodeSlotId) -> CssPixelPoint {
-        match self {
-            Self::Committed(rows) => rows.scroll_offset(id),
-            Self::DuringStage(rows) => rows.scroll_offset(id),
-        }
-    }
-
-    fn unique_node_id(&self, id: NodeSlotId) -> i64 {
-        match self {
-            Self::Committed(rows) => rows.unique_node_id(id),
-            Self::DuringStage(rows) => rows.unique_node_id(id),
-        }
-    }
-
-    fn with_image_map_areas<R>(&self, read: impl FnOnce(&ImageMapAreas) -> R) -> R {
-        match self {
-            Self::Committed(rows) => rows.with_image_map_areas(read),
-            Self::DuringStage(rows) => rows.with_image_map_areas(read),
         }
     }
 }
@@ -1305,12 +1155,12 @@ impl LayoutNodeArena {
             let mut stacking_context_entries = store.stacking_context_entries.borrow_mut();
             while side_data.len() <= index {
                 side_data.push(PaintableSideData::default());
-                store.row_reset_versions.push(0);
                 row_paint_states.push(RowPaintState::default());
                 absolute_rect_memo.push(None);
                 visual_context_records.push(None);
             }
             stacking_context_entries.grow_to(side_data.len());
+            store.row_reset_versions.get_mut().grow_to(side_data.len());
             let visual_context_node_handles = store.visual_context_node_handles.get_mut();
             visual_context_node_handles.grow_to(side_data.len());
             publish_visual_context_node_handles(visual_context_node_handles, index, None);
@@ -1399,8 +1249,14 @@ impl LayoutNodeArena {
     }
 
     fn bump_paintable_row_reset_version(&mut self, id: NodeSlotId) {
-        let version = &mut self.paintable_rows.row_reset_versions[id.slot_index() as usize];
-        *version = version.checked_add(1).expect("paintable row reset version overflowed");
+        let versions = self.paintable_rows.row_reset_versions.get_mut();
+        let index = id.slot_index() as usize;
+        let version = versions
+            .get(index)
+            .expect("invalid paintable arena slot ID")
+            .checked_add(1)
+            .expect("paintable row reset version overflowed");
+        versions.set(index, version).expect("invalid paintable arena slot ID");
     }
 
     pub(crate) fn paintable_visual_context_record(
@@ -1469,38 +1325,6 @@ impl LayoutNodeArena {
             Some(record) => read(&record.node_handles),
             None => read(&EMPTY_BOX_VISUAL_CONTEXT_NODE_HANDLES),
         }
-    }
-
-    /// The nodes of the box that an animation of the kind drives: the effect nodes of an opacity,
-    /// background color or filter animation, or the spatial nodes of a transform animation, as far
-    /// as the tree holds nodes of the right kind for them.
-    pub(crate) fn paintable_visual_animation_target_indices(
-        &self,
-        id: NodeSlotId,
-        tree: Option<&crate::painting::visual_context::VisualContextTree>,
-        target_kind: crate::painting::host::FfiVisualAnimationTargetKind,
-    ) -> Vec<u32> {
-        use crate::painting::host::FfiVisualAnimationTargetKind;
-        let Some(tree) = tree else {
-            return Vec::new();
-        };
-        self.with_paintable_visual_context_node_handles(id, |handles| {
-            let valid_targets = |indices: &mut dyn Iterator<Item = u32>| -> Vec<u32> {
-                indices
-                    .filter(|&index| tree.visual_animation_target_is_valid(target_kind, index))
-                    .collect()
-            };
-            match target_kind {
-                FfiVisualAnimationTargetKind::Opacity
-                | FfiVisualAnimationTargetKind::BackgroundColor
-                | FfiVisualAnimationTargetKind::Filter => {
-                    valid_targets(&mut handles.effects.iter().map(|index| index.0))
-                }
-                FfiVisualAnimationTargetKind::Transform => {
-                    valid_targets(&mut handles.spatial.iter().map(|index| index.0))
-                }
-            }
-        })
     }
 
     pub(crate) fn mark_paintable_subtree_may_own_geometry_dependent_nodes(&self, id: NodeSlotId) -> Option<bool> {
@@ -1586,15 +1410,15 @@ impl LayoutNodeArena {
         self.paintable_rows().paintable_row_is_populated(id)
     }
 
-    /// Lets a writer that runs while nothing reads the published rows write their chunks in place.
+    /// Lets a writer that runs while nothing reads the published rows write their chunks in place: the rows published
+    /// last let go of them until the writer's unit publishes again.
     pub(crate) fn release_published_paintable_rows(&mut self) {
         self.paintable_rows.published = None;
+        self.release_published_paintable_rows_of_row_snapshot();
     }
 
-    /// Hands the main side the rows as they are now, if a writer changed them since they were last
-    /// handed over.
-    pub(crate) fn publish_paintable_rows(&mut self) {
-        let hit_test_list = self.hit_test_list.get_mut().clone();
+    /// Brings the published generation of the rows up to date with what writers changed since it was published.
+    pub(crate) fn publish_paintable_rows(&mut self) -> PublishedRows {
         let visual_context_tree = self.paint_state().borrow().visual_context.tree.clone();
         let store = &mut self.paintable_rows;
         let fragment_links = store.committed_fragment_links.get_mut();
@@ -1602,20 +1426,22 @@ impl LayoutNodeArena {
         let unique_node_ids = store.unique_node_ids.ids.get_mut();
         let stacking_context_entries = store.stacking_context_entries.get_mut();
         let visual_context_node_handles = store.visual_context_node_handles.get_mut();
+        let row_reset_versions = store.row_reset_versions.get_mut();
         let Some(published) = &mut store.published else {
-            store.published = Some(PublishedRows {
+            let published = PublishedRows {
                 rows: store.rows.publish(),
                 fragment_links: fragment_links.publish(),
                 side_data: side_data.publish(),
                 unique_node_ids: unique_node_ids.publish(),
+                row_reset_versions: row_reset_versions.publish(),
                 stacking_context_entries: stacking_context_entries.publish(),
                 visual_context_node_handles: visual_context_node_handles.publish(),
                 scroll_offsets: store.scroll_offsets.snapshot(),
                 image_map_areas: store.image_map_areas.snapshot(),
-                hit_test_list,
                 visual_context_tree,
-            });
-            return;
+            };
+            store.published = Some(published.clone());
+            return published;
         };
         if store.rows.written_since_publish() {
             published.rows = store.rows.publish();
@@ -1629,6 +1455,9 @@ impl LayoutNodeArena {
         if unique_node_ids.written_since_publish() {
             published.unique_node_ids = unique_node_ids.publish();
         }
+        if row_reset_versions.written_since_publish() {
+            published.row_reset_versions = row_reset_versions.publish();
+        }
         if stacking_context_entries.written_since_publish() {
             published.stacking_context_entries = stacking_context_entries.publish();
         }
@@ -1637,17 +1466,33 @@ impl LayoutNodeArena {
         }
         published.scroll_offsets = store.scroll_offsets.snapshot();
         published.image_map_areas = store.image_map_areas.snapshot();
-        published.hit_test_list = hit_test_list;
         published.visual_context_tree = visual_context_tree;
+        published.clone()
     }
 
-    /// Publishes the rows as they are now, for a query snapshot to read while the arena goes on
-    /// changing.
-    pub(crate) fn publish_paintable_rows_for_query(&mut self) -> Option<PublishedRows> {
-        self.publish_paintable_rows();
-        let rows = self.paintable_rows.published.clone();
-        debug_assert!(rows.is_some(), "the rows were just published");
-        rows
+    /// What the document thread reads of the paint state beside the rows, as it is now.
+    pub(crate) fn paint_status(&self) -> PaintStatus {
+        let overflow = &self.scrollable_overflow;
+        let paint_state = self.paint_state().borrow();
+        PaintStatus {
+            scrollable_overflow_unmeasured: overflow.full_layout_commit.get()
+                || !overflow.rows_to_measure.borrow().is_empty()
+                || self.has_scheduled_scrollable_overflow_recalculation(),
+            scrollable_overflow_recalculations: overflow.recalculations.get(),
+            visual_context_dirty_boxes: paint_state.visual_context.dirty_boxes.boxes.len(),
+            layout_commit_generation: self.layout_commit_generation(),
+            last_recording_missed_vector_images: paint_state
+                .last_recording
+                .as_ref()
+                .is_some_and(|recording| !recording.missed_vector_images.is_empty()),
+            root_background_source: paint_state.root_background_source.unwrap_or_default(),
+        }
+    }
+
+    /// Publishes the rows as committed: with the scrollable overflow a commit or a writer left measured first.
+    pub(crate) fn publish_committed_rows(&mut self) {
+        self.measure_scrollable_overflow_on_stage_before_publication();
+        self.publish_rows();
     }
 
     /// Publishes the rows as they are now, for a recording to read while the arena goes on
@@ -1662,43 +1507,32 @@ impl LayoutNodeArena {
     }
 
     fn freeze_frame(&mut self, with_damage: bool) -> PublishedFrame {
-        self.publish_paintable_rows();
-        let rows = self
-            .paintable_rows
-            .published
-            .clone()
-            .expect("the rows were just published");
-        let hit_test_item_capacity_hint = self.hit_test_list.get_mut().as_ref().map_or(0, |list| list.items.len());
+        self.publish_rows();
+        let retired_slots = self.retire_freed_slots_while_frame_lives();
+        let hit_test_list = self.hit_test_list.get_mut().clone();
+        let hit_test_item_capacity_hint = hit_test_list.as_ref().map_or(0, |list| list.items.len());
         let paint_state = crate::painting::published_frame::PublishedPaintState::new(
             &self.paint_state().borrow(),
             hit_test_item_capacity_hint,
         );
-        let (replaced, layer_images) = self.publish_paint_fact_tables();
-        let facts = crate::painting::published_frame::PublishedPaintFacts {
-            text: self.publish_text(),
-            replaced,
-            layer_images,
-            svg_paint_resources: self.svg_paint_resources().publish(),
-        };
-        let shape = self.publish_paint_tree();
-        let geometry_epoch = self.paintable_rows.absolute_rect_memo_epoch.get();
         let damage = if with_damage {
             self.paint_damage_for_frame()
         } else {
             crate::painting::record::damage::FrameDamage::default()
         };
-        PublishedFrame::new(rows, shape, damage, paint_state, facts, geometry_epoch)
+        PublishedFrame::new(self.published_rows(), hit_test_list, retired_slots, damage, paint_state)
+    }
+
+    /// The geometry epoch of the absolute rect memo, which a publication of the rows carries.
+    pub(crate) fn absolute_rect_memo_epoch(&self) -> u64 {
+        self.paintable_rows.absolute_rect_memo_epoch.get()
     }
 
     /// Builds the structures a hit-test query derives from the list before the rows are
-    /// published, so that the query only reads. A published generation that still pins the list
-    /// lets go of it first, so building does not copy it.
+    /// published, so that the query only reads.
     pub(crate) fn prepare_hit_test_list_for_query(&mut self, needs_spatial_indexes: bool, needs_caret_lines: bool) {
         // A recording the frame presented has a newer list for the document to take in.
         self.try_take_in_recording();
-        if let Some(published) = &mut self.paintable_rows.published {
-            published.hit_test_list = None;
-        }
         let needs_building = self.hit_test_list.get_mut().as_ref().is_some_and(|list| {
             (needs_spatial_indexes && !list.spatial_indexes_built) || (needs_caret_lines && !list.caret_lines_built)
         });
@@ -1730,6 +1564,21 @@ impl LayoutNodeArena {
         *self.hit_test_list.get_mut() = list;
     }
 
+    /// Reads the rows as committed, which it publishes first.
+    #[cfg(test)]
+    pub(crate) fn with_committed_rows<R>(
+        &mut self,
+        read: impl FnOnce(&crate::painting::published_frame::PaintSource<'_>) -> R,
+    ) -> R {
+        self.publish_committed_rows();
+        let rows = self.published_rows();
+        let absolute_rects = RefCell::default();
+        read(&crate::painting::published_frame::PaintSource::of_rows(
+            &rows,
+            &absolute_rects,
+        ))
+    }
+
     #[cfg(test)]
     pub(crate) fn published_fragment_link_for_test(&self, id: NodeSlotId) -> Option<fragment_tree::FragmentLink> {
         self.paintable_rows
@@ -1739,27 +1588,6 @@ impl LayoutNodeArena {
             .get(id.slot_index() as usize)?
             .link_for(id.generation())
             .cloned()
-    }
-
-    /// The paintable rows as last published. Rows a main-side writer changed since are published
-    /// first: that writer has finished, since the main side reads between writes. Overflow a
-    /// commit or a writer left unmeasured is measured before they are.
-    pub(crate) fn committed_paintable_rows(&mut self) -> CommittedPaintableRows<'_> {
-        self.publish_committed_paintable_rows();
-        CommittedPaintableRows { arena: self }
-    }
-
-    /// Publishes what [`Self::committed_paintable_rows`] reads, for a reader of
-    /// [`Self::published_committed_paintable_rows`].
-    pub(crate) fn publish_committed_paintable_rows(&mut self) {
-        self.measure_scrollable_overflow_on_stage_before_publication();
-        self.publish_paintable_rows();
-    }
-
-    /// The paintable rows as last published, which [`Self::publish_committed_paintable_rows`] has
-    /// published.
-    pub(crate) fn published_committed_paintable_rows(&self) -> CommittedPaintableRows<'_> {
-        CommittedPaintableRows { arena: self }
     }
 
     pub(crate) fn live_paintable_data(&self, id: NodeSlotId) -> &PaintableData {
