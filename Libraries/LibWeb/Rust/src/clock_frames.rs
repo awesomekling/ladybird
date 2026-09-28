@@ -1245,7 +1245,7 @@ fn run_display_tick_on(
             }
             // What the samples left, the tick lays out in the frame the main thread handed the clock.
             // SAFETY: As above.
-            if !unsafe { frame.run_round() } {
+            if !unsafe { frame.run_round(owner) } {
                 return (FfiClockTickOutcome::NeedsMain, false, false);
             }
             let laid_out = frame.laid_out();

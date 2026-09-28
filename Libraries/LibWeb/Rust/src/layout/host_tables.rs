@@ -260,13 +260,13 @@ impl ArenaHandle {
     /// that runs on that thread, or beside it, rather than on the render owner, which hands the jobs it runs their
     /// state: a job the owner cannot take (a test holds the run it would queue behind), a debug path that runs a unit
     /// in place, or a stage the document thread submitted outside a rendering update. The one way from such a handle
-    /// to the state.
+    /// to the state, which only the `owner` takes, so a path of the main thread's cannot.
     ///
     /// # Safety
     ///
     /// `handle` must be a live handle from `layout_arena_create`, and nothing else may reach the state while the job
     /// runs.
-    pub(crate) unsafe fn held_by_waiting_thread(handle: *mut c_void) -> *mut Self {
+    pub(crate) unsafe fn held_by_waiting_thread(_owner: &crate::render_owner::Owner, handle: *mut c_void) -> *mut Self {
         handle.cast()
     }
 }

@@ -231,13 +231,14 @@ impl Flight {
     /// stages after them reach no style engine.
     pub(crate) fn run(
         mut self,
+        owner: &crate::render_owner::Owner,
         mut style_engine: Option<StyleEngineLoan>,
         state: Option<*mut crate::layout::ArenaHandle>,
     ) -> (FfiFlightOutcome, FlightRan) {
         // SAFETY: The frame in flight owns the arena, and a flight of no document's render state names the one it
         // runs in.
         let state = state.unwrap_or_else(|| unsafe {
-            crate::layout::ArenaHandle::held_by_waiting_thread(self.arena as *mut c_void)
+            crate::layout::ArenaHandle::held_by_waiting_thread(owner, self.arena as *mut c_void)
         });
         let owns_arena = self.layout.is_some();
         if let Some(layout) = self.layout.as_mut() {

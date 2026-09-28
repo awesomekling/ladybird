@@ -897,7 +897,7 @@ impl OwnerFrameJob {
                 "a job runs with its document's arena"
             );
             // SAFETY: As above.
-            let state = state.unwrap_or_else(|| unsafe { ArenaHandle::held_by_waiting_thread(frame_arena) });
+            let state = state.unwrap_or_else(|| unsafe { ArenaHandle::held_by_waiting_thread(owner, frame_arena) });
             // The faces the rounds want are their document's, for that document's layout end to request.
             let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(state as u64);
             // SAFETY: As above.
@@ -1097,7 +1097,9 @@ impl LayoutFrame {
         );
         if self.state.is_null() {
             // SAFETY: The frame runs for the update the arena is in, and the job that reaches it alone runs.
-            return unsafe { ArenaHandle::held_by_waiting_thread(self.inputs.arena_handle) };
+            return crate::render_owner::do_owner_work_here(|owner| unsafe {
+                ArenaHandle::held_by_waiting_thread(owner, self.inputs.arena_handle)
+            });
         }
         self.state
     }
@@ -1457,16 +1459,14 @@ impl LayoutFrame {
                     run: Self::run_job_in_state,
                 }),
             },
-            || {
+            |owner| {
                 // SAFETY: The frame runs for the update the arena is in, on the document thread, which waits for
                 // nothing.
-                let state = unsafe { ArenaHandle::held_by_waiting_thread((*frame).inputs.arena_handle) };
+                let state = unsafe { ArenaHandle::held_by_waiting_thread(owner, (*frame).inputs.arena_handle) };
                 let job = job.take().expect("a job runs once");
-                crate::render_owner::do_owner_work_here(|owner| {
-                    // SAFETY: As above.
-                    OwnerFrameJobAnswer(unsafe {
-                        crate::stage_thread::CallerWaits::new(run_job(owner, Self::run_job_in_state, frame, job, state))
-                    })
+                // SAFETY: As above.
+                OwnerFrameJobAnswer(unsafe {
+                    crate::stage_thread::CallerWaits::new(run_job(owner, Self::run_job_in_state, frame, job, state))
                 })
             },
         );
@@ -1870,11 +1870,11 @@ impl ClockLayoutFrame {
     /// # Safety
     ///
     /// On the thread that owns the arena, with the main thread idle.
-    pub(crate) unsafe fn run_round(&mut self) -> bool {
+    pub(crate) unsafe fn run_round(&mut self, owner: &crate::render_owner::Owner) -> bool {
         // A tick runs beside the document thread rather than as a job of the owner, and reaches the state the
         // document named.
         // SAFETY: Guaranteed by the caller.
-        self.frame.state = unsafe { ArenaHandle::held_by_waiting_thread(self.frame.inputs.arena_handle) };
+        self.frame.state = unsafe { ArenaHandle::held_by_waiting_thread(owner, self.frame.inputs.arena_handle) };
         let laid_out_whole = self.run_round_in_state();
         self.frame.state = std::ptr::null_mut();
         laid_out_whole
@@ -2164,7 +2164,9 @@ unsafe fn go_on_from_driven_frame(
                 let mut loan = loan;
                 // A stage the document thread submitted outside a rendering update reaches the state it named,
                 // which the frame in flight owns until the document thread takes it back (as above).
-                pass.hand_state(ArenaHandle::held_by_waiting_thread(pass.arena_handle as *mut c_void));
+                pass.hand_state(crate::render_owner::do_owner_work_here(|owner| {
+                    ArenaHandle::held_by_waiting_thread(owner, pass.arena_handle as *mut c_void)
+                }));
                 let _ = match loan.as_mut() {
                     Some(loan) => loan.lend_to_this_thread(|_| pass.run()),
                     None => pass.run(),

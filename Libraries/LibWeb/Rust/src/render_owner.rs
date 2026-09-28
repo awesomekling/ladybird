@@ -773,7 +773,7 @@ pub(crate) struct RenderingUpdate {
     /// How the owner runs it, with the render state of its document, where the owner holds one. The owner reaches
     /// the pipeline only through the updates it is sent, so what reaches the owner without reaching the pipeline (the
     /// unit tests' stage threads) links without it.
-    run: fn(Self, Option<*mut ArenaHandle>),
+    run: fn(Self, &Owner, Option<*mut ArenaHandle>),
 }
 
 impl RenderingUpdate {
@@ -790,12 +790,12 @@ impl RenderingUpdate {
         }
     }
 
-    fn run(self: Box<Self>, state: Option<*mut ArenaHandle>) {
-        (self.run)(*self, state);
+    fn run(self: Box<Self>, owner: &Owner, state: Option<*mut ArenaHandle>) {
+        (self.run)(*self, owner, state);
     }
 
-    fn run_flight(self, state: Option<*mut ArenaHandle>) {
-        let (outcome, ran) = self.flight.run(self.style_engine, state);
+    fn run_flight(self, owner: &Owner, state: Option<*mut ArenaHandle>) {
+        let (outcome, ran) = self.flight.run(owner, self.style_engine, state);
         // SAFETY: What the update's stages left is the frame's, which the main thread reaches only once it has taken
         // the frame back.
         let effects = unsafe { crate::stage_thread::FrameOwns::new(FrameEffects { outcome, ran }) };
@@ -999,7 +999,7 @@ fn handle_message(owner: &Owner, message: ToOwner) {
                     .get_mut(&document)
                     .map(|state| state.state_beside_main_thread(owner, update.style_engine.as_mut()))
             });
-            ticket.run(|| update.run(state));
+            ticket.run(|| update.run(owner, state));
         }
         ToOwner::Style {
             document,
@@ -1013,7 +1013,7 @@ fn handle_message(owner: &Owner, message: ToOwner) {
         }
         ToOwner::Paint { document, pass } => {
             // As for a layout unit, the pass finds the arena inside its answer.
-            (*pass).run(|| with_state(document, |state| state.state(owner)));
+            (*pass).run(owner, || with_state(document, |state| state.state(owner)));
         }
         ToOwner::Ask { document, query, reply } => reply.answer(|| {
             with_state(document, |state| state.answer(owner, query)).unwrap_or_else(|| Answer::left_to_host(query))
@@ -1231,22 +1231,22 @@ pub(crate) unsafe fn ask(document: DocumentId, arena: *mut c_void, query: Query)
     if !document.is_valid() {
         // The owner holds no state of an arena of no document (a unit test's): the thread that holds it answers.
         // SAFETY: Guaranteed by the caller.
-        return Answer::of_state_reaching_engine(&Owner::here(), query, unsafe {
-            &mut *ArenaHandle::held_by_waiting_thread(arena)
+        let owner = Owner::here();
+        return Answer::of_state_reaching_engine(&owner, query, unsafe {
+            &mut *ArenaHandle::held_by_waiting_thread(&owner, arena)
         });
     }
     let answer = crate::stage_thread::wait_for_owner(
         |reply| ToOwner::Ask { document, query, reply },
-        || {
-            let owner = Owner::here();
+        |owner| {
             if let Some(answer) =
-                STATES.with_borrow_mut(|states| states.get_mut(&document).map(|state| state.answer(&owner, query)))
+                STATES.with_borrow_mut(|states| states.get_mut(&document).map(|state| state.answer(owner, query)))
             {
                 return answer;
             }
             // SAFETY: Guaranteed by the caller.
-            Answer::of_state_reaching_engine(&owner, query, unsafe {
-                &mut *ArenaHandle::held_by_waiting_thread(arena)
+            Answer::of_state_reaching_engine(owner, query, unsafe {
+                &mut *ArenaHandle::held_by_waiting_thread(owner, arena)
             })
         },
     );
@@ -1299,13 +1299,9 @@ pub(crate) fn ask_engine(document: DocumentId, query: Query) -> Answer {
 pub(crate) fn ask_owner(document: DocumentId, query: Query) -> Answer {
     let answer = crate::stage_thread::wait_for_owner(
         |reply| ToOwner::Ask { document, query, reply },
-        || {
+        |owner| {
             STATES
-                .with_borrow_mut(|states| {
-                    states
-                        .get_mut(&document)
-                        .map(|state| state.answer(&Owner::here(), query))
-                })
+                .with_borrow_mut(|states| states.get_mut(&document).map(|state| state.answer(owner, query)))
                 .unwrap_or_else(|| Answer::left_to_host(query))
         },
     );
