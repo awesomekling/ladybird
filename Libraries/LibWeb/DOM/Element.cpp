@@ -139,9 +139,6 @@
 #include <LibWeb/IntersectionObserver/IntersectionObserver.h>
 #include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
-#include <LibWeb/Layout/Node.h>
-#include <LibWeb/Layout/NodeArena.h>
-#include <LibWeb/Layout/TreeBuilder.h>
 #include <LibWeb/Loader/ContentBlocker.h>
 #include <LibWeb/MathML/MathMLElement.h>
 #include <LibWeb/MathML/TagNames.h>
@@ -3606,8 +3603,8 @@ bool Element::is_scroll_container() const
     if (is_document_element())
         return true;
 
-    return Layout::overflow_value_makes_box_a_scroll_container(static_cast<CSS::Overflow>(box_values->overflow_x))
-        || Layout::overflow_value_makes_box_a_scroll_container(static_cast<CSS::Overflow>(box_values->overflow_y));
+    return Painting::overflow_value_makes_box_a_scroll_container(static_cast<CSS::Overflow>(box_values->overflow_x))
+        || Painting::overflow_value_makes_box_a_scroll_container(static_cast<CSS::Overflow>(box_values->overflow_y));
 }
 
 // Whether the element's box is a scroll container. The box's overflow is what the element's style says once the viewport

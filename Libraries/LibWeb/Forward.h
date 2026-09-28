@@ -256,7 +256,6 @@ class ColorStyleValue;
 class ComputedStyleWorkingSet;
 class ComputedValues;
 class ComputedStyleRecordView;
-class LayoutStyle;
 class ConicGradientStyleValue;
 class ContainerQuery;
 class ContentStyleValue;
@@ -972,7 +971,6 @@ namespace Web::Layout {
 class ImageProvider;
 class Box;
 class Node;
-class NodeArena;
 class NodeWithStyle;
 class Row;
 class TextNode;

@@ -36,9 +36,12 @@
 #include <LibWeb/HTML/HTMLTableCellElement.h>
 #include <LibWeb/HTML/HTMLTableColElement.h>
 #include <LibWeb/HTML/NavigableContainer.h>
+#include <LibWeb/Layout/Box.h>
 #include <LibWeb/Layout/ImageProvider.h>
 #include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Layout/NodeArena.h>
+#include <LibWeb/Layout/TextNode.h>
+#include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Painting/PaintableTypes.h>
 #include <LibWeb/Painting/PaintingRustBridge.h>
 #include <LibWeb/SVG/FragmentIdentifier.h>
@@ -369,9 +372,7 @@ Gfx::GlyphRun::TextType text_type_for_code_point(u32 code_point);
 
 void* document_layout_arena(DOM::Document& document)
 {
-    // Asking for the arena makes it.
-    (void)document.layout_node_arena();
-    return document.layout_arena_handle();
+    return document.layout_arena();
 }
 
 void* document_layout_arena_if_created(DOM::Document const& document)
@@ -514,10 +515,96 @@ void publish_table_spans(DOM::Element const& element)
     const_cast<DOM::Document&>(element.document()).render_inputs_for_write().style_engine().record_table_spans(identity, spans.column_span, spans.row_span, spans.raw_column_span);
 }
 
+// The shell of a row the build stamped, made the first time something asks for it.
+static void make_shell(void* context, Compositing::RustFFI::NodeSlotId slot, RustFFI::NodeKind kind)
+{
+    auto& document = *static_cast<DOM::Document*>(context);
+    NodeWithStyle* node = nullptr;
+    switch (kind) {
+    case RustFFI::NodeKind::BlockContainer:
+    case RustFFI::NodeKind::FieldSetBox:
+    case RustFFI::NodeKind::LegendBox:
+    case RustFFI::NodeKind::ListItemBox:
+    case RustFFI::NodeKind::ListItemMarkerBox:
+    case RustFFI::NodeKind::RangeInputBox:
+    case RustFFI::NodeKind::SVGForeignObjectBox:
+    case RustFFI::NodeKind::TableWrapper:
+    case RustFFI::NodeKind::TextAreaBox:
+    case RustFFI::NodeKind::TextInputBox:
+    case RustFFI::NodeKind::AudioBox:
+    case RustFFI::NodeKind::Box:
+    case RustFFI::NodeKind::CanvasBox:
+    case RustFFI::NodeKind::CheckBox:
+    case RustFFI::NodeKind::ImageBox:
+    case RustFFI::NodeKind::NavigableContainerViewport:
+    case RustFFI::NodeKind::RadioButton:
+    case RustFFI::NodeKind::SVGClipBox:
+    case RustFFI::NodeKind::SVGGeometryBox:
+    case RustFFI::NodeKind::SVGGraphicsBox:
+    case RustFFI::NodeKind::SVGImageBox:
+    case RustFFI::NodeKind::SVGMaskBox:
+    case RustFFI::NodeKind::SVGPatternBox:
+    case RustFFI::NodeKind::SVGSVGBox:
+    case RustFFI::NodeKind::SVGTextBox:
+    case RustFFI::NodeKind::SVGTextPathBox:
+    case RustFFI::NodeKind::VideoBox:
+        node = &allocate_layout_node<Box>(document, BindToPreparedArenaSlot::Yes, slot, kind);
+        break;
+    case RustFFI::NodeKind::BreakNode:
+    case RustFFI::NodeKind::InlineNode:
+        node = &allocate_layout_node<NodeWithStyle>(document, BindToPreparedArenaSlot::Yes, slot, kind);
+        break;
+    case RustFFI::NodeKind::TextNode:
+        allocate_layout_node<TextNode>(document, BindToPreparedArenaSlot::Yes, slot, kind);
+        return;
+    case RustFFI::NodeKind::GeneratedTextNode:
+        allocate_layout_node<GeneratedTextNode>(document, BindToPreparedArenaSlot::Yes, slot, kind);
+        return;
+    case RustFFI::NodeKind::Viewport:
+        allocate_layout_node<Viewport>(document, BindToPreparedArenaSlot::Yes, slot, kind);
+        return;
+    default:
+        VERIFY_NOT_REACHED();
+    }
+    // A row stamped for an element or a pseudo-element carries the record the mirror published for it, and adopting
+    // it is what the box tells the document about. An anonymous row's style is derived by the arena, which has already
+    // told the shell everything about it.
+    if (!node->is_anonymous() || node->is_generated_for_pseudo_element())
+        node->initialize_stamped_style_record();
+    else if (kind == RustFFI::NodeKind::InlineNode)
+        node->attach_style_resources();
+}
+
 void register_layout_host(DOM::Document& document)
 {
     auto* arena = document_layout_arena_if_created(document);
     VERIFY(arena);
+    RustFFI::FfiStyleRecordHostCallbacks style_record_host_callbacks {
+        .style_engine = document.style_computer().style_engine().rust_handle(),
+        .context = &document,
+        .shell_style_changed = [](void*, void* shell, u64 record, void const* payloads, bool attach_resources) {
+            as<NodeWithStyle>(*static_cast<Node*>(shell)).refresh_style_from_arena(CSS::StyleRecordID { record }, payloads, attach_resources);
+        },
+    };
+    RustFFI::layout_arena_set_style_record_host_callbacks(arena, style_record_host_callbacks);
+    // The render side says which nodes have a box and which of those boxes layout committed, so that DOM code reads a
+    // bit instead of looking up the node's row.
+    RustFFI::layout_arena_set_box_presence_host(arena, &document, [](void* context, u32 style_node, u8 bits) {
+        auto& document = *static_cast<DOM::Document*>(context);
+        // The document has no style node of its own; it is named by 0.
+        auto identity = style_node == 0 ? DOM::NodeIdentity::of_document() : DOM::NodeIdentity::of_style_node(CSS::StyleNodeID { style_node });
+        document.commit_messages().note_box_presence(identity,
+            (bits & RustFFI::BOX_PRESENCE_HAS_LAYOUT_BOX) != 0,
+            (bits & RustFFI::BOX_PRESENCE_HAS_COMMITTED_BOX) != 0);
+    });
+    RustFFI::layout_arena_set_shell_factory(arena, &document, make_shell);
+    RustFFI::layout_arena_set_chrome_state_callback(arena, &document,
+        [](void* context, Compositing::RustFFI::NodeSlotId slot, RustFFI::PaintableRowResetKind kind, bool is_viewport_row) {
+            auto& document = *static_cast<DOM::Document*>(context);
+            document.chrome_widget_registry().drop_widgets_for_slot(slot);
+            if (kind == RustFFI::PaintableRowResetKind::Recommitted && is_viewport_row)
+                document.paint_state().viewport_row_was_reset();
+        });
     static_assert(to_underlying(SVG::PreserveAspectRatio::Align::None) == 0);
     static_assert(to_underlying(SVG::PreserveAspectRatio::Align::xMinYMin) == 1);
     static_assert(to_underlying(SVG::PreserveAspectRatio::Align::xMidYMin) == 2);
@@ -553,6 +640,18 @@ void register_layout_host(DOM::Document& document)
     RustFFI::layout_arena_set_layout_host_callbacks(arena, callbacks);
     RustFFI::layout_arena_set_document_is_decoded_svg(arena, document.is_decoded_svg());
     Painting::register_geometry_host(document);
+}
+
+void unregister_layout_host(DOM::Document& document)
+{
+    auto* arena = document_layout_arena_if_created(document);
+    if (!arena)
+        return;
+    RustFFI::layout_arena_clear_chrome_state_callback(arena);
+    RustFFI::layout_arena_clear_style_record_host_callbacks(arena);
+    RustFFI::layout_arena_clear_layout_host_callbacks(arena);
+    RustFFI::layout_arena_clear_layout_update_host_callbacks(arena);
+    RustFFI::layout_arena_clear_shell_factory(arena);
 }
 
 }

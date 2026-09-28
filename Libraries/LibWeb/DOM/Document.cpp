@@ -218,10 +218,7 @@
 #include <LibWeb/Infra/SerializedURL.h>
 #include <LibWeb/IntersectionObserver/IntersectionObserver.h>
 #include <LibWeb/Layout/LayoutRustBridge.h>
-#include <LibWeb/Layout/NodeArena.h>
-#include <LibWeb/Layout/TextNode.h>
 #include <LibWeb/Layout/TreeBuilder.h>
-#include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Loader/ContentBlocker.h>
 #include <LibWeb/Namespace.h>
 #include <LibWeb/NavigationTiming/PerformanceNavigationTiming.h>
@@ -670,119 +667,23 @@ void Document::synchronize_dirty_style_attributes()
     }
 }
 
-Layout::NodeArena& Document::layout_node_arena()
+void* Document::layout_arena()
 {
-    // Created on first layout node so documents that never build a layout tree (e.g. temporary
-    // fragment-parsing documents) skip the Rust arena round-trip entirely.
-    if (!m_layout_node_arena) {
-        m_layout_node_arena = make_ref_counted<Layout::NodeArena>();
-        m_layout_node_arena->set_document({}, this);
+    // Made on the first ask, so documents that never build a layout tree (e.g. temporary fragment-parsing documents)
+    // skip the render owner round-trip entirely.
+    if (!m_render_document.handle.arena) {
+        m_render_document.handle = Layout::RustFFI::render_owner_create_document();
+        VERIFY(m_render_document.handle.arena);
+        Layout::RustFFI::layout_arena_set_layout_update_host_callbacks(m_render_document.handle.arena, layout_update_host_callbacks());
         Layout::register_layout_host(*this);
-        Layout::RustFFI::layout_arena_set_layout_update_host_callbacks(m_layout_node_arena->handle(), layout_update_host_callbacks());
-        Layout::RustFFI::FfiStyleRecordHostCallbacks style_record_host_callbacks {
-            .style_engine = style_computer().style_engine().rust_handle(),
-            .context = this,
-            .shell_style_changed = [](void*, void* shell, u64 record, void const* payloads, bool attach_resources) {
-                as<Layout::NodeWithStyle>(*static_cast<Layout::Node*>(shell)).refresh_style_from_arena(CSS::StyleRecordID { record }, payloads, attach_resources);
-            },
-        };
-        Layout::RustFFI::layout_arena_set_style_record_host_callbacks(m_layout_node_arena->handle(), style_record_host_callbacks);
-        // The render side says which nodes have a box and which of those boxes layout committed, so
-        // that DOM code reads a bit instead of looking up the node's row.
-        Layout::RustFFI::layout_arena_set_box_presence_host(m_layout_node_arena->handle(), this, [](void* context, u32 style_node, u8 bits) {
-            auto& document = *static_cast<Document*>(context);
-            // The document has no style node of its own; it is named by 0.
-            auto identity = style_node == 0 ? NodeIdentity::of_document() : NodeIdentity::of_style_node(CSS::StyleNodeID { style_node });
-            document.commit_messages().note_box_presence(identity,
-                (bits & Layout::RustFFI::BOX_PRESENCE_HAS_LAYOUT_BOX) != 0,
-                (bits & Layout::RustFFI::BOX_PRESENCE_HAS_COMMITTED_BOX) != 0);
-        });
-        Layout::RustFFI::layout_arena_set_shell_factory(m_layout_node_arena->handle(), this, [](void* context, Compositing::RustFFI::NodeSlotId slot, Layout::RustFFI::NodeKind kind) {
-            auto& document = *static_cast<Document*>(context);
-            Layout::NodeWithStyle* node = nullptr;
-            switch (kind) {
-            case Layout::RustFFI::NodeKind::BlockContainer:
-            case Layout::RustFFI::NodeKind::FieldSetBox:
-            case Layout::RustFFI::NodeKind::LegendBox:
-            case Layout::RustFFI::NodeKind::ListItemBox:
-            case Layout::RustFFI::NodeKind::ListItemMarkerBox:
-            case Layout::RustFFI::NodeKind::RangeInputBox:
-            case Layout::RustFFI::NodeKind::SVGForeignObjectBox:
-            case Layout::RustFFI::NodeKind::TableWrapper:
-            case Layout::RustFFI::NodeKind::TextAreaBox:
-            case Layout::RustFFI::NodeKind::TextInputBox:
-            case Layout::RustFFI::NodeKind::AudioBox:
-            case Layout::RustFFI::NodeKind::Box:
-            case Layout::RustFFI::NodeKind::CanvasBox:
-            case Layout::RustFFI::NodeKind::CheckBox:
-            case Layout::RustFFI::NodeKind::ImageBox:
-            case Layout::RustFFI::NodeKind::NavigableContainerViewport:
-            case Layout::RustFFI::NodeKind::RadioButton:
-            case Layout::RustFFI::NodeKind::SVGClipBox:
-            case Layout::RustFFI::NodeKind::SVGGeometryBox:
-            case Layout::RustFFI::NodeKind::SVGGraphicsBox:
-            case Layout::RustFFI::NodeKind::SVGImageBox:
-            case Layout::RustFFI::NodeKind::SVGMaskBox:
-            case Layout::RustFFI::NodeKind::SVGPatternBox:
-            case Layout::RustFFI::NodeKind::SVGSVGBox:
-            case Layout::RustFFI::NodeKind::SVGTextBox:
-            case Layout::RustFFI::NodeKind::SVGTextPathBox:
-            case Layout::RustFFI::NodeKind::VideoBox:
-                node = &Layout::allocate_layout_node<Layout::Box>(document, Layout::BindToPreparedArenaSlot::Yes, slot, kind);
-                break;
-            case Layout::RustFFI::NodeKind::BreakNode:
-            case Layout::RustFFI::NodeKind::InlineNode:
-                node = &Layout::allocate_layout_node<Layout::NodeWithStyle>(document, Layout::BindToPreparedArenaSlot::Yes, slot, kind);
-                break;
-            case Layout::RustFFI::NodeKind::TextNode:
-                Layout::allocate_layout_node<Layout::TextNode>(document, Layout::BindToPreparedArenaSlot::Yes, slot, kind);
-                return;
-            case Layout::RustFFI::NodeKind::GeneratedTextNode:
-                Layout::allocate_layout_node<Layout::GeneratedTextNode>(document, Layout::BindToPreparedArenaSlot::Yes, slot, kind);
-                return;
-            case Layout::RustFFI::NodeKind::Viewport:
-                Layout::allocate_layout_node<Layout::Viewport>(document, Layout::BindToPreparedArenaSlot::Yes, slot, kind);
-                return;
-            default:
-                VERIFY_NOT_REACHED();
-            }
-            // An anonymous row's style is derived by the arena, which has already told the shell
-            // everything about it. A row stamped for an element carries the record the mirror
-            // published, and adopting it is what the element's box tells the document about.
-            auto* element = as_if<Element>(node->dom_node());
-            if (!element) {
-                // A row the build stamped for a pseudo-element carries the record the mirror
-                // published for it, as an element's row does, and tells the document the same
-                // things about it. An anonymous row's style is derived by the arena, which has
-                // already told the shell everything about it.
-                if (!node->is_anonymous() || node->is_generated_for_pseudo_element())
-                    node->initialize_stamped_style_record();
-                else if (kind == Layout::RustFFI::NodeKind::InlineNode)
-                    node->attach_style_resources();
-                return;
-            }
-            node->initialize_stamped_style_record();
-        });
-        Layout::RustFFI::layout_arena_set_chrome_state_callback(
-            m_layout_node_arena->handle(), this,
-            [](void* context, Compositing::RustFFI::NodeSlotId slot, Layout::RustFFI::PaintableRowResetKind kind, bool is_viewport_row) {
-                auto& document = *static_cast<Document*>(context);
-                document.chrome_widget_registry().drop_widgets_for_slot(slot);
-                if (kind == Layout::RustFFI::PaintableRowResetKind::Recommitted && is_viewport_row)
-                    document.paint_state().viewport_row_was_reset();
-            });
     }
-    return *m_layout_node_arena;
+    return m_render_document.handle.arena;
 }
 
-void* Document::layout_arena_handle() const
+Document::RenderDocument::~RenderDocument()
 {
-    return m_layout_node_arena ? m_layout_node_arena->handle() : nullptr;
-}
-
-Layout::RustFFI::DocumentId Document::render_document_id() const
-{
-    return m_layout_node_arena ? m_layout_node_arena->render_document() : 0;
+    if (handle.arena)
+        Layout::RustFFI::render_owner_destroy_document(handle);
 }
 
 void Document::reset_style_invalidation_counters() const
@@ -1047,17 +948,11 @@ void Document::finalize()
 {
     stop_compositor_animation_timers();
     retire_render_state(Layout::RustFFI::FfiRenderStateRetirement::DocumentFinalized);
-    if (m_layout_node_arena)
-        Layout::RustFFI::layout_arena_clear_box_presence_host(m_layout_node_arena->handle());
+    // The boxes the teardown frees are no news to a document that is going away.
+    if (auto* arena = layout_arena_handle())
+        Layout::RustFFI::layout_arena_clear_box_presence_host(arena);
     tear_down_layout_tree();
-    if (m_layout_node_arena) {
-        Layout::RustFFI::layout_arena_clear_chrome_state_callback(m_layout_node_arena->handle());
-        Layout::RustFFI::layout_arena_clear_style_record_host_callbacks(m_layout_node_arena->handle());
-        Layout::RustFFI::layout_arena_clear_layout_host_callbacks(m_layout_node_arena->handle());
-        Layout::RustFFI::layout_arena_clear_layout_update_host_callbacks(m_layout_node_arena->handle());
-        Layout::RustFFI::layout_arena_clear_shell_factory(m_layout_node_arena->handle());
-        m_layout_node_arena->set_document({}, nullptr);
-    }
+    Layout::unregister_layout_host(*this);
     CSS::ComputedValuesFFI::rust_custom_property_registry_destroy(m_rust_custom_property_registry);
     Base::finalize();
     HTML::main_thread_event_loop().unregister_document({}, *this);
@@ -3100,16 +2995,6 @@ void Document::obtain_theme_color()
 
     // 3. Return nothing(the page has no theme color).
     document().page().client().page_did_change_theme_color(theme_color);
-}
-
-Layout::Viewport const* Document::unsafe_layout_node() const
-{
-    return static_cast<Layout::Viewport const*>(Node::unsafe_layout_node());
-}
-
-Layout::Viewport* Document::unsafe_layout_node()
-{
-    return static_cast<Layout::Viewport*>(Node::unsafe_layout_node());
 }
 
 bool Document::has_committed_viewport_box() const

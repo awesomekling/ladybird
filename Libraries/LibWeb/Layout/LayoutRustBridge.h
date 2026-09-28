@@ -48,8 +48,10 @@ RustFFI::FfiDocumentStyleForBuild document_style_for_build(DOM::Document&);
 bool attach_owed_style_resources(DOM::Document&, Compositing::RustFFI::NodeSlotId, bool owns_content_replacement_image);
 bool attach_owed_generated_image(DOM::Document&, Compositing::RustFFI::NodeSlotId, u32 style_node, RustFFI::FfiPseudoElement, RustFFI::FfiGeneratedContentItem, Compositing::RustFFI::NodeSlotId pseudo_element_box);
 
-// Registers the document-side answers every layout pass needs on the document's arena, once it has one.
-WEB_API void register_layout_host(DOM::Document&);
+// Registers the document-side answers the render side needs on the document's new arena, and takes them off it, along
+// with the layout update steps the document registers itself, as the document goes.
+void register_layout_host(DOM::Document&);
+void unregister_layout_host(DOM::Document&);
 
 // What the document publishes to the arena about a node, under its identity, for the rows built for it: what the rows
 // are painted and hit-tested with, what the element is scrolled to, whether the node sits in the focused text control,

@@ -51,8 +51,7 @@ public:
 
     static Compositing::RustFFI::NodeSlotId slot_id(Node const*);
     RustFFI::NodeKind kind() const { return m_kind; }
-    void* arena_handle() const;
-    NodeArena& node_arena() const { return *m_arena; }
+    void* arena_handle() const { return m_arena; }
 
     Node* parent_ptr() { return linked_node(RustFFI::FfiNodeLink::Parent); }
     Node const* parent_ptr() const { return linked_node(RustFFI::FfiNodeLink::Parent); }
@@ -234,7 +233,6 @@ public:
     // generated for, or 0.
     CSS::StyleNodeID style_node_id() const;
     // The StyleNodeID a row bound to this DOM node records, or 0 for a node that has none.
-    static CSS::StyleNodeID style_node_of(DOM::Node const*);
 
     void pin_style_record_for_detachment();
 
@@ -242,8 +240,6 @@ public:
     DOM::Document const& document() const;
 
     GC::Ptr<HTML::LocalNavigable> navigable() const;
-
-    Viewport& root();
 
     String debug_description() const;
 
@@ -281,32 +277,24 @@ public:
     // https://drafts.csswg.org/css-ui/#propdef-user-select
     CSS::UserSelect user_select_used_value() const;
 
-    enum class AttachToDOMNode {
-        No,
-        Yes,
-    };
-
 protected:
-    Node(DOM::Document&, GC::Ptr<DOM::Node>, RustFFI::NodeKind, AttachToDOMNode = AttachToDOMNode::Yes);
     Node(DOM::Document&, BindToPreparedArenaSlot, Compositing::RustFFI::NodeSlotId, RustFFI::NodeKind);
-
-    void take_over_rows_of_dom_node(DOM::Node&, AttachToDOMNode);
 
     bool has_flag(RustFFI::NodeFlag flag) const
     {
-        return (RustFFI::layout_arena_node_flags(m_arena->handle(), m_slot) & static_cast<u32>(flag)) != 0;
+        return (RustFFI::layout_arena_node_flags(m_arena, m_slot) & static_cast<u32>(flag)) != 0;
     }
 
     bool dom_target_stores_scroll_offset() const;
 
     bool has_compositor_animation_frame(RustFFI::CompositorAnimationFrameKind kind) const
     {
-        return RustFFI::layout_arena_node_has_compositor_animation_frame(m_arena->handle(), m_slot, kind);
+        return RustFFI::layout_arena_node_has_compositor_animation_frame(m_arena, m_slot, kind);
     }
 
     void set_flag(RustFFI::HostNodeFlag flag, bool value)
     {
-        RustFFI::layout_arena_set_node_flag(m_arena->handle(), m_slot, flag, value);
+        RustFFI::layout_arena_set_node_flag(m_arena, m_slot, flag, value);
     }
 
 private:
@@ -314,17 +302,20 @@ private:
 
     Node* linked_node(RustFFI::FfiNodeLink link) const
     {
-        return static_cast<Node*>(RustFFI::layout_arena_node_link_shell(m_arena->handle(), m_slot, link));
+        return static_cast<Node*>(RustFFI::layout_arena_node_link_shell(m_arena, m_slot, link));
     }
 
     Node* containing_block_node_if_live() const
     {
-        return static_cast<Node*>(RustFFI::layout_arena_node_containing_block_shell_if_live(m_arena->handle(), m_slot));
+        return static_cast<Node*>(RustFFI::layout_arena_node_containing_block_shell_if_live(m_arena, m_slot));
     }
 
-    u8 generated_for() const { return RustFFI::layout_arena_node_generated_for(m_arena->handle(), m_slot); }
+    u8 generated_for() const { return RustFFI::layout_arena_node_generated_for(m_arena, m_slot); }
+    bool is_bound_to_pseudo_element() const;
 
-    NonnullRefPtr<NodeArena> m_arena;
+    // The shell dies with its row, which dies with the document's render state, so neither outlives the document.
+    GC::Ref<DOM::Document> m_document;
+    void* m_arena { nullptr };
     Compositing::RustFFI::NodeSlotId m_slot;
     RustFFI::NodeKind m_kind { RustFFI::NodeKind::Unset };
     bool m_arena_is_destroying_shell { false };
@@ -338,11 +329,7 @@ T& allocate_layout_node(Args&&... args)
 
 class WEB_API NodeWithStyle : public Node {
 public:
-    NodeWithStyle(DOM::Document&, GC::Ptr<DOM::Node>, CSS::LayoutStyle, RustFFI::NodeKind = RustFFI::NodeKind::NodeWithStyle);
     NodeWithStyle(DOM::Document&, BindToPreparedArenaSlot, Compositing::RustFFI::NodeSlotId, RustFFI::NodeKind);
-    // A row the build prepared whose style the shell is what asks for, rather than the style
-    // mirror holding it under an identity the row names.
-    NodeWithStyle(DOM::Document&, BindToPreparedArenaSlot, Compositing::RustFFI::NodeSlotId, RustFFI::NodeKind, CSS::LayoutStyle);
 
     virtual ~NodeWithStyle() override;
 
@@ -595,7 +582,6 @@ private:
     virtual bool is_node_with_style() const final { return true; }
 
     void initialize_from_style_record();
-    void adopt_style(DOM::Document&, GC::Ptr<DOM::Node>, CSS::LayoutStyle);
     void publish_style_record_to_node_data();
     void did_update_style_record();
 
@@ -639,7 +625,5 @@ inline Gfx::Font const& NodeWithStyle::first_available_font() const
 {
     return font_list().first_available_font();
 }
-
-bool overflow_value_makes_box_a_scroll_container(CSS::Overflow overflow);
 
 }
