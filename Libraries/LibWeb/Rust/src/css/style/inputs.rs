@@ -2413,6 +2413,10 @@ impl StyleEngineState {
                 !self.retained.deferred_pseudo_element_observable_nodes.is_empty(),
                 PendingFacts::OBSERVABLE_DEFERRED_PSEUDO_ELEMENTS,
             ),
+            (
+                self.has_size_containers_needing_evaluation_after_layout(),
+                PendingFacts::SIZE_CONTAINERS_AFTER_LAYOUT,
+            ),
         ] {
             if holds {
                 facts = facts.union(fact);

@@ -90,6 +90,8 @@ impl PendingFacts {
     /// An element's deferred pseudo-element style was made observable, which a change of what is deferred owes an
     /// input.
     pub(crate) const OBSERVABLE_DEFERRED_PSEUDO_ELEMENTS: Self = Self(1 << 5);
+    /// [`StyleEngine::has_size_containers_needing_evaluation_after_layout`].
+    pub(crate) const SIZE_CONTAINERS_AFTER_LAYOUT: Self = Self(1 << 6);
     /// What an element's style input may leave.
     pub(crate) const ELEMENT_INPUT: Self =
         Self(Self::TRANSACTION.0 | Self::DEFERRED_ELEMENT_INPUTS.0 | Self::MAY_AFFECT_GEOMETRY.0);
