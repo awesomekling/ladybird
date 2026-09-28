@@ -26,6 +26,17 @@ class Scrollbar;
 
 }
 
+namespace Web::Layout {
+
+// Whether a row marked for layout carries the mark up through its ancestors, or, as a partial relayout boundary, keeps
+// it to itself.
+enum class LayoutUpdatePropagation : u8 {
+    ThroughAncestors,
+    BoundarySelfOnly,
+};
+
+}
+
 namespace Web::DOM {
 
 // Writes paint facts to the row an entry resolves to at the drain. Nothing makes a shell for the row to hand it over.
