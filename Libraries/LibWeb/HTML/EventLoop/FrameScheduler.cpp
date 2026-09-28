@@ -383,7 +383,8 @@ void FrameScheduler::consume_finished_frame()
             m_event_loop.call_finished_frame_consumer_again();
             return;
         }
-        Layout::RustFFI::rust_stage_thread_take_frame_in_flight();
+        // The frame has finished: taking it back waits for nothing, and adopts its news.
+        (void)Layout::RustFFI::rust_frame_news_take_finished_frame();
         consume_commit(EventLoop::FrameConsumeSite::StepOne);
     }
     if (m_state != State::CommittedTailPending)
