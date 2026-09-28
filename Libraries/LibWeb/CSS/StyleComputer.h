@@ -159,8 +159,8 @@ public:
 
     void begin_transition_stabilization_epoch();
     // Says whether a baseline was recorded, which is a main-side write.
-    bool record_transition_stabilization_baseline(StyleDrainScope const&, DOM::AbstractElement, Optional<StyleRecordID> before_change_style_record = {}) const;
-    bool pin_transition_stabilization_baseline_if_a_later_pass_may_need_it(StyleDrainScope const&, DOM::AbstractElement) const;
+    void record_transition_stabilization_baseline(StyleDrainScope const&, DOM::AbstractElement, Optional<StyleRecordID> before_change_style_record = {}) const;
+    void pin_transition_stabilization_baseline_if_a_later_pass_may_need_it(StyleDrainScope const&, DOM::AbstractElement) const;
     // Runs the whole transition step for an installed record, against the record the element moved
     // away from. Returns what publishing a started transition's values invalidates.
     [[nodiscard]] RequiredInvalidationAfterStyleChange run_transition_step_for_installed_record(StyleDrainScope const&, DOM::AbstractElement, StyleRecordID before_change_style_record, StyleEngineFFI::FfiTransitionStepDecidedInPass const* decided = nullptr) const;

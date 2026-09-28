@@ -1072,7 +1072,7 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                     // element holds by then is the after-change one. A row that owes the whole step
                     // pins the record it moved away from first.
                     if (transition_debt == 2 && document.is_in_style_stabilization_epoch() && settled.has_style())
-                        (void)document.style_computer().record_transition_stabilization_baseline(scope, settled, StyleRecordID { reaction.old_style_record });
+                        document.style_computer().record_transition_stabilization_baseline(scope, settled, StyleRecordID { reaction.old_style_record });
                     bool const compares_after_sample = engine_record_comparison == DOM::Element::EngineRecordComparison::AfterSample;
                     auto const row_sample_invalidation = compares_after_sample ? SampleInvalidation::AppliedByCaller : SampleInvalidation::Applied;
                     bool const installed_pass_sample = row_sampled_in_pass.present && settled.has_style()
