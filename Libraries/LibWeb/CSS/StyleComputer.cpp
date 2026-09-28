@@ -2155,11 +2155,6 @@ StyleRecordID StyleComputer::intern_computed_style_inputs(DOM::AbstractElement a
     return record_computed_style_inputs(Optional<DOM::AbstractElement> { abstract_element }, values, 0).new_style_record;
 }
 
-StyleRecordID StyleComputer::intern_anonymous_layout_style(ComputedValues const& values) const
-{
-    return record_computed_style_inputs({}, values, 0).new_style_record;
-}
-
 StyleEngine::StyleRecordDelta StyleComputer::record_computed_style_inputs(Optional<DOM::AbstractElement> abstract_element, ComputedValues const& values, StyleNodeID style_node_id) const
 {
     auto const& base = values.base_values();

@@ -929,6 +929,9 @@ public:
 
     [[nodiscard]] bool needs_full_layout_tree_update() const;
     void set_needs_full_layout_tree_update(bool);
+    // The document's style a layout round hands its tree build, which the render owner reads while the document waits
+    // for the round's job.
+    void keep_style_for_layout_tree_build(NonnullRefPtr<CSS::ComputedValues const>);
 
     CSS::ScrollStateQueryContainers& scroll_state_query_containers() { return m_scroll_state_query_containers; }
 
@@ -1798,6 +1801,7 @@ private:
     };
     RenderDocument m_render_document;
     GC::Ptr<CSS::StyleComputer> m_style_computer;
+    RefPtr<CSS::ComputedValues const> m_style_for_layout_tree_build;
     GC::Ptr<CSS::FontComputer> m_font_computer;
     GC::Ptr<CSS::StyleSheetList> m_style_sheets;
     GC::Ptr<Node> m_active_favicon;

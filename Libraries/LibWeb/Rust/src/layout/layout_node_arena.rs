@@ -6074,11 +6074,21 @@ impl LayoutNodeArena {
             || document_needs_layout_tree_update
     }
 
-    /// Holds the document's style for the build about to run, and the scroll offset of the
+    /// Interns the document's style for the build about to run and holds its record, with the scroll offset of the
     /// document's navigable, which the viewport's row holds.
-    pub(crate) fn publish_document_style(&self, record: u64, viewport_scroll_offset: FfiCssPixelPoint) {
-        self.published_viewport_scroll_offset.set(viewport_scroll_offset);
-        let derived = self.with_style_engine(|engine| engine.pin_derived_style_record(record));
+    ///
+    /// # Safety
+    ///
+    /// `style` must name the live group payloads and frozen longhand table of one style.
+    pub(crate) unsafe fn publish_document_style(&self, style: &super::update_layout::DocumentStyleForBuild) {
+        self.published_viewport_scroll_offset.set(style.viewport_scroll_offset);
+        let derived = self.with_style_engine(|engine| {
+            // SAFETY: Guaranteed by the caller.
+            let record = unsafe {
+                crate::css::style::bridge::intern_document_style(engine, &style.payloads, style.longhand_table.as_ref())
+            };
+            engine.pin_derived_style_record(record)
+        });
         self.release_published_document_style();
         self.published_document_style.set(Some(derived));
     }

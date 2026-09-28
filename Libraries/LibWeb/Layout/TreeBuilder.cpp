@@ -272,14 +272,21 @@ bool attach_owed_generated_image(DOM::Document& document, Compositing::RustFFI::
 
 // The viewport's style is the document's, which the style computer makes on demand rather than
 // publishing, so the document makes it for a round whose build may build the viewport as it reads
-// the round, with the navigable's scroll offset the viewport's row holds.
+// the round, with the navigable's scroll offset the viewport's row holds. The owner interns it as
+// the round's job begins, while the document keeps it.
 RustFFI::FfiDocumentStyleForBuild document_style_for_build(DOM::Document& document)
 {
-    auto& style_computer = document.style_computer();
-    auto document_style = style_computer.intern_anonymous_layout_style(*style_computer.create_document_style());
+    auto document_style = document.style_computer().create_document_style();
+    auto const& base = document_style->base_values();
+    RustFFI::FfiDocumentStyleForBuild style {};
+    static_assert(array_size(style.payloads.groups) == to_underlying(CSS::StyleGroupIndex::Count));
+    for (size_t index = 0; index < array_size(style.payloads.groups); ++index)
+        style.payloads.groups[index] = base.style_group_payload(static_cast<CSS::StyleGroupIndex>(index));
+    style.longhand_table = base.computed_longhand_table();
     auto navigable = document.navigable();
-    auto viewport_scroll_offset = navigable ? navigable->viewport_scroll_offset() : CSSPixelPoint {};
-    return { .record = document_style.value(), .viewport_scroll_offset = viewport_scroll_offset };
+    style.viewport_scroll_offset = navigable ? navigable->viewport_scroll_offset() : CSSPixelPoint {};
+    document.keep_style_for_layout_tree_build(move(document_style));
+    return style;
 }
 
 void detach_top_layer_element_layout_subtree(DOM::Element& element)
