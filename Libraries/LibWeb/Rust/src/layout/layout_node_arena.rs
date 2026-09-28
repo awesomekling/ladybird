@@ -7145,19 +7145,6 @@ pub unsafe extern "C" fn layout_arena_node_style_payloads(arena: *mut c_void, id
         .as_ptr()
 }
 
-/// The row's style record as the engine published it, which the caller owns one reference of; null
-/// for a row without style.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_node_published_style_record(arena: *mut c_void, id: NodeSlotId) -> *const c_void {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }
-        .data(id)
-        .style
-        .owner()
-        .map_or(std::ptr::null(), crate::css::style::published_record::into_handle)
-}
-
 /// The dependency flags of the row's style record, or zero for a row without style.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_node_style_dependency_flags(arena: *mut c_void, id: NodeSlotId) -> u8 {
