@@ -278,7 +278,10 @@ pub(crate) unsafe fn send(arena: *mut c_void, change: PaintChange) {
     {
         // SAFETY: The unit the owner runs holds the arena, and its document thread waits for it; or the document
         // thread does the owner's work; or the arena is the calling thread's alone.
-        let arena = unsafe { &mut *crate::layout::ArenaHandle::held_by_waiting_thread(arena) }.arena_mut();
+        let arena = crate::render_owner::do_owner_work_here(|owner| unsafe {
+            &mut *crate::layout::ArenaHandle::held_by_waiting_thread(owner, arena)
+        })
+        .arena_mut();
         change.apply(arena);
         // The unit publishes the rows as it ends; the document thread reads them next.
         if !crate::stage_thread::running_inside_stage() {

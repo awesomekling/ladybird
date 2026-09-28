@@ -83,7 +83,7 @@ pub(crate) struct OwnerPaintPass {
 impl OwnerPaintPass {
     /// Runs the pass on the owner, with the arena of the render state `found` finds for the pass's document. Where the
     /// owner holds none (a bug of the sender's), the pass runs with the arena the document thread sent.
-    pub(crate) fn run(self, found: impl FnOnce() -> Option<*mut ArenaHandle>) {
+    pub(crate) fn run(self, owner: &crate::render_owner::Owner, found: impl FnOnce() -> Option<*mut ArenaHandle>) {
         let Self { arena: sent, pass } = self;
         let sent = sent.into_inner();
         pass.run(|| {
@@ -94,7 +94,7 @@ impl OwnerPaintPass {
                 "a paint pass runs with its document's arena"
             );
             // SAFETY: The document thread waits for the pass, and the arena it sent is its document's.
-            found.unwrap_or_else(|| unsafe { ArenaHandle::held_by_waiting_thread(sent) })
+            found.unwrap_or_else(|| unsafe { ArenaHandle::held_by_waiting_thread(owner, sent) })
         });
     }
 }
@@ -141,11 +141,10 @@ pub(crate) unsafe fn run_paint_pass_of<A, R>(
     let handle = arena;
     if !document.is_valid() {
         // SAFETY: Guaranteed by the caller; the owner holds no state of an arena of no document.
-        return run_and_publish(
-            unsafe { &mut *ArenaHandle::held_by_waiting_thread(handle) }.arena_mut(),
-            body,
-            arguments,
-        );
+        let state = crate::render_owner::do_owner_work_here(|owner| unsafe {
+            &mut *ArenaHandle::held_by_waiting_thread(owner, handle)
+        });
+        return run_and_publish(state.arena_mut(), body, arguments);
     }
     let arguments = std::cell::Cell::new(Some(arguments));
     let outcome = crate::stage_thread::wait_for_owner(
@@ -162,9 +161,9 @@ pub(crate) unsafe fn run_paint_pass_of<A, R>(
             }),
         },
         // The owner does not run the pass: the calling thread does its work.
-        || {
+        |owner| {
             // SAFETY: Guaranteed by the caller; this thread does the owner's work, and nothing else reaches the state.
-            let state = unsafe { &mut *ArenaHandle::held_by_waiting_thread(handle) };
+            let state = unsafe { &mut *ArenaHandle::held_by_waiting_thread(owner, handle) };
             run_and_publish(state.arena_mut(), body, arguments.take().expect("a pass runs once"))
         },
     );

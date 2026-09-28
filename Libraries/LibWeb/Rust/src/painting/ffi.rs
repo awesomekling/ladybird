@@ -77,7 +77,10 @@ unsafe fn arena_of_owner_unit<'a>(arena: *mut c_void) -> &'a mut LayoutNodeArena
         "only a unit the owner runs holds the arena"
     );
     // SAFETY: Guaranteed by the caller.
-    unsafe { &mut *crate::layout::ArenaHandle::held_by_waiting_thread(arena) }.arena_mut()
+    crate::render_owner::do_owner_work_here(|owner| unsafe {
+        &mut *crate::layout::ArenaHandle::held_by_waiting_thread(owner, arena)
+    })
+    .arena_mut()
 }
 
 /// Sends the owner of the document whose arena `arena` names the paint state write `change`.

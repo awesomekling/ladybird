@@ -1890,16 +1890,17 @@ pub(crate) fn owner_work_runs_here() -> bool {
 
 /// Sends the render owner the message `message` makes of where it answers, and waits for the answer. The owner joins
 /// the calling thread for nothing: the thread only waits. Where there is no owner to send it to (no Rendering thread,
-/// or the calling thread is it), or the message would queue behind a run a test holds, `here` answers right here.
+/// or the calling thread is it), or the message would queue behind a run a test holds, `here` answers right here, as
+/// the owner.
 pub(crate) fn wait_for_owner<R>(
     message: impl FnOnce(OwnerReplyTo<R>) -> crate::render_owner::ToOwner,
-    here: impl FnOnce() -> R,
+    here: impl FnOnce(&crate::render_owner::Owner) -> R,
 ) -> std::thread::Result<R> {
     let Some(thread) = stage_thread().filter(|thread| std::thread::current().id() != thread.id) else {
-        return Ok(here());
+        return Ok(crate::render_owner::do_owner_work_here(here));
     };
     if has_frame_in_flight() && stage_thread_holds_run_for_queued_stage() {
-        return Ok(here());
+        return Ok(crate::render_owner::do_owner_work_here(here));
     }
     send_and_wait(thread, message)
 }
