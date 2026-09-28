@@ -1051,22 +1051,22 @@ Utf16String Internals::take_layout_trace()
 
 WebIDL::UnsignedLongLong Internals::table_cell_measurement_cache_miss_count()
 {
-    return Layout::RustFFI::layout_arena_table_cell_measurement_cache_miss_count(Layout::document_layout_arena(window().associated_document()));
+    return Layout::RustFFI::render_owner_arena_counts(Layout::document_render_document(window().associated_document())).table_cell_measurement_cache_misses;
 }
 
 WebIDL::UnsignedLongLong Internals::intrinsic_inline_measurement_count()
 {
-    return Layout::RustFFI::layout_arena_intrinsic_inline_measurement_count(Layout::document_layout_arena(window().associated_document()));
+    return Layout::RustFFI::render_owner_arena_counts(Layout::document_render_document(window().associated_document())).intrinsic_inline_measurements;
 }
 
 WebIDL::UnsignedLongLong Internals::retained_inline_item_count()
 {
-    return Layout::RustFFI::layout_arena_retained_inline_item_count(Layout::document_layout_arena(window().associated_document()));
+    return Layout::RustFFI::render_owner_arena_counts(Layout::document_render_document(window().associated_document())).retained_inline_items;
 }
 
 WebIDL::UnsignedLongLong Internals::intrinsic_measurement_count()
 {
-    return Layout::RustFFI::layout_arena_intrinsic_measurement_count(Layout::document_layout_arena(window().associated_document()));
+    return Layout::RustFFI::render_owner_arena_counts(Layout::document_render_document(window().associated_document())).intrinsic_measurements;
 }
 
 WebIDL::UnsignedLongLong Internals::accumulated_visual_context_tree_build_count()

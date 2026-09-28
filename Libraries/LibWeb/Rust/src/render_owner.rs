@@ -99,6 +99,8 @@ pub(crate) enum ArenaChange {
     /// The host adopted what the clock's ticks installed in the arena ahead of it: what it did not adopt leaves the
     /// arena's log, with its pins.
     DropUnadoptedAnimationSamples,
+    /// Whether the host listens for the boxes the document's nodes gain and lose.
+    HostHearsBoxPresence(bool),
 }
 
 impl ArenaChange {
@@ -112,6 +114,7 @@ impl ArenaChange {
                 }
             }
             ArenaChange::DropUnadoptedAnimationSamples => arena.drop_animation_adoptions(),
+            ArenaChange::HostHearsBoxPresence(hears) => arena.set_host_hears_box_presence(hears),
         }
     }
 }
@@ -272,7 +275,7 @@ impl RenderState {
                     engine.reach_on_owner(|_| arena.finish_flight_style_host_half().1)
                 }))
             }
-            _ => Answer::of(query, self.arena.arena_mut()),
+            _ => Answer::of_state(query, &mut self.arena),
         }
     }
 
@@ -349,6 +352,9 @@ pub(crate) enum ArenaQuery {
     /// Whether the counter styles an element's or pseudo-element's generated content names differ from the ones its
     /// box was built with.
     ContentCounterStylesChanged(crate::layout::counters::CounterOwner),
+    /// The text a pseudo-element's generated content resolved to when its box was built: its alt text when it has one,
+    /// otherwise every string in it.
+    GeneratedContentAccessibleText(crate::layout::counters::CounterOwner),
 }
 
 /// The answer to an [`ArenaQuery`].
@@ -358,6 +364,7 @@ pub(crate) enum ArenaAnswer {
     Byte(u8),
     Point(crate::layout::used_values::FfiCssPixelPoint),
     BuiltScrollSnapContainers(Vec<(crate::layout::node_data::NodeSlotId, bool)>),
+    Text(Vec<u16>),
 }
 
 impl ArenaQuery {
@@ -371,6 +378,7 @@ impl ArenaQuery {
             ArenaQuery::ContentCounterStylesChanged(_) => {
                 ArenaAnswer::Byte(LayoutNodeArena::CONTENT_COUNTER_STYLES_NOT_RECORDED)
             }
+            ArenaQuery::GeneratedContentAccessibleText(_) => ArenaAnswer::Text(Vec::new()),
         }
     }
 
@@ -391,6 +399,9 @@ impl ArenaQuery {
             }
             ArenaQuery::ContentCounterStylesChanged(owner) => {
                 ArenaAnswer::Byte(arena.content_counter_styles_changed(owner))
+            }
+            ArenaQuery::GeneratedContentAccessibleText(owner) => {
+                ArenaAnswer::Text(arena.generated_content().borrow().accessible_text(owner).to_vec())
             }
         }
     }
@@ -496,6 +507,7 @@ pub struct FfiArenaCounts {
     pub intrinsic_measurements: u64,
     pub intrinsic_inline_measurements: u64,
     pub table_cell_measurement_cache_misses: u64,
+    pub retained_inline_items: u64,
 }
 
 impl Answer {
@@ -527,6 +539,17 @@ impl Answer {
         outcome.unwrap_or_else(|_| Self::unanswered(query))
     }
 
+    /// Answers `query` from the arena of `state` and the layout scratch beside it.
+    fn of_state(query: Query, state: &mut ArenaHandle) -> Self {
+        let (arena, scratch) = state.arena_and_scratch();
+        let retained_inline_items = scratch.retained_inline_item_count();
+        let mut answer = Self::of(query, arena);
+        if let Self::LayoutCounts(counts) = &mut answer {
+            counts.arena.retained_inline_items = retained_inline_items;
+        }
+        answer
+    }
+
     /// Answers `query` from `arena` alone. A question the engine answers is left to the main thread.
     pub(crate) fn of(query: Query, arena: &mut LayoutNodeArena) -> Self {
         match query {
@@ -542,6 +565,7 @@ impl Answer {
                     intrinsic_measurements: arena.intrinsic_measurement_count(),
                     intrinsic_inline_measurements: arena.intrinsic_inline_measurement_count(),
                     table_cell_measurement_cache_misses: arena.table_cell_measurement_cache_miss_count(),
+                    retained_inline_items: 0,
                 },
             }),
             Query::PreOrderLabelViolations { root } => Self::Count(pre_order_label_violations(arena, root)),
@@ -1061,10 +1085,7 @@ pub(crate) unsafe fn ask(document: DocumentId, arena: *mut c_void, query: Query)
                 return answer;
             }
             // SAFETY: Guaranteed by the caller.
-            Answer::of(
-                query,
-                unsafe { &mut *ArenaHandle::held_by_waiting_thread(arena) }.arena_mut(),
-            )
+            Answer::of_state(query, unsafe { &mut *ArenaHandle::held_by_waiting_thread(arena) })
         },
     );
     debug_assert!(answer.is_ok(), "the render owner panicked answering {query:?}");
@@ -1239,6 +1260,24 @@ pub extern "C" fn render_owner_content_counter_styles_changed(
         ArenaAnswer::Byte(answer) => answer,
         _ => LayoutNodeArena::CONTENT_COUNTER_STYLES_NOT_RECORDED,
     }
+}
+
+/// The text the generated content of the pseudo-element `generated_for` of the element `style_node` in `document`
+/// resolved to when its box was built, as an `AK::Utf16String` raw representation the caller adopts.
+#[unsafe(no_mangle)]
+pub extern "C" fn render_owner_generated_content_accessible_text(
+    document: DocumentId,
+    style_node: u32,
+    generated_for: u8,
+) -> usize {
+    let text = StyleNodeID::from_raw(style_node).and_then(|element| {
+        let owner = crate::layout::counters::CounterOwner { element, generated_for };
+        match ask_arena(document, ArenaQuery::GeneratedContentAccessibleText(owner)) {
+            ArenaAnswer::Text(text) => Some(text),
+            _ => None,
+        }
+    });
+    ak::Utf16String::from_utf16(text.as_deref().unwrap_or_default()).into_raw()
 }
 
 /// Runs the style transaction `transaction` of `document`, which the calling document thread takes, on the owner, and

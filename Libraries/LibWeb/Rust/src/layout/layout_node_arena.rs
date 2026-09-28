@@ -6501,10 +6501,6 @@ pub(crate) unsafe fn paying_host_handbacks<R>(
     result
 }
 
-fn counter_owner(style_node: u32, generated_for: u8) -> Option<super::counters::CounterOwner> {
-    StyleNodeID::from_raw(style_node).map(|element| super::counters::CounterOwner { element, generated_for })
-}
-
 pub const CONTENT_COUNTER_STYLES_NOT_RECORDED: u8 = 0;
 pub const CONTENT_COUNTER_STYLES_UNCHANGED: u8 = 1;
 pub const CONTENT_COUNTER_STYLES_CHANGED: u8 = 2;
@@ -6521,69 +6517,6 @@ impl LayoutNodeArena {
             Some(true) => CONTENT_COUNTER_STYLES_CHANGED,
         }
     }
-}
-
-/// The text the content of the pseudo-element `generated_for` of the element `style_node` names last
-/// resolved to, the way accessibility reads it: the alt text when there is one, otherwise every
-/// string in order. The result is an `AK::Utf16String` raw representation the caller adopts.
-///
-/// # Safety
-///
-/// The arena must remain valid for the duration of the call.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_generated_content_accessible_text(
-    arena: *mut c_void,
-    style_node: u32,
-    generated_for: u8,
-) -> usize {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    let Some(owner) = counter_owner(style_node, generated_for) else {
-        return ak::Utf16String::from_utf16(&[]).into_raw();
-    };
-    // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on the
-    // document thread.
-    let generated_content = unsafe { LayoutNodeArena::from_handle(arena) }
-        .generated_content()
-        .borrow();
-    ak::Utf16String::from_utf16(generated_content.accessible_text(owner)).into_raw()
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_table_cell_measurement_cache_miss_count(arena: *mut c_void) -> u64 {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: The C++ wrapper keeps the arena alive for this call and
-    // serializes all access on the document thread.
-    unsafe { LayoutNodeArena::from_handle(arena) }.table_cell_measurement_cache_miss_count()
-}
-
-/// # Safety
-///
-/// The arena must remain valid for the duration of the call, with no layout stage running on it.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_retained_inline_item_count(arena: *mut c_void) -> u64 {
-    // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on the document thread.
-    unsafe { super::LayoutScratch::from_handle(arena) }.retained_inline_item_count()
-}
-
-/// # Safety
-///
-/// The arena must remain valid for the duration of the call.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_intrinsic_measurement_count(arena: *mut c_void) -> u64 {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: The C++ wrapper keeps the arena alive for this call and
-    // serializes all access on the document thread.
-    unsafe { LayoutNodeArena::from_handle(arena) }.intrinsic_measurement_count()
-}
-
-/// # Safety
-///
-/// The arena must remain valid for the duration of the call.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_intrinsic_inline_measurement_count(arena: *mut c_void) -> u64 {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: The C++ wrapper keeps the arena alive and serializes access on the document thread.
-    unsafe { LayoutNodeArena::from_handle(arena) }.intrinsic_inline_measurement_count()
 }
 
 #[unsafe(no_mangle)]
@@ -7240,7 +7173,8 @@ pub unsafe extern "C" fn layout_arena_set_box_presence_host(
         .box_presence_host
         .set(Some((context, callback)));
     // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }.set_host_hears_box_presence(true);
+    let document = unsafe { super::ArenaHandle::document_of(arena) };
+    crate::render_owner::send_arena_change(document, crate::render_owner::ArenaChange::HostHearsBoxPresence(true));
 }
 
 /// # Safety
@@ -7254,7 +7188,8 @@ pub unsafe extern "C" fn layout_arena_clear_box_presence_host(arena: *mut c_void
         .box_presence_host
         .set(None);
     // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }.set_host_hears_box_presence(false);
+    let document = unsafe { super::ArenaHandle::document_of(arena) };
+    crate::render_owner::send_arena_change(document, crate::render_owner::ArenaChange::HostHearsBoxPresence(false));
 }
 
 #[unsafe(no_mangle)]

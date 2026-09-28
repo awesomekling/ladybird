@@ -94,10 +94,6 @@ public:
     void* handle() const { return m_render_document.arena; }
     // The name of the document's render state, which the Rendering thread owns.
     RustFFI::DocumentId render_document() const { return m_render_document.document; }
-    u64 table_cell_measurement_cache_miss_count() const;
-    u64 retained_inline_item_count() const;
-    u64 intrinsic_measurement_count() const;
-    u64 intrinsic_inline_measurement_count() const;
 
     DOM::Document* document() const { return m_document.ptr(); }
     void set_document(Badge<DOM::Document>, DOM::Document* document) { m_document = document; }
