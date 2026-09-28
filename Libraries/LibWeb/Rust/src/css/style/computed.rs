@@ -2152,10 +2152,12 @@ impl ComputedGroupSets {
         self.reclaim_retired_animation_overlays();
     }
 
-    /// Lends the host's pins again at the end of a clock tick, without reclaiming what it retired: the host may pin
-    /// records while the tick ends.
-    pub(crate) fn end_clock_tick_beside_host_pins(&mut self) {
-        self.host_pins = self.host_pins.taken_back();
+    /// Stops lending the host's pins while the engine runs beside the document thread, and returns how they were lent,
+    /// which [`Self::lend_host_pins`] lends them as again once it no longer does.
+    pub(crate) fn lend_host_pins_beside(&mut self) -> HostPinsLend {
+        let lend = self.host_pins;
+        self.host_pins = lend.beside_flight();
+        lend
     }
 
     fn update_animation_overlay(

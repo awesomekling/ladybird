@@ -269,10 +269,10 @@ impl DocumentClock {
             FfiClockTickOutcome::PastDeadline
         } else if let Some(engine) = engine {
             // The main thread pins and unpins its host's records beside the tick, which reads none of them.
-            engine.begin_clock_lend_beside_host_pins();
+            let lend = engine.lend_host_pins_beside();
             // SAFETY: Guaranteed by the caller.
             let outcome = unsafe { self.sample_and_install(entries, state, engine, time) };
-            engine.end_clock_tick_beside_host_pins();
+            engine.restore_host_pins(lend);
             outcome
         } else {
             FfiClockTickOutcome::NeedsMain
@@ -1145,7 +1145,9 @@ fn run_display_tick(owner: &crate::render_owner::Owner, context: u64, frame_time
     // Taking the clock applies the arena's pending changes, which may reach the engine.
     let taken = match crate::render_owner::style_engine_of(document) {
         // SAFETY: The owner holds the document's render state, and the engine with it.
-        Some(engine) if !engine.is_null() => unsafe { engine.reach_on_owner(owner, |_| take_clock(owner, document)) },
+        Some(engine) if !engine.is_null() => unsafe {
+            engine.reach_on_owner_beside_main(owner, |_| take_clock(owner, document))
+        },
         _ => take_clock(owner, document),
     };
     let Some((mut clock, arena)) = taken else {
@@ -1234,7 +1236,8 @@ fn run_display_tick_on(
                 FfiClockPresent::Declined => (FfiClockTickOutcome::NeedsMain, laid_out, false),
             }
         };
-        // The whole tick reaches the engine as the owner: its layout round and its recording too.
+        // The whole tick reaches the engine as the owner, beside the main thread: its layout round and its recording
+        // too.
         // SAFETY: The owner holds the document's render state: its arena, and the engine the arena links.
         let engine = unsafe { &*arena }.arena().style_engine_handle();
         let reach_and_run_tick = || {
@@ -1242,7 +1245,7 @@ fn run_display_tick_on(
                 return run_tick(None);
             }
             // SAFETY: As above.
-            unsafe { engine.reach_on_owner(owner, |engine| run_tick(Some(engine))) }
+            unsafe { engine.reach_on_owner_beside_main(owner, |engine| run_tick(Some(engine))) }
         };
         tick = Some(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
             reach_and_run_tick,
