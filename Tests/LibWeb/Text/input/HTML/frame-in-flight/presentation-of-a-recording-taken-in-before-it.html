@@ -9,7 +9,6 @@
     asyncTest(async done => {
         await new Promise(resolve => window.addEventListener("load", resolve));
         await twoFrames();
-        internals.setRenderPresents(true);
         const before = internals.presentedSceneEpoch();
         const takenInBefore = internals.recordingsTakenInBeforeTheirPresentation();
         internals.takeInNextRecordingBeforeItsPresentation();
@@ -19,7 +18,6 @@
         }));
         await twoFrames();
         internals.takeInNextRecordingBeforeItsPresentation(false);
-        internals.resetRenderPresents();
         const takenIn = internals.recordingsTakenInBeforeTheirPresentation() - takenInBefore;
         println(`taken in before its presentation: ${takenIn}`);
         println(`presented: ${internals.presentedSceneEpoch() > before}`);

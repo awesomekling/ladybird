@@ -30,12 +30,6 @@ namespace Web::Compositor {
 
 class NavigablePresenter;
 
-// Whether the frame a navigable presents is sealed when the rendering update begins it and presented from the Rendering
-// thread, rather than read from its document where the frame is finished (LIBWEB_RENDER_PRESENTS=0).
-WEB_API bool render_presents();
-// Test only: overrides LIBWEB_RENDER_PRESENTS for the frames begun from now on, or stops overriding it.
-WEB_API void set_render_presents_for_testing(Optional<bool>);
-
 // Where a frame's keyboard scroll state goes with the epoch of a display list not recorded yet.
 inline constexpr u64 keyboard_scroll_epoch_placeholder = NumericLimits<u64>::max();
 

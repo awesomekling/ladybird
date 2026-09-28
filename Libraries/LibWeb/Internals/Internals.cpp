@@ -2047,16 +2047,6 @@ Utf16String Internals::frame_scheduler_state() const
     VERIFY_NOT_REACHED();
 }
 
-void Internals::set_render_presents(bool enabled)
-{
-    Compositor::set_render_presents_for_testing(enabled);
-}
-
-void Internals::reset_render_presents()
-{
-    Compositor::set_render_presents_for_testing({});
-}
-
 WebIDL::UnsignedLongLong Internals::presented_scene_epoch()
 {
     // NB: Read beside the frame in flight, which would be taken in by presenter().

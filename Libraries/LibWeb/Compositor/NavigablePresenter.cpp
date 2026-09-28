@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#include <LibCore/Environment.h>
 #include <LibWeb/Compositor/NavigablePresenter.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
 
@@ -13,22 +12,6 @@ namespace Web::Compositor {
 Presentation::~Presentation()
 {
     Layout::RustFFI::layout_recording_ticket_release(recording_ticket);
-}
-
-static Optional<bool> s_render_presents_for_testing;
-
-bool render_presents()
-{
-    static bool const enabled = [] {
-        auto value = Core::Environment::get("LIBWEB_RENDER_PRESENTS"sv);
-        return !value.has_value() || *value != "0"sv;
-    }();
-    return s_render_presents_for_testing.value_or(enabled);
-}
-
-void set_render_presents_for_testing(Optional<bool> enabled)
-{
-    s_render_presents_for_testing = enabled;
 }
 
 static Compositing::DisplayListResourceSet resources_to_hand_compositor(Compositing::DisplayListResourceStorage const& resource_storage, Compositing::DisplayListResourceSet const& paint_command_cache_source_resources, Compositing::DisplayListResourceSet const& display_list_command_resources, Compositing::AccumulatedVisualContextTree const& visual_context_tree)

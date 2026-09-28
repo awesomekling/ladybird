@@ -241,11 +241,6 @@ thread_local! {
         RefCell::new(std::collections::HashSet::new());
     // On the calling thread, how many forced joins took in a frame with a stage of each label.
     static FORCED_JOINS: RefCell<Vec<(&'static str, u64)>> = const { RefCell::new(Vec::new()) };
-    // On the calling thread, how many presentation stages it submitted, and how many times taking a
-    // frame back found one of them unfinished and waited for it (and so for its posts to the
-    // compositor, which stall while the compositor's socket is full).
-    static PRESENTATIONS_SUBMITTED: Cell<u64> = const { Cell::new(0) };
-    static TAKE_BACKS_THAT_WAITED_FOR_PRESENTATION: Cell<u64> = const { Cell::new(0) };
     // On the calling thread, the call sites a garbage collection reached the frame in flight from, each logged once.
     static SITES_REACHED_FROM_COLLECTION: RefCell<std::collections::HashSet<(&'static str, u32)>> =
         RefCell::new(std::collections::HashSet::new());
@@ -709,8 +704,7 @@ pub(crate) fn running_inside_stage() -> bool {
 /// The label of the stage that presents a navigable's frame at the end of the frame in flight.
 const PRESENTATION_STAGE: &str = "present";
 
-/// Whether the rendering update presents its frames from the frame in flight: when it submits its
-/// recordings, and presenting from the Rendering thread is on, unless LIBWEB_RENDER_PRESENTS=0 (which the host checks).
+/// Whether the rendering update presents its frames from the frame in flight: when it submits its recordings.
 fn submits_presentation() -> bool {
     submits("recording")
 }
@@ -739,57 +733,11 @@ pub unsafe extern "C" fn rust_stage_thread_submit_presentation(
 ) {
     // SAFETY: Guaranteed by the caller.
     let context = unsafe { FrameOwns::new(context) };
-    PRESENTATIONS_SUBMITTED.with(|count| count.set(count.get() + 1));
-    if logs_presentation_counts() {
-        log_presentation_counts();
-    }
     submit_paint_stage(PRESENTATION_STAGE, document as usize, move || {
         let context = context.into_inner();
         // SAFETY: Guaranteed by the caller.
         unsafe { present(context) };
     });
-}
-
-/// Whether every presentation counter change is logged (LIBWEB_RENDER_PRESENTS_COUNTS=1), for measuring how often a
-/// take-back waits for a presentation.
-fn logs_presentation_counts() -> bool {
-    static LOGS: OnceLock<bool> = OnceLock::new();
-    *LOGS.get_or_init(|| std::env::var("LIBWEB_RENDER_PRESENTS_COUNTS").is_ok_and(|value| value == "1"))
-}
-
-fn log_presentation_counts() {
-    let submitted = PRESENTATIONS_SUBMITTED.with(Cell::get);
-    let waits = TAKE_BACKS_THAT_WAITED_FOR_PRESENTATION.with(Cell::get);
-    eprintln!(
-        "RENDER PRESENTS: pid {} {waits} take-backs of {submitted} presentations waited for one to finish",
-        std::process::id()
-    );
-}
-
-fn note_take_back_waited_for_presentation() {
-    let waits = TAKE_BACKS_THAT_WAITED_FOR_PRESENTATION.with(|count| {
-        count.set(count.get() + 1);
-        count.get()
-    });
-    if waits.is_power_of_two() || logs_presentation_counts() {
-        log_presentation_counts();
-    }
-}
-
-/// How many presentation stages the calling thread submitted, and how many times taking a frame
-/// back waited for one of them.
-#[repr(C)]
-pub struct FfiPresentationCounters {
-    pub presentations_submitted: u64,
-    pub take_backs_that_waited_for_presentation: u64,
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn rust_stage_thread_presentation_counters() -> FfiPresentationCounters {
-    FfiPresentationCounters {
-        presentations_submitted: PRESENTATIONS_SUBMITTED.with(Cell::get),
-        take_backs_that_waited_for_presentation: TAKE_BACKS_THAT_WAITED_FOR_PRESENTATION.with(Cell::get),
-    }
 }
 
 /// Where in a submitted run of a stage a test's hold makes the stage thread wait.
@@ -1167,15 +1115,9 @@ pub(crate) fn frame_in_flight_has_finished() -> bool {
 /// one. A panic in one of its stages continues here. The frame's effects are the caller's to apply.
 pub(crate) fn take_frame_in_flight() -> bool {
     let stages = SUBMITTED.with_borrow_mut(std::mem::take);
-    let mut paint_stages = PAINTING.with_borrow_mut(std::mem::take);
+    let paint_stages = PAINTING.with_borrow_mut(std::mem::take);
     if stages.is_empty() && paint_stages.is_empty() {
         return false;
-    }
-    if paint_stages
-        .iter_mut()
-        .any(|stage| stage.label == PRESENTATION_STAGE && !stage.poll())
-    {
-        note_take_back_waited_for_presentation();
     }
     let mut panic = None;
     let mut on_taken_back = Vec::new();

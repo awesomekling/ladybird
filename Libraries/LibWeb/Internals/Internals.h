@@ -252,8 +252,6 @@ public:
     void inject_rendering_opportunity(double frame_time_ms);
     bool wait_for_frame_to_finish();
     Utf16String frame_scheduler_state() const;
-    void set_render_presents(bool enabled);
-    void reset_render_presents();
     WebIDL::UnsignedLongLong presented_scene_epoch();
     bool last_frame_keyboard_scroll_state_is_current();
     WebIDL::UnsignedLongLong presented_compositor_animation_count();
