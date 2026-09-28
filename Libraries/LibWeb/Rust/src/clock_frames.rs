@@ -431,7 +431,7 @@ impl DocumentClock {
             }
         }
         // SAFETY: As above.
-        if !unsafe { crate::painting::ffi::record_for_clock_tick(arena_handle) } {
+        if !unsafe { crate::painting::ffi::record_for_clock_tick(state) } {
             return FfiClockPresent::Declined;
         }
         let presented = present(arena_handle);
@@ -1066,9 +1066,11 @@ pub(crate) fn handle_on_owner(owner: &crate::render_owner::Owner, message: Clock
                 // A clock starts where a rendering update ended: until a tick moves something, the host's reads answer
                 // from what that update laid out, and no tick that runs meanwhile shows in them.
                 // SAFETY: The render state keeps the arena alive, and the owner holds it.
-                published.adoption().query_snapshot = unsafe { &mut *arena }
-                    .arena_mut()
-                    .publish_query_snapshot(&CLOCK_TICK_QUERY_SNAPSHOT_VIEWPORT);
+                published.adoption().query_snapshot = Some(
+                    unsafe { &mut *arena }
+                        .arena_mut()
+                        .publish_query_snapshot(&CLOCK_TICK_QUERY_SNAPSHOT_VIEWPORT),
+                );
             });
             TICKS_TO_ADOPT.store(true, Ordering::Release);
         }
@@ -1250,7 +1252,7 @@ fn run_display_tick_on(
             // A round that moved a box that owns a clip, a transform or a scroll frame moved the
             // visual contexts, which the compositor has from the main thread's frames.
             // SAFETY: As above.
-            if laid_out && !unsafe { crate::painting::ffi::settle_visual_contexts_for_clock_tick(arena.cast()) } {
+            if laid_out && !unsafe { crate::painting::ffi::settle_visual_contexts_for_clock_tick(arena) } {
                 count(&COUNTERS.ticks_moving_visual_contexts);
                 return (FfiClockTickOutcome::NeedsMain, laid_out, false);
             }
@@ -1260,9 +1262,11 @@ fn run_display_tick_on(
                 return (outcome, laid_out, false);
             }
             // SAFETY: As above.
-            adoption.query_snapshot = unsafe { &mut *arena }
-                .arena_mut()
-                .publish_query_snapshot(&CLOCK_TICK_QUERY_SNAPSHOT_VIEWPORT);
+            adoption.query_snapshot = Some(
+                unsafe { &mut *arena }
+                    .arena_mut()
+                    .publish_query_snapshot(&CLOCK_TICK_QUERY_SNAPSHOT_VIEWPORT),
+            );
             if main_presents {
                 return (outcome, laid_out, false);
             }

@@ -267,10 +267,6 @@ impl SvgPaintResources {
         published_filter_in(&self.rows.borrow(), slot, kind)
     }
 
-    pub(crate) fn published_filter_image_frames(&self) -> Vec<libgfx_rust::image_frame::ImageFrameHandle> {
-        published_filter_image_frames_in(&self.rows.borrow())
-    }
-
     pub(crate) fn published_paint_server(
         &self,
         slot: NodeSlotId,

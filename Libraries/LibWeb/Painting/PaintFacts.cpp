@@ -68,11 +68,9 @@ static void push_canvas_paint_facts_onto(HTML::HTMLCanvasElement const& canvas, 
         facts.canvas_id = canvas.canvas_id().value().value();
         facts.content_generation = canvas.content_generation();
     }
-    bool changed = Layout::RustFFI::layout_arena_set_canvas_paint_facts(row.arena(), row.slot(), facts);
-    // This reconciles facts while a layout row is being published, so the damage belongs to that
-    // publication rather than a later identity-based journal entry.
-    if (changed && has_committed_box(row))
-        apply_paint_cache_invalidation(row, PaintCacheInvalidation::PaintAndHitTest);
+    // Where the facts changed, the render owner damages the box's paint and hit-test caches as it takes them, so the
+    // damage belongs to the publication the facts are reconciled with rather than a later journal entry.
+    Layout::RustFFI::layout_arena_set_canvas_paint_facts(row.arena(), row.slot(), facts);
 }
 
 void push_canvas_paint_facts(HTML::HTMLCanvasElement const& canvas)
@@ -105,12 +103,7 @@ static Optional<u64> composited_context_id_for_navigable_container(HTML::Navigab
     return context_id->value();
 }
 
-enum class ReconcilingBeforeRecording : u8 {
-    No,
-    Yes,
-};
-
-static void push_navigable_container_paint_facts_onto(HTML::NavigableContainer const& navigable_container, BoxSlot const& row, ReconcilingBeforeRecording reconciling = ReconcilingBeforeRecording::No)
+static void push_navigable_container_paint_facts_onto(HTML::NavigableContainer const& navigable_container, BoxSlot const& row)
 {
     Layout::RustFFI::FfiNavigableContainerPaintFacts facts {};
     if (auto context_id = composited_context_id_for_navigable_container(navigable_container); context_id.has_value()) {
@@ -123,17 +116,9 @@ static void push_navigable_container_paint_facts_onto(HTML::NavigableContainer c
         facts.local_content_navigable.namespace_id = content_navigable->id().namespace_id;
         facts.local_content_navigable.local_id = content_navigable->id().local_id;
     }
-    bool changed = Layout::RustFFI::layout_arena_set_navigable_container_paint_facts(row.arena(), row.slot(), facts);
-    if (!changed)
-        return;
-    if (reconciling == ReconcilingBeforeRecording::Yes) {
-        // Recording reads these facts immediately below its call site, after the journal has
-        // already drained. Reconcile and damage them as one named pre-recording stage.
-        apply_paint_cache_invalidation(row, PaintCacheInvalidation::PaintAndHitTest);
-        return;
-    }
-    if (has_committed_box(row))
-        invalidate_paint_cache(navigable_container.document(), DOM::NodeIdentity::of(navigable_container));
+    // Where the facts changed, the render owner damages the box's paint and hit-test caches as it takes them: a
+    // recording right after reads them, as the host's reconciling before it does.
+    Layout::RustFFI::layout_arena_set_navigable_container_paint_facts(row.arena(), row.slot(), facts);
 }
 
 // The facts are read from the container as it is at the drain.
@@ -170,7 +155,7 @@ void reconcile_navigable_container_paint_facts(DOM::Document const& document, Re
             VERIFY(document.layout_is_up_to_date());
         if (!row || row.kind() != Layout::RustFFI::NodeKind::NavigableContainerViewport || !has_committed_box(row))
             continue;
-        push_navigable_container_paint_facts_onto(*navigable_container, row, ReconcilingBeforeRecording::Yes);
+        push_navigable_container_paint_facts_onto(*navigable_container, row);
     }
 }
 
@@ -310,8 +295,9 @@ void push_replaced_image_paint_facts(Layout::ImageProvider const& image_provider
             return;
         if (current_row.kind() != Layout::RustFFI::NodeKind::ImageBox && current_row.kind() != Layout::RustFFI::NodeKind::SVGImageBox)
             return;
-        if (Layout::RustFFI::layout_arena_set_replaced_image_paint_facts(current_row.arena(), current_row.slot(), facts))
-            set_needs_repaint(current_row, InvalidateDisplayList::PaintCommands);
+        // The render owner compares the facts; the image repaints as if they changed.
+        Layout::RustFFI::layout_arena_set_replaced_image_paint_facts(current_row.arena(), current_row.slot(), facts);
+        set_needs_repaint(current_row, InvalidateDisplayList::PaintCommands);
     });
 }
 
@@ -351,8 +337,9 @@ static void push_video_paint_facts_onto(HTML::HTMLVideoElement const& video_elem
         auto current_row = BoxSlot::of(anchor_row.document(), target_slot);
         if (!current_row || current_row.kind() != Layout::RustFFI::NodeKind::VideoBox)
             return;
-        if (Layout::RustFFI::layout_arena_set_video_paint_facts(current_row.arena(), current_row.slot(), facts))
-            set_needs_repaint(current_row, InvalidateDisplayList::PaintCommands);
+        // The render owner compares the facts; the video repaints as if they changed.
+        Layout::RustFFI::layout_arena_set_video_paint_facts(current_row.arena(), current_row.slot(), facts);
+        set_needs_repaint(current_row, InvalidateDisplayList::PaintCommands);
     });
 }
 

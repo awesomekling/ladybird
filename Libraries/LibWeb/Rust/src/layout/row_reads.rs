@@ -5,10 +5,12 @@
  */
 
 //! The rows of a document's layout as the document thread reads them: the row a node is bound to, the rows linked to
-//! one, and what each row is. The arena publishes them as one [`RowSnapshot`] wherever the render owner ends a unit
-//! that may have changed them (a job of a layout frame, a rendering update, a style transaction, a clock tick, the
-//! changes a unit or a question comes after), before it answers, and wherever a main thread entry changed them. The
-//! document thread reads the latest one where the arena keeps it, reaching neither the arena nor the owner.
+//! one, what each row is, and what it paints (see [`crate::painting::published_frame`]). The arena publishes them as
+//! one [`RowSnapshot`] wherever the render owner ends a unit that may have changed them (a job of a layout frame, a
+//! rendering update, a style transaction, a clock tick, a paint pass, the changes a unit or a question comes after),
+//! before it answers, and wherever a main thread entry changed them. The document thread reads the latest one where
+//! the arena keeps it, reaching neither the arena nor the owner, unless it sent a change that alters them which the
+//! latest one does not reflect yet: then it asks the owner to publish them again first.
 
 use super::layout_changes::LayoutChange;
 use super::layout_node_arena::{BOUND_ROWS_PER_CHUNK, PseudoElementRows, SLOTS_PER_CHUNK};
@@ -21,6 +23,7 @@ use crate::css::computed_value_views::ComputedValuesView;
 use crate::css::style::fast_hash::FastMap as HashMap;
 use crate::css::style::published_record::PublishedStyleRecord;
 use crate::css::style::tree::StyleNodeID;
+use crate::painting::published_frame::{PaintStatus, PublishedPaintFacts, PublishedRows};
 use crate::render_owner::ChangeSeq;
 use smallvec::SmallVec;
 use std::cell::Cell;
@@ -28,13 +31,15 @@ use std::ffi::c_void;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicPtr, Ordering};
 
-/// The rows of a document's layout as the arena published them: the shape and style of every row, and the row each
-/// node is bound to. It is immutable and owns all of it, through the copy-on-write generations the arena's columns
-/// publish, so it is read on the document thread while the arena goes on changing.
-#[derive(Default)]
+/// The rows of a document's layout as the arena published them: the shape and style of every row, the row each node is
+/// bound to, and the paintable rows with what they paint from. It is immutable and owns all of it, through the
+/// copy-on-write generations the arena's columns publish, so it is read on the document thread while the arena goes on
+/// changing.
+#[derive(Clone, Default)]
 pub(crate) struct RowSnapshot {
     pub(super) nodes: ColumnSnapshot<PaintNode, SLOTS_PER_CHUNK>,
-    /// Every row's style, which the snapshot keeps alive for the reads of it.
+    /// Every row's style, owned: the snapshot holds a reference on every style record's payloads it reads, so what the
+    /// document's style engine reclaims meanwhile does not reach it.
     pub(super) styles: ColumnSnapshot<PublishedStyle, SLOTS_PER_CHUNK>,
     /// The row each element is bound to, by its element index, and each text node, by its text index.
     pub(super) element_rows: ColumnSnapshot<NodeSlotId, BOUND_ROWS_PER_CHUNK>,
@@ -44,6 +49,13 @@ pub(crate) struct RowSnapshot {
     pub(super) viewport_row: NodeSlotId,
     /// The last change of the document thread's the rows include.
     pub(super) changes_taken_in: ChangeSeq,
+    /// The paintable rows, and the columns read beside them.
+    pub(crate) paintable: PublishedRows,
+    /// What the rows paint from beside their styles.
+    pub(crate) paint_facts: PublishedPaintFacts,
+    /// The arena's absolute rect memo epoch: a rect computed from rows of the same epoch holds for these.
+    pub(crate) geometry_epoch: u64,
+    pub(crate) paint_status: PaintStatus,
 }
 
 // A snapshot is read on the document thread while the arena is written wherever its owner runs: it holds no cell, no
@@ -68,6 +80,85 @@ impl RowSnapshot {
         // SAFETY: Guaranteed by the caller. A handle is also a pointer to its arena, and the projection borrows nothing
         // of the arena beside the slot, which only the arena's owner writes, in a unit the document thread is not in.
         unsafe { (*std::ptr::addr_of!((*handle.cast::<LayoutNodeArena>()).published_rows)).latest() }
+    }
+
+    /// The rows the arena `handle` names published last, as of every change the document thread sent that alters them
+    /// ([`crate::render_owner::ArenaChange`] says which do): where the owner has not published rows that reflect those
+    /// yet, the document thread asks it to.
+    ///
+    /// # Safety
+    ///
+    /// As for [`Self::published`].
+    #[track_caller]
+    pub(crate) unsafe fn current<'a>(handle: *mut c_void) -> &'a Self {
+        // SAFETY: Guaranteed by the caller.
+        unsafe { Self::published_as_of_sent_changes(handle, Freshness::Current) }
+    }
+
+    /// Like [`Self::current`], with the rows as committed: once the scrollable overflow a commit or a writer left is
+    /// measured.
+    ///
+    /// # Safety
+    ///
+    /// As for [`Self::published`].
+    #[track_caller]
+    pub(crate) unsafe fn committed<'a>(handle: *mut c_void) -> &'a Self {
+        // SAFETY: Guaranteed by the caller.
+        unsafe { Self::published_as_of_sent_changes(handle, Freshness::Committed) }
+    }
+
+    /// Like [`Self::current`], as of every change the document thread sent, for a test that reads what the owner counts
+    /// after them.
+    ///
+    /// # Safety
+    ///
+    /// As for [`Self::published`].
+    #[track_caller]
+    pub(crate) unsafe fn settled<'a>(handle: *mut c_void) -> &'a Self {
+        // SAFETY: Guaranteed by the caller.
+        unsafe { Self::published_as_of_sent_changes(handle, Freshness::Settled) }
+    }
+
+    /// Like [`Self::current`], shared, so the rows outlive the next publication.
+    ///
+    /// # Safety
+    ///
+    /// `handle` must be a live handle on the document thread.
+    pub(crate) unsafe fn current_shared(handle: *mut c_void) -> Arc<Self> {
+        // SAFETY: Guaranteed by the caller.
+        unsafe { Self::current(handle) };
+        // SAFETY: As above; the rows were just read, and nothing published since.
+        unsafe { (*std::ptr::addr_of!((*handle.cast::<LayoutNodeArena>()).published_rows)).shared() }
+    }
+
+    #[track_caller]
+    unsafe fn published_as_of_sent_changes<'a>(handle: *mut c_void, freshness: Freshness) -> &'a Self {
+        // SAFETY: Guaranteed by the caller.
+        let rows = unsafe { Self::published(handle) };
+        // SAFETY: As above.
+        let document = unsafe { super::ArenaHandle::document_of(handle) };
+        let changes_to_reflect = match freshness {
+            Freshness::Settled => crate::render_owner::sent_through(document),
+            Freshness::Current | Freshness::Committed => crate::render_owner::sent_row_changes_through(document),
+        };
+        // The owner holds no state of an arena of no document (a unit test's), which is written in place: the thread
+        // that holds it publishes it.
+        let reflects_sent_changes = document.is_valid() && rows.changes_taken_in >= changes_to_reflect;
+        let committed = matches!(freshness, Freshness::Committed);
+        if reflects_sent_changes && !(committed && rows.paint_status.scrollable_overflow_unmeasured) {
+            return rows;
+        }
+        // SAFETY: As above. The owner publishes rows that reflect the changes, and nothing borrows the ones read.
+        unsafe {
+            crate::render_owner::ask_about(
+                handle,
+                crate::render_owner::Query::CommittedRows {
+                    measured_overflow: committed,
+                },
+            )
+        };
+        // SAFETY: As above.
+        unsafe { Self::published(handle) }
     }
 
     pub(crate) fn node(&self, id: NodeSlotId) -> Option<&PaintNode> {
@@ -166,6 +257,17 @@ impl super::tree_builder::RemovedBoxRows for RowSnapshot {
     fn viewport_row(&self) -> Option<NodeSlotId> {
         RowSnapshot::viewport_row(self)
     }
+}
+
+/// How up to date the rows the document thread reads have to be.
+#[derive(Clone, Copy)]
+enum Freshness {
+    /// As of every change the thread sent that alters them.
+    Current,
+    /// As [`Self::Current`], and as committed: with the scrollable overflow a commit or a writer left measured.
+    Committed,
+    /// As of every change the thread sent.
+    Settled,
 }
 
 /// Where the arena keeps the latest [`RowSnapshot`] it published. The arena's owner replaces it only where the

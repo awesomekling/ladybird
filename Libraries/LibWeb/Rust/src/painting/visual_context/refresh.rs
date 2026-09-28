@@ -12,7 +12,7 @@ use crate::layout::node_data::NodeSlotId;
 use crate::painting::chrome_geometry;
 use crate::painting::host::FfiVisualContextTreeInputs;
 use crate::painting::paintable_geometry;
-use crate::painting::paintable_rows::PaintableRowsRead;
+use crate::painting::paintable_rows::ArenaRowsRead;
 use crate::painting::style_queries;
 use libgfx_rust::{FloatPoint, FloatRect, FloatSize};
 
@@ -25,7 +25,7 @@ pub(crate) struct ResolvedStickyInsets {
 }
 
 fn nearest_wheel_scrollable_ancestor_along_containing_blocks(
-    layout_arena: &impl PaintableRowsRead,
+    layout_arena: &impl ArenaRowsRead,
     slot: NodeSlotId,
     tree_inputs: &FfiVisualContextTreeInputs,
 ) -> Option<NodeSlotId> {
@@ -53,7 +53,7 @@ fn nearest_wheel_scrollable_ancestor_along_containing_blocks(
 
 // https://drafts.csswg.org/css-position/#insets
 pub(crate) fn resolve_sticky_insets_in_css_pixels(
-    layout_arena: &impl PaintableRowsRead,
+    layout_arena: &impl ArenaRowsRead,
     slot: NodeSlotId,
     tree_inputs: &FfiVisualContextTreeInputs,
 ) -> ResolvedStickyInsets {
@@ -79,7 +79,7 @@ pub(crate) fn resolve_sticky_insets_in_css_pixels(
 // The geometry stays zero while either row has been replaced by a subtree relayout: the pending
 // tree rebuild recreates the node before anything reads it.
 pub(crate) fn compute_sticky_data(
-    layout_arena: &impl PaintableRowsRead,
+    layout_arena: &impl ArenaRowsRead,
     scroll_state: &ScrollState,
     sticky_slot: ScrollStateSlot,
     tree_inputs: &FfiVisualContextTreeInputs,
@@ -158,7 +158,7 @@ pub(crate) fn compute_sticky_data(
 }
 
 pub(crate) fn refresh_sticky_constraints(
-    layout_arena: &impl PaintableRowsRead,
+    layout_arena: &impl ArenaRowsRead,
     scroll_state: &ScrollState,
     tree: &mut std::sync::Arc<VisualContextTree>,
     tree_inputs: &FfiVisualContextTreeInputs,
@@ -188,7 +188,7 @@ pub(crate) fn refresh_sticky_constraints(
     true
 }
 
-pub(crate) fn refresh_scroll_state(layout_arena: &impl PaintableRowsRead, scroll_state: &mut ScrollState) {
+pub(crate) fn refresh_scroll_state(layout_arena: &impl ArenaRowsRead, scroll_state: &mut ScrollState) {
     for slot in 0..scroll_state.slot_count() {
         let state = scroll_state.state_at_slot(slot);
         if state.is_sticky {

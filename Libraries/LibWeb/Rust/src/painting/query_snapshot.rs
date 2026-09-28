@@ -19,7 +19,6 @@
 //! the document drops the snapshot it holds as anything is written to its render inputs, so one it
 //! still holds does.
 
-use crate::cow_column::ColumnSnapshot;
 use crate::css::computed_value_views::ComputedValuesView;
 use crate::css::css_enums::positioning;
 use crate::css::css_pixels::{CssPixelPoint, CssPixelRect, CssPixels};
@@ -29,13 +28,12 @@ use crate::layout::node_data::{NodeFlag, NodeKind, NodeSlotId, PaintNode};
 use crate::layout::node_facts::{self, QueryFacts};
 use crate::layout::row_reads::RowSnapshot;
 use crate::layout::text_queries::{append_rendered_text, style_collapses_white_space};
-use crate::layout::{LayoutNodeArena, PublishedTextSlot, SLOTS_PER_CHUNK};
+use crate::layout::{LayoutNodeArena, PublishedTextSlot};
 use crate::painting::client_rects;
 use crate::painting::geometry_read::GeometryRead;
 use crate::painting::paintable_data::PaintableData;
 use crate::painting::paintable_geometry;
 use crate::painting::paintable_rows::CommittedSideDataRef;
-use crate::painting::published_frame::PublishedRows;
 use crate::painting::rect_to_viewport_transform::RectToViewportTransform;
 use crate::painting::visual_context::VisualContextTree;
 use libgfx_rust::FloatPoint;
@@ -70,11 +68,9 @@ pub struct FfiQuerySnapshotViewport {
 }
 
 pub(crate) struct QuerySnapshot {
-    rows: PublishedRows,
-    /// The shape and style of every row, and the row each node is bound to.
+    /// The shape, style and paintable row of every row, the row each node is bound to, and the rendered text of every
+    /// text row, as layout left it.
     tree: Arc<RowSnapshot>,
-    /// The rendered text of every text row, as layout left it.
-    text: ColumnSnapshot<PublishedTextSlot, SLOTS_PER_CHUNK>,
     viewport_conversion: ViewportConversion,
 }
 
@@ -86,8 +82,17 @@ const _: () = {
 };
 
 impl LayoutNodeArena {
-    /// Publishes the document's committed geometry as a snapshot, or none if its rows cannot be published.
-    pub(crate) fn publish_query_snapshot(&mut self, viewport: &FfiQuerySnapshotViewport) -> Option<QuerySnapshot> {
+    /// Publishes the document's rows, and its committed geometry as a snapshot of them, on the owner.
+    pub(crate) fn publish_query_snapshot(&mut self, viewport: &FfiQuerySnapshotViewport) -> QuerySnapshot {
+        self.publish_rows();
+        QuerySnapshot::new(self.published_rows(), viewport)
+    }
+}
+
+impl QuerySnapshot {
+    /// The committed geometry of the document whose rows are `tree`, which converts rects to viewport space as
+    /// `viewport` says.
+    pub(crate) fn new(tree: Arc<RowSnapshot>, viewport: &FfiQuerySnapshotViewport) -> Self {
         let viewport_conversion = if !viewport.has_committed_viewport_box {
             ViewportConversion::Identity
         } else if !viewport.visual_contexts_are_up_to_date {
@@ -100,23 +105,17 @@ impl LayoutNodeArena {
                 libcompositing_rust::ffi::ffi_slice(viewport.device_scroll_offsets, viewport.device_scroll_offsets_len)
             };
             ViewportConversion::VisualContexts {
-                tree: self.paint_state().borrow().visual_context.tree.clone(),
+                tree: tree.paintable.visual_context_tree.clone(),
                 device_scroll_offsets: offsets.into(),
                 device_pixels_per_css_pixel: viewport.device_pixels_per_css_pixel,
             }
         };
-        let rows = self.publish_paintable_rows_for_query()?;
-        self.publish_rows();
-        Some(QuerySnapshot {
-            rows,
-            tree: self.published_rows(),
-            text: self.publish_text(),
+        Self {
+            tree,
             viewport_conversion,
-        })
+        }
     }
-}
 
-impl QuerySnapshot {
     fn node(&self, id: NodeSlotId) -> Option<&PaintNode> {
         self.tree.node(id)
     }
@@ -146,7 +145,9 @@ impl QuerySnapshot {
 
     fn text_slot(&self, id: NodeSlotId) -> Option<&PublishedTextSlot> {
         self.node(id)?;
-        self.text
+        self.tree
+            .paint_facts
+            .text
             .get(id.slot_index() as usize)
             .filter(|slot| slot.generation == id.generation())
     }
@@ -366,19 +367,19 @@ impl QuerySnapshot {
 
 impl GeometryRead for QuerySnapshot {
     fn paintable_data(&self, id: NodeSlotId) -> &PaintableData {
-        self.rows.paintable_data(id)
+        self.tree.paintable.paintable_data(id)
     }
 
     fn paintable_row_is_populated(&self, id: NodeSlotId) -> bool {
-        self.rows.paintable_row_is_populated(id)
+        self.tree.paintable.paintable_row_is_populated(id)
     }
 
     fn with_committed_fragment_link<R>(&self, id: NodeSlotId, read: impl FnOnce(Option<&FragmentLink>) -> R) -> R {
-        self.rows.with_committed_fragment_link(id, read)
+        self.tree.paintable.with_committed_fragment_link(id, read)
     }
 
     fn committed_side_data(&self, id: NodeSlotId) -> CommittedSideDataRef<'_> {
-        CommittedSideDataRef::Published(self.rows.committed_side_data(id))
+        CommittedSideDataRef::Published(self.tree.paintable.committed_side_data(id))
     }
 
     fn node_kind_if_live(&self, id: NodeSlotId) -> Option<NodeKind> {

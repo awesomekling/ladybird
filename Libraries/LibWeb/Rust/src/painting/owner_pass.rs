@@ -33,9 +33,8 @@ pub(crate) enum PaintPass {
     ScrollableOverflow(Pass<(), ()>),
     /// Builds what a hit-test query derives from the hit-test list: its spatial indexes, its caret lines, or both.
     HitTestList(Pass<(bool, bool), ()>),
-    /// Records the display list of the frame a recording slot on the waiting thread's stack holds, and leaves the
-    /// recording in the slot.
-    Recording(Pass<CallerWaits<*mut c_void>, ()>),
+    /// Runs the function a pass on the waiting thread's stack holds ([`run_held_pass`]), and leaves its answer there.
+    Held(Pass<CallerWaits<*mut dyn RunHeldPass>, ()>),
 }
 
 /// A pass taking `A` and answering `R`: its arguments, what it runs, and where the owner answers it.
@@ -57,7 +56,7 @@ impl<A, R> Pass<A, R> {
             let state = state();
             let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(state as u64);
             // SAFETY: The document thread waits for the pass, and reaches nothing of the state meanwhile.
-            body(unsafe { &mut *state }.arena_mut(), arguments)
+            run_and_publish(unsafe { &mut *state }.arena_mut(), body, arguments)
         });
     }
 }
@@ -72,7 +71,7 @@ impl PaintPass {
             Self::ScrollState(pass) => pass.run(state),
             Self::ScrollableOverflow(pass) => pass.run(state),
             Self::HitTestList(pass) => pass.run(state),
-            Self::Recording(pass) => pass.run(state),
+            Self::Held(pass) => pass.run(state),
         }
     }
 }
@@ -103,6 +102,14 @@ impl OwnerPaintPass {
     }
 }
 
+/// Runs the pass `body` with `arguments` over `arena`, then publishes the rows it may have changed, which the document
+/// thread reads once it has the answer.
+fn run_and_publish<A, R>(arena: &mut LayoutNodeArena, body: fn(&mut LayoutNodeArena, A) -> R, arguments: A) -> R {
+    let answer = body(arena, arguments);
+    arena.publish_rows();
+    answer
+}
+
 /// Runs the paint pass `body` with `arguments` over the render state of `arena`'s document on the render owner, sent as
 /// the kind of pass `kind` makes, and waits for its answer. Where the owner does not run it (no Rendering thread, the
 /// calling thread is the owner, an arena of no document's render state, or a test holds the run it would queue
@@ -113,11 +120,36 @@ pub(crate) fn run_paint_pass<A, R>(
     body: fn(&mut LayoutNodeArena, A) -> R,
     arguments: A,
 ) -> R {
-    let document = arena.document();
-    if !document.is_valid() {
-        return body(arena, arguments);
+    if !arena.document().is_valid() {
+        return run_and_publish(arena, body, arguments);
     }
-    let handle = std::ptr::from_mut(arena).cast::<c_void>();
+    // SAFETY: The arena is the first field of its handle, and this thread holds it for the pass.
+    unsafe { run_paint_pass_of(std::ptr::from_mut(arena).cast(), kind, body, arguments) }
+}
+
+/// Runs the paint pass `body` with `arguments` over the render state of the document whose arena the calling document
+/// thread names as `arena`, as [`run_paint_pass`] does.
+///
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, on the document thread.
+pub(crate) unsafe fn run_paint_pass_of<A, R>(
+    arena: *mut c_void,
+    kind: fn(Pass<A, R>) -> PaintPass,
+    body: fn(&mut LayoutNodeArena, A) -> R,
+    arguments: A,
+) -> R {
+    // SAFETY: Guaranteed by the caller.
+    let document = unsafe { ArenaHandle::document_of(arena) };
+    let handle = arena;
+    if !document.is_valid() {
+        // SAFETY: Guaranteed by the caller; the owner holds no state of an arena of no document.
+        return run_and_publish(
+            unsafe { &mut *ArenaHandle::held_by_waiting_thread(handle) }.arena_mut(),
+            body,
+            arguments,
+        );
+    }
     let arguments = std::cell::Cell::new(Some(arguments));
     let outcome = crate::stage_thread::wait_for_owner(
         |reply| crate::render_owner::ToOwner::Paint {
@@ -132,11 +164,70 @@ pub(crate) fn run_paint_pass<A, R>(
                 }),
             }),
         },
-        // The arena is the caller's, which the owner does not reach: it runs no pass of it.
-        || body(arena, arguments.take().expect("a pass runs once")),
+        // The owner does not run the pass: the calling thread does its work.
+        || {
+            // SAFETY: Guaranteed by the caller; this thread does the owner's work, and nothing else reaches the state.
+            let state = unsafe { &mut *ArenaHandle::held_by_waiting_thread(handle) };
+            run_and_publish(state.arena_mut(), body, arguments.take().expect("a pass runs once"))
+        },
     );
     // A pass that panicked on the owner panics here, as a stage the document thread waits for does.
     outcome.unwrap_or_else(|payload| std::panic::resume_unwind(payload))
+}
+
+/// A pass by a function over the arena, which the document thread holds on its stack while it waits: the function, its
+/// arguments, and once the owner has run it, its answer.
+struct HeldPass<A, R> {
+    arguments: Option<A>,
+    body: fn(&mut LayoutNodeArena, A) -> R,
+    answer: Option<R>,
+}
+
+/// A [`HeldPass`] of any arguments and answer, as the owner runs it.
+pub(crate) trait RunHeldPass {
+    fn run(&mut self, arena: &mut LayoutNodeArena);
+}
+
+impl<A, R> RunHeldPass for HeldPass<A, R> {
+    fn run(&mut self, arena: &mut LayoutNodeArena) {
+        if let Some(arguments) = self.arguments.take() {
+            self.answer = Some((self.body)(arena, arguments));
+        }
+    }
+}
+
+/// Runs `body` with `arguments` over the render state of the document whose arena the calling document thread names
+/// as `arena`, on the render owner, and waits for its answer, as [`run_paint_pass_of`] does. The arguments and the
+/// answer stay on the calling thread's stack, which lends them to the owner for the pass: they may hold what the
+/// calling thread owns, which the owner reaches only while the thread waits.
+///
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, on the document thread.
+pub(crate) unsafe fn run_held_pass<A: 'static, R: Default + 'static>(
+    arena: *mut c_void,
+    arguments: A,
+    body: fn(&mut LayoutNodeArena, A) -> R,
+) -> R {
+    let mut held = HeldPass {
+        arguments: Some(arguments),
+        body,
+        answer: None,
+    };
+    let reference: *mut dyn RunHeldPass = &mut held;
+    // SAFETY: Guaranteed by the caller. The pass stays on this thread's stack, which waits for it.
+    unsafe {
+        run_paint_pass_of(
+            arena,
+            PaintPass::Held,
+            // SAFETY: The document thread waits for the pass, with the pass it holds live.
+            |arena, held| (*held.into_inner()).run(arena),
+            CallerWaits::new(reference),
+        );
+    }
+    // A pass that panicked panicked here too, so the owner ran this one.
+    debug_assert!(held.answer.is_some(), "the owner ran the pass");
+    held.answer.unwrap_or_default()
 }
 
 #[cfg(test)]

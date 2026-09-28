@@ -173,6 +173,13 @@ pub(crate) struct FrameDamage {
 }
 
 impl FrameDamage {
+    /// No damage, as a read outside a frame sees.
+    pub(crate) const NONE: Self = Self {
+        rows: Vec::new(),
+        all: false,
+        scroll_metadata_everywhere: false,
+    };
+
     pub(crate) fn of_row(&self, row: NodeSlotId) -> PaintDamage {
         self.rows
             .binary_search_by_key(&(row.slot_index(), row.generation()), |(listed, _)| {

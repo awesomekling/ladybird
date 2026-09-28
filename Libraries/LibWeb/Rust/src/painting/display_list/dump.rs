@@ -8,12 +8,12 @@ use super::builder::{for_each_command, inline_transform_of, read_command};
 use super::commands::*;
 use super::nested_records::{NestedRecordsRole, for_each_nested_record_span, span_bytes};
 use crate::css::color_resolution::format_to_8bit_compatible;
-use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::NodeSlotId;
 use crate::painting::dump::{
     format_float_like_ak, push_affine_transform, push_float_like_ak, push_float_point, push_float_rect,
     push_float_size, push_int_point, push_int_rect, push_int_size,
 };
+use crate::painting::published_frame::PaintRead;
 #[cfg(test)]
 use crate::painting::visual_context::VisualContextTree;
 use crate::painting::visual_context::VisualContextTreeDump;
@@ -88,6 +88,7 @@ impl PaintingDumpHost<'_> {
     }
 }
 
+#[derive(Default)]
 struct VisualContextNodeOwners {
     spatial: HashMap<u32, NodeSlotId>,
     clip: HashMap<u32, NodeSlotId>,
@@ -95,18 +96,16 @@ struct VisualContextNodeOwners {
 }
 
 impl VisualContextNodeOwners {
-    fn collect(arena: &LayoutNodeArena, viewport: NodeSlotId) -> Self {
-        let paintable_rows = arena.paintable_rows();
+    fn collect(arena: &impl PaintRead, viewport: NodeSlotId) -> Self {
         let mut owners = Self {
             spatial: HashMap::new(),
             clip: HashMap::new(),
             effect: HashMap::new(),
         };
         owners.spatial.insert(VISUAL_VIEWPORT_NODE_INDEX.0, viewport);
-        owners.spatial.insert(
-            paintable_rows.paintable_data(viewport).own_scroll_node_index.0,
-            viewport,
-        );
+        owners
+            .spatial
+            .insert(arena.paintable_data(viewport).own_scroll_node_index.0, viewport);
         let mut pending = vec![viewport];
         while let Some(slot) = pending.pop() {
             arena.with_paintable_visual_context_node_handles(slot, |handles| {
@@ -162,13 +161,22 @@ pub unsafe extern "C" fn painting_dump(
         _main_thread: &main_thread,
     };
     assert!(!display_list.is_null());
-    let arena = unsafe { crate::painting::ffi::arena_from_handle(arena) };
+    // SAFETY: Guaranteed by the caller.
+    let owners = unsafe {
+        crate::painting::ffi::read_current(arena, |rows| {
+            let mut owners = VisualContextNodeOwners::collect(rows, viewport);
+            for owners in [&mut owners.spatial, &mut owners.clip, &mut owners.effect] {
+                owners.retain(|_, owner| rows.slot_is_live(*owner));
+            }
+            owners
+        })
+    };
     let visual_context_tree = unsafe { libcompositing_rust::ffi::tree_from_handle(visual_context_tree) };
     let command_runs = unsafe { libcompositing_rust::ffi::ffi_slice(command_runs, command_run_count) };
-    let owners = VisualContextNodeOwners::collect(arena, viewport);
     let mut output = visual_context_tree.dump_nodes_reachable_from_runs(command_runs, |kind, index| {
-        let owner = owners.owner(kind, index)?;
-        arena.slot_is_live(owner).then(|| callbacks.debug_description(owner))
+        owners
+            .owner(kind, index)
+            .map(|owner| callbacks.debug_description(owner))
     });
     output.push_str("\nDisplayList:\n");
     dump_commands(&mut output, &callbacks, display_list, 0);

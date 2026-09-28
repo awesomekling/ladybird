@@ -624,12 +624,12 @@ static OverlayLabelFonts overlay_label_fonts(float css_size, double device_pixel
 void take_recording_trace_if_pending(DOM::Document& document)
 {
     struct TraceContext {
-        DOM::Document const& document;
+        DOM::Document& document;
         StringBuilder trace;
     } context { document, {} };
     bool has_pending_trace = Layout::RustFFI::layout_arena_take_recording_trace(
         layout_arena_handle(document), &context,
-        [](void* context_pointer, Compositing::RustFFI::NodeSlotId slot, void* description_sink) { push_box_description(static_cast<TraceContext*>(context_pointer)->document, slot, description_sink); },
+        [](void* context_pointer, u32 node, void* sink, void (*append)(void*, u8 const*, size_t)) { describe_dom_node_for_debug(static_cast<TraceContext*>(context_pointer)->document, node, sink, append); },
         [](void* context_pointer, u8 const* bytes, size_t byte_count) { static_cast<TraceContext*>(context_pointer)->trace.append(StringView { bytes, byte_count }); });
     if (has_pending_trace)
         document.paint_state().append_recording_trace(MUST(context.trace.to_string()));
@@ -1013,11 +1013,9 @@ static Optional<Compositor::PublishedDisplayList> publish_rust_display_list_reco
             return {};
     } else {
         if (site == PublicationSite::FrameInFlight)
-            Layout::RustFFI::layout_arena_publish_recording_in_frame(arena, recording_publish_callbacks(publish_storage));
+            Layout::RustFFI::layout_arena_publish_recording_in_frame(arena, recording_publish_callbacks(publish_storage), &presented);
         else
-            Layout::RustFFI::layout_arena_publish_recording(arena, recording_publish_callbacks(publish_storage));
-        presented.is_identical_to_published_frame = Layout::RustFFI::layout_arena_last_recording_is_identical_to_published_frame(arena);
-        presented.has_blocking_wheel_event_listeners = Layout::RustFFI::layout_arena_last_recording_has_blocking_wheel_event_listeners(arena);
+            Layout::RustFFI::layout_arena_publish_recording(arena, recording_publish_callbacks(publish_storage), &presented);
     }
     source.did_publish_recording();
     if (presented.has_blocking_wheel_event_listeners)
@@ -1050,7 +1048,7 @@ static Optional<Compositor::PublishedDisplayList> publish_rust_display_list_reco
         }
     }
 
-    auto display_list = Compositing::DisplayList::adopt_rust_command_storage(source.published_display_list_visual_context_tree(), recording_ticket ? presented.display_list : Layout::RustFFI::layout_arena_retain_recorded_display_list(arena));
+    auto display_list = Compositing::DisplayList::adopt_rust_command_storage(source.published_display_list_visual_context_tree(), presented.display_list);
     if (rust_painting_timing_enabled())
         dbgln("PAINT_RECORD rust={} µs commands={} bytes", rust_timer.elapsed_time().to_microseconds(), display_list->command_bytes().size());
 

@@ -37,6 +37,7 @@
 use crate::css::style::tree::StyleNodeID;
 use crate::layout::node_data::{NodeKind, NodeSlotId};
 use crate::layout::{ArenaHandle, FfiCssPixelRect, LayoutNodeArena};
+use crate::painting::geometry_read::GeometryRead;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::c_void;
@@ -64,6 +65,14 @@ impl DocumentId {
 /// before any change.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
 pub(crate) struct ChangeSeq(u64);
+
+/// The changes a document thread sent for a document: the number of the last one, and of the last one that alters the
+/// rows the owner publishes.
+#[derive(Default)]
+struct SentChanges {
+    through: ChangeSeq,
+    altering_rows_through: ChangeSeq,
+}
 
 /// A write the main thread makes to a document's layout arena, as owned data the owner applies in the order the main
 /// thread made it, before the next unit or query that reaches the arena.
@@ -117,9 +126,45 @@ pub(crate) enum ArenaChange {
     UnlinkStyleEngine,
     /// The anchor names registration moved in the document's style engine are published to the arena.
     PublishAnchorNames,
+    /// A write to the document's paint state.
+    Paint(crate::painting::paint_changes::PaintChange),
+    /// The counter styles a tree scope registers, which replace the ones it registered before.
+    CounterStyles {
+        tree_scope: u32,
+        scope: crate::css::counter_representation::CounterStyleScope,
+    },
 }
 
 impl ArenaChange {
+    /// Whether applying the change can alter what the rows the owner publishes answer the document thread (see
+    /// [`crate::layout::row_reads`]), so that a read the thread makes after sending it waits for rows that reflect it.
+    /// What the next layout or paint reads, and what the arena keeps for the host, alter none.
+    fn alters_published_rows(&self) -> bool {
+        match self {
+            ArenaChange::Layout(change) => change.alters_published_rows(),
+            ArenaChange::Paint(change) => change.alters_published_rows(),
+            // A row the install did not adopt the record of takes another style.
+            ArenaChange::FinishOwnerStyleHostHalf => true,
+            ArenaChange::DocumentIsDecodedSvg(_)
+            | ArenaChange::StyleSnapshotScrollStates(_)
+            | ArenaChange::OwnedProviderHandedOver(_)
+            | ArenaChange::DropUnadoptedAnimationSamples
+            | ArenaChange::HostHearsBoxPresence(_)
+            | ArenaChange::SelectionStyleChanged(_)
+            | ArenaChange::BuiltScrollSnapContainersTaken(_)
+            | ArenaChange::BeginLayoutTrace
+            | ArenaChange::EndLayoutTrace
+            | ArenaChange::SvgAttributeFacts { .. }
+            | ArenaChange::SvgStyleReferences { .. }
+            | ArenaChange::SvgAttributeFactsCleared(_)
+            | ArenaChange::LinkStyleEngine(_)
+            | ArenaChange::UnlinkStyleEngine
+            | ArenaChange::SelectionPseudoStylePublished(_)
+            | ArenaChange::PublishAnchorNames
+            | ArenaChange::CounterStyles { .. } => false,
+        }
+    }
+
     /// The engine the change links the arena to, which applying it reaches.
     fn linked_engine(&self) -> Option<crate::css::style::StyleEngineHandle> {
         match self {
@@ -168,6 +213,8 @@ impl ArenaChange {
                 Some(engine) => engine.publish_anchor_names(arena),
                 None => debug_assert!(false, "publishing anchor names reaches the engine"),
             },
+            ArenaChange::Paint(change) => change.apply(arena),
+            ArenaChange::CounterStyles { tree_scope, scope } => arena.publish_counter_styles(tree_scope, scope),
         }
     }
 }
@@ -370,6 +417,9 @@ pub(crate) enum Query {
     Engine(crate::css::style::owner_calls::StyleQueryRef),
     /// A write to the document's layout tree the main thread waits for, answered with what it owes the host.
     Write(crate::layout::layout_changes::LayoutWrite),
+    /// The document's rows as of every change the main thread sent, which the owner publishes: with the scrollable
+    /// overflow a commit or a writer left measured first where `measured_overflow`.
+    CommittedRows { measured_overflow: bool },
 }
 
 /// A read of a document's layout arena, which [`Query::Arena`] asks.
@@ -415,6 +465,15 @@ pub(crate) enum ArenaQuery {
     },
     /// The style record a row holds, for tests.
     NodeStyleRecord(NodeSlotId),
+    /// Where the stacking context structure below `viewport` differs from what paint preparation recorded, for tests.
+    StackingContextVerification { viewport: NodeSlotId },
+    /// The SVG-as-image renders the next recording, which reads the given inputs, is predicted to paint: the ones the
+    /// last recording painted or missed, and the first paints of the rows it records afresh.
+    PaintedVectorImages {
+        css_viewport_rect: crate::layout::used_values::FfiCssPixelRect,
+        document_declares_light_or_dark_color_scheme: bool,
+        image_color_scheme_fallback: u8,
+    },
 }
 
 /// A slice the document thread lends the owner with a query it waits for the answer to.
@@ -452,6 +511,8 @@ pub(crate) enum ArenaAnswer {
     Rows(Vec<NodeSlotId>),
     TextRanges(Vec<crate::layout::text_queries::FfiDomTextRange>),
     StyleRecord(u64),
+    Report(String),
+    VectorImages(Vec<crate::painting::record::vector_images::VectorImageRenderRequest>),
 }
 
 impl ArenaQuery {
@@ -478,6 +539,8 @@ impl ArenaQuery {
             ArenaQuery::SearchCandidates { .. } => ArenaAnswer::Rows(Vec::new()),
             ArenaQuery::FindText { .. } => ArenaAnswer::TextRanges(Vec::new()),
             ArenaQuery::NodeStyleRecord(_) => ArenaAnswer::StyleRecord(0),
+            ArenaQuery::StackingContextVerification { .. } => ArenaAnswer::Report(String::new()),
+            ArenaQuery::PaintedVectorImages { .. } => ArenaAnswer::VectorImages(Vec::new()),
         }
     }
 
@@ -539,6 +602,19 @@ impl ArenaQuery {
             } else {
                 0
             }),
+            ArenaQuery::StackingContextVerification { viewport } => ArenaAnswer::Report(
+                crate::painting::stacking_context::verify::verification_report(arena, viewport),
+            ),
+            ArenaQuery::PaintedVectorImages {
+                css_viewport_rect,
+                document_declares_light_or_dark_color_scheme,
+                image_color_scheme_fallback,
+            } => ArenaAnswer::VectorImages(crate::painting::record::vector_images::painted_vector_images(
+                arena,
+                css_viewport_rect,
+                document_declares_light_or_dark_color_scheme,
+                image_color_scheme_fallback,
+            )),
         }
     }
 }
@@ -552,6 +628,8 @@ pub(crate) enum Answer {
     Count(u64),
     Engine(EngineAnswered),
     Payment(crate::layout::HostPayment),
+    /// The owner published the rows the document thread reads.
+    Published,
 }
 
 /// What became of a [`Query::Engine`].
@@ -610,6 +688,7 @@ impl Answer {
             Query::Arena(query) => Self::Arena(query.left_to_host()),
             Query::Engine(_) => Self::Engine(EngineAnswered::LeftToHost),
             Query::Write(_) => Self::Payment(crate::layout::HostPayment::nothing()),
+            Query::CommittedRows { .. } => Self::Published,
         }
     }
 
@@ -627,11 +706,17 @@ impl Answer {
         outcome.unwrap_or_else(|_| Self::unanswered(query))
     }
 
-    /// Readies `arena` to answer `query` from: a geometry read reads the paintable rows as published, which publishes
-    /// what the units before it wrote.
+    /// Readies `arena` to answer `query` from: a geometry read reads the rows as committed, which publishes what the
+    /// units before it wrote.
     pub(crate) fn prepare(query: Query, arena: &mut LayoutNodeArena) {
         match query {
-            Query::Geometry { .. } => arena.publish_committed_paintable_rows(),
+            Query::Geometry { .. }
+            | Query::CommittedRows {
+                measured_overflow: true,
+            } => arena.publish_committed_rows(),
+            Query::CommittedRows {
+                measured_overflow: false,
+            } => arena.publish_rows(),
             Query::Arena(query) => query.prepare(arena),
             _ => {}
         }
@@ -693,6 +778,7 @@ impl Answer {
                 debug_assert!(false, "a write is made with the state, not answered from the arena");
                 Self::left_to_host(query)
             }
+            Query::CommittedRows { .. } => Self::Published,
         }
     }
 }
@@ -896,8 +982,9 @@ thread_local! {
     // On the owner thread, the documents whose rendering update the document thread recalled before the update began,
     // which the update ends at its first unit.
     static RECALLED: RefCell<std::collections::HashSet<DocumentId>> = RefCell::new(std::collections::HashSet::new());
-    // On a document thread, the number of the last change it sent for each document.
-    static SENT_THROUGH: RefCell<HashMap<DocumentId, ChangeSeq>> = RefCell::new(HashMap::new());
+    // On a document thread, the number of the last change it sent for each document, and of the last one that alters the
+    // rows the owner publishes.
+    static SENT_THROUGH: RefCell<HashMap<DocumentId, SentChanges>> = RefCell::new(HashMap::new());
     // On a document thread, the number of the last change it sent for each document ahead of a unit or question that
     // reaches the document's arena, which the owner applies every change it received before.
     static TAKEN_IN_THROUGH: RefCell<HashMap<DocumentId, ChangeSeq>> = RefCell::new(HashMap::new());
@@ -1122,10 +1209,14 @@ pub(crate) fn destroy_document(document: DocumentId) {
 /// Sends the arena write `change` for `document`, which the owner applies before the next unit or query that reaches
 /// the arena.
 pub(crate) fn send_arena_change(document: DocumentId, change: ArenaChange) -> ChangeSeq {
+    let alters_published_rows = change.alters_published_rows();
     let seq = SENT_THROUGH.with_borrow_mut(|sent| {
-        let seq = sent.entry(document).or_default();
-        seq.0 += 1;
-        *seq
+        let sent = sent.entry(document).or_default();
+        sent.through.0 += 1;
+        if alters_published_rows {
+            sent.altering_rows_through = sent.through;
+        }
+        sent.through
     });
     send(ToOwner::Changes {
         document,
@@ -1153,7 +1244,16 @@ pub(crate) fn note_sending(message: &ToOwner) {
 
 /// The number of the last change the calling document thread sent for `document`.
 pub(crate) fn sent_through(document: DocumentId) -> ChangeSeq {
-    SENT_THROUGH.with_borrow(|sent| sent.get(&document).copied().unwrap_or_default())
+    SENT_THROUGH.with_borrow(|sent| sent.get(&document).map_or_else(ChangeSeq::default, |sent| sent.through))
+}
+
+/// The number of the last change the calling document thread sent for `document` that alters the rows the owner
+/// publishes: rows that reflect it answer a read the thread makes now.
+pub(crate) fn sent_row_changes_through(document: DocumentId) -> ChangeSeq {
+    SENT_THROUGH.with_borrow(|sent| {
+        sent.get(&document)
+            .map_or_else(ChangeSeq::default, |sent| sent.altering_rows_through)
+    })
 }
 
 /// Recalls the rendering update of `document` the owner runs, if it runs one: the document thread takes its frame back.
@@ -1172,6 +1272,13 @@ pub(crate) fn recall_rendering_update(document: DocumentId) {
 ///
 /// `arena` must be the live arena of `document`, which no stage the document thread submitted owns.
 pub(crate) unsafe fn ask(document: DocumentId, arena: *mut c_void, query: Query) -> Answer {
+    if !document.is_valid() {
+        // The owner holds no state of an arena of no document (a unit test's): the thread that holds it answers.
+        // SAFETY: Guaranteed by the caller.
+        return Answer::of_state_reaching_engine(&Owner::here(), query, unsafe {
+            &mut *ArenaHandle::held_by_waiting_thread(arena)
+        });
+    }
     let answer = crate::stage_thread::wait_for_owner(
         |reply| ToOwner::Ask { document, query, reply },
         || {
@@ -1593,20 +1700,21 @@ impl FfiGeometryReadAnswer {
 
 /// Answers the geometry read `kind` about `node` from `arena`, which the units before it have laid out.
 fn answer_geometry(arena: &LayoutNodeArena, node: StyleNodeID, kind: FfiGeometryReadKind) -> FfiGeometryReadAnswer {
-    let slot = arena.bound_row(node);
     let has_layout_root = !arena.layout_root().is_invalid();
-    let rows = arena.published_committed_paintable_rows();
-    if slot.is_invalid() || rows.node_data_if_live(slot).is_none() {
+    let published = arena.published_rows();
+    let Some(slot) = published.bound_row(node) else {
         return FfiGeometryReadAnswer::no_box();
-    }
+    };
     // A table's principal box is its wrapper, which the document thread finds.
-    let parent = rows.node_data_if_live(slot).map(|data| data.parent.get());
-    if parent
-        .and_then(|parent| rows.node_data_if_live(parent))
-        .is_some_and(|data| data.kind.get() == NodeKind::TableWrapper)
+    if published
+        .parent(slot)
+        .and_then(|parent| published.node(parent))
+        .is_some_and(|parent| parent.kind == NodeKind::TableWrapper)
     {
         return FfiGeometryReadAnswer::default();
     }
+    let absolute_rects = std::cell::RefCell::default();
+    let rows = crate::painting::published_frame::PaintSource::of_rows(&published, &absolute_rects);
     match kind {
         FfiGeometryReadKind::BoundingClientRect => {
             // Only a box that needs no visual context: the document thread checks that its own facts (a zero

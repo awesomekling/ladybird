@@ -94,11 +94,16 @@ pub(crate) unsafe fn frame_generation(arena_handle: *mut c_void) -> u64 {
 /// # Safety
 ///
 /// As for [`frame_generation`].
+/// Counts a frame whose result was discarded because what it was made for was retired meanwhile.
+pub(crate) fn note_frame_retired() {
+    count(|counters| counters.frames_retired += 1);
+}
+
 pub(crate) unsafe fn frame_was_retired(arena_handle: *mut c_void, generation: u64) -> bool {
     // SAFETY: Guaranteed by the caller.
     let retired = unsafe { frame_generation(arena_handle) } != generation;
     if retired {
-        count(|counters| counters.frames_retired += 1);
+        note_frame_retired();
     }
     retired
 }

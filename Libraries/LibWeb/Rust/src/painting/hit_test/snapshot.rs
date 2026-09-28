@@ -24,7 +24,6 @@ use crate::css::style::tree::StyleNodeID;
 use crate::layout::FfiCssPixelPoint;
 use crate::layout::LayoutNodeArena;
 use crate::layout::node_data::{NodeFlag, NodeKind, NodeSlotId};
-use crate::layout::row_reads::RowSnapshot;
 use crate::painting::display_list::commands::ContextRef;
 use crate::painting::geometry_read::GeometryRead;
 use crate::painting::hit_test::HitTestList;
@@ -34,10 +33,12 @@ use std::cell::RefCell;
 use std::ffi::c_void;
 use std::sync::Arc;
 
+/// The default snapshot holds no list, so it hits nothing.
+#[derive(Default)]
 pub(crate) struct HitTestSnapshot {
+    /// The frame, whose rows name the row each DOM node was bound to, which a hit's box finds the box of its element
+    /// by.
     frame: PublishedFrame,
-    /// The row each DOM node was bound to, which a hit's box finds the box of its element by.
-    bound_rows: Arc<RowSnapshot>,
 }
 
 // A snapshot is hit tested on the main thread while the arena is written wherever its owner runs:
@@ -52,11 +53,8 @@ impl LayoutNodeArena {
     pub(crate) fn publish_hit_test_snapshot(&mut self) -> HitTestSnapshot {
         // The frame's rows pin the list as it is once its structures are built.
         self.prepare_hit_test_list_for_query(true, true);
-        let frame = self.freeze_frame_without_damage();
-        self.publish_rows();
         HitTestSnapshot {
-            frame,
-            bound_rows: self.published_rows(),
+            frame: self.freeze_frame_without_damage(),
         }
     }
 
@@ -70,7 +68,7 @@ impl LayoutNodeArena {
 
 impl HitTestSnapshot {
     pub(super) fn list(&self) -> Option<&HitTestList> {
-        self.frame.rows.hit_test_list.as_deref()
+        self.frame.hit_test_list.as_deref()
     }
 
     /// Runs a query over the list, the visual context tree it converts points through and the rows it
@@ -80,7 +78,7 @@ impl HitTestSnapshot {
         default: R,
         query: impl FnOnce(&HitTestList, &VisualContextTree, &PaintSource<'_>) -> R,
     ) -> R {
-        let (Some(list), Some(tree)) = (self.list(), self.frame.rows.visual_context_tree.as_deref()) else {
+        let (Some(list), Some(tree)) = (self.list(), self.frame.rows.paintable.visual_context_tree.as_deref()) else {
             return default;
         };
         if !list.spatial_indexes_built {
@@ -221,7 +219,7 @@ impl HitTestSnapshot {
         let image_rect = crate::painting::paintable_geometry::absolute_rect_or_default(rows, image);
         let x = (local_point.x - image_rect.x).to_float();
         let y = (local_point.y - image_rect.y).to_float();
-        let area = self.frame.rows.image_map_areas.area_for_point(
+        let area = self.frame.rows.paintable.image_map_areas.area_for_point(
             image,
             x,
             y,
@@ -343,11 +341,11 @@ impl HitTestSnapshot {
     fn bound_box(&self, identity: FfiHitNodeIdentity) -> Option<NodeSlotId> {
         let row = match identity.kind {
             FfiHitNodeIdentityKind::None => return None,
-            FfiHitNodeIdentityKind::Document => self.bound_rows.viewport_row()?,
+            FfiHitNodeIdentityKind::Document => self.frame.rows.viewport_row()?,
             FfiHitNodeIdentityKind::StyleNode => {
                 let element = StyleNodeID::from_raw(identity.style_node)?;
                 element.element_index()?;
-                self.bound_rows.bound_row(element)?
+                self.frame.rows.bound_row(element)?
             }
         };
         self.read_rows(|rows| rows.slot_is_live(row).then_some(row))
@@ -411,8 +409,10 @@ pub(super) unsafe fn snapshot_from_handle<'a>(snapshot: *const c_void) -> &'a Hi
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_publish_hit_test_snapshot(arena: *mut c_void) -> *const c_void {
-    let arena = unsafe { crate::painting::ffi::arena_from_handle_mut(arena) };
-    Arc::into_raw(Arc::new(arena.publish_hit_test_snapshot())).cast()
+    // SAFETY: Guaranteed by the caller.
+    let snapshot =
+        unsafe { crate::painting::owner_pass::run_held_pass(arena, (), |arena, ()| arena.publish_hit_test_snapshot()) };
+    Arc::into_raw(Arc::new(snapshot)).cast()
 }
 
 /// # Safety
@@ -438,8 +438,10 @@ pub unsafe extern "C" fn layout_arena_visit_hit_test_chrome_widgets(
     sink: *mut c_void,
     visit: unsafe extern "C" fn(*mut c_void, NodeSlotId, u8),
 ) -> u64 {
-    let arena = unsafe { crate::painting::ffi::arena_from_handle(arena) };
-    let Some(list) = arena.hit_test_list_as_recorded() else {
+    // SAFETY: Guaranteed by the caller.
+    let list =
+        unsafe { crate::painting::owner_pass::run_held_pass(arena, (), |arena, ()| arena.hit_test_list_as_recorded()) };
+    let Some(list) = list else {
         return 0;
     };
     for item in list.items.iter() {

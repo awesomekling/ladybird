@@ -10,7 +10,7 @@ use super::*;
 use crate::layout::node_data::NodeSlotId;
 use crate::painting::host::FfiVisualContextTreeInputs;
 use crate::painting::paintable_geometry;
-use crate::painting::paintable_rows::PaintableRowsRead;
+use crate::painting::paintable_rows::ArenaRowsRead;
 use crate::painting::published_frame::PaintRead;
 use crate::painting::style_queries;
 use libgfx_rust::CornerRadii;
@@ -89,7 +89,7 @@ impl BoxFacts {
     /// Gathers a box's facts for the visual context update, which keeps the bounds of the SVG
     /// filter the box references on its row.
     pub(crate) fn gather(
-        layout_arena: &impl crate::painting::paintable_rows::PaintableRowsRead,
+        layout_arena: &impl crate::painting::paintable_rows::ArenaRowsRead,
         slot: NodeSlotId,
         pixel_ratio: f64,
         consults_default_scroll_shift_anchors: bool,
@@ -218,7 +218,7 @@ pub(crate) struct FreshTree {
 }
 
 pub(crate) fn create_fresh_tree_with_viewport_nodes(
-    layout_arena: &impl PaintableRowsRead,
+    layout_arena: &impl ArenaRowsRead,
     viewport: NodeSlotId,
     inputs: &FfiVisualContextTreeInputs,
 ) -> FreshTree {

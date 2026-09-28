@@ -20,7 +20,7 @@ use crate::fast_hash::{FastMap as HashMap, FastSet as HashSet};
 use crate::layout::node_data::{NodeKind, NodeSlotId};
 use crate::painting::host::FfiVisualContextTreeInputs;
 use crate::painting::paint_order;
-use crate::painting::paintable_rows::PaintableRowsRead;
+use crate::painting::paintable_rows::ArenaRowsRead;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct ChildCascade {
@@ -49,7 +49,7 @@ fn incremental_tree_requires_fresh_build(tree: &VisualContextTree, delta: &Visua
     delta.tombstoned_any_node && !tree.node_references_are_consistent()
 }
 
-fn box_is_inside_svg_resource_subtree(layout_arena: &impl PaintableRowsRead, slot: NodeSlotId) -> bool {
+fn box_is_inside_svg_resource_subtree(layout_arena: &impl ArenaRowsRead, slot: NodeSlotId) -> bool {
     let mut node = Some(slot);
     while let Some(current) = node {
         if matches!(
@@ -71,7 +71,7 @@ struct WorkPlan {
 }
 
 fn expand_dirty_entries(
-    layout_arena: &impl PaintableRowsRead,
+    layout_arena: &impl ArenaRowsRead,
     dirty: &VisualContextDirtySet,
 ) -> Result<WorkPlan, VisualContextGlobalRebuildReason> {
     let mut work: HashMap<NodeSlotId, BoxDirtyBits> = HashMap::default();
@@ -113,7 +113,7 @@ fn expand_dirty_entries(
 }
 
 impl WorkPlan {
-    fn insert_ancestors_of_work(&mut self, layout_arena: &impl PaintableRowsRead, slot: NodeSlotId) {
+    fn insert_ancestors_of_work(&mut self, layout_arena: &impl ArenaRowsRead, slot: NodeSlotId) {
         let mut ancestor = paint_order::paint_parent(layout_arena, slot);
         while let Some(current) = ancestor {
             if !self.ancestors_of_work.insert(current) {
@@ -123,7 +123,7 @@ impl WorkPlan {
         }
     }
 
-    fn box_or_paint_ancestor_is_dirty(&self, layout_arena: &impl PaintableRowsRead, slot: NodeSlotId) -> bool {
+    fn box_or_paint_ancestor_is_dirty(&self, layout_arena: &impl ArenaRowsRead, slot: NodeSlotId) -> bool {
         let mut node = layout_arena.paintable_row_is_populated(slot).then_some(slot);
         while let Some(current) = node {
             if self.work.contains_key(&current) || self.revalidate_children_of.contains(&current) {
@@ -138,7 +138,7 @@ impl WorkPlan {
     // scroll chain and its anchor's. A box above the anchor or above the positioned box changes
     // those chains without its rebuild reaching the positioned box, so the box is rebuilt
     // whenever either chain holds a dirty box.
-    fn add_anchored_boxes_below_dirty_scroll_chains(&mut self, layout_arena: &impl PaintableRowsRead) {
+    fn add_anchored_boxes_below_dirty_scroll_chains(&mut self, layout_arena: &impl ArenaRowsRead) {
         if !layout_arena.may_have_default_scroll_shift_anchor() {
             return;
         }
@@ -201,7 +201,7 @@ pub(crate) enum RegisteredScrollLikeNode {
 }
 
 pub(crate) fn register_scroll_like_node(
-    layout_arena: &impl PaintableRowsRead,
+    layout_arena: &impl ArenaRowsRead,
     tree: &mut VisualContextTree,
     scroll_state: &mut ScrollState,
     node_index: SpatialNodeIndex,
@@ -240,7 +240,7 @@ pub(crate) fn register_scroll_like_node(
 }
 
 pub(crate) fn rebuild_scroll_state_from_tree(
-    layout_arena: &impl PaintableRowsRead,
+    layout_arena: &impl ArenaRowsRead,
     tree: &mut VisualContextTree,
     tree_inputs: &FfiVisualContextTreeInputs,
 ) -> ScrollState {
@@ -267,7 +267,7 @@ pub(crate) fn rebuild_scroll_state_from_tree(
 }
 
 pub(crate) fn box_owns_geometry_dependent_nodes(
-    layout_arena: &impl PaintableRowsRead,
+    layout_arena: &impl ArenaRowsRead,
     tree: &VisualContextTree,
     slot: NodeSlotId,
     handles: &BoxVisualContextNodeHandles,
@@ -320,7 +320,7 @@ struct WalkAnchorScrollShiftResolver<'a, Arena> {
     assignment_index_by_slot: &'a HashMap<NodeSlotId, usize>,
 }
 
-impl<Arena: PaintableRowsRead> AnchorScrollShiftResolver for WalkAnchorScrollShiftResolver<'_, Arena> {
+impl<Arena: ArenaRowsRead> AnchorScrollShiftResolver for WalkAnchorScrollShiftResolver<'_, Arena> {
     fn default_scroll_shift_anchor(&self, slot: NodeSlotId) -> NodeSlotId {
         self.layout_arena.default_scroll_shift_anchor(slot)
     }
@@ -341,7 +341,7 @@ impl<Arena: PaintableRowsRead> AnchorScrollShiftResolver for WalkAnchorScrollShi
 }
 
 fn anchor_is_awaiting_build(
-    layout_arena: &impl PaintableRowsRead,
+    layout_arena: &impl ArenaRowsRead,
     anchor_node: NodeSlotId,
     awaiting: &HashSet<NodeSlotId>,
 ) -> bool {
@@ -358,7 +358,7 @@ fn anchor_is_awaiting_build(
 }
 
 fn take_next_deferred_anchor_positioned(
-    layout_arena: &impl PaintableRowsRead,
+    layout_arena: &impl ArenaRowsRead,
     deferred: &mut Vec<DeferredAnchorPositionedBox>,
     awaiting: &mut HashSet<NodeSlotId>,
 ) -> Option<PendingBox> {
@@ -376,7 +376,7 @@ fn take_next_deferred_anchor_positioned(
     Some(entry.pending)
 }
 
-pub(crate) fn update_visual_context_tree<Arena: PaintableRowsRead>(
+pub(crate) fn update_visual_context_tree<Arena: ArenaRowsRead>(
     layout_arena: &Arena,
     viewport: NodeSlotId,
     tree_inputs: FfiVisualContextTreeInputs,
@@ -637,7 +637,7 @@ pub(crate) fn update_visual_context_tree<Arena: PaintableRowsRead>(
 
 #[cfg(debug_assertions)]
 pub(crate) fn debug_assert_every_live_node_is_owned(
-    layout_arena: &impl PaintableRowsRead,
+    layout_arena: &impl ArenaRowsRead,
     tree: &VisualContextTree,
     viewport: NodeSlotId,
 ) {
@@ -692,7 +692,7 @@ pub(crate) fn debug_assert_every_live_node_is_owned(
 
 #[cfg(not(debug_assertions))]
 pub(crate) fn debug_assert_every_live_node_is_owned(
-    _layout_arena: &impl PaintableRowsRead,
+    _layout_arena: &impl ArenaRowsRead,
     _tree: &VisualContextTree,
     _viewport: NodeSlotId,
 ) {

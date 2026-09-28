@@ -1150,8 +1150,12 @@ pub unsafe extern "C" fn rust_publish_counter_styles(
         scope.styles.insert(name, style.0.clone());
     }
 
-    let arena = unsafe { crate::painting::ffi::arena_from_handle(arena) };
-    arena.publish_counter_styles(tree_scope, scope);
+    // SAFETY: Guaranteed by the caller.
+    let document = unsafe { crate::layout::ArenaHandle::document_of(arena) };
+    crate::render_owner::send_arena_change(
+        document,
+        crate::render_owner::ArenaChange::CounterStyles { tree_scope, scope },
+    );
 }
 
 #[cfg(test)]

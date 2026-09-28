@@ -577,9 +577,8 @@ void InvalidationJournal::drain()
                     .canvas_id = rare->canvas_id,
                     .content_generation = rare->canvas_content_generation,
                 };
-                auto changed = Layout::RustFFI::layout_arena_set_canvas_paint_facts(box.arena(), box.slot(), facts);
-                if (changed && Painting::has_committed_box(box))
-                    Painting::apply_paint_cache_invalidation(box, Painting::PaintCacheInvalidation::PaintAndHitTest);
+                // Where the facts changed, the render owner damages the box's paint and hit-test caches.
+                Layout::RustFFI::layout_arena_set_canvas_paint_facts(box.arena(), box.slot(), facts);
             }
             if (rare && rare->has_form_control_paint_facts && (box.kind() == Layout::RustFFI::NodeKind::CheckBox || box.kind() == Layout::RustFFI::NodeKind::RadioButton)) {
                 Layout::RustFFI::FfiFormControlPaintFacts facts {
@@ -588,9 +587,9 @@ void InvalidationJournal::drain()
                     .indeterminate = rare->form_control_indeterminate,
                     .being_activated = rare->form_control_being_activated,
                 };
-                auto changed = Layout::RustFFI::layout_arena_set_form_control_paint_facts(box.arena(), box.slot(), facts);
-                if (changed && Painting::has_committed_box(box))
-                    Painting::set_needs_repaint(box, InvalidateDisplayList::PaintCommands);
+                // The render owner compares the facts; the control repaints as if they changed.
+                Layout::RustFFI::layout_arena_set_form_control_paint_facts(box.arena(), box.slot(), facts);
+                Painting::set_needs_repaint(box, InvalidateDisplayList::PaintCommands);
             }
             if (entry.clears_layer_image_paint_facts)
                 Layout::RustFFI::layout_arena_set_layer_image_paint_facts(box.arena(), box.slot(), nullptr, 0);

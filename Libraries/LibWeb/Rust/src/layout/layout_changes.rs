@@ -345,6 +345,44 @@ impl LayoutChange {
         }
     }
 
+    /// Whether applying the change can alter what the rows the owner publishes answer the document thread: the rows
+    /// themselves, their DOM facts, identities and styles. Marks for the next layout, the flags it reads, and what the
+    /// arena keeps for the host (the document thread keeps its own copy of the compositor animation frames) alter
+    /// none.
+    pub(crate) fn alters_published_rows(&self) -> bool {
+        match self {
+            Self::SetNodeDomPaintFacts { .. }
+            | Self::DetachRemainingRowsForRemoval { .. }
+            | Self::DetachRemovedBoxInPlace { .. }
+            | Self::StyleNodeChanged { .. }
+            | Self::InstallRowStyle { .. }
+            | Self::ReplaceRowStyleRecord { .. }
+            | Self::AdoptDerivedNodeStyle { .. }
+            | Self::InstallAnimationSample { .. } => true,
+            Self::SetNodeFlag { .. }
+            | Self::SetNeedsLayoutUpdateOfPossibleBoundary { .. }
+            | Self::SetNodeNeedsCompositorAnimationFrame { .. }
+            | Self::SetNeedsLayoutUpdate { .. }
+            | Self::SetNeedsOwnGeometryUpdate { .. }
+            | Self::SetNeedsFullLayoutTreeUpdate(_)
+            | Self::ResetCachedIntrinsicSizesOfSelfAndAncestors { .. }
+            | Self::DeferChildListInsertionLayoutUpdate { .. }
+            | Self::InvalidateTextContent { .. }
+            | Self::EnrollTextAfterLanguageChange { .. }
+            | Self::RecordPartialRelayoutEscape
+            | Self::SetOwnedImageNaturalSize { .. }
+            | Self::SetElementScrollOffset { .. }
+            | Self::SetPseudoElementScrollOffset { .. }
+            | Self::SetIdentityInFocusedTextControl { .. }
+            | Self::SetListOwnerHasStaleItemCounters { .. }
+            | Self::SetRowImageObservers { .. }
+            | Self::RowOwnsImageProvider { .. }
+            | Self::SetStyleImageResourcesAttached { .. }
+            | Self::PinBoundBoxStyleRecordForDetachment { .. }
+            | Self::SetTableSpans { .. } => false,
+        }
+    }
+
     /// Whether the change can mark a node for layout, which is all a change can do to whether the layout is up to date.
     fn lays_out_again(&self) -> bool {
         matches!(

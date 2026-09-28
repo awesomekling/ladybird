@@ -69,7 +69,6 @@
 use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::HashSet;
-use std::panic::Location;
 use std::sync::OnceLock;
 
 /// A render-side pass, as the seal names it in a report.
@@ -128,35 +127,6 @@ fn mode() -> Mode {
 thread_local! {
     static CURRENT_PASS: Cell<Pass> = const { Cell::new(Pass::None) };
     static REPORTED: RefCell<HashSet<(&'static str, &'static str)>> = RefCell::new(HashSet::new());
-    static REPORTED_MAIN_SIDE_READS: RefCell<HashSet<(Pass, &'static Location<'static>)>> = RefCell::new(HashSet::new());
-}
-
-pub(crate) fn note_main_side_read(call_site: &'static Location<'static>) {
-    static ENABLED: OnceLock<bool> = OnceLock::new();
-    if !*ENABLED.get_or_init(|| std::env::var_os("LIBWEB_VERIFY_RENDER_MUTATION_READS").is_some()) {
-        return;
-    }
-    let pass = CURRENT_PASS.with(Cell::get);
-    if !matches!(pass, Pass::VisualContextUpdate | Pass::ScrollableOverflow) {
-        return;
-    }
-    let first_time = REPORTED_MAIN_SIDE_READS.with(|reported| reported.borrow_mut().insert((pass, call_site)));
-    if !first_time {
-        return;
-    }
-    let report = format!(
-        "RENDER MUTATION READ: main side entered Rust at {call_site} during {}\n",
-        pass.name()
-    );
-    match std::env::var_os("LIBWEB_VERIFY_RENDER_MUTATION_READS_LOG") {
-        Some(path) => {
-            use std::io::Write;
-            if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
-                let _ = file.write_all(report.as_bytes());
-            }
-        }
-        None => eprint!("{report}"),
-    }
 }
 
 /// Restores the pass that was running when this one began.
