@@ -24,6 +24,7 @@
 #include <LibWeb/DOM/NodeIdentity.h>
 #include <LibWeb/Export.h>
 #include <LibWeb/Forward.h>
+#include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Layout/NodeArena.h>
 #include <LibWeb/Layout/TreeBuilderRustFFI.h>
 #include <LibWeb/TreeTraversal.h>
@@ -640,10 +641,5 @@ inline Gfx::Font const& NodeWithStyle::first_available_font() const
 }
 
 bool overflow_value_makes_box_a_scroll_container(CSS::Overflow overflow);
-
-void publish_dom_paint_facts(DOM::Node const&);
-void publish_element_scroll_offset(DOM::Element const&);
-void publish_is_in_focused_text_control(DOM::Node const&);
-void publish_table_spans(DOM::Element const&);
 
 }

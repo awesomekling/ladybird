@@ -12,6 +12,7 @@
 #include <AK/RefPtr.h>
 #include <AK/Variant.h>
 #include <AK/Vector.h>
+#include <LibGC/Ptr.h>
 #include <LibWeb/CSS/Enums.h>
 #include <LibWeb/CSS/PercentageOr.h>
 #include <LibWeb/Export.h>
@@ -49,6 +50,24 @@ bool attach_owed_generated_image(DOM::Document&, Compositing::RustFFI::NodeSlotI
 
 // Registers the document-side answers every layout pass needs on the document's arena, once it has one.
 WEB_API void register_layout_host(DOM::Document&);
+
+// What the document publishes to the arena about a node, under its identity, for the rows built for it: what the rows
+// are painted and hit-tested with, what the element is scrolled to, whether the node sits in the focused text control,
+// and the spans a table cell or column takes from its attributes.
+void publish_dom_paint_facts(DOM::Node const&);
+void publish_element_scroll_offset(DOM::Element const&);
+void publish_is_in_focused_text_control(DOM::Node const&);
+void publish_table_spans(DOM::Element const&);
+u8 dom_paint_facts_of(GC::Ptr<DOM::Node const>);
+struct TableSpans {
+    u16 column_span { 1 };
+    u16 row_span { 1 };
+    u32 raw_column_span { 1 };
+};
+TableSpans table_spans_of(DOM::Node const*);
+
+// Sets the record of the box's row as its element's record moved, without applying the style to the box.
+WEB_API void set_box_style_record(Painting::BoxSlot const&, CSS::PublishedStyleRecord const*);
 
 // What a style change does to a box beyond the record its row installs: re-deriving its values from the record, or,
 // for a change that only moves the images it names, loading and observing those.
