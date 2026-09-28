@@ -7,7 +7,6 @@
 #include <LibGC/Heap.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/HTML/Window.h>
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/ResizeObserver/ResizeObserverSize.h>
 
@@ -25,21 +24,21 @@ ResizeObserverSize::RawSize ResizeObserverSize::compute_box_size(DOM::Element& t
     // NB: Layout was up to date when observations were gathered, but a previous
     //     observer's callback may have invalidated it before we get here.
     //     This matches the behavior of all major browsers.
-    auto const* layout_node = target.unsafe_layout_node();
-    if (layout_node && Painting::has_committed_box(*layout_node)) {
+    auto box = Painting::BoxSlot::bound_to(target);
+    if (Painting::has_committed_box(box)) {
         switch (observed_box) {
         case ObservedBox::BorderBox:
-            size.inline_size = Painting::border_box_width(*layout_node).to_double();
-            size.block_size = Painting::border_box_height(*layout_node).to_double();
+            size.inline_size = Painting::border_box_width(box).to_double();
+            size.block_size = Painting::border_box_height(box).to_double();
             break;
         case ObservedBox::ContentBox:
-            size.inline_size = Painting::content_width(*layout_node).to_double();
-            size.block_size = Painting::content_height(*layout_node).to_double();
+            size.inline_size = Painting::content_width(box).to_double();
+            size.block_size = Painting::content_height(box).to_double();
             break;
         case ObservedBox::DevicePixelContentBox: {
             auto device_pixel_ratio = target.document().window()->device_pixel_ratio();
-            size.inline_size = Painting::border_box_width(*layout_node).to_double() * device_pixel_ratio;
-            size.block_size = Painting::border_box_height(*layout_node).to_double() * device_pixel_ratio;
+            size.inline_size = Painting::border_box_width(box).to_double() * device_pixel_ratio;
+            size.block_size = Painting::border_box_height(box).to_double() * device_pixel_ratio;
             break;
         }
         }

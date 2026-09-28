@@ -32,7 +32,6 @@
 #include <LibWeb/HTML/HTMLUListElement.h>
 #include <LibWeb/HTML/Parser/HTMLParser.h>
 #include <LibWeb/HTML/XMLSerializer.h>
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/Namespace.h>
 #include <LibWeb/VisualLines.h>
 

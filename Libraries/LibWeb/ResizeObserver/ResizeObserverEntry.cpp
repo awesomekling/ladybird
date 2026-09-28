@@ -6,7 +6,6 @@
 
 #include <LibGC/Heap.h>
 #include <LibWeb/DOM/Element.h>
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/ResizeObserver/ResizeObserverEntry.h>
 
@@ -43,14 +42,14 @@ WebIDL::ExceptionOr<GC::Ref<ResizeObserverEntry>> ResizeObserverEntry::create_an
     // NB: Layout was up to date when observations were gathered, but a previous
     //     observer's callback may have invalidated it before we get here.
     //     This matches the behavior of all major browsers.
-    auto const* layout_node = target.unsafe_layout_node();
-    if (!target.is_svg_element() && layout_node && Painting::has_committed_box(*layout_node)) {
-        auto absolute_padding_rect = Painting::absolute_padding_box_rect(*layout_node);
+    auto box = Painting::BoxSlot::bound_to(target);
+    if (!target.is_svg_element() && Painting::has_committed_box(box)) {
+        auto absolute_padding_rect = Painting::absolute_padding_box_rect(box);
         // Set this.contentRect.top to target.padding top.
         y = absolute_padding_rect.y().to_double();
         // Set this.contentRect.left to target.padding left.
         x = absolute_padding_rect.x().to_double();
-    } else if (target.is_svg_element() && layout_node && Painting::has_committed_box(*layout_node)) {
+    } else if (target.is_svg_element() && Painting::has_committed_box(box)) {
         // 8. If target is an SVG element without an associated CSS layout box do these steps:
         // Set this.contentRect.top and this.contentRect.left to 0.
         // NOTE: This is already done by the default constructor.

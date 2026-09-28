@@ -15,7 +15,6 @@
 #include <LibWeb/HTML/HTMLCanvasElement.h>
 #include <LibWeb/HTML/LocalNavigable.h>
 #include <LibWeb/HTML/OffscreenCanvas.h>
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/WebGL/EventNames.h>
 #include <LibWeb/WebGL/RemoteWebGLTransport.h>

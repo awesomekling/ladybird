@@ -5,6 +5,7 @@
  */
 
 #include <AK/StringBuilder.h>
+#include <LibWeb/CSS/ComputedValues.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/PseudoElement.h>
@@ -89,6 +90,23 @@ bool BoxSlot::has_committed_box() const
     return arena && *this && Layout::RustFFI::layout_arena_has_committed_box(arena, m_slot);
 }
 
+bool BoxSlot::is_atomic_inline() const
+{
+    auto* arena = this->arena();
+    return arena && *this && Layout::RustFFI::layout_arena_node_is_atomic_inline(arena, m_slot);
+}
+
+bool BoxSlot::is_scroll_container() const
+{
+    // NOTE: This isn't in the spec, but we want the viewport to behave like a scroll container.
+    if (is_viewport())
+        return true;
+    auto const* box_values = style_group<CSS::ComputedValues::BoxValues>();
+    return box_values
+        && (overflow_value_makes_box_a_scroll_container(static_cast<CSS::Overflow>(box_values->overflow_x))
+            || overflow_value_makes_box_a_scroll_container(static_cast<CSS::Overflow>(box_values->overflow_y)));
+}
+
 StringView BoxSlot::kind_name() const
 {
     return layout_node_kind_name(m_kind);
@@ -108,6 +126,17 @@ BoxSlot BoxSlot::linked(Layout::RustFFI::FfiNodeLink link) const
     if (!arena || !*this)
         return {};
     return { *m_document, Layout::RustFFI::layout_arena_linked_row(arena, m_slot, link) };
+}
+
+BoxSlot BoxSlot::next_in_pre_order(BoxSlot const& root) const
+{
+    if (auto child = first_child())
+        return child;
+    for (auto box = *this; box && box != root; box = box.parent()) {
+        if (auto sibling = box.next_sibling())
+            return sibling;
+    }
+    return {};
 }
 
 BoxSlot BoxSlot::containing_block() const
@@ -192,6 +221,20 @@ String BoxSlot::debug_description() const
         builder.append("(anonymous)"sv);
     }
     return MUST(builder.to_string());
+}
+
+bool overflow_value_makes_box_a_scroll_container(CSS::Overflow overflow)
+{
+    switch (overflow) {
+    case CSS::Overflow::Clip:
+    case CSS::Overflow::Visible:
+        return false;
+    case CSS::Overflow::Auto:
+    case CSS::Overflow::Hidden:
+    case CSS::Overflow::Scroll:
+        return true;
+    }
+    VERIFY_NOT_REACHED();
 }
 
 StringView layout_node_kind_name(Layout::RustFFI::NodeKind kind)
