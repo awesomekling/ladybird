@@ -141,6 +141,18 @@ constexpr CSS::SelectorFFI::FfiDomSelectorCallbacks dom_selector_callbacks {
     .previous_element_sibling = [](void const* element) { return node_to_ffi(element_from_ffi(element).previous_element_sibling()); },
     .next_element_sibling = [](void const* element) { return node_to_ffi(element_from_ffi(element).next_element_sibling()); },
     .first_element_child = [](void const* element) { return node_to_ffi(element_from_ffi(element).first_child_of_type<Element>()); },
+    .count_element_siblings = [](void const* pointer, CSS::SelectorFFI::FfiSiblingCount which) {
+        using enum CSS::SelectorFFI::FfiSiblingCount;
+        auto const& element = element_from_ffi(pointer);
+        bool of_same_type = which == BeforeOfSameType || which == AfterOfSameType;
+        bool after = which == After || which == AfterOfSameType;
+        u32 count = 0;
+        for (auto const* sibling = after ? element.next_element_sibling() : element.previous_element_sibling(); sibling;
+            sibling = after ? sibling->next_element_sibling() : sibling->previous_element_sibling()) {
+            if (!of_same_type || (sibling->local_name() == element.local_name() && sibling->namespace_uri() == element.namespace_uri()))
+                ++count;
+        }
+        return count; },
     .next_element_in_subtree = [](void const* node, void const* root) -> void const* {
         auto const& stay_within = node_from_ffi(root);
         for (auto const* next = node_from_ffi(node).next_in_pre_order(&stay_within); next; next = next->next_in_pre_order(&stay_within)) {
