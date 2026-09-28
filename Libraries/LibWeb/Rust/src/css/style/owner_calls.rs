@@ -18,6 +18,7 @@ use super::bridge::{
     FfiPublishedAnimationKeyframe, FfiPublishedLinearEasingPoint, FfiPublishedTransition, FfiRuleMatch, InputForPass,
 };
 use super::engine_home::{PendingFacts, StyleEngineHandle, StyleEngineInputHandle};
+use super::inputs::HandedCustomPropertyEnvironment;
 use super::tree::StyleNodeID;
 use crate::layout::LayoutNodeArena;
 use crate::render_owner::{Answer, DocumentId, EngineAnswered, Query};
@@ -52,6 +53,10 @@ pub(crate) enum EngineChange {
     /// The host took what the container conditions of an element's row read of its containers, which the engine
     /// records.
     ContainerEffectsTakenByHost(StyleNodeID),
+    /// The custom-property environment an element now holds, or that it holds none.
+    SetElementCustomPropertyData(StyleNodeID, Option<HandedCustomPropertyEnvironment>),
+    /// The custom-property environment one of an element's synthetic pseudo-elements now holds, or that it holds none.
+    SetPseudoElementCustomPropertyData(StyleNodeID, u8, Option<HandedCustomPropertyEnvironment>),
     /// The host folded the style input an element owes into the reaction it applies to it, as
     /// [`StyleEngine::absorb_element_style_input`] does.
     ElementStyleInputAbsorbedByHost {
@@ -105,7 +110,9 @@ impl EngineChange {
             | Self::PublishFontFaceSnapshot { .. }
             | Self::RowSampledTakenByHost(_)
             | Self::ContainerEffectsTakenByHost(_)
-            | Self::ElementStyleInputAbsorbedByHost { .. } => PendingFacts::NONE,
+            | Self::ElementStyleInputAbsorbedByHost { .. }
+            | Self::SetElementCustomPropertyData(..)
+            | Self::SetPseudoElementCustomPropertyData(..) => PendingFacts::NONE,
             // Only an element that loses its record may owe its resources an input.
             Self::Boundary(Write::SetElementContainerQueryInputs { record, .. }) if *record != 0 => PendingFacts::NONE,
             Self::Boundary(
@@ -202,6 +209,15 @@ impl EngineChange {
             } => {
                 engine.absorb_element_style_input(node, reaction, inherited_style_groups, false);
             }
+            // What the element held before is the document thread's to release.
+            Self::SetElementCustomPropertyData(node, handed) => {
+                let retired = engine.set_element_custom_property_data(node, handed);
+                engine.host.retired_custom_property_data.extend(retired);
+            }
+            Self::SetPseudoElementCustomPropertyData(node, pseudo, handed) => {
+                let retired = engine.set_pseudo_element_custom_property_data(node, pseudo, handed);
+                engine.host.retired_custom_property_data.extend(retired);
+            }
         }
     }
 }
@@ -282,18 +298,6 @@ pub(crate) enum StyleQuery {
     },
     HasSizeContainersNeedingEvaluationAfterLayout,
     HasSuspendedStylePass,
-    ElementCustomPropertyData {
-        node: u32,
-        identity: *mut u64,
-    },
-    PseudoElementCustomPropertyData {
-        node: u32,
-        pseudo: u8,
-        identity: *mut u64,
-    },
-    PseudoElementsWithCustomPropertyData {
-        node: u32,
-    },
     AssignedStyleRecord {
         node: u32,
         pseudo_kind: u8,
@@ -345,29 +349,6 @@ pub(crate) enum StyleQuery {
         custom_property_store: *const std::ffi::c_void,
         property_id: u16,
         value: *const crate::css::style_value::StyleValueData,
-    },
-    SetElementCustomPropertyData {
-        node: u32,
-        data: *const c_void,
-        store: *const c_void,
-        environment: u64,
-        is_animation_overlay: bool,
-        declares: bool,
-        animation_base: *const c_void,
-        animation_base_store: *const c_void,
-        animation_base_environment: u64,
-    },
-    SetPseudoElementCustomPropertyData {
-        node: u32,
-        pseudo: u8,
-        data: *const c_void,
-        store: *const c_void,
-        environment: u64,
-        is_animation_overlay: bool,
-        declares_own: bool,
-        animation_base: *const c_void,
-        animation_base_store: *const c_void,
-        animation_base_environment: u64,
     },
     InstallSampledCustomPropertyEnvironment {
         node: u32,
@@ -756,15 +737,6 @@ impl StyleQuery {
             Self::HasSuspendedStylePass => {
                 StyleAnswer::Bool(unsafe { crate::css::style::bridge::owner_has_suspended_style_pass(engine) })
             }
-            Self::ElementCustomPropertyData { node, identity } => StyleAnswer::Pointer(unsafe {
-                crate::css::style::bridge::owner_element_custom_property_data(engine, node, identity)
-            }),
-            Self::PseudoElementCustomPropertyData { node, pseudo, identity } => StyleAnswer::Pointer(unsafe {
-                crate::css::style::bridge::owner_pseudo_element_custom_property_data(engine, node, pseudo, identity)
-            }),
-            Self::PseudoElementsWithCustomPropertyData { node } => StyleAnswer::U64(unsafe {
-                crate::css::style::bridge::owner_pseudo_elements_with_custom_property_data(engine, node)
-            }),
             Self::AssignedStyleRecord { node, pseudo_kind } => StyleAnswer::U64(unsafe {
                 crate::css::style::bridge::owner_assigned_style_record(engine, node, pseudo_kind)
             }),
@@ -846,62 +818,6 @@ impl StyleQuery {
                 }
                 .cast(),
             ),
-            Self::SetElementCustomPropertyData {
-                node,
-                data,
-                store,
-                environment,
-                is_animation_overlay,
-                declares,
-                animation_base,
-                animation_base_store,
-                animation_base_environment,
-            } => {
-                unsafe {
-                    crate::css::style::bridge::owner_set_element_custom_property_data(
-                        engine,
-                        node,
-                        data,
-                        store,
-                        environment,
-                        is_animation_overlay,
-                        declares,
-                        animation_base,
-                        animation_base_store,
-                        animation_base_environment,
-                    );
-                };
-                StyleAnswer::None
-            }
-            Self::SetPseudoElementCustomPropertyData {
-                node,
-                pseudo,
-                data,
-                store,
-                environment,
-                is_animation_overlay,
-                declares_own,
-                animation_base,
-                animation_base_store,
-                animation_base_environment,
-            } => {
-                unsafe {
-                    crate::css::style::bridge::owner_set_pseudo_element_custom_property_data(
-                        engine,
-                        node,
-                        pseudo,
-                        data,
-                        store,
-                        environment,
-                        is_animation_overlay,
-                        declares_own,
-                        animation_base,
-                        animation_base_store,
-                        animation_base_environment,
-                    );
-                };
-                StyleAnswer::None
-            }
             Self::InstallSampledCustomPropertyEnvironment {
                 node,
                 pseudo_kind,

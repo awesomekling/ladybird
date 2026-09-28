@@ -54,6 +54,59 @@ impl RetainedCustomPropertyData {
     }
 }
 
+/// A custom-property environment the host hands the engine for an element or one of its synthetic pseudo-elements,
+/// which the document thread retains as it sends it.
+pub(crate) struct HandedCustomPropertyEnvironment {
+    data: RetainedCustomPropertyData,
+    identity: u64,
+    declares: bool,
+    animation_base: Option<AnimationBaseEnvironment>,
+}
+
+impl HandedCustomPropertyEnvironment {
+    /// Retains `data`, carrying `store`, named `identity`. An environment the element's animations sampled custom
+    /// properties into names the one it was composed over in `animation_base`: its identity, its store and the host's
+    /// object for it.
+    ///
+    /// # Safety
+    /// `data` must be a live `Web::CSS::CustomPropertyData` carrying `store`, which keeps alive the environment
+    /// `animation_base` names.
+    pub(crate) unsafe fn retain(
+        data: *const std::ffi::c_void,
+        store: *const std::ffi::c_void,
+        identity: u64,
+        declares: bool,
+        animation_base: Option<(u64, *const std::ffi::c_void, *const std::ffi::c_void)>,
+    ) -> Self {
+        Self {
+            // SAFETY: Guaranteed by the caller.
+            data: unsafe { RetainedCustomPropertyData::retain(data, store) },
+            identity,
+            declares,
+            animation_base: animation_base.map(|(environment, store, data)| AnimationBaseEnvironment {
+                environment,
+                store: crate::css::host_shared::HostShared::new(store),
+                data: crate::css::host_shared::HostShared::new(data),
+            }),
+        }
+    }
+
+    /// The host's object for the environment, and its identity.
+    pub(crate) fn answer(&self) -> (*const std::ffi::c_void, u64) {
+        (self.data.data(), self.identity)
+    }
+
+    fn into_held(self) -> HeldCustomPropertyEnvironment {
+        HeldCustomPropertyEnvironment {
+            identity: self.identity,
+            is_animation_overlay: self.animation_base.is_some(),
+            declares: self.declares,
+            data: Some(self.data),
+            animation_base: self.animation_base,
+        }
+    }
+}
+
 /// The custom-property environment an element or one of its pseudo-elements holds. The engine
 /// names it by identity; the host's object for it is kept when the host installed it, while one
 /// the engine moved the element to is an environment the engine resolved, which the host views
@@ -150,53 +203,38 @@ impl RetainedState {
         (count << 32) | index
     }
 
-    /// Keep the custom-property environment an element now holds. A null `data` records that the
-    /// element holds none.
-    ///
-    /// # Safety
-    /// `data` must be null or a live `Web::CSS::CustomPropertyData` carrying `store`, and, where it
-    /// is an animation overlay, keep alive the environment `animation_base` names; `animation_base`
-    /// is `None` for any other environment.
-    pub(crate) unsafe fn set_element_custom_property_data(
+    /// Keep the custom-property environment an element now holds, or that it holds none. Answers what the element held
+    /// before, or the environment itself where the element held it already, which the document thread releases.
+    pub(crate) fn set_element_custom_property_data(
         &mut self,
         node: StyleNodeID,
-        data: *const std::ffi::c_void,
-        store: *const std::ffi::c_void,
-        environment: u64,
-        declares: bool,
-        animation_base: Option<(u64, *const std::ffi::c_void, *const std::ffi::c_void)>,
-    ) -> Option<HeldCustomPropertyEnvironment> {
-        if data.is_null() {
-            return self.element_custom_property_data.remove(&node);
-        }
+        handed: Option<HandedCustomPropertyEnvironment>,
+    ) -> Option<RetainedCustomPropertyData> {
+        let Some(handed) = handed else {
+            return self.element_custom_property_data.remove(&node)?.data;
+        };
         if let Some(existing) = self.element_custom_property_data.get(&node)
-            && existing.data.as_ref().is_some_and(|existing| existing.data() == data)
+            && existing
+                .data
+                .as_ref()
+                .is_some_and(|existing| existing.data() == handed.data.data())
         {
-            return None;
+            return Some(handed.data);
         }
-        if environment != 0 {
+        if handed.identity != 0 {
             self.computed_group_sets
-                .set_node_custom_property_environment(node, environment);
+                .set_node_custom_property_environment(node, handed.identity);
             // A descendant substitutes under the environment it inherits from this element, such
             // as the one an animation samples custom properties into.
-            if self.custom_property_environments.store(environment).is_none() {
-                unsafe { self.custom_property_environments.retain(environment, store) };
+            if self.custom_property_environments.store(handed.identity).is_none() {
+                // SAFETY: The environment keeps its store alive, and the handed one keeps the environment.
+                unsafe {
+                    self.custom_property_environments
+                        .retain(handed.identity, handed.data.store.as_ptr());
+                };
             }
         }
-        self.element_custom_property_data.insert(
-            node,
-            HeldCustomPropertyEnvironment {
-                identity: environment,
-                is_animation_overlay: animation_base.is_some(),
-                declares,
-                animation_base: animation_base.map(|(environment, store, data)| AnimationBaseEnvironment {
-                    environment,
-                    store: crate::css::host_shared::HostShared::new(store),
-                    data: crate::css::host_shared::HostShared::new(data),
-                }),
-                data: Some(unsafe { RetainedCustomPropertyData::retain(data, store) }),
-            },
-        )
+        self.element_custom_property_data.insert(node, handed.into_held())?.data
     }
 
     /// The identity, the store and the host object of the environment the one an element holds was
@@ -230,64 +268,31 @@ impl RetainedState {
         })
     }
 
-    /// Keep the custom-property environment one of an element's synthetic pseudo-elements now holds;
-    /// a null `data` is one holding none.
+    /// Keep the custom-property environment one of an element's synthetic pseudo-elements now holds, or that it holds
+    /// none, as [`Self::set_element_custom_property_data`] does for an element.
     ///
     /// Unlike an element's, a pseudo-element's `declares` is whether what its own style resolves to
     /// is not simply the environment its originating element passes on, which the host tells.
-    ///
-    /// # Safety
-    /// `data` must be null or a live `Web::CSS::CustomPropertyData`, and `store` null or its store.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the environment and the one an overlay is over, as the element's"
-    )]
-    pub(crate) unsafe fn set_pseudo_element_custom_property_data(
+    pub(crate) fn set_pseudo_element_custom_property_data(
         &mut self,
         node: StyleNodeID,
         pseudo: u8,
-        data: *const std::ffi::c_void,
-        store: *const std::ffi::c_void,
-        environment: u64,
-        declares_own: bool,
-        animation_base: Option<(u64, *const std::ffi::c_void, *const std::ffi::c_void)>,
-    ) -> Option<HeldCustomPropertyEnvironment> {
-        if data.is_null() {
-            return self.pseudo_element_custom_property_data.remove(&(node, pseudo));
-        }
+        handed: Option<HandedCustomPropertyEnvironment>,
+    ) -> Option<RetainedCustomPropertyData> {
+        let Some(handed) = handed else {
+            return self.pseudo_element_custom_property_data.remove(&(node, pseudo))?.data;
+        };
         if self
             .pseudo_element_custom_property_data
             .get(&(node, pseudo))
             .and_then(|existing| existing.data.as_ref())
-            .is_some_and(|existing| existing.data() == data)
+            .is_some_and(|existing| existing.data() == handed.data.data())
         {
-            return None;
+            return Some(handed.data);
         }
-        self.pseudo_element_custom_property_data.insert(
-            (node, pseudo),
-            HeldCustomPropertyEnvironment {
-                identity: environment,
-                is_animation_overlay: animation_base.is_some(),
-                declares: declares_own,
-                data: Some(unsafe { RetainedCustomPropertyData::retain(data, store) }),
-                animation_base: animation_base.map(|(environment, store, data)| AnimationBaseEnvironment {
-                    environment,
-                    store: crate::css::host_shared::HostShared::new(store),
-                    data: crate::css::host_shared::HostShared::new(data),
-                }),
-            },
-        )
-    }
-
-    /// The kinds of the element's synthetic pseudo-elements that hold a custom-property
-    /// environment, one bit per kind.
-    pub(crate) fn pseudo_elements_with_custom_property_data(&self, node: StyleNodeID) -> u64 {
-        if self.pseudo_element_custom_property_data.is_empty() {
-            return 0;
-        }
-        (0..u64::BITS as u8)
-            .filter(|&pseudo| self.pseudo_element_custom_property_data.contains_key(&(node, pseudo)))
-            .fold(0, |kinds, pseudo| kinds | (1 << pseudo))
+        self.pseudo_element_custom_property_data
+            .insert((node, pseudo), handed.into_held())?
+            .data
     }
 
     /// The environment one of an element's synthetic pseudo-elements holds, as
@@ -1991,8 +1996,8 @@ impl StyleEngineState {
                 driven_viewport: (0.0, 0.0),
                 document_resource_contexts: Default::default(),
                 custom_property_registry,
-                element_custom_property_data: HashMap::default(),
-                pseudo_element_custom_property_data: HashMap::default(),
+                element_custom_property_data: Default::default(),
+                pseudo_element_custom_property_data: Default::default(),
                 sampled_custom_property_environments: HashMap::default(),
                 sampled_pseudo_element_custom_property_environments: HashMap::default(),
                 environment_move_recompute_nodes: HashSet::default(),

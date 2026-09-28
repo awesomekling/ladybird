@@ -43,6 +43,7 @@ use super::engine_home::{Holder, Owed, PendingFacts, StyleEngineLoan};
 use super::index::FeatureValue;
 use super::index::LocalFeatureKey;
 use super::index::StyleAtomID;
+use super::inputs::HandedCustomPropertyEnvironment;
 use super::memory::DeviceClass;
 #[cfg(feature = "style-recording")]
 use super::memory::MEMORY_CATEGORIES;
@@ -4880,6 +4881,116 @@ pub(crate) struct DrainAnswers {
     /// What the pass published for each row whose animations it sampled.
     rows_sampled: HashMap<StyleNodeID, FfiRowSampledInPass>,
     pub(crate) deferred_inputs: DeferredInputs,
+    /// The custom-property environments elements and their synthetic pseudo-elements hold.
+    pub(crate) environments: HeldEnvironments,
+}
+
+/// The custom-property environment each element and each of its synthetic pseudo-elements holds, as the host reads it:
+/// the host's object for it, and its identity. The main thread follows each environment it hands the engine, and
+/// whoever reaches the engine what else moved.
+#[derive(Default)]
+pub(crate) struct HeldEnvironments {
+    elements: HashMap<StyleNodeID, (*const c_void, u64)>,
+    pseudo_elements: HashMap<(StyleNodeID, u8), (*const c_void, u64)>,
+    /// The kinds of each element's synthetic pseudo-elements that hold one, one bit per kind.
+    pseudo_element_kinds: HashMap<StyleNodeID, u64>,
+}
+
+impl HeldEnvironments {
+    fn element(&self, node: StyleNodeID) -> (*const c_void, u64) {
+        self.elements.get(&node).copied().unwrap_or((std::ptr::null(), 0))
+    }
+
+    fn pseudo_element(&self, node: StyleNodeID, pseudo: u8) -> (*const c_void, u64) {
+        self.pseudo_elements
+            .get(&(node, pseudo))
+            .copied()
+            .unwrap_or((std::ptr::null(), 0))
+    }
+
+    fn pseudo_element_kinds(&self, node: StyleNodeID) -> u64 {
+        self.pseudo_element_kinds.get(&node).copied().unwrap_or(0)
+    }
+
+    /// Follows an environment the main thread hands the engine for an element, or for one of its synthetic
+    /// pseudo-elements, as the engine will keep it.
+    pub(crate) fn follow_handed(
+        &mut self,
+        node: StyleNodeID,
+        pseudo: Option<u8>,
+        handed: Option<&HandedCustomPropertyEnvironment>,
+    ) {
+        let answer = handed.map(HandedCustomPropertyEnvironment::answer);
+        match pseudo {
+            None => Self::keep(&mut self.elements, node, answer),
+            Some(pseudo) => {
+                Self::keep(&mut self.pseudo_elements, (node, pseudo), answer);
+                self.note_pseudo_element(node, pseudo);
+            }
+        }
+    }
+
+    /// Keeps `answer` for `key` as the engine does: an environment whose object is the one held already stays as it
+    /// is.
+    fn keep<K: Eq + std::hash::Hash>(
+        held: &mut HashMap<K, (*const c_void, u64)>,
+        key: K,
+        answer: Option<(*const c_void, u64)>,
+    ) {
+        match answer {
+            None => {
+                held.remove(&key);
+            }
+            Some(answer) => {
+                let kept = held.entry(key).or_insert(answer);
+                if kept.0 != answer.0 {
+                    *kept = answer;
+                }
+            }
+        }
+    }
+
+    fn note_pseudo_element(&mut self, node: StyleNodeID, pseudo: u8) {
+        let kind = 1_u64 << pseudo;
+        let kinds = self.pseudo_element_kinds.entry(node).or_default();
+        match self.pseudo_elements.contains_key(&(node, pseudo)) {
+            true => *kinds |= kind,
+            false => *kinds &= !kind,
+        }
+        if *kinds == 0 {
+            self.pseudo_element_kinds.remove(&node);
+        }
+    }
+
+    fn follow(&mut self, engine: &mut StyleEngine) {
+        for node in engine.retained.element_custom_property_data.take_written() {
+            match engine.element_custom_property_data.get(&node) {
+                Some(_) => self.elements.insert(node, engine.element_custom_property_data(node)),
+                None => self.elements.remove(&node),
+            };
+        }
+        for (node, pseudo) in engine.retained.pseudo_element_custom_property_data.take_written() {
+            match engine.pseudo_element_custom_property_data.get(&(node, pseudo)) {
+                Some(_) => self
+                    .pseudo_elements
+                    .insert((node, pseudo), engine.pseudo_element_custom_property_data(node, pseudo)),
+                None => self.pseudo_elements.remove(&(node, pseudo)),
+            };
+            self.note_pseudo_element(node, pseudo);
+        }
+        debug_assert!(
+            self.elements.len() == engine.element_custom_property_data.len()
+                && self.pseudo_elements.len() == engine.pseudo_element_custom_property_data.len()
+                && self
+                    .elements
+                    .iter()
+                    .all(|(&node, &answer)| engine.element_custom_property_data(node) == answer)
+                && self.pseudo_elements.iter().all(|(&(node, pseudo), &answer)| engine
+                    .pseudo_element_custom_property_data(node, pseudo)
+                    == answer),
+            "the host's copy of the custom-property environments follows the engine's"
+        );
+    }
 }
 
 /// The element style inputs the engine defers, by element, with what each owes: its reactions and inherited style
@@ -4916,7 +5027,7 @@ impl DeferredInputs {
     }
 
     /// Follows a change the main thread sends, which may leave `leaves`.
-    pub(crate) fn follow_sent(&mut self, change: &crate::css::style::owner_calls::StyleChange, leaves: PendingFacts) {
+    fn follow_sent(&mut self, change: &crate::css::style::owner_calls::StyleChange, leaves: PendingFacts) {
         use super::owner_calls::{EngineChange, StyleChange};
         let recomputes =
             super::transaction::STYLE_REACTION_PUBLISHED_STYLE | super::transaction::STYLE_REACTION_RECOMPUTE_STYLE;
@@ -4995,12 +5106,27 @@ impl DeferredInputs {
 }
 
 impl DrainAnswers {
+    /// Follows a change the main thread sends, which may leave `leaves`.
+    pub(crate) fn follow_sent(&mut self, change: &crate::css::style::owner_calls::StyleChange, leaves: PendingFacts) {
+        use super::owner_calls::{EngineChange, StyleChange};
+        match change {
+            StyleChange::Engine(EngineChange::SetElementCustomPropertyData(node, handed)) => {
+                self.environments.follow_handed(*node, None, handed.as_ref());
+            }
+            StyleChange::Engine(EngineChange::SetPseudoElementCustomPropertyData(node, pseudo, handed)) => {
+                self.environments.follow_handed(*node, Some(*pseudo), handed.as_ref());
+            }
+            _ => self.deferred_inputs.follow_sent(change, leaves),
+        }
+    }
+
     /// Follows what `engine` keeps, as whoever reached it is done with it.
     pub(crate) fn follow(&mut self, engine: &mut StyleEngine) {
         if let Some(records) = engine.host.records_for_drain.take() {
             self.records = records;
         }
         self.deferred_inputs.follow(engine);
+        self.environments.follow(engine);
         if engine.retained.container_effects_for_host.take_moved() {
             self.container_effects
                 .clone_from(&engine.retained.container_effects_for_host);
@@ -7327,53 +7453,24 @@ pub unsafe extern "C" fn style_engine_set_element_custom_property_data(
     animation_base_store: *const c_void,
     animation_base_environment: u64,
 ) {
-    crate::css::style::owner_calls::ask(
-        engine.home(),
-        "style_engine_set_element_custom_property_data",
-        crate::css::style::owner_calls::StyleQuery::SetElementCustomPropertyData {
-            node,
-            data,
-            store,
-            environment,
-            is_animation_overlay,
-            declares,
-            animation_base,
-            animation_base_store,
-            animation_base_environment,
-        },
-    );
-}
-
-/// Answers [`style_engine_set_element_custom_property_data`] from `engine`, on the render owner.
-///
-/// # Safety
-///
-/// As for [`style_engine_set_element_custom_property_data`].
-#[allow(clippy::too_many_arguments)]
-pub(crate) unsafe fn owner_set_element_custom_property_data(
-    engine: &mut crate::css::style::StyleEngine,
-    node: u32,
-    data: *const c_void,
-    store: *const c_void,
-    environment: u64,
-    is_animation_overlay: bool,
-    declares: bool,
-    animation_base: *const c_void,
-    animation_base_store: *const c_void,
-    animation_base_environment: u64,
-) {
     let Some(node) = StyleNodeID::from_raw(node) else {
         return;
     };
-    let animation_base =
-        is_animation_overlay.then_some((animation_base_environment, animation_base_store, animation_base));
-    // What the element held before is the document thread's to release.
-    let retired =
-        unsafe { engine.set_element_custom_property_data(node, data, store, environment, declares, animation_base) };
-    engine
-        .host
-        .retired_custom_property_data
-        .extend(retired.and_then(|held| held.data));
+    // SAFETY: Guaranteed by the caller.
+    let handed = (!data.is_null()).then(|| unsafe {
+        HandedCustomPropertyEnvironment::retain(
+            data,
+            store,
+            environment,
+            declares,
+            is_animation_overlay.then_some((animation_base_environment, animation_base_store, animation_base)),
+        )
+    });
+    crate::css::style::owner_calls::send(
+        engine,
+        "style_engine_set_element_custom_property_data",
+        crate::css::style::owner_calls::EngineChange::SetElementCustomPropertyData(node, handed),
+    );
 }
 
 /// The custom-property environment an element holds: the host's object for it, or null with the
@@ -7387,26 +7484,12 @@ pub unsafe extern "C" fn style_engine_element_custom_property_data(
     node: u32,
     identity: *mut u64,
 ) -> *const c_void {
-    crate::css::style::owner_calls::ask(
-        engine,
-        "style_engine_element_custom_property_data",
-        crate::css::style::owner_calls::StyleQuery::ElementCustomPropertyData { node, identity },
-    )
-    .pointer()
-}
-
-/// Answers [`style_engine_element_custom_property_data`] from `engine`, on the render owner.
-///
-/// # Safety
-///
-/// As for [`style_engine_element_custom_property_data`].
-pub(crate) unsafe fn owner_element_custom_property_data(
-    engine: &StyleEngine,
-    node: u32,
-    identity: *mut u64,
-) -> *const c_void {
+    engine.bring_home("style_engine_element_custom_property_data");
+    // SAFETY: The engine is home.
+    let environments = &unsafe { engine.drain_answers() }.environments;
     let (data, environment) =
-        StyleNodeID::from_raw(node).map_or((std::ptr::null(), 0), |node| engine.element_custom_property_data(node));
+        StyleNodeID::from_raw(node).map_or((std::ptr::null(), 0), |node| environments.element(node));
+    // SAFETY: Guaranteed by the caller.
     unsafe { *identity = environment };
     data
 }
@@ -7432,64 +7515,24 @@ pub unsafe extern "C" fn style_engine_set_pseudo_element_custom_property_data(
     animation_base_store: *const c_void,
     animation_base_environment: u64,
 ) {
-    crate::css::style::owner_calls::ask(
-        engine.home(),
-        "style_engine_set_pseudo_element_custom_property_data",
-        crate::css::style::owner_calls::StyleQuery::SetPseudoElementCustomPropertyData {
-            node,
-            pseudo,
-            data,
-            store,
-            environment,
-            is_animation_overlay,
-            declares_own,
-            animation_base,
-            animation_base_store,
-            animation_base_environment,
-        },
-    );
-}
-
-/// Answers [`style_engine_set_pseudo_element_custom_property_data`] from `engine`, on the render owner.
-///
-/// # Safety
-///
-/// As for [`style_engine_set_pseudo_element_custom_property_data`].
-#[allow(clippy::too_many_arguments)]
-pub(crate) unsafe fn owner_set_pseudo_element_custom_property_data(
-    engine: &mut crate::css::style::StyleEngine,
-    node: u32,
-    pseudo: u8,
-    data: *const c_void,
-    store: *const c_void,
-    environment: u64,
-    is_animation_overlay: bool,
-    declares_own: bool,
-    animation_base: *const c_void,
-    animation_base_store: *const c_void,
-    animation_base_environment: u64,
-) {
     let Some(node) = StyleNodeID::from_raw(node) else {
         return;
     };
-    let animation_base =
-        is_animation_overlay.then_some((animation_base_environment, animation_base_store, animation_base));
-    // What the pseudo-element held before is the document thread's to release.
-    let retired = unsafe {
-        engine.set_pseudo_element_custom_property_data(
-            node,
-            pseudo,
+    // SAFETY: Guaranteed by the caller.
+    let handed = (!data.is_null()).then(|| unsafe {
+        HandedCustomPropertyEnvironment::retain(
             data,
             store,
             environment,
             declares_own,
-            animation_base,
+            is_animation_overlay.then_some((animation_base_environment, animation_base_store, animation_base)),
         )
-    };
-    engine
-        .host
-        .retired_custom_property_data
-        .extend(retired.and_then(|held| held.data));
+    });
+    crate::css::style::owner_calls::send(
+        engine,
+        "style_engine_set_pseudo_element_custom_property_data",
+        crate::css::style::owner_calls::EngineChange::SetPseudoElementCustomPropertyData(node, pseudo, handed),
+    );
 }
 
 /// The custom-property environment one of an element's synthetic pseudo-elements holds, as
@@ -7504,28 +7547,12 @@ pub unsafe extern "C" fn style_engine_pseudo_element_custom_property_data(
     pseudo: u8,
     identity: *mut u64,
 ) -> *const c_void {
-    crate::css::style::owner_calls::ask(
-        engine,
-        "style_engine_pseudo_element_custom_property_data",
-        crate::css::style::owner_calls::StyleQuery::PseudoElementCustomPropertyData { node, pseudo, identity },
-    )
-    .pointer()
-}
-
-/// Answers [`style_engine_pseudo_element_custom_property_data`] from `engine`, on the render owner.
-///
-/// # Safety
-///
-/// As for [`style_engine_pseudo_element_custom_property_data`].
-pub(crate) unsafe fn owner_pseudo_element_custom_property_data(
-    engine: &StyleEngine,
-    node: u32,
-    pseudo: u8,
-    identity: *mut u64,
-) -> *const c_void {
-    let (data, environment) = StyleNodeID::from_raw(node).map_or((std::ptr::null(), 0), |node| {
-        engine.pseudo_element_custom_property_data(node, pseudo)
-    });
+    engine.bring_home("style_engine_pseudo_element_custom_property_data");
+    // SAFETY: The engine is home.
+    let environments = &unsafe { engine.drain_answers() }.environments;
+    let (data, environment) =
+        StyleNodeID::from_raw(node).map_or((std::ptr::null(), 0), |node| environments.pseudo_element(node, pseudo));
+    // SAFETY: Guaranteed by the caller.
     unsafe { *identity = environment };
     data
 }
@@ -7540,21 +7567,10 @@ pub unsafe extern "C" fn style_engine_pseudo_elements_with_custom_property_data(
     engine: StyleEngineHandle,
     node: u32,
 ) -> u64 {
-    crate::css::style::owner_calls::ask(
-        engine,
-        "style_engine_pseudo_elements_with_custom_property_data",
-        crate::css::style::owner_calls::StyleQuery::PseudoElementsWithCustomPropertyData { node },
-    )
-    .u64()
-}
-
-/// Answers [`style_engine_pseudo_elements_with_custom_property_data`] from `engine`, on the render owner.
-///
-/// # Safety
-///
-/// As for [`style_engine_pseudo_elements_with_custom_property_data`].
-pub(crate) unsafe fn owner_pseudo_elements_with_custom_property_data(engine: &StyleEngine, node: u32) -> u64 {
-    StyleNodeID::from_raw(node).map_or(0, |node| engine.pseudo_elements_with_custom_property_data(node))
+    engine.bring_home("style_engine_pseudo_elements_with_custom_property_data");
+    // SAFETY: The engine is home.
+    let environments = &unsafe { engine.drain_answers() }.environments;
+    StyleNodeID::from_raw(node).map_or(0, |node| environments.pseudo_element_kinds(node))
 }
 
 /// Installs the authoritative release order recorded for the next replay transaction.
