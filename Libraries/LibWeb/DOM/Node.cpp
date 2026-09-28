@@ -2760,12 +2760,12 @@ void Node::apply_layout_tree_update_mark(SetNeedsLayoutTreeUpdateReason reason)
             is_structural_boundary_self_rebuild_reason(reason));
 
         if (classification.marks_partial_relayout_boundary_self_only) {
-            document().render_inputs_for_write().set_needs_layout_update(row, SetNeedsLayoutReason::LayoutTreeUpdate, Layout::LayoutUpdatePropagation::BoundarySelfOnly);
+            document().render_inputs_for_write().set_needs_layout_update(row.slot(), SetNeedsLayoutReason::LayoutTreeUpdate, Layout::LayoutUpdatePropagation::BoundarySelfOnly);
         } else if (reason == SetNeedsLayoutTreeUpdateReason::NodeInsertBefore) {
             // What an insertion invalidates depends on the boxes it attaches, which only the layout tree build knows.
-            document().render_inputs_for_write().defer_child_list_insertion_layout_update(row);
+            document().render_inputs_for_write().defer_child_list_insertion_layout_update(row.slot());
         } else {
-            document().render_inputs_for_write().set_needs_layout_update(row, SetNeedsLayoutReason::LayoutTreeUpdate, Layout::LayoutUpdatePropagation::ThroughAncestors);
+            document().render_inputs_for_write().set_needs_layout_update(row.slot(), SetNeedsLayoutReason::LayoutTreeUpdate, Layout::LayoutUpdatePropagation::ThroughAncestors);
         }
 
         // FIXME: Escalating a rebuild past anonymous parents is not optimal, and we should

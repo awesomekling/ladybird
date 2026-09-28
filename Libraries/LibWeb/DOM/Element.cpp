@@ -3268,7 +3268,7 @@ void Element::set_style_node_id(CSS::StyleNodeID style_node_id)
     note_animation_timing_rows_identity_changed();
     auto old_style_node_id = m_style_node_id;
     m_style_node_id = style_node_id;
-    Layout::Node::dom_node_style_node_changed(*this, old_style_node_id);
+    document().render_inputs_for_write().note_style_node_changed(*this, old_style_node_id);
 }
 
 // The top layer is one of the few element facts the tree build reads that moves during the

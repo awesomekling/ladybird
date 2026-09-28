@@ -406,7 +406,7 @@ static void publish_table_spans(Element& element)
     Layout::publish_table_spans(element);
     if (auto* layout_node = element.unsafe_layout_node()) {
         if (layout_node->synchronize_table_span_data())
-            element.document().render_inputs_for_write().set_needs_layout_update(*layout_node, SetNeedsLayoutReason::TableSpanAttributeChange);
+            element.document().render_inputs_for_write().set_needs_layout_update(Layout::Node::slot_id(layout_node), SetNeedsLayoutReason::TableSpanAttributeChange);
     }
 }
 
@@ -433,7 +433,7 @@ static void publish_text_data(Text& text, bool whitespace_state_changed)
         text_layout_node->invalidate_text_for_rendering();
 
         // We also need to relayout.
-        text.document().render_inputs_for_write().set_needs_layout_update(*text_layout_node, SetNeedsLayoutReason::CharacterDataReplaceData);
+        text.document().render_inputs_for_write().set_needs_layout_update(Layout::Node::slot_id(text_layout_node), SetNeedsLayoutReason::CharacterDataReplaceData);
 
         if (whitespace_state_changed)
             text.set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::CharacterDataReplaceData);
@@ -567,11 +567,13 @@ void InvalidationJournal::drain()
             if (!entry.needs_layout_update && !entry.needs_repaint && !entry.needs_subtree_repaint && !entry.has_dom_paint_facts && !rare && !entry.clears_layer_image_paint_facts && !entry.invalidate_paint_and_hit_test_cache && !entry.invalidate_propagated_text_decoration_caches)
                 continue;
             // A node whose box went away between the mark and here has nothing left to mark.
-            auto row = arena ? entry.identity.bound_row(*arena) : Layout::Row {};
+            Layout::Row row;
+            if (arena)
+                row = entry.identity == NodeIdentity::of_document() ? arena->bound_viewport_row() : arena->bound_row(entry.identity.style_node());
             if (!row)
                 continue;
             if (entry.needs_layout_update)
-                row.document().render_inputs_for_write().set_needs_layout_update(row, entry.layout_reason, entry.layout_propagation);
+                m_document.render_inputs_for_write().set_needs_layout_update(row.slot(), entry.layout_reason, entry.layout_propagation);
             if (entry.has_dom_paint_facts) {
                 auto changed = Layout::RustFFI::layout_arena_set_node_dom_paint_facts(row.arena_handle(), row.slot(), entry.dom_paint_facts);
                 if (changed && node)

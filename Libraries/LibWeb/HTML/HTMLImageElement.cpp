@@ -158,7 +158,7 @@ void HTMLImageElement::update_layout_after_image_data_change(DOM::SetNeedsLayout
         return;
     }
 
-    document().render_inputs_for_write().reset_intrinsic_size_caches_of_self_and_ancestors(*image_box);
+    document().render_inputs_for_write().reset_intrinsic_size_caches_of_self_and_ancestors(Layout::Node::slot_id(image_box));
     image_provider_contents_changed();
 }
 

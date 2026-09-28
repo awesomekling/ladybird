@@ -201,7 +201,7 @@ void StyleEffectDrain::apply_layout_invalidation(DOM::Document& document, Viewpo
         if (box
             && box->is_partial_relayout_boundary()
             && !pseudo_element_row(PseudoElement::Backdrop)) {
-            document.render_inputs_for_write().set_needs_own_geometry_update(*box);
+            document.render_inputs_for_write().set_needs_own_geometry_update(row.slot());
             propagation = Layout::LayoutUpdatePropagation::BoundarySelfOnly;
         }
     }
