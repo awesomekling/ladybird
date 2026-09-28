@@ -132,6 +132,35 @@ struct DomMatcher<'a> {
     /// sibling, and whether they match there does not depend on the element the walk came from: remembering none of
     /// it, `p div div div span` beside no `p` tries every combination of ancestors for its `div`s.
     relation_failures: HashSet<(usize, usize, usize)>,
+    /// The number of siblings a child-indexed pseudo-class counts through each element, by element and counter. A
+    /// count walks only to the nearest sibling it knows, so matching every child of a parent walks its siblings once
+    /// rather than once per child.
+    nth_counts: HashMap<(usize, NthCounter), u32>,
+    /// The siblings a count walks past before it reaches one it knows, kept from count to count.
+    nth_walk: Vec<Element>,
+    /// Whether a child index has been asked for yet. Until then, nothing is remembered.
+    nth_asked: bool,
+}
+
+/// What a child-indexed pseudo-class counts among an element's siblings, and from which end.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct NthCounter {
+    from_end: bool,
+    counted: NthCounted,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum NthCounted {
+    Every,
+    OfType {
+        local_name: usize,
+        namespace_uri: usize,
+    },
+    /// Those an `of S` argument matches, by the argument's address and the shadow host it is matched in.
+    Of {
+        selectors: usize,
+        shadow_host: usize,
+    },
 }
 
 fn optional_element(element: *const c_void) -> Option<Element> {
@@ -146,6 +175,9 @@ impl<'a> DomMatcher<'a> {
             shadow_host,
             has_answers: HashMap::new(),
             relation_failures: HashSet::new(),
+            nth_counts: HashMap::new(),
+            nth_walk: Vec::new(),
+            nth_asked: false,
         }
     }
 
@@ -565,46 +597,107 @@ impl<'a> DomMatcher<'a> {
             }
         };
         // Only :nth-child() and :nth-last-child() take `of S`.
-        let siblings_before = if of_same_type || pseudo_class.argument_selector_list.is_empty() {
-            let which = match (from_end, of_same_type) {
-                (false, false) => FfiSiblingCount::Before,
-                (true, false) => FfiSiblingCount::After,
-                (false, true) => FfiSiblingCount::BeforeOfSameType,
-                (true, true) => FfiSiblingCount::AfterOfSameType,
-            };
-            self.count_element_siblings(element, which)
-        } else {
-            // `of S` counts the siblings S matches, so each one is matched here.
-            let argument_state = MatchState {
-                selector_kind: SelectorKind::Normal,
-                anchor: None,
-                ..state
-            };
-            let matches_argument = |this: &mut Self, candidate: Element| {
-                pseudo_class
-                    .argument_selector_list
-                    .iter()
-                    .any(|selector| this.matches_selector(selector, candidate, argument_state))
-            };
-            if !matches_argument(self, element) {
-                return false;
+        let has_argument = !of_same_type && !pseudo_class.argument_selector_list.is_empty();
+        if has_argument && !self.matches_nth_argument(pseudo_class, element, state) {
+            return false;
+        }
+        let siblings_before = match self.nth_sibling(element, from_end) {
+            None => 0,
+            // One element asked alone, as matches() and closest() mostly do, is counted by the host in one call.
+            Some(_) if !self.nth_asked && !has_argument => {
+                self.nth_asked = true;
+                let which = match (from_end, of_same_type) {
+                    (false, false) => FfiSiblingCount::Before,
+                    (true, false) => FfiSiblingCount::After,
+                    (false, true) => FfiSiblingCount::BeforeOfSameType,
+                    (true, true) => FfiSiblingCount::AfterOfSameType,
+                };
+                self.count_element_siblings(element, which)
             }
-            let step = |this: &Self, candidate: Element| match from_end {
-                true => this.next_element_sibling(candidate),
-                false => this.previous_element_sibling(candidate),
-            };
-            let mut count = 0u32;
-            let mut sibling = step(self, element);
-            while let Some(candidate) = sibling {
-                if matches_argument(self, candidate) {
-                    count += 1;
-                }
-                sibling = step(self, candidate);
+            Some(sibling) => {
+                self.nth_asked = true;
+                let counted = if of_same_type {
+                    let names = self.names(element);
+                    NthCounted::OfType {
+                        local_name: names.local_name,
+                        namespace_uri: names.namespace_uri,
+                    }
+                } else if has_argument {
+                    NthCounted::Of {
+                        selectors: pseudo_class.argument_selector_list.as_ptr() as usize,
+                        shadow_host: state.shadow_host.map_or(0, |host| host as usize),
+                    }
+                } else {
+                    NthCounted::Every
+                };
+                self.count_through(sibling, NthCounter { from_end, counted }, pseudo_class, state)
             }
-            count
         };
         let index = i32::try_from(siblings_before).unwrap_or(i32::MAX).saturating_add(1);
         pseudo_class.an_plus_b_pattern.matches(index)
+    }
+
+    fn nth_sibling(&self, element: Element, from_end: bool) -> Option<Element> {
+        match from_end {
+            true => self.next_element_sibling(element),
+            false => self.previous_element_sibling(element),
+        }
+    }
+
+    fn matches_nth_argument(
+        &mut self,
+        pseudo_class: &PseudoClassSelector,
+        element: Element,
+        state: MatchState,
+    ) -> bool {
+        let argument_state = MatchState {
+            selector_kind: SelectorKind::Normal,
+            anchor: None,
+            ..state
+        };
+        pseudo_class
+            .argument_selector_list
+            .iter()
+            .any(|selector| self.matches_selector(selector, element, argument_state))
+    }
+
+    /// The number of siblings the counter counts from the start (or the end) through `element`.
+    fn count_through(
+        &mut self,
+        element: Element,
+        counter: NthCounter,
+        pseudo_class: &PseudoClassSelector,
+        state: MatchState,
+    ) -> u32 {
+        let mut walk = std::mem::take(&mut self.nth_walk);
+        let mut count = 0;
+        let mut cursor = Some(element);
+        while let Some(sibling) = cursor {
+            if let Some(&known) = self.nth_counts.get(&(sibling as usize, counter)) {
+                count = known;
+                break;
+            }
+            walk.push(sibling);
+            cursor = self.nth_sibling(sibling, counter.from_end);
+        }
+        for &sibling in walk.iter().rev() {
+            let counted = match counter.counted {
+                NthCounted::Every => true,
+                NthCounted::OfType {
+                    local_name,
+                    namespace_uri,
+                } => {
+                    let names = self.names(sibling);
+                    names.local_name == local_name && names.namespace_uri == namespace_uri
+                }
+                NthCounted::Of { .. } => self.matches_nth_argument(pseudo_class, sibling, state),
+            };
+            count += u32::from(counted);
+            self.nth_counts.insert((sibling as usize, counter), count);
+        }
+        walk.clear();
+        self.nth_walk = walk;
+        count
     }
 
     fn matches_has_argument(
