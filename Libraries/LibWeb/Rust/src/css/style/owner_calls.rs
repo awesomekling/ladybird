@@ -34,6 +34,11 @@ pub(crate) enum EngineChange {
     /// Records every element whose style a size query or container-relative unit decided against the container
     /// `node`, as a change of what the container answers.
     RecordSizeContainerQueryDependents { node: u32 },
+    /// Whether the conditions of each native rule, by identity, hold now.
+    RuleConditionsHold(Vec<(u64, bool)>),
+    /// The cascade layer order of the author sheets of the tree scope `tree_scope`, by name; an empty name is the
+    /// unlayered rules' place.
+    LayerOrder { tree_scope: u32, names: Vec<Vec<u16>> },
 }
 
 impl EngineChange {
@@ -44,6 +49,26 @@ impl EngineChange {
             Self::RecordSizeContainerQueryDependents { node } => unsafe {
                 crate::css::style::bridge::owner_record_size_container_query_dependents(engine, node);
             },
+            Self::RuleConditionsHold(conditions) => {
+                for (identity, holds) in conditions {
+                    if let Some(rule) = engine.native_rule_id(identity) {
+                        super::bridge::operations::set_rule_conditions_hold(engine, rule.0 + 1, holds);
+                    }
+                }
+            }
+            Self::LayerOrder { tree_scope, names } => {
+                let layers = names
+                    .iter()
+                    .map(|name| {
+                        if name.is_empty() {
+                            0
+                        } else {
+                            super::bridge::intern_native_text(engine, name).0
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                super::bridge::operations::set_layer_order(engine, tree_scope, &layers);
+            }
         }
     }
 }
@@ -278,6 +303,20 @@ pub(crate) enum StyleQuery {
         length: usize,
         is_ascii: bool,
     },
+    /// Publishes the declarations the native rule of `identity` now holds, if the engine holds it.
+    RuleDeclarationsChanged {
+        identity: u64,
+        declarations: Option<std::sync::Arc<crate::css::declaration_block::DeclarationBlockData>>,
+    },
+    /// Removes the native rules of `count` identities in order, and writes the engine id plus one each had as it went,
+    /// or 0 for one gone already.
+    RemoveNativeRules {
+        identities: *const u64,
+        ids: *mut u32,
+        count: usize,
+    },
+    /// Compiles a sheet's rules into the engine, or replaces their selectors, as the walk says.
+    Compile(crate::css::rule::compilation::OwnerCompilation),
 }
 
 /// The answer to a [`StyleQuery`], of the variant the query asks for.
@@ -291,6 +330,7 @@ pub(crate) enum StyleAnswer {
     Pointer(*const c_void),
     RowSampled(super::bridge::FfiRowSampledInPass),
     RecordDelta(super::bridge::FfiStyleRecordDelta),
+    RuleDeclarations(Option<super::bridge::PublishedRuleDeclarations>),
     RecordDemand(super::bridge::FfiRecordDemandAnswer),
 }
 
@@ -381,6 +421,16 @@ impl StyleAnswer {
             _ => {
                 debug_assert!(false, "a record move is answered with a record move");
                 super::bridge::FfiStyleRecordDelta::default()
+            }
+        }
+    }
+
+    pub(crate) fn rule_declarations(self) -> Option<super::bridge::PublishedRuleDeclarations> {
+        match self {
+            Self::RuleDeclarations(value) => value,
+            _ => {
+                debug_assert!(false, "a declaration edit is answered with what it published");
+                None
             }
         }
     }
@@ -805,6 +855,32 @@ impl StyleQuery {
             #[cfg(feature = "style-recording")]
             Self::BenchmarkMarker { name, length, is_ascii } => {
                 unsafe { super::bridge::owner_record_benchmark_marker(engine, name, length, is_ascii) };
+                StyleAnswer::None
+            }
+            Self::RuleDeclarationsChanged { identity, declarations } => StyleAnswer::RuleDeclarations(
+                super::bridge::owner_rule_declarations_changed(engine, identity, declarations),
+            ),
+            Self::RemoveNativeRules { identities, ids, count } => {
+                // SAFETY: The main thread lends both arrays, of `count` each, until it has the answer.
+                let (identities, ids) = unsafe {
+                    (
+                        std::slice::from_raw_parts(identities, count),
+                        std::slice::from_raw_parts_mut(ids, count),
+                    )
+                };
+                for (identity, id) in identities.iter().zip(ids) {
+                    *id = engine.native_rule_id(*identity).map_or(0, |rule| rule.0 + 1);
+                    if *id != 0 {
+                        super::bridge::operations::remove_rule(engine, *id);
+                    }
+                }
+                StyleAnswer::None
+            }
+            Self::Compile(compilation) => {
+                // The walk reaches the engine through the publication's handle, which names this one.
+                let _ = engine;
+                // SAFETY: The main thread waits for the answer, keeping what the walk points at live.
+                unsafe { compilation.run() };
                 StyleAnswer::None
             }
         }

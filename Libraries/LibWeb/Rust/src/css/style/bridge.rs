@@ -1241,7 +1241,7 @@ impl FfiDeviceClass {
 }
 
 /// Cascade origin of a sheet, as the boundary names it.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum FfiCascadeOrigin {
     Author = 0,
@@ -5520,27 +5520,55 @@ pub unsafe extern "C" fn style_engine_native_rule_declarations_changed(
     context: *mut c_void,
     notify: unsafe extern "C" fn(*mut c_void, u32),
 ) -> bool {
-    // The handle the document's render inputs gave out, to write the engine through.
-    let engine = engine.home();
-    let handle = engine;
-    let engine: &StyleEngine = unsafe { engine_read_entrance(handle, "style_engine_native_rule_declarations_changed") };
-    let (id, declarations) = {
+    let (identity, declarations) = {
         let rule = unsafe { &*rule.cast::<crate::css::rule::NativeRule>() };
         let Some(identity) = rule.declaration_owner_identity() else {
             return false;
         };
-        let Some(id) = engine.native_rules.identities.get(&identity) else {
-            return false;
-        };
-        (id, rule.cascade_declarations())
+        (identity, rule.cascade_declarations())
+    };
+    // The host's notification reaches no engine (it moves the document's style environment version on), so the owner
+    // publishes the declarations first, in one round trip, and the host hears of a rule the engine holds after.
+    let published = crate::css::style::owner_calls::ask(
+        engine.home(),
+        "style_engine_native_rule_declarations_changed",
+        crate::css::style::owner_calls::StyleQuery::RuleDeclarationsChanged { identity, declarations },
+    )
+    .rule_declarations();
+    let Some(published) = published else {
+        return false;
     };
     super::seal::note_host_call("native_rule_declarations_changed.notify");
-    unsafe { notify(context, id.0 + 1) };
-    let engine = unsafe { handle.enter("style_engine_native_rule_declarations_changed") };
-    engine.native_rules.targets.get_mut(&id).unwrap().declarations = declarations.clone();
+    unsafe { notify(context, published.rule) };
+    published.declares_transitions
+}
+
+/// What publishing a native rule's declarations did, where the engine holds the rule.
+#[derive(Clone, Copy)]
+pub(crate) struct PublishedRuleDeclarations {
+    /// The rule's engine id plus one.
+    pub(crate) rule: u32,
+    pub(crate) declares_transitions: bool,
+}
+
+/// Publishes the declarations the native rule of `identity` now holds, on the render owner, if the engine holds the
+/// rule.
+pub(crate) fn owner_rule_declarations_changed(
+    engine: &mut StyleEngine,
+    identity: u64,
+    declarations: Option<std::sync::Arc<crate::css::declaration_block::DeclarationBlockData>>,
+) -> Option<PublishedRuleDeclarations> {
+    let id = engine.native_rules.identities.get(&identity)?;
+    let rule = id.0 + 1;
+    let target = engine.native_rules.targets.get_mut(&id)?;
+    target.declarations = declarations.clone();
     let version = engine.next_declaration_block_version();
-    operations::record_rule_declarations_changed(engine, id.0 + 1, version);
-    declarations.is_some_and(|declarations| publish_rule_declarations(engine, id.0 + 1, &declarations))
+    operations::record_rule_declarations_changed(engine, rule, version);
+    Some(PublishedRuleDeclarations {
+        rule,
+        declares_transitions: declarations
+            .is_some_and(|declarations| publish_rule_declarations(engine, rule, &declarations)),
+    })
 }
 
 /// Find the next compiled rule after an inserted native subtree, without creating CSSOM objects.
@@ -5589,9 +5617,6 @@ pub unsafe extern "C" fn style_engine_remove_native_rule(
     begin: unsafe extern "C" fn(*mut c_void, bool, bool),
     notify: unsafe extern "C" fn(*mut c_void, u32, bool),
 ) {
-    // The handle the document's render inputs gave out, to write the engine through.
-    let engine = engine.home();
-    let _ = unsafe { engine_read_entrance(engine, "style_engine_remove_native_rule") };
     use crate::css::rule::{NativeRule, NativeRuleType, mutation, read::RuleRef};
     use crate::css::style_sheet::NativeStyleSheet;
     let removed = unsafe {
@@ -5606,17 +5631,28 @@ pub unsafe extern "C" fn style_engine_remove_native_rule(
     let has_counter_style = removed
         .iter()
         .any(|rule| RuleRef::Materialized(rule).rule_type() == NativeRuleType::CounterStyle);
+    // The owner removes the rules in order, each with what removing the ones before it left, and names the engine id
+    // each had then (0 for one removed with an ancestor), which the host is told of. The host's callbacks reach no
+    // engine: they note what the document and its scopes derive from the rules, and republish the layer order.
+    let identities = removed
+        .iter()
+        .map(|rule| RuleRef::Materialized(rule).identity())
+        .collect::<Vec<_>>();
+    let mut ids = vec![0u32; identities.len()];
+    crate::css::style::owner_calls::ask(
+        engine.home(),
+        "style_engine_remove_native_rule",
+        crate::css::style::owner_calls::StyleQuery::RemoveNativeRules {
+            identities: identities.as_ptr(),
+            ids: ids.as_mut_ptr(),
+            count: identities.len(),
+        },
+    );
     super::seal::note_host_call("remove_native_rule.begin");
     unsafe { begin(context, changes_environment, has_counter_style) };
-    for rule in removed {
-        let declares_layer = mutation::declares_layer(&rule);
-        let id = unsafe { engine.enter("style_engine_remove_native_rule") }
-            .native_rule_id(RuleRef::Materialized(&rule).identity());
+    for (rule, id) in removed.iter().zip(ids) {
         super::seal::note_host_call("remove_native_rule.notify");
-        unsafe { notify(context, id.map_or(0, |id| id.0 + 1), declares_layer) };
-        if let Some(id) = id {
-            operations::remove_rule(unsafe { engine.enter("style_engine_remove_native_rule") }, id.0 + 1);
-        }
+        unsafe { notify(context, id, mutation::declares_layer(rule)) };
     }
 }
 
@@ -7282,7 +7318,7 @@ pub(crate) unsafe fn owner_record_benchmark_marker(
     });
 }
 
-unsafe fn borrow<'a, T>(pointer: *const T, count: usize) -> &'a [T] {
+pub(crate) unsafe fn borrow<'a, T>(pointer: *const T, count: usize) -> &'a [T] {
     if count == 0 {
         return &[];
     }

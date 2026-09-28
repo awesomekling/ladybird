@@ -2276,7 +2276,7 @@ static void visit_compilation(StyleSheetState const& sheet, u64 rule_identity, D
     MediaEnvironmentSnapshot environment { document };
     Parser::ValueParserFFI::NativeCompilationCallbacks callbacks {
         .context = &visit,
-        .import_source = [](void const* source, u64 identity, Parser::ValueParserFFI::NativeStyleSheet const* native_sheet) -> void const* {
+        .import_source = [](void const*, void const* source, u64 identity, Parser::ValueParserFFI::NativeStyleSheet const* native_sheet) -> void const* {
             auto const& sheet = *static_cast<StyleSheetState const*>(source);
             auto* import = sheet.import_for_rule(identity);
             VERIFY(import);
@@ -2284,7 +2284,7 @@ static void visit_compilation(StyleSheetState const& sheet, u64 rule_identity, D
             VERIFY(imported && imported->native_sheet().handle() == native_sheet);
             return imported;
         },
-        .implicit_scope_root = [](void const* source) { return implicit_scope_root_of(static_cast<StyleSheetState const*>(source)).value(); },
+        .implicit_scope_root = [](void const*, void const* source) { return implicit_scope_root_of(static_cast<StyleSheetState const*>(source)).value(); },
         .visit_rule = [](void const* context, void const* source, u64, RustRule::Type rule_type, Parser::ValueParserFFI::NativeCompilationContext const* compilation, Parser::ValueParserFFI::NativeCompilationResult result) { return (*static_cast<CompilationVisitor const*>(context))(rule_type, *static_cast<StyleSheetState const*>(source), *compilation, result); },
     };
     if (purpose == Parser::ValueParserFFI::NativeCompilationPurpose::Rules)

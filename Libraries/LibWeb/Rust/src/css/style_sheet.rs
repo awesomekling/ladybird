@@ -239,18 +239,6 @@ impl NativeStyleSheet {
         evaluation.result
     }
 
-    pub(crate) fn publish_conditions(
-        &self,
-        engine: &mut crate::css::style::StyleEngine,
-        environment: MediaEnvironment<'_>,
-    ) {
-        self.visit_conditions(environment, true, &mut |identity, holds| {
-            if let Some(rule) = engine.native_rule_id(identity) {
-                crate::css::style::bridge::operations::set_rule_conditions_hold(engine, rule.0 + 1, holds);
-            }
-        });
-    }
-
     pub(crate) fn visit_conditions(
         &self,
         environment: MediaEnvironment<'_>,
@@ -552,10 +540,17 @@ pub unsafe extern "C" fn rust_style_sheet_publish_conditions(
     engine: crate::css::style::StyleEngineInputHandle,
     environment: FfiMediaEnvironment,
 ) {
-    // The handle the document's render inputs gave out, to write the engine through.
-    let engine = engine.home();
-    let engine = unsafe { engine.enter("rust_style_sheet_publish_conditions") };
-    sheet.publish_conditions(engine, unsafe { environment.borrow() });
+    // Which rules' conditions hold is the sheet's and the environment's, the main thread's to read: the owner takes the
+    // answers, by rule identity.
+    let mut conditions = Vec::new();
+    sheet.visit_conditions(unsafe { environment.borrow() }, true, &mut |identity, holds| {
+        conditions.push((identity, holds));
+    });
+    crate::css::style::owner_calls::send(
+        engine,
+        "rust_style_sheet_publish_conditions",
+        crate::css::style::owner_calls::EngineChange::RuleConditionsHold(conditions),
+    );
 }
 
 // Keep first-seen sibling order and emit descendants before their parent, including the
@@ -626,8 +621,7 @@ pub unsafe extern "C" fn rust_style_sheet_publish_layer_order(
     record_layer: unsafe extern "C" fn(*mut c_void, *const u16, usize),
 ) -> bool {
     // The handle the document's render inputs gave out, to write the engine through.
-    let engine = engine.home();
-    engine.bring_home("rust_style_sheet_publish_layer_order");
+    let input_engine = engine;
     let sheets = if count == 0 {
         &[][..]
     } else {
@@ -639,18 +633,14 @@ pub unsafe extern "C" fn rust_style_sheet_publish_layer_order(
     // must clear the engine's old ranks.
     if has_layers || previously_had_layers {
         unsafe { prepare(context) };
-        let engine = unsafe { engine.enter("rust_style_sheet_publish_layer_order") };
-        let layers: Vec<_> = names
-            .iter()
-            .map(|name| {
-                if name.is_empty() {
-                    0
-                } else {
-                    crate::css::style::bridge::intern_native_text(engine, name).0
-                }
-            })
-            .collect();
-        crate::css::style::bridge::operations::set_layer_order(engine, tree_scope, &layers);
+        crate::css::style::owner_calls::send(
+            input_engine,
+            "rust_style_sheet_publish_layer_order",
+            crate::css::style::owner_calls::EngineChange::LayerOrder {
+                tree_scope,
+                names: names.clone(),
+            },
+        );
     }
     for name in names.iter().filter(|name| !name.is_empty()) {
         unsafe { record_layer(layer_context, name.as_ptr(), name.len()) };

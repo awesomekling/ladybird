@@ -35,7 +35,7 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-mod compilation;
+pub(crate) mod compilation;
 mod function;
 pub(crate) use function::CompiledFunction;
 pub(crate) mod mutation;
