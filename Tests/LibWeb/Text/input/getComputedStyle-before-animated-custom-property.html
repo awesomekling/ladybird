@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<script src="include.js"></script>
+<style>
+    #target::before {
+        content: "x";
+        --x: base;
+        --y: kept;
+    }
+</style>
+<div id="target"></div>
+<script>
+    test(() => {
+        const target = document.getElementById("target");
+        println(`before the animation: ${getComputedStyle(target, "::before").getPropertyValue("--x")}`);
+
+        const animation = target.animate([{ "--x": "from" }, { "--x": "to" }], { duration: 1000, pseudoElement: "::before" });
+        animation.pause();
+        animation.currentTime = 250;
+        println(`in the first half: ${getComputedStyle(target, "::before").getPropertyValue("--x")}`);
+        animation.currentTime = 750;
+        println(`in the second half: ${getComputedStyle(target, "::before").getPropertyValue("--x")}`);
+        println(`not animated: ${getComputedStyle(target, "::before").getPropertyValue("--y")}`);
+    });
+</script>
