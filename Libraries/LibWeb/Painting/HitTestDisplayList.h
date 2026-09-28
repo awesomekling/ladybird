@@ -64,7 +64,7 @@ public:
     TraversalDecision hit_test_all(CSSPixelPoint, DOM::Document const&, double device_pixels_per_css_pixel, ChromeMetrics const&, Function<TraversalDecision(HitTestResult)> const&) const;
 
 private:
-    HitTestDisplayList(u64 visual_context_tree_structural_epoch, DOM::Document&, ChromeWidgetRegistry&, NonnullRefPtr<HitTestSnapshot const>);
+    HitTestDisplayList(u64 visual_context_tree_structural_epoch, DOM::Document&, ChromeWidgetRegistry&, u64 rust_generation);
 
     struct Item {
         size_t item_index { 0 };
@@ -132,8 +132,8 @@ private:
     u64 m_visual_context_tree_structural_epoch { 0 };
     GC::Weak<DOM::Document> m_document;
     NonnullRefPtr<ChromeWidgetRegistry> m_chrome_widget_registry;
-    // The snapshot the list reads, which the hits it finds hold as well.
-    mutable NonnullRefPtr<HitTestSnapshot const> m_snapshot;
+    // The snapshot the list reads, which the hits it finds hold as well. None until the first query publishes one.
+    mutable RefPtr<HitTestSnapshot const> m_snapshot;
     u64 m_rust_generation { 0 };
 };
 
