@@ -23,7 +23,6 @@
 #include <LibWeb/HTML/EventLoop/FrameScheduler.h>
 #include <LibWeb/HTML/HTMLElement.h>
 #include <LibWeb/HTML/HTMLHtmlElement.h>
-#include <LibWeb/HTML/HTMLImageElement.h>
 #include <LibWeb/HTML/HTMLTableCellElement.h>
 #include <LibWeb/HTML/HTMLTableColElement.h>
 #include <LibWeb/HTML/LocalNavigable.h>
@@ -446,52 +445,50 @@ NodeWithStyle::~NodeWithStyle()
     //     release by slot, and asking would reach whichever row holds the slot next.
 }
 
-void NodeWithStyle::clear_image_observers()
-{
-    Painting::replace_style_image_observers(document(), slot_id(this), nullptr);
-}
-
-void NodeWithStyle::rebuild_image_observers(Vector<RefPtr<CSS::CursorStyleValue const>> cursor_style_values)
-{
-    auto observer_for = [&](CSS::AbstractImageStyleValue const* abstract_image) -> OwnPtr<Painting::StyleImageObserver> {
-        if (!abstract_image)
-            return nullptr;
-        auto const* image_to_observe = abstract_image->selected_image_style_value();
-        if (!image_to_observe)
-            return nullptr;
-        return make<Painting::StyleImageObserver>(document(), slot_id(this), *image_to_observe);
-    };
-
-    auto new_observers = make<Painting::StyleImageObserverSet>();
-    for (auto const& layer : background_layers())
-        new_observers->background_layers.append(observer_for(layer.background_image.ptr()));
-    for (auto const& layer : mask_layers())
-        new_observers->mask_layers.append(observer_for(layer.background_image.ptr()));
-    for (auto const& cursor_style_value : cursor_style_values)
-        new_observers->cursors.append(cursor_style_value ? observer_for(&cursor_style_value->image()) : nullptr);
-    new_observers->border_image_source = observer_for(border_image().source.ptr());
-    new_observers->list_style_image = observer_for(list_style_image());
-    new_observers->cursor_style_values = move(cursor_style_values);
-    new_observers->background_layer_data = background_layers();
-    new_observers->mask_layer_data = mask_layers();
-    new_observers->border_image = border_image();
-    // TODO: Observe other <image> accepting properties once we support them.
-
-    Painting::replace_style_image_observers(document(), slot_id(this), move(new_observers));
-}
-
 }
 
 namespace Web::Layout {
 
-// What a row taking a style record tells the rest of the document, other than about the row as a scroll snap container.
-static void did_update_row_style_record(DOM::Document& document, DOM::Node const* dom_node, void const* style_payloads)
+// The box whose scroll snap container a box's style describes: the viewport for the root element's, as the scroll snap
+// properties specified on the root element apply to the viewport rather than to its own box.
+static Painting::BoxSlot scroll_snap_container_of(Painting::BoxSlot const& box, DOM::Node const* dom_node)
 {
+    if (box.is_viewport() || (dom_node && dom_node == box.document().document_element()))
+        return Painting::BoxSlot::viewport_of(box.document());
+    if (!box.is_scroll_container())
+        return {};
+    return box;
+}
+
+// What a row taking a style record tells the rest of the document.
+static void did_update_row_style_record(Painting::BoxSlot const& box, DOM::Node const* dom_node, void const* style_payloads)
+{
+    auto& document = box.document();
     if (auto const* element = as_if<DOM::Element>(dom_node); element && element->has_style(CSS::PseudoElement::Selection))
         Painting::push_selection_pseudo_style(*element);
 
     if (NodeWithStyle::style_group_of<CSS::ComputedValues::MiscResetValues>(style_payloads).scroll_snap_type_value().strictness != CSS::ScrollSnapStrictness::None)
         document.set_may_have_scroll_snap_areas();
+
+    // NB: The root element's style can be published before the layout tree gives the document a viewport to snap
+    //     with, and is published again once building the layout tree binds this node's style record.
+    auto snap_container = scroll_snap_container_of(box, dom_node);
+    if (!snap_container)
+        return;
+
+    // What the layout tree builds found out about their scroll containers comes before what this style says.
+    Painting::take_built_scroll_snap_containers(document);
+
+    // A style change can make a box a snap container without the paint tree being built again, so the box registers
+    // itself here as well as when it is built.
+    if (Painting::is_scroll_snap_container(snap_container)) {
+        document.register_scroll_snap_container(snap_container);
+        return;
+    }
+
+    // A box that does not snap is snapped to no snap areas, so that a scroll it is given while it does not snap is not
+    // undone by a re-snap once it snaps again.
+    document.forget_snapped_areas_of_scroll_container(snap_container);
 }
 
 static bool style_record_holds_image_values(CSS::StyleRecordDependencyFlag dependency_flags)
@@ -510,54 +507,21 @@ static bool style_change_affects_layout(CSS::StyleRecordID old_style_record, voi
         || CSS::ComputedValues::layout_affecting_group_payloads_differ(static_cast<void const* const*>(old_style_payloads), new_style_record.view().payloads);
 }
 
-// Whether a row taking the style can make its box a scroll snap container, which registers itself with the document
-// through its shell.
-static bool style_can_make_row_a_scroll_snap_container(Row const& row, DOM::Node const* dom_node, void const* style_payloads)
-{
-    if (row.kind() == RustFFI::NodeKind::Viewport || (dom_node && dom_node == row.document().document_element()))
-        return true;
-    auto const& box = NodeWithStyle::style_group_of<CSS::ComputedValues::BoxValues>(style_payloads);
-    return overflow_value_makes_box_a_scroll_container(static_cast<CSS::Overflow>(box.overflow_x))
-        || overflow_value_makes_box_a_scroll_container(static_cast<CSS::Overflow>(box.overflow_y));
-}
-
-// Whether applying the style to the row needs its shell: for a style that holds images, whose resources the shell
-// loads and observes; for a box painted from facts its DOM node keeps; and for a box that can be a scroll snap
-// container.
-static bool applying_style_needs_shell(Row const& row, DOM::Node const* dom_node, CSS::PublishedStyleRecord const& style_record)
-{
-    switch (row.kind()) {
-    case RustFFI::NodeKind::CheckBox:
-    case RustFFI::NodeKind::RadioButton:
-    case RustFFI::NodeKind::CanvasBox:
-    case RustFFI::NodeKind::ImageBox:
-    case RustFFI::NodeKind::SVGImageBox:
-    case RustFFI::NodeKind::VideoBox:
-    case RustFFI::NodeKind::NavigableContainerViewport:
-        return true;
-    default:
-        break;
-    }
-    if (is<HTML::HTMLImageElement>(dom_node) || style_record_holds_image_values(style_record.dependency_flags()))
-        return true;
-    return style_can_make_row_a_scroll_snap_container(row, dom_node, style_record.payloads());
-}
-
 void NodeWithStyle::apply_style(Row const& row, CSS::PublishedStyleRecord const& style_record)
 {
     auto& document = row.document();
     auto const* dom_node = row.dom_node_identity().resolve(document).ptr();
-    if (row.shell_if_made() || applying_style_needs_shell(row, dom_node, style_record)) {
+    if (row.shell_if_made()) {
         as<NodeWithStyle>(row.shell()).apply_style(style_record);
         return;
     }
 
     // What apply_style() does to the row, with no shell to keep a mirror of it. A shell made later is made from the row.
     auto* old_image_observers = RustFFI::layout_arena_install_row_style(row.arena_handle(), row.slot(), style_record.identity().value());
-    did_update_row_style_record(document, dom_node, style_record.payloads());
-    // What attach_style_resources() does for a style that holds no images.
+    auto box = Painting::BoxSlot::of(document, row.slot());
+    did_update_row_style_record(box, dom_node, style_record.payloads());
     delete static_cast<Painting::StyleImageObserverSet*>(old_image_observers);
-    Painting::push_paint_facts_after_style_attach(Painting::BoxSlot::of(document, row.slot()), const_cast<DOM::Node*>(dom_node), Painting::StyleHoldsImageValues::No);
+    attach_style_resources_to_box(box);
 }
 
 static Row row_of_box(Painting::BoxSlot const& box)
@@ -574,9 +538,73 @@ void apply_style_to_box(Painting::BoxSlot const& box, CSS::PublishedStyleRecord 
 
 void attach_style_resources_to_box(Painting::BoxSlot const& box)
 {
-    auto row = row_of_box(box);
-    if (row && !row.is_text())
-        as<NodeWithStyle>(row.shell()).attach_style_resources();
+    auto const* style_payloads = box.style_payloads();
+    if (!style_payloads)
+        return;
+    auto& document = box.document();
+    auto* arena = box.arena();
+    auto slot = box.slot();
+    auto dom_node = box.dom_node();
+
+    // The style engine notes at publication whether a record holds an <image> anywhere this box would load and
+    // observe one. Nearly every style holds none, and that answer is one flag read; the walk below stays for the
+    // styles that do.
+    auto dependency_flags = static_cast<CSS::StyleRecordDependencyFlag>(RustFFI::layout_arena_node_style_dependency_flags(arena, slot));
+    if (!style_record_holds_image_values(dependency_flags)) {
+        Painting::replace_style_image_observers(document, slot, nullptr);
+        // The row keeps nothing a later attach would have to take away, which is what lets the
+        // tree build skip asking for one at all.
+        RustFFI::layout_arena_note_style_image_resources_attached(arena, slot, false);
+        Painting::push_paint_facts_after_style_attach(box, dom_node.ptr(), Painting::StyleHoldsImageValues::No);
+        return;
+    }
+
+    auto observers = make<Painting::StyleImageObserverSet>();
+    observers->background_layer_data = NodeWithStyle::style_group_of<CSS::ComputedValues::BackgroundValues>(style_payloads).background_layers_value();
+    observers->mask_layer_data = NodeWithStyle::style_group_of<CSS::ComputedValues::MaskValues>(style_payloads).mask_layers_value();
+    observers->border_image = NodeWithStyle::style_group_of<CSS::ComputedValues::BorderValues>(style_payloads).border_image_value();
+    auto cursors = NodeWithStyle::style_group_of<CSS::ComputedValues::InheritedUIValues>(style_payloads).cursor_span();
+    RefPtr<CSS::AbstractImageStyleValue const> list_style_image = NodeWithStyle::style_group_of<CSS::ComputedValues::InheritedListValues>(style_payloads).list_style_image_value();
+
+    auto load_image = [&](CSS::AbstractImageStyleValue const* image) {
+        if (image)
+            const_cast<CSS::AbstractImageStyleValue&>(*image).load_any_resources(document);
+    };
+    for (auto const& layer : observers->background_layer_data)
+        load_image(layer.background_image.ptr());
+    for (auto const& layer : observers->mask_layer_data)
+        load_image(layer.background_image.ptr());
+    load_image(observers->border_image.source.ptr());
+    observers->cursor_style_values.ensure_capacity(cursors.size());
+    for (auto const& cursor_data : cursors) {
+        auto cursor_style_value = CSS::ComputedValues::InheritedUIValues::cursor_style_value(cursor_data);
+        if (cursor_style_value)
+            load_image(&cursor_style_value->image());
+        observers->cursor_style_values.unchecked_append(move(cursor_style_value));
+    }
+    load_image(list_style_image.ptr());
+
+    auto observer_for = [&](CSS::AbstractImageStyleValue const* image) -> OwnPtr<Painting::StyleImageObserver> {
+        if (!image)
+            return nullptr;
+        auto const* image_to_observe = image->selected_image_style_value();
+        if (!image_to_observe)
+            return nullptr;
+        return make<Painting::StyleImageObserver>(document, slot, *image_to_observe);
+    };
+    for (auto const& layer : observers->background_layer_data)
+        observers->background_layers.append(observer_for(layer.background_image.ptr()));
+    for (auto const& layer : observers->mask_layer_data)
+        observers->mask_layers.append(observer_for(layer.background_image.ptr()));
+    for (auto const& cursor_style_value : observers->cursor_style_values)
+        observers->cursors.append(cursor_style_value ? observer_for(&cursor_style_value->image()) : nullptr);
+    observers->border_image_source = observer_for(observers->border_image.source.ptr());
+    observers->list_style_image = observer_for(list_style_image.ptr());
+    // TODO: Observe other <image> accepting properties once we support them.
+
+    Painting::replace_style_image_observers(document, slot, move(observers));
+    RustFFI::layout_arena_note_style_image_resources_attached(arena, slot, true);
+    Painting::push_paint_facts_after_style_attach(box, dom_node.ptr(), Painting::StyleHoldsImageValues::Yes);
 }
 
 void make_host_mirror_of_box(Painting::BoxSlot const& box)
@@ -625,41 +653,7 @@ void NodeWithStyle::apply_style(CSS::PublishedStyleRecord const& style_record)
 
 void NodeWithStyle::attach_style_resources()
 {
-    // The style engine notes at publication whether a record holds an <image> anywhere this node would load and
-    // observe one. Nearly every style holds none, and that answer is one flag read; the walk below stays for the
-    // styles that do.
-    if (!style_record_holds_image_values(style_dependency_flags())) {
-        clear_image_observers();
-        // The row keeps nothing a later attach would have to take away, which is what lets the
-        // tree build skip asking for one at all.
-        RustFFI::layout_arena_note_style_image_resources_attached(arena_handle(), slot_id(this), false);
-        Painting::push_paint_facts_after_style_attach(Painting::BoxSlot::of(document(), slot_id(this)), dom_node(), Painting::StyleHoldsImageValues::No);
-        return;
-    }
-
-    auto load_image = [&](CSS::AbstractImageStyleValue const* image) {
-        if (image)
-            const_cast<CSS::AbstractImageStyleValue&>(*image).load_any_resources(*this);
-    };
-
-    for (auto const& layer : background_layers())
-        load_image(layer.background_image.ptr());
-    for (auto const& layer : mask_layers())
-        load_image(layer.background_image.ptr());
-    load_image(border_image().source.ptr());
-    Vector<RefPtr<CSS::CursorStyleValue const>> cursor_style_values;
-    cursor_style_values.ensure_capacity(cursor().size());
-    for (auto const& cursor_data : cursor()) {
-        auto cursor_style_value = CSS::ComputedValues::InheritedUIValues::cursor_style_value(cursor_data);
-        if (cursor_style_value)
-            load_image(&cursor_style_value->image());
-        cursor_style_values.unchecked_append(move(cursor_style_value));
-    }
-    load_image(list_style_image());
-
-    rebuild_image_observers(move(cursor_style_values));
-    RustFFI::layout_arena_note_style_image_resources_attached(arena_handle(), slot_id(this), true);
-    Painting::push_paint_facts_after_style_attach(Painting::BoxSlot::of(document(), slot_id(this)), dom_node(), Painting::StyleHoldsImageValues::Yes);
+    attach_style_resources_to_box(Painting::BoxSlot::of(document(), slot_id(this)));
 }
 
 CSS::StyleScope const& NodeWithStyle::style_scope() const
@@ -828,10 +822,6 @@ void NodeWithStyle::set_style_record(Row const& row, CSS::PublishedStyleRecord c
         return;
     auto& document = row.document();
     auto const* dom_node = row.dom_node_identity().resolve(document).ptr();
-    if (style_can_make_row_a_scroll_snap_container(row, dom_node, style_record->payloads())) {
-        as<NodeWithStyle>(row.shell()).set_style_record(style_record);
-        return;
-    }
 
     // What set_style_record() does to the row, with no shell to keep a mirror of it. A record installed ahead of the
     // host is the row's already, where the shell's mirror still names the old one, so the row takes its adoption all
@@ -841,7 +831,7 @@ void NodeWithStyle::set_style_record(Row const& row, CSS::PublishedStyleRecord c
     if (old_style_record_identity != style_record->identity())
         changes_layout_affecting_style = style_change_affects_layout(old_style_record_identity, RustFFI::layout_arena_node_style_payloads(arena, slot), *style_record);
     RustFFI::layout_arena_replace_row_style_record(arena, slot, style_record->identity().value(), changes_layout_affecting_style);
-    did_update_row_style_record(document, dom_node, style_record->payloads());
+    did_update_row_style_record(Painting::BoxSlot::of(document, slot), dom_node, style_record->payloads());
 }
 
 void NodeWithStyle::pin_style_record_for_cxx_consumers()
@@ -867,16 +857,6 @@ void NodeWithStyle::bind_generated_style_record(CSS::PublishedStyleRecord const*
     publish_style_record_to_node_data();
 }
 
-static Node const* scroll_snap_container_of(NodeWithStyle const& node)
-{
-    // The scroll snap properties specified on the root element apply to the viewport rather than to its own box.
-    if (node.is_viewport() || (node.dom_node() && node.dom_node() == node.document().document_element()))
-        return node.document().unsafe_layout_node();
-    if (!node.is_scroll_container())
-        return nullptr;
-    return &node;
-}
-
 void NodeWithStyle::publish_style_record_to_node_data()
 {
     RustFFI::layout_arena_set_node_style(arena_handle(), slot_id(this), m_style_record_identity.value());
@@ -888,27 +868,7 @@ void NodeWithStyle::publish_style_record_to_node_data()
 
 void NodeWithStyle::did_update_style_record()
 {
-    did_update_row_style_record(document(), dom_node(), m_style_payloads);
-
-    // NB: The root element's style can be published before the layout tree gives the document a viewport to snap
-    //     with, and is published again once building the layout tree binds this node's style record.
-    auto const* snap_container = scroll_snap_container_of(*this);
-    if (!snap_container)
-        return;
-
-    // What the layout tree builds found out about their scroll containers comes before what this style says.
-    Painting::take_built_scroll_snap_containers(document());
-
-    // A style change can make a box a snap container without the paint tree being built again, so the box registers
-    // itself here as well as when it is built.
-    if (Painting::is_scroll_snap_container(*snap_container)) {
-        document().register_scroll_snap_container(Painting::BoxSlot::of(document(), slot_id(snap_container)));
-        return;
-    }
-
-    // A box that does not snap is snapped to no snap areas, so that a scroll it is given while it does not snap is not
-    // undone by a re-snap once it snaps again.
-    document().forget_snapped_areas_of_scroll_container(Painting::BoxSlot::of(document(), slot_id(snap_container)));
+    did_update_row_style_record(Painting::BoxSlot::of(document(), slot_id(this)), dom_node(), m_style_payloads);
 }
 
 namespace {
