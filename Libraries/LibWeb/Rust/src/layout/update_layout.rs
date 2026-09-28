@@ -2550,6 +2550,11 @@ pub unsafe extern "C" fn layout_arena_join_frame_owning_arena(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_hand_over_owed_image_resources(arena: *mut c_void, row: NodeSlotId) {
     // SAFETY: As above.
+    unsafe { crate::layout::HostTables::beside_frame(arena) }
+        .image_boxes_awaiting_owned_provider
+        .borrow_mut()
+        .remove(&row);
+    // SAFETY: As above.
     let document = unsafe { ArenaHandle::document_of(arena) };
     crate::render_owner::send_arena_change(document, crate::render_owner::ArenaChange::OwnedProviderHandedOver(row));
 }

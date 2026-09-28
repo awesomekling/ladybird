@@ -92,6 +92,15 @@ pub(crate) enum LayoutChange {
         list_owner: StyleNodeID,
         value: bool,
     },
+    /// The host gave the row the image observer set that `set` names, or none (`set` is 0).
+    SetRowImageObservers {
+        node: NodeSlotId,
+        set: usize,
+    },
+    /// The host gave the image box the provider it owns.
+    RowOwnsImageProvider {
+        node: NodeSlotId,
+    },
 }
 
 impl LayoutChange {
@@ -169,6 +178,16 @@ impl LayoutChange {
             }
             Self::SetListOwnerHasStaleItemCounters { list_owner, value } => {
                 arena.set_list_owner_has_stale_item_counters(list_owner, value);
+            }
+            Self::SetRowImageObservers { node, set } => {
+                if arena.slot_is_live(node) {
+                    arena.set_row_image_observers(node, set);
+                }
+            }
+            Self::RowOwnsImageProvider { node } => {
+                if arena.slot_is_live(node) {
+                    arena.note_row_owns_image_provider(node);
+                }
             }
         }
     }
