@@ -1586,9 +1586,19 @@ u64 Internals::clock_ticks_received() const
     return counters.ticks_posted + counters.ticks_folded;
 }
 
+// A test asks about the render clock as the rendering updates it ran left it: they end first, and grant the leases the
+// render clock ticks.
+static HTML::FrameScheduler& frame_scheduler_after_rendering_updates()
+{
+    auto& frame_scheduler = HTML::main_thread_event_loop().frame_scheduler();
+    if (frame_scheduler.state() == HTML::FrameScheduler::State::InFlight || frame_scheduler.state() == HTML::FrameScheduler::State::CommittedTailPending)
+        (void)frame_scheduler.finish_frame_now();
+    return frame_scheduler;
+}
+
 bool Internals::render_clock_ticks(DOM::Document const& document) const
 {
-    return HTML::main_thread_event_loop().frame_scheduler().render_clock_ticks(document);
+    return frame_scheduler_after_rendering_updates().render_clock_ticks(document);
 }
 
 GC::Ptr<Geometry::DOMRect> Internals::presented_border_box(DOM::Element const& element) const
@@ -1609,7 +1619,7 @@ GC::Ref<WebIDL::Promise> Internals::inject_clock_tick(double frame_time_ms)
 {
     auto promise = WebIDL::create_promise_for(window());
     auto frame_time = window().associated_document().relevant_settings_object().time_origin() + frame_time_ms;
-    HTML::main_thread_event_loop().frame_scheduler().inject_render_clock_tick(frame_time, [window = GC::Root { window() }, promise = GC::Root { promise }](bool ticked) {
+    frame_scheduler_after_rendering_updates().inject_render_clock_tick(frame_time, [window = GC::Root { window() }, promise = GC::Root { promise }](bool ticked) {
         HTML::TemporaryExecutionContext execution_context { window->principal_realm() };
         WebIDL::resolve_promise(*promise, JS::Value(ticked));
     });

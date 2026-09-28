@@ -45,6 +45,9 @@
             internals.injectRenderingOpportunity(frameTime);
             await nextTask();
         }
+        // The rendering updates end before the test goes on.
+        while (internals.frameSchedulerState() !== "idle")
+            await nextTask();
 
         const olderFrameTime = await frameTimeAfter(frameTime);
         const tickTime = await frameTimeAfter(olderFrameTime);

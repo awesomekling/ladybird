@@ -49,6 +49,9 @@
             internals.injectRenderingOpportunity(frameTime);
             await nextTask();
         }
+        // The rendering updates end before the test goes on.
+        while (internals.frameSchedulerState() !== "idle")
+            await nextTask();
 
         // Before the flip, then past it, then once more, which finds the lease ended.
         const flip = animation.startTime + 200;
@@ -70,6 +73,9 @@
             internals.injectRenderingOpportunity(frameTime);
             await nextTask();
         }
+        // The rendering updates end before the test goes on.
+        while (internals.frameSchedulerState() !== "idle")
+            await nextTask();
         const time = animation.currentTime;
         println(`text-transform after the flip: ${getComputedStyle(box).textTransform}`);
         println(`text after the flip: ${box.innerText}`);

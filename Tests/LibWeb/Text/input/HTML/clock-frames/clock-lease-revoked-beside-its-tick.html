@@ -24,9 +24,14 @@
         const armed = internals.holdNextClockTick("before-completion");
         let heldAt = "before-completion";
         if (armed) {
-            for (let i = 0; i < 200 && !(internals.frameSchedulerState() === "in-flight" && internals.renderingUpdateAwaitsPass()); ++i)
+            // The rendering update submits its clock tick once it has taken back the passes before it: one of those in
+            // flight holds nothing yet.
+            heldAt = "";
+            for (let i = 0; i < 200 && !heldAt; ++i) {
                 await new Promise(resolve => setTimeout(resolve, 5));
-            heldAt = internals.waitForHeldFrame();
+                if (internals.frameSchedulerState() === "in-flight" && internals.renderingUpdateAwaitsPass())
+                    heldAt = internals.waitForHeldFrame();
+            }
         }
         internals.setManualRenderingOpportunities(true);
         internals.releaseHeldFrame();
