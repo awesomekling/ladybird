@@ -991,8 +991,12 @@ void StyleComputer::start_needed_transitions(StyleDrainScope const& scope, Compu
         && existing_stabilization_state_indices.is_empty())
         return;
 
+    // NB: A property that holds no transition and whose decision is None has nothing for the epoch to commit, and a
+    //     later pass of the epoch reads the same absence from the element. So a stabilization state is only made for
+    //     a property that holds a transition or is given an action. A `transition: all` names every longhand, and
+    //     most of them are neither.
     struct PreparedTransition {
-        size_t stabilization_state_index;
+        Optional<size_t> stabilization_state_index;
         PropertyID property_id;
         RefPtr<StyleValue const> before_change_value;
         RefPtr<StyleValue const> after_change_value;
@@ -1002,44 +1006,49 @@ void StyleComputer::start_needed_transitions(StyleDrainScope const& scope, Compu
     };
     Vector<PreparedTransition> prepared_transitions;
     Vector<StyleValueFFI::FfiTransitionPropertyInput> ffi_properties;
+    prepared_transitions.ensure_capacity(matching_entries.size() + existing_transition_property_ids.size());
+    ffi_properties.ensure_capacity(matching_entries.size() + existing_transition_property_ids.size());
 
-    auto ensure_stabilization_state = [&](PropertyID property_id) -> size_t {
-        Optional<u64> state_key;
-        if (transition_target_key.has_value()) {
-            auto property = to_underlying(property_id);
-            VERIFY(property <= NumericLimits<u16>::max());
-            state_key = (*transition_target_key << 16) | property;
-            if (auto index = m_provisional_transition_state_indices.get(*state_key); index.has_value())
-                return *index;
-        } else {
-            for (size_t index = 0; index < m_provisional_transition_states.size(); ++index) {
-                auto const& state = m_provisional_transition_states[index];
-                if (state.element == GC::Ptr { element } && state.pseudo_element == pseudo_element && state.property_id == property_id)
-                    return index;
-            }
+    auto state_key_for = [&](PropertyID property_id) -> Optional<u64> {
+        if (!transition_target_key.has_value())
+            return {};
+        auto property = to_underlying(property_id);
+        VERIFY(property <= NumericLimits<u16>::max());
+        return (*transition_target_key << 16) | property;
+    };
+    auto find_stabilization_state = [&](PropertyID property_id) -> Optional<size_t> {
+        if (auto state_key = state_key_for(property_id); state_key.has_value())
+            return m_provisional_transition_state_indices.get(*state_key).copy();
+        for (size_t index = 0; index < m_provisional_transition_states.size(); ++index) {
+            auto const& state = m_provisional_transition_states[index];
+            if (state.element == GC::Ptr { element } && state.pseudo_element == pseudo_element && state.property_id == property_id)
+                return index;
         }
+        return {};
+    };
+    auto create_stabilization_state = [&](PropertyID property_id, GC::Ptr<CSSTransition> committed_transition) -> size_t {
         VERIFY(document().is_in_style_stabilization_epoch());
-        auto existing_transition = element.property_transition(pseudo_element, property_id);
         m_provisional_transition_states.append({
             .element = element,
             .pseudo_element = pseudo_element,
             .property_id = property_id,
-            .committed_transition = existing_transition,
+            .committed_transition = committed_transition,
             .proposed_transition = nullptr,
             .action = ProvisionalTransitionAction::None,
             .has_decision = false,
         });
         auto index = m_provisional_transition_states.size() - 1;
-        if (state_key.has_value()) {
+        if (auto state_key = state_key_for(property_id); state_key.has_value()) {
             m_provisional_transition_state_indices.set(*state_key, index);
             m_provisional_transition_state_indices_by_target.ensure(*transition_target_key).append(index);
         }
         return index;
     };
     auto append_transition_input = [&](PropertyID property_id, StyleValueFFI::FfiTransitionEntry const* matching_entry) {
-        auto stabilization_state_index = ensure_stabilization_state(property_id);
-        auto const& stabilization_state = m_provisional_transition_states[stabilization_state_index];
-        auto existing_transition = stabilization_state.committed_transition;
+        auto stabilization_state_index = find_stabilization_state(property_id);
+        auto existing_transition = stabilization_state_index.has_value()
+            ? m_provisional_transition_states[*stabilization_state_index].committed_transition
+            : element.property_transition(pseudo_element, property_id);
         bool has_running_transition = existing_transition && !existing_transition->is_finished() && !existing_transition->is_idle();
         bool has_completed_transition = existing_transition && !has_running_transition;
         bool allow_discrete = false;
@@ -1204,12 +1213,18 @@ void StyleComputer::start_needed_transitions(StyleDrainScope const& scope, Compu
     Vector<GC::Ref<Animations::KeyframeEffect>> newly_started_transition_effects;
     for (size_t index = 0; index < prepared_transitions.size(); ++index) {
         auto const& prepared_transition = prepared_transitions[index];
-        auto& stabilization_state = m_provisional_transition_states[prepared_transition.stabilization_state_index];
         auto property_id = prepared_transition.property_id;
         auto const& action = actions[index];
         VERIFY(action.property_id == to_underlying(property_id));
         auto existing_transition = prepared_transition.existing_transition;
         ++document().style_invalidation_counters().provisional_transition_decisions;
+        auto stabilization_state_index = prepared_transition.stabilization_state_index;
+        if (!stabilization_state_index.has_value()) {
+            if (action.kind == StyleValueFFI::FfiTransitionActionKind::None && !existing_transition)
+                continue;
+            stabilization_state_index = create_stabilization_state(property_id, existing_transition);
+        }
+        auto& stabilization_state = m_provisional_transition_states[*stabilization_state_index];
         if (stabilization_state.has_decision)
             ++document().style_invalidation_counters().superseded_provisional_transition_decisions;
         stabilization_state.has_decision = true;
