@@ -1453,7 +1453,7 @@ static void record_element_disconnecting(DOM::Element& element, TreeScopeID tree
     // element once it is retired, and must not carry the names over to it.
     if (auto const* anchor_values = element.style_group<ComputedValues::AnchorValues>(); anchor_values && !anchor_values->anchor_names_span().is_empty()) {
         style_engine->publish_input([node](StyleInputScope const& input) {
-            (void)StyleEngineFFI::style_engine_register_anchor_names(input, input.engine().rust_handle(), node.value(), 0);
+            (void)StyleEngineFFI::style_engine_register_anchor_names(input, input.engine().rust_handle(), node.value(), 0, false);
             StyleEngineFFI::style_engine_publish_anchor_names(input, input.engine().rust_handle());
         });
         // Positioned boxes anywhere may hold geometry resolved against these names, which the

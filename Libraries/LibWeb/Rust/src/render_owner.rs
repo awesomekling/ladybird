@@ -113,6 +113,8 @@ pub(crate) enum ArenaChange {
     LinkStyleEngine(crate::layout::StyleEngineLink),
     /// The host is about to destroy the document's style engine.
     UnlinkStyleEngine,
+    /// The anchor names registration moved in the document's style engine are published to the arena.
+    PublishAnchorNames,
 }
 
 impl ArenaChange {
@@ -157,6 +159,10 @@ impl ArenaChange {
                 None => debug_assert!(false, "linking the style engine reaches it"),
             },
             ArenaChange::UnlinkStyleEngine => arena.unlink_style_engine(),
+            ArenaChange::PublishAnchorNames => match engine {
+                Some(engine) => engine.publish_anchor_names(arena),
+                None => debug_assert!(false, "publishing anchor names reaches the engine"),
+            },
         }
     }
 }
@@ -263,7 +269,7 @@ impl RenderState {
                 ) as u64);
                 // SAFETY: The engine is the document's, and the document thread waits for the answer, keeping what
                 // the query borrows live.
-                unsafe { engine.reach_on_owner(|engine| query.answer(engine, self.arena.arena())) };
+                unsafe { engine.reach_on_owner(|engine| query.answer(engine)) };
                 Answer::Engine(EngineAnswered::Answered)
             }
             _ => Answer::of_state_reaching_engine(query, &mut self.arena),
