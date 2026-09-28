@@ -4,30 +4,20 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-//! The thread the render pipeline's sealed stages run on.
+//! The Rendering thread, which the render owner and the render pipeline's stages run on, and the
+//! Painting thread, which runs the recordings and presentations of the frame in flight.
 //!
-//! With `LIBWEB_STAGE_THREAD=lockstep`, the tree build walk, the layout stage, the display list
-//! recording stage and the render passes that run before the rows are published (the scrollable
-//! overflow measurement, the visual context update, the scroll state refresh and the hit-test
-//! list's derived structures) run on one thread of their own while the thread that called them
-//! waits for the result. Nothing runs concurrently, so the stages see exactly the state they would have seen on
-//! the calling thread, but everything they depend on that belongs to a thread (thread-local state,
-//! thread-bound handles, stack assumptions) is exercised the way a render thread will exercise it.
-//! Without the variable, stages run on the calling thread, unless they overlap by default
-//! ([`OVERLAP_BY_DEFAULT`]).
+//! There is one of each per process. A WebContent process runs every document it hosts on its one
+//! main thread, so a thread per process is also a thread per event loop.
 //!
-//! There is one stage thread per process. A WebContent process runs every document it hosts on its
-//! one main thread, so a thread per process is also a thread per event loop.
-//!
-//! `LIBWEB_STAGE_THREAD=overlap` runs every stage on the stage thread as lockstep does, and lets
-//! the rendering update submit the stages [`LIBWEB_STAGE_OVERLAP`](overlapping_stages) names
-//! instead of waiting for them: [`submit_stage_with_take_back`] hands the stage to the stage thread
-//! and returns, and the main thread goes back to its event loop while the stage runs. A submitted
-//! stage has no joins; it owns the arena of the document it runs for until the main thread takes it
-//! back. The frame scheduler takes it back at the top of the event loop once the stage has
-//! finished, or a main-thread access to that arena takes it back first (a forced join, logged once
-//! per call site). Either way the main thread blocks on the stage's reply and never spins its event
-//! loop inside a stage run, and the scheduler's consume-commit runs before the access goes on.
+//! The rendering update submits its stages instead of waiting for them: [`submit_rendering_update`]
+//! hands them to the Rendering thread and returns, and the main thread goes back to its event
+//! loop while the stage runs. A submitted stage has no joins; it owns the arena of the document it
+//! runs for until the main thread takes it back. The frame scheduler takes it back at the top of the
+//! event loop once the stage has finished, or a main-thread access to that arena takes it back first
+//! (a forced join, logged once per call site). Either way the main thread blocks on the stage's reply
+//! and never spins its event loop inside a stage run, and the scheduler's consume-commit runs before
+//! the access goes on.
 
 use std::any::Any;
 use std::cell::{Cell, RefCell};
@@ -79,42 +69,6 @@ struct StageThread {
     id: ThreadId,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum StageThreadMode {
-    Lockstep,
-    Overlap,
-}
-
-/// Whether the stages overlap without `LIBWEB_STAGE_THREAD`, as `LIBWEB_STAGE_THREAD=overlap` has
-/// them do. `LIBWEB_STAGE_OVERLAP=none` then runs them in place, as without the variable.
-const OVERLAP_BY_DEFAULT: bool = true;
-
-fn stage_thread_mode() -> Option<StageThreadMode> {
-    static MODE: OnceLock<Option<StageThreadMode>> = OnceLock::new();
-    *MODE.get_or_init(|| match std::env::var_os("LIBWEB_STAGE_THREAD") {
-        Some(mode) if mode == "lockstep" => Some(StageThreadMode::Lockstep),
-        Some(mode) if mode == "overlap" => Some(StageThreadMode::Overlap),
-        None if OVERLAP_BY_DEFAULT && !overlapping_stages().is_empty() => Some(StageThreadMode::Overlap),
-        _ => None,
-    })
-}
-
-/// The stages the rendering update submits when the stages overlap: a comma-separated list in
-/// `LIBWEB_STAGE_OVERLAP` (`none` names none), or the recording, layout and style, as one flight,
-/// when it is not set. `LIBWEB_FLIGHT=0` leaves the flight out of either.
-fn overlapping_stages() -> &'static [String] {
-    static STAGES: OnceLock<Vec<String>> = OnceLock::new();
-    STAGES.get_or_init(|| {
-        let flies = std::env::var_os("LIBWEB_FLIGHT").is_none_or(|value| value != "0");
-        std::env::var("LIBWEB_STAGE_OVERLAP")
-            .unwrap_or_else(|_| "recording,layout,style,flight".into())
-            .split(',')
-            .map(|stage| stage.trim().to_owned())
-            .filter(|stage| !stage.is_empty() && stage != "none" && (flies || stage != FLIGHT_STAGE))
-            .collect()
-    })
-}
-
 /// What the frame scheduler on the main thread does for a submitted stage.
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -131,10 +85,10 @@ pub struct FfiFrameSchedulerHost {
 
 static FRAME_SCHEDULER_HOST: OnceLock<FfiFrameSchedulerHost> = OnceLock::new();
 
-/// Whether the stages run under `LIBWEB_STAGE_THREAD=overlap`, and so want a frame scheduler host.
+/// Whether no frame scheduler host is installed yet: the first main-thread frame scheduler installs one.
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_stage_thread_wants_frame_scheduler_host() -> bool {
-    stage_thread_mode() == Some(StageThreadMode::Overlap) && FRAME_SCHEDULER_HOST.get().is_none()
+    FRAME_SCHEDULER_HOST.get().is_none()
 }
 
 /// The pass of a document the calling thread submitted last, as its frame in flight holds it.
@@ -160,16 +114,10 @@ pub extern "C" fn rust_stage_thread_submitted_document_pass() -> FfiSubmittedDoc
     })
 }
 
-/// Whether the rendering update submits its layout pass rather than laying out in place.
+/// Whether the calling thread submits the stages of its rendering updates, see [`submits`].
 #[unsafe(no_mangle)]
-pub extern "C" fn rust_stage_thread_submits_layout() -> bool {
-    submits("layout")
-}
-
-/// Whether the rendering update submits its first style pass rather than running it in place.
-#[unsafe(no_mangle)]
-pub extern "C" fn rust_stage_thread_submits_style() -> bool {
-    submits("style")
+pub extern "C" fn rust_stage_thread_submits() -> bool {
+    submits()
 }
 
 /// Installs the main thread's frame scheduler host. The first host installed stays.
@@ -205,9 +153,9 @@ impl StageThread {
                     match message {
                         StageMessage::Run(job) => job(),
                         StageMessage::Owner(message) => {
-                            tsan::acquire(stage_thread().expect("only the Rendering thread is sent owner messages"));
+                            tsan::acquire(stage_thread());
                             crate::render_owner::handle(message);
-                            tsan::release(stage_thread().expect("only the Rendering thread is sent owner messages"));
+                            tsan::release(stage_thread());
                         }
                     }
                 }
@@ -319,7 +267,7 @@ impl PaintStage {
 struct SubmittedStage {
     label: &'static str,
     // The stage whose hold on the document this one has: its own label, or for a flight, the label
-    // of the furthest stage it may run (see [`submit_flight`]).
+    // of the furthest stage it may run (see [`submit_rendering_update`]).
     role: &'static str,
     // The labels a test's hold may name to hold this run: its own, and those of the stages of a
     // flight it may run ("flight:style").
@@ -331,7 +279,7 @@ struct SubmittedStage {
     reply: StageReply,
     // What the main thread runs once it has taken the stage back, before anything else reaches
     // what the stage owned.
-    on_taken_back: Option<Box<dyn FnOnce()>>,
+    on_taken_back: Box<dyn FnOnce()>,
     _count: SubmittedStageCount,
 }
 
@@ -399,46 +347,10 @@ impl SubmittedStage {
     }
 }
 
-/// Whether the rendering update submits the stage `label` rather than waiting for it: under
-/// `LIBWEB_STAGE_THREAD=overlap`, with a frame scheduler, if `LIBWEB_STAGE_OVERLAP` names `label`,
-/// and only from the main thread.
-pub(crate) fn submits(label: &'static str) -> bool {
-    stage_thread_mode() == Some(StageThreadMode::Overlap)
-        && FRAME_SCHEDULER_HOST.get().is_some()
-        && stage_thread().is_some_and(|thread| std::thread::current().id() != thread.id)
-        && stage_overlaps(label)
-}
-
-/// Whether `LIBWEB_STAGE_OVERLAP` lets the stage `label` run beside the main thread. A clock tick
-/// goes where the layout pass it runs ahead of goes.
-fn stage_overlaps(label: &str) -> bool {
-    let overlaps = |label: &str| overlapping_stages().iter().any(|stage| stage == label);
-    overlaps(label) || (label == "clock" && overlaps("layout"))
-}
-
-/// Hands `stage` to the stage thread and returns at once, and has the main thread run
-/// `on_taken_back` once it has taken the stage back: at the top of the event loop, or in the forced
-/// join that takes it back first. It runs ahead of the frame scheduler's consume-commit, in
-/// submission order. The stage owns the arena `arena` until the main thread takes the frame back:
-/// the frame scheduler does at the top of its event loop once the stage has finished, and a
-/// main-thread access to the arena does before it goes on ([`join_frame_in_flight`]). A style pass
-/// reaches only its document's style engine, which it takes along
-/// (`crate::css::style::engine_home`).
-///
-/// # Safety
-///
-/// Until the frame is taken back, nothing but `stage` may reach what `stage` holds: every
-/// main-thread path to the arena has to go through [`join_frame_in_flight`] first.
-pub(crate) unsafe fn submit_stage_with_take_back(
-    label: &'static str,
-    arena: *mut c_void,
-    stage: impl FnOnce() + Send + 'static,
-    on_taken_back: impl FnOnce() + 'static,
-) {
-    // SAFETY: Guaranteed by the caller.
-    unsafe {
-        submit(label, label, vec![label], arena, stage, Some(Box::new(on_taken_back)));
-    }
+/// Whether the rendering update submits its stages rather than waiting for them: on the main thread, once its frame
+/// scheduler is installed. The Rendering thread runs what it reaches in place.
+pub(crate) fn submits() -> bool {
+    FRAME_SCHEDULER_HOST.get().is_some() && !on_owner_thread()
 }
 
 /// Submits the display list recording `stage` of the document whose arena is `arena` to the frame
@@ -454,20 +366,14 @@ pub(crate) fn submit_recording(arena: *mut c_void, stage: impl FnOnce() + Send +
 /// another (see `crate::flight`).
 pub(crate) const FLIGHT_STAGE: &str = "flight";
 
-/// Whether the rendering update submits its stages as one flight: under `LIBWEB_STAGE_OVERLAP`
-/// naming `flight` with the style and layout passes, which a flight begins with.
-pub(crate) fn submits_flight() -> bool {
-    submits("style") && submits("layout") && stage_overlaps(FLIGHT_STAGE)
-}
-
-/// Like [`submit_stage_with_take_back`], for the rendering update `update` of the document whose arena is `arena`,
-/// which the render owner runs as the frame's flight: the frame holds the document as a submitted stage `reach`
+/// Submits the rendering update `update` of the document whose arena is `arena`, which the render owner runs as the
+/// frame's flight, as [`submit_to_owner`] does: the frame holds the document as a submitted stage `reach`
 /// would, which holds it as every stage before it does. A test's hold on one of `stage_holds`, the stages the flight
 /// may run, holds it.
 ///
 /// # Safety
 ///
-/// As for [`submit_stage_with_take_back`].
+/// As for [`submit_to_owner`].
 pub(crate) unsafe fn submit_rendering_update(
     reach: &'static str,
     stage_holds: &[&'static str],
@@ -496,12 +402,12 @@ pub(crate) unsafe fn submit_rendering_update(
     }
 }
 
-/// Like [`submit_stage_with_take_back`], for a clock tick of the document whose arena is `arena`, which the render
-/// owner runs as the message `tick` makes of its run: the frame holds the arena as the stage `clock`.
+/// Submits a clock tick of the document whose arena is `arena`, which the render owner runs as the message `tick`
+/// makes of its run, as [`submit_to_owner`] does: the frame holds the arena as the stage `clock`.
 ///
 /// # Safety
 ///
-/// As for [`submit_stage_with_take_back`].
+/// As for [`submit_to_owner`].
 pub(crate) unsafe fn submit_clock_tick(
     arena: *mut c_void,
     tick: impl FnOnce(SubmittedRunTicket) -> crate::render_owner::ToOwner,
@@ -511,12 +417,17 @@ pub(crate) unsafe fn submit_clock_tick(
     unsafe { submit_to_owner("clock", "clock", vec!["clock"], arena, tick, on_taken_back) };
 }
 
-/// Sends the render owner the message `message` makes of a submitted run labelled `label`, which the frame in flight
-/// holds as [`submit`] does.
+/// Sends the render owner the message `message` makes of a submitted run labelled `label`, and returns at once. The
+/// main thread runs `on_taken_back` once it has taken the run back: at the top of the event loop, or in the forced join
+/// that takes it back first. It runs ahead of the frame scheduler's consume-commit, in submission order. The run owns
+/// the arena `arena` until the main thread takes the frame back: the frame scheduler does at the top of its event loop
+/// once the run has finished, and a main-thread access to the arena does before it goes on ([`join_frame_in_flight`]).
+/// A style pass reaches only its document's style engine, which it takes along (`crate::css::style::engine_home`).
 ///
 /// # Safety
 ///
-/// As for [`submit_stage_with_take_back`].
+/// Until the frame is taken back, nothing but the run may reach what it holds: every main-thread path to the arena has
+/// to go through [`join_frame_in_flight`] first.
 unsafe fn submit_to_owner(
     label: &'static str,
     role: &'static str,
@@ -525,7 +436,7 @@ unsafe fn submit_to_owner(
     message: impl FnOnce(SubmittedRunTicket) -> crate::render_owner::ToOwner,
     on_taken_back: impl FnOnce() + 'static,
 ) {
-    let thread = stage_thread().expect("only a stage thread runs submitted stages");
+    let thread = stage_thread();
     let (ticket, reply) = SubmittedRunTicket::new(thread, next_submitted_run(label, arena));
     let message = message(ticket);
     crate::render_owner::note_sending(&message);
@@ -534,31 +445,11 @@ unsafe fn submit_to_owner(
         // The stage thread only goes away if the process is going away.
         std::process::abort();
     }
-    note_submitted(label, role, hold_labels, arena, reply, Some(Box::new(on_taken_back)));
-}
-
-/// # Safety
-///
-/// As for [`submit_stage_with_take_back`].
-unsafe fn submit(
-    label: &'static str,
-    role: &'static str,
-    hold_labels: Vec<&'static str>,
-    arena: *mut c_void,
-    stage: impl FnOnce() + Send + 'static,
-    on_taken_back: Option<Box<dyn FnOnce()>>,
-) {
-    let thread = stage_thread().expect("only a stage thread runs submitted stages");
-    let run = next_submitted_run(label, arena);
-    let reply = send_submitted_run(thread, run, stage);
-    note_submitted(label, role, hold_labels, arena, reply, on_taken_back);
+    note_submitted(label, role, hold_labels, arena, reply, Box::new(on_taken_back));
 }
 
 fn next_submitted_run(label: &'static str, arena: *mut c_void) -> SubmittedRun {
-    debug_assert!(
-        submits(label) || (label == FLIGHT_STAGE && submits_flight()),
-        "the stage {label} is not submitted"
-    );
+    debug_assert!(submits(), "the stage {label} is not submitted");
     SubmittedRun {
         label,
         arena: arena as usize,
@@ -573,7 +464,7 @@ fn note_submitted(
     hold_labels: Vec<&'static str>,
     arena: *mut c_void,
     reply: StageReply,
-    on_taken_back: Option<Box<dyn FnOnce()>>,
+    on_taken_back: Box<dyn FnOnce()>,
 ) {
     SUBMITTED.with(|submitted| {
         submitted.borrow_mut().push(SubmittedStage {
@@ -591,13 +482,10 @@ fn note_submitted(
 /// Submits `stage`, a recording or presentation labelled `label` of the document whose arena is
 /// `document` (0 for none), to the frame in flight, on the paint lane: the one thread that runs every
 /// recording and presentation of the frame in flight, in submission order, so frames reach their
-/// compositor contexts in the order the rendering update painted them. Without a paint lane
-/// (`LIBWEB_PAINT_LANE=0`) that thread is the Rendering thread.
+/// compositor contexts in the order the rendering update painted them.
 fn submit_paint_stage(label: &'static str, document: usize, stage: impl FnOnce() + Send + 'static) {
-    let thread = paint_lane()
-        .or_else(stage_thread)
-        .expect("only a stage thread runs submitted stages");
-    debug_assert!(submits_presentation(), "the stage {label} is not submitted");
+    let thread = paint_lane();
+    debug_assert!(submits(), "the stage {label} is not submitted");
     let run = SubmittedRun {
         label,
         arena: 0,
@@ -689,12 +577,6 @@ pub(crate) fn run_detached_for(caller: ThreadId, arena: usize, work: impl FnOnce
     WAITING_CALLER.with(|waiting| waiting.set(waiting_caller));
 }
 
-/// Whether the render owner runs on a thread of its own beside the main thread: where the stages overlap it
-/// (`LIBWEB_STAGE_THREAD=overlap`), not without a stage thread (`LIBWEB_STAGE_OVERLAP=none`) or in lockstep with it.
-pub(crate) fn owner_runs_beside_main() -> bool {
-    stage_thread_mode() == Some(StageThreadMode::Overlap) && stage_thread().is_some()
-}
-
 /// Whether the stage thread is inside a stage the main thread submitted or waits for: a detached
 /// job the stage thread runs while such a stage waits for a join runs nested inside it.
 pub(crate) fn running_inside_stage() -> bool {
@@ -703,16 +585,6 @@ pub(crate) fn running_inside_stage() -> bool {
 
 /// The label of the stage that presents a navigable's frame at the end of the frame in flight.
 const PRESENTATION_STAGE: &str = "present";
-
-/// Whether the rendering update presents its frames from the frame in flight: when it submits its recordings.
-fn submits_presentation() -> bool {
-    submits("recording")
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn rust_stage_thread_submits_presentation() -> bool {
-    submits_presentation()
-}
 
 /// Submits `present(context)` to the frame in flight as a presentation stage on the paint lane,
 /// which runs once the recordings and presentations submitted before it have (a navigable's
@@ -809,8 +681,9 @@ fn lock_stage_hold() -> (std::sync::MutexGuard<'static, StageHold>, &'static Con
 
 /// Makes the stage thread wait at `point` of the next submitted run of the stage `label` names
 /// (for the arena `arena` only, unless it is null), until [`rust_stage_thread_release_held_stage`]
-/// or a main-thread wait for the stage releases it. Returns false, and holds nothing, unless the
-/// rendering update submits the stage `label` names.
+/// or a main-thread wait for the stage releases it. A hold on a stage of a flight is named after
+/// the flight, as "flight:style", and a hold may name the stages it holds the first run of, as
+/// "recording|flight:record".
 ///
 /// # Safety
 ///
@@ -821,21 +694,9 @@ pub unsafe extern "C" fn rust_stage_thread_hold_next_submitted_stage(
     label_length: usize,
     point: FfiStageHoldPoint,
     arena: *mut c_void,
-) -> bool {
-    if stage_thread_mode() != Some(StageThreadMode::Overlap) || FRAME_SCHEDULER_HOST.get().is_none() {
-        return false;
-    }
+) {
     // SAFETY: Guaranteed by the caller.
     let label = unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(label, label_length)) };
-    // A hold on a stage of a flight is named after the flight, as "flight:style", and a hold may name
-    // the stages it holds the first run of, as "recording|flight:record".
-    let overlaps = label.split('|').any(|stage| {
-        let submitted_label = stage.split_once(':').map_or(stage, |(flight, _)| flight);
-        stage_overlaps(submitted_label)
-    });
-    if !overlaps {
-        return false;
-    }
     let (mut hold, _) = lock_stage_hold();
     hold.armed = Some(ArmedHold {
         label: label.to_owned(),
@@ -843,7 +704,6 @@ pub unsafe extern "C" fn rust_stage_thread_hold_next_submitted_stage(
         arena: arena as usize,
     });
     hold.first_holdable_run = NEXT_SUBMITTED_RUN.load(Ordering::Relaxed);
-    true
 }
 
 /// Releases a held stage, or disarms a hold no stage has reached yet.
@@ -895,7 +755,7 @@ pub extern "C" fn rust_stage_thread_wait_for_threads_beside_held_run() {
         let (hold, _) = lock_stage_hold();
         hold.holding.as_ref().and(hold.holding_thread)
     };
-    let threads = [stage_thread(), PAINT_LANE.get().and_then(Option::as_ref)];
+    let threads = [Some(stage_thread()), PAINT_LANE.get()];
     for thread in threads.into_iter().flatten() {
         if Some(thread.id) == holding_thread || std::thread::current().id() == thread.id {
             continue;
@@ -1041,7 +901,7 @@ fn hold_at(point: FfiStageHoldPoint, flight_stage: Option<&'static str>) {
     changed.notify_all();
     // The owner holding a run goes on serving what may go between the run's units, as it does between any two: a
     // style transaction or a question the main thread waits for meanwhile is the owner's to run, not the main thread's.
-    let serves = stage_thread().is_some_and(|thread| thread.id == std::thread::current().id());
+    let serves = on_owner_thread();
     if !serves {
         while hold.holding.is_some() {
             hold = changed.wait(hold).expect("the stage hold is never poisoned");
@@ -1120,7 +980,7 @@ pub(crate) fn take_frame_in_flight() -> bool {
         if let Err(payload) = stage.wait() {
             panic.get_or_insert(payload);
         }
-        on_taken_back.extend(stage.on_taken_back.take());
+        on_taken_back.push(stage.on_taken_back);
     }
     for mut stage in paint_stages {
         if let Err(payload) = stage.wait().wait() {
@@ -1410,16 +1270,12 @@ pub unsafe extern "C" fn rust_stage_thread_forced_joins(label: *const u8, label_
 /// Orders what the calling thread wrote before it hands a style engine over (the main thread to a stage,
 /// or a stage back home) before what the thread that takes it reads after [`acquire_handoff`].
 pub(crate) fn release_handoff() {
-    if let Some(thread) = stage_thread() {
-        tsan::release(thread);
-    }
+    tsan::release(stage_thread());
 }
 
 /// The taking thread's side of [`release_handoff`].
 pub(crate) fn acquire_handoff() {
-    if let Some(thread) = stage_thread() {
-        tsan::acquire(thread);
-    }
+    tsan::acquire(stage_thread());
 }
 
 /// Test only: waits up to `timeout_ms` for every stage of the main thread's frame in flight to
@@ -1486,13 +1342,13 @@ pub(crate) unsafe fn call_site_file(file: *const u8, file_length: usize) -> &'st
     std::str::from_utf8(bytes).unwrap_or("<non-UTF-8 file name>")
 }
 
-/// Sends `message` to the render owner, the Rendering thread. Hands it back where the calling thread is the owner:
-/// without a Rendering thread, or on it.
+/// Sends `message` to the render owner, the Rendering thread. Hands it back where the calling thread is the owner.
 pub(crate) fn send_to_owner(message: crate::render_owner::ToOwner) -> Result<(), crate::render_owner::ToOwner> {
     crate::render_owner::note_sending(&message);
-    let Some(thread) = stage_thread().filter(|thread| std::thread::current().id() != thread.id) else {
+    if on_owner_thread() {
         return Err(message);
-    };
+    }
+    let thread = stage_thread();
     tsan::release(thread);
     if thread.jobs.send(StageMessage::Owner(message)).is_err() {
         // The Rendering thread only goes away if the process is going away.
@@ -1501,27 +1357,14 @@ pub(crate) fn send_to_owner(message: crate::render_owner::ToOwner) -> Result<(),
     Ok(())
 }
 
-/// Whether the render owner runs on a Rendering thread of its own. Without one, the owner's messages are handled on
-/// the thread that sends them.
-pub(crate) fn has_owner_thread() -> bool {
-    stage_thread().is_some()
-}
-
-/// Whether the render owner runs on a Rendering thread other than the calling one.
-pub(crate) fn owner_is_elsewhere() -> bool {
-    stage_thread().is_some_and(|thread| std::thread::current().id() != thread.id)
-}
-
 /// Whether the calling thread is the render owner's Rendering thread.
 pub(crate) fn on_owner_thread() -> bool {
-    stage_thread().is_some_and(|thread| std::thread::current().id() == thread.id)
+    std::thread::current().id() == stage_thread().id
 }
 
 /// Tells TSan about the ordering a reply from the render owner gave the calling thread.
 pub(crate) fn acquire_owner() {
-    if let Some(thread) = stage_thread() {
-        tsan::acquire(thread);
-    }
+    tsan::acquire(stage_thread());
 }
 
 /// The next message of the stage thread's own loop: the oldest deferred one, or the next to arrive.
@@ -1541,9 +1384,7 @@ fn next_incoming() -> Option<StageMessage> {
 /// it defers about that document, for its own loop (see [`crate::render_owner::between_units`]). Answers whether
 /// the main thread recalled the update meanwhile, to take its frame back where it is.
 pub(crate) fn serve_messages_between_units(document: crate::render_owner::DocumentId) -> bool {
-    let Some(thread) = stage_thread() else {
-        return false;
-    };
+    let thread = stage_thread();
     let mut recalled = RECALLED_WHILE_HELD.with(|recalled| recalled.replace(false));
     while let Some(message) =
         INCOMING.with(|incoming| incoming.borrow().as_ref().and_then(|incoming| incoming.try_recv().ok()))
@@ -1600,45 +1441,33 @@ pub(crate) fn acting_thread() -> ThreadId {
         .unwrap_or_else(|| std::thread::current().id())
 }
 
-fn stage_thread() -> Option<&'static StageThread> {
-    static STAGE_THREAD: OnceLock<Option<StageThread>> = OnceLock::new();
-    STAGE_THREAD
-        .get_or_init(|| stage_thread_mode().map(|_| StageThread::spawn("Rendering")))
-        .as_ref()
+/// The Rendering thread, which the render owner runs on.
+fn stage_thread() -> &'static StageThread {
+    static STAGE_THREAD: OnceLock<StageThread> = OnceLock::new();
+    STAGE_THREAD.get_or_init(|| StageThread::spawn("Rendering"))
 }
 
-static PAINT_LANE: OnceLock<Option<StageThread>> = OnceLock::new();
+static PAINT_LANE: OnceLock<StageThread> = OnceLock::new();
 
 /// The thread that runs the stages a frame submits for a document without reaching its arena: its
 /// display list recordings, which record a frame the document published, and the presentations
-/// that publish them from their tickets (unless LIBWEB_PAINT_LANE=0). Nothing the Rendering thread
-/// runs for the main thread, such as a style or layout pass the main thread waits for, queues
-/// behind them.
-fn paint_lane() -> Option<&'static StageThread> {
-    PAINT_LANE
-        .get_or_init(|| {
-            let enabled = std::env::var_os("LIBWEB_PAINT_LANE").is_none_or(|value| value != "0");
-            stage_thread_mode()
-                .filter(|_| enabled)
-                .map(|_| StageThread::spawn("Painting"))
-        })
-        .as_ref()
+/// that publish them from their tickets. Nothing the Rendering thread runs for the main thread,
+/// such as a style or layout pass the main thread waits for, queues behind them.
+fn paint_lane() -> &'static StageThread {
+    PAINT_LANE.get_or_init(|| StageThread::spawn("Painting"))
 }
 
 /// Tells TSan about the ordering waiting for the frame's stages gave the calling thread: with every
 /// thread that runs them.
 fn acquire_stage_threads() {
-    if let Some(thread) = stage_thread() {
-        tsan::acquire(thread);
-    }
-    if let Some(lane) = PAINT_LANE.get().and_then(Option::as_ref) {
+    tsan::acquire(stage_thread());
+    if let Some(lane) = PAINT_LANE.get() {
         tsan::acquire(lane);
     }
 }
 
-/// Runs `stage` on the stage thread if there is one, and returns its result once it has finished;
-/// the calling thread waits meanwhile. Without a stage thread, or when called from the stage thread
-/// itself, `stage` runs right here.
+/// Runs `stage` on the stage thread, and returns its result once it has finished; the calling
+/// thread waits meanwhile. When called from the stage thread itself, `stage` runs right here.
 ///
 /// A panic in `stage` continues on the calling thread, as it would have if `stage` had run there;
 /// a build that aborts on panic aborts on the stage thread instead.
@@ -1647,11 +1476,8 @@ fn acquire_stage_threads() {
 /// as for a scoped thread. A stage that has to take along a value the compiler cannot check names
 /// it with [`CallerWaits`].
 pub(crate) fn run_stage<R: Send>(stage: impl FnOnce() -> R + Send) -> R {
-    match stage_thread() {
-        // SAFETY: The stage is `Send`.
-        Some(thread) => unsafe { run_stage_on(thread, stage) },
-        None => stage(),
-    }
+    // SAFETY: The stage is `Send`.
+    unsafe { run_stage_on(stage_thread(), stage) }
 }
 
 /// A value a submitted stage owns although the compiler cannot check that it may cross threads.
@@ -1709,8 +1535,8 @@ unsafe fn run_stage_on<R: Send>(thread: &'static StageThread, stage: impl FnOnce
         return stage();
     }
     // This stage would queue behind the submitted ones, and a run a test holds there stays held, so
-    // the stage runs right here instead, as it does without a stage thread. It reaches nothing a
-    // submitted stage owns, and a wait for the held run in it lets that run go on as anywhere.
+    // the stage runs right here instead. It reaches nothing a submitted stage owns, and a wait for
+    // the held run in it lets that run go on as anywhere.
     if has_frame_in_flight() && stage_thread_holds_run_for_queued_stage() {
         return stage();
     }
@@ -1771,37 +1597,29 @@ impl<R> OwnerReplyTo<R> {
 /// Whether a thread that waits for the owner now does the owner's work itself: the owner holds a run for a test, which
 /// what the thread would wait for queues behind.
 pub(crate) fn owner_work_runs_here() -> bool {
-    stage_thread().is_some_and(|thread| std::thread::current().id() != thread.id)
-        && has_frame_in_flight()
-        && stage_thread_holds_run_for_queued_stage()
+    !on_owner_thread() && has_frame_in_flight() && stage_thread_holds_run_for_queued_stage()
 }
 
 /// Sends the render owner the message `message` makes of where it answers, and waits for the answer. The owner joins
-/// the calling thread for nothing: the thread only waits. Where there is no owner to send it to (no Rendering thread,
-/// or the calling thread is it), or the message would queue behind a run a test holds, `here` answers right here, as
-/// the owner.
+/// the calling thread for nothing: the thread only waits. Where the calling thread is the owner, or the message would
+/// queue behind a run a test holds, `here` answers right here, as the owner.
 pub(crate) fn wait_for_owner<R>(
     message: impl FnOnce(OwnerReplyTo<R>) -> crate::render_owner::ToOwner,
     here: impl FnOnce(&crate::render_owner::Owner) -> R,
 ) -> std::thread::Result<R> {
-    let Some(thread) = stage_thread().filter(|thread| std::thread::current().id() != thread.id) else {
-        return Ok(crate::render_owner::do_owner_work_here(here));
-    };
-    if has_frame_in_flight() && stage_thread_holds_run_for_queued_stage() {
+    if on_owner_thread() || (has_frame_in_flight() && stage_thread_holds_run_for_queued_stage()) {
         return Ok(crate::render_owner::do_owner_work_here(here));
     }
-    send_and_wait(thread, message)
+    send_and_wait(stage_thread(), message)
 }
 
 /// Sends the render owner, which is not the calling thread, the message `message` makes of where it answers, and waits
 /// for the answer, as [`wait_for_owner`] does, for what only the owner runs: the owner serves it between the units of
-/// whatever it runs, a run a test holds included. Answers `None` where there is no owner thread to send it to, or the
-/// calling thread is it.
+/// whatever it runs, a run a test holds included. Answers `None` where the calling thread is the owner.
 pub(crate) fn wait_for_owner_thread<R>(
     message: impl FnOnce(OwnerReplyTo<R>) -> crate::render_owner::ToOwner,
 ) -> Option<std::thread::Result<R>> {
-    let thread = stage_thread().filter(|thread| std::thread::current().id() != thread.id)?;
-    Some(send_and_wait(thread, message))
+    (!on_owner_thread()).then(|| send_and_wait(stage_thread(), message))
 }
 
 fn send_and_wait<R>(

@@ -272,8 +272,8 @@ pub struct FfiLayoutUpdateInputs {
     pub reason_is_inspect_devtools_layout_data: bool,
     /// A document hosting template contents never needs layout.
     pub is_template_contents_document: bool,
-    /// Whether the update may submit its first full layout pass to run beside the document thread
-    /// (under `LIBWEB_STAGE_OVERLAP=layout`), rather than waiting for it.
+    /// Whether the update may submit its first full layout pass to run beside the document thread,
+    /// rather than waiting for it.
     pub may_submit_pass: bool,
     /// The first round's facts, which the document read once it had run the round's style ahead of
     /// the update.
@@ -1800,7 +1800,7 @@ unsafe fn update_layout(
         reason_is_inspect_devtools_layout_data: inputs.reason_is_inspect_devtools_layout_data,
         is_template_contents_document: inputs.is_template_contents_document,
     };
-    let submits_pass = may_submit_pass && crate::stage_thread::submits("layout");
+    let submits_pass = may_submit_pass && crate::stage_thread::submits();
     // SAFETY: Guaranteed by the caller.
     let document = unsafe { super::ArenaHandle::document_of(arena_handle) };
     // The owner answers the query the document thread asked about the update from the frame it runs.
@@ -1831,7 +1831,7 @@ unsafe fn go_on_from_driven_frame(
         submits_pass || matches!(driven, DrivenFrame::Ended(_)),
         "a frame that submits no pass ends on the document thread"
     );
-    let mut pass = match driven {
+    let pass = match driven {
         DrivenFrame::Ended(answer) => {
             if let Some(answer) = answer {
                 crate::render_owner::answered(answer);
@@ -1840,65 +1840,23 @@ unsafe fn go_on_from_driven_frame(
         }
         DrivenFrame::Pass(pass) => *pass,
     };
-    if crate::stage_thread::submits_flight() {
-        // The flight goes on to record the document once it has laid it out, if the document seals what
-        // that reads before it submits the flight, with the rest of the round's host steps done.
-        crate::painting::ffi::layout_arena_discard_sealed_flight_paint();
-        let Some(host_tables) = main_thread.host_tables() else {
-            debug_assert!(false, "layout node arena has no host tables");
-            // With nowhere to keep the flight for the document to seal, it goes unsealed: it lays the
-            // document out and records nothing.
-            // SAFETY: Guaranteed by the caller.
-            unsafe { submit_flight(arena_handle, pass) };
-            return FfiLayoutUpdateOutcome::PassSubmitted;
-        };
-        let prepared = host_tables.prepared_flight.replace(Some(pass));
-        debug_assert!(
-            prepared.is_none(),
-            "a document submits the flight it prepared before another"
-        );
-        return FfiLayoutUpdateOutcome::FlightReady;
-    }
-    let take_back = pass.take_back();
-    // The pass reads the style engine through the arena, and takes the engine along.
-    // SAFETY: Guaranteed by the caller.
-    let style_engine = unsafe { super::HostTables::beside_frame(arena_handle) }.style_engine();
-    let (loan, settlement) = (!style_engine.is_null())
-        .then(|| {
-            style_engine.lend(
-                crate::css::style::engine_home::Holder::LayoutPass,
-                crate::css::style::engine_home::Owed::TakeBack,
-            )
-        })
-        .unzip();
-    // SAFETY: The frame reaches only the arena and its style engine, which the frame in flight owns
-    // until the document thread takes it back: every document-thread path to the arena and the tree
-    // update marks it holds joins the frame first, and the engine goes with the pass.
-    unsafe {
-        crate::stage_thread::submit_stage_with_take_back(
-            "layout",
-            arena_handle,
-            move || {
-                let mut loan = loan;
-                // A stage the document thread submitted outside a rendering update reaches the state it named,
-                // which the frame in flight owns until the document thread takes it back (as above).
-                pass.hand_state(crate::render_owner::do_owner_work_here(|owner| {
-                    ArenaHandle::held_by_waiting_thread(owner, pass.arena_handle as *mut c_void)
-                }));
-                let _ = match loan.as_mut() {
-                    Some(loan) => loan.lend_to_this_thread(|_| pass.run()),
-                    None => pass.run(),
-                };
-            },
-            move || {
-                if let Some(settlement) = settlement {
-                    settlement.settle();
-                }
-                take_back.finish();
-            },
-        );
-    }
-    FfiLayoutUpdateOutcome::PassSubmitted
+    // The flight goes on to record the document once it has laid it out, if the document seals what
+    // that reads before it submits the flight, with the rest of the round's host steps done.
+    crate::painting::ffi::layout_arena_discard_sealed_flight_paint();
+    let Some(host_tables) = main_thread.host_tables() else {
+        debug_assert!(false, "layout node arena has no host tables");
+        // With nowhere to keep the flight for the document to seal, it goes unsealed: it lays the
+        // document out and records nothing.
+        // SAFETY: Guaranteed by the caller.
+        unsafe { submit_flight(arena_handle, pass) };
+        return FfiLayoutUpdateOutcome::PassSubmitted;
+    };
+    let prepared = host_tables.prepared_flight.replace(Some(pass));
+    debug_assert!(
+        prepared.is_none(),
+        "a document submits the flight it prepared before another"
+    );
+    FfiLayoutUpdateOutcome::FlightReady
 }
 
 /// Submits the flight the document's layout update readied, once the document has sealed what its

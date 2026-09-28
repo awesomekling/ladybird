@@ -51,7 +51,7 @@
             await new Promise(resolve => window.addEventListener("load", resolve, { once: true }));
         await nextFrame();
 
-        // Under LIBWEB_STAGE_THREAD=overlap, the frame for the change below is held in flight while the insertions
+        // The frame for the change below is held in flight while the insertions
         // run beside it. In the other modes, nothing is held.
         internals.holdNextRecordingFrame();
         container.appendChild(buildSubtree("a", 1500));

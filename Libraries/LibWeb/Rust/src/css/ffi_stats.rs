@@ -176,8 +176,7 @@ thread_local! {
 // The complete style updates of the document thread. A fly-string reference dropped anywhere
 // inside one, on the document thread or in a stage run on the stage thread, reaches this through
 // `release_utf16_fly_string`, which a drop calls with no engine or update at hand. So it is
-// process-wide rather than per thread; stage runs are lockstep and a process has one document
-// thread, so the lock is uncontended.
+// process-wide rather than per thread, behind a lock.
 static COMPLETE_STYLE_UPDATE_STATE: Mutex<CompleteStyleUpdateState> = Mutex::new(CompleteStyleUpdateState::new());
 
 fn complete_style_update_state() -> std::sync::MutexGuard<'static, CompleteStyleUpdateState> {

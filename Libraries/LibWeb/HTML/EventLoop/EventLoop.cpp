@@ -741,8 +741,7 @@ void EventLoop::update_the_rendering()
     auto frames_submitted_before_update = m_rendering_scheduler_counters.frames_submitted;
     ++m_rendering_scheduler_counters.updates_run;
     bool frame_in_flight = false;
-    m_rendering_update_may_overlap_layout = false;
-    m_rendering_update_may_overlap_style = false;
+    m_rendering_update_may_overlap = false;
     ScopeGuard const guard = [this, &frame_in_flight, update_start_nanoseconds, frames_submitted_before_update] {
         // The main half ends here, with the submission of the frame if there is one.
         m_rendering_scheduler_counters.main_half_nanoseconds += MonotonicTime::now().nanoseconds() - update_start_nanoseconds;
@@ -886,12 +885,9 @@ void EventLoop::update_the_rendering()
     // does before the layout pass can change the decision anymore.
     // NB: The style pass is submitted under the same conditions as the layout pass: a task that runs beside it runs
     //     before the step 16 it belongs to.
-    bool const submits_layout = Layout::RustFFI::rust_stage_thread_submits_layout();
-    bool const submits_style = Layout::RustFFI::rust_stage_thread_submits_style();
-    if (submits_layout || submits_style) {
+    if (Layout::RustFFI::rust_stage_thread_submits()) {
         auto blocker = layout_overlap_blocker_for_rendering_update(docs);
-        m_rendering_update_may_overlap_layout = submits_layout && !blocker.has_value();
-        m_rendering_update_may_overlap_style = submits_style && !blocker.has_value();
+        m_rendering_update_may_overlap = !blocker.has_value();
         if (blocker.has_value())
             ++m_rendering_scheduler_counters.layout_overlap_blocked_updates[to_underlying(*blocker)];
         else
@@ -907,7 +903,7 @@ void EventLoop::update_the_rendering()
 
     // Each leased document's tick samples the effects step 11 left to its lease, beside the
     // main thread, and the rendering update goes on at step 16 once every document has adopted its tick.
-    if (m_frame_scheduler->tick_clock_leases(documents, 0, frame_timestamp, m_rendering_update_may_overlap_layout)) {
+    if (m_frame_scheduler->tick_clock_leases(documents, 0, frame_timestamp, m_rendering_update_may_overlap)) {
         frame_in_flight = true;
         return;
     }
@@ -955,11 +951,11 @@ bool EventLoop::run_rendering_update_from_step_16(Vector<GC::Ref<DOM::Document>>
         // What was taken back belongs to the document the rendering update went on at: every document after it
         // submits its own passes, as the first did (a child document, such as an app's iframe, included).
         auto document_submission = document_index == first_document_index ? layout_submission : LayoutSubmission::MaySubmit;
-        if (document_submission == LayoutSubmission::MaySubmit && m_rendering_update_may_overlap_style && document->submit_style_for_rendering_update()) {
+        if (document_submission == LayoutSubmission::MaySubmit && m_rendering_update_may_overlap && document->submit_style_for_rendering_update()) {
             m_frame_scheduler->submit_document_pass(docs, document_index, frame_timestamp);
             return true;
         }
-        if (document_submission != LayoutSubmission::Wait && m_rendering_update_may_overlap_layout && document->submit_layout_for_rendering_update()) {
+        if (document_submission != LayoutSubmission::Wait && m_rendering_update_may_overlap && document->submit_layout_for_rendering_update()) {
             m_frame_scheduler->submit_document_pass(docs, document_index, frame_timestamp);
             return true;
         }

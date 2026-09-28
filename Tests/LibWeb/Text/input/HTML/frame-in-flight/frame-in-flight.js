@@ -1,17 +1,16 @@
-// Deterministic holds on the frame in flight (LIBWEB_STAGE_THREAD=overlap).
+// Deterministic holds on the frame in flight.
 //
 // whileFrameInFlight(point, mutate, during) runs `mutate` in a rAF callback, so the rendering update paints, and holds
 // the recording that update submits at `point` ("before-run", "mid-recording" or "before-completion"). `during`
 // then runs in a task while that frame is held there, and gets { armed, heldAt, state }. With `doc`, only that
 // document's recording is held (a main-thread wait for that recording, such as its document's layout update, lets it
-// go on; the layout update of a document painted after it runs beside it). Where frames are not
-// submitted (default and lockstep modes), nothing is armed and `during` runs after the rendering update: a test prints
-// the same output in every mode, and checks the in-flight facts only when `armed` is set.
+// go on; the layout update of a document painted after it runs beside it). A document without a layout arena arms
+// nothing, and `during` then runs after the rendering update.
 // It starts once the document has loaded: the load task lays the document out, which waits for the frame in flight.
-// Where the rendering update submits its layout pass too (LIBWEB_STAGE_OVERLAP naming "layout"), the frame is in
-// flight twice: the recording is submitted only once the main thread has taken the layout pass back between tasks and
-// gone on with the rendering update, so `during` waits for that first. So it does where a flight that could have
-// recorded ended before it did: the rendering update records once it has taken that flight back.
+// Where the rendering update submits its layout pass first, the frame is in flight twice: the recording is submitted
+// only once the main thread has taken the layout pass back between tasks and gone on with the rendering update, so
+// `during` waits for that first. So it does where a flight that could have recorded ended before it did: the
+// rendering update records once it has taken that flight back.
 async function whileFrameInFlight(point, mutate, during, doc = null) {
     if (document.readyState !== "complete")
         await new Promise(resolve => window.addEventListener("load", resolve, { once: true }));
@@ -32,8 +31,7 @@ async function whileFrameInFlight(point, mutate, during, doc = null) {
                         }
                         heldAt = internals.waitForHeldFrame();
                         // A flight that could have recorded can end before it does while this waits.
-                        if (heldAt || !internals.heldFrameAwaitsSubmission())
-                            break;
+                        if (heldAt || !internals.heldFrameAwaitsSubmission()) break;
                     }
                     const frame = { armed, heldAt, state: internals.frameSchedulerState() };
                     const result = await during(frame);
@@ -52,18 +50,16 @@ async function whileFrameInFlight(point, mutate, during, doc = null) {
 
 let layoutHoldsHeld = 0;
 
-// Where the rendering update submits its layout pass, whether whileLayoutInFlight held as many layout passes as
-// `count`, so that a test checks it is not vacuous in every mode (true wherever none is submitted).
+// Whether whileLayoutInFlight held as many layout passes as `count`, so that a test checks it is not vacuous.
 function layoutHoldsWereHeld(count) {
-    return !internals.submitsLayoutPass() || layoutHoldsHeld === count;
+    return layoutHoldsHeld === count;
 }
 
-// whileLayoutInFlight(point, mutate, during) is whileFrameInFlight for the full layout pass a rendering update submits
-// under LIBWEB_STAGE_OVERLAP=layout, held at `point` ("before-run" or "before-completion"): `mutate` runs in a rAF
-// callback and has to leave layout to do, and `during` runs in a task while that pass is held. With `doc`, only that
-// document's pass is held. `during` gets { heldAt, state }: heldAt is "" wherever no layout pass was submitted (every
-// mode that does not submit one, and a rendering update that lays out in place), and `during` then runs after the
-// rendering update. A test prints the same output in every mode, and checks the in-flight facts only when heldAt is set.
+// whileLayoutInFlight(point, mutate, during) is whileFrameInFlight for the full layout pass a rendering update submits,
+// held at `point` ("before-run" or "before-completion"): `mutate` runs in a rAF callback and has to leave layout to do,
+// and `during` runs in a task while that pass is held. With `doc`, only that document's pass is held. `during` gets
+// { heldAt, state }: heldAt is "" where no layout pass was submitted (a rendering update that lays out in place), and
+// `during` then runs after the rendering update. A test checks the in-flight facts only when heldAt is set.
 async function whileLayoutInFlight(point, mutate, during, doc = null) {
     if (document.readyState !== "complete")
         await new Promise(resolve => window.addEventListener("load", resolve, { once: true }));
@@ -88,8 +84,7 @@ async function whileLayoutInFlight(point, mutate, during, doc = null) {
                         // Returns "" at once if no layout pass was submitted.
                         heldAt = internals.waitForHeldFrame();
                         // A flight that could have laid out can end before it does while this waits.
-                        if (heldAt || !internals.heldFrameAwaitsSubmission())
-                            break;
+                        if (heldAt || !internals.heldFrameAwaitsSubmission()) break;
                     }
                     if (heldAt) layoutHoldsHeld++;
                     const frame = { heldAt, state: internals.frameSchedulerState() };
@@ -107,12 +102,11 @@ async function whileLayoutInFlight(point, mutate, during, doc = null) {
     });
 }
 
-// whileStyleInFlight(point, mutate, during) is whileLayoutInFlight for the first style pass a rendering update submits
-// under LIBWEB_STAGE_OVERLAP naming "style", held at `point` ("before-run" or "before-completion"): `mutate` runs in a
-// rAF callback and has to leave style to do, and `during` runs in a task while that pass is held. With `doc`, only that
-// document's pass is held. `during` gets { heldAt, state }: heldAt is "" wherever no style pass was submitted, and
-// `during` then runs after the rendering update. A test prints the same output in every mode, and checks the in-flight
-// facts only when heldAt is set (styleHeldAsArmed).
+// whileStyleInFlight(point, mutate, during) is whileLayoutInFlight for the first style pass a rendering update submits,
+// held at `point` ("before-run" or "before-completion"): `mutate` runs in a rAF callback and has to leave style to do,
+// and `during` runs in a task while that pass is held. With `doc`, only that document's pass is held. `during` gets
+// { heldAt, state }: heldAt is "" where no style pass was submitted, and `during` then runs after the rendering update.
+// A test checks the in-flight facts only when heldAt is set (styleHeldAsArmed).
 async function whileStyleInFlight(point, mutate, during, doc = null) {
     if (document.readyState !== "complete")
         await new Promise(resolve => window.addEventListener("load", resolve, { once: true }));
@@ -160,7 +154,7 @@ function layoutHeldAsArmed(frame, point) {
     return !frame.heldAt || (frame.heldAt === point && frame.state === "in-flight");
 }
 
-// Whether the frame was held where it was armed and was in flight while it was (true in every mode that did not arm).
+// Whether the frame was held where it was armed and was in flight while it was (true where nothing was armed).
 function heldAsArmed(frame, point) {
     return !frame.armed || (frame.heldAt === point && frame.state === "in-flight");
 }

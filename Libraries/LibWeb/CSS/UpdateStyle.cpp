@@ -1195,8 +1195,8 @@ static void restore_unsettled_row_debts(DOM::Document& document, ReadonlySpan<St
     drain.apply(document);
 }
 
-// A style update of a document. Its first transaction's pass can run beside the main thread
-// (LIBWEB_STAGE_OVERLAP=style): the update then lives on the heap between begin() and finish(), and
+// A style update of a document. Its first transaction's pass can run beside the main thread: the
+// update then lives on the heap between begin() and finish(), and
 // every scope it holds open stays open while the pass is in flight.
 class StyleUpdate {
     AK_ALLOC_WITH_KMALLOC;

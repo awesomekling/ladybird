@@ -15,7 +15,7 @@
 
 namespace Web::HTML {
 
-// The completion of a frame that ran beside the document thread (LIBWEB_STAGE_THREAD=overlap). The thread that
+// The completion of a frame that ran beside the document thread. The thread that
 // finishes the frame posts it; the thread that registered receives it through its own Core event loop, which runs
 // the delivery steps no matter whether the page is visible, idle or waiting for a rendering opportunity.
 //

@@ -450,7 +450,7 @@ public:
     // installs the batch ends that render half once it has installed it.
     [[nodiscard]] bool take_owner_applied_render_half() { return exchange(m_owner_applied_render_half, false); }
     // Takes pending inputs as take_style_transaction() does, and hands the transaction's pass to the render side
-    // instead of waiting for it (LIBWEB_STAGE_OVERLAP=style). Until the frame in flight is taken back, the pass owns
+    // instead of waiting for it. Until the frame in flight is taken back, the pass owns
     // the engine, and every engine entrance joins the frame first. The document's layout arena stays the main
     // thread's.
     void submit_style_transaction(StyleNodeID root);

@@ -167,8 +167,6 @@ RENDER_STAGE_ALLOWED = {
             "stage_thread.rs:THREAD",
             "stage_thread.rs:WAITING_CALLER",
             "stage_thread.rs:INCOMING",
-            "stage_thread.rs:MODE",
-            "stage_thread.rs:STAGES",
             "stage_thread.rs:FRAME_SCHEDULER_HOST",
             "stage_thread.rs:THREAD_SETUP",
             "stage_thread.rs:STAGE_HOLD",

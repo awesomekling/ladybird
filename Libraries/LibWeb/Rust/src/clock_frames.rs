@@ -557,13 +557,6 @@ pub(crate) fn document_destroyed(document: DocumentId) {
 // The ticks the host adopted that installed a sample.
 static CLOCK_TICKS_PRESENTED: AtomicU64 = AtomicU64::new(0);
 
-/// Whether a rendering update may submit a clock tick: the stage thread runs the `clock` stage beside the main
-/// thread.
-#[unsafe(no_mangle)]
-pub extern "C" fn rust_stage_thread_submits_clock() -> bool {
-    crate::stage_thread::submits("clock")
-}
-
 /// Starts the clock of the document whose layout arena is `arena`, in place of the one it had: it
 /// ticks the document timeline, which the style engine knows as `timeline_identity`, reading zero
 /// at `timeline_zero` and now at `time`, until `deadline` (timeline times, ms). The render clock
@@ -794,7 +787,7 @@ pub unsafe extern "C" fn rust_document_clock_submit_tick(
     arena: *mut c_void,
     time: f64,
 ) -> bool {
-    if !rust_stage_thread_submits_clock() {
+    if !crate::stage_thread::submits() {
         return false;
     }
     let Some(published) = publication_of(arena) else {
@@ -1474,14 +1467,10 @@ pub extern "C" fn rust_render_clock_set_needs_main(needs_main: extern "C" fn(u64
     let _ = NEEDS_MAIN.set(needs_main);
 }
 
-/// A render clock's way to the owner, or null where there is no owner beside the main thread to tick
-/// clocks on (the stages do not overlap). The render clock thread owns it, and destroys it with
+/// A render clock's way to the owner. The render clock thread owns it, and destroys it with
 /// [`rust_render_clock_sender_destroy`].
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_render_clock_sender_create() -> *mut ClockSender {
-    if !crate::stage_thread::owner_runs_beside_main() {
-        return std::ptr::null_mut();
-    }
     Box::into_raw(Box::new(ClockSender { slots: HashMap::new() }))
 }
 

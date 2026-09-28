@@ -1097,18 +1097,7 @@ pub(crate) fn document_with_clock_at(context: u64) -> Option<DocumentId> {
 /// Sends `message` to the owner: to the Rendering thread, or handled right here where there is none.
 pub(crate) fn send(message: ToOwner) {
     if let Err(message) = crate::stage_thread::send_to_owner(message) {
-        let changes_of = match &message {
-            ToOwner::Changes { document, .. } => Some(*document),
-            _ => None,
-        };
         handle(message);
-        // Without a Rendering thread, the thread that sends a change is the owner, and runs nothing beside it: the
-        // change applies to the arena as it is sent.
-        if let Some(document) = changes_of.filter(|_| !crate::stage_thread::has_owner_thread()) {
-            with_state(document, |state| {
-                state.apply_changes(EngineReach::Owner(&Owner::here()));
-            });
-        }
     }
 }
 
@@ -1271,8 +1260,7 @@ pub(crate) unsafe fn ask_about(arena: *mut c_void, query: Query) -> Answer {
 
 /// Asks the owner the engine query `query` about `document` and waits for the answer, as of every change the calling
 /// thread sent before. Only the owner answers it: a run a test holds serves it between the run's units. The thread that
-/// holds the document's render state (the owner, or without a Rendering thread the thread its messages are handled on)
-/// answers it right here.
+/// holds the document's render state (the owner) answers it right here.
 pub(crate) fn ask_engine(document: DocumentId, query: Query) -> Answer {
     if let Some(answer) = STATES.with_borrow_mut(|states| {
         states
@@ -1413,9 +1401,8 @@ pub extern "C" fn render_owner_generated_content_accessible_text(
 
 /// Runs the style transaction `transaction` of `document`, which the calling document thread takes, on the owner, and
 /// waits for its answers. The owner serves it between the units of whatever it runs. Where the calling thread holds
-/// the document's render state, it is the owner (a process with no Rendering thread handles the owner's messages where
-/// they are sent, and a unit the owner runs may take a transaction), and runs the transaction as the owner does one it
-/// is sent.
+/// the document's render state, it is the owner (a unit the owner runs may take a transaction), and runs the
+/// transaction as the owner does one it is sent.
 pub(crate) fn run_style_transaction(
     document: DocumentId,
     transaction: crate::css::style::bridge::OwnerStyleTransaction,

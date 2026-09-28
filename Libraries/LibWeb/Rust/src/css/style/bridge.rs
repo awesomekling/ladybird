@@ -39,7 +39,7 @@ use super::cascade::CascadeOperator;
 use super::compiler::ImplicitScopeRoot;
 use super::compiler::NamespaceScope;
 use super::compiler::ScopeChain;
-use super::engine_home::{Holder, Owed, PendingFacts, StyleEngineLoan};
+use super::engine_home::{PendingFacts, StyleEngineLoan};
 use super::index::FeatureValue;
 use super::index::LocalFeatureKey;
 use super::index::StyleAtomID;
@@ -7137,26 +7137,8 @@ pub unsafe extern "C" fn style_engine_submit_style_transaction(
     let install_feedback = unsafe { install_feedback.borrow() };
     // SAFETY: Guaranteed by the caller.
     let pass = unsafe { prepare_style_pass(engine, root, computation_inputs, layout_arena, input, install_feedback) };
-    let engine = engine.home();
-    if crate::stage_thread::submits_flight() {
-        // SAFETY: As above.
-        unsafe { crate::flight::submit(layout_arena, crate::flight::Flight::from_style_pass(layout_arena, pass)) };
-        return;
-    }
-    // The pass takes the engine along, and sends it home once it has run.
-    let (loan, settlement) = engine.lend(Holder::StylePass, Owed::TakeBack);
     // SAFETY: As above.
-    unsafe {
-        crate::stage_thread::submit_stage_with_take_back(
-            "style",
-            layout_arena,
-            move || {
-                let mut loan = loan;
-                pass.run(&mut loan);
-            },
-            move || settlement.settle(),
-        );
-    }
+    unsafe { crate::flight::submit(layout_arena, crate::flight::Flight::from_style_pass(layout_arena, pass)) };
 }
 
 /// A style pass the main thread has prepared to run beside it, with what it takes along from the

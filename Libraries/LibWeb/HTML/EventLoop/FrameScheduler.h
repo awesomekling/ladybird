@@ -69,8 +69,7 @@ public:
             Layout,
             // A clock lease's tick, which goes on at step 16 for every document.
             Clock,
-            // A flight (LIBWEB_STAGE_OVERLAP naming flight): the style pass and the stages after it, up to the first
-            // one that needs the main thread. The rendering update goes on where the flight ended.
+            // A flight: the style pass and the stages after it, up to the first one that needs the main thread. The rendering update goes on where the flight ended.
             Flight,
         };
         Kind kind { Kind::Layout };
@@ -87,7 +86,7 @@ public:
     Optional<SubmittedPass> submitted_pass;
 };
 
-// Runs the rendering update's frame beside the main thread under LIBWEB_STAGE_THREAD=overlap. One rendering update is
+// Runs the rendering update's frame beside the main thread. One rendering update is
 // a main half (every step of it but the recording, on the main thread), one frame (the recording, on the render side),
 // a consume-commit that takes the frame in (publishes each recording, then builds and hands off its compositor frame,
 // and runs no script) and a tail (the screenshots of the frame and the end of the rendering update). At most one frame

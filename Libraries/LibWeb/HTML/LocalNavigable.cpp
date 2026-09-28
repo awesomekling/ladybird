@@ -6950,7 +6950,7 @@ static void present_from_frame_in_flight(void* context)
 bool LocalNavigable::submit_presentation(PendingCompositorFrame& pending_frame)
 {
     auto presentation = pending_frame.presentation;
-    if (!presentation || !Layout::RustFFI::rust_stage_thread_submits_presentation() || !has_compositor_context())
+    if (!presentation || !Layout::RustFFI::rust_stage_thread_submits() || !has_compositor_context())
         return false;
     // The frame in flight presents what it records, from the recording's ticket. A recording the main thread waited
     // for, or one it took in already, is finished by consume-commit, and so is every frame of the ticket after it.
@@ -7222,7 +7222,7 @@ bool LocalNavigable::seal_flight_paint_now(DOM::Document& document, bool may_pre
             && (!is_top_level_traversable() || page().keyboard_scroll_state_is_current(m_keyboard_scroll_state_of_last_frame->generation));
     };
     OwnPtr<FlightPresentation> flight_presentation;
-    if (may_present && Layout::RustFFI::rust_stage_thread_submits_presentation() && keyboard_scroll_state_of_last_frame_is_current()) {
+    if (may_present && Layout::RustFFI::rust_stage_thread_submits() && keyboard_scroll_state_of_last_frame_is_current()) {
         if (auto frame_sink = compositor_context().prepare_to_submit_frame_from_render_side()) {
             auto& document_paint_state = document.paint_state();
             Compositing::ScrollStateSnapshot scroll_state_snapshot { document_paint_state.scroll_state_snapshot() };

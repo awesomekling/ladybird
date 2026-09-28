@@ -20,7 +20,7 @@
         await nextFrame();
         await nextFrame();
 
-        // Under LIBWEB_STAGE_THREAD=overlap, the recording this style change needs is submitted to the render side and
+        // The recording this style change needs is submitted to the render side and
         // held there. The child document is not rendered, so the frame does not hold it. The task below changes the
         // child's tree beside the frame and lays the child out, and the child's style update lays out this document
         // first, which the frame in flight holds. In the other modes, the task runs after the rendering update.

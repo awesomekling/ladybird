@@ -99,8 +99,8 @@ public:
 
         // What the frames of the rendering updates cost the main thread, and what ran beside them. A frame is
         // "submitted" when it leaves main to run on its own and "consumed" when main takes its result back; one that
-        // runs while main waits for it is "lockstep". The frame scheduler submits a rendering update's frame under
-        // LIBWEB_STAGE_THREAD=overlap; every other rendering update is a lockstep frame.
+        // runs while main waits for it is "lockstep". A rendering update whose frame the frame scheduler does not submit
+        // is a lockstep frame.
         u64 frames_submitted { 0 };
         u64 frames_consumed { 0 };
         Array<u64, to_underlying(FrameLockstepReason::Count)> frames_lockstep {};
@@ -191,7 +191,6 @@ public:
 
     // Whether the layout of the running rendering update may run beside the main thread, decided once all of its
     // animation frame callbacks and their microtasks have run (step 14).
-    bool rendering_update_may_overlap_layout() const { return m_rendering_update_may_overlap_layout; }
     // What keeps the layout of a rendering update over docs in place, if anything. The whole rendering update decides
     // together: once one document's layout has been submitted, tasks run before every later document's step 16.
     [[nodiscard]] Optional<DOM::LayoutOverlapBlocker> layout_overlap_blocker_for_rendering_update(ReadonlySpan<GC::Root<DOM::Document>> docs) const;
@@ -238,8 +237,7 @@ public:
 
     bool running_rendering_task() const { return m_running_rendering_task; }
 
-    // Under LIBWEB_STAGE_THREAD=overlap, a frame finishes beside the document thread and is consumed at step 1 of the
-    // processing model. The consumer is called there whenever FrameCompletion::the() has a completion pending, or it
+    // A frame finishes beside the document thread and is consumed at step 1 of the processing model. The consumer is called there whenever FrameCompletion::the() has a completion pending, or it
     // asked to be called again, no matter whether any page is visible or has a rendering opportunity. Setting it
     // registers this event loop for completions, so one posted earlier is delivered now.
     void set_finished_frame_consumer(GC::Ptr<GC::Function<void()>>);
@@ -365,8 +363,7 @@ private:
 
     bool m_running_rendering_task { false };
     bool m_running_synchronous_rendering_update { false };
-    bool m_rendering_update_may_overlap_layout { false };
-    bool m_rendering_update_may_overlap_style { false };
+    bool m_rendering_update_may_overlap { false };
     bool m_rendering_task_queued { false };
     // The queued rendering task ran while the previous rendering update's frame was in flight and held its rendering
     // opportunity: it counts as queued, and is queued again once that frame has been taken in.
