@@ -2668,11 +2668,9 @@ String Internals::viewport_overflow_x()
 {
     auto& document = window().associated_document();
     document.update_layout(DOM::UpdateLayoutReason::Debugging);
-    auto viewport_slot = bound_slot_of(document);
-    VERIFY(is_valid_slot(viewport_slot));
-    CSS::ComputedStyleRecordView viewport_style { CSS::PublishedStyleRecord::adopt(Layout::RustFFI::layout_arena_node_published_style_record(Layout::document_layout_arena(document), viewport_slot)) };
-    auto overflow = viewport_style->overflow_x();
-    switch (overflow) {
+    auto const* box_values = Painting::BoxSlot::viewport_of(document).style_group<CSS::ComputedValues::BoxValues>();
+    VERIFY(box_values);
+    switch (static_cast<CSS::Overflow>(box_values->overflow_x)) {
     case CSS::Overflow::Auto:
         return "auto"_string;
     case CSS::Overflow::Clip:
