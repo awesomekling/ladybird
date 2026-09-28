@@ -999,10 +999,8 @@ impl StyleQuery {
                 StyleAnswer::None
             }
             Self::Compile(compilation) => {
-                // The walk reaches the engine through the publication's handle, which names this one.
-                let _ = engine;
                 // SAFETY: The main thread waits for the answer, keeping what the walk points at live.
-                unsafe { compilation.run() };
+                unsafe { compilation.run(engine) };
                 StyleAnswer::None
             }
             Self::TakeContainerEffects { node } => StyleAnswer::ContainerEffects(unsafe {

@@ -14,7 +14,7 @@ use std::ffi::c_void;
 use std::rc::Rc;
 
 mod publication;
-use publication::{NativeCompilationResult, NativeStylePublication, SelectorInputs};
+use publication::{NativeCompilationResult, NativeStylePublication, Publication, SelectorInputs};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -110,7 +110,7 @@ impl CompilationContext {
         source: *const c_void,
         environment: MediaEnvironment<'_>,
         callbacks: &NativeCompilationCallbacks,
-        publication: Option<&NativeStylePublication>,
+        publishing: bool,
         matching: Option<Rc<crate::css::selector_parser::RustParsedSelectorList>>,
     ) -> Self {
         let mut context = self.clone();
@@ -132,7 +132,7 @@ impl CompilationContext {
                 implicit_root,
             });
         }
-        if publication.is_some() {
+        if publishing {
             context.selectors = unsafe { self.selectors.within(rule, matching, implicit_root) };
         }
         if let Some(container) = rule.container() {
@@ -164,18 +164,23 @@ unsafe fn visit_rule(
     context: &CompilationContext,
     environment: MediaEnvironment<'_>,
     callbacks: &NativeCompilationCallbacks,
-    publication: Option<&NativeStylePublication>,
+    mut publication: Option<&mut Publication<'_>>,
 ) {
-    let selectors = publication.and_then(|_| unsafe { context.selectors.matching_selectors(rule) });
+    let selectors = publication
+        .is_some()
+        .then(|| unsafe { context.selectors.matching_selectors(rule) })
+        .flatten();
     if context.purpose == NativeCompilationPurpose::Selectors
         && let Some(publication) = publication
     {
-        unsafe { publication.replace_selectors(rule, sheet, context, selectors.as_deref().unwrap()) };
+        publication.replace_selectors(rule, sheet, context, selectors.as_deref().unwrap());
         return;
     }
-    let result = publication.map_or_else(NativeCompilationResult::default, |publication| unsafe {
-        publication.compile(rule, sheet, context, selectors.as_deref())
-    });
+    let result = publication
+        .as_deref_mut()
+        .map_or_else(NativeCompilationResult::default, |publication| unsafe {
+            publication.compile(rule, sheet, context, selectors.as_deref())
+        });
     if !unsafe {
         (callbacks.visit_rule)(
             callbacks.context,
@@ -191,7 +196,8 @@ unsafe fn visit_rule(
     }
     if rule.rule_type() == NativeRuleType::Import {
         if let Some(imported) = sheet.imported_sheet(rule.identity()) {
-            let nested = unsafe { context.within(rule, source, environment, callbacks, publication, selectors) };
+            let nested =
+                unsafe { context.within(rule, source, environment, callbacks, publication.is_some(), selectors) };
             let imported_source =
                 unsafe { (callbacks.import_source)(callbacks.context, source, rule.identity(), &imported) };
             unsafe {
@@ -207,10 +213,18 @@ unsafe fn visit_rule(
             };
         }
     } else {
-        let nested = unsafe { context.within(rule, source, environment, callbacks, publication, selectors) };
+        let nested = unsafe { context.within(rule, source, environment, callbacks, publication.is_some(), selectors) };
         let _ = rule.visit_children(&mut |child| {
             unsafe {
-                visit_rule(child, sheet, source, &nested, environment, callbacks, publication);
+                visit_rule(
+                    child,
+                    sheet,
+                    source,
+                    &nested,
+                    environment,
+                    callbacks,
+                    publication.as_deref_mut(),
+                );
             }
             std::ops::ControlFlow::Continue(())
         });
@@ -224,11 +238,19 @@ unsafe fn visit_list(
     context: &CompilationContext,
     environment: MediaEnvironment<'_>,
     callbacks: &NativeCompilationCallbacks,
-    publication: Option<&NativeStylePublication>,
+    mut publication: Option<&mut Publication<'_>>,
 ) {
     let _ = list.visit_rules(&mut |rule| {
         unsafe {
-            visit_rule(rule, sheet, source, context, environment, callbacks, publication);
+            visit_rule(
+                rule,
+                sheet,
+                source,
+                context,
+                environment,
+                callbacks,
+                publication.as_deref_mut(),
+            );
         };
         std::ops::ControlFlow::Continue(())
     });
@@ -401,7 +423,7 @@ unsafe fn replace_selectors(
     source: *const c_void,
     environment: MediaEnvironment<'_>,
     callbacks: &NativeCompilationCallbacks,
-    publication: Option<&NativeStylePublication>,
+    mut publication: Option<&mut Publication<'_>>,
 ) {
     let mut path = Vec::new();
     if !find_rule_path(sheet.rules(), sheet, rule_identity, &mut path) {
@@ -421,7 +443,7 @@ unsafe fn replace_selectors(
                 target_source,
                 environment,
                 callbacks,
-                publication,
+                publication.is_some(),
                 None,
             )
         };
@@ -436,8 +458,10 @@ unsafe fn replace_selectors(
     let mut pending = vec![(target, context)];
     let mut affected = Vec::new();
     while let Some((rule, context)) = pending.pop() {
-        let selectors =
-            publication.and_then(|_| unsafe { context.selectors.matching_selectors(RuleRef::Materialized(&rule)) });
+        let selectors = publication
+            .is_some()
+            .then(|| unsafe { context.selectors.matching_selectors(RuleRef::Materialized(&rule)) })
+            .flatten();
         if has_compiled_children(RuleRef::Materialized(&rule))
             && let Some(children) = &rule.children
         {
@@ -447,7 +471,7 @@ unsafe fn replace_selectors(
                     target_source,
                     environment,
                     callbacks,
-                    publication,
+                    publication.is_some(),
                     selectors.clone(),
                 )
             };
@@ -467,7 +491,7 @@ unsafe fn replace_selectors(
         }
     }
     for (rule, context, selectors) in affected {
-        let Some(publication) = publication else {
+        let Some(publication) = publication.as_deref_mut() else {
             // Whether the engine holds the rule is the owner's to know: the walk asks the host what compiling the
             // rule's subtree anew would.
             unsafe {
@@ -483,28 +507,26 @@ unsafe fn replace_selectors(
             }
             continue;
         };
-        let id =
-            unsafe { publication.engine.enter("rust_style_sheet_replace_selectors") }.native_rule_id(rule.identity);
-        if id.is_some() {
+        if publication.engine.native_rule_id(rule.identity).is_some() {
             debug_assert!(
                 selectors.is_some(),
                 "a walk with a publication binds each style rule's selectors"
             );
             if let Some(selectors) = &selectors {
-                unsafe {
-                    publication.replace_selectors(RuleRef::Materialized(&rule), target_sheet, &context, selectors);
-                };
+                publication.replace_selectors(RuleRef::Materialized(&rule), target_sheet, &context, selectors);
             }
             continue;
         }
         // A previously empty selector list may become matchable. Publish that newly active
         // subtree with its current conditions and source-order position.
-        let mut publication = *publication;
-        publication.before_rule = crate::css::rule::mutation::successor(sheet, rule.identity, |identity| {
-            unsafe { publication.engine.enter("rust_style_sheet_replace_selectors") }
-                .native_rule_id(identity)
-                .map_or(0, |id| id.0 + 1)
+        let before_rule = crate::css::rule::mutation::successor(sheet, rule.identity, |identity| {
+            publication.engine.native_rule_id(identity).map_or(0, |id| id.0 + 1)
         });
+        let mut publication = Publication {
+            engine: &mut *publication.engine,
+            sheet: publication.sheet,
+            before_rule,
+        };
         unsafe {
             visit_compilation(
                 sheet,
@@ -513,7 +535,7 @@ unsafe fn replace_selectors(
                 source,
                 environment,
                 callbacks,
-                Some(&publication),
+                Some(&mut publication),
             );
         }
     }
@@ -526,7 +548,7 @@ unsafe fn visit_compilation(
     source: *const c_void,
     environment: MediaEnvironment<'_>,
     callbacks: &NativeCompilationCallbacks,
-    publication: Option<&NativeStylePublication>,
+    mut publication: Option<&mut Publication<'_>>,
 ) {
     let context = CompilationContext {
         purpose,
@@ -558,7 +580,7 @@ unsafe fn visit_compilation(
         context: &CompilationContext,
         environment: MediaEnvironment<'_>,
         callbacks: &NativeCompilationCallbacks,
-        publication: Option<&NativeStylePublication>,
+        mut publication: Option<&mut Publication<'_>>,
     ) -> std::ops::ControlFlow<()> {
         if rule.identity() == identity {
             unsafe {
@@ -569,7 +591,7 @@ unsafe fn visit_compilation(
         if !has_compiled_children(rule) {
             return std::ops::ControlFlow::Continue(());
         }
-        let nested = unsafe { context.within(rule, source, environment, callbacks, publication, None) };
+        let nested = unsafe { context.within(rule, source, environment, callbacks, publication.is_some(), None) };
         if rule.rule_type() == NativeRuleType::Import {
             if let Some(imported) = sheet.imported_sheet(rule.identity()) {
                 let imported_source =
@@ -583,7 +605,7 @@ unsafe fn visit_compilation(
                         &nested,
                         environment,
                         callbacks,
-                        publication,
+                        publication.as_deref_mut(),
                     )
                 });
             }
@@ -598,7 +620,7 @@ unsafe fn visit_compilation(
                     &nested,
                     environment,
                     callbacks,
-                    publication,
+                    publication.as_deref_mut(),
                 )
             })
         }
@@ -612,7 +634,7 @@ unsafe fn visit_compilation(
             &context,
             environment,
             callbacks,
-            publication,
+            publication.as_deref_mut(),
         )
     });
 }
@@ -813,17 +835,22 @@ pub(crate) struct OwnerCompilation {
 }
 
 impl OwnerCompilation {
-    /// Walks the rules on the owner, which reaches the engine through the publication's handle.
+    /// Walks the rules on the owner, publishing into `engine`, the one it answers from.
     ///
     /// # Safety
     ///
-    /// On the owner, with the engine reached, while the main thread waits keeping what the walk points at live.
-    pub(crate) unsafe fn run(self) {
+    /// On the owner, while the main thread waits keeping what the walk points at live.
+    pub(crate) unsafe fn run(self, engine: &mut crate::css::style::StyleEngine) {
         // SAFETY: Guaranteed by the caller.
         let (sheet, answers) = unsafe { (&*self.sheet, &mut *self.answers) };
         let callbacks = answers.replaying();
         // SAFETY: As above.
         let environment = unsafe { self.environment.borrow() };
+        let mut publication = Publication {
+            engine,
+            sheet: self.publication.sheet,
+            before_rule: self.publication.before_rule,
+        };
         match self.purpose {
             NativeCompilationPurpose::Rules => unsafe {
                 visit_compilation(
@@ -833,7 +860,7 @@ impl OwnerCompilation {
                     self.source,
                     environment,
                     &callbacks,
-                    Some(&self.publication),
+                    Some(&mut publication),
                 );
             },
             NativeCompilationPurpose::Selectors => unsafe {
@@ -843,7 +870,7 @@ impl OwnerCompilation {
                     self.source,
                     environment,
                     &callbacks,
-                    Some(&self.publication),
+                    Some(&mut publication),
                 );
             },
         }

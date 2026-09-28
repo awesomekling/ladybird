@@ -131,15 +131,23 @@ impl SelectorInputs {
     }
 }
 
-impl NativeStylePublication {
-    pub(super) unsafe fn replace_selectors(
-        &self,
+/// Where a walk on the render owner publishes the rules it compiles: the engine the owner answers from, the sheet, and
+/// the rule they go before.
+pub(super) struct Publication<'e> {
+    pub(super) engine: &'e mut crate::css::style::StyleEngine,
+    pub(super) sheet: u32,
+    pub(super) before_rule: u32,
+}
+
+impl Publication<'_> {
+    pub(super) fn replace_selectors(
+        &mut self,
         rule: RuleRef<'_>,
         source: &NativeStyleSheet,
         context: &CompilationContext,
         selectors: &RustParsedSelectorList,
     ) {
-        let engine = unsafe { self.engine.enter("rust_style_sheet_replace_selectors") };
+        let engine = &mut *self.engine;
         let id = engine.native_rule_id(rule.identity()).map_or(0, |id| id.0 + 1);
         let namespaces = NamespaceScope::from_rule_list(source.rules(), |text| {
             crate::css::style::bridge::intern_native_text(engine, text)
@@ -149,16 +157,15 @@ impl NativeStylePublication {
     }
 
     pub(super) unsafe fn compile(
-        &self,
+        &mut self,
         rule: RuleRef<'_>,
         source: &NativeStyleSheet,
         context: &CompilationContext,
         selectors: Option<&RustParsedSelectorList>,
     ) -> NativeCompilationResult {
         let mut result = NativeCompilationResult::default();
-        let engine = unsafe { self.engine.enter("rust_style_sheet_compile") };
-        let sheet = self.sheet;
-        let before = self.before_rule;
+        let (sheet, before) = (self.sheet, self.before_rule);
+        let engine = &mut *self.engine;
         // Reuse the engine's recorded publication operations so recording and replay see the
         // same semantic inputs as incremental CSSOM edits.
         result.rule_id = match rule.rule_type() {
