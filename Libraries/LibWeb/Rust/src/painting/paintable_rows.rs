@@ -1740,8 +1740,20 @@ impl LayoutNodeArena {
     /// first: that writer has finished, since the main side reads between writes. Overflow a
     /// commit or a writer left unmeasured is measured before they are.
     pub(crate) fn committed_paintable_rows(&mut self) -> CommittedPaintableRows<'_> {
+        self.publish_committed_paintable_rows();
+        CommittedPaintableRows { arena: self }
+    }
+
+    /// Publishes what [`Self::committed_paintable_rows`] reads, for a reader of
+    /// [`Self::published_committed_paintable_rows`].
+    pub(crate) fn publish_committed_paintable_rows(&mut self) {
         self.measure_scrollable_overflow_on_stage_before_publication();
         self.publish_paintable_rows();
+    }
+
+    /// The paintable rows as last published, which [`Self::publish_committed_paintable_rows`] has
+    /// published.
+    pub(crate) fn published_committed_paintable_rows(&self) -> CommittedPaintableRows<'_> {
         CommittedPaintableRows { arena: self }
     }
 

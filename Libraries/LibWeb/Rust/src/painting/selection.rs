@@ -325,6 +325,30 @@ fn transform_selection_background_color(color: Color) -> Color {
     result
 }
 
+/// Has the subtree of the nearest painted ancestor of `element` paint again once its `::selection`
+/// style changed, so cached text commands take the new highlight: the element itself where it has
+/// a committed box, else the nearest one in the ancestry the layout tree was built from (a
+/// `display: contents` element has no box of its own), else the viewport.
+pub(crate) fn repaint_after_selection_style_change(arena: &LayoutNodeArena, element: StyleNodeID) {
+    let rows = arena.paintable_rows();
+    let painted = |row: NodeSlotId| !row.is_invalid() && rows.paintable_row_is_populated(row);
+    let mut ancestor = Some(element);
+    let mut painted_ancestor = None;
+    while let Some(node) = ancestor {
+        let row = arena.bound_row(node);
+        if painted(row) {
+            painted_ancestor = Some(row);
+            break;
+        }
+        ancestor = StyleNodeID::from_raw(arena.shadow_including_parent(node).element);
+    }
+    let Some(row) = painted_ancestor.or_else(|| Some(arena.bound_viewport_row()).filter(|&row| painted(row))) else {
+        return;
+    };
+    arena.push_paint_damage_to_paint_subtree(row, PaintDamage::ALL_PRODUCERS);
+    arena.push_paint_damage_for_repaint(row, PaintDamage::ALL_PRODUCERS);
+}
+
 /// Gives the rows that paint text under `element` what its published `::selection` record says
 /// selected text paints with: the element's own rows, or, while it has no box, the rows of its
 /// text children, which then have no element row above them to find it on.

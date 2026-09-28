@@ -168,7 +168,7 @@ pub(crate) enum LayoutReadAnswer {
 
 impl LayoutRead {
     /// Answers the question from `arena`, as the units before it left it.
-    pub(crate) fn answer(self, arena: &mut LayoutNodeArena) -> LayoutReadAnswer {
+    pub(crate) fn answer(self, arena: &LayoutNodeArena) -> LayoutReadAnswer {
         match self {
             Self::ClassifyLayoutTreeUpdate {
                 node,

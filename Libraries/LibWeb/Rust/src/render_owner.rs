@@ -99,9 +99,25 @@ pub(crate) enum ArenaChange {
     HostHearsBoxPresence(bool),
     /// A write to the document's layout marks or layout facts.
     Layout(crate::layout::layout_changes::LayoutChange),
+    /// The host installed a style update whose transactions the owner applied the batches of to the layout nodes: a
+    /// row the install did not adopt the record of is put back with the record its element holds, and what that owes
+    /// the host goes with the next payment the owner hands it.
+    FinishOwnerStyleHostHalf,
+    /// The `::selection` style of an element changed: the subtree of its nearest painted ancestor in the ancestry the
+    /// layout tree was built from (a `display: contents` element has no box of its own) paints again, so cached text
+    /// commands take the new highlight.
+    SelectionStyleChanged(StyleNodeID),
+    /// The host took these of the scroll containers finished layout tree builds gave a style.
+    BuiltScrollSnapContainersTaken(Vec<NodeSlotId>),
 }
 
 impl ArenaChange {
+    /// Whether applying the change reaches the document's style engine, which the owner reaches only in a unit the
+    /// main thread waits for.
+    fn reaches_engine(&self) -> bool {
+        matches!(self, ArenaChange::FinishOwnerStyleHostHalf)
+    }
+
     fn apply(self, arena: &mut LayoutNodeArena) {
         match self {
             ArenaChange::DocumentIsDecodedSvg(is_decoded_svg) => arena.set_document_is_decoded_svg(is_decoded_svg),
@@ -114,6 +130,11 @@ impl ArenaChange {
             ArenaChange::DropUnadoptedAnimationSamples => arena.drop_animation_adoptions(),
             ArenaChange::HostHearsBoxPresence(hears) => arena.set_host_hears_box_presence(hears),
             ArenaChange::Layout(change) => change.apply(arena),
+            ArenaChange::FinishOwnerStyleHostHalf => arena.finish_owner_style_host_half(),
+            ArenaChange::SelectionStyleChanged(element) => {
+                crate::painting::selection::repaint_after_selection_style_change(arena, element);
+            }
+            ArenaChange::BuiltScrollSnapContainersTaken(taken) => arena.drop_built_scroll_snap_containers(&taken),
         }
     }
 }
@@ -135,6 +156,10 @@ impl Change {
 
     fn writes_arena(&self) -> bool {
         matches!(self, Change::Arena(_))
+    }
+
+    fn writes_arena_without_engine(&self) -> bool {
+        matches!(self, Change::Arena(change) if !change.reaches_engine())
     }
 }
 
@@ -196,18 +221,34 @@ pub(crate) struct RenderState {
 
 impl RenderState {
     /// Applies the arena changes the owner has received, which every unit and query that reaches the arena comes after.
-    fn apply_arena_changes(&mut self) {
+    /// A unit the main thread waits for applies them all; one that runs beside the main thread (a rendering update)
+    /// leaves those that reach the style engine to the next unit the main thread waits for.
+    fn apply_arena_changes(&mut self, main_thread_waits: bool) {
         let received = self.changes.received_through;
-        let changes = self.changes.take_through(received, Change::writes_arena);
+        let wanted = if main_thread_waits {
+            Change::writes_arena
+        } else {
+            Change::writes_arena_without_engine
+        };
+        let changes = self.changes.take_through(received, wanted);
         if changes.is_empty() {
             return;
         }
+        let engine = self.style_engine();
         let arena = self.arena.arena_mut();
-        for change in changes {
-            if let Change::Arena(change) = change {
-                change.apply(arena);
+        let apply = |arena: &mut LayoutNodeArena| {
+            for change in changes {
+                if let Change::Arena(change) = change {
+                    change.apply(arena);
+                }
             }
+        };
+        if !main_thread_waits || engine.is_null() {
+            apply(arena);
+            return;
         }
+        // SAFETY: The engine is the document's, and the main thread waits for the unit with the engine's token home.
+        unsafe { engine.reach_on_owner(|_| apply(arena)) };
     }
 
     /// Applies the changes to the style engine the owner has received, in order, which every unit and query that
@@ -245,7 +286,7 @@ impl RenderState {
 
     /// Answers `query` from the state as the units before it left it.
     fn answer(&mut self, query: Query) -> Answer {
-        self.apply_arena_changes();
+        self.apply_arena_changes(true);
         self.apply_style_changes();
         match query {
             Query::Engine(query) => {
@@ -266,17 +307,6 @@ impl RenderState {
                 unsafe { engine.reach_on_owner(|engine| query.answer(engine)) };
                 Answer::Engine(EngineAnswered::Answered)
             }
-            Query::FinishOwnerStyleHostHalf => {
-                let engine = self.style_engine();
-                let arena = self.arena.arena();
-                if engine.is_null() {
-                    return Answer::of(query, self.arena.arena_mut());
-                }
-                // SAFETY: As for a style read: the document thread waits for the answer with the engine's token home.
-                Answer::Payment(OwedToHost(unsafe {
-                    engine.reach_on_owner(|_| arena.finish_flight_style_host_half().1)
-                }))
-            }
             _ => Answer::of_state(query, &mut self.arena),
         }
     }
@@ -289,14 +319,21 @@ impl RenderState {
 
     /// The handle of the state's arena, which names the document to what files work under it.
     fn arena_handle(&mut self) -> *mut c_void {
-        self.apply_arena_changes();
+        self.apply_arena_changes(true);
         self.apply_style_changes();
         std::ptr::from_mut::<ArenaHandle>(&mut self.arena).cast::<c_void>()
     }
 
-    /// The state's arena and what lives beside it, which the owner hands the units it runs for the document.
+    /// The state's arena and what lives beside it, which the owner hands the units the main thread waits for.
     fn state(&mut self) -> *mut ArenaHandle {
-        self.apply_arena_changes();
+        self.apply_arena_changes(true);
+        self.apply_style_changes();
+        std::ptr::from_mut::<ArenaHandle>(&mut self.arena)
+    }
+
+    /// The state's arena and what lives beside it, for a rendering update, which runs beside the main thread.
+    fn state_beside_main_thread(&mut self) -> *mut ArenaHandle {
+        self.apply_arena_changes(false);
         self.apply_style_changes();
         std::ptr::from_mut::<ArenaHandle>(&mut self.arena)
     }
@@ -326,14 +363,6 @@ pub(crate) enum Query {
     /// How many rows of the layout subtree `root` heads carry a pre-order label no greater than the row before them,
     /// for tests.
     PreOrderLabelViolations { root: NodeSlotId },
-    /// The element the tree build last saw as the shadow-including parent of the element `node`.
-    ShadowIncludingParentElement { node: StyleNodeID },
-    /// Whether `row` still names a live row.
-    RowIsLive { row: NodeSlotId },
-    /// Ends the host half of the batches the owner applied to the layout nodes as the document thread took a style
-    /// update's transactions, once the update has installed them: a row the install did not adopt the record of is
-    /// put back with the record its element holds. Answers what that owes the host.
-    FinishOwnerStyleHostHalf,
     /// A read of the document's layout arena.
     Arena(ArenaQuery),
     /// A read of the document's style engine, which the owner answers into the query the main thread holds.
@@ -347,8 +376,9 @@ pub(crate) enum Query {
 pub(crate) enum ArenaQuery {
     /// Whether a box of the document has ever been given a scroll snap type.
     MayHaveScrollSnapAreas,
-    /// Takes the scroll containers finished layout tree builds gave a style, each with whether it snaps.
-    TakeBuiltScrollSnapContainers,
+    /// The live scroll containers finished layout tree builds gave a style that the host has not taken, each with
+    /// whether it snaps.
+    BuiltScrollSnapContainers,
     /// Whether the innermost list-item counter of an element counts forward and was created by it.
     InnermostListItemCounterIsOwnForwardCounter(StyleNodeID),
     /// What a pseudo-element's box has scrolled to.
@@ -377,7 +407,7 @@ impl ArenaQuery {
             ArenaQuery::MayHaveScrollSnapAreas | ArenaQuery::InnermostListItemCounterIsOwnForwardCounter(_) => {
                 ArenaAnswer::Flag(false)
             }
-            ArenaQuery::TakeBuiltScrollSnapContainers => ArenaAnswer::BuiltScrollSnapContainers(Vec::new()),
+            ArenaQuery::BuiltScrollSnapContainers => ArenaAnswer::BuiltScrollSnapContainers(Vec::new()),
             ArenaQuery::PseudoElementScrollOffset { .. } => ArenaAnswer::Point(Default::default()),
             ArenaQuery::ContentCounterStylesChanged(_) => {
                 ArenaAnswer::Byte(LayoutNodeArena::CONTENT_COUNTER_STYLES_NOT_RECORDED)
@@ -386,11 +416,11 @@ impl ArenaQuery {
         }
     }
 
-    fn answer(self, arena: &mut LayoutNodeArena) -> ArenaAnswer {
+    fn answer(self, arena: &LayoutNodeArena) -> ArenaAnswer {
         match self {
             ArenaQuery::MayHaveScrollSnapAreas => ArenaAnswer::Flag(arena.may_have_scroll_snap_areas()),
-            ArenaQuery::TakeBuiltScrollSnapContainers => {
-                ArenaAnswer::BuiltScrollSnapContainers(arena.take_built_scroll_snap_containers())
+            ArenaQuery::BuiltScrollSnapContainers => {
+                ArenaAnswer::BuiltScrollSnapContainers(arena.built_scroll_snap_containers())
             }
             ArenaQuery::InnermostListItemCounterIsOwnForwardCounter(element) => ArenaAnswer::Flag(
                 arena
@@ -418,10 +448,6 @@ pub(crate) enum Answer {
     LayoutCounts(LayoutCounts),
     Arena(ArenaAnswer),
     Count(u64),
-    /// An element, or 0 for none.
-    Element(u32),
-    Is(bool),
-    Payment(OwedToHost),
     Engine(EngineAnswered),
     Layout(crate::layout::layout_changes::LayoutReadAnswer),
 }
@@ -438,15 +464,6 @@ pub(crate) enum EngineAnswered {
     Unanswered,
 }
 
-/// What the owner's answer owes the host, which the document thread pays.
-pub(crate) struct OwedToHost(pub(crate) crate::layout::HostPayment);
-
-impl std::fmt::Debug for OwedToHost {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("OwedToHost")
-    }
-}
-
 impl Answer {
     /// The count a [`Query::PreOrderLabelViolations`] answered.
     pub(crate) fn count(self) -> u64 {
@@ -455,39 +472,6 @@ impl Answer {
             _ => {
                 debug_assert!(false, "a count is answered with a count");
                 0
-            }
-        }
-    }
-
-    /// The element a [`Query::ShadowIncludingParentElement`] answered.
-    pub(crate) fn element(self) -> u32 {
-        match self {
-            Self::Element(element) => element,
-            _ => {
-                debug_assert!(false, "an element is answered with an element");
-                0
-            }
-        }
-    }
-
-    /// What a query that owes the host answered.
-    pub(crate) fn payment(self) -> crate::layout::HostPayment {
-        match self {
-            Self::Payment(OwedToHost(payment)) => payment,
-            _ => {
-                debug_assert!(false, "a query that owes the host is answered with a payment");
-                crate::layout::HostPayment::nothing()
-            }
-        }
-    }
-
-    /// What a yes-or-no query answered.
-    pub(crate) fn is(self) -> bool {
-        match self {
-            Self::Is(is) => is,
-            _ => {
-                debug_assert!(false, "a yes-or-no query is answered with yes or no");
-                false
             }
         }
     }
@@ -522,9 +506,6 @@ impl Answer {
             Query::Geometry { .. } => Self::Geometry(FfiGeometryReadAnswer::default()),
             Query::LayoutCounts => Self::LayoutCounts(LayoutCounts::default()),
             Query::PreOrderLabelViolations { .. } => Self::Count(0),
-            Query::ShadowIncludingParentElement { .. } => Self::Element(0),
-            Query::RowIsLive { .. } => Self::Is(false),
-            Query::FinishOwnerStyleHostHalf => Self::Payment(OwedToHost(crate::layout::HostPayment::nothing())),
             Query::Arena(query) => Self::Arena(query.left_to_host()),
             Query::Engine(_) => Self::Engine(EngineAnswered::LeftToHost),
             Query::Layout(read) => Self::Layout(read.unanswered()),
@@ -545,10 +526,19 @@ impl Answer {
         outcome.unwrap_or_else(|_| Self::unanswered(query))
     }
 
-    /// Answers `query` from the arena of `state` and the layout scratch beside it.
+    /// Readies `arena` to answer `query` from: a geometry read reads the paintable rows as published, which publishes
+    /// what the units before it wrote.
+    pub(crate) fn prepare(query: Query, arena: &mut LayoutNodeArena) {
+        if matches!(query, Query::Geometry { .. }) {
+            arena.publish_committed_paintable_rows();
+        }
+    }
+
+    /// Answers `query` from the arena of `state` and the layout scratch beside it, which it readies first.
     fn of_state(query: Query, state: &mut ArenaHandle) -> Self {
         let (arena, scratch) = state.arena_and_scratch();
         let retained_inline_items = scratch.retained_inline_item_count();
+        Self::prepare(query, arena);
         let mut answer = Self::of(query, arena);
         if let Self::LayoutCounts(counts) = &mut answer {
             counts.arena.retained_inline_items = retained_inline_items;
@@ -556,8 +546,9 @@ impl Answer {
         answer
     }
 
-    /// Answers `query` from `arena` alone. A question the engine answers is left to the main thread.
-    pub(crate) fn of(query: Query, arena: &mut LayoutNodeArena) -> Self {
+    /// Answers `query` from `arena` alone, which [`Self::prepare`] readied. A question reads the arena, and writes
+    /// nothing of it. A question the engine answers is left to the main thread.
+    pub(crate) fn of(query: Query, arena: &LayoutNodeArena) -> Self {
         match query {
             Query::Geometry { node, kind } => Self::Geometry(answer_geometry(arena, node, kind)),
             Query::LayoutCounts => Self::LayoutCounts(LayoutCounts {
@@ -575,9 +566,6 @@ impl Answer {
                 },
             }),
             Query::PreOrderLabelViolations { root } => Self::Count(pre_order_label_violations(arena, root)),
-            Query::ShadowIncludingParentElement { node } => Self::Element(arena.shadow_including_parent(node).element),
-            Query::RowIsLive { row } => Self::Is(arena.slot_is_live(row)),
-            Query::FinishOwnerStyleHostHalf => Self::Payment(OwedToHost(arena.finish_flight_style_host_half().1)),
             Query::Arena(query) => Self::Arena(query.answer(arena)),
             Query::Engine(_) => Self::left_to_host(query),
             Query::Layout(read) => Self::Layout(read.answer(arena)),
@@ -843,7 +831,8 @@ fn handle_message(message: ToOwner) {
                 "a rendering update of a document with no render state"
             );
             // A test's update of no document runs with the arena its flight names.
-            let state = STATES.with_borrow_mut(|states| states.get_mut(&document).map(RenderState::state));
+            let state =
+                STATES.with_borrow_mut(|states| states.get_mut(&document).map(RenderState::state_beside_main_thread));
             ticket.run(|| update.run(state));
         }
         ToOwner::Style {
@@ -867,7 +856,7 @@ fn handle_message(message: ToOwner) {
             reply,
         } => reply.answer(|| {
             with_state(document, |state| {
-                state.apply_arena_changes();
+                state.apply_arena_changes(true);
                 state.apply_style_changes();
                 debug_assert!(
                     state.changes.pending.front().is_none_or(|(seq, _)| *seq > through),
@@ -969,7 +958,16 @@ pub(crate) fn document_with_clock_at(context: u64) -> Option<DocumentId> {
 /// Sends `message` to the owner: to the Rendering thread, or handled right here where there is none.
 pub(crate) fn send(message: ToOwner) {
     if let Err(message) = crate::stage_thread::send_to_owner(message) {
+        let changes_of = match &message {
+            ToOwner::Changes { document, .. } => Some(*document),
+            _ => None,
+        };
         handle(message);
+        // Without a Rendering thread, the thread that sends a change is the owner, and runs nothing beside it: the
+        // change applies to the arena as it is sent.
+        if let Some(document) = changes_of.filter(|_| !crate::stage_thread::has_owner_thread()) {
+            with_state(document, |state| state.apply_arena_changes(true));
+        }
     }
 }
 
@@ -1268,10 +1266,17 @@ pub unsafe extern "C" fn render_owner_take_built_scroll_snap_containers(
     context: *mut c_void,
     callback: unsafe extern "C" fn(*mut c_void, crate::layout::node_data::NodeSlotId, bool),
 ) {
-    let ArenaAnswer::BuiltScrollSnapContainers(built) = ask_arena(document, ArenaQuery::TakeBuiltScrollSnapContainers)
+    let ArenaAnswer::BuiltScrollSnapContainers(built) = ask_arena(document, ArenaQuery::BuiltScrollSnapContainers)
     else {
         return;
     };
+    if built.is_empty() {
+        return;
+    }
+    send_arena_change(
+        document,
+        ArenaChange::BuiltScrollSnapContainersTaken(built.iter().map(|&(row, _)| row).collect()),
+    );
     for (row, is_scroll_snap_container) in built {
         // SAFETY: Guaranteed by the caller.
         unsafe { callback(context, row, is_scroll_snap_container) };
@@ -1496,10 +1501,10 @@ impl FfiGeometryReadAnswer {
 }
 
 /// Answers the geometry read `kind` about `node` from `arena`, which the units before it have laid out.
-fn answer_geometry(arena: &mut LayoutNodeArena, node: StyleNodeID, kind: FfiGeometryReadKind) -> FfiGeometryReadAnswer {
+fn answer_geometry(arena: &LayoutNodeArena, node: StyleNodeID, kind: FfiGeometryReadKind) -> FfiGeometryReadAnswer {
     let slot = arena.bound_row(node);
     let has_layout_root = !arena.layout_root().is_invalid();
-    let rows = arena.committed_paintable_rows();
+    let rows = arena.published_committed_paintable_rows();
     if slot.is_invalid() || rows.node_data_if_live(slot).is_none() {
         return FfiGeometryReadAnswer::no_box();
     }
