@@ -3286,6 +3286,17 @@ impl StyleEngineState {
                 // applies it, which is no record when its style was cleared on entry to display:none
                 // while the engine kept the record.
                 let held_style_record = self.held_style_record_in_pass(node);
+                // Whether a row the host holds no style for keeps its style below a hidden ancestor
+                // is the engine's to say: the host sees only the rows of the wave it installs.
+                if held_style_record == 0
+                    && required_in_hidden_subtrees
+                        .get_or_insert_with(|| {
+                            self.required_in_hidden_subtrees(&pass.published_nodes[next_published_index..])
+                        })
+                        .contains(&node)
+                {
+                    style_delta.record_damage |= bridge::FfiStyleInvalidationField::KeptInHiddenSubtree as u32;
+                }
                 // A row whose custom-property environment moved moves its descendants' with it: the
                 // pass moves them here, and a descendant settled after it reads the moved one. Where
                 // the host walks below the row instead, once it installs it, a child settled before
