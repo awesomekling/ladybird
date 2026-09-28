@@ -3171,7 +3171,29 @@ impl StyleEngineState {
                             .map_err(String::from)
                     });
                     match published {
-                        Ok(_) => engine_sample_check::note_taken("settled row sample"),
+                        Ok(published) => {
+                            engine_sample_check::note_taken("settled row sample");
+                            // What the host's comparison of the move to the composition would ask
+                            // for, answered with the composition.
+                            if let Some((old_style_record, _)) = engine_computed_delta
+                                && old_style_record.raw() != published.style_record
+                                && self
+                                    .retained
+                                    .computed_group_sets
+                                    .style_record_view(old_style_record.raw())
+                                    .is_some()
+                            {
+                                let damage = self.retained.element_record_damage(
+                                    node,
+                                    false,
+                                    old_style_record.raw(),
+                                    published.style_record,
+                                ) | bridge::FfiStyleInvalidationField::EngineComputed as u32;
+                                self.retained
+                                    .rows_sampled_in_pass
+                                    .insert(node, engine_sample::SettledRowPublication { damage, ..published });
+                            }
+                        }
                         Err(reason) => engine_sample_check::note_declined(&format!("settled row: {reason}")),
                     }
                 }
