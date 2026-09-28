@@ -1816,93 +1816,36 @@ pub unsafe extern "C" fn style_engine_set_tree_scope_animation_keyframes(
     base_url_bytes: *const u8,
     base_url_byte_count: usize,
 ) {
-    crate::css::style::owner_calls::ask(
-        engine.home(),
-        "style_engine_set_tree_scope_animation_keyframes",
-        crate::css::style::owner_calls::StyleQuery::SetTreeScopeAnimationKeyframes {
-            tree_scope,
-            shadow_root_identity,
-            name_lengths,
-            name_units,
-            name_unit_count,
-            count,
-            descriptions,
-            description_count,
-            keyframes,
-            keyframe_count,
-            declarations,
-            declaration_count,
-            custom_declarations,
-            custom_declaration_count,
-            linear_points,
-            linear_point_count,
-            base_url_bytes,
-            base_url_byte_count,
-        },
-    );
-}
-
-/// Answers [`style_engine_set_tree_scope_animation_keyframes`] from `engine`, on the render owner.
-///
-/// # Safety
-///
-/// As for [`style_engine_set_tree_scope_animation_keyframes`].
-#[allow(clippy::too_many_arguments)]
-pub(crate) unsafe fn owner_set_tree_scope_animation_keyframes(
-    engine: &mut crate::css::style::StyleEngine,
-    tree_scope: u32,
-    shadow_root_identity: usize,
-    name_lengths: *const u32,
-    name_units: *const u16,
-    name_unit_count: usize,
-    count: usize,
-    descriptions: *const FfiPublishedAnimationEffect,
-    description_count: usize,
-    keyframes: *const FfiPublishedAnimationKeyframe,
-    keyframe_count: usize,
-    declarations: *const FfiPublishedAnimationDeclaration,
-    declaration_count: usize,
-    custom_declarations: *const FfiPublishedAnimationCustomDeclaration,
-    custom_declaration_count: usize,
-    linear_points: *const FfiPublishedLinearEasingPoint,
-    linear_point_count: usize,
-    base_url_bytes: *const u8,
-    base_url_byte_count: usize,
-) {
-    let name_lengths = match count {
-        0 => &[][..],
-        _ => unsafe { std::slice::from_raw_parts(name_lengths, count) },
-    };
-    let name_units = match name_unit_count {
-        0 => &[][..],
-        _ => unsafe { std::slice::from_raw_parts(name_units, name_unit_count) },
-    };
-    let buffers = unsafe {
-        published_effect_buffers(
-            descriptions,
-            description_count,
-            keyframes,
-            keyframe_count,
-            declarations,
-            declaration_count,
-            custom_declarations,
-            custom_declaration_count,
-            linear_points,
-            linear_point_count,
-            base_url_bytes,
-            base_url_byte_count,
+    // SAFETY: Guaranteed by the caller. The descriptions take references of their own to the values they name.
+    let keyframes = unsafe {
+        crate::css::style::animations::TreeScopeKeyframes::build(
+            borrow(name_lengths, count),
+            borrow(name_units, name_unit_count),
+            published_effect_buffers(
+                descriptions,
+                description_count,
+                keyframes,
+                keyframe_count,
+                declarations,
+                declaration_count,
+                custom_declarations,
+                custom_declaration_count,
+                linear_points,
+                linear_point_count,
+                base_url_bytes,
+                base_url_byte_count,
+            ),
         )
     };
-    unsafe {
-        engine.set_tree_scope_animation_keyframes(
-            TreeScopeID(tree_scope),
+    crate::css::style::owner_calls::send(
+        engine,
+        "style_engine_set_tree_scope_animation_keyframes",
+        crate::css::style::owner_calls::EngineChange::SetTreeScopeAnimationKeyframes {
+            tree_scope: TreeScopeID(tree_scope),
             shadow_root_identity,
-            name_lengths,
-            name_units,
-            buffers,
-        );
-    }
-    engine.count_animation_keyframe_scopes();
+            keyframes,
+        },
+    );
 }
 
 /// How one effect's description travels across the boundary: a header naming the ranges of the flat

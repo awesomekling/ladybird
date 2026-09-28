@@ -68,6 +68,12 @@ impl StyleEngineInputHandle {
         answers.follow_sent(&change, leaves);
         self.0.home().exchange().unapplied.push((change, leaves));
     }
+
+    /// Leaves `change`, which leaves nothing the main thread's answers follow, in the engine's home without borrowing
+    /// the answers.
+    pub(super) fn send_unfollowed(self, change: StyleChange) {
+        self.0.home().exchange().unapplied.push((change, PendingFacts::NONE));
+    }
 }
 
 /// What a style engine holds for its next style transaction, which the main thread reads from the engine's home.
@@ -169,6 +175,12 @@ struct Exchange {
     /// thread never adopts news older than a change it no longer finds unapplied.
     news: Option<EngineNews>,
 }
+
+// What the exchange holds moves between the main thread and whoever reaches the engine.
+const _: () = {
+    const fn assert_send<T: Send>() {}
+    assert_send::<Exchange>();
+};
 
 impl StyleEngineHome {
     fn exchange(&self) -> MutexGuard<'_, Exchange> {

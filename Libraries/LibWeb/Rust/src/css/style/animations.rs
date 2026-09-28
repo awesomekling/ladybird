@@ -2204,14 +2204,57 @@ pub(crate) struct AnimationKeyframes {
     descriptions: HashMap<usize, (PublishedEffect, u32)>,
 }
 
-impl AnimationKeyframes {
-    /// Replace one scope's row. The names arrive packed into one buffer of code units with a length
-    /// each, the way an element's animation names do, and each one's description in the same flat
-    /// buffers an element's effect descriptions travel in, in the order the names are given.
+/// The `@keyframes` one style scope defines, as the main thread publishes them: each name with the description of the
+/// host's keyframe set for it, which the engine owns.
+pub(crate) struct TreeScopeKeyframes {
+    names: Box<[CssString]>,
+    descriptions: Vec<PublishedEffect>,
+}
+
+impl TreeScopeKeyframes {
+    /// The row of a scope that defines nothing, which gives up the one it had.
+    pub(crate) fn none() -> Self {
+        Self {
+            names: Box::new([]),
+            descriptions: Vec::new(),
+        }
+    }
+
+    /// The row the names packed into one buffer of code units with a length each describe (the way an element's
+    /// animation names travel), each with its description in the flat buffers an element's effect descriptions travel
+    /// in, in the order the names are given.
     ///
     /// # Safety
-    /// Every declaration's `value` must be a live style value the host holds a reference to for the
-    /// duration of the call.
+    /// As for [`build_published_effects`].
+    pub(crate) unsafe fn build(
+        name_lengths: &[u32],
+        name_units: &[u16],
+        published_buffers: PublishedEffectBuffers<'_>,
+    ) -> Self {
+        assert!(
+            name_lengths.len() == published_buffers.effects.len(),
+            "a published @keyframes name must come with its keyframe set"
+        );
+        let mut offset = 0usize;
+        let names = name_lengths
+            .iter()
+            .map(|&length| {
+                let end = offset + length as usize;
+                assert!(end <= name_units.len(), "@keyframes name lengths overrun their buffer");
+                let name = CssString::from_utf16(&name_units[offset..end]);
+                offset = end;
+                name
+            })
+            .collect();
+        Self {
+            names,
+            // SAFETY: Guaranteed by the caller.
+            descriptions: unsafe { build_published_effects(published_buffers) },
+        }
+    }
+}
+
+impl AnimationKeyframes {
     #[must_use]
     pub(crate) fn generation(&self) -> u64 {
         self.generation
@@ -2223,18 +2266,8 @@ impl AnimationKeyframes {
         self.scopes.len()
     }
 
-    pub(crate) unsafe fn set(
-        &mut self,
-        tree_scope: TreeScopeID,
-        shadow_root_identity: usize,
-        name_lengths: &[u32],
-        name_units: &[u16],
-        published_buffers: PublishedEffectBuffers<'_>,
-    ) {
-        assert!(
-            name_lengths.len() == published_buffers.effects.len(),
-            "a published @keyframes name must come with its keyframe set"
-        );
+    /// Replaces one scope's row with `keyframes`.
+    pub(crate) fn set(&mut self, tree_scope: TreeScopeID, shadow_root_identity: usize, keyframes: TreeScopeKeyframes) {
         self.generation += 1;
         if let Some(previous) = self.scopes.get(&tree_scope) {
             for set in previous.values() {
@@ -2246,7 +2279,8 @@ impl AnimationKeyframes {
                 }
             }
         }
-        if name_lengths.is_empty() {
+        let TreeScopeKeyframes { names, descriptions } = keyframes;
+        if names.is_empty() {
             self.scopes.remove(&tree_scope);
             // A scope that defines nothing and a scope with no row answer alike, so the identity
             // may as well stop naming it: giving the row up is how a shadow root on its way out
@@ -2257,19 +2291,13 @@ impl AnimationKeyframes {
         if shadow_root_identity != 0 {
             self.scope_by_shadow_root.insert(shadow_root_identity, tree_scope);
         }
-        let descriptions = unsafe { build_published_effects(published_buffers) };
-        let mut sets = HashMap::with_capacity(name_lengths.len());
-        let mut published = HashMap::with_capacity(name_lengths.len());
-        let mut offset = 0usize;
-        for (&length, description) in name_lengths.iter().zip(descriptions) {
-            let end = offset + length as usize;
-            assert!(end <= name_units.len(), "@keyframes name lengths overrun their buffer");
-            let name = KeyframesName(CssString::from_utf16(&name_units[offset..end]));
-            offset = end;
+        let mut sets = HashMap::with_capacity(names.len());
+        let mut published = HashMap::with_capacity(names.len());
+        for (name, description) in names.into_iter().zip(descriptions) {
             // The host names a set by its own pointer, which is what it publishes as the
             // description's identity.
             let pointer = description.identity as usize;
-            sets.insert(name, PublishedKeyframesSet { pointer });
+            sets.insert(KeyframesName(name), PublishedKeyframesSet { pointer });
             published.insert(pointer, description);
         }
         for set in sets.values() {
@@ -2322,25 +2350,10 @@ impl AnimationKeyframes {
     }
 }
 
-/// The references to a scope's keyframe sets the host hands over with the scope's row, which it lets
-/// go of through `release` once the row is gone: until then, a plan the engine owes may still name
-/// one of the sets.
-struct HostKeyframeSets {
-    sets: *mut std::ffi::c_void,
-    release: unsafe extern "C" fn(*mut std::ffi::c_void),
-}
-
-impl Drop for HostKeyframeSets {
-    fn drop(&mut self) {
-        // SAFETY: The host handed the references over with `release`, and they are let go of once.
-        unsafe { (self.release)(self.sets) };
-    }
-}
-
-/// Gives up the `@keyframes` row of a shadow root's scope, which is on its way out, with the
-/// references to the keyframe sets it names, `sets`, which the engine lets go of through `release`
-/// once the row is gone. A garbage collection's finalizer calls it: it waits for the owner, never
-/// for the engine.
+/// Gives up the `@keyframes` row of a shadow root's scope, which is on its way out, and lets go of the references to
+/// the keyframe sets it names, `sets`, through `release`. A garbage collection's finalizer calls it: it waits for
+/// nothing. A plan the engine owes may still name one of the sets until the owner applies the change, but the host
+/// takes a plan only from the owner, which applies the change first.
 ///
 /// # Safety
 /// `engine` must be live; `release` must accept `sets` once, on the main thread.
@@ -2352,35 +2365,14 @@ pub unsafe extern "C" fn style_engine_unpublish_tree_scope_animation_keyframes(
     sets: *mut std::ffi::c_void,
     release: unsafe extern "C" fn(*mut std::ffi::c_void),
 ) {
-    let _sets = HostKeyframeSets { sets, release };
-    super::owner_calls::ask_from_finalizer(
-        engine.home(),
+    super::owner_calls::unpublish_tree_scope_keyframes_from_finalizer(
+        engine,
         "style_engine_unpublish_tree_scope_animation_keyframes",
-        super::owner_calls::StyleQuery::UnpublishTreeScopeAnimationKeyframes {
-            tree_scope,
-            shadow_root_identity,
-        },
+        TreeScopeID(tree_scope),
+        shadow_root_identity,
     );
-}
-
-/// Gives up the `@keyframes` row [`style_engine_unpublish_tree_scope_animation_keyframes`] names,
-/// on the owner.
-pub(crate) fn owner_unpublish_tree_scope_animation_keyframes(
-    engine: &mut super::StyleEngine,
-    tree_scope: u32,
-    shadow_root_identity: usize,
-) {
-    // SAFETY: An empty row names no style value.
-    unsafe {
-        engine.set_tree_scope_animation_keyframes(
-            TreeScopeID(tree_scope),
-            shadow_root_identity,
-            &[],
-            &[],
-            PublishedEffectBuffers::default(),
-        );
-    }
-    engine.count_animation_keyframe_scopes();
+    // SAFETY: Guaranteed by the caller.
+    unsafe { release(sets) };
 }
 
 impl super::StyleEngine {
@@ -3022,10 +3014,9 @@ mod tests {
                 base_url_length: 0,
             })
             .collect::<Vec<_>>();
-        unsafe {
-            keyframes.set(
-                tree_scope,
-                0,
+        // SAFETY: The effects name no style value.
+        let scope = unsafe {
+            TreeScopeKeyframes::build(
                 &name_lengths,
                 &name_units,
                 PublishedEffectBuffers {
@@ -3036,8 +3027,9 @@ mod tests {
                     linear_points: &[],
                     base_url_bytes: &[],
                 },
-            );
-        }
+            )
+        };
+        keyframes.set(tree_scope, 0, scope);
     }
 
     #[test]
