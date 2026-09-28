@@ -283,7 +283,7 @@ def normalize(sample):
         for key in [whole, *phases]
         if key != "prepareMicroseconds" or key in delta[lane]
     }
-    # Optional pass clocks sit alongside the phases in the same lanes. compare() leaves every
+    # Clocks outside the phases sit alongside them in the same lanes. compare() leaves every
     # microsecond counter out of its counter diff, so each clock has to reach the metrics to be read.
     sample["metrics"].update(
         {

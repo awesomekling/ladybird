@@ -349,7 +349,6 @@ impl RetainedState {
         } else {
             CompletionExactness::AllowPruning
         };
-        let materialize_timer = flush::PassTimer::start();
         let batch = prefer_complete_batch
             .then(|| {
                 self.prepared_batch_matching_traversal
@@ -365,8 +364,6 @@ impl RetainedState {
         let relation_dispatch = batch
             .as_ref()
             .map(|_| self.prepare_scope_program(TreeScopeID::DOCUMENT));
-        materialize_timer.stop(Counter::CompletionBatchMaterializeMicroseconds, counters);
-        let relation_timer = flush::PassTimer::start();
         // The walk that just converged left the retained states describing THIS transaction,
         // so the completion batch can extend the warm automaton instead of re-deriving every
         // upquery spine. Without a current walk the retained states describe the previous
@@ -414,7 +411,6 @@ impl RetainedState {
         if let Some(facts) = batch.as_ref() {
             self.prepare_prefix_rows_for_batch(facts, &mut prefix_contexts);
         }
-        relation_timer.stop(Counter::CompletionBatchRelationMicroseconds, counters);
         self.batch_matching_traversal = Some(Box::new(BatchMatchingTraversal {
             pending_published: PublishedMatchAnswers::default(),
             answer_effects: AnswerEffects::default(),
