@@ -18,18 +18,18 @@
 //! run of its own, labelled `clock`, ahead of its layout pass.
 //!
 //! A render clock (`Web::Compositor::RenderClock`, a thread of its own) also has the owner tick a clock, at
-//! the display ticks the compositor delivers for the clock's compositor context, without the main
-//! thread: see [`rust_render_clock_post_tick`]. During the port the main thread still reaches the
-//! arena itself, so such a tick runs only while the main thread is idle, blocked in its outermost
-//! event loop with no frame in flight, which it tells the owner in order with everything it sent
-//! before (see [`rust_render_clock_main_will_idle`]); the main thread waits for a tick that runs
-//! before it goes on when it wakes (see [`rust_render_clock_main_did_wake`]).
+//! the display ticks the compositor delivers for the clock's compositor context, whatever the main
+//! thread is doing: see [`rust_render_clock_post_tick`]. Such a tick is a job on the owner like any
+//! other, so it never runs beside a unit of a rendering update. Where the main thread began a
+//! rendering update of the document since the last display tick, it keeps up with the display, and
+//! its next frame shows what the tick lays out: the tick presents nothing of its own. The main thread
+//! adopts what the ticks published when it next runs (see [`rust_render_clock_take_ticks_to_adopt`]).
 
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::ThreadId;
 
 use crate::css::style::StyleEngine;
@@ -42,6 +42,7 @@ use crate::css::style::tree::StyleNodeID;
 use crate::layout::node_data::NodeSlotId;
 use crate::layout::update_layout::ClockLayoutFrame;
 use crate::layout::{ArenaHandle, LayoutNodeArena};
+use crate::painting::query_snapshot::{FfiQuerySnapshotViewport, QuerySnapshot};
 use crate::render_owner::DocumentId;
 
 /// Whether clock frames are on: unless `LIBWEB_RENDER_CLOCK_FRAMES=0`.
@@ -50,11 +51,10 @@ pub(crate) fn enabled() -> bool {
     *ENABLED.get_or_init(|| std::env::var("LIBWEB_RENDER_CLOCK_FRAMES").as_deref() != Ok("0"))
 }
 
-/// An element whose animations a clock ticks, with the record it holds.
+/// An element whose animations a clock ticks.
 #[derive(Clone, Copy)]
 pub(crate) struct ClockTarget {
     style_node: StyleNodeID,
-    style_record: u64,
     /// Whether the element has a pseudo-element style that inherits from it outside its box: a
     /// ::backdrop or a ::selection style, which only the main thread derives.
     has_pseudo_element_style_outside_box: bool,
@@ -101,6 +101,18 @@ pub(crate) struct ClockTickEntry {
     pub(crate) installed_in_arena: bool,
 }
 
+/// How the host took the frame a tick recorded.
+#[repr(u8)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FfiClockPresent {
+    /// It presented the frame.
+    Presented,
+    /// The main thread presents from the navigable's presenter now, and its frames show what the tick laid out.
+    MainPresents,
+    /// The render side cannot show the frame: the main thread has to.
+    Declined,
+}
+
 /// How a tick ended.
 #[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -115,9 +127,10 @@ pub enum FfiClockTickOutcome {
     Stopped,
 }
 
-/// What the ticks of a document's clock publish for the main thread, which reads it once no tick
-/// runs: the owner writes it as a tick ends, and the main thread reads it when it wakes, or once it
-/// has taken a submitted tick back.
+/// What the ticks of a document's clocks publish for the main thread: the owner writes it as a tick
+/// ends, and the main thread adopts it when it next runs, beside the ticks that go on, or once it
+/// has taken a submitted tick back. A document keeps one across the clocks it starts and stops: a
+/// tick that ran before the owner learned of a new clock or of a stop leaves its samples here too.
 pub(crate) struct ClockPublication {
     /// The timeline time of the last tick that presented, or of the start, as `f64` bits.
     time: AtomicU64,
@@ -126,20 +139,17 @@ pub(crate) struct ClockPublication {
     /// Whether the render side presented every tick the host has not adopted yet, so that adopting
     /// them repaints nothing.
     presented_since_adoption: AtomicBool,
-    /// How many display ticks in a row the render clock could not run because the main thread held
-    /// the arena or had paused the clock, while nothing else ticked it: from
-    /// [`MISSED_TICKS_BEFORE_MAIN`] on, the main thread's rendering updates tick the clock in its
-    /// place.
-    ticks_missed: AtomicU32,
-    /// The time of the clock, as `f64` bits, when the render clock last missed a tick.
-    time_at_missed_tick: AtomicU64,
+    /// Whether the main thread began a rendering update of the document since the render clock's
+    /// last display tick: it keeps up with the display, and presents what the ticks lay out.
+    main_rendered: AtomicBool,
     /// The progress (percent) at which the last tick sampled each scroll progress timeline, or the
     /// host held it at the start, by the timeline's style engine identity.
     scroll_progress: Mutex<Vec<(u32, f64)>>,
-    /// What the ticks left for the host to adopt, one entry per target.
-    entries: Mutex<Vec<ClockTickEntry>>,
+    /// What the ticks left for the host to adopt, which a display tick writes as a whole: the host
+    /// takes all of one tick or none.
+    adoption: Mutex<Adoption>,
     /// The layout frame the render clock's ticks lay out in, which the main thread hands the clock
-    /// and takes in when it wakes.
+    /// and takes in as it adopts the ticks.
     layout_frame: Mutex<Option<ClockLayoutFrame>>,
 }
 
@@ -155,10 +165,10 @@ impl ClockPublication {
             time: AtomicU64::new(time.to_bits()),
             outcome: Mutex::default(),
             presented_since_adoption: AtomicBool::new(false),
-            ticks_missed: AtomicU32::new(0),
-            time_at_missed_tick: AtomicU64::new(f64::NAN.to_bits()),
+            // A clock starts at the end of a rendering update.
+            main_rendered: AtomicBool::new(true),
             scroll_progress: Mutex::default(),
-            entries: Mutex::default(),
+            adoption: Mutex::default(),
             layout_frame: Mutex::default(),
         }
     }
@@ -171,22 +181,20 @@ impl ClockPublication {
         *self.outcome.lock().expect("clock publication outcome") = Some(outcome);
     }
 
-    /// How many rounds the ticks laid out in the layout frame the main thread has yet to take in.
-    fn rounds_owed(&self) -> u32 {
-        self.layout_frame
-            .lock()
-            .expect("clock publication layout frame")
-            .as_ref()
-            .map_or(0, ClockLayoutFrame::rounds)
+    fn adoption(&self) -> std::sync::MutexGuard<'_, Adoption> {
+        self.adoption.lock().expect("clock publication adoption")
     }
+}
 
-    fn take_entry(&self) -> Option<ClockTickEntry> {
-        let mut entries = self.entries.lock().expect("clock publication entries");
-        if entries.is_empty() {
-            return None;
-        }
-        Some(entries.remove(0))
-    }
+/// What the ticks of a document's clocks left for the host to adopt.
+#[derive(Default)]
+struct Adoption {
+    /// One entry per target.
+    entries: Vec<ClockTickEntry>,
+    /// The committed geometry the last display tick that moved something laid out, or the start of a
+    /// clock found, which the host's reads answer from once it adopted the entries, as they would
+    /// from a snapshot it published.
+    query_snapshot: Option<QuerySnapshot>,
 }
 
 /// The clock of a document, which the owner keeps in the document's render state: what its ticks
@@ -194,6 +202,8 @@ impl ClockPublication {
 pub(crate) struct DocumentClock {
     /// The compositor context whose display ticks the render clock hands the clock, or 0.
     context: u64,
+    /// The main thread of the document, which a display tick runs for.
+    main_thread: ThreadId,
     /// The style engine identity of the document timeline the clock ticks.
     timeline_identity: u32,
     /// The unsafe shared current time, in milliseconds, at which the timeline reads zero: a frame
@@ -209,6 +219,9 @@ pub(crate) struct DocumentClock {
     /// thread adopts what its ticks left before its rendering update stops it. A later tick would
     /// sample over records only the entries the host has not adopted yet keep alive.
     needs_main: bool,
+    /// Whether the main thread stopped the clock: nothing ticks it, and it stays for what its ticks
+    /// left the host until the next clock of the document replaces it.
+    stopped: bool,
     targets: Vec<ClockTarget>,
     scroll_timelines: Vec<FfiClockScrollTimeline>,
     /// The rows the last tick's samples repaint, and whether they hit test differently.
@@ -222,8 +235,15 @@ pub(crate) struct DocumentClock {
 }
 
 impl DocumentClock {
-    pub(crate) fn context(&self) -> u64 {
-        self.context
+    /// Whether the render clock ticks the clock at the display ticks of the compositor context
+    /// `context`.
+    pub(crate) fn ticks_at(&self, context: u64) -> bool {
+        !self.stopped && self.context == context
+    }
+
+    /// Whether the ticks left samples the host has not taken yet.
+    pub(crate) fn left_samples_to_adopt(&self) -> bool {
+        !self.published.adoption().entries.is_empty()
     }
 
     /// The timeline time of a frame shown at `frame_time` (unsafe shared current time, ms).
@@ -232,16 +252,17 @@ impl DocumentClock {
     }
 
     /// Samples the clock's targets at timeline time `time` and installs what they compose into the
-    /// arena `arena_handle`, ahead of the host, which adopts the entries this publishes (see
+    /// arena `arena_handle`, ahead of the host, which adopts the `entries` this leaves (see
     /// `style_engine_clock_tick_take_entry`). No tick samples at or past the deadline. The scroll
-    /// timelines are sampled where the host sampled them.
+    /// timelines are sampled where the host held them as it started the clock.
     ///
     /// # Safety
     ///
     /// On the owner, which holds `state`, the arena of the clock's document, and `engine`, its style engine: inside
-    /// the `clock` run the host submitted, or with the main thread idle.
+    /// the `clock` run the host submitted, or in a display tick.
     unsafe fn run_tick(
         &mut self,
+        entries: &mut Vec<ClockTickEntry>,
         state: *mut ArenaHandle,
         engine: Option<&mut StyleEngine>,
         time: f64,
@@ -252,7 +273,7 @@ impl DocumentClock {
             // The main thread pins and unpins its host's records beside the tick, which reads none of them.
             engine.begin_clock_lend_beside_host_pins();
             // SAFETY: Guaranteed by the caller.
-            let outcome = unsafe { self.sample_and_install(state, engine, time) };
+            let outcome = unsafe { self.sample_and_install(entries, state, engine, time) };
             engine.end_clock_tick_beside_host_pins();
             outcome
         } else {
@@ -275,6 +296,7 @@ impl DocumentClock {
     /// As for [`Self::run_tick`].
     unsafe fn sample_and_install(
         &mut self,
+        entries: &mut Vec<ClockTickEntry>,
         state: *mut ArenaHandle,
         engine: &mut StyleEngine,
         time: f64,
@@ -287,18 +309,11 @@ impl DocumentClock {
         let mut samples = unsafe { &*engine }
             .animation_timeline_samples()
             .with_time(self.timeline_identity, time);
-        // A scroll progress timeline is where the host sampled it. Past the progress at which an effect
-        // changes its phase or its iteration, the host has events to send.
+        // A scroll progress timeline is where the host held it as it started the clock. Past the progress at
+        // which an effect changes its phase or its iteration, the host has events to send.
         let mut scroll_progress = Vec::with_capacity(self.scroll_timelines.len());
         for timeline in &self.scroll_timelines {
-            let progress = samples
-                .sample(timeline.identity)
-                .flatten()
-                .filter(|sample| sample.is_percentage)
-                .map(|sample| sample.value);
-            let Some(progress) = progress else {
-                return FfiClockTickOutcome::NeedsMain;
-            };
+            let progress = timeline.progress;
             if !timeline.holds(progress) {
                 return FfiClockTickOutcome::NeedsMain;
             }
@@ -311,17 +326,25 @@ impl DocumentClock {
             .lock()
             .expect("clock publication scroll progress") = scroll_progress;
         let mut outcome = FfiClockTickOutcome::Presented;
-        let mut entries = self.published.entries.lock().expect("clock publication entries");
         self.repaints.clear();
         self.tick_started_fresh = entries.is_empty();
         let mut presentable = true;
-        for target in &mut self.targets {
+        for target in &self.targets {
+            // A tick samples over the record the target's box holds: the host's, or the one an earlier
+            // tick installed ahead of it.
+            let row = arena.bound_row(target.style_node);
+            if row.is_invalid() {
+                outcome = FfiClockTickOutcome::NeedsMain;
+                presentable = false;
+                continue;
+            }
+            let style_record = arena.node_style_record(row);
             // SAFETY: As above; the borrow ends with the call.
             let sampled = unsafe {
                 sample_installed_record_for_clock_tick(
                     &mut *engine,
                     target.style_node,
-                    target.style_record,
+                    style_record,
                     arena_handle,
                     &samples,
                 )
@@ -331,17 +354,16 @@ impl DocumentClock {
                 presentable = false;
                 entries.push(ClockTickEntry {
                     style_node: target.style_node,
-                    style_record_before: target.style_record,
+                    style_record_before: style_record,
                     sample: declined_sample(),
                     installed_in_arena: false,
                 });
                 continue;
             };
             // The sample moved nothing the record composed.
-            if sample.style_record == target.style_record {
+            if sample.style_record == style_record {
                 continue;
             }
-            let previous_record = target.style_record;
             let level = sample.invalidation.invalidation & 0x3;
             let needs_layout_tree_rebuild = level >= 3;
             let needs_relayout = level >= 2;
@@ -349,21 +371,18 @@ impl DocumentClock {
                 && arena.install_animation_sample(target.style_node, sample.style_record, needs_relayout);
             presentable &= installed_in_arena
                 && render_side_shows(&sample, || {
-                    !target.has_pseudo_element_style_outside_box
-                        && box_holds_only_text(arena, arena.bound_row(target.style_node))
+                    !target.has_pseudo_element_style_outside_box && box_holds_only_text(arena, row)
                 });
             if level >= 1 && installed_in_arena {
                 let affects_hit_testing =
                     sample.invalidation.invalidation & FfiStyleInvalidationField::AffectsHitTesting as u32 != 0;
-                self.repaints
-                    .push((arena.bound_row(target.style_node), affects_hit_testing));
+                self.repaints.push((row, affects_hit_testing));
             }
-            target.style_record = sample.style_record;
             // Ticks the host has not adopted yet fold into one entry per target, over the record the
             // host holds: the arena's log keeps only the last record too.
             if let Some(entry) = entries.iter_mut().find(|entry| {
                 entry.style_node == target.style_node
-                    && entry.sample.style_record == previous_record
+                    && entry.sample.style_record == style_record
                     && entry.installed_in_arena
                     && installed_in_arena
             }) {
@@ -372,7 +391,7 @@ impl DocumentClock {
             }
             entries.push(ClockTickEntry {
                 style_node: target.style_node,
-                style_record_before: previous_record,
+                style_record_before: style_record,
                 sample,
                 installed_in_arena,
             });
@@ -381,43 +400,18 @@ impl DocumentClock {
         outcome
     }
 
-    /// Lays out what the tick's samples left, in the layout frame the main thread handed the clock.
-    /// Returns whether a round laid out, or `None` where the main thread has to.
-    ///
-    /// # Safety
-    ///
-    /// As for [`Self::run_tick`], with the main thread idle.
-    unsafe fn lay_out(&self, state: *mut ArenaHandle) -> Option<bool> {
-        let mut frame = self
-            .published
-            .layout_frame
-            .lock()
-            .expect("clock publication layout frame");
-        let Some(frame) = frame.as_mut() else {
-            // SAFETY: The caller holds the arena.
-            let arena = unsafe { &*state }.arena();
-            return arena.layout_is_up_to_date(false).then_some(false);
-        };
-        // SAFETY: Guaranteed by the caller.
-        if !unsafe { frame.run_round() } {
-            return None;
-        }
-        Some(frame.laid_out())
-    }
-
     /// Shows what the tick installed and laid out: repaints the rows its samples repaint, records
-    /// the display list again and has the host present it. Returns false where the render side
-    /// cannot show it, and the main thread has to.
+    /// the display list again and has the host present it.
     ///
     /// # Safety
     ///
     /// As for [`Self::lay_out`].
-    unsafe fn present(&self, state: *mut ArenaHandle) -> bool {
+    unsafe fn present(&self, state: *mut ArenaHandle) -> FfiClockPresent {
         if !self.presentable {
-            return false;
+            return FfiClockPresent::Declined;
         }
         let Some(present) = PRESENT.get() else {
-            return false;
+            return FfiClockPresent::Declined;
         };
         let arena_handle = state.cast::<c_void>();
         // SAFETY: The caller holds the arena.
@@ -438,14 +432,14 @@ impl DocumentClock {
         }
         // SAFETY: As above.
         if !unsafe { crate::painting::ffi::record_for_clock_tick(arena_handle) } {
-            return false;
+            return FfiClockPresent::Declined;
         }
-        if present(arena_handle) {
-            return true;
+        let presented = present(arena_handle);
+        if presented != FfiClockPresent::Presented {
+            // Nothing presents the recording; the main thread records the frame again.
+            arena.recording().discard_pending_recording();
         }
-        // Nothing presents the recording; the main thread records the frame again.
-        arena.recording().discard_pending_recording();
-        false
+        presented
     }
 }
 
@@ -537,9 +531,17 @@ fn declined_sample() -> FfiRowSampledInPass {
     }
 }
 
+/// On the main thread: what the clocks of a document publish, and whether one runs.
+struct MainSideClock {
+    published: Arc<ClockPublication>,
+    running: bool,
+}
+
 thread_local! {
-    // On the main thread, what the clock of each document it started publishes, until it stops it.
-    static PUBLICATIONS: RefCell<HashMap<DocumentId, Arc<ClockPublication>>> = RefCell::new(HashMap::new());
+    // On the main thread, the clocks of each document it started a clock for, until the document goes.
+    static CLOCKS: RefCell<HashMap<DocumentId, MainSideClock>> = RefCell::new(HashMap::new());
+    // On the main thread, the entries of the adoption it took last that the host has yet to adopt.
+    static ADOPTING: RefCell<std::collections::VecDeque<ClockTickEntry>> = RefCell::default();
 }
 
 /// The document whose layout arena is `arena`.
@@ -556,9 +558,19 @@ unsafe fn document_of(arena: *mut c_void) -> DocumentId {
 /// On the main thread: what the clock of the document whose layout arena is `arena` publishes, if
 /// the main thread started it and has not stopped it.
 fn publication_of(arena: *mut c_void) -> Option<Arc<ClockPublication>> {
+    main_side_clock_of(arena, |clock| clock.running.then(|| Arc::clone(&clock.published))).flatten()
+}
+
+/// On the main thread: what the clocks of the document whose layout arena is `arena` publish, whether
+/// one runs or not.
+fn samples_publication_of(arena: *mut c_void) -> Option<Arc<ClockPublication>> {
+    main_side_clock_of(arena, |clock| Arc::clone(&clock.published))
+}
+
+fn main_side_clock_of<R>(arena: *mut c_void, operation: impl FnOnce(&mut MainSideClock) -> R) -> Option<R> {
     // SAFETY: Every caller passes the live arena of a document on the main thread.
     let document = unsafe { document_of(arena) };
-    PUBLICATIONS.with_borrow(|publications| publications.get(&document).cloned())
+    CLOCKS.with_borrow_mut(|clocks| clocks.get_mut(&document).map(operation))
 }
 
 /// Sends the owner `message` about the clock of a document.
@@ -569,7 +581,7 @@ fn send(message: ClockMessage) {
 /// On the main thread: the document whose render state the owner dropped had its clock dropped
 /// with it.
 pub(crate) fn document_destroyed(document: DocumentId) {
-    PUBLICATIONS.with_borrow_mut(|publications| publications.remove(&document));
+    CLOCKS.with_borrow_mut(|clocks| clocks.remove(&document));
 }
 
 // The ticks the host adopted that installed a sample.
@@ -607,17 +619,28 @@ pub unsafe extern "C" fn rust_document_clock_start(
 ) {
     // SAFETY: Guaranteed by the caller.
     let document = unsafe { document_of(arena) };
-    let published = Arc::new(ClockPublication::new(time));
-    PUBLICATIONS.with_borrow_mut(|publications| publications.insert(document, Arc::clone(&published)));
+    let published = CLOCKS.with_borrow_mut(|clocks| {
+        let clock = clocks.entry(document).or_insert_with(|| MainSideClock {
+            published: Arc::new(ClockPublication::new(time)),
+            running: false,
+        });
+        clock.running = true;
+        let published = &clock.published;
+        published.time.store(time.to_bits(), Ordering::Release);
+        published.presented_since_adoption.store(false, Ordering::Release);
+        Arc::clone(published)
+    });
     send(ClockMessage::Start {
         document,
         clock: Box::new(DocumentClock {
             context,
+            main_thread: std::thread::current().id(),
             timeline_identity,
             timeline_zero,
             deadline,
             paused: false,
             needs_main: false,
+            stopped: false,
             targets: Vec::new(),
             scroll_timelines: Vec::new(),
             repaints: Vec::new(),
@@ -640,7 +663,6 @@ pub unsafe extern "C" fn rust_document_clock_start(
 pub unsafe extern "C" fn rust_document_clock_set_targets(
     arena: *mut c_void,
     style_nodes: *const u32,
-    style_records: *const u64,
     pseudo_element_styles_outside_box: *const bool,
     count: usize,
 ) {
@@ -650,17 +672,10 @@ pub unsafe extern "C" fn rust_document_clock_set_targets(
     let mut targets = Vec::with_capacity(count);
     for index in 0..count {
         // SAFETY: Guaranteed by the caller.
-        let (node, record, outside_box) = unsafe {
-            (
-                *style_nodes.add(index),
-                *style_records.add(index),
-                *pseudo_element_styles_outside_box.add(index),
-            )
-        };
+        let (node, outside_box) = unsafe { (*style_nodes.add(index), *pseudo_element_styles_outside_box.add(index)) };
         if let Some(style_node) = StyleNodeID::from_raw(node) {
             targets.push(ClockTarget {
                 style_node,
-                style_record: record,
                 has_pseudo_element_style_outside_box: outside_box,
             });
         }
@@ -720,20 +735,20 @@ pub extern "C" fn rust_document_clock_scroll_progress(arena: *mut c_void, identi
     })
 }
 
-/// Stops the clock of the document whose layout arena is `arena`, if it has one. What its last tick
-/// left for the host to adopt goes with it.
+/// Stops the clock of the document whose layout arena is `arena`, if it has one. What its ticks
+/// left stays for the host to adopt, beside what a tick that runs before the owner learns of the
+/// stop leaves.
 ///
 /// # Safety
 ///
 /// `arena` is the live layout arena of a document on the main thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rust_document_clock_stop(arena: *mut c_void) {
+    if main_side_clock_of(arena, |clock| std::mem::replace(&mut clock.running, false)) != Some(true) {
+        return;
+    }
     // SAFETY: Guaranteed by the caller.
     let document = unsafe { document_of(arena) };
-    let Some(published) = PUBLICATIONS.with_borrow_mut(|publications| publications.remove(&document)) else {
-        return;
-    };
-    published.entries.lock().expect("clock publication entries").clear();
     send(ClockMessage::Stop { document });
 }
 
@@ -823,7 +838,6 @@ pub unsafe extern "C" fn rust_document_clock_submit_tick(
     };
     // SAFETY: Guaranteed by the caller.
     let document = unsafe { document_of(arena) };
-    *published.outcome.lock().expect("clock publication outcome") = None;
     // The host shows what this tick installs itself.
     published.presented_since_adoption.store(false, Ordering::Release);
     // The tick samples the engine, and takes it along.
@@ -866,7 +880,7 @@ pub extern "C" fn rust_document_clock_tick_outcome(arena: *mut c_void) -> FfiClo
 /// Whether the render side presented every tick of the clock of the document whose layout arena is
 /// `arena` the host has not adopted yet: adopting them repaints nothing.
 pub(crate) fn presented_since_adoption(arena: *mut c_void) -> bool {
-    publication_of(arena).is_some_and(|published| published.presented_since_adoption.load(Ordering::Acquire))
+    samples_publication_of(arena).is_some_and(|published| published.presented_since_adoption.load(Ordering::Acquire))
 }
 
 /// As [`presented_since_adoption`].
@@ -887,10 +901,57 @@ pub extern "C" fn rust_clock_ticks_presented() -> u64 {
     CLOCK_TICKS_PRESENTED.load(Ordering::Relaxed)
 }
 
-/// Takes the next entry the ticks of the clock of the document whose layout arena is `arena` left
-/// for the host to adopt.
-pub(crate) fn take_clock_tick_entry(arena: *mut c_void) -> Option<ClockTickEntry> {
-    publication_of(arena)?.take_entry()
+/// What the host adopts of what the ticks of the clocks of a document left, all of it as one tick
+/// left it: whether the ticks left samples, which `style_engine_clock_tick_take_entry` hands out
+/// from now on, the time of that tick (NaN without a running clock), and the query snapshot of what
+/// it laid out, or null, which the host owns (`query_snapshot_release`).
+#[repr(C)]
+pub struct FfiClockAdoption {
+    pub has_samples: bool,
+    pub time: f64,
+    pub query_snapshot: *const c_void,
+}
+
+/// Takes what the ticks of the clocks of the document whose layout arena is `arena` left for the
+/// host to adopt.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_document_clock_take_adoption(arena: *mut c_void) -> FfiClockAdoption {
+    let running = publication_of(arena).is_some();
+    let Some(published) = samples_publication_of(arena) else {
+        ADOPTING.with_borrow_mut(std::collections::VecDeque::clear);
+        return FfiClockAdoption {
+            has_samples: false,
+            time: f64::NAN,
+            query_snapshot: std::ptr::null(),
+        };
+    };
+    let mut adoption = published.adoption();
+    let has_samples = !adoption.entries.is_empty();
+    ADOPTING.with_borrow_mut(|adopting| *adopting = std::mem::take(&mut adoption.entries).into());
+    FfiClockAdoption {
+        has_samples,
+        time: if running { published.time() } else { f64::NAN },
+        query_snapshot: adoption
+            .query_snapshot
+            .take()
+            .map_or(std::ptr::null(), crate::painting::query_snapshot::into_handle),
+    }
+}
+
+/// Takes the next entry of the adoption the host took last.
+pub(crate) fn take_clock_tick_entry() -> Option<ClockTickEntry> {
+    ADOPTING.with_borrow_mut(std::collections::VecDeque::pop_front)
+}
+
+/// Whether the clocks of the document whose layout arena is `arena` left something for the host to
+/// adopt: samples its ticks installed, or the query snapshot of what a tick or the start of a clock
+/// found laid out.
+#[unsafe(no_mangle)]
+pub extern "C" fn rust_document_clock_left_adoption(arena: *mut c_void) -> bool {
+    samples_publication_of(arena).is_some_and(|published| {
+        let adoption = published.adoption();
+        !adoption.entries.is_empty() || adoption.query_snapshot.is_some()
+    })
 }
 
 /// Drops what the host did not adopt of the records the ticks of the clock of the document whose
@@ -913,14 +974,13 @@ pub unsafe extern "C" fn rust_document_clock_drop_unadopted(arena: *mut c_void) 
     );
 }
 
-/// Whether the render clock missed so many display ticks of the clock of the document whose layout
-/// arena is `arena` in a row that the main thread's rendering updates tick it in its place.
+/// A rendering update of the document whose layout arena is `arena` begins: the main thread keeps
+/// up with the display, and presents what the render clock's next display tick lays out itself.
 #[unsafe(no_mangle)]
-pub extern "C" fn rust_document_clock_misses_ticks(arena: *mut c_void) -> bool {
-    publication_of(arena).is_some_and(|published| {
-        published.ticks_missed.load(Ordering::Acquire) >= MISSED_TICKS_BEFORE_MAIN
-            && published.time_at_missed_tick.load(Ordering::Acquire) == published.time.load(Ordering::Acquire)
-    })
+pub extern "C" fn rust_document_clock_main_renders(arena: *mut c_void) {
+    if let Some(published) = publication_of(arena) {
+        published.main_rendered.store(true, Ordering::Release);
+    }
 }
 
 /// A message about the clocks of documents, which the owner handles in order with every other
@@ -945,9 +1005,6 @@ pub(crate) enum ClockMessage {
     Paused { document: DocumentId, paused: bool },
     /// Stops the clock of `document`.
     Stop { document: DocumentId },
-    /// The main thread `main_thread` went idle: the render clock's ticks may run until it wakes,
-    /// unless it woke already (see [`rust_render_clock_main_will_idle`]).
-    MainIdle { generation: u64, main_thread: ThreadId },
     /// A display tick for the compositor context `context`, at the time its slot holds when it runs, which `run`
     /// runs.
     DisplayTick {
@@ -970,8 +1027,7 @@ pub(crate) enum ClockMessage {
 }
 
 impl ClockMessage {
-    /// The document the message is about; none for what the idle main thread and the render clock
-    /// send.
+    /// The document the message is about; none for what the render clock sends.
     pub(crate) fn document(&self) -> DocumentId {
         match self {
             Self::Start { document, .. }
@@ -980,7 +1036,7 @@ impl ClockMessage {
             | Self::Paused { document, .. }
             | Self::Stop { document }
             | Self::SubmittedTick { document, .. } => *document,
-            Self::MainIdle { .. } | Self::DisplayTick { .. } | Self::InjectedTick { .. } => DocumentId::default(),
+            Self::DisplayTick { .. } | Self::InjectedTick { .. } => DocumentId::default(),
         }
     }
 }
@@ -1004,7 +1060,17 @@ pub(crate) struct SubmittedTick {
 pub(crate) fn handle_on_owner(message: ClockMessage) {
     match message {
         ClockMessage::Start { document, clock } => {
-            crate::render_owner::with_clock_slot(document, |slot| *slot = Some(*clock));
+            let published = Arc::clone(&clock.published);
+            crate::render_owner::with_clock(document, |slot, arena| {
+                *slot = Some(*clock);
+                // A clock starts where a rendering update ended: until a tick moves something, the host's reads answer
+                // from what that update laid out, and no tick that runs meanwhile shows in them.
+                // SAFETY: The render state keeps the arena alive, and the owner holds it.
+                published.adoption().query_snapshot = unsafe { &mut *arena }
+                    .arena_mut()
+                    .publish_query_snapshot(&CLOCK_TICK_QUERY_SNAPSHOT_VIEWPORT);
+            });
+            TICKS_TO_ADOPT.store(true, Ordering::Release);
         }
         ClockMessage::Targets { document, targets } => {
             crate::render_owner::with_clock_slot(document, |slot| {
@@ -1028,17 +1094,11 @@ pub(crate) fn handle_on_owner(message: ClockMessage) {
             });
         }
         ClockMessage::Stop { document } => {
-            crate::render_owner::with_clock_slot(document, |slot| *slot = None);
-        }
-        ClockMessage::MainIdle {
-            generation,
-            main_thread,
-        } => {
-            let mut gate = idle_gate().state.lock().expect("render clock idle gate");
-            if gate.holder == ArenaHolder::Main && gate.idle_requested == Some(generation) {
-                gate.holder = ArenaHolder::Idle(main_thread);
-                gate.idle_requested = None;
-            }
+            crate::render_owner::with_clock_slot(document, |slot| {
+                if let Some(clock) = slot {
+                    clock.stopped = true;
+                }
+            });
         }
         ClockMessage::DisplayTick { context, slot, run } => {
             // A read-modify-write, which a later tick's post orders against: either that post finds the
@@ -1052,8 +1112,16 @@ pub(crate) fn handle_on_owner(message: ClockMessage) {
             frame_time_nanoseconds,
             run,
         } => {
+            // A test's tick stands for a display frame the main thread missed.
+            if let Some(document) = crate::render_owner::document_with_clock_at(context) {
+                crate::render_owner::with_clock_slot(document, |slot| {
+                    if let Some(clock) = slot {
+                        clock.published.main_rendered.store(false, Ordering::Release);
+                    }
+                });
+            }
             run(context, frame_time_nanoseconds);
-            end_injected_tick();
+            adopt_on_main(true);
         }
         ClockMessage::SubmittedTick { document, tick, ticket } => ticket.run(|| (tick.run)(document, *tick)),
     }
@@ -1086,12 +1154,17 @@ fn run_submitted_tick(document: DocumentId, tick: SubmittedTick) {
             published.set_outcome(FfiClockTickOutcome::Stopped);
             return;
         };
+        if clock.stopped {
+            published.set_outcome(FfiClockTickOutcome::Stopped);
+            put_clock_back(document, clock);
+            return;
+        }
         debug_assert!(
             Arc::ptr_eq(&clock.published, &published),
             "a submitted tick publishes to the clock it was submitted for"
         );
         // SAFETY: The run owns the arena and its engine until the main thread takes it back.
-        unsafe { clock.run_tick(arena, engine, time) };
+        unsafe { clock.run_tick(&mut published.adoption().entries, arena, engine, time) };
         put_clock_back(document, clock);
     };
     match style_engine {
@@ -1101,32 +1174,16 @@ fn run_submitted_tick(document: DocumentId, tick: SubmittedTick) {
 }
 
 /// Runs the display tick at `frame_time_nanoseconds` for the clock that ticks at the compositor
-/// context `context`, on the owner.
+/// context `context`, on the owner, whatever the main thread is doing.
 fn run_display_tick(context: u64, frame_time_nanoseconds: i64) {
     count(&COUNTERS.ticks_run);
     let Some(document) = crate::render_owner::document_with_clock_at(context) else {
         count(&COUNTERS.ticks_dropped_without_clock);
         return;
     };
-    let idle_tick = match IdleTick::begin() {
-        Ok(idle_tick) => idle_tick,
-        Err(main_holds_arena) => {
-            count(&COUNTERS.ticks_dropped_main_busy);
-            if main_holds_arena {
-                let published = crate::render_owner::with_clock_slot(document, |slot| {
-                    slot.as_ref().map(|clock| Arc::clone(&clock.published))
-                })
-                .flatten();
-                if let Some(published) = published {
-                    miss_tick(context, &published);
-                }
-            }
-            return;
-        }
-    };
-    // Taking the clock applies the arena's pending changes, which may reach the engine the idle main thread left home.
+    // Taking the clock applies the arena's pending changes, which may reach the engine.
     let taken = match crate::render_owner::style_engine_of(document) {
-        // SAFETY: The main thread is idle with nothing in flight, and waits for this tick when it wakes.
+        // SAFETY: The owner holds the document's render state, and the engine with it.
         Some(engine) if !engine.is_null() => unsafe { engine.reach_on_owner(|_| take_clock(document)) },
         _ => take_clock(document),
     };
@@ -1134,23 +1191,14 @@ fn run_display_tick(context: u64, frame_time_nanoseconds: i64) {
         count(&COUNTERS.ticks_dropped_without_clock);
         return;
     };
-    run_display_tick_on(&mut clock, arena, idle_tick, context, frame_time_nanoseconds);
+    run_display_tick_on(&mut clock, arena, context, frame_time_nanoseconds);
     put_clock_back(document, clock);
 }
 
-/// Runs a display tick of `clock`, whose document's arena is `arena`, while `idle_tick` holds the
-/// arenas.
-fn run_display_tick_on(
-    clock: &mut DocumentClock,
-    arena: *mut ArenaHandle,
-    idle_tick: IdleTick,
-    context: u64,
-    frame_time_nanoseconds: i64,
-) {
+/// Runs a display tick of `clock`, whose document's arena is `arena`.
+fn run_display_tick_on(clock: &mut DocumentClock, arena: *mut ArenaHandle, context: u64, frame_time_nanoseconds: i64) {
     if clock.paused {
         count(&COUNTERS.ticks_dropped_paused);
-        drop(idle_tick);
-        miss_tick(context, &clock.published);
         return;
     }
     if clock.needs_main {
@@ -1158,42 +1206,41 @@ fn run_display_tick_on(
         return;
     }
     let published = Arc::clone(&clock.published);
-    published.ticks_missed.store(0, Ordering::Release);
+    // A main thread that rendered the document since the last display tick keeps up with the display: its next frame
+    // shows what the tick lays out.
+    let main_presents = published.main_rendered.swap(false, Ordering::AcqRel);
     let time = clock.timeline_time_at(frame_time_nanoseconds as f64 / 1.0e6);
     if time.partial_cmp(&published.time()) != Some(std::cmp::Ordering::Greater) {
         count(&COUNTERS.ticks_dropped_stale);
         return;
     }
+    // The main thread takes what the tick leaves, and the layout frame it lays out in, once it is over.
+    let mut adoption = published.adoption();
+    let mut layout_frame = published.layout_frame.lock().expect("clock publication layout frame");
+    // The main thread hands the clock the next layout frame as it takes the last one in.
+    let Some(frame) = layout_frame.as_mut() else {
+        return;
+    };
     let mut tick = None;
-    crate::stage_thread::run_detached_for(idle_tick.caller, arena as usize, || {
-        let run_tick = || {
-            // SAFETY: The main thread is idle with nothing in flight, and waits for this tick when
-            // it wakes: the owner holds the arena and its engine until `idle_tick` is dropped.
-            let engine = unsafe { &*arena }.arena().style_engine_handle();
-            // SAFETY: As above.
-            let outcome = if engine.is_null() {
-                unsafe { clock.run_tick(arena, None, time) }
-            } else {
-                unsafe { engine.reach_on_owner(|engine| clock.run_tick(arena, Some(engine), time)) }
-            };
+    crate::stage_thread::run_detached_for(clock.main_thread, arena as usize, || {
+        let mut run_tick = |engine: Option<&mut StyleEngine>| {
+            let entries = &mut adoption.entries;
+            // SAFETY: The owner holds the document's render state: its arena, and the engine the arena links.
+            let outcome = unsafe { clock.run_tick(entries, arena, engine, time) };
             if outcome != FfiClockTickOutcome::Presented {
                 return (outcome, false, false);
             }
             // A sample the arena did not take, the host installs over the record the target held
             // before: only its entry keeps that record alive, and no later tick may sample over it.
-            if published
-                .entries
-                .lock()
-                .expect("clock publication entries")
-                .iter()
-                .any(|entry| !entry.installed_in_arena)
-            {
+            if entries.iter().any(|entry| !entry.installed_in_arena) {
                 return (FfiClockTickOutcome::NeedsMain, false, false);
             }
+            // What the samples left, the tick lays out in the frame the main thread handed the clock.
             // SAFETY: As above.
-            let Some(laid_out) = (unsafe { clock.lay_out(arena) }) else {
+            if !unsafe { frame.run_round() } {
                 return (FfiClockTickOutcome::NeedsMain, false, false);
-            };
+            }
+            let laid_out = frame.laid_out();
             // A round that moved a box that owns a clip, a transform or a scroll frame moved the
             // visual contexts, which the compositor has from the main thread's frames.
             // SAFETY: As above.
@@ -1203,13 +1250,36 @@ fn run_display_tick_on(
             }
             // A tick that moved nothing shows nothing new.
             let moved_nothing = !laid_out && clock.repaints.is_empty();
-            // SAFETY: As above.
-            if !moved_nothing && !unsafe { clock.present(arena) } {
-                return (FfiClockTickOutcome::NeedsMain, laid_out, false);
+            if moved_nothing {
+                return (outcome, laid_out, false);
             }
-            (outcome, laid_out, !moved_nothing)
+            // SAFETY: As above.
+            adoption.query_snapshot = unsafe { &mut *arena }
+                .arena_mut()
+                .publish_query_snapshot(&CLOCK_TICK_QUERY_SNAPSHOT_VIEWPORT);
+            if main_presents {
+                return (outcome, laid_out, false);
+            }
+            // SAFETY: As above.
+            match unsafe { clock.present(arena) } {
+                FfiClockPresent::Presented => (outcome, laid_out, true),
+                FfiClockPresent::MainPresents => (outcome, laid_out, false),
+                FfiClockPresent::Declined => (FfiClockTickOutcome::NeedsMain, laid_out, false),
+            }
         };
-        tick = Some(std::panic::catch_unwind(std::panic::AssertUnwindSafe(run_tick)));
+        // The whole tick reaches the engine as the owner: its layout round and its recording too.
+        // SAFETY: The owner holds the document's render state: its arena, and the engine the arena links.
+        let engine = unsafe { &*arena }.arena().style_engine_handle();
+        let reach_and_run_tick = || {
+            if engine.is_null() {
+                return run_tick(None);
+            }
+            // SAFETY: As above.
+            unsafe { engine.reach_on_owner(|engine| run_tick(Some(engine))) }
+        };
+        tick = Some(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+            reach_and_run_tick,
+        )));
     });
     let Some(Ok((outcome, laid_out, presented_frame))) = tick else {
         // A tick has nobody to hand a panic to.
@@ -1221,210 +1291,92 @@ fn run_display_tick_on(
         published.set_outcome(outcome);
         clock.needs_main = true;
     }
+    // What the main thread presents, it repaints as it adopts it.
+    let moved = laid_out || !clock.repaints.is_empty();
+    let shown_on_render_side = presented && (presented_frame || !moved);
     if clock.tick_started_fresh {
-        published.presented_since_adoption.store(presented, Ordering::Release);
-    } else if !presented {
+        published
+            .presented_since_adoption
+            .store(shown_on_render_side, Ordering::Release);
+    } else if !shown_on_render_side {
         published.presented_since_adoption.store(false, Ordering::Release);
     }
-    if published.entries.lock().is_ok_and(|entries| !entries.is_empty()) {
+    if !adoption.entries.is_empty() {
         TICKS_TO_ADOPT.store(true, Ordering::Release);
     }
-    let rounds_owed = published.rounds_owed();
-    drop(idle_tick);
-    if presented {
-        count(&COUNTERS.ticks_installed);
-        if laid_out {
-            count(&COUNTERS.ticks_laid_out);
-        }
-        // A tick that moved nothing presented no frame.
-        if presented_frame {
-            count(&COUNTERS.ticks_presented);
-        }
-        // What the rounds owe the document piles up in the frame until the main thread takes it in:
-        // one that idles for long takes it in every so often, and pays for a few rounds at a time.
-        if laid_out && rounds_owed >= MAX_CLOCK_ROUNDS_OWED {
-            count(&COUNTERS.ticks_waking_main_to_adopt);
-            if let Some(wake_main) = WAKE_MAIN.get() {
-                wake_main();
-            }
+    let rounds_owed = layout_frame.as_ref().map_or(0, ClockLayoutFrame::rounds);
+    drop(layout_frame);
+    drop(adoption);
+    if !presented {
+        count(&COUNTERS.ticks_needing_main);
+        if let Some(needs_main) = NEEDS_MAIN.get() {
+            needs_main(context);
         }
         return;
     }
-    count(&COUNTERS.ticks_needing_main);
-    if let Some(needs_main) = NEEDS_MAIN.get() {
-        needs_main(context);
+    count(&COUNTERS.ticks_installed);
+    if laid_out {
+        count(&COUNTERS.ticks_laid_out);
+    }
+    // A tick that moved nothing presented no frame, and the main thread presents what one moved while it keeps up.
+    if presented_frame {
+        count(&COUNTERS.ticks_presented);
+    } else if moved {
+        count(&COUNTERS.ticks_presented_by_main);
+    }
+    // What the rounds owe the document piles up in the frame until the main thread takes it in: one
+    // that renders nothing for long is asked to take it in every so often, and pays for a few rounds
+    // at a time.
+    if laid_out && rounds_owed >= MAX_CLOCK_ROUNDS_OWED {
+        count(&COUNTERS.ticks_asking_main_to_adopt);
+        adopt_on_main(false);
     }
 }
 
-/// How many display ticks in a row a clock may miss before the main thread's rendering updates tick
-/// it: a task that holds the arena for a frame or two is over before anyone sees the difference.
-const MISSED_TICKS_BEFORE_MAIN: u32 = 2;
+/// What a display tick's query snapshot converts rects to viewport space with: only what no transform,
+/// sticky offset or scroll offset moves, as the tick keeps no scroll state of the main thread's. A read
+/// the snapshot does not answer reads the document as a read without a snapshot does.
+const CLOCK_TICK_QUERY_SNAPSHOT_VIEWPORT: FfiQuerySnapshotViewport = FfiQuerySnapshotViewport {
+    has_committed_viewport_box: true,
+    visual_contexts_are_up_to_date: false,
+    viewport_scroll_offset_is_zero: false,
+    device_scroll_offsets: std::ptr::null(),
+    device_scroll_offsets_len: 0,
+    device_pixels_per_css_pixel: 1.0,
+};
 
-/// Notes a display tick the render clock could not run for the clock that publishes to
-/// `published`: the main thread held its arena or had paused it. Nothing else has the main thread
-/// render, so one that keeps missing them asks it for a rendering update at every display tick
-/// until the render clock runs one again.
-fn miss_tick(context: u64, published: &ClockPublication) {
-    // A rendering update that ticked the clock since the last miss ends the run: one the render
-    // clock's tick ran into is no reason to ask for another.
-    let time = published.time.load(Ordering::Acquire);
-    let missed = if published.time_at_missed_tick.swap(time, Ordering::AcqRel) == time {
-        published.ticks_missed.load(Ordering::Acquire).saturating_add(1)
-    } else {
-        1
-    };
-    published.ticks_missed.store(missed, Ordering::Release);
-    if missed < MISSED_TICKS_BEFORE_MAIN {
-        return;
-    }
-    count(&COUNTERS.ticks_missed_asking_main);
-    if let Some(needs_main) = NEEDS_MAIN.get() {
-        needs_main(context);
-    }
-}
-
-// The render clock: display ticks delivered to a thread of their own, which sends them to the owner
-// for the clock of their compositor context, which it ticks while the main thread is idle.
-
-/// Who may reach the arenas of documents with a clock now.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum ArenaHolder {
-    /// The main thread: it is awake, or it has a frame in flight, or the owner has yet to learn that
-    /// it went idle.
-    Main,
-    /// Nobody: the main thread is blocked in its outermost event loop, and a render clock tick may
-    /// start. The tick acts for the thread named.
-    Idle(ThreadId),
-    /// A render clock tick, which the main thread waits for when it wakes.
-    Tick,
-}
-
-struct GateState {
-    holder: ArenaHolder,
-    /// How many times the main thread went idle.
-    idle_generation: u64,
-    /// The time the main thread went idle that the owner has yet to learn of, while it has not woken
-    /// since: [`ClockMessage::MainIdle`] with this generation lets the ticks in.
-    idle_requested: Option<u64>,
-}
-
-struct IdleGate {
-    state: Mutex<GateState>,
-    tick_ended: Condvar,
-}
-
-fn idle_gate() -> &'static IdleGate {
-    static GATE: OnceLock<IdleGate> = OnceLock::new();
-    GATE.get_or_init(|| IdleGate {
-        state: Mutex::new(GateState {
-            holder: ArenaHolder::Main,
-            idle_generation: 0,
-            idle_requested: None,
-        }),
-        tick_ended: Condvar::new(),
-    })
-}
-
-/// A render clock tick's hold on the arenas, taken where the main thread is idle.
-struct IdleTick {
-    /// The thread the tick acts for, which it gives the arenas back to when it ends.
-    caller: ThreadId,
-}
-
-impl IdleTick {
-    /// Takes the arenas for a tick. Fails where the main thread holds them, with `true`, or where
-    /// another tick holds them, with `false`.
-    fn begin() -> Result<Self, bool> {
-        let mut state = idle_gate().state.lock().expect("render clock idle gate");
-        let caller = match state.holder {
-            ArenaHolder::Idle(caller) => caller,
-            ArenaHolder::Tick => return Err(false),
-            ArenaHolder::Main => return Err(true),
-        };
-        state.holder = ArenaHolder::Tick;
-        Ok(Self { caller })
-    }
-}
-
-impl Drop for IdleTick {
-    fn drop(&mut self) {
-        let gate = idle_gate();
-        let mut state = gate.state.lock().expect("render clock idle gate");
-        if state.holder == ArenaHolder::Tick {
-            state.holder = ArenaHolder::Idle(self.caller);
-        }
-        drop(state);
-        gate.tick_ended.notify_all();
-    }
-}
-
-// Whether a render clock tick installed something since the main thread last woke.
+// Whether a display tick left something for the main thread to adopt since it last took it.
 static TICKS_TO_ADOPT: AtomicBool = AtomicBool::new(false);
 
-/// The main thread is about to block in its outermost event loop. Unless it has a frame in flight,
-/// render clock ticks may reach the arenas of documents with a clock until it wakes, once the owner
-/// has handled what the main thread sent it before.
+/// Whether the render clock's ticks left something for the documents to adopt since the main thread
+/// last asked, which they adopt before anything else reaches them.
 #[unsafe(no_mangle)]
-pub extern "C" fn rust_render_clock_main_will_idle() {
-    if !enabled() || crate::stage_thread::has_frame_in_flight() {
-        return;
-    }
-    let generation = {
-        let mut state = idle_gate().state.lock().expect("render clock idle gate");
-        if state.holder != ArenaHolder::Main {
-            return;
-        }
-        state.idle_generation += 1;
-        state.idle_requested = Some(state.idle_generation);
-        state.idle_generation
-    };
-    send(ClockMessage::MainIdle {
-        generation,
-        main_thread: std::thread::current().id(),
-    });
+pub extern "C" fn rust_render_clock_take_ticks_to_adopt() -> bool {
+    enabled() && TICKS_TO_ADOPT.swap(false, Ordering::AcqRel)
 }
 
-/// The main thread woke. Waits for a render clock tick that is running to end, and takes the arenas
-/// back. Returns whether a tick installed something since it last woke, which the documents adopt
-/// before anything else reaches them.
+/// Has the main thread adopt what the render clock's ticks left. Runs on the Rendering thread.
+static ADOPT_ON_MAIN: OnceLock<extern "C" fn(bool)> = OnceLock::new();
+
+/// Has the render clock call `adopt_on_main(injected_tick_ran)` on the Rendering thread where the
+/// main thread should adopt what the ticks left without waiting for something else to run on it: a
+/// tick a test injected ran, or the ticks laid out many rounds for it to take in. The first one set
+/// stays.
 #[unsafe(no_mangle)]
-pub extern "C" fn rust_render_clock_main_did_wake() -> bool {
-    if !enabled() {
-        return false;
+pub extern "C" fn rust_render_clock_set_adopt_on_main(adopt: extern "C" fn(bool)) {
+    let _ = ADOPT_ON_MAIN.set(adopt);
+}
+
+fn adopt_on_main(injected_tick_ran: bool) {
+    if let Some(adopt) = ADOPT_ON_MAIN.get() {
+        adopt(injected_tick_ran);
     }
-    take_arenas_back();
-    TICKS_TO_ADOPT.swap(false, Ordering::AcqRel)
 }
 
-fn take_arenas_back() {
-    let gate = idle_gate();
-    let mut state = gate.state.lock().expect("render clock idle gate");
-    // A tick a test injected while the main thread idled runs before it takes the arenas back.
-    while state.holder == ArenaHolder::Tick || INJECTED_TICKS_PENDING.load(Ordering::Acquire) > 0 {
-        state = gate.tick_ended.wait(state).expect("render clock idle gate");
-    }
-    state.holder = ArenaHolder::Main;
-    state.idle_requested = None;
-}
-
-// The ticks a test injected that the owner has not run yet.
-static INJECTED_TICKS_PENDING: AtomicUsize = AtomicUsize::new(0);
-
-/// Wakes the main thread from its event loop. Runs on the Rendering thread.
-static WAKE_MAIN: OnceLock<extern "C" fn()> = OnceLock::new();
-
-/// Has the render clock call `wake_main()` on the Rendering thread where a tick a test injected ended, for the main
-/// thread to go on with what waits for it, and where the ticks laid out many rounds for an idle main thread to take
-/// in. The first one set stays.
-#[unsafe(no_mangle)]
-pub extern "C" fn rust_render_clock_set_wake_main(wake_main: extern "C" fn()) {
-    let _ = WAKE_MAIN.set(wake_main);
-}
-
-/// Hands the owner a display tick at `frame_time_nanoseconds` (monotonic time) for the compositor context `context`,
-/// as the render clock hands it one, for a test that drives the ticks itself. Call it where the main thread has just
-/// let render clock ticks in (see [`rust_render_clock_main_will_idle`]): the main thread waits for the tick before it
-/// takes the arenas back, and the tick wakes it when it ends. Returns false where there is no owner to tick it.
+/// Hands the owner a display tick at `frame_time_nanoseconds` (monotonic time) for the compositor
+/// context `context`, as the render clock hands it one, for a test that drives the ticks itself.
+/// Once the tick has run, the render clock has the main thread adopt what it left (see
+/// [`rust_render_clock_set_adopt_on_main`]). Returns false where there is no owner to tick it.
 ///
 /// # Safety
 ///
@@ -1436,29 +1388,12 @@ pub unsafe extern "C" fn rust_render_clock_inject_tick(
     frame_time_nanoseconds: i64,
 ) -> bool {
     assert!(!sender.is_null(), "render clock sender is null");
-    INJECTED_TICKS_PENDING.fetch_add(1, Ordering::AcqRel);
-    let sent = crate::stage_thread::send_to_owner(crate::render_owner::ToOwner::Clock(ClockMessage::InjectedTick {
+    crate::stage_thread::send_to_owner(crate::render_owner::ToOwner::Clock(ClockMessage::InjectedTick {
         context,
         frame_time_nanoseconds,
         run: run_display_tick,
     }))
-    .is_ok();
-    if !sent {
-        end_injected_tick();
-    }
-    sent
-}
-
-fn end_injected_tick() {
-    let gate = idle_gate();
-    {
-        let _state = gate.state.lock().expect("render clock idle gate");
-        INJECTED_TICKS_PENDING.fetch_sub(1, Ordering::AcqRel);
-    }
-    gate.tick_ended.notify_all();
-    if let Some(wake_main) = WAKE_MAIN.get() {
-        wake_main();
-    }
+    .is_ok()
 }
 
 /// Where the render clock's display ticks wait for the owner: one per compositor context. Ticks
@@ -1468,8 +1403,8 @@ pub(crate) struct ClockSlot {
     queued: AtomicBool,
 }
 
-/// How many rounds the ticks lay out in one layout frame before they wake an idle main thread to
-/// take it in: about two seconds of display ticks.
+/// How many rounds the ticks lay out in one layout frame before they ask the main thread to take it
+/// in: about two seconds of display ticks.
 const MAX_CLOCK_ROUNDS_OWED: u32 = 120;
 
 /// How many slots a render clock keeps before it lets go of those no tick waits in.
@@ -1490,8 +1425,8 @@ pub struct FfiRenderClockCounters {
     pub ticks_folded: u64,
     /// Ticks the stage thread ran.
     pub ticks_run: u64,
-    /// Ticks that found the main thread holding the arenas, and were dropped.
-    pub ticks_dropped_main_busy: u64,
+    /// Ticks the main thread presented, as it kept up with the display.
+    pub ticks_presented_by_main: u64,
     /// Ticks for a context no document's clock ticks at.
     pub ticks_dropped_without_clock: u64,
     /// Ticks for a clock the main thread moved what it ticks of.
@@ -1510,9 +1445,8 @@ pub struct FfiRenderClockCounters {
     pub ticks_needing_main: u64,
     /// Ticks whose layout moved the visual contexts, which ended their clock.
     pub ticks_moving_visual_contexts: u64,
-    /// Ticks that woke an idle main thread to take in the rounds they laid out.
-    pub ticks_waking_main_to_adopt: u64,
-    pub ticks_missed_asking_main: u64,
+    /// Ticks that asked the main thread to take in the rounds they laid out.
+    pub ticks_asking_main_to_adopt: u64,
 }
 
 #[derive(Default)]
@@ -1520,7 +1454,7 @@ struct RenderClockCounters {
     ticks_posted: AtomicU64,
     ticks_folded: AtomicU64,
     ticks_run: AtomicU64,
-    ticks_dropped_main_busy: AtomicU64,
+    ticks_presented_by_main: AtomicU64,
     ticks_dropped_without_clock: AtomicU64,
     ticks_dropped_paused: AtomicU64,
     ticks_dropped_needing_main: AtomicU64,
@@ -1530,15 +1464,14 @@ struct RenderClockCounters {
     ticks_presented: AtomicU64,
     ticks_needing_main: AtomicU64,
     ticks_moving_visual_contexts: AtomicU64,
-    ticks_waking_main_to_adopt: AtomicU64,
-    ticks_missed_asking_main: AtomicU64,
+    ticks_asking_main_to_adopt: AtomicU64,
 }
 
 static COUNTERS: RenderClockCounters = RenderClockCounters {
     ticks_posted: AtomicU64::new(0),
     ticks_folded: AtomicU64::new(0),
     ticks_run: AtomicU64::new(0),
-    ticks_dropped_main_busy: AtomicU64::new(0),
+    ticks_presented_by_main: AtomicU64::new(0),
     ticks_dropped_without_clock: AtomicU64::new(0),
     ticks_dropped_paused: AtomicU64::new(0),
     ticks_dropped_needing_main: AtomicU64::new(0),
@@ -1548,8 +1481,7 @@ static COUNTERS: RenderClockCounters = RenderClockCounters {
     ticks_presented: AtomicU64::new(0),
     ticks_needing_main: AtomicU64::new(0),
     ticks_moving_visual_contexts: AtomicU64::new(0),
-    ticks_waking_main_to_adopt: AtomicU64::new(0),
-    ticks_missed_asking_main: AtomicU64::new(0),
+    ticks_asking_main_to_adopt: AtomicU64::new(0),
 };
 
 fn count(counter: &AtomicU64) {
@@ -1557,13 +1489,13 @@ fn count(counter: &AtomicU64) {
 }
 
 /// Presents the display list a render clock tick recorded for the document of an arena: publishes
-/// it and hands the frame to the compositor. Runs on the Rendering thread, with the main thread idle.
-static PRESENT: OnceLock<extern "C" fn(*mut c_void) -> bool> = OnceLock::new();
+/// it and hands the frame to the compositor. Runs on the Rendering thread.
+static PRESENT: OnceLock<extern "C" fn(*mut c_void) -> FfiClockPresent> = OnceLock::new();
 
 /// Has the render clock call `present(arena)` to present what a tick recorded. The first one set
 /// stays.
 #[unsafe(no_mangle)]
-pub extern "C" fn rust_render_clock_set_present(present: extern "C" fn(*mut c_void) -> bool) {
+pub extern "C" fn rust_render_clock_set_present(present: extern "C" fn(*mut c_void) -> FfiClockPresent) {
     let _ = PRESENT.set(present);
 }
 
@@ -1601,9 +1533,9 @@ pub unsafe extern "C" fn rust_render_clock_sender_destroy(sender: *mut ClockSend
 }
 
 /// Hands the display tick at `frame_time_nanoseconds` (monotonic time) for the compositor context
-/// `context` to the owner, which ticks the clock of that context with it if the main thread is idle
-/// then. Where a tick for the context is still waiting there, it takes this time instead. Returns
-/// false where there is no owner, which there only is not when the process is going.
+/// `context` to the owner, which ticks the clock of that context with it. Where a tick for the
+/// context is still waiting there, it takes this time instead. Returns false where there is no
+/// owner, which there only is not when the process is going.
 ///
 /// # Safety
 ///
@@ -1651,7 +1583,7 @@ pub extern "C" fn rust_render_clock_counters() -> FfiRenderClockCounters {
         ticks_posted: load(&COUNTERS.ticks_posted),
         ticks_folded: load(&COUNTERS.ticks_folded),
         ticks_run: load(&COUNTERS.ticks_run),
-        ticks_dropped_main_busy: load(&COUNTERS.ticks_dropped_main_busy),
+        ticks_presented_by_main: load(&COUNTERS.ticks_presented_by_main),
         ticks_dropped_without_clock: load(&COUNTERS.ticks_dropped_without_clock),
         ticks_dropped_paused: load(&COUNTERS.ticks_dropped_paused),
         ticks_dropped_needing_main: load(&COUNTERS.ticks_dropped_needing_main),
@@ -1661,8 +1593,7 @@ pub extern "C" fn rust_render_clock_counters() -> FfiRenderClockCounters {
         ticks_presented: load(&COUNTERS.ticks_presented),
         ticks_needing_main: load(&COUNTERS.ticks_needing_main),
         ticks_moving_visual_contexts: load(&COUNTERS.ticks_moving_visual_contexts),
-        ticks_waking_main_to_adopt: load(&COUNTERS.ticks_waking_main_to_adopt),
-        ticks_missed_asking_main: load(&COUNTERS.ticks_missed_asking_main),
+        ticks_asking_main_to_adopt: load(&COUNTERS.ticks_asking_main_to_adopt),
     }
 }
 
@@ -1686,50 +1617,5 @@ mod tests {
         assert_eq!(folded.invalidation.invalidation & 0x3, 0x2);
         assert_eq!(folded.invalidation.invalidation & !0x3, 0x30);
         assert_eq!(folded.invalidation.changed_non_inherited_style_groups, 0b11);
-    }
-
-    #[test]
-    fn idle_gate_lets_a_tick_in_only_once_the_owner_learns_the_main_thread_idles_and_waits_for_it() {
-        take_arenas_back();
-        assert_eq!(IdleTick::begin().err(), Some(true), "the main thread holds the arenas");
-        let main_thread = std::thread::current().id();
-        let generation = {
-            let mut state = idle_gate().state.lock().unwrap();
-            state.idle_generation += 1;
-            state.idle_requested = Some(state.idle_generation);
-            state.idle_generation
-        };
-        // A stale idle, one the main thread woke from before the owner learned of it, lets nothing in.
-        handle_on_owner(ClockMessage::MainIdle {
-            generation: generation - 1,
-            main_thread,
-        });
-        assert_eq!(IdleTick::begin().err(), Some(true), "a stale idle lets no tick in");
-        handle_on_owner(ClockMessage::MainIdle {
-            generation,
-            main_thread,
-        });
-        let tick = IdleTick::begin().expect("the main thread is idle");
-        assert_eq!(IdleTick::begin().err(), Some(false), "another tick holds the arenas");
-        let woke = Arc::new(AtomicBool::new(false));
-        let waker = {
-            let woke = Arc::clone(&woke);
-            std::thread::spawn(move || {
-                take_arenas_back();
-                woke.store(true, Ordering::SeqCst);
-            })
-        };
-        std::thread::sleep(std::time::Duration::from_millis(20));
-        assert!(!woke.load(Ordering::SeqCst), "the main thread waits for the tick");
-        drop(tick);
-        waker.join().unwrap();
-        assert!(woke.load(Ordering::SeqCst));
-        assert!(IdleTick::begin().is_err());
-        // Once the main thread woke, the idle it asked for before lets nothing in.
-        handle_on_owner(ClockMessage::MainIdle {
-            generation,
-            main_thread,
-        });
-        assert_eq!(IdleTick::begin().err(), Some(true));
     }
 }

@@ -1323,6 +1323,9 @@ public:
     // in every document that embeds this one. UpToDate says the read just updated the accumulated visual contexts as
     // well.
     void publish_query_snapshot_after_read(Painting::QueryVisualContexts);
+    // The document adopted what the render clock's ticks installed, and what they laid out is its committed geometry:
+    // the reads answer from `snapshot` where nothing the main thread did since has to be laid out first.
+    void adopt_render_clock_query_snapshot(NonnullRefPtr<Painting::QuerySnapshot const> snapshot);
     [[nodiscard]] bool may_publish_query_snapshot() const;
     // A style change marked a layout node for a layout update, as a node's own mark does.
     void note_style_change_needs_layout_update(Badge<CSS::StyleEffectDrain>)

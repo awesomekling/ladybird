@@ -340,6 +340,11 @@ void EventLoop::process()
         m_finished_frame_consumer->function()();
     }
 
+    // AD-HOC: What the render clock's ticks installed beside this event loop is adopted here, before anything else sees
+    //         the documents.
+    if (m_type == Type::Window)
+        m_frame_scheduler->adopt_render_clock_ticks_if_any();
+
     // AD-HOC: A rendering task that held its rendering opportunity while a frame was in flight is queued again once
     //         the render side has finished that frame.
     queue_held_rendering_task_if_frame_finished();

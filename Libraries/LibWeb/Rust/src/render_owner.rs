@@ -233,10 +233,19 @@ impl RenderState {
             .find_map(ArenaChange::linked_engine)
             .unwrap_or_else(|| self.style_engine());
         let face_owner = std::ptr::from_mut::<ArenaHandle>(&mut self.arena) as u64;
+        // A display tick that ran after the host took what the clock's ticks left installed samples the host has not
+        // taken: what it did not adopt before goes with a later drop.
+        let keeps_unadopted = self
+            .clock
+            .as_ref()
+            .is_some_and(crate::clock_frames::DocumentClock::left_samples_to_adopt);
         let arena = self.arena.arena_mut();
         let apply = |arena: &mut LayoutNodeArena, mut engine: Option<&mut crate::css::style::StyleEngine>| {
             for change in changes {
-                change.apply(arena, engine.as_deref_mut());
+                match change {
+                    ArenaChange::DropUnadoptedAnimationSamples if keeps_unadopted => {}
+                    change => change.apply(arena, engine.as_deref_mut()),
+                }
             }
         };
         if engine.is_null() {
@@ -1014,7 +1023,7 @@ pub(crate) fn document_with_clock_at(context: u64) -> Option<DocumentId> {
     STATES.with_borrow(|states| {
         states
             .iter()
-            .find(|(_, state)| state.clock.as_ref().is_some_and(|clock| clock.context() == context))
+            .find(|(_, state)| state.clock.as_ref().is_some_and(|clock| clock.ticks_at(context)))
             .map(|(document, _)| *document)
     })
 }

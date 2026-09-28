@@ -35,6 +35,13 @@ RefPtr<QuerySnapshot const> QuerySnapshot::publish(DOM::Document const& document
     return adopt_ref(*new QuerySnapshot(handle, visual_contexts));
 }
 
+RefPtr<QuerySnapshot const> QuerySnapshot::adopt(void const* handle, QueryVisualContexts visual_contexts)
+{
+    if (!handle)
+        return nullptr;
+    return adopt_ref(*new QuerySnapshot(handle, visual_contexts));
+}
+
 QuerySnapshot::QuerySnapshot(void const* handle, QueryVisualContexts visual_contexts)
     : m_handle(handle)
     , m_visual_contexts(visual_contexts)

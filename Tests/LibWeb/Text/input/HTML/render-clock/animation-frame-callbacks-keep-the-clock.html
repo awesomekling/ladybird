@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<style>
+    #box {
+        width: 100px;
+        height: 20px;
+        animation: grow 20s linear;
+    }
+    @keyframes grow {
+        from {
+            width: 100px;
+        }
+        to {
+            width: 2100px;
+        }
+    }
+</style>
+<div id="box"></div>
+<script src="../../include.js"></script>
+<script>
+    function nextTask() {
+        const { promise, resolve } = Promise.withResolvers();
+        const channel = new MessageChannel();
+        channel.port1.onmessage = resolve;
+        channel.port2.postMessage(null);
+        return promise;
+    }
+
+    // A frame time past `time`, and not past now: the time a display tick at the next frame carries.
+    async function frameTimeAfter(time) {
+        while (performance.now() <= time + 1)
+            await nextTask();
+        return performance.now();
+    }
+
+    // A page with animation frame callbacks has a rendering update at every display frame. Where the render clock ticks
+    // at each of those frames too, the page keeps its clock through the updates, rather than losing it as each one
+    // begins and getting it back as it ends: the frame callbacks see it at every frame.
+    asyncTest(async done => {
+        const enabled = internals.clockFramesEnabled();
+        internals.setManualRenderingOpportunities(true, true);
+        await nextTask();
+        let frameTime = performance.now();
+        // A frame: the render clock's display tick, then the rendering update, whose frame callback answers whether the
+        // page has a clock.
+        const frame = async () => {
+            frameTime = await frameTimeAfter(frameTime);
+            await internals.injectClockTick(frameTime);
+            const clockInCallback = new Promise(resolve => requestAnimationFrame(() => resolve(internals.renderClockTicks(document))));
+            internals.injectRenderingOpportunity(frameTime);
+            return clockInCallback;
+        };
+        for (let frames = 0; frames < 3 || (enabled && frames < 60 && !internals.renderClockTicks(document)); ++frames)
+            await frame();
+        let keptInEveryFrame = true;
+        for (let i = 0; i < 10; ++i)
+            keptInEveryFrame &&= await frame();
+        internals.setManualRenderingOpportunities(false);
+        println(`the page keeps its clock through the rendering updates: ${!enabled || keptInEveryFrame}`);
+        done();
+    });
+</script>

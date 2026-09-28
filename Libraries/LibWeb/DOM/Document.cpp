@@ -791,6 +791,12 @@ void Document::publish_query_snapshot_after_read(Painting::QueryVisualContexts v
     });
 }
 
+void Document::adopt_render_clock_query_snapshot(NonnullRefPtr<Painting::QuerySnapshot const> snapshot)
+{
+    if (may_publish_query_snapshot())
+        m_render_inputs.publish_query_snapshot(move(snapshot));
+}
+
 u64 Document::layout_commit_generation() const
 {
     auto* arena = layout_arena_handle();
@@ -845,6 +851,12 @@ Document::JoinScope::~JoinScope()
         ++counters.joins_that_published_nothing;
     }
     counters.max_nanoseconds = max(counters.max_nanoseconds, elapsed);
+
+    // A read that laid the document out beside a render clock's ticks is what they lay it out from next: at the
+    // viewport size a zoom gave it since, say.
+    if (!m_render_state_was_clean && m_reason != UpdateLayoutReason::HTMLEventLoopRenderingUpdate && m_document.layout_commit_generation() != m_layout_commit_generation
+        && HTML::main_thread_event_loop().frame_scheduler().render_clock_ticks(m_document))
+        m_document.renew_clock_layout_frame();
 }
 
 void Document::JoinScope::note_extra_pass() const

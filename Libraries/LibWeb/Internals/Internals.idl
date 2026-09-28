@@ -228,8 +228,8 @@ interface Internals {
     object getAnimationTimingRowCounters();
     // Leaves clock leases to the main thread's rendering updates, with no render clock armed, while suspended.
     undefined setRenderClockSuspended(boolean suspended);
-    // Hands the leases a render clock ticks a display tick at frameTimeMs (like injectRenderingOpportunity()) once the
-    // main thread goes idle, as the render clock would. Resolves with whether a lease took it, once it has run. With
+    // Hands the leases a render clock ticks a display tick at frameTimeMs (like injectRenderingOpportunity()), as the
+    // render clock would. Resolves with whether a lease took it, once it has run and the page adopted it. With
     // setManualRenderingOpportunities(true, true), no display tick but these reaches the leases.
     Promise<boolean> injectClockTick(double frameTimeMs);
     undefined resetJoinCounters();

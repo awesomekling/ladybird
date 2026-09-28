@@ -34,6 +34,8 @@ class QuerySnapshot : public RefCounted<QuerySnapshot> {
 public:
     // Null while a stage runs: the arena then has no committed geometry to publish.
     static RefPtr<QuerySnapshot const> publish(DOM::Document const&, QueryVisualContexts);
+    // Takes a snapshot the render side published (a null handle is none).
+    static RefPtr<QuerySnapshot const> adopt(void const* handle, QueryVisualContexts);
     ~QuerySnapshot();
 
     QueryVisualContexts visual_contexts() const { return m_visual_contexts; }

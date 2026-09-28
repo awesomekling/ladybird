@@ -1,2 +1,0 @@
-the render clock ticks the page while it has frame callbacks: false
-the render clock ticks the page once they stop: true
