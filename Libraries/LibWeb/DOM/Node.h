@@ -411,9 +411,6 @@ public:
     virtual void adopted_from(Document&) { }
     virtual WebIDL::ExceptionOr<void> cloned(Node&, bool) const { return {}; }
 
-    Layout::Node const* unsafe_layout_node() const;
-    Layout::Node* unsafe_layout_node() { return const_cast<Layout::Node*>(static_cast<Node const*>(this)->unsafe_layout_node()); }
-
     // What the render side last said about this node's boxes: whether a layout tree build gave it
     // one, and whether a layout pass committed geometry for it. Both are bits the render side
     // commits as it changes them, so asking is a read of the node, not of render state.

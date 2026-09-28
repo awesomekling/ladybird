@@ -6,15 +6,7 @@
 
 #pragma once
 
-#include <AK/Badge.h>
-#include <AK/Noncopyable.h>
-#include <AK/RefCounted.h>
 #include <AK/Types.h>
-#include <AK/Vector.h>
-#include <AK/WeakPtr.h>
-#include <LibGC/Cell.h>
-#include <LibGC/Ptr.h>
-#include <LibWeb/CSS/StyleEngineIdentifiers.h>
 #include <LibWeb/Export.h>
 #include <LibWeb/Forward.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
@@ -22,7 +14,6 @@
 namespace Web::Layout {
 
 class Node;
-class NodeArena;
 class TextNode;
 
 // A live row of a document's layout node arena, named by its slot. What the host does to a row that
@@ -31,15 +22,14 @@ class TextNode;
 class WEB_API Row {
 public:
     Row() = default;
-    Row(NodeArena const&, RustFFI::FfiBoundRow const&);
+    Row(DOM::Document const&, RustFFI::FfiBoundRow const&);
     // A row whose shell the caller holds. What takes a row takes a shell as well.
     Row(Node const&);
 
-    explicit operator bool() const { return m_arena; }
+    explicit operator bool() const { return m_document; }
 
-    NodeArena& arena() const { return const_cast<NodeArena&>(*m_arena); }
     void* arena_handle() const;
-    DOM::Document& document() const;
+    DOM::Document& document() const { return const_cast<DOM::Document&>(*m_document); }
     Compositing::RustFFI::NodeSlotId slot() const { return m_slot; }
     RustFFI::NodeKind kind() const { return m_kind; }
     bool is_text() const { return m_kind == RustFFI::NodeKind::TextNode || m_kind == RustFFI::NodeKind::GeneratedTextNode; }
@@ -61,40 +51,10 @@ public:
     CSS::Display display() const;
 
 private:
-    NodeArena const* m_arena { nullptr };
+    DOM::Document const* m_document { nullptr };
     Compositing::RustFFI::NodeSlotId m_slot { Compositing::RustFFI::NodeSlotId_INVALID };
     mutable Node* m_shell { nullptr };
     RustFFI::NodeKind m_kind { RustFFI::NodeKind::Unset };
-};
-
-class WEB_API NodeArena : public RefCounted<NodeArena> {
-    AK_MAKE_NONCOPYABLE(NodeArena);
-    AK_MAKE_NONMOVABLE(NodeArena);
-
-public:
-    NodeArena();
-    ~NodeArena();
-
-    Compositing::RustFFI::NodeSlotId allocate(RustFFI::FfiNodeConstructionFacts const&);
-    Node* node_if_live(Compositing::RustFFI::NodeSlotId) const;
-    // The row `slot` names, found without making a shell for it, if it is still live.
-    Row row_if_live(Compositing::RustFFI::NodeSlotId) const;
-
-    // The row of the element or text node with `style_node`, or of its pseudo-element of kind
-    // `generated_for`, found without making a shell for it.
-    Row bound_row(CSS::StyleNodeID style_node, u8 generated_for = 0) const;
-    // The viewport row the document is bound to, found without making a shell for it.
-    Row bound_viewport_row() const;
-    void* handle() const { return m_render_document.arena; }
-    // The name of the document's render state, which the Rendering thread owns.
-    RustFFI::DocumentId render_document() const { return m_render_document.document; }
-
-    DOM::Document* document() const { return m_document.ptr(); }
-    void set_document(Badge<DOM::Document>, DOM::Document* document) { m_document = document; }
-
-private:
-    RustFFI::FfiRenderDocument m_render_document;
-    GC::RawPtr<DOM::Document> m_document;
 };
 
 WEB_API bool destroy_layout_subtree(Node&);

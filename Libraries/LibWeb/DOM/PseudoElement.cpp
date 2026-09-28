@@ -12,7 +12,6 @@
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/PseudoElement.h>
 #include <LibWeb/Layout/LayoutRustBridge.h>
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/Painting/BoxSlot.h>
 
 namespace Web::DOM {
@@ -38,19 +37,6 @@ void SyntheticPseudoElement::visit_edges(JS::Cell::Visitor& visitor)
     Base::visit_edges(visitor);
 
     visitor.visit(m_originating_element);
-}
-
-// A pseudo-element's box is the row bound to its generator's identity and its type. The generated
-// content inside the box carries the same pair, so only this binding tells the box from its content.
-Layout::NodeWithStyle* SyntheticPseudoElement::unsafe_layout_node() const
-{
-    if (!m_originating_element)
-        return nullptr;
-    // An originating element with no StyleNodeID has no rows, and is not asked for them: see Node::unsafe_layout_node().
-    auto* arena = m_originating_element->document().layout_arena_handle();
-    if (!arena || m_originating_element->style_node_id() == 0)
-        return nullptr;
-    return static_cast<Layout::NodeWithStyle*>(Layout::RustFFI::layout_arena_bound_pseudo_element_shell(arena, m_originating_element->style_node_id().value(), encode_generated_for(m_type)));
 }
 
 bool SyntheticPseudoElement::has_box() const

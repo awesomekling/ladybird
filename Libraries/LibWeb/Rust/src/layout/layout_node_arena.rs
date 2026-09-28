@@ -1571,6 +1571,7 @@ impl LayoutNodeArena {
 
     // Freshly created chunks are default-initialized and free() resets slots on release, so
     // allocate() always hands out clean NodeData without writing it again.
+    #[cfg(test)]
     pub(crate) fn allocate(&mut self, construction_facts: FfiNodeConstructionFacts) -> NodeSlotId {
         let slot = self.allocate_unbound();
         self.bind_shell(slot, construction_facts);
@@ -1581,6 +1582,7 @@ impl LayoutNodeArena {
         self.allocate_slot()
     }
 
+    #[cfg(test)]
     pub(crate) fn bind_shell(&self, slot: NodeSlotId, construction_facts: FfiNodeConstructionFacts) {
         assert!(
             self.slot_is_live(slot),
@@ -6612,18 +6614,6 @@ pub unsafe extern "C" fn layout_arena_set_node_dom_paint_facts(arena: *mut c_voi
     // SAFETY: The C++ wrapper keeps the arena alive for this call and
     // serializes all access on the document thread.
     unsafe { LayoutNodeArena::from_handle(arena) }.set_node_dom_paint_facts(id, facts)
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_note_rows_share_dom_node(
-    arena: *mut c_void,
-    bound_row: NodeSlotId,
-    added_row: NodeSlotId,
-) {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: The C++ wrapper keeps the arena alive for this call and
-    // serializes all access on the document thread.
-    unsafe { LayoutNodeArena::from_handle(arena) }.note_rows_share_dom_node(bound_row, added_row);
 }
 
 /// Pins, for the host, the style record of the box the element or text node with `style_node` is

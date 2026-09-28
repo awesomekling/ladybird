@@ -612,9 +612,6 @@ public:
 
     virtual bool is_child_allowed(Node const&) const override;
 
-    Layout::Viewport const* unsafe_layout_node() const;
-    Layout::Viewport* unsafe_layout_node();
-
     // The row the document's layout tree is rooted at. The tree build records it in the arena, so
     // the document keeps no copy of its own.
     [[nodiscard]] Compositing::RustFFI::NodeSlotId layout_root_slot() const;
@@ -948,13 +945,13 @@ public:
 
     CSS::ScrollStateQueryContainers& scroll_state_query_containers() { return m_scroll_state_query_containers; }
 
-    [[nodiscard]] Layout::NodeArena& layout_node_arena();
-    [[nodiscard]] Layout::NodeArena* layout_node_arena_if_created() { return m_layout_node_arena; }
-    [[nodiscard]] Layout::NodeArena const* layout_node_arena_if_created() const { return m_layout_node_arena; }
-    // The handle the render side's entries name the document's layout arena by, or null before the arena is created.
-    [[nodiscard]] void* layout_arena_handle() const;
-    // The name the render owner knows the document's render state by, which is invalid (0) before the arena is created.
-    [[nodiscard]] Layout::RustFFI::DocumentId render_document_id() const;
+    // The handle the render side's entries name the document's layout arena by, made with the document's render state
+    // on the first ask.
+    void* layout_arena();
+    // The same, or null before the first ask.
+    [[nodiscard]] void* layout_arena_handle() const { return m_render_document.handle.arena; }
+    // The name the render owner knows the document's render state by, which is invalid (0) before the first ask.
+    [[nodiscard]] Layout::RustFFI::DocumentId render_document_id() const { return m_render_document.handle.document; }
     Painting::ChromeWidgetRegistry& chrome_widget_registry() { return *m_chrome_widget_registry; }
     Painting::ChromeWidgetRegistry const& chrome_widget_registry() const { return *m_chrome_widget_registry; }
 
@@ -1806,7 +1803,18 @@ private:
     GC::Ptr<HTML::Window> m_window;
     GC::Ref<DOM::EventTarget> m_relevant_global_event_target;
 
-    RefPtr<Layout::NodeArena> m_layout_node_arena;
+    // The document's render state on the render owner, which drops it with the document.
+    struct RenderDocument {
+        AK_MAKE_NONCOPYABLE(RenderDocument);
+        AK_MAKE_NONMOVABLE(RenderDocument);
+
+    public:
+        RenderDocument() = default;
+        ~RenderDocument();
+
+        Layout::RustFFI::FfiRenderDocument handle {};
+    };
+    RenderDocument m_render_document;
     OwnPtr<Painting::DocumentPaintState> m_paint_state;
     NonnullRefPtr<Painting::ChromeWidgetRegistry> m_chrome_widget_registry;
     NonnullOwnPtr<InvalidationJournal> m_invalidation_journal;

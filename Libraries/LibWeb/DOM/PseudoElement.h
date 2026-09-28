@@ -59,7 +59,6 @@ public:
 
     CSS::PseudoElement type() const { return m_type; }
 
-    Layout::NodeWithStyle* unsafe_layout_node() const;
     bool has_box() const override;
     // The pseudo-element's box stops being bound to it, and holds its style record until it is detached.
     void unbind_box();

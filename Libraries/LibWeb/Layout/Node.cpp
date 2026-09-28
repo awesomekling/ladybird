@@ -43,67 +43,16 @@
 
 namespace Web::Layout {
 
-// The StyleNodeID a row bound to this DOM node records: an element's or a text node's.
-CSS::StyleNodeID Node::style_node_of(DOM::Node const* node)
-{
-    if (auto const* element = as_if<DOM::Element>(node))
-        return element->style_node_id();
-    if (auto const* text = as_if<DOM::Text>(node))
-        return text->style_node_id();
-    return {};
-}
-
-// Every element fact a row is built with is published in the style mirror under the row's
-// identity; see `CSS::ElementConstructionFact`. The row reads them there rather than here.
-static RustFFI::FfiNodeConstructionFacts build_node_construction_facts(GC::Ptr<DOM::Node> node, RustFFI::NodeKind kind, void* shell)
-{
-    return {
-        .kind = kind,
-        .shell = shell,
-        .is_anonymous = node == nullptr,
-        .dom_paint_facts = dom_paint_facts_of(node),
-        .style_node = Node::style_node_of(node.ptr()).value(),
-    };
-}
-
-Node::Node(DOM::Document& document, GC::Ptr<DOM::Node> node, RustFFI::NodeKind kind, AttachToDOMNode attach_to_dom_node)
-    : m_arena(document.layout_node_arena())
-    , m_slot(m_arena->allocate(build_node_construction_facts(node, kind, this)))
-    , m_kind(kind)
-{
-    publish_own_scroll_offset();
-    // The node is in hand here, so this does not have to look one up.
-    RustFFI::layout_arena_publish_unique_node_id(m_arena->handle(), m_slot,
-        is_viewport() ? document.unique_id().value() : (is<DOM::Element>(node.ptr()) ? node->unique_id().value() : 0));
-
-    if (!node)
-        return;
-    take_over_rows_of_dom_node(*node, attach_to_dom_node);
-}
-
-// What a row built around a DOM node owes the node's other rows, and the node itself. A row the
-// build prepared reaches this through its identity instead of through a pointer it was handed.
-void Node::take_over_rows_of_dom_node(DOM::Node& node, AttachToDOMNode attach_to_dom_node)
-{
-    auto* row_already_bound_to_dom_node = node.unsafe_layout_node();
-    if (row_already_bound_to_dom_node)
-        RustFFI::layout_arena_note_rows_share_dom_node(m_arena->handle(), row_already_bound_to_dom_node->m_slot, m_slot);
-    if (attach_to_dom_node == AttachToDOMNode::Yes) {
-        if (row_already_bound_to_dom_node)
-            row_already_bound_to_dom_node->pin_style_record_for_detachment();
-        RustFFI::layout_arena_bind_row(m_arena->handle(), m_slot);
-    }
-}
-
 // The build stamps a row out of the node's identity and materialises its shell here. Everything
 // the DOM-backed constructor read off the node it was handed, this one reaches through the
 // identity the row already carries; a row stamped for no node at all is an anonymous box.
 Node::Node(DOM::Document& document, BindToPreparedArenaSlot, Compositing::RustFFI::NodeSlotId slot, RustFFI::NodeKind kind)
-    : m_arena(document.layout_node_arena())
+    : m_document(document)
+    , m_arena(document.layout_arena_handle())
     , m_slot(slot)
     , m_kind(kind)
 {
-    RustFFI::layout_arena_attach_shell(m_arena->handle(), m_slot, this);
+    RustFFI::layout_arena_attach_shell(m_arena, m_slot, this);
 }
 
 Node::~Node()
@@ -171,11 +120,6 @@ StringView Node::class_name() const
     VERIFY_NOT_REACHED();
 }
 
-void* Node::arena_handle() const
-{
-    return m_arena->handle();
-}
-
 Box const* Node::containing_block() const
 {
     return static_cast<Box const*>(containing_block_node_if_live());
@@ -207,13 +151,6 @@ GC::Ptr<HTML::LocalNavigable> Node::navigable() const
     return document().navigable();
 }
 
-Viewport& Node::root()
-{
-    // NB: Called during layout, which is in progress.
-    VERIFY(document().unsafe_layout_node());
-    return *document().unsafe_layout_node();
-}
-
 bool NodeWithStyle::is_positioned() const
 {
     return position() != CSS::Positioning::Static;
@@ -231,27 +168,6 @@ bool NodeWithStyle::is_sticky_position() const
     return position == CSS::Positioning::Sticky;
 }
 
-NodeWithStyle::NodeWithStyle(DOM::Document& document, GC::Ptr<DOM::Node> node, CSS::LayoutStyle style, RustFFI::NodeKind kind)
-    : Node(document, node, kind)
-{
-    adopt_style(document, node, move(style));
-}
-
-void NodeWithStyle::adopt_style(DOM::Document& document, GC::Ptr<DOM::Node> node, CSS::LayoutStyle style)
-{
-    VERIFY(style);
-    if (!!style.style_record_identity()) {
-        m_style_record_identity = style.style_record_identity();
-    } else if (auto* element = as_if<DOM::Element>(node.ptr())) {
-        m_style_record_identity = document.style_computer().intern_computed_style_inputs({ *element }, *style.values());
-    } else {
-        m_style_record_identity = document.style_computer().intern_anonymous_layout_style(*style.values());
-    }
-    initialize_from_style_record();
-    if (!style.style_record_identity())
-        RustFFI::layout_arena_adopt_derived_node_style(arena_handle(), slot_id(this), m_style_record_identity.value());
-}
-
 NodeWithStyle::NodeWithStyle(DOM::Document& document, BindToPreparedArenaSlot bind, Compositing::RustFFI::NodeSlotId slot, RustFFI::NodeKind kind)
     : Node(document, bind, slot, kind)
 {
@@ -260,12 +176,6 @@ NodeWithStyle::NodeWithStyle(DOM::Document& document, BindToPreparedArenaSlot bi
     // The shell reads its style through the payloads of the record the row owns.
     m_style_payloads = RustFFI::layout_arena_node_style_payloads(arena_handle(), slot);
     VERIFY(m_style_payloads);
-}
-
-NodeWithStyle::NodeWithStyle(DOM::Document& document, BindToPreparedArenaSlot bind, Compositing::RustFFI::NodeSlotId slot, RustFFI::NodeKind kind, CSS::LayoutStyle style)
-    : Node(document, bind, slot, kind)
-{
-    adopt_style(document, dom_node(), move(style));
 }
 
 // A row stamped for an element already carries the style record the mirror published for it, so
@@ -377,8 +287,8 @@ void NodeWithStyle::apply_style(Row const& row, CSS::PublishedStyleRecord const&
 
 static Row row_of_box(Painting::BoxSlot const& box)
 {
-    auto* arena = box ? box.document().layout_node_arena_if_created() : nullptr;
-    return arena ? arena->row_if_live(box.slot()) : Row {};
+    auto* arena = box ? box.arena() : nullptr;
+    return arena ? Row { box.document(), RustFFI::layout_arena_row_if_live(arena, box.slot()) } : Row {};
 }
 
 void apply_style_to_box(Painting::BoxSlot const& box, CSS::PublishedStyleRecord const& style_record)
@@ -733,19 +643,14 @@ void NodeWithStyle::set_display(CSS::Display display)
     RustFFI::layout_arena_set_layout_display(arena_handle(), slot_id(this), bit_cast<u32>(display));
 }
 
-bool overflow_value_makes_box_a_scroll_container(CSS::Overflow overflow)
-{
-    return Painting::overflow_value_makes_box_a_scroll_container(overflow);
-}
-
 bool NodeWithStyle::is_scroll_container() const
 {
     // NOTE: This isn't in the spec, but we want the viewport to behave like a scroll container.
     if (is_viewport())
         return true;
 
-    return overflow_value_makes_box_a_scroll_container(overflow_x())
-        || overflow_value_makes_box_a_scroll_container(overflow_y());
+    return Painting::overflow_value_makes_box_a_scroll_container(overflow_x())
+        || Painting::overflow_value_makes_box_a_scroll_container(overflow_y());
 }
 
 DOM::Node const* Node::dom_node() const
@@ -755,10 +660,7 @@ DOM::Node const* Node::dom_node() const
 
 DOM::Node* Node::dom_node()
 {
-    auto* document = m_arena->document();
-    if (!document)
-        return nullptr;
-    return dom_node_identity().resolve(*document).ptr();
+    return dom_node_identity().resolve(m_document).ptr();
 }
 
 DOM::NodeIdentity Node::dom_node_identity() const
@@ -779,10 +681,7 @@ GC::Ptr<DOM::Element const> Node::pseudo_element_generator() const
 
 GC::Ptr<DOM::Element> Node::pseudo_element_generator()
 {
-    auto* document = m_arena->document();
-    if (!document)
-        return nullptr;
-    return as_if<DOM::Element>(pseudo_element_generator_identity().resolve(*document).ptr());
+    return as_if<DOM::Element>(pseudo_element_generator_identity().resolve(m_document).ptr());
 }
 
 DOM::NodeIdentity Node::pseudo_element_generator_identity() const
@@ -794,7 +693,14 @@ DOM::NodeIdentity Node::pseudo_element_generator_identity() const
 
 CSS::StyleNodeID Node::style_node_id() const
 {
-    return RustFFI::layout_arena_node_style_node(m_arena->handle(), m_slot);
+    return RustFFI::layout_arena_node_style_node(m_arena, m_slot);
+}
+
+// A pseudo-element's box is the row bound to its generator's identity and its type. The generated content inside the
+// box carries the same pair, so only this binding tells the box from its content.
+bool Node::is_bound_to_pseudo_element() const
+{
+    return RustFFI::layout_arena_bound_row_of(arena_handle(), style_node_id().value(), generated_for()).slot.index == m_slot.index;
 }
 
 // An element's box holds the element's scroll offset. Everything generated for a pseudo-element
@@ -809,7 +715,7 @@ bool Node::dom_target_stores_scroll_offset() const
             return false;
         auto synthetic_pseudo_element = generator->get_synthetic_pseudo_element(*pseudo_element);
         return synthetic_pseudo_element.has_value()
-            && synthetic_pseudo_element->unsafe_layout_node() == this
+            && is_bound_to_pseudo_element()
             && !synthetic_pseudo_element->scroll_offset().is_zero();
     }
     if (auto const* element = as_if<DOM::Element>(dom_node()))
@@ -831,7 +737,7 @@ CSSPixelPoint Node::dom_target_scroll_offset() const
         if (!generator)
             return {};
         auto synthetic_pseudo_element = generator->get_synthetic_pseudo_element(*pseudo_element);
-        if (!synthetic_pseudo_element.has_value() || synthetic_pseudo_element->unsafe_layout_node() != this)
+        if (!synthetic_pseudo_element.has_value() || !is_bound_to_pseudo_element())
             return {};
         return synthetic_pseudo_element->scroll_offset();
     }
@@ -845,7 +751,7 @@ void Node::publish_to_every_row_built_for_dom_node(void (Node::*publish)())
     struct Publication {
         void (Node::*publish)();
     } publication { publish };
-    RustFFI::layout_arena_for_each_row_built_for_same_node(m_arena->handle(), m_slot, &publication,
+    RustFFI::layout_arena_for_each_row_built_for_same_node(m_arena, m_slot, &publication,
         [](void* context, void* shell) {
             auto* row = static_cast<Node*>(shell);
             (row->*static_cast<Publication*>(context)->publish)();
@@ -859,7 +765,7 @@ void Node::publish_scroll_offset()
 
 void Node::publish_own_scroll_offset()
 {
-    RustFFI::layout_arena_publish_scroll_offset(m_arena->handle(), m_slot, dom_target_scroll_offset(), dom_target_stores_scroll_offset());
+    RustFFI::layout_arena_publish_scroll_offset(m_arena, m_slot, dom_target_scroll_offset(), dom_target_stores_scroll_offset());
 }
 
 // The same three answers the render side used to ask the document for, in the same order: the
@@ -881,14 +787,12 @@ i64 Node::dom_target_unique_node_id() const
 
 DOM::Document& Node::document()
 {
-    VERIFY(m_arena->document());
-    return *m_arena->document();
+    return m_document;
 }
 
 DOM::Document const& Node::document() const
 {
-    VERIFY(m_arena->document());
-    return *m_arena->document();
+    return m_document;
 }
 
 // https://drafts.csswg.org/css-ui/#propdef-user-select

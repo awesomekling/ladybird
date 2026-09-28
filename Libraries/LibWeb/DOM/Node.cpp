@@ -89,8 +89,6 @@
 #include <LibWeb/Infra/SerializedURL.h>
 #include <LibWeb/InvalidateDisplayList.h>
 #include <LibWeb/Layout/LayoutRustBridge.h>
-#include <LibWeb/Layout/Node.h>
-#include <LibWeb/Layout/NodeArena.h>
 #include <LibWeb/Layout/TreeBuilderRustFFI.h>
 #include <LibWeb/MathML/MathMLElement.h>
 #include <LibWeb/Namespace.h>
@@ -3961,27 +3959,6 @@ size_t Node::length() const
 
     // 3. Return the number of node’s children.
     return child_count();
-}
-
-// A node's layout node is the row its StyleNodeID is bound to in the document's layout node arena.
-// The document has no identity; it is bound to a viewport row.
-Layout::Node const* Node::unsafe_layout_node() const
-{
-    auto* arena = m_document->layout_arena_handle();
-    Layout::Node const* layout_node = nullptr;
-    if (arena) {
-        // A node with no StyleNodeID has no row. It is not asked for, as the ask reaches the arena, which a frame in
-        // flight may own.
-        if (auto const* element = as_if<Element>(*this)) {
-            if (element->style_node_id() != 0)
-                layout_node = static_cast<Layout::Node const*>(Layout::RustFFI::layout_arena_bound_shell(arena, element->style_node_id().value()));
-        } else if (auto const* text = as_if<Text>(*this)) {
-            if (text->style_node_id() != 0)
-                layout_node = static_cast<Layout::Node const*>(Layout::RustFFI::layout_arena_bound_shell(arena, text->style_node_id().value()));
-        } else if (is_document())
-            layout_node = static_cast<Layout::Node const*>(Layout::RustFFI::layout_arena_bound_viewport_shell(arena));
-    }
-    return layout_node;
 }
 
 bool Node::box_is_placed_in_top_layer() const

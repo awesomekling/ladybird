@@ -16,22 +16,6 @@ pub(crate) struct MainThreadFfiEntry {
 
 const MAIN_THREAD_FFI_ENTRY: MainThreadFfiEntry = MainThreadFfiEntry { _private: () };
 
-#[unsafe(no_mangle)]
-unsafe extern "C" fn layout_arena_allocate(
-    arena: *mut c_void,
-    construction_facts: FfiNodeConstructionFacts,
-) -> NodeSlotId {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
-    // SAFETY: The C++ wrapper keeps the arena alive for this call and
-    // serializes all access on the document thread.
-    unsafe {
-        paying_host_handbacks(&main_thread, arena, || {
-            (&mut *arena.cast::<LayoutNodeArena>()).allocate(construction_facts)
-        })
-    }
-}
-
 /// # Safety
 ///
 /// The arena must remain valid for the duration of the call, and `root` must name a live node
@@ -122,25 +106,6 @@ unsafe extern "C" fn layout_arena_node_containing_block_slot_if_live(arena: *mut
         .unwrap_or(NodeSlotId::INVALID)
 }
 
-/// The shell of the row the element or text node with `style_node` is bound to, materialised if
-/// nothing has asked for it yet, or null if the node has no row.
-#[unsafe(no_mangle)]
-unsafe extern "C" fn layout_arena_bound_shell(arena: *mut c_void, style_node: u32) -> *mut c_void {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
-    let Some(style_node) = StyleNodeID::from_raw(style_node) else {
-        return std::ptr::null_mut();
-    };
-    // SAFETY: The C++ wrapper keeps the arena alive for this call and
-    // serializes all access on the document thread.
-    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
-    let row = arena.bound_row(style_node);
-    if row.is_invalid() {
-        return std::ptr::null_mut();
-    }
-    arena.node_shell(&main_thread, row)
-}
-
 /// Tells the render owner that the `::selection` style of the element with `style_node` changed:
 /// the owner has the subtree of its nearest painted ancestor paint again. Nothing waits for it.
 ///
@@ -161,29 +126,6 @@ unsafe extern "C" fn layout_arena_repaint_after_selection_style_change(arena: *m
             crate::render_owner::ArenaChange::SelectionStyleChanged(element),
         );
     }
-}
-
-/// The shell of the row the pseudo-element of kind `generated_for` on the element with
-/// `style_node` is bound to, materialised if nothing has asked for it yet, or null.
-#[unsafe(no_mangle)]
-unsafe extern "C" fn layout_arena_bound_pseudo_element_shell(
-    arena: *mut c_void,
-    style_node: u32,
-    generated_for: u8,
-) -> *mut c_void {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
-    let Some(style_node) = StyleNodeID::from_raw(style_node) else {
-        return std::ptr::null_mut();
-    };
-    // SAFETY: The C++ wrapper keeps the arena alive for this call and
-    // serializes all access on the document thread.
-    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
-    let row = arena.bound_pseudo_element_row(style_node, generated_for);
-    if row.is_invalid() {
-        return std::ptr::null_mut();
-    }
-    arena.node_shell(&main_thread, row)
 }
 
 /// A row the host names by its slot, with the shell the host made for it, if it made one.
@@ -220,8 +162,7 @@ impl FfiBoundRow {
 }
 
 /// The row the element or text node with `style_node` is bound to, or, for a nonzero
-/// `generated_for`, the row of its pseudo-element of that kind. Unlike
-/// [`layout_arena_bound_shell`], this makes no shell.
+/// `generated_for`, the row of its pseudo-element of that kind. This makes no shell.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn layout_arena_bound_row_of(arena: *mut c_void, style_node: u32, generated_for: u8) -> FfiBoundRow {
     assert!(!arena.is_null(), "layout node arena handle is null");
@@ -229,7 +170,7 @@ unsafe extern "C" fn layout_arena_bound_row_of(arena: *mut c_void, style_node: u
     let Some(style_node) = StyleNodeID::from_raw(style_node) else {
         return FfiBoundRow::NONE;
     };
-    // SAFETY: As for `layout_arena_bound_shell`.
+    // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
     let arena = unsafe { LayoutNodeArena::from_handle(arena) };
     let slot = if generated_for == 0 {
         arena.bound_row(style_node)
@@ -239,8 +180,7 @@ unsafe extern "C" fn layout_arena_bound_row_of(arena: *mut c_void, style_node: u
     FfiBoundRow::of(arena, &main_thread, slot)
 }
 
-/// The viewport row the document is bound to. Unlike [`layout_arena_bound_viewport_shell`], this
-/// makes no shell.
+/// The viewport row the document is bound to. This makes no shell.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn layout_arena_bound_viewport_row(arena: *mut c_void) -> FfiBoundRow {
     assert!(!arena.is_null(), "layout node arena handle is null");
@@ -272,33 +212,6 @@ unsafe extern "C" fn layout_arena_row_if_live(arena: *mut c_void, slot: NodeSlot
         return FfiBoundRow::NONE;
     }
     FfiBoundRow::of(arena, &main_thread, slot)
-}
-
-/// The shell of the viewport row the document is bound to, materialised if nothing has asked for
-/// it yet, or null.
-#[unsafe(no_mangle)]
-unsafe extern "C" fn layout_arena_bound_viewport_shell(arena: *mut c_void) -> *mut c_void {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
-    // SAFETY: As above.
-    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
-    let row = arena.bound_viewport_row();
-    if row.is_invalid() {
-        return std::ptr::null_mut();
-    }
-    arena.node_shell(&main_thread, row)
-}
-
-#[unsafe(no_mangle)]
-unsafe extern "C" fn layout_arena_bind_row(arena: *mut c_void, id: NodeSlotId) {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
-    // SAFETY: As above.
-    unsafe {
-        paying_host_handbacks(&main_thread, arena, || {
-            (LayoutNodeArena::from_handle(arena)).bind_row(id);
-        });
-    }
 }
 
 #[unsafe(no_mangle)]

@@ -3448,18 +3448,6 @@ pub unsafe extern "C" fn layout_arena_publish_visual_context_tree_inputs(
     arena.publish_visual_context_tree_inputs(inputs);
 }
 
-/// Publishes the unique node id of what a box is the box of, as the document names it. Called
-/// wherever that answer can change: a box being built for a DOM node, a box becoming the box of a
-/// pseudo-element, and the viewport's box, which is the document's.
-///
-/// # Safety
-///
-/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_publish_unique_node_id(arena: *mut c_void, slot: NodeSlotId, id: i64) {
-    unsafe { arena_from_handle(arena) }.unique_node_ids().publish(slot, id);
-}
-
 /// The scroll offset last published for a box, or zero for one that holds none.
 ///
 /// # Safety

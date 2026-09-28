@@ -13,7 +13,6 @@
 #include <LibWeb/DOM/Text.h>
 #include <LibWeb/HTML/EventLoop/EventLoop.h>
 #include <LibWeb/Layout/LayoutRustBridge.h>
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/Painting/DocumentPaintState.h>
 #include <LibWeb/Painting/Scrollbar.h>
