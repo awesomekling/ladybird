@@ -2013,16 +2013,6 @@ void Internals::set_manual_rendering_opportunities(bool enabled, bool with_clock
     page().client().set_manual_rendering_opportunities(enabled, with_clock_ticks);
 }
 
-void Internals::set_rendering_opportunity_hold(bool enabled)
-{
-    HTML::EventLoop::set_holds_rendering_opportunities_for_testing(enabled);
-}
-
-void Internals::reset_rendering_opportunity_hold()
-{
-    HTML::EventLoop::set_holds_rendering_opportunities_for_testing({});
-}
-
 bool Internals::rendering_task_held() const
 {
     return HTML::main_thread_event_loop().rendering_task_held();

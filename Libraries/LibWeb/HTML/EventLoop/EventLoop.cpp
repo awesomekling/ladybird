@@ -69,25 +69,6 @@ EventLoop::~EventLoop() = default;
 
 bool EventLoop::s_a_frame_is_in_flight { false };
 
-static Optional<bool> s_holds_rendering_opportunities_for_testing;
-
-bool EventLoop::holds_rendering_opportunities()
-{
-    if (s_holds_rendering_opportunities_for_testing.has_value())
-        return *s_holds_rendering_opportunities_for_testing;
-    // On unless LIBWEB_RENDERING_OPPORTUNITY_HOLD=0.
-    static bool const holds = [] {
-        auto const* value = getenv("LIBWEB_RENDERING_OPPORTUNITY_HOLD");
-        return !value || StringView { value, strlen(value) } != "0"sv;
-    }();
-    return holds;
-}
-
-void EventLoop::set_holds_rendering_opportunities_for_testing(Optional<bool> holds)
-{
-    s_holds_rendering_opportunities_for_testing = holds;
-}
-
 // One frame interval at 60 Hz: how long a rendering task waits behind other tasks before it runs ahead of them, and
 // how long after its rendering opportunity the display has offered another.
 static constexpr u64 rendering_task_queue_wait_limit_nanoseconds = 1'000'000'000 / 60;
@@ -99,9 +80,9 @@ void EventLoop::run_rendering_task()
     m_rendering_task_runs_ahead = false;
     // The previous rendering update's frame and tail come first. The tail hands its pages the rendering opportunity
     // this task was queued for again, and while the task still counts as queued, that queues no second one.
-    // A frame the render side is still working on is not waited for where rendering opportunities are held: the task
-    // holds its opportunity instead, and the step 1 that takes the frame in and runs its tail queues it again.
-    if (holds_rendering_opportunities() && !m_frame_scheduler->finish_finished_frames()) {
+    // A frame the render side is still working on is not waited for: the task holds its opportunity instead, and the
+    // step 1 that takes the frame in and runs its tail queues it again.
+    if (!m_frame_scheduler->finish_finished_frames()) {
         m_rendering_task_held = true;
         ++m_rendering_scheduler_counters.rendering_tasks_held;
         return;
@@ -136,7 +117,7 @@ bool EventLoop::rendering_task_runs_ahead_of_queue() const
         return false;
     if (m_rendering_task_runs_ahead)
         return true;
-    if (!holds_rendering_opportunities() || m_rendering_task_ran_ahead_since_last_task)
+    if (m_rendering_task_ran_ahead_since_last_task)
         return false;
     return MonotonicTime::now().nanoseconds() - m_rendering_task_queued_at_nanoseconds >= rendering_task_queue_wait_limit_nanoseconds;
 }

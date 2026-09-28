@@ -3,11 +3,9 @@
 <script src="frame-in-flight.js"></script>
 <div id="box" style="width: 10px; height: 10px; background: green"></div>
 <script>
-    // Where rendering opportunities are held, a rendering task that finds the previous rendering update's recording
-    // still in flight does not wait for it: it holds its opportunity, and the held rendering update runs once the frame
+    // A rendering task that finds the previous rendering update's recording still in flight does not wait for it: it holds its opportunity, and the held rendering update runs once the frame
     // has finished and been taken in, ahead of the tasks queued meanwhile. The opportunity is never lost.
     asyncTest(async done => {
-        internals.setRenderingOpportunityHold(true);
         const order = [];
         const held = await whileFrameInFlight("before-run", () => {
             box.style.width = "20px";
@@ -40,7 +38,6 @@
             facts.aheadOfQueue = after.renderingTasksAheadOfQueue - before.renderingTasksAheadOfQueue;
             return facts;
         });
-        internals.resetRenderingOpportunityHold();
         println(`held as armed: ${heldAsArmed(held, "before-run")}`);
         println(`rendering task held its opportunity: ${!held.armed || (held.taskHeld && held.heldTasks === 1)}`);
         println(`frame still held, no rendering update: ${!held.armed || (held.stillHeld && held.updatesWhileHeld === 0)}`);
