@@ -662,6 +662,9 @@ pub(crate) struct SettledRowPublication {
     /// Whether building the composition rebuilt every style group rather than the ones the overlay
     /// writes.
     pub(crate) rebuilt_every_group: bool,
+    /// What moving the element from the record it held before the pass to this one damages, where
+    /// the pass answered it: [`bridge::FfiRowSampledInPass::damage`].
+    pub(crate) damage: u32,
 }
 
 /// The environment an element's animations composed its animated custom properties into, which the
@@ -1094,6 +1097,7 @@ impl super::StyleEngineState {
             keyframes_inherited_non_inherited_style_groups: sample.keyframes_inherited_non_inherited_style_groups,
             uses_tree_counting_function: sample.uses_tree_counting_function,
             rebuilt_every_group,
+            damage: 0,
         };
         match pseudo {
             None => self.retained.rows_sampled_in_pass.insert(node, published),
@@ -1253,6 +1257,7 @@ impl super::StyleEngineState {
                 keyframes_inherited_non_inherited_style_groups: sample.keyframes_inherited_non_inherited_style_groups,
                 uses_tree_counting_function: sample.uses_tree_counting_function,
                 rebuilt_every_group: false,
+                damage: 0,
             });
         }
         let published = self.publish_settled_row_sample(node, pseudo, sample, counters)?;

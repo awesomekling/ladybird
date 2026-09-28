@@ -1086,9 +1086,15 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                             document.style_computer().apply_settled_animation_plan(settled, *plan_after_pass_sample);
                         row_effects.append(StyleEffectDrain::AnimationNames { StyleNodeID { reaction.style_node } });
                     }
+                    // The pass answered what the move from the record the row moved from to its
+                    // composition damages with the composition.
                     Optional<u32> sample_damage;
-                    if (!installed_pass_sample && settled.has_style() && (has_animation_effects || animation_plan.has_value() || row_effect_debt & StyleEngine::SettledRowOwesAnAnimationSample))
+                    if (installed_pass_sample) {
+                        if (row_sampled_in_pass.damage && old_style_record.value() == reaction.old_style_record && element->style_record_identity().value() == row_sampled_in_pass.style_record)
+                            sample_damage = row_sampled_in_pass.damage;
+                    } else if (settled.has_style() && (has_animation_effects || animation_plan.has_value() || row_effect_debt & StyleEngine::SettledRowOwesAnAnimationSample)) {
                         sample_damage = sample_animations_for_installed_record(scope, settled, row_sample_invalidation, compares_after_sample ? old_style_record : StyleRecordID {});
+                    }
                     if (compares_after_sample)
                         invalidation = element->compare_engine_computed_style_record_after_sample(scope, old_style_record, invalidation, &row_effects, sample_damage);
                     // The step runs here rather than after the batch: a descendant applied later

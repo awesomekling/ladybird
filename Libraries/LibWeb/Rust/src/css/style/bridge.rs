@@ -4219,7 +4219,9 @@ pub struct FfiRowSampledInPass {
     pub rebuilt_every_group: bool,
     /// What moving the element from the record the host compares its sampled style with to
     /// `style_record` damages, as the engine answers a record's damage (with
-    /// `FfiStyleInvalidationField::EngineComputed` set); zero where the host compares with none.
+    /// `FfiStyleInvalidationField::EngineComputed` set); zero where the engine did not answer it.
+    /// The host compares with the record it named as it asked for the sample, or, for a row the
+    /// pass sampled, with the record the row moved from.
     pub damage: u32,
 }
 
@@ -4608,6 +4610,7 @@ fn sample_record_without_overlay_slot(
         keyframes_inherited_non_inherited_style_groups: sample.keyframes_inherited_non_inherited_style_groups,
         uses_tree_counting_function: sample.uses_tree_counting_function,
         rebuilt_every_group: false,
+        damage: 0,
     };
     if !engine.animation_overlay_changed(style_record, sample.style.overlay) {
         return Ok(unchanged);
@@ -5285,7 +5288,7 @@ fn row_sampled_in_pass(
             }),
             custom_property_environment_named: false,
             rebuilt_every_group: published.rebuilt_every_group,
-            damage: 0,
+            damage: published.damage,
         },
     }
 }
