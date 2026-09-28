@@ -415,17 +415,17 @@ impl StyleEngine {
         self.computed_group_sets.host_pins_handle()
     }
 
-    /// Stops lending the host's pins to the engine while clock ticks run beside the main thread (lent
-    /// the engine mid-task, or submitted by a rendering update), which pins and unpins records at any
-    /// moment.
-    pub(crate) fn begin_clock_lend_beside_host_pins(&mut self) {
-        self.computed_group_sets.begin_pass_beside_host_pins();
+    /// Stops lending the host's pins to the engine while it runs beside the main thread (a clock tick, lent the engine
+    /// mid-task or submitted by a rendering update), which pins and unpins records at any moment. Returns how they were
+    /// lent, for [`Self::restore_host_pins`]. What the engine retires meanwhile, the next pass taken back reclaims.
+    pub(crate) fn lend_host_pins_beside(&mut self) -> super::host_pins::HostPinsLend {
+        self.computed_group_sets.lend_host_pins_beside()
     }
 
-    /// Lends the host's pins again at the end of a clock tick on the owner, which reads them only in a later unit the
-    /// host waits for. What the tick retired the next pass taken back reclaims.
-    pub(crate) fn end_clock_tick_beside_host_pins(&mut self) {
-        self.computed_group_sets.end_clock_tick_beside_host_pins();
+    /// Lends the host's pins as [`Self::lend_host_pins_beside`] found them: a reach beside the main thread may nest in
+    /// another.
+    pub(crate) fn restore_host_pins(&mut self, lend: super::host_pins::HostPinsLend) {
+        self.computed_group_sets.lend_host_pins(lend);
     }
 
     pub(crate) fn pin_layout_style_record(&mut self, record: u64) {

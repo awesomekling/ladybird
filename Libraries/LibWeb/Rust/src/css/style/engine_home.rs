@@ -518,6 +518,33 @@ impl StyleEngineHandle {
         unsafe { reach_on_this_thread(self.address(), engine, run) }
     }
 
+    /// As [`Self::reach_on_owner`], in a unit the main thread does not wait for (a display tick): the main thread pins
+    /// and unpins its host's records beside the whole reach, applying what it sent the engine included, so the engine
+    /// does not read its pins until the reach ends.
+    ///
+    /// # Safety
+    ///
+    /// As for [`Self::reach_on_owner`].
+    pub(crate) unsafe fn reach_on_owner_beside_main<T>(
+        self,
+        _owner: &crate::render_owner::Owner,
+        run: impl FnOnce(&mut StyleEngine) -> T,
+    ) -> T {
+        /// Lends the host's pins as they were once the reach ends, or unwinds.
+        struct RestoreHostPins(*mut StyleEngine, super::host_pins::HostPinsLend);
+        impl Drop for RestoreHostPins {
+            fn drop(&mut self) {
+                // SAFETY: The reach has ended: nothing else borrows the engine.
+                unsafe { &mut *self.0 }.restore_host_pins(self.1);
+            }
+        }
+        let engine = self.home().engine.as_ptr();
+        // SAFETY: Guaranteed by the caller; nothing on the owner's thread reaches the engine yet.
+        let _restore = RestoreHostPins(engine, unsafe { &mut *engine }.lend_host_pins_beside());
+        // SAFETY: As for `reach_on_owner`.
+        unsafe { reach_on_this_thread(self.address(), engine, run) }
+    }
+
     /// What the engine holds for its next style transaction, as whoever last reached it left it, with what the main
     /// thread sent it since. On the main thread.
     pub(crate) fn pending_facts(self) -> PendingFacts {
@@ -737,6 +764,39 @@ mod tests {
         )));
         let handle = engine.handle();
         (engine, handle)
+    }
+
+    #[test]
+    fn a_reach_beside_the_main_thread_never_reads_its_pins() {
+        use super::super::host_pins::{HostPinsHandle, HostPinsLend, HostStyleRecordPins};
+        let is_beside = |lend| matches!(lend, HostPinsLend::BesideFlight(_));
+        let (mut engine, handle) = test_engine();
+        let mut pins = Box::<HostStyleRecordPins>::default();
+        // SAFETY: The table outlives the engine's use of it in this test.
+        let pins_handle = unsafe { HostPinsHandle::new(&raw mut *pins) };
+        engine
+            .engine()
+            .computed_group_sets
+            .lend_host_pins(HostPinsLend::Lent(pins_handle));
+        crate::render_owner::do_owner_work_here(|owner| {
+            // SAFETY: The test is the owner, and holds the engine.
+            unsafe {
+                handle.reach_on_owner_beside_main(owner, |engine| {
+                    // A clock tick within the reach stops lending the pins, and lends them as it found them after.
+                    let lend = engine.lend_host_pins_beside();
+                    assert!(is_beside(lend));
+                    engine.restore_host_pins(lend);
+                    let lend = engine.lend_host_pins_beside();
+                    assert!(is_beside(lend), "the tick's end lends no pins beside the main thread");
+                    engine.restore_host_pins(lend);
+                })
+            }
+        });
+        let lend = engine.engine().lend_host_pins_beside();
+        assert!(
+            matches!(lend, HostPinsLend::Lent(_)),
+            "the pins are lent again once the reach ends"
+        );
     }
 
     #[test]
