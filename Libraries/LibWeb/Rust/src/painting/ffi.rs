@@ -2073,8 +2073,7 @@ pub unsafe extern "C" fn layout_arena_seal_flight_paint(
 }
 
 /// Drops the paint sealed for a flight that was not submitted.
-#[unsafe(no_mangle)]
-pub extern "C" fn layout_arena_discard_sealed_flight_paint() {
+pub(crate) fn discard_sealed_flight_paint() {
     SEALED_FLIGHT_PAINT.with_borrow_mut(Option::take);
 }
 
@@ -3471,34 +3470,6 @@ pub unsafe extern "C" fn layout_arena_text_range_rects(
 pub struct FfiOptionalCssPixelRect {
     pub has_value: bool,
     pub rect: FfiCssPixelRect,
-}
-
-/// # Safety
-///
-/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_paintable_first_fragment_rect_for_node(
-    arena: *mut c_void,
-    block: NodeSlotId,
-    node: NodeSlotId,
-) -> FfiOptionalCssPixelRect {
-    // SAFETY: Guaranteed by the caller.
-    unsafe {
-        read_committed(arena, |paintable_rows| {
-            if !paintable_rows.paintable_row_is_populated(block) {
-                return FfiOptionalCssPixelRect::default();
-            }
-            paintable_rows
-                .committed_side_data(block)
-                .fragments()
-                .iter()
-                .find(|fragment| fragment.layout_node == node)
-                .map_or_else(FfiOptionalCssPixelRect::default, |fragment| FfiOptionalCssPixelRect {
-                    has_value: true,
-                    rect: crate::painting::text_fragment::absolute_rect(paintable_rows, fragment).into(),
-                })
-        })
-    }
 }
 
 /// # Safety

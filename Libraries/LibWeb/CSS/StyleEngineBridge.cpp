@@ -438,12 +438,6 @@ void StyleEngine::end_style_record_view_epoch()
     StyleEngineFFI::style_engine_end_style_record_view_epoch(rust_handle());
 }
 
-void StyleEngine::set_element_custom_property_data(StyleDrainScope const& scope, StyleNodeID node, CustomPropertyData const* data, bool is_animation_overlay, bool declares)
-{
-    StyleEngineFFI::style_engine_set_element_custom_property_data(scope,
-        rust_handle(), node.value(), data, data ? data->rust_store() : nullptr, data ? data->identity() : 0, is_animation_overlay, declares, nullptr, nullptr, 0);
-}
-
 void StyleEngine::decide_transitions(StyleRecordID before_style_record, void const* after_longhand_table, void const* after_animated_overlay, StyleValueFFI::FfiTransitionInput& input, StyleValueFFI::FfiTransitionAction* actions) const
 {
     StyleValueFFI::rust_decide_transitions(rust_handle(), before_style_record.value(), after_longhand_table, after_animated_overlay, &input, actions);
@@ -904,15 +898,6 @@ void StyleEngine::record_size_container_query_dependents(StyleNodeID container)
     StyleEngineFFI::style_engine_record_size_container_query_dependents(rust_handle(), container.value());
 }
 
-void StyleEngine::record_element_style_input_change(StyleNodeID style_node, u8 reaction, u8 inherited_style_groups)
-{
-    if (style_node != 0 && reaction != 0) {
-        flush_deferred_geometry_transaction_before_non_replayable_input(*this, m_style_computer);
-        note_recorded_input(*this, m_style_computer);
-        record_element_style_input(style_node, reaction, inherited_style_groups);
-    }
-}
-
 void StyleEngine::record_derived_element_style_input_change(StyleNodeID style_node, u8 reaction, u8 inherited_style_groups)
 {
     if (style_node != 0 && reaction != 0) {
@@ -975,18 +960,6 @@ bool StyleEngine::has_journaled_input() const
         || has_changed_node_lists()
         // An atom's adoption is no input to style.
         || m_host_fact_writes.size() > m_pending_atom_adoption_count;
-}
-
-size_t StyleEngine::recorded_input_count() const
-{
-    return m_pending_arrival_count
-        + m_tree_deltas.size()
-        + m_element_arrivals.size()
-        + m_local_feature_deltas.size()
-        + m_state_deltas.size()
-        + m_element_declaration_deltas.size()
-        + m_slots_whose_assignment_changed.size() + m_top_layer_changed
-        + (m_host_fact_writes.size() - m_pending_atom_adoption_count);
 }
 
 // A page that inserts markup records thousands of writes per transaction: the buffers keep their capacity for the next

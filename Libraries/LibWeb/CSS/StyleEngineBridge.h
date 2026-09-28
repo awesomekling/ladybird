@@ -89,8 +89,6 @@ public:
 
 #include <LibWeb/StyleEngineBridgeGenerated.h>
 
-    void set_element_custom_property_data(StyleDrainScope const&, StyleNodeID, CustomPropertyData const*, bool is_animation_overlay = false, bool declares = false);
-
     // The host names a node the moment it connects, from identities the engine granted it ahead of
     // time, and the mint crosses with the next transaction ahead of everything written to the identity
     // since. Identity 0 is never minted; it means "no node".
@@ -302,7 +300,6 @@ public:
     void record_container_query_input_change(StyleNodeID);
     // Records every element whose style a size query or container-relative unit decided against the container.
     void record_size_container_query_dependents(StyleNodeID container);
-    void record_element_style_input_change(StyleNodeID style_node, u8 reaction = PublishedStyle | RecomputeStyle, u8 inherited_style_groups = 0);
     // A reaction C++ derived from one it applied, for the engine to settle where it can.
     void record_derived_element_style_input_change(StyleNodeID style_node, u8 reaction, u8 inherited_style_groups = 0);
     void record_tree_counting_style_input_change(StyleNodeID style_node);
@@ -317,8 +314,6 @@ public:
     void note_pending_arrivals(size_t count);
     [[nodiscard]] bool has_pending_arrivals() const { return m_pending_arrival_count > 0; }
     void forget_pending_arrivals() { m_pending_arrival_count = 0; }
-    // How many inputs are recorded for the next submission, which is what settling for a selector query costs.
-    [[nodiscard]] size_t recorded_input_count() const;
     [[nodiscard]] bool has_pending_transaction() const;
     // Keep a style reaction the host applied to an element as it installed a batch, which the next transaction derives
     // the element's children's reactions from: `reaction` is what the element reacted to, `inherited_style_groups_changed`

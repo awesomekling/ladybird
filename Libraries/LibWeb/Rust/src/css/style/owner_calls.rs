@@ -1046,13 +1046,6 @@ pub(crate) fn unpublish_tree_scope_keyframes_from_finalizer(
     }));
 }
 
-/// Like [`ask`], for a read of what a published record holds only, which goes on while the install of the batch a
-/// stage published is still owed.
-pub(crate) fn ask_records(engine: StyleEngineHandle, entry: &'static str, query: StyleQuery) -> StyleAnswer {
-    engine.bring_home_to_read_records(entry);
-    ask_document(engine.document(), entry, query)
-}
-
 fn ask_document(document: DocumentId, entry: &'static str, query: StyleQuery) -> StyleAnswer {
     let mut cell = StyleQueryCell::new(query);
     let answered = crate::render_owner::ask_engine(document, Query::Engine(cell.for_owner()));

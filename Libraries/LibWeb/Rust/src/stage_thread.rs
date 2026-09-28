@@ -91,29 +91,6 @@ pub extern "C" fn rust_stage_thread_wants_frame_scheduler_host() -> bool {
     FRAME_SCHEDULER_HOST.get().is_none()
 }
 
-/// The pass of a document the calling thread submitted last, as its frame in flight holds it.
-#[repr(u8)]
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum FfiSubmittedDocumentPass {
-    None,
-    Style,
-    Layout,
-    Flight,
-}
-
-/// Which pass of a document the calling thread submitted last: the frame scheduler takes the kind of
-/// the frame it ends the main half with from what was submitted, rather than asking again which the
-/// document would submit.
-#[unsafe(no_mangle)]
-pub extern "C" fn rust_stage_thread_submitted_document_pass() -> FfiSubmittedDocumentPass {
-    SUBMITTED.with_borrow(|submitted| match submitted.last().map(|stage| stage.label) {
-        Some("style") => FfiSubmittedDocumentPass::Style,
-        Some("layout") => FfiSubmittedDocumentPass::Layout,
-        Some(FLIGHT_STAGE) => FfiSubmittedDocumentPass::Flight,
-        _ => FfiSubmittedDocumentPass::None,
-    })
-}
-
 /// Whether the calling thread submits the stages of its rendering updates, see [`submits`].
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_stage_thread_submits() -> bool {

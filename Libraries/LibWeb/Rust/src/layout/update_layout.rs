@@ -1865,7 +1865,7 @@ unsafe fn go_on_from_driven_frame(
     };
     // The flight goes on to record the document once it has laid it out, if the document seals what
     // that reads before it submits the flight, with the rest of the round's host steps done.
-    crate::painting::ffi::layout_arena_discard_sealed_flight_paint();
+    crate::painting::ffi::discard_sealed_flight_paint();
     let Some(host_tables) = main_thread.host_tables() else {
         debug_assert!(false, "layout node arena has no host tables");
         // With nowhere to keep the flight for the document to seal, it goes unsealed: it lays the

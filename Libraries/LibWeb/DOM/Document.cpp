@@ -866,13 +866,6 @@ void Document::JoinScope::note_extra_pass() const
     ++m_document.m_join_counters[to_underlying(m_reason)].nested;
 }
 
-void Document::JoinScope::note_frame_wait(u64 nanoseconds) const
-{
-    auto& counters = m_document.m_join_counters[to_underlying(m_reason)];
-    ++counters.frame_waits;
-    counters.frame_wait_nanoseconds += nanoseconds;
-}
-
 void Document::dump_join_counters() const
 {
     Vector<size_t> reasons;
@@ -892,14 +885,11 @@ void Document::dump_join_counters() const
         totals.clean_read_nanoseconds += counters.clean_read_nanoseconds;
         totals.max_nanoseconds = max(totals.max_nanoseconds, counters.max_nanoseconds);
         totals.joins_that_published_nothing += counters.joins_that_published_nothing;
-        totals.frame_waits += counters.frame_waits;
-        totals.frame_wait_nanoseconds += counters.frame_wait_nanoseconds;
     }
 
-    dbgln("Joins: {} calls, {} joins ({} published nothing), {} clean reads, {} nested, {:.3f}ms blocked ({:.3f}ms of it on clean reads, {:.3f}ms in {} frame waits)",
+    dbgln("Joins: {} calls, {} joins ({} published nothing), {} clean reads, {} nested, {:.3f}ms blocked ({:.3f}ms of it on clean reads)",
         totals.calls, totals.joins, totals.joins_that_published_nothing, totals.clean_reads, totals.nested,
-        totals.total_nanoseconds / 1'000'000.0, totals.clean_read_nanoseconds / 1'000'000.0,
-        totals.frame_wait_nanoseconds / 1'000'000.0, totals.frame_waits);
+        totals.total_nanoseconds / 1'000'000.0, totals.clean_read_nanoseconds / 1'000'000.0);
     for (auto reason : reasons) {
         auto const& counters = m_join_counters[reason];
         dbgln("  {:>9.3f}ms ({:>8.3f}ms clean) {:>7} joins ({:>7} idle) {:>7} clean {:>7} nested  max {:>8.3f}ms  {}",

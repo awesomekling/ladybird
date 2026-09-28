@@ -65,14 +65,12 @@ public:
     // on once the frame is taken back: step 16 for documents[document_index], which the pass laid out or styled.
     struct SubmittedPass {
         enum class Kind : u8 {
-            Style,
-            Layout,
             // A clock lease's tick, which goes on at step 16 for every document.
             Clock,
             // A flight: the style pass and the stages after it, up to the first one that needs the main thread. The rendering update goes on where the flight ended.
             Flight,
         };
-        Kind kind { Kind::Layout };
+        Kind kind { Kind::Flight };
         Vector<GC::Ref<DOM::Document>> documents;
         size_t document_index { 0 };
         HighResolutionTime::DOMHighResTimeStamp frame_timestamp { 0 };
@@ -114,9 +112,6 @@ public:
     ~FrameScheduler();
 
     State state() const { return m_state; }
-
-    // Whether a rendering update may submit its frame, rather than waiting for the render side.
-    static bool submits_frames();
 
     void begin_main_half(bool synchronous);
     // The recording mode of the main half's recordings.
