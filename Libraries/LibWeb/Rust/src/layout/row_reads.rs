@@ -10,16 +10,19 @@
 //! changes a unit or a question comes after), before it answers, and wherever a main thread entry changed them. The
 //! document thread reads the latest one where the arena keeps it, reaching neither the arena nor the owner.
 
-use super::LayoutNodeArena;
+use super::layout_changes::LayoutChange;
 use super::layout_node_arena::{BOUND_ROWS_PER_CHUNK, PseudoElementRows, SLOTS_PER_CHUNK};
 use super::node_data::{FfiNodeLink, NodeKind, NodeSlotId, PaintNode};
 use super::node_facts;
 use super::tree_shape::PublishedStyle;
+use super::{HostTables, LayoutNodeArena};
 use crate::cow_column::ColumnSnapshot;
 use crate::css::computed_value_views::ComputedValuesView;
 use crate::css::css_enums::positioning;
+use crate::css::style::fast_hash::FastMap as HashMap;
 use crate::css::style::published_record::PublishedStyleRecord;
 use crate::css::style::tree::StyleNodeID;
+use crate::render_owner::ChangeSeq;
 use smallvec::SmallVec;
 use std::ffi::c_void;
 use std::sync::Arc;
@@ -214,6 +217,73 @@ impl RowSnapshotSlot {
     }
 }
 
+/// The styles the document thread applied to rows that the owner has not taken in yet. A read of a row's style answers
+/// them ahead of the snapshot, as the rows will once the owner has published them: a record, or none where the arena
+/// derives the row's style from now on.
+#[derive(Default)]
+pub(crate) struct StylesSentAhead {
+    styles: HashMap<NodeSlotId, Option<Arc<PublishedStyleRecord>>>,
+    /// The change that sent the latest of them: the owner takes it in with all of them.
+    latest: Option<ChangeSeq>,
+}
+
+impl StylesSentAhead {
+    /// Notes that the change `sent` gave the row `row` the style `style`. A change the owner took in as it was sent
+    /// is in the rows already.
+    fn note(&mut self, row: NodeSlotId, style: Option<Arc<PublishedStyleRecord>>, sent: Option<ChangeSeq>) {
+        match sent {
+            Some(sent) => {
+                self.styles.insert(row, style);
+                self.latest = Some(sent);
+            }
+            None => {
+                self.styles.remove(&row);
+            }
+        }
+    }
+
+    /// The style the document thread sent ahead for `row` of the arena `arena` names, if the owner has not taken it in.
+    ///
+    /// # Safety
+    ///
+    /// `arena` must be a live handle on the document thread.
+    unsafe fn get(&mut self, arena: *mut c_void, row: NodeSlotId) -> Option<&Option<Arc<PublishedStyleRecord>>> {
+        let latest = self.latest?;
+        // SAFETY: Guaranteed by the caller.
+        if !unsafe { super::layout_changes::not_taken_in(arena, latest) } {
+            self.styles.clear();
+            self.latest = None;
+            return None;
+        }
+        self.styles.get(&row)
+    }
+}
+
+/// Runs `read` with the style record of the row in `id`, as the document thread last applied it.
+///
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread.
+#[track_caller]
+unsafe fn read_row_style<R>(
+    arena: *mut c_void,
+    id: NodeSlotId,
+    read: impl FnOnce(Option<&PublishedStyleRecord>) -> R,
+) -> R {
+    // SAFETY: Guaranteed by the caller.
+    let rows = unsafe { RowSnapshot::published(arena) };
+    // SAFETY: As above.
+    let mut sent = unsafe { HostTables::beside_frame(arena) }
+        .styles_sent_ahead
+        .borrow_mut();
+    // SAFETY: As above.
+    match unsafe { sent.get(arena, id) } {
+        Some(Some(record)) => read(Some(record)),
+        // What the arena derives for the row is its to make: until it has, the row reads as published.
+        _ => read(rows.style_record(id)),
+    }
+}
+
 /// A row the host names by its slot.
 #[repr(C)]
 pub struct FfiBoundRow {
@@ -376,9 +446,11 @@ pub unsafe extern "C" fn layout_arena_node_style_node(arena: *mut c_void, id: No
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_node_style_payloads(arena: *mut c_void, id: NodeSlotId) -> *const c_void {
     // SAFETY: Guaranteed by the caller.
-    unsafe { RowSnapshot::published(arena) }
-        .style_record(id)
-        .map_or(std::ptr::null(), |record| record.payloads.as_ptr())
+    unsafe {
+        read_row_style(arena, id, |record| {
+            record.map_or(std::ptr::null(), |record| record.payloads.as_ptr())
+        })
+    }
 }
 
 /// The dependency flags of the row's style record, or zero for a row without style.
@@ -389,9 +461,94 @@ pub unsafe extern "C" fn layout_arena_node_style_payloads(arena: *mut c_void, id
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_node_style_dependency_flags(arena: *mut c_void, id: NodeSlotId) -> u8 {
     // SAFETY: Guaranteed by the caller.
-    unsafe { RowSnapshot::published(arena) }
-        .style_record(id)
-        .map_or(0, |record| record.dependency_flags)
+    unsafe { read_row_style(arena, id, |record| record.map_or(0, |record| record.dependency_flags)) }
+}
+
+/// Applies the style of the published record `style_record` names to the row `node`, taking a style that holds no
+/// images: see [`LayoutNodeArena::install_row_style`]. Answers the image observers the row let go of, which the host
+/// deletes.
+///
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread, `node` must name a live row with style, and `style_record`
+/// must be a live handle of a record the style engine holds.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_install_row_style(
+    arena: *mut c_void,
+    node: NodeSlotId,
+    style_record: *const c_void,
+) -> *mut c_void {
+    // SAFETY: Guaranteed by the caller.
+    let record = unsafe { crate::css::style::published_record::shared_from_handle(style_record) };
+    // SAFETY: As above.
+    let host_tables = unsafe { HostTables::from_handle(arena) };
+    let old_image_observers = host_tables.replace_image_observers(node, std::ptr::null_mut());
+    let change = LayoutChange::InstallRowStyle {
+        node,
+        style_record: record.style_record,
+    };
+    // SAFETY: As above.
+    let sent = unsafe { super::layout_changes::send(arena, change) };
+    host_tables
+        .styles_sent_ahead
+        .borrow_mut()
+        .note(node, Some(record), sent);
+    old_image_observers
+}
+
+/// Moves the row `node` to its DOM target's record `style_record` names, without applying the style: see
+/// [`LayoutNodeArena::replace_row_style_record`]. Answers whether the row takes the record, which a row holding one
+/// the arena derived for it does not.
+///
+/// # Safety
+///
+/// As for [`layout_arena_install_row_style`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_replace_row_style_record(
+    arena: *mut c_void,
+    node: NodeSlotId,
+    style_record: *const c_void,
+) -> bool {
+    // SAFETY: Guaranteed by the caller.
+    let host_tables = unsafe { HostTables::from_handle(arena) };
+    let mut sent_ahead = host_tables.styles_sent_ahead.borrow_mut();
+    // SAFETY: As above.
+    let holds_derived_style = match unsafe { sent_ahead.get(arena, node) } {
+        Some(style) => style.is_none(),
+        // SAFETY: As above.
+        None => unsafe { RowSnapshot::published(arena) }
+            .node(node)
+            .is_none_or(|row| row.holds_derived_style),
+    };
+    if holds_derived_style {
+        return false;
+    }
+    // SAFETY: As above.
+    let record = unsafe { crate::css::style::published_record::shared_from_handle(style_record) };
+    let change = LayoutChange::ReplaceRowStyleRecord {
+        node,
+        style_record: record.style_record,
+    };
+    // SAFETY: As above.
+    let sent = unsafe { super::layout_changes::send(arena, change) };
+    sent_ahead.note(node, Some(record), sent);
+    true
+}
+
+/// Gives the row `node` the record `record` the host derived for it from its DOM target's style.
+///
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread, and the style engine must hold `record`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_adopt_derived_node_style(arena: *mut c_void, node: NodeSlotId, record: u64) {
+    // SAFETY: Guaranteed by the caller.
+    let sent = unsafe { super::layout_changes::send(arena, LayoutChange::AdoptDerivedNodeStyle { node, record }) };
+    // SAFETY: As above.
+    unsafe { HostTables::beside_frame(arena) }
+        .styles_sent_ahead
+        .borrow_mut()
+        .note(node, None, sent);
 }
 
 #[cfg(test)]

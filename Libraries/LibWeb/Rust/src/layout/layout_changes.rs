@@ -113,6 +113,21 @@ pub(crate) enum LayoutChange {
         style_node: StyleNodeID,
         generated_for: u8,
     },
+    /// The host applied the style of `style_record` to the row: see [`LayoutNodeArena::install_row_style`].
+    InstallRowStyle {
+        node: NodeSlotId,
+        style_record: u64,
+    },
+    /// The row's DOM target took `style_record`: see [`LayoutNodeArena::replace_row_style_record`].
+    ReplaceRowStyleRecord {
+        node: NodeSlotId,
+        style_record: u64,
+    },
+    /// The host derived `record` for the row from its DOM target's style.
+    AdoptDerivedNodeStyle {
+        node: NodeSlotId,
+        record: u64,
+    },
     /// An animation sample published this record for the element, which adopted it: the element's row takes it over.
     InstallAnimationSample {
         style_node: StyleNodeID,
@@ -196,6 +211,21 @@ impl LayoutChange {
                 offset,
             } => arena.set_pseudo_element_scroll_offset(generator, pseudo_kind, offset),
             Self::StyleNodeChanged { old, new } => arena.change_style_node(old, new),
+            Self::InstallRowStyle { node, style_record } => {
+                if arena.slot_is_live(node) {
+                    arena.install_row_style(node, style_record);
+                }
+            }
+            Self::ReplaceRowStyleRecord { node, style_record } => {
+                if arena.slot_is_live(node) {
+                    arena.replace_row_style_record(node, style_record);
+                }
+            }
+            Self::AdoptDerivedNodeStyle { node, record } => {
+                if arena.slot_is_live(node) {
+                    arena.adopt_derived_node_style(node, record);
+                }
+            }
             Self::SetIdentityInFocusedTextControl { node, value } => {
                 arena.set_identity_in_focused_text_control(node, value);
             }

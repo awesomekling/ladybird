@@ -632,7 +632,7 @@ void apply_style_to_box(Painting::BoxSlot const& box, CSS::PublishedStyleRecord 
 {
     if (!box.is_live() || box.is_text())
         return;
-    auto* old_image_observers = RustFFI::layout_arena_install_row_style(box.arena(), box.slot(), style_record.identity().value());
+    auto* old_image_observers = RustFFI::layout_arena_install_row_style(box.arena(), box.slot(), style_record.handle());
     did_update_box_style_record(box, style_record.payloads());
     delete static_cast<Painting::StyleImageObserverSet*>(old_image_observers);
     attach_style_resources_to_box(box);
@@ -716,7 +716,7 @@ void set_style_record_of_box(Painting::BoxSlot const& box, CSS::PublishedStyleRe
         return;
     // A layout-derived record is independent of its DOM target's record. A rendering consequence replaces and
     // re-derives it explicitly through apply_style_to_box().
-    if (RustFFI::layout_arena_replace_row_style_record(box.arena(), box.slot(), style_record->identity().value()))
+    if (RustFFI::layout_arena_replace_row_style_record(box.arena(), box.slot(), style_record->handle()))
         did_update_box_style_record(box, style_record->payloads());
 }
 

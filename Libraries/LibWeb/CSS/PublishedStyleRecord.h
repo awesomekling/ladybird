@@ -28,6 +28,8 @@ public:
 
     // The engine's identity of the record, for comparing records and naming one to the engine.
     StyleRecordID identity() const { return StyleRecordID { m_read.style_record }; }
+    // The record as Rust names it, for handing it on to what keeps a reference of its own.
+    void const* handle() const { return m_handle; }
     StyleEngineFFI::FfiStyleRecordView const& view() const { return m_read.view; }
     void const* payloads() const { return m_read.view.payloads; }
     StyleRecordDependencyFlag dependency_flags() const { return static_cast<StyleRecordDependencyFlag>(m_read.view.dependency_flags); }

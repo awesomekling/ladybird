@@ -128,6 +128,20 @@ pub(crate) fn into_handle(record: Arc<PublishedStyleRecord>) -> *const c_void {
     Arc::into_raw(record).cast()
 }
 
+/// A reference of its own to the record C++ names by `handle`.
+///
+/// # Safety
+///
+/// `handle` must be a live handle from `into_handle`.
+pub(crate) unsafe fn shared_from_handle(handle: *const c_void) -> Arc<PublishedStyleRecord> {
+    let record = handle.cast::<PublishedStyleRecord>();
+    // SAFETY: Guaranteed by the caller: the handle holds a reference, to which this adds one.
+    unsafe {
+        Arc::increment_strong_count(record);
+        Arc::from_raw(record)
+    }
+}
+
 /// What C++ reads of a published record, all of it borrowed from the record for as long as the
 /// handle lives.
 #[repr(C)]
