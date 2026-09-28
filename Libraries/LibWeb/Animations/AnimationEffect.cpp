@@ -1010,25 +1010,6 @@ void install_sampled_custom_property_environment(CSS::StyleDrainScope const& sco
     }
 }
 
-static void install_taken_engine_sample(CSS::StyleDrainScope const&, DOM::AbstractElement, CSS::StyleRecordID style_record_before_update, bool caller_applies_invalidation, CSS::StyleEngineFFI::FfiRowSampledInPass const&, InstalledInArena);
-
-// The engine samples the animations of an element or pseudo-element over the record the host holds
-// for it, from the timing rows, descriptions and environments it holds, and publishes the
-// composition as its record. What the sample found out is recorded on the element and its parent
-// as the host's own sample records it. Returns false where the engine cannot sample it, and the
-// host does.
-static bool install_engine_sample_of_installed_record(CSS::StyleDrainScope const& scope, DOM::AbstractElement element, AnimationUpdateContext::ElementData const& data)
-{
-    GC::Ref<DOM::Element> target = element.element();
-    auto& document = target->document();
-    auto const sample = CSS::StyleEngineFFI::style_engine_sample_installed_record(scope.engine().rust_handle(), target->style_node_id().value(),
-        CSS::pseudo_element_to_ffi(element.pseudo_element()), data.style_record_before_update.value(), Layout::document_layout_arena_if_created(document));
-    if (!sample.present)
-        return false;
-    install_taken_engine_sample(scope, element, data.style_record_before_update, data.caller_applies_invalidation, sample, InstalledInArena::No);
-    return true;
-}
-
 // Install what an engine sample of an element's animations over the record `style_record_before_update` published,
 // and record what the sample found out on the element and its parent. Where the render side installed the sample's
 // record in the arena already, the element adopts it.
@@ -1107,23 +1088,39 @@ void AnimationUpdateContext::publish_animation_inputs_before_sample(DOM::Element
 // Install what the engine's samples of the updated elements published, in the drain `scope` proves.
 static void install_engine_samples(CSS::StyleDrainScope const& scope, HashMap<DOM::AbstractElement, AnimationUpdateContext::ElementData>& elements)
 {
+    // The engine samples the effects the element's timing rows name, which include the transitions a
+    // step provisionally started and a dirty effect that just became irrelevant, whose terminal
+    // contribution the sample removes. It samples every element over the record it holds in one go,
+    // and publishes each composition as its record. An element the engine cannot sample keeps the
+    // composition it holds.
+    struct SampledElement {
+        DOM::AbstractElement element;
+        AnimationUpdateContext::ElementData data;
+    };
+    Vector<SampledElement> sampled_elements;
+    Vector<CSS::StyleEngineFFI::FfiInstalledRecord> records;
     for (auto& it : elements) {
-        if (!it.value.style_record_before_update)
-            continue;
-        auto& element = it.key;
-        GC::Ref<DOM::Element> target = element.element();
+        auto const& element = it.key;
         // Disconnected elements no longer have a style-engine row to publish refreshed
         // animation style into.
-        if (target->style_node_id() == 0)
+        auto style_node = element.element().style_node_id();
+        if (!it.value.style_record_before_update || style_node == 0 || element.style_record_identity() != it.value.style_record_before_update)
             continue;
+        sampled_elements.append({ element, it.value });
+        records.append({ style_node.value(), CSS::pseudo_element_to_ffi(element.pseudo_element()), it.value.style_record_before_update.value() });
+    }
+    if (records.is_empty())
+        return;
+    Vector<CSS::StyleEngineFFI::FfiRowSampledInPass> samples;
+    samples.resize(records.size());
+    auto& document = sampled_elements.first().element.element().document();
+    CSS::StyleEngineFFI::style_engine_sample_installed_records(scope.engine().rust_handle(), records.data(), records.size(), samples.data(), Layout::document_layout_arena_if_created(document));
+    for (size_t i = 0; i < samples.size(); ++i) {
+        auto& [element, data] = sampled_elements[i];
         // An earlier entry already republished this style with the current animation values.
-        if (element.style_record_identity() != it.value.style_record_before_update)
+        if (!samples[i].present || element.style_record_identity() != data.style_record_before_update)
             continue;
-        // The engine samples the effects the element's timing rows name, which include the
-        // transitions a step provisionally started and a dirty effect that just became irrelevant,
-        // whose terminal contribution the sample removes. An element the engine cannot sample
-        // keeps the composition it holds.
-        (void)install_engine_sample_of_installed_record(scope, element, it.value);
+        install_taken_engine_sample(scope, element, data.style_record_before_update, data.caller_applies_invalidation, samples[i], InstalledInArena::No);
     }
 }
 

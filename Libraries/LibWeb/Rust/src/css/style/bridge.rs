@@ -4391,84 +4391,117 @@ pub(crate) unsafe fn owner_sampled_custom_property_environment_owner(
     true
 }
 
-/// Sample the animations of an element, or of one of its pseudo-elements, over the record the host
-/// holds for it, from the engine's own inputs, and publish the composition as its record. `present`
-/// is false where the engine cannot, and the host samples it itself; an answer naming
-/// `style_record` again says the sample moved nothing.
-///
-/// # Safety
-/// `engine` must be live, and `layout_arena` the document's live layout arena or null.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_sample_installed_record(
-    engine: StyleEngineInputHandle,
-    node: u32,
-    pseudo_kind: u8,
-    style_record: u64,
-    layout_arena: *mut c_void,
-) -> FfiRowSampledInPass {
-    crate::css::style::owner_calls::ask(
-        engine.home(),
-        "style_engine_sample_installed_record",
-        crate::css::style::owner_calls::StyleQuery::SampleInstalledRecord {
-            node,
-            pseudo_kind,
-            style_record,
-            layout_arena,
-        },
-    )
-    .row_sampled()
+/// A record the host holds for an element, or for one of its pseudo-elements (`pseudo_kind`, or
+/// `u8::MAX` for the element), which the engine samples the animations over.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct FfiInstalledRecord {
+    pub node: u32,
+    pub pseudo_kind: u8,
+    pub style_record: u64,
 }
 
-/// Answers [`style_engine_sample_installed_record`] from `engine`, on the render owner.
+/// Sample the animations of each of `count` elements or pseudo-elements over the record the host
+/// holds for it, in order, from the engine's own inputs, and publish each composition as its record
+/// into `samples`. A sample is not `present` where the engine cannot take it, and the host samples it
+/// itself; one naming its `style_record` again says the sample moved nothing.
+///
+/// # Safety
+/// `engine` must be live, `records` valid for `count` reads and `samples` for `count` writes, and
+/// `layout_arena` the document's live layout arena or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn style_engine_sample_installed_records(
+    engine: StyleEngineInputHandle,
+    records: *const FfiInstalledRecord,
+    count: usize,
+    samples: *mut FfiRowSampledInPass,
+    layout_arena: *mut c_void,
+) {
+    crate::css::style::owner_calls::ask(
+        engine.home(),
+        "style_engine_sample_installed_records",
+        crate::css::style::owner_calls::StyleQuery::SampleInstalledRecords {
+            records,
+            count,
+            samples,
+            layout_arena,
+        },
+    );
+}
+
+/// Answers [`style_engine_sample_installed_records`] from `engine`, on the render owner.
 ///
 /// # Safety
 ///
-/// As for [`style_engine_sample_installed_record`].
-pub(crate) unsafe fn owner_sample_installed_record(
+/// As for [`style_engine_sample_installed_records`].
+pub(crate) unsafe fn owner_sample_installed_records(
     engine: &mut StyleEngine,
-    node: u32,
-    pseudo_kind: u8,
-    style_record: u64,
+    records: *const FfiInstalledRecord,
+    count: usize,
+    samples: *mut FfiRowSampledInPass,
     layout_arena: *mut c_void,
-) -> FfiRowSampledInPass {
+) {
+    // SAFETY: Guaranteed by the caller, who waits for the answer.
+    let (records, samples) = unsafe {
+        (
+            std::slice::from_raw_parts(records, count),
+            std::slice::from_raw_parts_mut(samples, count),
+        )
+    };
     abort_on_panic(|| {
-        let Some(style_node) = StyleNodeID::from_raw(node) else {
-            return row_sampled_in_pass(engine, None);
-        };
-        let pseudo = (pseudo_kind != u8::MAX).then_some(pseudo_kind);
         let layout_arena = unsafe { super::animations::CommittedTransformReferenceBoxes::lend(layout_arena) };
         // The host samples at the times it published.
         let timeline_samples = engine.animation_timeline_samples().clone();
-        let owns_slot = engine
-            .computed_group_sets
-            .owns_animation_overlay_slot(super::computed::ComputedStyleTarget::new(style_node, pseudo_kind));
-        let sampled = match owns_slot {
-            true => engine.sample_installed_record(style_node, pseudo, style_record, layout_arena, &timeline_samples),
-            false => sample_record_without_overlay_slot(
-                engine,
-                style_node,
-                pseudo_kind,
-                style_record,
-                layout_arena,
-                &timeline_samples,
-            ),
-        };
-        match sampled {
-            Ok(published) => {
-                super::engine_sample_check::note_taken("installed record sample");
-                row_sampled_in_pass(engine, Some(published))
-            }
-            Err(reason) => {
-                super::engine_sample_check::note_declined(&format!("installed record: {reason}"));
-                row_sampled_in_pass(engine, None)
-            }
+        for (record, sample) in records.iter().zip(samples) {
+            *sample = sample_installed_record(engine, *record, layout_arena, &timeline_samples);
         }
-    })
+    });
+}
+
+fn sample_installed_record(
+    engine: &mut StyleEngine,
+    record: FfiInstalledRecord,
+    layout_arena: super::animations::CommittedTransformReferenceBoxes,
+    timeline_samples: &super::animations::AnimationTimelineSamples,
+) -> FfiRowSampledInPass {
+    let FfiInstalledRecord {
+        node,
+        pseudo_kind,
+        style_record,
+    } = record;
+    let Some(style_node) = StyleNodeID::from_raw(node) else {
+        return FfiRowSampledInPass::absent();
+    };
+    let pseudo = (pseudo_kind != u8::MAX).then_some(pseudo_kind);
+    let owns_slot = engine
+        .computed_group_sets
+        .owns_animation_overlay_slot(super::computed::ComputedStyleTarget::new(style_node, pseudo_kind));
+    let sampled = match owns_slot {
+        true => engine.sample_installed_record(style_node, pseudo, style_record, layout_arena, timeline_samples),
+        false => sample_record_without_overlay_slot(
+            engine,
+            style_node,
+            pseudo_kind,
+            style_record,
+            layout_arena,
+            timeline_samples,
+        ),
+    };
+    match sampled {
+        Ok(published) => {
+            super::engine_sample_check::note_taken("installed record sample");
+            row_sampled_in_pass(engine, Some(published))
+        }
+        Err(reason) => {
+            super::engine_sample_check::note_declined(&format!("installed record: {reason}"));
+            FfiRowSampledInPass::absent()
+        }
+    }
 }
 
 /// Sample the animations of an element over the record the host holds for it at the times
 /// `timeline_samples` names, and publish the composition as its record, as
-/// [`style_engine_sample_installed_record`] does for the host: for a clock tick, which samples on
+/// [`style_engine_sample_installed_records`] does for the host: for a clock tick, which samples on
 /// the render side. `None` where the element owns no overlay slot or the engine cannot sample it,
 /// and the host samples it itself.
 ///
