@@ -3571,7 +3571,7 @@ fn run_tree_build_stage(host: &DomTreeBuilderHost, document_style_node: u32) -> 
     );
     let viewport = arena.layout_root();
     assert!(!viewport.is_invalid(), "a layout tree build places the viewport");
-    arena.settle_built_scroll_containers();
+    let scroll_containers = arena.take_built_scroll_containers();
 
     for record in state.pinned_style_records {
         arena.release_style_record_pinned_for_build(record);
@@ -3598,22 +3598,6 @@ fn run_tree_build_stage(host: &DomTreeBuilderHost, document_style_node: u32) -> 
     // SAFETY: The stage holds the arena alone, and no borrow above outlives the free.
     let arena = unsafe { &*host.arena };
     let handbacks = arena.take_tree_build_handbacks();
-    // The document takes the scroll containers the build gave a style. Where no box was ever given a scroll snap type,
-    // none of them snaps, and the document has no snapped areas for them to forget.
-    let built = arena.built_scroll_snap_containers();
-    arena.drop_built_scroll_snap_containers(&built.iter().map(|&(slot, _)| slot).collect::<Vec<_>>());
-    let scroll_containers = if arena.may_have_scroll_snap_areas() {
-        built
-            .into_iter()
-            .map(|(slot, is_scroll_snap_container)| FfiBuiltScrollContainer {
-                slot,
-                is_scroll_snap_container,
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
-
     super::tree_build_seal::end_build();
     TreeBuildStageOutput {
         outcome: FfiLayoutTreeBuildOutcome {

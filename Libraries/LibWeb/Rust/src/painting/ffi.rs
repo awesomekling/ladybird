@@ -2636,22 +2636,6 @@ pub unsafe extern "C" fn layout_arena_navigable_container_local_content_navigabl
     }
 }
 
-/// # Safety
-///
-/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_scroll_snap_axes(
-    arena: *mut c_void,
-    snap_container: NodeSlotId,
-) -> crate::painting::host::FfiSnapAxes {
-    // SAFETY: Guaranteed by the caller.
-    unsafe {
-        read_current(arena, |rows| {
-            crate::painting::scroll_snap::snap_axes_of_scroll_container(rows, snap_container)
-        })
-    }
-}
-
 /// Tells the render owner that the element with `element_style_node` published a `::selection` style, which the rows
 /// that paint text under it paint selected text with. Nothing waits for it.
 ///

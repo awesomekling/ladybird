@@ -6,6 +6,7 @@
 
 use super::abspos_inputs::AbsposLayoutInputs;
 use super::formatting_context::DerivedBaselines;
+use super::formatting_context::FfiBuiltScrollContainer;
 use super::formatting_context::LayoutMode;
 use super::geometry::AvailableSize;
 use super::geometry::AvailableSpace;
@@ -1021,18 +1022,6 @@ struct AnimationAdoption {
     host_style_record: u64,
 }
 
-/// The scroll containers finished tree builds settled, in the order they settled them, each with
-/// whether it was a scroll snap container then.
-#[derive(Default)]
-struct SettledScrollContainers {
-    rows: Vec<(NodeSlotId, bool)>,
-    /// Where each row is in `rows`: a build settles each of its rows without a walk over the rows
-    /// earlier builds settled.
-    positions: HashMap<NodeSlotId, usize>,
-    /// How many rows were left when the rows builds freed were last dropped.
-    rows_after_last_prune: usize,
-}
-
 pub(crate) struct LayoutNodeArena {
     chunks: Vec<Box<Chunk>>,
     chunks_by_address: Vec<ChunkAddress>,
@@ -1267,9 +1256,6 @@ pub(crate) struct LayoutNodeArena {
     /// The scroll containers a running tree build gave a style, which may be where scroll
     /// snapping happens once the build is over.
     built_scroll_containers: RefCell<Vec<NodeSlotId>>,
-    /// The scroll containers finished tree builds gave a style, each with whether it was a scroll
-    /// snap container then, until the document's scroll snap bookkeeping takes them.
-    built_scroll_snap_containers_for_host: RefCell<SettledScrollContainers>,
     /// The image resources the tree builds owe the host for the rows they stamped, in the order the
     /// builds came to owe them, until the frame the builds ran in takes them.
     image_resources_owed_to_host: RefCell<Vec<(NodeSlotId, OwedImageResources)>>,
@@ -1405,7 +1391,6 @@ impl LayoutNodeArena {
             needs_full_scrollable_overflow_recalculation: Cell::new(false),
             text_nodes_enrolled_for_content_sync: RefCell::new(HashSet::default()),
             built_scroll_containers: RefCell::new(Vec::new()),
-            built_scroll_snap_containers_for_host: RefCell::new(SettledScrollContainers::default()),
             image_resources_owed_to_host: RefCell::new(Vec::new()),
             image_boxes_awaiting_owned_provider: RefCell::new(HashSet::default()),
             published_document_style: Cell::new(None),
@@ -6177,65 +6162,27 @@ impl LayoutNodeArena {
         })
     }
 
-    /// Decides, once a build is over, whether each scroll container it gave a style is a scroll
-    /// snap container, which the viewport's answer needs the root element's box for. A row the
-    /// build freed again, such as whitespace table fixup removed, is left out.
-    pub(crate) fn settle_built_scroll_containers(&self) {
-        let built = std::mem::take(&mut *self.built_scroll_containers.borrow_mut());
-        let mut settled = self.built_scroll_snap_containers_for_host.borrow_mut();
-        for row in built {
-            if !self.slot_is_live(row) || settled.positions.contains_key(&row) {
-                continue;
-            }
-            let axes = crate::painting::scroll_snap::snap_axes_of_scroll_container(self, row);
-            let position = settled.rows.len();
-            settled.positions.insert(row, position);
-            settled.rows.push((row, axes.x || axes.y));
+    /// The scroll containers the build that is over gave a style, for the document's scroll snap bookkeeping, each
+    /// with whether it is a scroll snap container, which the viewport's answer needs the root element's box for. A row
+    /// the build freed again, such as whitespace table fixup removed, is left out. Where no box was ever given a scroll
+    /// snap type, none of them snaps, and the document has no snapped areas for them to forget, so it takes none.
+    pub(crate) fn take_built_scroll_containers(&self) -> Vec<FfiBuiltScrollContainer> {
+        let mut built = self.built_scroll_containers.borrow_mut();
+        if !self.may_have_scroll_snap_areas() {
+            built.clear();
+            return Vec::new();
         }
-        // A document without scroll snap areas never takes them, so the rows later builds freed are
-        // dropped once they could make up half of them.
-        if settled.rows.len() > 2 * settled.rows_after_last_prune + 64 {
-            settled.rows.retain(|&(row, _)| self.slot_is_live(row));
-            let positions = settled
-                .rows
-                .iter()
-                .enumerate()
-                .map(|(position, &(row, _))| (row, position))
-                .collect();
-            settled.positions = positions;
-            settled.rows_after_last_prune = settled.rows.len();
-        }
-    }
-
-    /// The scroll containers finished builds gave a style that the host has not taken, each with
-    /// whether it was a scroll snap container then. A later build can still free a row, so only the
-    /// live ones are handed out.
-    pub(crate) fn built_scroll_snap_containers(&self) -> Vec<(NodeSlotId, bool)> {
-        self.built_scroll_snap_containers_for_host
-            .borrow()
-            .rows
-            .iter()
-            .copied()
-            .filter(|&(row, _)| self.slot_is_live(row))
+        built
+            .drain(..)
+            .filter(|&slot| self.slot_is_live(slot))
+            .map(|slot| {
+                let axes = crate::painting::scroll_snap::snap_axes_of_scroll_container(self, slot);
+                FfiBuiltScrollContainer {
+                    slot,
+                    is_scroll_snap_container: axes.x || axes.y,
+                }
+            })
             .collect()
-    }
-
-    /// Drops the scroll containers the host took of [`Self::built_scroll_snap_containers`], and the
-    /// rows later builds freed.
-    pub(crate) fn drop_built_scroll_snap_containers(&self, taken: &[NodeSlotId]) {
-        let taken: std::collections::HashSet<NodeSlotId> = taken.iter().copied().collect();
-        let mut settled = self.built_scroll_snap_containers_for_host.borrow_mut();
-        settled
-            .rows
-            .retain(|&(row, _)| !taken.contains(&row) && self.slot_is_live(row));
-        let positions = settled
-            .rows
-            .iter()
-            .enumerate()
-            .map(|(position, &(row, _))| (row, position))
-            .collect();
-        settled.positions = positions;
-        settled.rows_after_last_prune = settled.rows.len();
     }
 
     /// The image resources the finished builds owe the host, in the order they came to owe them.
@@ -6429,18 +6376,6 @@ pub unsafe extern "C" fn layout_arena_set_node_flag(
     };
     // SAFETY: Guaranteed by the caller.
     unsafe { super::layout_changes::send(arena, change) };
-}
-
-/// Mark the node `id` names to have its own geometry updated by the next layout, without laying out
-/// its subtree again.
-///
-/// # Safety
-///
-/// The arena must remain valid for the duration of the call, and `id` must name a live node in it.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_set_needs_own_geometry_update(marks: LayoutUpdateMarksHandle, id: NodeSlotId) {
-    // SAFETY: The render inputs hand out the marks of their document's live arena.
-    unsafe { super::layout_changes::send_through_marks(marks, LayoutChange::SetNeedsOwnGeometryUpdate { node: id }) };
 }
 
 /// What the door of one main-side writer cost: how often it was passed, and how often and for how
