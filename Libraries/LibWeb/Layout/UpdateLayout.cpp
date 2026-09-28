@@ -22,15 +22,6 @@
 
 namespace Web::DOM {
 
-static Layout::RustFFI::FfiUtf16View ffi_utf16_view(Utf16View view)
-{
-    return {
-        .ascii = view.has_ascii_storage() ? reinterpret_cast<u8 const*>(view.ascii_span().data()) : nullptr,
-        .utf16 = view.has_ascii_storage() ? nullptr : reinterpret_cast<u16 const*>(view.utf16_span().data()),
-        .length = view.length_in_code_units(),
-    };
-}
-
 // Reads the document's selection range, when it has one, into `snapshot`, whose nodes `nodes` holds. Answers the
 // snapshot, or null when the document has no selection range.
 static Layout::RustFFI::FfiSelectionSnapshot const* read_selection(Document& document, Layout::RustFFI::FfiSelectionSnapshot& snapshot, Vector<Layout::RustFFI::FfiSelectionSnapshotNode>& nodes)
@@ -373,7 +364,6 @@ bool Document::update_style_and_layout_once(UpdateLayoutReason reason, Throttled
     Layout::RustFFI::FfiLayoutUpdateInputs inputs {
         .reason_is_inspect_devtools_layout_data = reason == UpdateLayoutReason::InspectDevToolsLayoutData,
         .is_template_contents_document = m_created_for_appropriate_template_contents,
-        .reason_name = ffi_utf16_view(to_string(reason)),
         .may_submit_pass = may_submit_pass,
         .style_in_flight = style_in_flight,
         .viewport_propagation_sources = {},

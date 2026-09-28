@@ -147,7 +147,6 @@ RENDER_STAGE_ALLOWED = {
         [
             "stage_thread.rs:LOGS",
             "clock_frames.rs:ENABLED",
-            "css/style/flush.rs:ENABLED",
             "css/style/mod.rs:CASCADE_WINNERS",
             "css/style/mod.rs:PREFIX_RELATION",
             "css/style/mod.rs:PUBLISHED_STYLE_TRANSACTION",
@@ -155,7 +154,6 @@ RENDER_STAGE_ALLOWED = {
             "css/style/mod.rs:STYLE_ANSWER_PATCH",
             "css/style/mod.rs:STYLE_PLAN_PROVENANCE",
             "layout/fc_run_cache.rs:MODE",
-            "layout/update_layout.rs:ENABLED",
         ],
     ),
     **render_stage_entries(

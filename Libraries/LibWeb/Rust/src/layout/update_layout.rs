@@ -27,14 +27,12 @@ use super::tree_builder::{
 };
 use super::{ArenaHandle, LayoutNodeArena};
 use crate::abort_on_panic;
-use crate::css::ffi_support::FfiUtf16View;
 use crate::css::style::tree::StyleNodeID;
 use crate::layout::used_values::FfiCssPixelPoint;
 use crate::painting::paintable_data::FfiSelectionSnapshot;
 use crate::painting::selection::SelectionSnapshot;
 use std::cell::Cell;
 use std::ffi::c_void;
-use std::time::Instant;
 
 mod main_thread_entries;
 
@@ -281,8 +279,6 @@ pub struct FfiLayoutUpdateInputs {
     pub reason_is_inspect_devtools_layout_data: bool,
     /// A document hosting template contents never needs layout.
     pub is_template_contents_document: bool,
-    /// The update reason's name, read only when tracing is enabled.
-    pub reason_name: FfiUtf16View,
     /// Whether the update may submit its first full layout pass to run beside the document thread
     /// (under `LIBWEB_STAGE_OVERLAP=layout`), rather than waiting for it.
     pub may_submit_pass: bool,
@@ -403,52 +399,6 @@ fn layout_is_up_to_date(arena: &LayoutNodeArena, facts: &FfiLayoutUpdateDocument
     arena.layout_is_up_to_date(facts.document_needs_layout_tree_build)
 }
 
-/// The `TREEBUILD` and `LAYOUT` timing lines, off unless `LIBWEB_UPDATE_LAYOUT_TRACE` is set.
-struct UpdateLayoutTrace {
-    reason: Option<String>,
-}
-
-fn update_layout_trace_is_enabled() -> bool {
-    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ENABLED.get_or_init(|| std::env::var_os("LIBWEB_UPDATE_LAYOUT_TRACE").is_some())
-}
-
-impl UpdateLayoutTrace {
-    /// # Safety
-    ///
-    /// `reason_name` must satisfy [`FfiUtf16View::to_utf16`]'s requirements.
-    unsafe fn new(reason_name: FfiUtf16View) -> Self {
-        if !update_layout_trace_is_enabled() {
-            return Self { reason: None };
-        }
-        // SAFETY: Guaranteed by the caller.
-        let reason = unsafe { reason_name.to_utf16() }
-            .map(|units| String::from_utf16_lossy(&units))
-            .unwrap_or_default();
-        Self { reason: Some(reason) }
-    }
-
-    fn disabled() -> Self {
-        Self { reason: None }
-    }
-
-    fn now(&self) -> Option<Instant> {
-        self.reason.as_ref().map(|_| Instant::now())
-    }
-
-    fn tree_build(&self, started: Option<Instant>) {
-        if let Some(started) = started {
-            eprintln!("TREEBUILD {} µs", started.elapsed().as_micros());
-        }
-    }
-
-    fn layout(&self, started: Option<Instant>) {
-        if let (Some(reason), Some(started)) = (&self.reason, started) {
-            eprintln!("LAYOUT {reason} {} µs", started.elapsed().as_micros());
-        }
-    }
-}
-
 enum PartialRelayout {
     NotEligible,
     Done,
@@ -465,7 +415,6 @@ struct FrameInputs {
     arena_handle: *mut c_void,
     reason_is_inspect_devtools_layout_data: bool,
     is_template_contents_document: bool,
-    trace: UpdateLayoutTrace,
 }
 
 /// What a layout pass takes ahead of it: what the facts of the replaced content enrolled for sync
@@ -665,7 +614,6 @@ struct PendingLayoutPass {
     layout_root: NodeSlotId,
     sources: LayoutPassSources,
     facts: FfiLayoutUpdateDocumentFacts,
-    started: Option<Instant>,
 }
 
 impl PendingLayoutPass {
@@ -679,7 +627,6 @@ impl PendingLayoutPass {
             layout_root,
             sources: LayoutPassSources { content },
             facts,
-            started,
         } = self;
         // SAFETY (for the three steps below): Guaranteed by the caller; the viewport box stays live
         // between them, and no row was freed since the sources were read.
@@ -707,7 +654,6 @@ impl PendingLayoutPass {
         LaidOutPass {
             commit_host_half,
             facts,
-            started,
         }
     }
 }
@@ -717,7 +663,6 @@ impl PendingLayoutPass {
 struct LaidOutPass {
     commit_host_half: DeferredLayoutCommitHostHalf,
     facts: FfiLayoutUpdateDocumentFacts,
-    started: Option<Instant>,
 }
 
 /// What the owner's arena and style engine show as a frame job ends, which the document thread reads with the facts
@@ -1674,8 +1619,6 @@ impl LayoutFrame {
         }
         drop(registered_partial_relayout_roots);
 
-        let layout_started = self.inputs.trace.now();
-
         if needs_layout_tree_rebuild {
             let state = self.state();
             let (walked, mut host_half) = self.walk_layout_tree_build();
@@ -1698,7 +1641,6 @@ impl LayoutFrame {
             // next style round pays the build's host half, after the reset of the full tree update
             // flag.
             self.arena().set_needs_full_layout_tree_update(false);
-            self.inputs.trace.tree_build(layout_started);
 
             let Some(pass_sources) = pass_sources else {
                 return FrameStep::Ended(RoundEnd::AnotherRound);
@@ -1713,7 +1655,6 @@ impl LayoutFrame {
             layout_root,
             sources: self.take_pass_sources(),
             facts,
-            started: layout_started,
         })
     }
 
@@ -1739,12 +1680,10 @@ impl LayoutFrame {
         let LaidOutPass {
             commit_host_half,
             facts,
-            started,
         } = laid_out;
         self.owe_host_half(OwedHostHalf::Commit(commit_host_half));
         self.messages.full_layouts_performed += 1;
         self.note_layout_commit(true);
-        self.inputs.trace.layout(started);
         facts
     }
 
@@ -1774,7 +1713,6 @@ impl LayoutFrame {
 
         let mut layout_tree_was_built_in_partial_branch = false;
         if *needs_layout_tree_rebuild {
-            let tree_build_started = self.inputs.trace.now();
             let state = self.state();
             let (walked, mut host_half) = self.walk_layout_tree_build();
             let needs_another_build_pass = walked.outcome.needs_another_build_pass;
@@ -1797,7 +1735,6 @@ impl LayoutFrame {
             // The build invalidates what deferred child list insertions reach, which can register
             // more boundaries.
             registered_partial_relayout_roots.extend(self.arena().take_partial_relayout_boundary_roots());
-            self.inputs.trace.tree_build(tree_build_started);
         }
 
         let layout_root = self.arena().layout_root();
@@ -1950,7 +1887,6 @@ unsafe fn make_clock_layout_frame(
                 arena_handle,
                 reason_is_inspect_devtools_layout_data: false,
                 is_template_contents_document: false,
-                trace: UpdateLayoutTrace::disabled(),
             },
             messages: FrameMessages::default(),
             layout_pass: 0,
@@ -2023,8 +1959,7 @@ unsafe fn frame_state(arena_handle: *mut c_void) -> FfiLayoutFrameState {
 ///
 /// # Safety
 ///
-/// As for [`arena`], on the document thread, and `inputs` must satisfy
-/// [`UpdateLayoutTrace::new`]'s requirements. The first round's selection, if any, must be valid.
+/// As for [`arena`], on the document thread. The first round's selection, if any, must be valid.
 unsafe fn update_layout(
     main_thread: &crate::stage::MainThread,
     arena_handle: *mut c_void,
@@ -2055,8 +1990,6 @@ unsafe fn update_layout(
         arena_handle,
         reason_is_inspect_devtools_layout_data: inputs.reason_is_inspect_devtools_layout_data,
         is_template_contents_document: inputs.is_template_contents_document,
-        // SAFETY: Guaranteed by the caller.
-        trace: unsafe { UpdateLayoutTrace::new(inputs.reason_name) },
     };
     let submits_pass = may_submit_pass && crate::stage_thread::submits("layout");
     debug_assert!(
