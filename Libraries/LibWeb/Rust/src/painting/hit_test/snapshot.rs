@@ -390,13 +390,8 @@ impl HitTestSnapshot {
                 .unwrap_or_default();
             facts.accumulated_visual_context = rows.paintable_data(row).accumulated_visual_context;
             facts.absolute_rect = crate::painting::paintable_geometry::absolute_rect_or_default(rows, row).into();
-            let first_piece_position = rows
-                .node_is_fragmented_inline(row)
-                .then(|| crate::painting::ffi::inline_first_piece_position(rows, row))
-                .flatten();
-            facts.box_type_agnostic_position = first_piece_position
-                .unwrap_or_else(|| crate::painting::paintable_geometry::absolute_position(rows, row))
-                .into();
+            facts.box_type_agnostic_position =
+                crate::painting::paintable_geometry::box_type_agnostic_position(rows, row).into();
             facts
         })
     }

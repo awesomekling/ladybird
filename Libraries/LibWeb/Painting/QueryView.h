@@ -74,8 +74,12 @@ public:
     {
     }
 
+    QueryVisualContexts visual_contexts() const { return m_snapshot->visual_contexts(); }
+
     // The box the element is bound to: its layout node.
     Optional<QueryBox> box_of(DOM::Element const&) const;
+    // The box the document is bound to: the viewport.
+    Optional<QueryBox> viewport_box() const;
     // The element's principal box: the table wrapper box of a table.
     Optional<QueryBox> principal_box_of(DOM::Element const&) const;
 
@@ -83,6 +87,12 @@ public:
     bool any_ancestor_establishes_a_fixed_position_containing_block(QueryBox) const;
     CSSPixelRect absolute_border_box_rect(QueryBox) const;
     CSSPixelRect absolute_padding_box_rect(QueryBox) const;
+    CSSPixelRect absolute_rect(QueryBox) const;
+
+    // https://drafts.csswg.org/cssom-view/#dom-mouseevent-offsetx
+    // The offset from the box of an event at the position, relative to the initial containing block. Empty if the
+    // snapshot cannot undo the transforms that apply to the box.
+    Optional<CSSPixelPoint> mouse_event_offset(QueryBox, CSSPixelPoint) const;
 
     // Empty if the snapshot cannot convert the box's rects to viewport space.
     Optional<Vector<CSSPixelRect>> client_rects(QueryBox) const;

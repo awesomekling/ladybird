@@ -59,8 +59,6 @@ public:
     // rendered-content query: DOM adjacency alone cannot describe wrapping, writing modes, floats, or empty lines.
     [[nodiscard]] Optional<CaretPosition> caret_position_on_adjacent_line(DOM::Node const&, size_t offset, TextAffinity, CaretLineDirection, CSSPixels inline_coordinate, DOM::Node const& scope) const;
     [[nodiscard]] Optional<CSSPixels> caret_line_block_coordinate(DOM::Node const&, size_t offset, TextAffinity) const;
-    // The box the DOM node is bound to, as a snapshot published for this read names it.
-    [[nodiscard]] Optional<HitBox> bound_box_of(DOM::NodeIdentity) const;
     TraversalDecision hit_test_all(CSSPixelPoint, DOM::Document const&, double device_pixels_per_css_pixel, ChromeMetrics const&, Function<TraversalDecision(HitTestResult)> const&) const;
 
 private:
