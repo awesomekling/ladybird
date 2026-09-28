@@ -1605,16 +1605,13 @@ pub(super) fn run_formatting_context(
         Ok(attempt) => attempt,
         Err(entry) => {
             let reuses_committed_subtree = entry.can_reuse_committed_subtree();
-            let _trace = callbacks
-                .arena()
-                .layout_trace
-                .run(box_, fc_type, purpose, layout_mode, || {
-                    if reuses_committed_subtree {
-                        "REUSE SUBTREE"
-                    } else {
-                        "REPLAY FRAGMENTS"
-                    }
-                });
+            let _trace = callbacks.arena().trace_run(box_, fc_type, purpose, layout_mode, || {
+                if reuses_committed_subtree {
+                    "REUSE SUBTREE"
+                } else {
+                    "REPLAY FRAGMENTS"
+                }
+            });
             let outputs = entry.outputs_to_replay(&cache_key);
             if entry.is_uncommitted() {
                 fc_run_cache::store_replayed_uncommitted_entry(&callbacks, box_, cache_key, &entry, &outputs);
@@ -1628,8 +1625,7 @@ pub(super) fn run_formatting_context(
     }
     let _trace = callbacks
         .arena()
-        .layout_trace
-        .run(box_, fc_type, purpose, layout_mode, || cache_attempt.trace_action());
+        .trace_run(box_, fc_type, purpose, layout_mode, || cache_attempt.trace_action());
     let previous_line_data = cache_attempt.previous_line_data();
     let outputs = execute_formatting_context_run(
         purpose,
@@ -2209,7 +2205,7 @@ pub(crate) fn run_table_cell_ahead_of_its_intrinsic_block_padding(
         Ok(fc_run_cache::FcRunCacheAttempt::Bypass) => return None,
         Ok(attempt) => attempt,
         Err(entry) => {
-            let _trace = run.callbacks.arena().layout_trace.run(
+            let _trace = run.callbacks.arena().trace_run(
                 cell,
                 FormattingContextType::Block,
                 LayoutPurpose::Commit,
@@ -2219,7 +2215,7 @@ pub(crate) fn run_table_cell_ahead_of_its_intrinsic_block_padding(
             return Some(entry.outputs.result);
         }
     };
-    let _trace = run.callbacks.arena().layout_trace.run(
+    let _trace = run.callbacks.arena().trace_run(
         cell,
         FormattingContextType::Block,
         LayoutPurpose::Commit,
@@ -2402,7 +2398,7 @@ fn run_root_layout_stage(stage: LayoutStageInput<'_>, scratch: &LayoutScratch) -
         ..ContainingBlockConstraints::default()
     };
     let pass_fragments = RunRecords::with_unrooted(scratch, arena, root, NodeSlotId::INVALID, |entry_records| {
-        let _trace = arena.layout_trace.pass(None);
+        let _trace = arena.trace_pass(None);
         let viewport_used = entry_records.create_used_values(&callbacks, root, root_constraints);
         let entry_fragments = std::rc::Rc::new(fragment_tree::RunFragmentBuilder::new_entry_accumulator(root));
         let entry_run = FormattingContextRun {
@@ -2645,6 +2641,7 @@ impl DeferredLayoutCommitHostHalf {
             payment,
             notifications,
             viewport_row: arena.bound_viewport_row(),
+            traced_nodes: arena.layout_trace().take_nodes_to_name(),
         }
     }
 }
@@ -2656,6 +2653,8 @@ pub(crate) struct CommitPayment {
     notifications: commit::CommitNotifications,
     /// The viewport's row as the commit left it, which the row resets it tells the host of name.
     viewport_row: NodeSlotId,
+    /// The DOM nodes the layout trace named since the commit before, which the host names while they are live.
+    traced_nodes: crate::layout::trace::TracedNodes,
 }
 
 impl CommitPayment {
@@ -2669,7 +2668,9 @@ impl CommitPayment {
             payment,
             notifications,
             viewport_row,
+            traced_nodes,
         } = self;
+        crate::layout::trace::name_traced_nodes(main_thread, traced_nodes);
         payment.pay(main_thread);
         // SAFETY: The host and shells remain live, and no arena borrow is active.
         unsafe { notifications.notify_host(main_thread, &LayoutHost::of(main_thread), viewport_row) };
@@ -2770,7 +2771,7 @@ fn compute_subtree_layout_stage(stage: LayoutStageInput<'_>, scratch: &LayoutScr
         entry_root,
         entry_root_containing_block,
         |entry_records| {
-            let _trace = arena.layout_trace.pass(Some(root));
+            let _trace = arena.trace_pass(Some(root));
             let entry_fragments =
                 std::rc::Rc::new(fragment_tree::RunFragmentBuilder::new_entry_accumulator(entry_root));
             let entry_run = FormattingContextRun {

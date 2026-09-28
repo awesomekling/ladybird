@@ -24,6 +24,9 @@ use std::ffi::c_void;
 #[derive(Default)]
 pub(crate) struct HostTables {
     pub(super) layout_host: Cell<Option<FfiLayoutHostCallbacks>>,
+    /// While the document traces its layout: how the host names the DOM nodes the trace mentions, and the names it
+    /// gave the nodes the layout commits taken in so far named, while the nodes were live.
+    pub(super) layout_trace_names: RefCell<Option<super::trace::LayoutTraceNames>>,
     pub(super) layout_update_host: Cell<Option<LayoutUpdateHost>>,
     /// The flight the document's layout update readied, until the document has sealed what its
     /// recording reads and submits it.
@@ -42,8 +45,6 @@ pub(crate) struct HostTables {
     pub(super) image_observer_sets_owed: RefCell<Vec<(NodeSlotId, *mut c_void)>>,
     /// The number of the last change the document thread sent the owner that lays a node out again.
     pub(super) last_relayout_change_sent: Cell<Option<crate::render_owner::ChangeSeq>>,
-    /// How the host names a node a layout trace mentions, set when tracing begins.
-    pub(super) layout_trace_describe_node: Cell<Option<super::trace::NodeDescriber>>,
     /// The generation of the document's render state, which retiring it moves on. See
     /// [`super::frame_retirement`].
     pub(super) frame_generation: Cell<u64>,
@@ -125,11 +126,6 @@ impl HostTables {
             .get(&style_node)
             .filter(|(_, installed)| *installed == style_record)
             .map(|(damage, _)| *damage)
-    }
-
-    /// Whether the document traces its layout, and has the owners of the trace lines named once a frame is over.
-    pub(crate) fn traces_layout(&self) -> bool {
-        self.layout_trace_describe_node.get().is_some()
     }
 
     /// The host tables of the arena `handle` names.

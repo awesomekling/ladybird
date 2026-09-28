@@ -28,6 +28,25 @@ unsafe extern "C" {
     fn ladybird_layout_code_point_category_facts(code_point: u32) -> super::tree_builder::FfiCodePointCategoryFacts;
 }
 
+// The Rust tests link without LibUnicode: there, the word at an offset is empty.
+#[cfg(test)]
+mod unicode_test_stand_ins {
+    #[unsafe(no_mangle)]
+    unsafe extern "C" fn unicode_layout_word_boundaries(
+        _text: *const u16,
+        _length: usize,
+        offset: usize,
+        start: *mut usize,
+        end: *mut usize,
+    ) {
+        // SAFETY: The caller hands two writable offsets.
+        unsafe {
+            *start = offset;
+            *end = offset;
+        }
+    }
+}
+
 pub(crate) fn code_point_category_facts(code_point: u32) -> super::tree_builder::FfiCodePointCategoryFacts {
     // SAFETY: This service classifies a scalar value without accessing layout.
     unsafe { ladybird_layout_code_point_category_facts(code_point) }

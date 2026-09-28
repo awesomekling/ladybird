@@ -2898,14 +2898,6 @@ impl LayoutNodeArena {
         self.active_layout_pass_depth.set(depth - 1);
     }
 
-    /// Names the owners of the layout trace lines the passes left, once no pass is running. A pass's
-    /// commit ends it ahead of its host half, which names them on the document thread.
-    pub(crate) fn name_layout_trace_owners(&self, main_thread: &crate::stage::MainThread) {
-        if self.active_layout_pass_depth.get() == 0 {
-            self.layout_trace.name_owners(main_thread, self);
-        }
-    }
-
     pub(crate) fn set_layout_root(&self, viewport: NodeSlotId) {
         self.layout_root.set(viewport);
     }
@@ -4666,22 +4658,16 @@ impl LayoutNodeArena {
     pub(crate) fn set_style_node_svg_attribute_facts(
         &mut self,
         style_node: StyleNodeID,
-        facts: FfiSvgAttributeFacts,
+        facts: Box<FfiSvgAttributeFacts>,
         points: &[super::svg_formatting_context::FfiFloatPoint],
     ) {
         self.assert_owner_thread();
-        let replaced = match self.svg_attribute_facts.entry(style_node) {
-            std::collections::hash_map::Entry::Occupied(mut published) => {
-                let replaced = Self::published_reference_atoms(published.get());
-                **published.get_mut() = facts;
-                replaced
-            }
-            std::collections::hash_map::Entry::Vacant(slot) => {
-                slot.insert(Box::new(facts));
-                [0; PUBLISHED_REFERENCE_ATOM_COUNT]
-            }
+        let retained = Self::published_reference_atoms(&facts);
+        let replaced = match self.svg_attribute_facts.insert(style_node, facts) {
+            Some(published) => Self::published_reference_atoms(&published),
+            None => [0; PUBLISHED_REFERENCE_ATOM_COUNT],
         };
-        self.retain_published_reference_atoms(Self::published_reference_atoms(&facts), replaced);
+        self.retain_published_reference_atoms(retained, replaced);
         if points.is_empty() {
             self.svg_points.remove(&style_node);
         } else {

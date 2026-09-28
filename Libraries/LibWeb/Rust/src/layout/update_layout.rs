@@ -967,7 +967,6 @@ impl LayoutFrame {
         // What the build owes the document can mark nodes for another build.
         // SAFETY: Guaranteed by the caller.
         unsafe { super::tree_update_marks::take_back_from_frame(arena_handle) };
-        let mut committed = false;
         for payment in std::mem::take(&mut self.host_payments) {
             match payment {
                 // The install is the rest of the style update, as the commit of a style flight runs it
@@ -994,14 +993,8 @@ impl LayoutFrame {
                 HostHalfPayment::Commit(payment) => {
                     // SAFETY: Guaranteed by the caller.
                     unsafe { payment.deliver(main_thread) };
-                    committed = true;
                 }
             }
-        }
-        // A document that traces its layout names the owners of the lines the passes left.
-        if committed && main_thread.host_tables().is_some_and(super::HostTables::traces_layout) {
-            // Host callbacks have returned.
-            self.arena().name_layout_trace_owners(main_thread);
         }
         // What the document thread wrote to the marks beside the frame, it wrote after all of that.
         // SAFETY: Guaranteed by the caller. The marks are handed back.

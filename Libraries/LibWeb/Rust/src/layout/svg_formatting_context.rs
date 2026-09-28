@@ -167,6 +167,24 @@ pub const SVG_GEOMETRY_KIND_LINE: u8 = 5;
 pub const SVG_GEOMETRY_KIND_POLYLINE: u8 = 6;
 pub const SVG_GEOMETRY_KIND_POLYGON: u8 = 7;
 
+/// Sends the owner of the document whose arena `arena` names `change`, about the element `style_node` names.
+///
+/// # Safety
+///
+/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
+unsafe fn send_svg_change(
+    arena: *mut c_void,
+    style_node: u32,
+    change: impl FnOnce(crate::css::style::tree::StyleNodeID) -> crate::render_owner::ArenaChange,
+) {
+    let Some(element) = crate::css::style::tree::StyleNodeID::from_raw(style_node) else {
+        return;
+    };
+    // SAFETY: Guaranteed by the caller.
+    let document = unsafe { super::ArenaHandle::document_of(arena) };
+    crate::render_owner::send_arena_change(document, change(element));
+}
+
 /// Publishes what an SVG element's presentation attributes parse to, under its style node. The
 /// `points` list of a <polyline> or <polygon> travels beside the facts rather than inside them,
 /// being the one geometry attribute that is not a fixed number of values.
@@ -183,17 +201,18 @@ pub unsafe extern "C" fn layout_arena_set_style_node_svg_attribute_facts(
     points: *const FfiFloatPoint,
     count: usize,
 ) {
-    let arena = unsafe { LayoutNodeArena::from_handle_mut(arena) };
-    let Some(style_node) = crate::css::style::tree::StyleNodeID::from_raw(style_node) else {
-        return;
-    };
-    let points = if count == 0 {
-        &[][..]
-    } else {
-        // SAFETY: The caller keeps the list alive for this synchronous call.
-        unsafe { std::slice::from_raw_parts(points, count) }
-    };
-    arena.set_style_node_svg_attribute_facts(style_node, facts, points);
+    // SAFETY: The caller keeps the list alive for this synchronous call.
+    let points = unsafe { libcompositing_rust::ffi::ffi_slice(points, count) }.to_vec();
+    // SAFETY: Guaranteed by the caller.
+    unsafe {
+        send_svg_change(arena, style_node, |element| {
+            crate::render_owner::ArenaChange::SvgAttributeFacts {
+                element,
+                facts: Box::new(facts),
+                points,
+            }
+        });
+    }
 }
 
 /// Publishes only the resources a graphics element's style names, leaving what its attributes
@@ -212,11 +231,15 @@ pub unsafe extern "C" fn layout_arena_set_style_node_svg_style_references(
     fill: u32,
     stroke: u32,
 ) {
-    let arena = unsafe { LayoutNodeArena::from_handle_mut(arena) };
-    let Some(style_node) = crate::css::style::tree::StyleNodeID::from_raw(style_node) else {
-        return;
-    };
-    arena.set_style_node_svg_style_references(style_node, [mask, clip_path, fill, stroke]);
+    // SAFETY: Guaranteed by the caller.
+    unsafe {
+        send_svg_change(arena, style_node, |element| {
+            crate::render_owner::ArenaChange::SvgStyleReferences {
+                element,
+                references: [mask, clip_path, fill, stroke],
+            }
+        });
+    }
 }
 
 /// # Safety
@@ -224,11 +247,14 @@ pub unsafe extern "C" fn layout_arena_set_style_node_svg_style_references(
 /// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_clear_style_node_svg_attribute_facts(arena: *mut c_void, style_node: u32) {
-    let arena = unsafe { LayoutNodeArena::from_handle_mut(arena) };
-    let Some(style_node) = crate::css::style::tree::StyleNodeID::from_raw(style_node) else {
-        return;
+    // SAFETY: Guaranteed by the caller.
+    unsafe {
+        send_svg_change(
+            arena,
+            style_node,
+            crate::render_owner::ArenaChange::SvgAttributeFactsCleared,
+        );
     };
-    arena.clear_style_node_svg_attribute_facts(style_node);
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

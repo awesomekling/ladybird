@@ -6,90 +6,57 @@
 
 use crate::css::css_pixels::CssPixelRect;
 use crate::layout::LayoutNodeArena;
+use crate::layout::debug_text::{AppendBytes, DebugText, DescribeDomNode};
 use crate::layout::node_data::NodeSlotId;
 use crate::painting::dump::push_css_pixel_rect;
 use crate::painting::paintable_geometry;
 use crate::painting::style_queries;
+use crate::render_owner::{ArenaAnswer, ArenaQuery, DocumentId};
 use std::ffi::c_void;
 use std::fmt::Write;
 
-pub(crate) struct MainThreadFfiEntry {
-    _private: (),
-}
-
-const MAIN_THREAD_FFI_ENTRY: MainThreadFfiEntry = MainThreadFfiEntry { _private: () };
-
-#[derive(Clone, Copy)]
-#[repr(C)]
-pub struct FfiStackingContextDumpCallbacks {
-    pub context: *mut c_void,
-    pub debug_description:
-        unsafe extern "C" fn(context: *mut c_void, layout_node: NodeSlotId, description_sink: *mut c_void),
-    pub append_text: unsafe extern "C" fn(context: *mut c_void, bytes: *const u8, byte_count: usize),
-}
-
-struct StackingContextDumpHost<'a> {
-    callbacks: FfiStackingContextDumpCallbacks,
-    _main_thread: &'a crate::stage::MainThread<'a>,
-}
-
-impl StackingContextDumpHost<'_> {
-    fn debug_description(&self, layout_node: NodeSlotId) -> String {
-        let mut description = Vec::new();
-        // SAFETY: The C++ host fills the description sink synchronously through the exported push
-        // function.
-        unsafe {
-            (self.callbacks.debug_description)(self.callbacks.context, layout_node, (&raw mut description).cast());
-        };
-        String::from_utf8_lossy(&description).into_owned()
+/// The stacking context tree of the document whose arena is `arena`, for tests: a line per stacking context, nested
+/// in paint order, each naming its box. A document with no stacking contexts dumps nothing.
+pub(crate) fn stacking_context_tree(arena: &LayoutNodeArena) -> DebugText {
+    let mut output = DebugText::default();
+    let viewport = arena.bound_viewport_row();
+    if arena.stacking_context_entries(viewport).is_some() {
+        visit(&mut output, arena, viewport, 0);
     }
-
-    fn append_text(&self, text: &str) {
-        // SAFETY: The C++ sink copies the completed dump synchronously.
-        unsafe { (self.callbacks.append_text)(self.callbacks.context, text.as_ptr(), text.len()) };
-    }
+    output
 }
 
+/// Hands `append_text` the stacking context tree of `document`, for tests, with the DOM node of each box it names as
+/// `describe_node` describes it.
+///
 /// # Safety
 ///
-/// `arena` must be a live handle from `layout_arena_create`, used on the document thread.
-/// `debug_description` is called synchronously with a `Vec<u8>` sink the host fills through
-/// `layout_arena_paint_push_bytes`, and `append_text` copies the completed dump synchronously.
+/// `describe_node` and `append_text` must be callable with `context` for the duration of this call.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn layout_arena_dump_stacking_context_tree(
-    arena: *mut c_void,
-    viewport: NodeSlotId,
-    callbacks: FfiStackingContextDumpCallbacks,
+pub unsafe extern "C" fn render_owner_dump_stacking_context_tree(
+    document: DocumentId,
+    context: *mut c_void,
+    describe_node: DescribeDomNode,
+    append_text: AppendBytes,
 ) {
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
-    let callbacks = StackingContextDumpHost {
-        callbacks,
-        _main_thread: &main_thread,
-    };
-    // SAFETY: The caller guarantees a live arena handle borrowed for this call.
-    let arena = unsafe { LayoutNodeArena::from_handle(arena) };
-    if arena.stacking_context_entries(viewport).is_none() {
+    let ArenaAnswer::DebugText(text) = crate::render_owner::ask_arena(document, ArenaQuery::StackingContextTree) else {
         return;
-    }
-    let mut output = String::new();
-    visit(&mut output, arena, viewport, 0, &callbacks);
-    callbacks.append_text(&output);
+    };
+    // SAFETY: Guaranteed by the caller.
+    let text = unsafe { text.finish_with_host(context, describe_node) };
+    // SAFETY: As above.
+    unsafe { append_text(context, text.as_ptr(), text.len()) };
 }
 
-fn visit(
-    output: &mut String,
-    arena: &LayoutNodeArena,
-    root: NodeSlotId,
-    depth: usize,
-    callbacks: &StackingContextDumpHost<'_>,
-) {
-    output.extend(std::iter::repeat_n(' ', depth));
+fn visit(output: &mut DebugText, arena: &LayoutNodeArena, root: NodeSlotId, depth: usize) {
+    output.text().extend(std::iter::repeat_n(' ', depth));
     if !arena.slot_is_live(root) {
-        output.push_str("SC for (gone)\n");
+        output.text().push_str("SC for (gone)\n");
     } else {
-        push_line(
-            output,
-            &callbacks.debug_description(root),
+        output.text().push_str("SC for ");
+        output.push_box(arena, root);
+        push_line_after_box(
+            output.text(),
             paintable_geometry::absolute_rect_or_default(&arena.paintable_rows(), root),
             effective_z_index(arena, root),
             has_css_transform(arena, root),
@@ -100,7 +67,7 @@ fn visit(
         return;
     };
     for entry in entries.negative_z_index_child_contexts() {
-        visit(output, arena, entry.slot, depth + 1, callbacks);
+        visit(output, arena, entry.slot, depth + 1);
     }
     for &descendant in &entries.stack_level_zero_boxes {
         if arena.paintable_row_is_populated(descendant)
@@ -109,22 +76,16 @@ fn visit(
                 .paintable_data(descendant)
                 .establishes_stacking_context
         {
-            visit(output, arena, descendant, depth + 1, callbacks);
+            visit(output, arena, descendant, depth + 1);
         }
     }
     for entry in entries.positive_z_index_child_contexts() {
-        visit(output, arena, entry.slot, depth + 1, callbacks);
+        visit(output, arena, entry.slot, depth + 1);
     }
 }
 
-fn push_line(
-    output: &mut String,
-    description: &str,
-    rect: CssPixelRect,
-    effective_z_index: Option<i32>,
-    has_transform: bool,
-) {
-    let _ = write!(output, "SC for {description} ");
+fn push_line_after_box(output: &mut String, rect: CssPixelRect, effective_z_index: Option<i32>, has_transform: bool) {
+    output.push(' ');
     push_css_pixel_rect(output, rect);
     output.push_str(" (z-index: ");
     if let Some(z_index) = effective_z_index {
@@ -154,7 +115,7 @@ fn has_css_transform(arena: &LayoutNodeArena, slot: NodeSlotId) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::push_line;
+    use super::push_line_after_box;
     use crate::css::css_pixels::{CssPixelRect, CssPixels};
 
     #[test]
@@ -166,8 +127,10 @@ mod tests {
             CssPixels::from_integer(40),
         );
         let mut output = String::new();
-        push_line(&mut output, "Viewport<#document>", rect, None, false);
-        push_line(&mut output, "BlockContainer<DIV>#target.a.b", rect, Some(-1), true);
+        output.push_str("SC for Viewport<#document>");
+        push_line_after_box(&mut output, rect, None, false);
+        output.push_str("SC for BlockContainer<DIV>#target.a.b");
+        push_line_after_box(&mut output, rect, Some(-1), true);
         assert_eq!(
             output,
             concat!(

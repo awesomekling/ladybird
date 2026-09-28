@@ -457,16 +457,15 @@ static void append_bytes_to_string_builder(void* context, u8 const* bytes, size_
 void dump_stacking_context_tree(StringBuilder& builder, DOM::Document const& document)
 {
     struct DumpContext {
-        DOM::Document const& document;
+        DOM::Document& document;
         StringBuilder& builder;
-    } context { document, builder };
-    Layout::RustFFI::FfiStackingContextDumpCallbacks callbacks {
-        .context = &context,
-        .debug_description = [](void* context_pointer, Compositing::RustFFI::NodeSlotId slot, void* description_sink) { push_box_description(static_cast<DumpContext*>(context_pointer)->document, slot, description_sink); },
-        .append_text = [](void* context_pointer, u8 const* bytes, size_t byte_count) { static_cast<DumpContext*>(context_pointer)->builder.append(StringView { bytes, byte_count }); },
-    };
-    Layout::RustFFI::layout_arena_dump_stacking_context_tree(
-        layout_arena_handle(document), viewport_row_slot(document), callbacks);
+    } context { const_cast<DOM::Document&>(document), builder };
+    Layout::RustFFI::render_owner_dump_stacking_context_tree(
+        Layout::document_render_document(context.document), &context,
+        [](void* context_pointer, u32 node, void* sink, void (*append)(void*, u8 const*, size_t)) {
+            describe_dom_node_for_debug(static_cast<DumpContext*>(context_pointer)->document, node, sink, append);
+        },
+        [](void* context_pointer, u8 const* bytes, size_t byte_count) { static_cast<DumpContext*>(context_pointer)->builder.append(StringView { bytes, byte_count }); });
 }
 
 static void push_bytes_to_dump_sink(void* sink, ReadonlyBytes bytes)

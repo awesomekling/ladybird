@@ -5,39 +5,20 @@
  */
 
 use super::LayoutNodeArena;
+use super::debug_text::{AppendBytes, DebugText, DescribeDomNode};
 use super::formatting_context::{FormattingContextType, LayoutMode, LayoutPurpose};
 use super::node_data::{NodeFlag, NodeKind, NodeSlotId};
+use crate::render_owner::{ArenaAnswer, ArenaChange, ArenaQuery};
 use std::cell::RefCell;
 use std::ffi::c_void;
-use std::fmt::Write;
-
-mod main_thread_entries;
-
-pub(crate) use main_thread_entries::MainThreadFfiEntry;
-
-type AppendText = unsafe extern "C" fn(*mut c_void, *const u8, usize);
-pub(crate) type DescribeNode = unsafe extern "C" fn(*mut c_void, NodeSlotId, *mut c_void, AppendText);
-
-/// How the host names a node a layout trace mentions: the callback and the context it is called with.
-#[derive(Clone, Copy)]
-pub(crate) struct NodeDescriber {
-    pub(crate) describe: DescribeNode,
-    pub(crate) context: *mut c_void,
-}
 
 struct Trace {
-    lines: Vec<Line>,
+    /// A line per traced event, each naming the box it is about as the event happened: a later mutation may remove
+    /// the box or reuse its slot before JavaScript takes the trace.
+    text: DebugText,
     depth: usize,
-}
-
-/// One traced event: what it says, and the node it names, if any. The node is named once the
-/// pass is over, since naming it can materialise its shell, which asks the document something.
-struct Line {
-    depth: usize,
-    prefix: &'static str,
-    owner: Option<NodeSlotId>,
-    owner_name: Option<String>,
-    text: String,
+    /// How many of the DOM nodes the text names the layout commits handed the host to name.
+    handed_to_host: usize,
 }
 
 /// Observation belongs to the document, not to a single pass: geometry reads and
@@ -49,105 +30,88 @@ pub(super) struct Scope<'a>(&'a LayoutTrace);
 
 impl Drop for Scope<'_> {
     fn drop(&mut self) {
-        self.0.0.borrow_mut().as_mut().unwrap().depth -= 1;
+        if let Some(trace) = self.0.0.borrow_mut().as_mut() {
+            trace.depth -= 1;
+        }
     }
 }
 
 impl LayoutTrace {
-    fn begin(&self) {
-        assert!(self.0.borrow().as_ref().is_none_or(|trace| trace.depth == 0));
+    pub(crate) fn begin(&self) {
+        debug_assert!(self.0.borrow().as_ref().is_none_or(|trace| trace.depth == 0));
         *self.0.borrow_mut() = Some(Trace {
-            lines: Vec::new(),
+            text: DebugText::default(),
             depth: 0,
+            handed_to_host: 0,
         });
     }
 
-    fn take(&self, main_thread: &crate::stage::MainThread, arena: &LayoutNodeArena) -> String {
-        self.name_owners(main_thread, arena);
-        let Some(trace) = self.0.borrow_mut().take() else {
-            return String::new();
+    /// The DOM nodes the trace named since this was asked last, which a layout commit hands the host to name while
+    /// they are live, with the number of the first among all the trace names.
+    pub(crate) fn take_nodes_to_name(&self) -> TracedNodes {
+        let mut trace = self.0.borrow_mut();
+        let Some(trace) = trace.as_mut() else {
+            return TracedNodes::default();
         };
-        assert_eq!(trace.depth, 0, "incomplete layout trace");
-        let mut text = String::new();
-        for line in trace.lines {
-            writeln!(
-                text,
-                "{}{}{}{}",
-                "  ".repeat(line.depth),
-                line.prefix,
-                line.owner_name.unwrap_or_default(),
-                line.text
-            )
-            .unwrap();
+        let first = trace.handed_to_host;
+        trace.handed_to_host = trace.text.node_count();
+        TracedNodes {
+            first,
+            nodes: trace.text.nodes_from(first).collect(),
         }
-        text
     }
 
-    /// Names the nodes the traced events name. This runs once a pass is over, while the nodes the
-    /// pass ran for are still live: a subsequent mutation may remove them or reuse their arena
-    /// slots before JavaScript takes the trace. The host describes them through the callback it
-    /// registered in the host tables when tracing began.
-    pub(super) fn name_owners(&self, main_thread: &crate::stage::MainThread, arena: &LayoutNodeArena) {
-        let unnamed = {
-            let state = self.0.borrow();
-            let Some(trace) = state.as_ref() else {
-                return;
-            };
-            let unnamed: Vec<(usize, NodeSlotId)> = trace
-                .lines
-                .iter()
-                .enumerate()
-                .filter(|(_, line)| line.owner_name.is_none())
-                .filter_map(|(index, line)| line.owner.map(|owner| (index, owner)))
-                .collect();
-            unnamed
-        };
-        if unnamed.is_empty() {
-            return;
-        }
-        let describe = main_thread
-            .host_tables()
-            .and_then(|host_tables| host_tables.layout_trace_describe_node.get())
-            .expect("a layout trace names its nodes through the callback it began with");
-        let names: Vec<(usize, String)> = unnamed
-            .into_iter()
-            .map(|(index, owner)| (index, owner_name(arena, owner, describe)))
-            .collect();
-        if let Some(trace) = self.0.borrow_mut().as_mut() {
-            for (index, name) in names {
-                trace.lines[index].owner_name = Some(name);
-            }
-        }
+    /// What was traced since the trace began.
+    pub(crate) fn text(&self) -> DebugText {
+        let trace = self.0.borrow();
+        debug_assert!(
+            trace.as_ref().is_none_or(|trace| trace.depth == 0),
+            "incomplete layout trace"
+        );
+        trace.as_ref().map(|trace| trace.text.clone()).unwrap_or_default()
+    }
+
+    pub(crate) fn end(&self) {
+        *self.0.borrow_mut() = None;
     }
 
     fn scope(
         &self,
         prefix: &'static str,
-        owner: Option<NodeSlotId>,
+        owner: Option<(&LayoutNodeArena, NodeSlotId)>,
         text: impl FnOnce() -> String,
     ) -> Option<Scope<'_>> {
         let mut state = self.0.borrow_mut();
         let trace = state.as_mut()?;
-        let depth = trace.depth;
-        trace.lines.push(Line {
-            depth,
-            prefix,
-            owner,
-            owner_name: None,
-            text: text(),
-        });
+        let line = trace.text.text();
+        line.push_str(&"  ".repeat(trace.depth));
+        line.push_str(prefix);
+        if let Some((arena, owner)) = owner {
+            name_owner(&mut trace.text, arena, owner);
+        }
+        let line = trace.text.text();
+        line.push_str(&text());
+        line.push('\n');
         trace.depth += 1;
         Some(Scope(self))
     }
+}
 
-    pub(super) fn pass(&self, partial_root: Option<NodeSlotId>) -> Option<Scope<'_>> {
+impl LayoutNodeArena {
+    pub(crate) fn layout_trace(&self) -> &LayoutTrace {
+        &self.layout_trace
+    }
+
+    pub(super) fn trace_pass(&self, partial_root: Option<NodeSlotId>) -> Option<Scope<'_>> {
         match partial_root {
-            Some(root) => self.scope("layout PARTIAL ", Some(root), String::new),
-            None => self.scope("layout FULL", None, String::new),
+            Some(root) => self
+                .layout_trace
+                .scope("layout PARTIAL ", Some((self, root)), String::new),
+            None => self.layout_trace.scope("layout FULL", None, String::new),
         }
     }
 
-    pub(super) fn run(
+    pub(super) fn trace_run(
         &self,
         root: NodeSlotId,
         fc_type: FormattingContextType,
@@ -155,7 +119,7 @@ impl LayoutTrace {
         mode: LayoutMode,
         action: impl FnOnce() -> &'static str,
     ) -> Option<Scope<'_>> {
-        self.scope("", Some(root), || {
+        self.layout_trace.scope("", Some((self, root)), || {
             let context = match fc_type {
                 FormattingContextType::Block => "block",
                 FormattingContextType::Inline => "inline",
@@ -178,62 +142,148 @@ impl LayoutTrace {
     }
 }
 
-fn owner_name(arena: &LayoutNodeArena, root: NodeSlotId, describer: NodeDescriber) -> String {
-    if arena.data(root).kind.get() == NodeKind::Viewport {
-        return "@viewport".into();
-    }
-    unsafe extern "C" fn append(sink: *mut c_void, bytes: *const u8, length: usize) {
-        // SAFETY: describe receives this live vector and supplies bytes valid for this call.
-        unsafe { &mut *sink.cast::<Vec<u8>>() }.extend_from_slice(unsafe { std::slice::from_raw_parts(bytes, length) });
-    }
-    // An anonymous row and a text row are named from the row, the way the host would describe them.
+fn name_owner(text: &mut DebugText, arena: &LayoutNodeArena, root: NodeSlotId) {
     let data = arena.data(root);
     let kind = data.kind.get();
-    if data.flags.get() & NodeFlag::Anonymous as u32 != 0 {
-        return format!("{kind:?}(anonymous)");
+    if kind == NodeKind::Viewport {
+        text.text().push_str("@viewport");
+    } else if kind == NodeKind::TextNode && data.flags.get() & NodeFlag::Anonymous as u32 == 0 {
+        text.text().push_str("TextNode<#text>");
+    } else {
+        text.push_box(arena, root);
     }
-    if kind == NodeKind::TextNode {
-        return format!("{kind:?}<#text>");
-    }
-    let mut bytes = Vec::<u8>::new();
-    // SAFETY: describe copies the node's description synchronously without changing layout.
-    unsafe { (describer.describe)(describer.context, root, (&raw mut bytes).cast(), append) };
-    String::from_utf8(bytes).expect("layout trace label must be UTF-8")
 }
 
+/// DOM nodes a layout trace named, from the `first`th of all it named.
+#[derive(Default)]
+pub(crate) struct TracedNodes {
+    first: usize,
+    nodes: Vec<u32>,
+}
+
+/// How the host names the DOM nodes a layout trace mentions, and the names it gave them so far, by their number among
+/// all the trace names.
+pub(crate) struct LayoutTraceNames {
+    context: *mut c_void,
+    describe: DescribeDomNode,
+    names: Vec<Option<String>>,
+}
+
+impl LayoutTraceNames {
+    fn describe(&self, node: u32, text: &mut String) {
+        let mut name = DebugText::default();
+        name.push_dom_node(node);
+        // SAFETY: The host keeps the callback callable with its context while the document traces its layout.
+        text.push_str(&unsafe { name.finish_with_host(self.context, self.describe) });
+    }
+}
+
+/// On the document thread, as it takes a layout commit in: names the DOM nodes the layout trace named, while they are
+/// live.
+pub(crate) fn name_traced_nodes(main_thread: &crate::stage::MainThread, traced: TracedNodes) {
+    if traced.nodes.is_empty() {
+        return;
+    }
+    let Some(host_tables) = main_thread.host_tables() else {
+        return;
+    };
+    let mut trace_names = host_tables.layout_trace_names.borrow_mut();
+    let Some(trace_names) = trace_names.as_mut() else {
+        return;
+    };
+    let end = traced.first + traced.nodes.len();
+    if trace_names.names.len() < end {
+        trace_names.names.resize(end, None);
+    }
+    for (index, node) in (traced.first..end).zip(traced.nodes) {
+        let mut name = String::new();
+        trace_names.describe(node, &mut name);
+        trace_names.names[index] = Some(name);
+    }
+}
+
+/// Begins tracing the layout of the document whose arena `arena` names, for tests: each layout pass and formatting
+/// context run from now on leaves a line, naming the box it is about as the host's `describe_node` describes the DOM
+/// node the box was built for.
+///
 /// # Safety
-/// The arena must be live. The callback and its context must remain valid until tracing stops, and
-/// the callback must synchronously describe the row it is handed without mutating layout.
+///
+/// `arena` must be a live arena handle on the document thread, and `describe_node` must be callable with `context`
+/// until the trace is taken.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn layout_arena_begin_layout_trace(
     arena: *mut c_void,
     context: *mut c_void,
-    describe_node: DescribeNode,
+    describe_node: DescribeDomNode,
 ) {
-    unsafe { super::HostTables::from_handle(arena) }
-        .layout_trace_describe_node
-        .set(Some(NodeDescriber {
-            describe: describe_node,
-            context,
-        }));
-    unsafe { LayoutNodeArena::from_handle(arena) }.layout_trace.begin();
+    // SAFETY: Guaranteed by the caller.
+    let host_tables = unsafe { super::HostTables::from_handle(arena) };
+    *host_tables.layout_trace_names.borrow_mut() = Some(LayoutTraceNames {
+        context,
+        describe: describe_node,
+        names: Vec::new(),
+    });
+    // SAFETY: As above.
+    let document = unsafe { super::ArenaHandle::document_of(arena) };
+    crate::render_owner::send_arena_change(document, ArenaChange::BeginLayoutTrace);
+}
+
+/// Ends tracing the layout of the document whose arena `arena` names, and hands `append_text` what was traced.
+///
+/// # Safety
+///
+/// `arena` must be a live arena handle on the document thread, and `append_text` must be callable with `context` for
+/// the duration of this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_take_layout_trace(
+    arena: *mut c_void,
+    context: *mut c_void,
+    append_text: AppendBytes,
+) {
+    // SAFETY: Guaranteed by the caller.
+    let answer = unsafe { crate::render_owner::ask_arena_of(arena, ArenaQuery::LayoutTrace) };
+    // SAFETY: As above.
+    let document = unsafe { super::ArenaHandle::document_of(arena) };
+    crate::render_owner::send_arena_change(document, ArenaChange::EndLayoutTrace);
+    // SAFETY: As above.
+    let trace_names = unsafe { super::HostTables::from_handle(arena) }
+        .layout_trace_names
+        .take();
+    let (ArenaAnswer::DebugText(text), Some(trace_names)) = (answer, trace_names) else {
+        return;
+    };
+    // A node no commit named is named now, if it is still live.
+    let mut index = 0;
+    let text = text.finish(|node, text| {
+        match trace_names.names.get(index).and_then(Option::as_deref) {
+            Some(name) => text.push_str(name),
+            None => trace_names.describe(node, text),
+        }
+        index += 1;
+    });
+    // SAFETY: Guaranteed by the caller.
+    unsafe { append_text(context, text.as_ptr(), text.len()) };
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn take(trace: &LayoutTrace) -> String {
+        let text = trace.text().finish(|_, _| {});
+        trace.end();
+        text
+    }
+
     #[test]
     fn disabled_trace_does_not_construct_labels() {
-        let arena = LayoutNodeArena::new();
         let trace = LayoutTrace::default();
         assert!(trace.scope("", None, || panic!("disabled observation")).is_none());
-        assert_eq!(trace.take(&crate::stage::MainThread::for_test(), &arena), "");
+        assert_eq!(take(&trace), "");
     }
 
     #[test]
     fn preserves_nesting_repeated_runs_and_multiple_passes() {
-        let arena = LayoutNodeArena::new();
         let trace = LayoutTrace::default();
         trace.begin();
         {
@@ -248,20 +298,19 @@ mod tests {
             let _pass = trace.scope("layout PARTIAL ", None, || "#boundary".into());
         }
         assert_eq!(
-            trace.take(&crate::stage::MainThread::for_test(), &arena),
+            take(&trace),
             "layout FULL\n  @viewport/block RUN (cache=bypass)\n    #child/block REUSE SUBTREE\n    #child/block RUN (cache=miss)\nlayout PARTIAL #boundary\n"
         );
         assert!(trace.scope("", None, || panic!("take must disable tracing")).is_none());
-        assert_eq!(trace.take(&crate::stage::MainThread::for_test(), &arena), "");
+        assert_eq!(take(&trace), "");
     }
 
     #[test]
     fn begin_discards_previous_events() {
-        let arena = LayoutNodeArena::new();
         let trace = LayoutTrace::default();
         trace.begin();
         drop(trace.scope("", None, || "old pass".into()));
         trace.begin();
-        assert_eq!(trace.take(&crate::stage::MainThread::for_test(), &arena), "");
+        assert_eq!(take(&trace), "");
     }
 }

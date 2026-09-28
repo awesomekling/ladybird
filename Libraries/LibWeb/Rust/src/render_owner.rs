@@ -109,6 +109,20 @@ pub(crate) enum ArenaChange {
     SelectionStyleChanged(StyleNodeID),
     /// The host took these of the scroll containers finished layout tree builds gave a style.
     BuiltScrollSnapContainersTaken(Vec<NodeSlotId>),
+    /// Each layout pass and formatting context run from now on leaves a line in the layout trace, for tests.
+    BeginLayoutTrace,
+    /// The host took the layout trace: tracing ends.
+    EndLayoutTrace,
+    /// What an SVG element's presentation attributes parse to, with the points of a `<polyline>` or `<polygon>`.
+    SvgAttributeFacts {
+        element: StyleNodeID,
+        facts: Box<crate::layout::svg_formatting_context::FfiSvgAttributeFacts>,
+        points: Vec<crate::layout::svg_formatting_context::FfiFloatPoint>,
+    },
+    /// The resources an SVG graphics element's style names: its mask, clip path, fill and stroke.
+    SvgStyleReferences { element: StyleNodeID, references: [u32; 4] },
+    /// An SVG element left the document with what its presentation attributes parse to.
+    SvgAttributeFactsCleared(StyleNodeID),
 }
 
 impl ArenaChange {
@@ -129,6 +143,15 @@ impl ArenaChange {
                 crate::painting::selection::repaint_after_selection_style_change(arena, element);
             }
             ArenaChange::BuiltScrollSnapContainersTaken(taken) => arena.drop_built_scroll_snap_containers(&taken),
+            ArenaChange::BeginLayoutTrace => arena.layout_trace().begin(),
+            ArenaChange::EndLayoutTrace => arena.layout_trace().end(),
+            ArenaChange::SvgAttributeFacts { element, facts, points } => {
+                arena.set_style_node_svg_attribute_facts(element, facts, &points);
+            }
+            ArenaChange::SvgStyleReferences { element, references } => {
+                arena.set_style_node_svg_style_references(element, references);
+            }
+            ArenaChange::SvgAttributeFactsCleared(element) => arena.clear_style_node_svg_attribute_facts(element),
         }
     }
 }
@@ -258,7 +281,8 @@ impl RenderState {
             apply(arena);
             return;
         }
-        // Putting back the rows a style install did not adopt reaches the engine through the arena.
+        // Putting back the rows a style install did not adopt, and retaining the atoms an SVG publication names, reach
+        // the engine through the arena.
         reach.reach(engine, |_| apply(arena));
     }
 
@@ -313,7 +337,7 @@ impl RenderState {
                 unsafe { engine.reach_on_owner(|engine| query.answer(engine, self.arena.arena())) };
                 Answer::Engine(EngineAnswered::Answered)
             }
-            _ => Answer::of_state(query, &mut self.arena),
+            _ => Answer::of_state_reaching_engine(query, &mut self.arena),
         }
     }
 
@@ -396,6 +420,51 @@ pub(crate) enum ArenaQuery {
     /// The text a pseudo-element's generated content resolved to when its box was built: its alt text when it has one,
     /// otherwise every string in it.
     GeneratedContentAccessibleText(crate::layout::counters::CounterOwner),
+    /// What the layout trace traced since it began.
+    LayoutTrace,
+    /// The document's stacking context tree, for tests.
+    StackingContextTree,
+    /// The text the rows of the text node whose primary row is `primary` render, with whitespace collapsed where their
+    /// style collapses it if `collapse_whitespace`.
+    RenderedText {
+        primary: NodeSlotId,
+        collapse_whitespace: bool,
+    },
+    /// The DOM range of the word at `dom_offset` in the text the rows of the text node whose primary row is `primary`
+    /// render.
+    WordRange { primary: NodeSlotId, dom_offset: usize },
+    /// The text rows below `viewport` find-in-page searches, where the document has no searchable text for it.
+    SearchCandidates { viewport: NodeSlotId },
+    /// Where `query` occurs in the searchable text below `viewport`, which leaves out the `excluded` search candidates
+    /// where it is built for the query.
+    FindText {
+        viewport: NodeSlotId,
+        query: LentSlice<u16>,
+        case_sensitive: bool,
+        excluded: LentSlice<NodeSlotId>,
+    },
+}
+
+/// A slice the document thread lends the owner with a query it waits for the answer to.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct LentSlice<T: 'static>(std::ptr::NonNull<[T]>);
+
+// SAFETY: The document thread waits for the answer to the query that carries the slice, which keeps it live and
+// unwritten until the owner has answered.
+unsafe impl<T: Sync> Send for LentSlice<T> {}
+
+impl<T> LentSlice<T> {
+    pub(crate) fn new(slice: &[T]) -> Self {
+        Self(std::ptr::NonNull::from(slice))
+    }
+
+    /// # Safety
+    ///
+    /// Only in answering the query that carries the slice, which the document thread waits for.
+    unsafe fn get<'a>(self) -> &'a [T] {
+        // SAFETY: Guaranteed by the caller.
+        unsafe { self.0.as_ref() }
+    }
 }
 
 /// The answer to an [`ArenaQuery`].
@@ -406,6 +475,10 @@ pub(crate) enum ArenaAnswer {
     Point(crate::layout::used_values::FfiCssPixelPoint),
     BuiltScrollSnapContainers(Vec<(crate::layout::node_data::NodeSlotId, bool)>),
     Text(Vec<u16>),
+    DebugText(crate::layout::debug_text::DebugText),
+    Range(crate::layout::rendered_text::FfiTextSourceRange),
+    Rows(Vec<NodeSlotId>),
+    TextRanges(Vec<crate::layout::text_queries::FfiDomTextRange>),
 }
 
 impl ArenaQuery {
@@ -419,7 +492,32 @@ impl ArenaQuery {
             ArenaQuery::ContentCounterStylesChanged(_) => {
                 ArenaAnswer::Byte(LayoutNodeArena::CONTENT_COUNTER_STYLES_NOT_RECORDED)
             }
-            ArenaQuery::GeneratedContentAccessibleText(_) => ArenaAnswer::Text(Vec::new()),
+            ArenaQuery::GeneratedContentAccessibleText(_) | ArenaQuery::RenderedText { .. } => {
+                ArenaAnswer::Text(Vec::new())
+            }
+            ArenaQuery::LayoutTrace | ArenaQuery::StackingContextTree => ArenaAnswer::DebugText(Default::default()),
+            ArenaQuery::WordRange { dom_offset, .. } => {
+                ArenaAnswer::Range(crate::layout::rendered_text::FfiTextSourceRange {
+                    start: dom_offset,
+                    length: 0,
+                })
+            }
+            ArenaQuery::SearchCandidates { .. } => ArenaAnswer::Rows(Vec::new()),
+            ArenaQuery::FindText { .. } => ArenaAnswer::TextRanges(Vec::new()),
+        }
+    }
+
+    /// Readies `arena` to answer the query from.
+    fn prepare(self, arena: &mut LayoutNodeArena) {
+        match self {
+            ArenaQuery::RenderedText { primary, .. } | ArenaQuery::WordRange { primary, .. } => {
+                arena.sync_text_fragments(primary);
+            }
+            ArenaQuery::FindText { viewport, excluded, .. } => {
+                // SAFETY: The document thread waits for the answer.
+                arena.prepare_searchable_text(viewport, unsafe { excluded.get() });
+            }
+            _ => {}
         }
     }
 
@@ -443,6 +541,24 @@ impl ArenaQuery {
             }
             ArenaQuery::GeneratedContentAccessibleText(owner) => {
                 ArenaAnswer::Text(arena.generated_content().borrow().accessible_text(owner).to_vec())
+            }
+            ArenaQuery::LayoutTrace => ArenaAnswer::DebugText(arena.layout_trace().text()),
+            ArenaQuery::StackingContextTree => {
+                ArenaAnswer::DebugText(crate::painting::stacking_context::dump::stacking_context_tree(arena))
+            }
+            ArenaQuery::RenderedText {
+                primary,
+                collapse_whitespace,
+            } => ArenaAnswer::Text(arena.rendered_text(primary, collapse_whitespace)),
+            ArenaQuery::WordRange { primary, dom_offset } => {
+                ArenaAnswer::Range(arena.text_word_range(primary, dom_offset))
+            }
+            ArenaQuery::SearchCandidates { viewport } => ArenaAnswer::Rows(arena.search_candidates(viewport)),
+            ArenaQuery::FindText {
+                query, case_sensitive, ..
+            } => {
+                // SAFETY: The document thread waits for the answer.
+                ArenaAnswer::TextRanges(arena.matching_text(unsafe { query.get() }, case_sensitive))
             }
         }
     }
@@ -536,9 +652,23 @@ impl Answer {
     /// Readies `arena` to answer `query` from: a geometry read reads the paintable rows as published, which publishes
     /// what the units before it wrote.
     pub(crate) fn prepare(query: Query, arena: &mut LayoutNodeArena) {
-        if matches!(query, Query::Geometry { .. }) {
-            arena.publish_committed_paintable_rows();
+        match query {
+            Query::Geometry { .. } => arena.publish_committed_paintable_rows(),
+            Query::Arena(query) => query.prepare(arena),
+            _ => {}
         }
+    }
+
+    /// Answers `query` from `state` as [`Self::of_state`] does, with the document's style engine lent to the calling
+    /// thread, as a question may read the engine (the source of a text's rendered text, the counter styles of generated
+    /// content). The document thread waits for the answer.
+    fn of_state_reaching_engine(query: Query, state: &mut ArenaHandle) -> Self {
+        let engine = state.arena().style_engine_handle();
+        if engine.is_null() {
+            return Self::of_state(query, state);
+        }
+        // SAFETY: The engine is the document's, and the document thread waits for the answer.
+        unsafe { engine.reach_on_owner(|_| Self::of_state(query, state)) }
     }
 
     /// Answers `query` from the arena of `state` and the layout scratch beside it, which it readies first.
@@ -1131,7 +1261,7 @@ pub(crate) unsafe fn ask(document: DocumentId, arena: *mut c_void, query: Query)
                 return answer;
             }
             // SAFETY: Guaranteed by the caller.
-            Answer::of_state(query, unsafe { &mut *ArenaHandle::held_by_waiting_thread(arena) })
+            Answer::of_state_reaching_engine(query, unsafe { &mut *ArenaHandle::held_by_waiting_thread(arena) })
         },
     );
     debug_assert!(answer.is_ok(), "the render owner panicked answering {query:?}");
@@ -1236,12 +1366,29 @@ fn join_frame_of(document: DocumentId) {
 
 /// Asks the owner `query` of the layout arena of `document`, once its frame in flight is taken back.
 #[track_caller]
-fn ask_arena(document: DocumentId, query: ArenaQuery) -> ArenaAnswer {
+pub(crate) fn ask_arena(document: DocumentId, query: ArenaQuery) -> ArenaAnswer {
     if !document.is_valid() {
         return query.left_to_host();
     }
     join_frame_of(document);
     match ask_owner(document, Query::Arena(query)) {
+        Answer::Arena(answer) => answer,
+        _ => {
+            debug_assert!(false, "an arena query is answered from the arena");
+            query.left_to_host()
+        }
+    }
+}
+
+/// Asks the owner `query` of the layout arena the calling document thread names as `arena`, once the frame in flight
+/// that owns the arena, if any, has been taken back.
+///
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread.
+pub(crate) unsafe fn ask_arena_of(arena: *mut c_void, query: ArenaQuery) -> ArenaAnswer {
+    // SAFETY: Guaranteed by the caller.
+    match unsafe { ask_about(arena, Query::Arena(query)) } {
         Answer::Arena(answer) => answer,
         _ => {
             debug_assert!(false, "an arena query is answered from the arena");
