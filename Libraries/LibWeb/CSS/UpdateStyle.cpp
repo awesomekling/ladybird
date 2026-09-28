@@ -39,8 +39,7 @@
 #include <LibWeb/HTML/HTMLSlotElement.h>
 #include <LibWeb/HTML/LocalNavigable.h>
 #include <LibWeb/HTML/NavigableContainer.h>
-#include <LibWeb/Layout/Box.h>
-#include <LibWeb/Layout/Viewport.h>
+#include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/Selection/Selection.h>
 
@@ -126,9 +125,9 @@ static bool flight_marks_cover(RequiredInvalidationAfterStyleChange const& appli
 
 // What the flight that applied a row marked of its layout nodes, if it applied it (with the record `style_record`, unless
 // taken), taken with the row's invalidation or as the host installs the row itself.
-static Optional<RequiredInvalidationAfterStyleChange> marks_of_flight(Layout::NodeArena& arena, StyleNodeID style_node, bool take, StyleRecordID style_record = {})
+static Optional<RequiredInvalidationAfterStyleChange> marks_of_flight(void* arena, StyleNodeID style_node, bool take, StyleRecordID style_record = {})
 {
-    auto damage = Layout::RustFFI::layout_arena_flight_style_damage(arena.handle(), style_node.value(), style_record.value(), take);
+    auto damage = Layout::RustFFI::layout_arena_flight_style_damage(arena, style_node.value(), style_record.value(), take);
     if (!damage)
         return {};
     return decode_style_invalidation(static_cast<u32>(damage));
@@ -141,31 +140,32 @@ static thread_local size_t s_rows_the_flight_left_to_mark = 0;
 
 void StyleEffectDrain::apply_layout_invalidation(DOM::Document& document, ViewportPropagationSources const& viewport_propagation_sources, StyleNodeID style_node, RequiredInvalidationAfterStyleChange const& invalidation)
 {
-    auto* arena = document.layout_node_arena_if_created();
+    auto* arena = document.layout_arena_handle();
     if (!arena)
         return;
-    if (auto applied = marks_of_flight(*arena, style_node, true); applied.has_value() && flight_marks_cover(*applied, invalidation)) {
+    if (auto applied = marks_of_flight(arena, style_node, true); applied.has_value() && flight_marks_cover(*applied, invalidation)) {
         // The render owner applied the row as it took the transaction, and the layout it marked is still to run.
         if (!s_installing_style_applied_by_flight && applied->needs_relayout())
             document.note_style_change_needs_layout_update({});
         return;
     }
     ++s_rows_the_flight_left_to_mark;
-    // The rows the arena binds to the node's element and its synthetic pseudo-elements.
-    auto row = arena->bound_row(style_node);
-    auto pseudo_element_row = [&](PseudoElement pseudo_element) {
-        return arena->bound_row(style_node, Layout::Node::encode_generated_for(pseudo_element));
+    // The boxes the arena binds to the node's element and its synthetic pseudo-elements.
+    auto identity = DOM::NodeIdentity::of_style_node(style_node);
+    auto box = Painting::BoxSlot::bound_to(document, identity);
+    auto pseudo_element_box = [&](PseudoElement pseudo_element) {
+        return Painting::BoxSlot::bound_to(document, identity, pseudo_element);
     };
 
     if (invalidation.accumulated_visual_contexts() != AccumulatedVisualContextInvalidation::None) {
         auto scope = invalidation.accumulated_visual_contexts() == AccumulatedVisualContextInvalidation::UpdateValues
             ? DOM::Document::AccumulatedVisualContextUpdateScope::Values
             : DOM::Document::AccumulatedVisualContextUpdateScope::Structure;
-        if (row)
-            document.schedule_accumulated_visual_context_update(row, scope);
+        if (box)
+            document.schedule_accumulated_visual_context_update(box, scope);
         for (auto index = to_underlying(first_synthetic_pseudo_element); index <= to_underlying(last_synthetic_pseudo_element); ++index) {
-            if (auto pseudo_row = pseudo_element_row(static_cast<PseudoElement>(index)))
-                document.schedule_accumulated_visual_context_update(pseudo_row, scope);
+            if (auto pseudo_box = pseudo_element_box(static_cast<PseudoElement>(index)))
+                document.schedule_accumulated_visual_context_update(pseudo_box, scope);
         }
     }
 
@@ -180,7 +180,7 @@ void StyleEffectDrain::apply_layout_invalidation(DOM::Document& document, Viewpo
     if (is_viewport_propagation_source)
         document.record_partial_relayout_escape(DOM::PartialRelayoutEscapeReason::ViewportPropagationSourceChangedByStyleChange);
     // A node without a box has nothing to mark.
-    if (!row)
+    if (!box)
         return;
     // A relayout-only style change on an absolutely positioned partial relayout boundary
     // stays confined to it: the box contributes nothing to ancestor layout, and partial
@@ -189,21 +189,18 @@ void StyleEffectDrain::apply_layout_invalidation(DOM::Document& document, Viewpo
     // element's invalidation while the ::backdrop box is a sibling of the element's box,
     // outside the subtree a boundary-self relayout covers.
     auto propagation = Layout::LayoutUpdatePropagation::ThroughAncestors;
-    auto row_is_absolutely_positioned = [&] {
-        auto position = static_cast<Positioning>(Layout::NodeWithStyle::style_group_of<ComputedValues::BoxValues>(row.style_payloads()).position);
+    auto box_is_absolutely_positioned = [&] {
+        auto position = static_cast<Positioning>(box.style_group<ComputedValues::BoxValues>()->position);
         return position == Positioning::Absolute || position == Positioning::Fixed;
     };
     if (!invalidation.needs_layout_tree_rebuild()
         && !is_viewport_propagation_source
-        && !row.is_text()
-        && row_is_absolutely_positioned()) {
-        auto* box = as_if<Layout::Box>(row.shell());
-        if (box
-            && box->is_partial_relayout_boundary()
-            && !pseudo_element_row(PseudoElement::Backdrop)) {
-            document.render_inputs_for_write().set_needs_own_geometry_update(row.slot());
-            propagation = Layout::LayoutUpdatePropagation::BoundarySelfOnly;
-        }
+        && !box.is_text()
+        && box_is_absolutely_positioned()
+        && Layout::RustFFI::layout_arena_node_is_partial_relayout_boundary(box.arena(), box.slot())
+        && !pseudo_element_box(PseudoElement::Backdrop)) {
+        document.render_inputs_for_write().set_needs_own_geometry_update(box.slot());
+        propagation = Layout::LayoutUpdatePropagation::BoundarySelfOnly;
     }
     document.render_inputs_for_write().note_needs_layout_update(DOM::NodeIdentity::of_style_node(style_node), DOM::SetNeedsLayoutReason::StyleChange, propagation);
     document.note_style_change_needs_layout_update({});
@@ -278,50 +275,51 @@ void StyleEffectDrain::take_layout_node_style_records(DOM::Document& document)
     }
 }
 
-// The style being installed is held by its record; if it is not, the row keeps the style it has.
-static void apply_style_to_row(StyleDrainScope const& scope, Layout::Row const& row, StyleRecordID style_record)
+// The style being installed is held by its record; if it is not, the box keeps the style it has.
+static void apply_style_to_box(StyleDrainScope const& scope, Painting::BoxSlot const& box, StyleRecordID style_record)
 {
     auto published = scope.engine().publish_style_record(scope, style_record);
     ASSERT(published);
     if (published)
-        Layout::NodeWithStyle::apply_style(row, *published);
+        Layout::apply_style_to_box(box, *published);
 }
 
 void StyleEffectDrain::apply_layout_node_style(StyleDrainScope const& scope, DOM::Document& document, StyleNodeID style_node, RequiredInvalidationAfterStyleChange const& invalidation, StyleRecordID style_record, PseudoElementStyleRecords const& pseudo_element_style_records)
 {
     if (invalidation.needs_layout_tree_rebuild())
         return;
-    auto* arena = document.layout_node_arena_if_created();
+    auto* arena = document.layout_arena_handle();
     if (!arena)
         return;
 
     // If we're keeping the layout tree, we can just apply the new style to the existing layout tree.
-    auto row = arena->bound_row(style_node);
-    ASSERT(!row || style_record.value() != 0);
+    auto identity = DOM::NodeIdentity::of_style_node(style_node);
+    auto box = Painting::BoxSlot::bound_to(document, identity);
+    ASSERT(!box || style_record.value() != 0);
     // A flight applied the row's record to the layout nodes and painted after it: the element's box only takes the record
     // into its mirror, and its pseudo-elements' records are the ones they hold. A row whose record or pseudo-element
     // records are others than the flight's is installed here over what the flight did, marks and all.
     bool const moves_pseudo_element_records = any_of(pseudo_element_style_records, [](auto record) { return record.value() != 0; });
-    auto applied_by_flight = marks_of_flight(*arena, style_node, false, style_record);
+    auto applied_by_flight = marks_of_flight(arena, style_node, false, style_record);
     if (applied_by_flight.has_value() && !moves_pseudo_element_records && flight_marks_cover(*applied_by_flight, invalidation)) {
-        if (row && style_record.value() != 0)
-            apply_style_to_row(scope, row, style_record);
+        if (box && style_record.value() != 0)
+            apply_style_to_box(scope, box, style_record);
         return;
     }
-    (void)marks_of_flight(*arena, style_node, true);
+    (void)marks_of_flight(arena, style_node, true);
     ++s_rows_the_flight_left_to_mark;
-    if (row && style_record.value() != 0) {
-        apply_style_to_row(scope, row, style_record);
-        if (Painting::has_committed_box(row))
-            Painting::repaint_after_style_change(row, invalidation);
+    if (box && style_record.value() != 0) {
+        apply_style_to_box(scope, box, style_record);
+        if (Painting::has_committed_box(box))
+            Painting::repaint_after_style_change(box, invalidation);
     }
 
     if (invalidation.repaint_selection) {
-        Layout::RustFFI::layout_arena_sync_selection_pseudo_style(arena->handle(), style_node.value());
+        Layout::RustFFI::layout_arena_sync_selection_pseudo_style(arena, style_node.value());
         // NB: A display:contents element has no box of its own. The render owner repaints the subtree of the nearest
         //     painted ancestor in the ancestry the layout tree was built from, so cached text commands take the new
         //     highlight, and the document paints again.
-        Layout::RustFFI::layout_arena_repaint_after_selection_style_change(arena->handle(), style_node.value());
+        Layout::RustFFI::layout_arena_repaint_after_selection_style_change(arena, style_node.value());
         Painting::repaint_document_after_owner_style_change(document, InvalidateDisplayList::PaintCommandsAndHitTestList);
     }
 
@@ -330,10 +328,10 @@ void StyleEffectDrain::apply_layout_node_style(StyleDrainScope const& scope, DOM
         if (!pseudo_element_style_record)
             continue;
         auto pseudo_element = static_cast<PseudoElement>(to_underlying(first_synthetic_pseudo_element) + index);
-        if (auto pseudo_element_row = arena->bound_row(style_node, Layout::Node::encode_generated_for(pseudo_element))) {
-            apply_style_to_row(scope, pseudo_element_row, pseudo_element_style_record);
-            if (Painting::has_committed_box(pseudo_element_row))
-                Painting::repaint_after_style_change(pseudo_element_row, invalidation);
+        if (auto pseudo_element_box = Painting::BoxSlot::bound_to(document, identity, pseudo_element)) {
+            apply_style_to_box(scope, pseudo_element_box, pseudo_element_style_record);
+            if (Painting::has_committed_box(pseudo_element_box))
+                Painting::repaint_after_style_change(pseudo_element_box, invalidation);
         }
     }
 }
@@ -406,8 +404,7 @@ void StyleEffectDrain::apply_render_half(StyleDrainScope const& scope, DOM::Docu
             });
     }
     // The rows registered their anchor names, and each name they moved is published once.
-    auto* arena = document.layout_node_arena_if_created();
-    StyleEngineFFI::style_engine_publish_anchor_names(scope, scope.engine().rust_handle(), arena ? arena->handle() : nullptr);
+    StyleEngineFFI::style_engine_publish_anchor_names(scope, scope.engine().rust_handle(), document.layout_arena_handle());
     m_render_effects.clear();
     m_pseudo_element_style_records.clear();
 }
@@ -516,7 +513,7 @@ static StyleEngineTransaction take_style_engine_transaction(DOM::Document& docum
     auto& style_engine = document.render_inputs_for_write().style_engine();
     // The render owner applies what the batch moves of the layout tree it holds itself, unless the tree is to be built
     // again, or the batch is one wave of a flight's install, whose render half the flight owns.
-    if (document.layout_node_arena_if_created() && !document.needs_layout_tree_update() && !document.child_needs_layout_tree_update()
+    if (document.layout_arena_handle() && !document.needs_layout_tree_update() && !document.child_needs_layout_tree_update()
         && !s_installing_style_applied_by_flight) {
         auto const viewport_propagation_sources = StyleEffectDrain::viewport_propagation_sources_of(document);
         return accept_style_engine_transaction(document, style_engine.take_style_transaction(*root, StyleEngine::OwnerRenderHalf { viewport_propagation_sources.span() }));
@@ -576,7 +573,7 @@ static bool install_composition_sampled_in_pass(StyleDrainScope const& scope, DO
     if (!sample.overlay_is_empty && document.is_in_style_stabilization_epoch()
         && (document.style_stabilization_has_style_reactions() || sample.invalidation.requires_base_style_recomputation))
         document.style_computer().record_transition_stabilization_baseline(scope, abstract_element);
-    (void)element.unsafe_layout_node();
+    Layout::make_host_mirror_of_box(Painting::BoxSlot::bound_to(element));
     Animations::apply_published_animation_overlay(scope, abstract_element, sample.invalidation, StyleRecordID { sample.style_record }, sample_invalidation == SampleInvalidation::AppliedByCaller);
     return true;
 }
@@ -1269,8 +1266,8 @@ StyleUpdate::~StyleUpdate()
     }
     // The rows the render owner applied as it took the update's transactions that the install left are put back.
     if (document.render_inputs_for_write().style_engine().take_owner_applied_render_half()) {
-        if (auto* arena = document.layout_node_arena_if_created())
-            Layout::RustFFI::layout_arena_finish_owner_style_host_half(arena->handle());
+        if (auto* arena = document.layout_arena_handle())
+            Layout::RustFFI::layout_arena_finish_owner_style_host_half(arena);
     }
     if (m_began_complete_style_update)
         finish_complete_style_update(document);

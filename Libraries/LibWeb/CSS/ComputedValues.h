@@ -911,6 +911,7 @@ public:
     Color text_decoration_color() const { return Color::from_bgra(m_noninherited.text_reset->text_decoration_color); }
     ReadonlySpan<ShadowData> text_shadow() const { return m_inherited.text->text_shadow_span(); }
     Positioning position() const { return static_cast<Positioning>(m_noninherited.box->position); }
+    BoxSizing box_sizing() const { return static_cast<BoxSizing>(m_noninherited.box->box_sizing); }
     bool transition_delay_and_duration_are_single_zero() const { return m_noninherited.animation->transition_delay_and_duration_are_single_zero_value(); }
     WhiteSpaceCollapse white_space_collapse() const { return m_inherited.text->white_space_collapse_value(); }
     FlexDirection flex_direction() const { return static_cast<FlexDirection>(m_noninherited.alignment->flex_direction); }
@@ -976,6 +977,7 @@ public:
         return style_value_from_handle(property_id, reinterpret_cast<RustStyleValueHandle const&>(*handle));
     }
     LengthBox margin() const { return length_box(m_noninherited.surround->margin); }
+    LengthBox padding() const { return length_box(m_noninherited.surround->padding); }
     LengthBox scroll_margin() const { return length_box(m_noninherited.misc->scroll_margin); }
 
     BorderData const& border_left() const { return m_noninherited.border->border_left_value(); }
@@ -992,6 +994,7 @@ public:
     Vector<BackgroundLayerData> mask_layers() const { return m_noninherited.mask_data->mask_layers_value(); }
 
     Color webkit_text_fill_color() const { return m_inherited.text->webkit_text_fill_color_value(); }
+    CSSPixels letter_spacing() const { return m_inherited.text->letter_spacing_value(); }
 
     ListStyleType list_style_type(StyleScope const& style_scope) const { return m_inherited.list->list_style_type_value(style_scope); }
     RefPtr<AbstractImageStyleValue const> list_style_image() const { return m_inherited.list->list_style_image_value(); }

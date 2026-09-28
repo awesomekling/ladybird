@@ -26,7 +26,6 @@ public:
 
     AbstractImageStyleValue const& image() const { return m_image; }
 
-    Optional<Gfx::ImageCursor> make_image_cursor(Layout::NodeWithStyle const&, GC::Ptr<HTML::DecodedImageData>) const;
     Optional<Gfx::ImageCursor> make_image_cursor(DOM::Document const&, Color current_color, GC::Ptr<HTML::DecodedImageData>) const;
     // The gradient stop context carries the current color the cursor image is painted with.
     Optional<Gfx::ImageCursor> make_image_cursor(DOM::Document const&, ColorResolutionContext const& gradient_stop_color_resolution_context, GC::Ptr<HTML::DecodedImageData>) const;

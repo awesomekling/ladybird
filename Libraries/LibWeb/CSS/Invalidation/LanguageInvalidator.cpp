@@ -13,15 +13,17 @@
 #include <LibWeb/DOM/PseudoElement.h>
 #include <LibWeb/DOM/ShadowRoot.h>
 #include <LibWeb/HTML/HTMLSlotElement.h>
-#include <LibWeb/Layout/TextNode.h>
+#include <LibWeb/Painting/BoxSlot.h>
 #include <LibWeb/TraversalDecision.h>
 
 namespace Web::CSS::Invalidation {
 
-static void enroll_language_dependent_text(Layout::Node& root)
+static void enroll_language_dependent_text(Painting::BoxSlot const& root)
 {
+    if (!root)
+        return;
     // The owner lays the root out again where any text under it renders with the language.
-    root.document().render_inputs_for_write().enroll_text_after_language_change(Layout::Node::slot_id(&root));
+    root.document().render_inputs_for_write().enroll_text_after_language_change(root.slot());
 }
 
 // `lang` and `dir` both inherit, so a change on one element changes what every element under it
@@ -36,9 +38,8 @@ static void publish_language_and_directionality(DOM::Element& element, bool is_d
             } else {
                 descendant->invalidate_lang_value();
                 record_element_language_and_directionality(*descendant);
-                descendant->for_each_synthetic_pseudo_element([](CSS::PseudoElement, DOM::SyntheticPseudoElement const& pseudo) {
-                    if (auto* layout_node = pseudo.unsafe_layout_node())
-                        enroll_language_dependent_text(*layout_node);
+                descendant->for_each_synthetic_pseudo_element([descendant](CSS::PseudoElement pseudo_element, DOM::SyntheticPseudoElement const&) {
+                    enroll_language_dependent_text(Painting::BoxSlot::of_pseudo_element(*descendant, pseudo_element));
                 });
             }
             return TraversalDecision::Continue;
@@ -48,9 +49,8 @@ static void publish_language_and_directionality(DOM::Element& element, bool is_d
         // Language is a DOM input outside the computed style groups. Rust checks
         // the styles of every slice and refreshes their text without rebuilding
         // the source ranges, which depend on the untransformed text.
-        auto* text_layout_node = as_if<Layout::TextNode>(node.unsafe_layout_node());
-        if (text_layout_node)
-            enroll_language_dependent_text(*text_layout_node);
+        if (auto box = Painting::BoxSlot::bound_to(node); box.is_text())
+            enroll_language_dependent_text(box);
         return TraversalDecision::Continue;
     });
 }
