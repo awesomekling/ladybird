@@ -823,8 +823,8 @@ struct FrameOutput {
 /// What the owner answers a job of a layout frame with.
 enum FrameJobAnswer {
     Rounds(FrameOutput),
-    /// Whether ending the host half of the flight's style put back a row the flight applied, what that owes the host's
-    /// shells, and what the arena and the engine show after the host's install.
+    /// Whether ending the host half of the flight's style put back a row the flight applied, what that owes the host,
+    /// and what the arena and the engine show after the host's install.
     FlightStyleHostHalf {
         restored: bool,
         payment: HostPayment,
@@ -1003,7 +1003,7 @@ impl LayoutFrame {
     }
 
     /// Ends the host half of the style the frame's flight ran, once the host has installed it, on the owner, and
-    /// pays what that owes the host's shells. Answers whether a row the flight applied was put back.
+    /// pays what that owes the host. Answers whether a row the flight applied was put back.
     fn finish_flight_style_host_half(&mut self, main_thread: &crate::stage::MainThread) -> bool {
         // SAFETY: The frame runs for the update the arena is in.
         let document = unsafe { super::ArenaHandle::document_of(self.inputs.arena_handle) };
@@ -1156,8 +1156,8 @@ impl LayoutFrame {
             .tree_build_may_create_viewport(document_needs_layout_tree_update)
     }
 
-    /// Walks the tree build the style round readied, in the frame. Its host half (the shells of the
-    /// rows the walk freed, the box presence it changed, the DOM nodes its commit messages resolve
+    /// Walks the tree build the style round readied, in the frame. Its host half (the host objects of
+    /// the rows the walk freed, the box presence it changed, the DOM nodes its commit messages resolve
     /// to, a new viewport's paint state) is left to the next join, and the style resources and
     /// generated image providers of its new rows to the end of the frame.
     fn walk_layout_tree_build(&mut self) -> (WalkedLayoutTreeBuild, TreeBuildHostHalf) {
@@ -2697,7 +2697,7 @@ mod tests {
         arena.set_needs_full_layout_tree_update(false);
         assert!(layout_is_up_to_date(&arena, &facts));
 
-        arena.free_subtree(viewport).destroy_shells_and_invoke_callbacks();
+        arena.free_subtree(viewport).invoke_callbacks();
         assert!(!layout_is_up_to_date(&arena, &facts));
     }
 

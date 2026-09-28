@@ -267,7 +267,7 @@ fn apply_replaced_display_adjustment(
         FfiReplacedElementDisplayAdjustment::Inline => display_outside::INLINE,
         FfiReplacedElementDisplayAdjustment::None => return,
     };
-    arena.update_layout_style(node, crate::layout::ShellStyleChangeNotice::Handback, |style| {
+    arena.update_layout_style(node, |style| {
         style.set_display(FfiDisplay::outside_and_inside(outside, display_inside::FLOW, false));
     });
 }
@@ -3159,15 +3159,14 @@ struct TreeBuildStageOutput {
 
 /// What a finished layout tree build walk owes the host, and what it found out for the document.
 /// The walk's frame pays it on the document thread in its next join, since no host code runs in
-/// between: the layout pass that may follow the build reads only the arena, and makes any shell it
-/// reads on demand.
+/// between: the layout pass that may follow the build reads only the arena.
 #[must_use]
 pub(crate) struct TreeBuildHostHalf {
     reports: Vec<crate::layout::commit::FfiCommitMessage>,
     handbacks: super::layout_node_arena::HostHandbacks,
 }
 
-// The walk's handbacks name the shells they owe by id, so the walk crosses back on its own terms.
+// The walk's handbacks name the rows they owe for by slot, so the walk crosses back on its own terms.
 const _: () = {
     const fn assert_send<T: Send>() {}
     assert_send::<TreeBuildHostHalf>();
@@ -3208,10 +3207,9 @@ pub(crate) struct TreeBuildPayment {
 }
 
 impl TreeBuildPayment {
-    /// Pays what the walk let go of, as it would have while the walk ran: the boxes nodes gained or lost, the
-    /// host-owned objects of the rows it freed, and the style changes of the shells of the boxes it kept. Then what
-    /// the build found out goes to the document, in the order the build found it out; nothing can clear a DOM update
-    /// flag again once the walk is complete. The new rows owe no shell: a reader that wants one makes it.
+    /// Pays what the walk let go of, as it would have while the walk ran: the boxes nodes gained or lost, and the
+    /// host-owned objects of the rows it freed. Then what the build found out goes to the document, in the order the
+    /// build found it out; nothing can clear a DOM update flag again once the walk is complete.
     pub(crate) fn pay(self, main_thread: &crate::stage::MainThread) {
         self.payment.pay(main_thread);
         if !self.reports.is_empty() {
@@ -3318,11 +3316,9 @@ fn run_tree_build_stage(host: &DomTreeBuilderHost, document_style_node: u32) -> 
                 .expect("the document element's box publishes its style during the build")
                 .misc_reset()
                 .scrollbar_width;
-            layout_host.arena().update_layout_style(
-                document_layout_node,
-                crate::layout::ShellStyleChangeNotice::Handback,
-                |style| style.set_scrollbar_width(scrollbar_width),
-            );
+            layout_host
+                .arena()
+                .update_layout_style(document_layout_node, |style| style.set_scrollbar_width(scrollbar_width));
         }
     }
 
@@ -3930,15 +3926,13 @@ fn stamp_pseudo_element_box_row(
         .stamp_pseudo_element_row(slot, kind, generator, pseudo_kind);
     layout_host.note_style_of_built_row(slot, None);
     if decision == FfiPseudoElementDecision::Contents {
-        layout_host
-            .arena()
-            .update_layout_style(slot, crate::layout::ShellStyleChangeNotice::Handback, |style| {
-                style.set_display(FfiDisplay::outside_and_inside(
-                    crate::css::css_enums::display_outside::INLINE,
-                    crate::css::css_enums::display_inside::FLOW,
-                    false,
-                ));
-            });
+        layout_host.arena().update_layout_style(slot, |style| {
+            style.set_display(FfiDisplay::outside_and_inside(
+                crate::css::css_enums::display_outside::INLINE,
+                crate::css::css_enums::display_inside::FLOW,
+                false,
+            ));
+        });
     }
     if is_list_item_marker {
         // https://drafts.csswg.org/css-lists-3/#list-style-position-property
@@ -4524,14 +4518,13 @@ impl TreeBuilderHost {
             NodeKind::FieldSetBox => {
                 let display = self.style(slot).map(|style| style.display());
                 if let Some(display) = display.filter(FfiDisplay::is_flow_inside) {
-                    self.arena()
-                        .update_layout_style(slot, crate::layout::ShellStyleChangeNotice::Handback, |style| {
-                            style.set_display(FfiDisplay::outside_and_inside(
-                                display.outside,
-                                crate::css::css_enums::display_inside::FLOW_ROOT,
-                                false,
-                            ));
-                        });
+                    self.arena().update_layout_style(slot, |style| {
+                        style.set_display(FfiDisplay::outside_and_inside(
+                            display.outside,
+                            crate::css::css_enums::display_inside::FLOW_ROOT,
+                            false,
+                        ));
+                    });
                 }
             }
             // A media element renders the children of its shadow root, such as its controls.
@@ -5574,13 +5567,12 @@ fn wrap_fieldset_contents_if_needed(host: &TreeBuilderHost, layout_node: LayoutN
             overflow_x: style.box_values().overflow_x,
             overflow_y: style.box_values().overflow_y,
         };
-        host.arena()
-            .update_layout_style(layout_node, crate::layout::ShellStyleChangeNotice::Handback, |style| {
-                style.set_overflow(
-                    crate::css::css_enums::overflow::VISIBLE,
-                    crate::css::css_enums::overflow::VISIBLE,
-                );
-            });
+        host.arena().update_layout_style(layout_node, |style| {
+            style.set_overflow(
+                crate::css::css_enums::overflow::VISIBLE,
+                crate::css::css_enums::overflow::VISIBLE,
+            );
+        });
         let wrapper = host.create_anonymous_box(
             layout_node,
             AnonymousStyleKind::FieldsetContentWrapper,
@@ -5978,8 +5970,7 @@ fn generate_missing_parents(host: &TreeBuilderHost, root: LayoutNode) -> Vec<Lay
                 AnonymousStyleOverrides::default(),
                 NodeKind::TableWrapper,
             );
-            host.arena()
-                .reset_table_box_style_used_by_wrapper(table_root, crate::layout::ShellStyleChangeNotice::Handback);
+            host.arena().reset_table_box_style_used_by_wrapper(table_root);
             let wrapper_slot = wrapper.slot();
             host.move_child(table_root, wrapper_slot, NodeSlotId::INVALID);
             host.attach_child(parent, wrapper, nearest_sibling);

@@ -10,7 +10,7 @@ use crate::layout::node_data::NodeSlotId;
 mod host_calls;
 
 pub(crate) use host_calls::{
-    destroy_image_observers, destroy_owned_image_provider, destroy_shell, notify_owned_image_provider_of_detach,
+    destroy_image_observers, destroy_owned_image_provider, notify_owned_image_provider_of_detach,
 };
 
 /// Frees the subtree `root` heads and hands back what its rows held, for whoever pays the arena's
@@ -153,9 +153,7 @@ mod tests {
     }
 
     fn free(arena: &mut LayoutNodeArena, allocation: NodeAllocation) {
-        arena
-            .free_subtree(allocation.slot)
-            .destroy_shells_and_invoke_callbacks();
+        arena.free_subtree(allocation.slot).invoke_callbacks();
     }
 
     #[test]
@@ -258,7 +256,7 @@ mod tests {
         for slot in [root.slot, a.slot, b.slot, c.slot] {
             assert!(!arena.slot_is_live(slot));
         }
-        freed.destroy_shells_and_invoke_callbacks();
+        freed.invoke_callbacks();
     }
 
     #[test]

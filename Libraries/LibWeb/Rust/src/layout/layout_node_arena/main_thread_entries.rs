@@ -80,10 +80,9 @@ unsafe extern "C" fn layout_arena_style_node_changed(arena: *mut c_void, old_sty
 /// The arena and record must be live on the document thread.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn layout_arena_adopt_derived_node_style(arena: *mut c_void, node: NodeSlotId, record: u64) {
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let arena = unsafe { LayoutNodeArena::from_handle(arena) };
     let derived = arena.with_style_engine(|engine| engine.pin_derived_style_record(record));
-    arena.apply_reinherited_style_record(node, derived, ShellStyleChangeNotice::Now(&main_thread));
+    arena.apply_reinherited_style_record(node, derived);
 }
 
 /// Applies a style to a row, taking a style that holds no images, in one call: the host's pin
@@ -103,8 +102,6 @@ unsafe extern "C" fn layout_arena_install_row_style(
 ) -> *mut c_void {
     assert!(!arena.is_null(), "layout node arena handle is null");
     // SAFETY: As above.
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
-    // SAFETY: As above.
     let host_tables = unsafe { crate::layout::HostTables::from_handle(arena) };
     // SAFETY: As above.
     let arena = unsafe { LayoutNodeArena::from_handle(arena) };
@@ -119,7 +116,7 @@ unsafe extern "C" fn layout_arena_install_row_style(
         }
         arena.enroll_node_for_svg_paint_resources_sync(node);
         arena.set_node_flag(node, NodeFlag::HasAnimatedOpacityOrTransform, false);
-        arena.reinherit_anonymous_descendants(node, ShellStyleChangeNotice::Now(&main_thread));
+        arena.reinherit_anonymous_descendants(node);
     }
     let old_image_observers = arena.replace_image_observers(host_tables, node, std::ptr::null_mut());
     arena.note_style_image_resources_attached(node, false);

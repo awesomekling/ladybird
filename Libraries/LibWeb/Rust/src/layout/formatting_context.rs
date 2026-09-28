@@ -2461,7 +2461,7 @@ fn run_root_layout_stage(stage: LayoutStageInput<'_>, scratch: &LayoutScratch) -
 
 /// The arena half ahead of a root layout, from what the document answered for it beforehand:
 /// propagates the root and body styles, as their published style records have them, to the
-/// viewport and syncs enrolled content. It needs no host, and the shells whose style it changes hear of it when the pass's commit pays its
+/// viewport and syncs enrolled content. It needs no host, and what it owes the host is paid with the pass's commit's
 /// handbacks, which must be followed by `end_layout_pass_preparation_handbacks`.
 ///
 /// # Safety
@@ -2479,12 +2479,7 @@ pub(crate) unsafe fn prepare_root_layout_from_sources(
     let arena = unsafe { &*state }.arena();
     arena.begin_layout_pass_preparation_handbacks();
     let propagation_facts = viewport_propagation::viewport_propagation_facts(arena);
-    viewport_propagation::propagate_root_styles_to_viewport(
-        arena,
-        root,
-        &propagation_facts,
-        ShellStyleChangeNotice::Handback,
-    );
+    viewport_propagation::propagate_root_styles_to_viewport(arena, root, &propagation_facts);
     // The style rewrites enroll the affected boxes' text children for content sync, so the sync
     // follows them, and both precede the pass, which caches decoded style.
     // SAFETY: As above.

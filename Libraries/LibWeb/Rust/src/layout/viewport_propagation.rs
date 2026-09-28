@@ -292,14 +292,13 @@ pub(crate) fn propagate_root_styles_to_viewport(
     arena: &LayoutNodeArena,
     viewport: NodeSlotId,
     facts: &ViewportPropagationFacts,
-    notice: crate::layout::ShellStyleChangeNotice<'_>,
 ) {
     assert!(!viewport.is_invalid());
     let apply_overflow = |node: NodeSlotId, (x, y): (u8, u8)| {
-        arena.update_layout_style(node, notice, |style| style.set_overflow(x, y));
+        arena.update_layout_style(node, |style| style.set_overflow(x, y));
     };
     let apply_writing_mode_and_direction = |node: NodeSlotId, writing_mode: u8, direction: u8| {
-        arena.update_layout_style(node, notice, |style| {
+        arena.update_layout_style(node, |style| {
             style.set_writing_mode_and_direction(writing_mode, direction);
         });
     };
