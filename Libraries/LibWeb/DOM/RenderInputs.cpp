@@ -179,31 +179,15 @@ void RenderInputs::set_needs_full_layout_tree_update(bool value)
 static void apply_style_node_change(Node& node, CSS::StyleNodeID old_style_node, CSS::StyleNodeID new_style_node)
 {
     auto& document = node.document();
-    if (auto* arena = document.layout_arena_handle()) {
-        // The node's rows, and those of its pseudo-elements, take its new identity along with their
-        // bindings. Both are still keyed by the old identity here, so this precedes retiring it.
-        if (old_style_node != 0 && new_style_node != 0) {
-            auto old_identity = NodeIdentity::of_style_node(old_style_node);
-            if (auto box = Painting::BoxSlot::bound_to(document, old_identity))
-                Layout::RustFFI::layout_arena_set_style_node_of_rows_sharing_dom_node_with(arena, box.slot(), new_style_node.value());
-            if (auto* element = as_if<Element>(node)) {
-                element->for_each_synthetic_pseudo_element([&](CSS::PseudoElement pseudo_element, SyntheticPseudoElement const&) {
-                    if (auto box = Painting::BoxSlot::bound_to(document, old_identity, pseudo_element))
-                        Layout::RustFFI::layout_arena_set_style_node_of_generated_subtree(arena, box.slot(), new_style_node.value());
-                });
-            }
-            // What the node's pseudo-elements have scrolled to is keyed by the same pair, and
-            // takes the node's new identity along with their bindings.
-            Layout::RustFFI::layout_arena_move_pseudo_element_scroll_offsets(arena, old_style_node.value(), new_style_node.value());
-            // So does what the element itself has scrolled to, which is keyed by the identity
-            // alone; the element still holds the offset, so it is simply republished.
-            if (auto* element = as_if<Element>(node))
-                Layout::RustFFI::layout_arena_set_element_scroll_offset(arena, new_style_node.value(), element->scroll_offset({}));
-        }
-        // A retired identity may be reused, so it leaves every row carrying it, including rows of a
-        // removed subtree that outlive the disconnection.
-        if (old_style_node != 0)
-            Layout::RustFFI::layout_arena_forget_style_node(arena, old_style_node.value());
+    if (auto* arena = document.layout_arena_handle(); arena && old_style_node != 0) {
+        // What the element has scrolled to is keyed by its identity, and goes with it; the element still holds the
+        // offset, so it is simply republished.
+        if (auto* element = as_if<Element>(node); element && new_style_node != 0)
+            Layout::RustFFI::layout_arena_set_element_scroll_offset(arena, new_style_node.value(), element->scroll_offset({}));
+        // The node's rows, and those of its pseudo-elements, take its new identity along with their bindings and what
+        // the pseudo-elements have scrolled to. A retired identity may be reused, so it leaves every row carrying it,
+        // including rows of a removed subtree that outlive the disconnection.
+        Layout::RustFFI::layout_arena_style_node_changed(arena, old_style_node.value(), new_style_node.value());
     }
     // The arena names the node it tells about a binding change by identity, so a node changing
     // identity is one the arena cannot name. Its box-presence bits are re-committed here instead,

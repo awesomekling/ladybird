@@ -1741,15 +1741,10 @@ Compositing::RustFFI::NodeSlotId Document::layout_root_slot() const
 
 void Document::tear_down_layout_tree()
 {
-    auto* arena = layout_arena_handle();
-    auto layout_root = arena ? Layout::RustFFI::layout_arena_row_if_live(arena, layout_root_slot()).slot : Compositing::RustFFI::NodeSlotId_INVALID;
-    bool has_layout_root = layout_root.index != Compositing::RustFFI::INVALID_NODE_SLOT_INDEX;
-    if (has_layout_root)
-        Layout::RustFFI::layout_arena_prepare_subtree_for_detach(arena, layout_root);
     m_hit_test_display_list = nullptr;
     m_chrome_widget_registry->clear();
-    if (has_layout_root)
-        Layout::RustFFI::layout_arena_free_subtree(arena, layout_root);
+    if (auto layout_root = Painting::BoxSlot::of(*this, layout_root_slot()))
+        Layout::RustFFI::layout_arena_drop_subtree(layout_root.arena(), layout_root.slot());
     m_paint_state = nullptr;
     set_needs_full_layout_tree_update(true);
 }

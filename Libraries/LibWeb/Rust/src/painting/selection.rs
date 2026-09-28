@@ -20,6 +20,7 @@ use crate::painting::record::damage::PaintDamage;
 use crate::painting::record::paint::text::{SelectionStyleAnswer, ShadowLayer};
 use crate::painting::text_fragment;
 use libgfx_rust::Color;
+use std::ffi::c_void;
 
 #[derive(Debug)]
 pub(crate) struct SelectionRange {
@@ -323,6 +324,27 @@ fn transform_selection_background_color(color: Color) -> Color {
         alpha += ALPHA_INCREMENT;
     }
     result
+}
+
+/// Tells the render owner that the `::selection` style of the element with `style_node` changed: the owner has the
+/// subtree of its nearest painted ancestor paint again. Nothing waits for it.
+///
+/// # Safety
+///
+/// `arena` must be a live handle on the document thread.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn layout_arena_repaint_after_selection_style_change(arena: *mut c_void, style_node: u32) {
+    let Some(element) = StyleNodeID::from_raw(style_node) else {
+        return;
+    };
+    // SAFETY: Guaranteed by the caller.
+    let document = unsafe { crate::layout::ArenaHandle::document_of(arena) };
+    if document.is_valid() {
+        crate::render_owner::send_arena_change(
+            document,
+            crate::render_owner::ArenaChange::SelectionStyleChanged(element),
+        );
+    }
 }
 
 /// Has the subtree of the nearest painted ancestor of `element` paint again once its `::selection`

@@ -34,10 +34,6 @@ public:
     u64 custom_property_environment() const { return m_read.custom_property_environment; }
     bool is_animation_overlay() const { return m_read.view.animation_overlay_identity != 0; }
 
-    // Whether an identity names an animation overlay's record rather than a base record (ANIMATION_OVERLAY_TAG in
-    // computed.rs), which a holder of the identity alone knows.
-    static constexpr bool identity_is_animation_overlay(StyleRecordID identity) { return identity.value() & (1ull << 63); }
-
 private:
     PublishedStyleRecord(void const* handle, StyleEngineFFI::FfiPublishedStyleRecordRead const& read)
         : m_handle(handle)
