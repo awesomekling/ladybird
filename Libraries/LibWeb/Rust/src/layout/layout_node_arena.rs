@@ -919,8 +919,12 @@ impl RowsByStyleNode {
     }
 }
 
-/// The principal box each pseudo-element is bound to, by its generator's identity and its kind.
-pub(crate) type PseudoElementRows = HashMap<(StyleNodeID, u8), NodeSlotId>;
+/// The principal box each synthetic pseudo-element of an element is bound to, by its kind: `generated_for` 1 at the
+/// first entry.
+pub(crate) type PseudoElementRows = [NodeSlotId; SYNTHETIC_PSEUDO_ELEMENT_GENERATED_FOR_COUNT as usize];
+
+/// How many elements a chunk of the [`BoundRowsByStyleNode`] pseudo-element column holds.
+pub(crate) const PSEUDO_ELEMENT_ROWS_PER_CHUNK: usize = 64;
 
 /// How many identities a chunk of a [`BoundRowsByStyleNode`] column holds.
 pub(crate) const BOUND_ROWS_PER_CHUNK: usize = 256;
@@ -932,6 +936,8 @@ pub(crate) const BOUND_ROWS_PER_CHUNK: usize = 256;
 struct BoundRowsByStyleNode {
     elements: CowColumn<NodeSlotId, BOUND_ROWS_PER_CHUNK>,
     texts: CowColumn<NodeSlotId, BOUND_ROWS_PER_CHUNK>,
+    /// The rows of each element's pseudo-elements, by its element index.
+    pseudo_elements: CowColumn<PseudoElementRows, PSEUDO_ELEMENT_ROWS_PER_CHUNK>,
 }
 
 impl BoundRowsByStyleNode {
@@ -948,16 +954,49 @@ impl BoundRowsByStyleNode {
             Some(index) => (&mut self.elements, index),
             None => (&mut self.texts, style_node.text_index().unwrap()),
         };
-        let index = index as usize;
-        column.grow_to(index + 1);
-        let Some(mut row) = column.row_mut(index) else {
-            debug_assert!(false, "the column holds the row it grew to");
-            // The write goes to a head no row holds.
-            let mut head = NodeSlotId::INVALID;
-            return callback(&mut head);
-        };
-        callback(&mut row)
+        with_grown_row_mut(column, index as usize, callback)
     }
+
+    /// Where the kind `generated_for` of pseudo-element of an element's pseudo-element rows is.
+    fn pseudo_element_entry(generator: StyleNodeID, generated_for: u8) -> Option<(usize, usize)> {
+        let kind = usize::from(generated_for).checked_sub(1)?;
+        let index = generator.element_index()? as usize;
+        (kind < SYNTHETIC_PSEUDO_ELEMENT_GENERATED_FOR_COUNT as usize).then_some((index, kind))
+    }
+
+    fn pseudo_element_head(&self, generator: StyleNodeID, generated_for: u8) -> NodeSlotId {
+        Self::pseudo_element_entry(generator, generated_for)
+            .and_then(|(index, kind)| Some(self.pseudo_elements.get(index)?[kind]))
+            .unwrap_or(NodeSlotId::INVALID)
+    }
+
+    fn with_pseudo_element_head_mut<R>(
+        &mut self,
+        generator: StyleNodeID,
+        generated_for: u8,
+        callback: impl FnOnce(&mut NodeSlotId) -> R,
+    ) -> R {
+        let Some((index, kind)) = Self::pseudo_element_entry(generator, generated_for) else {
+            debug_assert!(false, "only an element's synthetic pseudo-elements are bound to rows");
+            return callback(&mut NodeSlotId::default());
+        };
+        with_grown_row_mut(&mut self.pseudo_elements, index, |rows| callback(&mut rows[kind]))
+    }
+}
+
+/// Runs `callback` on the row at `index` of `column`, growing the column to hold it.
+fn with_grown_row_mut<T: Clone + Default + PartialEq, const CHUNK: usize, R>(
+    column: &mut CowColumn<T, CHUNK>,
+    index: usize,
+    callback: impl FnOnce(&mut T) -> R,
+) -> R {
+    column.grow_to(index + 1);
+    let Some(mut row) = column.row_mut(index) else {
+        debug_assert!(false, "the column holds the row it grew to");
+        // The write goes to a row the column does not hold.
+        return callback(&mut T::default());
+    };
+    callback(&mut row)
 }
 
 /// Where an element sits in the shadow-including tree, as the tree build last saw it: the identity
@@ -1067,7 +1106,6 @@ pub(crate) struct LayoutNodeArena {
     /// The principal box each pseudo-element is bound to, keyed by its generator's identity and its
     /// kind. The generated content inside the box carries the same pair but is never bound. A row
     /// snapshot shares the map, which a write after it copies.
-    bound_pseudo_element_rows: RefCell<Arc<PseudoElementRows>>,
     /// The scroll offset each pseudo-element holds, keyed by its generator's identity and its
     /// kind. A pseudo-element has no identity of its own and its box is replaced whenever its
     /// subtree is rebuilt, so the offset is held against the pair that outlives both, and a newly
@@ -1299,7 +1337,6 @@ impl LayoutNodeArena {
             next_rows_with_same_style_node: Vec::new(),
             first_rows_by_style_node: RefCell::new(RowsByStyleNode::default()),
             bound_rows_by_style_node: RefCell::new(BoundRowsByStyleNode::default()),
-            bound_pseudo_element_rows: RefCell::default(),
             pseudo_element_scroll_offsets: HashMap::default(),
             element_scroll_offsets: HashMap::default(),
             identities_in_focused_text_control: HashSet::default(),
@@ -1916,7 +1953,7 @@ impl LayoutNodeArena {
             styles,
             element_rows: bound_rows.elements.publish(),
             text_rows: bound_rows.texts.publish(),
-            pseudo_element_rows: self.bound_pseudo_element_rows.get_mut().clone(),
+            pseudo_element_rows: bound_rows.pseudo_elements.publish(),
             viewport_row: self.bound_viewport_row.get(),
             paintable,
             paint_facts,
@@ -2104,12 +2141,6 @@ impl LayoutNodeArena {
         marks.set_child_needs(node, false);
     }
 
-    /// Whether any element holds a box for one of its pseudo-elements, which is what says a walk
-    /// over one element's pseudo-element boxes has anything to look at.
-    pub(crate) fn has_pseudo_element_boxes(&self) -> bool {
-        !self.bound_pseudo_element_rows.borrow().is_empty()
-    }
-
     /// The pseudo-element of kind `generated_for` on the element with `generator` gives up the box
     /// it holds, which is what a build does before it decides whether the pseudo-element gets one.
     pub(crate) fn clear_pseudo_element_box(&self, generator: StyleNodeID, generated_for: u8) {
@@ -2131,11 +2162,9 @@ impl LayoutNodeArena {
     /// The row the pseudo-element of kind `generated_for` on the element with `generator` is bound
     /// to, if any.
     pub(crate) fn bound_pseudo_element_row(&self, generator: StyleNodeID, generated_for: u8) -> NodeSlotId {
-        self.bound_pseudo_element_rows
+        self.bound_rows_by_style_node
             .borrow()
-            .get(&(generator, generated_for))
-            .copied()
-            .unwrap_or(NodeSlotId::INVALID)
+            .pseudo_element_head(generator, generated_for)
     }
 
     /// The node a row can be bound to, if any.
@@ -2168,20 +2197,11 @@ impl LayoutNodeArena {
         let style_node = match node {
             BoundNode::Identity(style_node) => style_node,
             BoundNode::PseudoElement(generator, generated_for) => {
-                let mut bound_rows = self.bound_pseudo_element_rows.borrow_mut();
-                let key = (generator, generated_for);
-                let previous = bound_rows.get(&key).copied().unwrap_or(NodeSlotId::INVALID);
-                let mut bound_row = previous;
-                let result = callback(&mut bound_row);
-                if bound_row != previous {
-                    let bound_rows = Arc::make_mut(&mut bound_rows);
-                    if bound_row.is_invalid() {
-                        bound_rows.remove(&key);
-                    } else {
-                        bound_rows.insert(key, bound_row);
-                    }
-                }
-                return result;
+                return self.bound_rows_by_style_node.borrow_mut().with_pseudo_element_head_mut(
+                    generator,
+                    generated_for,
+                    callback,
+                );
             }
             BoundNode::Document => {
                 let mut bound_row = self.bound_viewport_row.get();

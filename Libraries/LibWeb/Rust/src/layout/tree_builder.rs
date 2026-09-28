@@ -525,10 +525,6 @@ fn clear_stale_layout_node(arena: *mut LayoutNodeArena, node: StyleNodeID, clear
 /// Every pseudo-element of the element gives up the box it holds. A text node has none, and no
 /// kind above the synthetic ones is ever bound to a box.
 fn clear_synthetic_pseudo_element_boxes(arena: *mut LayoutNodeArena, node: StyleNodeID) {
-    // SAFETY: The arena outlives every walk over it.
-    if !unsafe { &*arena }.has_pseudo_element_boxes() {
-        return;
-    }
     for generated_for in 1..=crate::layout::node_data::GENERATED_FOR_LAST_SYNTHETIC {
         free_pseudo_element_box(arena, node, generated_for);
     }
@@ -671,12 +667,10 @@ pub unsafe extern "C" fn rust_detach_remaining_layout_rows_for_removal(
     let (rows, mut sent_ahead) = unsafe { super::row_reads::rows_and_sent_ahead(arena) };
     let mut detached = Vec::new();
     for &node in &nodes {
-        if node.element_index().is_some() && rows.has_pseudo_element_rows() {
-            detached.extend(
-                (1..=crate::layout::node_data::GENERATED_FOR_LAST_SYNTHETIC)
-                    .filter_map(|generated_for| rows.bound_pseudo_element_row(node, generated_for)),
-            );
-        }
+        detached.extend(
+            (1..=crate::layout::node_data::GENERATED_FOR_LAST_SYNTHETIC)
+                .filter_map(|generated_for| rows.bound_pseudo_element_row(node, generated_for)),
+        );
         if let Some(row) = rows.bound_row(node) {
             detached.extend(topmost_row_of_top_layer_placement(rows, row));
         }
