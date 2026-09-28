@@ -8,28 +8,14 @@
 </style>
 <div id="flow">flow</div><div id="box"></div>
 <script>
-    // A style change that relayouts the body, which the viewport propagates its overflow, writing mode and direction
-    // from, run in the flight that lays the document out: the flight applies it to the layout nodes itself, and the
-    // relayout is a full one, as the main thread's install would make it.
-    function flightCounts() {
-        const counters = internals.getRenderingSchedulerCounters();
-        let styleFlights = 0;
-        for (const count of Object.values(counters.flightStyleEnds))
-            styleFlights += count;
-        return { styleFlights, applied: counters.flightStyleEnds.applied };
-    }
-
+    // A style change beside a frame in flight that relayouts the body, which the viewport propagates its overflow,
+    // writing mode and direction from: the relayout is a full one.
     asyncTest(async done => {
         await twoFrames();
-        const before = flightCounts();
         await whileFrameInFlight("before-run", () => {
             document.body.className = "narrow";
         }, frame => frame);
         await twoFrames();
-        const after = flightCounts();
-        // Without LIBWEB_FLIGHT_STYLE=1 no flight runs its layout's style.
-        const styleRanInLayoutFlight = after.styleFlights > before.styleFlights;
-        println(`style applied in its flight: ${!styleRanInLayoutFlight || after.applied > before.applied}`);
         println(`body width: ${document.body.offsetWidth}`);
         println(`flow width: ${flow.offsetWidth}`);
         println(`box width: ${box.offsetWidth}`);

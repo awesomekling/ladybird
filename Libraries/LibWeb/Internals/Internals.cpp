@@ -1824,8 +1824,8 @@ GC::Ref<JS::Object> Internals::get_rendering_scheduler_counters() const
     }
     object->define_direct_property("flightPaintSeals"_utf16_fly_string, flight_paint, JS::default_attributes);
     // Flights by why they ended, and by the last stage they ran.
-    static constexpr Array flight_end_reasons { "done"sv, "stageRunsOnMain"sv, "paintNotSealed"sv, "roundLeftWork"sv, "svgPaintResources"sv, "vectorImages"sv, "noViewport"sv, "hostLeftWork"sv, "preempted"sv, "styleNeedsHost"sv };
-    static constexpr Array flight_stages { "style"sv, "styleRenderHalf"sv, "rounds"sv, "paintPrep"sv, "record"sv, "present"sv };
+    static constexpr Array flight_end_reasons { "done"sv, "stageRunsOnMain"sv, "paintNotSealed"sv, "roundLeftWork"sv, "svgPaintResources"sv, "vectorImages"sv, "noViewport"sv, "hostLeftWork"sv, "preempted"sv };
+    static constexpr Array flight_stages { "style"sv, "rounds"sv, "paintPrep"sv, "record"sv, "present"sv };
     auto flight_ends = JS::Object::create(realm, nullptr);
     for (size_t reason = 0; reason < flight_end_reasons.size(); ++reason) {
         auto by_stage = JS::Object::create(realm, nullptr);
@@ -1836,13 +1836,6 @@ GC::Ref<JS::Object> Internals::get_rendering_scheduler_counters() const
         flight_ends->define_direct_property(Utf16FlyString::from_utf8(flight_end_reasons[reason]), by_stage, JS::default_attributes);
     }
     object->define_direct_property("flightEnds"_utf16_fly_string, flight_ends, JS::default_attributes);
-    // Flights that ran their layout's style: whether they applied its batch themselves, or why they left it to the main
-    // thread.
-    static constexpr Array flight_style_ends { "applied"sv, "noBatch"sv, "row"sv, "firstStyle"sv, "damage"sv, "rebuild"sv, "descendants"sv, "animation"sv, "customProperties"sv, "resources"sv, "layoutNode"sv, "staleLayoutNode"sv };
-    auto flight_style_ends_object = JS::Object::create(realm, nullptr);
-    for (size_t end = 0; end < flight_style_ends.size(); ++end)
-        flight_style_ends_object->define_direct_property(Utf16FlyString::from_utf8(flight_style_ends[end]), JS::Value(Layout::RustFFI::rust_flight_style_ends(static_cast<i32>(end) - 1)), JS::default_attributes);
-    object->define_direct_property("flightStyleEnds"_utf16_fly_string, flight_style_ends_object, JS::default_attributes);
     object->define_direct_property("frameCompletionsPosted"_utf16_fly_string, JS::Value(HTML::FrameCompletion::the().posted_count()), JS::default_attributes);
     object->define_direct_property("frameCompletionsDelivered"_utf16_fly_string, JS::Value(HTML::FrameCompletion::the().delivered_count()), JS::default_attributes);
 

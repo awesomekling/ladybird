@@ -305,11 +305,7 @@ bool FrameScheduler::pass_in_flight_records() const
 {
     if (!awaits_pass() || m_ticket->submitted_pass->kind != FrameTicket::SubmittedPass::Kind::Flight)
         return false;
-    if (!m_ticket->submitted_pass->sealed_flight_paint)
-        return false;
-    // A flight that runs the style of its layout records only if it applies that style itself; otherwise the rendering
-    // update lays out after it, and records then.
-    return !CSS::style_update_submitted_in_layout_flight() || Layout::RustFFI::rust_flight_applies_its_style();
+    return m_ticket->submitted_pass->sealed_flight_paint != nullptr;
 }
 
 bool FrameScheduler::pass_in_flight_holds(DOM::Document const& document) const
@@ -515,7 +511,6 @@ void FrameScheduler::resume_rendering_update_after_flight(FrameTicket::Submitted
     auto reached = flight.flight_outcome->reached;
     switch (reached) {
     case FfiFlightStage::Style:
-    case FfiFlightStage::StyleRenderHalf:
         m_event_loop.resume_rendering_update_after_style({}, flight.documents, flight.document_index, flight.frame_timestamp);
         return;
     // NB: A flight that recorded this rendering update's frame, and whose recording did not stand or whose presented

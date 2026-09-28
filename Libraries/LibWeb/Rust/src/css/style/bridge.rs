@@ -7054,8 +7054,6 @@ fn apply_render_half_on_owner(
         return None;
     }
     arena.apply_flight_style_rows(&rows).ok()?;
-    // No flight reads whether one applied a batch: the host's render half ends with the update.
-    arena.take_flight_style_applied();
     let mut effects = OwnerRenderHalfEffects {
         moved_visual_contexts: false,
         repaint: 0,
@@ -7108,16 +7106,6 @@ pub unsafe extern "C" fn style_engine_submit_style_transaction(
     // SAFETY: Guaranteed by the caller.
     let pass = unsafe { prepare_style_pass(engine, root, computation_inputs, layout_arena, input, install_feedback) };
     let engine = engine.home();
-    // A layout frame that runs its first round's style in its flight takes the pass along instead.
-    let Some(pass) = STYLE_PASS_FOR_FLIGHT.with(|collected| match collected.borrow_mut().as_mut() {
-        Some(slot) => {
-            *slot = Some(pass);
-            None
-        }
-        None => Some(pass),
-    }) else {
-        return;
-    };
     if crate::stage_thread::submits_flight() {
         // SAFETY: As above.
         unsafe { crate::flight::submit(layout_arena, crate::flight::Flight::from_style_pass(layout_arena, pass)) };
@@ -7137,27 +7125,6 @@ pub unsafe extern "C" fn style_engine_submit_style_transaction(
             move || settlement.settle(),
         );
     }
-}
-
-thread_local! {
-    // On the main thread, from the point the style pass a layout frame's flight is to run is
-    // submitted for it until the frame's first round takes it: the pass, once submitted.
-    static STYLE_PASS_FOR_FLIGHT: std::cell::RefCell<Option<Option<StylePassJob>>> =
-        const { std::cell::RefCell::new(None) };
-}
-
-/// Collects the style pass the main thread submits next, unless the document has no style to
-/// update, for a layout frame's flight to run.
-pub(crate) fn collect_next_style_pass_for_flight() {
-    STYLE_PASS_FOR_FLIGHT.with(|collected| {
-        let previous = collected.borrow_mut().replace(None);
-        debug_assert!(previous.is_none(), "one style pass is collected at a time");
-    });
-}
-
-/// The style pass collected for a layout frame's flight, if the main thread submitted one.
-pub(crate) fn take_style_pass_collected_for_flight() -> Option<StylePassJob> {
-    STYLE_PASS_FOR_FLIGHT.with(|collected| collected.borrow_mut().take().flatten())
 }
 
 /// A style pass the main thread has prepared to run beside it, with what it takes along from the

@@ -1002,11 +1002,6 @@ static void reuse_journal_buffer(Buffer& member, Buffer& buffer)
 
 void StyleEngine::submit_recorded_input(RecordedInputGoesTo goes_to)
 {
-    // A layout flight that ran a style pass installs the pass's batch as it is taken back: whoever submits the recorded
-    // input goes on to ask the engine about it, so the flight is taken back first, and the recorded input goes in after
-    // its batch.
-    if (m_published_batch_waits && m_style_computer && style_update_submitted_in_layout_flight())
-        m_style_computer->document().join_frame_in_flight();
     // The recorded input is the next transaction's journal. While a pass is in flight it stays there.
     if (pass_is_in_flight() || m_holds_input_recorded_beside_pass)
         return;

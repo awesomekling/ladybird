@@ -7,25 +7,10 @@
 </style>
 <div id="container"><div id="box">box</div><div id="other">other</div></div>
 <script>
-    // A rendering update whose style changes leave the layout tree as it is runs its style pass, its layout and its
-    // recording in one flight: the flight applies what the style pass published to the layout nodes itself, and the
-    // main thread installs it on the elements as it takes the flight back. A selector query beside the flight's
-    // recording takes the flight back first, so it sees what a write beside the flight changed.
-    function flightCounts() {
-        const counters = internals.getRenderingSchedulerCounters();
-        let flights = 0;
-        for (const stages of Object.values(counters.flightEnds))
-            for (const count of Object.values(stages))
-                flights += count;
-        let styleFlights = 0;
-        for (const count of Object.values(counters.flightStyleEnds))
-            styleFlights += count;
-        return { flights, styleFlights, applied: counters.flightStyleEnds.applied };
-    }
-
+    // A selector query beside a frame in flight that runs a rendering update's style and layout sees what a write beside
+    // the frame changed.
     asyncTest(async done => {
         await twoFrames();
-        const before = flightCounts();
         const result = await whileFrameInFlight("before-run", () => {
             box.className = "wide";
         }, frame => {
@@ -34,11 +19,7 @@
             return { ...frame, queried: queried ? queried.id : "nothing" };
         });
         await twoFrames();
-        const after = flightCounts();
         println(`held as armed: ${heldAsArmed(result, "before-run")}`);
-        // Without LIBWEB_FLIGHT_STYLE=1 no flight runs its layout's style, and the style runs in a flight of its own.
-        const styleRanInLayoutFlight = after.styleFlights > before.styleFlights;
-        println(`style applied in its flight: ${after.flights === before.flights || !styleRanInLayoutFlight || after.applied > before.applied}`);
         println(`query found: ${result.queried}`);
         println(`box width: ${box.offsetWidth}`);
         println(`box color: ${getComputedStyle(box).color}`);

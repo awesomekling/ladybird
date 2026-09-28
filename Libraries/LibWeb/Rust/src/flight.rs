@@ -15,7 +15,6 @@
 use crate::css::style::StyleEngineHandle;
 use crate::css::style::bridge::StylePassJob;
 use crate::css::style::engine_home::{Holder, Owed, StyleEngineLoan, StyleEngineSettlement};
-use crate::css::style::flight_style_rows::{FLIGHT_STYLE_DECLINE_COUNT, FfiFlightStyleDecline};
 use crate::layout::update_layout::{LayoutPassJob, LayoutPassTakeBack};
 use crate::render_owner::{FrameEffects, RenderingUpdate};
 use std::cell::Cell;
@@ -27,8 +26,6 @@ use std::ffi::c_void;
 pub enum FfiFlightStage {
     /// The style pass.
     Style,
-    /// The render half of the style pass's drain.
-    StyleRenderHalf,
     /// The layout rounds.
     Rounds,
     /// The paint preparation of the recording.
@@ -64,12 +61,9 @@ pub enum FfiFlightEndReason {
     HostLeftWork,
     /// A forced join waited for it, and it stopped at the end of the stage it ran.
     Preempted,
-    /// Its style pass published a batch whose install on the document thread reaches what its
-    /// layout reads: the document thread installs it and lays out after it.
-    StyleNeedsHost,
 }
 
-const FLIGHT_END_REASON_COUNT: usize = FfiFlightEndReason::StyleNeedsHost as usize + 1;
+const FLIGHT_END_REASON_COUNT: usize = FfiFlightEndReason::Preempted as usize + 1;
 
 impl From<crate::painting::ffi::FlightPaintStop> for FfiFlightEndReason {
     fn from(stop: crate::painting::ffi::FlightPaintStop) -> Self {
@@ -108,8 +102,6 @@ pub(crate) struct Flight {
     began: FfiFlightStage,
     arena: usize,
     style: Option<StylePassJob>,
-    /// The elements the viewport propagates from, a relayout of which is not a partial one.
-    viewport_propagation_sources: Vec<crate::css::style::tree::StyleNodeID>,
     layout: Option<LayoutPassJob>,
     paint: Option<crate::painting::ffi::FlightPaintSeal>,
 }
@@ -118,9 +110,6 @@ pub(crate) struct Flight {
 #[derive(Default)]
 pub(crate) struct FlightRan {
     paint: Option<crate::painting::ffi::FlightPaintProducts>,
-    /// For a flight that ran its layout's style: whether it applied the style's batch to the arena
-    /// itself, or why it left it to the document thread.
-    style: Option<Result<(), FfiFlightStyleDecline>>,
 }
 
 /// What the main thread runs as it takes a flight back, for the stages the flight ran.
@@ -134,7 +123,6 @@ impl Flight {
         Self {
             began: FfiFlightStage::Style,
             arena: arena as usize,
-            viewport_propagation_sources: Vec::new(),
             style: Some(style),
             layout: None,
             paint: None,
@@ -148,29 +136,6 @@ impl Flight {
             began: FfiFlightStage::Rounds,
             arena: arena as usize,
             style: None,
-            viewport_propagation_sources: Vec::new(),
-            layout: Some(layout),
-            paint: crate::painting::ffi::take_sealed_flight_paint(arena),
-        }
-    }
-
-    /// A flight that runs the style pass `style` of a layout frame's first round, applies the
-    /// batch it publishes to the arena itself where the document thread's install of it would
-    /// reach nothing the round reads, and goes on with the rest of the round `layout` has readied,
-    /// and from there as a flight from the layout pass does. Where the batch's install reaches
-    /// what the round reads, the flight ends after the pass, and the document thread installs the
-    /// batch and lays out after it.
-    pub(crate) fn from_style_and_layout_pass(
-        arena: *mut c_void,
-        style: StylePassJob,
-        layout: LayoutPassJob,
-        viewport_propagation_sources: Vec<crate::css::style::tree::StyleNodeID>,
-    ) -> Self {
-        Self {
-            began: FfiFlightStage::Style,
-            arena: arena as usize,
-            viewport_propagation_sources,
-            style: Some(style),
             layout: Some(layout),
             paint: crate::painting::ffi::take_sealed_flight_paint(arena),
         }
@@ -178,25 +143,16 @@ impl Flight {
 
     /// The stages of the flight a test's hold may name.
     fn stage_holds(&self) -> &'static [&'static str] {
-        match (self.began, self.layout.is_some(), self.paint.is_some()) {
-            (FfiFlightStage::Style, true, true) => &[
-                "flight:style",
+        match (self.layout.is_some(), self.paint.is_some()) {
+            (false, _) => &["flight:style"],
+            (true, true) => &[
                 "flight:layout",
                 "flight:laid-out",
                 "flight:record",
                 "flight:recorded",
                 "flight:present",
             ],
-            (FfiFlightStage::Style, true, false) => &["flight:style", "flight:layout", "flight:laid-out"],
-            (FfiFlightStage::Style, false, _) => &["flight:style"],
-            (_, _, true) => &[
-                "flight:layout",
-                "flight:laid-out",
-                "flight:record",
-                "flight:recorded",
-                "flight:present",
-            ],
-            (_, _, false) => &["flight:layout", "flight:laid-out"],
+            (true, false) => &["flight:layout", "flight:laid-out"],
         }
     }
 
@@ -213,10 +169,9 @@ impl Flight {
         if style_engine.is_null() {
             return None;
         }
-        Some(match (self.layout.is_some(), self.began) {
-            (true, FfiFlightStage::Style) => style_engine.lend(Holder::LayoutPass, Owed::Install),
-            (true, _) => style_engine.lend(Holder::LayoutPass, Owed::Nothing),
-            (false, _) => style_engine.lend(Holder::StylePass, Owed::TakeBack),
+        Some(match self.layout.is_some() {
+            true => style_engine.lend(Holder::LayoutPass, Owed::Nothing),
+            false => style_engine.lend(Holder::StylePass, Owed::TakeBack),
         })
     }
 
@@ -270,8 +225,9 @@ impl Flight {
                             .expect("a flight that runs a style pass holds its engine's token"),
                     );
                     reached = FfiFlightStage::Style;
-                    next = FfiFlightStage::StyleRenderHalf;
-                    None
+                    // A flight that begins with style runs nothing after it: the rendering update lays out once it
+                    // has taken the flight back.
+                    Some(FfiFlightEndReason::StageRunsOnMain)
                 }
                 FfiFlightStage::Rounds => {
                     crate::stage_thread::hold_before_flight_stage("flight:layout");
@@ -287,13 +243,11 @@ impl Flight {
                     // What the flight runs after its layout reads nothing of the style engine, so
                     // it sends the engine home. The main thread's writes may go on beside it only if
                     // what the round owes the document thread reaches no node they could change: no
-                    // tree build or image to pay for, no rebuild to ask for. A flight that ran the
-                    // round's style still owes the document thread the install of the batch it
-                    // published, which lets only reads of the records go on.
-                    let owed = match (round.may_be_presented, self.began) {
-                        (false, _) => Owed::TakeBack,
-                        (true, FfiFlightStage::Style) => Owed::Install,
-                        (true, _) => Owed::Nothing,
+                    // tree build or image to pay for, no rebuild to ask for.
+                    let owed = if round.may_be_presented {
+                        Owed::Nothing
+                    } else {
+                        Owed::TakeBack
                     };
                     if let Some(style_engine) = style_engine.take() {
                         style_engine.send_home(owed);
@@ -346,52 +300,7 @@ impl Flight {
                     reached = FfiFlightStage::Present;
                     Some(FfiFlightEndReason::Done)
                 }
-                FfiFlightStage::StyleRenderHalf if self.layout.is_some() => {
-                    let applied = if recalled {
-                        None
-                    } else {
-                        let style_engine = style_engine
-                            .as_mut()
-                            .expect("a flight that runs a style pass holds its engine's token");
-                        // SAFETY: The frame in flight owns the arena, and the pass has run.
-                        Some(
-                            style_engine
-                                .lend_to_this_thread(|engine| unsafe { self.apply_style_render_half(engine, state) }),
-                        )
-                    };
-                    let applied_it = applied == Some(Ok(()));
-                    FLIGHT_STYLE_DECISION.store(
-                        if applied_it {
-                            STYLE_DECIDED_APPLIED
-                        } else {
-                            STYLE_DECIDED_LEFT_TO_HOST
-                        },
-                        std::sync::atomic::Ordering::Release,
-                    );
-                    if let Some(applied) = applied {
-                        ran.style = Some(applied);
-                    }
-                    if applied_it {
-                        let layout = self.layout.as_mut().expect("a flight that lays out has its pass");
-                        let style_engine = style_engine
-                            .as_mut()
-                            .expect("a flight that runs a style pass holds its engine's token");
-                        // SAFETY: As above.
-                        style_engine.lend_to_this_thread(|_| unsafe { layout.ready_after_style_in_flight() });
-                        reached = FfiFlightStage::StyleRenderHalf;
-                        next = FfiFlightStage::Rounds;
-                        None
-                    } else {
-                        // The document thread installs the batch, and ends the frame the round
-                        // readied, which lays out ahead of what it installs.
-                        self.layout.take().expect("a flight that lays out has its pass").park();
-                        Some(match applied {
-                            None => FfiFlightEndReason::Preempted,
-                            Some(_) => FfiFlightEndReason::StyleNeedsHost,
-                        })
-                    }
-                }
-                FfiFlightStage::StyleRenderHalf | FfiFlightStage::Record => Some(FfiFlightEndReason::StageRunsOnMain),
+                FfiFlightStage::Record => Some(FfiFlightEndReason::StageRunsOnMain),
             };
             if let Some(end) = end {
                 // A style pass alone does not own the arena, which the main thread goes on writing beside it.
@@ -408,33 +317,6 @@ impl Flight {
                 return (FfiFlightOutcome { began, reached, end }, ran);
             }
         }
-    }
-}
-
-impl Flight {
-    /// Applies the batch the flight's style pass published to the arena, ahead of the document
-    /// thread's install of it, if that install reaches nothing the rest of the round reads.
-    ///
-    /// # Safety
-    ///
-    /// The frame in flight owns the arena of the render state `state`, and the pass has run in
-    /// `engine`.
-    unsafe fn apply_style_render_half(
-        &self,
-        engine: &crate::css::style::StyleEngine,
-        state: *mut crate::layout::ArenaHandle,
-    ) -> Result<(), FfiFlightStyleDecline> {
-        if !self
-            .layout
-            .as_ref()
-            .is_some_and(LayoutPassJob::lays_out_the_tree_it_has)
-        {
-            return Err(FfiFlightStyleDecline::Rebuild);
-        }
-        let rows = engine.rows_a_flight_applies(&self.viewport_propagation_sources)?;
-        // SAFETY: Guaranteed by the caller.
-        let arena = unsafe { &*state }.arena();
-        arena.apply_flight_style_rows(&rows)
     }
 }
 
@@ -474,36 +356,6 @@ thread_local! {
     // On the main thread, how many flights ended where, by end reason and by the last stage they ran.
     static FLIGHT_ENDS: Cell<[[u64; FLIGHT_STAGE_COUNT]; FLIGHT_END_REASON_COUNT]> =
         const { Cell::new([[0; FLIGHT_STAGE_COUNT]; FLIGHT_END_REASON_COUNT]) };
-    // On the main thread, how many flights that ran their layout's style applied its batch
-    // themselves (the first count), and how many left it to the document thread, by why.
-    static FLIGHT_STYLE_ENDS: Cell<[u64; FLIGHT_STYLE_DECLINE_COUNT + 1]> =
-        const { Cell::new([0; FLIGHT_STYLE_DECLINE_COUNT + 1]) };
-}
-
-// What the flight in flight that runs its layout's style decided about the batch its style pass
-// published: nothing yet, applied in the flight, or left to the document thread.
-const STYLE_UNDECIDED: u8 = 0;
-const STYLE_DECIDED_APPLIED: u8 = 1;
-const STYLE_DECIDED_LEFT_TO_HOST: u8 = 2;
-static FLIGHT_STYLE_DECISION: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(STYLE_UNDECIDED);
-
-/// Whether the flight in flight that runs its layout's style applies the batch its style pass
-/// published itself, and so goes on to lay out and record. Waits (bounded) for the flight to decide,
-/// unless a test holds it before it does.
-#[unsafe(no_mangle)]
-pub extern "C" fn rust_flight_applies_its_style() -> bool {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    loop {
-        match FLIGHT_STYLE_DECISION.load(std::sync::atomic::Ordering::Acquire) {
-            STYLE_DECIDED_APPLIED => return true,
-            STYLE_DECIDED_LEFT_TO_HOST => return false,
-            _ => {}
-        }
-        if crate::stage_thread::stage_thread_holds_a_run() || std::time::Instant::now() >= deadline {
-            return false;
-        }
-        std::thread::sleep(std::time::Duration::from_micros(100));
-    }
 }
 
 /// Submits `flight` for the document whose arena is `arena`.
@@ -523,7 +375,6 @@ pub(crate) unsafe fn submit(arena: *mut c_void, flight: Flight) {
     let began = flight.began;
     // SAFETY: Guaranteed by the caller.
     let document = unsafe { crate::layout::ArenaHandle::document_of(arena) };
-    FLIGHT_STYLE_DECISION.store(STYLE_UNDECIDED, std::sync::atomic::Ordering::Release);
     // SAFETY: Guaranteed by the caller.
     unsafe {
         crate::stage_thread::submit_rendering_update(
@@ -552,13 +403,6 @@ pub(crate) unsafe fn submit(arena: *mut c_void, flight: Flight) {
                     crate::stage_thread::FrameOwns::into_inner,
                 );
                 take_back.finish(&mut outcome);
-                if let Some(style) = ran.style {
-                    FLIGHT_STYLE_ENDS.with(|ends| {
-                        let mut counts = ends.get();
-                        counts[style.err().map_or(0, |decline| decline as usize + 1)] += 1;
-                        ends.set(counts);
-                    });
-                }
                 FLIGHT_ENDS.with(|ends| {
                     let mut counts = ends.get();
                     counts[outcome.end as usize][outcome.reached as usize] += 1;
@@ -618,17 +462,8 @@ pub extern "C" fn rust_flight_ends(reason: FfiFlightEndReason, reached: FfiFligh
     FLIGHT_ENDS.with(|ends| ends.get()[reason as usize][reached as usize])
 }
 
-/// How many flights that ran their layout's style the main thread took back that applied its batch
-/// themselves (`decline` below zero), or left it to the document thread for `decline`.
-#[unsafe(no_mangle)]
-pub extern "C" fn rust_flight_style_ends(decline: i32) -> u64 {
-    let index = usize::try_from(decline + 1).unwrap_or(0);
-    FLIGHT_STYLE_ENDS.with(|ends| ends.get().get(index).copied().unwrap_or(0))
-}
-
 /// Forgets how the calling thread's flights ended so far.
 #[unsafe(no_mangle)]
 pub extern "C" fn rust_reset_flight_ends() {
     FLIGHT_ENDS.with(|ends| ends.set([[0; FLIGHT_STAGE_COUNT]; FLIGHT_END_REASON_COUNT]));
-    FLIGHT_STYLE_ENDS.with(|ends| ends.set([0; FLIGHT_STYLE_DECLINE_COUNT + 1]));
 }

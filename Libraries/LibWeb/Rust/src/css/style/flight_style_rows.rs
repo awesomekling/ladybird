@@ -36,12 +36,9 @@ pub(crate) struct FlightStyleRow {
     pub(crate) viewport_propagation_source: bool,
 }
 
-/// Why a flight leaves a style pass's batch to the host.
-#[repr(u8)]
+/// Why the owner leaves a style transaction's batch to the host.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FfiFlightStyleDecline {
-    /// The pass published nothing for the flight to read.
-    NoBatch,
     /// A row is a pseudo-element's, or one the host settles in a way of its own.
     Row,
     /// A row is an element's first style.
@@ -64,22 +61,7 @@ pub enum FfiFlightStyleDecline {
     StaleLayoutNode,
 }
 
-pub(crate) const FLIGHT_STYLE_DECLINE_COUNT: usize = FfiFlightStyleDecline::StaleLayoutNode as usize + 1;
-
 impl StyleEngine {
-    /// The rows of the batch the submitted style pass left that a flight applies to the layout
-    /// nodes itself, or why it leaves the batch to the host. `viewport_propagation_sources` names
-    /// the elements the viewport propagates from.
-    pub(crate) fn rows_a_flight_applies(
-        &self,
-        viewport_propagation_sources: &[StyleNodeID],
-    ) -> Result<Vec<FlightStyleRow>, FfiFlightStyleDecline> {
-        let Some((_, output)) = self.host.submitted_style_pass_output.as_ref() else {
-            return Err(FfiFlightStyleDecline::NoBatch);
-        };
-        self.rows_applied_ahead_of_host(output.answers(), viewport_propagation_sources)
-    }
-
     /// The rows of the batch the style transaction the render owner took left, which the owner
     /// applies to the layout nodes itself as the transaction ends, as a flight does for its pass,
     /// or why it leaves the batch to the host.

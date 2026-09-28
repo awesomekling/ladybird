@@ -77,12 +77,9 @@ RENDER_STAGE_ALLOWED = {
             "clock_frames.rs:ADOPTING",
             "flight.rs:TAKEN_BACK_OUTCOME",
             "flight.rs:FLIGHT_ENDS",
-            "flight.rs:FLIGHT_STYLE_ENDS",
-            "css/style/bridge.rs:STYLE_PASS_FOR_FLIGHT",
         ],
     ),
     **render_stage_entries(PRESENTED_COUNTER, ["clock_frames.rs:CLOCK_TICKS_PRESENTED"]),
-    **render_stage_entries(STAGE_THREAD, ["flight.rs:FLIGHT_STYLE_DECISION"]),
     **render_stage_entries(SUBMITTED_COUNT, ["stage_thread.rs:SUBMITTED_STAGES"]),
     **render_stage_entries(
         STYLE_ENGINE_TOKEN,

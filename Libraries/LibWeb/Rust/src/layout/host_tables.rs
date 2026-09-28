@@ -30,7 +30,7 @@ pub(crate) struct HostTables {
     pub(super) layout_update_host: Cell<Option<LayoutUpdateHost>>,
     /// The flight the document's layout update readied, until the document has sealed what its
     /// recording reads and submits it.
-    pub(super) prepared_flight: RefCell<Option<super::update_layout::PreparedFlight>>,
+    pub(super) prepared_flight: RefCell<Option<super::update_layout::LayoutPassJob>>,
     pub(super) box_presence_host: Cell<Option<BoxPresenceHost>>,
     pub(crate) geometry_host: Cell<Option<GeometryHostCallbacks>>,
     pub(crate) chrome_state_callback: Cell<Option<ChromeStateCallback>>,

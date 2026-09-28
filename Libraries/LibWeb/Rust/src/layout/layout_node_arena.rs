@@ -1052,8 +1052,6 @@ pub(crate) struct LayoutNodeArena {
     /// take theirs from: the host pays it ahead of installing the batch, which reads what it hands
     /// back. `None` unless a flight applied a batch whose host half is not paid yet.
     flight_style_handbacks: RefCell<Option<HostHandbacks>>,
-    /// Whether a flight applied a style batch whose repaint the end of its frame settles.
-    flight_style_applied: Cell<bool>,
     /// The StyleNodeID of the element or text node each row is bound to, or of the element it is
     /// generated for. Rows carrying one
     /// identity are chained through `next_rows_with_same_style_node` from
@@ -1297,7 +1295,6 @@ impl LayoutNodeArena {
             leftover_payment: RefCell::new(HostPayment::nothing()),
             flight_style_damages: RefCell::new(HashMap::default()),
             flight_style_handbacks: RefCell::new(None),
-            flight_style_applied: Cell::new(false),
             style_nodes: Vec::new(),
             next_rows_with_same_style_node: Vec::new(),
             first_rows_by_style_node: RefCell::new(RowsByStyleNode::default()),
@@ -2387,7 +2384,6 @@ impl LayoutNodeArena {
             }
         }
         self.open_host_handback_span();
-        self.flight_style_applied.set(true);
         for row in rows {
             let marks = layout_node_marks(row.damage);
             // Only a full layout pass propagates the viewport's overflow, writing mode and
@@ -2536,11 +2532,6 @@ impl LayoutNodeArena {
         if let Some(kind) = visual_context {
             self.note_visual_context_box_dirty(slot, kind);
         }
-    }
-
-    /// Whether a flight applied a style batch since this was asked last.
-    pub(crate) fn take_flight_style_applied(&self) -> bool {
-        self.flight_style_applied.replace(false)
     }
 
     /// Takes what each row of the style batch a flight applied marked of its element's layout nodes,
