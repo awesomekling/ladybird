@@ -172,10 +172,30 @@ impl ArenaChange {
     }
 }
 
+/// The right to act as the render owner: to run units over the render states it owns, and reach the style engines
+/// they link. Only the thread that handles the owner's messages, and so holds its render states, has one, for as long
+/// as it handles one; it cannot leave that thread.
+pub(crate) struct Owner(std::marker::PhantomData<*const ()>);
+
+impl Owner {
+    /// The owner, on the thread that handles its messages or holds the render state of the document at hand: the
+    /// Rendering thread, the thread the messages are handled on where there is none, or a document thread that does
+    /// the owner's work itself where a test holds the owner's run.
+    fn here() -> Self {
+        Self(std::marker::PhantomData)
+    }
+}
+
+/// Runs `op` as the owner, on a thread that waits for the owner and does the owner's work itself where the owner
+/// cannot: see [`crate::stage_thread::wait_for_owner`].
+pub(crate) fn do_owner_work_here<R>(op: impl FnOnce(&Owner) -> R) -> R {
+    op(&Owner::here())
+}
+
 /// How a unit that applies a document's changes reaches its style engine.
 enum EngineReach<'a> {
-    /// The main thread waits for the unit, with the engine home.
-    Home,
+    /// As the owner.
+    Owner(&'a Owner),
     /// The unit runs beside the main thread, which lent it the engine.
     Lent(&'a mut crate::css::style::engine_home::StyleEngineLoan),
 }
@@ -187,8 +207,8 @@ impl EngineReach<'_> {
         run: impl FnOnce(&mut crate::css::style::StyleEngine) -> T,
     ) -> T {
         match self {
-            // SAFETY: The engine is the document's, and the main thread waits for the unit with the engine home.
-            Self::Home => unsafe { engine.reach_on_owner(run) },
+            // SAFETY: The engine is the document's, which the arena that links it keeps alive.
+            Self::Owner(owner) => unsafe { engine.reach_on_owner(owner, run) },
             Self::Lent(loan) => loan.lend_to_this_thread(run),
         }
     }
@@ -265,8 +285,8 @@ impl RenderState {
     }
 
     /// Answers `query` from the state as the units before it left it.
-    fn answer(&mut self, query: Query) -> Answer {
-        self.apply_changes(EngineReach::Home);
+    fn answer(&mut self, owner: &Owner, query: Query) -> Answer {
+        self.apply_changes(EngineReach::Owner(owner));
         match query {
             Query::Engine(query) => {
                 let engine = self.style_engine();
@@ -283,10 +303,10 @@ impl RenderState {
                 ) as u64);
                 // SAFETY: The engine is the document's, and the document thread waits for the answer, keeping what
                 // the query borrows live.
-                unsafe { engine.reach_on_owner(|engine| query.answer(engine)) };
+                unsafe { engine.reach_on_owner(owner, |engine| query.answer(engine)) };
                 Answer::Engine(EngineAnswered::Answered)
             }
-            _ => Answer::of_state_reaching_engine(query, &mut self.arena),
+            _ => Answer::of_state_reaching_engine(owner, query, &mut self.arena),
         }
     }
 
@@ -296,9 +316,9 @@ impl RenderState {
         self.arena.arena().style_engine_handle()
     }
 
-    /// The state's arena and what lives beside it, which the owner hands the units the main thread waits for.
-    fn state(&mut self) -> *mut ArenaHandle {
-        self.apply_changes(EngineReach::Home);
+    /// The state's arena and what lives beside it, which the owner hands its units.
+    fn state(&mut self, owner: &Owner) -> *mut ArenaHandle {
+        self.apply_changes(EngineReach::Owner(owner));
         std::ptr::from_mut::<ArenaHandle>(&mut self.arena)
     }
 
@@ -306,12 +326,13 @@ impl RenderState {
     /// style engine lent to it as `style_engine`.
     fn state_beside_main_thread(
         &mut self,
+        owner: &Owner,
         style_engine: Option<&mut crate::css::style::engine_home::StyleEngineLoan>,
     ) -> *mut ArenaHandle {
         match style_engine {
             Some(loan) => self.apply_changes(EngineReach::Lent(loan)),
             // Only an update of a document with no engine is lent none, and its changes reach no engine.
-            None if self.style_engine().is_null() => self.apply_changes(EngineReach::Home),
+            None if self.style_engine().is_null() => self.apply_changes(EngineReach::Owner(owner)),
             // The changes wait for the next unit the main thread waits for.
             None => debug_assert!(false, "a rendering update is lent its document's style engine"),
         }
@@ -619,13 +640,13 @@ impl Answer {
     /// Answers `query` from `state` as [`Self::of_state`] does, with the document's style engine lent to the calling
     /// thread, as a question may read the engine (the source of a text's rendered text, the counter styles of generated
     /// content). The document thread waits for the answer.
-    fn of_state_reaching_engine(query: Query, state: &mut ArenaHandle) -> Self {
+    fn of_state_reaching_engine(owner: &Owner, query: Query, state: &mut ArenaHandle) -> Self {
         let engine = state.arena().style_engine_handle();
         if engine.is_null() {
             return Self::of_state(query, state);
         }
-        // SAFETY: The engine is the document's, and the document thread waits for the answer.
-        unsafe { engine.reach_on_owner(|_| Self::of_state(query, state)) }
+        // SAFETY: The engine is the document's, which the arena that links it keeps alive.
+        unsafe { engine.reach_on_owner(owner, |_| Self::of_state(query, state)) }
     }
 
     /// Answers `query` from the arena of `state` and the layout scratch beside it, which it readies first, or makes
@@ -888,12 +909,13 @@ thread_local! {
 /// Handles `message`, on the owner thread. A panic in handling it ends that message, not the owner: a document thread
 /// that waits for an answer gets it as its answer.
 pub(crate) fn handle(message: ToOwner) {
-    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handle_message(message))).is_err() {
+    let owner = Owner::here();
+    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handle_message(&owner, message))).is_err() {
         debug_assert!(false, "the render owner panicked handling a message");
     }
 }
 
-fn handle_message(message: ToOwner) {
+fn handle_message(owner: &Owner, message: ToOwner) {
     match message {
         ToOwner::Create { document, arena } => {
             let state = RenderState {
@@ -932,7 +954,7 @@ fn handle_message(message: ToOwner) {
             let state = STATES.with_borrow_mut(|states| {
                 states
                     .get_mut(&document)
-                    .map(|state| state.state_beside_main_thread(update.style_engine.as_mut()))
+                    .map(|state| state.state_beside_main_thread(owner, update.style_engine.as_mut()))
             });
             ticket.run(|| update.run(state));
         }
@@ -940,18 +962,18 @@ fn handle_message(message: ToOwner) {
             document,
             transaction,
             reply,
-        } => reply.answer(|| run_style_on_owner(document, transaction)),
+        } => reply.answer(|| run_style_on_owner(owner, document, transaction)),
         ToOwner::Layout { document, job } => {
             // The state's borrow ends before the job runs, which may reach another document's state. The job finds
             // the arena inside its answer, so that a panic there answers the waiting document thread.
-            (*job).run(|| with_state(document, RenderState::state));
+            (*job).run(owner, || with_state(document, |state| state.state(owner)));
         }
         ToOwner::Paint { document, pass } => {
             // As for a layout unit, the pass finds the arena inside its answer.
-            (*pass).run(|| with_state(document, RenderState::state));
+            (*pass).run(|| with_state(document, |state| state.state(owner)));
         }
         ToOwner::Ask { document, query, reply } => reply.answer(|| {
-            with_state(document, |state| state.answer(query)).unwrap_or_else(|| Answer::left_to_host(query))
+            with_state(document, |state| state.answer(owner, query)).unwrap_or_else(|| Answer::left_to_host(query))
         }),
         ToOwner::Recall { document } => {
             // A rendering update the owner deferred ends at its first unit. The update was sent before the recall, so
@@ -967,7 +989,7 @@ fn handle_message(message: ToOwner) {
                 state.retire();
             }
         }
-        ToOwner::Clock(message) => crate::clock_frames::handle_on_owner(message),
+        ToOwner::Clock(message) => crate::clock_frames::handle_on_owner(owner, message),
     }
 }
 
@@ -1005,11 +1027,12 @@ pub(crate) fn with_clock_slot<R>(
 /// On the owner thread: runs `operation` on the clock slot of `document`'s render state, with the arena it ticks, which
 /// the render state keeps alive.
 pub(crate) fn with_clock<R>(
+    owner: &Owner,
     document: DocumentId,
     operation: impl FnOnce(&mut Option<crate::clock_frames::DocumentClock>, *mut ArenaHandle) -> R,
 ) -> Option<R> {
     with_state(document, |state| {
-        let arena = state.state();
+        let arena = state.state(owner);
         operation(&mut state.clock, arena)
     })
 }
@@ -1039,7 +1062,9 @@ pub(crate) fn send(message: ToOwner) {
         // Without a Rendering thread, the thread that sends a change is the owner, and runs nothing beside it: the
         // change applies to the arena as it is sent.
         if let Some(document) = changes_of.filter(|_| !crate::stage_thread::has_owner_thread()) {
-            with_state(document, |state| state.apply_changes(EngineReach::Home));
+            with_state(document, |state| {
+                state.apply_changes(EngineReach::Owner(&Owner::here()));
+            });
         }
     }
 }
@@ -1150,13 +1175,16 @@ pub(crate) unsafe fn ask(document: DocumentId, arena: *mut c_void, query: Query)
     let answer = crate::stage_thread::wait_for_owner(
         |reply| ToOwner::Ask { document, query, reply },
         || {
+            let owner = Owner::here();
             if let Some(answer) =
-                STATES.with_borrow_mut(|states| states.get_mut(&document).map(|state| state.answer(query)))
+                STATES.with_borrow_mut(|states| states.get_mut(&document).map(|state| state.answer(&owner, query)))
             {
                 return answer;
             }
             // SAFETY: Guaranteed by the caller.
-            Answer::of_state_reaching_engine(query, unsafe { &mut *ArenaHandle::held_by_waiting_thread(arena) })
+            Answer::of_state_reaching_engine(&owner, query, unsafe {
+                &mut *ArenaHandle::held_by_waiting_thread(arena)
+            })
         },
     );
     debug_assert!(answer.is_ok(), "the render owner panicked answering {query:?}");
@@ -1183,7 +1211,11 @@ pub(crate) unsafe fn ask_about(arena: *mut c_void, query: Query) -> Answer {
 /// holds the document's render state (the owner, or without a Rendering thread the thread its messages are handled on)
 /// answers it right here.
 pub(crate) fn ask_engine(document: DocumentId, query: Query) -> Answer {
-    if let Some(answer) = STATES.with_borrow_mut(|states| states.get_mut(&document).map(|state| state.answer(query))) {
+    if let Some(answer) = STATES.with_borrow_mut(|states| {
+        states
+            .get_mut(&document)
+            .map(|state| state.answer(&Owner::here(), query))
+    }) {
         return answer;
     }
     let answer = crate::stage_thread::wait_for_owner_thread(|reply| ToOwner::Ask { document, query, reply });
@@ -1206,7 +1238,11 @@ pub(crate) fn ask_owner(document: DocumentId, query: Query) -> Answer {
         |reply| ToOwner::Ask { document, query, reply },
         || {
             STATES
-                .with_borrow_mut(|states| states.get_mut(&document).map(|state| state.answer(query)))
+                .with_borrow_mut(|states| {
+                    states
+                        .get_mut(&document)
+                        .map(|state| state.answer(&Owner::here(), query))
+                })
                 .unwrap_or_else(|| Answer::left_to_host(query))
         },
     );
@@ -1423,7 +1459,7 @@ pub(crate) fn run_style_transaction(
 ) -> crate::css::style::bridge::OwnerStyleTransactionView {
     let transaction = Box::new(transaction);
     if STATES.with_borrow(|states| states.contains_key(&document)) {
-        return run_style_on_owner(document, transaction);
+        return run_style_on_owner(&Owner::here(), document, transaction);
     }
     let transaction = std::cell::Cell::new(Some(transaction));
     let ran = crate::stage_thread::wait_for_owner_thread(|reply| {
@@ -1446,12 +1482,13 @@ pub(crate) fn run_style_transaction(
 /// On the owner: runs the style transaction `transaction` of `document` with the engine its render state links, while
 /// the document thread waits for it.
 fn run_style_on_owner(
+    owner: &Owner,
     document: DocumentId,
     transaction: Box<crate::css::style::bridge::OwnerStyleTransaction>,
 ) -> crate::css::style::bridge::OwnerStyleTransactionView {
     // The state's changes, the link to its engine among them, go in before the engine is read.
     let reached = with_state(document, |state| {
-        let state_handle = state.state();
+        let state_handle = state.state(owner);
         (state.style_engine(), state_handle)
     })
     .filter(|(engine, _)| !engine.is_null());
@@ -1467,7 +1504,7 @@ fn run_style_on_owner(
     let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(state as u64);
     // SAFETY: The engine and the state are the document's, which only the owner reaches, and the document thread
     // waits for the transaction.
-    let view = unsafe { engine.reach_on_owner(|engine| transaction.run(engine, &mut *state)) };
+    let view = unsafe { engine.reach_on_owner(owner, |engine| transaction.run(engine, &mut *state)) };
     // SAFETY: As above.
     unsafe { &mut *state }.arena_mut().publish_rows();
     view
