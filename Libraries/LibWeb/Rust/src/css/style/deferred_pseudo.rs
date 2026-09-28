@@ -50,6 +50,7 @@ impl StyleEngineState {
     /// Release ordinary deferred reactions into this transaction while retaining pseudo-only
     /// work for nodes outside the current observability interval.
     pub(super) fn flush_deferred_element_style_inputs(&mut self, counters: &mut Counters) {
+        self.host.deferred_element_style_inputs_moved = true;
         for input in std::mem::take(&mut self.host.deferred_element_style_inputs) {
             let InputValue::ElementStyleInput {
                 reaction,
