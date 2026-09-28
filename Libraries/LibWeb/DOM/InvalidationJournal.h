@@ -39,7 +39,7 @@ enum class LayoutUpdatePropagation : u8 {
 
 namespace Web::DOM {
 
-// Writes paint facts to the row an entry resolves to at the drain. Nothing makes a shell for the row to hand it over.
+// Writes paint facts to the row an entry resolves to at the drain.
 using PaintFactsUpdate = Function<void(Painting::BoxSlot const&)>;
 
 enum class PaintFactsFamily : u8 {

@@ -7547,7 +7547,7 @@ static Painting::CompositorAnimationKeyframes const& compositor_animation_keyfra
 // keeps it pending with the effect. The checks here are the ones that read the animation objects; the
 // builder in Rust lowers and validates the keyframes.
 // The box an animation target is bound to: the element's, its pseudo-element's, or that of the element an
-// element-backed pseudo-element stands in for. Found by the arena's bindings, without making a shell for it.
+// element-backed pseudo-element stands in for. Found by the arena's bindings.
 static Painting::BoxSlot box_of_animation_target(AbstractElement const& target)
 {
     if (auto pseudo_element = target.pseudo_element(); pseudo_element.has_value())

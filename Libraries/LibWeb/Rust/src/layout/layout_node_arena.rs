@@ -4349,28 +4349,6 @@ impl LayoutNodeArena {
         }
     }
 
-    fn materialize_shell(&self, main_thread: &crate::stage::MainThread, id: NodeSlotId) -> *mut c_void {
-        let Some((context, factory)) = main_thread
-            .host_tables()
-            .and_then(|host_tables| host_tables.shell_factory.get())
-        else {
-            return std::ptr::null_mut();
-        };
-        let data = self.data(id);
-        if data.kind.get() == NodeKind::Unset {
-            return std::ptr::null_mut();
-        }
-        super::tree_build_seal::note_host_call("layout_node_shell_factory");
-        super::seal::note_host_call(self.layout_pass_is_running(), "layout_node_shell_factory");
-        crate::painting::seal::note_host_call("layout_node_shell_factory");
-        // SAFETY: Registration and unregistration keep the factory context live; the factory binds a
-        // shell to this live slot and writes nothing but the slot's shell cell.
-        unsafe { factory(context, id, data.kind.get()) };
-        data.shell
-            .get()
-            .map_or(std::ptr::null_mut(), |shell| shell.host_object(main_thread))
-    }
-
     pub(crate) fn shell_count(&self) -> u32 {
         let mut count = 0;
         for (index, metadata) in self.slot_metadata.iter().enumerate() {
@@ -6170,13 +6148,6 @@ impl LayoutNodeArena {
         self.live_count
     }
 
-    pub(crate) fn shell_if_live(&self, main_thread: &crate::stage::MainThread, id: NodeSlotId) -> *mut c_void {
-        if !self.slot_is_live(id) {
-            return std::ptr::null_mut();
-        }
-        self.node_shell(main_thread, id)
-    }
-
     pub(crate) fn node_link_slot(&self, id: NodeSlotId, link: FfiNodeLink) -> NodeSlotId {
         let data = self.data(id);
         match link {
@@ -6186,30 +6157,6 @@ impl LayoutNodeArena {
             FfiNodeLink::PreviousSibling => data.previous_sibling.get(),
             FfiNodeLink::NextSibling => data.next_sibling.get(),
         }
-    }
-
-    pub(crate) fn node_link_shell(
-        &self,
-        main_thread: &crate::stage::MainThread,
-        id: NodeSlotId,
-        link: FfiNodeLink,
-    ) -> *mut c_void {
-        let linked = self.node_link_slot(id, link);
-        if linked.is_invalid() {
-            return std::ptr::null_mut();
-        }
-        self.node_shell(main_thread, linked)
-    }
-
-    pub(crate) fn node_containing_block_shell_if_live(
-        &self,
-        main_thread: &crate::stage::MainThread,
-        id: NodeSlotId,
-    ) -> *mut c_void {
-        self.node_containing_block_if_live(id)
-            .map_or(std::ptr::null_mut(), |containing_block| {
-                self.shell_if_live(main_thread, containing_block)
-            })
     }
 
     pub(crate) fn node_flags(&self, id: NodeSlotId) -> u32 {
@@ -6405,15 +6352,6 @@ impl LayoutNodeArena {
     /// Notes that the host is about to hand `id` the provider it owns, if it was waiting for one.
     pub(crate) fn note_owned_provider_handed_over(&self, id: NodeSlotId) {
         self.image_boxes_awaiting_owned_provider.borrow_mut().remove(&id);
-    }
-
-    /// The shell of `id`, made now if nothing has asked for it before. Making one runs the host's
-    /// shell factory, so only the main thread can ask.
-    pub(crate) fn node_shell(&self, main_thread: &crate::stage::MainThread, id: NodeSlotId) -> *mut c_void {
-        if let Some(shell) = self.data(id).shell.get() {
-            return shell.host_object(main_thread);
-        }
-        self.materialize_shell(main_thread, id)
     }
 
     pub(crate) fn dom_offset_for_rendered_text_offset(
@@ -7861,8 +7799,6 @@ mod tests {
         let mut arena = LayoutNodeArena::new();
         let slot = arena.allocate_unbound();
         assert!(arena.slot_is_live(slot));
-        let main_thread = crate::stage::MainThread::for_test();
-        assert!(arena.node_shell(&main_thread, slot).is_null());
         assert_eq!(arena.data(slot).kind.get(), NodeKind::Unset);
 
         let unbound_freed = arena.free_subtree(slot);

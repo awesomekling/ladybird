@@ -7,7 +7,6 @@
 #include "CounterStyle.h"
 #include <LibWeb/CSS/StyleScope.h>
 #include <LibWeb/DOM/Document.h>
-#include <LibWeb/Layout/NodeArena.h>
 #include <LibWeb/ValueParserRustFFI.h>
 
 namespace Web::CSS {

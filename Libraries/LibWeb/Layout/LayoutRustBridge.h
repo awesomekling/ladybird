@@ -68,15 +68,10 @@ struct TableSpans {
 };
 TableSpans table_spans_of(DOM::Node const*);
 
-// Sets the record of the box's row as its element's record moved, without applying the style to the box.
-WEB_API void set_box_style_record(Painting::BoxSlot const&, CSS::PublishedStyleRecord const*);
-
 // What a style change does to a box beyond the record its row installs: re-deriving its values from the record, or,
 // for a change that only moves the images it names, loading and observing those.
 WEB_API void apply_style_to_box(Painting::BoxSlot const&, CSS::PublishedStyleRecord const&);
 WEB_API void attach_style_resources_to_box(Painting::BoxSlot const&);
-// Makes the host's mirror of the box now, from the record its row holds, if nothing has made it yet.
-WEB_API void make_host_mirror_of_box(Painting::BoxSlot const&);
 // Sets the record the box holds as its DOM target's, unless the box holds a style of its own.
 void set_style_record_of_box(Painting::BoxSlot const&, CSS::PublishedStyleRecord const*);
 // Publishes the scroll offset of the box's DOM target to every row built for it.
@@ -110,7 +105,6 @@ extern "C" WEB_API bool ladybird_layout_code_point_has_combining_mark_line_break
 extern "C" WEB_API bool ladybird_layout_code_point_has_emoji_property(u32);
 extern "C" WEB_API Web::Layout::RustFFI::FfiCodePointCategoryFacts ladybird_layout_code_point_category_facts(u32);
 
-extern "C" WEB_API void ladybird_layout_node_shell_destroy(void*);
 extern "C" WEB_API void ladybird_layout_owned_image_provider_destroy(void*);
 extern "C" WEB_API void ladybird_layout_image_observers_destroy(void*);
 extern "C" WEB_API void ladybird_layout_owned_image_provider_notify_detach(void*);

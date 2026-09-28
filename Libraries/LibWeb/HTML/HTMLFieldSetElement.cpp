@@ -15,7 +15,6 @@
 #include <LibWeb/HTML/HTMLOutputElement.h>
 #include <LibWeb/HTML/HTMLSelectElement.h>
 #include <LibWeb/HTML/HTMLTextAreaElement.h>
-#include <LibWeb/Layout/Box.h>
 #include <LibWeb/Painting/PaintFacts.h>
 
 namespace Web::HTML {

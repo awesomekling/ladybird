@@ -62,39 +62,6 @@ unsafe extern "C" fn layout_arena_pre_order_label_violation_count(arena: *mut c_
         .count()
 }
 
-/// # Safety
-///
-/// The arena must remain valid for the duration of the call. `id` may be
-/// invalid or stale; null is returned in that case.
-#[unsafe(no_mangle)]
-unsafe extern "C" fn layout_arena_node_shell_if_live(arena: *mut c_void, id: NodeSlotId) -> *mut c_void {
-    // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
-    // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }.shell_if_live(&main_thread, id)
-}
-
-#[unsafe(no_mangle)]
-unsafe extern "C" fn layout_arena_node_link_shell(
-    arena: *mut c_void,
-    id: NodeSlotId,
-    link: FfiNodeLink,
-) -> *mut c_void {
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
-    // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
-    unsafe { LayoutNodeArena::from_handle(arena) }.node_link_shell(&main_thread, id, link)
-}
-
-#[unsafe(no_mangle)]
-unsafe extern "C" fn layout_arena_node_containing_block_shell_if_live(
-    arena: *mut c_void,
-    id: NodeSlotId,
-) -> *mut c_void {
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
-    // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
-    unsafe { LayoutNodeArena::from_handle(arena) }.node_containing_block_shell_if_live(&main_thread, id)
-}
-
 /// The containing block of the row `id` names, or an invalid slot if it has none or it is no longer live.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn layout_arena_node_containing_block_slot_if_live(arena: *mut c_void, id: NodeSlotId) -> NodeSlotId {
@@ -128,45 +95,36 @@ unsafe extern "C" fn layout_arena_repaint_after_selection_style_change(arena: *m
     }
 }
 
-/// A row the host names by its slot, with the shell the host made for it, if it made one.
+/// A row the host names by its slot.
 #[repr(C)]
 pub struct FfiBoundRow {
     /// The row, or an invalid slot if there is none.
     pub slot: NodeSlotId,
-    /// The row's shell, or null if nothing has asked for one yet.
-    pub shell: *mut c_void,
     pub kind: NodeKind,
 }
 
 impl FfiBoundRow {
     const NONE: Self = Self {
         slot: NodeSlotId::INVALID,
-        shell: std::ptr::null_mut(),
         kind: NodeKind::Unset,
     };
 
-    fn of(arena: &LayoutNodeArena, main_thread: &crate::stage::MainThread, slot: NodeSlotId) -> Self {
+    fn of(arena: &LayoutNodeArena, slot: NodeSlotId) -> Self {
         if slot.is_invalid() {
             return Self::NONE;
         }
-        let data = arena.data(slot);
         Self {
             slot,
-            shell: data
-                .shell
-                .get()
-                .map_or(std::ptr::null_mut(), |shell| shell.host_object(main_thread)),
-            kind: data.kind.get(),
+            kind: arena.data(slot).kind.get(),
         }
     }
 }
 
 /// The row the element or text node with `style_node` is bound to, or, for a nonzero
-/// `generated_for`, the row of its pseudo-element of that kind. This makes no shell.
+/// `generated_for`, the row of its pseudo-element of that kind.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn layout_arena_bound_row_of(arena: *mut c_void, style_node: u32, generated_for: u8) -> FfiBoundRow {
     assert!(!arena.is_null(), "layout node arena handle is null");
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     let Some(style_node) = StyleNodeID::from_raw(style_node) else {
         return FfiBoundRow::NONE;
     };
@@ -177,41 +135,38 @@ unsafe extern "C" fn layout_arena_bound_row_of(arena: *mut c_void, style_node: u
     } else {
         arena.bound_pseudo_element_row(style_node, generated_for)
     };
-    FfiBoundRow::of(arena, &main_thread, slot)
+    FfiBoundRow::of(arena, slot)
 }
 
-/// The viewport row the document is bound to. This makes no shell.
+/// The viewport row the document is bound to.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn layout_arena_bound_viewport_row(arena: *mut c_void) -> FfiBoundRow {
     assert!(!arena.is_null(), "layout node arena handle is null");
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     // SAFETY: As above.
     let arena = unsafe { LayoutNodeArena::from_handle(arena) };
-    FfiBoundRow::of(arena, &main_thread, arena.bound_viewport_row())
+    FfiBoundRow::of(arena, arena.bound_viewport_row())
 }
 
-/// The row `slot` links to by `link`, with its shell if one was made.
+/// The row `slot` links to by `link`.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn layout_arena_linked_row(arena: *mut c_void, slot: NodeSlotId, link: FfiNodeLink) -> FfiBoundRow {
     assert!(!arena.is_null(), "layout node arena handle is null");
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
     let arena = unsafe { LayoutNodeArena::from_handle(arena) };
-    FfiBoundRow::of(arena, &main_thread, arena.node_link_slot(slot, link))
+    FfiBoundRow::of(arena, arena.node_link_slot(slot, link))
 }
 
-/// The row `slot` names, with its shell if one was made, or none if the row is no longer live,
+/// The row `slot` names, or none if the row is no longer live,
 /// which a slot noted earlier may not be.
 #[unsafe(no_mangle)]
 unsafe extern "C" fn layout_arena_row_if_live(arena: *mut c_void, slot: NodeSlotId) -> FfiBoundRow {
     assert!(!arena.is_null(), "layout node arena handle is null");
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
     let arena = unsafe { LayoutNodeArena::from_handle(arena) };
     if !arena.slot_is_live(slot) {
         return FfiBoundRow::NONE;
     }
-    FfiBoundRow::of(arena, &main_thread, slot)
+    FfiBoundRow::of(arena, slot)
 }
 
 #[unsafe(no_mangle)]
@@ -226,7 +181,7 @@ unsafe extern "C" fn layout_arena_unbind_row(arena: *mut c_void, id: NodeSlotId)
     }
 }
 
-/// Visits the live shell of every row built for the same DOM node as `id`, that row included.
+/// Visits every row built for the same DOM node as `id`, that row included.
 ///
 /// # Safety
 ///
@@ -237,22 +192,15 @@ unsafe extern "C" fn layout_arena_for_each_row_built_for_same_node(
     arena: *mut c_void,
     id: NodeSlotId,
     context: *mut c_void,
-    visit: unsafe extern "C" fn(*mut c_void, *mut c_void),
+    visit: unsafe extern "C" fn(*mut c_void, NodeSlotId),
 ) {
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
     assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: The C++ wrapper keeps the arena alive for this call and serializes all access on
-    // the document thread.
+    // SAFETY: The C++ caller keeps the arena alive for this synchronous call.
     let arena = unsafe { LayoutNodeArena::from_handle(arena) };
     // The ring is a column of links rather than a borrow, so the host may re-enter the arena
     // from `visit`. What it must not do is change which rows are built for the node.
-    arena.for_each_row_built_for_same_node(id, |row| {
-        let shell = arena.shell_if_live(&main_thread, row);
-        if !shell.is_null() {
-            // SAFETY: The host answers synchronously and does not free the shell.
-            unsafe { visit(context, shell) };
-        }
-    });
+    // SAFETY: The host answers synchronously.
+    arena.for_each_row_built_for_same_node(id, |row| unsafe { visit(context, row) });
 }
 
 #[unsafe(no_mangle)]
@@ -329,23 +277,10 @@ unsafe extern "C" fn layout_arena_adopt_derived_node_style(arena: *mut c_void, n
     arena.apply_reinherited_style_record(node, derived, ShellStyleChangeNotice::Now(&main_thread));
 }
 
-#[unsafe(no_mangle)]
-unsafe extern "C" fn layout_arena_set_layout_display(arena: *mut c_void, node: NodeSlotId, display: u32) {
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
-    unsafe { LayoutNodeArena::from_handle(arena) }.update_layout_style(
-        node,
-        ShellStyleChangeNotice::Now(&main_thread),
-        |style| {
-            style.set_display(crate::css::display::FfiDisplay::from_raw(display));
-        },
-    );
-}
-
-/// What the host's `NodeWithStyle::apply_style()` does to the arena for a row without a shell,
-/// taking a style that holds no images, in one call: the host's pin follows the record, an
-/// adoption left by a sample installed ahead is taken, and otherwise the record, its flags and
-/// the anonymous descendants' inherited style are written. Returns the image observers the row
-/// let go of, which the host deletes.
+/// Applies a style to a row, taking a style that holds no images, in one call: the host's pin
+/// follows the record, an adoption left by a sample installed ahead is taken, and otherwise the
+/// record, its flags and the anonymous descendants' inherited style are written. Returns the image
+/// observers the row let go of, which the host deletes.
 ///
 /// # Safety
 ///
@@ -405,10 +340,10 @@ unsafe extern "C" fn layout_arena_row_style_record(arena: *mut c_void, node: Nod
     }
 }
 
-/// What the host's `NodeWithStyle::set_style_record_identity()` does to the arena for a row without
-/// a shell, in one call: the host's pin follows the record, an adoption left by a sample installed
-/// ahead is taken, and otherwise the record is written, with the caches of the row and its
-/// ancestors reset if `changes_layout_affecting_style` and the record is another than the row's.
+/// Moves a row to its DOM target's record, without applying the style, in one call: the host's pin
+/// follows the record, an adoption left by a sample installed ahead is taken, and otherwise the
+/// record is written, with the caches of the row and its ancestors reset if
+/// `changes_layout_affecting_style` and the record is another than the row's.
 ///
 /// # Safety
 ///
@@ -446,16 +381,6 @@ unsafe extern "C" fn layout_arena_replace_row_style_record(
         arena.bump_fragment_cache_epoch_of_self_and_ancestors(node);
         arena.reset_cached_intrinsic_sizes_of_self_and_ancestors(node);
     }
-}
-
-#[unsafe(no_mangle)]
-unsafe extern "C" fn layout_arena_reinherit_anonymous_descendants(arena: *mut c_void, node: NodeSlotId) {
-    assert!(!arena.is_null(), "layout node arena handle is null");
-    // SAFETY: As above.
-    let main_thread = unsafe { crate::stage::from_ffi_entry(&MAIN_THREAD_FFI_ENTRY, arena) };
-    // SAFETY: As above.
-    unsafe { LayoutNodeArena::from_handle(arena) }
-        .reinherit_anonymous_descendants(node, ShellStyleChangeNotice::Now(&main_thread));
 }
 
 /// What the render owner left of applying the batch of a style transaction to the layout nodes of

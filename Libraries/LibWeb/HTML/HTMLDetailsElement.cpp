@@ -16,7 +16,6 @@
 #include <LibWeb/HTML/HTMLSummaryElement.h>
 #include <LibWeb/HTML/ToggleEvent.h>
 #include <LibWeb/HighResolutionTime/TimeOrigin.h>
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/Namespace.h>
 
 namespace Web::HTML {

@@ -1324,8 +1324,7 @@ static u32 style_node_of(Node const& node)
 }
 
 // Where the box of the removed node with identity `style_node` sits, given `previous_sibling` and `next_sibling`, the
-// node's siblings in the parent as the layout tree has them. The arena finds the boxes by identity, so no shell is made
-// to ask.
+// node's siblings in the parent as the layout tree has them. The arena finds the boxes by identity.
 static Layout::RustFFI::FfiRemovedBoxPlace removed_box_place(u32 style_node, Node const& parent, Node const* previous_sibling, Node const* next_sibling, Layout::RustFFI::FfiDetachedBoxLevel box_level)
 {
     auto sibling = [](Node const* sibling) {
@@ -1368,7 +1367,7 @@ bool Node::list_item_box_change_renumbers_list(Element const& list_item)
 
 // Pins the style record of the box `node`, or its pseudo-element of kind `pseudo_element`, is bound
 // to, the way the box would for its C++ readers once the node leaves the document. The row is
-// found by the node's identity, so no shell is made just to pin it.
+// found by the node's identity.
 // The style records of the boxes of a subtree that leaves the document, pinned together once the subtree has been
 // walked: its boxes stay in the layout tree, and are read, until they are detached.
 class BoundBoxStyleRecordPinsForDetachment {

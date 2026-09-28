@@ -21,12 +21,14 @@
 #include <LibWeb/CSS/StyleInputScope.h>
 #include <LibWeb/CSS/StyleValues/AnchorStyleValue.h>
 #include <LibWeb/CSS/StyleValues/CalculatedStyleValue.h>
+#include <LibWeb/CSS/StyleValues/CursorStyleValue.h>
 #include <LibWeb/CSS/ValueType.h>
 #include <LibWeb/DOM/AbstractElement.h>
 #include <LibWeb/DOM/CommitMessages.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/DOM/Node.h>
+#include <LibWeb/DOM/PseudoElement.h>
 #include <LibWeb/DOM/ShadowRoot.h>
 #include <LibWeb/DOM/Text.h>
 #include <LibWeb/HTML/AttributeNames.h>
@@ -35,15 +37,16 @@
 #include <LibWeb/HTML/HTMLElement.h>
 #include <LibWeb/HTML/HTMLTableCellElement.h>
 #include <LibWeb/HTML/HTMLTableColElement.h>
+#include <LibWeb/HTML/LocalNavigable.h>
 #include <LibWeb/HTML/NavigableContainer.h>
-#include <LibWeb/Layout/Box.h>
 #include <LibWeb/Layout/ImageProvider.h>
 #include <LibWeb/Layout/LayoutRustBridge.h>
-#include <LibWeb/Layout/NodeArena.h>
-#include <LibWeb/Layout/TextNode.h>
-#include <LibWeb/Layout/Viewport.h>
+#include <LibWeb/Painting/BoxSlot.h>
+#include <LibWeb/Painting/PaintFacts.h>
 #include <LibWeb/Painting/PaintableTypes.h>
 #include <LibWeb/Painting/PaintingRustBridge.h>
+#include <LibWeb/Painting/ScrollSnap.h>
+#include <LibWeb/Painting/StyleImageObservers.h>
 #include <LibWeb/SVG/FragmentIdentifier.h>
 #include <LibWeb/SVG/SVGCircleElement.h>
 #include <LibWeb/SVG/SVGClipPathElement.h>
@@ -364,8 +367,78 @@ void clear_svg_attribute_facts(DOM::Document& document, CSS::StyleNodeID style_n
     RustFFI::layout_arena_clear_style_node_svg_attribute_facts(document_layout_arena(document), style_node.value());
 }
 
-// Defined beside the text shaping it classifies code points for.
-Gfx::GlyphRun::TextType text_type_for_code_point(u32 code_point);
+// Classifies a code point for direction-run splitting during text chunking: strong LTR/RTL,
+// direction-neutral Common, or ContextDependent (resolved from surrounding runs).
+static Gfx::GlyphRun::TextType text_type_for_code_point(u32 code_point)
+{
+    // Fast path for ASCII using a lookup table.
+    // Each ASCII character has a statically known bidi class.
+    if (code_point < 0x80) {
+        using enum Gfx::GlyphRun::TextType;
+        // clang-format off
+        static constexpr auto L = Ltr;
+        static constexpr auto C = Common;
+        static constexpr auto X = ContextDependent;
+        static constexpr Gfx::GlyphRun::TextType ascii_text_types[128] = {
+            // 0x00-0x0F: Control characters (BN=Common, S/B/WS=ContextDependent)
+            C, C, C, C, C, C, C, C, C, X, X, X, X, X, C, C,
+            // 0x10-0x1F: Control characters
+            C, C, C, C, C, C, C, C, C, C, C, C, X, X, X, X,
+            // 0x20-0x2F: Space and punctuation
+            X, C, C, X, X, X, C, C, C, C, C, X, X, X, X, X,
+            // 0x30-0x3F: Digits and punctuation
+            X, X, X, X, X, X, X, X, X, X, X, C, C, C, C, C,
+            // 0x40-0x4F: @ and uppercase letters
+            C, L, L, L, L, L, L, L, L, L, L, L, L, L, L, L,
+            // 0x50-0x5F: Uppercase letters and punctuation
+            L, L, L, L, L, L, L, L, L, L, L, C, C, C, C, C,
+            // 0x60-0x6F: ` and lowercase letters
+            C, L, L, L, L, L, L, L, L, L, L, L, L, L, L, L,
+            // 0x70-0x7F: Lowercase letters and punctuation
+            L, L, L, L, L, L, L, L, L, L, L, C, C, C, C, C,
+        };
+        // clang-format on
+        return ascii_text_types[code_point];
+    }
+
+    switch (Unicode::bidirectional_class(code_point)) {
+    case Unicode::BidiClass::WhiteSpaceNeutral:
+
+    case Unicode::BidiClass::BlockSeparator:
+    case Unicode::BidiClass::SegmentSeparator:
+    case Unicode::BidiClass::CommonNumberSeparator:
+    case Unicode::BidiClass::DirNonSpacingMark:
+
+    case Unicode::BidiClass::ArabicNumber:
+    case Unicode::BidiClass::EuropeanNumber:
+    case Unicode::BidiClass::EuropeanNumberSeparator:
+    case Unicode::BidiClass::EuropeanNumberTerminator:
+        return Gfx::GlyphRun::TextType::ContextDependent;
+
+    case Unicode::BidiClass::BoundaryNeutral:
+    case Unicode::BidiClass::OtherNeutral:
+    case Unicode::BidiClass::FirstStrongIsolate:
+    case Unicode::BidiClass::PopDirectionalFormat:
+    case Unicode::BidiClass::PopDirectionalIsolate:
+        return Gfx::GlyphRun::TextType::Common;
+
+    case Unicode::BidiClass::LeftToRight:
+    case Unicode::BidiClass::LeftToRightEmbedding:
+    case Unicode::BidiClass::LeftToRightIsolate:
+    case Unicode::BidiClass::LeftToRightOverride:
+        return Gfx::GlyphRun::TextType::Ltr;
+
+    case Unicode::BidiClass::RightToLeft:
+    case Unicode::BidiClass::RightToLeftArabic:
+    case Unicode::BidiClass::RightToLeftEmbedding:
+    case Unicode::BidiClass::RightToLeftIsolate:
+    case Unicode::BidiClass::RightToLeftOverride:
+        return Gfx::GlyphRun::TextType::Rtl;
+
+    default:
+        VERIFY_NOT_REACHED();
+    }
+}
 
 void* document_layout_arena(DOM::Document& document)
 {
@@ -512,64 +585,235 @@ void publish_table_spans(DOM::Element const& element)
     const_cast<DOM::Document&>(element.document()).render_inputs_for_write().style_engine().record_table_spans(identity, spans.column_span, spans.row_span, spans.raw_column_span);
 }
 
-// The shell of a row the build stamped, made the first time something asks for it.
-static void make_shell(void* context, Compositing::RustFFI::NodeSlotId slot, RustFFI::NodeKind kind)
+// The box whose scroll snap container a box's style describes: the viewport for the root element's, as the scroll snap
+// properties specified on the root element apply to the viewport rather than to its own box.
+static Painting::BoxSlot scroll_snap_container_of(Painting::BoxSlot const& box, DOM::Node const* dom_node)
 {
-    auto& document = *static_cast<DOM::Document*>(context);
-    NodeWithStyle* node = nullptr;
-    switch (kind) {
-    case RustFFI::NodeKind::BlockContainer:
-    case RustFFI::NodeKind::FieldSetBox:
-    case RustFFI::NodeKind::LegendBox:
-    case RustFFI::NodeKind::ListItemBox:
-    case RustFFI::NodeKind::ListItemMarkerBox:
-    case RustFFI::NodeKind::RangeInputBox:
-    case RustFFI::NodeKind::SVGForeignObjectBox:
-    case RustFFI::NodeKind::TableWrapper:
-    case RustFFI::NodeKind::TextAreaBox:
-    case RustFFI::NodeKind::TextInputBox:
-    case RustFFI::NodeKind::AudioBox:
-    case RustFFI::NodeKind::Box:
-    case RustFFI::NodeKind::CanvasBox:
-    case RustFFI::NodeKind::CheckBox:
-    case RustFFI::NodeKind::ImageBox:
-    case RustFFI::NodeKind::NavigableContainerViewport:
-    case RustFFI::NodeKind::RadioButton:
-    case RustFFI::NodeKind::SVGClipBox:
-    case RustFFI::NodeKind::SVGGeometryBox:
-    case RustFFI::NodeKind::SVGGraphicsBox:
-    case RustFFI::NodeKind::SVGImageBox:
-    case RustFFI::NodeKind::SVGMaskBox:
-    case RustFFI::NodeKind::SVGPatternBox:
-    case RustFFI::NodeKind::SVGSVGBox:
-    case RustFFI::NodeKind::SVGTextBox:
-    case RustFFI::NodeKind::SVGTextPathBox:
-    case RustFFI::NodeKind::VideoBox:
-        node = &allocate_layout_node<Box>(document, BindToPreparedArenaSlot::Yes, slot, kind);
-        break;
-    case RustFFI::NodeKind::BreakNode:
-    case RustFFI::NodeKind::InlineNode:
-        node = &allocate_layout_node<NodeWithStyle>(document, BindToPreparedArenaSlot::Yes, slot, kind);
-        break;
-    case RustFFI::NodeKind::TextNode:
-        allocate_layout_node<TextNode>(document, BindToPreparedArenaSlot::Yes, slot, kind);
+    if (box.is_viewport() || (dom_node && dom_node == box.document().document_element()))
+        return Painting::BoxSlot::viewport_of(box.document());
+    if (!box.is_scroll_container())
+        return {};
+    return box;
+}
+
+// What a box taking a style record tells the rest of the document.
+static void did_update_box_style_record(Painting::BoxSlot const& box, void const* style_payloads)
+{
+    auto& document = box.document();
+    auto dom_node = box.dom_node();
+    if (auto const* element = as_if<DOM::Element>(dom_node.ptr()); element && element->has_style(CSS::PseudoElement::Selection))
+        Painting::push_selection_pseudo_style(*element);
+
+    if (CSS::style_group_from_payloads<CSS::ComputedValues::MiscResetValues>(style_payloads)->scroll_snap_type_value().strictness != CSS::ScrollSnapStrictness::None)
+        document.set_may_have_scroll_snap_areas();
+
+    // NB: The root element's style can be published before the layout tree gives the document a viewport to snap
+    //     with, and is published again once building the layout tree binds this node's style record.
+    auto snap_container = scroll_snap_container_of(box, dom_node.ptr());
+    if (!snap_container)
         return;
-    case RustFFI::NodeKind::GeneratedTextNode:
-        allocate_layout_node<GeneratedTextNode>(document, BindToPreparedArenaSlot::Yes, slot, kind);
+
+    // What the layout tree builds found out about their scroll containers comes before what this style says.
+    Painting::take_built_scroll_snap_containers(document);
+
+    // A style change can make a box a snap container without the paint tree being built again, so the box registers
+    // itself here as well as when it is built.
+    if (Painting::is_scroll_snap_container(snap_container)) {
+        document.register_scroll_snap_container(snap_container);
         return;
-    case RustFFI::NodeKind::Viewport:
-        allocate_layout_node<Viewport>(document, BindToPreparedArenaSlot::Yes, slot, kind);
-        return;
-    default:
-        VERIFY_NOT_REACHED();
     }
-    // A row stamped for an element or a pseudo-element carries the record the mirror published for it, and adopting
-    // it is what the box tells the document about. An anonymous row's style is derived by the arena, which has already
-    // told the shell everything about it.
-    if (!node->is_anonymous() || node->is_generated_for_pseudo_element())
-        node->initialize_stamped_style_record();
-    else if (kind == RustFFI::NodeKind::InlineNode)
-        node->attach_style_resources();
+
+    // A box that does not snap is snapped to no snap areas, so that a scroll it is given while it does not snap is not
+    // undone by a re-snap once it snaps again.
+    document.forget_snapped_areas_of_scroll_container(snap_container);
+}
+
+// Whether moving a box from one record to the other can change its layout, from the payloads each record names: an
+// overlay record borrows other payloads than its base, so carrying one is reason enough.
+static bool style_change_affects_layout(CSS::StyleRecordID old_style_record, void const* old_style_payloads, CSS::PublishedStyleRecord const& new_style_record)
+{
+    return !old_style_record
+        || !old_style_payloads
+        || CSS::PublishedStyleRecord::identity_is_animation_overlay(old_style_record)
+        || new_style_record.is_animation_overlay()
+        || CSS::ComputedValues::layout_affecting_group_payloads_differ(static_cast<void const* const*>(old_style_payloads), new_style_record.view().payloads);
+}
+
+void apply_style_to_box(Painting::BoxSlot const& box, CSS::PublishedStyleRecord const& style_record)
+{
+    if (!box.is_live() || box.is_text())
+        return;
+    auto* old_image_observers = RustFFI::layout_arena_install_row_style(box.arena(), box.slot(), style_record.identity().value());
+    did_update_box_style_record(box, style_record.payloads());
+    delete static_cast<Painting::StyleImageObserverSet*>(old_image_observers);
+    attach_style_resources_to_box(box);
+}
+
+void attach_style_resources_to_box(Painting::BoxSlot const& box)
+{
+    auto const* style_payloads = box.style_payloads();
+    if (!style_payloads)
+        return;
+    auto& document = box.document();
+    auto* arena = box.arena();
+    auto slot = box.slot();
+    auto dom_node = box.dom_node();
+
+    // The style engine notes at publication whether a record holds an <image> anywhere this box would load and
+    // observe one. Nearly every style holds none, and that answer is one flag read; the walk below stays for the
+    // styles that do.
+    auto dependency_flags = static_cast<CSS::StyleRecordDependencyFlag>(RustFFI::layout_arena_node_style_dependency_flags(arena, slot));
+    if (!has_flag(dependency_flags, CSS::StyleRecordDependencyFlag::HoldsImageValues)) {
+        Painting::replace_style_image_observers(document, slot, nullptr);
+        // The row keeps nothing a later attach would have to take away, which is what lets the
+        // tree build skip asking for one at all.
+        RustFFI::layout_arena_note_style_image_resources_attached(arena, slot, false);
+        Painting::push_paint_facts_after_style_attach(box, dom_node.ptr(), Painting::StyleHoldsImageValues::No);
+        return;
+    }
+
+    auto observers = make<Painting::StyleImageObserverSet>();
+    observers->background_layer_data = CSS::style_group_from_payloads<CSS::ComputedValues::BackgroundValues>(style_payloads)->background_layers_value();
+    observers->mask_layer_data = CSS::style_group_from_payloads<CSS::ComputedValues::MaskValues>(style_payloads)->mask_layers_value();
+    observers->border_image = CSS::style_group_from_payloads<CSS::ComputedValues::BorderValues>(style_payloads)->border_image_value();
+    auto cursors = CSS::style_group_from_payloads<CSS::ComputedValues::InheritedUIValues>(style_payloads)->cursor_span();
+    RefPtr<CSS::AbstractImageStyleValue const> list_style_image = CSS::style_group_from_payloads<CSS::ComputedValues::InheritedListValues>(style_payloads)->list_style_image_value();
+
+    auto load_image = [&](CSS::AbstractImageStyleValue const* image) {
+        if (image)
+            const_cast<CSS::AbstractImageStyleValue&>(*image).load_any_resources(document);
+    };
+    for (auto const& layer : observers->background_layer_data)
+        load_image(layer.background_image.ptr());
+    for (auto const& layer : observers->mask_layer_data)
+        load_image(layer.background_image.ptr());
+    load_image(observers->border_image.source.ptr());
+    observers->cursor_style_values.ensure_capacity(cursors.size());
+    for (auto const& cursor_data : cursors) {
+        auto cursor_style_value = CSS::ComputedValues::InheritedUIValues::cursor_style_value(cursor_data);
+        if (cursor_style_value)
+            load_image(&cursor_style_value->image());
+        observers->cursor_style_values.unchecked_append(move(cursor_style_value));
+    }
+    load_image(list_style_image.ptr());
+
+    auto observer_for = [&](CSS::AbstractImageStyleValue const* image) -> OwnPtr<Painting::StyleImageObserver> {
+        if (!image)
+            return nullptr;
+        auto const* image_to_observe = image->selected_image_style_value();
+        if (!image_to_observe)
+            return nullptr;
+        return make<Painting::StyleImageObserver>(document, slot, *image_to_observe);
+    };
+    for (auto const& layer : observers->background_layer_data)
+        observers->background_layers.append(observer_for(layer.background_image.ptr()));
+    for (auto const& layer : observers->mask_layer_data)
+        observers->mask_layers.append(observer_for(layer.background_image.ptr()));
+    for (auto const& cursor_style_value : observers->cursor_style_values)
+        observers->cursors.append(cursor_style_value ? observer_for(&cursor_style_value->image()) : nullptr);
+    observers->border_image_source = observer_for(observers->border_image.source.ptr());
+    observers->list_style_image = observer_for(list_style_image.ptr());
+    // TODO: Observe other <image> accepting properties once we support them.
+
+    Painting::replace_style_image_observers(document, slot, move(observers));
+    RustFFI::layout_arena_note_style_image_resources_attached(arena, slot, true);
+    Painting::push_paint_facts_after_style_attach(box, dom_node.ptr(), Painting::StyleHoldsImageValues::Yes);
+}
+
+void set_style_record_of_box(Painting::BoxSlot const& box, CSS::PublishedStyleRecord const* style_record)
+{
+    // A box has style for as long as it lives: a record taken away from its DOM target leaves the box the one it has.
+    if (!style_record || !box.is_live() || box.is_text())
+        return;
+    auto* arena = box.arena();
+    auto slot = box.slot();
+    // A layout-derived record is independent of its DOM target's record. A rendering consequence replaces and
+    // re-derives it explicitly through apply_style_to_box().
+    auto const row_style_record = RustFFI::layout_arena_row_style_record(arena, slot);
+    if (row_style_record.derived)
+        return;
+    auto const old_style_record_identity = CSS::StyleRecordID { row_style_record.record };
+    bool changes_layout_affecting_style = old_style_record_identity != style_record->identity()
+        && style_change_affects_layout(old_style_record_identity, RustFFI::layout_arena_node_style_payloads(arena, slot), *style_record);
+    RustFFI::layout_arena_replace_row_style_record(arena, slot, style_record->identity().value(), changes_layout_affecting_style);
+    did_update_box_style_record(box, style_record->payloads());
+}
+
+// Whether a box is the one its pseudo-element is bound to. The generated content inside the box carries the same
+// generator and type, so only this binding tells the box from its content.
+static bool is_bound_to_pseudo_element(Painting::BoxSlot const& box, DOM::Element const& generator, CSS::PseudoElement pseudo_element)
+{
+    return Painting::BoxSlot::bound_to(box.document(), DOM::NodeIdentity::of(generator), pseudo_element) == box;
+}
+
+// The scroll offset a box's DOM target holds for it. An element's box holds the element's scroll offset. Everything
+// generated for a pseudo-element names it as generator, but only the pseudo-element's own box is what scrolls, so only
+// that box holds the pseudo-element's offset; the generated content inside it holds none.
+static CSSPixelPoint dom_target_scroll_offset(Painting::BoxSlot const& box)
+{
+    if (box.is_viewport()) {
+        auto navigable = box.document().navigable();
+        return navigable ? navigable->viewport_scroll_offset() : CSSPixelPoint {};
+    }
+    if (auto pseudo_element = box.generated_for_pseudo_element(); pseudo_element.has_value()) {
+        // A compositor scroll can reach a removed generator's box before the layout tree drops it.
+        auto generator = box.pseudo_element_generator();
+        if (!generator)
+            return {};
+        auto synthetic_pseudo_element = generator->get_synthetic_pseudo_element(*pseudo_element);
+        if (!synthetic_pseudo_element.has_value() || !is_bound_to_pseudo_element(box, *generator, *pseudo_element))
+            return {};
+        return synthetic_pseudo_element->scroll_offset();
+    }
+    if (auto const* element = as_if<DOM::Element>(box.dom_node().ptr()))
+        return element->scroll_offset({});
+    return {};
+}
+
+void publish_scroll_offset_of_box(Painting::BoxSlot const& box)
+{
+    if (!box.is_live())
+        return;
+    RustFFI::layout_arena_for_each_row_built_for_same_node(box.arena(), box.slot(), &box.document(),
+        [](void* context, Compositing::RustFFI::NodeSlotId slot) {
+            auto row = Painting::BoxSlot::of(*static_cast<DOM::Document*>(context), slot);
+            auto offset = dom_target_scroll_offset(row);
+            // The navigable stores the viewport's offset, and the arena knows the viewport's box holds it without
+            // being told.
+            RustFFI::layout_arena_publish_scroll_offset(row.arena(), slot, offset, !row.is_viewport() && !offset.is_zero());
+        });
+}
+
+bool synchronize_table_spans_of_box(Painting::BoxSlot const& box)
+{
+    if (!box.is_live())
+        return false;
+    auto spans = table_spans_of(box.dom_node().ptr());
+    return RustFFI::layout_arena_set_table_spans(box.arena(), box.slot(), spans.column_span, spans.row_span, spans.raw_column_span);
+}
+
+bool update_empty_line_box_fragment_flag_of_box(Painting::BoxSlot const& text_box)
+{
+    if (!text_box.is_live())
+        return false;
+    // Text controls and editing hosts rely on their text node producing a zero-width fragment even
+    // when it has no text: the fragment keeps the line box alive with real font metrics, giving the
+    // caret an anchor to paint at and the control its baseline. Stamping this as a node flag keeps
+    // layout itself unaware of editing state.
+    auto produces_line_box_fragment_when_empty = [&] {
+        auto const* dom_text = as_if<DOM::Text>(text_box.dom_node().ptr());
+        if (!dom_text)
+            return false;
+        if (auto const* shadow_root = as_if<DOM::ShadowRoot>(dom_text->root())) {
+            if (as_if<HTML::FormAssociatedTextControlElement>(shadow_root->host()))
+                return true;
+        }
+        return dom_text->parent() && dom_text->parent()->is_editing_host();
+    }();
+    if (text_box.has_flag(RustFFI::NodeFlag::ProducesLineBoxFragmentWhenEmpty) == produces_line_box_fragment_when_empty)
+        return false;
+    RustFFI::layout_arena_set_node_flag(text_box.arena(), text_box.slot(), RustFFI::HostNodeFlag::ProducesLineBoxFragmentWhenEmpty, produces_line_box_fragment_when_empty);
+    return true;
 }
 
 void register_layout_host(DOM::Document& document)
@@ -579,9 +823,8 @@ void register_layout_host(DOM::Document& document)
     RustFFI::FfiStyleRecordHostCallbacks style_record_host_callbacks {
         .style_engine = document.style_computer().style_engine().rust_handle(),
         .context = &document,
-        .shell_style_changed = [](void*, void* shell, u64 record, void const* payloads, bool attach_resources) {
-            as<NodeWithStyle>(*static_cast<Node*>(shell)).refresh_style_from_arena(CSS::StyleRecordID { record }, payloads, attach_resources);
-        },
+        // The host makes no shells, so no shell hears of its row's style.
+        .shell_style_changed = [](void*, void*, u64, void const*, bool) { VERIFY_NOT_REACHED(); },
     };
     RustFFI::layout_arena_set_style_record_host_callbacks(arena, style_record_host_callbacks);
     // The render side says which nodes have a box and which of those boxes layout committed, so that DOM code reads a
@@ -594,7 +837,6 @@ void register_layout_host(DOM::Document& document)
             (bits & RustFFI::BOX_PRESENCE_HAS_LAYOUT_BOX) != 0,
             (bits & RustFFI::BOX_PRESENCE_HAS_COMMITTED_BOX) != 0);
     });
-    RustFFI::layout_arena_set_shell_factory(arena, &document, make_shell);
     RustFFI::layout_arena_set_chrome_state_callback(arena, &document,
         [](void* context, Compositing::RustFFI::NodeSlotId slot, RustFFI::PaintableRowResetKind kind, bool is_viewport_row) {
             auto& document = *static_cast<DOM::Document*>(context);
@@ -648,7 +890,6 @@ void unregister_layout_host(DOM::Document& document)
     RustFFI::layout_arena_clear_style_record_host_callbacks(arena);
     RustFFI::layout_arena_clear_layout_host_callbacks(arena);
     RustFFI::layout_arena_clear_layout_update_host_callbacks(arena);
-    RustFFI::layout_arena_clear_shell_factory(arena);
 }
 
 }

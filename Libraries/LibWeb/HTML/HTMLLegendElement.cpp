@@ -8,7 +8,6 @@
 #include <LibWeb/CSS/StyleEngineInput.h>
 #include <LibWeb/HTML/HTMLFieldSetElement.h>
 #include <LibWeb/HTML/HTMLLegendElement.h>
-#include <LibWeb/Layout/Box.h>
 
 namespace Web::HTML {
 
