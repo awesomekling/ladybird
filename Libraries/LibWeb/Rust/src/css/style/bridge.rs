@@ -2089,6 +2089,9 @@ pub struct FfiTransitionStepDecidedInPass {
     pub present: bool,
     pub actions: *const FfiTransitionStepAction,
     pub action_count: usize,
+    /// Whether the target had a before-change style to decide the step over, outside a display:none subtree. Where it
+    /// had none, the host runs no step.
+    pub has_before_change_style: bool,
 }
 
 impl FfiTransitionStepDecidedInPass {
@@ -2098,6 +2101,7 @@ impl FfiTransitionStepDecidedInPass {
             present: false,
             actions: std::ptr::null(),
             action_count: 0,
+            has_before_change_style: false,
         }
     }
 }
@@ -5304,6 +5308,7 @@ impl HomeAnswers {
                 present: true,
                 actions: step.actions().as_ptr(),
                 action_count: step.actions().len(),
+                has_before_change_style: step.has_before_change_style(),
             },
             None => FfiTransitionStepDecidedInPass::absent(),
         }

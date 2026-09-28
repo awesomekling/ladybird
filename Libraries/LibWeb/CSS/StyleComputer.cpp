@@ -799,26 +799,11 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_inst
 
     // https://drafts.csswg.org/css-transitions-2/#defining-before-change-style
     record_transition_stabilization_baseline(scope, abstract_element, before_change_style_record);
-    if (auto baseline = scope.engine().transition_baseline(scope, abstract_element.element().style_node_id(), pseudo_element_to_ffi(abstract_element.pseudo_element())); baseline != 0)
-        before_change_style_record = StyleRecordID { baseline };
-
-    // A transition starts from the before-change style. The newly installed record may itself
-    // have display: none; checking it would skip the discrete transition into that state.
-    ComputedStyleRecordView before_change_style { scope.engine().publish_style_record(scope, before_change_style_record) };
-    if (!before_change_style || before_change_style->in_display_none_subtree())
+    // A step the pass decided was decided over the epoch's before-change style and the parent the
+    // pass read, and where the target had no before-change style the pass decided no step.
+    if (decided && !decided->has_before_change_style)
         return {};
-    if (auto parent = abstract_element.element_to_inherit_style_from(); parent.has_value()) {
-        if (auto parent_style = parent->computed_style(); parent_style && parent_style->in_display_none_subtree())
-            return {};
-        // A display:none change clears the styles of the subtree below it, while an SVG element
-        // there can still install a record. The record the engine assigned the parent says whether
-        // it is hidden, as the pass that decided the step read it.
-        if (!parent->computed_style()) {
-            auto parent_record = StyleEngineFFI::style_engine_assigned_style_record(scope.engine().rust_handle(), parent->element().style_node_id().value(), pseudo_element_to_ffi(parent->pseudo_element()));
-            if (auto parent_style_record = scope.engine().publish_style_record(scope, StyleRecordID { parent_record }); parent_style_record && has_flag(parent_style_record->dependency_flags(), StyleRecordDependencyFlag::InDisplayNoneSubtree))
-                return {};
-        }
-    }
+
     // OPTIMIZATION: The two lists `start_needed_transitions` decides over, plus this element's own
     //               provisional states. With none of them there is nothing to decide, and the
     //               after-change style need not be reconstructed at all.
@@ -832,6 +817,29 @@ RequiredInvalidationAfterStyleChange StyleComputer::run_transition_step_for_inst
     ASSERT(decided_names_each_property);
     if (!decided_names_each_property)
         decided = nullptr;
+
+    if (!decided) {
+        if (auto baseline = scope.engine().transition_baseline(scope, abstract_element.element().style_node_id(), pseudo_element_to_ffi(abstract_element.pseudo_element())); baseline != 0)
+            before_change_style_record = StyleRecordID { baseline };
+
+        // A transition starts from the before-change style. The newly installed record may itself
+        // have display: none; checking it would skip the discrete transition into that state.
+        ComputedStyleRecordView before_change_style { scope.engine().publish_style_record(scope, before_change_style_record) };
+        if (!before_change_style || before_change_style->in_display_none_subtree())
+            return {};
+        if (auto parent = abstract_element.element_to_inherit_style_from(); parent.has_value()) {
+            if (auto parent_style = parent->computed_style(); parent_style && parent_style->in_display_none_subtree())
+                return {};
+            // A display:none change clears the styles of the subtree below it, while an SVG element
+            // there can still install a record. The record the engine assigned the parent says whether
+            // it is hidden, as the pass that decided the step read it.
+            if (!parent->computed_style()) {
+                auto parent_record = StyleEngineFFI::style_engine_assigned_style_record(scope.engine().rust_handle(), parent->element().style_node_id().value(), pseudo_element_to_ffi(parent->pseudo_element()));
+                if (auto parent_style_record = scope.engine().publish_style_record(scope, StyleRecordID { parent_record }); parent_style_record && has_flag(parent_style_record->dependency_flags(), StyleRecordDependencyFlag::InDisplayNoneSubtree))
+                    return {};
+            }
+        }
+    }
 
     begin_style_update();
     ScopeGuard end_style_update = [&] { this->end_style_update(); };
@@ -983,20 +991,6 @@ void StyleComputer::start_needed_transitions(StyleDrainScope const& scope, Compu
         && existing_stabilization_state_indices.is_empty())
         return;
 
-    StyleValueFFI::FfiAnimationContext transition_animation_context {
-        .allow_discrete = false,
-        .current_color = new_style.property(PropertyID::Color).rust_style_value_data(),
-        .has_length_resolution_context = false,
-        .length_resolution_context = {},
-        .has_transform_reference_box = false,
-        .transform_reference_box_width = 0,
-        .transform_reference_box_height = 0,
-    };
-    // The lengths the transitions resolve against are those of the record the element installed.
-    transition_animation_context.has_length_resolution_context = StyleValueFFI::rust_transition_length_resolution_context(
-        m_style_engine.engine().rust_handle(), abstract_element.style_record_identity().value(), &transition_animation_context.length_resolution_context);
-    apply_committed_transform_reference_box(scope, abstract_element, transition_animation_context);
-
     struct PreparedTransition {
         size_t stabilization_state_index;
         PropertyID property_id;
@@ -1122,12 +1116,6 @@ void StyleComputer::start_needed_transitions(StyleDrainScope const& scope, Compu
         stabilization_state.action = ProvisionalTransitionAction::None;
     }
 
-    StyleValueFFI::FfiTransitionInput input {
-        .context = transition_animation_context,
-        .properties = ffi_properties.data(),
-        .property_count = ffi_properties.size(),
-        .target_key = transition_target_key.value_or(0),
-    };
     Vector<StyleValueFFI::FfiTransitionAction> actions;
     actions.resize(prepared_transitions.size());
     if (decided) {
@@ -1161,6 +1149,25 @@ void StyleComputer::start_needed_transitions(StyleDrainScope const& scope, Compu
                 property.before_change_value = start_value;
         }
     } else {
+        StyleValueFFI::FfiAnimationContext transition_animation_context {
+            .allow_discrete = false,
+            .current_color = new_style.property(PropertyID::Color).rust_style_value_data(),
+            .has_length_resolution_context = false,
+            .length_resolution_context = {},
+            .has_transform_reference_box = false,
+            .transform_reference_box_width = 0,
+            .transform_reference_box_height = 0,
+        };
+        // The lengths the transitions resolve against are those of the record the element installed.
+        transition_animation_context.has_length_resolution_context = StyleValueFFI::rust_transition_length_resolution_context(
+            m_style_engine.engine().rust_handle(), abstract_element.style_record_identity().value(), &transition_animation_context.length_resolution_context);
+        apply_committed_transform_reference_box(scope, abstract_element, transition_animation_context);
+        StyleValueFFI::FfiTransitionInput input {
+            .context = transition_animation_context,
+            .properties = ffi_properties.data(),
+            .property_count = ffi_properties.size(),
+            .target_key = transition_target_key.value_or(0),
+        };
         m_style_engine.engine().decide_transitions(
             before_change_style_record,
             new_style.computed_longhand_table(),

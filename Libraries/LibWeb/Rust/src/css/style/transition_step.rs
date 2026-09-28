@@ -138,6 +138,19 @@ struct TransitionStep {
     for_host: TransitionStepForHost,
 }
 
+impl TransitionStep {
+    /// A step that decides nothing over the before-change style the target has.
+    fn over_before_change_style() -> Self {
+        Self {
+            for_host: TransitionStepForHost {
+                has_before_change_style: true,
+                ..TransitionStepForHost::default()
+            },
+            ..Self::default()
+        }
+    }
+}
+
 /// A transition step the pass decided, which the host applies where it installs the row: the
 /// decision for each property, and what a transition it starts runs from and to, which the step
 /// keeps alive.
@@ -145,6 +158,9 @@ struct TransitionStep {
 pub(crate) struct TransitionStepForHost {
     actions: Vec<FfiTransitionStepAction>,
     _values: Vec<RetainedStyleValueData>,
+    /// Whether the target had a before-change style to decide the step over, outside a display:none subtree. Where it
+    /// had none, the host runs no step.
+    has_before_change_style: bool,
 }
 
 // SAFETY: The actions' values point into `_values`, which own a reference to each.
@@ -196,6 +212,11 @@ impl TransitionStepForHost {
     #[must_use]
     pub(crate) fn actions(&self) -> &[FfiTransitionStepAction] {
         &self.actions
+    }
+
+    #[must_use]
+    pub(crate) fn has_before_change_style(&self) -> bool {
+        self.has_before_change_style
     }
 }
 
@@ -253,7 +274,7 @@ impl RetainedState {
             false => crate::css::style_compute::transition_entries(after_table).0,
         };
         if entries.is_empty() && transitions.is_empty() {
-            return Ok(TransitionStep::default());
+            return Ok(TransitionStep::over_before_change_style());
         }
         // A pseudo-element inherits from its originating element. A parent hidden as the pass reads
         // it may still be revealed before the host installs this row, and the host decides against
@@ -396,7 +417,7 @@ impl RetainedState {
         // What the step starts, as `CSSTransition` builds it, for the composition the step leaves.
         let mut removed = Vec::new();
         let mut started = Vec::new();
-        let mut for_host = TransitionStepForHost::default();
+        let mut for_host = TransitionStep::over_before_change_style().for_host;
         for (property, action) in properties.iter().zip(&actions) {
             for_host.actions.push(FfiTransitionStepAction {
                 property_id: action.property_id,
