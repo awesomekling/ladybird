@@ -7,7 +7,6 @@
 #include <LibWeb/HTML/HTMLAreaElement.h>
 #include <LibWeb/HTML/HTMLImageElement.h>
 #include <LibWeb/HTML/HTMLMapElement.h>
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/Painting/PaintFacts.h>
 
@@ -86,8 +85,7 @@ GC::Ptr<HTMLImageElement> HTMLMapElement::first_image_with_focusable_shapes() co
 GC::Ptr<HTMLImageElement> HTMLMapElement::first_painted_image_with_focusable_shapes() const
 {
     return first_associated_image_matching([](HTMLImageElement& image_element) {
-        auto const* layout_node = image_element.layout_node();
-        return layout_node && Painting::has_committed_box(*layout_node) && !image_element.is_inert();
+        return Painting::has_committed_box(Painting::BoxSlot::bound_to(image_element)) && !image_element.is_inert();
     });
 }
 

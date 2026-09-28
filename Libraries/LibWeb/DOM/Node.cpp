@@ -88,11 +88,9 @@
 #include <LibWeb/HTML/XMLSerializer.h>
 #include <LibWeb/Infra/SerializedURL.h>
 #include <LibWeb/InvalidateDisplayList.h>
-#include <LibWeb/Layout/Box.h>
 #include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/Layout/NodeArena.h>
-#include <LibWeb/Layout/TextNode.h>
 #include <LibWeb/Layout/TreeBuilderRustFFI.h>
 #include <LibWeb/MathML/MathMLElement.h>
 #include <LibWeb/Namespace.h>
@@ -118,22 +116,6 @@ static bool final_direct_list_item_does_not_renumber_existing_content(Element co
         return false;
 
     return CSS::innermost_list_item_counter_is_own_forward_counter(*list_owner);
-}
-
-// The text the text node's box renders, whitespace as it is in the text: nothing for a text node without a box.
-static Utf16String rendered_text_of_text_box(Text const& text)
-{
-    auto box = Painting::BoxSlot::bound_to(text);
-    if (!box)
-        return {};
-    // The rendered text is refreshed from the data the mirror holds, so data the journal still holds goes through first.
-    text.document().drain_invalidation_journal();
-    Utf16String rendered_text;
-    Layout::RustFFI::layout_arena_collect_rendered_text(box.arena(), box.slot(), false, &rendered_text,
-        [](void* context, Layout::RustFFI::FfiRenderedTextView view) {
-            *static_cast<Utf16String*>(context) = Utf16String::from_utf16({ reinterpret_cast<char16_t const*>(view.text), view.length_in_code_units });
-        });
-    return rendered_text;
 }
 
 // The text the pseudo-element's content resolved to when its box was built: its alt text when it has one, otherwise
@@ -1602,7 +1584,7 @@ void Node::update_layout_tree_for_removal(Node& parent, LayoutSubtreeRemoval rem
             // needs a layout update either way, which the layout update that takes the frame in makes.
             auto style_node = style_node_of(*this);
             parent.set_needs_layout_update(SetNeedsLayoutReason::LayoutTreeUpdate);
-            HTML::FrameScheduler::change_arena(document(), [detach_layout_subtree_for_removal, style_node, parent = GC::make_root(parent), previous_sibling = GC::make_root(previous_sibling()), next_sibling = GC::make_root(next_sibling())](auto&) {
+            HTML::FrameScheduler::change_arena(document(), [detach_layout_subtree_for_removal, style_node, parent = GC::make_root(parent), previous_sibling = GC::make_root(previous_sibling()), next_sibling = GC::make_root(next_sibling())](void*) {
                 auto place = removed_box_place(style_node, *parent, previous_sibling.ptr(), next_sibling.ptr(), Layout::RustFFI::FfiDetachedBoxLevel::FromStyle);
                 if (!detach_layout_subtree_for_removal(place, *parent))
                     parent->set_needs_layout_tree_update(true, SetNeedsLayoutTreeUpdateReason::NodeRemove);
@@ -1644,8 +1626,8 @@ void Node::detach_remaining_layout_nodes_for_removal()
         return;
     // Beside a frame that owns the arena, the rows stay bound under the nodes' identities until the frame has been
     // taken in, and are detached then, ahead of the identity changes.
-    HTML::FrameScheduler::change_arena(document(), [style_nodes = move(style_nodes)](auto& arena) {
-        Layout::RustFFI::rust_detach_remaining_layout_rows_for_removal(arena.handle(), style_nodes.data(), style_nodes.size());
+    HTML::FrameScheduler::change_arena(document(), [style_nodes = move(style_nodes)](void* arena) {
+        Layout::RustFFI::rust_detach_remaining_layout_rows_for_removal(arena, style_nodes.data(), style_nodes.size());
     });
 }
 
@@ -2766,18 +2748,18 @@ void Node::apply_layout_tree_update_mark(SetNeedsLayoutTreeUpdateReason reason)
         document().set_child_needs_layout_tree_update(true);
 
     // NB: Propagating layout invalidation, layout is not up to date.
-    if (auto row = layout_row()) {
+    if (auto box = Painting::BoxSlot::bound_to(*this)) {
         auto classification = Layout::RustFFI::layout_arena_classify_layout_tree_update(
-            row.arena_handle(), row.slot(),
+            box.arena(), box.slot(),
             is_structural_boundary_self_rebuild_reason(reason));
 
         if (classification.marks_partial_relayout_boundary_self_only) {
-            document().render_inputs_for_write().set_needs_layout_update(row.slot(), SetNeedsLayoutReason::LayoutTreeUpdate, Layout::LayoutUpdatePropagation::BoundarySelfOnly);
+            document().render_inputs_for_write().set_needs_layout_update(box.slot(), SetNeedsLayoutReason::LayoutTreeUpdate, Layout::LayoutUpdatePropagation::BoundarySelfOnly);
         } else if (reason == SetNeedsLayoutTreeUpdateReason::NodeInsertBefore) {
             // What an insertion invalidates depends on the boxes it attaches, which only the layout tree build knows.
-            document().render_inputs_for_write().defer_child_list_insertion_layout_update(row.slot());
+            document().render_inputs_for_write().defer_child_list_insertion_layout_update(box.slot());
         } else {
-            document().render_inputs_for_write().set_needs_layout_update(row.slot(), SetNeedsLayoutReason::LayoutTreeUpdate, Layout::LayoutUpdatePropagation::ThroughAncestors);
+            document().render_inputs_for_write().set_needs_layout_update(box.slot(), SetNeedsLayoutReason::LayoutTreeUpdate, Layout::LayoutUpdatePropagation::ThroughAncestors);
         }
 
         // FIXME: Escalating a rebuild past anonymous parents is not optimal, and we should
@@ -4647,7 +4629,7 @@ ErrorOr<Utf16String> Node::name_or_description(NameOrDescription target, Documen
     // cause traversal through element subtrees in way that’s necessary to check for descendants that are referenced by
     // aria-labelledby or aria-describedby and/or un-hidden. See the comment for substep A above.
     if (is_text() && (!parent_element() || (parent_element()->is_referenced() || !parent_element()->is_hidden() || !parent_element()->has_hidden_ancestor() || parent_element()->has_referenced_and_hidden_ancestor()))) {
-        if (auto text = rendered_text_of_text_box(static_cast<Text const&>(*this)); !text.is_empty())
+        if (auto text = Painting::rendered_text(Painting::BoxSlot::bound_to(*this), false); !text.is_empty())
             return text;
         return text_content().value();
     }

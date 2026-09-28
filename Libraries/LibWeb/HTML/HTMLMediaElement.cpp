@@ -53,7 +53,6 @@
 #include <LibWeb/HTML/Window.h>
 #include <LibWeb/Infra/SerializedURL.h>
 #include <LibWeb/InvalidateDisplayList.h>
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/MediaCapture/MediaStream.h>
 #include <LibWeb/MediaSourceExtensions/MediaSource.h>
 #include <LibWeb/Page/Page.h>
@@ -2655,8 +2654,8 @@ bool HTMLMediaElement::video_sink_should_tick() const
         return true;
     if (document().visibility_state() != VisibilityState::Visible)
         return false;
-    auto const* layout_node = this->layout_node();
-    return layout_node && Painting::has_committed_box(*layout_node) && Painting::is_visible(*layout_node);
+    auto box = Painting::BoxSlot::bound_to(*this);
+    return Painting::has_committed_box(box) && Painting::is_visible(box);
 }
 
 void HTMLMediaElement::sync_video_sink_ticking() const

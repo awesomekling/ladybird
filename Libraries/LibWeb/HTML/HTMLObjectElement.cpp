@@ -13,6 +13,7 @@
 #include <LibWeb/CSS/StyleValues/DisplayStyleValue.h>
 #include <LibWeb/CSS/StyleValues/KeywordStyleValue.h>
 #include <LibWeb/CSS/StyleValues/LengthStyleValue.h>
+#include <LibWeb/DOM/AbstractElement.h>
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/DocumentLoadEventDelayer.h>
 #include <LibWeb/DOM/DocumentLoading.h>
@@ -34,9 +35,9 @@
 #include <LibWeb/HTML/Scripting/Environments.h>
 #include <LibWeb/HTML/SharedResourceRequest.h>
 #include <LibWeb/HighResolutionTime/TimeOrigin.h>
-#include <LibWeb/Layout/Box.h>
 #include <LibWeb/Loader/ResourceLoader.h>
 #include <LibWeb/MimeSniff/Resource.h>
+#include <LibWeb/Painting/BoxSlot.h>
 #include <LibWeb/SVG/SVGSVGElement.h>
 #include <LibWebCommon/MimeSniff/MimeType.h>
 
@@ -583,9 +584,8 @@ CSS::SizeWithAspectRatio HTMLObjectElement::natural_size_of_content_svg_document
     if (!root)
         return {};
     // The size is published as the document loads, when its layout may not be up to date yet.
-    auto const* root_layout_node = content_document->layout_is_up_to_date() ? root->layout_node() : nullptr;
-    auto resolution_context = root_layout_node
-        ? CSS::Length::ResolutionContext::for_layout_node(*root_layout_node)
+    auto resolution_context = content_document->layout_is_up_to_date() && Painting::BoxSlot::bound_to(*root)
+        ? CSS::Length::ResolutionContext::for_element(DOM::AbstractElement { *root })
         : CSS::Length::ResolutionContext::for_document(*content_document);
     return SVG::SVGSVGElement::negotiate_natural_metrics(*root, resolution_context);
 }

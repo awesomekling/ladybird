@@ -449,7 +449,6 @@ public:
     bool perform_a_snapped_relative_user_scroll(Painting::BoxSlot const&, CSSPixelPoint delta, Compositing::SnapSelectionStrategy::Type, SnapStepAccumulation, Compositing::ScrollAnimationKind = Compositing::ScrollAnimationKind::SmoothScroll);
     bool perform_a_scroll_step_for_key_input(Painting::BoxSlot const&, CSSPixelPoint delta, Compositing::SnapSelectionStrategy::Type);
     bool perform_a_snapped_momentum_scroll(Painting::BoxSlot const&, CSSPixelPoint momentum_delta);
-    Layout::Node* layout_node_for_async_scroll_node_stable_id(Compositing::AsyncScrollNodeStableID);
     void re_snap_scroll_containers_after_layout_change();
     void abort_in_flight_smooth_scrolls(Compositing::AsyncScrollNodeStableID, SmoothScrollAbortCause);
     void abort_in_flight_smooth_scrolls_taken_over_by_user_input(Compositing::AsyncScrollNodeStableID, CSSPixelPoint scroll_offset_at_gesture_start);

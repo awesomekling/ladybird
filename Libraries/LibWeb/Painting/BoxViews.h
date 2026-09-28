@@ -84,6 +84,8 @@ WEB_API Optional<String> flex_layout_json(BoxSlot const&, UniqueNodeID);
 
 WEB_API CSSPixelPoint box_type_agnostic_position(BoxSlot const&);
 WEB_API CSSPixelRect caret_rect_for_child_offset(BoxSlot const&, size_t offset);
+// The text a text box renders, its whitespace collapsed or as it is in the text; nothing for any other box.
+WEB_API Utf16String rendered_text(BoxSlot const& text_box, bool collapse_whitespace);
 WEB_API Vector<CSSPixelRect> client_rects(BoxSlot const&, Layout::RustFFI::FfiRectToViewportTransform const&);
 WEB_API CSSPixelRect bounding_client_rect(BoxSlot const&, Layout::RustFFI::FfiRectToViewportTransform const&);
 WEB_API CSSPixelPoint cumulative_scroll_compensation(BoxSlot const&);

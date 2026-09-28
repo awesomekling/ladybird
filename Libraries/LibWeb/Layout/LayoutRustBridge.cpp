@@ -359,8 +359,8 @@ void publish_svg_style_references(DOM::Element& element)
 void clear_svg_attribute_facts(DOM::Document& document, CSS::StyleNodeID style_node)
 {
     // Beside a frame that owns the arena, the facts leave with the rest of the removal's arena changes.
-    HTML::FrameScheduler::change_arena(document, [style_node](auto& arena) {
-        RustFFI::layout_arena_clear_style_node_svg_attribute_facts(arena.handle(), style_node.value());
+    HTML::FrameScheduler::change_arena(document, [style_node](void* arena) {
+        RustFFI::layout_arena_clear_style_node_svg_attribute_facts(arena, style_node.value());
     });
 }
 

@@ -85,7 +85,6 @@
 #include <LibWeb/HTML/WindowProxy.h>
 #include <LibWeb/HighResolutionTime/TimeOrigin.h>
 #include <LibWeb/Internals/Internals.h>
-#include <LibWeb/Layout/Viewport.h>
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/Painting/PaintingRustBridge.h>
@@ -1925,10 +1924,10 @@ void Window::scroll(ScrollToOptions const& options, GC::Ptr<WebIDL::Promise> pro
         // NB: Make sure layout is up-to-date before looking at scrollable overflow metrics.
         document->update_layout(DOM::UpdateLayoutReason::WindowScroll);
 
-        auto const* layout_node = document->layout_node();
-        VERIFY(layout_node && Painting::has_committed_box(*layout_node));
-        auto scrolling_area = Painting::scrollable_overflow_rect(*layout_node).value().to_type<float>();
-        auto overflow_directions = Painting::rust_physical_overflow_directions(*layout_node);
+        auto viewport_box = Painting::BoxSlot::viewport_of(*document);
+        VERIFY(Painting::has_committed_box(viewport_box));
+        auto scrolling_area = Painting::scrollable_overflow_rect(viewport_box).value().to_type<float>();
+        auto overflow_directions = Painting::rust_physical_overflow_directions(viewport_box);
 
         // 7. -> If the viewport has rightward overflow direction
         //       Let x be max(0, min(x, viewport scrolling area width - viewport width)).
