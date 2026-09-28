@@ -2382,7 +2382,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::apply_engine_computed_style_r
     return result.invalidation;
 }
 
-CSS::RequiredInvalidationAfterStyleChange Element::compare_engine_computed_style_record_after_sample(CSS::StyleDrainScope const& scope, CSS::StyleRecordID style_record_before_installation, CSS::RequiredInvalidationAfterStyleChange invalidation, CSS::StyleEffectDrain* effect_drain)
+CSS::RequiredInvalidationAfterStyleChange Element::compare_engine_computed_style_record_after_sample(CSS::StyleDrainScope const& scope, CSS::StyleRecordID style_record_before_installation, CSS::RequiredInvalidationAfterStyleChange invalidation, CSS::StyleEffectDrain* effect_drain, Optional<u32> sample_damage)
 {
     auto const style_record = style_record_identity();
     if (style_record != style_record_before_installation) {
@@ -2398,7 +2398,7 @@ CSS::RequiredInvalidationAfterStyleChange Element::compare_engine_computed_style
             .old_style_record = style_record_before_installation,
             .new_style_record = style_record,
         };
-        auto result = compute_required_invalidation_with_cache(scope, *new_computed_values, old_state, abstract_element, style_record_delta);
+        auto result = compute_required_invalidation_with_cache(scope, *new_computed_values, old_state, abstract_element, style_record_delta, sample_damage);
         if (result.any_computed_value_changed)
             document().style_invalidation_counters().element_computed_style_changes++;
         invalidation |= result.invalidation;

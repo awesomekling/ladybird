@@ -4217,6 +4217,10 @@ pub struct FfiRowSampledInPass {
     pub custom_property_environment_named: bool,
     /// Whether building the composition rebuilt every style group.
     pub rebuilt_every_group: bool,
+    /// What moving the element from the record the host compares its sampled style with to
+    /// `style_record` damages, as the engine answers a record's damage (with
+    /// `FfiStyleInvalidationField::EngineComputed` set); zero where the host compares with none.
+    pub damage: u32,
 }
 
 /// Takes what the pass published for a row whose animations it sampled, so that exactly one
@@ -4391,13 +4395,15 @@ pub(crate) unsafe fn owner_sampled_custom_property_environment_owner(
 }
 
 /// A record the host holds for an element, or for one of its pseudo-elements (`pseudo_kind`, or
-/// `u8::MAX` for the element), which the engine samples the animations over.
+/// `u8::MAX` for the element), which the engine samples the animations over; and the record the
+/// host compares the element's sampled style with once it installs the sample, or zero.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct FfiInstalledRecord {
     pub node: u32,
     pub pseudo_kind: u8,
     pub style_record: u64,
+    pub compared_with: u64,
 }
 
 /// Sample the animations of each of `count` elements or pseudo-elements over the record the host
@@ -4467,6 +4473,7 @@ fn sample_installed_record(
         node,
         pseudo_kind,
         style_record,
+        compared_with,
     } = record;
     let Some(style_node) = StyleNodeID::from_raw(node) else {
         return FfiRowSampledInPass::absent();
@@ -4486,16 +4493,21 @@ fn sample_installed_record(
             timeline_samples,
         ),
     };
-    match sampled {
-        Ok(published) => {
-            super::engine_sample_check::note_taken("installed record sample");
-            row_sampled_in_pass(engine, Some(published))
-        }
+    let published = match sampled {
+        Ok(published) => published,
         Err(reason) => {
             super::engine_sample_check::note_declined(&format!("installed record: {reason}"));
-            FfiRowSampledInPass::absent()
+            return FfiRowSampledInPass::absent();
         }
+    };
+    super::engine_sample_check::note_taken("installed record sample");
+    let mut sample = row_sampled_in_pass(engine, Some(published));
+    // What the host's comparison would ask for, answered with the sample.
+    if compared_with != 0 && compared_with != sample.style_record && pseudo.is_none() {
+        sample.damage = engine.element_record_damage(style_node, false, compared_with, sample.style_record)
+            | FfiStyleInvalidationField::EngineComputed as u32;
     }
+    sample
 }
 
 /// Sample the animations of an element over the record the host holds for it at the times
@@ -4765,6 +4777,7 @@ impl FfiRowSampledInPass {
             custom_property_reactions: 0,
             custom_property_environment_named: false,
             rebuilt_every_group: false,
+            damage: 0,
         }
     }
 }
@@ -5272,6 +5285,7 @@ fn row_sampled_in_pass(
             }),
             custom_property_environment_named: false,
             rebuilt_every_group: published.rebuilt_every_group,
+            damage: 0,
         },
     }
 }

@@ -523,14 +523,20 @@ enum class SampleInvalidation {
     AppliedByCaller,
 };
 
-static void sample_animations_for_installed_record(StyleDrainScope const& scope, DOM::AbstractElement abstract_element, SampleInvalidation sample_invalidation = SampleInvalidation::Applied)
+// Returns what the engine answered moving the element from `compared_with` to the record it holds
+// once the sample installs damages, where it did.
+static Optional<u32> sample_animations_for_installed_record(StyleDrainScope const& scope, DOM::AbstractElement abstract_element, SampleInvalidation sample_invalidation = SampleInvalidation::Applied, StyleRecordID compared_with = {})
 {
     auto record = abstract_element.style_record_identity();
     if (!record)
-        return;
-    Animations::AnimationUpdateContext context;
-    context.drain_scope = &scope;
-    context.elements.set(abstract_element, { .style_record_before_update = record, .caller_applies_invalidation = sample_invalidation == SampleInvalidation::AppliedByCaller });
+        return {};
+    Optional<u32> damage;
+    {
+        Animations::AnimationUpdateContext context;
+        context.drain_scope = &scope;
+        context.elements.set(abstract_element, { .style_record_before_update = record, .caller_applies_invalidation = sample_invalidation == SampleInvalidation::AppliedByCaller, .compared_with = compared_with, .damage = &damage });
+    }
+    return damage;
 }
 
 // The pass sampled the element's animations over the record the row settled and published the
@@ -587,7 +593,7 @@ static void sample_animations_for_installed_pseudos(StyleDrainScope const& scope
             continue;
         DOM::AbstractElement pseudo { element, static_cast<PseudoElement>(kind) };
         if (pseudo.has_style())
-            sample_animations_for_installed_record(scope, pseudo);
+            (void)sample_animations_for_installed_record(scope, pseudo);
     }
 }
 
@@ -1080,10 +1086,11 @@ static RequiredInvalidationAfterStyleChange apply_style_engine_reactions(StyleDr
                             document.style_computer().apply_settled_animation_plan(settled, *plan_after_pass_sample);
                         row_effects.append(StyleEffectDrain::AnimationNames { StyleNodeID { reaction.style_node } });
                     }
+                    Optional<u32> sample_damage;
                     if (!installed_pass_sample && settled.has_style() && (has_animation_effects || animation_plan.has_value() || row_effect_debt & StyleEngine::SettledRowOwesAnAnimationSample))
-                        sample_animations_for_installed_record(scope, settled, row_sample_invalidation);
+                        sample_damage = sample_animations_for_installed_record(scope, settled, row_sample_invalidation, compares_after_sample ? old_style_record : StyleRecordID {});
                     if (compares_after_sample)
-                        invalidation = element->compare_engine_computed_style_record_after_sample(scope, old_style_record, invalidation, &row_effects);
+                        invalidation = element->compare_engine_computed_style_record_after_sample(scope, old_style_record, invalidation, &row_effects, sample_damage);
                     // The step runs here rather than after the batch: a descendant applied later
                     // reads this element's after-change style, which is what the step decides
                     // against, and the C++ computation this row replaces runs it inside itself.
@@ -1652,8 +1659,8 @@ static Optional<RequiredInvalidationAfterStyleChange> install_targeted_record_de
     StyleComputer::record_container_query_effects(scope, DOM::AbstractElement { element }, container_effects);
     engine.acknowledge_engine_computed_record(scope, element.style_node_id());
     if (samples_over_the_record) {
-        sample_animations_for_installed_record(scope, DOM::AbstractElement { element }, SampleInvalidation::AppliedByCaller);
-        invalidation = element.compare_engine_computed_style_record_after_sample(scope, old_style_record, invalidation);
+        auto sample_damage = sample_animations_for_installed_record(scope, DOM::AbstractElement { element }, SampleInvalidation::AppliedByCaller, old_style_record);
+        invalidation = element.compare_engine_computed_style_record_after_sample(scope, old_style_record, invalidation, nullptr, sample_damage);
     }
     return invalidation;
 }

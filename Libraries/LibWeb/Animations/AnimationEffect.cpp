@@ -1107,7 +1107,7 @@ static void install_engine_samples(CSS::StyleDrainScope const& scope, HashMap<DO
         if (!it.value.style_record_before_update || style_node == 0 || element.style_record_identity() != it.value.style_record_before_update)
             continue;
         sampled_elements.append({ element, it.value });
-        records.append({ style_node.value(), CSS::pseudo_element_to_ffi(element.pseudo_element()), it.value.style_record_before_update.value() });
+        records.append({ style_node.value(), CSS::pseudo_element_to_ffi(element.pseudo_element()), it.value.style_record_before_update.value(), it.value.compared_with.value() });
     }
     if (records.is_empty())
         return;
@@ -1121,6 +1121,8 @@ static void install_engine_samples(CSS::StyleDrainScope const& scope, HashMap<DO
         if (!samples[i].present || element.style_record_identity() != data.style_record_before_update)
             continue;
         install_taken_engine_sample(scope, element, data.style_record_before_update, data.caller_applies_invalidation, samples[i], InstalledInArena::No);
+        if (data.damage && samples[i].damage && element.style_record_identity().value() == samples[i].style_record)
+            *data.damage = samples[i].damage;
     }
 }
 
