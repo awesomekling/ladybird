@@ -17,7 +17,6 @@
 #include <LibWeb/DOM/InvalidationJournal.h>
 #include <LibWeb/Export.h>
 #include <LibWeb/Forward.h>
-#include <LibWeb/Layout/NodeArena.h>
 #include <LibWeb/Painting/QueryView.h>
 
 namespace Web::CSS {

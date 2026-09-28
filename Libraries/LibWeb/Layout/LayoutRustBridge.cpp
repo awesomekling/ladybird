@@ -32,6 +32,7 @@
 #include <LibWeb/HTML/HTMLElement.h>
 #include <LibWeb/Layout/ImageProvider.h>
 #include <LibWeb/Layout/LayoutRustBridge.h>
+#include <LibWeb/Layout/NodeArena.h>
 #include <LibWeb/Painting/PaintableTypes.h>
 #include <LibWeb/Painting/PaintingRustBridge.h>
 #include <LibWeb/SVG/FragmentIdentifier.h>

@@ -25,11 +25,6 @@ class Node;
 class NodeArena;
 class TextNode;
 
-enum class LayoutUpdatePropagation : u8 {
-    ThroughAncestors,
-    BoundarySelfOnly,
-};
-
 // A live row of a document's layout node arena, named by its slot. What the host does to a row that
 // only has its style or paint facts written, or its paint damaged, it does through this without
 // making the row's shell; a shell is made only for what needs one.
