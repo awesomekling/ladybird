@@ -442,15 +442,6 @@ void StyleEngine::end_style_record_view_epoch()
     StyleEngineFFI::style_engine_end_style_record_view_epoch(rust_handle());
 }
 
-double StyleEngine::ensure_random_base_value(StyleNodeID node, Utf16View name, bool element_shared)
-{
-    Vector<u16> code_units;
-    code_units.ensure_capacity(name.length_in_code_units());
-    for (size_t index = 0; index < name.length_in_code_units(); ++index)
-        code_units.unchecked_append(name.code_unit_at(index));
-    return bit_cast<double>(ensure_random_base_value(node, code_units.span(), element_shared));
-}
-
 void StyleEngine::set_element_custom_property_data(StyleDrainScope const& scope, StyleNodeID node, CustomPropertyData const* data, bool is_animation_overlay, bool declares)
 {
     StyleEngineFFI::style_engine_set_element_custom_property_data(scope,

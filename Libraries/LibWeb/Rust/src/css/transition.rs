@@ -451,8 +451,24 @@ pub unsafe extern "C" fn rust_transition_length_resolution_context(
     style_record: u64,
     context: *mut crate::css::animation::FfiAnimationLengthResolutionContext,
 ) -> bool {
-    let style_engine: &crate::css::style::StyleEngine =
-        unsafe { style_engine.enter("rust_transition_length_resolution_context") };
+    crate::css::style::owner_calls::ask(
+        style_engine,
+        "rust_transition_length_resolution_context",
+        crate::css::style::owner_calls::StyleQuery::TransitionLengthResolutionContext { style_record, context },
+    )
+    .is()
+}
+
+/// Answers [`rust_transition_length_resolution_context`] from `style_engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`rust_transition_length_resolution_context`].
+pub(crate) unsafe fn owner_transition_length_resolution_context(
+    style_engine: &mut crate::css::style::StyleEngine,
+    style_record: u64,
+    context: *mut crate::css::animation::FfiAnimationLengthResolutionContext,
+) -> bool {
     let Some(length) = style_engine.transition_length_resolution_context(style_record) else {
         return false;
     };

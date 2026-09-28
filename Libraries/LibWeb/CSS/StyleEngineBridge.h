@@ -88,7 +88,6 @@ public:
 
 #include <LibWeb/StyleEngineBridgeGenerated.h>
 
-    [[nodiscard]] double ensure_random_base_value(StyleNodeID, Utf16View name, bool element_shared);
     void set_element_custom_property_data(StyleDrainScope const&, StyleNodeID, CustomPropertyData const*, bool is_animation_overlay = false, bool declares = false);
 
     // The host names a node the moment it connects, from identities the engine granted it ahead of

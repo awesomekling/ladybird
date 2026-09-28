@@ -76,6 +76,13 @@ pub(crate) enum Change {
     /// hint declarations, and the host facts they read. The engine applies them as one batch, which is how its
     /// invalidation sees them.
     StyleInputs(InputForPass),
+    /// A write to the document's style engine, which the owner applies before the next unit or query that reaches
+    /// the engine, in order with the style inputs.
+    #[expect(
+        dead_code,
+        reason = "the generated writes go to the owner with the style inputs recorded then read back"
+    )]
+    Engine(crate::css::style::owner_calls::EngineChange),
     /// A write to the document's layout arena, which the owner applies before the next unit or query that reaches
     /// the arena.
     Arena(ArenaChange),
@@ -119,6 +126,7 @@ impl Change {
     fn apply(self, target: &mut ChangeTarget<'_>) {
         match self {
             Change::StyleInputs(inputs) => inputs.apply(target.style_engine),
+            Change::Engine(change) => change.apply(target.style_engine),
             Change::Arena(_) => debug_assert!(false, "a style unit applies no arena change"),
         }
     }
@@ -200,21 +208,58 @@ impl RenderState {
         }
     }
 
+    /// Applies the changes to the style engine the owner has received, in order, which every unit and query that
+    /// reaches the engine comes after, as it came after the main thread's writes when the main thread made them
+    /// directly. The owner reaches the engine only while the main thread waits for it or has lent it a stage, so
+    /// nothing reads the engine beside them.
+    fn apply_style_changes(&mut self) {
+        if self.changes.pending.is_empty() {
+            return;
+        }
+        let received = self.changes.received_through;
+        let changes = self.changes.take_through(received, |change| !change.writes_arena());
+        if changes.is_empty() {
+            return;
+        }
+        let engine = self.style_engine();
+        if engine.is_null() {
+            debug_assert!(false, "the owner applies style changes of a document with an engine");
+            return;
+        }
+        // SAFETY: The engine is the document's, and the document thread reaches it only through the owner, or once it
+        // has taken back the stage it lent it.
+        unsafe {
+            engine.reach_on_owner(|engine| {
+                let mut target = ChangeTarget { style_engine: engine };
+                for change in changes {
+                    change.apply(&mut target);
+                }
+            });
+        }
+    }
+
     /// Answers `query` from the state as the units before it left it.
     fn answer(&mut self, query: Query) -> Answer {
         self.apply_arena_changes();
+        self.apply_style_changes();
         match query {
-            Query::ComputedStyle(demand) => {
+            Query::Engine(query) => {
                 let engine = self.style_engine();
                 if engine.is_null() {
-                    debug_assert!(false, "the owner answers the style reads of a document with an engine");
-                    return Answer::left_to_host(query);
+                    debug_assert!(
+                        false,
+                        "the owner answers the engine queries of a document with an engine"
+                    );
+                    return Answer::left_to_host(Query::Engine(query));
                 }
-                // SAFETY: The engine is the document's, and the document thread waits for the answer with the
-                // engine's token home.
-                Answer::ComputedStyle(StyleReadAnswer::Answered(unsafe {
-                    engine.reach_on_owner(|engine| demand.answer(engine))
-                }))
+                // The faces a read's style computation wants are this document's.
+                let _wanted_face_owner = libgfx_rust::font::WantedFaceOwner::enter(std::ptr::from_mut::<ArenaHandle>(
+                    &mut self.arena,
+                ) as u64);
+                // SAFETY: The engine is the document's, and the document thread waits for the answer, keeping what
+                // the query borrows live.
+                unsafe { engine.reach_on_owner(|engine| query.answer(engine)) };
+                Answer::Engine(EngineAnswered::Answered)
             }
             Query::FinishOwnerStyleHostHalf => {
                 let engine = self.style_engine();
@@ -240,12 +285,14 @@ impl RenderState {
     /// The handle of the state's arena, which names the document to what files work under it.
     fn arena_handle(&mut self) -> *mut c_void {
         self.apply_arena_changes();
+        self.apply_style_changes();
         std::ptr::from_mut::<ArenaHandle>(&mut self.arena).cast::<c_void>()
     }
 
     /// The state's arena and what lives beside it, which the owner hands the units it runs for the document.
     fn state(&mut self) -> *mut ArenaHandle {
         self.apply_arena_changes();
+        self.apply_style_changes();
         std::ptr::from_mut::<ArenaHandle>(&mut self.arena)
     }
 
@@ -271,10 +318,6 @@ pub(crate) enum Query {
     },
     /// How many layout passes and tree builds the document's layout has run, for tests.
     LayoutCounts,
-    /// The computed style of an element or one of its pseudo-elements, which a read cannot wait for a style update
-    /// to install: a getComputedStyle() read of an element whose style is not up to date, for one. The owner answers
-    /// the demand with the engine of the document's render state.
-    ComputedStyle(crate::css::style::bridge::RecordDemand),
     /// How many rows of the layout subtree `root` heads carry a pre-order label no greater than the row before them,
     /// for tests.
     PreOrderLabelViolations { root: NodeSlotId },
@@ -288,6 +331,8 @@ pub(crate) enum Query {
     FinishOwnerStyleHostHalf,
     /// A read of the document's layout arena.
     Arena(ArenaQuery),
+    /// A read of the document's style engine, which the owner answers into the query the main thread holds.
+    Engine(crate::css::style::owner_calls::StyleQueryRef),
 }
 
 /// A read of a document's layout arena, which [`Query::Arena`] asks.
@@ -356,13 +401,25 @@ impl ArenaQuery {
 pub(crate) enum Answer {
     Geometry(FfiGeometryReadAnswer),
     LayoutCounts(LayoutCounts),
-    ComputedStyle(StyleReadAnswer),
     Arena(ArenaAnswer),
     Count(u64),
     /// An element, or 0 for none.
     Element(u32),
     Is(bool),
     Payment(OwedToHost),
+    Engine(EngineAnswered),
+}
+
+/// What became of a [`Query::Engine`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum EngineAnswered {
+    /// The owner wrote the answer into the query.
+    Answered,
+    /// The owner holds no engine of the document to answer with: the main thread answers the query.
+    LeftToHost,
+    /// The owner panicked answering the query, which it may have left half done in the engine. Nothing answers it
+    /// again.
+    Unanswered,
 }
 
 /// What the owner's answer owes the host, which the document thread pays.
@@ -420,18 +477,6 @@ impl Answer {
     }
 }
 
-/// What became of a [`Query::ComputedStyle`].
-#[derive(Debug)]
-pub(crate) enum StyleReadAnswer {
-    /// The record the demand answered, as the value the main thread reads it through.
-    Answered(crate::css::style::bridge::RecordDemandAnswer),
-    /// The owner holds no engine of the document to answer with: the main thread answers the demand.
-    LeftToHost,
-    /// The owner panicked answering the demand, which it may have left half done in the engine. Nothing answers it
-    /// again: the read goes unanswered.
-    Unanswered,
-}
-
 /// How many layout passes and tree builds a document's layout has run.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct LayoutCounts {
@@ -459,12 +504,12 @@ impl Answer {
         match query {
             Query::Geometry { .. } => Self::Geometry(FfiGeometryReadAnswer::default()),
             Query::LayoutCounts => Self::LayoutCounts(LayoutCounts::default()),
-            Query::ComputedStyle(_) => Self::ComputedStyle(StyleReadAnswer::LeftToHost),
             Query::PreOrderLabelViolations { .. } => Self::Count(0),
             Query::ShadowIncludingParentElement { .. } => Self::Element(0),
             Query::RowIsLive { .. } => Self::Is(false),
             Query::FinishOwnerStyleHostHalf => Self::Payment(OwedToHost(crate::layout::HostPayment::nothing())),
             Query::Arena(query) => Self::Arena(query.left_to_host()),
+            Query::Engine(_) => Self::Engine(EngineAnswered::LeftToHost),
         }
     }
 
@@ -472,7 +517,7 @@ impl Answer {
     /// main thread is not left to answer it again from there.
     fn unanswered(query: Query) -> Self {
         match query {
-            Query::ComputedStyle(_) => Self::ComputedStyle(StyleReadAnswer::Unanswered),
+            Query::Engine(_) => Self::Engine(EngineAnswered::Unanswered),
             _ => Self::left_to_host(query),
         }
     }
@@ -499,12 +544,12 @@ impl Answer {
                     table_cell_measurement_cache_misses: arena.table_cell_measurement_cache_miss_count(),
                 },
             }),
-            Query::ComputedStyle(_) => Self::left_to_host(query),
             Query::PreOrderLabelViolations { root } => Self::Count(pre_order_label_violations(arena, root)),
             Query::ShadowIncludingParentElement { node } => Self::Element(arena.shadow_including_parent(node).element),
             Query::RowIsLive { row } => Self::Is(arena.slot_is_live(row)),
             Query::FinishOwnerStyleHostHalf => Self::Payment(OwedToHost(arena.finish_flight_style_host_half().1)),
             Query::Arena(query) => Self::Arena(query.answer(arena)),
+            Query::Engine(_) => Self::left_to_host(query),
         }
     }
 }
@@ -699,6 +744,10 @@ thread_local! {
     static RECALLED: RefCell<std::collections::HashSet<DocumentId>> = RefCell::new(std::collections::HashSet::new());
     // On a document thread, the number of the last change it sent for each document.
     static SENT_THROUGH: RefCell<HashMap<DocumentId, ChangeSeq>> = RefCell::new(HashMap::new());
+    // On a document thread, the documents it sent a change to the style engine of that no query it asked since has
+    // come after: the owner may not have applied it yet.
+    static STYLE_CHANGES_SENT: RefCell<std::collections::HashSet<DocumentId>> =
+        RefCell::new(std::collections::HashSet::new());
     // On a document thread, the address of each document's arena it created, which names the frame in flight of the
     // document: nothing reaches the arena through it.
     static FRAME_KEYS: RefCell<HashMap<DocumentId, usize>> = RefCell::new(HashMap::new());
@@ -772,6 +821,8 @@ fn handle_message(message: ToOwner) {
             reply,
         } => reply.answer(|| {
             with_state(document, |state| {
+                state.apply_arena_changes();
+                state.apply_style_changes();
                 debug_assert!(
                     state.changes.pending.front().is_none_or(|(seq, _)| *seq > through),
                     "a query is answered after the changes sent before it"
@@ -921,6 +972,7 @@ pub(crate) fn create_document() -> (DocumentId, *mut c_void) {
 /// Drops the render state of `document` on the owner. Nothing waits for it.
 pub(crate) fn destroy_document(document: DocumentId) {
     SENT_THROUGH.with_borrow_mut(|sent| sent.remove(&document));
+    STYLE_CHANGES_SENT.with_borrow_mut(|sent| sent.remove(&document));
     FRAME_KEYS.with_borrow_mut(|keys| keys.remove(&document));
     send(ToOwner::Destroy { document });
 }
@@ -938,12 +990,19 @@ pub(crate) fn send_change(
         seq.0 += 1;
         *seq
     });
+    STYLE_CHANGES_SENT.with_borrow_mut(|sent| sent.insert(document));
     send(ToOwner::Changes {
         document,
         first: seq,
         changes: vec![change],
     });
     seq
+}
+
+/// On a document thread: whether it sent a change to the style engine of `document` that no query it asked since came
+/// after, which the owner may not have applied yet.
+pub(crate) fn has_unapplied_style_changes(document: DocumentId) -> bool {
+    document.is_valid() && STYLE_CHANGES_SENT.with_borrow(|sent| sent.contains(&document))
 }
 
 /// Sends the arena write `change` for `document`, which the owner applies before the next unit or query that reaches
@@ -985,11 +1044,15 @@ pub(crate) fn recall_rendering_update(document: DocumentId) {
 pub(crate) unsafe fn ask(document: DocumentId, arena: *mut c_void, query: Query) -> Answer {
     let through = sent_through(document);
     let answer = crate::stage_thread::wait_for_owner(
-        |reply| ToOwner::Ask {
-            document,
-            through,
-            query,
-            reply,
+        |reply| {
+            // The owner applies every style change sent before the query first.
+            STYLE_CHANGES_SENT.with_borrow_mut(|sent| sent.remove(&document));
+            ToOwner::Ask {
+                document,
+                through,
+                query,
+                reply,
+            }
         },
         || {
             if let Some(answer) =
@@ -1028,11 +1091,15 @@ pub(crate) unsafe fn ask_about(arena: *mut c_void, query: Query) -> Answer {
 pub(crate) fn ask_owner(document: DocumentId, query: Query) -> Answer {
     let through = sent_through(document);
     let answer = crate::stage_thread::wait_for_owner(
-        |reply| ToOwner::Ask {
-            document,
-            through,
-            query,
-            reply,
+        |reply| {
+            // The owner applies every style change sent before the query first.
+            STYLE_CHANGES_SENT.with_borrow_mut(|sent| sent.remove(&document));
+            ToOwner::Ask {
+                document,
+                through,
+                query,
+                reply,
+            }
         },
         || {
             STATES
@@ -1553,14 +1620,17 @@ mod tests {
                 document,
                 arena: SpareArena(arena),
             });
-            let query = Query::ComputedStyle(crate::css::style::bridge::RecordDemand {
-                node: 1,
-                pseudo_kind: u8::MAX,
-                exclude_inline_style: false,
-                targeted: false,
-                read_only: true,
-                parent_highlight: 0,
-            });
+            let mut cell = crate::css::style::owner_calls::StyleQueryCell::new(
+                crate::css::style::owner_calls::StyleQuery::ReadDemand(crate::css::style::bridge::RecordDemand {
+                    node: 1,
+                    pseudo_kind: u8::MAX,
+                    exclude_inline_style: false,
+                    targeted: false,
+                    read_only: true,
+                    parent_highlight: 0,
+                }),
+            );
+            let query = Query::Engine(cell.for_owner());
             let (reply, answered) = crate::stage_thread::owner_reply_for_test();
             handle(ToOwner::Ask {
                 document,
@@ -1571,13 +1641,15 @@ mod tests {
             let outcome = answered();
             assert!(outcome.is_err(), "the owner panicked answering");
             // The host takes the read as unanswered, and does not answer it again with the engine the owner left.
-            let answer = crate::css::style::bridge::host_answer_of_owner_read(Answer::of_outcome(query, outcome));
-            assert!(
-                answer.is_some_and(|answer| answer.unanswered && answer.is_absent && answer.published_record.is_null()),
-                "the host answers the read without the engine"
-            );
+            assert!(matches!(
+                Answer::of_outcome(query, outcome),
+                Answer::Engine(EngineAnswered::Unanswered)
+            ));
             // A read the owner leaves to the host is the host's to answer.
-            assert!(crate::css::style::bridge::host_answer_of_owner_read(Answer::left_to_host(query)).is_none());
+            assert!(matches!(
+                Answer::left_to_host(query),
+                Answer::Engine(EngineAnswered::LeftToHost)
+            ));
             handle(ToOwner::Destroy { document });
             STATES.with_borrow(|states| states.is_empty())
         });

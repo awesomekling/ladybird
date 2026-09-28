@@ -135,6 +135,8 @@ struct StyleEngineHome {
     holder: Cell<Option<Holder>>,
     /// The layout arena of the engine's document, which the stages that take the token run for.
     arena: Cell<usize>,
+    /// The document whose render state's arena links the engine, whose render owner owns the engine.
+    document: Cell<crate::render_owner::DocumentId>,
     /// What entrances that must not wait left for the token's arrival, in the order they left it.
     deferred_writes: RefCell<Vec<DeferredWrite>>,
 }
@@ -390,6 +392,7 @@ impl StyleEngineHandle {
             }),
             holder: Cell::new(None),
             arena: Cell::new(0),
+            document: Cell::new(crate::render_owner::DocumentId::default()),
             deferred_writes: RefCell::new(Vec::new()),
         });
         Self(Rc::into_raw(home).cast_mut().cast())
@@ -454,9 +457,18 @@ impl StyleEngineHandle {
         unsafe { reach_on_this_thread(self.address(), engine, run) }
     }
 
-    /// Names the layout arena of the engine's document, which the stages that take the token run for.
-    pub(crate) fn link_arena(self, arena: usize) {
+    /// Names the layout arena of the engine's document `document`, which the stages that take the token run for.
+    pub(crate) fn link_arena(self, arena: usize, document: crate::render_owner::DocumentId) {
         self.home().arena.set(arena);
+        self.home().document.set(document);
+    }
+
+    /// The document whose render state's arena links the engine, or the invalid document where none does.
+    pub(crate) fn document(self) -> crate::render_owner::DocumentId {
+        if self.is_null() {
+            return crate::render_owner::DocumentId::default();
+        }
+        self.home().document.get()
     }
 
     /// Lends the token to a stage of the `holder` kind, which sends it home owing no less than
@@ -533,15 +545,17 @@ impl StyleEngineHandle {
     /// As for [`Self::enter`].
     unsafe fn enter_for<'a>(self, access: Access, entry: &'static str) -> &'a mut StyleEngine {
         let home = self.home();
-        // A token is lent only to a submitted stage, so with none submitted every token is home.
-        if crate::stage_thread::no_stage_is_submitted() {
-            // SAFETY: Guaranteed by the caller.
-            return unsafe { &mut *home.engine.as_ptr() };
-        }
         let (lent_home, lent_engine) = LENT_TO_THIS_THREAD.get();
         if lent_home == self.address() {
             // SAFETY: The stage that holds the token lent it to this thread; guaranteed by the caller.
             return unsafe { &mut *lent_engine };
+        }
+        // A token is lent only to a submitted stage, so with none submitted every token is home.
+        if crate::stage_thread::no_stage_is_submitted() {
+            // What the main thread sent the owner of the engine goes in before the main thread reaches it.
+            super::owner_calls::apply_changes_before_main_reaches(self);
+            // SAFETY: Guaranteed by the caller.
+            return unsafe { &mut *home.engine.as_ptr() };
         }
         if crate::stage_thread::running_inside_stage() {
             debug_assert!(
@@ -554,6 +568,7 @@ impl StyleEngineHandle {
             return unsafe { &mut *home.engine.as_ptr() };
         }
         home.bring_home(access, entry, 0, 0);
+        super::owner_calls::apply_changes_before_main_reaches(self);
         // SAFETY: The token is home, or the stage that holds it is done with the engine as far as
         // `access` reaches; guaranteed by the caller.
         unsafe { &mut *home.engine.as_ptr() }
@@ -693,7 +708,7 @@ mod tests {
     fn a_finalizer_leaves_its_write_for_a_token_a_pass_has_not_sent_home() {
         let (_engine, handle) = test_engine();
         let arena = std::ptr::NonNull::<c_void>::dangling().as_ptr();
-        handle.link_arena(arena as usize);
+        handle.link_arena(arena as usize, crate::render_owner::DocumentId::default());
         let (loan, settlement) = handle.lend(Holder::StylePass, Owed::TakeBack);
         // Stands in for the pass's stage, which the main thread has not taken back.
         crate::stage_thread::stand_in_submitted_stage_for_test(arena);

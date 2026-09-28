@@ -6919,48 +6919,6 @@ fn finish_resolved_animation_properties(resolved: ResolvedAnimationDeclarations)
     }
 }
 
-/// The key one effect's keyframes are sampled at, from the timing the host published for it rather
-/// than from the effect's own `transformed_progress()`.
-///
-/// Returns whether the mirror answered at all. Where it did, `*is_resolved_out` says whether the
-/// progress resolved: an effect whose progress is unresolved is one the stage leaves out.
-///
-/// # Safety
-/// `style_engine` must be a live style engine, and both out-parameters must be writable.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rust_published_animation_current_key(
-    style_engine: crate::css::style::StyleEngineHandle,
-    style_node: u32,
-    slot: u8,
-    effect_identity: u64,
-    is_resolved_out: *mut bool,
-    key_out: *mut f64,
-) -> bool {
-    let engine: &crate::css::style::StyleEngine = unsafe {
-        crate::css::style::bridge::engine_read_entrance(style_engine, "rust_published_animation_current_key")
-    };
-    use crate::css::style::animations;
-
-    let Some(node) = crate::css::style::tree::StyleNodeID::from_raw(style_node) else {
-        return false;
-    };
-    let Some(row) = engine.element_animation_timing_rows_for_effect(node, slot, effect_identity) else {
-        return false;
-    };
-    let Some(timeline_time) = animations::row_timeline_time(row, engine.animation_timeline_samples()) else {
-        return false;
-    };
-    let linear_points = engine.element_animation_timing_row_linear_points(node, slot);
-    let Some(key) = animations::row_current_key(row, linear_points, timeline_time) else {
-        return false;
-    };
-    unsafe {
-        *is_resolved_out = key.is_some();
-        *key_out = key.unwrap_or(0.0);
-    }
-    true
-}
-
 /// Order one element's animation timing rows in composite order, as indices into the list the host
 /// packed. The order is decided from the rows alone: every number
 /// `KeyframeEffect::composite_order()` compares travels on the row, so the list a stage reads is in
@@ -7007,8 +6965,30 @@ pub unsafe extern "C" fn rust_substitute_compositor_keyframe_value(
     property_id: u16,
     value: *const crate::css::style_value::StyleValueData,
 ) -> *const crate::css::style_value::StyleValueData {
-    let engine: &crate::css::style::StyleEngine =
-        unsafe { style_engine.enter("rust_substitute_compositor_keyframe_value") };
+    crate::css::style::owner_calls::ask(
+        style_engine,
+        "rust_substitute_compositor_keyframe_value",
+        crate::css::style::owner_calls::StyleQuery::SubstituteCompositorKeyframeValue {
+            custom_property_store,
+            property_id,
+            value,
+        },
+    )
+    .pointer()
+    .cast::<crate::css::style_value::StyleValueData>()
+}
+
+/// Answers [`rust_substitute_compositor_keyframe_value`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`rust_substitute_compositor_keyframe_value`].
+pub(crate) unsafe fn owner_substitute_compositor_keyframe_value(
+    engine: &mut crate::css::style::StyleEngine,
+    custom_property_store: *const std::ffi::c_void,
+    property_id: u16,
+    value: *const crate::css::style_value::StyleValueData,
+) -> *const crate::css::style_value::StyleValueData {
     let written = unsafe {
         crate::css::style_value::RetainedStyleValueData::from_retained_pointer(
             crate::css::style_value::retain_style_value(value),

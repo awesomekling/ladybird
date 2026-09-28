@@ -2789,7 +2789,7 @@ impl LayoutNodeArena {
         self.host_style_record_pins.set(None);
         if !style_engine.is_null() {
             // The stages that take the engine's token run for this arena.
-            style_engine.link_arena(std::ptr::from_ref(self) as usize);
+            style_engine.link_arena(std::ptr::from_ref(self) as usize, self.document);
             // SAFETY: The registered style engine outlives this arena's live nodes.
             let engine = unsafe { style_engine.enter("layout arena style engine link") };
             engine.install_layout_style_snapshots(self.layout_style_snapshots.clone());

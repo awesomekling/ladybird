@@ -93,6 +93,7 @@ pub mod memory;
 mod native_rules;
 pub mod order;
 mod ordering;
+pub(crate) mod owner_calls;
 mod partial_view;
 mod planning;
 mod prefix;

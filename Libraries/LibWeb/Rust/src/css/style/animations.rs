@@ -1430,21 +1430,6 @@ impl AnimationTimingRows {
             .map_or(&[][..], |published| &published.linear_points[..])
     }
 
-    /// The row of one effect, which the stage names by the identity it already uses to look its
-    /// description up. The list is published in composite order, but the stage holds a subset of
-    /// it, so a position in the stage's own list is not an answer.
-    #[must_use]
-    pub(crate) fn row_for_effect(
-        &self,
-        node: StyleNodeID,
-        slot: AnimationSlot,
-        effect_identity: u64,
-    ) -> Option<&AnimationTimingRow> {
-        self.rows(node, slot)
-            .iter()
-            .find(|row| row.effect_identity == effect_identity)
-    }
-
     /// Give up the rows of identities that have been retired, which can be minted again.
     pub(crate) fn retire(&mut self, nodes: &[StyleNodeID]) {
         if self.rows.is_empty() {

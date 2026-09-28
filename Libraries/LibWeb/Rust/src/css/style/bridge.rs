@@ -241,7 +241,7 @@ pub struct FfiRecordDemandAnswer {
 
 impl FfiRecordDemandAnswer {
     /// The answer of an absent record.
-    fn absent() -> Self {
+    pub(crate) fn absent() -> Self {
         Self {
             record: FfiEngineComputedRecord::default(),
             is_absent: true,
@@ -3467,7 +3467,25 @@ pub unsafe extern "C" fn style_engine_consume_published_match_answer(
     out: *mut FfiRuleMatch,
     capacity: usize,
 ) -> usize {
-    let engine = unsafe { engine_entrance(engine, "style_engine_consume_published_match_answer") };
+    crate::css::style::owner_calls::ask(
+        engine.home(),
+        "style_engine_consume_published_match_answer",
+        crate::css::style::owner_calls::StyleQuery::ConsumePublishedMatchAnswer { node, out, capacity },
+    )
+    .usize()
+}
+
+/// Answers [`style_engine_consume_published_match_answer`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_consume_published_match_answer`].
+pub(crate) unsafe fn owner_consume_published_match_answer(
+    engine: &mut StyleEngine,
+    node: u32,
+    out: *mut FfiRuleMatch,
+    capacity: usize,
+) -> usize {
     let Some(node) = StyleNodeID::from_raw(node) else {
         return usize::MAX;
     };
@@ -3525,7 +3543,31 @@ pub unsafe extern "C" fn style_engine_match_element(
     capacity: usize,
     compact_for_cascade: bool,
 ) -> usize {
-    let engine = unsafe { engine_entrance(engine, "style_engine_match_element") };
+    crate::css::style::owner_calls::ask(
+        engine.home(),
+        "style_engine_match_element",
+        crate::css::style::owner_calls::StyleQuery::MatchElement {
+            node,
+            out,
+            capacity,
+            compact_for_cascade,
+        },
+    )
+    .usize()
+}
+
+/// Answers [`style_engine_match_element`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_match_element`].
+pub(crate) unsafe fn owner_match_element(
+    engine: &mut StyleEngine,
+    node: u32,
+    out: *mut FfiRuleMatch,
+    capacity: usize,
+    compact_for_cascade: bool,
+) -> usize {
     let Some(node) = StyleNodeID::from_raw(node) else {
         return usize::MAX;
     };
@@ -3953,7 +3995,20 @@ pub unsafe extern "C" fn style_engine_assigned_style_record(
     node: u32,
     pseudo_kind: u8,
 ) -> u64 {
-    let engine: &StyleEngine = unsafe { engine_read_entrance(engine, "style_engine_assigned_style_record") };
+    crate::css::style::owner_calls::ask(
+        engine,
+        "style_engine_assigned_style_record",
+        crate::css::style::owner_calls::StyleQuery::AssignedStyleRecord { node, pseudo_kind },
+    )
+    .u64()
+}
+
+/// Answers [`style_engine_assigned_style_record`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_assigned_style_record`].
+pub(crate) unsafe fn owner_assigned_style_record(engine: &StyleEngine, node: u32, pseudo_kind: u8) -> u64 {
     let Some(node) = StyleNodeID::from_raw(node) else {
         return 0;
     };
@@ -4054,7 +4109,29 @@ pub unsafe extern "C" fn style_engine_element_record_damage(
     old_style_record: u64,
     new_style_record: u64,
 ) -> u32 {
-    let engine = unsafe { engine_entrance(engine, "style_engine_element_record_damage") };
+    crate::css::style::owner_calls::ask(
+        engine.home(),
+        "style_engine_element_record_damage",
+        crate::css::style::owner_calls::StyleQuery::ElementRecordDamage {
+            node,
+            old_style_record,
+            new_style_record,
+        },
+    )
+    .u32()
+}
+
+/// Answers [`style_engine_element_record_damage`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_element_record_damage`].
+pub(crate) unsafe fn owner_element_record_damage(
+    engine: &mut StyleEngine,
+    node: u32,
+    old_style_record: u64,
+    new_style_record: u64,
+) -> u32 {
     let Some(node) = StyleNodeID::from_raw(node) else {
         return super::style_invalidation::unreadable_record_damage("ElementRecordDamageWithoutStyleNode");
     };
@@ -4077,7 +4154,35 @@ pub unsafe extern "C" fn style_engine_pseudo_element_record_damage(
     originating_style_record: u64,
     counter_styles_changed: bool,
 ) -> u32 {
-    let engine = unsafe { engine_entrance(engine, "style_engine_pseudo_element_record_damage") };
+    crate::css::style::owner_calls::ask(
+        engine.home(),
+        "style_engine_pseudo_element_record_damage",
+        crate::css::style::owner_calls::StyleQuery::PseudoElementRecordDamage {
+            node,
+            pseudo_kind,
+            old_style_record,
+            new_style_record,
+            originating_style_record,
+            counter_styles_changed,
+        },
+    )
+    .u32()
+}
+
+/// Answers [`style_engine_pseudo_element_record_damage`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_pseudo_element_record_damage`].
+pub(crate) unsafe fn owner_pseudo_element_record_damage(
+    engine: &mut StyleEngine,
+    node: u32,
+    pseudo_kind: u8,
+    old_style_record: u64,
+    new_style_record: u64,
+    originating_style_record: u64,
+    counter_styles_changed: bool,
+) -> u32 {
     let Some(node) = StyleNodeID::from_raw(node) else {
         return super::style_invalidation::unreadable_record_damage("PseudoElementRecordDamageWithoutStyleNode");
     };
@@ -4203,8 +4308,29 @@ pub unsafe extern "C" fn style_engine_sampled_custom_property_environment_owner(
     node: *mut u32,
     pseudo_kind: *mut u8,
 ) -> bool {
-    let engine: &StyleEngine =
-        unsafe { engine_read_entrance(engine, "style_engine_sampled_custom_property_environment_owner") };
+    crate::css::style::owner_calls::ask(
+        engine,
+        "style_engine_sampled_custom_property_environment_owner",
+        crate::css::style::owner_calls::StyleQuery::SampledCustomPropertyEnvironmentOwner {
+            environment,
+            node,
+            pseudo_kind,
+        },
+    )
+    .is()
+}
+
+/// Answers [`style_engine_sampled_custom_property_environment_owner`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_sampled_custom_property_environment_owner`].
+pub(crate) unsafe fn owner_sampled_custom_property_environment_owner(
+    engine: &StyleEngine,
+    environment: u64,
+    node: *mut u32,
+    pseudo_kind: *mut u8,
+) -> bool {
     let Some((owner, kind)) = engine
         .sampled_pseudo_element_custom_property_environments
         .iter()
@@ -4240,7 +4366,31 @@ pub unsafe extern "C" fn style_engine_sample_installed_record(
     style_record: u64,
     layout_arena: *mut c_void,
 ) -> FfiRowSampledInPass {
-    let engine = unsafe { engine_entrance(engine, "style_engine_sample_installed_record") };
+    crate::css::style::owner_calls::ask(
+        engine.home(),
+        "style_engine_sample_installed_record",
+        crate::css::style::owner_calls::StyleQuery::SampleInstalledRecord {
+            node,
+            pseudo_kind,
+            style_record,
+            layout_arena,
+        },
+    )
+    .row_sampled()
+}
+
+/// Answers [`style_engine_sample_installed_record`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_sample_installed_record`].
+pub(crate) unsafe fn owner_sample_installed_record(
+    engine: &mut StyleEngine,
+    node: u32,
+    pseudo_kind: u8,
+    style_record: u64,
+    layout_arena: *mut c_void,
+) -> FfiRowSampledInPass {
     abort_on_panic(|| {
         let Some(style_node) = StyleNodeID::from_raw(node) else {
             return row_sampled_in_pass(engine, None);
@@ -4500,12 +4650,10 @@ pub unsafe extern "C" fn style_engine_decide_transition_step_for_installed_recor
     })
 }
 
-fn row_sampled_in_pass(
-    engine: &StyleEngine,
-    published: Option<super::engine_sample::SettledRowPublication>,
-) -> FfiRowSampledInPass {
-    match published {
-        None => FfiRowSampledInPass {
+impl FfiRowSampledInPass {
+    /// What a row the host samples itself is answered with.
+    pub(crate) fn absent() -> Self {
+        Self {
             present: false,
             style_record: 0,
             invalidation: FfiAnimationInvalidation::default(),
@@ -4519,7 +4667,16 @@ fn row_sampled_in_pass(
             custom_property_reactions: 0,
             custom_property_environment_named: false,
             rebuilt_every_group: false,
-        },
+        }
+    }
+}
+
+fn row_sampled_in_pass(
+    engine: &StyleEngine,
+    published: Option<super::engine_sample::SettledRowPublication>,
+) -> FfiRowSampledInPass {
+    match published {
+        None => FfiRowSampledInPass::absent(),
         Some(published) => FfiRowSampledInPass {
             present: true,
             style_record: published.style_record,
@@ -4871,7 +5028,7 @@ impl RecordDemand {
 
 impl RecordDemandAnswer {
     /// The answer as the host takes it, which owns a reference to the record.
-    fn into_ffi(self) -> FfiRecordDemandAnswer {
+    pub(crate) fn into_ffi(self) -> FfiRecordDemandAnswer {
         FfiRecordDemandAnswer {
             published_record: self
                 .record
@@ -4883,16 +5040,16 @@ impl RecordDemandAnswer {
 
 /// Answer a style read the host has to answer synchronously, as a CSSOM read does. The render owner
 /// answers it with the engine of the document's render state, in a round trip after the document's
-/// earlier changes (`Query::ComputedStyle`); where it does not, a style stage run of its own does,
-/// with the frame in flight joined. `pseudo_kind == u8::MAX` selects the originating element.
+/// earlier changes. `pseudo_kind == u8::MAX` selects the originating element.
 ///
 /// # Safety
-/// `engine` must be live, and `layout_arena` the document's live layout arena or null.
+/// `engine` must be live. `layout_arena` is the document's live layout arena or null, which names the
+/// same document as the engine's link.
 #[unsafe(no_mangle)]
 #[allow(clippy::too_many_arguments)]
 pub unsafe extern "C" fn style_engine_answer_read_demand(
     engine: StyleEngineInputHandle,
-    layout_arena: *mut c_void,
+    _layout_arena: *mut c_void,
     node: u32,
     pseudo_kind: u8,
     exclude_inline_style: bool,
@@ -4908,49 +5065,12 @@ pub unsafe extern "C" fn style_engine_answer_read_demand(
         read_only,
         parent_highlight,
     };
-    // SAFETY: The host passes its document's live layout arena, or null.
-    let document = (!layout_arena.is_null())
-        .then(|| unsafe { crate::layout::ArenaHandle::document_of(layout_arena) })
-        .filter(|document| crate::render_owner::runs_style_of(*document));
-    if let Some(document) = document {
-        // This thread only brings the engine's token home, so that no stage holds the engine while the owner reads
-        // it.
-        engine.home().bring_home("style_engine_answer_read_demand");
-        super::seal::note_engine_call("style_engine_answer_read_demand");
-        // SAFETY: The arena is the document's, and this thread reaches the engine again only once the owner has
-        // answered.
-        let answer = unsafe {
-            crate::render_owner::ask(
-                document,
-                layout_arena,
-                crate::render_owner::Query::ComputedStyle(demand),
-            )
-        };
-        if let Some(answer) = host_answer_of_owner_read(answer) {
-            return answer;
-        }
-    }
-    let engine = unsafe { engine_entrance(engine, "style_engine_answer_read_demand") };
-    abort_on_panic(|| crate::stage_thread::run_stage(move || demand.answer(engine))).into_ffi()
-}
-
-/// The host's answer to a style read the render owner was asked, or none where the owner left the
-/// demand to the host. A read the owner panicked answering is not answered again: the engine may
-/// hold the demand half done.
-pub(crate) fn host_answer_of_owner_read(answer: crate::render_owner::Answer) -> Option<FfiRecordDemandAnswer> {
-    use crate::render_owner::{Answer, StyleReadAnswer};
-    match answer {
-        Answer::ComputedStyle(StyleReadAnswer::Answered(answer)) => Some(answer.into_ffi()),
-        Answer::ComputedStyle(StyleReadAnswer::Unanswered) => Some(FfiRecordDemandAnswer {
-            unanswered: true,
-            ..FfiRecordDemandAnswer::absent()
-        }),
-        Answer::ComputedStyle(StyleReadAnswer::LeftToHost) => None,
-        _ => {
-            debug_assert!(false, "a style read is answered with a style record");
-            None
-        }
-    }
+    crate::css::style::owner_calls::ask(
+        engine.home(),
+        "style_engine_answer_read_demand",
+        crate::css::style::owner_calls::StyleQuery::ReadDemand(demand),
+    )
+    .record_demand()
 }
 
 /// Replays a recorded record demand.
@@ -5055,7 +5175,35 @@ pub unsafe extern "C" fn style_engine_declared_only_record(
     hint_count: usize,
     inline_block: *const c_void,
 ) -> *const c_void {
-    let engine = unsafe { engine_entrance(engine, "style_engine_declared_only_record") };
+    crate::css::style::owner_calls::ask(
+        engine.home(),
+        "style_engine_declared_only_record",
+        crate::css::style::owner_calls::StyleQuery::DeclaredOnlyRecord {
+            subject,
+            facts,
+            hint_kind,
+            hints,
+            hint_count,
+            inline_block,
+        },
+    )
+    .pointer()
+}
+
+/// Answers [`style_engine_declared_only_record`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_declared_only_record`].
+pub(crate) unsafe fn owner_declared_only_record(
+    engine: &mut StyleEngine,
+    subject: u32,
+    facts: u32,
+    hint_kind: FfiElementDeclarationKind,
+    hints: *const c_void,
+    hint_count: usize,
+    inline_block: *const c_void,
+) -> *const c_void {
     abort_on_panic(|| {
         // A record held by no node is no event a replay could reproduce.
         let Some(subject) = StyleNodeID::from_raw(subject).filter(|_| engine.recording_id().is_none()) else {
@@ -5139,8 +5287,24 @@ pub unsafe extern "C" fn style_engine_borrow_engine_custom_property_environment(
     identity: u64,
     parent: *mut u64,
 ) -> *const c_void {
-    let engine: &StyleEngine =
-        unsafe { engine_read_entrance(engine, "style_engine_borrow_engine_custom_property_environment") };
+    crate::css::style::owner_calls::ask(
+        engine,
+        "style_engine_borrow_engine_custom_property_environment",
+        crate::css::style::owner_calls::StyleQuery::BorrowEngineCustomPropertyEnvironment { identity, parent },
+    )
+    .pointer()
+}
+
+/// Answers [`style_engine_borrow_engine_custom_property_environment`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_borrow_engine_custom_property_environment`].
+pub(crate) unsafe fn owner_borrow_engine_custom_property_environment(
+    engine: &StyleEngine,
+    identity: u64,
+    parent: *mut u64,
+) -> *const c_void {
     let Some((store, parent_identity)) = engine.custom_property_environments.engine_environment(identity) else {
         return std::ptr::null();
     };
@@ -5149,29 +5313,6 @@ pub unsafe extern "C" fn style_engine_borrow_engine_custom_property_environment(
         *parent = parent_identity;
     }
     store
-}
-
-/// Whether the node's own cascade declares `name_raw`: zero for none, one for
-/// a normal declaration, two for an important declaration, and three when
-/// the match answer is unavailable. An inherited
-/// engine environment may flatten its ancestor's declarations into its store,
-/// so the store's own-entry importance cannot answer this animation question.
-///
-/// # Safety
-/// `engine` must be live and `name_raw` must name a live UTF-16 fly string.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn style_engine_cascaded_custom_property_importance(
-    engine: StyleEngineHandle,
-    node: u32,
-    pseudo_kind: u8,
-    name_raw: usize,
-) -> u8 {
-    let engine: &StyleEngine =
-        unsafe { engine_read_entrance(engine, "style_engine_cascaded_custom_property_importance") };
-    let Some(node) = StyleNodeID::from_raw(node) else {
-        return 0;
-    };
-    engine.cascaded_custom_property_importance(node, (pseudo_kind != u8::MAX).then_some(pseudo_kind), name_raw)
 }
 
 // The raw identity must remain a live Utf16FlyString for the native engine to retain it.
@@ -5309,7 +5450,20 @@ pub unsafe extern "C" fn style_engine_native_container_effects_release(effects: 
 /// Engine must be live.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_native_rule_id(engine: StyleEngineHandle, identity: u64) -> u32 {
-    let engine: &StyleEngine = unsafe { engine_read_entrance(engine, "style_engine_native_rule_id") };
+    crate::css::style::owner_calls::ask(
+        engine,
+        "style_engine_native_rule_id",
+        crate::css::style::owner_calls::StyleQuery::NativeRuleId { identity },
+    )
+    .u32()
+}
+
+/// Answers [`style_engine_native_rule_id`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_native_rule_id`].
+pub(crate) unsafe fn owner_native_rule_id(engine: &StyleEngine, identity: u64) -> u32 {
     engine.native_rule_id(identity).map_or(0, |id| id.0 + 1)
 }
 
@@ -5359,7 +5513,20 @@ pub unsafe extern "C" fn style_engine_native_rule_successor(
     sheet: *const c_void,
     identity: u64,
 ) -> u32 {
-    let engine: &StyleEngine = unsafe { engine_read_entrance(engine, "style_engine_native_rule_successor") };
+    crate::css::style::owner_calls::ask(
+        engine,
+        "style_engine_native_rule_successor",
+        crate::css::style::owner_calls::StyleQuery::NativeRuleSuccessor { sheet, identity },
+    )
+    .u32()
+}
+
+/// Answers [`style_engine_native_rule_successor`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_native_rule_successor`].
+pub(crate) unsafe fn owner_native_rule_successor(engine: &StyleEngine, sheet: *const c_void, identity: u64) -> u32 {
     let sheet = unsafe { &*sheet.cast::<crate::css::style_sheet::NativeStyleSheet>() };
     crate::css::rule::mutation::successor(sheet, identity, |identity| {
         engine.native_rules.identities.get(&identity).map_or(0, |id| id.0 + 1)
@@ -5423,9 +5590,26 @@ pub unsafe extern "C" fn style_engine_remove_native_rule(
 pub unsafe extern "C" fn style_engine_native_rule_target(
     engine: StyleEngineHandle,
     rule: u32,
-    result: &mut FfiNativeRuleTarget,
+    result: *mut FfiNativeRuleTarget,
 ) -> bool {
-    let engine: &StyleEngine = unsafe { engine_read_entrance(engine, "style_engine_native_rule_target") };
+    crate::css::style::owner_calls::ask(
+        engine,
+        "style_engine_native_rule_target",
+        crate::css::style::owner_calls::StyleQuery::NativeRuleTarget { rule, result },
+    )
+    .is()
+}
+
+/// Answers [`style_engine_native_rule_target`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_native_rule_target`].
+pub(crate) unsafe fn owner_native_rule_target(
+    engine: &StyleEngine,
+    rule: u32,
+    result: *mut FfiNativeRuleTarget,
+) -> bool {
     let Some(target) = rule
         .checked_sub(1)
         .and_then(|id| engine.native_rules.targets.get(&RuleID(id)))
@@ -5436,6 +5620,8 @@ pub unsafe extern "C" fn style_engine_native_rule_target(
         return false;
     };
     let origin = engine.program.sheet_origin(engine.program.rule_sheet(RuleID(rule - 1)));
+    // SAFETY: The caller vouches that `result` is writable.
+    let result = unsafe { &mut *result };
     *result = FfiNativeRuleTarget {
         identity: target.identity.get(),
         declaration_version: engine
@@ -5466,7 +5652,20 @@ pub unsafe extern "C" fn style_engine_native_rule_target(
 /// Engine must be live.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn style_engine_has_suspended_style_pass(engine: StyleEngineHandle) -> bool {
-    let engine: &StyleEngine = unsafe { engine_read_entrance(engine, "style_engine_has_suspended_style_pass") };
+    crate::css::style::owner_calls::ask(
+        engine,
+        "style_engine_has_suspended_style_pass",
+        crate::css::style::owner_calls::StyleQuery::HasSuspendedStylePass,
+    )
+    .is()
+}
+
+/// Answers [`style_engine_has_suspended_style_pass`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_has_suspended_style_pass`].
+pub(crate) unsafe fn owner_has_suspended_style_pass(engine: &StyleEngine) -> bool {
     engine.state.host.suspended_style_pass.is_some()
 }
 
@@ -6715,7 +6914,24 @@ pub unsafe extern "C" fn style_engine_element_custom_property_data(
     node: u32,
     identity: *mut u64,
 ) -> *const c_void {
-    let engine: &StyleEngine = unsafe { engine_read_entrance(engine, "style_engine_element_custom_property_data") };
+    crate::css::style::owner_calls::ask(
+        engine,
+        "style_engine_element_custom_property_data",
+        crate::css::style::owner_calls::StyleQuery::ElementCustomPropertyData { node, identity },
+    )
+    .pointer()
+}
+
+/// Answers [`style_engine_element_custom_property_data`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_element_custom_property_data`].
+pub(crate) unsafe fn owner_element_custom_property_data(
+    engine: &StyleEngine,
+    node: u32,
+    identity: *mut u64,
+) -> *const c_void {
     let (data, environment) =
         StyleNodeID::from_raw(node).map_or((std::ptr::null(), 0), |node| engine.element_custom_property_data(node));
     unsafe { *identity = environment };
@@ -6774,8 +6990,25 @@ pub unsafe extern "C" fn style_engine_pseudo_element_custom_property_data(
     pseudo: u8,
     identity: *mut u64,
 ) -> *const c_void {
-    let engine: &StyleEngine =
-        unsafe { engine_read_entrance(engine, "style_engine_pseudo_element_custom_property_data") };
+    crate::css::style::owner_calls::ask(
+        engine,
+        "style_engine_pseudo_element_custom_property_data",
+        crate::css::style::owner_calls::StyleQuery::PseudoElementCustomPropertyData { node, pseudo, identity },
+    )
+    .pointer()
+}
+
+/// Answers [`style_engine_pseudo_element_custom_property_data`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_pseudo_element_custom_property_data`].
+pub(crate) unsafe fn owner_pseudo_element_custom_property_data(
+    engine: &StyleEngine,
+    node: u32,
+    pseudo: u8,
+    identity: *mut u64,
+) -> *const c_void {
     let (data, environment) = StyleNodeID::from_raw(node).map_or((std::ptr::null(), 0), |node| {
         engine.pseudo_element_custom_property_data(node, pseudo)
     });
@@ -6793,8 +7026,20 @@ pub unsafe extern "C" fn style_engine_pseudo_elements_with_custom_property_data(
     engine: StyleEngineHandle,
     node: u32,
 ) -> u64 {
-    let engine: &StyleEngine =
-        unsafe { engine_read_entrance(engine, "style_engine_pseudo_elements_with_custom_property_data") };
+    crate::css::style::owner_calls::ask(
+        engine,
+        "style_engine_pseudo_elements_with_custom_property_data",
+        crate::css::style::owner_calls::StyleQuery::PseudoElementsWithCustomPropertyData { node },
+    )
+    .u64()
+}
+
+/// Answers [`style_engine_pseudo_elements_with_custom_property_data`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_pseudo_elements_with_custom_property_data`].
+pub(crate) unsafe fn owner_pseudo_elements_with_custom_property_data(engine: &StyleEngine, node: u32) -> u64 {
     StyleNodeID::from_raw(node).map_or(0, |node| engine.pseudo_elements_with_custom_property_data(node))
 }
 
@@ -6826,7 +7071,30 @@ pub unsafe extern "C" fn style_engine_counter(
     out_value: *mut u64,
     out_name_length: *mut usize,
 ) -> *const u8 {
-    let engine: &StyleEngine = unsafe { engine_read_entrance(engine, "style_engine_counter") };
+    crate::css::style::owner_calls::ask(
+        engine,
+        "style_engine_counter",
+        crate::css::style::owner_calls::StyleQuery::Counter {
+            index,
+            out_value,
+            out_name_length,
+        },
+    )
+    .pointer()
+    .cast::<u8>()
+}
+
+/// Answers [`style_engine_counter`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_counter`].
+pub(crate) unsafe fn owner_counter(
+    engine: &StyleEngine,
+    index: usize,
+    out_value: *mut u64,
+    out_name_length: *mut usize,
+) -> *const u8 {
     let result = engine.counters().iter().nth(index);
     engine.record_boundary_call(EventKind::Counter, |payload| {
         payload.write_u64(u64::try_from(index).expect("counter index exceeds u64"));
@@ -6890,6 +7158,8 @@ unsafe fn borrow_mut<'a, T>(pointer: *mut T, count: usize) -> &'a mut [T] {
     assert!(!pointer.is_null(), "a non-empty output array must not be null");
     unsafe { std::slice::from_raw_parts_mut(pointer, count) }
 }
+
+use super::owner_calls::BoundaryResult;
 
 include!(concat!(env!("OUT_DIR"), "/style_engine_boundary_generated.rs"));
 
@@ -7477,12 +7747,20 @@ mod tests {
 pub unsafe extern "C" fn style_engine_has_size_containers_needing_evaluation_after_layout(
     engine: StyleEngineHandle,
 ) -> bool {
-    let engine: &StyleEngine = unsafe {
-        engine_read_entrance(
-            engine,
-            "style_engine_has_size_containers_needing_evaluation_after_layout",
-        )
-    };
+    crate::css::style::owner_calls::ask(
+        engine,
+        "style_engine_has_size_containers_needing_evaluation_after_layout",
+        crate::css::style::owner_calls::StyleQuery::HasSizeContainersNeedingEvaluationAfterLayout,
+    )
+    .is()
+}
+
+/// Answers [`style_engine_has_size_containers_needing_evaluation_after_layout`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_has_size_containers_needing_evaluation_after_layout`].
+pub(crate) unsafe fn owner_has_size_containers_needing_evaluation_after_layout(engine: &StyleEngine) -> bool {
     engine.has_size_containers_needing_evaluation_after_layout()
 }
 
@@ -7496,7 +7774,20 @@ pub unsafe extern "C" fn style_engine_size_query_container_scan_visits(
     engine: StyleEngineInputHandle,
     reset: bool,
 ) -> u64 {
-    let engine = unsafe { engine_entrance(engine, "style_engine_size_query_container_scan_visits") };
+    crate::css::style::owner_calls::ask(
+        engine.home(),
+        "style_engine_size_query_container_scan_visits",
+        crate::css::style::owner_calls::StyleQuery::SizeQueryContainerScanVisits { reset },
+    )
+    .u64()
+}
+
+/// Answers [`style_engine_size_query_container_scan_visits`] from `engine`, on the render owner.
+///
+/// # Safety
+///
+/// As for [`style_engine_size_query_container_scan_visits`].
+pub(crate) unsafe fn owner_size_query_container_scan_visits(engine: &mut StyleEngine, reset: bool) -> u64 {
     engine.size_query_container_scan_visits(reset)
 }
 

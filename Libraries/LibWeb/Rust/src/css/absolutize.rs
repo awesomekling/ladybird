@@ -2213,8 +2213,33 @@ pub unsafe extern "C" fn rust_random_sharing_absolutize(
     engine: crate::css::style::StyleEngineInputHandle,
     node: u32,
 ) -> *const StyleValueData {
-    // The handle the document's render inputs gave out, to write the engine through.
+    // The handle the document's render inputs gave out, whose engine a draw writes.
     let engine = engine.home();
+    if engine.is_null() {
+        // SAFETY: Guaranteed by the caller.
+        return unsafe { owner_random_sharing_absolutize(None, value, length, node) };
+    }
+    crate::css::style::owner_calls::ask(
+        engine,
+        "rust_random_sharing_absolutize",
+        crate::css::style::owner_calls::StyleQuery::RandomSharingAbsolutize { value, length, node },
+    )
+    .pointer()
+    .cast()
+}
+
+/// Answers [`rust_random_sharing_absolutize`] with `engine`, on the render owner, or without an engine for a value
+/// that draws nothing.
+///
+/// # Safety
+///
+/// As for [`rust_random_sharing_absolutize`].
+pub(crate) unsafe fn owner_random_sharing_absolutize(
+    mut engine: Option<&mut crate::css::style::StyleEngine>,
+    value: *const StyleValueData,
+    length: *const core::ffi::c_void,
+    node: u32,
+) -> *const StyleValueData {
     let data = unsafe { &*value };
     let StyleValueData::RandomValueSharing {
         fixed_value,
@@ -2226,7 +2251,6 @@ pub unsafe extern "C" fn rust_random_sharing_absolutize(
     else {
         unreachable!();
     };
-    let mut engine = (!engine.is_null()).then(|| unsafe { engine.enter("rust_random_sharing_absolutize") });
     let node = crate::css::style::tree::StyleNodeID::from_raw(node);
     let fixed = match fixed_value.optional_data() {
         Some(fixed) => {
