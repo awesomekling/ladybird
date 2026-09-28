@@ -355,7 +355,7 @@ impl DocumentClock {
                 entries.push(ClockTickEntry {
                     style_node: target.style_node,
                     style_record_before: style_record,
-                    sample: declined_sample(),
+                    sample: FfiRowSampledInPass::absent(),
                     installed_in_arena: false,
                 });
                 continue;
@@ -511,24 +511,6 @@ fn folded_sample(earlier: &FfiRowSampledInPass, later: FfiRowSampledInPass) -> F
         folded.custom_property_environment_named = earlier.custom_property_environment_named;
     }
     folded
-}
-
-fn declined_sample() -> FfiRowSampledInPass {
-    FfiRowSampledInPass {
-        present: false,
-        style_record: 0,
-        invalidation: Default::default(),
-        overlay_is_empty: true,
-        substitution_marks: 0,
-        keyframes_inherited_non_inherited_style_groups: 0,
-        uses_tree_counting_function: false,
-        custom_property_environment_moved: false,
-        custom_property_environment: 0,
-        custom_property_store: std::ptr::null(),
-        custom_property_reactions: 0,
-        custom_property_environment_named: false,
-        rebuilt_every_group: false,
-    }
 }
 
 /// On the main thread: what the clocks of a document publish, and whether one runs.
@@ -1617,7 +1599,7 @@ mod tests {
     use super::*;
 
     fn sample(record: u64, invalidation: u32, groups: u32) -> FfiRowSampledInPass {
-        let mut sample = declined_sample();
+        let mut sample = FfiRowSampledInPass::absent();
         sample.present = true;
         sample.style_record = record;
         sample.invalidation.invalidation = invalidation;

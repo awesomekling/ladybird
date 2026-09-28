@@ -52,6 +52,10 @@ struct AnimationUpdateContext {
         // The caller compares the element's style before and after this update itself, and marks
         // what layout and paint need from that one comparison.
         bool caller_applies_invalidation { false };
+        // The record the caller compares the element's sampled style with, and where it takes what
+        // the engine answered that move damages with the sample, once the sample installs.
+        CSS::StyleRecordID compared_with {};
+        Optional<u32>* damage { nullptr };
     };
 
     AnimationUpdateContext();

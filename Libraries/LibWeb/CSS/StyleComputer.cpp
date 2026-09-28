@@ -751,7 +751,7 @@ static void collect_dimension_attribute(Vector<StyleProperty>& properties, DOM::
 static StyleEngineFFI::FfiRowSampledInPass resample_installed_record_after_host_step(StyleDrainScope const& scope, DOM::AbstractElement abstract_element, StyleRecordID installed_style_record)
 {
     auto& element = abstract_element.element();
-    StyleEngineFFI::FfiInstalledRecord const record { element.style_node_id().value(), pseudo_element_to_ffi(abstract_element.pseudo_element()), installed_style_record.value() };
+    StyleEngineFFI::FfiInstalledRecord const record { element.style_node_id().value(), pseudo_element_to_ffi(abstract_element.pseudo_element()), installed_style_record.value(), 0 };
     StyleEngineFFI::FfiRowSampledInPass resampled {};
     StyleEngineFFI::style_engine_sample_installed_records(scope.engine().rust_handle(), &record, 1, &resampled, element.document().layout_arena_handle());
     if (resampled.present && resampled.custom_property_environment_moved)
