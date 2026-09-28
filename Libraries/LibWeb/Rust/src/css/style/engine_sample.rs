@@ -1107,8 +1107,9 @@ impl super::StyleEngineState {
 
     /// Take what the pass published for a row whose animations it sampled, so that exactly one
     /// installation applies it.
+    /// Takes what the host took from its copy of the table already.
     pub(crate) fn take_row_sampled_in_pass(&mut self, node: StyleNodeID) -> Option<SettledRowPublication> {
-        self.retained.rows_sampled_in_pass.remove(&node)
+        self.retained.rows_sampled_in_pass.take_taken_by_host(&node)
     }
 
     /// Sample the animations of the synthetic pseudo-elements the engine just settled for an

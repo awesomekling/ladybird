@@ -27,6 +27,7 @@
 //! and the main thread adds what each change it sends may leave.
 
 use super::StyleEngine;
+use super::bridge::DrainAnswers;
 use super::owner_calls::StyleChange;
 use std::cell::{Cell, UnsafeCell};
 use std::ffi::c_void;
@@ -150,6 +151,9 @@ struct StyleEngineHome {
     /// The [`PendingFacts`] whoever last reached the engine left, with what the main thread sent since. Written by the
     /// main thread, or by whoever reaches the engine while it waits or has lent the engine.
     pending: AtomicU8,
+    /// What the engine keeps for the main thread's drain of its last style transaction. Written by whoever reaches the
+    /// engine, as it is done with it.
+    drain: UnsafeCell<DrainAnswers>,
 }
 
 impl StyleEngineHome {
@@ -235,6 +239,8 @@ unsafe fn reach_on_this_thread<T>(home: usize, engine: *mut StyleEngine, run: im
     unsafe { home.apply_unapplied(engine) };
     let result = run(engine);
     home.pending.store(engine.pending_facts().0, Ordering::Relaxed);
+    // SAFETY: As above.
+    unsafe { &mut *home.drain.get() }.follow(engine);
     result
 }
 
@@ -404,6 +410,7 @@ impl StyleEngineHandle {
             document,
             unapplied: UnsafeCell::new(Vec::new()),
             pending: AtomicU8::new(0),
+            drain: UnsafeCell::default(),
         });
         let handle = Self(Rc::into_raw(home).cast_mut().cast());
         crate::render_owner::send_arena_change(
@@ -465,6 +472,17 @@ impl StyleEngineHandle {
     /// thread sent it since. On the main thread.
     pub(crate) fn pending_facts(self) -> PendingFacts {
         PendingFacts(self.home().pending.load(Ordering::Relaxed))
+    }
+
+    /// What the engine keeps for the main thread's drain of its last style transaction.
+    ///
+    /// # Safety
+    ///
+    /// On the main thread, with no stage holding the engine, and no other borrow of it live.
+    #[allow(clippy::mut_from_ref)]
+    pub(crate) unsafe fn drain_answers<'a>(self) -> &'a mut DrainAnswers {
+        // SAFETY: Guaranteed by the caller: nothing else writes the home's answers meanwhile.
+        unsafe { &mut *self.home().drain.get() }
     }
 
     /// The document whose render state's arena links the engine, whose render owner owns it.

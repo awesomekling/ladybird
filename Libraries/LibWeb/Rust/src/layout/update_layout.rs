@@ -847,20 +847,32 @@ pub(crate) struct OwnerFrameJob {
 ///
 /// # Safety
 ///
-/// Nothing but the thread running the job reaches the frame and its arena until this returns.
+/// Nothing but the thread running the job reaches the frame, its arena and the style engine the arena links until this
+/// returns.
 unsafe fn run_job(
     run: unsafe fn(*mut LayoutFrame, FrameJob) -> FrameJobAnswer,
     frame: *mut LayoutFrame,
     job: FrameJob,
     state: *mut ArenaHandle,
 ) -> FrameJobAnswer {
+    let run_in_state = || {
+        // SAFETY: Guaranteed by the caller.
+        unsafe {
+            (*frame).state = state;
+            let answer = run(frame, job);
+            (*frame).state = std::ptr::null_mut();
+            (*state).arena_mut().publish_rows();
+            answer
+        }
+    };
+    // The rounds reach the style engine the arena links as a unit its document thread waits for, with the engine home:
+    // what waits for the engine goes in first, and what the rounds leave in it is the home's to read once they are done.
     // SAFETY: Guaranteed by the caller.
-    unsafe {
-        (*frame).state = state;
-        let answer = run(frame, job);
-        (*frame).state = std::ptr::null_mut();
-        (*state).arena_mut().publish_rows();
-        answer
+    let engine = unsafe { &*state }.arena().style_engine_handle();
+    match engine.is_null() {
+        true => run_in_state(),
+        // SAFETY: As above.
+        false => unsafe { engine.reach_on_owner(|_| run_in_state()) },
     }
 }
 
