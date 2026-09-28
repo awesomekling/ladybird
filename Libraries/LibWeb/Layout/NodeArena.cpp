@@ -127,26 +127,6 @@ CSS::Display Row::display() const
     return CSS::display_from_ffi_display(NodeWithStyle::style_group_of<CSS::ComputedValues::BoxValues>(style_payloads()).display);
 }
 
-u64 NodeArena::table_cell_measurement_cache_miss_count() const
-{
-    return RustFFI::layout_arena_table_cell_measurement_cache_miss_count(handle());
-}
-
-u64 NodeArena::retained_inline_item_count() const
-{
-    return RustFFI::layout_arena_retained_inline_item_count(handle());
-}
-
-u64 NodeArena::intrinsic_measurement_count() const
-{
-    return RustFFI::layout_arena_intrinsic_measurement_count(handle());
-}
-
-u64 NodeArena::intrinsic_inline_measurement_count() const
-{
-    return RustFFI::layout_arena_intrinsic_inline_measurement_count(handle());
-}
-
 bool destroy_layout_subtree(Node& node)
 {
     return RustFFI::layout_arena_detach_and_free_subtree(node.arena_handle(), Node::slot_id(&node));

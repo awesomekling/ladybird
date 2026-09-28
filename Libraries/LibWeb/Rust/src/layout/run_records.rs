@@ -122,17 +122,6 @@ impl LayoutScratch {
         self.inline_item_stashes.borrow_mut().clear();
     }
 
-    /// The layout scratch of the arena `handle` names.
-    ///
-    /// # Safety
-    ///
-    /// `handle` must come from `layout_arena_create` and stay live for `'a`, and nothing else may
-    /// borrow the scratch meanwhile.
-    pub(crate) unsafe fn from_handle<'a>(handle: *mut std::ffi::c_void) -> &'a mut Self {
-        // SAFETY: Guaranteed by the caller.
-        unsafe { super::ArenaHandle::layout_scratch_of(handle) }
-    }
-
     pub(crate) fn end_layout_pass(&self) {
         self.run_record_stack.release_spare_chunks();
     }

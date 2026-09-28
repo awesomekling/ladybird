@@ -89,6 +89,7 @@
 #include <LibWeb/Infra/SerializedURL.h>
 #include <LibWeb/InvalidateDisplayList.h>
 #include <LibWeb/Layout/Box.h>
+#include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Layout/Node.h>
 #include <LibWeb/Layout/NodeArena.h>
 #include <LibWeb/Layout/TextNode.h>
@@ -140,10 +141,8 @@ static Utf16String rendered_text_of_text_box(Text const& text)
 // every string in it.
 static Utf16String generated_content_accessible_text(Element const& element, CSS::PseudoElement pseudo_element)
 {
-    auto* arena = element.document().layout_arena_handle();
-    VERIFY(arena);
-    return Utf16String::adopt_raw(Layout::RustFFI::layout_arena_generated_content_accessible_text(
-        arena, element.style_node_id().value(), encode_generated_for(pseudo_element)));
+    return Utf16String::adopt_raw(Layout::RustFFI::render_owner_generated_content_accessible_text(
+        element.document().render_document_id(), element.style_node_id().value(), encode_generated_for(pseudo_element)));
 }
 
 // Every node the style engine hears of gets an identity as it connects, so handing one out and
