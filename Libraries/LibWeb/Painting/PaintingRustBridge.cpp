@@ -41,8 +41,6 @@
 #include <LibWeb/Layout/ImageProvider.h>
 #include <LibWeb/Layout/LayoutRustBridge.h>
 #include <LibWeb/Layout/LayoutRustFFI.h>
-#include <LibWeb/Layout/Node.h>
-#include <LibWeb/Layout/NodeArena.h>
 #include <LibWeb/Page/EventHandler.h>
 #include <LibWeb/Page/MiddleButtonScrollHandler.h>
 #include <LibWeb/Page/Page.h>
@@ -1113,22 +1111,6 @@ Compositing::DisplayListResource record_image_paint_display_list(ImagePaint cons
             *static_cast<Optional<Compositing::DisplayListResource>*>(context) = Compositing::DisplayListResource { move(display_list), move(visual_context_tree) };
         });
     return recorded_display_list.release_value();
-}
-
-// For callers outside Painting that still hold a layout node; these go with the Layout classes.
-static BoxSlot box_slot(Layout::Node const& node)
-{
-    return BoxSlot::of(node.document(), Layout::Node::slot_id(&node));
-}
-
-Layout::RustFFI::FfiPhysicalOverflowDirections rust_physical_overflow_directions(Layout::Node const& box)
-{
-    return rust_physical_overflow_directions(box_slot(box));
-}
-
-CSS::ColorResolutionContext gradient_stop_color_resolution_context(Layout::NodeWithStyle const& layout_node)
-{
-    return gradient_stop_color_resolution_context(box_slot(layout_node));
 }
 
 }

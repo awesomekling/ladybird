@@ -170,5 +170,3 @@ WEB_API bool is_paintable_with_lines(DOM::Document const&, DOM::NodeIdentity);
 WEB_API bool is_inline_paintable(DOM::Document const&, DOM::NodeIdentity);
 
 }
-
-#include <LibWeb/Painting/LayoutNodeViews.h>

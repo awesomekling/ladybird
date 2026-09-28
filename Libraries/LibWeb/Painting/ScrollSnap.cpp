@@ -10,7 +10,6 @@
 #include <LibWeb/DOM/Document.h>
 #include <LibWeb/DOM/Element.h>
 #include <LibWeb/Layout/LayoutRustBridge.h>
-#include <LibWeb/Layout/Node.h>
 #include <LibWeb/Painting/BoxViews.h>
 #include <LibWeb/Painting/PaintingRustBridge.h>
 #include <LibWeb/Painting/ScrollSnap.h>
@@ -410,22 +409,6 @@ Compositing::SnapDestination select_resnap_destination(BoxSlot const& snap_conta
     if (y_offset.has_value())
         snap_destination.snapped_areas.y = record_snapped_areas(y_chosen_candidate, candidates.y_candidates, selection.snapped_areas.y, *y_offset, current_offset.y(), snap_destination.position.x());
     return snap_destination;
-}
-
-// For callers outside Painting that still hold a layout node; these go with the Layout classes.
-bool is_scroll_snap_container(Layout::Node const& node)
-{
-    return is_scroll_snap_container(BoxSlot::of(node.document(), Layout::Node::slot_id(&node)));
-}
-
-Compositing::SnapDestination adjust_scroll_destination_for_snapping(Layout::Node const& snap_container, CSSPixelPoint destination, Compositing::SnapSelectionStrategy const& strategy)
-{
-    return adjust_scroll_destination_for_snapping(BoxSlot::of(snap_container.document(), Layout::Node::slot_id(&snap_container)), destination, strategy);
-}
-
-Compositing::SnapDestination select_resnap_destination(Layout::Node const& snap_container, CSSPixelPoint current_offset, ResnapSelection const& selection)
-{
-    return select_resnap_destination(BoxSlot::of(snap_container.document(), Layout::Node::slot_id(&snap_container)), current_offset, selection);
 }
 
 }

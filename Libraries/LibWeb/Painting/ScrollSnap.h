@@ -53,9 +53,4 @@ struct ResnapSelection {
 
 WEB_API Compositing::SnapDestination select_resnap_destination(BoxSlot const& snap_container, CSSPixelPoint current_offset, ResnapSelection const&);
 
-// For callers outside Painting that still hold a layout node; these go with the Layout classes.
-WEB_API bool is_scroll_snap_container(Layout::Node const&);
-WEB_API Compositing::SnapDestination adjust_scroll_destination_for_snapping(Layout::Node const& snap_container, CSSPixelPoint destination, Compositing::SnapSelectionStrategy const& strategy = {});
-WEB_API Compositing::SnapDestination select_resnap_destination(Layout::Node const& snap_container, CSSPixelPoint current_offset, ResnapSelection const&);
-
 }
